@@ -12,6 +12,7 @@ import {
   KvList,
 } from '@/signal/components/Primitives';
 import {LoadingState} from '@/signal/components/Loaders';
+import {toLoadFailure, type LoadFailure} from '@/lib/loadState';
 import {ConfirmModal, PromptModal} from '@/signal/components/Modal';
 import {Bell, Settings, Plus} from '@/signal/icons/icons';
 import {useAuthStore, selectIsSuperAdmin} from '@/stores/useAuthStore';
@@ -21,6 +22,27 @@ import {
   type AdminWriteChange,
   type AdminWriteConfirmation,
 } from './adminSafety';
+
+/**
+ * D4 — honest load failure for the Signal-chrome admin page.
+ *
+ * The IDE `<LoadError>` cannot be reused here: `/admin/*` renders standalone,
+ * outside `.ide-root`, so its `ide-*` classes would be unstyled.
+ */
+function AdminLoadError({failure, what}: {failure: LoadFailure; what: string}) {
+  return (
+    <Card>
+      <div style={{marginBottom: 4}}>
+        {failure.kind === 'forbidden'
+          ? `You do not have access to ${what}.`
+          : `Could not load ${what}.`}
+      </div>
+      <div style={{color: 'var(--signal-text-dim)', fontSize: 13}}>
+        {failure.message} This is not a claim that there are no {what} — we could not find out.
+      </div>
+    </Card>
+  );
+}
 
 // Admin (super-admin)
 // Canonical activation-funnel stage keys (uppercase + `.windowed`), aligned
@@ -291,12 +313,17 @@ function AdminUsersSection({ok, bad}: SectionProps) {
   const [users, setUsers] = useState<api.AuthUser[] | null>(null);
   const [confirm, setConfirm] = useState<PendingAdminWrite | null>(null);
   const [grantFor, setGrantFor] = useState<api.AuthUser | null>(null);
+  const [usersFailure, setUsersFailure] = useState<LoadFailure | null>(null);
 
   useEffect(() => {
     api
       .adminListUsers()
-      .then(setUsers)
-      .catch(() => setUsers([]));
+      .then((rows) => {
+        setUsers(rows);
+        setUsersFailure(null);
+      })
+      // D4: falling to [] rendered "Users · 0" — an affirmative empty directory.
+      .catch((e: unknown) => setUsersFailure(toLoadFailure(e)));
   }, []);
 
   const patch = (u: api.AuthUser) =>
@@ -330,6 +357,7 @@ function AdminUsersSection({ok, bad}: SectionProps) {
   const confirmWrite = (change: AdminWriteChange, run: () => Promise<void>) =>
     setConfirm({copy: adminWriteConfirmation(change), run});
 
+  if (usersFailure) return <AdminLoadError failure={usersFailure} what='users' />;
   if (!users) return <LoadingState label='Loading users…' />;
   return (
     <>
@@ -419,12 +447,16 @@ function AdminOrgsSection({ok, bad}: SectionProps) {
   const [confirm, setConfirm] = useState<PendingAdminWrite | null>(null);
   const [grantFor, setGrantFor] = useState<api.OrgDto | null>(null);
   const [limitFor, setLimitFor] = useState<api.OrgDto | null>(null);
+  const [orgsFailure, setOrgsFailure] = useState<LoadFailure | null>(null);
 
   useEffect(() => {
     api
       .adminListOrgs()
-      .then(setOrgs)
-      .catch(() => setOrgs([]));
+      .then((rows) => {
+        setOrgs(rows);
+        setOrgsFailure(null);
+      })
+      .catch((e: unknown) => setOrgsFailure(toLoadFailure(e)));
   }, []);
 
   const patch = (o: api.OrgDto) =>
@@ -450,6 +482,7 @@ function AdminOrgsSection({ok, bad}: SectionProps) {
   const confirmWrite = (change: AdminWriteChange, run: () => Promise<void>) =>
     setConfirm({copy: adminWriteConfirmation(change), run});
 
+  if (orgsFailure) return <AdminLoadError failure={orgsFailure} what='orgs' />;
   if (!orgs) return <LoadingState label='Loading orgs…' />;
   return (
     <>
@@ -611,7 +644,7 @@ function AdminAnalyticsSection({orgId}: {orgId: string | null}) {
               ['Total runs', String(usage.totalRuns)],
               ['Successful', String(usage.successfulRuns)],
               ['Failed', String(usage.failedRuns)],
-              ['Total cost', `$${(usage.totalCost ?? 0).toFixed(2)}`],
+              ['Total cost', `$${(usage.totalCost ?? 0).toFixed(4)}`],
             ].map(([label, value]) => (
               <div key={label} className='signal-quick-card'>
                 <h4>{label}</h4>
@@ -631,7 +664,7 @@ function AdminAnalyticsSection({orgId}: {orgId: string | null}) {
         <>
           <SectionHeader>Cost by model</SectionHeader>
           <Card>
-            <KvList pairs={costEntries.map(([m, c]) => ({k: m, v: `$${c.toFixed(2)}`}))} />
+            <KvList pairs={costEntries.map(([m, c]) => ({k: m, v: `$${c.toFixed(4)}`}))} />
           </Card>
         </>
       )}
@@ -809,12 +842,16 @@ function AdminTopupsSection({ok, bad}: SectionProps) {
   const [pkgs, setPkgs] = useState<api.TopupPackageAdmin[] | null>(null);
   const [creating, setCreating] = useState(false);
   const [deleteFor, setDeleteFor] = useState<api.TopupPackageAdmin | null>(null);
+  const [pkgsFailure, setPkgsFailure] = useState<LoadFailure | null>(null);
 
   const load = () =>
     api
       .adminListTopupPackages()
-      .then(setPkgs)
-      .catch(() => setPkgs([]));
+      .then((rows) => {
+        setPkgs(rows);
+        setPkgsFailure(null);
+      })
+      .catch((e: unknown) => setPkgsFailure(toLoadFailure(e)));
   useEffect(() => {
     void load();
   }, []);
@@ -828,6 +865,7 @@ function AdminTopupsSection({ok, bad}: SectionProps) {
       })
       .catch(bad);
 
+  if (pkgsFailure) return <AdminLoadError failure={pkgsFailure} what='top-up packages' />;
   if (!pkgs) return <LoadingState label='Loading top-up packages…' />;
   return (
     <>

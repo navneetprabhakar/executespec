@@ -36,7 +36,7 @@ export const KEY_PLACEHOLDER: Record<UserKeyProvider, string> = {
 const CONSUMER_EMAIL_DOMAINS = new Set(['gmail.com', 'yahoo.com', 'outlook.com', 'hotmail.com']);
 
 export function formatUsd(n?: number | null): string {
-  return n == null ? '—' : `$${n.toFixed(2)}`;
+  return n == null ? '—' : `$${n.toFixed(4)}`;
 }
 
 export function domainListFromEmail(email?: string | null): string[] {
@@ -126,6 +126,7 @@ export function orgKeyRows(org: api.OrgDto): OrgKeyRow[] {
   return [
     {provider: 'anthropic', label: 'Anthropic', connected: !!org.hasAnthropicKey},
     {provider: 'openai', label: 'OpenAI', connected: !!org.hasOpenAiKey},
+    {provider: 'gemini', label: 'Gemini', connected: !!org.hasGeminiKey},
     ...(isEnterprise
       ? [
           {provider: 'openrouter' as const, label: 'OpenRouter', connected: !!org.hasOpenRouterKey},

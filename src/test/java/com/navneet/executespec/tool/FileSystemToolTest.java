@@ -146,4 +146,14 @@ class FileSystemToolTest {
       assertThat(result).doesNotContain("TOPSECRET");
     }
   }
+
+  @Test
+  @DisplayName("RR-643: real-path check failure fails CLOSED, not through to the lexical guard")
+  void realPathFailureFailsClosed() {
+    // The workspace directory does not exist, so the symlink-containment toRealPath() cannot run.
+    // Previously safeResolve swallowed the IOException and returned the lexically-contained path;
+    // it must now refuse (fail-closed) rather than silently degrade to the lexical guard alone.
+    String read = fsTool.readFile("ghost-run", "x.txt");
+    assertThat(read).startsWith("ACCESS DENIED");
+  }
 }

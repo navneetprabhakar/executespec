@@ -1,6 +1,8 @@
 package com.navneet.executespec.tool;
 
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 
 /**
@@ -35,6 +37,24 @@ public final class PathSafety {
     Path resolved = rootReal.resolve(requested).normalize();
     if (!resolved.startsWith(rootReal)) {
       throw new SecurityException("path escapes workspace: " + relativePath);
+    }
+    // Lexical containment is not sufficient: an in-workspace component can be a symlink to an
+    // arbitrary host path. Walk every component that currently exists without following links.
+    // New leaf paths are allowed only beneath the already-validated nearest existing parent.
+    Path current = rootReal;
+    for (Path component : rootReal.relativize(resolved)) {
+      current = current.resolve(component);
+      if (!Files.exists(current, LinkOption.NOFOLLOW_LINKS)) {
+        break;
+      }
+      if (Files.isSymbolicLink(current)) {
+        throw new SecurityException(
+            "symbolic links are not allowed in workspace paths: " + relativePath);
+      }
+      Path existingReal = current.toRealPath(LinkOption.NOFOLLOW_LINKS);
+      if (!existingReal.startsWith(rootReal)) {
+        throw new SecurityException("path escapes workspace: " + relativePath);
+      }
     }
     return resolved;
   }

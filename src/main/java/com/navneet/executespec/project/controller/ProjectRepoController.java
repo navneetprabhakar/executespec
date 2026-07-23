@@ -7,13 +7,24 @@ import jakarta.validation.Valid;
 
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.project.dto.CreateRepoRequest;
+import com.navneet.executespec.project.dto.LocalProjectSourceDto;
+import com.navneet.executespec.project.dto.LocalSourceHeartbeatRequest;
+import com.navneet.executespec.project.dto.LocalSourceHeartbeatResponse;
 import com.navneet.executespec.project.dto.ProjectRepoDto;
 import com.navneet.executespec.project.dto.ProjectRepoLinkDto;
+import com.navneet.executespec.project.dto.RegisterLocalSourceRequest;
 import com.navneet.executespec.project.dto.UpdateRelationshipsRequest;
 import com.navneet.executespec.project.security.ProjectAccessGuard;
+import com.navneet.executespec.project.service.LocalProjectSourceService;
 import com.navneet.executespec.project.service.ProjectRepoService;
 import com.navneet.executespec.repo.GitHubRepoService;
 import com.navneet.executespec.repo.GitHubRepoService.RemoteRepo;
+import com.navneet.executespec.repo.ScmCapability;
+import com.navneet.executespec.repo.ScmCredentialResolver;
+import com.navneet.executespec.repo.ScmProvider;
+import com.navneet.executespec.repo.ScmRemoteRepository;
+import com.navneet.executespec.repo.ScmRepositoryClient;
+import com.navneet.executespec.repo.ScmRepositoryClientRegistry;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -31,7 +42,10 @@ import lombok.RequiredArgsConstructor;
 public class ProjectRepoController {
 
   private final ProjectRepoService service;
+  private final LocalProjectSourceService localProjectSourceService;
   private final GitHubRepoService gitHub;
+  private final ScmRepositoryClientRegistry scmClients;
+  private final ScmCredentialResolver scmCredentials;
   private final ProjectAccessGuard projectAccessGuard;
 
   /**
@@ -44,8 +58,28 @@ public class ProjectRepoController {
       @AuthenticationPrincipal AppUserDetails userDetails,
       @RequestParam(value = "owner", required = false) String owner) {
     var u = userDetails.getUser();
-    String effectiveOwner = (owner != null && !owner.isBlank()) ? owner : u.getGithubOwner();
-    return ResponseEntity.ok(gitHub.listOwnerRepos(effectiveOwner, u.getGithubPat()));
+    // No owner query means the complete PAT-visible catalogue (owner + collaborator + org), not
+    // merely the user's personal namespace. An explicit owner remains a server-side filter.
+    String ownerFilter = (owner != null && !owner.isBlank()) ? owner : null;
+    return ResponseEntity.ok(gitHub.listOwnerRepos(ownerFilter, u.getGithubPat()));
+  }
+
+  /** Provider-neutral remote catalogue. Credentials are resolved server-side and never returned. */
+  @GetMapping("/api/repos/scm")
+  public ResponseEntity<List<ScmRemoteRepository>> listScmRepos(
+      @AuthenticationPrincipal AppUserDetails userDetails,
+      @RequestParam("provider") String provider,
+      @RequestParam(value = "owner", required = false) String owner) {
+    ScmProvider selected = ScmProvider.require(provider);
+    ScmRepositoryClient client = scmClients.require(selected);
+    if (!client.supports(ScmCapability.CATALOG)) {
+      throw new org.springframework.web.server.ResponseStatusException(
+          HttpStatus.UNPROCESSABLE_ENTITY, selected + " catalogue is not supported");
+    }
+    return ResponseEntity.ok(
+        client.listRepositories(
+            owner == null || owner.isBlank() ? null : owner.trim(),
+            scmCredentials.require(userDetails.getUser().getId(), selected)));
   }
 
   /* ── Lifecycle ── */
@@ -75,17 +109,18 @@ public class ProjectRepoController {
   @PostMapping("/api/repos/{repoId}/sync")
   public ResponseEntity<ProjectRepoDto> syncRepo(
       @AuthenticationPrincipal AppUserDetails userDetails, @PathVariable UUID repoId) {
-    // GA-readiness P4.1-followup — visible repo-access check at the call site. The
-    // service-side `loadRepoForRead` runs again as defense in depth.
-    service.loadRepoForRead(
-        repoId, userDetails.getUser().getId(), userDetails.getUser().getOrgId());
+    // Sync changes shared source metadata, so org-scoped repos require ORG_ADMIN authority.
+    service.loadRepoForWrite(
+        repoId,
+        userDetails.getUser().getId(),
+        userDetails.getUser().getOrgId(),
+        isOrgAdmin(userDetails));
     return ResponseEntity.ok(
         service.syncRepo(
             repoId,
             userDetails.getUser().getId(),
             userDetails.getUser().getOrgId(),
-            isOrgAdmin(userDetails),
-            userDetails.getUser().getGithubPat()));
+            isOrgAdmin(userDetails)));
   }
 
   /**
@@ -96,11 +131,16 @@ public class ProjectRepoController {
   @PostMapping("/api/repos/{repoId}/webhook")
   public ResponseEntity<java.util.Map<String, Object>> installRepoWebhook(
       @AuthenticationPrincipal AppUserDetails userDetails, @PathVariable UUID repoId) {
-    // GA-readiness P4.1-followup — explicit access check before the GitHub-side mutation.
-    service.loadRepoForRead(
-        repoId, userDetails.getUser().getId(), userDetails.getUser().getOrgId());
+    // Installing a webhook mutates both GitHub and shared source state.
+    service.loadRepoForWrite(
+        repoId,
+        userDetails.getUser().getId(),
+        userDetails.getUser().getOrgId(),
+        isOrgAdmin(userDetails));
     var u = userDetails.getUser();
-    boolean ok = service.installWebhook(repoId, u.getGithubPat(), u.getId(), u.getOrgId());
+    boolean ok =
+        service.installWebhook(
+            repoId, u.getGithubPat(), u.getId(), u.getOrgId(), isOrgAdmin(userDetails));
     if (ok) {
       return ResponseEntity.ok(java.util.Map.of("installed", true));
     }
@@ -133,6 +173,48 @@ public class ProjectRepoController {
   }
 
   /* ── Project linking ── */
+
+  /**
+   * Register (or renew) an opaque local-folder connector and link it to this project. The request
+   * deliberately has no path field; the server stores random client IDs and bounded metadata only.
+   */
+  @PostMapping("/api/projects/{projectId}/sources/local")
+  public ResponseEntity<LocalProjectSourceDto> registerLocalSource(
+      @AuthenticationPrincipal AppUserDetails userDetails,
+      @PathVariable String projectId,
+      @Valid @RequestBody RegisterLocalSourceRequest request) {
+    projectAccessGuard.assertCanWrite(projectId, userDetails);
+    LocalProjectSourceDto result =
+        localProjectSourceService.register(
+            projectId,
+            request,
+            userDetails.getUser().getId(),
+            userDetails.getUser().getOrgId(),
+            isOrgAdmin(userDetails));
+    return ResponseEntity.status(result.created() ? HttpStatus.CREATED : HttpStatus.OK)
+        .body(result);
+  }
+
+  /**
+   * Renew a registered local source's lease. Path-free like registration; only the connector
+   * installation that registered the folder identity can keep it ONLINE.
+   */
+  @PostMapping("/api/projects/{projectId}/sources/local/{localFolderId}/heartbeat")
+  public ResponseEntity<LocalSourceHeartbeatResponse> heartbeatLocalSource(
+      @AuthenticationPrincipal AppUserDetails userDetails,
+      @PathVariable String projectId,
+      @PathVariable UUID localFolderId,
+      @Valid @RequestBody LocalSourceHeartbeatRequest request) {
+    projectAccessGuard.assertCanWrite(projectId, userDetails);
+    return ResponseEntity.ok(
+        localProjectSourceService.heartbeat(
+            projectId,
+            localFolderId,
+            request,
+            userDetails.getUser().getId(),
+            userDetails.getUser().getOrgId(),
+            isOrgAdmin(userDetails)));
+  }
 
   @GetMapping("/api/projects/{projectId}/repos")
   public ResponseEntity<List<ProjectRepoLinkDto>> listProjectRepos(

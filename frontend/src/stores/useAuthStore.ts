@@ -2,12 +2,28 @@ import {create} from 'zustand';
 import * as api from '@/lib/api';
 import type {TierPermissions} from '@/hooks/useTierPermissions';
 
+/**
+ * RR-198 — permissions are a three-state signal, not a nullable value. `null`
+ * means "unknown" but the store must also tell consumers WHY it is unknown so
+ * the UI can render a retry/error rather than silently downgrading a paid/admin
+ * account to a disabled-controls state when the permission fetch merely failed.
+ */
+export type PermissionsStatus = 'idle' | 'loading' | 'ready' | 'error';
+
 interface AuthStore {
   user: api.AuthUser | null;
   accessToken: string | null;
   isAuthenticated: boolean;
   isLoading: boolean;
   permissions: TierPermissions | null;
+  /** RR-198 — lifecycle of the permissions fetch. `error` ≠ empty permissions. */
+  permissionsStatus: PermissionsStatus;
+  /**
+   * RR-196 — set when a user-initiated logout could NOT be confirmed by the server. The HttpOnly
+   * refresh cookie cannot be cleared from JavaScript, so an unconfirmed logout means the seven-day
+   * session may still be live. The UI must not report a clean sign-out in that case.
+   */
+  logoutError: string | null;
 
   login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
@@ -19,7 +35,16 @@ interface AuthStore {
     attribution?: {signupSource?: string; utmSource?: string; utmCampaign?: string},
   ) => Promise<void>;
   refreshAccessToken: () => Promise<boolean>;
+  /**
+   * RR-1335 — adopt a login-shaped session returned outside the normal login form (e.g. the
+   * email-verification endpoint, which sets the refresh cookie and returns an access token + user).
+   * Mirrors `login`'s post-steps so a just-verified user lands authenticated instead of being sent
+   * back to re-enter credentials while a valid refresh cookie is discarded.
+   */
+  adoptSession: (accessToken: string, user: api.AuthUser) => void;
   loadMe: () => Promise<void>;
+  /** RR-198 — (re)fetch tier permissions, tracking loading/ready/error state. */
+  loadPermissions: () => Promise<void>;
   setUser: (user: api.AuthUser | null) => void;
   clearAuth: () => void;
 }
@@ -30,31 +55,57 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
   isAuthenticated: !!localStorage.getItem('access_token'),
   isLoading: false,
   permissions: null,
+  permissionsStatus: 'idle',
+  logoutError: null,
 
   login: async (email, password) => {
     const resp = await api.authLogin({email, password});
     localStorage.setItem('access_token', resp.accessToken);
+    // RR-196 — an explicit successful login clears any prior unconfirmed-logout marker so
+    // cookie-based auto-refresh is allowed again for this deliberately re-authenticated session.
+    localStorage.removeItem('es:logout_unconfirmed');
     // R-190 — normalize legacy 'vibe' viewMode at the parse boundary.
     set({
       accessToken: resp.accessToken,
       user: api.normalizeAuthUser(resp.user),
       isAuthenticated: true,
     });
-    // Load permissions after login
-    api
-      .getMyPermissions()
-      .then((p) => set({permissions: p}))
-      .catch(() => {});
+    // RR-198 — load permissions with tracked loading/ready/error state.
+    void get().loadPermissions();
   },
 
   logout: async () => {
-    try {
-      await api.authLogout();
-    } catch {
-      /* ignore */
+    // RR-196 — logout is a server-side revocation, not a local token delete. Attempt it (with one
+    // retry for a transient blip) and record whether the server actually confirmed. Local access
+    // state is always cleared, but if the revocation was NOT confirmed we (a) surface `logoutError`
+    // so the UI never claims a clean sign-out and (b) set a durable marker that blocks cookie-based
+    // auto-refresh in `loadMe` — otherwise the next visitor on a shared machine could be silently
+    // reauthenticated from the still-live refresh cookie.
+    let confirmed = false;
+    for (let attempt = 0; attempt < 2 && !confirmed; attempt++) {
+      try {
+        await api.authLogout();
+        confirmed = true;
+      } catch {
+        /* retry once, then give up */
+      }
     }
     localStorage.removeItem('access_token');
-    set({accessToken: null, user: null, isAuthenticated: false, permissions: null});
+    if (confirmed) {
+      localStorage.removeItem('es:logout_unconfirmed');
+    } else {
+      localStorage.setItem('es:logout_unconfirmed', '1');
+    }
+    set({
+      accessToken: null,
+      user: null,
+      isAuthenticated: false,
+      permissions: null,
+      permissionsStatus: 'idle',
+      logoutError: confirmed
+        ? null
+        : 'Sign-out could not be confirmed with the server — your session may still be active. Retry or close this browser.',
+    });
   },
 
   register: async (email, firstName, lastName, password, attribution) => {
@@ -75,14 +126,37 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
       return true;
     } catch {
       localStorage.removeItem('access_token');
-      set({accessToken: null, user: null, isAuthenticated: false, permissions: null});
+      set({
+        accessToken: null,
+        user: null,
+        isAuthenticated: false,
+        permissions: null,
+        permissionsStatus: 'idle',
+      });
       return false;
     }
+  },
+
+  adoptSession: (accessToken, user) => {
+    localStorage.setItem('access_token', accessToken);
+    // RR-196 — a freshly adopted session is a deliberate authentication; clear any stale marker.
+    localStorage.removeItem('es:logout_unconfirmed');
+    set({
+      accessToken,
+      user: api.normalizeAuthUser(user),
+      isAuthenticated: true,
+      logoutError: null,
+    });
+    void get().loadPermissions();
   },
 
   loadMe: async () => {
     const token = localStorage.getItem('access_token');
     if (!token) {
+      // RR-196 — do NOT resurrect a session the user explicitly (if unconfirmably) logged out of.
+      // The marker is cleared only by a deliberate login, so a shared machine cannot silently
+      // reauthenticate the next visitor from the still-live refresh cookie.
+      if (localStorage.getItem('es:logout_unconfirmed')) return;
       // Try refresh via cookie
       const ok = await get().refreshAccessToken();
       if (!ok) return;
@@ -102,20 +176,48 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
         api.updateViewMode('pro').catch(() => {});
       }
       set({user, isAuthenticated: true});
-      // Load tier permissions
-      api
-        .getMyPermissions()
-        .then((p) => set({permissions: p}))
-        .catch(() => {});
+      // RR-198 — load tier permissions with tracked loading/ready/error state.
+      void get().loadPermissions();
+    } catch (e) {
+      // RR-197 — distinguish a definitively dead session from a transient fault.
+      // A 401/403 means the token is invalid: clear ALL access state including
+      // the persisted token, atomically, so a reload does not reconstruct
+      // isAuthenticated=true from the same dead token and loop the spinner /
+      // unauthorized-request path. A transient failure (network / 5xx / unknown)
+      // must NOT mutate authentication truth — leave the session intact so a
+      // retry can recover instead of forcing a spurious logout.
+      const status = e instanceof api.ApiError ? e.status : undefined;
+      const definitiveAuthFailure = status === 401 || status === 403;
+      if (definitiveAuthFailure) {
+        get().clearAuth();
+      }
+    }
+  },
+
+  loadPermissions: async () => {
+    // RR-198 — model permissions as loading | ready | error so consumers can
+    // tell "the permission service failed" apart from "not entitled". On failure
+    // we retain the last-known permissions snapshot (do not null it) and flag
+    // `error` so the UI can offer retry instead of rendering a downgraded account.
+    set({permissionsStatus: 'loading'});
+    try {
+      const p = await api.getMyPermissions();
+      set({permissions: p, permissionsStatus: 'ready'});
     } catch {
-      set({user: null, isAuthenticated: false, permissions: null});
+      set({permissionsStatus: 'error'});
     }
   },
 
   setUser: (user) => set({user}),
   clearAuth: () => {
     localStorage.removeItem('access_token');
-    set({accessToken: null, user: null, isAuthenticated: false, permissions: null});
+    set({
+      accessToken: null,
+      user: null,
+      isAuthenticated: false,
+      permissions: null,
+      permissionsStatus: 'idle',
+    });
   },
 }));
 

@@ -62,27 +62,44 @@ public class BoundedTestGenKickoff {
 
   /** Starts test generation and returns immediately to run finalization. */
   public void kickoff(String runId, Runnable pipeline) {
+    kickoff(runId, pipeline, () -> {});
+  }
+
+  /** Starts test generation and owns run-scoped cleanup after completion or interruption. */
+  public void kickoff(String runId, Runnable pipeline, Runnable cleanup) {
     var snapshot = ContextSnapshotFactory.builder().build().captureAll();
+    var routeContext = com.navneet.executespec.router.RunModelOverrides.capture();
     AtomicReference<ScheduledFuture<?>> timeoutTaskRef = new AtomicReference<>();
     Future<?> future =
         workerExecutor.submit(
             snapshot.wrap(
-                () -> {
-                  try {
-                    pipeline.run();
-                  } catch (Throwable t) {
-                    log.error(
-                        "[TestGen] bounded kickoff failed for run {}: {}",
-                        runId,
-                        t.getMessage(),
-                        t);
-                  } finally {
-                    ScheduledFuture<?> timeoutTask = timeoutTaskRef.get();
-                    if (timeoutTask != null) {
-                      timeoutTask.cancel(false);
-                    }
-                  }
-                }));
+                () ->
+                    com.navneet.executespec.router.RunModelOverrides.runWith(
+                        routeContext,
+                        () -> {
+                          try {
+                            pipeline.run();
+                          } catch (Throwable t) {
+                            log.error(
+                                "[TestGen] bounded kickoff failed for run {}: {}",
+                                runId,
+                                t.getMessage(),
+                                t);
+                          } finally {
+                            try {
+                              cleanup.run();
+                            } catch (Throwable cleanupFailure) {
+                              log.warn(
+                                  "[TestGen] cleanup failed for run {}: {}",
+                                  runId,
+                                  cleanupFailure.getMessage());
+                            }
+                            ScheduledFuture<?> timeoutTask = timeoutTaskRef.get();
+                            if (timeoutTask != null) {
+                              timeoutTask.cancel(false);
+                            }
+                          }
+                        })));
 
     ScheduledFuture<?> timeoutTask =
         timeoutExecutor.schedule(

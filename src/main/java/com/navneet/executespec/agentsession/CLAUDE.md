@@ -22,9 +22,42 @@ turns separately from runs.
   calls `SpecChatService` with the read-only allow-list, its system prompt must not advertise legacy
   direct run-control tools; web run creation stays on the structured `create_cloud_run` proposal and
   confirmation path.
+- `create_cloud_run` is emitted only for `CODE_RUN_REQUIRED` decisions whose policy allows the Run
+  API. Missing project/repository context and read-only permission mode return explanation-only
+  `IMPLEMENTATION_PROPOSAL` decisions with no confirmation card. That blocked state is now a typed
+  contract (`dto/AgentActionContext`: `requiredContext[]`, `blockingReasons[]`, `confirmable`,
+  `recommendedAction`, `projectSelectionRequired`) carried on both `OrchestratorDecision` and the
+  `TypedAction` itself, so clients decide confirmability from structured fields rather than prose,
+  and a turn replayed from `agent_turn.proposed_action_json` keeps the same contract after reload.
+  The context is nullable for rows persisted before it existed; clients must treat absent context
+  as unknown, never as confirmable.
+  Write authority is part of that context: `InterpretIntentRequest.projectWriteAuthorized` carries
+  the caller's resolved project write authority into routing, and an explicit `false` returns
+  `AgentActionContext.writeScopeRequired()` with `runApiAllowed=false` so a `PROJECT_VIEWER` never
+  sees a confirmable run card whose confirmation would 403. `null` means the caller did not evaluate
+  authority; the submission gate's `assertCanWrite` remains the authority in every case. The legacy
+  `/api/spec/chat` route-decision preview does not evaluate it.
+  `AgentIntentDecisions.decision(...)` enforces the invariant
+  structurally and throws when a `create_cloud_run` action is built with a blocked context, a
+  disallowed Run API, or a missing/blank `projectId`. Non-run decisions must never reach
+  `/api/orchestrator/turn/confirm` or produce “stored orchestrator decision is not a run route”.
 - `POST /api/orchestrator/turn` is the non-stream primary decision endpoint. It uses the same
   deterministic route/policy contract, persists `ORCHESTRATOR_DECISION`, and uses client `turnId`
   as the idempotency key.
+- The orchestrator trace records which engine actually decided. `AgentIntentService.RouteAttribution`
+  carries the deterministic branch or the exact classifier provider/model/promptId plus
+  `classifierAttempted`, and `AgentTracePayloadFactory` writes those verbatim. Do not reintroduce a
+  hardcoded `modelProvider=deterministic` / `model=none`: this trace is reconciled against
+  `run_step_usage` and `llm_usage_attempt_intent`, so a false attribution contradicts the ledger.
+- Streaming turns route, guard and persist `AgentStreamTurnSupport.routedUserText(request)` — the
+  last user entry of the conversation the provider will execute — not `request.message()`, which
+  the runner discards whenever `conversation` is non-empty.
+- The deterministic run-id grammar accepts only a canonical UUID. A bare hex token is not a run id:
+  commit SHAs, hex-looking words and long digit strings used to produce credit-charging
+  approve/cancel confirmation cards for the wrong target.
+- The action catalog must resolve every action type a router can emit (including `cancel_run`), and
+  its tier ladder mirrors `TierEnforcementService.TIER_RANK` — PRO_PLUS and BYOK are paid tiers, and
+  an unrecognised tier throws instead of silently degrading to FREE.
 - `agent_usage_ledger` is the future meter for open-ended CLI/VS Code conversation usage. Run
   credits and refunds remain owned by the existing run approval path. Streaming chat writes usage
   here with `billingPolicy=INCLUDED` until a separate conversation billing/fair-use policy exists.
@@ -42,8 +75,10 @@ turns separately from runs.
   Both the decision and spawn paths require the authenticated session owner; child execution is
   read-only and cannot acquire run authority. Eligibility is advisory and spawn repeats limits
   transactionally, so a stale probe cannot bypass depth, child-count, or aggregate tree budgets.
-  The canonical chat turn exposes the bounded `spawn_subagent` and `spawn_subagents` tools to the
-  model; both use the same service/protocol seam and return structured child evidence. The batch
+  The canonical chat turn does not expose `spawn_subagent` / `spawn_subagents` to the model because
+  those calls spend provider budget and the turn protocol does not carry a scoped, expiring,
+  single-use spend confirmation. Explicit REST/coordinator calls still use the same service/protocol
+  seam and return structured child evidence. The batch
   tool accepts one to four independent role-contract requests, reserves every child before
   execution, and returns partial results/failures without granting write, shell, run, or approval
   authority. The REST endpoints are
@@ -78,6 +113,9 @@ turns separately from runs.
 - Web/CLI/VS Code streaming turns may also send an explicit `modelOverride`. The server resolves
   its provider from the model registry, enforces `ModelAccessService` and provider/model
   compatibility, persists the session default, and applies the override only to that next turn.
+  `AgentStreamTurnStarter` resolves provider and model as one pair: a provider change without a
+  model clears the old provider's session model and falls back through the selected provider's
+  registry route. It must never combine a new provider with a stale model from an earlier turn.
 - Common chat is not only a run launcher. When an `agent_session` has a `projectId`, the streaming
   turn path binds `ProjectChatTools` through `SpecChatService` so CLI and VS Code can answer
   project/code questions with the same architecture, memory, document, tech-debt, and source-search
@@ -113,15 +151,28 @@ turns separately from runs.
   pessimistic parent-session lock and append-only `SUBAGENT_WRITER_RESERVED` /
   `SUBAGENT_WRITER_RELEASED` events to permit at most one active reservation per explicit workspace
   scope. `authorizeWriter` must be called before every mutation and `releaseWriter` is
-  terminal/idempotent. `ImplementerMutationService` is the deliberately narrow opt-in execution
+  terminal/idempotent. All writer reserve/mutate/execute/release endpoints additionally require
+  PAT transport proven by `JwtAuthenticationFilter`; a caller-declared CLI surface is never an
+  authentication credential. `ImplementerMutationService` is the deliberately narrow opt-in execution
   seam: the `IMPLEMENTER_V1` contract is disabled by default, requires CLI/VS Code local-hands
-  sessions, an existing absolute workspace scope, an active exact-scope reservation, and only
-  `writeFile`/`editFile`. `ImplementerExecutionService` adds the bounded WORKHORSE model loop
-  behind that seam: read/search/diff plus file mutation and build/test tools are allowlisted, the
-  reservation is rechecked before every round and mutation, checkpoints are persisted before and
-  after the pass, terminal turns are recorded, and the reservation is released on success/failure.
-  It remains disabled by default and WEB sessions are rejected. Read-only child behavior remains
-  unchanged.
+  sessions, proven session ownership, a server-derived workspace scope, an active exact-scope
+  reservation, and only `writeFile`/`editFile`. `ImplementerExecutionService` adds the bounded
+  WORKHORSE model loop behind that seam: read/search/diff plus file mutation and build/test tools
+  are allowlisted, the reservation is rechecked before every round and mutation, checkpoints are
+  persisted before and after the pass, terminal turns are recorded, and the reservation is released
+  on success/failure. It remains disabled by default and WEB sessions are rejected. Read-only child
+  behavior remains unchanged.
+- **The writer seam executes on the SERVER, not on the caller's machine (RR-495).** The CLI/VS Code
+  gate describes who may call it, not where the bytes land: every tool it binds is a server tool. The
+  scope is therefore derived from server state by `subagent/ImplementerWorkspaceScope` — the run
+  workspace for a run-scoped session, otherwise
+  `<agent.workspace>/agent-sessions/<sessionId>` — and the request may only narrow it with a
+  *relative* subpath proven contained by `security/SafeWorkspacePath`. A caller-supplied absolute
+  path is refused with an explicit message rather than reinterpreted, because a client that sent one
+  believed it was addressing its own filesystem. Previously any existing writable server directory
+  was accepted, which made an enabled flag a remote write/read/build-execution primitive. A genuine
+  client-side writer still needs the signed tool-call/result envelope protocol the run pipeline
+  uses; this containment is not that protocol.
 - Local-hands reconnect recovery reconstructs pending tool calls across every still-active session
   for a run, using the latest event timestamp per action id. This matters while an old CLI/VS Code
   session is being retired and a replacement session reconnects; callers must not assume the newest
@@ -135,7 +186,9 @@ turns separately from runs.
   `(session_id, action_id)` for `LOCAL_HANDS_COMPLETED` rows (deduping historical duplicates first),
   so retried result envelopes are first-writer-wins across JVMs. `LocalHandsStateService` reports
   whether the terminal insert was accepted; a duplicate is an expected idempotent retry.
-- `GET /api/runs/{runId}/tool-session/reconnect-status` is the explicit handoff boundary. `CONNECTED`
+- Every local tool transport route (`tool-results`, reconnect/status/disconnect and pending calls)
+  requires PAT transport in addition to run read/write authorization; a same-user browser JWT is
+  not a local connector. `GET /api/runs/{runId}/tool-session/reconnect-status` is the explicit handoff boundary. `CONNECTED`
   means the in-memory worker wait was rebound; `RESTART_REQUIRES_NEW_RUN` means durable action
   evidence exists but the JVM lost the provider future, so a returned tool result cannot resume the
   old worker. Persisted calls older than the remote lease are returned as `staleCallIds` and must
@@ -147,6 +200,13 @@ turns separately from runs.
   `CANCELLED` and appends a `SUBAGENT_RECOVERY` event with `reason=SERVER_RESTART`. Provider calls
   and in-memory tool futures cannot be resumed across a process boundary; cancelling the stale
   child releases its reserved descendant budget and lets the parent request a fresh bounded child.
+  Liveness is a lease, not an assumption: `SubagentExecutionService` renews the child heartbeat
+  every 30s for the whole execution (turn admission alone does not cover a long model round), and
+  `AgentSessionStartupRecovery` only cancels a child whose lease has been unrenewed for 300s.
+  **Known scope limit:** that sweep reads the whole `agent_session` table and has no owner/instance
+  identity to fence on, so it cannot prove a candidate belongs to the booting JVM. A child whose
+  owner is alive but wedged past the window is still cancelled; true node fencing needs a durable
+  owner id plus lease token, which the current schema does not carry.
 
 ## Key Files
 
@@ -154,7 +214,7 @@ turns separately from runs.
 | ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `OrchestratorController.java`              | Primary structured `/api/orchestrator/turn` endpoint for route/policy decisions plus explicit `/turn/confirm` for confirmed cloud-run submissions.                                                                  |
 | `OrchestratorService.java`                 | Stable controller-to-service facade for structured turn decisions and explicit confirmed run submission; delegates persistence to `AgentSessionService` and keeps run creation behind `AgentRunSubmissionGate`.     |
-| `AgentRunSubmissionGate.java`              | The only agent-session path allowed to create a new cloud run from a stored `CODE_RUN_REQUIRED` decision. Confirmed submissions can carry `lowComplexityWorkerStartTier` so LOW tasks can start cheap without using a route-pinning model override.                              |
+| `AgentRunSubmissionGate.java`              | The only agent-session path allowed to create a new cloud run from a stored `CODE_RUN_REQUIRED` decision. It requires canonical project write authority. Local execution fails closed here because the confirmation DTO cannot bind `selectedRepoIds` + `localInstallationId`; clients must use normal local-run admission. Confirmed cloud submissions can carry `lowComplexityWorkerStartTier` so LOW tasks can start cheap without using a route-pinning model override. |
 | `AgentActionArguments.java`                | Package-local typed-action argument helper shared by confirmed run submission and confirmation write guards.                                                                                                        |
 | `AgentSessionController.java`              | REST surface under `/api/agent`: sessions, streaming + recorded turns, action catalog, context resolution, gate decision cards.                                                                                     |
 | `AgentSessionHistoryService.java`          | Ownership-checked, transactional transcript reset used by the cross-surface `/sessions/{id}/history` DELETE contract; preserves session identity and usage audit rows.                                         |
@@ -166,7 +226,8 @@ turns separately from runs.
 | `AgentRecordedTurnService.java`            | Persists legacy recorded turns from one canonical orchestrator decision; adapts that decision to the legacy DTO without a second classifier call, then writes the turn, title/timestamp, `INTENT` event, and response. |
 | `AgentActionLifecycleService.java`         | Persists action planned/event/result records for local tool and terminal action audit trails.                                                                                                                       |
 | `subagent/SubagentProtocol*.java`          | Persisted parent/child request-result protocol with idempotent child ids, versioned role contracts (read-only SCOUT/VERIFIER/REPRODUCER/REVIEWER/DOCS_SCOUT plus disabled-by-default IMPLEMENTER_V1), depth/child/turn/cost guards, explicit start, completion handoff, cancellation propagation, and single-writer reservation events. |
-| `subagent/ImplementerMutationService.java` | Fail-closed single-writer mutation seam for CLI/VS Code only; validates feature flag, ownership, local-hands surface, workspace scope, reservation, and the two allowed file mutation tools before dispatch. |
+| `subagent/ImplementerMutationService.java` | Fail-closed single-writer mutation seam for CLI/VS Code only; validates feature flag, session ownership, local-hands surface, server-derived workspace scope, reservation, and the two allowed file mutation tools before dispatch. |
+| `subagent/ImplementerWorkspaceScope.java` | Server-authoritative scope binder for the writer seam: derives the root from the session (run workspace or per-session sandbox), accepts only relative narrowing proven contained by `SafeWorkspacePath`, and refuses caller-supplied absolute host paths. |
 | `subagent/ImplementerExecutionService.java` | Disabled-by-default bounded WORKHORSE IMPLEMENTER loop; binds the allowlisted read/edit/build/test tools, routes mutations through the reservation seam, persists checkpoints and terminal turn evidence, and releases the reservation on terminal paths. |
 | `SubagentExecutionService.java`            | Executes persisted role-contract children through the read-only orchestrator policy and bounded `SpecChatService`/`LlmRouter` tool loop; records each model round, requires evidence for verification/reproduction/review/docs roles, propagates cancellation, and gates deterministic coordinator-triggered execution. |
 | `AgentEventRecorder.java`                  | Appends durable action events with consistent ids, timestamps, turn/action scoping, and payload JSON fallback.                                                                                                      |
@@ -185,7 +246,7 @@ turns separately from runs.
 | `AgentAttachmentService.java`              | Validates + extracts + sanitizes a chat upload (magic-byte type allow-list + Tika + `InputSanitizer` injection scan + `ContextSanitizer`), stores it, and builds the untrusted-delimited injection block for the turn. Audits accept/reject. |
 | `AgentAttachmentStore.java`                | Redis-backed store (2h TTL) for validated, sanitized upload text keyed by session + attachment id, loaded server-side at turn time.                                                                                 |
 | `AgentText.java`                           | Package-local string helper for repeated blank, fallback, trim, and path-leaf handling across agent-session services.                                                                                               |
-| `AgentIntentService.java`                  | Typed intent router: deterministic safety/explicit-command guards first, then strict JSON natural-language classification through `LlmRouter.callText`; the effective session provider/model is passed into the classifier (legacy callers retain the Anthropic default); malformed/unavailable output fails closed to the non-run fallback. |
+| `AgentIntentService.java`                  | Typed intent router: deterministic safety/explicit-command guards first, then strict JSON natural-language classification through `LlmRouter.callText`; the effective session provider/model is passed into the classifier. Missing provider policy skips provider dispatch and uses the deterministic non-run classifier; malformed/unavailable output does the same. There is no implicit Anthropic fallback. |
 | `AgentIntentDecisions.java`                | Package-local decision/policy construction and billing-impact mapping helper for deterministic route outputs.                                                                                                       |
 | `AgentGuardIntents.java`                   | Package-local pre-routing guard for empty input, unsafe requests, and explicit no-edit/chat-only instructions.                                                                                                      |
 | `AgentCodeChangeIntents.java`              | Package-local code-change router for local code tasks, missing-project implementation proposals, and confirmation-gated cloud-run proposals.                                                                        |
@@ -214,7 +275,9 @@ turns separately from runs.
   action lifecycle correlation across permission prompts, local tool events, and action results.
 - `V262__agent_event_replay_cursor.sql` adds a durable database-assigned `stream_sequence` cursor
   and replay index. `/events` remains the compatibility list; `/events/replay?after=` returns a
-  cursor envelope for stream interruption and visibility-resume backfill.
+  cursor envelope for stream interruption and visibility-resume backfill. Both the initial snapshot
+  and cursor delta are bounded to 500 response events; delta queries fetch one sentinel row and set
+  `hasMore`/`nextSequence` instead of materialising the rest of a long-lived session.
 - `V265__dedupe_local_hands_restart_events.sql` deduplicates historical
   `LOCAL_HANDS_WORKER_RESTARTED` transitions and adds a partial first-writer-wins index, so two
   JVMs observing the same stale worker cannot publish competing restart handoff records.
@@ -245,11 +308,19 @@ turns separately from runs.
   require imperative command wording plus run ids and confirmation actions, list-runs/list-gates
   stays read-only, and approval-boundary wording inside code-run requests (for example "do not
   code until I approve") is not claimed by lifecycle routing.
-- `AgentRunSubmissionGateTest` pins confirmed cloud-run submission idempotency and propagation of
+- `AgentRunSubmissionGateTest` pins confirmed cloud-run submission idempotency, canonical project
+  write denial, fail-closed local confirmation without connector/repo binding, and propagation of
   `lowComplexityWorkerStartTier=LIGHTWEIGHT|WORKHORSE` as a normalized non-pinning run hint.
 - `AgentCodeChangeIntentsTest` pins the only code-run-producing branch directly: local tools yield
   `local_code_task` without run API access, project-scoped cloud runs require confirmation, and
-  missing/blank project context cannot call the run API.
+  missing/blank project context cannot call the run API. It also pins the typed blocking contract:
+  a missing project yields a non-confirmable `AgentActionContext` with `MISSING_PROJECT_CONTEXT` +
+  `SELECT_PROJECT`, and a confirmable proposal carries the context on the action so it survives
+  persistence and reload.
+- `AgentIntentDecisionsTest` additionally pins the fail-closed `create_cloud_run` invariant: a
+  proposal with no project context, with a blocked `AgentActionContext`, or with `runApiAllowed`
+  false throws instead of producing a clickable-but-unexecutable proposal. It also pins that an
+  `AgentActionContext` cannot simultaneously be confirmable and carry blocking reasons.
 - `AgentNonRunIntentsTest` pins non-run routing around the code-change branch: local terminal
   actions, review/plan, vague mutation clarification, read-only code help, cost queries, and
   project resolution cannot call the run API.
@@ -280,9 +351,12 @@ turns separately from runs.
   no store write. `specchat/WebSearchChatToolsTest` pins the `web_fetch` SSRF guards (scheme,
   localhost/`*.internal`, loopback/link-local/metadata IPs), suspicious egress-query rejection,
   default-port-only enforcement, pinned-address handoff, content-type/length response guards, and
-  required-arg rejection.
-- `AgentApiOpenApiCoverageTest` pins that public agent-session, orchestrator, and managed-AI API
-  routes plus action-lifecycle schemas are represented in `docs/openapi.yaml`.
+  required-arg rejection. External content now fails closed when `ContextSanitizer` throws;
+  neither raw fetched content, malformed tool JSON, nor exception messages are echoed into the
+  model envelope/log. The hostile canary regression pins that boundary.
+- The docs-repository `tests/test_openapi_contract.py` gate pins that public agent-session,
+  orchestrator, and managed-AI routes plus action-lifecycle schemas are represented in
+  `executespec-docs/backend/reference/openapi.yaml`.
 - `AgentSessionReadServiceTest` pins active-session pagination, latest linked-run summary
   hydration for session rows, owned-session loading, missing/forbidden session rejection, event
   listing, bounded turn pagination, and stored trace hydration.

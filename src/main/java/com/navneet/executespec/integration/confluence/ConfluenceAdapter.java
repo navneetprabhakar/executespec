@@ -39,40 +39,33 @@ public class ConfluenceAdapter implements InboundAdapter, OutboundAdapter {
   public void verifySignature(Map<String, String> headers, String rawBody) {
     // Audit 2026-05-12 review item C #21 — was a no-op accepting any POST. Confluence Cloud
     // sends an HMAC-SHA256 hex digest in X-Hub-Signature when a webhook secret is configured;
-    // verify it constant-time. If no secret is configured, refuse the webhook (prod posture)
-    // unless the caller can also present the bearer apiToken in Authorization (legacy dev
-    // posture).
+    // verify it constant-time.
+    //
+    // RR-584 — fail CLOSED, and NEVER accept the outbound apiToken as an inbound bearer. The old
+    // fallback let a request authenticate with `Authorization: Bearer <config.apiToken>` when no
+    // webhook secret was set. That apiToken is the credential used for outbound Confluence writes;
+    // reusing it for ingress meant a privileged, reusable token had to traverse webhook delivery/
+    // proxy/logging infrastructure, and it had no body binding or replay freshness. A dedicated
+    // inbound HMAC secret is required, matching the Bitbucket/PagerDuty/ServiceNow posture
+    // (RR-637).
     String webhookSecret = config.getWebhookSecret();
-    if (webhookSecret != null && !webhookSecret.isBlank()) {
-      String header = headers.getOrDefault("x-hub-signature", "");
-      // Accept both "sha256=<hex>" and bare hex forms.
-      String received = header.startsWith("sha256=") ? header.substring(7) : header;
-      String expected =
-          com.navneet.executespec.util.HmacUtil.hexSha256(
-              webhookSecret, rawBody == null ? "" : rawBody);
-      if (!java.security.MessageDigest.isEqual(
-          expected.getBytes(java.nio.charset.StandardCharsets.UTF_8),
-          received.getBytes(java.nio.charset.StandardCharsets.UTF_8))) {
-        throw new com.navneet.executespec.integration.WebhookSignatureException(
-            "Confluence webhook HMAC mismatch");
-      }
-      return;
+    if (webhookSecret == null || webhookSecret.isBlank()) {
+      throw new com.navneet.executespec.integration.WebhookSignatureException(
+          "Confluence webhook: configure integration.confluence.webhook-secret to enable inbound"
+              + " webhooks");
     }
-    // Legacy fallback: bearer apiToken in Authorization header (dev-friendly path).
-    if (config.getApiToken() != null && !config.getApiToken().isBlank()) {
-      String authHeader = headers.getOrDefault("authorization", "");
-      String expected = "Bearer " + config.getApiToken();
-      if (!java.security.MessageDigest.isEqual(
-          expected.getBytes(java.nio.charset.StandardCharsets.UTF_8),
-          authHeader.getBytes(java.nio.charset.StandardCharsets.UTF_8))) {
-        throw new com.navneet.executespec.integration.WebhookSignatureException(
-            "Confluence bearer token mismatch");
-      }
-      return;
+    String header = headers.getOrDefault("x-hub-signature", "");
+    // Accept both "sha256=<hex>" and bare hex forms.
+    String received = header.startsWith("sha256=") ? header.substring(7) : header;
+    String expected =
+        com.navneet.executespec.util.HmacUtil.hexSha256(
+            webhookSecret, rawBody == null ? "" : rawBody);
+    if (!java.security.MessageDigest.isEqual(
+        expected.getBytes(java.nio.charset.StandardCharsets.UTF_8),
+        received.getBytes(java.nio.charset.StandardCharsets.UTF_8))) {
+      throw new com.navneet.executespec.integration.WebhookSignatureException(
+          "Confluence webhook HMAC mismatch");
     }
-    throw new com.navneet.executespec.integration.WebhookSignatureException(
-        "Confluence webhook: configure integration.confluence.webhook-secret to enable inbound"
-            + " webhooks");
   }
 
   @Override
@@ -80,7 +73,22 @@ public class ConfluenceAdapter implements InboundAdapter, OutboundAdapter {
     try {
       ConfluenceWebhookPayload payload = mapper.readValue(rawBody, ConfluenceWebhookPayload.class);
       if (payload.event() != null && payload.page() != null && payload.page().id() != null) {
-        return payload.event() + "-" + payload.page().id();
+        // RR-581 — the durable identity must change between successive edits of the same page.
+        // `<event>-<pageId>` alone made every `page_updated` after the first look like a replay, so
+        // later requirement/AC changes never launched a run. Prefer the page's monotonic version
+        // number, then the delivery timestamp; only when NEITHER is present do we fall back to a
+        // random id (accept-once) rather than a stable key that would false-dedupe every update.
+        String pageId = payload.page().id();
+        Integer version =
+            payload.page().version() == null ? null : payload.page().version().number();
+        if (version != null) {
+          return payload.event() + "-" + pageId + "-v" + version;
+        }
+        if (payload.timestamp() != null) {
+          return payload.event() + "-" + pageId + "-t" + payload.timestamp();
+        }
+        // No provider-supplied discriminator — cannot prove this is a duplicate, so accept it.
+        return payload.event() + "-" + pageId + "-" + UUID.randomUUID();
       }
     } catch (Exception ignored) {
     }

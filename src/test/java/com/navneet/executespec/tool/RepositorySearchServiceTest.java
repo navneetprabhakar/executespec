@@ -166,6 +166,25 @@ class RepositorySearchServiceTest {
   }
 
   @Test
+  void boundsDecodedSnapshotCacheByFileCount() throws Exception {
+    int files = RepositorySearchService.MAX_CACHED_SNAPSHOTS_PER_WORKSPACE + 32;
+    for (int i = 0; i < files; i++) {
+      Files.writeString(root.resolve("cache-" + i + ".txt"), "symbol-" + i + "\n");
+    }
+    var service = new RepositorySearchService();
+
+    service.search(
+        root,
+        new RepositorySearchService.SearchRequest(
+            "missing-symbol", RepositorySearchService.SearchMode.SYMBOL, true, null, null, 50, 0));
+
+    assertThat(service.cachedSnapshotCount(root))
+        .isLessThanOrEqualTo(RepositorySearchService.MAX_CACHED_SNAPSHOTS_PER_WORKSPACE);
+    assertThat(service.cachedCharacterCount(root))
+        .isLessThanOrEqualTo(RepositorySearchService.MAX_CACHED_CHARACTERS_PER_WORKSPACE);
+  }
+
+  @Test
   void gitInventoryIncludesTrackedAndNonIgnoredFilesButExcludesIgnoredTrees() throws Exception {
     runGit("init", "-q");
     Files.writeString(root.resolve(".gitignore"), ".generated/\n");
@@ -267,6 +286,26 @@ class RepositorySearchServiceTest {
         service.relationships(
             root, new RepositorySearchService.RelationshipRequest("Widget", null, "*.java", 50));
     assertThat(changed.repositoryFingerprint()).isNotEqualTo(result.repositoryFingerprint());
+  }
+
+  @Test
+  void relationshipsDoNotInventTargetWhenSymbolHasMultipleDefinitions() throws Exception {
+    Files.writeString(root.resolve("Mysql.java"), "class DatabaseWrapper {}\n");
+    Files.writeString(root.resolve("Postgres.java"), "class DatabaseWrapper {}\n");
+    Files.writeString(
+        root.resolve("BackendTest.java"),
+        "@Test void backend() { DatabaseWrapper wrapper = new DatabaseWrapper(); }\n");
+
+    var result =
+        new RepositorySearchService()
+            .relationships(
+                root,
+                new RepositorySearchService.RelationshipRequest(
+                    "DatabaseWrapper", null, "*.java", 50));
+
+    assertThat(result.edges())
+        .isNotEmpty()
+        .allSatisfy(edge -> assertThat(edge.targetPath()).isNull());
   }
 
   @Test

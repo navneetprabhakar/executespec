@@ -1,6 +1,7 @@
 package com.navneet.executespec.memory;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 
 import com.navneet.executespec.auth.entity.AppUser;
@@ -13,6 +14,10 @@ import com.navneet.executespec.auth.repository.ProjectRepository;
 import com.navneet.executespec.auth.repository.TierConfigRepository;
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.memory.entity.ProjectChatMessage;
+import com.navneet.executespec.project.security.ProjectAccessGuard;
+import com.navneet.executespec.security.InputSanitizer;
+import com.navneet.executespec.specchat.ChatSecurityAuditService;
+import com.navneet.executespec.specchat.ChatToolPolicy;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -45,12 +50,16 @@ public class ProjectChatController {
   // models the YAML doesn't yet know about.
   private final com.navneet.executespec.router.ModelResolver modelResolver;
   private final com.navneet.executespec.router.ModelRegistry modelRegistry;
+  private final com.navneet.executespec.router.OrgModelOverrideService orgModelOverrideService;
+  private final ProjectAccessGuard projectAccessGuard;
+  private final InputSanitizer inputSanitizer;
+  private final ChatSecurityAuditService chatSecurityAuditService;
 
   @GetMapping
   public ResponseEntity<List<ProjectChatMessage>> history(
       @AuthenticationPrincipal AppUserDetails principal, @PathVariable String projectId) {
     requireChatAccess(principal, projectId);
-    return ResponseEntity.ok(chatService.history(projectId));
+    return ResponseEntity.ok(chatService.history(projectId, principal));
   }
 
   /**
@@ -59,7 +68,11 @@ public class ProjectChatController {
    * used in {@link ProjectChatService#send} so the chip never drifts from the model that's actually
    * answering the next turn.
    */
-  public record ChatInfo(String model, String provider, int contextWindow) {}
+  public record ChatInfo(
+      String model,
+      String provider,
+      int contextWindow,
+      Map<String, String> confirmedActionModels) {}
 
   @GetMapping("/info")
   public ResponseEntity<ChatInfo> info(
@@ -73,17 +86,42 @@ public class ProjectChatController {
         project.getAiProvider() != null
             ? project.getAiProvider()
             : com.navneet.executespec.router.LlmProvider.ANTHROPIC;
+    Map<String, String> previous = com.navneet.executespec.router.RunModelOverrides.capture();
+    com.navneet.executespec.router.RunModelOverrides.bind(
+        orgModelOverrideService.overridesForRun(project.getOrgId()));
+    try {
+      com.navneet.executespec.router.ResolvedModel resolved =
+          modelResolver.resolve(
+              "ProjectChatAgent", provider, com.navneet.executespec.router.AgentTier.PLANNING);
+      String model = resolved.getModel();
+      Map<String, String> actionModels =
+          Map.of(
+              "REGENERATE_ARCHITECTURE",
+              exactActionModel("ArchitectureDocGenerator", provider),
+              "GENERATE_PROJECT_DOC",
+              exactActionModel("ProjectDocGeneratorService", provider),
+              "RUN_CODE_REVIEW",
+              exactActionModel("CodeReviewAgent", provider));
+      return ResponseEntity.ok(
+          new ChatInfo(
+              model,
+              provider.name(),
+              modelRegistry.contextLimitForOrPrefixFallback(model),
+              actionModels));
+    } finally {
+      com.navneet.executespec.router.RunModelOverrides.bind(previous);
+    }
+  }
+
+  private String exactActionModel(
+      String agentRole, com.navneet.executespec.router.LlmProvider provider) {
     com.navneet.executespec.router.ResolvedModel resolved =
-        modelResolver.resolve(
-            "ProjectChatAgent", provider, com.navneet.executespec.router.AgentTier.PLANNING);
-    String model = resolved.getModel();
-    return ResponseEntity.ok(
-        new ChatInfo(
-            model,
-            resolved.getActualProvider() == null
-                ? provider.name()
-                : resolved.getActualProvider().name(),
-            modelRegistry.contextLimitForOrPrefixFallback(model)));
+        modelResolver.resolve(agentRole, provider);
+    if (resolved.getActualProvider() != provider) {
+      throw new ResponseStatusException(
+          HttpStatus.CONFLICT, "adaptive provider routing cannot scope a confirmed action");
+    }
+    return resolved.getModel();
   }
 
   @PostMapping
@@ -102,9 +140,48 @@ public class ProjectChatController {
     // V169 (2026-05-02) — caller's PAT threads into project-action tools (regenerate_architecture
     // hits private repos with this PAT). May be null for users who haven't connected a PAT yet;
     // tools that need it return a clear error in that case.
+    // Project chat spends provider tokens. An explicit PROJECT_VIEWER may read history/info but
+    // cannot initiate a paid turn. The service and tool wrappers repeat this authorization.
+    try {
+      projectAccessGuard.assertCanWrite(projectId, principal);
+    } catch (RuntimeException denied) {
+      chatSecurityAuditService.record(
+          "CHAT_TURN_DENIED",
+          projectId,
+          projectId,
+          principal,
+          "project_chat_turn",
+          ChatToolPolicy.Capability.SPEND_AI,
+          "DENIED",
+          project.getOrgId());
+      throw denied;
+    }
+    chatSecurityAuditService.record(
+        "CHAT_TURN_ALLOWED",
+        projectId,
+        projectId,
+        principal,
+        "project_chat_turn",
+        ChatToolPolicy.Capability.SPEND_AI,
+        "ALLOWED",
+        project.getOrgId());
+    String message = inputSanitizer.normalize(body.message);
+    try {
+      inputSanitizer.scan(message);
+    } catch (RuntimeException denied) {
+      chatSecurityAuditService.record(
+          "CHAT_INPUT_DENIED",
+          projectId,
+          projectId,
+          principal,
+          "project_chat_input",
+          ChatToolPolicy.Capability.SPEND_AI,
+          "DENIED",
+          project.getOrgId());
+      throw denied;
+    }
     ProjectChatMessage reply =
-        chatService.send(
-            projectId, project.getOrgId(), user.getId(), body.message, user.getGithubPat());
+        chatService.send(projectId, project.getOrgId(), principal, message, user.getGithubPat());
     return ResponseEntity.ok(reply);
   }
 
@@ -116,7 +193,7 @@ public class ProjectChatController {
   public ResponseEntity<java.util.Map<String, String>> compile(
       @AuthenticationPrincipal AppUserDetails principal, @PathVariable String projectId) {
     requireChatAccess(principal, projectId);
-    String spec = chatService.compileToSpec(projectId);
+    String spec = chatService.compileToSpec(projectId, principal);
     return ResponseEntity.ok(java.util.Map.of("spec", spec));
   }
 
@@ -128,7 +205,7 @@ public class ProjectChatController {
   public ResponseEntity<java.util.Map<String, Integer>> clear(
       @AuthenticationPrincipal AppUserDetails principal, @PathVariable String projectId) {
     requireChatAccess(principal, projectId);
-    int deleted = chatService.clearHistory(projectId);
+    int deleted = chatService.clearHistory(projectId, principal);
     return ResponseEntity.ok(java.util.Map.of("deleted", deleted));
   }
 
@@ -142,7 +219,7 @@ public class ProjectChatController {
       @AuthenticationPrincipal AppUserDetails principal, @PathVariable String projectId) {
     requireChatAccess(principal, projectId);
     try {
-      return ResponseEntity.ok(chatService.compactHistory(projectId));
+      return ResponseEntity.ok(chatService.compactHistory(projectId, principal));
     } catch (IllegalStateException e) {
       throw new ResponseStatusException(HttpStatus.CONFLICT, e.getMessage());
     } catch (IllegalArgumentException e) {
@@ -157,6 +234,12 @@ public class ProjectChatController {
         projectRepo
             .findById(projectId)
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "project"));
+    // RR-593 — evaluate the SUPER_ADMIN global bypass BEFORE the tenant-membership gate. The
+    // standard ProjectAccessGuard grants SUPER_ADMIN globally; the old ordering 403'd platform
+    // operators out of tenants they had not joined before their documented bypass was ever checked.
+    if ("SUPER_ADMIN".equals(user.getGlobalRole())) {
+      return user;
+    }
     // RL-2026-05-056 — honour V175 cross-org ProjectMember access (consistent with
     // ProjectAccessGuard.assertCanRead). A cross-org invitee reaches the project via a
     // ProjectMember row, not org match; the old org-only check 403'd them out of project chat.
@@ -164,9 +247,6 @@ public class ProjectChatController {
     boolean isMember = projectMemberRepo.existsByProjectIdAndUserId(projectId, user.getId());
     if (!orgMatch && !isMember) {
       throw new ResponseStatusException(HttpStatus.FORBIDDEN, "project not in caller org");
-    }
-    if ("SUPER_ADMIN".equals(user.getGlobalRole())) {
-      return user;
     }
     String orgId = project.getOrgId() != null ? project.getOrgId() : user.getOrgId();
     String tier =
@@ -180,7 +260,7 @@ public class ProjectChatController {
       // R4 (2026-05-01 follow-up Task 7) — V165 retired MAX; gating
       // copy now names the post-V165 ladder.
       throw new ResponseStatusException(
-          HttpStatus.FORBIDDEN, "Project chat requires Team or Enterprise tier");
+          HttpStatus.FORBIDDEN, "Project chat requires a Team, BYOK, or Enterprise plan");
     }
     return user;
   }

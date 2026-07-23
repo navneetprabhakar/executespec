@@ -1,5 +1,6 @@
 package com.navneet.executespec.contracts.consumers;
 
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -13,6 +14,7 @@ import com.navneet.executespec.contracts.ContractRegistry;
 import com.navneet.executespec.contracts.ContractRegistryRepository;
 import com.navneet.executespec.folder.ExecutespecFolderWriter;
 import com.navneet.executespec.project.entity.ProjectRepo;
+import com.navneet.executespec.project.repository.ProjectRepoLinkRepository;
 import com.navneet.executespec.project.repository.ProjectRepoRepository;
 
 import org.springframework.http.HttpStatus;
@@ -20,6 +22,8 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
+import org.yaml.snakeyaml.DumperOptions;
+import org.yaml.snakeyaml.Yaml;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -48,8 +52,8 @@ public class ContractConsumerController {
   private final ContractRegistryRepository registryRepo;
   private final ContractConsumerRepository consumerRepo;
   private final ProjectRepoRepository projectRepoRepo;
+  private final ProjectRepoLinkRepository projectRepoLinkRepo;
   private final ExecutespecFolderWriter folderWriter;
-  private final com.navneet.executespec.auth.repository.AppUserRepository userRepo;
   private final com.navneet.executespec.project.pr.PullRequestRecordService prRecordService;
   private final com.navneet.executespec.project.security.ProjectAccessGuard projectAccessGuard;
   private final org.springframework.beans.factory.ObjectProvider<ActivityEventEmitter>
@@ -59,6 +63,7 @@ public class ContractConsumerController {
   public ResponseEntity<List<ConsumerDto>> list(
       @PathVariable String projectId, @PathVariable UUID contractId, Authentication auth) {
     projectAccessGuard.assertCanRead(projectId, principal(auth));
+    requireContractInProject(projectId, contractId);
     List<ConsumerDto> out =
         consumerRepo.findByContractIdAndDeclaredInProjectId(contractId, projectId).stream()
             .map(ConsumerDto::from)
@@ -80,6 +85,8 @@ public class ContractConsumerController {
         registryRepo
             .findById(contractId)
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "contract"));
+    requireRepoInProject(projectId, contract.getRepoId());
+    requireRepoInProject(projectId, body.consumerRepoId());
     ProjectRepo consumerRepo2 =
         projectRepoRepo
             .findById(body.consumerRepoId())
@@ -100,14 +107,18 @@ public class ContractConsumerController {
             .consumerRepoId(body.consumerRepoId())
             .declaredVersionConstraint(body.versionConstraint())
             .declaredInProjectId(projectId)
-            .declaredByUserId(auth.getName())
+            // RR-524 (same defect class) — attribute to the immutable actor id, not the email.
+            .declaredByUserId(resolvedUserId(auth))
             .build();
     ContractConsumer saved = consumerRepo.save(entity);
 
     // Open the consumer-side declaration PR (best-effort; persist
     // the DB row regardless because the planner-injection path keys
     // off the row, not the file).
-    String pat = userRepo.findById(auth.getName()).map(u -> u.getGithubPat()).orElse(null);
+    // RR-524 (same defect class) — auth.getName() is the EMAIL, not the AppUser id, so
+    // findById(email) always resolved a null PAT and private-repo declaration PRs never opened.
+    // Read the decrypted PAT from the authenticated principal instead.
+    String pat = principal(auth).getUser().getGithubPat();
     String yaml = composeConsumerYaml(contract, body.versionConstraint());
     String path = ".executespec/contracts/consumed/" + contract.getName() + ".consumer.yaml";
     try {
@@ -166,7 +177,7 @@ public class ContractConsumerController {
       emitter.emit(
           parseUuidOrNull(projectId),
           ActivityEventType.CONTRACT_CONSUMER_DECLARED,
-          parseUuidOrNull(auth.getName()),
+          parseUuidOrNull(resolvedUserId(auth)),
           "CONTRACT",
           contractId.toString(),
           "Declared consumer "
@@ -189,6 +200,8 @@ public class ContractConsumerController {
       @PathVariable UUID consumerRepoId,
       Authentication auth) {
     projectAccessGuard.assertCanWrite(projectId, principal(auth));
+    requireContractInProject(projectId, contractId);
+    requireRepoInProject(projectId, consumerRepoId);
     ContractConsumer existing =
         consumerRepo
             .findByContractIdAndConsumerRepoIdAndDeclaredInProjectId(
@@ -202,7 +215,7 @@ public class ContractConsumerController {
       emitter.emit(
           parseUuidOrNull(projectId),
           ActivityEventType.CONTRACT_CONSUMER_REMOVED,
-          parseUuidOrNull(auth.getName()),
+          parseUuidOrNull(resolvedUserId(auth)),
           "CONTRACT",
           contractId.toString(),
           "Removed consumer declaration for repo " + consumerRepoId,
@@ -212,17 +225,59 @@ public class ContractConsumerController {
   }
 
   static String composeConsumerYaml(ContractRegistry contract, String versionConstraint) {
-    StringBuilder sb = new StringBuilder();
-    sb.append("# Auto-generated by ExecuteSpec at consumer-declaration time.\n");
-    sb.append("# Edit the version constraint below; the contract identity is fixed.\n");
-    sb.append("contract:\n");
-    sb.append("  id: ").append(contract.getId()).append("\n");
-    sb.append("  name: ").append(contract.getName()).append("\n");
-    sb.append("  type: ").append(contract.typeEnum().name()).append("\n");
-    sb.append("versionConstraint: ")
-        .append(versionConstraint == null ? "any" : versionConstraint)
-        .append("\n");
-    return sb.toString();
+    // RR-598 — the detected contract name and the caller-controlled versionConstraint used to be
+    // concatenated straight into plain YAML scalars. A value containing ':', '#', a quote, a
+    // newline or a YAML tag could change the generated document's structure or inject
+    // attacker-chosen keys into a TRUSTED .executespec control file. Build a typed object graph and
+    // let SnakeYAML quote/escape every scalar, and bound the version constraint first so it cannot
+    // smuggle structure even before quoting.
+    Map<String, Object> contractNode = new LinkedHashMap<>();
+    contractNode.put("id", contract.getId() == null ? null : contract.getId().toString());
+    contractNode.put("name", contract.getName());
+    contractNode.put("type", contract.typeEnum().name());
+
+    Map<String, Object> root = new LinkedHashMap<>();
+    root.put("contract", contractNode);
+    root.put("versionConstraint", sanitizeVersionConstraint(versionConstraint));
+
+    DumperOptions options = new DumperOptions();
+    options.setDefaultFlowStyle(DumperOptions.FlowStyle.BLOCK);
+    options.setPrettyFlow(false);
+    String body = new Yaml(options).dump(root);
+
+    return "# Auto-generated by ExecuteSpec at consumer-declaration time.\n"
+        + "# Edit the version constraint below; the contract identity is fixed.\n"
+        + body;
+  }
+
+  /**
+   * RR-598 — bound the caller-controlled version constraint to a safe scalar. Null/blank collapses
+   * to {@code "any"}; control characters are stripped and the value is length-capped. SnakeYAML
+   * still quotes whatever remains, so this is defence in depth, not the only escaping.
+   */
+  static String sanitizeVersionConstraint(String raw) {
+    if (raw == null || raw.isBlank()) return "any";
+    String cleaned = raw.replaceAll("\\p{Cntrl}", "").trim();
+    if (cleaned.isEmpty()) return "any";
+    if (cleaned.length() > 100) cleaned = cleaned.substring(0, 100);
+    return cleaned;
+  }
+
+  private ContractRegistry requireContractInProject(String projectId, UUID contractId) {
+    ContractRegistry contract =
+        registryRepo
+            .findById(contractId)
+            .orElseThrow(
+                () -> new ResponseStatusException(HttpStatus.NOT_FOUND, "contract not found"));
+    requireRepoInProject(projectId, contract.getRepoId());
+    return contract;
+  }
+
+  private void requireRepoInProject(String projectId, UUID repoId) {
+    if (repoId == null
+        || projectRepoLinkRepo.findByProjectIdAndRepoId(projectId, repoId).isEmpty()) {
+      throw new ResponseStatusException(HttpStatus.NOT_FOUND, "contract or repo not found");
+    }
   }
 
   private com.navneet.executespec.auth.security.AppUserDetails principal(
@@ -232,6 +287,11 @@ public class ContractConsumerController {
       return u;
     throw new org.springframework.web.server.ResponseStatusException(
         org.springframework.http.HttpStatus.UNAUTHORIZED, "auth required");
+  }
+
+  /** RR-524 (same defect class) — the immutable actor id (UUID string), never the email. */
+  private String resolvedUserId(org.springframework.security.core.Authentication auth) {
+    return principal(auth).getUser().getId();
   }
 
   private static UUID parseUuidOrNull(String s) {

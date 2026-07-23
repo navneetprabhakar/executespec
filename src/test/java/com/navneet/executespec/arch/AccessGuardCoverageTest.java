@@ -112,6 +112,11 @@ class AccessGuardCoverageTest {
           "/executions/{",
           "/launches/{",
           "/repos/{",
+          // Review rows expose source paths, diffs, comments, and paid mutation entrypoints. Their
+          // direct-id/body/query routes do not carry /projects/{...} in the URL, so pin the whole
+          // surfaces explicitly against future tenant-guard regressions.
+          "/code-reviews",
+          "/pr-reviews",
           // C2 (audit 2026-05-29) — the readymade/migration libraries take the tenant projectId
           // in the body/param (not a path id) and reference the recipe by a public {slug}. Scoping
           // their {slug} surfaces forces a guard on resolve / instantiate / dry-run / apply, the
@@ -156,11 +161,8 @@ class AccessGuardCoverageTest {
               "com.navneet.executespec.auth.controller.SuperAdminController#forceFailTask",
               "com.navneet.executespec.auth.controller.SuperAdminController#reReviewRun",
               "com.navneet.executespec.folder.ExecutespecMigrationController#migrate",
-              // V2 canary surface — runIds in `/api/v2/runs/` reference Run rows which are a
-              // separate storage from the production `pipeline_run` table; they're scoped to
-              // V2 bring-up testing, not customer data. Live V2 runs go through the production
-              // `/api/runs` surface which has its own RunAccessGuard coverage.
-              "com.navneet.executespec.rollout.RolloutRunController#poll",
+              // RR-934 — the retired `rollout.RolloutRunController` (dead `/api/v2/runs`) was
+              // deleted; its allowlist entry went with it.
               // Public solution/recipe reads keyed by a non-tenant {slug} — no project / run id
               // bind; tier-gating is per-row in the response body. C2 — audit 2026-05-29.
               "com.navneet.executespec.readymade.controller.ReadymadeController#detail",
@@ -204,10 +206,6 @@ class AccessGuardCoverageTest {
   private static final Set<String> READ_ONLY_WRITE_HANDLERS =
       new LinkedHashSet<>(
           Set.of(
-              "com.navneet.executespec.contracts.drift.ContractDriftController#checkContract",
-              "com.navneet.executespec.contracts.drift.ContractDriftController#checkProject",
-              "com.navneet.executespec.contracts.drift.ContractDriftController#checkRepo",
-              "com.navneet.executespec.export.ProjectExportController#export",
               // Read-only POST computations gated by assertCanRead (mutate no tenant state):
               // resolve picks a variant; dry-run computes applicability + cost + sample diff.
               // C2 — audit 2026-05-29.

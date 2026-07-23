@@ -50,6 +50,19 @@ class AgentGuardIntentsTest {
   }
 
   @Test
+  void adversarialNegationOverridesMutationWordsAndCannotCreateRun() {
+    var decision =
+        decide(
+            "Analyse the highest-risk change seams in this repository; do not create a run or"
+                + " modify code.");
+
+    assertThat(decision.route()).isEqualTo("READ_ONLY_CODE_HELP");
+    assertThat(decision.requiresUserConfirmation()).isFalse();
+    assertThat(decision.proposedAction()).isNull();
+    assertThat(decision.policy().runApiAllowed()).isFalse();
+  }
+
+  @Test
   void ordinaryMessageIsNotClaimed() {
     assertThat(AgentGuardIntents.decide("implement OAuth", "implement oauth")).isEmpty();
   }

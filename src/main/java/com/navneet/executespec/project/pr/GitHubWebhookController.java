@@ -1,10 +1,15 @@
 package com.navneet.executespec.project.pr;
 
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
+
+import jakarta.servlet.http.HttpServletRequest;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -12,7 +17,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -47,28 +51,61 @@ public class GitHubWebhookController {
   @Value("${github.webhook.secret:}")
   private String webhookSecret;
 
+  /**
+   * RR-193 — hard ceiling on the webhook request body ExecuteSpec will buffer before doing any HMAC
+   * / JSON / DB work. The subscribed event families (pull_request, check_run,
+   * pull_request_review_comment) are metadata payloads well under this bound, so an oversized body
+   * is an abuse / misconfiguration signal, not a legitimate delivery. Configurable via {@code
+   * github.webhook.max-body-bytes}; default 1 MiB.
+   */
+  @Value("${github.webhook.max-body-bytes:1048576}")
+  private int maxBodyBytes = 1_048_576;
+
   @PostMapping("/webhooks/github")
   public ResponseEntity<Void> receive(
       @RequestHeader(value = "X-Hub-Signature-256", required = false) String signature,
       @RequestHeader(value = "X-GitHub-Event", required = false) String event,
-      @RequestBody String body) {
+      HttpServletRequest request) {
 
     if (webhookSecret == null || webhookSecret.isBlank()) {
       log.warn("GitHub webhook received but secret not configured — rejecting");
       return ResponseEntity.status(401).build();
     }
+
+    // RR-193 — reject an oversized delivery before allocating/hashing/parsing it. Check the
+    // declared
+    // Content-Length first (cheap early-out), then enforce the same bound while reading so a lying
+    // or
+    // absent Content-Length cannot bypass it.
+    long declaredLength = request.getContentLengthLong();
+    if (declaredLength > maxBodyBytes) {
+      log.warn("GitHub webhook body too large (declared {} bytes) — rejecting", declaredLength);
+      return ResponseEntity.status(413).build();
+    }
+    byte[] body;
+    try {
+      body = readCapped(request.getInputStream(), maxBodyBytes);
+    } catch (BodyTooLargeException tooLarge) {
+      log.warn("GitHub webhook body exceeded {} bytes while streaming — rejecting", maxBodyBytes);
+      return ResponseEntity.status(413).build();
+    } catch (IOException io) {
+      log.warn("GitHub webhook body read failed: {}", io.getMessage());
+      return ResponseEntity.badRequest().build();
+    }
+
     if (!signatureValid(signature, body)) {
       log.warn("GitHub webhook signature mismatch");
       return ResponseEntity.status(401).build();
     }
     if (event == null) return ResponseEntity.noContent().build();
+    String bodyText = new String(body, StandardCharsets.UTF_8);
 
     // v2.5.12 — distinguish parse errors (400) from unexpected errors (500).
     // Previously every exception surfaced as 400, masking real backend bugs
     // as "bad payload" and inviting GitHub to retry until the bug was fixed.
     JsonNode root;
     try {
-      root = objectMapper.readTree(body);
+      root = objectMapper.readTree(bodyText);
     } catch (com.fasterxml.jackson.core.JsonProcessingException parseEx) {
       log.warn("GitHub webhook JSON parse failed: {}", parseEx.getOriginalMessage());
       return ResponseEntity.badRequest().build();
@@ -190,26 +227,41 @@ public class GitHubWebhookController {
     String author = textOrNull(comment.path("user"), "login");
     String htmlUrl = textOrNull(comment, "html_url");
 
-    try {
-      prCommentInboxService.ingest(
-          new com.navneet.executespec.prreview.inbox.PrCommentInboxService.IngestRequest(
-              repoFullName, prNumber, commentId, filePath, lineNumber, body, author, htmlUrl));
-    } catch (Exception e) {
-      log.warn(
-          "[pr-comment-inbox] ingest failed for {}:{} comment {}: {}",
-          repoFullName,
-          prNumber,
-          commentId,
-          e.getMessage());
-    }
+    // RR-194 — a transient ingest failure must NOT be acknowledged to GitHub as a successful
+    // delivery (204). Let it propagate to the receive() handler, which returns 500 so GitHub
+    // redelivers; ingest is idempotent (dedup on commentId), so a redelivery cannot double-insert.
+    prCommentInboxService.ingest(
+        new com.navneet.executespec.prreview.inbox.PrCommentInboxService.IngestRequest(
+            repoFullName, prNumber, commentId, filePath, lineNumber, body, author, htmlUrl));
   }
 
-  private boolean signatureValid(String signature, String body) {
+  /**
+   * RR-193 — read at most {@code cap} bytes from the request stream. GitHub signs the exact raw
+   * bytes, so HMAC is computed over what is actually read here. Throws {@link
+   * BodyTooLargeException} the moment a delivery would exceed the cap rather than continuing to
+   * allocate.
+   */
+  private static byte[] readCapped(InputStream in, int cap) throws IOException {
+    ByteArrayOutputStream buffer = new ByteArrayOutputStream(Math.min(cap, 8192));
+    byte[] chunk = new byte[8192];
+    int total = 0;
+    int read;
+    while ((read = in.read(chunk)) != -1) {
+      total += read;
+      if (total > cap) throw new BodyTooLargeException();
+      buffer.write(chunk, 0, read);
+    }
+    return buffer.toByteArray();
+  }
+
+  private static final class BodyTooLargeException extends IOException {}
+
+  private boolean signatureValid(String signature, byte[] body) {
     if (signature == null || !signature.startsWith("sha256=")) return false;
     try {
       Mac mac = Mac.getInstance("HmacSHA256");
       mac.init(new SecretKeySpec(webhookSecret.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
-      byte[] hash = mac.doFinal(body.getBytes(StandardCharsets.UTF_8));
+      byte[] hash = mac.doFinal(body);
       StringBuilder hex = new StringBuilder(hash.length * 2);
       for (byte b : hash) hex.append(String.format("%02x", b));
       String expected = "sha256=" + hex;

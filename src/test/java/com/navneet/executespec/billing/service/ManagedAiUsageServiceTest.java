@@ -61,23 +61,45 @@ class ManagedAiUsageServiceTest {
 
     when(modelClassifier.managedAiEnabled(anyString())).thenReturn(true);
     when(periodRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
-    service =
-        new ManagedAiUsageService(
-            properties,
-            eventRepo,
-            new ManagedAiCreditCalculator(),
-            modelClassifier,
-            new ManagedAiRoutingPolicy(),
-            new ManagedAiUsageMapper(),
-            new ManagedAiUsagePeriodService(
-                periodRepo, tierResolver, pipelineRunRepository, notificationService),
-            tierResolver);
+    service = buildService(properties, pipelineRunRepository);
+  }
+
+  private ManagedAiUsageService buildService(
+      ManagedAiProperties properties, PipelineRunRepository pipelineRunRepository) {
+    ManagedAiUsagePeriodService periodService =
+        new ManagedAiUsagePeriodService(
+            periodRepo,
+            tierResolver,
+            pipelineRunRepository,
+            notificationService,
+            new ManagedAiUsagePeriodInitializer(periodRepo));
+    ManagedAiRoutingPolicy policy = new ManagedAiRoutingPolicy();
+    return new ManagedAiUsageService(
+        properties,
+        eventRepo,
+        new ManagedAiCreditCalculator(),
+        modelClassifier,
+        policy,
+        new ManagedAiUsageMapper(),
+        periodService,
+        tierResolver,
+        new ManagedAiAdmissionGate(periodRepo, periodService, policy));
+  }
+
+  /**
+   * RR-1664/RR-1665: admission and per-call authorization now read the period under a pessimistic
+   * row lock, so every fixture must answer both the locked and the unlocked lookup with the same
+   * row.
+   */
+  private void stubCurrentPeriod(ManagedAiUsagePeriod period) {
+    when(periodRepo.findCurrent(anyString(), any())).thenReturn(Optional.of(period));
+    when(periodRepo.findCurrentForUpdate(anyString(), any())).thenReturn(Optional.of(period));
   }
 
   @Test
   void platformSuccessfulCallDebitsRawCogsAndCredits() {
     ManagedAiUsagePeriod period = period();
-    when(periodRepo.findCurrentForUpdate(anyString(), any())).thenReturn(Optional.of(period));
+    stubCurrentPeriod(period);
     when(modelClassifier.costClass("deepseek-v4-pro-native")).thenReturn("BALANCED");
 
     service.recordSuccessfulCall(
@@ -103,7 +125,7 @@ class ManagedAiUsageServiceTest {
   @Test
   void byokSuccessfulCallWritesAnalyticsEventButDoesNotDebitCredits() {
     ManagedAiUsagePeriod period = period();
-    when(periodRepo.findCurrentForUpdate(anyString(), any())).thenReturn(Optional.of(period));
+    stubCurrentPeriod(period);
     when(modelClassifier.costClass("deepseek-v4-pro-native")).thenReturn("BALANCED");
 
     service.recordSuccessfulCall(
@@ -130,7 +152,7 @@ class ManagedAiUsageServiceTest {
   void cheapOnlyStateStepsDownToSameProviderCheapModel() {
     ManagedAiUsagePeriod period = period();
     period.setAiCreditsUsed(1500); // CHEAP_ONLY = 75% of the 2000 grant
-    when(periodRepo.findCurrent(anyString(), any())).thenReturn(Optional.of(period));
+    stubCurrentPeriod(period);
     when(modelClassifier.costClass("deepseek-v4-pro-native")).thenReturn("BALANCED");
     when(modelClassifier.costClass("deepseek-v4-flash-native")).thenReturn("CHEAP");
     when(modelClassifier.sameProviderStepDown("deepseek", "deepseek-v4-pro-native"))
@@ -156,7 +178,7 @@ class ManagedAiUsageServiceTest {
   void valueModeStepsCriticalPlannerUpToSameProviderFrontierModel() {
     ManagedAiUsagePeriod period = period();
     period.setAiCreditsUsed(500); // VALUE_MODE = 25% of the 2000 grant
-    when(periodRepo.findCurrent(anyString(), any())).thenReturn(Optional.of(period));
+    stubCurrentPeriod(period);
     when(modelClassifier.costClass("claude-sonnet-4-6")).thenReturn("BALANCED");
     when(modelClassifier.costClass("claude-opus-4-6")).thenReturn("FRONTIER");
     when(modelClassifier.sameProviderStepUp("anthropic", "claude-sonnet-4-6"))
@@ -182,7 +204,7 @@ class ManagedAiUsageServiceTest {
   void valueModeDoesNotStepWorkerUpToFrontier() {
     ManagedAiUsagePeriod period = period();
     period.setAiCreditsUsed(500); // VALUE_MODE = 25% of the 2000 grant
-    when(periodRepo.findCurrent(anyString(), any())).thenReturn(Optional.of(period));
+    stubCurrentPeriod(period);
     when(modelClassifier.costClass("claude-sonnet-4-6")).thenReturn("BALANCED");
 
     ManagedAiUsageService.CallAuthorization auth =
@@ -204,8 +226,7 @@ class ManagedAiUsageServiceTest {
     ManagedAiUsagePeriod period = period();
     period.setRawCogsUsedUsd(3.95);
     period.setAiCreditsUsed(490); // +1 call (10 cr) crosses VALUE_MODE at 500
-    when(periodRepo.findCurrentForUpdate(anyString(), any())).thenReturn(Optional.of(period));
-    when(periodRepo.findCurrent(anyString(), any())).thenReturn(Optional.of(period));
+    stubCurrentPeriod(period);
     when(modelClassifier.costClass("claude-sonnet-4-6")).thenReturn("BALANCED");
     when(modelClassifier.costClass("claude-opus-4-6")).thenReturn("FRONTIER");
     when(modelClassifier.sameProviderStepUp("anthropic", "claude-sonnet-4-6"))
@@ -254,7 +275,7 @@ class ManagedAiUsageServiceTest {
   void exhaustedStateBlocksBeforeProviderCall() {
     ManagedAiUsagePeriod period = period();
     period.setAiCreditsUsed(2000); // EXHAUSTED — grant fully spent
-    when(periodRepo.findCurrent(anyString(), any())).thenReturn(Optional.of(period));
+    stubCurrentPeriod(period);
     when(modelClassifier.costClass("deepseek-v4-pro-native")).thenReturn("BALANCED");
     when(modelClassifier.sameProviderStepDown(anyString(), anyString()))
         .thenReturn(Optional.empty());
@@ -274,12 +295,42 @@ class ManagedAiUsageServiceTest {
   }
 
   @Test
+  void fixedEmbeddingCapabilityStaysOnItsModelAndObeysTheManagedCreditGate() {
+    ManagedAiUsagePeriod period = period();
+    period.setAiCreditsUsed(1500); // CHEAP_ONLY
+    stubCurrentPeriod(period);
+    when(modelClassifier.costClass("text-embedding-3-small")).thenReturn("CHEAP");
+
+    service.authorizeFixedCapabilityCall(
+        "embedding:document-1",
+        "openai",
+        "text-embedding-3-small",
+        "ProjectDocumentEmbedding",
+        keys(),
+        RunKeyContext.Source.PLATFORM);
+
+    verify(modelClassifier, never()).sameProviderStepDown(anyString(), anyString());
+
+    period.setAiCreditsUsed(2000); // EXHAUSTED
+    org.assertj.core.api.Assertions.assertThatThrownBy(
+            () ->
+                service.authorizeFixedCapabilityCall(
+                    "embedding:document-1",
+                    "openai",
+                    "text-embedding-3-small",
+                    "ProjectDocumentEmbedding",
+                    keys(),
+                    RunKeyContext.Source.PLATFORM))
+        .isInstanceOf(ResponseStatusException.class)
+        .hasMessageContaining("EXHAUSTED");
+  }
+
+  @Test
   void debitTransitionNotifiesAndNextCallStepsDownMidRun() {
     ManagedAiUsagePeriod period = period();
     period.setRawCogsUsedUsd(11.95);
     period.setAiCreditsUsed(1490); // +1 call (10 cr) crosses CHEAP_ONLY at 1500
-    when(periodRepo.findCurrentForUpdate(anyString(), any())).thenReturn(Optional.of(period));
-    when(periodRepo.findCurrent(anyString(), any())).thenReturn(Optional.of(period));
+    stubCurrentPeriod(period);
     when(modelClassifier.costClass("deepseek-v4-pro-native")).thenReturn("BALANCED");
     when(modelClassifier.costClass("deepseek-v4-flash-native")).thenReturn("CHEAP");
     when(modelClassifier.sameProviderStepDown("deepseek", "deepseek-v4-pro-native"))
@@ -327,13 +378,63 @@ class ManagedAiUsageServiceTest {
     assertThat(auth.reason()).contains("stepped down");
   }
 
+  @Test
+  void freeTierLockForcesDeepSeekFlashRegardlessOfRequestedProvider() {
+    // F2 (founder decision 2026-07-18): FREE is native-DeepSeek-Flash only. A FREE user requesting
+    // a premium Anthropic model must be forced onto deepseek-v4-flash-native, not stepped down
+    // within Anthropic.
+    ManagedAiProperties props = new ManagedAiProperties();
+    ManagedAiProperties.TierPolicy free = new ManagedAiProperties.TierPolicy();
+    free.setIncludedCredits(200);
+    free.setRawCogsCapUsd(2.0);
+    free.setHardStopAfterRawUsd(2.0);
+    free.setLockedProvider("deepseek");
+    free.setLockedModel("deepseek-v4-flash-native");
+    props.setTiers(Map.of("FREE", free));
+    when(tierResolver.resolveUserTier("u1")).thenReturn("FREE");
+    when(modelClassifier.costClass("deepseek-v4-flash-native")).thenReturn("CHEAP");
+    ManagedAiUsagePeriod freePeriod =
+        ManagedAiUsagePeriod.builder()
+            .id("p-free")
+            .userId("u1")
+            .orgId("o1")
+            .tier("FREE")
+            .periodStart(Instant.parse("2026-06-01T00:00:00Z"))
+            .periodEnd(Instant.parse("2026-07-01T00:00:00Z"))
+            .includedAiCredits(200)
+            .aiCreditsUsed(0)
+            .rawCogsCapUsd(2.0)
+            .rawCogsUsedUsd(0.0)
+            .hardStopAfterRawUsd(2.0)
+            .routingState(ManagedAiUsageService.FULL)
+            .build();
+    stubCurrentPeriod(freePeriod);
+    ManagedAiUsageService freeService = buildService(props, mock(PipelineRunRepository.class));
+
+    ManagedAiUsageService.CallAuthorization auth =
+        freeService.authorizeCall(
+            "run-1",
+            "anthropic",
+            "claude-sonnet-5",
+            "OutlinePlannerAgent",
+            keys(),
+            RunKeyContext.Source.PLATFORM);
+
+    assertThat(auth.modelChanged()).isTrue();
+    assertThat(auth.provider()).isEqualTo("deepseek");
+    assertThat(auth.model()).isEqualTo("deepseek-v4-flash-native");
+    assertThat(auth.reason()).contains("tier lock");
+    // The premium model must never be stepped-within-Anthropic for a locked tier.
+    verify(modelClassifier, never()).sameProviderStepUp(anyString(), anyString());
+  }
+
   // ---- Run-count retirement (2026-06-22): submission-time credit gate + entitlements summary ----
 
   @Test
   void assertCanStartRunThrows402WhenExhausted() {
     ManagedAiUsagePeriod period = period();
     period.setAiCreditsUsed(2000); // grant fully spent -> EXHAUSTED
-    when(periodRepo.findCurrent(anyString(), any())).thenReturn(Optional.of(period));
+    stubCurrentPeriod(period);
 
     org.assertj.core.api.Assertions.assertThatThrownBy(
             () -> service.assertCanStartRun(userDetails(), false))
@@ -345,7 +446,7 @@ class ManagedAiUsageServiceTest {
   void assertCanStartRunAllowsWhenBudgetRemains() {
     ManagedAiUsagePeriod period = period();
     period.setAiCreditsUsed(50); // well under thresholds -> FULL
-    when(periodRepo.findCurrent(anyString(), any())).thenReturn(Optional.of(period));
+    stubCurrentPeriod(period);
 
     service.assertCanStartRun(userDetails(), false); // no throw
   }
@@ -354,6 +455,7 @@ class ManagedAiUsageServiceTest {
   void assertCanStartRunBypassesGateForOwnKeys() {
     service.assertCanStartRun(userDetails(), true); // pure BYOK -> exempt, no period lookup
     verify(periodRepo, never()).findCurrent(anyString(), any());
+    verify(periodRepo, never()).findCurrentForUpdate(anyString(), any());
   }
 
   @Test
@@ -361,13 +463,80 @@ class ManagedAiUsageServiceTest {
     when(tierResolver.resolveUserTier("u1")).thenReturn("ENTERPRISE"); // no managed policy
     service.assertCanStartRun(userDetails(), false); // ungated -> no throw
     verify(periodRepo, never()).findCurrent(anyString(), any());
+    verify(periodRepo, never()).findCurrentForUpdate(anyString(), any());
+  }
+
+  // ---- RR-1664: admission is serialized and reserving, not check-then-act ----
+
+  @Test
+  void assertCanStartRunTakesTheRowLockAndReservesHeadroom() {
+    ManagedAiUsagePeriod period = period();
+    period.setAiCreditsUsed(50);
+    stubCurrentPeriod(period);
+
+    service.assertCanStartRun(userDetails(), false);
+
+    // The decision must be taken under the pessimistic lock, never the plain read.
+    verify(periodRepo).findCurrentForUpdate(anyString(), any());
+    verify(periodRepo, never()).findCurrent(anyString(), any());
+    assertThat(period.getReservedAiCredits()).isEqualTo(51);
+    // A reservation is a claim on headroom, not proof of spend: recorded usage is untouched and the
+    // persisted routing state still reflects it.
+    assertThat(period.getAiCreditsUsed()).isEqualTo(50);
+    assertThat(period.getRoutingState()).isEqualTo(ManagedAiUsageService.FULL);
+  }
+
+  @Test
+  void concurrentAdmissionsAtTheLastCreditAdmitExactlyOne() {
+    ManagedAiUsagePeriod period = period();
+    period.setAiCreditsUsed(1999); // one credit of a 2000 grant remains
+    stubCurrentPeriod(period);
+
+    // Serialized by the row lock: the first submission reserves the last credit...
+    service.assertCanStartRun(userDetails(), false);
+    assertThat(period.getReservedAiCredits()).isEqualTo(2000);
+
+    // ...and the second sees the in-flight claim rather than the same remaining allowance.
+    org.assertj.core.api.Assertions.assertThatThrownBy(
+            () -> service.assertCanStartRun(userDetails(), false))
+        .isInstanceOf(ResponseStatusException.class)
+        .hasMessageContaining("exhausted");
+    assertThat(period.getReservedAiCredits()).isEqualTo(2000);
+  }
+
+  @Test
+  void recordedUsageSubsumesEarlierReservationsSoNothingLeaks() {
+    ManagedAiUsagePeriod period = period();
+    period.setAiCreditsUsed(10);
+    period.setReservedAiCredits(13); // three admitted runs that have not spent yet
+    stubCurrentPeriod(period);
+
+    // The runs then actually spend; recorded usage overtakes the reservation.
+    period.setAiCreditsUsed(40);
+    service.assertCanStartRun(userDetails(), false);
+
+    // Reconciled to max(reserved, used) + 1 — the stale 13 does not stack on top of the real 40.
+    assertThat(period.getReservedAiCredits()).isEqualTo(41);
+  }
+
+  @Test
+  void assertCanStartRunStillRefusesOnTheRawCogsCeiling() {
+    ManagedAiUsagePeriod period = period();
+    period.setAiCreditsUsed(0); // credits untouched
+    period.setRawCogsUsedUsd(16.0); // but the raw-COGS hard stop is met (RR-225)
+    stubCurrentPeriod(period);
+
+    org.assertj.core.api.Assertions.assertThatThrownBy(
+            () -> service.assertCanStartRun(userDetails(), false))
+        .isInstanceOf(ResponseStatusException.class)
+        .hasMessageContaining("exhausted");
   }
 
   @Test
   void creditSummaryReportsManagedBalanceForManagedTier() {
     ManagedAiUsagePeriod period = period();
     period.setAiCreditsUsed(500);
-    when(periodRepo.findCurrent(anyString(), any())).thenReturn(Optional.of(period));
+    stubCurrentPeriod(period);
 
     ManagedAiUsageService.CreditSummary cs = service.creditSummary("u1", "PRO");
 
@@ -381,7 +550,7 @@ class ManagedAiUsageServiceTest {
   void creditSummaryReflectsCurrentPolicyGrantWhenPeriodSnapshotIsStale() {
     ManagedAiUsagePeriod stale = period();
     stale.setIncludedAiCredits(0); // period created under an older 0-credit policy
-    when(periodRepo.findCurrent(anyString(), any())).thenReturn(Optional.of(stale));
+    stubCurrentPeriod(stale);
 
     ManagedAiUsageService.CreditSummary cs = service.creditSummary("u1", "PRO");
 

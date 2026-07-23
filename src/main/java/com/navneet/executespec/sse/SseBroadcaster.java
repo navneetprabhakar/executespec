@@ -1,18 +1,23 @@
 package com.navneet.executespec.sse;
 
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import jakarta.annotation.PostConstruct;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.navneet.executespec.benchmark.BenchmarkTrajectoryStore;
 
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.redis.connection.Message;
 import org.springframework.data.redis.connection.MessageListener;
@@ -69,9 +74,22 @@ public class SseBroadcaster {
   private static final String SEQUENCE_PREFIX = "sse:sequence:";
   private static final Duration REPLAY_TTL = Duration.ofHours(24);
 
-  /** Unique ID for this JVM instance — used to suppress echo from Redis pub/sub. */
+  /**
+   * Unique ID for this JVM instance — used to suppress echo from Redis pub/sub.
+   *
+   * <p>RR-424 — the previous identity was {@code loopbackHostName + "-" + pid}. Containers commonly
+   * report the same loopback hostname and run the JVM as PID 1, so two replicas could compute the
+   * SAME id and each classify the other's pub/sub events as a self-echo — subscribers on the
+   * non-origin replica then received no live run events. A per-boot random suffix makes the id
+   * deployment-unique regardless of host/PID collision; it only needs to be stable for the lifetime
+   * of this process and distinct from every peer's.
+   */
   private static final String INSTANCE_ID =
-      java.net.InetAddress.getLoopbackAddress().getHostName() + "-" + ProcessHandle.current().pid();
+      java.net.InetAddress.getLoopbackAddress().getHostName()
+          + "-"
+          + ProcessHandle.current().pid()
+          + "-"
+          + java.util.UUID.randomUUID();
 
   private final Map<String, CopyOnWriteArrayList<SseEmitter>> emitters = new ConcurrentHashMap<>();
   private final AtomicInteger totalEmitterCount = new AtomicInteger(0);
@@ -81,8 +99,26 @@ public class SseBroadcaster {
   private final MeterRegistry meterRegistry;
   private final StringRedisTemplate redis;
   private final RedisMessageListenerContainer listenerContainer;
+  private final BenchmarkTrajectoryStore benchmarkTrajectoryStore;
 
+  @Autowired
   public SseBroadcaster(
+      ObjectMapper mapper,
+      ApplicationEventPublisher eventPublisher,
+      MeterRegistry meterRegistry,
+      StringRedisTemplate redis,
+      RedisMessageListenerContainer listenerContainer,
+      ObjectProvider<BenchmarkTrajectoryStore> benchmarkTrajectoryStore) {
+    this.mapper = mapper;
+    this.eventPublisher = eventPublisher;
+    this.meterRegistry = meterRegistry;
+    this.redis = redis;
+    this.listenerContainer = listenerContainer;
+    this.benchmarkTrajectoryStore = benchmarkTrajectoryStore.getIfAvailable();
+  }
+
+  /** Provider-free constructor retained for narrow unit tests outside the benchmark profile. */
+  SseBroadcaster(
       ObjectMapper mapper,
       ApplicationEventPublisher eventPublisher,
       MeterRegistry meterRegistry,
@@ -93,6 +129,7 @@ public class SseBroadcaster {
     this.meterRegistry = meterRegistry;
     this.redis = redis;
     this.listenerContainer = listenerContainer;
+    this.benchmarkTrajectoryStore = null;
   }
 
   @PostConstruct
@@ -208,6 +245,8 @@ public class SseBroadcaster {
     String json = serialize(event);
     if (json == null) return;
 
+    appendBenchmarkTrajectory(runId, event);
+
     // Persist to replay log (before local delivery so reconnecting clients see it)
     long seqNum = appendToReplayLog(runId, json);
 
@@ -232,9 +271,29 @@ public class SseBroadcaster {
   public void emitDirect(String runId, RunEvent event) {
     String json = serialize(event);
     if (json == null) return;
+    appendBenchmarkTrajectory(runId, event);
     long seqNum = appendToReplayLog(runId, json);
     deliverLocal(runId, json, seqNum);
     publishToRedis(runId, json, seqNum);
+  }
+
+  private void appendBenchmarkTrajectory(String runId, RunEvent event) {
+    if (benchmarkTrajectoryStore == null) return;
+    try {
+      benchmarkTrajectoryStore.append(runId, event);
+    } catch (RuntimeException e) {
+      // Optional benchmark evidence must never break the product event path. Benchmark submission
+      // still fails closed because no complete export will be available.
+      log.error(
+          "Benchmark trajectory eligibility/append failed for run {}: {}",
+          runId,
+          e.getClass().getName());
+    }
+  }
+
+  /** Explicitly register a benchmark run before its first event; a DB fallback covers restarts. */
+  public void registerBenchmarkTrajectory(String runId) {
+    if (benchmarkTrajectoryStore != null) benchmarkTrajectoryStore.registerBenchmarkRun(runId);
   }
 
   /** Complete the SSE stream for a run (run finished or validation complete). */
@@ -311,11 +370,17 @@ public class SseBroadcaster {
    * replay TTL). Reuses the same Redis list the reconnect-replay uses — no new persistence. Each
    * entry already carries {@code type} + {@code timestamp} + payload fields (see {@link RunEvent}).
    */
-  public List<java.util.Map<String, Object>> getReplayLog(String runId) {
+  public ReplayLog getReplayLog(String runId) {
     try {
-      List<String> raw = redis.opsForList().range(REPLAY_PREFIX + runId, 0, -1);
-      if (raw == null || raw.isEmpty()) return java.util.List.of();
+      String key = REPLAY_PREFIX + runId;
+      List<String> raw = redis.opsForList().range(key, 0, -1);
+      Long ttlMs = redis.getExpire(key, TimeUnit.MILLISECONDS);
+      if (raw == null || raw.isEmpty()) {
+        return new ReplayLog(java.util.List.of(), false, "EXPIRED_OR_EMPTY", null, null, false);
+      }
       List<java.util.Map<String, Object>> out = new java.util.ArrayList<>(raw.size());
+      long firstSequence = 0;
+      long lastSequence = 0;
       for (String entry : raw) {
         try {
           com.fasterxml.jackson.databind.JsonNode node = mapper.readTree(entry);
@@ -324,17 +389,42 @@ public class SseBroadcaster {
           // drop that row from the run-detail Logs API.
           String json =
               node.has("seq") && node.has("payload") ? node.path("payload").asText() : entry;
-          out.add(mapper.readValue(json, new com.fasterxml.jackson.core.type.TypeReference<>() {}));
+          java.util.Map<String, Object> event =
+              mapper.readValue(json, new com.fasterxml.jackson.core.type.TypeReference<>() {});
+          if (node.has("seq")) {
+            long sequence = node.path("seq").asLong(0);
+            if (firstSequence == 0) firstSequence = sequence;
+            lastSequence = sequence;
+            // The browser receives this same sequence as Last-Event-ID on the live stream. Keeping
+            // it in the durable row gives both transports one stable deduplication identity.
+            event.put("_eventId", String.valueOf(sequence));
+          }
+          out.add(event);
         } catch (Exception ignore) {
           // skip a single malformed entry; keep the rest of the log
         }
       }
-      return out;
+      Instant retainedUntil = ttlMs != null && ttlMs > 0 ? Instant.now().plusMillis(ttlMs) : null;
+      return new ReplayLog(
+          out,
+          true,
+          "AVAILABLE",
+          retainedUntil,
+          lastSequence > 0 ? String.valueOf(lastSequence) : null,
+          firstSequence > 1);
     } catch (Exception e) {
       log.debug("[SSE] replay-log read failed for run {}: {}", runId, e.getMessage());
-      return java.util.List.of();
+      return new ReplayLog(java.util.List.of(), false, "STORE_UNAVAILABLE", null, null, false);
     }
   }
+
+  public record ReplayLog(
+      List<java.util.Map<String, Object>> events,
+      boolean available,
+      String reason,
+      Instant retainedUntil,
+      String lastEventId,
+      boolean truncated) {}
 
   private void publishToRedis(String runId, String json, long sequence) {
     try {

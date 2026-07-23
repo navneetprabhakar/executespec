@@ -2,6 +2,7 @@ package com.navneet.executespec.billing.service;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -18,6 +19,7 @@ import com.navneet.executespec.billing.dto.SubscriptionInitResult;
 import com.navneet.executespec.billing.dto.VerifyPaymentRequest;
 import com.navneet.executespec.billing.entity.*;
 import com.navneet.executespec.billing.exception.BillingException;
+import com.navneet.executespec.billing.exception.UnresolvedWebhookDependencyException;
 import com.navneet.executespec.billing.gateway.BillingGateway;
 import com.navneet.executespec.billing.gateway.PaymentGatewayRouter;
 import com.navneet.executespec.billing.repository.*;
@@ -78,9 +80,16 @@ public class BillingService {
   private final BillingStatusUsageService statusUsageService;
   private final BillingPeriodService periodService;
   private final BillingTierBridgeService tierBridgeService;
+
+  /** V310 — durable liabilities for irreversible gateway actions (RR-048, RR-049). */
+  private final BillingGatewayObligationService obligationService;
+
   private final BillingSubscriptionWriter subscriptionWriter;
   private final BillingWebhookEventRecorder webhookEventRecorder;
   private final RunTopupService runTopupService;
+
+  /** RR-054 + RR-056 — webhook stale-transition rejection + activation idempotency claims. */
+  private final BillingWebhookSequencingService webhookSequencing;
 
   @Value("${billing.founder-pricing.max-slots:100}")
   private int founderMaxSlots;
@@ -112,8 +121,17 @@ public class BillingService {
               .filter(p -> tierIsListed(p.getTier()))
               .collect(Collectors.toList());
     }
+    // RR-057: was one limit query per plan inside the mapper. Fetch every plan's limits in a single
+    // batch query, then group in memory so the response is identical with a constant query count.
+    List<UUID> planIds = plans.stream().map(BillingPlan::getId).collect(Collectors.toList());
+    Map<UUID, List<BillingPlanLimit>> limitsByPlan =
+        planIds.isEmpty()
+            ? Map.of()
+            : limitRepo.findByBillingPlanIdIn(planIds).stream()
+                .collect(Collectors.groupingBy(BillingPlanLimit::getBillingPlanId));
+
     return plans.stream()
-        .map(p -> PlanResponse.from(p, limitRepo.findByBillingPlanId(p.getId())))
+        .map(p -> PlanResponse.from(p, limitsByPlan.getOrDefault(p.getId(), List.of())))
         .collect(Collectors.toList());
   }
 
@@ -229,7 +247,14 @@ public class BillingService {
               checkout.sessionId());
 
       subscriptionWriter.createPending(
-          userId, user.getOrgId(), plan, "STRIPE", checkout.sessionId(), null, isFounder);
+          userId,
+          user.getOrgId(),
+          plan,
+          "STRIPE",
+          checkout.sessionId(),
+          null,
+          isFounder,
+          effectiveSeats);
 
     } else {
       // Razorpay: use legacy gateway
@@ -245,7 +270,8 @@ public class BillingService {
           "RAZORPAY",
           result.gatewaySubscriptionId(),
           result.gatewayCustomerId(),
-          isFounder);
+          isFounder,
+          effectiveSeats);
     }
 
     log.info(
@@ -301,6 +327,17 @@ public class BillingService {
 
     AppUser activatedUser =
         userRepo.findById(userId).orElseThrow(() -> new IllegalArgumentException("User not found"));
+
+    // RR-056: claim this activation by its immutable gateway payment id. If the same payment was
+    // already activated by the webhook (or a replayed callback), skip the non-idempotent effects
+    // (retire superseded subscription / generate invoice / notify) and just report current status.
+    if (!webhookSequencing.claimActivation("RAZORPAY", request.razorpayPaymentId())) {
+      log.info(
+          "verifyAndActivate: payment {} already activated — returning current status without"
+              + " re-running effects",
+          request.razorpayPaymentId());
+      return getStatus(userId);
+    }
 
     // Retire any existing subscription only after payment has succeeded.
     retireExistingSubscriptionForActivation(sub, plan, activatedUser);
@@ -520,13 +557,24 @@ public class BillingService {
       var event = webhookEventRecorder.recordStart("RAZORPAY", eventId, eventType, rawPayload);
       if (event.isEmpty()) return;
 
+      // RR-054: the provider's own event time (unix seconds) drives last-writer ordering, so a
+      // delayed/out-of-order delivery cannot regress a newer state.
+      Instant eventTime = parseEpochSeconds(payload.path("created_at"));
+
       // 2. Process
-      processWebhookEvent(eventType, subEntityId, payload);
+      processWebhookEvent(eventType, subEntityId, payload, eventTime);
 
       webhookEventRecorder.markProcessed(event.get());
 
     } catch (SecurityException e) {
       throw e; // re-throw signature failures
+    } catch (UnresolvedWebhookDependencyException unresolved) {
+      // RR-055: the subscription this event refers to is not visible yet. Leave the recorder row
+      // processed=false (markProcessed was skipped) with its raw payload retained, so the event is
+      // truthfully un-acknowledged and reprocessable rather than falsely acked and lost.
+      log.warn(
+          "Razorpay webhook deferred (unresolved dependency, left un-acked): {}",
+          unresolved.getMessage());
     } catch (Exception e) {
       log.error("Webhook processing error: {}", e.getMessage(), e);
       // Don't rethrow — we want to return 200 to Razorpay to prevent retries
@@ -534,7 +582,8 @@ public class BillingService {
     }
   }
 
-  private void processWebhookEvent(String eventType, String entityId, JsonNode payload) {
+  private void processWebhookEvent(
+      String eventType, String entityId, JsonNode payload, Instant eventTime) {
     // Handle order-related events (top-up purchases)
     if ("order.paid".equals(eventType) || "payment.captured".equals(eventType)) {
       handleOrderPaymentWebhook(eventType, entityId, payload);
@@ -548,7 +597,26 @@ public class BillingService {
 
     BillingSubscription sub = subRepo.findByGatewaySubscriptionId(entityId).orElse(null);
     if (sub == null) {
-      log.warn("Webhook for unknown subscription: {} (event={})", entityId, eventType);
+      // RR-055: an event for a subscription we cannot see yet is an UNRESOLVED DEPENDENCY, not an
+      // ignorable event. Do NOT let the recorder mark it processed — throw so the raw payload is
+      // retained un-acked and can be replayed once the local checkout row is visible.
+      throw new UnresolvedWebhookDependencyException(
+          "Razorpay webhook for not-yet-visible subscription "
+              + entityId
+              + " (event="
+              + eventType
+              + ")");
+    }
+
+    // RR-054: reject a transition whose provider event time predates the newest one already
+    // applied.
+    if (webhookSequencing.isStaleTransition(sub, eventTime)) {
+      log.warn(
+          "Webhook: dropping stale {} for sub={} (eventTime={} < applied={})",
+          eventType,
+          entityId,
+          eventTime,
+          sub.getLastProviderEventAt());
       return;
     }
 
@@ -556,15 +624,25 @@ public class BillingService {
       case "subscription.authenticated" -> {
         deactivateFreeSubscription(sub.getUserId(), sub.getId());
         sub.setStatus("ACTIVE");
+        webhookSequencing.markTransitionApplied(sub, eventTime);
         subRepo.save(sub);
         log.info("Webhook: subscription authenticated, subId={}", entityId);
       }
       case "subscription.charged" -> {
+        String renewalPaymentId =
+            payload.path("payload").path("payment").path("entity").path("id").asText("");
+        // RR-056: one charge = one activation. A duplicate/replayed charge for the same payment id
+        // must not re-extend the period, re-bridge the tier or re-invoice.
+        if (!webhookSequencing.claimActivation("RAZORPAY", renewalPaymentId)) {
+          log.info("Webhook: charge {} already processed — skipping", renewalPaymentId);
+          break;
+        }
         deactivateFreeSubscription(sub.getUserId(), sub.getId());
         BillingPlan plan = planRepo.findById(sub.getBillingPlanId()).orElseThrow();
         sub.setCurrentPeriodStart(Instant.now());
         sub.setCurrentPeriodEnd(periodService.periodEnd(plan.getPeriod()));
         sub.setStatus("ACTIVE");
+        webhookSequencing.markTransitionApplied(sub, eventTime);
         subRepo.save(sub);
 
         // Ensure tier is correct (in case of previous PAST_DUE)
@@ -577,8 +655,6 @@ public class BillingService {
 
         // Generate renewal invoice and email it
         try {
-          String renewalPaymentId =
-              payload.path("payload").path("payment").path("entity").path("id").asText("");
           Invoice invoice = invoiceService.generateSubscriptionInvoice(sub, plan, renewalPaymentId);
           if (invoice != null) {
             AppUser renewalUser = userRepo.findById(sub.getUserId()).orElse(null);
@@ -593,6 +669,7 @@ public class BillingService {
       }
       case "subscription.pending" -> {
         sub.setStatus("PAST_DUE");
+        webhookSequencing.markTransitionApplied(sub, eventTime);
         subRepo.save(sub);
         log.warn("Webhook: subscription pending (payment issue), user={}", sub.getUserId());
         // V1.1: Payment failed notification
@@ -605,12 +682,14 @@ public class BillingService {
       }
       case "subscription.halted" -> {
         // *** ALL RETRIES EXHAUSTED — DOWNGRADE TO FREE ***
+        webhookSequencing.markTransitionApplied(sub, eventTime);
         tierBridgeService.downgradeToFree(sub);
         log.warn("Webhook: subscription halted → downgraded to free, user={}", sub.getUserId());
       }
       case "subscription.cancelled" -> {
         sub.setStatus("CANCELLED");
         sub.setCancelledAt(Instant.now());
+        webhookSequencing.markTransitionApplied(sub, eventTime);
         subRepo.save(sub);
 
         // If past period end already, downgrade now
@@ -621,11 +700,37 @@ public class BillingService {
         log.info("Webhook: subscription cancelled, user={}", sub.getUserId());
       }
       case "subscription.completed" -> {
+        webhookSequencing.markTransitionApplied(sub, eventTime);
         tierBridgeService.downgradeToFree(sub);
         log.info("Webhook: subscription completed → downgraded, user={}", sub.getUserId());
       }
       default -> log.debug("Webhook: unhandled event type: {}", eventType);
     }
+  }
+
+  /**
+   * RR-054 — parse a provider event time expressed as unix epoch SECONDS (Stripe {@code created},
+   * Razorpay {@code created_at}). Returns {@code null} when the field is absent or non-numeric, in
+   * which case the stale-transition guard is a safe no-op (a transition is never dropped for lack
+   * of a usable event time).
+   */
+  private static Instant parseEpochSeconds(JsonNode node) {
+    if (node == null || node.isMissingNode() || node.isNull()) {
+      return null;
+    }
+    long seconds;
+    if (node.isNumber()) {
+      seconds = node.asLong(0L);
+    } else if (node.isTextual()) {
+      try {
+        seconds = Long.parseLong(node.asText().trim());
+      } catch (NumberFormatException e) {
+        return null;
+      }
+    } else {
+      return null;
+    }
+    return seconds > 0 ? Instant.ofEpochSecond(seconds) : null;
   }
 
   // ORDER PAYMENT WEBHOOK (top-up purchases)
@@ -709,26 +814,41 @@ public class BillingService {
 
       // Process based on event type
       JsonNode dataObject = payload.path("data").path("object");
+      // RR-054: Stripe's top-level `created` (unix seconds) is the provider event time.
+      Instant eventTime = parseEpochSeconds(payload.path("created"));
 
       switch (eventType) {
-        case "checkout.session.completed" -> handleStripeCheckoutCompleted(dataObject);
-        case "invoice.paid" -> handleStripeInvoicePaid(dataObject);
-        case "invoice.payment_failed" -> handleStripeInvoicePaymentFailed(dataObject);
-        case "customer.subscription.deleted" -> handleStripeSubscriptionDeleted(dataObject);
+        case "checkout.session.completed" -> handleStripeCheckoutCompleted(dataObject, eventTime);
+        case "invoice.paid" -> handleStripeInvoicePaid(dataObject, eventTime);
+        case "invoice.payment_failed" -> handleStripeInvoicePaymentFailed(dataObject, eventTime);
+        case "customer.subscription.deleted" ->
+            handleStripeSubscriptionDeleted(dataObject, eventTime);
         default -> log.debug("Stripe webhook: unhandled event type: {}", eventType);
       }
 
       webhookEventRecorder.markProcessed(event.get());
 
+    } catch (UnresolvedWebhookDependencyException unresolved) {
+      // RR-055: a signed event whose local subscription is not visible yet. Do NOT mark it
+      // processed — the recorder row stays processed=false with its raw payload retained so the
+      // event is truthfully un-acknowledged and available for reprocessing, instead of being
+      // falsely acked and lost.
+      log.warn(
+          "Stripe webhook deferred (unresolved dependency, left un-acked): {}",
+          unresolved.getMessage());
     } catch (Exception e) {
       log.error("Stripe webhook processing error: {}", e.getMessage(), e);
     }
   }
 
   /**
-   * v2.6.0 — fetch the seat quantity from the first line-item of a Stripe subscription. Falls back
-   * to 1 on any error (TEAM checkout will still succeed, just with wrong seat count — webhook
-   * replay or manual reconciliation can fix later).
+   * v2.6.0 — fetch the seat quantity from the first line-item of a Stripe subscription.
+   *
+   * <p>RR-419 follow-on: this used to return {@code 1} when the Stripe retrieve threw, and the
+   * caller wrote that straight onto {@code totalSeats}. A transient Stripe outage during the
+   * checkout webhook therefore silently collapsed a paid 20-seat TEAM subscription to a single
+   * seat. It now returns {@code 0} to mean "provider quantity unknown", and the caller keeps the
+   * checkout-requested seat count instead of overwriting it with a guess.
    */
   private int fetchStripeSubscriptionSeatCount(String stripeSubscriptionId) {
     try {
@@ -744,14 +864,15 @@ public class BillingService {
       }
     } catch (com.stripe.exception.StripeException e) {
       log.warn(
-          "Stripe seat-quantity fetch failed for subId={}, defaulting to 1: {}",
+          "Stripe seat-quantity fetch failed for subId={} — keeping the checkout-requested seat"
+              + " count: {}",
           stripeSubscriptionId,
           e.getMessage());
     }
-    return 1;
+    return 0;
   }
 
-  private void handleStripeCheckoutCompleted(JsonNode session) {
+  private void handleStripeCheckoutCompleted(JsonNode session, Instant eventTime) {
     String stripeCheckoutSessionId = session.path("id").asText("");
     String stripeSubscriptionId = session.path("subscription").asText("");
     String stripeCustomerId = session.path("customer").asText("");
@@ -845,10 +966,26 @@ public class BillingService {
       return;
     }
 
+    // RR-054: don't let a delayed checkout.session.completed overwrite state set by a newer event.
+    if (webhookSequencing.isStaleTransition(sub, eventTime)) {
+      log.warn(
+          "Stripe checkout.session.completed dropped as stale for subId={} (eventTime={} <"
+              + " applied={})",
+          stripeSubscriptionId,
+          eventTime,
+          sub.getLastProviderEventAt());
+      return;
+    }
+
     sub.setStatus("ACTIVE");
     sub.setGatewayCustomerId(stripeCustomerId);
     sub.setCurrentPeriodStart(Instant.now());
-    sub.setTotalSeats(seatQuantity);
+    // RR-419: only let the provider correct the seat count when it actually reported one.
+    // seatQuantity == 0 means the Stripe retrieve failed; the checkout-requested quantity
+    // persisted by BillingSubscriptionWriter.createPending stays authoritative.
+    if (seatQuantity > 0) {
+      sub.setTotalSeats(seatQuantity);
+    }
     AppUser checkoutUser = userRepo.findById(sub.getUserId()).orElse(null);
     if (checkoutUser != null) {
       BillingPlan checkoutPlan = planRepo.findById(sub.getBillingPlanId()).orElse(null);
@@ -858,6 +995,7 @@ public class BillingService {
     } else {
       log.warn("Stripe checkout completed for subscription with unknown user: {}", sub.getUserId());
     }
+    webhookSequencing.markTransitionApplied(sub, eventTime);
     subRepo.save(sub);
 
     log.info(
@@ -867,7 +1005,7 @@ public class BillingService {
         seatQuantity);
   }
 
-  private void handleStripeInvoicePaid(JsonNode invoice) {
+  private void handleStripeInvoicePaid(JsonNode invoice, Instant eventTime) {
     String stripeSubscriptionId = invoice.path("subscription").asText("");
     String stripeInvoiceId = invoice.path("id").asText("");
     String invoicePdfUrl = invoice.path("invoice_pdf").asText("");
@@ -880,13 +1018,34 @@ public class BillingService {
     BillingSubscription sub =
         subRepo.findByGatewaySubscriptionId(stripeSubscriptionId).orElse(null);
     if (sub == null) {
-      log.warn("Stripe invoice.paid for unknown subscription: {}", stripeSubscriptionId);
+      // RR-055: a paid invoice whose local subscription is not visible yet is an UNRESOLVED
+      // DEPENDENCY, not an ignorable event. Refuse to ack it — losing a paid activation is the
+      // worst outcome — so it stays retryable instead of being marked processed and discarded.
+      throw new UnresolvedWebhookDependencyException(
+          "Stripe invoice.paid for not-yet-visible subscription " + stripeSubscriptionId);
+    }
+
+    // RR-054: reject a delayed invoice.paid that would overwrite a newer transition.
+    if (webhookSequencing.isStaleTransition(sub, eventTime)) {
+      log.warn(
+          "Stripe invoice.paid dropped as stale for subId={} (eventTime={} < applied={})",
+          stripeSubscriptionId,
+          eventTime,
+          sub.getLastProviderEventAt());
       return;
     }
 
     BillingPlan plan = planRepo.findById(sub.getBillingPlanId()).orElse(null);
     if (plan == null) {
       log.warn("Plan not found for subscription: {}", sub.getBillingPlanId());
+      return;
+    }
+
+    // RR-056: one paid invoice = one activation. A duplicate/replayed invoice.paid for the same
+    // immutable Stripe invoice id must not re-retire, re-extend, re-bridge or re-invoice. Claimed
+    // only once we know the event is actionable, so a missing plan does not consume the claim.
+    if (!webhookSequencing.claimActivation("STRIPE", stripeInvoiceId)) {
+      log.info("Stripe invoice {} already processed — skipping duplicate effects", stripeInvoiceId);
       return;
     }
 
@@ -900,6 +1059,7 @@ public class BillingService {
     sub.setStatus("ACTIVE");
     sub.setCurrentPeriodStart(Instant.now());
     sub.setCurrentPeriodEnd(periodService.periodEnd(plan.getPeriod()));
+    webhookSequencing.markTransitionApplied(sub, eventTime);
     subRepo.save(sub);
 
     // Ensure tier is correct
@@ -924,7 +1084,7 @@ public class BillingService {
     log.info("Stripe invoice.paid: subId={}, invoiceId={}", stripeSubscriptionId, stripeInvoiceId);
   }
 
-  private void handleStripeInvoicePaymentFailed(JsonNode invoice) {
+  private void handleStripeInvoicePaymentFailed(JsonNode invoice, Instant eventTime) {
     String stripeSubscriptionId = invoice.path("subscription").asText("");
 
     if (stripeSubscriptionId.isBlank()) return;
@@ -933,7 +1093,19 @@ public class BillingService {
         subRepo.findByGatewaySubscriptionId(stripeSubscriptionId).orElse(null);
     if (sub == null) return;
 
+    // RR-054: a delayed payment_failed must not regress a subscription a newer paid event already
+    // restored to ACTIVE.
+    if (webhookSequencing.isStaleTransition(sub, eventTime)) {
+      log.warn(
+          "Stripe invoice.payment_failed dropped as stale for subId={} (eventTime={} < applied={})",
+          stripeSubscriptionId,
+          eventTime,
+          sub.getLastProviderEventAt());
+      return;
+    }
+
     sub.setStatus("PAST_DUE");
+    webhookSequencing.markTransitionApplied(sub, eventTime);
     subRepo.save(sub);
 
     log.warn(
@@ -947,7 +1119,7 @@ public class BillingService {
     }
   }
 
-  private void handleStripeSubscriptionDeleted(JsonNode subscription) {
+  private void handleStripeSubscriptionDeleted(JsonNode subscription, Instant eventTime) {
     String stripeSubscriptionId = subscription.path("id").asText("");
 
     if (stripeSubscriptionId.isBlank()) return;
@@ -959,11 +1131,83 @@ public class BillingService {
       return;
     }
 
+    // RR-054: a delayed subscription.deleted must not downgrade a subscription a newer event
+    // legitimately re-activated.
+    if (webhookSequencing.isStaleTransition(sub, eventTime)) {
+      log.warn(
+          "Stripe subscription.deleted dropped as stale for subId={} (eventTime={} < applied={})",
+          stripeSubscriptionId,
+          eventTime,
+          sub.getLastProviderEventAt());
+      return;
+    }
+
+    webhookSequencing.markTransitionApplied(sub, eventTime);
     tierBridgeService.downgradeToFree(sub);
     log.info(
         "Stripe subscription deleted → downgraded to free: subId={}, user={}",
         stripeSubscriptionId,
         sub.getUserId());
+  }
+
+  /**
+   * Cancel the gateway subscription that a paid upgrade supersedes.
+   *
+   * <p><b>RR-049 (double billing).</b> This used to be a bare try/catch that logged a warning and
+   * moved on; the local row was then marked {@code UPGRADED} regardless. A failed cancellation
+   * therefore left the OLD gateway subscription renewing indefinitely while ExecuteSpec displayed
+   * it as retired — the customer is charged for both plans and nothing in the system says so.
+   *
+   * <p>The intent is now committed as a durable obligation <i>before</i> the gateway call, so a
+   * failure (or a rollback of the enclosing upgrade transaction) leaves a visible, retryable work
+   * item. The upgrade still proceeds: the customer has paid for the new tier and must get it. What
+   * changed is that the unfinished cancellation is no longer invisible.
+   */
+  private void cancelSupersededSubscription(BillingSubscription existing) {
+    String gatewaySubscriptionId = existing.getGatewaySubscriptionId();
+    if (gatewaySubscriptionId == null) {
+      return;
+    }
+    String gw = existing.getPaymentGateway();
+
+    BillingGatewayObligation obligation =
+        obligationService.record(
+            BillingGatewayObligation.builder()
+                .kind(BillingGatewayObligation.KIND_CANCEL_OLD_SUBSCRIPTION)
+                .subscriptionId(existing.getId())
+                .userId(existing.getUserId())
+                .orgId(existing.getOrgId())
+                .gateway(gw)
+                .gatewayRef(gatewaySubscriptionId)
+                .detail("Cancel superseded subscription after paid upgrade")
+                .idempotencyKey(
+                    BillingGatewayObligationService.key(
+                        BillingGatewayObligation.KIND_CANCEL_OLD_SUBSCRIPTION,
+                        existing.getId(),
+                        gatewaySubscriptionId))
+                .build());
+
+    if (obligation.isConfirmed()) {
+      return;
+    }
+
+    try {
+      if ("STRIPE".equalsIgnoreCase(gw)) {
+        gatewayRouter.stripe().cancelSubscription(gatewaySubscriptionId);
+      } else {
+        razorpayGateway.cancelImmediately(gatewaySubscriptionId);
+      }
+      obligationService.markSucceeded(obligation.getId(), gatewaySubscriptionId);
+    } catch (Exception e) {
+      obligationService.markFailed(obligation.getId(), e.getMessage());
+      log.error(
+          "Old gateway subscription {} was NOT cancelled after upgrade — it may keep billing the"
+              + " customer. Outstanding obligation={}: {}",
+          gatewaySubscriptionId,
+          obligation.getId(),
+          e.getMessage(),
+          e);
+    }
   }
 
   /**
@@ -1048,24 +1292,86 @@ public class BillingService {
             runLimit,
             refundAmount == runBasedRefund ? "runs" : "time");
 
-    try {
-      // Issue refund on payment gateway
-      String gw = existing.getPaymentGateway();
-      if ("RAZORPAY".equalsIgnoreCase(gw)
-          && razorpayGateway
-              instanceof com.navneet.executespec.billing.gateway.RazorpayGateway rpGw) {
-        rpGw.refundPartial(paymentId, refundAmount, reason);
-      }
-      // Note: Stripe refunds handled via Stripe dashboard or future implementation
+    String gw = existing.getPaymentGateway();
 
-      // Generate credit note for accounting
+    // RR-048: persist the refund liability BEFORE attempting it, keyed so a retried upgrade
+    // reuses this obligation instead of refunding twice. Committed in its own transaction, so
+    // a later rollback of the upgrade cannot erase the fact that we owe this money.
+    BillingGatewayObligation obligation =
+        obligationService.record(
+            BillingGatewayObligation.builder()
+                .kind(BillingGatewayObligation.KIND_PRORATED_REFUND)
+                .subscriptionId(existing.getId())
+                .userId(existing.getUserId())
+                .orgId(existing.getOrgId())
+                .gateway(gw)
+                .gatewayRef(paymentId)
+                .amountMinor(refundAmount)
+                .currency("INR")
+                .detail(reason)
+                .idempotencyKey(
+                    BillingGatewayObligationService.key(
+                        BillingGatewayObligation.KIND_PRORATED_REFUND,
+                        existing.getId(),
+                        paymentId,
+                        refundAmount))
+                .build());
+
+    if (obligation.isConfirmed()) {
+      log.info(
+          "Prorated refund already settled for sub={} paymentId={} — not refunding again",
+          existing.getId(),
+          paymentId);
+      return;
+    }
+
+    // Attempt the gateway refund. RR-048: everything downstream — the credit note, the
+    // "we refunded you" email, the PRORATED_REFUND audit row — is now gated on this actually
+    // succeeding. Previously all three were emitted for Stripe as well, where no refund call
+    // was ever made, so ExecuteSpec's accounting and its customer communication both stated
+    // that money had moved when it had not.
+    String refundId;
+    try {
+      refundId = attemptGatewayRefund(gw, paymentId, refundAmount, reason);
+    } catch (Exception e) {
+      obligationService.markFailed(obligation.getId(), e.getMessage());
+      log.error(
+          "Prorated refund FAILED and remains outstanding: sub={}, obligation={}, amount={} paise:"
+              + " {}",
+          existing.getId(),
+          obligation.getId(),
+          refundAmount,
+          e.getMessage(),
+          e);
+      return;
+    }
+
+    if (refundId == null) {
+      // No automated refund path on this gateway. This is an outstanding liability requiring an
+      // operator, not a completed refund — so no credit note, no refund email, no audit row
+      // claiming otherwise.
+      obligationService.markUnsupported(
+          obligation.getId(),
+          "No automated refund path for gateway " + gw + "; settle manually and mark resolved");
+      log.warn(
+          "Prorated refund of {} paise for sub={} cannot be issued automatically on gateway {} —"
+              + " recorded as outstanding obligation {}",
+          refundAmount,
+          existing.getId(),
+          gw,
+          obligation.getId());
+      return;
+    }
+
+    obligationService.markSucceeded(obligation.getId(), refundId);
+
+    // The money actually moved — now, and only now, produce the accounting + customer evidence.
+    try {
       Invoice creditNote = invoiceService.generateCreditNote(invoice.getId(), refundAmount, reason);
 
-      // Send refund email with credit note
       notificationService.sendUpgradeRefund(
           user.getEmail(), existingPlan.getName(), unusedRuns, runLimit, refundAmount);
 
-      // Send credit note email
       try {
         if (creditNote != null) {
           invoiceEmailService.sendInvoice(user.getEmail(), user.getFirstName(), creditNote);
@@ -1075,12 +1381,14 @@ public class BillingService {
       }
 
       log.info(
-          "Prorated refund issued: sub={}, amount={} paise, unused={}/{} runs, paymentId={}",
+          "Prorated refund issued: sub={}, amount={} paise, unused={}/{} runs, paymentId={},"
+              + " refundId={}",
           existing.getId(),
           refundAmount,
           unusedRuns,
           runLimit,
-          paymentId);
+          paymentId,
+          refundId);
 
       paymentAuditService.record(
           "USER",
@@ -1097,12 +1405,41 @@ public class BillingService {
           refundAmount,
           existing.getUserId(),
           existing.getOrgId());
-
     } catch (Exception e) {
-      // Refund failure should not block the upgrade
+      // The refund succeeded; only the paperwork failed. Do not roll the refund back and do not
+      // retry it — leave a loud log against the confirmed obligation's external ref.
       log.error(
-          "Failed to issue prorated refund for sub={}: {}", existing.getId(), e.getMessage(), e);
+          "Prorated refund {} SUCCEEDED on gateway but credit-note/notification failed for sub={}:"
+              + " {}",
+          refundId,
+          existing.getId(),
+          e.getMessage(),
+          e);
     }
+  }
+
+  /**
+   * Attempt a partial refund on the owning gateway.
+   *
+   * @return the gateway's refund identifier, or {@code null} when this gateway has no automated
+   *     refund path (the caller must then record an outstanding obligation rather than claiming the
+   *     refund happened). Throws when the gateway rejected an attempt that WAS made.
+   */
+  private String attemptGatewayRefund(
+      String gateway, String paymentId, long amountPaise, String reason) {
+    if ("RAZORPAY".equalsIgnoreCase(gateway)
+        && razorpayGateway
+            instanceof com.navneet.executespec.billing.gateway.RazorpayGateway rpGw) {
+      String refundId = rpGw.refundPartial(paymentId, amountPaise, reason);
+      if (refundId == null || refundId.isBlank()) {
+        throw new BillingException(
+            "Razorpay refund returned no refund id for payment " + paymentId);
+      }
+      return refundId;
+    }
+    // Stripe refunds are still a dashboard/manual action. Returning null keeps that honest
+    // instead of manufacturing accounting evidence for money that never moved.
+    return null;
   }
 
   // HELPERS
@@ -1161,20 +1498,7 @@ public class BillingService {
                   activatingSub.getUserId(),
                   existingTier,
                   activatingPlan.getTier());
-              try {
-                if (existing.getGatewaySubscriptionId() != null) {
-                  String gw = existing.getPaymentGateway();
-                  if ("STRIPE".equalsIgnoreCase(gw)) {
-                    gatewayRouter.stripe().cancelSubscription(existing.getGatewaySubscriptionId());
-                  } else {
-                    razorpayGateway.cancelImmediately(existing.getGatewaySubscriptionId());
-                  }
-                }
-              } catch (Exception e) {
-                log.warn(
-                    "Failed to cancel old subscription on gateway after upgrade payment: {}",
-                    e.getMessage());
-              }
+              cancelSupersededSubscription(existing);
 
               issueProratedRefund(existing, existingPlan, user);
 

@@ -17,6 +17,7 @@ class RateLimitPolicyLevelTest {
     assertThat(policy.getLimit("READ", "FREE", GuardrailLevel.LOW)).isEqualTo(300);
     assertThat(policy.getLimit("DEPLOY", "ENTERPRISE", GuardrailLevel.LOW)).isEqualTo(60);
     assertThat(policy.getLimit("AUTH", "login", GuardrailLevel.LOW)).isEqualTo(10);
+    assertThat(policy.getLimit("PUBLIC_SHARE", "FREE", GuardrailLevel.LOW)).isEqualTo(60);
   }
 
   @Test
@@ -24,6 +25,7 @@ class RateLimitPolicyLevelTest {
     assertThat(policy.getLimit("WRITE", "PRO", GuardrailLevel.MEDIUM)).isEqualTo(100);
     assertThat(policy.getLimit("DEPLOY", "ENTERPRISE", GuardrailLevel.MEDIUM)).isEqualTo(30);
     assertThat(policy.getLimit("PREVIEW", "PRO", GuardrailLevel.MEDIUM)).isEqualTo(30);
+    assertThat(policy.getLimit("PUBLIC_SHARE", "FREE", GuardrailLevel.MEDIUM)).isEqualTo(30);
     // READ / AUTH / RUNS / WEBHOOK untouched at MEDIUM
     assertThat(policy.getLimit("READ", "FREE", GuardrailLevel.MEDIUM)).isEqualTo(300);
     assertThat(policy.getLimit("AUTH", "login", GuardrailLevel.MEDIUM)).isEqualTo(10);
@@ -40,6 +42,7 @@ class RateLimitPolicyLevelTest {
     assertThat(policy.getLimit("AUTH", "login", GuardrailLevel.HIGH)).isEqualTo(2);
     assertThat(policy.getLimit("RUNS", "PRO", GuardrailLevel.HIGH)).isEqualTo(5);
     assertThat(policy.getLimit("WEBHOOK", "DEFAULT", GuardrailLevel.HIGH)).isEqualTo(25);
+    assertThat(policy.getLimit("PUBLIC_SHARE", "FREE", GuardrailLevel.HIGH)).isEqualTo(15);
   }
 
   @Test
@@ -67,5 +70,13 @@ class RateLimitPolicyLevelTest {
     assertThat(policy.getLimit("WRITE", "TEAM", GuardrailLevel.LOW)).isEqualTo(1000);
     assertThat(policy.getLimit("PREVIEW", "TEAM", GuardrailLevel.LOW)).isEqualTo(200);
     assertThat(policy.getLimit("DEPLOY", "TEAM", GuardrailLevel.LOW)).isEqualTo(60);
+  }
+
+  @Test
+  void publicShareReadsUseDedicatedAbuseBudget() {
+    assertThat(policy.classifyGroup("GET", "/api/shared/bearer/meta")).isEqualTo("PUBLIC_SHARE");
+    assertThat(policy.classifyGroup("HEAD", "/api/shared/bearer/project"))
+        .isEqualTo("PUBLIC_SHARE");
+    assertThat(policy.classifyGroup("GET", "/api/projects/p1")).isEqualTo("READ");
   }
 }

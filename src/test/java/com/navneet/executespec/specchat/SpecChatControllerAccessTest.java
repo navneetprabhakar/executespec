@@ -5,6 +5,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 import java.util.List;
 import java.util.Map;
@@ -40,7 +41,16 @@ class SpecChatControllerAccessTest {
 
     SpecChatController controller =
         new SpecChatController(
-            audit, service, flags, providers, access, mock(AgentIntentService.class));
+            audit,
+            service,
+            flags,
+            providers,
+            access,
+            mock(AgentIntentService.class),
+            new com.navneet.executespec.security.InputSanitizer(),
+            new com.navneet.executespec.security.ContextSanitizer(),
+            mock(ChatSecurityAuditService.class),
+            new SpecChatTurnDispatcher(8, 2));
     var request =
         new SpecChatController.SpecChatRequest(
             "session-1", "foreign", null, List.of(Map.of("role", "user", "content", "list")), null);
@@ -57,6 +67,113 @@ class SpecChatControllerAccessTest {
             org.mockito.ArgumentMatchers.anyString(),
             org.mockito.ArgumentMatchers.any(),
             org.mockito.ArgumentMatchers.anyString());
+  }
+
+  @Test
+  void cannotReuseAnotherUsersLegacySessionId() {
+    SpecChatAuditRepository audit = mock(SpecChatAuditRepository.class);
+    SpecChatService service = mock(SpecChatService.class);
+    FeatureFlagService flags = mock(FeatureFlagService.class);
+    AiProviderPreferenceService providers = mock(AiProviderPreferenceService.class);
+    when(audit.findBySessionId("shared-session"))
+        .thenReturn(
+            java.util.Optional.of(
+                SpecChatAudit.builder()
+                    .id("audit-1")
+                    .sessionId("shared-session")
+                    .userId("another-user")
+                    .orgId("org-1")
+                    .turnCount(1)
+                    .build()));
+    SpecChatController controller =
+        new SpecChatController(
+            audit,
+            service,
+            flags,
+            providers,
+            mock(ProjectAccessGuard.class),
+            mock(AgentIntentService.class),
+            new com.navneet.executespec.security.InputSanitizer(),
+            new com.navneet.executespec.security.ContextSanitizer(),
+            mock(ChatSecurityAuditService.class),
+            new SpecChatTurnDispatcher(8, 2));
+    var request =
+        new SpecChatController.SpecChatRequest(
+            "shared-session",
+            null,
+            null,
+            List.of(Map.of("role", "user", "content", "hello")),
+            null);
+
+    assertThatThrownBy(() -> controller.chat(user(), request, null, mock(HttpServletRequest.class)))
+        .isInstanceOf(ResponseStatusException.class)
+        .matches(
+            error ->
+                ((ResponseStatusException) error).getStatusCode()
+                    == org.springframework.http.HttpStatus.FORBIDDEN);
+    verify(audit, never()).save(any());
+    verify(service, never()).runTurn(any(), any(), any(), any(), any(), any(), any());
+  }
+
+  /**
+   * RR-539 — the agent loop must not occupy the servlet thread, and admission must be bounded. The
+   * first turn returns while its provider loop is still blocked; the second is refused with 429
+   * instead of pinning a second HTTP worker.
+   */
+  @Test
+  void turnRunsOffTheRequestThreadAndConcurrencyIsBounded() throws Exception {
+    SpecChatAuditRepository audit = mock(SpecChatAuditRepository.class);
+    SpecChatService service = mock(SpecChatService.class);
+    FeatureFlagService flags = mock(FeatureFlagService.class);
+    AiProviderPreferenceService providers = mock(AiProviderPreferenceService.class);
+    when(flags.isEnabled("spec.chat.enabled")).thenReturn(true);
+    when(audit.findBySessionId(any())).thenReturn(java.util.Optional.empty());
+    when(audit.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+    java.util.concurrent.CountDownLatch entered = new java.util.concurrent.CountDownLatch(1);
+    java.util.concurrent.CountDownLatch release = new java.util.concurrent.CountDownLatch(1);
+    org.mockito.Mockito.doAnswer(
+            invocation -> {
+              entered.countDown();
+              release.await();
+              return null;
+            })
+        .when(service)
+        .runTurn(any(), any(), any(), any(), any(), any(), any());
+
+    SpecChatController controller =
+        new SpecChatController(
+            audit,
+            service,
+            flags,
+            providers,
+            mock(ProjectAccessGuard.class),
+            mock(AgentIntentService.class),
+            new com.navneet.executespec.security.InputSanitizer(),
+            new com.navneet.executespec.security.ContextSanitizer(),
+            mock(ChatSecurityAuditService.class),
+            new SpecChatTurnDispatcher(1, 1));
+    var request =
+        new SpecChatController.SpecChatRequest(
+            "session-async", null, null, List.of(Map.of("role", "user", "content", "hi")), null);
+
+    try {
+      // Returns even though the loop below is still blocked inside the provider call.
+      controller.chat(user(), request, null, mock(HttpServletRequest.class));
+      org.assertj.core.api.Assertions.assertThat(
+              entered.await(5, java.util.concurrent.TimeUnit.SECONDS))
+          .isTrue();
+
+      assertThatThrownBy(
+              () -> controller.chat(user(), request, null, mock(HttpServletRequest.class)))
+          .isInstanceOf(ResponseStatusException.class)
+          .matches(
+              error ->
+                  ((ResponseStatusException) error).getStatusCode()
+                      == org.springframework.http.HttpStatus.TOO_MANY_REQUESTS);
+    } finally {
+      release.countDown();
+    }
   }
 
   private static AppUserDetails user() {

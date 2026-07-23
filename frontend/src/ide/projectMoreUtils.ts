@@ -1,5 +1,45 @@
 import type * as api from '@/lib/api';
 
+// RR-747 — the project dashboard DTO exposes `recentPrs`, never `openPrs`. Deriving the open-PR list
+// from `recentPrs` (filtered by status/state) instead of reading the invented `openPrs` field stops
+// the PR tab from reporting "No open pull requests" whenever open PRs actually exist. Kept pure here
+// so it is unit-testable without constructing the component tree.
+export const openPrsFromDashboard = (d: unknown): Array<Record<string, unknown>> => {
+  const recent = ((d as {recentPrs?: unknown[]})?.recentPrs || []) as Array<
+    Record<string, unknown>
+  >;
+  return recent.filter(
+    (p) =>
+      String(
+        (p as {status?: string}).status || (p as {state?: string}).state || '',
+      ).toUpperCase() === 'OPEN',
+  );
+};
+
+// RR-1511 — collapse a share link's server-provided lifecycle fields into one explicit state, so
+// revoked and expired links are not rendered identically to live ones.
+export function shareLinkStatus(s: api.ShareLinkDto): 'Active' | 'Revoked' | 'Expired' {
+  if (s.revokedAt || s.active === false) return 'Revoked';
+  if (s.expiresAt && new Date(s.expiresAt).getTime() <= Date.now()) return 'Expired';
+  return 'Active';
+}
+
+/**
+ * RR-1469 — the project activity row previously read `actorName`/`actor`, fields the served
+ * `ActivityEntry` never carries (it exposes `actorUserId` + `actorType`), so every row rendered a
+ * blank actor. Resolve the real fields: `System` for system-authored events and a legible user id
+ * for user events; never a silent empty string (kept pure here so it's unit-testable).
+ */
+export function actorLabel(e: Record<string, unknown>): string {
+  const actorType = String(e.actorType || '');
+  if (actorType === 'SYSTEM') return 'System';
+  const id = e.actorUserId;
+  if (typeof id === 'string' && id.length > 0) {
+    return id.length > 12 ? `user ${id.slice(0, 8)}` : `user ${id}`;
+  }
+  return actorType === 'USER' ? 'User' : '—';
+}
+
 export type ArchDocSection = {heading: string; body: string};
 export type ContractDetectorSummary = {
   scanned: number;
@@ -7,6 +47,22 @@ export type ContractDetectorSummary = {
   totalContracts: number;
   driftCandidateIds: string[];
 };
+
+export function uiBound<T>(promise: Promise<T>, timeoutMs = 10_000): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = globalThis.setTimeout(() => reject(new Error('Request timed out.')), timeoutMs);
+    promise.then(
+      (value) => {
+        globalThis.clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        globalThis.clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
 
 export function looksLikeArtifact(content: string): boolean {
   return content.length > 1200 || /```|^#{2,}\s|\|.+\|/m.test(content);
@@ -71,18 +127,46 @@ export function isExternalProjectMember(
   return member.external === true;
 }
 
-export function canManageProjectSharing(input: {
+export type ProjectAuthorityInput = {
   globalRole?: string | null;
   orgRole?: string | null;
   projectRole?: string | null;
   hasProjectMembership?: boolean;
-}): boolean {
+};
+
+/**
+ * RR-1507 — membership administration (add/remove members, resend/revoke org
+ * invites). The server's add/remove path is `ProjectService.requireProjectAdmin`,
+ * which admits only SUPER_ADMIN, host-org ORG_ADMIN, or a `PROJECT_ADMIN`
+ * membership. A `PROJECT_DEVELOPER` is NOT admitted, so the UI must not present
+ * a fully enabled member-admin surface that returns 403 after every confirm.
+ */
+export function canManageMembership(input: ProjectAuthorityInput): boolean {
   if (input.globalRole === 'SUPER_ADMIN') return true;
-  if (input.projectRole === 'PROJECT_ADMIN' || input.projectRole === 'PROJECT_DEVELOPER') {
-    return true;
-  }
+  if (input.projectRole === 'PROJECT_ADMIN') return true;
   if (input.hasProjectMembership) return false;
   return input.orgRole === 'ORG_ADMIN';
+}
+
+/**
+ * RR-1507 — share-link management. The server's share-link guard is
+ * `isProjectWriter`, which additionally admits `PROJECT_DEVELOPER`. This is a
+ * genuinely wider authority than membership management, so it is a separate
+ * predicate rather than one boolean covering both.
+ */
+export function canManageShareLinks(input: ProjectAuthorityInput): boolean {
+  if (canManageMembership(input)) return true;
+  return input.projectRole === 'PROJECT_DEVELOPER';
+}
+
+/**
+ * @deprecated RR-1507 — this single predicate conflated two different server
+ * guards (membership vs share-links). Retained as an alias for the wider
+ * share-link authority; call sites should choose `canManageMembership` or
+ * `canManageShareLinks` explicitly.
+ */
+export function canManageProjectSharing(input: ProjectAuthorityInput): boolean {
+  return canManageShareLinks(input);
 }
 
 export function availableOrgMembers(
@@ -112,4 +196,53 @@ export function parseArchDoc(md: string): {preamble: string; sections: ArchDocSe
       body: section.body.join('\n'),
     })),
   };
+}
+
+/**
+ * RR-1658 — roll up a batch of drift checks into the three states the backend actually
+ * reports. The UI used to count only `hasDrift`, but `DriftCheckResult.hasDrift` is false
+ * for BOTH `NO_DRIFT` and `UNAVAILABLE` (retained that way for wire compatibility after
+ * RR-1631), so a contract whose source could not be read — SCM outage, expired PAT —
+ * was presented as clean.
+ *
+ * Rows from a server predating the tri-state carry no `status`; those fall back to the
+ * `hasDrift` boolean, which is exactly as informative as it was before, and are never
+ * counted as unavailable on the basis of a missing field.
+ */
+export function summarizeDriftResults(results: api.DriftCheckResult[] | null | undefined): {
+  drifted: number;
+  clean: number;
+  unavailable: number;
+  total: number;
+} {
+  const rows = results ?? [];
+  let drifted = 0;
+  let unavailable = 0;
+  for (const row of rows) {
+    const status = row.status ?? (row.hasDrift ? 'DRIFT' : 'NO_DRIFT');
+    if (status === 'DRIFT') drifted += 1;
+    else if (status === 'UNAVAILABLE') unavailable += 1;
+  }
+  return {drifted, clean: rows.length - drifted - unavailable, unavailable, total: rows.length};
+}
+
+/** User-facing sentence for a drift rollup that never calls an unperformable check clean. */
+export function driftSummaryMessage(summary: {
+  drifted: number;
+  unavailable: number;
+  total: number;
+}): string {
+  const parts: string[] = [];
+  if (summary.drifted > 0) {
+    parts.push(`${summary.drifted} drift result${summary.drifted === 1 ? '' : 's'} detected`);
+  }
+  if (summary.unavailable > 0) {
+    parts.push(
+      `${summary.unavailable} contract${summary.unavailable === 1 ? '' : 's'} could not be checked`,
+    );
+  }
+  if (parts.length === 0) {
+    return summary.total === 0 ? 'No contracts to check.' : 'No drift detected.';
+  }
+  return `${parts.join('; ')}.`;
 }

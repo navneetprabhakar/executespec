@@ -6,6 +6,7 @@ import static com.navneet.executespec.integration.RunPipelineSupport.truncate;
 
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
@@ -13,6 +14,7 @@ import java.util.UUID;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.agent.Plan;
+import com.navneet.executespec.agent.PromptTrustBoundary;
 import com.navneet.executespec.auth.repository.ProjectRepository;
 import com.navneet.executespec.codeintel.ProjectArchitectureService;
 import com.navneet.executespec.codeintel.TieredCodemapSelector;
@@ -24,6 +26,7 @@ import com.navneet.executespec.project.service.ProjectRepoService;
 import com.navneet.executespec.reviewer.ReviewerResult;
 import com.navneet.executespec.router.ModelAccessService;
 import com.navneet.executespec.router.ModelRegistry;
+import com.navneet.executespec.security.SafeWorkspacePath;
 
 import org.springframework.stereotype.Component;
 
@@ -79,8 +82,16 @@ class RunContextComposer {
       ExecutionResult execResult,
       ReviewerResult reviewResult,
       Instant startedAt) {
-    Path readme = workspace.resolve("README.md");
-    if (Files.exists(readme)) {
+    // RR-465 — the workspace holds a customer-controlled clone. `README.md` may be a symlink to a
+    // host path; a dangling one would make writeString CREATE the target outside the workspace.
+    Path readme;
+    try {
+      readme = SafeWorkspacePath.resolveWithin(workspace, "README.md");
+    } catch (IOException | SecurityException e) {
+      log.warn("RunOrchestrator run={} refused unsafe README.md path: {}", runId, e.getMessage());
+      return;
+    }
+    if (Files.exists(readme, LinkOption.NOFOLLOW_LINKS)) {
       log.debug(
           "RunOrchestrator run={} README.md already present (planner-authored), skipping", runId);
       return;
@@ -179,8 +190,11 @@ class RunContextComposer {
   void writeAgentContext(Path workspace, Plan plan) {
     if (workspace == null || plan.projectType() == null) return;
     try {
-      Path dir = workspace.resolve(".agent-context");
+      // RR-465 — a cloned repository can ship `.agent-context` as a symlink to a host directory;
+      // without this the project.json write truncates an arbitrary writable host file.
+      Path dir = SafeWorkspacePath.resolveWithin(workspace, ".agent-context");
       Files.createDirectories(dir);
+      SafeWorkspacePath.requireWithin(workspace, dir);
       // Normalize to the canonical PreviewProjectType/DeployStrategy enum form
       // (UPPER_SNAKE_CASE). V2 planner historically emitted lowercase-hyphenated
       // values (e.g. "node-backend") which silently fell through to heuristic
@@ -188,7 +202,8 @@ class RunContextComposer {
       String normalizedType = plan.projectType().trim().toUpperCase().replace('-', '_');
       String json =
           objectMapper.writeValueAsString(java.util.Map.of("project_type", normalizedType));
-      Files.writeString(dir.resolve("project.json"), json);
+      Files.writeString(
+          SafeWorkspacePath.resolveWithin(workspace, ".agent-context/project.json"), json);
     } catch (Exception e) {
       log.debug("writeAgentContext failed: {}", e.getMessage());
     }
@@ -244,10 +259,15 @@ class RunContextComposer {
         // from the selector (unparseable / blank spec) falls back to the original head-truncate.
         String body = tiered ? TieredCodemapSelector.select(content, specText, cap) : null;
         if (body == null) body = truncate(content, cap);
+        // RR-466 — the codemap is derived from untrusted repository names/symbols and prior LLM
+        // output. It is injected into imperative worker/planner context, so it must be delimited as
+        // project-controlled evidence (never followed as instructions) rather than concatenated raw
+        // into a higher-trust position.
+        String framedBody = PromptTrustBoundary.wrap("CODEMAP", body);
         sb.append("### Codemap — ")
             .append(lastPathSegment(r.getGithubRepoFullName()))
             .append("\n")
-            .append(body)
+            .append(framedBody)
             .append("\n\n");
         budget -= body.length();
       }
@@ -278,9 +298,12 @@ class RunContextComposer {
       }
       String body = truncate(doc.get().getContent(), ARCH_INJECT_CAP);
       if (body.isBlank()) return "";
+      // RR-466 — the architecture doc is prior LLM output over untrusted repository content. A
+      // poisoned architecture could otherwise steer later workers from a higher-trust prompt
+      // position; delimit it as project-controlled evidence.
       return "PROJECT ARCHITECTURE (high-level design — use to understand how modules/components"
           + " relate before editing):\n\n"
-          + body;
+          + PromptTrustBoundary.wrap("PROJECT_ARCHITECTURE", body);
     } catch (Exception e) {
       log.warn("buildArchitectureContext failed (continuing without arch): {}", e.getMessage());
       return "";
@@ -356,17 +379,20 @@ class RunContextComposer {
    * Previously a hardcoded switch returned Haiku/flash/mini even after YAML moved Anthropic
    * WORKHORSE to Sonnet (2026-04-19) and Gemini WORKHORSE to Pro (2026-05-04).
    *
-   * <p>Final-fallback safety net: if YAML lookup returns null (e.g. provider mis-configured), fall
-   * back to the historical Anthropic-Haiku default rather than NPE'ing the run.
+   * <p>RR-467 — fail CLOSED. The old net returned an Anthropic Haiku slug whenever the YAML lookup
+   * failed, regardless of the requested provider. A Gemini/OpenAI/DeepSeek configuration error
+   * would then silently cross providers to an unintended Anthropic route, making route pins, key
+   * ownership and billing evidence disagree. A missing model for the selected provider now blocks
+   * the run instead of routing it through a model another provider owns.
    */
   String defaultModelFor(String provider) {
     String model = modelRegistry.workhouseModelFor(provider);
     if (model != null && !model.isBlank()) return model;
-    log.warn(
-        "RunOrchestrator: no workhorse model in YAML matrix for provider '{}'; falling back to"
-            + " claude-haiku-4-5-20251001",
-        provider);
-    return "claude-haiku-4-5-20251001";
+    throw new IllegalStateException(
+        "No workhorse model configured for provider '"
+            + provider
+            + "'; refusing to fall back to a model owned by a different provider. Configure the"
+            + " model-matrix for this provider before selecting it.");
   }
 
   String buildMultiRepoSummary(String projectId, List<UUID> selectedRepoIds) {

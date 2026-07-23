@@ -1,6 +1,7 @@
 package com.navneet.executespec.router;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -47,14 +48,18 @@ class ProjectProviderResolverTest {
   }
 
   @Test
-  void missingOrInvalidPreferenceFallsBackToCanonicalAnthropic() {
+  void missingOrInvalidPreferenceFailsClosed() {
     AppUser user = new AppUser();
     user.setPreferredAiProvider("retired-provider");
     when(appUserRepository.findById("u-1")).thenReturn(Optional.of(user));
 
-    assertThat(resolver.resolve(Project.builder().aiProvider(null).createdBy("u-1").build()))
-        .isEqualTo(LlmProvider.ANTHROPIC);
-    assertThat(resolver.resolve((Project) null)).isEqualTo(LlmProvider.ANTHROPIC);
+    assertThatThrownBy(
+            () -> resolver.resolve(Project.builder().aiProvider(null).createdBy("u-1").build()))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("invalid account provider preference");
+    assertThatThrownBy(() -> resolver.resolve((Project) null))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("project required");
   }
 
   @Test

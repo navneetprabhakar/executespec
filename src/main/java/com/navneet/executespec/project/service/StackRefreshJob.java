@@ -5,13 +5,15 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
 
+import com.navneet.executespec.auth.repository.AppUserRepository;
 import com.navneet.executespec.project.entity.ProjectRepo;
+import com.navneet.executespec.project.repository.ProjectRepoLinkRepository;
 import com.navneet.executespec.project.repository.ProjectRepoRepository;
 import com.navneet.executespec.repo.GitHubRepoService;
 
+import org.springframework.data.domain.PageRequest;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.annotation.Transactional;
 
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -35,8 +37,11 @@ public class StackRefreshJob {
 
   private static final Duration MIN_REFRESH_AGE = Duration.ofHours(20);
   private static final long PACING_MS = 200;
+  private static final int MAX_PER_SWEEP = 100;
 
   private final ProjectRepoRepository repoRepo;
+  private final ProjectRepoLinkRepository linkRepo;
+  private final AppUserRepository userRepo;
   private final StackDetector stackDetector;
   private final GitHubRepoService gitHub;
   private final MeterRegistry meterRegistry;
@@ -48,25 +53,35 @@ public class StackRefreshJob {
   }
 
   /** Manual entry point for tests / admin tooling. */
-  @Transactional
   public void runOnce() {
     Counter changed = Counter.builder("executespec.stack.refresh.changed").register(meterRegistry);
     Counter unchanged =
         Counter.builder("executespec.stack.refresh.unchanged").register(meterRegistry);
     Counter failed = Counter.builder("executespec.stack.refresh.failed").register(meterRegistry);
 
-    List<ProjectRepo> all = repoRepo.findAll();
     Instant cutoff = Instant.now().minus(MIN_REFRESH_AGE);
+    List<ProjectRepo> candidates =
+        repoRepo.findStackRefreshCandidates(cutoff, PageRequest.of(0, MAX_PER_SWEEP));
     int seen = 0;
-    for (ProjectRepo repo : all) {
-      if (repo.getUpdatedAt() != null && repo.getUpdatedAt().isAfter(cutoff)) continue;
+    for (ProjectRepo repo : candidates) {
+      String credentialUserId = resolveCredentialUserId(repo);
+      String pat =
+          credentialUserId == null
+              ? null
+              : userRepo.findById(credentialUserId).map(user -> user.getGithubPat()).orElse(null);
+      if (pat == null || pat.isBlank()) {
+        failed.increment();
+        log.warn(
+            "StackRefreshJob skipped repo {} because no current linked-user GitHub credential is"
+                + " available",
+            repo.getGithubRepoFullName());
+        continue;
+      }
       try {
-        String fresh = stackDetector.detect(repo.getGithubRepoFullName(), null);
+        String fresh = stackDetector.detect(repo.getGithubRepoFullName(), pat);
         String headSha =
             gitHub.getBranchHeadSha(
-                "https://github.com/" + repo.getGithubRepoFullName(),
-                repo.getDefaultBranch(),
-                null);
+                "https://github.com/" + repo.getGithubRepoFullName(), repo.getDefaultBranch(), pat);
         boolean stackChanged = !Objects.equals(repo.getDetectedStack(), fresh);
         boolean shaChanged = headSha != null && !Objects.equals(repo.getLastSyncedSha(), headSha);
         if (stackChanged) repo.setDetectedStack(fresh);
@@ -88,6 +103,21 @@ public class StackRefreshJob {
         break;
       }
     }
-    log.info("StackRefreshJob processed {}/{} repos", seen, all.size());
+    log.info(
+        "StackRefreshJob processed {}/{} bounded candidates (max={})",
+        seen,
+        candidates.size(),
+        MAX_PER_SWEEP);
+  }
+
+  private String resolveCredentialUserId(ProjectRepo repo) {
+    if (repo.getOwnerUserId() != null && !repo.getOwnerUserId().isBlank()) {
+      return repo.getOwnerUserId();
+    }
+    return linkRepo
+        .findFirstByRepoIdOrderByIdAsc(repo.getId())
+        .map(link -> link.getLinkedBy())
+        .filter(id -> id != null && !id.isBlank())
+        .orElse(null);
   }
 }

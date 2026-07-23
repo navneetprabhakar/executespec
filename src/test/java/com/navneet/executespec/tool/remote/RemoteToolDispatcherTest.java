@@ -63,10 +63,27 @@ class RemoteToolDispatcherTest {
   @Test
   void isRemote_togglesWithRegistration() {
     assertThat(dispatcher.isRemote("r1")).isFalse();
+    assertThat(dispatcher.toolProfile("r1")).isNull();
     dispatcher.register("r1");
     assertThat(dispatcher.isRemote("r1")).isTrue();
+    assertThat(dispatcher.toolProfile("r1"))
+        .isEqualTo(RemoteToolDispatcher.ToolProfile.LOCAL_HANDS);
     dispatcher.unregister("r1");
     assertThat(dispatcher.isRemote("r1")).isFalse();
+    assertThat(dispatcher.toolProfile("r1")).isNull();
+  }
+
+  @Test
+  void explicitTerminalBenchProfileSurvivesReconnect() {
+    dispatcher.register("r1", RemoteToolDispatcher.ToolProfile.TERMINAL_BENCH);
+
+    assertThat(dispatcher.toolProfile("r1"))
+        .isEqualTo(RemoteToolDispatcher.ToolProfile.TERMINAL_BENCH);
+
+    dispatcher.disconnect("r1");
+    dispatcher.reconnect("r1");
+    assertThat(dispatcher.toolProfile("r1"))
+        .isEqualTo(RemoteToolDispatcher.ToolProfile.TERMINAL_BENCH);
   }
 
   @Test
@@ -74,6 +91,45 @@ class RemoteToolDispatcherTest {
     JsonNode n = om.readTree(dispatcher.dispatch("r1", "t1", "readFile", "{\"path\":\"x\"}"));
     assertThat(n.get("ok").asBoolean()).isFalse();
     assertThat(n.get("kind").asText()).isEqualTo("INTERNAL");
+  }
+
+  @Test
+  void expiredAbsoluteDeadlineRefusesToolWithoutEmission() throws Exception {
+    dispatcher.register(
+        "r1",
+        RemoteToolDispatcher.ToolProfile.TERMINAL_BENCH,
+        System.currentTimeMillis() - 1,
+        5_000L);
+
+    JsonNode result =
+        om.readTree(dispatcher.dispatch("r1", "t1", "shell", "{\"command\":\"sleep 5\"}"));
+
+    assertThat(result.path("ok").asBoolean()).isFalse();
+    assertThat(result.path("kind").asText()).isEqualTo("DEADLINE_EXCEEDED");
+    verify(broadcaster, org.mockito.Mockito.never()).emit(eq("r1"), any(RunEvent.class));
+  }
+
+  @Test
+  void deadlineAndShutdownReserveArePropagatedInToolFrame() throws Exception {
+    long deadline = System.currentTimeMillis() + 60_000L;
+    dispatcher.register("r1", RemoteToolDispatcher.ToolProfile.TERMINAL_BENCH, deadline, 7_000L);
+    doAnswer(
+            inv -> {
+              RunEvent ev = inv.getArgument(1);
+              String callId = om.readTree(ev.payload()).path("callId").asText();
+              dispatcher.complete("r1", callId, "{\"ok\":true,\"content\":\"done\"}");
+              return null;
+            })
+        .when(broadcaster)
+        .emit(eq("r1"), any(RunEvent.class));
+
+    dispatcher.dispatch("r1", "t1", "readFile", "{\"path\":\"x\"}");
+
+    ArgumentCaptor<RunEvent> cap = ArgumentCaptor.forClass(RunEvent.class);
+    verify(broadcaster).emit(eq("r1"), cap.capture());
+    JsonNode frame = om.readTree(cap.getValue().payload());
+    assertThat(frame.path("absoluteDeadlineEpochMs").asLong()).isEqualTo(deadline);
+    assertThat(frame.path("shutdownReserveMs").asLong()).isEqualTo(7_000L);
   }
 
   @Test
@@ -270,7 +326,11 @@ class RemoteToolDispatcherTest {
 
   @Test
   void reconnectRenewsPendingCallDeadline() throws Exception {
-    dispatcher = new RemoteToolDispatcher(broadcaster, om, stateService, 120L);
+    // Timings scaled up (was 120ms deadline / 80+70ms sleeps) so scheduling jitter under a loaded
+    // CI runner cannot race the deadline: renewal margin is now ~800ms, not ~50ms. The renewal
+    // semantics are unchanged — the total elapsed still crosses the ORIGINAL deadline, proving the
+    // reconnect renewed it.
+    dispatcher = new RemoteToolDispatcher(broadcaster, om, stateService, 2000L);
     dispatcher.register("r1");
     CountDownLatch firstEmission = new CountDownLatch(1);
     AtomicInteger emissions = new AtomicInteger();
@@ -290,11 +350,14 @@ class RemoteToolDispatcherTest {
       Future<String> result =
           executor.submit(() -> dispatcher.dispatch("r1", "t1", "readFile", "{}"));
       assertThat(firstEmission.await(2, TimeUnit.SECONDS)).isTrue();
-      Thread.sleep(80L);
+      Thread.sleep(1200L);
       dispatcher.disconnect("r1");
       dispatcher.reconnect("r1");
-      Thread.sleep(70L);
+      Thread.sleep(1200L);
 
+      // t≈2400ms > original 2000ms deadline: without renewal the call would have timed out
+      // (isDone==true); still pending here proves reconnect renewed the deadline (new expiry
+      // ≈3200ms).
       assertThat(result.isDone()).isFalse();
       dispatcher.complete("r1", callId[0], "{\"ok\":true,\"content\":\"handoff\"}");
       assertThat(om.readTree(result.get(2, TimeUnit.SECONDS)).path("content").asText())

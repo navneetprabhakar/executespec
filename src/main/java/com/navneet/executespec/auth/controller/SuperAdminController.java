@@ -4,7 +4,6 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import java.util.stream.Collectors;
 
 import com.navneet.executespec.auth.dto.AdminInviteRequest;
 import com.navneet.executespec.auth.dto.OrgDto;
@@ -41,7 +40,6 @@ public class SuperAdminController {
   private final OrgMemberRepository orgMemberRepo;
   private final OrgService orgService;
   private final InvitationService invitationService;
-  private final PaymentAuditService paymentAuditService;
   private final TierConfigRepository tierConfigRepo;
   private final MailService mailService;
   private final ActivityAuditService auditService;
@@ -57,6 +55,11 @@ public class SuperAdminController {
   private final com.navneet.executespec.integration.RunLifecycleService runLifecycleService;
   private final com.navneet.executespec.report.VerifiedScoreBackfillService
       verifiedScoreBackfillService;
+  private final AdminUserMutationService adminUserMutationService;
+  private final AdminUserQueryService adminUserQueryService;
+  private final com.navneet.executespec.billing.service.TopupPackageAdminService
+      topupPackageAdminService;
+  private final com.fasterxml.jackson.databind.ObjectMapper objectMapper;
 
   // Guardrail level diagnostic (Plan 1 P1)
 
@@ -176,7 +179,7 @@ public class SuperAdminController {
             .entityType("TASK")
             .entityId(runId + "/" + taskId)
             .actorId(admin == null ? null : admin.getUser().getId())
-            .metadata("{\"reason\":\"" + reason.trim().replace("\"", "\\\"") + "\"}")
+            .metadata(auditJson(Map.of("reason", reason.trim())))
             .build());
     return ResponseEntity.ok(result);
   }
@@ -237,11 +240,8 @@ public class SuperAdminController {
             .entityId("v2-run-orchestrator")
             .actorId(admin.getUser().getId())
             .newValue(
-                "{\"haltedCount\":"
-                    + halted.size()
-                    + ",\"reason\":\""
-                    + (reason == null ? "" : reason.replace("\"", "\\\""))
-                    + "\"}")
+                auditJson(
+                    Map.of("haltedCount", halted.size(), "reason", reason == null ? "" : reason)))
             .build());
     return ResponseEntity.ok(
         Map.of(
@@ -255,12 +255,18 @@ public class SuperAdminController {
 
   @PostMapping("/prompts/{name}/rollback")
   public ResponseEntity<Map<String, Object>> rollbackPrompt(@PathVariable String name) {
-    boolean done = promptVersioningService.rollback(name);
-    if (!done) {
-      return ResponseEntity.status(HttpStatus.NOT_FOUND)
-          .body(Map.of("error", "No audit history found for prompt: " + name));
-    }
-    return ResponseEntity.ok(Map.of("rolledBack", name));
+    // RR-1304 — the endpoint returns 2xx ONLY when the live prompt provably changed. A restore
+    // failure (disk/permission/short-write) is a 500, not a falsely-acknowledged 200.
+    PromptVersioningService.RollbackOutcome outcome = promptVersioningService.rollback(name);
+    return switch (outcome) {
+      case ROLLED_BACK -> ResponseEntity.ok(Map.of("rolledBack", name));
+      case NO_HISTORY ->
+          ResponseEntity.status(HttpStatus.NOT_FOUND)
+              .body(Map.of("error", "No audit history found for prompt: " + name));
+      case RESTORE_FAILED ->
+          ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+              .body(Map.of("error", "Rollback could not be applied for prompt: " + name));
+    };
   }
 
   @GetMapping("/prompts/{name}/history")
@@ -281,19 +287,10 @@ public class SuperAdminController {
   }
 
   @GetMapping("/users")
-  public ResponseEntity<List<UserDto>> listUsers() {
-    List<UserDto> users =
-        userRepo.findAllActive().stream()
-            .map(
-                u -> {
-                  var member =
-                      u.getOrgId() != null
-                          ? orgMemberRepo.findByOrgIdAndUserId(u.getOrgId(), u.getId()).orElse(null)
-                          : null;
-                  return UserDto.from(u, member);
-                })
-            .collect(Collectors.toList());
-    return ResponseEntity.ok(users);
+  public ResponseEntity<List<UserDto>> listUsers(
+      @RequestParam(required = false) Integer page, @RequestParam(required = false) Integer size) {
+    // RR-012: batched org-membership lookup + optional bounded page (see AdminUserQueryService).
+    return ResponseEntity.ok(adminUserQueryService.listUsers(page, size));
   }
 
   @GetMapping("/users/{id}")
@@ -314,32 +311,15 @@ public class SuperAdminController {
       @AuthenticationPrincipal AppUserDetails adminDetails,
       @PathVariable String id,
       @RequestBody Map<String, String> body) {
-    AppUser user =
-        userRepo
-            .findById(id)
-            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));
-    String oldStatus = user.getStatus();
-    String newStatus = body.get("status");
-    user.setStatus(newStatus);
-    user.setUpdatedAt(Instant.now());
-    userRepo.save(user);
-
-    auditService.record(
-        ActivityAudit.builder()
-            .eventType("USER_STATUS_CHANGED")
-            .entityType("USER")
-            .entityId(id)
-            .actorId(adminDetails.getUser().getId())
-            .oldValue("{\"status\":\"" + oldStatus + "\"}")
-            .newValue("{\"status\":\"" + newStatus + "\"}")
-            .build());
-
-    // Notify user on suspension
-    if ("SUSPENDED".equals(newStatus) && !"SUSPENDED".equals(oldStatus)) {
-      mailService.sendSuspensionEmail(user.getEmail(), user.getFirstName());
+    // RR-009/RR-010: validation, invariants (self / last-super-admin) and structured audit live in
+    // AdminUserMutationService, transactional with the write.
+    AdminUserMutationService.StatusChange result =
+        adminUserMutationService.updateStatus(
+            adminDetails.getUser().getId(), id, body == null ? null : body.get("status"));
+    if (result.newlySuspended()) {
+      mailService.sendSuspensionEmail(result.user().getEmail(), result.user().getFirstName());
     }
-
-    return ResponseEntity.ok(UserDto.from(user, null));
+    return ResponseEntity.ok(UserDto.from(result.user(), null));
   }
 
   @PutMapping("/users/{id}/tier")
@@ -347,34 +327,17 @@ public class SuperAdminController {
       @AuthenticationPrincipal AppUserDetails adminDetails,
       @PathVariable String id,
       @RequestBody Map<String, String> body) {
-    AppUser user =
-        userRepo
-            .findById(id)
-            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));
-    String oldTier = user.getTier();
-    String newTier = body.get("tier");
-    user.setTier(newTier);
-    user.setUpdatedAt(Instant.now());
-    userRepo.save(user);
-    paymentAuditService.record(
-        "USER", id, "PLAN_UPGRADED", oldTier, newTier, adminDetails.getUser().getId(), null);
-
-    auditService.record(
-        ActivityAudit.builder()
-            .eventType("USER_TIER_CHANGED")
-            .entityType("USER")
-            .entityId(id)
-            .actorId(adminDetails.getUser().getId())
-            .oldValue("{\"tier\":\"" + oldTier + "\"}")
-            .newValue("{\"tier\":\"" + newTier + "\"}")
-            .build());
-
-    // Notify user of tier upgrade
-    if (!oldTier.equals(newTier)) {
-      mailService.sendTierUpgradeEmail(user.getEmail(), user.getFirstName(), newTier, newTier);
+    AdminUserMutationService.TierChange result =
+        adminUserMutationService.updateTier(
+            adminDetails.getUser().getId(), id, body == null ? null : body.get("tier"));
+    if (result.changed()) {
+      mailService.sendTierUpgradeEmail(
+          result.user().getEmail(),
+          result.user().getFirstName(),
+          result.newTier(),
+          result.newTier());
     }
-
-    return ResponseEntity.ok(UserDto.from(user, null));
+    return ResponseEntity.ok(UserDto.from(result.user(), null));
   }
 
   @PutMapping("/users/{id}/role")
@@ -383,24 +346,8 @@ public class SuperAdminController {
       @PathVariable String id,
       @RequestBody Map<String, String> body) {
     AppUser user =
-        userRepo
-            .findById(id)
-            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));
-    String oldRole = user.getGlobalRole();
-    user.setGlobalRole(body.get("role"));
-    user.setUpdatedAt(Instant.now());
-    userRepo.save(user);
-
-    auditService.record(
-        ActivityAudit.builder()
-            .eventType("USER_ROLE_CHANGED")
-            .entityType("USER")
-            .entityId(id)
-            .actorId(adminDetails.getUser().getId())
-            .oldValue("{\"role\":\"" + oldRole + "\"}")
-            .newValue("{\"role\":\"" + body.get("role") + "\"}")
-            .build());
-
+        adminUserMutationService.updateRole(
+            adminDetails.getUser().getId(), id, body == null ? null : body.get("role"));
     return ResponseEntity.ok(UserDto.from(user, null));
   }
 
@@ -419,7 +366,9 @@ public class SuperAdminController {
       @AuthenticationPrincipal AppUserDetails adminDetails,
       @PathVariable String id,
       @RequestBody Map<String, String> body) {
-    orgService.changeOrgStatus(id, body.get("status"), adminDetails.getUser().getId());
+    // RR-010: reject an out-of-domain status before it is persisted.
+    String status = AdminMutationValues.requireOrgStatus(body == null ? null : body.get("status"));
+    orgService.changeOrgStatus(id, status, adminDetails.getUser().getId());
     return ResponseEntity.ok(orgService.getOrg(id));
   }
 
@@ -428,7 +377,9 @@ public class SuperAdminController {
       @AuthenticationPrincipal AppUserDetails adminDetails,
       @PathVariable String id,
       @RequestBody Map<String, String> body) {
-    orgService.changeOrgTier(id, body.get("tier"), adminDetails.getUser().getId());
+    // RR-010: reject an out-of-domain tier before it is persisted.
+    String tier = AdminMutationValues.requireTier(body == null ? null : body.get("tier"));
+    orgService.changeOrgTier(id, tier, adminDetails.getUser().getId());
     return ResponseEntity.ok(orgService.getOrg(id));
   }
 
@@ -438,8 +389,11 @@ public class SuperAdminController {
       @AuthenticationPrincipal AppUserDetails adminDetails,
       @PathVariable String id,
       @RequestBody Map<String, Object> body) {
-    Object raw = body.get("limit");
-    Integer limit = raw == null ? null : ((Number) raw).intValue();
+    // RR-010: a run-limit override must be null (reset to default) or a non-negative integer, never
+    // a negative or non-numeric value.
+    Integer limit =
+        AdminMutationValues.optionalNonNegativeInt(
+            body == null ? null : body.get("limit"), "limit");
     return ResponseEntity.ok(
         orgService.updateRunLimitOverride(id, limit, adminDetails.getUser().getId()));
   }
@@ -477,21 +431,34 @@ public class SuperAdminController {
       @AuthenticationPrincipal AppUserDetails adminDetails, @RequestBody AdminInviteRequest req) {
 
     String adminId = adminDetails.getUser().getId();
-    String resolvedOrgId = null;
 
+    // RR-013 — an invite must name a target email and a target org (existing or new). The old code
+    // silently did NOTHING when both newOrgName and orgId were absent, then returned
+    // "Invitation sent" — a false-success that created no invitation and no onboarding action.
+    // There is no implemented "free invite with no org" flow, so reject that input instead of
+    // claiming success.
+    if (req.email() == null || req.email().isBlank()) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "email is required");
+    }
+
+    String resolvedOrgId;
     if (req.newOrgName() != null && !req.newOrgName().isBlank()) {
       Org newOrg = orgService.createOrgAsAdmin(req.newOrgName(), adminId);
       resolvedOrgId = newOrg.getId();
     } else if (req.orgId() != null && !req.orgId().isBlank()) {
       resolvedOrgId = req.orgId();
+    } else {
+      throw new ResponseStatusException(
+          HttpStatus.BAD_REQUEST,
+          "Provide an existing orgId or a newOrgName to invite into. A free invite with no target"
+              + " org is not supported — direct the user to self-register.");
     }
 
-    if (resolvedOrgId != null) {
-      invitationService.createAdminInvitation(resolvedOrgId, req.email(), req.orgRole(), adminId);
-    }
-    // FREE invite: user registers independently via the normal flow
+    invitationService.createAdminInvitation(resolvedOrgId, req.email(), req.orgRole(), adminId);
 
-    return ResponseEntity.ok(Map.of("message", "Invitation sent to " + req.email()));
+    // Typed result describing what was created so the caller isn't guessing.
+    return ResponseEntity.ok(
+        Map.of("message", "Invitation sent to " + req.email(), "orgId", resolvedOrgId));
   }
 
   @GetMapping("/invitations/escalated")
@@ -549,11 +516,9 @@ public class SuperAdminController {
       @AuthenticationPrincipal AppUserDetails adminDetails,
       @PathVariable String id,
       @RequestBody Map<String, Object> body) {
-    int quantity = ((Number) body.get("quantity")).intValue();
+    int quantity = AdminMutationValues.requirePositiveInt(body.get("quantity"), "quantity");
     Integer expiryDays =
-        body.containsKey("expiryDays") && body.get("expiryDays") != null
-            ? ((Number) body.get("expiryDays")).intValue()
-            : null;
+        AdminMutationValues.optionalNonNegativeInt(body.get("expiryDays"), "expiryDays");
     String reason = (String) body.get("reason");
 
     RunTopup topup =
@@ -574,11 +539,9 @@ public class SuperAdminController {
       @AuthenticationPrincipal AppUserDetails adminDetails,
       @PathVariable String id,
       @RequestBody Map<String, Object> body) {
-    int quantity = ((Number) body.get("quantity")).intValue();
+    int quantity = AdminMutationValues.requirePositiveInt(body.get("quantity"), "quantity");
     Integer expiryDays =
-        body.containsKey("expiryDays") && body.get("expiryDays") != null
-            ? ((Number) body.get("expiryDays")).intValue()
-            : null;
+        AdminMutationValues.optionalNonNegativeInt(body.get("expiryDays"), "expiryDays");
     String reason = (String) body.get("reason");
 
     RunTopup topup =
@@ -593,50 +556,38 @@ public class SuperAdminController {
   }
 
   @PostMapping("/topup-packages")
-  public ResponseEntity<TopupPackage> createTopupPackage(@RequestBody Map<String, Object> body) {
-    TopupPackage pkg =
-        TopupPackage.builder()
-            .name((String) body.get("name"))
-            .runCount(((Number) body.get("runCount")).intValue())
-            .amountInr(((Number) body.get("amountInr")).longValue())
-            .amountUsd(
-                body.containsKey("amountUsd") ? ((Number) body.get("amountUsd")).longValue() : 0)
-            .active(true)
-            .sortOrder(
-                body.containsKey("sortOrder") ? ((Number) body.get("sortOrder")).intValue() : 0)
-            .build();
-    return ResponseEntity.ok(topupPackageRepo.save(pkg));
+  public ResponseEntity<TopupPackage> createTopupPackage(
+      @AuthenticationPrincipal AppUserDetails adminDetails, @RequestBody Map<String, Object> body) {
+    // RR-011: validated money/count + audit atomicity live in TopupPackageAdminService.
+    return ResponseEntity.ok(topupPackageAdminService.create(adminDetails.getUser().getId(), body));
   }
 
   @PutMapping("/topup-packages/{id}")
   public ResponseEntity<TopupPackage> updateTopupPackage(
-      @PathVariable UUID id, @RequestBody Map<String, Object> body) {
-    TopupPackage pkg =
-        topupPackageRepo
-            .findById(id)
-            .orElseThrow(
-                () -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Package not found"));
-    if (body.containsKey("name")) pkg.setName((String) body.get("name"));
-    if (body.containsKey("runCount")) pkg.setRunCount(((Number) body.get("runCount")).intValue());
-    if (body.containsKey("amountInr"))
-      pkg.setAmountInr(((Number) body.get("amountInr")).longValue());
-    if (body.containsKey("amountUsd"))
-      pkg.setAmountUsd(((Number) body.get("amountUsd")).longValue());
-    if (body.containsKey("active")) pkg.setActive((Boolean) body.get("active"));
-    if (body.containsKey("sortOrder"))
-      pkg.setSortOrder(((Number) body.get("sortOrder")).intValue());
-    return ResponseEntity.ok(topupPackageRepo.save(pkg));
+      @AuthenticationPrincipal AppUserDetails adminDetails,
+      @PathVariable UUID id,
+      @RequestBody Map<String, Object> body) {
+    return ResponseEntity.ok(
+        topupPackageAdminService.update(adminDetails.getUser().getId(), id, body));
   }
 
   @DeleteMapping("/topup-packages/{id}")
-  public ResponseEntity<Map<String, String>> deleteTopupPackage(@PathVariable UUID id) {
-    TopupPackage pkg =
-        topupPackageRepo
-            .findById(id)
-            .orElseThrow(
-                () -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Package not found"));
-    pkg.setActive(false);
-    topupPackageRepo.save(pkg);
+  public ResponseEntity<Map<String, String>> deleteTopupPackage(
+      @AuthenticationPrincipal AppUserDetails adminDetails, @PathVariable UUID id) {
+    topupPackageAdminService.deactivate(adminDetails.getUser().getId(), id);
     return ResponseEntity.ok(Map.of("message", "Package deactivated"));
+  }
+
+  /**
+   * RR-009 — serialize audit metadata with Jackson rather than string concatenation, so a
+   * user-controlled value cannot inject unbalanced quotes / control characters into the audit
+   * chain.
+   */
+  private String auditJson(Map<String, Object> fields) {
+    try {
+      return objectMapper.writeValueAsString(fields);
+    } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+      return "{}";
+    }
   }
 }

@@ -8,7 +8,6 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
 import java.util.Map;
@@ -17,9 +16,9 @@ import java.util.stream.Collectors;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.navneet.executespec.project.entity.ProjectRepo;
 import com.navneet.executespec.repo.GitHubRepoService;
+import com.navneet.executespec.security.SafeWorkspacePath;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -82,6 +81,9 @@ public class ExecutespecFolderWriter {
   private final ObjectMapper json;
   private final GitHubRepoService gh;
 
+  /** Git Data plumbing: blob → tree → commit → ref. See {@link GitObjectWriter}. */
+  private final GitObjectWriter gitObjects;
+
   @Autowired
   public ExecutespecFolderWriter(ObjectMapper json, GitHubRepoService gh) {
     this(HttpClient.newHttpClient(), json, gh);
@@ -92,6 +94,7 @@ public class ExecutespecFolderWriter {
     this.http = http;
     this.json = json;
     this.gh = gh;
+    this.gitObjects = new GitObjectWriter(http, json);
   }
 
   /**
@@ -188,6 +191,11 @@ public class ExecutespecFolderWriter {
         .orElse(true); // file missing counts as drift
   }
 
+  /**
+   * PR mode: build one commit carrying every drifted file, place it on a brand-new branch, then
+   * open the PR. Nothing is visible in the repository until the branch ref is created, so a failure
+   * before that point publishes nothing at all.
+   */
   private Optional<PullRequestInfo> prFlow(
       ProjectRepo repo,
       String defaultBranch,
@@ -196,7 +204,7 @@ public class ExecutespecFolderWriter {
       String prDescription,
       String pat) {
     String repoFullName = repo.getGithubRepoFullName();
-    Optional<String> baseSha = getRefSha(repoFullName, defaultBranch, pat);
+    Optional<String> baseSha = gitObjects.getRefSha(repoFullName, defaultBranch, pat);
     if (baseSha.isEmpty()) {
       log.warn(
           "[ExecutespecFolderWriter] could not resolve {} default branch SHA for {}",
@@ -232,35 +240,15 @@ public class ExecutespecFolderWriter {
       return Optional.empty();
     }
 
+    Optional<String> commitSha =
+        gitObjects.buildCommit(repoFullName, baseSha.get(), drifted, prTitle, pat);
+    if (commitSha.isEmpty()) return Optional.empty();
+
     String branchName = synthesiseBranchName(prTitle);
-    if (!createBranch(repoFullName, branchName, baseSha.get(), pat)) {
+    if (!gitObjects.createBranchAt(repoFullName, branchName, commitSha.get(), pat)) {
       log.warn(
           "[ExecutespecFolderWriter] could not create branch {} on {}", branchName, repoFullName);
       return Optional.empty();
-    }
-
-    List<String> writtenPaths = new ArrayList<>();
-    for (Map.Entry<String, String> e : drifted.entrySet()) {
-      // Read existing SHA (if file exists on default branch) so PUT becomes an update.
-      String existingSha =
-          getContents(repoFullName, defaultBranch, e.getKey(), pat)
-              .map(FileSnapshot::contentSha)
-              .orElse(null);
-      if (!putContents(
-          repoFullName,
-          branchName,
-          e.getKey(),
-          e.getValue(),
-          "ExecuteSpec: " + prTitle,
-          existingSha,
-          pat)) {
-        log.warn(
-            "[ExecutespecFolderWriter] put failed for {} on branch {}; aborting batch",
-            e.getKey(),
-            branchName);
-        return Optional.empty();
-      }
-      writtenPaths.add(e.getKey());
     }
 
     String prUrl =
@@ -272,15 +260,29 @@ public class ExecutespecFolderWriter {
             prDescription == null ? "" : prDescription,
             pat);
     if (prUrl == null) {
+      // Compensate: the branch exists but carries no PR, so it is an orphan by definition.
+      // Deleting it keeps a retry from accumulating abandoned executespec/* branches.
       log.warn(
-          "[ExecutespecFolderWriter] branch {} pushed but PR open failed for {}",
+          "[ExecutespecFolderWriter] branch {} pushed but PR open failed for {} — deleting branch",
           branchName,
           repoFullName);
+      if (!gitObjects.deleteRef(repoFullName, branchName, pat)) {
+        log.error(
+            "[ExecutespecFolderWriter] orphan branch {} on {} could not be deleted; it must be "
+                + "cleaned up manually",
+            branchName,
+            repoFullName);
+      }
       return Optional.empty();
     }
-    return Optional.of(new PullRequestInfo(prUrl, branchName, writtenPaths, true));
+    return Optional.of(new PullRequestInfo(prUrl, branchName, List.copyOf(drifted.keySet()), true));
   }
 
+  /**
+   * DIRECT_PUSH mode: build the same single commit, then compare-and-swap the default branch onto
+   * it. {@code force=false} plus a parent of the SHA we planned against means GitHub refuses the
+   * update if anyone else moved the branch meanwhile, so a lost race publishes nothing.
+   */
   private Optional<PullRequestInfo> directPush(
       ProjectRepo repo,
       String defaultBranch,
@@ -288,116 +290,27 @@ public class ExecutespecFolderWriter {
       String commitMessage,
       String pat) {
     String repoFullName = repo.getGithubRepoFullName();
-    List<String> writtenPaths = new ArrayList<>();
-    for (Map.Entry<String, String> e : files.entrySet()) {
-      String existingSha =
-          getContents(repoFullName, defaultBranch, e.getKey(), pat)
-              .map(FileSnapshot::contentSha)
-              .orElse(null);
-      if (!putContents(
-          repoFullName,
+    Optional<String> baseSha = gitObjects.getRefSha(repoFullName, defaultBranch, pat);
+    if (baseSha.isEmpty()) {
+      log.warn(
+          "[ExecutespecFolderWriter] could not resolve {} SHA for {}; DIRECT_PUSH aborted",
           defaultBranch,
-          e.getKey(),
-          e.getValue(),
-          "ExecuteSpec: " + commitMessage,
-          existingSha,
-          pat)) {
-        log.warn(
-            "[ExecutespecFolderWriter] DIRECT_PUSH put failed for {} on {}",
-            e.getKey(),
-            repoFullName);
-        return Optional.empty();
-      }
-      writtenPaths.add(e.getKey());
-    }
-    return Optional.of(new PullRequestInfo(null, defaultBranch, writtenPaths, false));
-  }
-
-  Optional<String> getRefSha(String repoFullName, String branch, String pat) {
-    try {
-      HttpRequest req =
-          HttpRequest.newBuilder()
-              .uri(
-                  URI.create(
-                      "https://api.github.com/repos/"
-                          + repoFullName
-                          + "/git/refs/heads/"
-                          + URLEncoder.encode(branch, StandardCharsets.UTF_8)))
-              .header("Authorization", "Bearer " + pat)
-              .header("Accept", "application/vnd.github+json")
-              .GET()
-              .build();
-      HttpResponse<String> res = http.send(req, HttpResponse.BodyHandlers.ofString());
-      if (res.statusCode() != 200) return Optional.empty();
-      JsonNode tree = json.readTree(res.body());
-      JsonNode obj = tree.path("object").path("sha");
-      return obj.isMissingNode() ? Optional.empty() : Optional.of(obj.asText());
-    } catch (Exception ex) {
-      log.debug("getRefSha failed for {}@{}: {}", repoFullName, branch, ex.getMessage());
+          repoFullName);
       return Optional.empty();
     }
-  }
+    Optional<String> commitSha =
+        gitObjects.buildCommit(repoFullName, baseSha.get(), files, commitMessage, pat);
+    if (commitSha.isEmpty()) return Optional.empty();
 
-  boolean createBranch(String repoFullName, String newBranch, String fromSha, String pat) {
-    try {
-      ObjectNode body = json.createObjectNode();
-      body.put("ref", "refs/heads/" + newBranch);
-      body.put("sha", fromSha);
-      HttpRequest req =
-          HttpRequest.newBuilder()
-              .uri(URI.create("https://api.github.com/repos/" + repoFullName + "/git/refs"))
-              .header("Authorization", "Bearer " + pat)
-              .header("Accept", "application/vnd.github+json")
-              .header("Content-Type", "application/json")
-              .POST(HttpRequest.BodyPublishers.ofString(body.toString()))
-              .build();
-      HttpResponse<String> res = http.send(req, HttpResponse.BodyHandlers.ofString());
-      // 201 Created = success; 422 with "Reference already exists" = idempotent success
-      return res.statusCode() == 201
-          || (res.statusCode() == 422
-              && res.body() != null
-              && res.body().contains("already exists"));
-    } catch (Exception ex) {
-      log.debug("createBranch failed: {}", ex.getMessage());
-      return false;
+    if (!gitObjects.fastForwardRef(repoFullName, defaultBranch, commitSha.get(), pat)) {
+      log.warn(
+          "[ExecutespecFolderWriter] DIRECT_PUSH ref update rejected on {}/{} — nothing published",
+          repoFullName,
+          defaultBranch);
+      return Optional.empty();
     }
-  }
-
-  boolean putContents(
-      String repoFullName,
-      String branch,
-      String path,
-      String content,
-      String message,
-      String existingSha,
-      String pat) {
-    try {
-      String encoded = Base64.getEncoder().encodeToString(content.getBytes(StandardCharsets.UTF_8));
-      ObjectNode body = json.createObjectNode();
-      body.put("message", message);
-      body.put("content", encoded);
-      body.put("branch", branch);
-      if (existingSha != null) body.put("sha", existingSha);
-      HttpRequest req =
-          HttpRequest.newBuilder()
-              .uri(
-                  URI.create(
-                      "https://api.github.com/repos/"
-                          + repoFullName
-                          + "/contents/"
-                          + URLEncoder.encode(path, StandardCharsets.UTF_8).replace("%2F", "/")))
-              .header("Authorization", "Bearer " + pat)
-              .header("Accept", "application/vnd.github+json")
-              .header("Content-Type", "application/json")
-              .PUT(HttpRequest.BodyPublishers.ofString(body.toString()))
-              .build();
-      HttpResponse<String> res = http.send(req, HttpResponse.BodyHandlers.ofString());
-      // 200 OK = updated existing; 201 Created = created new
-      return res.statusCode() == 200 || res.statusCode() == 201;
-    } catch (Exception ex) {
-      log.debug("putContents failed for {}: {}", path, ex.getMessage());
-      return false;
-    }
+    return Optional.of(
+        new PullRequestInfo(null, defaultBranch, List.copyOf(files.keySet()), false));
   }
 
   Optional<FileSnapshot> getContents(String repoFullName, String branch, String path, String pat) {
@@ -451,10 +364,30 @@ public class ExecutespecFolderWriter {
     return CONFIG_PREFIX + projectSlug + "/" + suffix;
   }
 
+  /**
+   * RR-525 — a bare {@code startsWith(".executespec/")} is not containment: {@code
+   * .executespec/contracts/produced/../../../.github/workflows/release.yml} passes it and lands
+   * anywhere in the repository. Callers derive these names from customer/source-controlled strings
+   * (contract names), so the writer must enforce canonical POSIX relative segments itself and
+   * re-check containment after normalization, not trust its callers.
+   */
   private void requireFolderRoot(String path) {
     if (path == null || !path.startsWith(FOLDER_ROOT)) {
       throw new IllegalArgumentException(
           "ExecutespecFolderWriter only writes paths under " + FOLDER_ROOT + "; got: " + path);
+    }
+    try {
+      SafeWorkspacePath.requireSafeRelativePosixPath(path);
+    } catch (SecurityException e) {
+      throw new IllegalArgumentException(
+          "ExecutespecFolderWriter rejected an unsafe path: " + e.getMessage());
+    }
+    // Normalize defensively: even with dot segments rejected above, prove the canonical form is
+    // still beneath the folder root before any SCM write.
+    String normalized = java.nio.file.Path.of(path).normalize().toString().replace('\\', '/');
+    if (!normalized.startsWith(FOLDER_ROOT)) {
+      throw new IllegalArgumentException(
+          "ExecutespecFolderWriter path escapes " + FOLDER_ROOT + " after normalization");
     }
   }
 

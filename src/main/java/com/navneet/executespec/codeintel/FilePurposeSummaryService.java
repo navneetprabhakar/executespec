@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.Optional;
 
 import com.navneet.executespec.agent.LlmRouter;
+import com.navneet.executespec.agent.PromptTrustBoundary;
 import com.navneet.executespec.codeintel.entity.FilePurposeSummary;
 import com.navneet.executespec.codeintel.repository.FilePurposeSummaryRepository;
 import com.navneet.executespec.config.featureflag.FeatureFlagService;
@@ -144,7 +145,10 @@ public class FilePurposeSummaryService {
     try {
       ResolvedModel resolved = modelResolver.resolve("FilePurposeSummaryService", effective);
       Prompt prompt =
-          new Prompt(List.of(new SystemMessage(SUMMARY_SYSTEM), new UserMessage(userPayload)));
+          new Prompt(
+              List.of(
+                  new SystemMessage(SUMMARY_SYSTEM),
+                  new UserMessage(PromptTrustBoundary.wrap("FILE_PURPOSE_EVIDENCE", userPayload))));
       ChatResponse response =
           llmRouter.callText(
               resolved.providerName(),

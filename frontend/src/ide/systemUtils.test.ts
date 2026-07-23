@@ -8,6 +8,7 @@ import {
   auditTarget,
   auditTimestamp,
   buildSearchHits,
+  customerSafeNotificationText,
   filterAuditLogs,
   filterNotifications,
   isNotificationUnread,
@@ -27,6 +28,12 @@ type TestNotification = api.NotificationItem & {severity?: string; readAt?: stri
 type TestProject = api.ProjectDto & {repoCount?: number; totalRuns?: number};
 
 describe('systemUtils', () => {
+  it('hides raw provider spend from customer notification copy', () => {
+    expect(customerSafeNotificationText('Completed · $0.10 · 19s', false)).toBe('Completed · 19s');
+    expect(customerSafeNotificationText('Completed · $0.10 · 19s', true)).toBe(
+      'Completed · $0.10 · 19s',
+    );
+  });
   it('filters notifications and derives read state, targets, and severity color', () => {
     const items = [
       notification({id: 'n1', type: 'PLAN_READY', read: false, severity: 'warn'}),

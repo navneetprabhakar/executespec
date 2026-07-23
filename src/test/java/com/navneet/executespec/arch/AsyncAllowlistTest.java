@@ -97,7 +97,6 @@ class AsyncAllowlistTest {
               "BillingNotificationService#sendUsageWarning",
               "BillingNotificationService#sendManagedAiRoutingStateChanged",
               "InvoiceEmailService#sendInvoice",
-              "RunQuotaRefundListener#onRunFailed",
               // PR-G (2026-05-13) — cost-outlier detector. Reads scalar fields on PipelineRun
               // (actualCostUsd, costEstimateHigh, aiProvider). No lazy collections — safe @Async.
               "CostOutlierDetector#onRunCompleted",
@@ -142,7 +141,10 @@ class AsyncAllowlistTest {
 
               // project workspace — @Async + writeRawFile (file I/O, DB read only)
               "ProjectWorkspaceWarmer#warmDiskCache",
-              "ProjectDocumentService#indexAsync",
+              // Project-document ingestion now crosses the async boundary through a primitive-id
+              // event. The listener reloads state in ProjectDocumentService#processDocument, so
+              // no caller-owned JPA entity crosses threads.
+              "ProjectDocumentIndexJob#onQueued",
               // code-RAG — clone + walk + embed into project_code_chunk (file I/O + DB;
               // RL-2026-05-052)
               "CodeIndexingService#indexRepoAsync",
@@ -157,12 +159,10 @@ class AsyncAllowlistTest {
 
               // programbench — async background that polls run row + tars submission.
               // Reads the PipelineRun via id (no lazy navigation), shells out to docker.
-              "ProgramBenchTaskService#captureOnTerminalAsync",
 
               // swebench — same shape as programbench: polls run row + captures git diff
               // patch via docker exec at terminal status. PipelineRun read by id only;
               // shells out for diff capture; writes preds.json + submission.patch + tarball.
-              "SwebenchTaskService#captureOnTerminalAsync",
 
               // Wave 2.1 — activation instrumentation. Tracks events to PostHog +
               // user_activation_event row. Takes primitive args (userId, enum, map);

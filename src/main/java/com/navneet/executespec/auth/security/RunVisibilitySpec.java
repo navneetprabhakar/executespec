@@ -17,9 +17,24 @@ public class RunVisibilitySpec {
 
   /**
    * Returns a Specification that filters pipeline_run rows to only those the given user is allowed
-   * to see.
+   * to see. Backward-compatible overload with no external project memberships.
    */
   public Specification<PipelineRun> forUser(AppUser user, OrgMember orgMember) {
+    return forUser(user, orgMember, java.util.List.of());
+  }
+
+  /**
+   * Returns a Specification that filters pipeline_run rows to only those the given user is allowed
+   * to see.
+   *
+   * <p>RR-212 — {@code accessibleProjectIds} are the ids of projects the user is an ACTIVE member
+   * of (including cross-org {@code ProjectMember} collaborations). Runs of those projects are OR-ed
+   * into the own-runs fallback so a collaborator can DISCOVER the host project's runs in a normal
+   * list, matching what the per-run detail guard already permits. It deliberately does NOT broaden
+   * to the host org — only that project's runs become visible.
+   */
+  public Specification<PipelineRun> forUser(
+      AppUser user, OrgMember orgMember, java.util.Collection<String> accessibleProjectIds) {
     return (Root<PipelineRun> root, CriteriaQuery<?> query, CriteriaBuilder cb) -> {
 
       // SUPER_ADMIN sees everything
@@ -39,14 +54,19 @@ public class RunVisibilitySpec {
         return cb.equal(root.get("orgId"), user.getOrgId());
       }
 
-      // Safety fallback: user has orgId but orgMember record is missing/orphaned.
-      // Still grant org-scoped visibility so they can see runs in their org.
-      if (user.getOrgId() != null) {
-        return cb.equal(root.get("orgId"), user.getOrgId());
-      }
+      // RR-210: NO org-wide fallback. `app_user.org_id` is a denormalized pointer; `org_member` is
+      // the authoritative membership record. Granting tenant-wide run visibility from the pointer
+      // alone meant a removed/expired membership kept working for as long as the stale pointer
+      // survived, and it overrode the very table that revocation writes to. Absent or unrecognized
+      // membership now falls through to own-runs-only.
+      var ownRuns = cb.equal(root.get("createdByUserId"), user.getId());
 
-      // FREE user (no org) — see own runs only
-      return cb.equal(root.get("createdByUserId"), user.getId());
+      // RR-212 — plus runs of projects the user is an active member of (cross-org collaborations
+      // included), so a collaborator can find the host project's runs, not only open a known URL.
+      if (accessibleProjectIds != null && !accessibleProjectIds.isEmpty()) {
+        return cb.or(ownRuns, root.get("projectId").in(accessibleProjectIds));
+      }
+      return ownRuns;
     };
   }
 }

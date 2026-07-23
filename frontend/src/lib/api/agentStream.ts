@@ -184,6 +184,14 @@ export async function streamAgentTurn(
   const decoder = new TextDecoder();
   let buffer = '';
   let terminalEventSeen = false;
+  // RR-1344 — the server emits a terminal `error` event on a persisted turn
+  // failure. That is a terminal frame (so the "ended before completion" guard
+  // must not also fire), but it is NOT success: it must surface as a thrown
+  // error so callers take their failure/recovery path and never dispatch a
+  // "done" that flips the UI to idle/confirmation over a real failure.
+  // Holder (not a bare `let`) so control-flow analysis does not narrow the
+  // closure-assigned value to `never` at the post-loop throw.
+  const terminalError: {value: AgentStreamError | null} = {value: null};
   const markTerminal = (event: string) => {
     if (event === 'done' || event === 'error') terminalEventSeen = true;
   };
@@ -211,7 +219,11 @@ export async function streamAgentTurn(
       handlers.onToolEvent?.(parsed.data as AgentStreamToolEvent);
     }
     if (parsed.event === 'done') handlers.onDone?.(parsed.data as AgentStreamDone);
-    if (parsed.event === 'error') handlers.onErrorEvent?.(parsed.data as AgentStreamError);
+    if (parsed.event === 'error') {
+      const err = parsed.data as AgentStreamError;
+      terminalError.value = err;
+      handlers.onErrorEvent?.(err);
+    }
   };
 
   // A successful HTTP response is not proof that a turn completed. Proxies and browser
@@ -234,6 +246,11 @@ export async function streamAgentTurn(
     reading = !done;
   }
   if (buffer.trim()) emitFrame(buffer);
+  // RR-1344 — a terminal `error` frame is a failure. Throw so the caller's
+  // catch/recovery runs and it never falls through to a success/"done" path.
+  if (terminalError.value) {
+    throw new ApiError(502, terminalError.value.message || 'The agent turn failed on the server.');
+  }
   if (!terminalEventSeen && !signal?.aborted) {
     throw new ApiError(
       502,

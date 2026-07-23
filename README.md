@@ -9,7 +9,7 @@ Spec-driven AI coding platform. A customer submits a spec in natural language, t
 | Project           | `2.0.0`             | [`VERSION`](VERSION), [`Version`](Version), [`pom.xml`](pom.xml) `<version>` |
 | Spring Boot       | `3.5.14`            | [`pom.xml`](pom.xml) `<parent>` (bumped from `3.3.0` by Dependabot #132, 2026-05-16) |
 | Spring AI         | `1.1.6`             | [`pom.xml`](pom.xml) `<spring-ai.version>` (BOM import)                |
-| Flyway head       | `V272`              | `src/main/resources/db/migration/V272_*.sql`                           |
+| Flyway head       | `V304`              | `src/main/resources/db/migration/V304__benchmark_task_result_route_attribution.sql` |
 | Frontend          | `2.0.0`             | [`frontend/package.json`](frontend/package.json) `"version"`           |
 
 `VERSION` and `Version` are kept identical by hand; the project's own conventions reference `Version` as the source of truth. The frontend ships under the same release stamp as the backend.
@@ -22,7 +22,7 @@ Spec-driven AI coding platform. A customer submits a spec in natural language, t
 | Framework           | Spring Boot 3.5.14 (Web, Data JPA, Security, OAuth2 client, Mail, Thymeleaf, Actuator, AOP, Validation, Retry, Data Redis) | [`pom.xml`](pom.xml) deps 1, 5, 14–20, 30, 36–39, 60 |
 | LLM SDK             | Spring AI 1.1.6 starters for Anthropic, OpenAI, Google GenAI                        | [`pom.xml`](pom.xml) deps 2–4                                                    |
 | LLM auto-config     | Provider auto-configurations disabled in favor of manual `AgentModelConfig` beans   | [`src/main/java/com/navneet/executespec/ExecutespecApplication.java`](src/main/java/com/navneet/executespec/ExecutespecApplication.java) |
-| Database            | PostgreSQL (Cloud SQL in prod), Flyway migrations head V272                         | [`pom.xml`](pom.xml) deps 6–8, `src/main/resources/db/migration/`                 |
+| Database            | PostgreSQL (Cloud SQL in prod), Flyway migrations head V304                         | [`pom.xml`](pom.xml) deps 6–8, `src/main/resources/db/migration/`                 |
 | Cache / lock        | Redis (Lettuce), ShedLock 7.7.0                                                     | [`pom.xml`](pom.xml) deps 30–32                                                  |
 | Auth                | JJWT 0.13.0 + Spring Security OAuth2 client (Google, GitHub)                        | [`pom.xml`](pom.xml) deps 14–18                                                  |
 | Billing             | Stripe 32.1.0, Razorpay (HMAC), invoice PDFs via OpenPDF 2.0.3 + flying-saucer 9.4.0 | [`pom.xml`](pom.xml) deps 21–22, 56; HMAC via commons-codec 1.22.0 (dep 35)     |
@@ -60,7 +60,7 @@ Spec-driven AI coding platform. A customer submits a spec in natural language, t
 │   └── ... (76 package roots total under com.navneet.executespec)
 ├── src/main/resources/
 │   ├── application.yml           Single source of truth for model matrix, provider routes, pricing, failover
-│   ├── db/migration/             Flyway V*.sql (head V272, immutable post-apply)
+│   ├── db/migration/             Flyway V*.sql (head V304, immutable post-apply)
 │   ├── prompts/                  External LLM prompts (assembled by PromptAssembler)
 │   └── static/                   Vite build output served by Spring Boot
 ├── src/test/java/                Unit + ArchUnit guard tests (e.g. AccessGuardCoverageTest)
@@ -117,9 +117,71 @@ The Vite dev server proxies `/api` to `http://localhost:8080` (overridable via `
 
 Run submit advanced options include continuation controls: "Confirm model upgrades" maps to `requireConfirmationBeforeExpensiveContinuation`, while "Require benchmark evidence" maps to `requireBenchmarkPriorForAutomaticContinuation`. Benchmark evidence is not required by default, so the quality-ranked selected candidate can run automatically within the normal continuation ceilings; checking the benchmark guard sends an explicit per-run `true` override that approval-gates unbenchmarked model/provider upgrades.
 
-Operator benchmark smokes are disabled by default. For a local/dev SWE-bench run, set `SWEBENCH_ENABLED=true`, `SWEBENCH_OUTPUT_BASE` to a writable directory, and `SWEBENCH_INSTANCES_FILE` to the task JSON; the base configuration binds these controls without requiring the benchmark profile. Keep `SWEBENCH_DEFAULT_PROVIDER=deepseek` for the approved DeepSeek-only smoke lane.
+Operator benchmark smokes are disabled by default. For a local/dev SWE-bench run, set `SWEBENCH_ENABLED=true`, `SWEBENCH_OUTPUT_BASE` to a writable directory, and `SWEBENCH_INSTANCES_FILE` to the task JSON; the base configuration binds these controls without requiring the benchmark profile. Keep `SWEBENCH_DEFAULT_PROVIDER=deepseek` for the approved DeepSeek-only smoke lane. The benchmark generation request accepts `absoluteDeadlineEpochMs` and `shutdownReserveMs`; the server tightens that deadline to `SWEBENCH_TASK_WALL_TIMEOUT_MINUTES`, keeps at least 120 seconds for cleanup/result publication, and rejects an unusable deadline before container or provider work.
+
+Live provider fixtures are also fail-closed. Reserve an exact provider/model/run scope with
+`scripts/provider-budget-ledger.mjs`, then boot with the Maven live-test profile and that reservation:
+
+```bash
+mvn -Plive-llm-test \
+  -Dexecutespec.live-llm.reservation-id="$RESERVATION_ID" \
+  spring-boot:run -Dspring-boot.run.profiles=local
+```
+
+The Spring Boot plugin propagates the profile's safety properties into the forked application JVM.
+Without both the profile and a matching reservation, `LlmRouter` rejects provider dispatch. Reconcile
+or conservatively close the reservation after the test; never reuse it for a different run.
 
 Operators can set `execution.continuation.low-complexity-worker-start-tier=LIGHTWEIGHT` to start LOW worker tasks on the cheaper tier while preserving automatic step-up; the default remains `WORKHORSE`. Web Compose, web/CLI/VS Code agent confirmation, and legacy spec-chat `submit_run` can send `lowComplexityWorkerStartTier=LIGHTWEIGHT` without setting `modelName`, so it is not a route pin. Run-detail continuation policy evidence shows both the configured and effective LOW start tier, so invalid values that fell back to `WORKHORSE` stay visible.
+
+### Project Chat paid actions
+
+Project Chat's model-selected tool surface is read-only. Web and CLI/OpenTUI offer three explicit
+human actions—regenerate architecture, generate an EXPLANATION/SETUP document, and run a linked
+repository Code Review. They are buttons/commands, not proposals generated by the chat model.
+
+Each action first issues a V292 confirmation scoped to the initiating actor, host org, project,
+action, exact provider/model, canonical target, and a hard action budget. Only a SHA-256 token
+digest is stored; the bearer is returned once, kept in client process memory, expires after five
+minutes by default, and is consumed under a PostgreSQL row lock before any side effect. Execution
+uses the action-specific route returned by `GET /api/projects/{projectId}/chat/info`, including
+Enterprise org matrix overrides. It cannot adapt or fail over, including across the asynchronous
+Code Review executor; an unavailable or drifting route returns 503. Usage is attributed to the
+initiating actor while credential resolution remains bound to the host project subject.
+
+Hard caps are architecture **1,000,000 tokens / $10 / 64 provider calls**, generated docs
+**200,000 / $3 / 2**, and code review **300,000 / $5 / 2**. A consumed grant is never resurrected
+after failure. Issue, deny, consume, expiry, replay, completion, and failure decisions enter the
+hash-chained `activity_audit`; V292 rejects audit-row UPDATE/DELETE and serializes cross-JVM chain
+appends with a PostgreSQL transaction advisory lock.
+
+### Enterprise LLM usage audit
+
+Managed FREE accounts expose and persist only the configured native DeepSeek Flash route. A
+premium provider/model submitted by an older client is normalized before the run record, plan
+gate, or UI summary is created; dispatch still reauthorizes the same lock. BYOK, TEAM, and
+ENTERPRISE routing remains governed by the customer's key-source and model-matrix policy.
+
+V293 records an immutable write-ahead intent before each known physical provider operation and an
+append-only terminal fact afterward. Retries, failovers, Gemini cache operations, Anthropic forced
+tool fallbacks, token/cache/reasoning usage, actual key source, actor, role, feature, project and run
+causality remain separately attributable. A missing terminal is surfaced as `MISSING_TERMINAL`
+rather than disappearing, and managed-AI credits link to the exact usage event instead of a fuzzy
+provider/model/time match.
+
+ORG_ADMIN users can inspect their own organization in Org settings; SUPER_ADMIN users can select a
+tenant in Admin analytics. JSON and formula-safe CSV exports use an inclusive organization-calendar
+date range plus an explicit IANA timezone. The same guarded API is available at
+`GET /api/admin/analytics/llm-usage-audit` and `/llm-usage-audit.csv`. Provider invoice comparison
+remains explicitly unavailable until a real upstream invoice/request ingestion contract exists.
+
+### Governed public validation reports
+
+New validation-report shares use the project-share lifecycle: SHA-256 bearer storage, seven-day
+default expiry, revocation, access audit, and project/run scope validation. V294 preserves
+historical `/reports/shared/{token}` URLs for a bounded migration grace period while clearing their
+plaintext bearers. A standalone run must be attached to a project before it can mint a public
+report link.
 
 **Local observability (optional)**
 
@@ -146,6 +208,11 @@ mvn -Pintegration verify        # opt-in integration tests (e2e, integration, ch
 
 `mvn verify` runs Spotless in `check` mode (the same gate CI enforces in `lint.yml`) and binds JaCoCo so a coverage report lands under `target/site/jacoco/`. Surefire excludes the `e2e`, `integration`, and `chaos` JUnit groups by default; pass `-Pintegration` (or the equivalent profile your CI uses) to run them.
 
+Validation evidence is fail-closed: code-changing tasks require an admitted baseline-to-final product
+diff attributable to that task, and persisted executable verification distinguishes `PASSED`,
+`BUILD_ONLY`, `FAILED`, and `UNAVAILABLE`. The Web evidence ledger exposes those deterministic facts;
+the headline score is a summary and must not be treated as independent proof.
+
 **Frontend**
 
 ```bash
@@ -165,7 +232,8 @@ The long-form documentation now lives in the central docs repo — see [`DOCS.md
 
 → **https://github.com/navneetprabhakar/executespec-docs/tree/main/backend** — architecture · product · operations · security · design · plans · ADRs · reason-logs · business · competitive analysis · reference.
 
-The REST API spec remains in this repo at [`docs/openapi.yaml`](docs/openapi.yaml).
+The REST API contract is maintained in the central docs repository at
+[`backend/reference/openapi.yaml`](../executespec-docs/backend/reference/openapi.yaml).
 
 ## Required environment variables
 
@@ -199,10 +267,18 @@ OpenAI, OpenRouter, and Fireworks retain the shared 120-second OpenAI-wire defau
 | ------------------------------------------------------------------------------------------ | --------------------------------------------------------------------- |
 | `POSTGRES_HOST` / `POSTGRES_PORT` / `POSTGRES_DB` / `POSTGRES_USER` / `POSTGRES_PASSWORD`  | `localhost` / `5432` / `executespec` / `postgres` / `postgres`        |
 | `REDIS_HOST`                                                                               | `localhost`                                                           |
+| `CRYPTO_LOCAL_KEY` / `CRYPTO_GCP_SECRET_RESOURCE`                                          | Shared dev/prod/benchmark require one. Local key is Base64 AES-256; GCP resource must end in immutable `/versions/<number>` (never `latest`). |
 | `STRIPE_SECRET_KEY` / `STRIPE_PUBLISHABLE_KEY` / `STRIPE_WEBHOOK_SECRET`                   | Required when `BILLING_DEFAULT_GATEWAY=stripe`                        |
 | `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET`                                    | Enables Google OAuth2 login                                           |
 | `GITHUB_OAUTH_CLIENT_ID` / `GITHUB_OAUTH_CLIENT_SECRET`                                    | Enables GitHub OAuth2 login                                           |
 | `SLACK_CLIENT_ID` / `SLACK_CLIENT_SECRET` / `SLACK_SIGNING_SECRET`                         | Enables Slack integration                                             |
+| `DEPLOYMENT_RECOVERY_SAFE_ENABLED`                                                         | Explicit prod attestation required to expose deployment creation; defaults to `false` |
+
+Release safety: production and benchmark profiles do not deliver outbound integration lifecycle
+updates because the current adapters are non-idempotent, best-effort append operations. Deployment
+creation is also hidden and returns 503 unless durable external-resource recovery has been
+explicitly attested with `DEPLOYMENT_RECOVERY_SAFE_ENABLED=true`; existing deployment read,
+rollback, and destroy operations remain available for cleanup.
 | `APP_SURFACE_RETURN_URL`                                                                   | Browser OAuth callback URL (e.g. `http://localhost:5173/auth/callback`) |
 | `DASHBOARD_URL`                                                                            | Dashboard URL used in Slack and notification links                    |
 

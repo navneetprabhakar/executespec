@@ -79,14 +79,17 @@ public class Org {
 
   @Convert(converter = EncryptedValueConverter.class)
   @Column(name = "anthropic_api_key")
+  @lombok.ToString.Exclude
   private String anthropicApiKey;
 
   @Convert(converter = EncryptedValueConverter.class)
   @Column(name = "openai_api_key")
+  @lombok.ToString.Exclude
   private String openAiApiKey;
 
   @Convert(converter = EncryptedValueConverter.class)
   @Column(name = "gemini_api_key")
+  @lombok.ToString.Exclude
   private String geminiApiKey;
 
   /**
@@ -94,14 +97,17 @@ public class Org {
    */
   @Convert(converter = EncryptedValueConverter.class)
   @Column(name = "open_router_api_key")
+  @lombok.ToString.Exclude
   private String openRouterApiKey;
 
   @Convert(converter = EncryptedValueConverter.class)
   @Column(name = "deepseek_api_key")
+  @lombok.ToString.Exclude
   private String deepSeekApiKey;
 
   @Convert(converter = EncryptedValueConverter.class)
   @Column(name = "fireworks_api_key")
+  @lombok.ToString.Exclude
   private String fireworksApiKey;
 
   // Key source mode & provider restrictions
@@ -184,6 +190,7 @@ public class Org {
 
   @Convert(converter = EncryptedValueConverter.class)
   @Column(name = "jira_api_token")
+  @lombok.ToString.Exclude
   private String jiraApiToken;
 
   /**
@@ -201,6 +208,7 @@ public class Org {
 
   @Convert(converter = EncryptedValueConverter.class)
   @Column(name = "confluence_api_token")
+  @lombok.ToString.Exclude
   private String confluenceApiToken;
 
   // V143 product_id field deleted by V179 (single-surface retirement,

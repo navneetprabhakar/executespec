@@ -51,20 +51,23 @@ class AgentOrchestratorTurnService {
     }
 
     String projectId = AgentText.firstNonBlank(request.projectId(), session.getProjectId());
+    Boolean writeAuthorized = null;
     if (projectId != null) {
       projectAccessGuard.assertCanRead(projectId, user);
+      writeAuthorized = AgentWriteAuthority.resolve(projectAccessGuard, projectId, user);
     }
-    OrchestratorDecision rawDecision =
-        intentService.decide(
+    AgentIntentService.RoutedDecision routed =
+        intentService.decideWithAttribution(
             new InterpretIntentRequest(
                 session.getId(),
                 AgentText.firstNonBlank(request.message(), ""),
                 projectId,
                 toRepoContext(request),
-                toClientCapabilities(request)),
+                toClientCapabilities(request),
+                writeAuthorized),
             session.getDefaultProvider(),
             session.getDefaultModel());
-    OrchestratorDecision decision = applyRequestPolicy(rawDecision, request);
+    OrchestratorDecision decision = applyRequestPolicy(routed.decision(), request);
     OrchestratorTurnResponse response =
         new OrchestratorTurnResponse(
             turnId,
@@ -99,7 +102,8 @@ class AgentOrchestratorTurnService {
             request.message(),
             false,
             null,
-            "deterministic_pre_router"));
+            "deterministic_pre_router",
+            routed.attribution()));
     session.setUpdatedAt(Instant.now());
     if (request.message() != null
         && !request.message().isBlank()
@@ -124,11 +128,12 @@ class AgentOrchestratorTurnService {
         "IMPLEMENTATION_PROPOSAL",
         decision.confidence(),
         "read_only_permission_blocks_run",
-        true,
+        false,
         "This looks like implementation work, but your current permission mode is read-only. I"
-            + " will not create a run unless you confirm an execution mode change.",
-        decision.proposedAction(),
-        new OrchestratorPolicy(false, true, "Read-only permission mode blocks new run submission."),
+            + " will not create a run. Change execution mode before asking for a cloud run.",
+        null,
+        new OrchestratorPolicy(
+            false, false, "Read-only permission mode blocks new run submission."),
         decision.traceId());
   }
 

@@ -30,6 +30,7 @@ public class RenewalReminderScheduler {
   private final AppUserRepository userRepo;
   private final MailService mailService;
   private final InAppNotificationService notificationService;
+  private final BillingReminderDispatchGuard dispatchGuard;
 
   private static final DateTimeFormatter DATE_FMT =
       DateTimeFormatter.ofPattern("MMMM d, yyyy").withZone(ZoneId.of("Asia/Kolkata"));
@@ -57,21 +58,41 @@ public class RenewalReminderScheduler {
             planRepo.findById(sub.getBillingPlanId()).map(p -> p.getName()).orElse("your plan");
 
         String renewalDate = DATE_FMT.format(sub.getCurrentPeriodEnd());
+        String subId = sub.getId() == null ? null : sub.getId().toString();
+
+        // RR-518 — claim each channel once per billing period before delivering, so the daily
+        // schedule (and every replica) can revisit this subscription without re-notifying.
 
         // Email reminder
-        mailService.sendRenewalReminder(
-            user.getEmail(), user.getFirstName(), planName, renewalDate);
+        if (dispatchGuard.claim(
+            subId,
+            sub.getUserId(),
+            sub.getCurrentPeriodEnd(),
+            BillingReminderDispatchGuard.TYPE_RENEWAL,
+            BillingReminderDispatchGuard.TYPE_RENEWAL,
+            BillingReminderDispatchGuard.CHANNEL_EMAIL)) {
+          mailService.sendRenewalReminder(
+              user.getEmail(), user.getFirstName(), planName, renewalDate);
+        }
 
         // In-app notification
-        notificationService.create(
+        if (dispatchGuard.claim(
+            subId,
             sub.getUserId(),
-            "RENEWAL_REMINDER",
-            "Subscription renewing soon",
-            "Your " + planName + " subscription will renew on " + renewalDate + ".",
-            "/billing");
+            sub.getCurrentPeriodEnd(),
+            BillingReminderDispatchGuard.TYPE_RENEWAL,
+            BillingReminderDispatchGuard.TYPE_RENEWAL,
+            BillingReminderDispatchGuard.CHANNEL_IN_APP)) {
+          notificationService.create(
+              sub.getUserId(),
+              "RENEWAL_REMINDER",
+              "Subscription renewing soon",
+              "Your " + planName + " subscription will renew on " + renewalDate + ".",
+              "/billing");
+        }
 
         log.info(
-            "Renewal reminder sent: user={}, plan={}, renewalDate={}",
+            "Renewal reminder processed: user={}, plan={}, renewalDate={}",
             user.getEmail(),
             planName,
             renewalDate);

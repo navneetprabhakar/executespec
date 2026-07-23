@@ -66,6 +66,7 @@ class ExecutionOrchestratorTriggerAnalysisRetryTest {
   @org.junit.jupiter.api.BeforeEach
   void wireOrchestrator() {
     runCas = new ExecutionRunCasUpdater(runRepo);
+    final ExecutionOrchestrator[] selfHolder = new ExecutionOrchestrator[1];
     orchestrator =
         new ExecutionOrchestrator(
             runRepo,
@@ -86,7 +87,18 @@ class ExecutionOrchestratorTriggerAnalysisRetryTest {
             pipelineRunRepo,
             gateStore,
             plannerService,
-            costAggregator);
+            costAggregator,
+            // RR-343 — the production bean routes self-calls through the Spring @Async proxy; in a
+            // plain unit test the "proxy" is the instance itself, so the calls stay synchronous and
+            // the existing assertions still observe them.
+            new org.springframework.beans.factory.ObjectProvider<ExecutionOrchestrator>() {
+              @Override
+              public ExecutionOrchestrator getObject() {
+                return selfHolder[0];
+              }
+            },
+            new com.navneet.executespec.integration.PipelineExecutorPool());
+    selfHolder[0] = orchestrator;
   }
 
   @Test

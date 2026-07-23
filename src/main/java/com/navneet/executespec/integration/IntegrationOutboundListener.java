@@ -4,6 +4,7 @@ import static java.util.stream.Collectors.toMap;
 
 import java.util.Map;
 
+import com.navneet.executespec.config.OperationalReleasePolicy;
 import com.navneet.executespec.harness.event.PipelineEvent;
 import com.navneet.executespec.reviewer.model.ReviewReport;
 import com.navneet.executespec.state.StateStore;
@@ -36,6 +37,7 @@ public class IntegrationOutboundListener {
   private final IntegrationRunRepository integrationRunRepo;
   private final StateStore stateStore;
   private final java.util.List<OutboundAdapter> outboundAdapters;
+  private final OperationalReleasePolicy operationalReleasePolicy;
 
   private volatile Map<String, OutboundAdapter> adapterMap;
 
@@ -66,6 +68,17 @@ public class IntegrationOutboundListener {
   }
 
   private void notifyOutbound(String runId, String status) {
+    if (!operationalReleasePolicy.outboundIntegrationDeliveryEnabled()) {
+      log.debug(
+          "[Integration] Outbound BEST_EFFORT delivery disabled for run={} status={}",
+          runId,
+          status);
+      return;
+    }
+    log.info(
+        "[Integration] Dispatching BEST_EFFORT outbound lifecycle update run={} status={}",
+        runId,
+        status);
     Runnable task =
         ContextSnapshotFactory.builder()
             .build()

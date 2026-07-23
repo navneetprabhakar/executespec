@@ -35,7 +35,7 @@ class AgentSessionStartupRecoveryTest {
             .userId("user-1")
             .title("scout")
             .status("RUNNING")
-            .updatedAt(Instant.now().minusSeconds(300))
+            .updatedAt(Instant.now().minusSeconds(900))
             .build();
     when(sessions.findByStatusAndClientSurface("RUNNING", "SUBAGENT")).thenReturn(List.of(child));
     when(sessions.findByIdForUpdate("child-1")).thenReturn(java.util.Optional.of(child));
@@ -62,7 +62,7 @@ class AgentSessionStartupRecoveryTest {
             .userId("user-1")
             .title("scout")
             .status("READY")
-            .updatedAt(Instant.now().minusSeconds(300))
+            .updatedAt(Instant.now().minusSeconds(900))
             .build();
     when(sessions.findByStatusAndClientSurface("READY", "SUBAGENT")).thenReturn(List.of(child));
     when(sessions.findByIdForUpdate("ready-child-1")).thenReturn(java.util.Optional.of(child));
@@ -78,6 +78,46 @@ class AgentSessionStartupRecoveryTest {
             eq("SUBAGENT_RECOVERY"),
             org.mockito.ArgumentMatchers.argThat(
                 payload -> payload.toString().contains("previousStatus=READY")));
+  }
+
+  @Test
+  void aChildStillInsideOneLongModelRoundSurvivesAPeerBootSweep() {
+    // RR-1571: a WORKHORSE round routinely exceeds two minutes. With the mid-turn lease renewal,
+    // an actively executing child owned by a live peer JVM must not be cancelled by this sweep.
+    AgentSession midTurn =
+        AgentSession.builder()
+            .id("mid-turn-1")
+            .orgId("org-1")
+            .userId("user-1")
+            .title("scout")
+            .status("RUNNING")
+            .updatedAt(Instant.now().minusSeconds(150))
+            .build();
+    when(sessions.findByStatusAndClientSurface("RUNNING", "SUBAGENT")).thenReturn(List.of(midTurn));
+    when(sessions.findByIdForUpdate("mid-turn-1")).thenReturn(java.util.Optional.of(midTurn));
+
+    assertThat(recovery.reconcileRunningSessions()).isZero();
+    assertThat(midTurn.getStatus()).isEqualTo("RUNNING");
+    verify(sessions, org.mockito.Mockito.never()).save(midTurn);
+  }
+
+  @Test
+  void aRecentlyReservedReadyChildIsNotCancelledBeforeItsExecutorClaimsIt() {
+    AgentSession reserved =
+        AgentSession.builder()
+            .id("reserved-1")
+            .orgId("org-1")
+            .userId("user-1")
+            .title("scout")
+            .status("READY")
+            .updatedAt(Instant.now().minusSeconds(150))
+            .build();
+    when(sessions.findByStatusAndClientSurface("READY", "SUBAGENT")).thenReturn(List.of(reserved));
+    when(sessions.findByIdForUpdate("reserved-1")).thenReturn(java.util.Optional.of(reserved));
+
+    assertThat(recovery.reconcileRunningSessions()).isZero();
+    assertThat(reserved.getStatus()).isEqualTo("READY");
+    verify(sessions, org.mockito.Mockito.never()).save(reserved);
   }
 
   @Test
@@ -120,7 +160,7 @@ class AgentSessionStartupRecoveryTest {
             .userId("user-1")
             .title("scout")
             .status("RUNNING")
-            .updatedAt(Instant.now().minusSeconds(300))
+            .updatedAt(Instant.now().minusSeconds(900))
             .build();
     AgentSession peerState =
         AgentSession.builder()
@@ -155,7 +195,7 @@ class AgentSessionStartupRecoveryTest {
             .title("web conversation")
             .clientSurface("WEB")
             .status("RUNNING")
-            .updatedAt(Instant.now().minusSeconds(300))
+            .updatedAt(Instant.now().minusSeconds(900))
             .build();
     // Repository query is surface-scoped; a non-child row must never enter the recovery loop.
     when(sessions.findByStatusAndClientSurface("RUNNING", "SUBAGENT")).thenReturn(List.of());
@@ -193,7 +233,7 @@ class AgentSessionStartupRecoveryTest {
             payload.capture());
     assertThat(payload.getValue())
         .containsEntry("clientSurface", "SUBAGENT")
-        .containsEntry("staleAfterSeconds", 120L)
+        .containsEntry("staleAfterSeconds", 300L)
         .containsEntry("staleTimestampPresent", false)
         .containsEntry("previousStatus", "RUNNING")
         .containsKey("recoveryBatchId");

@@ -11,6 +11,20 @@ import com.navneet.executespec.deployment.preview.verify.BootHealthEvaluator.Boo
  */
 final class ValidationReportScoreCalculator {
 
+  /**
+   * CODE_DELIVERED credit when the anti-gaming guards are on but no deterministic endpoint evidence
+   * exists (RR-1648). Midpoint of the guarded range {@code [50, 100]} — the same credit a 50%
+   * coverage reading earns — so an unmeasured slot is neither zeroed nor treated as full delivery.
+   */
+  private static final double CODE_DELIVERED_UNMEASURED = 75;
+
+  /**
+   * TESTS-slot cap when the guards are on and the coverage judgment is missing or unrecognised
+   * (RR-1648). Below the full 100 so a trivially-passing suite cannot reach the top of the slot on
+   * an absent judgment, above the explicit PARTIAL cap because absence is not a negative finding.
+   */
+  private static final double TESTS_UNMEASURED_CAP = 85;
+
   private ValidationReportScoreCalculator() {}
 
   static int additive(
@@ -30,8 +44,16 @@ final class ValidationReportScoreCalculator {
     double weight = 0;
     if (filesGenerated >= 0) {
       double code = 100;
-      if (gamingGuards && endpointCoverage != null) {
-        code = 50 + 0.5 * clamp(endpointCoverage, 0, 100);
+      if (gamingGuards) {
+        // RR-1648 — the endpoint tie-in used to fire only when endpoint evidence existed, so any
+        // run the accuracy pass classified non-HTTP (or for which it emitted no endpoint block)
+        // collected the full 30-point slot at 100 purely for having written files. Absent evidence
+        // is not evidence of delivery: an unmeasured slot gets the midpoint of the measured range
+        // (the same value a 50% coverage reading would earn) instead of full credit.
+        code =
+            endpointCoverage != null
+                ? 50 + 0.5 * clamp(endpointCoverage, 0, 100)
+                : CODE_DELIVERED_UNMEASURED;
       }
       weighted += 30 * code;
       weight += 30;
@@ -45,15 +67,22 @@ final class ValidationReportScoreCalculator {
     }
     if (testsTotal > 0) {
       double tests = 100 * clamp((double) testsPassed / Math.max(1, testsTotal), 0, 1);
-      if (gamingGuards && coverageLevel != null) {
+      if (gamingGuards) {
+        // RR-1648 — an unknown / unrecognised coverage judgment used to fall through to an
+        // uncapped 100, so an always-passing trivial suite scored full marks whenever the LLM
+        // failed to emit a level it recognised. Only an explicit GOOD/COMPREHENSIVE judgment
+        // lifts the cap; everything else (including null and unrecognised values) is unmeasured.
         tests =
             Math.min(
                 tests,
-                switch (coverageLevel) {
-                  case "NONE" -> 30;
-                  case "PARTIAL" -> 70;
-                  default -> 100;
-                });
+                coverageLevel == null
+                    ? TESTS_UNMEASURED_CAP
+                    : switch (coverageLevel) {
+                      case "NONE" -> 30;
+                      case "PARTIAL" -> 70;
+                      case "GOOD", "COMPREHENSIVE" -> 100;
+                      default -> TESTS_UNMEASURED_CAP;
+                    });
       }
       weighted += 20 * tests;
       weight += 20;
@@ -88,7 +117,8 @@ final class ValidationReportScoreCalculator {
             testsTotal,
             reviewerVerdict,
             unfixedCriticals,
-            coverageLevel));
+            coverageLevel,
+            bootVerification));
   }
 
   static int multiplicative(
@@ -109,6 +139,11 @@ final class ValidationReportScoreCalculator {
             ? ValidationReportScorePolicy.testFactorFromCoverageLevel(coverageLevel)
             : clamp((double) testsPassed / Math.max(1, testsTotal), 0, 1);
     double reviewer = reviewerVerdict == null ? .5 : reviewerFactor(reviewerVerdict);
+    // RR-1650 — an unmeasured endpoint signal is deliberately neutral (factor 1.0) rather than
+    // scored. This path is multiplicative and has no denominator to drop the slot from, so any
+    // value below 1.0 would penalise every non-HTTP spec for a dimension that does not apply to
+    // it. That mirrors the additive path, which likewise drops the slot when the signal is absent.
+    // The neutral factor is safe only because the trust cap below now constrains the result.
     double endpoint = endpointCoverage == null ? 1 : clamp(endpointCoverage / 100.0, 0, 1);
     if ("CLEAN".equals(reviewerVerdict) || "FIXED_ISSUES".equals(reviewerVerdict)) {
       endpoint = Math.max(endpoint, reviewer);
@@ -120,8 +155,22 @@ final class ValidationReportScoreCalculator {
       tests = Math.max(tests, reviewer);
     }
     double criticalDamper = Math.max(.5, 1 - .05 * Math.max(0, unfixedCriticals));
-    return (int)
-        clamp(Math.round(100 * build * tests * reviewer * endpoint * criticalDamper), 0, 100);
+    int raw =
+        (int) clamp(Math.round(100 * build * tests * reviewer * endpoint * criticalDamper), 0, 100);
+    // RL-2026-06-026 trust caps applied to the legacy path too (RR-1650). This formula is the
+    // documented rollback for `scoring.additive-v2`; without the cap, flipping that flag off also
+    // silently removed every "this headline is not credible above N" constraint.
+    return Math.min(
+        raw,
+        trustCap(
+            raw,
+            buildPassed,
+            testsPassed,
+            testsTotal,
+            reviewerVerdict,
+            unfixedCriticals,
+            coverageLevel,
+            bootVerification));
   }
 
   static int rubric(
@@ -171,7 +220,8 @@ final class ValidationReportScoreCalculator {
       int total,
       String reviewer,
       int criticals,
-      String coverage) {
+      String coverage,
+      BootVerification bootVerification) {
     int cap = 100;
     if ("REVIEW_FAILED".equals(reviewer)) cap = Math.min(cap, 70);
     else if ("UNRESOLVED_ISSUES".equals(reviewer)) cap = Math.min(cap, 80);
@@ -182,6 +232,20 @@ final class ValidationReportScoreCalculator {
     else if (total <= 0) {
       if ("NONE".equalsIgnoreCase(coverage)) cap = Math.min(cap, 75);
       else if ("UNKNOWN".equalsIgnoreCase(coverage) || coverage == null) cap = Math.min(cap, 90);
+    }
+    // RR-296 — the BUILD slot already scores a non-healthy boot below full (UNHEALTHY=55 etc.), but
+    // the trust cap only saw the compile bit, so a service that compiled + tested + reviewed clean
+    // could show a passing 89 headline while its own health probe failed. Apply the cap from the
+    // strongest available BUILD evidence: ANY non-HEALTHY boot bounds the headline below the 85
+    // PASS threshold. The more-broken verdicts already drive the BUILD slot low enough that this
+    // cap
+    // does not bite them; it exists to stop the borderline UNHEALTHY case reading PASS. Inert on
+    // default runs (verify-boot flag off ⇒ bootVerification == null), tighten-only when present.
+    if (bootVerification != null
+        && bootVerification.verdict()
+            != com.navneet.executespec.deployment.preview.verify.BootHealthEvaluator.Verdict
+                .HEALTHY) {
+      cap = Math.min(cap, 84);
     }
     return Math.max(0, Math.min(100, Math.min(raw, cap)));
   }

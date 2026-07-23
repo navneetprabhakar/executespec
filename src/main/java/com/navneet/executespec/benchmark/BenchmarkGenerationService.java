@@ -13,12 +13,16 @@ import java.util.concurrent.TimeUnit;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.navneet.executespec.cost.EffectiveRouteProjection;
 import com.navneet.executespec.cost.RunCostTracker;
+import com.navneet.executespec.cost.RunStepUsageRepository;
 import com.navneet.executespec.engine.CodeGenEngine;
+import com.navneet.executespec.engine.EngineBudget;
 import com.navneet.executespec.engine.EngineOutcome;
 import com.navneet.executespec.engine.EngineRequest;
 import com.navneet.executespec.engine.EngineResult;
 import com.navneet.executespec.engine.VerifyMode;
+import com.navneet.executespec.sse.SseBroadcaster;
 import com.navneet.executespec.state.RunMode;
 import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
@@ -48,10 +52,10 @@ import lombok.extern.slf4j.Slf4j;
  * instance) and hands back the diff — no polling, no harvesting.
  *
  * <p>It still creates ONE minimal {@link PipelineRun} row, because the worker reads two things from
- * it: {@code hardCapUsd} (the dollar budget cap, in {@code WorkerAgent}) and {@code sourceType}
- * (the PATCH test-verification gate, in {@code CodeGenEngineImpl} — {@code "benchmark"} ⇒ gate OFF
- * for blind runs). That row is the minimal subset of what {@code submitRun} sets, not the full
- * lifecycle.
+ * it: optional {@code hardCapUsd} (the dollar budget cap, in {@code WorkerAgent}) and {@code
+ * sourceType} (the PATCH test-verification gate, in {@code CodeGenEngineImpl} — {@code "benchmark"}
+ * ⇒ gate OFF for blind runs). That row is the minimal subset of what {@code submitRun} sets, not
+ * the full lifecycle.
  *
  * <p>Blind: the agent sees only the issue {@code problem_statement}; the hidden tests are applied
  * externally at scoring.
@@ -62,37 +66,97 @@ import lombok.extern.slf4j.Slf4j;
 public class BenchmarkGenerationService {
 
   private static final ObjectMapper JSON = new ObjectMapper();
+  static final long DEFAULT_SHUTDOWN_RESERVE_MS = 120_000L;
   private final SwebenchProperties props;
   private final SwebenchInstanceLoader loader;
   private final SwebenchContainerStore containerStore;
   private final CodeGenEngine codeGenEngine;
   private final PipelineRunRepository runRepo;
   private final RunCostTracker costTracker;
+  private final RunStepUsageRepository stepUsage;
+  private final SseBroadcaster broadcaster;
 
   private final Object generationSlotsLock = new Object();
   private Semaphore generationSlots;
   private int generationSlotLimit;
 
-  /** Synchronous result returned straight to the HTTP caller. */
+  /**
+   * Synchronous result returned straight to the HTTP caller.
+   *
+   * <p>{@code provider}/{@code model} are the REQUESTED route. {@code effectiveProvider}/{@code
+   * effectiveModel} are the route that physically served the run, derived from the canonical {@code
+   * run_step_usage} ledger. Both are carried deliberately: a campaign that records only the
+   * requested route cannot detect that failover or a managed-AI substitution changed who actually
+   * did the work. {@code routeAttribution} is LEDGER / MIXED / UNATTRIBUTED, and {@code
+   * routeDiverged} is true whenever the served route is not provably the requested one.
+   */
   public record GenerateResult(
       String runId,
       String instanceId,
       String provider,
       String model,
+      String effectiveProvider,
+      String effectiveModel,
+      String routeAttribution,
+      boolean routeDiverged,
       String outcome,
       int iterations,
       int toolCalls,
       long patchBytes,
       double costUsd,
+      long inputTokens,
+      long outputTokens,
       String submissionPatch,
       String predsJson,
       String proPatchJson) {}
+
+  /**
+   * The physical route that actually served {@code runId}, read only from the canonical {@code
+   * run_step_usage} ledger. Never falls back to the requested provider/model: an unattributed run
+   * must stay visibly unattributed rather than borrow the route it asked for.
+   */
+  EffectiveRouteProjection effectiveRoute(String runId) {
+    return EffectiveRouteProjection.from(stepUsage.findByRunIdOrderByCreatedAtAsc(runId));
+  }
 
   /**
    * Generate a patch for one SWE-bench instance, blind, synchronously. Blocks until the worker
    * terminates, then returns the captured diff + cost.
    */
   public GenerateResult generate(String instanceId, String aiProvider, String modelName) {
+    return generate(instanceId, aiProvider, modelName, null, null, null);
+  }
+
+  public GenerateResult generate(
+      String instanceId, String aiProvider, String modelName, Double requestedHardCapUsd) {
+    return generate(instanceId, aiProvider, modelName, requestedHardCapUsd, null, null);
+  }
+
+  public GenerateResult generate(
+      String instanceId,
+      String aiProvider,
+      String modelName,
+      Double requestedHardCapUsd,
+      Long requestedDeadlineEpochMs,
+      Long requestedShutdownReserveMs) {
+    return generate(
+        instanceId,
+        aiProvider,
+        modelName,
+        requestedHardCapUsd,
+        true,
+        requestedDeadlineEpochMs,
+        requestedShutdownReserveMs);
+  }
+
+  public GenerateResult generate(
+      String instanceId,
+      String aiProvider,
+      String modelName,
+      Double requestedHardCapUsd,
+      Boolean enforceHardCap,
+      Long requestedDeadlineEpochMs,
+      Long requestedShutdownReserveMs) {
     if (!props.isEnabled()) {
       throw new ResponseStatusException(
           HttpStatus.SERVICE_UNAVAILABLE, "swebench is disabled (set swebench.enabled=true)");
@@ -100,6 +164,12 @@ public class BenchmarkGenerationService {
     if (instanceId == null || instanceId.isBlank()) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "instanceId required");
     }
+    DeadlineBudget deadline =
+        effectiveDeadlineBudget(
+            requestedDeadlineEpochMs,
+            requestedShutdownReserveMs,
+            props.getTaskWallTimeoutMinutes(),
+            Instant.now().toEpochMilli());
 
     SwebenchInstanceLoader.SwebenchInstance instance = loader.findById(instanceId);
     String image = loader.imageNameFor(instanceId);
@@ -107,7 +177,8 @@ public class BenchmarkGenerationService {
         aiProvider != null && !aiProvider.isBlank() ? aiProvider : props.getDefaultProvider();
     String model =
         modelName != null && !modelName.isBlank() ? modelName : defaultPlanningModel(provider);
-    double hardCapUsd = validatedHardCapUsd();
+    Double hardCapUsd =
+        Boolean.FALSE.equals(enforceHardCap) ? null : validatedHardCapUsd(requestedHardCapUsd);
 
     String runId = UUID.randomUUID().toString();
     String containerName = "bench-gen-" + runId.substring(0, 8);
@@ -146,6 +217,7 @@ public class BenchmarkGenerationService {
               .hardCapUsd(hardCapUsd)
               .build();
       runRepo.save(row);
+      broadcaster.registerBenchmarkTrajectory(runId);
 
       log.info(
           "benchmark-gen START run={} instance={} provider={} model={}",
@@ -168,6 +240,13 @@ public class BenchmarkGenerationService {
                   .runId(runId)
                   .taskId("__root__")
                   .verifyMode(VerifyMode.NONE)
+                  .budget(
+                      new EngineBudget(
+                          null,
+                          deadline.wallClockSeconds(),
+                          hardCapUsd,
+                          deadline.deadlineEpochMs(),
+                          deadline.shutdownReserveMs()))
                   .build());
 
       String patch =
@@ -184,7 +263,20 @@ public class BenchmarkGenerationService {
         proPatches = writeSweBenchProPatches(outputDir, instanceId, model, patch);
       }
 
-      double cost = costTracker.snapshot(runId).costUsd();
+      RunCostTracker.Snapshot usage = costTracker.snapshot(runId);
+      double cost = usage.costUsd();
+      EffectiveRouteProjection route = effectiveRoute(runId);
+      if (route.divergesFrom(provider, model)) {
+        log.warn(
+            "benchmark-gen ROUTE DIVERGENCE run={} instance={} requested={}/{} served={}/{} ({})",
+            runId,
+            instanceId,
+            provider,
+            model,
+            route.provider(),
+            route.model(),
+            route.attribution());
+      }
       markTerminal(runId, er.outcome(), patch.length());
 
       log.info(
@@ -201,35 +293,127 @@ public class BenchmarkGenerationService {
           instanceId,
           provider,
           model,
+          route.provider(),
+          route.model(),
+          route.attribution().name(),
+          route.divergesFrom(provider, model),
           er.outcome().name(),
           er.iterations(),
           er.toolCalls(),
           patch.getBytes(java.nio.charset.StandardCharsets.UTF_8).length,
           cost,
+          usage.inputTokens(),
+          usage.outputTokens(),
           submission.toString(),
           preds.toString(),
           proPatches == null ? null : proPatches.toString());
     } catch (ResponseStatusException rse) {
+      markFailed(runId, rse);
       throw rse;
     } catch (Exception e) {
+      markFailed(runId, e);
       log.error("benchmark-gen FAILED run={} instance={}", runId, instanceId, e);
       throw new ResponseStatusException(
           HttpStatus.INTERNAL_SERVER_ERROR, "generation failed: " + e.getMessage(), e);
     } finally {
       run("docker rm -f " + containerName, 30);
       containerStore.remove(runId);
+      // RR-951 — the per-run checkout under <outputBase>/ws/<runId> was never reclaimed, so every
+      // generation (including setup failures) monotonically filled the benchmark VM. The scored
+      // artifacts (submission.patch, preds) live under outputDir and are retained; only the bulky
+      // working checkout is deleted, no-follow, on every terminal and setup path.
+      deleteWorkspaceQuietly(workspace);
       releaseGenerationSlot();
     }
   }
 
-  private double validatedHardCapUsd() {
-    double value = props.getHardCapUsd();
-    if (!Double.isFinite(value) || value <= 0.0) {
+  /**
+   * RR-951 — recursively delete a benchmark working checkout without following symbolic links.
+   * {@link Files#walk(Path, java.nio.file.FileVisitOption...)} does not follow links by default, so
+   * a planted symlink is removed as a link and its target is never traversed.
+   */
+  private void deleteWorkspaceQuietly(Path workspace) {
+    if (workspace == null || !Files.exists(workspace)) return;
+    try (var walk = Files.walk(workspace)) {
+      walk.sorted(java.util.Comparator.reverseOrder())
+          .forEach(
+              p -> {
+                try {
+                  Files.deleteIfExists(p);
+                } catch (IOException ignored) {
+                  // best-effort; a leftover file is preferable to failing the terminal path
+                }
+              });
+    } catch (IOException e) {
+      log.warn("benchmark-gen: failed to reclaim workspace {}: {}", workspace, e.getMessage());
+    }
+  }
+
+  private double validatedHardCapUsd(Double requestedHardCapUsd) {
+    return effectiveHardCapUsd(props.getHardCapUsd(), requestedHardCapUsd);
+  }
+
+  static double effectiveHardCapUsd(double configuredHardCapUsd, Double requestedHardCapUsd) {
+    if (!Double.isFinite(configuredHardCapUsd) || configuredHardCapUsd <= 0.0) {
       throw new ResponseStatusException(
           HttpStatus.INTERNAL_SERVER_ERROR,
           "swebench.hard-cap-usd must be a finite positive value");
     }
-    return value;
+    if (requestedHardCapUsd == null) {
+      return configuredHardCapUsd;
+    }
+    if (!Double.isFinite(requestedHardCapUsd) || requestedHardCapUsd <= 0.0) {
+      throw new ResponseStatusException(
+          HttpStatus.BAD_REQUEST, "hardCapUsd must be a finite positive value");
+    }
+    return Math.min(configuredHardCapUsd, requestedHardCapUsd);
+  }
+
+  record DeadlineBudget(long deadlineEpochMs, long shutdownReserveMs, int wallClockSeconds) {}
+
+  static DeadlineBudget effectiveDeadlineBudget(
+      Long requestedDeadlineEpochMs,
+      Long requestedShutdownReserveMs,
+      int configuredTimeoutMinutes,
+      long nowEpochMs) {
+    if (configuredTimeoutMinutes <= 0) {
+      throw new ResponseStatusException(
+          HttpStatus.INTERNAL_SERVER_ERROR, "swebench.task-wall-timeout-minutes must be positive");
+    }
+    if (requestedShutdownReserveMs != null && requestedShutdownReserveMs < 0) {
+      throw new ResponseStatusException(
+          HttpStatus.BAD_REQUEST, "shutdownReserveMs must be non-negative");
+    }
+
+    long configuredDurationMs;
+    long configuredDeadline;
+    try {
+      configuredDurationMs = Math.multiplyExact((long) configuredTimeoutMinutes, 60_000L);
+      configuredDeadline = Math.addExact(nowEpochMs, configuredDurationMs);
+    } catch (ArithmeticException overflow) {
+      throw new ResponseStatusException(
+          HttpStatus.INTERNAL_SERVER_ERROR, "configured benchmark deadline overflows epoch millis");
+    }
+
+    long deadline =
+        requestedDeadlineEpochMs == null
+            ? configuredDeadline
+            : Math.min(requestedDeadlineEpochMs, configuredDeadline);
+    long reserve =
+        Math.max(
+            DEFAULT_SHUTDOWN_RESERVE_MS,
+            requestedShutdownReserveMs == null
+                ? DEFAULT_SHUTDOWN_RESERVE_MS
+                : requestedShutdownReserveMs);
+    if (deadline <= nowEpochMs || deadline - nowEpochMs <= reserve) {
+      throw new ResponseStatusException(
+          HttpStatus.BAD_REQUEST,
+          "absoluteDeadlineEpochMs must leave more time than shutdownReserveMs");
+    }
+
+    long remainingMs = deadline - nowEpochMs;
+    long seconds = Math.max(1L, (remainingMs + 999L) / 1_000L);
+    return new DeadlineBudget(deadline, reserve, (int) Math.min(Integer.MAX_VALUE, seconds));
   }
 
   void acquireGenerationSlot(String instanceId) {
@@ -364,22 +548,68 @@ public class BenchmarkGenerationService {
 
   private String captureDiff(
       String containerName, String baseCommit, String workdir, boolean proExcludes) {
-    String diffTarget = (baseCommit == null || baseCommit.isBlank()) ? "HEAD" : baseCommit;
+    String cmd = captureDiffCommand(containerName, baseCommit, workdir, proExcludes);
+    ShellResult diff = run(cmd, 120);
+    return captureDiffOutput(diff);
+  }
+
+  static String captureDiffCommand(
+      String containerName, String baseCommit, String workdir, boolean proExcludes) {
+    if (containerName == null || !containerName.matches("bench-gen-[0-9a-f]{8}")) {
+      throw new IllegalArgumentException("invalid benchmark container name");
+    }
+    String safeWorkdir = validatedBenchmarkWorkdir(workdir);
+    String diffTarget = validatedDiffTarget(baseCommit);
     String excludes = diffExcludes(proExcludes);
     String cmd =
         "docker exec "
             + containerName
             + " sh -c '"
-            + "cd "
-            + workdir
-            + " && "
-            + "git ls-files --others --exclude-standard | xargs -r git add -N >/dev/null 2>&1; "
-            + "git diff "
+            + "set -e; cd "
+            + safeWorkdir
+            // Ubuntu's security-backported Git 2.34 ignores safe.directory from command-scope
+            // `git -c`; it accepts the trust boundary only from protected (global/system) config.
+            // The cleanroom is isolated and --rm, and the path is restricted to the two harness
+            // workdirs below, so replace any image default with exactly this repository.
+            + "; git config --global --replace-all safe.directory "
+            + safeWorkdir
+            + "; git add -N --all >/dev/null; git diff "
             + diffTarget
             + excludes
             + "'";
-    ShellResult diff = run(cmd, 120);
-    return diff.exit() == 0 ? diff.output() : "";
+    return cmd;
+  }
+
+  static String validatedBenchmarkWorkdir(String workdir) {
+    if (!"/testbed".equals(workdir) && !"/app".equals(workdir)) {
+      throw new IllegalArgumentException("invalid benchmark workdir");
+    }
+    return workdir;
+  }
+
+  static String captureDiffOutput(ShellResult diff) {
+    if (diff.exit() == 0) {
+      return diff.output() == null ? "" : diff.output();
+    }
+    String detail = diff.output() == null ? "" : diff.output().trim().replaceAll("\\s+", " ");
+    if (detail.length() > 600) {
+      detail = detail.substring(0, 600) + "…";
+    }
+    throw new IllegalStateException(
+        "benchmark patch capture failed (exit="
+            + diff.exit()
+            + ")"
+            + (detail.isBlank() ? "" : ": " + detail));
+  }
+
+  static String validatedDiffTarget(String baseCommit) {
+    if (baseCommit == null || baseCommit.isBlank()) {
+      return "HEAD";
+    }
+    if (!baseCommit.matches("[0-9a-fA-F]{7,64}")) {
+      throw new IllegalArgumentException("invalid benchmark base commit");
+    }
+    return baseCommit;
   }
 
   /**
@@ -454,8 +684,13 @@ public class BenchmarkGenerationService {
           .findById(runId)
           .ifPresent(
               pr -> {
-                pr.setStatus(patchLen > 0 ? "COMPLETE" : "PARTIAL");
-                String reason = "BENCH_GEN:" + outcome.name();
+                // RR-953 — COMPLETE only when the engine actually asserted completion AND produced
+                // a patch. A non-empty patch from an iteration/budget/wall-clock/stopped/error
+                // non-completion is partial evidence, not a completed run; recording it COMPLETE
+                // corrupted operator status, analytics and recovery assumptions.
+                boolean complete = outcome == EngineOutcome.COMPLETED && patchLen > 0;
+                pr.setStatus(complete ? "COMPLETE" : "PARTIAL");
+                String reason = "BENCH_GEN:" + outcome.name() + ":" + patchLen + "B";
                 pr.setStatusReason(reason.length() > 80 ? reason.substring(0, 80) : reason);
                 pr.setCompletedAt(Instant.now());
                 runRepo.save(pr);
@@ -465,18 +700,53 @@ public class BenchmarkGenerationService {
     }
   }
 
+  private void markFailed(String runId, Exception failure) {
+    try {
+      runRepo
+          .findById(runId)
+          .ifPresent(
+              pr -> {
+                pr.setStatus("FAILED");
+                String message =
+                    failure.getMessage() == null
+                        ? failure.getClass().getSimpleName()
+                        : failure.getMessage();
+                String reason = "BENCH_GEN_FAILED:" + message.replaceAll("\\s+", " ");
+                pr.setStatusReason(reason.length() > 80 ? reason.substring(0, 80) : reason);
+                pr.setCompletedAt(Instant.now());
+                runRepo.save(pr);
+              });
+    } catch (Exception e) {
+      log.warn("benchmark-gen: failed to mark run {} failed: {}", runId, e.getMessage());
+    }
+  }
+
   /**
    * PLANNING-tier defaults per provider (mirror {@code application.yml model-matrix} PLANNING row).
    * Overridable per request via {@code modelName}; this only sets the default when none is given so
    * the service stays dependency-light.
    */
-  private static String defaultPlanningModel(String provider) {
-    if (provider == null) return "claude-sonnet-5";
+  static String defaultPlanningModel(String provider) {
+    // RR-954 — never silently pair a non-Anthropic provider with an Anthropic model. The previous
+    // default fell every unrecognised provider (including OpenRouter/Fireworks, which YAML assigns
+    // DeepSeek models) through to claude-sonnet-5, so an omitted-model run failed or recorded an
+    // invalid cross-provider comparison. Map each supported provider to its PLANNING-tier default
+    // (mirror application.yml model-matrix) and fail closed on anything else.
+    if (provider == null || provider.isBlank()) {
+      throw new ResponseStatusException(
+          HttpStatus.BAD_REQUEST, "aiProvider is required to resolve a default model");
+    }
     return switch (provider.toLowerCase()) {
+      case "anthropic" -> "claude-sonnet-5";
       case "openai" -> "gpt-5.4";
       case "gemini", "google" -> "gemini-3.5-flash";
       case "deepseek" -> "deepseek-v4-flash-native";
-      default -> "claude-sonnet-5";
+      case "openrouter" -> "deepseek-v4-pro";
+      case "fireworks" -> "deepseek-v4-pro-fw";
+      default ->
+          throw new ResponseStatusException(
+              HttpStatus.BAD_REQUEST,
+              "no default model for provider '" + provider + "'; supply modelName explicitly");
     };
   }
 

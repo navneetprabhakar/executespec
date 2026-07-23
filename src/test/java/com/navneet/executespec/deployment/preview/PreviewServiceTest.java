@@ -215,6 +215,48 @@ class PreviewServiceTest {
   }
 
   @Nested
+  @DisplayName("Distributed cleanup safety")
+  class DistributedCleanupSafety {
+
+    @Test
+    void orphanDiscoveryIsFailSafeOffByDefault() {
+      when(composeExecutor.listProjects("es-preview-")).thenReturn(java.util.List.of("orphan"));
+
+      service.cleanupOrphans();
+
+      verify(composeExecutor, never()).listProjects(any());
+      verify(composeExecutor, never()).down(any(), anyBoolean());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void rollingShutdownPreservesActivePreviewsByDefault() {
+      var active =
+          (java.util.concurrent.ConcurrentHashMap<String, PreviewSession>)
+              org.springframework.test.util.ReflectionTestUtils.getField(service, "active");
+      active.put(
+          "run-safe",
+          new PreviewSession(
+              "run-safe",
+              "es-preview-runsafe",
+              PreviewProjectType.NODE_FRONTEND,
+              PreviewMode.REST,
+              null,
+              PreviewStatus.RUNNING,
+              "http://localhost:10000",
+              10000,
+              null,
+              java.time.Instant.now(),
+              java.time.Instant.now().plusSeconds(300)));
+
+      service.shutdownAll();
+
+      assertThat(active).containsKey("run-safe");
+      verify(composeExecutor, never()).down(any(), anyBoolean());
+    }
+  }
+
+  @Nested
   @DisplayName("Concurrent preview limits by tier")
   class ConcurrencyLimits {
 

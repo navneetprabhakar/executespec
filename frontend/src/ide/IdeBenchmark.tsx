@@ -72,6 +72,16 @@ function relTime(iso?: string | null): string {
   return `${Math.floor(h / 24)}d ago`;
 }
 
+function duration(seconds?: number | null): string {
+  const s = Math.max(0, Math.round(Number(seconds ?? 0)));
+  if (!Number.isFinite(s)) return '—';
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ${s % 60}s`;
+  const h = Math.floor(m / 60);
+  return `${h}h ${m % 60}m`;
+}
+
 function evColor(type: string): string {
   const t = type.toUpperCase();
   if (t === 'RUN_DONE' || t === 'SUBMITTED') return 'var(--ide-green)';
@@ -259,9 +269,14 @@ function RunRow({r, onOpen}: {r: api.BenchmarkRun; onOpen: () => void}) {
         {fmtTok(r.inputTokens)}↑ {fmtTok(r.outputTokens)}↓
       </td>
       <td style={{...TD, color: MUTED, whiteSpace: 'nowrap'}}>
-        {dateTime(r.createdAt)}
+        {r.activeAttemptCount ? `${r.activeAttemptCount} active · ` : ''}
+        {duration(r.elapsedSeconds)} elapsed
         <div style={{fontSize: 11}}>
-          {r.finishedAt ? `done ${dateTime(r.finishedAt)}` : relTime(r.createdAt)}
+          {r.finishedAt
+            ? `done ${dateTime(r.finishedAt)}`
+            : r.etaSeconds != null
+              ? `ETA ${duration(r.etaSeconds)}`
+              : relTime(r.createdAt)}
         </div>
       </td>
       <td style={{...TD, width: 36}}>
@@ -271,11 +286,72 @@ function RunRow({r, onOpen}: {r: api.BenchmarkRun; onOpen: () => void}) {
   );
 }
 
+/** Compact phone representation of a run. The desktop table stays intact so
+ * wide screens retain the comparison density; phones get a readable card with
+ * the same run-level affordance and metrics. */
+function RunCard({r, onOpen}: {r: api.BenchmarkRun; onOpen: () => void}) {
+  const status = effectiveStatus(r);
+  const scored = r.totalTasks > 0 ? `${r.resolvedTasks}/${r.totalTasks}` : String(r.resolvedTasks);
+  return (
+    <article className='ide-benchmark-mobile-card'>
+      <div className='ide-benchmark-mobile-card-head'>
+        <div style={{minWidth: 0}}>
+          <div style={{display: 'flex', alignItems: 'center', gap: 8, minWidth: 0}}>
+            <SuiteChip suite={r.suite} />
+            <strong className='ide-benchmark-mobile-model'>{r.model}</strong>
+          </div>
+          <div className='ide-benchmark-mobile-provider'>{r.provider}</div>
+        </div>
+        <button
+          type='button'
+          className='ide-benchmark-mobile-open'
+          onClick={onOpen}
+          aria-label={`Open ${r.model} ${r.suite} benchmark`}
+          title='Open benchmark details'
+        >
+          <ExternalLink size={16} aria-hidden='true' />
+        </button>
+      </div>
+      <div className='ide-benchmark-mobile-dataset'>
+        <span>{shortDataset(r.dataset)}</span>
+        <IdeBadge kind={benchKind(status)}>{status}</IdeBadge>
+      </div>
+      <div className='ide-benchmark-mobile-progress'>
+        <ResolvedBar resolved={r.resolvedTasks} total={r.totalTasks} />
+        <span style={{whiteSpace: 'nowrap'}}>
+          <strong>{scored}</strong> ({pct(r.resolvedTasks, r.totalTasks)}%)
+        </span>
+      </div>
+      {r.submissionStatus && (
+        <div className='ide-benchmark-mobile-submission'>
+          <SubChip status={r.submissionStatus} url={r.leaderboardUrl} />
+        </div>
+      )}
+      <div className='ide-benchmark-mobile-metrics'>
+        <KV k='Cost'>{fmtCost(r.costUsd)}</KV>
+        <KV k='Tokens'>
+          {fmtTok(r.inputTokens)}↑ {fmtTok(r.outputTokens)}↓
+        </KV>
+        <KV k='Attempts'>k={r.k}</KV>
+        <KV k='Time'>{dateTime(r.createdAt)}</KV>
+        <KV k='Progress'>
+          {r.activeAttemptCount || 0} active · {r.completedAttempts || 0} scored
+        </KV>
+      </div>
+    </article>
+  );
+}
+
 function RunTable({runs, empty}: {runs: api.BenchmarkRun[]; empty: string}) {
   const navigate = useNavigate();
   if (!runs.length) return <EmptyCard>{empty}</EmptyCard>;
   return (
     <div className='ide-card ide-benchmark-table-card'>
+      <div className='ide-benchmark-mobile-list' aria-label='Benchmark runs'>
+        {runs.map((r) => (
+          <RunCard key={r.id} r={r} onOpen={() => navigate(`/benchmark/${r.id}`)} />
+        ))}
+      </div>
       <table className='ide-benchmark-table'>
         <thead>
           <tr>
@@ -400,7 +476,14 @@ function AttemptPips({attempts, k}: {attempts: api.BenchmarkTaskResult[]; k: num
             </span>
           );
         const pass = a.reward > 0;
-        const extra = [a.outcome, a.reason].filter(Boolean).join(' · ');
+        const extra = [
+          a.outcome,
+          a.failureClassification,
+          a.reason,
+          a.trajectorySha256 ? `trajectory ${a.trajectorySha256.slice(0, 10)}…` : null,
+        ]
+          .filter(Boolean)
+          .join(' · ');
         return (
           <span
             key={i}
@@ -448,6 +531,11 @@ function TaskTable({groups, k, runDone}: {groups: TaskGroup[]; k: number; runDon
                     {[g.outcome, g.reason].filter(Boolean).join(' · ')}
                   </div>
                 )}
+                {!g.passed && g.attempts[g.attempts.length - 1]?.failureClassification && (
+                  <div style={{marginTop: 3, color: MUTED, fontSize: 11}}>
+                    {g.attempts[g.attempts.length - 1]?.failureClassification}
+                  </div>
+                )}
               </td>
               <td style={TD}>
                 <AttemptPips attempts={g.attempts} k={k} />
@@ -464,7 +552,51 @@ function TaskTable({groups, k, runDone}: {groups: TaskGroup[]; k: number; runDon
                 ) : (
                   <span style={{color: MUTED}}>—</span>
                 )}
+                {g.attempts
+                  .filter((a) => a.trajectoryLocation)
+                  .map((a) => (
+                    <div
+                      key={`trajectory-${a.attempt}`}
+                      style={{marginTop: 3, color: MUTED, fontSize: 11, maxWidth: 220}}
+                      title={`${a.trajectoryLocation}\nsha256:${a.trajectorySha256}`}
+                    >
+                      a{a.attempt} trajectory · {a.trajectorySha256?.slice(0, 10)}…
+                    </div>
+                  ))}
               </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function ActiveAttempts({attempts}: {attempts: api.BenchmarkActiveAttempt[]}) {
+  if (!attempts.length) return null;
+  return (
+    <div className='ide-card' style={{padding: 0, overflowX: 'auto'}}>
+      <table style={{width: '100%', borderCollapse: 'collapse'}}>
+        <thead>
+          <tr>
+            {['Task', 'Attempt', 'Elapsed', 'ETA', 'Last heartbeat'].map((h) => (
+              <th key={h} style={TH}>
+                {h}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {attempts.map((a) => (
+            <tr key={a.id} style={{borderTop: '1px solid var(--ide-border)'}}>
+              <td style={{...TD, fontFamily: 'monospace'}}>{a.taskName}</td>
+              <td style={TD}>
+                #{a.attempt}{' '}
+                {a.stale && <span style={{color: 'var(--ide-red)'}}>· stale heartbeat</span>}
+              </td>
+              <td style={TD}>{duration((Date.now() - Date.parse(a.startedAt)) / 1000)}</td>
+              <td style={TD}>{a.etaSeconds == null ? '—' : duration(a.etaSeconds)}</td>
+              <td style={TD}>{relTime(a.lastProgressAt)}</td>
             </tr>
           ))}
         </tbody>
@@ -502,6 +634,7 @@ function EventLog({events}: {events: api.BenchmarkEvent[]}) {
 
 function Detail({d}: {d: api.BenchmarkDetail}) {
   const r = d.run;
+  const activeAttempts = d.activeAttempts ?? [];
   const groups = groupTasks(d.tasks);
   const status = effectiveStatus(r);
   const runDone = ['DONE', 'FAILED', 'CANCELLED'].includes(status.toUpperCase());
@@ -539,7 +672,18 @@ function Detail({d}: {d: api.BenchmarkDetail}) {
         <KV k='Provider'>{r.provider}</KV>
         <KV k='Dataset'>{r.dataset || '—'}</KV>
         <KV k='Submission'>{r.submissionStatus || '—'}</KV>
-        <KV k='Started'>{relTime(r.startedAt)}</KV>
+        <KV k='Readiness'>
+          {r.submissionReadiness || 'NOT_REQUIRED'}
+          {r.submissionReadinessReason && (
+            <div style={{fontSize: 11, color: MUTED}}>{r.submissionReadinessReason}</div>
+          )}
+        </KV>
+        <KV k='Elapsed / ETA'>
+          {duration(r.elapsedSeconds)} / {r.etaSeconds == null ? '—' : duration(r.etaSeconds)}
+        </KV>
+        <KV k='Attempts'>
+          {r.activeAttemptCount || 0} active · {r.completedAttempts || 0} scored
+        </KV>
       </div>
 
       {r.leaderboardUrl && (
@@ -557,6 +701,15 @@ function Detail({d}: {d: api.BenchmarkDetail}) {
         <div style={{marginTop: 12}}>
           <ErrCard msg={r.error} />
         </div>
+      )}
+
+      {activeAttempts.length > 0 && (
+        <>
+          <div className='ide-h2' style={{marginTop: 18}}>
+            Active attempts ({activeAttempts.length})
+          </div>
+          <ActiveAttempts attempts={activeAttempts} />
+        </>
       )}
 
       <div className='ide-h2' style={{marginTop: 18}}>
@@ -591,37 +744,72 @@ export default function IdeBenchmark() {
   const [runs, setRuns] = useState<api.BenchmarkRun[] | null>(null);
   const [detail, setDetail] = useState<api.BenchmarkDetail | null>(null);
   const [err, setErr] = useState('');
+  // RR-1350 — the tracking controller only exists in local/dev/benchmark profiles.
+  // In production it returns 404, which the 5s poll would otherwise hit forever.
+  // Detect that once, stop polling, and say so instead of showing a sync error.
+  const [unavailable, setUnavailable] = useState(false);
+  const [lastSuccessfulRefresh, setLastSuccessfulRefresh] = useState<number | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [now, setNow] = useState(() => Date.now());
   const [currentCollapsed, setCurrentCollapsed] = useState(false);
   const [historicalCollapsed, setHistoricalCollapsed] = useState(false);
   const groups = useMemo(() => groupRuns(runs ?? []), [runs]);
 
   const loadList = useCallback(async () => {
+    setRefreshing(true);
     try {
       setRuns(await api.listBenchmarks());
       setErr('');
+      setLastSuccessfulRefresh(Date.now());
     } catch (e: unknown) {
+      // RR-1350 — a 404 means this environment does not host the tracking controller.
+      if (Number((e as {status?: number}).status) === 404) {
+        setUnavailable(true);
+        setErr('');
+        return;
+      }
       setErr(e instanceof Error ? e.message : 'Failed to load benchmark runs.');
-      setRuns([]);
+      // A transient telemetry failure must not replace the last known-good snapshot with an
+      // authoritative-looking empty state.
+      setRuns((current) => current ?? []);
+    } finally {
+      setRefreshing(false);
     }
   }, []);
 
   const loadDetail = useCallback(async (id: string) => {
+    setRefreshing(true);
     try {
       setDetail(await api.getBenchmark(id));
-    } catch {
-      /* keep the last good detail on a transient poll error */
+      setErr('');
+      setLastSuccessfulRefresh(Date.now());
+    } catch (e: unknown) {
+      if (Number((e as {status?: number}).status) === 404) {
+        setUnavailable(true);
+        setErr('');
+        return;
+      }
+      setErr(e instanceof Error ? e.message : 'Failed to refresh benchmark detail.');
+      // Keep the last good detail, but make the failed refresh visible to the operator.
+    } finally {
+      setRefreshing(false);
     }
   }, []);
 
+  const refreshActive = useCallback(() => {
+    if (benchmarkId) return loadDetail(benchmarkId);
+    return loadList();
+  }, [benchmarkId, loadDetail, loadList]);
+
   // List: initial load + 5s poll (skipped when the tab is hidden).
   useEffect(() => {
-    if (!isAdmin) return;
+    if (!isAdmin || benchmarkId || unavailable) return;
     void loadList();
     const t = setInterval(() => {
       if (!document.hidden) void loadList();
     }, 5000);
     return () => clearInterval(t);
-  }, [isAdmin, loadList]);
+  }, [benchmarkId, isAdmin, loadList, unavailable]);
 
   // Detail route: load on open + 3s poll while selected (skipped when hidden).
   useEffect(() => {
@@ -629,12 +817,61 @@ export default function IdeBenchmark() {
       setDetail(null);
       return;
     }
+    if (unavailable) return;
     void loadDetail(benchmarkId);
     const t = setInterval(() => {
       if (!document.hidden) void loadDetail(benchmarkId);
     }, 3000);
     return () => clearInterval(t);
-  }, [benchmarkId, loadDetail]);
+  }, [benchmarkId, loadDetail, unavailable]);
+
+  // Browser timers are throttled in background tabs. Refetch immediately when the operator
+  // returns instead of waiting for the next polling interval and presenting an old snapshot.
+  useEffect(() => {
+    if (!isAdmin) return;
+    const onVisible = () => {
+      if (!document.hidden) void refreshActive();
+    };
+    const onFocus = () => void refreshActive();
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('focus', onFocus);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('focus', onFocus);
+    };
+  }, [isAdmin, refreshActive]);
+
+  useEffect(() => {
+    const t = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(t);
+  }, []);
+
+  const staleAfterMs = benchmarkId ? 10_000 : 15_000;
+  const isStale = lastSuccessfulRefresh !== null && now - lastSuccessfulRefresh > staleAfterMs;
+  const syncLabel = lastSuccessfulRefresh
+    ? `${err ? 'Sync error · showing data from' : isStale ? 'Stale · last synced' : 'Synced'} ${new Date(
+        lastSuccessfulRefresh,
+      ).toLocaleTimeString()}`
+    : refreshing
+      ? 'Syncing benchmark telemetry…'
+      : err
+        ? 'Benchmark telemetry unavailable'
+        : 'Waiting for benchmark telemetry';
+
+  const SyncStatus = () => (
+    <div
+      data-testid='benchmark-sync-status'
+      aria-live='polite'
+      style={{
+        color: err || isStale ? 'var(--ide-yellow)' : 'var(--ide-muted)',
+        fontSize: 11,
+        marginBottom: 10,
+      }}
+    >
+      {refreshing && lastSuccessfulRefresh ? 'Refreshing · ' : ''}
+      {syncLabel}
+    </div>
+  );
 
   if (!isAdmin) {
     return (
@@ -645,9 +882,23 @@ export default function IdeBenchmark() {
     );
   }
 
+  if (unavailable) {
+    // RR-1350 — the benchmark tracking backend is not deployed in this environment.
+    return (
+      <div className='ide-pane' style={{maxWidth: 760}}>
+        <h1 className='ide-h1'>Benchmarks</h1>
+        <EmptyCard>
+          Benchmark tracking is not available in this environment. The tracking backend runs only in
+          local, dev and dedicated benchmark deployments.
+        </EmptyCard>
+      </div>
+    );
+  }
+
   if (benchmarkId) {
     return (
       <div className='ide-pane' style={{maxWidth: 1180}}>
+        <SyncStatus />
         {err && <ErrCard msg={err} />}
         {!detail ? <IdeLoader label='Loading benchmark detail…' pad={24} /> : <Detail d={detail} />}
       </div>
@@ -672,6 +923,8 @@ export default function IdeBenchmark() {
         Operator telemetry for Terminal-Bench and SWE-bench. This is not a customer run launcher;
         external harnesses publish verifier events and this page tracks them.
       </div>
+
+      <SyncStatus />
 
       {err && <ErrCard msg={err} />}
 

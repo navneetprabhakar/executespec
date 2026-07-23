@@ -170,6 +170,16 @@ class ShellSandboxPolicyTest {
       var result = policy.validate("ssh user@remote-host.com", "/ws");
       assertThat(result.permitted()).isFalse();
     }
+
+    @Test
+    @DisplayName("credential files are blocked but safe templates remain inspectable")
+    void credentialFiles() {
+      assertThat(policy.validate("cat .env", "/ws").permitted()).isFalse();
+      assertThat(policy.validate("grep token secrets/service-account.json", "/ws").permitted())
+          .isFalse();
+      assertThat(policy.validate("cat certs/client.pem", "/ws").permitted()).isFalse();
+      assertThat(policy.validate("cat .env.example", "/ws").permitted()).isTrue();
+    }
   }
 
   @Nested

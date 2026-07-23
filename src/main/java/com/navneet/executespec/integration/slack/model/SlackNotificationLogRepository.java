@@ -14,6 +14,10 @@ public interface SlackNotificationLogRepository extends JpaRepository<SlackNotif
 
   List<SlackNotificationLog> findByRunIdOrderByCreatedAtDesc(String runId);
 
+  // RR-414 — tenant-scoped run-log lookup. An unscoped `findByRunId` let any org admin read another
+  // tenant's Slack delivery metadata (channel, event, error text) by supplying a foreign run id.
+  List<SlackNotificationLog> findByOrgIdAndRunIdOrderByCreatedAtDesc(String orgId, String runId);
+
   List<SlackNotificationLog> findByOrgIdOrderByCreatedAtDesc(String orgId, Pageable pageable);
 
   @Modifying

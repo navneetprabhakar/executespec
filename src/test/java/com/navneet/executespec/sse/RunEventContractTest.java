@@ -32,12 +32,12 @@ class RunEventContractTest {
     assertEquals("TOKEN_USAGE", event.type());
     assertEquals("task-1", event.taskId());
     assertEquals("in=100,out=25,total=125", event.payload());
-    assertEquals(100, event.data().get("inputTokens"));
-    assertEquals(25, event.data().get("outputTokens"));
-    assertEquals(40, event.data().get("cacheReadTokens"));
-    assertEquals(7, event.data().get("cacheWriteTokens"));
-    assertEquals(9, event.data().get("reasoningTokens"));
-    assertEquals(3, event.data().get("calls"));
+    assertEquals(100L, event.data().get("inputTokens"));
+    assertEquals(25L, event.data().get("outputTokens"));
+    assertEquals(40L, event.data().get("cacheReadTokens"));
+    assertEquals(7L, event.data().get("cacheWriteTokens"));
+    assertEquals(9L, event.data().get("reasoningTokens"));
+    assertEquals(3L, event.data().get("calls"));
     assertEquals("openai", event.data().get("provider"));
     assertEquals("gpt-5.4", event.data().get("model"));
   }

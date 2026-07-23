@@ -146,4 +146,36 @@ class RunModelOverridesResolverTest {
     assertThat(resolver.resolve("WorkerAgent", LlmProvider.ANTHROPIC).getModel())
         .isEqualTo("claude-opus-4-6");
   }
+
+  @Test
+  void capturedRouteContextSurvivesExecutorFanoutAndDoesNotLeak() throws Exception {
+    RunModelOverrides.bind(Map.of("anthropic:workhorse", "claude-opus-4-6"));
+    Map<String, String> snapshot = RunModelOverrides.capture();
+    java.util.concurrent.ExecutorService executor =
+        java.util.concurrent.Executors.newSingleThreadExecutor();
+    try {
+      String inside =
+          executor
+              .submit(
+                  () -> {
+                    java.util.concurrent.atomic.AtomicReference<String> resolved =
+                        new java.util.concurrent.atomic.AtomicReference<>();
+                    RunModelOverrides.runWith(
+                        snapshot,
+                        () ->
+                            resolved.set(
+                                resolver.resolve("WorkerAgent", LlmProvider.ANTHROPIC).getModel()));
+                    return resolved.get();
+                  })
+              .get();
+      assertThat(inside).isEqualTo("claude-opus-4-6");
+      assertThat(
+              executor
+                  .submit(() -> resolver.resolve("WorkerAgent", LlmProvider.ANTHROPIC).getModel())
+                  .get())
+          .isEqualTo("claude-haiku-4-5-20251001");
+    } finally {
+      executor.shutdownNow();
+    }
+  }
 }

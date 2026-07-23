@@ -35,6 +35,12 @@
     <executespec.live-llm.enabled>false</executespec.live-llm.enabled>
     <executespec.live-llm.test-mode>false</executespec.live-llm.test-mode>
     <executespec.live-llm.reservation-id></executespec.live-llm.reservation-id>
+    <!-- CI-minutes (2026-07-22): JaCoCo instrumentation + report add real wall-clock to every
+         `mvn test`, but coverage is NOT a gate (there is no jacoco:check). Skip it by default so the
+         CI PR gate (`mvn spotless:check test`) runs uninstrumented; generate coverage on demand with
+         `-Pcoverage`. jacoco-maven-plugin honours the `jacoco.skip` property on both prepare-agent
+         and report goals. -->
+    <jacoco.skip>true</jacoco.skip>
   </properties>
 
   <dependencyManagement>
@@ -500,6 +506,12 @@
       <artifactId>spring-security-test</artifactId>
       <scope>test</scope>
     </dependency>
+    <dependency>
+      <groupId>com.squareup.okhttp3</groupId>
+      <artifactId>mockwebserver</artifactId>
+      <version>4.12.0</version>
+      <scope>test</scope>
+    </dependency>
 
     <!-- ArchUnit — enforces architectural rules as JUnit tests -->
     <dependency>
@@ -580,6 +592,15 @@
               <artifactId>lombok</artifactId>
             </exclude>
           </excludes>
+          <!-- spring-boot:run forks the application JVM. Propagate the same fail-closed live-test
+               properties used by Surefire so -Plive-llm-test actually enables the guarded runtime
+               after an exact provider-budget reservation is supplied. Packaged production JARs are
+               unaffected; the default Maven properties above remain false. -->
+          <systemPropertyVariables>
+            <executespec.live-llm.enabled>${executespec.live-llm.enabled}</executespec.live-llm.enabled>
+            <executespec.live-llm.test-mode>${executespec.live-llm.test-mode}</executespec.live-llm.test-mode>
+            <executespec.live-llm.reservation-id>${executespec.live-llm.reservation-id}</executespec.live-llm.reservation-id>
+          </systemPropertyVariables>
         </configuration>
       </plugin>
       <plugin>
@@ -590,6 +611,13 @@
                keys; run via -Pintegration. Default Surefire run = fast unit tests
                only so CI's `mvn package` is bounded to a couple of minutes. -->
           <excludedGroups>e2e,integration,chaos</excludedGroups>
+          <!-- CI-minutes (2026-07-22): parallel Surefire forks were TRIED and REVERTED. The win was
+               only ~15s (JaCoCo-skip below is the real saving), and forkCount>1 exposed timing-flaky
+               tests (tight Thread.sleep + deadline assertions race under CPU contention) AND forced
+               10-fork local gates on dev machines. A green-always serial run beats a marginally
+               faster flaky one. If revisited, harden every short-sleep timing test first and pin CI
+               to forkCount matching the runner's dedicated cores. -->
+
           <systemPropertyVariables>
             <executespec.live-llm.enabled>${executespec.live-llm.enabled}</executespec.live-llm.enabled>
             <executespec.live-llm.test-mode>${executespec.live-llm.test-mode}</executespec.live-llm.test-mode>
@@ -649,6 +677,15 @@
           <execution>
             <id>prepare-agent</id>
             <goals><goal>prepare-agent</goal></goals>
+            <configuration>
+              <!-- The JaCoCo agent appends to jacoco.exec by default. If a test JVM is ever killed
+                   mid-write (Ctrl-C, OOM, timeout) the exec file is left truncated, and because
+                   every later run appends to it the `report` goal then fails permanently with
+                   "Unknown block type 0" on any workspace that isn't cleaned — breaking the build
+                   for reasons unrelated to the code. Starting each run from a fresh exec file makes
+                   the coverage step self-healing. -->
+              <append>false</append>
+            </configuration>
           </execution>
           <execution>
             <id>report</id>
@@ -670,6 +707,14 @@
   </build>
 
   <profiles>
+    <!-- CI-minutes (2026-07-22): coverage is off by default (see jacoco.skip in <properties>).
+         Run `mvn -Pcoverage test` to instrument + emit target/site/jacoco. -->
+    <profile>
+      <id>coverage</id>
+      <properties>
+        <jacoco.skip>false</jacoco.skip>
+      </properties>
+    </profile>
     <profile>
       <id>integration</id>
       <build>

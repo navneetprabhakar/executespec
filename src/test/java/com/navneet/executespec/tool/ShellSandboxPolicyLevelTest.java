@@ -86,12 +86,13 @@ class ShellSandboxPolicyLevelTest {
                 .validate("expo export --platform android", "/ws", GuardrailLevel.LOW)
                 .permitted())
         .isTrue();
-    assertThat(
-            policy
-                .validate(
-                    "eas build --platform android --profile production", "/ws", GuardrailLevel.LOW)
-                .permitted())
-        .isTrue();
+    // RR-853 — `eas build` is a networked cloud build (external side effect) and is now denied at
+    // every guardrail level, LOW included; it must route through /api/deployments.
+    var easLow =
+        policy.validate(
+            "eas build --platform android --profile production", "/ws", GuardrailLevel.LOW);
+    assertThat(easLow.permitted()).isFalse();
+    assertThat(easLow.reason()).contains("/api/deployments");
     assertThat(policy.validate("jest --ci", "/ws", GuardrailLevel.LOW).permitted()).isTrue();
   }
 
@@ -106,24 +107,32 @@ class ShellSandboxPolicyLevelTest {
                 .validate("expo export --platform android", "/ws", GuardrailLevel.HIGH)
                 .permitted())
         .isTrue();
-    assertThat(
-            policy
-                .validate(
-                    "eas build --platform android --profile production", "/ws", GuardrailLevel.HIGH)
-                .permitted())
-        .isTrue();
+    // RR-853 — `eas build` denied at HIGH too (external side effect, not a HIGH verb question).
+    var easHigh =
+        policy.validate(
+            "eas build --platform android --profile production", "/ws", GuardrailLevel.HIGH);
+    assertThat(easHigh.permitted()).isFalse();
+    assertThat(easHigh.reason()).contains("/api/deployments");
   }
 
   @Test
-  void easUpdateBlockedAtHigh() {
-    // `eas update` is the OTA-push path — deploy-equivalent and therefore
-    // forbidden at HIGH. Must route through /api/deployments instead.
-    var blocked = policy.validate("eas update --branch main", "/ws", GuardrailLevel.HIGH);
-    assertThat(blocked.permitted()).isFalse();
-    assertThat(blocked.reason()).contains("HIGH-level canonical verb allowlist");
-    // LOW still permits it (pre-existing loose policy).
-    assertThat(policy.validate("eas update --branch main", "/ws", GuardrailLevel.LOW).permitted())
-        .isTrue();
+  void easExternalSideEffectsBlockedAtEveryLevel() {
+    // RR-853 — build / submit / update are networked external side effects: paid cloud build,
+    // app-store submission, OTA push. All three are denied at LOW, MEDIUM and HIGH and must route
+    // through /api/deployments. `npx eas <verb>` is denied on the same grounds.
+    for (GuardrailLevel level : GuardrailLevel.values()) {
+      for (String cmd :
+          new String[] {
+            "eas build --platform android --profile production",
+            "eas submit --platform ios",
+            "eas update --branch main",
+            "npx eas build --platform android"
+          }) {
+        var blocked = policy.validate(cmd, "/ws", level);
+        assertThat(blocked.permitted()).as("%s at %s must be blocked", cmd, level).isFalse();
+        assertThat(blocked.reason()).contains("/api/deployments");
+      }
+    }
   }
 
   @Test

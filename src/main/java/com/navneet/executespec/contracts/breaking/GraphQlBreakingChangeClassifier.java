@@ -54,6 +54,21 @@ public class GraphQlBreakingChangeClassifier implements BreakingChangeClassifier
           ContractDiff.Confidence.UNCLASSIFIED,
           name());
     }
+    // graphql-inspector exits non-zero when it finds breaking changes, so a non-zero exit alone is
+    // not an error. But a hard tool error (parse failure, bad schema path) exits non-zero with the
+    // message on stderr and nothing on stdout; previously exitCode was ignored entirely and that
+    // case produced "No structural changes … DETERMINISTIC" — a tool failure reported as an
+    // authoritative all-clear (RR-1652). Mirrors the oasdiff guard.
+    if (result.exitCode() != 0
+        && (result.stdout() == null || result.stdout().isBlank())
+        && result.stderr() != null
+        && !result.stderr().isBlank()) {
+      return new ContractDiff(
+          "graphql-inspector stderr: " + result.stderr().strip(),
+          List.of(),
+          ContractDiff.Confidence.UNCLASSIFIED,
+          name());
+    }
     List<ContractDiff.Change> changes = new ArrayList<>();
     for (String raw : (result.stdout() == null ? "" : result.stdout()).split("\\r?\\n")) {
       String line = raw.trim();

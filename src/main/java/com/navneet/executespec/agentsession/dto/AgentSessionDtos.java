@@ -145,23 +145,68 @@ public final class AgentSessionDtos {
       int extractedChars,
       String preview) {}
 
+  /**
+   * @param projectWriteAuthorized {@code TRUE}/{@code FALSE} when the caller resolved the actor's
+   *     project write authority before routing, {@code null} when it did not. An explicit {@code
+   *     FALSE} suppresses the confirmable cloud-run proposal so a read-only collaborator is not
+   *     shown a run card whose confirmation would be rejected. The submission gate remains the
+   *     authority in every case.
+   */
   public record InterpretIntentRequest(
       String sessionId,
       String message,
       String projectId,
       RepoContext repoContext,
-      ClientCapabilities clientCapabilities) {}
+      ClientCapabilities clientCapabilities,
+      Boolean projectWriteAuthorized) {
 
+    /** Compatibility overload for callers that have not resolved write authority. */
+    public InterpretIntentRequest(
+        String sessionId,
+        String message,
+        String projectId,
+        RepoContext repoContext,
+        ClientCapabilities clientCapabilities) {
+      this(sessionId, message, projectId, repoContext, clientCapabilities, null);
+    }
+  }
+
+  /**
+   * A typed action proposal.
+   *
+   * <p>{@code actionContext} is the Phase 4 typed blocking contract. It is nullable for backward
+   * compatibility with persisted {@code agent_turn.proposed_action_json} rows written before the
+   * field existed; clients must treat {@code null} as "unknown" and fall back to their own
+   * confirmability rules rather than assuming confirmable.
+   */
   public record TypedAction(
       String type,
       Map<String, Object> arguments,
       boolean requiresConfirmation,
       String billingImpact,
-      String confirmationPrompt) {}
+      String confirmationPrompt,
+      AgentActionContext actionContext) {
+
+    /** Backward-compatible constructor for actions that carry no typed blocking context. */
+    public TypedAction(
+        String type,
+        Map<String, Object> arguments,
+        boolean requiresConfirmation,
+        String billingImpact,
+        String confirmationPrompt) {
+      this(type, arguments, requiresConfirmation, billingImpact, confirmationPrompt, null);
+    }
+  }
 
   public record OrchestratorPolicy(
       boolean runApiAllowed, boolean confirmationRequiredBeforeSubmit, String reason) {}
 
+  /**
+   * A route decision.
+   *
+   * <p>{@code actionContext} carries the typed blocking contract even when {@code proposedAction}
+   * is null, so a client can render "what is missing and what to do next" without parsing prose.
+   */
   public record OrchestratorDecision(
       String route,
       double confidence,
@@ -170,7 +215,31 @@ public final class AgentSessionDtos {
       String assistantReply,
       TypedAction proposedAction,
       OrchestratorPolicy policy,
-      String traceId) {}
+      String traceId,
+      AgentActionContext actionContext) {
+
+    /** Backward-compatible constructor for decisions that carry no typed blocking context. */
+    public OrchestratorDecision(
+        String route,
+        double confidence,
+        String reasonCode,
+        boolean requiresUserConfirmation,
+        String assistantReply,
+        TypedAction proposedAction,
+        OrchestratorPolicy policy,
+        String traceId) {
+      this(
+          route,
+          confidence,
+          reasonCode,
+          requiresUserConfirmation,
+          assistantReply,
+          proposedAction,
+          policy,
+          traceId,
+          null);
+    }
+  }
 
   public record OrchestratorRepoContext(
       String gitRoot,

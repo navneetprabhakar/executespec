@@ -21,8 +21,8 @@ Output shape:
 ## Files
 
 - `PrReviewAgent.java` — single-call agent. PLANNING-tier via `ModelResolver.resolve("PrReviewAgent", provider)`. Emits `submitReview` tool call; orchestrator parses args directly.
-- `PrReviewService.java` — orchestrator. Tier gate (`assertTierAndQuota`) → idempotency check (per `(repo, pr, head_sha)` triple) → persist QUEUED row → dispatch on dedicated 4-thread pool → SSE on `pr-review-{prReviewId}`. Cost attribution via `RunCostTracker.snapshot("pr-review-{id}")`.
-- `PrReviewController.java` — REST surface. `POST /api/pr-reviews` returns 202 + QUEUED row; FREE → 403, quota exhausted → 429, GitHub fetch fail → 502. List + detail endpoints under `/api/pr-reviews` and `/api/projects/{id}/pr-reviews`.
+- `PrReviewService.java` — orchestrator. Tier gate (`assertTierAndQuota`) → project-scoped idempotency check → persist QUEUED row → dispatch on dedicated 4-thread pool → SSE on `pr-review-{prReviewId}`. Cost attribution via `RunCostTracker.snapshot("pr-review-{id}")`.
+- `PrReviewController.java` — REST surface. `POST /api/pr-reviews` requires `projectId + repoId + prNumber`, write-guards the project, and canonicalises the optional `repoFullName` assertion through the linked `ProjectRepo` before tier/quota checks. FREE → 403, quota exhausted → 429, GitHub fetch fail → 502. Direct detail and by-PR list reads are project-read-guarded.
 - `entity/PrReview.java`, `entity/PrReviewComment.java` — JPA entities for `pr_review` + `pr_review_comment` (V172).
 - `repository/PrReviewRepository.java`, `repository/PrReviewCommentRepository.java` — Spring Data JPA repos. `countByUserSince(userId, monthStart)` powers the per-tier monthly quota gate.
 
@@ -36,7 +36,7 @@ pr_review               -- one row per (repo, PR, head_sha) review run
   ├── status ∈ {QUEUED, RUNNING, COMPLETE, FAILED}
   ├── posted_to_github_at + github_review_id (slice 3 — GitHub mirroring)
   ├── cost_usd + total_input_tokens + total_output_tokens
-  └── unique (repo_full_name, pr_number, head_sha)
+  └── V281 repo_id FK + unique (project_id, repo_id, pr_number, head_sha) for new rows
 
 pr_review_comment       -- one row per line-anchored comment
   ├── side ∈ {LEFT, RIGHT}     (GitHub Reviews API convention)
@@ -64,12 +64,21 @@ Driven by `tier_config.pr_review_enabled` (boolean) + `pr_review_monthly_quota` 
 
 ## Idempotency
 
-A unique index on `(repo_full_name, pr_number, head_sha)` ensures re-running on the
-same SHA returns the existing row instead of starting a new review. The service short-
+A partial unique index on `(project_id, repo_id, pr_number, head_sha)` ensures re-running on the
+same SHA in the same tenant project returns the existing row even if the repository is renamed. The service short-
 circuits when an existing row is in COMPLETE or RUNNING; FAILED + QUEUED-but-stalled
-rows are re-queued.
+rows are re-queued. V281 replaces the old global repo/PR/SHA key, which could otherwise reuse a
+different project's row when both tenants linked the same public repository, and backfills the new
+`repo_id` column where a historical link can be resolved. Historical rows that cannot be backfilled
+remain under a separate project/name/PR/SHA partial unique index and are not used by new-write
+lookups.
 
 ## Outstanding (slice 3+)
+
+`PrReviewService` has an explicit Spring-selected production constructor in addition to its
+package-private compatibility constructor. Keep the production constructor explicit whenever the
+dependency list changes; Lombok does not generate `@RequiredArgsConstructor` when another
+constructor already exists. The benchmark-profile boot gate caught this contract on 2026-07-18.
 
 - GitHub Reviews API mirroring — push the verdict + comments back to the PR via
   `POST /repos/{o}/{r}/pulls/{n}/reviews` so they show up inline. Both `posted_to_github_at`

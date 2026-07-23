@@ -8,6 +8,8 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 
+import com.navneet.executespec.testgen.BoundedProcess;
+
 import org.springframework.stereotype.Service;
 
 import lombok.extern.slf4j.Slf4j;
@@ -168,7 +170,7 @@ public class VendoredPathGuard {
    */
   public ScrubResult scrubCommittedVendored(Path repoDir) {
     if (!Files.isDirectory(repoDir.resolve(".git"))) {
-      return new ScrubResult(0, 0, java.util.Set.of());
+      return new ScrubResult(0, 0, java.util.Set.of(), false);
     }
     try {
       List<String> tracked = runGit(repoDir, List.of("ls-files"), 30);
@@ -176,19 +178,26 @@ public class VendoredPathGuard {
       int vendoredFileCount = 0;
       for (String path : tracked) {
         if (isVendored(path)) {
-          vendoredFileCount++;
-          // Use the SECOND-LEVEL parent in case the vendored dir is nested (e.g.
-          // "repos/api/node_modules/foo/index.js" → root segment is "node_modules", but the
-          // actual rm path needs to be relative to the repo we're operating on, which is
-          // already the case since we're running inside repoDir).
-          vendoredRoots.add(firstVendoredSegmentOf(path));
+          // The exact vendored subtree prefix (e.g. "repos/api/node_modules"), relative to repoDir.
+          // RR-649: a null/unsafe target is refused, not widened to the first path segment.
+          String target = firstVendoredSegmentOf(path);
+          if (isSafeVendoredRemovalTarget(target)) {
+            vendoredFileCount++;
+            vendoredRoots.add(target);
+          } else {
+            log.warn(
+                "VendoredPathGuard.scrub: refusing to remove {} in {} — no unambiguous vendored"
+                    + " subtree could be derived",
+                path,
+                repoDir.getFileName());
+          }
         }
       }
       if (vendoredRoots.isEmpty()) {
         log.debug(
             "VendoredPathGuard.scrub: {} has no tracked vendored content (no-op)",
             repoDir.getFileName());
-        return new ScrubResult(0, tracked.size(), java.util.Set.of());
+        return new ScrubResult(0, tracked.size(), java.util.Set.of(), true);
       }
 
       log.info(
@@ -207,7 +216,7 @@ public class VendoredPathGuard {
       ensureLocalIdentity(repoDir);
       for (String segment : vendoredRoots) {
         try {
-          runGit(repoDir, List.of("rm", "--cached", "-r", "--ignore-unmatch", segment), 60);
+          runGit(repoDir, List.of("rm", "--cached", "-r", "--ignore-unmatch", "--", segment), 60);
         } catch (Exception inner) {
           log.warn(
               "git rm --cached failed for {}/{}: {}",
@@ -223,6 +232,12 @@ public class VendoredPathGuard {
         // best-effort
       }
       // 3. One scrub commit so the cleanup is atomic in history.
+      // RR-650 — the commit outcome is now part of the result contract. When it fails, the removals
+      // remain only STAGED (not committed), so a later reset/checkout can restore the vendored
+      // content or an unrelated commit can absorb the large staged deletion — the caller must not
+      // be
+      // told the scrub durably succeeded.
+      boolean committed = false;
       try {
         runGit(
             repoDir,
@@ -236,44 +251,82 @@ public class VendoredPathGuard {
                     + vendoredRoots.size()
                     + " roots)"),
             30);
+        committed = true;
       } catch (Exception e) {
         log.warn(
-            "VendoredPathGuard.scrub: scrub commit failed in {}: {}",
+            "VendoredPathGuard.scrub: scrub commit failed in {}: {} — removals remain staged only",
             repoDir.getFileName(),
             e.getMessage());
-        // index is already updated; lack of a commit just means subsequent `git status` shows
-        // a big staged removal. Acceptable.
       }
-      return new ScrubResult(vendoredFileCount, tracked.size(), vendoredRoots);
+      return new ScrubResult(vendoredFileCount, tracked.size(), vendoredRoots, committed);
     } catch (Exception e) {
       log.warn("VendoredPathGuard.scrub failed for {}: {}", repoDir.getFileName(), e.getMessage());
-      return new ScrubResult(0, 0, java.util.Set.of());
+      return new ScrubResult(0, 0, java.util.Set.of(), false);
     }
   }
 
-  /** Result of a {@link #scrubCommittedVendored} call. */
-  public record ScrubResult(int filesRemoved, int totalTrackedAtScan, java.util.Set<String> roots) {
+  /**
+   * Result of a {@link #scrubCommittedVendored} call.
+   *
+   * @param committed RR-650 — true only when the scrub commit landed. When false with {@code
+   *     filesRemoved > 0}, the removals are staged but NOT durably committed (a partial state).
+   */
+  public record ScrubResult(
+      int filesRemoved, int totalTrackedAtScan, java.util.Set<String> roots, boolean committed) {
     public boolean changed() {
       return filesRemoved > 0;
     }
   }
 
   /**
-   * Like {@link #rootSegmentOf} but returns the FIRST path segment that matches a vendored dir
-   * (instead of always the first segment). Lets us scrub the right level when vendored dirs are
-   * nested under non-vendored prefixes — though for the multi-repo workspace shape we use, the
-   * vendored dir is always at the repo root, so this collapses to {@code rootSegmentOf} in
-   * practice.
+   * RR-649 (2026-07-21) — returns the exact prefix ending at the FIRST path segment that is itself
+   * a vendored directory, or {@code null} when no segment matches.
+   *
+   * <p>For {@code frontend/node_modules/pkg/index.js} this returns {@code frontend/node_modules} —
+   * NOT {@code frontend}. The previous {@link #rootSegmentOf} fallback here (and at the {@code
+   * purgeStagedVendored} call site) meant a nested vendored directory resolved to the application
+   * subtree, and the subsequent {@code git rm --cached -r} unstaged every tracked source file under
+   * it. Returning {@code null} instead of guessing is deliberate: an ambiguous removal target must
+   * be refused, never widened.
+   *
+   * <p>Matching is case-insensitive so it agrees with {@link #VENDORED_REGEX}. The prior {@code
+   * VENDORED_DIRS.contains(p)} check was case-SENSITIVE while {@code isVendored} was not, so a path
+   * like {@code Frontend/Node_Modules/x} passed the vendored test and then fell through to the
+   * root-segment fallback — the same catastrophic widening, reachable from the scrub path too.
    */
-  private String firstVendoredSegmentOf(String path) {
+  static String firstVendoredSegmentOf(String path) {
+    if (path == null || path.isBlank()) return null;
     String[] parts = path.split("/");
     StringBuilder accum = new StringBuilder();
     for (String p : parts) {
+      if (p.isEmpty()) continue;
       if (accum.length() > 0) accum.append('/');
       accum.append(p);
-      if (VENDORED_DIRS.contains(p)) return accum.toString();
+      for (String vendored : VENDORED_DIRS) {
+        if (vendored.equalsIgnoreCase(p)) return accum.toString();
+      }
     }
-    return rootSegmentOf(path); // shouldn't reach here — caller already checked isVendored
+    return null;
+  }
+
+  /**
+   * RR-649 — final sanity check before a removal target is handed to {@code git rm --cached -r}.
+   * The target must be non-blank, relative, traversal-free, and its LAST segment must itself be a
+   * vendored directory name. Anything else is refused rather than removed.
+   */
+  static boolean isSafeVendoredRemovalTarget(String target) {
+    if (target == null || target.isBlank()) return false;
+    if (target.startsWith("/") || target.startsWith("-")) return false;
+    String[] parts = target.split("/");
+    if (parts.length == 0) return false;
+    for (String p : parts) {
+      if (p.isEmpty() || ".".equals(p) || "..".equals(p)) return false;
+    }
+    String last = parts[parts.length - 1];
+    for (String vendored : VENDORED_DIRS) {
+      if (vendored.equalsIgnoreCase(last)) return true;
+    }
+    return false;
   }
 
   /**
@@ -300,7 +353,20 @@ public class VendoredPathGuard {
       List<String> staged = runGit(repoDir, List.of("diff", "--cached", "--name-only"), 10);
       Set<String> vendoredHits = new LinkedHashSet<>();
       for (String path : staged) {
-        if (isVendored(path)) vendoredHits.add(rootSegmentOf(path));
+        if (!isVendored(path)) continue;
+        // RR-649: the exact vendored subtree, never the first path segment. A null/unsafe target
+        // means we could not identify the vendored directory — leave the path staged rather than
+        // deleting a guess.
+        String target = firstVendoredSegmentOf(path);
+        if (isSafeVendoredRemovalTarget(target)) {
+          vendoredHits.add(target);
+        } else {
+          log.warn(
+              "VendoredPathGuard: refusing to unstage {} in {} — no unambiguous vendored subtree"
+                  + " could be derived",
+              path,
+              repoDir.getFileName());
+        }
       }
       if (vendoredHits.isEmpty()) return 0;
 
@@ -318,7 +384,7 @@ public class VendoredPathGuard {
       // on retries / when the path was already cleaned by augmentGitignore's own commit.
       for (String hit : vendoredHits) {
         try {
-          runGit(repoDir, List.of("rm", "--cached", "-r", "--ignore-unmatch", hit), 30);
+          runGit(repoDir, List.of("rm", "--cached", "-r", "--ignore-unmatch", "--", hit), 30);
         } catch (Exception inner) {
           log.debug("git rm --cached failed for {}: {}", hit, inner.getMessage());
         }
@@ -391,23 +457,34 @@ public class VendoredPathGuard {
     ProcessBuilder pb =
         new ProcessBuilder(cmd).directory(repoDir.toFile()).redirectErrorStream(true);
     pb.environment().keySet().retainAll(List.of("PATH", "HOME"));
-    Process p = pb.start();
-    List<String> lines = new ArrayList<>();
-    try (var br =
-        new java.io.BufferedReader(
-            new java.io.InputStreamReader(
-                p.getInputStream(), java.nio.charset.StandardCharsets.UTF_8))) {
-      String line;
-      while ((line = br.readLine()) != null) lines.add(line);
-    }
-    boolean done = p.waitFor(timeoutSeconds, java.util.concurrent.TimeUnit.SECONDS);
-    if (!done) {
-      p.destroyForcibly();
-      throw new IOException("git command timed out: " + cmd);
-    }
-    if (p.exitValue() != 0) {
-      throw new IOException("git " + args + " exit=" + p.exitValue() + " — " + lines);
+    BoundedProcess.Outcome outcome = runBoundedGit(pb, timeoutSeconds, cmd);
+    List<String> lines = outcome.output().lines().toList();
+    if (outcome.exitCode() != 0) {
+      throw new IOException("git " + args + " exit=" + outcome.exitCode() + " — " + lines);
     }
     return lines;
+  }
+
+  /**
+   * RR-651: run a git child through {@link BoundedProcess} so the timed wait is reachable while the
+   * child is still alive — reading its output to EOF on this thread first (the old shape) let a
+   * hung git that kept its descriptor open block the pipeline thread past every deadline. A timeout
+   * is surfaced as an {@link IOException} rather than a silent hang. Package-private for the
+   * hung-child regression test.
+   */
+  static BoundedProcess.Outcome runBoundedGit(ProcessBuilder pb, int timeoutSeconds, Object label)
+      throws IOException {
+    BoundedProcess.Outcome outcome;
+    try {
+      outcome = BoundedProcess.run(pb, java.time.Duration.ofSeconds(timeoutSeconds));
+    } catch (IOException e) {
+      throw e;
+    } catch (Exception e) {
+      throw new IOException("git " + label + " failed: " + e.getMessage(), e);
+    }
+    if (!outcome.finished()) {
+      throw new IOException("git command timed out: " + label);
+    }
+    return outcome;
   }
 }

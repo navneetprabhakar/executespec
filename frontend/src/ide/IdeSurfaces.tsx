@@ -1,7 +1,11 @@
 import {useEffect, useMemo, useRef, useState} from 'react';
 import {Link, useNavigate, useParams} from 'react-router-dom';
 import * as api from '@/lib/api';
+import {consumeSpecHandoff, writeSpecHandoff} from '@/lib/specHandoff';
+import {repoSupports} from '@/ide/projectRepoUi';
 import {IdeBadge, IdeLoader, statusKind} from '@/ide/IdeKit';
+import {LoadError} from '@/ide/LoadError';
+import {toLoadFailure, type LoadFailure} from '@/lib/loadState';
 import {ScoreBadge} from '@/ide/ScoreBadge';
 import {SpecChat} from '@/signal/components/SpecChat';
 import {CostProgressBar} from '@/signal/components/CostProgressBar';
@@ -11,13 +15,24 @@ import {useIsMobile} from '@/hooks/useIsMobile';
 import {useAuthStore, selectNormalizedTier, selectIsSuperAdmin} from '@/stores/useAuthStore';
 import {useSse} from '@/hooks/useSse';
 import {useSseStore} from '@/stores/useSseStore';
+// RR-790 — reuse the typed event normalizer so the live view renders tool,
+// continuation, usage and evidence envelopes instead of only message/payload.
+import {logLabel, logMessage, isNoisyLogEvent} from '@/ide/runResultUtils';
 import {buildIdeComposeRunRequest} from '@/ide/ideComposeRunRequest';
+import {
+  providerIsDispatchable,
+  providerOptionLabel,
+  providerReadinessLabel,
+} from '@/ide/providerReadiness';
+import {useProviderReadiness} from '@/ide/useProviderReadiness';
 import {
   formatManagedAiPlanMessage,
   hasUnlimitedAiCredits,
   managedAiStatusLabel,
 } from '@/ide/planUtils';
 import {ModelPicker, type ModelPickerOption} from '@/ide/ModelPicker';
+import {isProductProvider, productProviderCatalog} from '@/ide/agentModelRouting';
+import {fmtCost} from '@/lib/utils';
 
 // Relative timestamps everywhere (review/11 #8) — `toLocaleString()` was
 // locale-ambiguous (DD/MM vs MM/DD), carried seconds noise, and clashed with
@@ -75,18 +90,6 @@ function managedKind(state?: string | null): 'ok' | 'warn' | 'bad' {
 function isLiveStatus(s?: string | null): boolean {
   return NON_TERMINAL.has((s || '').toUpperCase());
 }
-// C6 (review/11) — quota subtitle segment shared by IdeWelcome + IdeCompose.
-// Never emits a leading separator; unlimited tiers say so in words instead of
-// the "0 / ∞ runs" jargon, and "this cycle" became "this month".
-function quotaSubtitle(
-  tier: string,
-  _permissions: {monthlyRunLimit: number; currentRunCount: number} | null,
-): string {
-  // Run-count retirement (2026-06-22): monthly run caps no longer gate usage — managed AI
-  // credits do (surfaced on the billing / top-up pages, and enforced server-side at submit).
-  // The subtitle stays at the tier so it never shows a stale run cap.
-  return tier;
-}
 // Map a backend run status to the human phase the user actually sees on screen.
 function phaseLabel(status?: string | null): string {
   const s = (status || '').toUpperCase();
@@ -106,14 +109,16 @@ function phaseLabel(status?: string | null): string {
 export function IdeWelcome() {
   const navigate = useNavigate();
   const isMobile = useIsMobile();
-  const tier = useAuthStore(selectNormalizedTier);
   const isSuperAdmin = useAuthStore(selectIsSuperAdmin);
   const permissions = useAuthStore((s) => s.permissions);
   const [runs, setRuns] = useState<api.RunSummary[] | null>(null);
   const [projects, setProjects] = useState<api.ProjectDto[] | null>(null);
+  const [runsFailure, setRunsFailure] = useState<LoadFailure | null>(null);
+  const [projectsFailure, setProjectsFailure] = useState<LoadFailure | null>(null);
   const [liveRun, setLiveRun] = useState<api.RunDetail | null>(null);
   const [samples, setSamples] = useState<api.SampleSpecDto[]>([]);
   const [sampleBusyId, setSampleBusyId] = useState<string | null>(null);
+  const [sampleError, setSampleError] = useState('');
 
   // Surface the monthly run cap (mirrors HomePage). Permissions are loaded on
   // login; fetch lazily if the store hasn't been hydrated yet.
@@ -147,11 +152,17 @@ export function IdeWelcome() {
           setLiveRun(null);
         }
       })
-      .catch(() => !cancelled && setRuns([]));
+      // D4: an empty run list here renders the "Ship your first verified PR"
+      // onboarding card — shown to a user who may have shipped fifty.
+      .catch((e: unknown) => !cancelled && setRunsFailure(toLoadFailure(e)));
     api
       .getProjects()
-      .then((p) => !cancelled && setProjects(p.filter((x) => !x.archivedAt)))
-      .catch(() => !cancelled && setProjects([]));
+      .then((p) => {
+        if (cancelled) return;
+        setProjects(p.filter((x) => !x.archivedAt));
+        setProjectsFailure(null);
+      })
+      .catch((e: unknown) => !cancelled && setProjectsFailure(toLoadFailure(e)));
     return () => {
       cancelled = true;
     };
@@ -169,21 +180,27 @@ export function IdeWelcome() {
 
   async function startFromSample(s: api.SampleSpecDto) {
     setSampleBusyId(s.id);
+    setSampleError('');
     try {
       const picked = await api.pickOnboardingSample(s.id);
-      sessionStorage.setItem('signal:pending-spec', picked.spec || s.title);
+      // RR-782 — only hand off a real executable spec. The catalogue DTO carries a display title,
+      // not the spec, so on failure we must NOT substitute `s.title` (that silently turns a detailed
+      // starter into a vague one-liner). Block with a retryable error instead.
+      const spec = (picked.spec || '').trim();
+      if (!spec) throw new Error('empty spec');
+      writeSpecHandoff({spec, source: 'onboarding-sample'});
+      navigate('/compose');
     } catch {
-      sessionStorage.setItem('signal:pending-spec', s.title);
+      setSampleError('Could not load that starter spec. Please try again.');
     } finally {
       setSampleBusyId(null);
     }
-    navigate('/compose');
   }
 
-  const runCap = quotaSubtitle(tier, permissions);
-
   const liveTasks = liveRun?.tasks ?? [];
-  const liveDone = liveTasks.filter((t) => t.status === 'COMPLETED' || t.status === 'DONE').length;
+  // RR-781 — the canonical terminal task status is COMPLETE; counting only COMPLETED/DONE left the
+  // hero showing 0/N while tasks actually finished. Reuse the tolerant classifier defined below.
+  const liveDone = liveTasks.filter((t) => taskIsDone(t.status)).length;
   const liveSpent = liveRun?.actualCostUsd ?? 0;
 
   return (
@@ -191,7 +208,7 @@ export function IdeWelcome() {
       <h1 className='ide-h1'>Workspace</h1>
       <div className='ide-sub'>
         {/* ⌘K hint suppressed on touch layouts (review/11 #9). */}
-        Spec-driven runs across your repos. {runCap}.{isMobile ? '' : ' Press ⌘K to jump anywhere.'}
+        Spec-driven runs across your repos.{isMobile ? '' : ' Press ⌘K to jump anywhere.'}
       </div>
 
       {liveRun && (
@@ -221,7 +238,7 @@ export function IdeWelcome() {
             {isSuperAdmin && (
               <>
                 <span>·</span>
-                <span>${liveSpent.toFixed(2)}</span>
+                <span>{fmtCost(liveSpent)}</span>
               </>
             )}
           </div>
@@ -246,7 +263,9 @@ export function IdeWelcome() {
       </div>
 
       <div className='ide-h2'>Recent work</div>
-      {runs === null ? (
+      {runsFailure ? (
+        <LoadError failure={runsFailure} what='work' />
+      ) : runs === null ? (
         <IdeLoader label='Loading work…' />
       ) : runs.length === 0 ? (
         <div className='ide-card' style={{marginBottom: 8}}>
@@ -270,6 +289,11 @@ export function IdeWelcome() {
                   {sampleBusyId === s.id ? 'Preparing…' : s.title}
                 </button>
               ))}
+            </div>
+          )}
+          {sampleError && (
+            <div style={{marginBottom: 10, fontSize: 12, color: 'var(--ide-red)'}}>
+              {sampleError}
             </div>
           )}
           <div style={{display: 'flex', gap: 8, flexWrap: 'wrap'}}>
@@ -297,7 +321,7 @@ export function IdeWelcome() {
                 {typeof r.verifiedScore === 'number' && <ScoreBadge score={r.verifiedScore} />}
                 {isSuperAdmin && typeof r.actualCostUsd === 'number' && (
                   <span className='ide-mono' style={{color: 'var(--ide-fg-muted)'}}>
-                    ${r.actualCostUsd.toFixed(2)}
+                    {fmtCost(r.actualCostUsd)}
                   </span>
                 )}
                 {r.aiProvider && <span>{providerLabel(r.aiProvider)}</span>}
@@ -311,7 +335,9 @@ export function IdeWelcome() {
       )}
 
       <div className='ide-h2'>Projects</div>
-      {projects === null ? (
+      {projectsFailure ? (
+        <LoadError failure={projectsFailure} what='projects' />
+      ) : projects === null ? (
         <IdeLoader label='Loading projects…' />
       ) : projects.length === 0 ? (
         <div className='ide-empty'>No projects yet.</div>
@@ -335,6 +361,7 @@ export function IdeCompose() {
   const tier = useAuthStore(selectNormalizedTier);
   const permissions = useAuthStore((s) => s.permissions);
   const user = useAuthStore((s) => s.user);
+  const providerReadiness = useProviderReadiness();
 
   const [spec, setSpec] = useState('');
   const [provider, setProvider] = useState('ANTHROPIC');
@@ -363,7 +390,11 @@ export function IdeCompose() {
   // FREE $3 · PRO $5 (BYOK lifts it server-side) · TEAM/ENTERPRISE have no platform
   // cap, so the input there only sets a voluntary ceiling.
   const tierMaxCap = tier === 'FREE' ? 3 : tier === 'PRO' ? 5 : tier === 'ENTERPRISE' ? 1000 : 25;
-  const [costCap, setCostCap] = useState<number>(Math.min(2, tierMaxCap));
+  // RR-783 — 0 means "no user override": the request builder sends `userCostCap` only when > 0, so
+  // the server/plan default cap applies. Previously this defaulted to $2, so every run — including
+  // BYOK/Team/Enterprise routes whose platform cap is higher or absent — silently carried a $2
+  // ceiling the user never chose, cutting runs short. Lowering the ceiling is now an explicit opt-in.
+  const [costCap, setCostCap] = useState<number>(0);
   const [estimate, setEstimate] = useState<api.LaunchEstimate | null>(null);
   // RUN-7 (review/11) — estimate freshness: timestamp of the last fetch + a
   // "stale" flag that flips after 60s and surfaces a refresh link-button.
@@ -376,15 +407,12 @@ export function IdeCompose() {
   const [mobileStep, setMobileStep] = useState<1 | 2 | 3 | 4>(1);
 
   // Compose handoff — a discovery surface (library / templates / chat compile)
-  // may stash a pre-filled spec under `signal:pending-spec` before navigating
-  // here. Consume it once on mount so the textarea pre-fills, mirroring the
-  // Signal ComposePage behaviour.
+  // may stash a versioned structured handoff before navigating here. Consume it
+  // once on mount so the textarea pre-fills. `consumeSpecHandoff` migrates the
+  // legacy bare-string form so a handoff written by an older bundle is honoured.
   useEffect(() => {
-    const pending = sessionStorage.getItem('signal:pending-spec');
-    if (pending) {
-      setSpec(pending);
-      sessionStorage.removeItem('signal:pending-spec');
-    }
+    const pending = consumeSpecHandoff();
+    if (pending) setSpec(pending.spec);
   }, []);
 
   useEffect(() => {
@@ -403,7 +431,7 @@ export function IdeCompose() {
   useEffect(() => {
     api
       .getAvailableModels()
-      .then((m) => setProviderOptions(m.providers || []))
+      .then((m) => setProviderOptions(productProviderCatalog(m.providers || [])))
       .catch(() => setProviderOptions([]));
   }, []);
 
@@ -451,13 +479,20 @@ export function IdeCompose() {
   }, [provider]);
 
   useEffect(() => {
-    if (user?.preferredAiProvider) {
+    if (tier === 'FREE') {
+      setModelName('');
+      setProvider('DEEPSEEK');
+    } else if (user?.preferredAiProvider && isProductProvider(user.preferredAiProvider)) {
+      setModelName('');
       setProvider(user.preferredAiProvider.toUpperCase());
     }
-  }, [user?.preferredAiProvider]);
+  }, [tier, user?.preferredAiProvider]);
 
   function chooseProvider(next: string) {
-    const normalized = next.toUpperCase();
+    const normalized = tier === 'FREE' ? 'DEEPSEEK' : next.toUpperCase();
+    // Clear synchronously with the provider selection. Waiting for the effect leaves a render in
+    // which a fast submit can pair the new provider with the previous provider's exact model.
+    setModelName('');
     setProvider(normalized);
     if (user?.preferredAiProvider?.toUpperCase() !== normalized) {
       useAuthStore.setState({user: user ? {...user, preferredAiProvider: normalized} : user});
@@ -472,34 +507,52 @@ export function IdeCompose() {
     setErr('');
     try {
       const picked = await api.pickOnboardingSample(sample.id);
-      setSpec(picked.spec || sample.title);
-      if (picked.preferredProvider) setProvider(picked.preferredProvider.toUpperCase());
+      // RR-782 — the sample title is display metadata, not the executable spec. Only populate the
+      // composer from a real spec; on failure surface an error rather than seeding a vague title.
+      const spec = (picked.spec || '').trim();
+      if (!spec) throw new Error('empty spec');
+      setSpec(spec);
+      if (picked.preferredProvider) chooseProvider(picked.preferredProvider);
     } catch {
-      // Backend tracking is best-effort; still let the user start from the title.
-      setSpec(sample.title);
+      setErr('Could not load that starter spec. Please try again.');
     } finally {
       setSampleBusyId(null);
     }
   }
 
   // Load repos when the project changes; default to all selected.
+  // RR-784 — repository scope is an execution-scope/authorization input. Without a generation guard
+  // a late response for project A could overwrite the repo list + default selection after the user
+  // switched to project B, silently binding the run to the wrong project's repositories. Gate the
+  // commit on a per-effect `cancelled` flag so only the active project's response applies.
   useEffect(() => {
     if (!projectId) {
       setProjectRepos([]);
       setSelectedRepoIds([]);
       return;
     }
+    let cancelled = false;
     api
       .getProjectRepos(projectId)
       .then((rs) => {
+        if (cancelled) return;
         const list = rs as unknown as Array<Record<string, unknown>>;
         setProjectRepos(list);
-        setSelectedRepoIds(list.map((r) => repoIdFor(r)).filter(Boolean));
+        setSelectedRepoIds(
+          list
+            .filter((repo) => repoSupports(repo, 'CLOUD_RUN'))
+            .map((r) => repoIdFor(r))
+            .filter(Boolean),
+        );
       })
       .catch(() => {
+        if (cancelled) return;
         setProjectRepos([]);
         setSelectedRepoIds([]);
       });
+    return () => {
+      cancelled = true;
+    };
   }, [projectId]);
 
   // Debounced p25/p75 estimate. Only meaningful inside a project (the
@@ -510,20 +563,29 @@ export function IdeCompose() {
       setEstimateAt(null);
       return;
     }
+    // RR-785 — a debounced estimate has no request identity, so an older project/spec/provider/model
+    // response could settle last and present a fresh timestamp over a cost/task range computed for a
+    // different route — directly affecting approval and cap choices. Discard superseded responses.
+    let cancelled = false;
     const t = setTimeout(() => {
       api
-        .estimateRun(projectId, spec.trim())
+        .estimateRun(projectId, spec.trim(), provider, modelName || undefined)
         .then((e) => {
+          if (cancelled) return;
           setEstimate(e);
           setEstimateAt(Date.now());
         })
         .catch(() => {
+          if (cancelled) return;
           setEstimate(null);
           setEstimateAt(null);
         });
     }, 600);
-    return () => clearTimeout(t);
-  }, [projectId, spec]);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [projectId, spec, provider, modelName]);
 
   // RUN-7 — flip the estimate card's freshness line to a refresh affordance
   // 60s after the last fetch.
@@ -535,10 +597,12 @@ export function IdeCompose() {
   }, [estimateAt]);
 
   // RUN-7 — manual refresh re-runs the existing estimate fetch immediately.
+  // RR-785 — refresh must use the SAME route inputs as the automatic estimate (provider + model),
+  // otherwise Review shows a fresh timestamp on a range computed for the default route.
   function refreshEstimate() {
     if (!projectId || spec.trim().length < 12) return;
     api
-      .estimateRun(projectId, spec.trim())
+      .estimateRun(projectId, spec.trim(), provider, modelName || undefined)
       .then((e) => {
         setEstimate(e);
         setEstimateAt(Date.now());
@@ -573,10 +637,27 @@ export function IdeCompose() {
 
   const selectableProviders = useMemo(() => {
     const options = providerOptions.length > 0 ? providerOptions : FALLBACK_PROVIDER_OPTIONS;
+    // RR-786 — an own-keys tier (BYOK/TEAM/ENTERPRISE) or a user who has stored
+    // the provider's own key is entitled to select it; hard-hiding Fireworks
+    // from every non-Enterprise account contradicts the BYOK/Team own-key lanes
+    // and can leave the select with no option matching a saved preference.
+    // Actual dispatchability is still enforced separately by provider readiness.
+    const ownKeysTier = tier === 'BYOK' || tier === 'TEAM' || tier === 'ENTERPRISE';
+    const providerEntitled = (id: string): boolean => {
+      const up = id.toUpperCase();
+      if (!ENTERPRISE_PROVIDER_IDS.has(up)) return true;
+      if (tier === 'ENTERPRISE') return true;
+      if (up === 'FIREWORKS') return ownKeysTier || !!user?.hasFireworksKey;
+      // OpenRouter is an org gateway with no per-user key lane → own-keys tiers only.
+      return ownKeysTier;
+    };
     return options
-      .filter((p) => tier === 'ENTERPRISE' || !ENTERPRISE_PROVIDER_IDS.has(p.id.toUpperCase()))
+      .filter((p) => tier !== 'FREE' || p.id.toUpperCase() === 'DEEPSEEK')
+      .filter((p) => providerEntitled(p.id))
       .map((p) => ({...p, id: p.id.toUpperCase()}));
-  }, [providerOptions, tier]);
+  }, [providerOptions, tier, user?.hasFireworksKey]);
+  const selectedProviderReadiness = providerReadiness.byProvider.get(provider.toUpperCase());
+  const selectedProviderReady = providerIsDispatchable(selectedProviderReadiness);
 
   const modelLabelById = useMemo(() => {
     const labels: Record<string, string> = {...modelLabels};
@@ -637,6 +718,16 @@ export function IdeCompose() {
       setErr('Describe what to build first.');
       return;
     }
+    if (providerReadiness.loading || providerReadiness.error || !selectedProviderReady) {
+      setErr(
+        providerReadiness.error
+          ? 'Provider readiness could not be verified. Retry after the service is available.'
+          : providerReadiness.loading
+            ? 'Provider readiness is still being checked.'
+            : providerReadinessLabel(selectedProviderReadiness),
+      );
+      return;
+    }
     setBusy(true);
     setErr('');
     try {
@@ -674,7 +765,7 @@ export function IdeCompose() {
       <h1 className='ide-h1'>Start work</h1>
       <div className='ide-sub'>
         Describe the change. We will ask before coding and keep the technical defaults out of the
-        way. {quotaSubtitle(tier, permissions)}
+        way.
       </div>
 
       <div className='ide-compose-steps' aria-label='New work steps'>
@@ -709,7 +800,10 @@ export function IdeCompose() {
                 rows={8}
                 placeholder='e.g. Add a health endpoint that returns build SHA and uptime, with tests.'
                 value={spec}
-                onChange={(e) => setSpec(e.target.value)}
+                onChange={(e) => {
+                  setSpec(e.target.value);
+                  if (err === 'Describe what to build first.') setErr('');
+                }}
               />
               <div style={{marginTop: 10}}>
                 <SpecChat projectId={projectId || undefined} draftSpec={spec} onApply={setSpec} />
@@ -807,7 +901,7 @@ export function IdeCompose() {
               <div className='ide-sub' style={{marginTop: 0, marginBottom: 0}}>
                 {projectId
                   ? `${projects.find((p) => p.id === projectId)?.name}. ${selectedRepoIds.length} ${selectedRepoIds.length === 1 ? 'repo' : 'repos'} selected.`
-                  : 'Sandbox creates an isolated run without touching a repo.'}
+                  : 'Sandbox starts a run without linking a repository.'}
               </div>
             </div>
 
@@ -834,7 +928,11 @@ export function IdeCompose() {
               <div style={{color: 'var(--ide-red)', fontSize: 13, marginBottom: 10}}>{err}</div>
             )}
             <div className='ide-run-action ide-compose-submit-action'>
-              <button className='ide-btn' onClick={submit} disabled={busy}>
+              <button
+                className='ide-btn'
+                onClick={submit}
+                disabled={busy || (projectRepos.length > 0 && selectedRepoIds.length === 0)}
+              >
                 {busy ? 'Submitting...' : 'Create plan'}
               </button>
             </div>
@@ -848,14 +946,22 @@ export function IdeCompose() {
                   {projectRepos.map((r) => {
                     const rId = repoIdFor(r);
                     const selected = selectedRepoIds.includes(rId);
+                    const canRun = repoSupports(r, 'CLOUD_RUN');
                     return (
                       <button
                         key={rId}
                         className={selected ? 'ide-btn' : 'ide-btn ghost'}
+                        disabled={!canRun}
+                        title={
+                          canRun
+                            ? undefined
+                            : 'This provider is linked for source browsing and sync; cloud execution is not supported yet.'
+                        }
                         onClick={() => toggleRepo(rId)}
                       >
                         {selected ? '✓ ' : ''}
                         {repoDisplayName(r)}
+                        {!canRun ? ' · browse only' : ''}
                       </button>
                     );
                   })}
@@ -863,25 +969,63 @@ export function IdeCompose() {
               </div>
             )}
 
-            {/* PAT pre-flight (2026-06-10): GitHub pushes use the CALLER's own PAT (no
-          system PAT since 2026-05-23). Without one, a project run completes but
-          the PR push fails — previously discovered only on the result page. */}
-            {projectId != null && user != null && !user.hasGithubPat && (
-              <div
-                className='ide-card'
-                style={{
-                  borderColor: 'var(--ide-yellow)',
-                  fontSize: 13,
-                  lineHeight: 1.5,
-                }}
-              >
-                No GitHub token connected. The run can generate code, but it cannot open a PR until
-                you add one.{' '}
-                <Link to='/integrations' style={{color: 'var(--ide-accent)', fontWeight: 600}}>
-                  Connect GitHub →
-                </Link>
-              </div>
-            )}
+            {/* PAT pre-flight (2026-06-10): pushes use the CALLER's own credential (no system PAT
+          since 2026-05-23). Without one, a project run completes but the PR push fails — previously
+          discovered only on the result page.
+          RR-787 — aggregate the SCM providers of the SELECTED repositories and warn only for the
+          provider(s) actually needed, so a Bitbucket-only user no longer sees an irrelevant GitHub
+          blocker (and vice versa). A greenfield/no-repo run publishes to GitHub, so default there. */}
+            {projectId != null &&
+              user != null &&
+              (() => {
+                const providers = new Set<string>(
+                  projectRepos.length > 0 && selectedRepoIds.length > 0
+                    ? selectedRepoIds.map((id) =>
+                        String(
+                          (
+                            projectRepos.find((r) => repoIdFor(r) === id) as
+                              | {scmProvider?: string}
+                              | undefined
+                          )?.scmProvider || 'GITHUB',
+                        ).toUpperCase(),
+                      )
+                    : ['GITHUB'],
+                );
+                const needsGithub = providers.has('GITHUB') && !user.hasGithubPat;
+                const needsBitbucket = providers.has('BITBUCKET') && !user.hasBitbucketAppPassword;
+                if (!needsGithub && !needsBitbucket) return null;
+                return (
+                  <div
+                    className='ide-card'
+                    style={{borderColor: 'var(--ide-yellow)', fontSize: 13, lineHeight: 1.5}}
+                  >
+                    {needsGithub && (
+                      <div>
+                        No GitHub token connected. The run can generate code, but it cannot open a
+                        GitHub PR until you add one.{' '}
+                        <Link
+                          to='/integrations'
+                          style={{color: 'var(--ide-accent)', fontWeight: 600}}
+                        >
+                          Connect GitHub →
+                        </Link>
+                      </div>
+                    )}
+                    {needsBitbucket && (
+                      <div style={{marginTop: needsGithub ? 8 : 0}}>
+                        No Bitbucket credential connected. The run can generate code, but it cannot
+                        open a Bitbucket PR until you add one.{' '}
+                        <Link
+                          to='/integrations'
+                          style={{color: 'var(--ide-accent)', fontWeight: 600}}
+                        >
+                          Connect Bitbucket →
+                        </Link>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
           </section>
         </div>
 
@@ -905,12 +1049,29 @@ export function IdeCompose() {
                     onChange={(e) => chooseProvider(e.target.value)}
                   >
                     {selectableProviders.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.label || providerLabel(p.id)}
+                      <option
+                        key={p.id}
+                        value={p.id}
+                        disabled={!providerIsDispatchable(providerReadiness.byProvider.get(p.id))}
+                      >
+                        {providerOptionLabel(
+                          p.label || providerLabel(p.id),
+                          providerReadiness.byProvider.get(p.id),
+                        )}
                         {p.tag ? ` · ${p.tag}` : ''}
                       </option>
                     ))}
                   </select>
+                  <div
+                    role={selectedProviderReady ? 'status' : 'alert'}
+                    style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 4}}
+                  >
+                    {providerReadiness.error
+                      ? 'Provider readiness unavailable; starting work is disabled.'
+                      : providerReadiness.loading
+                        ? 'Checking provider readiness…'
+                        : providerReadinessLabel(selectedProviderReadiness)}
+                  </div>
                 </div>
                 {/* Per-run provider+model pin (Beta, Enterprise-only — 2026-05-22). Overrides org &
                   default matrix for this run only. '' = Default → no modelName sent. */}
@@ -953,18 +1114,26 @@ export function IdeCompose() {
                       className='ide-input'
                       type='number'
                       step='0.5'
-                      min='0.5'
+                      min='0'
                       max={tierMaxCap}
-                      value={costCap}
-                      aria-label='Run cost cap in USD'
+                      value={costCap || ''}
+                      placeholder='Default'
+                      aria-label='Run cost cap in USD (blank = platform default)'
                       aria-labelledby='compose-cap-label'
-                      onChange={(e) =>
-                        setCostCap(Math.max(0.5, Math.min(tierMaxCap, Number(e.target.value) || 0)))
-                      }
+                      onChange={(e) => {
+                        // RR-783 — blank / 0 keeps the platform default; a positive value opts into
+                        // a tighter voluntary ceiling clamped to the tier max.
+                        const v = Number(e.target.value) || 0;
+                        setCostCap(v <= 0 ? 0 : Math.max(0.5, Math.min(tierMaxCap, v)));
+                      }}
                       style={{width: 90}}
                     />
                     <span style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}>
-                      {tierMaxCap === 1000 ? 'USD' : `max $${tierMaxCap}`}
+                      {costCap <= 0
+                        ? 'platform default'
+                        : tierMaxCap === 1000
+                          ? 'USD'
+                          : `max $${tierMaxCap}`}
                     </span>
                   </div>
                 </div>
@@ -1134,7 +1303,7 @@ export function IdeCompose() {
                 <div className='ide-kv'>
                   <span>Cost</span>
                   <span>
-                    ${estimate.estimatedCostLow.toFixed(2)}-${estimate.estimatedCostHigh.toFixed(2)}
+                    ${estimate.estimatedCostLow.toFixed(4)}-${estimate.estimatedCostHigh.toFixed(4)}
                   </span>
                 </div>
                 {estimate.basis && (
@@ -1185,7 +1354,7 @@ export function IdeCompose() {
               </div>
               <div className='ide-kv'>
                 <span>Cap</span>
-                <span>${costCap.toFixed(2)}</span>
+                <span>{costCap > 0 ? `$${costCap.toFixed(2)}` : 'Platform default'}</span>
               </div>
             </div>
           </section>
@@ -1212,7 +1381,13 @@ export function IdeCompose() {
             Next
           </button>
         ) : (
-          <button className='ide-btn' onClick={submit} disabled={busy}>
+          <button
+            className='ide-btn'
+            onClick={submit}
+            disabled={
+              busy || providerReadiness.loading || providerReadiness.error || !selectedProviderReady
+            }
+          >
             {busy ? 'Submitting...' : 'Create plan'}
           </button>
         )}
@@ -1226,13 +1401,6 @@ export function IdeCompose() {
   );
 }
 
-type LiveEntry = {
-  id?: string;
-  type?: string;
-  timestamp?: number;
-  data?: {message?: string; payload?: string};
-};
-
 // AgentTask.status is one of PENDING | LOCKED | WORKING | COMPLETE | PARTIAL | FAILED | BLOCKED
 // (see state/entity/AgentTask.java). The earlier checks for 'COMPLETED'/'DONE'/'RUNNING' matched
 // none of these, so the live task list never flipped its indicator. Tolerant + case-insensitive.
@@ -1244,16 +1412,6 @@ function taskIsRunning(s?: string | null): boolean {
   const u = (s || '').toUpperCase();
   return u === 'WORKING' || u === 'RUNNING' || u === 'EXECUTING';
 }
-// Friendly live-log type labels (review/11 IdeLive) — raw enums like TOOL_CALL
-// read as plumbing. Colors keep the same keying in the renderer below.
-function logTypeLabel(type?: string): string {
-  const t = (type || 'log').toLowerCase();
-  if (t.includes('tool')) return '🔧 tool';
-  if (t.includes('llm') || t.includes('completion')) return '🧠 model';
-  if (t.includes('warn')) return '⚠ warning';
-  return t;
-}
-
 export function IdeLive() {
   const params = useParams();
   const navigate = useNavigate();
@@ -1274,6 +1432,7 @@ export function IdeLive() {
   useSse(runId || null);
   const sseEntries = useSseStore((s) => s.entries);
   const sseStatus = useSseStore((s) => s.status);
+  const replayWarning = useSseStore((s) => s.replayNotice);
   const fileTick = useSseStore((s) => s.fileWrittenTickAt);
   const logBottomRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
@@ -1351,7 +1510,14 @@ export function IdeLive() {
   const elapsed = formatElapsed(runElapsedMs(run));
 
   // Prefer SSE entries (real-time); they're the only live source here.
-  const logList = sseEntries.slice(-100) as LiveEntry[];
+  // RR-790 — drop internal RUN_DETAIL refresh pings, keep every typed envelope,
+  // and disclose when the visible window hides older retained events.
+  const renderableEntries = (sseEntries as unknown as api.RunLogEvent[]).filter(
+    (ev) => !isNoisyLogEvent(ev),
+  );
+  const LIVE_WINDOW = 100;
+  const logList = renderableEntries.slice(-LIVE_WINDOW);
+  const hiddenLiveEvents = renderableEntries.length - logList.length;
   const sseConnected = sseStatus === 'CONNECTED';
   // Transport jargon → plain status (review/11 IdeLive copy).
   const sseLabel = sseConnected
@@ -1360,7 +1526,10 @@ export function IdeLive() {
       ? 'Connecting…'
       : sseStatus === 'RECONNECTING'
         ? 'Reconnecting — brief delay…'
-        : 'Live (5s refresh)';
+        : // RR-202/RR-203 — surface a stalled stream instead of implying it is live.
+          sseStatus === 'ERROR'
+          ? 'Live stream unavailable — using 5s refresh'
+          : 'Live (5s refresh)';
   // Mobile hides the task list via CSS — keep a one-line summary visible at
   // all widths (subtle enough to be harmless on desktop too).
   const currentTaskTitle = tasks.find((t) => taskIsRunning(t.status))?.title;
@@ -1385,7 +1554,7 @@ export function IdeLive() {
               ? `${completed}/${tasks.length} steps`
               : (run?.status || '').toLowerCase() || 'running'}{' '}
             · {elapsed}
-            {isSuperAdmin && ` · $${spent.toFixed(2)}`}
+            {isSuperAdmin && ` · $${spent.toFixed(4)}`}
             {tokIn + tokOut > 0 && ` · ${(tokIn + tokOut).toLocaleString()} tok`}
           </div>
         </div>
@@ -1519,6 +1688,14 @@ export function IdeLive() {
               {currentTaskTitle ? ` — ${currentTaskTitle}` : ''}
             </div>
           )}
+          {replayWarning && (
+            <div
+              role='status'
+              style={{fontSize: 12, color: 'var(--ide-yellow)', margin: '0 0 8px'}}
+            >
+              {replayWarning}
+            </div>
+          )}
           {logList.length === 0 ? (
             <div className='ide-card'>
               <IdeLoader label='Waiting for the first tool call… the agent is warming up. Usually 30–60s.' />
@@ -1534,19 +1711,38 @@ export function IdeLive() {
                 padding: 8,
               }}
             >
+              {hiddenLiveEvents > 0 && (
+                <div
+                  role='status'
+                  style={{
+                    padding: '6px 8px',
+                    fontSize: 11,
+                    color: 'var(--ide-fg-muted)',
+                    borderBottom: '1px solid var(--ide-border)',
+                  }}
+                >
+                  {/* RR-790 — the live buffer only shows the most recent window. */}
+                  {hiddenLiveEvents.toLocaleString()} earlier event
+                  {hiddenLiveEvents === 1 ? '' : 's'} scrolled out of the live view — open the run
+                  result Logs tab for the full stream.
+                </div>
+              )}
               {logList.map((ev, i) => {
                 const t = (ev.type || 'log').toLowerCase();
                 const color = t.includes('tool')
                   ? 'var(--ide-accent)'
                   : t.includes('llm') || t.includes('completion')
                     ? 'var(--ide-green)'
-                    : t.includes('warn')
+                    : t.includes('warn') || t.includes('fail')
                       ? 'var(--ide-yellow)'
                       : 'var(--ide-fg-muted)';
-                const body = ev.data?.message || ev.data?.payload || '';
+                // RR-790 — the shared normalizer renders every typed envelope; fall back
+                // to the raw type label only when it produces nothing.
+                const body = logMessage(ev);
+                const ts = typeof ev.timestamp === 'number' ? ev.timestamp : null;
                 return (
                   <div
-                    key={ev.id || i}
+                    key={(ev.id as string) || i}
                     style={{
                       padding: '6px 8px',
                       borderBottom: '1px solid var(--ide-border)',
@@ -1555,14 +1751,14 @@ export function IdeLive() {
                     }}
                   >
                     <span className='ide-mono' style={{color, marginRight: 8, fontSize: 10}}>
-                      {logTypeLabel(ev.type)}
+                      {logLabel(ev.type)}
                     </span>
-                    {ev.timestamp && (
+                    {ts != null && (
                       <span
                         className='ide-mono'
                         style={{color: 'var(--ide-fg-muted)', marginRight: 8, fontSize: 10}}
                       >
-                        {new Date(ev.timestamp).toLocaleTimeString()}
+                        {new Date(ts).toLocaleTimeString()}
                       </span>
                     )}
                     <span>{body}</span>

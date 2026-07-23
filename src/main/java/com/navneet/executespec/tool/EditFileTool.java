@@ -1,13 +1,16 @@
 package com.navneet.executespec.tool;
 
 import java.io.IOException;
+import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.List;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.navneet.executespec.security.CodeAbuseScanner;
+import com.navneet.executespec.security.GeneratedSecretScanner;
 import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
 
@@ -35,8 +38,17 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 public class EditFileTool implements Tool {
 
+  /**
+   * RR-1022 — hard ceiling on the file an edit may load. {@code editFile} reads the whole file into
+   * memory and builds a fresh String per edit, so an unbounded target amplifies CPU/heap and
+   * inflates the worker's conversation. 8 MiB comfortably covers real source files while refusing a
+   * multi-megabyte generated/blob file that editFile has no business rewriting in memory.
+   */
+  private static final long MAX_EDIT_FILE_BYTES = 8L * 1024 * 1024;
+
   private final FileSandboxPolicy fileSandboxPolicy;
   private final CodeAbuseScanner codeAbuseScanner;
+  private final GeneratedSecretScanner generatedSecretScanner;
 
   /**
    * PR-C (2026-05-13) — pushes {@code FILE_WRITTEN} events to RunDetail SSE subscribers the moment
@@ -129,8 +141,19 @@ public class EditFileTool implements Tool {
     if (!editsNode.isArray() || editsNode.isEmpty()) {
       return ToolResult.err(ToolResult.ErrorKind.INVALID_ARGS, "edits must be a non-empty array");
     }
+    // RR-1018 — unconditional reserved-namespace deny. Runs BEFORE containment/guardrail checks
+    // because it must hold at every guardrail level, including the production LOW default.
+    String reservedError = ReservedWorkspacePaths.rejectionFor(path);
+    if (reservedError != null) {
+      log.warn("editFile blocked reserved control-plane path={}", path);
+      return ToolResult.err(ToolResult.ErrorKind.FORBIDDEN, reservedError);
+    }
     try {
       Path resolved = PathSafety.safeResolve(ctx.workspaceRoot(), path);
+      String reviewerPolicyError = ReviewerMutationScope.validateEditFile(path);
+      if (reviewerPolicyError != null) {
+        return ToolResult.err(ToolResult.ErrorKind.FORBIDDEN, reviewerPolicyError);
+      }
       // Guardrail-level file-sandbox gate — no-op at LOW.
       FileSandboxPolicy.Decision sandbox =
           fileSandboxPolicy.validateWrite(ctx.workspaceRoot(), resolved);
@@ -142,6 +165,18 @@ public class EditFileTool implements Tool {
         return ToolResult.err(
             ToolResult.ErrorKind.NOT_FOUND,
             "file not found: " + path + " — use writeFile to create new files");
+      }
+      // RR-1022 — refuse an oversized target before loading it into memory.
+      long fileBytes = Files.size(resolved);
+      if (fileBytes > MAX_EDIT_FILE_BYTES) {
+        return ToolResult.err(
+            ToolResult.ErrorKind.INVALID_ARGS,
+            "file is too large to edit in memory ("
+                + fileBytes
+                + " bytes > "
+                + MAX_EDIT_FILE_BYTES
+                + " cap): "
+                + path);
       }
       String working = Files.readString(resolved);
       // Read-before-write gate (RL-2026-05-051, harness adoption #1): the worker must have read
@@ -177,6 +212,19 @@ public class EditFileTool implements Tool {
         }
         boolean replaceAll = edit.path("replaceAll").asBoolean(false);
         Integer occurrence = edit.hasNonNull("occurrence") ? edit.get("occurrence").asInt() : null;
+        // RR-1023 — replaceAll and occurrence are mutually exclusive selectors. StringEditMatcher
+        // silently tested replaceAll first, so a call that named occurrence=k AND (accidentally)
+        // replaceAll=true replaced EVERY match and still returned OK. Refuse the ambiguity instead
+        // of guessing which selector the caller meant.
+        if (replaceAll && occurrence != null) {
+          return ToolResult.err(
+              ToolResult.ErrorKind.INVALID_ARGS,
+              "edit #"
+                  + idx
+                  + " in "
+                  + path
+                  + ": set either replaceAll=true OR occurrence=<k>, not both");
+        }
         StringEditMatcher.Result result =
             StringEditMatcher.apply(working, oldStr, newStr, replaceAll, occurrence);
         if (result instanceof StringEditMatcher.Failed f) {
@@ -198,6 +246,16 @@ public class EditFileTool implements Tool {
                 + ")");
         idx++;
       }
+      var secretFinding = generatedSecretScanner.scan(working);
+      if (secretFinding.isPresent()) {
+        log.warn(
+            "editFile blocked generated credential path={} category={}",
+            path,
+            secretFinding.get().category());
+        return ToolResult.err(
+            ToolResult.ErrorKind.FORBIDDEN,
+            "edited content contains a high-confidence credential pattern and cannot be written");
+      }
       CodeAbuseScanner.ScanResult scanResult = codeAbuseScanner.scan(path, working);
       if (scanResult.flagged()) {
         log.warn(
@@ -209,7 +267,7 @@ public class EditFileTool implements Tool {
             ToolResult.ErrorKind.FORBIDDEN,
             "edited content matched a " + scanResult.category() + " pattern and cannot be written");
       }
-      Files.writeString(resolved, working);
+      writeAtomically(resolved, working);
       // Ledger now reflects the post-edit content, so consecutive edits to this file don't trip the
       // read-before-write gate (the worker just edited it — its view is current).
       readState.recordWrite(ctx.runId(), resolved, working);
@@ -237,6 +295,30 @@ public class EditFileTool implements Tool {
     } catch (IOException ioe) {
       log.warn("editFile IO error path={}", path, ioe);
       return ToolResult.err(ToolResult.ErrorKind.IO_ERROR, ioe.getMessage());
+    }
+  }
+
+  /**
+   * RR-1021 — commit the edited content by writing a sibling temp file and moving it over the
+   * target, so a crash / disk-full mid-write cannot leave the sole copy of the file truncated. The
+   * move is atomic where the filesystem supports it; otherwise it degrades to a replace-existing
+   * move (still strictly better than an in-place truncating {@code writeString}). The temp file is
+   * cleaned up on any failure. This does not add cross-thread CAS — the read-before-write ledger
+   * already rejects a stale edit — but it removes the torn-write window.
+   */
+  private static void writeAtomically(Path target, String content) throws IOException {
+    Path dir = target.getParent();
+    Path tmp = Files.createTempFile(dir == null ? target : dir, ".editfile-", ".tmp");
+    try {
+      Files.writeString(tmp, content);
+      try {
+        Files.move(
+            tmp, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+      } catch (AtomicMoveNotSupportedException unsupported) {
+        Files.move(tmp, target, StandardCopyOption.REPLACE_EXISTING);
+      }
+    } finally {
+      Files.deleteIfExists(tmp);
     }
   }
 }

@@ -25,8 +25,26 @@ public interface InboundAdapter {
   Optional<IntegrationEvent> parseEvent(String rawBody);
 
   /**
+   * Header-aware parse. Some providers (Bitbucket) carry the authoritative event type / delivery id
+   * only in HTTP headers, not the body. The default delegates to the body-only form so adapters
+   * that do not need headers are unaffected (RR-638).
+   */
+  default Optional<IntegrationEvent> parseEvent(Map<String, String> headers, String rawBody) {
+    return parseEvent(rawBody);
+  }
+
+  /**
    * Extract a stable, unique event ID from the payload for idempotency. Used to deduplicate retried
    * webhook deliveries.
    */
   String extractEventId(String rawBody);
+
+  /**
+   * Header-aware idempotency id. Providers that expose a stable per-delivery id in a header (e.g.
+   * Bitbucket's {@code X-Request-UUID}) can use it so distinct lifecycle events for one entity are
+   * not collapsed into a single id. The default delegates to the body-only form (RR-638).
+   */
+  default String extractEventId(Map<String, String> headers, String rawBody) {
+    return extractEventId(rawBody);
+  }
 }

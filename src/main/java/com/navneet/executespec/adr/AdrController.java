@@ -19,8 +19,9 @@ import org.springframework.web.server.ResponseStatusException;
 import lombok.RequiredArgsConstructor;
 
 /**
- * M-014 (Wave 2) — REST surface for ADRs cached from {@code
- * .executespec/arch/adrs/<NNNN>-<slug>.md} into the V137 {@code adr} table.
+ * M-014 (Wave 2) — read-only REST surface for ADR rows in the V137 {@code adr} table. Checked-in
+ * ADR discovery/synchronization is not implemented; callers must inspect the capability endpoint
+ * rather than treating an empty list as proof that the repository has no decisions.
  *
  * <p>{@code GET /api/projects/{projectId}/adrs} — list ADRs for a project (optionally filter to
  * ACCEPTED — the planner-injection set). {@code GET /api/projects/{projectId}/adrs/{id}} — single
@@ -35,7 +36,23 @@ import lombok.RequiredArgsConstructor;
 public class AdrController {
 
   private final AdrRepository adrRepo;
+  private final AdrInjectionService adrInjectionService;
   private final ProjectAccessGuard projectAccessGuard;
+
+  @GetMapping("/capability")
+  public ResponseEntity<AdrCapability> capability(
+      @PathVariable String projectId, Authentication auth) {
+    if (auth == null) throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "auth");
+    projectAccessGuard.assertCanRead(projectId, principalOrNull(auth));
+    long indexedCount = adrRepo.countByProjectId(projectId);
+    return ResponseEntity.ok(
+        new AdrCapability(
+            false,
+            "READ_ONLY_CACHE",
+            indexedCount,
+            adrInjectionService.injectionEnabled(),
+            "Checked-in ADR discovery and synchronization are not implemented."));
+  }
 
   @GetMapping
   public ResponseEntity<List<AdrSummary>> list(
@@ -101,6 +118,14 @@ public class AdrController {
           a.getFilePath());
     }
   }
+
+  /** Honest readiness contract for the otherwise read-only ADR cache. */
+  public record AdrCapability(
+      boolean automaticIngestion,
+      String source,
+      long indexedCount,
+      boolean plannerInjectionEnabled,
+      String reason) {}
 
   /** Full record for the detail endpoint, including markdown body. */
   public record AdrDetail(

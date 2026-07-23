@@ -316,7 +316,7 @@ class ModelProviderCandidateServiceTest {
     assertThat(sonnet.reasons())
         .contains(
             "benchmark aggregate anthropic/claude-sonnet-4-6 resolved 68/120 tasks across 2"
-                + " runs (sample-weighted; minimum 20-task prior)");
+                + " distinct observation(s) (sample-weighted; minimum 20-task prior)");
   }
 
   @Test
@@ -461,6 +461,92 @@ class ModelProviderCandidateServiceTest {
   }
 
   @Test
+  void unknownBenchmarkSuiteIsNeverUsedAsAQualityPrior() {
+    // RR-218: a suite ExecuteSpec does not recognise (new, misspelled or unrelated) must remain
+    // informational only, even with enough tasks — it cannot silently drive provider selection.
+    when(benchmarkRunRepository.findTop50ByStatusOrderByCreatedAtDesc("DONE"))
+        .thenReturn(
+            List.of(
+                BenchmarkRun.builder()
+                    .id("bench-mystery")
+                    .suite("MYSTERY_BENCH")
+                    .dataset("v1")
+                    .provider("anthropic")
+                    .model("claude-sonnet-4-6")
+                    .totalTasks(50)
+                    .resolvedTasks(50)
+                    .status("DONE")
+                    .build()));
+
+    ModelProviderScore sonnet =
+        find(
+            service.buildCandidates(
+                ModelProviderCandidateRequest.builder()
+                    .taskCategory("BUG_FIX")
+                    .requiredQualityThreshold(70.0)
+                    .build()),
+            "anthropic",
+            "claude-sonnet-4-6");
+
+    // Falls back to YAML quality (86.0), NOT the 100% resolved rate of the unknown suite.
+    assertThat(sonnet.qualityScore()).isEqualTo(86.0);
+    assertThat(sonnet.benchmarkQualityPriorAvailable()).isFalse();
+    assertThat(sonnet.reasons())
+        .contains(
+            "benchmark MYSTERY_BENCH/v1 resolved 50/50 tasks (suite MYSTERY_BENCH is not a prior"
+                + " for task category BUG_FIX)",
+            "benchmark quality prior unavailable for anthropic/claude-sonnet-4-6; using"
+                + " fallback/local/validation signals only");
+  }
+
+  @Test
+  void collapsesRepeatedTrialsOfTheSameCorpusToTheNewestRun() {
+    // RR-219: re-running one favorable benchmark repeatedly is not independent evidence. Two runs
+    // of the SAME (suite, dataset) must collapse to the newest (18/20 = 90%), not pool as 20/40.
+    when(benchmarkRunRepository.findTop50ByStatusOrderByCreatedAtDesc("DONE"))
+        .thenReturn(
+            List.of(
+                BenchmarkRun.builder()
+                    .id("bench-newest")
+                    .suite("SWE_BENCH")
+                    .dataset("lite")
+                    .provider("anthropic")
+                    .model("claude-sonnet-4-6")
+                    .totalTasks(20)
+                    .resolvedTasks(18)
+                    .status("DONE")
+                    .build(),
+                BenchmarkRun.builder()
+                    .id("bench-older-rerun")
+                    .suite("SWE_BENCH")
+                    .dataset("lite")
+                    .provider("anthropic")
+                    .model("claude-sonnet-4-6")
+                    .totalTasks(20)
+                    .resolvedTasks(2)
+                    .status("DONE")
+                    .build()));
+
+    ModelProviderScore sonnet =
+        find(
+            service.buildCandidates(
+                ModelProviderCandidateRequest.builder()
+                    .taskCategory("BUG_FIX")
+                    .requiredQualityThreshold(50.0)
+                    .build()),
+            "anthropic",
+            "claude-sonnet-4-6");
+
+    assertThat(sonnet.qualityScore()).isEqualTo(90.0);
+    assertThat(sonnet.benchmarkQualityPriorAvailable()).isTrue();
+    assertThat(sonnet.reasons())
+        .anySatisfy(
+            reason ->
+                assertThat(reason)
+                    .contains("repeated trial(s) of the same corpus collapsed to newest"));
+  }
+
+  @Test
   void filtersByProviderAndModelAllowLists() {
     List<ModelProviderScore> candidates =
         service.buildCandidates(
@@ -494,8 +580,18 @@ class ModelProviderCandidateServiceTest {
   }
 
   @Test
-  void providerPreferenceOrderFeedsFallbackTieBreakerPenalty() {
-    List<ModelProviderScore> candidates =
+  void providerPreferenceDoesNotChangeMeasuredQuality() {
+    // RR-816: provider preference is a policy tie-breaker, never a quality adjustment. Sonnet's
+    // quality must stay 86.0 regardless of where its provider sits in the preference order; the
+    // preference position is carried separately for the ranking-band tie-break only.
+    List<ModelProviderScore> preferredFirst =
+        service.buildCandidates(
+            ModelProviderCandidateRequest.builder()
+                .taskCategory("BUG_FIX")
+                .requiredQualityThreshold(60.0)
+                .providerPreferenceOrder(List.of("anthropic", "openai"))
+                .build());
+    List<ModelProviderScore> preferredLast =
         service.buildCandidates(
             ModelProviderCandidateRequest.builder()
                 .taskCategory("BUG_FIX")
@@ -503,8 +599,13 @@ class ModelProviderCandidateServiceTest {
                 .providerPreferenceOrder(List.of("openai", "anthropic"))
                 .build());
 
-    ModelProviderScore sonnet = find(candidates, "anthropic", "claude-sonnet-4-6");
-    assertThat(sonnet.qualityScore()).isEqualTo(85.75);
+    ModelProviderScore sonnetFirst = find(preferredFirst, "anthropic", "claude-sonnet-4-6");
+    ModelProviderScore sonnetLast = find(preferredLast, "anthropic", "claude-sonnet-4-6");
+    assertThat(sonnetFirst.qualityScore()).isEqualTo(86.0);
+    assertThat(sonnetLast.qualityScore()).isEqualTo(86.0);
+    // The preference position is still captured, just kept out of the quality gate.
+    assertThat(sonnetFirst.providerPreferenceOrder()).isEqualTo(0);
+    assertThat(sonnetLast.providerPreferenceOrder()).isEqualTo(1);
   }
 
   private static ModelProviderScore find(

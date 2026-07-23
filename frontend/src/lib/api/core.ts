@@ -287,6 +287,11 @@ export interface AgentTokenEntry {
 }
 
 export interface RunDetail extends RunSummary {
+  /** Durable caller-selected route contract; effective per-call evidence lives in /cost. */
+  requestedProvider?: string | null;
+  requestedModel?: string | null;
+  routingMode?: 'AUTO' | 'PROVIDER_PREFERRED' | 'EXACT_LOCK' | null;
+  routePinned?: boolean | null;
   tasks: TaskSummary[];
   planJson: string;
   reviewJson: string;
@@ -459,9 +464,23 @@ export interface ProjectSlackChannelDto {
 // RunEvent object: {type, timestamp, status?, taskId?, message?/line?, relativePath?, ...}.
 export interface RunLogEvent {
   type: string;
-  timestamp?: number;
+  // RR-1381 — persisted replay serializes `RunEvent.timestamp` (an `Instant`) as an ISO-8601
+  // string, not a number. Typing it number-only made `replayEntry` substitute 0 for every
+  // reloaded event, dating them all to 1970. Accept both; `runReplay` normalizes.
+  timestamp?: number | string;
   [k: string]: unknown;
 }
+
+export interface RunReplayLog {
+  events: RunLogEvent[];
+  available: boolean;
+  reason: 'AVAILABLE' | 'EXPIRED_OR_EMPTY' | 'STORE_UNAVAILABLE';
+  retainedUntil: string | null;
+  lastEventId: string | null;
+  truncated: boolean;
+}
+
+export type {RunStepCostCall, RunCostEvidence} from './costEvidenceTypes';
 
 /**
  * 2026-05-02 — file listing with per-path git-derived change status. Multi-repo aware (the
@@ -545,6 +564,39 @@ export interface PreviewAnalysis {
   }[];
 }
 
+/**
+ * Static UI render — a self-contained HTML approximation of a run's screens, produced without
+ * building or deploying anything. Distinct from LocalPreviewStatus, which runs the real app in a
+ * container. This never contributes to verifiedScore.
+ */
+export interface PreviewRenderManifest {
+  jobId: string | null;
+  runId: string;
+  status: 'NONE' | 'QUEUED' | 'RENDERING' | 'READY' | 'NO_SURFACES' | 'FAILED';
+  failureReason: string | null;
+  surfacesFound: number;
+  surfacesRendered: number;
+  /** Operator-facing honesty label, driven by the least faithful surface in the set. */
+  fidelityNote: string | null;
+  requestedAt: string | null;
+  completedAt: string | null;
+  surfaces: PreviewRenderSurface[];
+  /** False when preview.render-agent.enabled is off — the feature is disabled, not merely busy. */
+  available?: boolean;
+}
+
+export interface PreviewRenderSurface {
+  surfaceId: string;
+  displayName: string;
+  sourcePath: string;
+  target: 'WEB' | 'REACT_NATIVE' | 'ANDROID_NATIVE' | 'IOS_NATIVE';
+  fidelity: 'CLOSE' | 'STRUCTURAL' | 'APPROXIMATE';
+  viewportWidth: number;
+  viewportHeight: number;
+  rendered: boolean;
+  failureReason: string | null;
+}
+
 export interface ExecResult {
   stdout: string;
   stderr: string;
@@ -586,9 +638,13 @@ export interface AuthUser {
   firstName: string;
   lastName: string;
   globalRole: 'SUPER_ADMIN' | 'FINANCE' | 'USER';
-  // Tier-coherence: 4-tier ladder. Legacy MAX was renamed to TEAM in V141
-  // and the JAR no longer emits MAX. Type narrowed to match backend reality.
-  tier: 'FREE' | 'PRO' | 'TEAM' | 'ENTERPRISE';
+  // RR-167 / RR-1338 — canonical tier ladder. The active backend ladder is
+  // FREE → PRO → PRO_PLUS → BYOK → TEAM → ENTERPRISE (V253). The union
+  // previously stopped at ENTERPRISE, which (a) hid PRO_PLUS/BYOK cases from
+  // exhaustive `tier ===` switches and (b) let BYOK fall through to the
+  // cost-cap default. Legacy MAX was renamed to TEAM in V141 and is no longer
+  // emitted. Keep this in sync with the server tier enum.
+  tier: 'FREE' | 'PRO' | 'PRO_PLUS' | 'BYOK' | 'TEAM' | 'ENTERPRISE';
   status: string;
   mustChangePassword: boolean;
   emailVerified: boolean;
@@ -1147,9 +1203,24 @@ export interface SsoConfig {
 }
 
 export interface GitHubRemoteRepo {
+  immutableId?: string;
   fullName: string;
+  cloneUrl?: string;
   defaultBranch: string;
   isPrivate: boolean;
+  sizeKb?: number | null;
+}
+
+export interface ScmRemoteRepository {
+  provider: 'GITHUB' | 'BITBUCKET';
+  immutableId: string;
+  fullName: string;
+  displayName: string;
+  cloneUrl: string;
+  defaultBranch: string;
+  isPrivate: boolean;
+  sizeKb: number | null;
+  capabilities: string[];
 }
 
 // v2.5.2 — Spec templates (Phase 4.2 / UX-2.3).
@@ -1222,6 +1293,7 @@ export interface RepoHealth {
   lastCodeMapSha: string | null;
   currentOriginSha: string | null;
   isStale: boolean;
+  syncStatus: 'IN_SYNC' | 'DRIFTED' | 'UNKNOWN';
   webhookInstalled: boolean;
   openPrCount: number;
   lastAnalysedAt: string | null;
@@ -1262,11 +1334,21 @@ export interface ContractCoverageResponse {
 }
 
 // E2.8 — contract drift detection
+/**
+ * RR-1631 / RR-1658 — `hasDrift` is deliberately false for BOTH `NO_DRIFT` and `UNAVAILABLE`
+ * (the backend kept it that way for wire compatibility), so it alone cannot distinguish
+ * "verified identical" from "we could not read the source". Always branch on `status` when
+ * reporting a result to a user; `hasDrift` is only safe for counting confirmed drift.
+ * Optional so a response from a server predating the tri-state still parses.
+ */
+export type DriftStatus = 'NO_DRIFT' | 'DRIFT' | 'UNAVAILABLE';
+
 export interface DriftCheckResult {
   contractId: string;
   hasDrift: boolean;
   summary: string;
   eventId?: string | null;
+  status?: DriftStatus;
 }
 
 // E3.16 — standards compliance report
@@ -1340,6 +1422,14 @@ export interface AdrSummary {
   filePath: string | null;
 }
 
+export interface AdrCapability {
+  automaticIngestion: boolean;
+  source: 'READ_ONLY_CACHE';
+  indexedCount: number;
+  plannerInjectionEnabled: boolean;
+  reason: string;
+}
+
 export interface AdrDetail extends AdrSummary {
   deciders: string | null;
   supersedes: string | null;
@@ -1402,12 +1492,34 @@ export interface GeneratedDocRow {
 export interface ProjectDocumentRow {
   id: string;
   projectId: string;
-  pathRelative: string;
+  /** Legacy servers exposed this internal path; hardened servers intentionally omit it. */
+  pathRelative?: string;
   filename: string | null;
   mimeType: string | null;
   sizeBytes: number | null;
-  status: 'UPLOADED' | 'EXTRACTING' | 'EMBEDDING' | 'READY' | 'FAILED';
-  failureReason: string | null;
+  status:
+    | 'UPLOADED'
+    | 'EXTRACTING'
+    | 'EMBEDDING'
+    | 'INDEXING'
+    | 'RETRY_PENDING'
+    | 'READY'
+    | 'LEXICAL_READY'
+    | 'FAILED'
+    | 'CANCELLED';
+  /** Stable client-safe code; raw parser/storage errors are never returned. */
+  errorCode?: string | null;
+  /** Legacy field omitted by hardened servers. */
+  failureReason?: string | null;
+  pageCount?: number | null;
+  extractedChars?: number | null;
+  estimatedTokens?: number | null;
+  retrievalMode?: 'PENDING' | 'SEMANTIC' | 'LEXICAL' | null;
+  semanticSearchAvailable?: boolean;
+  lexicalSearchAvailable?: boolean;
+  readinessReason?: string | null;
+  embeddingProvider?: string | null;
+  embeddingModel?: string | null;
   createdAt: string;
 }
 
@@ -1490,6 +1602,7 @@ export interface ProjectChatInfo {
   model: string;
   provider: string;
   contextWindow: number;
+  confirmedActionModels: Record<string, string>;
 }
 
 export interface ProjectChatMessageDto {
@@ -1535,6 +1648,7 @@ export type {
 export interface PrReviewDto {
   id: string;
   projectId: string;
+  repoId: string | null;
   repoFullName: string;
   prNumber: number;
   headSha: string;
@@ -1651,7 +1765,9 @@ export type ShareLinkSurface =
 export interface ShareLinkDto {
   id: string;
   projectId: string;
-  token: string;
+  /** Returned once by create; list responses always redact the bearer. */
+  token: string | null;
+  tokenPrefix: string;
   surface: ShareLinkSurface;
   scopeId: string | null;
   label: string | null;

@@ -1,6 +1,10 @@
 package com.navneet.executespec.anonrun;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
+import java.util.HexFormat;
 import java.util.Optional;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -16,12 +20,41 @@ import lombok.extern.slf4j.Slf4j;
  * R-111 follow-up — Redis-backed session store for anonymous-trial sessions. Replaces the in-memory
  * ConcurrentHashMap that lost state on JVM restart and couldn't be inspected operationally.
  *
- * <p>Keying: {@code v3:anon-run:sess:<token>}. JSON-encoded value, 24h TTL applied on every write
- * so an active session that gets updated extends its lifetime.
+ * <p>Keying: {@code v3:anon-run:sess:<sha256(token)>}. JSON-encoded value, 24h TTL applied on every
+ * write so an active session that gets updated extends its lifetime.
  *
  * <p>Bind-on-signup: {@link #bindToUser(String, String)} stamps boundUserId so the auth flow can
  * claim the session at signup time. The downstream "convert this anonymous run into a real run"
  * step is the next deferred slice.
+ *
+ * <p><b>RR-665 (2026-07-21) — the session token is a bearer credential.</b> Two corrections:
+ *
+ * <ol>
+ *   <li><b>The bearer never reaches a log.</b> Every diagnostic here identifies a session by {@link
+ *       #fingerprint(String)} — a truncated SHA-256 of the token — so an operator can correlate
+ *       lines without the log line itself being a usable credential. Anything that appears in
+ *       application logs must be assumed to have leaked into diagnostic pipelines.
+ *   <li><b>Binding is atomic.</b> The old implementation read the session, checked {@code
+ *       boundUserId}, then wrote — so two concurrent claims of the same unbound token could both
+ *       observe it as unclaimed, both be told they succeeded, and race to overwrite the owner.
+ *       Ownership is now decided by a single {@code SETNX} on a separate claim key ({@code
+ *       v3:anon-run:claim:<sha256(token)>}) which is the authoritative record of who owns the
+ *       session; the session blob is updated only by the caller that won that claim. Exactly one
+ *       claimant can ever win, and every other caller is told the authoritative owner.
+ * </ol>
+ *
+ * <p><b>RR-665 remainder, closed 2026-07-22 — the bearer is no longer AT REST either.</b> The
+ * previous pass cleaned the log and response surfaces but left the raw token as the Redis key
+ * ({@code v3:anon-run:sess:<token>}) and inside the stored JSON, so a keyspace listing, a {@code
+ * SCAN}/{@code MONITOR} trace, a slowlog entry or a Redis snapshot handed to an operator still
+ * yielded working bearers. That is not inherent to a token-keyed store: this store is only ever
+ * asked about a token the CALLER already holds, so the token itself never has to be persisted. Both
+ * keys are now {@code sha256(token)} (the same one-way discipline {@code
+ * personal_access_token.token_hash} uses), and {@link #save} strips the token out of the JSON
+ * before writing — {@link #find} re-attaches the caller's own token to the returned record, so
+ * every consumer sees an unchanged {@link AnonymousRunSession}. A pre-existing session written
+ * under the legacy raw-token key is still readable (rolling deploy / unexpired 24h sessions) and is
+ * rewritten to the hashed key on its next update.
  */
 @Slf4j
 @Component
@@ -29,62 +62,155 @@ import lombok.extern.slf4j.Slf4j;
 public class AnonymousRunSessionStore {
 
   private static final String KEY_PREFIX = "v3:anon-run:sess:";
+
+  /**
+   * RR-665 — claim-if-unbound key. Separate from the session blob precisely so ownership can be
+   * decided by one atomic Redis operation rather than a read-check-write over the whole record.
+   */
+  private static final String CLAIM_PREFIX = "v3:anon-run:claim:";
+
   public static final Duration SESSION_TTL = Duration.ofHours(24);
 
   private final StringRedisTemplate redis;
   private final ObjectMapper mapper;
 
   public void save(AnonymousRunSession session) {
+    if (session == null || session.token() == null || session.token().isBlank()) {
+      // The token is the only addressing key this store has. Persisting a tokenless record would
+      // write an unreachable row under the digest of "", so fail loudly instead (RR-665).
+      throw new IllegalArgumentException("anonymous session has no token; refusing to persist");
+    }
     try {
       redis
           .opsForValue()
-          .set(KEY_PREFIX + session.token(), mapper.writeValueAsString(session), SESSION_TTL);
+          .set(
+              KEY_PREFIX + keyHash(session.token()),
+              mapper.writeValueAsString(withoutToken(session)),
+              SESSION_TTL);
     } catch (JsonProcessingException e) {
       // Should never trip — record fields are all primitives + strings.
       // Log loud + rethrow so the controller surfaces a 500 instead of
       // silently losing the session.
       log.error(
-          "v3 anon-run session serialize failed token={}: {}", session.token(), e.getMessage());
+          "v3 anon-run session serialize failed session={}: {}",
+          fingerprint(session.token()),
+          e.getMessage());
       throw new IllegalStateException("session serialize failed", e);
     }
   }
 
   public Optional<AnonymousRunSession> find(String token) {
     if (token == null || token.isBlank()) return Optional.empty();
-    String raw = redis.opsForValue().get(KEY_PREFIX + token);
+    String raw = redis.opsForValue().get(KEY_PREFIX + keyHash(token));
+    if (raw == null) {
+      // Legacy raw-token key, written before RR-665's at-rest pass. Still readable so unexpired
+      // sessions survive the deploy; the next save() rewrites it under the hashed key.
+      raw = redis.opsForValue().get(KEY_PREFIX + token);
+    }
     if (raw == null) return Optional.empty();
     try {
-      return Optional.of(mapper.readValue(raw, AnonymousRunSession.class));
+      // The stored blob carries no token (see class javadoc); re-attach the caller's own.
+      return Optional.of(mapper.readValue(raw, AnonymousRunSession.class).withToken(token));
     } catch (JsonProcessingException e) {
-      log.warn("v3 anon-run session deserialize failed token={}: {}", token, e.getMessage());
+      log.warn(
+          "v3 anon-run session deserialize failed session={}: {}",
+          fingerprint(token),
+          e.getMessage());
       return Optional.empty();
     }
   }
 
   /**
-   * Stamp the session as "claimed" by a freshly-signed-up user. Returns the updated session (or
-   * empty when the token is unknown / expired). Idempotent: a second bind to the same userId is a
-   * no-op; a bind to a different userId is rejected (returns the existing session unchanged) so a
-   * token can't be silently re-claimed by another account.
+   * Claim the session for a freshly-signed-up user. Returns the session as the caller may see it,
+   * or empty when the token is unknown / expired.
+   *
+   * <p>Ownership is decided by one atomic claim-if-unbound. The returned session always carries the
+   * authoritative {@code boundUserId}: when the caller lost the race (or the session was already
+   * bound), that is the OTHER user's id, so the caller can see it did not win. Idempotent — a
+   * second bind by the same user is a no-op that reports success.
    */
   public Optional<AnonymousRunSession> bindToUser(String token, String userId) {
+    if (token == null || token.isBlank() || userId == null || userId.isBlank()) {
+      return Optional.empty();
+    }
     Optional<AnonymousRunSession> existing = find(token);
     if (existing.isEmpty()) return Optional.empty();
     AnonymousRunSession s = existing.get();
-    if (s.boundUserId() != null && !s.boundUserId().equals(userId)) {
-      log.warn(
-          "v3 anon-run session token={} already bound to {} — rejecting bind to {}",
-          token,
-          s.boundUserId(),
-          userId);
+
+    String claimKey = CLAIM_PREFIX + keyHash(token);
+    // Sessions bound before the claim key existed: seed the claim from the blob so the CAS below
+    // is authoritative for them too. setIfAbsent, so this cannot overwrite a live claim.
+    if (s.boundUserId() != null) {
+      redis.opsForValue().setIfAbsent(claimKey, s.boundUserId(), SESSION_TTL);
+    }
+
+    String owner = claim(claimKey, userId);
+    if (owner == null) {
+      // The claim key expired between our SETNX and the read-back. Retry once; if it is still
+      // indeterminate, refuse rather than guess — an unproven claim must not grant ownership.
+      owner = claim(claimKey, userId);
+    }
+    if (owner == null) {
+      log.warn("v3 anon-run claim indeterminate session={}", fingerprint(token));
       return existing;
     }
-    if (userId.equals(s.boundUserId())) {
-      return existing; // idempotent
+
+    if (!owner.equals(userId)) {
+      log.warn(
+          "v3 anon-run session={} already bound to {} — rejecting bind to {}",
+          fingerprint(token),
+          owner,
+          userId);
+      // Report the authoritative owner even if the stored blob predates the claim key.
+      return Optional.of(owner.equals(s.boundUserId()) ? s : s.boundTo(owner));
     }
-    AnonymousRunSession updated = s.boundTo(userId);
+    if (owner.equals(s.boundUserId())) {
+      return existing; // idempotent — we already own it
+    }
+    // We won the claim; re-read so a concurrent status update from the dispatcher is preserved.
+    AnonymousRunSession updated = find(token).orElse(s).boundTo(owner);
     save(updated);
-    log.info("v3 anon-run session token={} bound to user={}", token, userId);
+    log.info("v3 anon-run session={} bound to user={}", fingerprint(token), userId);
     return Optional.of(updated);
+  }
+
+  /**
+   * One atomic claim-if-unbound. Returns the authoritative owner (this caller when the claim was
+   * won, the incumbent otherwise), or null when the key could not be resolved.
+   */
+  private String claim(String claimKey, String userId) {
+    Boolean won = redis.opsForValue().setIfAbsent(claimKey, userId, SESSION_TTL);
+    if (Boolean.TRUE.equals(won)) return userId;
+    return redis.opsForValue().get(claimKey);
+  }
+
+  /**
+   * RR-665 — a short, non-reversible identifier for a session, safe to log. Never log the token
+   * itself: it is a bearer credential and a logged credential is a leaked credential.
+   */
+  static String fingerprint(String token) {
+    if (token == null || token.isBlank()) return "none";
+    return keyHash(token).substring(0, 12);
+  }
+
+  /**
+   * RR-665 — the full one-way digest used as the Redis key, so the keyspace never contains a usable
+   * bearer. Full length (not the truncated log {@link #fingerprint}) because this one has to be
+   * collision-free across every live session, not merely human-correlatable.
+   */
+  static String keyHash(String token) {
+    try {
+      byte[] digest =
+          MessageDigest.getInstance("SHA-256").digest(token.getBytes(StandardCharsets.UTF_8));
+      return HexFormat.of().formatHex(digest);
+    } catch (NoSuchAlgorithmException e) {
+      // SHA-256 is mandated by the JCA spec; unreachable on any supported JVM.
+      throw new IllegalStateException("SHA-256 unavailable", e);
+    }
+  }
+
+  /** RR-665 — the shape actually persisted: everything except the bearer. */
+  private static AnonymousRunSession withoutToken(AnonymousRunSession session) {
+    return session.withToken(null);
   }
 }

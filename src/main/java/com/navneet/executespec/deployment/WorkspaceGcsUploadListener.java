@@ -84,7 +84,7 @@ public class WorkspaceGcsUploadListener {
 
     // Idempotent: skip if already uploaded
     PipelineRun run = stateStore.findRun(runId).orElse(null);
-    if (run == null || run.getGcsWorkspaceKey() != null) return;
+    if (!shouldUpload(run)) return;
 
     Path workspace = Path.of(agentProps.getWorkspace(), runId);
     if (!Files.isDirectory(workspace)) {
@@ -96,6 +96,15 @@ public class WorkspaceGcsUploadListener {
       Path zipPath = exportService.exportWorkspace(runId);
       try {
         String gcsKey = gcsStore.uploadZip(runId, zipPath);
+        // RR-1676: uploadZip returns null when GCS is unavailable, and a persisted null/absent key
+        // later reads as "archived" (getGcsWorkspaceKey() != null is the archived precondition).
+        // Only
+        // a proven, present archive may be recorded; otherwise fail into the catch below so the run
+        // is enqueued for retry instead of being falsely marked archived over an absent object.
+        if (gcsKey == null || gcsKey.isBlank() || !gcsStore.exists(gcsKey)) {
+          throw new IllegalStateException(
+              "GCS archive did not produce a durable, present object key for run " + runId);
+        }
         // Set gcsWorkspaceKey but NOT gcsArchivedAt — local copy stays
         run.setGcsWorkspaceKey(gcsKey);
         stateStore.saveRun(run);
@@ -120,5 +129,9 @@ public class WorkspaceGcsUploadListener {
                       : "",
               "error", e.getMessage() != null ? e.getMessage() : "unknown"));
     }
+  }
+
+  static boolean shouldUpload(PipelineRun run) {
+    return run != null && run.getGcsWorkspaceKey() == null && !run.isLocalExecutionRequested();
   }
 }

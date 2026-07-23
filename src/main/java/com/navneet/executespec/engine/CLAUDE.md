@@ -1,7 +1,14 @@
 # `engine/` — the code-gen engine seam
 
+## PATCH/critic prompt authority (2026-07-18)
+
+`CodeGenEngineImpl` frames the PATCH task and deterministic repository orientation independently as
+untrusted user evidence. `WorkerAgent`'s optional critic pass likewise frames the task and candidate
+deliverable independently; neither repository text nor generated/tool-derived content is appended to
+the critic system policy. `ApplyService` frames post-run apply suggestions before worker dispatch.
+
 > Added 2026-05-27 (RL-2026-05-052). Design + migration plan:
-> [`docs/plans/codegen-engine-extraction.md`](../../../../../../../docs/plans/codegen-engine-extraction.md).
+> [codegen engine extraction plan](https://github.com/navneetprabhakar/executespec-docs/blob/main/backend/plans/codegen-engine-extraction.md).
 
 Isolates **code generation** as a provider-agnostic core engine, with the pipeline
 (classifier / planner / reviewer / scoring / governance) as **upstream / downstream** layers — so the
@@ -18,6 +25,23 @@ rollout, each phase shippable + green:
 | **5+6** | **`ToolOutputCompactor` + prompt-cache discipline** — bulk worker tool output (> 3 KB; `readFile`/`searchFiles`/`listFiles`/`shell`/`buildProject`/`runTests`) is summarised through the LIGHTWEIGHT tier (Haiku / Flash) before being appended to the WORKHORSE worker's history. Only the compacted summary lands in the worker's context. Skip list: writeFile/editFile/gitCommit/completeTask/gitDiff/gitStatus (already short / load-bearing); most-recent-tool-call (preserve verbatim); raw < 3 KB. Fail-safe: any LLM exception → raw output. Default OFF behind `worker.tool-compactor.enabled` (V216, default false). Mirrors Anthropic's Claude Code CLI internal pattern — bulk through Haiku, decision-context through Sonnet. | **landed default-OFF** (RL-2026-05-052, this branch) |
 | 6 | Land the pending harness internals IN the engine: #5 cache discipline · #7 compaction · #8 fork-sub-agents · #9 permission ruleset + hooks. (Static/dynamic system-prompt boundary for true prefix-cache stability is still future scope; the compactor above is the first half of #7.) | partial |
 
+## Capability-keyed tool policy (RR-1599, 2026-07-20)
+
+`WorkerToolPolicy` is the single classifier behind every `WorkerAgent` safety and progress gate.
+The registry mints several NAMES over one implementation (`executeCommand`/`runCommand`/
+`terminalCommand` = shell; `build`/`runBuild` = build; `rename` = `move`; `deletePath` = `delete`;
+`applyPatch`/`ast_edit` = edit), so the previous literal-name predicates silently failed OPEN for
+every alias they had not enumerated: the verified-pass guard did not refuse an alias, and the
+build-verification gate could not be satisfied through `build`/`runBuild`. Policy now keys on
+`tool.ToolCapability`.
+
+Fail-closed direction differs per predicate and is deliberate: safety predicates
+(`isRiskyAfterVerifiedPass`, `isWriteTool`, `isShellTool`) treat an UNCLASSIFIED name as dangerous,
+while `isProgressTool` treats it as NOT progress so an unknown tool cannot hold the stagnation guard
+open. `WorkerAgent.mutationTarget` also uses explicit classification only — an unclassified tool's
+arguments must never be claimed as a delivered product path — and now emits `[target=…]` for
+`move` / `delete` / `ast_edit` too, which previously produced no delivery evidence at all.
+
 ## Files
 
 | File | Purpose |
@@ -28,7 +52,7 @@ rollout, each phase shippable + green:
 | `EngineResult.java` | `diff · verification · transcript · cost · outcome · summary`. |
 | `EngineOutcome.java` | COMPLETED / STAGNATED / ITER_LIMIT / BUDGET / WALL_CLOCK / STOPPED / ERROR (maps from `agent.WorkerResult.Outcome`). |
 | `VerifyMode.java` | NONE / SOFT_NUDGE / HARD_GATE — the verify lever as **data**, not a code branch. |
-| `EngineBudget.java` | iterCap / wallClockSeconds / dollarCap (null = engine/tier default). |
+| `EngineBudget.java` | iterCap / wallClockSeconds / dollarCap plus an optional absolute deadline and protected shutdown reserve (null = engine/tier default). The three-argument constructor remains source-compatible. |
 | `EngineCost.java` | inputTokens / outputTokens / cacheReadTokens / usd (cache-aware). |
 | `EngineVerification.java` | buildOk / testsPassed / testsTotal / detail (null field = **not measured**, distinct from failed). |
 | `WorkerAgent.java` | **(Phase 4, moved from `agent/`)** the sequential multi-turn worker loop — stream → tools → `completeTask`; progress/verify nudges; Lever-B salvage. **PATCH no-edit nudge (RL-2026-06-030):** non-terminal PATCH runs inject the existing progress nudge after 6 consecutive non-write iterations with zero edits, and pre-edit build/test/read loops do not reset that watchdog; BUILD and Terminal-Bench keep their existing thresholds. **Forced-tool-choice salvage (RL-2026-05-059, flag `worker.salvage-force-tool-choice.enabled`, V224, default OFF):** when on, `runSalvageCall` does a `salvageAttempt` with the tool set restricted to `writeFile`/`editFile`/`completeTask` (`salvageTools(restrict=true)`) + `tool_choice="required"`, then **falls back** to today's full-tools/auto attempt if the forced one yields no tool call — so a model that returns reasoning-only text (the verified 4/10 native-DeepSeek zero-write empty-patch failure) is forced to emit an edit, with no regression for providers that reject `"required"`. Still imports `agent.LlmRouter` + `agent.LlmRequest`. |
@@ -61,7 +85,7 @@ Three provider-neutral borrows on the worker dispatch path (default-on unless no
 - **Sibling pairing after `completeTask` (C2).** `completeTask` short-circuits its batch with a `return`; any tool call AFTER it in the same assistant turn is now paired with a synthetic `SUPERSEDED` `tool_result`, so the persisted/replayed history never carries a dangling `tool_use` (Anthropic pairing invariant).
 - **Pre-dispatch arg validation (B4).** `dispatchOne` (and the Spring-AI `ToolRegistry.ContextBoundToolCallback.call`) run `tool/ToolArgValidator` before `tool.execute` — a conservative, fail-open, **absent-only** check that rejects a call omitting a schema-declared `required` field with an `INVALID_ARGS` the model recovers from. No model-visible schema change (sidesteps the RL-2026-05-061 schema-sensitivity class).
 - **Read-only-batch parallelism (C1, RL-2026-06-010).** When `execution.continuation.parallel-read-tools-enabled=true` and a single assistant turn emits ONLY read-only tools (`readFile`/`searchFiles`/`listFiles`/`gitStatus`/`gitDiff`, ≥2, non-remote), `maybeParallelReadDispatch` pre-executes their bodies concurrently on virtual threads; the sequential loop then consumes the cached `{callId→envelope}` map, so every per-call mutation (metrics/SSE/`toolResponses` order/gate-tracking) is byte-identical. Server logs and legacy `LOG` SSE lines emit the parallel batch labels on start plus per-call `ok`/`err` results on completion. Any batch with a write/build/shell/`completeTask` (or a remote run) stays fully sequential (no read/write ordering hazard); fail-safe (timeout/partial → sequential; reads are idempotent). Behavior-neutral + faster on read-heavy exploration turns. Safe because the read set is pure (`ReadFileStateStore` = synchronizedMap+ConcurrentHashMap; `RunCostTracker` reached via `maybeCompact` is `AtomicLong`-based).
-- **Tool-call result logging for waste guards.** Normal worker `toolCallLog` entries now append `-> OK` / `-> ERR` after the bounded argument preview. `SequentialExecutor` uses that result-bearing log to group repeated `shell` / `bash` / `buildProject` / `runTests` failures by stable command/test signature.
+- **Tool-call result logging for waste guards.** Normal worker `toolCallLog` entries persist only the tool name, an opaque SHA-256 argument signature and `-> OK` / `-> ERR`; raw arguments and commands are never retained. Mutating calls also append an exact bounded `[target=...]` so task-attributable diff evidence survives without edit content. `SequentialExecutor` uses the result-bearing signature to group repeated `shell` / `bash` / `buildProject` / `runTests` failures; only explicit `-> OK` mutation entries may claim a product path.
 
 ## Invariants
 
@@ -88,3 +112,23 @@ Three provider-neutral borrows on the worker dispatch path (default-on unless no
 - Context-overflow recovery: `isContextLengthError` + compactNow → `hardTrimHistory` → ERROR (was: instant ERROR). The deterministic fallback now bounds oversized short tool envelopes while preserving assistant/tool pairing, and progress signatures use text-safe separators (no NUL byte). Pinned by `WorkerAgentOverflowRecoveryTest`.
 - `RepoOrientationService` (`worker.localization.enabled`): deterministic warm-start block (layout, identifier grep hits, resolver commands) injected into the BUILD planner cold-start and the first worker user message. The planner and worker share the same advisory evidence marker; the flag remains fail-open and default-off until a measured gate flips it.
 - `WorkerTaskRequest` gained `progressV2` + `autoVerify`. New `@RequiredArgsConstructor` deps go at the END of the field list (7 test ctor sites were churned by mid-list insertion).
+
+## P1 audit-remediation batch (engine lane, 2026-07-22)
+
+Fail-closed / evidence-honest corrections; no migration.
+
+- **RR-259** — worker progress and `totalWriteCalls` now derive from SUCCESSFUL mutations /
+  verification transitions (`isOkEnvelope && !isFailureEnvelope`), not tool-name matches. A rejected
+  write or failing build no longer resets the no-progress watchdog, and a single failed write no
+  longer inflates `totalWriteCalls` (which had disabled zero-write Lever-B salvage).
+- **RR-260** — `WorkerResult.salvagedUnverified` flags a best-guess salvage write; the executor
+  treats a salvaged `COMPLETED` as a soft completion so it must pass the smoke gate to reach SUCCESS
+  (COMPLETED_WITH_WARNING when smoke is skipped). "file changed" is no longer "task completed".
+- **RR-591** — the direct verification/critic path (`dispatchToolDirect` and the
+  missingDeliverables / visibleTestsExist / readDeliverableContext / snapshotTerminalVerifiedCandidate
+  / terminalVerifierPass helpers) now threads the task's immutable absolute deadline into
+  `dispatchRemote`, so reconnects can no longer renew a terminal remote call forever.
+- **RR-622** — worker tool-call metrics record `boundedToolMetricName(tc.name())` (registered alias
+  or `"unknown"`), so an adversarial provider cannot mint unbounded Micrometer series.
+- **RR-1562** — `EngineBudget.dollarCap` now propagates onto `WorkerTaskRequest.dollarCap`; the worker
+  enforces `min(dollarCap, PipelineRun.hardCapUsd)`, so a per-solve cap is no longer a dead field.

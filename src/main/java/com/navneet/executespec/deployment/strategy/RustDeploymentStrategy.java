@@ -86,11 +86,24 @@ public class RustDeploymentStrategy implements DeploymentStrategy {
         if (stripped.startsWith("name") && stripped.contains("=")) {
           String value = stripped.split("=", 2)[1].strip();
           // Remove surrounding quotes
-          return value.replace("\"", "").replace("'", "").strip();
+          return sanitizeName(value.replace("\"", "").replace("'", "").strip());
         }
       }
     } catch (IOException ignored) {
     }
     return "app";
+  }
+
+  /**
+   * The detected binary name is spliced into the generated Dockerfile COPY instruction, so it is
+   * untrusted Cargo.toml content. A value containing whitespace, a quote or {@code ..} can inject
+   * extra COPY sources or path traversal (RR-1634). Accept only a conservative identifier shape;
+   * otherwise fall back to the safe default.
+   */
+  private static final java.util.regex.Pattern SAFE_NAME =
+      java.util.regex.Pattern.compile("[A-Za-z0-9._-]{1,100}");
+
+  private static String sanitizeName(String candidate) {
+    return candidate != null && SAFE_NAME.matcher(candidate).matches() ? candidate : "app";
   }
 }

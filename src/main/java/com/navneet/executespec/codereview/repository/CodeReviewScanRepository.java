@@ -1,19 +1,21 @@
 package com.navneet.executespec.codereview.repository;
 
 import java.time.Instant;
-import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
 import com.navneet.executespec.codereview.entity.CodeReviewScan;
 
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Slice;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 public interface CodeReviewScanRepository extends JpaRepository<CodeReviewScan, UUID> {
 
-  List<CodeReviewScan> findByProjectIdOrderByStartedAtDesc(String projectId);
+  Slice<CodeReviewScan> findByProjectIdAndStartedAtGreaterThanEqualOrderByStartedAtDescIdDesc(
+      String projectId, Instant since, Pageable pageable);
 
   /** Latest scan for a (repo) — used when the user opens the Code Quality tab cold. */
   Optional<CodeReviewScan> findFirstByRepoFullNameOrderByStartedAtDesc(String repoFullName);
@@ -32,6 +34,10 @@ public interface CodeReviewScanRepository extends JpaRepository<CodeReviewScan, 
    */
   Optional<CodeReviewScan> findFirstByProjectIdAndRepoFullNameOrderByStartedAtDesc(
       String projectId, String repoFullName);
+
+  /** Immutable admission tuple used by V299 background-job idempotency. */
+  Optional<CodeReviewScan> findByProjectIdAndRepoIdAndScannedSha(
+      String projectId, UUID repoId, String scannedSha);
 
   /**
    * Per-month count for a given user — used by the tier-quota gate to enforce per-tier monthly caps

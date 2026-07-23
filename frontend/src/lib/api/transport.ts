@@ -71,6 +71,47 @@ export function parseErrorMessage(status: number, raw: string): string {
   return STATUS_MESSAGES[status] ?? `Request failed (${status}). Please try again.`;
 }
 
+/**
+ * RR-169 — every shared request now carries a deadline. Before this, `fetchJson`/`fetchText`
+ * issued `fetch` with no timeout signal, so a stalled connection left spinners and mutation
+ * controls pending indefinitely, encouraged duplicate user actions, and retained request/response
+ * resources across navigation. A single default total deadline turns a stall into a typed
+ * timeout `ApiError` (status 0, same sentinel a network failure uses) that callers already branch
+ * on via `isRetryableError`.
+ */
+export const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
+
+/**
+ * Builds an `AbortSignal` that fires after `timeoutMs`, composed with an optional caller signal so
+ * a component that unmounts can still cancel. Uses a manual `AbortController` rather than
+ * `AbortSignal.timeout`/`AbortSignal.any` so it works in every runtime (including the jsdom test
+ * env). Returns the signal plus a `clear()` to release the timer once the request settles.
+ */
+function timeoutSignal(
+  callerSignal: AbortSignal | undefined,
+  timeoutMs: number,
+): {signal: AbortSignal; clear: () => void; timedOut: () => boolean} {
+  const controller = new AbortController();
+  let didTimeout = false;
+  const timer = setTimeout(() => {
+    didTimeout = true;
+    controller.abort();
+  }, timeoutMs);
+  const onAbort = () => controller.abort();
+  if (callerSignal) {
+    if (callerSignal.aborted) controller.abort();
+    else callerSignal.addEventListener('abort', onAbort, {once: true});
+  }
+  return {
+    signal: controller.signal,
+    clear: () => {
+      clearTimeout(timer);
+      if (callerSignal) callerSignal.removeEventListener('abort', onAbort);
+    },
+    timedOut: () => didTimeout,
+  };
+}
+
 let refreshInFlight: Promise<boolean> | null = null;
 
 function shouldAttemptRefresh(url: string): boolean {
@@ -107,6 +148,26 @@ async function refreshAccessTokenOnce(): Promise<boolean> {
   return refreshInFlight;
 }
 
+/**
+ * The refresh token is also dead, so this session cannot be recovered.
+ *
+ * Without this the app soft-bricks: `isAuthenticated` is derived from localStorage, so leaving the
+ * stale access_token in place keeps ProtectedRoute satisfied while every request 401s. The user is
+ * told "Please log in again" by an error banner but the app refuses to take them anywhere, and only
+ * a manual reload recovers.
+ *
+ * Clear the dead token and bounce to /login, preserving the current path in `?redirect=` so the
+ * login page returns the user to where they were (it already honours that parameter).
+ */
+function endDeadSession(): void {
+  if (typeof window === 'undefined') return;
+  if (!localStorage.getItem('access_token')) return; // already handled by a concurrent request
+  localStorage.removeItem('access_token');
+  const here = window.location.pathname + window.location.search + window.location.hash;
+  const onAuthPage = window.location.pathname.startsWith('/login');
+  window.location.replace(onAuthPage ? '/login' : `/login?redirect=${encodeURIComponent(here)}`);
+}
+
 async function fetchJson(url: string, opts?: RequestInit): Promise<Response> {
   // Audit r5 (P0-2, 2026-05-06): a backend OOM crash during the new-user
   // walkthrough surfaced as `fetch()` rejecting with `TypeError: Failed
@@ -117,6 +178,8 @@ async function fetchJson(url: string, opts?: RequestInit): Promise<Response> {
   // ApiError with `status: 0` (a sentinel callers can branch on for
   // retry UI). Genuine 4xx/5xx responses still reach the original status
   // path.
+  // RR-169: compose a total deadline so a stalled request fails typed instead of hanging forever.
+  const deadline = timeoutSignal(opts?.signal ?? undefined, DEFAULT_REQUEST_TIMEOUT_MS);
   let res: Response;
   try {
     const headers = {'Content-Type': 'application/json', ...authHeader(), ...opts?.headers};
@@ -124,36 +187,54 @@ async function fetchJson(url: string, opts?: RequestInit): Promise<Response> {
       ...opts,
       headers,
       credentials: 'include', // send refresh_token cookie
+      signal: deadline.signal,
     });
   } catch (e) {
+    if (deadline.timedOut()) {
+      throw new ApiError(0, 'The request timed out. Please check your connection and try again.');
+    }
     const reason = e instanceof Error ? e.message : 'unknown';
     throw new ApiError(
       0,
       `Can't reach the server (${reason}). Check your connection and try again.`,
     );
+  } finally {
+    deadline.clear();
   }
   return res;
 }
 
 async function fetchText(url: string): Promise<Response> {
+  // RR-169: same total deadline for plain-text reads.
+  const deadline = timeoutSignal(undefined, DEFAULT_REQUEST_TIMEOUT_MS);
   try {
     return await fetch(BASE + url, {
       headers: {...authHeader()},
       credentials: 'include',
+      signal: deadline.signal,
     });
   } catch (e) {
+    if (deadline.timedOut()) {
+      throw new ApiError(0, 'The request timed out. Please check your connection and try again.');
+    }
     const reason = e instanceof Error ? e.message : 'unknown';
     throw new ApiError(
       0,
       `Can't reach the server (${reason}). Check your connection and try again.`,
     );
+  } finally {
+    deadline.clear();
   }
 }
 
 export async function req<T>(url: string, opts?: RequestInit): Promise<T> {
   let res = await fetchJson(url, opts);
-  if (res.status === 401 && shouldAttemptRefresh(url) && (await refreshAccessTokenOnce())) {
-    res = await fetchJson(url, opts);
+  if (res.status === 401 && shouldAttemptRefresh(url)) {
+    if (await refreshAccessTokenOnce()) {
+      res = await fetchJson(url, opts);
+    } else {
+      endDeadSession();
+    }
   }
   if (!res.ok) {
     const raw = await res.text().catch(() => '');
@@ -180,8 +261,12 @@ export function isRetryableError(e: unknown): boolean {
 /** Fetch a plain-text endpoint (e.g. file content served as text/plain). */
 export async function reqText(url: string): Promise<string> {
   let res = await fetchText(url);
-  if (res.status === 401 && shouldAttemptRefresh(url) && (await refreshAccessTokenOnce())) {
-    res = await fetchText(url);
+  if (res.status === 401 && shouldAttemptRefresh(url)) {
+    if (await refreshAccessTokenOnce()) {
+      res = await fetchText(url);
+    } else {
+      endDeadSession();
+    }
   }
   if (!res.ok) {
     const raw = await res.text().catch(() => '');

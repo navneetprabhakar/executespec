@@ -32,14 +32,27 @@ class RunOrchestratorReviewerRouteTest {
     assertThat(decision.recommendedDecision()).isEqualTo(RunContinuationDecision.STOP_FAILED);
   }
 
-  /** Pins the validation-side boundary: no report is not itself proof of low quality. */
+  /**
+   * RR-826 — this previously pinned "no report is not itself proof of low quality" as intended
+   * fail-open behavior. That made the product's defining verified-output claim optional exactly
+   * when the verifier failed: report generation swallows every exception and returns empty, so a
+   * database, provenance or persistence failure produced a terminal run with NO deterministic
+   * verification artifact while keeping its pre-report success-shaped status and proceeding to
+   * publication.
+   *
+   * <p>Final verification is now {@code PASSED | FAILED | UNAVAILABLE}, and only PASSED may leave a
+   * run success-shaped. An absent report is UNAVAILABLE and must not pass the gate — which also
+   * makes the boolean gate agree with the companion goal decision, which already labelled the same
+   * absence {@code FAILED/STOP_FAILED}.
+   */
   @Test
-  void postReviewValidationBoundaryDoesNotEscalateWithoutReport() {
-    assertThat(RunOrchestrator.validationReportQualityFailed(null, 70)).isFalse();
+  void postReviewValidationBoundaryTreatsAMissingReportAsUnverified() {
+    assertThat(RunOrchestrator.validationReportQualityFailed(null, 70)).isTrue();
 
     var decision = RunOrchestrator.validationReportLowQualityGoalDecision(null, 70);
     assertThat(decision.reason()).contains("verifiedScore=unknown");
     assertThat(decision.reason()).contains("pipelineResult=UNKNOWN");
+    assertThat(decision.recommendedDecision()).isEqualTo(RunContinuationDecision.STOP_FAILED);
   }
 
   @Test
@@ -199,6 +212,30 @@ class RunOrchestratorReviewerRouteTest {
         ValidationReport.builder().verifiedScore(86).pipelineResult(PipelineResult.PASSED).build();
 
     assertThat(RunOrchestrator.validationReportQualityFailed(report, 70)).isFalse();
+  }
+
+  @Test
+  void deterministicProvenanceFailureDowngradesTheRunInsteadOfPublishingPartial() {
+    ValidationReport report =
+        ValidationReport.builder()
+            .verifiedScore(0)
+            .pipelineResult(PipelineResult.FAILED)
+            .issuesJson("[{\"stage\":\"DETERMINISTIC_PROVENANCE\"}]")
+            .build();
+
+    assertThat(RunOrchestrator.validationReportProvenanceFailed(report)).isTrue();
+  }
+
+  @Test
+  void ordinaryLowQualityReportIsNotMisclassifiedAsMissingProductEvidence() {
+    ValidationReport report =
+        ValidationReport.builder()
+            .verifiedScore(0)
+            .pipelineResult(PipelineResult.FAILED)
+            .issuesJson("[{\"stage\":\"REVIEWER\"}]")
+            .build();
+
+    assertThat(RunOrchestrator.validationReportProvenanceFailed(report)).isFalse();
   }
 
   @Test

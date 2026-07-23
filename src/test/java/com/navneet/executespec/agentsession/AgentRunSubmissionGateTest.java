@@ -5,14 +5,16 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.ArgumentMatchers.nullable;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.util.Map;
-import java.util.Optional;
 
 import com.navneet.executespec.agent.ApiKeyResolver;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.OrchestratorPolicy;
@@ -29,9 +31,10 @@ import com.navneet.executespec.billing.service.ManagedAiUsageService;
 import com.navneet.executespec.billing.service.UsageTrackingService;
 import com.navneet.executespec.config.featureflag.FeatureFlagService;
 import com.navneet.executespec.integration.RunOrchestrator;
+import com.navneet.executespec.project.security.ProjectAccessGuard;
 import com.navneet.executespec.router.ModelAccessService;
+import com.navneet.executespec.run.RunIdempotencyClaim;
 import com.navneet.executespec.run.RunIdempotencyService;
-import com.navneet.executespec.run.RunLocalExecutionFlag;
 import com.navneet.executespec.security.InputSanitizer;
 import com.navneet.executespec.state.StateStore;
 import com.navneet.executespec.state.entity.PipelineRun;
@@ -57,7 +60,7 @@ class AgentRunSubmissionGateTest {
   @Mock AiProviderPreferenceService aiProviderPreferenceService;
   @Mock RunIdempotencyService runIdempotencyService;
   @Mock StateStore stateStore;
-  @Mock RunLocalExecutionFlag runLocalExecutionFlag;
+  @Mock ProjectAccessGuard projectAccessGuard;
 
   private AgentRunSubmissionGate gate;
 
@@ -76,7 +79,7 @@ class AgentRunSubmissionGateTest {
             aiProviderPreferenceService,
             runIdempotencyService,
             stateStore,
-            runLocalExecutionFlag);
+            projectAccessGuard);
   }
 
   @Test
@@ -113,8 +116,8 @@ class AgentRunSubmissionGateTest {
 
   @Test
   void confirmedRunSubmitsExactlyOnceAndRecordsUsage() {
-    when(runIdempotencyService.lookup("u1", "agent-orchestrator:turn-1"))
-        .thenReturn(Optional.empty());
+    when(runIdempotencyService.claim(eq("u1"), eq("agent-orchestrator:turn-1"), anyString()))
+        .thenReturn(RunIdempotencyClaim.claimed("u1", "agent-orchestrator:turn-1", "owner", 1L));
     when(aiProviderPreferenceService.preferredProvider(any())).thenReturn("DEEPSEEK");
     when(runOrchestrator.submitRun(
             anyString(),
@@ -176,13 +179,116 @@ class AgentRunSubmissionGateTest {
             (Boolean) null,
             (String) null);
     verify(usageTrackingService).increment("u1", "RUNS", 1);
-    verify(runIdempotencyService).record("u1", "agent-orchestrator:turn-1", "run-1");
+    verify(runIdempotencyService)
+        .complete(
+            argThat(c -> "agent-orchestrator:turn-1".equals(c.idempotencyKey()) && c.owned()),
+            eq("run-1"));
+  }
+
+  @Test
+  void aPreSubmitValidationFailureReleasesTheIdempotencyClaim() {
+    // RR-1579: credit exhaustion, a disallowed model or a missing BYOK key used to leave the
+    // durable claim held with no run id, so the retry after fixing the problem was rejected as a
+    // duplicate submission until the lease elapsed.
+    var claim = RunIdempotencyClaim.claimed("u1", "agent-orchestrator:turn-1", "owner", 1L);
+    when(runIdempotencyService.claim(eq("u1"), eq("agent-orchestrator:turn-1"), anyString()))
+        .thenReturn(claim);
+    org.mockito.Mockito.doThrow(
+            new org.springframework.web.server.ResponseStatusException(
+                org.springframework.http.HttpStatus.PAYMENT_REQUIRED, "AI credits exhausted"))
+        .when(managedAiUsageService)
+        .assertCanStartRun(any(), anyBoolean());
+
+    org.assertj.core.api.Assertions.assertThatThrownBy(
+            () ->
+                gate.submitConfirmed(
+                    session(),
+                    turn("Implement OAuth login"),
+                    decision("CODE_RUN_REQUIRED", true),
+                    request(true),
+                    user()))
+        .isInstanceOf(org.springframework.web.server.ResponseStatusException.class);
+
+    verify(runIdempotencyService).failFinal(eq(claim), anyString());
+    verify(runIdempotencyService, org.mockito.Mockito.never()).complete(any(), anyString());
+  }
+
+  @Test
+  void confirmationInheritsSessionProviderAndModelWhenClientsDoNotEchoThem() {
+    when(runIdempotencyService.claim(eq("u1"), eq("agent-orchestrator:turn-1"), anyString()))
+        .thenReturn(RunIdempotencyClaim.claimed("u1", "agent-orchestrator:turn-1", "owner", 1L));
+    when(runOrchestrator.submitRun(
+            anyString(),
+            anyString(),
+            isNull(),
+            anyString(),
+            isNull(),
+            isNull(),
+            anyBoolean(),
+            anyBoolean(),
+            anyString(),
+            anyString(),
+            anyString(),
+            anyString(),
+            anyString(),
+            anyString(),
+            isNull(),
+            isNull(),
+            anyBoolean(),
+            isNull(),
+            isNull(),
+            nullable(Boolean.class),
+            nullable(Boolean.class),
+            nullable(String.class)))
+        .thenReturn(PipelineRun.builder().runId("run-session-route").createdByUserId("u1").build());
+    AgentSession session =
+        AgentSession.builder()
+            .id("s1")
+            .orgId("org-1")
+            .userId("u1")
+            .projectId("p1")
+            .defaultProvider("ANTHROPIC")
+            .defaultModel("claude-opus-4-8")
+            .build();
+
+    gate.submitConfirmed(
+        session,
+        turn("Implement OAuth login"),
+        decision("CODE_RUN_REQUIRED", true),
+        request(true),
+        user());
+
+    verify(modelAccessService).assertProviderModelPair("ANTHROPIC", "claude-opus-4-8");
+    verify(runOrchestrator)
+        .submitRun(
+            "Implement OAuth login",
+            "AGENT_ORCHESTRATOR",
+            null,
+            "EXISTING",
+            null,
+            null,
+            false,
+            false,
+            "claude-opus-4-8",
+            "ANTHROPIC",
+            "u1",
+            "org-1",
+            "p1",
+            "PRODUCTION",
+            null,
+            null,
+            false,
+            null,
+            null,
+            (Boolean) null,
+            (Boolean) null,
+            (String) null);
   }
 
   @Test
   void confirmedRunCanStartLowComplexityWorkersOnLightweightTier() {
-    when(runIdempotencyService.lookup("u1", "agent-orchestrator:turn-1"))
-        .thenReturn(Optional.empty());
+    when(runIdempotencyService.claim(eq("u1"), eq("agent-orchestrator:turn-1"), anyString()))
+        .thenReturn(RunIdempotencyClaim.claimed("u1", "agent-orchestrator:turn-1", "owner", 1L));
     when(aiProviderPreferenceService.preferredProvider(any())).thenReturn("DEEPSEEK");
     when(runOrchestrator.submitRun(
             anyString(),
@@ -246,8 +352,8 @@ class AgentRunSubmissionGateTest {
 
   @Test
   void confirmedRunPropagatesPrototypeExecutionModeAndEditedSpec() {
-    when(runIdempotencyService.lookup("u1", "agent-orchestrator:turn-1"))
-        .thenReturn(Optional.empty());
+    when(runIdempotencyService.claim(eq("u1"), eq("agent-orchestrator:turn-1"), anyString()))
+        .thenReturn(RunIdempotencyClaim.claimed("u1", "agent-orchestrator:turn-1", "owner", 1L));
     when(aiProviderPreferenceService.preferredProvider(any())).thenReturn("DEEPSEEK");
     when(runOrchestrator.submitRun(
             anyString(),
@@ -309,48 +415,24 @@ class AgentRunSubmissionGateTest {
   }
 
   @Test
-  void confirmedLocalRunRequiresPatAndMarksLocalExecutionFlag() {
+  void confirmedLocalRunRequiresPatAndFailsClosedWithoutConnectorBinding() {
     when(featureFlagService.isEnabled("worker.local-hands.enabled")).thenReturn(true);
-    when(runIdempotencyService.lookup("u1", "agent-orchestrator:turn-1"))
-        .thenReturn(Optional.empty());
-    when(aiProviderPreferenceService.preferredProvider(any())).thenReturn("DEEPSEEK");
-    when(runOrchestrator.submitRun(
-            anyString(),
-            anyString(),
-            isNull(),
-            anyString(),
-            isNull(),
-            isNull(),
-            anyBoolean(),
-            anyBoolean(),
-            isNull(),
-            anyString(),
-            anyString(),
-            anyString(),
-            anyString(),
-            anyString(),
-            isNull(),
-            isNull(),
-            anyBoolean(),
-            isNull(),
-            isNull(),
-            nullable(Boolean.class),
-            nullable(Boolean.class),
-            nullable(String.class)))
-        .thenReturn(PipelineRun.builder().runId("run-local").createdByUserId("u1").build());
 
     var request =
         new OrchestratorRunConfirmationRequest(
             "s1", "turn-1", true, null, null, null, null, null, true, null);
-    gate.submitConfirmed(
-        session(),
-        turn("Implement OAuth login"),
-        decision("CODE_RUN_REQUIRED", true),
-        request,
-        user(),
-        true);
-
-    verify(runLocalExecutionFlag).mark("run-local");
+    assertThatThrownBy(
+            () ->
+                gate.submitConfirmed(
+                    session(),
+                    turn("Implement OAuth login"),
+                    decision("CODE_RUN_REQUIRED", true),
+                    request,
+                    user(),
+                    true))
+        .isInstanceOf(ResponseStatusException.class)
+        .hasMessageContaining("local connector and repository selection");
+    verifyNoInteractions(runOrchestrator);
 
     assertThatThrownBy(
             () ->
@@ -363,6 +445,26 @@ class AgentRunSubmissionGateTest {
                     false))
         .isInstanceOf(ResponseStatusException.class)
         .hasMessageContaining("Personal Access Token");
+  }
+
+  @Test
+  void projectWriteDenialStopsConfirmedRunBeforeSubmission() {
+    doThrow(new ResponseStatusException(org.springframework.http.HttpStatus.FORBIDDEN, "denied"))
+        .when(projectAccessGuard)
+        .assertCanWrite(anyString(), any());
+
+    assertThatThrownBy(
+            () ->
+                gate.submitConfirmed(
+                    session(),
+                    turn("Implement OAuth login"),
+                    decision("CODE_RUN_REQUIRED", true),
+                    request(true),
+                    user()))
+        .isInstanceOf(ResponseStatusException.class)
+        .hasMessageContaining("denied");
+
+    verifyNoInteractions(runOrchestrator);
   }
 
   private static OrchestratorRunConfirmationRequest request(boolean confirmed) {

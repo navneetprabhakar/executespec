@@ -19,9 +19,10 @@ import lombok.RequiredArgsConstructor;
  * don't break current callers: the caller must be a member of the project's organisation (their
  * {@code orgId} equals {@code project.orgId}). SUPER_ADMIN short-circuits any check.
  *
- * <p>Project-member-level granularity (e.g. PROJECT_DEVELOPER vs ORG_ADMIN) is a follow-up — the
- * current bar is "don't leak to strangers in unrelated orgs", which is what the adversarial test
- * exposed.
+ * <p>Read access remains organisation-first because projects are an organisation-visible grouping
+ * surface. Write access is least-privilege: SUPER_ADMIN, the host organisation's ORG_ADMIN, or an
+ * explicit PROJECT_ADMIN / PROJECT_DEVELOPER membership. Mere organisation membership is never a
+ * project mutation capability.
  */
 @Component
 @RequiredArgsConstructor
@@ -82,43 +83,117 @@ public class ProjectAccessGuard {
   }
 
   /**
-   * Assert the caller may WRITE / MUTATE this project. Same in-org / cross-org admission rules as
-   * {@link #assertCanRead}, but additionally rejects PROJECT_VIEWER members (V175 read-only role).
-   * Use this on every endpoint that creates, updates, or deletes per-project state — invites, share
-   * links, memory compactions, autofix dispatches, architecture (re)generation, override /
-   * exception submissions, credential storage, etc.
+   * Assert the caller may WRITE / MUTATE this project. Use this on every endpoint that creates,
+   * updates, or deletes per-project state — invites, share links, memory compactions, autofix
+   * dispatches, architecture (re)generation, override / exception submissions, credential storage,
+   * etc.
    *
    * <p>Audit 2026-05-12 review item B #9-#18 — closes the "{@code assertCanRead} used as
    * write-gate" cluster.
    */
   public Project assertCanWrite(String projectId, AppUserDetails userDetails) {
     Project project = assertCanRead(projectId, userDetails);
+    // RR-832 — a soft-deleted (tombstoned) project must not be mutable through the shared write
+    // guard. The canonical GET already 404s a soft-deleted row and says restore is the only way
+    // back; without this, a caller retaining the id could keep submitting runs, agent turns, chat,
+    // reviews, exports and integration changes — spending against and mutating an object whose
+    // advertised lifecycle permits only restore. Fail closed with the same 404 the GET returns so
+    // existence is not leaked. Only {@link #assertCanRestore} may load a tombstone.
+    if (project.isSoftDeleted()) {
+      throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Project not found");
+    }
+    return assertWriteAuthority(project, userDetails);
+  }
 
+  /**
+   * RR-832 — load a soft-deleted (tombstoned) project for the dedicated restore capability. This is
+   * the ONLY guard that admits a {@code deletedAt != null} row; it grants the same write-level
+   * authority as {@link #assertCanWrite} (SUPER_ADMIN / host ORG_ADMIN / PROJECT_ADMIN /
+   * PROJECT_DEVELOPER) but deliberately skips the tombstone fail-closed check so the restore
+   * endpoint can bring the project back. Non-deleted projects pass through unchanged.
+   */
+  public Project assertCanRestore(String projectId, AppUserDetails userDetails) {
+    Project project = assertCanRead(projectId, userDetails);
+    return assertWriteAuthority(project, userDetails);
+  }
+
+  /**
+   * Shared write-authority decision — used by {@link #assertCanWrite} and {@link
+   * #assertCanRestore}.
+   */
+  private Project assertWriteAuthority(Project project, AppUserDetails userDetails) {
     if ("SUPER_ADMIN".equals(userDetails.getUser().getGlobalRole())) {
       return project;
     }
 
     String callerOrgId = userDetails.getUser().getOrgId();
-    if (callerOrgId != null && callerOrgId.equals(project.getOrgId())) {
-      // In-org members are admitted for writes by default; cross-org collaborators MUST pass the
-      // per-project_member role check below.
+    boolean sameOrg = callerOrgId != null && callerOrgId.equals(project.getOrgId());
+    if (sameOrg && isOrgAdmin(userDetails)) {
       return project;
     }
 
     String callerUserId = userDetails.getUser().getId();
     if (callerUserId != null) {
-      var member = projectMemberRepo.findByProjectIdAndUserId(projectId, callerUserId);
+      var member = projectMemberRepo.findByProjectIdAndUserId(project.getId(), callerUserId);
       if (member.isPresent()) {
         String role = member.get().getProjectRole();
         if ("PROJECT_VIEWER".equals(role)) {
           throw new ResponseStatusException(
               HttpStatus.FORBIDDEN, "PROJECT_VIEWER cannot modify this project");
         }
-        return project;
+        if ("PROJECT_ADMIN".equals(role) || "PROJECT_DEVELOPER".equals(role)) {
+          return project;
+        }
+        throw new ResponseStatusException(
+            HttpStatus.FORBIDDEN, "Unknown project role cannot modify this project");
       }
     }
 
     throw new ResponseStatusException(
         HttpStatus.FORBIDDEN, "You don't have write access to this project");
+  }
+
+  /**
+   * Assert the caller has an administrative capability for this project.
+   *
+   * <p>This is deliberately stronger than {@link #assertCanWrite}: project developers may mutate
+   * ordinary project resources, but they must not read administrative activity such as policy and
+   * auto-detection changes. The capability is granted only to SUPER_ADMIN, the host organisation's
+   * ORG_ADMIN, or an explicit PROJECT_ADMIN member (including an authorised external admin).
+   */
+  public Project assertCanAdmin(String projectId, AppUserDetails userDetails) {
+    Project project = assertCanRead(projectId, userDetails);
+    // RR-832 — administrative access to a tombstoned project is refused for the same reason as
+    // write access; only the restore capability may load a soft-deleted row.
+    if (project.isSoftDeleted()) {
+      throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Project not found");
+    }
+
+    if ("SUPER_ADMIN".equals(userDetails.getUser().getGlobalRole())) {
+      return project;
+    }
+
+    String callerOrgId = userDetails.getUser().getOrgId();
+    boolean sameOrg = callerOrgId != null && callerOrgId.equals(project.getOrgId());
+    if (sameOrg && isOrgAdmin(userDetails)) {
+      return project;
+    }
+
+    String callerUserId = userDetails.getUser().getId();
+    if (callerUserId != null
+        && projectMemberRepo
+            .findByProjectIdAndUserId(projectId, callerUserId)
+            .map(member -> "PROJECT_ADMIN".equals(member.getProjectRole()))
+            .orElse(false)) {
+      return project;
+    }
+
+    throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Project admin access is required");
+  }
+
+  private static boolean isOrgAdmin(AppUserDetails userDetails) {
+    if ("ORG_ADMIN".equals(userDetails.getUser().getGlobalRole())) return true;
+    return userDetails.getOrgMember() != null
+        && "ORG_ADMIN".equals(userDetails.getOrgMember().getOrgRole());
   }
 }

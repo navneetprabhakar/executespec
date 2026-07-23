@@ -4,12 +4,15 @@ import java.util.List;
 import java.util.Optional;
 
 import com.navneet.executespec.agent.LlmRouter;
+import com.navneet.executespec.agent.PromptTrustBoundary;
 import com.navneet.executespec.auth.entity.Project;
 import com.navneet.executespec.auth.repository.ProjectRepository;
 import com.navneet.executespec.codeintel.entity.ProjectArchitectureDoc;
 import com.navneet.executespec.codeintel.entity.ProjectGeneratedDoc;
 import com.navneet.executespec.codeintel.entity.ProjectGeneratedDoc.DocType;
 import com.navneet.executespec.codeintel.repository.ProjectGeneratedDocRepository;
+import com.navneet.executespec.executioncontext.LlmExecutionPolicyFactory;
+import com.navneet.executespec.executioncontext.LlmExecutionReference;
 import com.navneet.executespec.project.entity.ProjectRepo;
 import com.navneet.executespec.project.entity.ProjectRepoLink;
 import com.navneet.executespec.project.repository.ProjectRepoLinkRepository;
@@ -19,6 +22,7 @@ import com.navneet.executespec.router.LlmProvider;
 import com.navneet.executespec.router.ModelResolver;
 import com.navneet.executespec.router.ProjectProviderResolver;
 import com.navneet.executespec.router.ResolvedModel;
+import com.navneet.executespec.router.RunModelOverrides;
 
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
@@ -63,6 +67,7 @@ public class ProjectDocGeneratorService {
   private final LlmRouter llmRouter;
   private final ModelResolver modelResolver;
   private final ProjectProviderResolver projectProviderResolver;
+  private final LlmExecutionPolicyFactory executionPolicyFactory;
 
   /** v2.6.4 — compute USD cost from tokens × pricing matrix for the dashboard rollup. */
   private final com.navneet.executespec.cost.RunCostTracker costTracker;
@@ -79,7 +84,8 @@ public class ProjectDocGeneratorService {
       LlmRouter llmRouter,
       ModelResolver modelResolver,
       com.navneet.executespec.cost.RunCostTracker costTracker,
-      ProjectProviderResolver projectProviderResolver) {
+      ProjectProviderResolver projectProviderResolver,
+      LlmExecutionPolicyFactory executionPolicyFactory) {
     this.architectureService = architectureService;
     this.workspace = workspace;
     this.docRepo = docRepo;
@@ -91,6 +97,7 @@ public class ProjectDocGeneratorService {
     this.modelResolver = modelResolver;
     this.costTracker = costTracker;
     this.projectProviderResolver = projectProviderResolver;
+    this.executionPolicyFactory = executionPolicyFactory;
   }
 
   /**
@@ -118,6 +125,7 @@ public class ProjectDocGeneratorService {
         llmRouter,
         modelResolver,
         costTracker,
+        null,
         null);
   }
 
@@ -228,6 +236,17 @@ public class ProjectDocGeneratorService {
   @Transactional
   public ProjectGeneratedDoc generate(
       String projectId, DocType docType, String generatedByUser, LlmProvider provider) {
+    return generate(projectId, docType, generatedByUser, provider, null);
+  }
+
+  /** Confirmed action path with one shared exact-route budget context. */
+  @Transactional
+  public ProjectGeneratedDoc generate(
+      String projectId,
+      DocType docType,
+      String generatedByUser,
+      LlmProvider provider,
+      LlmExecutionReference confirmedActionReference) {
     Project project =
         projectRepo
             .findById(projectId)
@@ -275,11 +294,31 @@ public class ProjectDocGeneratorService {
 
     LlmProvider effective = provider != null ? provider : resolveProvider(project);
     ResolvedModel resolved = modelResolver.resolve("ProjectDocGeneratorService", effective);
+    String exactModel = RunModelOverrides.lookup(effective, resolved.getAgentTier());
 
     Prompt prompt =
-        new Prompt(List.of(new SystemMessage(systemPrompt), new UserMessage(userPayload)));
+        new Prompt(
+            List.of(
+                new SystemMessage(systemPrompt),
+                new UserMessage(PromptTrustBoundary.wrap("PROJECT_DOC_EVIDENCE", userPayload))));
 
     String runId = "project-doc-" + docType.name().toLowerCase() + "-" + projectId;
+    if (executionPolicyFactory == null) {
+      throw new IllegalStateException("Execution policy factory is required for project docs");
+    }
+    String contextId = runId + "-" + java.util.UUID.randomUUID();
+    var executionReference =
+        confirmedActionReference != null
+            ? confirmedActionReference
+            : executionPolicyFactory.forProject(
+                projectId,
+                "project-doc",
+                "PROJECT_DOC",
+                contextId,
+                contextId,
+                effective.name(),
+                exactModel,
+                generatedByUser);
     ChatResponse response =
         llmRouter.callText(
             resolved.providerName(),
@@ -287,7 +326,8 @@ public class ProjectDocGeneratorService {
             prompt.getInstructions(),
             runId,
             "project-doc-" + docType.name().toLowerCase(),
-            "generate");
+            "generate",
+            executionReference);
 
     String content = response.getResult().getOutput().getText();
     if (content == null || content.isBlank()) {
@@ -415,11 +455,11 @@ public class ProjectDocGeneratorService {
   }
 
   private LlmProvider resolveProvider(Project project) {
-    return projectProviderResolver == null
-        ? (project != null && project.getAiProvider() != null
-            ? project.getAiProvider()
-            : ProjectProviderResolver.CANONICAL_DEFAULT)
-        : projectProviderResolver.resolve(project);
+    if (projectProviderResolver != null) return projectProviderResolver.resolve(project);
+    if (project == null || project.getAiProvider() == null) {
+      throw new IllegalStateException("Project provider is required for document generation");
+    }
+    return project.getAiProvider();
   }
 
   private static String nullToDash(String s) {

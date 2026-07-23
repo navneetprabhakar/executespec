@@ -3,6 +3,7 @@ package com.navneet.executespec.api.controller;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 import com.navneet.executespec.auth.security.AppUserDetails;
@@ -10,6 +11,7 @@ import com.navneet.executespec.router.LlmProvider;
 import com.navneet.executespec.router.ModelAccessService;
 import com.navneet.executespec.router.ModelMatrixProperties;
 import com.navneet.executespec.router.ModelRegistry;
+import com.navneet.executespec.router.ProviderReadinessService;
 
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -31,6 +33,7 @@ public class ModelController {
   private final ModelMatrixProperties matrixProps;
   private final ModelRegistry modelRegistry;
   private final ModelAccessService modelAccess;
+  private final ProviderReadinessService providerReadinessService;
 
   // Task 15 (2026-05-01 fix list): post-V120 the canonical provider key
   // is "gemini" (was "google" pre-migration); the label map lacked the
@@ -63,7 +66,9 @@ public class ModelController {
         .getProviders()
         .forEach(
             (providerKey, models) -> {
-              if (ModelAccessService.isDisabledProvider(providerKey)) {
+              LlmProvider registeredProvider = registeredProvider(providerKey);
+              if (registeredProvider == null
+                  || ModelAccessService.isDisabledProvider(registeredProvider.name())) {
                 return;
               }
               List<ModelEntry> modelEntries = new ArrayList<>();
@@ -89,17 +94,12 @@ public class ModelController {
                 }
               }
 
-              String tag = "";
-              try {
-                tag = LlmProvider.valueOf(providerKey.toUpperCase()).getTag();
-              } catch (IllegalArgumentException ignored) {
-              }
-
               providers.add(
                   new ProviderEntry(
-                      providerKey.toUpperCase(),
-                      PROVIDER_LABELS.getOrDefault(providerKey, providerKey),
-                      tag,
+                      registeredProvider.name(),
+                      PROVIDER_LABELS.getOrDefault(
+                          registeredProvider.name().toLowerCase(Locale.ROOT), providerKey),
+                      registeredProvider.getTag(),
                       modelEntries));
             });
 
@@ -107,15 +107,20 @@ public class ModelController {
   }
 
   /**
-   * The catalog as seen by the authenticated user: every model flagged {@code available} against
-   * the caller's tier. The whole list is returned so the client picker can show locked models too;
-   * the free tier gets only its provider's models marked available (others are selectable in the UI
-   * but rejected at run/session submit).
+   * The catalog as seen by the authenticated user: every model is flagged {@code available} only
+   * when both the caller's tier and the effective org/key readiness permit its provider. The whole
+   * list is returned so clients can explain unavailable models without treating global YAML or a
+   * platform key as Enterprise authority.
    */
   @GetMapping("/me")
   public ResponseEntity<List<UserModel>> myModels(
       @AuthenticationPrincipal AppUserDetails userDetails) {
     String userId = userDetails.getUser().getId();
+    java.util.Set<String> dispatchableProviders =
+        providerReadinessService.resolve(userId).stream()
+            .filter(ProviderReadinessService.ProviderReadiness::dispatchable)
+            .map(readiness -> readiness.provider().toUpperCase(Locale.ROOT))
+            .collect(java.util.stream.Collectors.toUnmodifiableSet());
     List<UserModel> out = new ArrayList<>();
     // Enumerate the full configured catalog (every entry under model-matrix.models), not just each
     // provider's planning/workhorse/lightweight slots — otherwise models not wired into a tier slot
@@ -126,19 +131,38 @@ public class ModelController {
             (id, cfg) -> {
               String provider =
                   cfg.getProvider() != null ? cfg.getProvider().toUpperCase() : "OTHER";
-              if (ModelAccessService.isDisabledProvider(provider)) {
+              LlmProvider registeredProvider = registeredProvider(provider);
+              if (registeredProvider == null
+                  || ModelAccessService.isDisabledProvider(registeredProvider.name())) {
                 return;
               }
               out.add(
                   new UserModel(
                       id,
-                      provider,
+                      registeredProvider.name(),
                       modelRegistry.displayLabelFor(id),
                       modelAccess.minTierFor(id),
-                      modelAccess.isAllowed(userId, id)));
+                      modelAccess.isAllowed(userId, id)
+                          && dispatchableProviders.contains(registeredProvider.name())));
             });
     out.sort(Comparator.comparing(UserModel::provider).thenComparing(UserModel::label));
     return ResponseEntity.ok(out);
+  }
+
+  /**
+   * Catalogs are product admission surfaces, not passive reflections of YAML. Unknown or retired
+   * provider rows must not become selectable because an old overlay or stale database snapshot
+   * reintroduced metadata that the runtime cannot dispatch.
+   */
+  private static LlmProvider registeredProvider(String provider) {
+    if (provider == null || provider.isBlank()) return null;
+    String normalized = provider.trim().toUpperCase(Locale.ROOT);
+    if ("GOOGLE".equals(normalized)) normalized = "GEMINI";
+    try {
+      return LlmProvider.valueOf(normalized);
+    } catch (IllegalArgumentException ignored) {
+      return null;
+    }
   }
 
   public record AvailableModelsResponse(List<ProviderEntry> providers) {}

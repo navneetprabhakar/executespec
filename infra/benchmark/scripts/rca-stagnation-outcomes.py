@@ -6,7 +6,7 @@ for benchmark-source runs, cross-tabbed with model and — when benchmark tracki
 exist — with verifier reward. Purpose: quantify how many "model failures" were actually
 harness terminations (COMPLETED_BY_STAGNATION / STOPPED_WITHOUT_COMPLETE / iteration or
 wall-clock caps) vs clean completeTask calls. See finding #2 in
-docs/plans/swe-bench-pro-harness-adversarial-assessment-2026-07-04.md.
+../executespec-docs/backend/plans/source-repository/swe-bench-pro-harness-adversarial-assessment-2026-07-04.md.
 
 The benchmark VM is being torn down (2026-07-04), so this targets a DB DUMP or any
 reachable Postgres with the copied data:

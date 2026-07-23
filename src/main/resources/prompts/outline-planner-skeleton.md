@@ -103,6 +103,9 @@ Contracts:
 Project ADRs:
 {{PROJECT_ADRS}}
 
+Engineering standards:
+{{ENGINEERING_STANDARDS}}
+
 PR review comments:
 {{PR_REVIEW_COMMENTS}}
 

@@ -7,6 +7,8 @@ export type UiSlashCommand = {
   surfaces?: readonly UiSlashSurface[];
 };
 
+export const UI_PROVIDER_USAGE = '/provider anthropic|openai|gemini|deepseek|openrouter|fireworks';
+
 export const UI_SLASH_COMMANDS: readonly UiSlashCommand[] = [
   {command: '/help', description: 'Show available UI commands'},
   {command: '/team', description: 'Open team access'},
@@ -14,7 +16,11 @@ export const UI_SLASH_COMMANDS: readonly UiSlashCommand[] = [
   {command: '/projects', description: 'List projects'},
   {command: '/runs', description: 'List recent work'},
   {command: '/status', description: 'Show current context'},
-  {command: '/provider', args: '<anthropic|openai|deepseek>', description: 'Set provider'},
+  {
+    command: '/provider',
+    args: '<anthropic|openai|gemini|deepseek|openrouter|fireworks>',
+    description: 'Set provider',
+  },
   {command: '/clear', description: 'Clear this chat'},
   {command: '/compile', description: 'Create work from project chat', surfaces: ['project']},
   {command: '/compact', description: 'Compact project chat history', surfaces: ['project']},
@@ -50,6 +56,9 @@ export function normalizeUiProvider(input?: string): string | null {
   const p = (input || '').trim().toUpperCase();
   if (!p) return null;
   if (p === 'CLAUDE') return 'ANTHROPIC';
-  if (['ANTHROPIC', 'OPENAI', 'DEEPSEEK'].includes(p)) return p;
+  if (p === 'GOOGLE') return 'GEMINI';
+  if (['ANTHROPIC', 'OPENAI', 'GEMINI', 'DEEPSEEK', 'OPENROUTER', 'FIREWORKS'].includes(p)) {
+    return p;
+  }
   return null;
 }

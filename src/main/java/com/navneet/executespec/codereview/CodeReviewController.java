@@ -5,10 +5,15 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
+import com.navneet.executespec.auth.entity.Project;
+import com.navneet.executespec.auth.repository.ProjectRepository;
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.codereview.entity.CodeReviewIssue;
 import com.navneet.executespec.codereview.entity.CodeReviewScan;
+import com.navneet.executespec.cost.CostVisibilityPolicy;
 import com.navneet.executespec.project.security.ProjectAccessGuard;
+import com.navneet.executespec.project.service.ProjectRepoService;
+import com.navneet.executespec.security.GeneratedSecretScanner;
 
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -42,9 +47,27 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class CodeReviewController {
 
+  static final int MAX_HISTORY_DAYS = 366;
+  static final int MAX_HISTORY_PAGE_SIZE = 200;
+  static final int MAX_HISTORY_PAGE = 1000;
+
   private final CodeReviewService service;
   private final ProjectAccessGuard projectAccessGuard;
+  private final ProjectRepoService projectRepoService;
   private final CodeReviewAutofixService autofixService;
+  private final GeneratedSecretScanner secretScanner;
+  private final ProjectRepository projectRepository;
+
+  /**
+   * RR-563 — raw provider-dollar cost is a billing figure. The scan DTO exposed {@code costUsd} to
+   * every project reader (including non-billing developers and cross-org collaborators). Only a
+   * billing-role viewer of the project's own org sees it; for everyone else the field is {@code
+   * null}, and the DTO shape is otherwise unchanged so the dashboard keeps rendering.
+   */
+  private boolean canSeeCost(String projectId, AppUserDetails userDetails) {
+    String orgId = projectRepository.findById(projectId).map(Project::getOrgId).orElse(null);
+    return CostVisibilityPolicy.canViewRawCost(userDetails, orgId);
+  }
 
   public record SubmitCodeReviewRequest(String projectId, UUID repoId, String repoFullName) {}
 
@@ -56,10 +79,18 @@ public class CodeReviewController {
     if (userDetails == null) {
       throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "authentication required");
     }
-    if (req == null || req.projectId() == null || req.repoFullName() == null) {
+    if (req == null || req.projectId() == null || req.repoId() == null) {
       throw new ResponseStatusException(
-          HttpStatus.BAD_REQUEST, "projectId and repoFullName are required");
+          HttpStatus.BAD_REQUEST, "projectId and repoId are required");
     }
+    // Tenant/write admission and canonical repository resolution happen before the paid-tier or
+    // quota checks. A caller must neither probe another tenant's linked repos nor consume quota for
+    // an arbitrary repoFullName.
+    projectAccessGuard.assertCanWrite(req.projectId(), userDetails);
+    var repo =
+        projectRepoService.resolveGitHubReviewRepoStrict(
+            req.projectId(), req.repoId(), req.repoFullName());
+    String canonicalFullName = repo.getGithubRepoFullName();
     try {
       service.assertTierAndQuota(userDetails.getUser());
     } catch (CodeReviewService.TierBlockedException e) {
@@ -72,11 +103,12 @@ public class CodeReviewController {
     try {
       row =
           service.submitScan(
-              req.projectId(), req.repoId(), req.repoFullName(), userDetails.getUser());
+              req.projectId(), repo.getId(), canonicalFullName, userDetails.getUser());
     } catch (IllegalArgumentException e) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage());
     }
-    return ResponseEntity.status(HttpStatus.ACCEPTED).body(CodeReviewScanDto.from(row));
+    return ResponseEntity.status(HttpStatus.ACCEPTED)
+        .body(CodeReviewScanDto.from(row, canSeeCost(req.projectId(), userDetails)));
   }
 
   /** Body for {@link #autofix}. */
@@ -114,6 +146,39 @@ public class CodeReviewController {
         .body(new AutofixResponse(result.runId(), result.findingKey(), result.outcome().name()));
   }
 
+  @PostMapping("/api/code-reviews/{id}/cancel")
+  public ResponseEntity<Void> cancel(
+      @PathVariable UUID id, @AuthenticationPrincipal AppUserDetails userDetails) {
+    CodeReviewScan scan = requireWritableScan(id, userDetails);
+    if (!service.requestCancellation(scan.getId())) {
+      throw new ResponseStatusException(HttpStatus.CONFLICT, "scan is not cancellable");
+    }
+    return ResponseEntity.accepted().build();
+  }
+
+  @PostMapping("/api/code-reviews/{id}/retry")
+  public ResponseEntity<CodeReviewScanDto> retry(
+      @PathVariable UUID id, @AuthenticationPrincipal AppUserDetails userDetails) {
+    CodeReviewScan scan = requireWritableScan(id, userDetails);
+    if (!service.retryScan(scan.getId())) {
+      throw new ResponseStatusException(HttpStatus.CONFLICT, "scan is not retryable");
+    }
+    return ResponseEntity.accepted()
+        .body(
+            CodeReviewScanDto.from(
+                service.findScan(id), canSeeCost(scan.getProjectId(), userDetails)));
+  }
+
+  private CodeReviewScan requireWritableScan(UUID id, AppUserDetails userDetails) {
+    if (userDetails == null) {
+      throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "authentication required");
+    }
+    CodeReviewScan scan = service.findScan(id);
+    if (scan == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "no such scan");
+    projectAccessGuard.assertCanWrite(scan.getProjectId(), userDetails);
+    return scan;
+  }
+
   /** Get a single scan by id (with issues inlined for convenience). */
   @GetMapping("/api/code-reviews/{id}")
   public ResponseEntity<CodeReviewScanWithIssues> get(
@@ -125,8 +190,10 @@ public class CodeReviewController {
     if (row == null) {
       throw new ResponseStatusException(HttpStatus.NOT_FOUND, "no such scan");
     }
+    projectAccessGuard.assertCanRead(row.getProjectId(), userDetails);
     List<CodeReviewIssue> issues = service.issuesFor(id);
-    return ResponseEntity.ok(CodeReviewScanWithIssues.from(row, issues));
+    return ResponseEntity.ok(
+        CodeReviewScanWithIssues.from(row, issues, canSeeCost(row.getProjectId(), userDetails)));
   }
 
   /**
@@ -135,15 +202,31 @@ public class CodeReviewController {
    */
   @GetMapping("/api/projects/{projectId}/code-reviews")
   public ResponseEntity<List<CodeReviewScanDto>> listForProject(
-      @PathVariable String projectId, @AuthenticationPrincipal AppUserDetails userDetails) {
+      @PathVariable String projectId,
+      @RequestParam(defaultValue = "0") int page,
+      @RequestParam(defaultValue = "50") int limit,
+      @RequestParam(defaultValue = "366") int sinceDays,
+      @AuthenticationPrincipal AppUserDetails userDetails) {
     if (userDetails == null) {
       throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "authentication required");
     }
     // GA-readiness P4.1-followup — code review scans expose source-file paths
     // + suggested-fix snippets, both leak across orgs without a tenant guard.
     projectAccessGuard.assertCanRead(projectId, userDetails);
-    return ResponseEntity.ok(
-        service.listForProject(projectId).stream().map(CodeReviewScanDto::from).toList());
+    int safePage = Math.min(Math.max(page, 0), MAX_HISTORY_PAGE);
+    int safeLimit = Math.min(Math.max(limit, 1), MAX_HISTORY_PAGE_SIZE);
+    int safeSinceDays = Math.min(Math.max(sinceDays, 1), MAX_HISTORY_DAYS);
+    boolean includeCost = canSeeCost(projectId, userDetails);
+    var rows =
+        service.listForProject(
+            projectId,
+            Instant.now().minusSeconds((long) safeSinceDays * 86_400L),
+            org.springframework.data.domain.PageRequest.of(safePage, safeLimit));
+    return ResponseEntity.ok()
+        .header("X-Page", Integer.toString(safePage))
+        .header("X-Page-Size", Integer.toString(safeLimit))
+        .header("X-Has-More", Boolean.toString(rows.hasNext()))
+        .body(rows.getContent().stream().map(s -> CodeReviewScanDto.from(s, includeCost)).toList());
   }
 
   /**
@@ -166,7 +249,8 @@ public class CodeReviewController {
         service.latestForProjectRepoAnyStatus(projectId, repoFullName);
     if (latest.isEmpty()) return ResponseEntity.noContent().build();
     List<CodeReviewIssue> issues = service.issuesFor(latest.get().getId());
-    return ResponseEntity.ok(CodeReviewScanWithIssues.from(latest.get(), issues));
+    return ResponseEntity.ok(
+        CodeReviewScanWithIssues.from(latest.get(), issues, canSeeCost(projectId, userDetails)));
   }
 
   /**
@@ -184,9 +268,15 @@ public class CodeReviewController {
     if (row == null) {
       throw new ResponseStatusException(HttpStatus.NOT_FOUND, "no such scan");
     }
+    projectAccessGuard.assertCanRead(row.getProjectId(), userDetails);
     String md = row.getReportMarkdown();
     if (md == null || md.isBlank()) {
       throw new ResponseStatusException(HttpStatus.NOT_FOUND, "scan has no report yet");
+    }
+    if (secretScanner.scan(md).isPresent()) {
+      throw new ResponseStatusException(
+          HttpStatus.UNPROCESSABLE_ENTITY,
+          "Code review contains credential-like material and cannot be downloaded");
     }
     String filename =
         "code-review-"
@@ -215,6 +305,9 @@ public class CodeReviewController {
       String triggerSource,
       Integer totalFilesScanned,
       Integer totalLoc,
+      // RR-1696 — coverage of the file-sampling walk: COMPLETE | TRUNCATED_* | null (read as
+      // UNKNOWN), so a possibly-truncated totalFilesScanned/totalLoc is not presented as fact.
+      String scanCoverage,
       Integer staticFindingsCount,
       Integer llmFindingsCount,
       Integer llmFilteredOutCount,
@@ -223,7 +316,11 @@ public class CodeReviewController {
       Instant startedAt,
       Instant finishedAt,
       String failureReason) {
-    static CodeReviewScanDto from(CodeReviewScan s) {
+    /**
+     * RR-563 — {@code includeCost=false} nulls the raw provider-dollar cost for non-billing
+     * readers.
+     */
+    static CodeReviewScanDto from(CodeReviewScan s, boolean includeCost) {
       return new CodeReviewScanDto(
           s.getId(),
           s.getProjectId(),
@@ -234,10 +331,11 @@ public class CodeReviewController {
           s.getTriggerSource(),
           s.getTotalFilesScanned(),
           s.getTotalLoc(),
+          s.getScanCoverage(),
           s.getStaticFindingsCount(),
           s.getLlmFindingsCount(),
           s.getLlmFilteredOutCount(),
-          s.getCostUsd(),
+          includeCost ? s.getCostUsd() : null,
           s.getDurationMs(),
           s.getStartedAt(),
           s.getFinishedAt(),
@@ -277,9 +375,10 @@ public class CodeReviewController {
 
   public record CodeReviewScanWithIssues(
       CodeReviewScanDto scan, String reportMarkdown, List<CodeReviewIssueDto> issues) {
-    static CodeReviewScanWithIssues from(CodeReviewScan s, List<CodeReviewIssue> issues) {
+    static CodeReviewScanWithIssues from(
+        CodeReviewScan s, List<CodeReviewIssue> issues, boolean includeCost) {
       return new CodeReviewScanWithIssues(
-          CodeReviewScanDto.from(s),
+          CodeReviewScanDto.from(s, includeCost),
           s.getReportMarkdown(),
           issues.stream().map(CodeReviewIssueDto::from).toList());
     }

@@ -169,6 +169,39 @@ class UiStyleResolverDesignTest {
     assertThat(result).isEqualTo(shortContent);
   }
 
+  // RR-1054 — the char ceiling is a HARD limit independent of heading shape. A malformed/hostile
+  // DESIGN.md with FOUR OR FEWER `## ` sections previously bypassed the limiter entirely and
+  // returned unbounded content. maxTokens=2500 => ~10K char ceiling.
+  @Test
+  void enforceTokenLimit_headingFreeContentIsStillTruncated() {
+    StringBuilder hostile = new StringBuilder("# Design\n");
+    for (int i = 0; i < 4000; i++) {
+      hostile.append("filler filler filler filler line ").append(i).append('\n');
+    }
+    assertThat(hostile.length()).isGreaterThan(50_000);
+    String result = resolver.enforceTokenLimit(hostile.toString());
+    // Bounded to the ceiling plus the truncation marker and one boundary line — never the full
+    // input.
+    assertThat(result.length()).isLessThan(hostile.length());
+    assertThat(result.length()).isLessThanOrEqualTo(10_200);
+    assertThat(result).contains("Truncated");
+  }
+
+  // RR-1054 — content with a handful of headings that also exceeds the ceiling is likewise bounded.
+  @Test
+  void enforceTokenLimit_fewHeadingsOverBudgetIsTruncated() {
+    StringBuilder content = new StringBuilder();
+    for (int s = 0; s < 3; s++) {
+      content.append("## Section ").append(s).append('\n');
+      for (int i = 0; i < 2000; i++) {
+        content.append("body body body body ").append(i).append('\n');
+      }
+    }
+    String result = resolver.enforceTokenLimit(content.toString());
+    assertThat(result.length()).isLessThan(content.length());
+    assertThat(result.length()).isLessThanOrEqualTo(10_200);
+  }
+
   @Test
   @EnabledIf("designRootExists")
   void enforceTokenLimit_longContentTruncated() {

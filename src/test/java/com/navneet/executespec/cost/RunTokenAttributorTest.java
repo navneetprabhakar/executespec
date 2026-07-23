@@ -5,8 +5,11 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.util.List;
 import java.util.Optional;
 
+import com.navneet.executespec.harness.ExecutionResult;
+import com.navneet.executespec.harness.TaskOutcome;
 import com.navneet.executespec.state.entity.AgentTask;
 import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.AgentTaskRepository;
@@ -23,8 +26,155 @@ class RunTokenAttributorTest {
   private final PipelineRunRepository runRepo = mock(PipelineRunRepository.class);
   private final AgentTaskRepository taskRepo = mock(AgentTaskRepository.class);
   private final RunCostTracker costTracker = mock(RunCostTracker.class);
+  private final RunStepUsageRepository usageRepo = mock(RunStepUsageRepository.class);
+  private final RunEffectiveRouteService effectiveRoutes = new RunEffectiveRouteService(usageRepo);
   private final RunTokenAttributor attributor =
-      new RunTokenAttributor(runRepo, taskRepo, costTracker);
+      new RunTokenAttributor(runRepo, taskRepo, costTracker, effectiveRoutes);
+
+  private static RunStepUsage successRow(String taskId, String provider, String model) {
+    return RunStepUsage.builder()
+        .id(taskId + ":" + provider)
+        .runId(UUID_RUN_ID)
+        .taskId(taskId)
+        .provider(provider)
+        .model(model)
+        .attemptStatus("SUCCESS")
+        .build();
+  }
+
+  private static ExecutionResult resultWithSingleTask(
+      String taskId, String provider, String model) {
+    TaskOutcome outcome =
+        TaskOutcome.builder()
+            .taskId(taskId)
+            .status(TaskOutcome.Status.SUCCESS)
+            .dispatchedProvider(provider)
+            .dispatchedModel(model)
+            .build();
+    return ExecutionResult.builder().perTask(List.of(outcome)).build();
+  }
+
+  /**
+   * Step 4 core pin: the ledger is the authority for the route that actually served a task. A
+   * failed-over task must NOT be persisted under the tier-resolved requested route, because {@code
+   * ModelProviderCandidateService} consumes task-level route rows as a quality prior.
+   */
+  @Test
+  void attributeWorkerPersistsTheLedgerRouteNotTheRequestedDispatchedRoute() {
+    AgentTask task = AgentTask.builder().taskId("12345678_T1").runId(UUID_RUN_ID).build();
+    when(taskRepo.findById("12345678_T1")).thenReturn(Optional.of(task));
+    when(costTracker.snapshotTask(UUID_RUN_ID, "T1"))
+        .thenReturn(new RunCostTracker.Snapshot(10, 4, 0, 0, 0.0, 1));
+    when(usageRepo.findByRunIdAndTaskIdOrderByCreatedAtAsc(UUID_RUN_ID, "T1"))
+        .thenReturn(List.of(successRow("T1", "openrouter", "glm-5.2")));
+
+    attributor.attributeWorker(
+        UUID_RUN_ID,
+        resultWithSingleTask("T1", "deepseek", "deepseek-v4-pro-native"),
+        10,
+        4,
+        "DEEPSEEK",
+        "deepseek-v4-pro-native");
+
+    ArgumentCaptor<AgentTask> saved = ArgumentCaptor.forClass(AgentTask.class);
+    verify(taskRepo).save(saved.capture());
+    AgentTask persisted = saved.getValue();
+    // Requested/tier-resolved columns keep their existing meaning.
+    assertThat(persisted.getProvider()).isEqualTo("DEEPSEEK");
+    assertThat(persisted.getModel()).isEqualTo("deepseek-v4-pro-native");
+    // Effective columns carry the route that actually served the task.
+    assertThat(persisted.getEffectiveProvider()).isEqualTo("OPENROUTER");
+    assertThat(persisted.getEffectiveModel()).isEqualTo("glm-5.2");
+    assertThat(persisted.getEffectiveRouteAttribution()).isEqualTo("LEDGER");
+  }
+
+  @Test
+  void attributeWorkerFallsBackToTheRequestedRouteOnlyWhenTheLedgerIsEmpty() {
+    AgentTask task = AgentTask.builder().taskId("12345678_T1").runId(UUID_RUN_ID).build();
+    when(taskRepo.findById("12345678_T1")).thenReturn(Optional.of(task));
+    when(costTracker.snapshotTask(UUID_RUN_ID, "T1"))
+        .thenReturn(new RunCostTracker.Snapshot(10, 4, 0, 0, 0.0, 1));
+    when(usageRepo.findByRunIdAndTaskIdOrderByCreatedAtAsc(UUID_RUN_ID, "T1"))
+        .thenReturn(List.of());
+
+    attributor.attributeWorker(
+        UUID_RUN_ID,
+        resultWithSingleTask("T1", "anthropic", "claude-sonnet-5"),
+        10,
+        4,
+        "ANTHROPIC",
+        "claude-sonnet-5");
+
+    ArgumentCaptor<AgentTask> saved = ArgumentCaptor.forClass(AgentTask.class);
+    verify(taskRepo).save(saved.capture());
+    assertThat(saved.getValue().getEffectiveProvider()).isEqualTo("ANTHROPIC");
+    assertThat(saved.getValue().getEffectiveModel()).isEqualTo("claude-sonnet-5");
+    assertThat(saved.getValue().getEffectiveRouteAttribution()).isEqualTo("UNATTRIBUTED");
+  }
+
+  /**
+   * A multi-route task must stay visibly multi-route. Collapsing it to one provider would defeat
+   * the projection exactly where route truth matters most.
+   */
+  @Test
+  void attributeWorkerRecordsAMultiRouteTaskAsMixedRatherThanPickingOneProvider() {
+    AgentTask task = AgentTask.builder().taskId("12345678_T1").runId(UUID_RUN_ID).build();
+    when(taskRepo.findById("12345678_T1")).thenReturn(Optional.of(task));
+    when(costTracker.snapshotTask(UUID_RUN_ID, "T1"))
+        .thenReturn(new RunCostTracker.Snapshot(10, 4, 0, 0, 0.0, 1));
+    when(usageRepo.findByRunIdAndTaskIdOrderByCreatedAtAsc(UUID_RUN_ID, "T1"))
+        .thenReturn(
+            List.of(
+                successRow("T1", "deepseek", "deepseek-v4-pro-native"),
+                successRow("T1", "openrouter", "glm-5.2")));
+
+    attributor.attributeWorker(
+        UUID_RUN_ID,
+        resultWithSingleTask("T1", "deepseek", "deepseek-v4-pro-native"),
+        10,
+        4,
+        "DEEPSEEK",
+        "deepseek-v4-pro-native");
+
+    ArgumentCaptor<AgentTask> saved = ArgumentCaptor.forClass(AgentTask.class);
+    verify(taskRepo).save(saved.capture());
+    assertThat(saved.getValue().getEffectiveRouteAttribution()).isEqualTo("MIXED");
+    assertThat(saved.getValue().getEffectiveProvider()).isNull();
+    assertThat(saved.getValue().getEffectiveModel()).isNull();
+  }
+
+  /** Failed physical attempts did not serve the task and must not be projected as its route. */
+  @Test
+  void attributeWorkerIgnoresFailedAttemptsWhenProjectingTheEffectiveRoute() {
+    AgentTask task = AgentTask.builder().taskId("12345678_T1").runId(UUID_RUN_ID).build();
+    when(taskRepo.findById("12345678_T1")).thenReturn(Optional.of(task));
+    when(costTracker.snapshotTask(UUID_RUN_ID, "T1"))
+        .thenReturn(new RunCostTracker.Snapshot(10, 4, 0, 0, 0.0, 1));
+    RunStepUsage failed =
+        RunStepUsage.builder()
+            .id("failed")
+            .runId(UUID_RUN_ID)
+            .taskId("T1")
+            .provider("deepseek")
+            .model("deepseek-v4-pro-native")
+            .attemptStatus("FAILED")
+            .build();
+    when(usageRepo.findByRunIdAndTaskIdOrderByCreatedAtAsc(UUID_RUN_ID, "T1"))
+        .thenReturn(List.of(failed, successRow("T1", "openrouter", "glm-5.2")));
+
+    attributor.attributeWorker(
+        UUID_RUN_ID,
+        resultWithSingleTask("T1", "deepseek", "deepseek-v4-pro-native"),
+        10,
+        4,
+        "DEEPSEEK",
+        "deepseek-v4-pro-native");
+
+    ArgumentCaptor<AgentTask> saved = ArgumentCaptor.forClass(AgentTask.class);
+    verify(taskRepo).save(saved.capture());
+    assertThat(saved.getValue().getEffectiveRouteAttribution()).isEqualTo("LEDGER");
+    assertThat(saved.getValue().getEffectiveProvider()).isEqualTo("OPENROUTER");
+  }
 
   @Test
   void attributePhaseAdditionalAddsToExistingReviewerColumnsAndRunTotalDeltaOnly() {
@@ -66,5 +216,50 @@ class RunTokenAttributorTest {
     assertThat(saved.getValue().getOutputTokens()).isEqualTo(9);
     assertThat(saved.getValue().getProvider()).isEqualTo("ANTHROPIC");
     assertThat(saved.getValue().getModel()).isEqualTo("claude-sonnet-4-6");
+  }
+
+  /**
+   * RR-1561 — the residual pass exists so per-task token columns reconcile to the worker aggregate.
+   * Integer division discarded up to n-1 tokens per direction, which made exact reconciliation
+   * impossible by construction. 7 residual input tokens across 3 tasks must land as 3/2/2, not
+   * 2/2/2 with 1 silently lost.
+   */
+  @Test
+  void theResidualRemainderIsDistributedSoPerTaskTokensReconcileToTheWorkerTotal() {
+    List<TaskOutcome> outcomes =
+        List.of(
+            TaskOutcome.builder().taskId("T1").status(TaskOutcome.Status.SUCCESS).build(),
+            TaskOutcome.builder().taskId("T2").status(TaskOutcome.Status.SUCCESS).build(),
+            TaskOutcome.builder().taskId("T3").status(TaskOutcome.Status.SUCCESS).build());
+    for (var outcome : outcomes) {
+      String rowId = "12345678_" + outcome.taskId();
+      when(taskRepo.findById(rowId))
+          .thenReturn(Optional.of(AgentTask.builder().taskId(rowId).runId(UUID_RUN_ID).build()));
+      // No per-task snapshot at all: the whole aggregate is residual.
+      when(costTracker.snapshotTask(UUID_RUN_ID, outcome.taskId()))
+          .thenReturn(new RunCostTracker.Snapshot(0, 0, 0, 0, 0.0, 0));
+      when(usageRepo.findByRunIdAndTaskIdOrderByCreatedAtAsc(UUID_RUN_ID, outcome.taskId()))
+          .thenReturn(List.of());
+    }
+
+    attributor.attributeWorker(
+        UUID_RUN_ID,
+        ExecutionResult.builder().perTask(outcomes).build(),
+        7,
+        5,
+        "DEEPSEEK",
+        "deepseek-v4-pro-native");
+
+    ArgumentCaptor<AgentTask> saved = ArgumentCaptor.forClass(AgentTask.class);
+    verify(taskRepo, org.mockito.Mockito.times(3)).save(saved.capture());
+    int totalIn = saved.getAllValues().stream().mapToInt(AgentTask::getInputTokens).sum();
+    int totalOut = saved.getAllValues().stream().mapToInt(AgentTask::getOutputTokens).sum();
+
+    assertThat(totalIn)
+        .as("per-task input tokens must sum exactly to the worker aggregate")
+        .isEqualTo(7);
+    assertThat(totalOut)
+        .as("per-task output tokens must sum exactly to the worker aggregate")
+        .isEqualTo(5);
   }
 }

@@ -116,9 +116,16 @@ public class FileSystemTool {
         }
       }
     } catch (IOException e) {
-      // toRealPath failure (e.g. workspace deleted mid-flight) — fall through to the lexical
-      // check we already passed; this is a degraded state but the lexical guard still holds.
-      log.debug("safeResolve toRealPath failed for {}: {}", resolved, e.getMessage());
+      // RR-643 — FAIL CLOSED. A toRealPath failure (workspace deleted mid-flight, permission fault,
+      // a concurrent process removing an ancestor) means the symlink-containment layer could NOT
+      // run. Returning the lexically-contained path anyway leaves a check/use window in which an
+      // existing ancestor can be swapped for a symlink and a write redirected outside the
+      // workspace.
+      // A degraded filesystem state is a refusal, not a silent downgrade to the lexical guard
+      // alone.
+      log.warn("safeResolve real-path check failed for {} — refusing (fail-closed)", resolved);
+      throw new SecurityException(
+          "workspace path could not be verified against its real path: " + relativePath);
     }
     return resolved;
   }
@@ -127,10 +134,11 @@ public class FileSystemTool {
    * Checks if the current task is allowed to write to the given path. Returns an error message if
    * blocked by another task's file lock, null if OK.
    */
-  private String checkFileLock(String path) {
+  private String checkFileLock(String runId, String path) {
     String currentTask = WorkspaceContext.getTaskId();
-    if (currentTask != null && lockTool != null) {
-      Optional<String> owner = lockTool.getOwner(path);
+    if (currentTask != null && lockTool != null && runId != null) {
+      // RR-1544: locks are (runId, filePath); a bare path would read another run's owner.
+      Optional<String> owner = lockTool.getOwner(runId, path);
       if (owner.isPresent() && !owner.get().equals(currentTask)) {
         return "WRITE BLOCKED: File '"
             + path
@@ -211,7 +219,7 @@ public class FileSystemTool {
       @ToolParam(description = "Path of the file to write", required = true) String path,
       @ToolParam(description = "Complete content of the file", required = true) String content) {
     try {
-      String lockBlock = checkFileLock(path);
+      String lockBlock = checkFileLock(runId, path);
       if (lockBlock != null) return lockBlock;
       Path target = safeResolve(runId, path);
       String fileName =
@@ -255,7 +263,7 @@ public class FileSystemTool {
       @ToolParam(description = "Exact string to replace", required = true) String oldStr,
       @ToolParam(description = "New string to insert", required = true) String newStr) {
     try {
-      String lockBlock = checkFileLock(path);
+      String lockBlock = checkFileLock(runId, path);
       if (lockBlock != null) return lockBlock;
       Path target = safeResolve(runId, path);
       String current = Files.readString(target);

@@ -1,12 +1,15 @@
 package com.navneet.executespec.tool;
 
 import java.io.IOException;
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.navneet.executespec.programbench.ProgramBenchContainerStore;
+import com.navneet.executespec.sandbox.SandboxExecResult;
+import com.navneet.executespec.sandboxroute.SandboxCommandRoutingService;
 import com.navneet.executespec.smoketest.BuildCommand;
 import com.navneet.executespec.smoketest.BuildCommandResolver;
 
@@ -40,6 +43,27 @@ public class BuildProjectTool implements Tool {
   // SWE-bench Pro uses /app. The no-op compile.sh detection wrapper does NOT apply (SWE-bench has
   // no compile.sh contract — the tests are the truth).
   private final com.navneet.executespec.swebench.SwebenchContainerStore swebenchContainers;
+
+  /**
+   * RR-281 — {@code buildProject} used to be an unrestricted shell-execution tool: the resolved
+   * command (which can originate from a model-authored {@code plannerCommand} / {@code command}
+   * argument) went straight to {@code /bin/sh -c} with no policy check, so anything the shell tool
+   * refused could be re-submitted here. Host dispatch now validates through the same {@link
+   * ShellSandboxPolicy}. Container dispatch skips it for the same reason {@link ShellTool} does —
+   * the {@code --network none} cleanroom is the boundary there.
+   */
+  private final ShellSandboxPolicy sandboxPolicy;
+
+  /**
+   * RR-282 / RR-1674 — the resolved build command is generated repository content (npm scripts,
+   * Maven/Gradle plugins, Cargo build scripts). Running it on the application host gives it the
+   * service account's filesystem, credentials and network reach, which no textual policy can take
+   * back. When {@link SandboxCommandRoutingService#routingEnabled()} is on, the build is dispatched
+   * into the run's sandbox instead; when the sandbox cannot run it, the build is reported
+   * unavailable and is NOT retried on the host. Both flags are seeded false, so the default path is
+   * unchanged.
+   */
+  private final SandboxCommandRoutingService sandboxRouting;
 
   @Override
   public String name() {
@@ -128,6 +152,59 @@ public class BuildProjectTool implements Tool {
       }
     }
 
+    // RR-281 — validate the resolved command before it reaches /bin/sh. Only the host path is
+    // checked: the ProgramBench compile-check wrapper below intentionally uses subshells the
+    // policy forbids, and it is only ever applied for container dispatch.
+    if (containerId == null && sandboxPolicy != null) {
+      ShellSandboxPolicy.ValidationResult validation =
+          sandboxPolicy.validate(bc.command(), ctx.workspaceRoot().toString());
+      if (!validation.permitted()) {
+        log.warn(
+            "buildProject blocked by sandbox command={} source={} reason={}",
+            bc.command(),
+            bc.sourceDescription(),
+            validation.reason());
+        return ToolResult.err(
+            ToolResult.ErrorKind.FORBIDDEN,
+            "build command blocked by sandbox: " + validation.reason());
+      }
+    }
+
+    // RR-282 / RR-1674 — sandbox dispatch, ahead of any host ProcessBuilder. Bench cleanrooms keep
+    // their own container boundary and are left exactly as they were.
+    if (containerId == null && sandboxRouting != null && sandboxRouting.routingEnabled()) {
+      SandboxExecResult sandboxed =
+          sandboxRouting.executeShell(
+              ctx.runId(),
+              ctx.workspaceRoot(),
+              bc.command(),
+              Duration.ofSeconds(bc.timeoutSeconds()));
+      return switch (sandboxed.status()) {
+        case COMPLETED ->
+            ToolResult.ok(
+                buildSummary(
+                    ctx,
+                    bc,
+                    sandboxed.exitCode(),
+                    SandboxCommandRoutingService.combinedOutput(sandboxed)));
+        case TIMED_OUT ->
+            ToolResult.err(
+                ToolResult.ErrorKind.TIMEOUT,
+                "build exceeded "
+                    + bc.timeoutSeconds()
+                    + "s timeout inside the sandbox: "
+                    + bc.command());
+          // Never a host retry: "the sandbox could not run this" is the containment working, and
+          // falling back would reinstate exactly the host execution this routing exists to remove.
+        case UNAVAILABLE, REFUSED ->
+            ToolResult.err(
+                ToolResult.ErrorKind.UNAVAILABLE,
+                "build unavailable — the sandbox could not run it ("
+                    + sandboxed.detail()
+                    + "). It was NOT executed on the application host.");
+      };
+    }
+
     String effectiveCmd =
         applyCompileCheckWrapper ? wrapForExecutableCompileCheck(bc.command()) : bc.command();
 
@@ -172,24 +249,8 @@ public class BuildProjectTool implements Tool {
       }
       String output = new String(proc.getInputStream().readAllBytes());
       int exit = proc.exitValue();
-      boolean noOp = "fallback:no-op".equals(bc.sourceDescription());
-      // Output budget (#6): persist a full build log to disk + give the worker a preview + readFile
-      // path, so a long compiler/maven failure isn't lost to a 4 KB truncation.
-      String summary =
-          "command="
-              + bc.command()
-              + "\nsource="
-              + bc.sourceDescription()
-              + "\nsmokeSignal="
-              + (noOp ? "UNAVAILABLE" : "EXECUTED")
-              + "\nnoOp="
-              + noOp
-              + "\nexit="
-              + exit
-              + "\noutput:\n"
-              + ToolOutput.budget(ctx, "build", output, ToolOutput.DEFAULT_INLINE_CAP);
       // Return Ok regardless of exit code — the LLM/harness reads exit and decides.
-      return ToolResult.ok(summary);
+      return ToolResult.ok(buildSummary(ctx, bc, exit, output));
     } catch (IOException ioe) {
       log.warn("buildProject IO error command={}", bc.command(), ioe);
       return ToolResult.err(ToolResult.ErrorKind.IO_ERROR, ioe.getMessage());
@@ -197,6 +258,30 @@ public class BuildProjectTool implements Tool {
       Thread.currentThread().interrupt();
       return ToolResult.err(ToolResult.ErrorKind.INTERNAL, "interrupted");
     }
+  }
+
+  /**
+   * The tool's success envelope. Extracted so the host and sandbox dispatch paths cannot drift: the
+   * worker and the harness parse this text, and a routed build must be indistinguishable from a
+   * host build in everything except where it ran.
+   *
+   * <p>Output budget (#6): the full build log is persisted to disk and the worker gets a preview
+   * plus a {@code readFile} path, so a long compiler/Maven failure is not lost to truncation.
+   */
+  private String buildSummary(ExecutionContext ctx, BuildCommand bc, int exit, String output) {
+    boolean noOp = "fallback:no-op".equals(bc.sourceDescription());
+    return "command="
+        + bc.command()
+        + "\nsource="
+        + bc.sourceDescription()
+        + "\nsmokeSignal="
+        + (noOp ? "UNAVAILABLE" : "EXECUTED")
+        + "\nnoOp="
+        + noOp
+        + "\nexit="
+        + exit
+        + "\noutput:\n"
+        + ToolOutput.budget(ctx, "build", output, ToolOutput.DEFAULT_INLINE_CAP);
   }
 
   /**

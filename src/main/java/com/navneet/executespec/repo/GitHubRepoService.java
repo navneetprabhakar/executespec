@@ -128,13 +128,24 @@ public class GitHubRepoService {
         continue;
       }
 
-      // Some other failure (auth, network, etc.) — don't retry
-      return "https://github.com/" + effectiveOwner + "/" + name + ".git";
+      // RR-149 — some other failure (auth, network, API error). A repository was NOT created, so we
+      // must NOT return a constructed URL: the run would persist and publish against a source that
+      // does not exist. Signal failure (null); callers surface a safe, explicit creation error.
+      log.warn(
+          "[GitHubRepoService] Repo creation for '{}' failed without a name collision — no repo was"
+              + " created; returning null rather than a fabricated URL",
+          name);
+      return null;
     }
 
-    // All retries exhausted
-    String fallbackName = baseName + "-" + ThreadLocalRandom.current().nextInt(10, 100);
-    return "https://github.com/" + effectiveOwner + "/" + fallbackName + ".git";
+    // RR-149 — all name-collision retries exhausted without a successful create. Never return an
+    // unattempted URL; report failure so retry/idempotency stays explicit.
+    log.warn(
+        "[GitHubRepoService] Repo creation exhausted {} name-collision retries for base '{}' —"
+            + " returning null",
+        3,
+        baseName);
+    return null;
   }
 
   /**
@@ -274,15 +285,23 @@ public class GitHubRepoService {
    */
   /**
    * v2.5.5 (UX-4.2) — list files changed between two commits via GitHub's compare API. Returns one
-   * {@link ChangedFile} per file (added / modified / removed / renamed) or empty on failure. No
-   * pagination — the compare endpoint caps at 300 files per response which is plenty for an arch
-   * diff. Uses the caller's PAT for private-repo access.
+   * {@link ChangedFile} per file (added / modified / removed / renamed). No pagination — the
+   * compare endpoint caps at 300 files per response which is plenty for an arch diff. Uses the
+   * caller's PAT for private-repo access.
+   *
+   * <p>RR-1656 — the result is typed because an empty file list is NOT evidence of "these two SHAs
+   * are identical": a non-200 response, an auth failure and a transport error all produce no files
+   * as well. Callers that render or score the diff must branch on {@link
+   * CompareResult#successful()} rather than on emptiness.
    */
-  public List<ChangedFile> compareCommits(
+  public CompareResult compareCommits(
       String repoFullName, String baseSha, String headSha, String overridePat) {
     String effectivePat = overridePat;
-    if (repoFullName == null || baseSha == null || headSha == null) return List.of();
-    if (baseSha.equals(headSha)) return List.of();
+    if (repoFullName == null || baseSha == null || headSha == null) {
+      return CompareResult.failed("INVALID_COMPARE_ARGUMENTS", null);
+    }
+    // Identical SHAs are a genuine, verified no-change compare — never a failure.
+    if (baseSha.equals(headSha)) return CompareResult.success(List.of());
     try {
       HttpClient client = HttpClient.newHttpClient();
       HttpRequest.Builder b =
@@ -308,11 +327,12 @@ public class GitHubRepoService {
             baseSha,
             headSha,
             res.statusCode());
-        return List.of();
+        return CompareResult.failed("GITHUB_COMPARE_HTTP_ERROR", res.statusCode());
       }
       JsonNode root = new ObjectMapper().readTree(res.body());
       JsonNode files = root.path("files");
-      if (!files.isArray()) return List.of();
+      // A compare payload with no "files" array is a shape we cannot read — not a clean compare.
+      if (!files.isArray()) return CompareResult.failed("GITHUB_COMPARE_UNREADABLE_BODY", 200);
       List<ChangedFile> out = new ArrayList<>(files.size());
       for (JsonNode f : files) {
         out.add(
@@ -322,10 +342,30 @@ public class GitHubRepoService {
                 f.path("additions").asInt(0),
                 f.path("deletions").asInt(0)));
       }
-      return out;
+      return CompareResult.success(out);
     } catch (Exception e) {
       log.warn("[GitHubRepoService] compareCommits {}: {}", repoFullName, e.getMessage());
-      return List.of();
+      return CompareResult.failed("GITHUB_COMPARE_REQUEST_FAILED", null);
+    }
+  }
+
+  /**
+   * Typed GitHub compare result (RR-1656). {@code successful=true} with an empty {@code files} list
+   * means the compare ran and found no changed files; {@code successful=false} means the question
+   * could not be asked and the caller must not present the result as a clean diff.
+   */
+  public record CompareResult(
+      List<ChangedFile> files, boolean successful, String errorCode, Integer upstreamStatus) {
+    public CompareResult {
+      files = files == null ? List.of() : List.copyOf(files);
+    }
+
+    public static CompareResult success(List<ChangedFile> files) {
+      return new CompareResult(files, true, null, 200);
+    }
+
+    public static CompareResult failed(String errorCode, Integer upstreamStatus) {
+      return new CompareResult(List.of(), false, errorCode, upstreamStatus);
     }
   }
 
@@ -340,7 +380,10 @@ public class GitHubRepoService {
   public boolean diffConfinedTo(
       String repoFullName, String baseSha, String headSha, String prefix, String overridePat) {
     if (baseSha == null || headSha == null || baseSha.equals(headSha)) return false;
-    List<ChangedFile> files = compareCommits(repoFullName, baseSha, headSha, overridePat);
+    CompareResult compare = compareCommits(repoFullName, baseSha, headSha, overridePat);
+    // Fail-safe: an unavailable compare is "in doubt", which this contract treats as a real change.
+    if (!compare.successful()) return false;
+    List<ChangedFile> files = compare.files();
     if (files.isEmpty()) return false;
     for (ChangedFile f : files) {
       if (f.filename() == null || !f.filename().startsWith(prefix)) return false;
@@ -456,16 +499,27 @@ public class GitHubRepoService {
    * @return sorted list of relative file paths, or empty list on failure
    */
   public List<String> listRepoFiles(String repoUrl, String overridePat) {
-    return listRepoFiles(repoUrl, null, overridePat);
+    return listRepoFilesResult(repoUrl, null, overridePat).files();
   }
 
   /** Variant that respects a non-default branch (avoids the hardcoded {@code main}). */
   public List<String> listRepoFiles(String repoUrl, String branch, String overridePat) {
+    return listRepoFilesResult(repoUrl, branch, overridePat).files();
+  }
+
+  /**
+   * Typed GitHub tree result. An empty successful tree is materially different from a missing PAT,
+   * upstream rejection, or transport failure; callers that make readiness/scoring decisions must
+   * use this method instead of inferring success from an empty list.
+   */
+  public RepoFileListResult listRepoFilesResult(String repoUrl, String branch, String overridePat) {
     String effectivePat = overridePat;
-    if (effectivePat == null || effectivePat.isBlank()) return List.of();
+    if (effectivePat == null || effectivePat.isBlank()) {
+      return RepoFileListResult.failed("MISSING_GITHUB_PAT", null);
+    }
 
     String[] ownerRepo = extractOwnerRepo(repoUrl);
-    if (ownerRepo == null) return List.of();
+    if (ownerRepo == null) return RepoFileListResult.failed("INVALID_REPOSITORY_URL", null);
 
     String effectiveBranch = (branch != null && !branch.isBlank()) ? branch : "main";
     try {
@@ -492,36 +546,69 @@ public class GitHubRepoService {
             "[GitHubRepoService] Failed to list repo files for {}: {}",
             repoUrl,
             response.statusCode());
-        return List.of();
+        return RepoFileListResult.failed("GITHUB_TREE_HTTP_ERROR", response.statusCode());
       }
 
-      // Parse the "tree" array: extract "path" where "type" is "blob"
-      return parseTreePaths(response.body());
+      // Parse the "tree" array: extract "path" where "type" is "blob". GitHub marks recursive
+      // trees as truncated for very large repositories; preserve that fact instead of presenting
+      // a partial inventory as complete.
+      boolean truncated =
+          new ObjectMapper().readTree(response.body()).path("truncated").asBoolean(false);
+      return RepoFileListResult.success(parseTreePaths(response.body()), truncated);
     } catch (Exception e) {
       log.warn("[GitHubRepoService] Error listing repo files: {}", e.getMessage());
-      return List.of();
+      return RepoFileListResult.failed("GITHUB_TREE_REQUEST_FAILED", null);
+    }
+  }
+
+  public record RepoFileListResult(
+      List<String> files,
+      boolean successful,
+      boolean truncated,
+      String errorCode,
+      Integer upstreamStatus) {
+    public RepoFileListResult {
+      files = files == null ? List.of() : List.copyOf(files);
+    }
+
+    public static RepoFileListResult success(List<String> files) {
+      return success(files, false);
+    }
+
+    public static RepoFileListResult success(List<String> files, boolean truncated) {
+      return new RepoFileListResult(files, true, truncated, null, 200);
+    }
+
+    public static RepoFileListResult failed(String errorCode, Integer upstreamStatus) {
+      return new RepoFileListResult(List.of(), false, false, errorCode, upstreamStatus);
     }
   }
 
   /**
    * Reads a single file from a GitHub repo via the Contents API.
    *
+   * <p>RR-1631 — failures are signalled OUT OF BAND. This method previously returned a {@code "//
+   * …"} sentinel string in the same channel as file content, which is indistinguishable from a
+   * legitimate C-style/proto/GraphQL source file whose first line is a {@code //} comment. Callers
+   * must branch on {@link RepoFileResult#successful()} and never inspect the content prefix.
+   *
    * @param repoUrl HTTPS clone URL
    * @param relativePath file path relative to repo root
-   * @param overridePat per-user PAT (null falls back to system PAT)
-   * @return file content as string, or error message on failure
+   * @param overridePat per-user PAT
    */
-  public String readRepoFile(String repoUrl, String relativePath, String overridePat) {
+  public RepoFileResult readRepoFile(String repoUrl, String relativePath, String overridePat) {
     return readRepoFile(repoUrl, relativePath, null, overridePat);
   }
 
-  public String readRepoFile(
+  public RepoFileResult readRepoFile(
       String repoUrl, String relativePath, String branch, String overridePat) {
     String effectivePat = overridePat;
-    if (effectivePat == null || effectivePat.isBlank()) return "// No GitHub PAT configured";
+    if (effectivePat == null || effectivePat.isBlank()) {
+      return RepoFileResult.failed("MISSING_GITHUB_PAT", null);
+    }
 
     String[] ownerRepo = extractOwnerRepo(repoUrl);
-    if (ownerRepo == null) return "// Invalid repo URL";
+    if (ownerRepo == null) return RepoFileResult.failed("INVALID_REPOSITORY_URL", null);
 
     String effectiveBranch = (branch != null && !branch.isBlank()) ? branch : "main";
     try {
@@ -548,14 +635,41 @@ public class GitHubRepoService {
 
       HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
       if (response.statusCode() != 200) {
-        return "// File not found on GitHub (status " + response.statusCode() + ")";
+        return RepoFileResult.failed("GITHUB_CONTENTS_HTTP_ERROR", response.statusCode());
       }
 
       // Extract base64-encoded "content" field and decode
       return decodeGitHubContent(response.body());
     } catch (Exception e) {
       log.warn("[GitHubRepoService] Error reading repo file {}: {}", relativePath, e.getMessage());
-      return "// Error reading file from GitHub: " + e.getMessage();
+      return RepoFileResult.failed("GITHUB_CONTENTS_REQUEST_FAILED", null);
+    }
+  }
+
+  /**
+   * Typed single-file read result (RR-1631). {@code successful=false} carries a stable, secret-free
+   * {@code errorCode} and never a content string, so an unavailable read can never be mistaken for
+   * file bytes — nor a real file whose first line is a comment mistaken for a failure.
+   */
+  public record RepoFileResult(
+      String content, boolean successful, String errorCode, Integer upstreamStatus) {
+
+    public static RepoFileResult success(String content) {
+      return new RepoFileResult(content == null ? "" : content, true, null, 200);
+    }
+
+    public static RepoFileResult failed(String errorCode, Integer upstreamStatus) {
+      return new RepoFileResult(null, false, errorCode, upstreamStatus);
+    }
+
+    /** Content when the read succeeded, else {@code null}. Never a failure sentinel. */
+    public String contentOrNull() {
+      return successful ? content : null;
+    }
+
+    /** True when GitHub answered that the path does not exist on the requested ref. */
+    public boolean notFound() {
+      return !successful && upstreamStatus != null && upstreamStatus == 404;
     }
   }
 
@@ -564,28 +678,53 @@ public class GitHubRepoService {
     cloneRepo(repoUrl, workspacePath, null);
   }
 
+  /** Thrown when an existing-repo clone cannot proceed because no credential is available. */
+  public static final class MissingCredentialException extends RuntimeException {
+    public MissingCredentialException(String message) {
+      super(message);
+    }
+  }
+
   /**
-   * Clones a GitHub repo into {@code workspacePath} using the provided PAT for auth. Falls back to
-   * {@code git init} if no PAT is available.
+   * Clones a GitHub repo into {@code workspacePath} using the provided PAT for auth.
+   *
+   * <p>RR-150 — a missing PAT NEVER silently substitutes an empty {@code git init} workspace: doing
+   * so let callers plan and generate against an empty tree while believing they were modifying an
+   * existing repository (replacement-style diffs, false readiness). Without a credential we attempt
+   * an unauthenticated clone, which succeeds for public repositories; if that fails (private/
+   * unreachable) we fail closed with {@link MissingCredentialException} so the caller stops before
+   * planning rather than proceeding against an empty source.
    */
   public void cloneRepo(String repoUrl, String workspacePath, String overridePat) throws Exception {
     String effectivePat = overridePat;
-    if (effectivePat == null || effectivePat.isBlank()) {
+    boolean authenticated = effectivePat != null && !effectivePat.isBlank();
+    if (!authenticated) {
       log.info(
-          "[GitHubRepoService] No PAT configured — initializing empty git repo at {}",
-          workspacePath);
-      ProcessBuilder pb = new ProcessBuilder("git", "init", workspacePath);
-      pb.inheritIO();
-      int exit = pb.start().waitFor();
-      if (exit != 0) throw new RuntimeException("git init failed with exit code " + exit);
-      return;
+          "[GitHubRepoService] No PAT configured — attempting unauthenticated clone of {} (public"
+              + " repositories only)",
+          repoUrl);
     }
 
-    String authUrl = repoUrl.replace("https://", "https://oauth2:" + effectivePat + "@");
-    ProcessBuilder pb = new ProcessBuilder("git", "clone", authUrl, workspacePath);
-    pb.inheritIO();
-    int exit = pb.start().waitFor();
-    if (exit != 0) throw new RuntimeException("git clone failed with exit code " + exit);
+    // Credential-gate 2026-07-17: PAT rides the child env (GitProcessAuth), not argv/remote —
+    // and inheritIO is gone so child git output can't stream tokens into the parent's stdout.
+    ProcessBuilder pb =
+        GitProcessAuth.git(
+            authenticated ? effectivePat : null,
+            java.util.List.of("clone", repoUrl, workspacePath));
+    pb.redirectErrorStream(true);
+    Process p = pb.start();
+    String out = new String(p.getInputStream().readAllBytes());
+    int exit = p.waitFor();
+    if (exit != 0) {
+      if (!authenticated) {
+        throw new MissingCredentialException(
+            "MISSING_GITHUB_PAT: clone of "
+                + repoUrl
+                + " failed without a credential (likely a private or unreachable repository);"
+                + " refusing to substitute an empty workspace");
+      }
+      throw new RuntimeException("git clone failed with exit code " + exit + ": " + out);
+    }
   }
 
   /** Generates a random memorable repo name (e.g. "swift-spark", "bold-nexus"). */
@@ -736,7 +875,55 @@ public class GitHubRepoService {
   }
 
   /**
+   * RR-146 — the outcome of a PR-creation attempt, distinguishing "this call opened a new PR" from
+   * "GitHub already has a PR for this head" and from a real failure.
+   *
+   * <p>The untyped {@code null} return conflated all three, and callers read {@code null} as
+   * failure and enqueued deletion of the head branch — so republishing an existing PR could
+   * schedule destruction of the branch that PR is reviewing. Only {@link Outcome#FAILED} may
+   * authorize branch cleanup.
+   */
+  public record PullRequestCreation(
+      Outcome outcome, String prUrl, Integer prNumber, String detail) {
+
+    public enum Outcome {
+      /** This invocation created the pull request. */
+      CREATED,
+      /** GitHub reports an open pull request already exists for this head branch. */
+      ALREADY_EXISTS,
+      /** No pull request exists as a result of this invocation, and none was found. */
+      FAILED
+    }
+
+    public static PullRequestCreation created(String prUrl, Integer prNumber) {
+      return new PullRequestCreation(Outcome.CREATED, prUrl, prNumber, "created");
+    }
+
+    public static PullRequestCreation alreadyExists(String prUrl, Integer prNumber) {
+      return new PullRequestCreation(
+          Outcome.ALREADY_EXISTS, prUrl, prNumber, "pull request already exists for this branch");
+    }
+
+    public static PullRequestCreation failed(String detail) {
+      return new PullRequestCreation(Outcome.FAILED, null, null, detail);
+    }
+
+    /** True when a pull request exists for the branch, whoever created it. */
+    public boolean prExists() {
+      return outcome != Outcome.FAILED;
+    }
+
+    public boolean failed() {
+      return outcome == Outcome.FAILED;
+    }
+  }
+
+  /**
    * Creates a pull request on a GitHub repository.
+   *
+   * <p>Compatibility shape: returns the PR URL, or {@code null} for BOTH "already exists" and real
+   * failure. Callers that take a destructive action on failure MUST use {@link
+   * #createPullRequestDetailed} instead — see RR-146.
    *
    * @param repoUrl HTTPS clone URL
    * @param head source branch name (e.g. "executespec/abc123")
@@ -748,16 +935,27 @@ public class GitHubRepoService {
    */
   public String createPullRequest(
       String repoUrl, String head, String base, String title, String prBody, String overridePat) {
+    return createPullRequestDetailed(repoUrl, head, base, title, prBody, overridePat).prUrl();
+  }
+
+  /**
+   * RR-146 — typed PR creation. On GitHub's 422 "A pull request already exists" the existing open
+   * PR for {@code head} is looked up and returned as {@link
+   * PullRequestCreation.Outcome#ALREADY_EXISTS}; the branch is live review material, never an
+   * orphan.
+   */
+  public PullRequestCreation createPullRequestDetailed(
+      String repoUrl, String head, String base, String title, String prBody, String overridePat) {
     String effectivePat = overridePat;
     if (effectivePat == null || effectivePat.isBlank()) {
       log.warn("[GitHubRepoService] No PAT — cannot create PR");
-      return null;
+      return PullRequestCreation.failed("no GitHub credential");
     }
 
     String[] ownerRepo = extractOwnerRepo(repoUrl);
     if (ownerRepo == null) {
       log.warn("[GitHubRepoService] Cannot parse owner/repo from {}", repoUrl);
-      return null;
+      return PullRequestCreation.failed("unparseable repository URL");
     }
 
     String safeTitle = sanitiseDescription(title);
@@ -798,12 +996,12 @@ public class GitHubRepoService {
           int end = responseBody.indexOf("\"", start);
           String prUrl = responseBody.substring(start, end);
           log.info("[GitHubRepoService] Created PR: {}", prUrl);
-          return prUrl;
+          return PullRequestCreation.created(prUrl, prNumberFromUrl(prUrl));
         }
       }
-      // 422 with "A pull request already exists" is normal for continue-on-PR
-      // flows — the push already updated the branch, and GitHub auto-updates
-      // the existing PR. Return null gracefully (caller should not treat as error).
+      // 422 "A pull request already exists" is normal for continue-on-PR flows — the push already
+      // updated the branch and GitHub auto-updated the existing PR. RR-146: this is explicitly NOT
+      // a failure; the head branch is under active review and must never be queued for deletion.
       if (response.statusCode() == 422
           && response.body() != null
           && response.body().contains("already exists")) {
@@ -812,18 +1010,182 @@ public class GitHubRepoService {
             ownerRepo[0],
             ownerRepo[1],
             head);
-        return null;
+        OpenPullRequestLookup existing =
+            findOpenPullRequestForHead(ownerRepo[0] + "/" + ownerRepo[1], head, effectivePat);
+        return PullRequestCreation.alreadyExists(existing.prUrl(), existing.prNumber());
       }
       log.warn(
-          "[GitHubRepoService] Failed to create PR for {}/{}: status {} — {}",
+          "[GitHubRepoService] Failed to create PR for {}/{}: status {}",
           ownerRepo[0],
           ownerRepo[1],
-          response.statusCode(),
-          response.body());
+          response.statusCode());
+      return PullRequestCreation.failed("GitHub returned status " + response.statusCode());
     } catch (Exception e) {
       log.warn("[GitHubRepoService] Error creating PR: {}", e.getMessage());
+      return PullRequestCreation.failed("transport error contacting GitHub");
     }
-    return null;
+  }
+
+  /** Extract the trailing {@code /pull/<n>} number from a PR HTML URL; null when absent. */
+  static Integer prNumberFromUrl(String prUrl) {
+    if (prUrl == null) return null;
+    int idx = prUrl.lastIndexOf("/pull/");
+    if (idx < 0) return null;
+    String tail = prUrl.substring(idx + "/pull/".length()).trim();
+    int end = 0;
+    while (end < tail.length() && Character.isDigit(tail.charAt(end))) end++;
+    if (end == 0) return null;
+    try {
+      return Integer.valueOf(tail.substring(0, end));
+    } catch (NumberFormatException e) {
+      return null;
+    }
+  }
+
+  /**
+   * RR-146 / RR-380 — result of asking GitHub whether an OPEN pull request currently exists for a
+   * head branch. {@code known=false} means the question could not be answered (no credential,
+   * transport error, unexpected status) and callers must fail closed rather than assume "none".
+   */
+  public record OpenPullRequestLookup(
+      boolean known, boolean present, String prUrl, Integer prNumber) {
+
+    public static OpenPullRequestLookup unknown() {
+      return new OpenPullRequestLookup(false, false, null, null);
+    }
+
+    public static OpenPullRequestLookup none() {
+      return new OpenPullRequestLookup(true, false, null, null);
+    }
+
+    public static OpenPullRequestLookup found(String prUrl, Integer prNumber) {
+      return new OpenPullRequestLookup(true, true, prUrl, prNumber);
+    }
+
+    /** True only when GitHub positively answered that no open PR references the branch. */
+    public boolean provenAbsent() {
+      return known && !present;
+    }
+  }
+
+  /**
+   * Look up the OPEN pull request whose head is {@code branch} in {@code repoFullName}. Bounded
+   * timeouts; never throws.
+   */
+  public OpenPullRequestLookup findOpenPullRequestForHead(
+      String repoFullName, String branch, String overridePat) {
+    if (overridePat == null || overridePat.isBlank()) return OpenPullRequestLookup.unknown();
+    if (repoFullName == null || !repoFullName.contains("/")) return OpenPullRequestLookup.unknown();
+    if (branch == null || branch.isBlank()) return OpenPullRequestLookup.unknown();
+    String owner = repoFullName.substring(0, repoFullName.indexOf('/'));
+    try {
+      HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
+      HttpRequest request =
+          HttpRequest.newBuilder()
+              .uri(
+                  URI.create(
+                      "https://api.github.com/repos/"
+                          + repoFullName
+                          + "/pulls?state=open&per_page=100&head="
+                          + URLEncoder.encode(owner + ":" + branch, StandardCharsets.UTF_8)))
+              .timeout(Duration.ofSeconds(15))
+              .header("Authorization", "Bearer " + overridePat)
+              .header("Accept", "application/vnd.github+json")
+              .GET()
+              .build();
+      HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+      if (response.statusCode() != 200) {
+        log.warn(
+            "[GitHubRepoService] open-PR lookup {} head={} status {}",
+            repoFullName,
+            branch,
+            response.statusCode());
+        return OpenPullRequestLookup.unknown();
+      }
+      JsonNode array = JSON_MAPPER.readTree(response.body());
+      if (!array.isArray()) return OpenPullRequestLookup.unknown();
+      for (JsonNode pr : array) {
+        // GitHub's head filter is a prefix-tolerant query; require an exact ref match.
+        if (branch.equals(pr.path("head").path("ref").asText(""))) {
+          return OpenPullRequestLookup.found(
+              pr.path("html_url").asText(null),
+              pr.hasNonNull("number") ? pr.path("number").asInt() : null);
+        }
+      }
+      return OpenPullRequestLookup.none();
+    } catch (Exception e) {
+      log.warn(
+          "[GitHubRepoService] open-PR lookup {} head={} failed: {}",
+          repoFullName,
+          branch,
+          e.getMessage());
+      return OpenPullRequestLookup.unknown();
+    }
+  }
+
+  /**
+   * RR-380 — current state of a remote branch ref. {@code known=false} means GitHub did not answer,
+   * so a caller about to delete must abort rather than proceed on an assumption.
+   */
+  public record BranchRefState(boolean known, boolean present, String sha) {
+
+    public static BranchRefState unknown() {
+      return new BranchRefState(false, false, null);
+    }
+
+    public static BranchRefState absent() {
+      return new BranchRefState(true, false, null);
+    }
+
+    public static BranchRefState at(String sha) {
+      return new BranchRefState(true, true, sha);
+    }
+  }
+
+  /**
+   * Read the exact current SHA of {@code refs/heads/<branch>} in {@code repoFullName}. Used as the
+   * freshness check immediately before an irreversible branch deletion.
+   */
+  public BranchRefState getBranchRef(String repoFullName, String branch, String overridePat) {
+    if (overridePat == null || overridePat.isBlank()) return BranchRefState.unknown();
+    if (repoFullName == null || !repoFullName.contains("/")) return BranchRefState.unknown();
+    if (branch == null || branch.isBlank()) return BranchRefState.unknown();
+    try {
+      HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
+      HttpRequest request =
+          HttpRequest.newBuilder()
+              .uri(
+                  URI.create(
+                      "https://api.github.com/repos/"
+                          + repoFullName
+                          + "/git/ref/heads/"
+                          + URLEncoder.encode(branch, StandardCharsets.UTF_8).replace("%2F", "/")))
+              .timeout(Duration.ofSeconds(15))
+              .header("Authorization", "Bearer " + overridePat)
+              .header("Accept", "application/vnd.github+json")
+              .GET()
+              .build();
+      HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+      if (response.statusCode() == 404) return BranchRefState.absent();
+      if (response.statusCode() != 200) {
+        log.warn(
+            "[GitHubRepoService] branch ref {} on {} status {}",
+            branch,
+            repoFullName,
+            response.statusCode());
+        return BranchRefState.unknown();
+      }
+      JsonNode node = JSON_MAPPER.readTree(response.body());
+      String sha = node.path("object").path("sha").asText("");
+      return sha.isBlank() ? BranchRefState.unknown() : BranchRefState.at(sha);
+    } catch (Exception e) {
+      log.warn(
+          "[GitHubRepoService] branch ref {} on {} failed: {}",
+          branch,
+          repoFullName,
+          e.getMessage());
+      return BranchRefState.unknown();
+    }
   }
 
   /**
@@ -1112,39 +1474,71 @@ public class GitHubRepoService {
    * Parses the Git Trees API response to extract file paths. Expected format: {"tree": [{"path":
    * "src/main.java", "type": "blob"}, ...]}
    */
-  private List<String> parseTreePaths(String json) {
+  static List<String> parseTreePaths(String json) {
     List<String> paths = new ArrayList<>();
-    // Simple JSON parsing — find each "path":"..." where preceding "type":"blob"
-    int idx = 0;
-    while (idx < json.length()) {
-      int typeIdx = json.indexOf("\"type\":", idx);
-      if (typeIdx < 0) break;
-
-      int pathIdx = json.indexOf("\"path\":", typeIdx);
-      if (pathIdx < 0) break;
-
-      // Check if type is "blob"
-      int typeValStart = json.indexOf("\"", typeIdx + 7) + 1;
-      int typeValEnd = json.indexOf("\"", typeValStart);
-      String typeVal = json.substring(typeValStart, typeValEnd);
-
-      // Extract path value
-      int pathValStart = json.indexOf("\"", pathIdx + 7) + 1;
-      int pathValEnd = json.indexOf("\"", pathValStart);
-      String pathVal = json.substring(pathValStart, pathValEnd);
-
-      if ("blob".equals(typeVal) && !pathVal.startsWith(".git")) {
-        paths.add(pathVal);
+    try {
+      JsonNode tree = new ObjectMapper().readTree(json).path("tree");
+      if (!tree.isArray()) return List.of();
+      for (JsonNode entry : tree) {
+        String type = entry.path("type").asText("");
+        String path = entry.path("path").asText("");
+        if ("blob".equals(type) && !path.isBlank() && !isGitMetadataPath(path)) {
+          paths.add(path);
+        }
       }
-
-      idx = pathValEnd + 1;
+    } catch (Exception e) {
+      log.warn("[GitHubRepoService] Failed to parse Git Trees response: {}", e.getMessage());
+      return List.of();
     }
     paths.sort(String::compareTo);
     return paths;
   }
 
+  private static boolean isGitMetadataPath(String path) {
+    return ".git".equals(path) || path.startsWith(".git/");
+  }
+
   /** Lightweight DTO for {@link #listOwnerRepos(String, String)}. */
-  public record RemoteRepo(String fullName, String defaultBranch, boolean isPrivate) {}
+  public record RemoteRepo(
+      String immutableId,
+      String fullName,
+      String cloneUrl,
+      String defaultBranch,
+      boolean isPrivate,
+      Long sizeKb) {}
+
+  /** Reads canonical repository metadata, including GitHub's immutable numeric repository id. */
+  public RemoteRepo getRemoteRepo(String fullName, String overridePat) {
+    if (overridePat == null || overridePat.isBlank() || fullName == null || fullName.isBlank()) {
+      return null;
+    }
+    try {
+      HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
+      HttpRequest request =
+          HttpRequest.newBuilder()
+              .uri(URI.create("https://api.github.com/repos/" + fullName.trim()))
+              .timeout(Duration.ofSeconds(15))
+              .header("Authorization", "Bearer " + overridePat)
+              .header("Accept", "application/vnd.github+json")
+              .GET()
+              .build();
+      HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+      if (response.statusCode() != 200) return null;
+      JsonNode node = new ObjectMapper().readTree(response.body());
+      String canonical = node.path("full_name").asText(null);
+      if (canonical == null || node.path("id").isMissingNode()) return null;
+      return new RemoteRepo(
+          Long.toString(node.path("id").asLong()),
+          canonical,
+          node.path("clone_url").asText("https://github.com/" + canonical + ".git"),
+          node.path("default_branch").asText("main"),
+          node.path("private").asBoolean(false),
+          node.path("size").isNumber() ? node.path("size").asLong() : null);
+    } catch (Exception ex) {
+      log.warn("[GitHubRepoService] getRemoteRepo failed for {}: {}", fullName, ex.getMessage());
+      return null;
+    }
+  }
 
   /**
    * Snapshot of a PR for dashboard rendering (title, body, stats, truncated diff).
@@ -1402,9 +1796,12 @@ public class GitHubRepoService {
           }
           out.add(
               new RemoteRepo(
+                  Long.toString(node.path("id").asLong()),
                   full,
+                  node.path("clone_url").asText("https://github.com/" + full + ".git"),
                   node.path("default_branch").asText("main"),
-                  node.path("private").asBoolean(false)));
+                  node.path("private").asBoolean(false),
+                  node.path("size").isNumber() ? node.path("size").asLong() : null));
         }
         if (arr.size() < 100) break; // last page
       }
@@ -1424,19 +1821,23 @@ public class GitHubRepoService {
    * Decodes the base64 "content" field from a GitHub Contents API response. The GitHub API returns
    * content in base64 with newlines every 60 chars.
    */
-  private String decodeGitHubContent(String json) {
+  private RepoFileResult decodeGitHubContent(String json) {
     int contentIdx = json.indexOf("\"content\":");
-    if (contentIdx < 0) return "// No content field in response";
+    if (contentIdx < 0) return RepoFileResult.failed("GITHUB_CONTENTS_NO_CONTENT_FIELD", 200);
 
     int start = json.indexOf("\"", contentIdx + 10) + 1;
     int end = json.indexOf("\"", start);
+    if (start <= 0 || end < start) {
+      return RepoFileResult.failed("GITHUB_CONTENTS_UNREADABLE_BODY", 200);
+    }
     String base64 = json.substring(start, end).replace("\\n", "").replace("\n", "").trim();
 
     try {
       byte[] decoded = Base64.getDecoder().decode(base64);
-      return new String(decoded);
+      return RepoFileResult.success(new String(decoded, StandardCharsets.UTF_8));
     } catch (Exception e) {
-      return "// Failed to decode file content: " + e.getMessage();
+      log.warn("[GitHubRepoService] Failed to decode file content: {}", e.getMessage());
+      return RepoFileResult.failed("GITHUB_CONTENTS_DECODE_FAILED", 200);
     }
   }
 }

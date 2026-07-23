@@ -6,13 +6,19 @@ import java.util.UUID;
 
 import com.navneet.executespec.project.entity.ProjectRepoLink;
 
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface ProjectRepoLinkRepository extends JpaRepository<ProjectRepoLink, UUID> {
 
   List<ProjectRepoLink> findByProjectId(String projectId);
 
+  /** Bounded export/index traversal; callers must not materialise every link for huge projects. */
+  List<ProjectRepoLink> findByProjectIdOrderById(String projectId, Pageable pageable);
+
   List<ProjectRepoLink> findByRepoId(UUID repoId);
+
+  Optional<ProjectRepoLink> findFirstByRepoIdOrderByIdAsc(UUID repoId);
 
   Optional<ProjectRepoLink> findByProjectIdAndRepoId(String projectId, UUID repoId);
 

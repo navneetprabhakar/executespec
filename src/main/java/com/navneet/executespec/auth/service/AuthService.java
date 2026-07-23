@@ -1,8 +1,12 @@
 package com.navneet.executespec.auth.service;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.Base64;
 import java.util.UUID;
 
 import com.navneet.executespec.analytics.EventName;
@@ -12,6 +16,7 @@ import com.navneet.executespec.auth.entity.ActivityAudit;
 import com.navneet.executespec.auth.entity.AppUser;
 import com.navneet.executespec.auth.entity.EmailToken;
 import com.navneet.executespec.auth.entity.OrgMember;
+import com.navneet.executespec.auth.oauth.OAuthEmailConflictException;
 import com.navneet.executespec.auth.repository.AppUserRepository;
 import com.navneet.executespec.auth.repository.EmailTokenRepository;
 import com.navneet.executespec.auth.repository.OrgMemberRepository;
@@ -165,9 +170,13 @@ public class AuthService {
 
   @Transactional
   public void verifyEmail(String token) {
+    if (token == null || token.isBlank()) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid or expired token");
+    }
+    // RR-132 — the stored token is a SHA-256 digest; match on the hash of the presented value.
     EmailToken emailToken =
         emailTokenRepo
-            .findByTokenAndType(token, "EMAIL_VERIFICATION")
+            .findByTokenAndType(hashCapabilityToken(token), "EMAIL_VERIFICATION")
             .orElseThrow(
                 () ->
                     new ResponseStatusException(
@@ -219,9 +228,13 @@ public class AuthService {
    */
   @Transactional
   public LoginResponse verifyEmailAndAuthenticate(String token) {
+    if (token == null || token.isBlank()) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid or expired token");
+    }
+    // RR-132 — the stored token is a SHA-256 digest; match on the hash of the presented value.
     EmailToken emailToken =
         emailTokenRepo
-            .findByTokenAndType(token, "EMAIL_VERIFICATION")
+            .findByTokenAndType(hashCapabilityToken(token), "EMAIL_VERIFICATION")
             .orElseThrow(
                 () ->
                     new ResponseStatusException(
@@ -344,7 +357,8 @@ public class AuthService {
   /** Validate refresh token and return new access token. */
   @Transactional
   public LoginResponse refresh(String refreshToken) {
-    if (!jwtUtil.isTokenValid(refreshToken)) {
+    // RR-128: rotation accepts refresh tokens only — an access or SSE token is not a refresh grant.
+    if (!jwtUtil.isRefreshTokenValid(refreshToken)) {
       throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid refresh token");
     }
     String jti = jwtUtil.extractJti(refreshToken);
@@ -358,6 +372,9 @@ public class AuthService {
             .findById(userId)
             .orElseThrow(
                 () -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "User not found"));
+    if (!jwtUtil.isRefreshTokenValid(refreshToken, user.getTokenInvalidatedAt())) {
+      throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Refresh token revoked");
+    }
     assertActiveForSession(user);
     OrgMember orgMember = null;
     if (user.getOrgId() != null) {
@@ -384,28 +401,74 @@ public class AuthService {
     return UserDto.from(user, orgMember, tierEnforcementService.resolveUserTier(user.getId()));
   }
 
-  /** Revoke a refresh token. */
+  /** End the browser session represented by this refresh token. */
   @Transactional
   public void logout(String refreshToken) {
-    if (refreshToken == null || !jwtUtil.isTokenValid(refreshToken)) return;
+    if (refreshToken == null || !jwtUtil.isRefreshTokenValid(refreshToken)) return;
+    String userId = jwtUtil.extractUserId(refreshToken);
+    revokeRefreshToken(refreshToken);
+    userRepo
+        .findById(userId)
+        .ifPresent(
+            user -> {
+              Instant now = Instant.now();
+              user.setTokenInvalidatedAt(now);
+              user.setUpdatedAt(now);
+              userRepo.save(user);
+            });
+  }
+
+  /** Revoke one refresh grant without invalidating the newly rotated session. */
+  @Transactional
+  public void revokeRefreshToken(String refreshToken) {
+    if (refreshToken == null || !jwtUtil.isRefreshTokenValid(refreshToken)) return;
     String jti = jwtUtil.extractJti(refreshToken);
     Instant exp = jwtUtil.extractExpiry(refreshToken);
     blocklistRepo.insertIfAbsent(jti, jwtUtil.extractUserId(refreshToken), exp);
   }
 
+  /** How long a password-reset capability stays usable. */
+  static final int PASSWORD_RESET_EXPIRY_MINUTES = 30;
+
+  static final String PASSWORD_RESET_TOKEN_TYPE = "PASSWORD_RESET";
+
+  /**
+   * Issues a password-reset capability. Deliberately does NOT touch the account's credentials.
+   *
+   * <p>RR-127 / RR-1336: this endpoint is unauthenticated, so the previous behaviour — generate a
+   * temporary password, overwrite the account hash, and email the plaintext — let anyone who knew
+   * an address lock the owner out on demand, and it never created the {@code PASSWORD_RESET} token
+   * the adjacent reset endpoint requires, so the advertised reset link could never work. Now the
+   * caller only causes an expiring, single-use, hashed capability to be minted and mailed as a
+   * link; the password changes only after the recipient proves mailbox control by presenting that
+   * token.
+   *
+   * <p>Only the SHA-256 digest is persisted (the {@code email_token.token} column is the lookup
+   * key, so storing the digest there keeps the schema unchanged while removing the
+   * plaintext-at-rest exposure of RR-132 for this token type). Reissuing supersedes any outstanding
+   * reset token.
+   *
+   * <p>The response is unconditionally successful to preserve enumeration resistance.
+   */
   @Transactional
   public void forgotPassword(String email) {
+    if (email == null || email.isBlank()) return;
     userRepo
         .findByEmail(email.toLowerCase())
         .ifPresent(
             user -> {
-              String tempPassword = generateSecurePassword();
-              user.setPasswordHash(passwordEncoder.encode(tempPassword));
-              user.setMustChangePassword(true);
-              user.setUpdatedAt(Instant.now());
-              userRepo.save(user);
-              mailService.sendTemporaryPasswordEmail(
-                  user.getEmail(), user.getFirstName(), tempPassword);
+              Instant now = Instant.now();
+              emailTokenRepo.invalidateOutstanding(user.getId(), PASSWORD_RESET_TOKEN_TYPE, now);
+              String plaintext = randomCapabilityToken();
+              emailTokenRepo.save(
+                  EmailToken.builder()
+                      .id(UUID.randomUUID().toString())
+                      .userId(user.getId())
+                      .token(hashCapabilityToken(plaintext))
+                      .type(PASSWORD_RESET_TOKEN_TYPE)
+                      .expiresAt(now.plus(PASSWORD_RESET_EXPIRY_MINUTES, ChronoUnit.MINUTES))
+                      .build());
+              mailService.sendPasswordResetEmail(user.getEmail(), user.getFirstName(), plaintext);
             });
     // Always return success to prevent email enumeration
   }
@@ -413,18 +476,22 @@ public class AuthService {
   @Transactional
   public void resetPassword(String token, String newPassword) {
     validatePasswordStrength(newPassword);
+    if (token == null || token.isBlank()) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid or expired token");
+    }
     EmailToken emailToken =
         emailTokenRepo
-            .findByTokenAndType(token, "PASSWORD_RESET")
+            .findByTokenAndType(hashCapabilityToken(token), PASSWORD_RESET_TOKEN_TYPE)
             .orElseThrow(
                 () ->
                     new ResponseStatusException(
                         HttpStatus.BAD_REQUEST, "Invalid or expired token"));
-    if (emailToken.getUsedAt() != null) {
-      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Token already used");
-    }
-    if (emailToken.getExpiresAt().isBefore(Instant.now())) {
-      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Token expired");
+
+    // RR-133: claim the single-use token atomically BEFORE mutating credentials, so two concurrent
+    // holders of one link cannot both reset the account.
+    Instant now = Instant.now();
+    if (emailTokenRepo.claimIfUnused(emailToken.getId(), now) != 1) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid or expired token");
     }
 
     AppUser user =
@@ -433,11 +500,11 @@ public class AuthService {
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));
     user.setPasswordHash(passwordEncoder.encode(newPassword));
     user.setMustChangePassword(false);
-    user.setUpdatedAt(Instant.now());
+    // A completed reset ends every session minted before it: the common reason to reset is that
+    // someone else may hold the old credential.
+    user.setTokenInvalidatedAt(now);
+    user.setUpdatedAt(now);
     userRepo.save(user);
-
-    emailToken.setUsedAt(Instant.now());
-    emailTokenRepo.save(emailToken);
 
     auditService.record(
         ActivityAudit.builder()
@@ -465,9 +532,15 @@ public class AuthService {
       }
     }
     validatePasswordStrength(req.newPassword());
+    Instant now = Instant.now();
     user.setPasswordHash(passwordEncoder.encode(req.newPassword()));
     user.setMustChangePassword(false);
-    user.setUpdatedAt(Instant.now());
+    // RR-134 — a credential change ends every session minted before it. The password reset path
+    // already advances the per-user session epoch; a change must do the same, otherwise an attacker
+    // holding an access/refresh token stays authenticated after the owner rotates a compromised
+    // password. JwtAuthenticationFilter enforces tokenInvalidatedAt on every request.
+    user.setTokenInvalidatedAt(now);
+    user.setUpdatedAt(now);
     userRepo.save(user);
 
     auditService.record(
@@ -556,7 +629,12 @@ public class AuthService {
    */
   @Transactional
   public AppUser findOrCreateFromOAuth(
-      String provider, String oauthId, String email, String name, String avatarUrl) {
+      String provider,
+      String oauthId,
+      String email,
+      String name,
+      String avatarUrl,
+      boolean emailVerified) {
     // 1. Exact OAuth match
     var existing = userRepo.findByOauthProviderAndOauthId(provider, oauthId);
     if (existing.isPresent()) {
@@ -572,6 +650,18 @@ public class AuthService {
     var byEmail = userRepo.findByEmail(email.toLowerCase());
     if (byEmail.isPresent()) {
       AppUser user = byEmail.get();
+      // RR-131 — refuse to link a provider identity to an already-registered account (which may be
+      // a password account, or a different OAuth provider) unless the provider VERIFIED the email.
+      // Without this, a provider that returns an unverified/attacker-controlled email would
+      // silently
+      // link into someone else's account and mint a session for it.
+      if (!emailVerified) {
+        throw new OAuthEmailConflictException(
+            "This email is already registered. Sign in with your existing method, or verify the"
+                + " email with your "
+                + provider
+                + " account before linking.");
+      }
       assertOAuthLoginAllowed(user);
       user.setOauthProvider(provider);
       user.setOauthId(oauthId);
@@ -671,16 +761,21 @@ public class AuthService {
   }
 
   private String createEmailToken(String userId, String type, int expiryHours) {
-    String token = UUID.randomUUID().toString().replace("-", "");
+    // RR-132 — the plaintext token is the bearer credential emailed to the user; only its SHA-256
+    // digest reaches the database, exactly as the password-reset lane (forgotPassword) and PATs
+    // already do. A read-only DB leak therefore yields no usable activation capability.
+    // Verification
+    // hashes the presented token and matches on the digest.
+    String plaintext = randomCapabilityToken();
     emailTokenRepo.save(
         EmailToken.builder()
             .id(UUID.randomUUID().toString())
             .userId(userId)
-            .token(token)
+            .token(hashCapabilityToken(plaintext))
             .type(type)
             .expiresAt(Instant.now().plus(expiryHours, ChronoUnit.HOURS))
             .build());
-    return token;
+    return plaintext;
   }
 
   private void validatePasswordStrength(String password) {
@@ -708,44 +803,42 @@ public class AuthService {
       throw new ResponseStatusException(
           HttpStatus.BAD_REQUEST, "Password must contain at least one special character");
     }
-    if (password.contains(" ")) {
+    // RR-603 — the previous check only looked for a literal space, so the "no whitespace"
+    // guarantee was false for tabs, newlines and every other Unicode whitespace codepoint. Reject
+    // any whitespace codepoint so the advertised policy is actually enforced across register, reset
+    // and change.
+    if (password.codePoints().anyMatch(Character::isWhitespace)) {
       throw new ResponseStatusException(
           HttpStatus.BAD_REQUEST, "Password must not contain whitespace");
     }
   }
 
   /**
-   * Generates a random 12-character password containing uppercase, lowercase, digits, and special
-   * characters — guaranteed to pass validatePasswordStrength().
+   * Mints a high-entropy, URL-safe capability token. Only the caller (and the recipient's mailbox)
+   * ever sees the plaintext; {@link #hashCapabilityToken} is what reaches the database.
    */
-  private String generateSecurePassword() {
-    String upper = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-    String lower = "abcdefghijklmnopqrstuvwxyz";
-    String digits = "0123456789";
-    String special = "!@#$%&*";
-    String all = upper + lower + digits + special;
-    SecureRandom rng = new SecureRandom();
+  private String randomCapabilityToken() {
+    byte[] raw = new byte[32];
+    new SecureRandom().nextBytes(raw);
+    return Base64.getUrlEncoder().withoutPadding().encodeToString(raw);
+  }
 
-    // Guarantee at least one of each required type
-    StringBuilder sb = new StringBuilder(12);
-    sb.append(upper.charAt(rng.nextInt(upper.length())));
-    sb.append(lower.charAt(rng.nextInt(lower.length())));
-    sb.append(digits.charAt(rng.nextInt(digits.length())));
-    sb.append(special.charAt(rng.nextInt(special.length())));
-
-    // Fill the rest
-    for (int i = 4; i < 12; i++) {
-      sb.append(all.charAt(rng.nextInt(all.length())));
+  /**
+   * SHA-256 digest of a capability token, hex-encoded. Matches the one-way storage discipline
+   * already used for personal access tokens and share links: a read-only database leak yields no
+   * usable reset capability (RR-132 for the reset lane).
+   */
+  static String hashCapabilityToken(String plaintext) {
+    try {
+      byte[] digest =
+          MessageDigest.getInstance("SHA-256").digest(plaintext.getBytes(StandardCharsets.UTF_8));
+      StringBuilder sb = new StringBuilder(digest.length * 2);
+      for (byte b : digest) {
+        sb.append(Character.forDigit((b >> 4) & 0xF, 16)).append(Character.forDigit(b & 0xF, 16));
+      }
+      return sb.toString();
+    } catch (NoSuchAlgorithmException e) {
+      throw new IllegalStateException("SHA-256 unavailable", e);
     }
-
-    // Shuffle to avoid predictable positions
-    char[] chars = sb.toString().toCharArray();
-    for (int i = chars.length - 1; i > 0; i--) {
-      int j = rng.nextInt(i + 1);
-      char tmp = chars[i];
-      chars[i] = chars[j];
-      chars[j] = tmp;
-    }
-    return new String(chars);
   }
 }

@@ -1,7 +1,7 @@
 package com.navneet.executespec.deployment.preview.vm;
 
-import java.io.IOException;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
@@ -9,8 +9,9 @@ import java.util.stream.Collectors;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.navneet.executespec.testgen.BoundedProcess;
 
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
@@ -26,30 +27,61 @@ import lombok.extern.slf4j.Slf4j;
 @Service
 @Slf4j
 @RequiredArgsConstructor
-@ConditionalOnProperty(name = "preview.mode", havingValue = "vm")
+// RR-1044: the VM/SSH preview machinery must be gated on BOTH the selected mode AND the
+// preview.vm.enabled switch (default false), so selecting mode=vm without enabling it no longer
+// instantiates SSH machinery. When absent, PreviewService falls back to its "enable preview.vm"
+// error.
+@ConditionalOnExpression("'${preview.mode:}'.equals('vm') and ${preview.vm.enabled:false}")
 public class PreviewDeploymentService {
 
   private static final String PREVIEW_JSON_PREFIX = "PREVIEW_JSON:";
   private static final int SSH_CONNECT_TIMEOUT = 10;
   private static final int PROCESS_TIMEOUT_SECONDS = 300;
 
+  /** RR-1049: the only DNS suffix a preview URL may carry — the id is the sole variable label. */
+  static final String PREVIEW_DOMAIN_SUFFIX = ".preview.executespec.ai";
+
+  /** RR-1040: upper bound on a single TTL extension, in minutes. */
+  static final int MAX_EXTEND_MINUTES = 240;
+
   private final PreviewVmProperties vmProperties;
   private final PreviewRegistryRepository registryRepo;
   private final PreviewMetricRepository metricsRepo;
   private final ObjectMapper objectMapper;
 
-  /** Deploy a generated project as a live preview on a remote VM. */
+  /**
+   * Backward-compatible overload — deploys with the VM registry's default TTL. Prefer {@link
+   * #deploy(String, String, Path, int)} so the session and registry share one TTL authority
+   * (RR-1042).
+   */
   public PreviewVmResult deploy(String projectName, String executionId, Path projectDir) {
+    return deploy(projectName, executionId, projectDir, vmProperties.getDefaultTtlMinutes());
+  }
+
+  /**
+   * Deploy a generated project as a live preview on a remote VM.
+   *
+   * <p>RR-1042: {@code ttlMinutes} is the authoritative TTL passed through from the caller (the
+   * product session), so the registry expiry, the remote deploy script and the customer-facing
+   * session promise cannot disagree. A non-positive value falls back to the VM default.
+   */
+  public PreviewVmResult deploy(
+      String projectName, String executionId, Path projectDir, int ttlMinutes) {
     String previewId = generatePreviewId(projectName);
     PreviewVmProperties.VmConfig targetVm = selectVm();
-    int ttlMinutes = vmProperties.getDefaultTtlMinutes();
+    if (ttlMinutes <= 0) {
+      ttlMinutes = vmProperties.getDefaultTtlMinutes();
+    }
+    // RR-1049: the canonical, server-derived preview URL. The remote deploy script's output is
+    // never allowed to choose the URL a downstream host-network test container connects to.
+    String canonicalUrl = "https://" + previewId + PREVIEW_DOMAIN_SUFFIX;
 
     PreviewRegistry entry =
         PreviewRegistry.builder()
             .id(previewId)
             .executionId(executionId)
             .projectName(projectName)
-            .url("https://" + previewId + ".preview.executespec.ai")
+            .url(canonicalUrl)
             .vmId(targetVm.getId())
             .vmIp(targetVm.getInternalIp())
             .status("deploying")
@@ -75,8 +107,12 @@ public class PreviewDeploymentService {
                   "/opt/preview-engine/bin/deploy-preview.sh %s %s %d",
                   previewId, remoteTmpDir, ttlMinutes));
 
-      // Parse result from script output
+      // Parse result from script output. RR-1049: the script runs on a remote VM whose output is
+      // untrusted for URL/identity purposes. Validate the port range and pin BOTH the previewId and
+      // the URL to server-derived values so a compromised VM/script cannot forge a teardown
+      // identity or redirect the host-network test container to loopback/RFC1918/metadata targets.
       PreviewVmResult result = parsePreviewJson(output);
+      validateAndPinResult(result, previewId, canonicalUrl);
 
       // If target VM is NOT the gateway, write Caddy config on gateway
       if (!"gateway".equals(targetVm.getRole())) {
@@ -116,6 +152,27 @@ public class PreviewDeploymentService {
 
   /** Tear down a preview by its ID. */
   public void teardown(String previewId) {
+    int claimed = registryRepo.claimForTeardown(previewId);
+    if (claimed != 1) {
+      PreviewRegistry current =
+          registryRepo
+              .findById(previewId)
+              .orElseThrow(() -> new PreviewDeploymentException("Preview not found: " + previewId));
+      if (List.of("tearing_down", "gc_processing", "torn_down").contains(current.getStatus())) {
+        log.info(
+            "Preview teardown already claimed or complete: {} status={}",
+            previewId,
+            current.getStatus());
+        return;
+      }
+      throw new PreviewDeploymentException(
+          "Preview cannot be torn down from status " + current.getStatus() + ": " + previewId);
+    }
+    teardownClaimed(previewId);
+  }
+
+  /** Execute teardown after the caller atomically claimed the registry row. */
+  void teardownClaimed(String previewId) {
     PreviewRegistry entry =
         registryRepo
             .findById(previewId)
@@ -144,12 +201,31 @@ public class PreviewDeploymentService {
     log.info("Preview torn down: {}", previewId);
   }
 
-  /** Extend a preview's TTL. */
+  /**
+   * Extend a preview's TTL.
+   *
+   * <p>RR-1040: the extension is bounded to a positive {@code [1, MAX_EXTEND_MINUTES]} range so a
+   * negative value cannot shorten the preview and a huge value cannot overflow the expiry or revive
+   * stale metadata. Only a live preview (active/deploying/unhealthy) can be extended — a
+   * torn-down/failed/gc row is not resurrected. The new expiry is computed from {@code max(now,
+   * currentExpiry) + duration} so extending an already-future preview genuinely adds time instead
+   * of resetting it to {@code now + duration}.
+   */
   public void extend(String previewId, int extraMinutes) {
+    if (extraMinutes < 1 || extraMinutes > MAX_EXTEND_MINUTES) {
+      throw new PreviewDeploymentException(
+          "Extension must be between 1 and " + MAX_EXTEND_MINUTES + " minutes: " + extraMinutes);
+    }
+
     PreviewRegistry entry =
         registryRepo
             .findById(previewId)
             .orElseThrow(() -> new PreviewDeploymentException("Preview not found: " + previewId));
+
+    if (!List.of("active", "deploying", "unhealthy").contains(entry.getStatus())) {
+      throw new PreviewDeploymentException(
+          "Preview cannot be extended from status " + entry.getStatus() + ": " + previewId);
+    }
 
     String vmExternalIp = resolveExternalIp(entry.getVmId());
 
@@ -157,10 +233,35 @@ public class PreviewDeploymentService {
         vmExternalIp,
         String.format("/opt/preview-engine/bin/extend-preview.sh %s %d", previewId, extraMinutes));
 
-    entry.setExpiresAt(Instant.now().plus(extraMinutes, ChronoUnit.MINUTES));
+    Instant now = Instant.now();
+    Instant base =
+        (entry.getExpiresAt() != null && entry.getExpiresAt().isAfter(now))
+            ? entry.getExpiresAt()
+            : now;
+    entry.setExpiresAt(base.plus(extraMinutes, ChronoUnit.MINUTES));
     registryRepo.save(entry);
 
     log.info("Preview {} extended by {}m", previewId, extraMinutes);
+  }
+
+  /**
+   * RR-1049: validates the untrusted remote deploy-script output and overwrites its URL + preview
+   * id with the server-derived values. The script may only report the port (validated to a legal
+   * range) and the health flag; it may not choose where downstream test traffic goes or forge which
+   * preview id was deployed.
+   */
+  static void validateAndPinResult(PreviewVmResult result, String previewId, String canonicalUrl) {
+    if (result == null) {
+      throw new PreviewDeploymentException("No PREVIEW_JSON result to validate");
+    }
+    int port = result.getPort();
+    if (port < 1 || port > 65535) {
+      throw new PreviewDeploymentException("Remote preview reported an out-of-range port: " + port);
+    }
+    // Pin identity + URL to what the server generated, discarding any attacker-influenced values.
+    result.setPreviewId(previewId);
+    result.setUrl(canonicalUrl);
+    result.setVmIp(null);
   }
 
   /**
@@ -194,18 +295,28 @@ public class PreviewDeploymentService {
         .orElseThrow(() -> new PreviewDeploymentException("All preview VMs at capacity"));
   }
 
-  private String generatePreviewId(String projectName) {
+  // RR-1618 — package-private static so the entropy/format is directly unit-testable; uses no
+  // instance state.
+  static String generatePreviewId(String projectName) {
     String slug =
         projectName
             .toLowerCase()
             .replaceAll("[^a-z0-9]", "-")
             .replaceAll("-+", "-")
             .replaceAll("^-|-$", "");
-    if (slug.length() > 40) {
-      slug = slug.substring(0, 40);
+    // RR-1618: the id is the registry @Id (a merge, not an insert), the DNS label, the Caddy
+    // site-config filename and the remote /tmp dir. The prior 4-hex suffix carried only 16 bits of
+    // entropy over a caller-influenced project slug, so a same-named project collided with
+    // p≈1/65536
+    // per pair — and an attacker who can name a project could retry until a match and silently
+    // overwrite the victim's registry row. Use the full 128-bit UUID (32 hex chars). Cap the slug
+    // so
+    // the whole id stays within the 63-char DNS label limit (24 + '-' + 32 = 57).
+    if (slug.length() > 24) {
+      slug = slug.substring(0, 24).replaceAll("-$", "");
     }
-    String hash = UUID.randomUUID().toString().substring(0, 4);
-    return slug + "-" + hash;
+    String hash = UUID.randomUUID().toString().replace("-", "");
+    return slug.isEmpty() ? hash : slug + "-" + hash;
   }
 
   private void scpDirectory(Path localDir, String remotePath, String targetIp) {
@@ -254,23 +365,30 @@ public class PreviewDeploymentService {
   private String execute(ProcessBuilder pb) {
     try {
       pb.redirectErrorStream(true);
-      Process process = pb.start();
-      String output = new String(process.getInputStream().readAllBytes());
-      boolean finished =
-          process.waitFor(PROCESS_TIMEOUT_SECONDS, java.util.concurrent.TimeUnit.SECONDS);
-      if (!finished) {
-        process.destroyForcibly();
+      // RR-1037: BoundedProcess drains the SSH/SCP child on a separate thread so the deadline is
+      // reachable while the child is still alive, and caps captured output. Reading stdout to EOF
+      // first (the old shape) let a hung child that kept its pipe open defeat the timeout, while an
+      // unbounded read could exhaust the heap.
+      BoundedProcess.Outcome outcome =
+          BoundedProcess.run(pb, Duration.ofSeconds(PROCESS_TIMEOUT_SECONDS));
+      if (!outcome.finished()) {
         throw new PreviewDeploymentException(
             "Command timed out after " + PROCESS_TIMEOUT_SECONDS + "s");
       }
-      int exit = process.exitValue();
-      if (exit != 0) {
+      if (outcome.exitCode() != 0) {
         throw new PreviewDeploymentException(
-            "Command failed (exit " + exit + "): " + truncate(output, 2000));
+            "Command failed (exit "
+                + outcome.exitCode()
+                + "): "
+                + truncate(outcome.output(), 2000));
       }
-      return output;
-    } catch (IOException | InterruptedException e) {
-      Thread.currentThread().interrupt();
+      return outcome.output();
+    } catch (PreviewDeploymentException e) {
+      throw e;
+    } catch (Exception e) {
+      if (e instanceof InterruptedException) {
+        Thread.currentThread().interrupt();
+      }
       throw new PreviewDeploymentException("Execution failed: " + e.getMessage(), e);
     }
   }

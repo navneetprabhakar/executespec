@@ -96,13 +96,25 @@ public class DotNetDeploymentStrategy implements DeploymentStrategy {
         String content = Files.readString(csproj);
         // Look for explicit <AssemblyName> tag
         Matcher m = Pattern.compile("<AssemblyName>([^<]+)</AssemblyName>").matcher(content);
-        if (m.find()) return m.group(1).strip();
+        if (m.find()) return sanitizeName(m.group(1).strip());
         // Fall back to csproj file stem (e.g. MyApp.csproj → MyApp)
         String stem = csproj.getFileName().toString();
-        return stem.substring(0, stem.lastIndexOf('.'));
+        return sanitizeName(stem.substring(0, stem.lastIndexOf('.')));
       }
     } catch (IOException ignored) {
     }
     return "app";
+  }
+
+  /**
+   * The detected assembly name is spliced into the generated Dockerfile ENTRYPOINT, so it is
+   * untrusted model/repo-authored content. A value containing a newline or a quote can inject an
+   * arbitrary Dockerfile instruction (build-time RCE) or an extra entrypoint argument (RR-1627 /
+   * RR-1634). Accept only a conservative identifier shape; otherwise fall back to the safe default.
+   */
+  private static final Pattern SAFE_NAME = Pattern.compile("[A-Za-z0-9._-]{1,100}");
+
+  private static String sanitizeName(String candidate) {
+    return candidate != null && SAFE_NAME.matcher(candidate).matches() ? candidate : "app";
   }
 }

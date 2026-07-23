@@ -3,10 +3,14 @@ package com.navneet.executespec.config;
 import java.lang.reflect.Method;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.Executor;
+import java.util.concurrent.ThreadPoolExecutor;
 
 import org.springframework.aop.interceptor.AsyncUncaughtExceptionHandler;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.scheduling.annotation.AsyncConfigurer;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -44,6 +48,38 @@ public class AsyncObservabilityConfig implements AsyncConfigurer {
   private final org.springframework.beans.factory.ObjectProvider<MeterRegistry>
       meterRegistryProvider;
   private final ConcurrentMap<String, Counter> counterByKey = new ConcurrentHashMap<>();
+
+  @Value("${executespec.async.core-pool-size:4}")
+  private int corePoolSize;
+
+  @Value("${executespec.async.max-pool-size:16}")
+  private int maxPoolSize;
+
+  @Value("${executespec.async.queue-capacity:500}")
+  private int queueCapacity;
+
+  /**
+   * RR-109 — bounded executor for every UNQUALIFIED {@code @Async} method (mail sends, referral /
+   * invite / run-completion notifications, SSE fan-out). Without this override Spring falls back to
+   * {@code SimpleAsyncTaskExecutor}, which spawns a brand-new unbounded thread per task, so a
+   * notification/invite burst could create unbounded concurrent tasks/connections and exhaust
+   * threads, memory or provider limits. The pool is capped and its queue is bounded; {@link
+   * ThreadPoolExecutor.CallerRunsPolicy} applies backpressure by running the overflow task on the
+   * caller thread rather than dropping it or allocating without limit.
+   */
+  @Override
+  public Executor getAsyncExecutor() {
+    ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+    executor.setCorePoolSize(corePoolSize);
+    executor.setMaxPoolSize(maxPoolSize);
+    executor.setQueueCapacity(queueCapacity);
+    executor.setThreadNamePrefix("es-async-");
+    executor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
+    executor.setWaitForTasksToCompleteOnShutdown(true);
+    executor.setAwaitTerminationSeconds(20);
+    executor.initialize();
+    return executor;
+  }
 
   @Override
   public AsyncUncaughtExceptionHandler getAsyncUncaughtExceptionHandler() {

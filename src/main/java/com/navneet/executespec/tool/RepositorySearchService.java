@@ -1,6 +1,8 @@
 package com.navneet.executespec.tool;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
@@ -9,6 +11,7 @@ import java.nio.file.SimpleFileVisitor;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -18,16 +21,19 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
+
+import com.navneet.executespec.testgen.BoundedProcess;
 
 import org.springframework.stereotype.Service;
 
 /**
  * Deterministic, workspace-confined repository search contract. This is the typed seam shared by
- * worker tools, project chat, local-hands clients, and future optional explorers (for example
- * FastContext). It deliberately uses a bounded Java implementation first; an rg/tree-sitter adapter
- * can implement the same request/result contract without changing callers.
+ * worker tools, project chat, local-hands clients, and future optional explorers. It deliberately
+ * uses a bounded Java implementation first; another adapter can implement the same request/result
+ * contract without changing callers.
  */
 @Service
 public class RepositorySearchService {
@@ -49,6 +55,20 @@ public class RepositorySearchService {
   private static final int MAX_HITS = 1000;
   private static final int MAX_PREVIEW = 240;
   private static final int HASH_BUFFER_BYTES = 64 * 1024;
+
+  /**
+   * RR-555 — an untrusted REGEX-mode pattern is compiled with the backtracking JDK engine and run
+   * over every indexed line. Bound the pattern length and skip pathologically long lines before the
+   * matcher touches them, so a catastrophic-backtracking expression cannot pin a CPU on a single
+   * attacker-controlled line. RR-554 — cap per-file bytes before decoding so one huge text-looking
+   * file cannot exhaust heap. These are conservative bounds, not a linear-time engine swap.
+   */
+  private static final int MAX_PATTERN_CHARS = 2_000;
+
+  private static final int MAX_MATCH_LINE_CHARS = 20_000;
+  private static final long MAX_DECODE_FILE_BYTES = 8L * 1024 * 1024;
+  static final int MAX_CACHED_SNAPSHOTS_PER_WORKSPACE = 512;
+  static final long MAX_CACHED_CHARACTERS_PER_WORKSPACE = 8L * 1024 * 1024;
 
   /** Small, process-local index. It is deliberately bounded because workspaces are untrusted. */
   private static final int MAX_INDEXED_WORKSPACES = 4;
@@ -96,7 +116,9 @@ public class RepositorySearchService {
                       request.query(), line, request.caseSensitive(), file.getFileName().toString())
                   : null;
           if (request.mode() == SearchMode.SYMBOL && symbolMatch == null) continue;
-          if (request.mode() != SearchMode.SYMBOL && !pattern.matcher(line).find()) continue;
+          // RR-555 — never feed a pathologically long line to the backtracking matcher.
+          if (request.mode() != SearchMode.SYMBOL
+              && (line.length() > MAX_MATCH_LINE_CHARS || !pattern.matcher(line).find())) continue;
           Path relative = root.relativize(file);
           hits.add(
               new SearchHit(
@@ -152,10 +174,10 @@ public class RepositorySearchService {
       throw new IllegalArgumentException("workspace and non-blank symbol are required");
     }
     SearchResult all = searchAllSymbolHits(workspace, request);
-    Map<String, String> declarations = new HashMap<>();
+    Set<String> declarations = new java.util.LinkedHashSet<>();
     for (SearchHit hit : all.hits()) {
       if (hit.matchType() == MatchType.SYMBOL_DEFINITION) {
-        declarations.putIfAbsent(hit.path(), hit.path());
+        declarations.add(hit.path());
       }
     }
     List<RelationshipEdge> edges = new ArrayList<>();
@@ -168,7 +190,11 @@ public class RepositorySearchService {
             default -> null;
           };
       if (type == null) continue;
-      String target = declarations.isEmpty() ? null : declarations.keySet().iterator().next();
+      // A lexical token can legitimately have many declarations (for example Django's backend-
+      // specific DatabaseWrapper classes). Picking the first path fabricates a confidently wrong
+      // graph. Link only the unambiguous case; language-aware resolution owns multi-definition
+      // disambiguation.
+      String target = declarations.size() == 1 ? declarations.iterator().next() : null;
       edges.add(
           new RelationshipEdge(
               hit.path(),
@@ -232,8 +258,8 @@ public class RepositorySearchService {
   /**
    * Returns a stable inventory while avoiding a full directory walk for every tool turn. The
    * metadata check keeps the cache safe for live worktrees: a changed file is re-read before it can
-   * contribute a hit. This is the local-index seam that an optional FastContext/tree-sitter backend
-   * can replace later without changing the search contract or callers.
+   * contribute a hit. This is the local-index seam that an optional external backend can replace
+   * later without changing the search contract or callers.
    */
   private List<Path> indexedFiles(Path root, Path searchRoot) throws IOException {
     // Inventory discovery is intentionally outside the cache lock. A git ls-files/tree walk can
@@ -253,7 +279,12 @@ public class RepositorySearchService {
         cached = new CachedWorkspace(root, currentFiles);
         cached.lastInventoryRequest = requestSequence;
         workspaceIndex.put(root, cached);
-      } else if (requestSequence >= cached.lastInventoryRequest) {
+      } else if (requestSequence > cached.lastInventoryRequest) {
+        // RR-556 — publish inventory only when this walk is STRICTLY newer than the one currently
+        // stored, and advance the stored sequence in the SAME critical section. The previous code
+        // never assigned lastInventoryRequest after cache creation, so an older (slower) walk that
+        // finished after a newer one still satisfied `>=` and regressed cached.files to a stale
+        // view (omitting new paths / reintroducing deleted ones).
         cached.files = List.copyOf(currentFiles);
         cached.lastInventoryRequest = requestSequence;
       }
@@ -276,7 +307,8 @@ public class RepositorySearchService {
     private final Path root;
     private List<Path> files;
     private long lastInventoryRequest;
-    private final Map<Path, FileSnapshot> snapshots = new LinkedHashMap<>();
+    private final Map<Path, FileSnapshot> snapshots = new LinkedHashMap<>(64, 0.75f, true);
+    private long cachedCharacters;
 
     private CachedWorkspace(Path root, List<Path> files) {
       this.root = root;
@@ -289,30 +321,95 @@ public class RepositorySearchService {
         // targets at the read boundary so a newly introduced link cannot make a search disclose
         // content outside the workspace that was originally canonicalized.
         if (Files.isSymbolicLink(file) && !file.toRealPath().startsWith(root)) {
-          snapshots.remove(file);
+          removeSnapshot(file);
           return null;
         }
         // Metadata is only a useful fast path when the filesystem guarantees a reliable
         // nanosecond mtime. Network mounts and editor save/replace cycles can preserve both
         // size and mtime, so compare a streaming content digest before reusing the decoded lines.
+        // RR-554 — bound per-file bytes before decoding so a single huge (or
+        // binary-but-text-looking)
+        // file cannot allocate beyond the intended cache bound and monopolize the search.
+        if (Files.size(file) > MAX_DECODE_FILE_BYTES) {
+          removeSnapshot(file);
+          return null;
+        }
         String contentHash = knownContentHash == null ? contentHash(file) : knownContentHash;
         FileSnapshot previous = snapshots.get(file);
         if (previous != null && previous.contentHash.equals(contentHash)) {
           return previous.lines;
         }
         List<String> current = Files.readAllLines(file);
-        snapshots.put(file, new FileSnapshot(contentHash, current));
+        putSnapshot(file, new FileSnapshot(contentHash, current, characterCount(current)));
         return current;
       } catch (IOException | OutOfMemoryError e) {
-        snapshots.remove(file);
+        removeSnapshot(file);
         return null;
       }
     }
+
+    private void putSnapshot(Path file, FileSnapshot snapshot) {
+      FileSnapshot previous = snapshots.put(file, snapshot);
+      if (previous != null) cachedCharacters -= previous.characterCount;
+      cachedCharacters += snapshot.characterCount;
+      var iterator = snapshots.entrySet().iterator();
+      while ((snapshots.size() > MAX_CACHED_SNAPSHOTS_PER_WORKSPACE
+              || cachedCharacters > MAX_CACHED_CHARACTERS_PER_WORKSPACE)
+          && iterator.hasNext()) {
+        FileSnapshot evicted = iterator.next().getValue();
+        cachedCharacters -= evicted.characterCount;
+        iterator.remove();
+      }
+    }
+
+    private void removeSnapshot(Path file) {
+      FileSnapshot removed = snapshots.remove(file);
+      if (removed != null) cachedCharacters -= removed.characterCount;
+    }
+
+    private static long characterCount(List<String> lines) {
+      long total = 0;
+      for (String line : lines) {
+        long characters = line.length() + 1L;
+        if (total > Long.MAX_VALUE - characters) return Long.MAX_VALUE;
+        total += characters;
+      }
+      return total;
+    }
+
+    private synchronized int snapshotCount() {
+      return snapshots.size();
+    }
+
+    private synchronized long characterCount() {
+      return cachedCharacters;
+    }
   }
 
-  private record FileSnapshot(String contentHash, List<String> lines) {}
+  private record FileSnapshot(String contentHash, List<String> lines, long characterCount) {}
+
+  int cachedSnapshotCount(Path workspace) throws IOException {
+    Path root = workspace.toRealPath();
+    synchronized (workspaceIndex) {
+      CachedWorkspace cached = workspaceIndex.get(root);
+      return cached == null ? 0 : cached.snapshotCount();
+    }
+  }
+
+  long cachedCharacterCount(Path workspace) throws IOException {
+    Path root = workspace.toRealPath();
+    synchronized (workspaceIndex) {
+      CachedWorkspace cached = workspaceIndex.get(root);
+      return cached == null ? 0 : cached.characterCount();
+    }
+  }
 
   private static Pattern compile(SearchRequest request) {
+    // RR-555 — reject an over-long expression before it reaches the backtracking compiler.
+    if (request.mode() == SearchMode.REGEX && request.query().length() > MAX_PATTERN_CHARS) {
+      throw new IllegalArgumentException(
+          "search pattern exceeds " + MAX_PATTERN_CHARS + " characters");
+    }
     if (request.mode() == SearchMode.SYMBOL) {
       return Pattern.compile(
           "(?<![A-Za-z0-9_$])" + Pattern.quote(request.query()) + "(?![A-Za-z0-9_$])",
@@ -354,6 +451,12 @@ public class RepositorySearchService {
    * files through {@code --others}. A plain directory (tests, unpacked uploads, or a local-hands
    * workspace without Git metadata) uses the bounded tree-walk fallback above.
    */
+  /** Bound the git NUL-separated path listing so a huge repository cannot exhaust the heap. */
+  private static final int MAX_GIT_INVENTORY_BYTES = 32 * 1024 * 1024; // 32 MiB
+
+  /** Wall-clock ceiling for the inventory subprocess so a hung git cannot block a search thread. */
+  private static final Duration GIT_INVENTORY_TIMEOUT = Duration.ofSeconds(30);
+
   private static List<Path> gitInventory(Path root, Path searchRoot) {
     Process process = null;
     try {
@@ -369,9 +472,37 @@ public class RepositorySearchService {
                   "-z")
               .redirectErrorStream(false)
               .start();
-      byte[] output = process.getInputStream().readAllBytes();
-      if (process.waitFor() != 0) return null;
-      String listing = new String(output, StandardCharsets.UTF_8);
+      // RR-554: the NUL-separated (`-z`) listing has no newlines, so the line-oriented
+      // BoundedProcess would still allocate the whole blob before its char cap. Drain stdout into a
+      // byte-bounded buffer and stderr into a discard drain, both on separate threads, with the
+      // deadline started BEFORE the reads — the old shape read stdout to EOF then called an untimed
+      // waitFor(), so a hung or enormous ls-files pinned the search thread and grew the heap
+      // without
+      // limit. Destroy the whole tree on expiry.
+      ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+      Process proc = process;
+      Thread outDrain =
+          Thread.ofVirtual()
+              .name("repo-inventory-out")
+              .start(() -> drainBounded(proc.getInputStream(), buffer, MAX_GIT_INVENTORY_BYTES));
+      Thread errDrain =
+          Thread.ofVirtual()
+              .name("repo-inventory-err")
+              .start(() -> drainDiscard(proc.getErrorStream()));
+
+      boolean finished = process.waitFor(GIT_INVENTORY_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
+      if (!finished) {
+        process.descendants().forEach(ProcessHandle::destroyForcibly);
+        process.destroyForcibly();
+        process.waitFor(5, TimeUnit.SECONDS);
+        joinDrainQuietly(outDrain);
+        joinDrainQuietly(errDrain);
+        return null;
+      }
+      joinDrainQuietly(outDrain);
+      joinDrainQuietly(errDrain);
+      if (process.exitValue() != 0) return null;
+      String listing = buffer.toString(StandardCharsets.UTF_8);
       List<Path> files = new ArrayList<>();
       for (String relativeName : listing.split("\\u0000")) {
         if (relativeName.isBlank()) continue;
@@ -389,6 +520,44 @@ public class RepositorySearchService {
     } catch (Exception ignored) {
       if (process != null) process.destroyForcibly();
       return null;
+    }
+  }
+
+  /**
+   * Drain a stream into a byte-bounded buffer, continuing to read past the cap so the pipe frees.
+   */
+  private static void drainBounded(InputStream in, ByteArrayOutputStream sink, int maxBytes) {
+    try {
+      byte[] buf = new byte[8192];
+      int n;
+      while ((n = in.read(buf)) != -1) {
+        int room = maxBytes - sink.size();
+        if (room > 0) {
+          sink.write(buf, 0, Math.min(n, room));
+        }
+      }
+    } catch (Exception ignored) {
+      // Expected when the tree is destroyed mid-read; whatever was captured stays valid.
+    }
+  }
+
+  /** Read a stream to EOF and discard — keeps a secondary pipe from blocking the child. */
+  private static void drainDiscard(InputStream in) {
+    try {
+      byte[] buf = new byte[8192];
+      while (in.read(buf) != -1) {
+        // discard
+      }
+    } catch (Exception ignored) {
+      // best-effort
+    }
+  }
+
+  private static void joinDrainQuietly(Thread drain) {
+    try {
+      drain.join(Duration.ofSeconds(5));
+    } catch (InterruptedException interrupted) {
+      Thread.currentThread().interrupt();
     }
   }
 
@@ -433,13 +602,17 @@ public class RepositorySearchService {
 
   private static String gitSha(Path root) {
     try {
-      Process process =
+      // RR-554: bound the subprocess. rev-parse output is one short line, so BoundedProcess (which
+      // drains on a separate thread with a reachable deadline and a char cap) is the right reuse —
+      // the old shape read stdout to EOF then called an untimed waitFor().
+      ProcessBuilder pb =
           new ProcessBuilder("git", "-C", root.toString(), "rev-parse", "HEAD")
-              .redirectErrorStream(true)
-              .start();
-      String value =
-          new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8).trim();
-      return process.waitFor() == 0 && !value.isBlank() ? value : "WORKTREE_ONLY";
+              .redirectErrorStream(true);
+      BoundedProcess.Outcome outcome = BoundedProcess.run(pb, Duration.ofSeconds(10));
+      String value = outcome.output().strip();
+      return outcome.finished() && outcome.exitCode() == 0 && !value.isBlank()
+          ? value
+          : "WORKTREE_ONLY";
     } catch (Exception ignored) {
       return "WORKTREE_ONLY";
     }

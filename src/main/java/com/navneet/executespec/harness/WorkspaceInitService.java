@@ -2,12 +2,12 @@ package com.navneet.executespec.harness;
 
 import java.io.IOException;
 import java.nio.file.*;
-import java.nio.file.attribute.BasicFileAttributes;
 import java.util.List;
 import java.util.UUID;
 
 import com.navneet.executespec.config.AgentProperties;
 import com.navneet.executespec.deployment.WorkspaceRestoreService;
+import com.navneet.executespec.security.SafeWorkspacePath;
 
 import org.springframework.stereotype.Service;
 
@@ -31,6 +31,57 @@ public class WorkspaceInitService {
   private final WorkspaceRestoreService restoreService;
   private final com.navneet.executespec.state.repository.RunRepoSnapshotRepository snapshotRepo;
   private final VendoredPathGuard vendoredPathGuard;
+
+  /**
+   * Exclusions written into every greenfield run workspace. {@code .agent-context/} is the internal
+   * evidence directory (full tool logs, run journal, file locks) and must never reach a customer
+   * pull request (RR-1546).
+   */
+  static final String AGENT_WORKSPACE_GITIGNORE =
+      "target/\n"
+          + "build/\n"
+          + "node_modules/\n"
+          + ".gradle/\n"
+          + "__pycache__/\n"
+          + "*.class\n"
+          + "*.pyc\n"
+          + "*.log\n"
+          + ".batch_output/\n"
+          + ".agent-context/\n";
+
+  /** Exclusion appended to a CLONED repository's {@code .git/info/exclude} (RR-1546). */
+  static final String AGENT_CONTEXT_EXCLUDE_ENTRY = ".agent-context/";
+
+  /**
+   * Appends {@code .agent-context/} to a cloned repository's {@code .git/info/exclude}.
+   *
+   * <p>Brownfield clones use the CUSTOMER's {@code .gitignore}, which has no reason to mention an
+   * ExecuteSpec-internal directory, and mutating that tracked file would show up as a spurious diff
+   * in the pull request. {@code .git/info/exclude} is per-clone, untracked, and never pushed — the
+   * correct place for a host-side exclusion. Best-effort: a failure here degrades to the previous
+   * behaviour and must not fail the clone.
+   */
+  void excludeAgentContextInClone(Path repoRoot) {
+    try {
+      Path infoDir = repoRoot.resolve(".git").resolve("info");
+      if (!Files.isDirectory(repoRoot.resolve(".git"))) return;
+      Files.createDirectories(infoDir);
+      Path exclude = infoDir.resolve("exclude");
+      String existing = Files.exists(exclude) ? Files.readString(exclude) : "";
+      if (existing.lines().anyMatch(l -> l.strip().equals(AGENT_CONTEXT_EXCLUDE_ENTRY))) return;
+      String prefix = existing.isEmpty() || existing.endsWith("\n") ? "" : "\n";
+      Files.writeString(
+          exclude,
+          existing
+              + prefix
+              + "# ExecuteSpec internal execution evidence — never publish (RR-1546)\n"
+              + AGENT_CONTEXT_EXCLUDE_ENTRY
+              + "\n");
+    } catch (IOException e) {
+      log.warn(
+          "Could not add .agent-context exclusion to clone at {}: {}", repoRoot, e.getMessage());
+    }
+  }
 
   /**
    * Creates and initialises a fresh, isolated workspace for {@code runId}.
@@ -65,18 +116,14 @@ public class WorkspaceInitService {
       runGit(workspace, "git", "config", "user.email", "agent@executespec.local");
       runGit(workspace, "git", "config", "user.name", "ExecuteSpec Agent");
 
-      // Standard build-artifact exclusions
-      Files.writeString(
-          workspace.resolve(".gitignore"),
-          "target/\n"
-              + "build/\n"
-              + "node_modules/\n"
-              + ".gradle/\n"
-              + "__pycache__/\n"
-              + "*.class\n"
-              + "*.pyc\n"
-              + "*.log\n"
-              + ".batch_output/\n");
+      // Standard build-artifact exclusions.
+      //
+      // `.agent-context/` (RR-1546) holds INTERNAL execution evidence: full un-budgeted shell /
+      // build / test output spilled by ToolOutput.persistFull, the rolling run journal, and file
+      // locks. GitCommitTool and GitTool stage with `git add -A`, so without this entry every one
+      // of those files was committed and pushed into the customer's pull request — the class
+      // javadoc's claim that it "is not pushed on product runs" had nothing enforcing it.
+      Files.writeString(workspace.resolve(".gitignore"), AGENT_WORKSPACE_GITIGNORE);
 
       // Every worker MUST update README.md (hard requirement in worker.txt step 7).
       // Parallel workers all modify README.md independently from the same base, causing
@@ -106,8 +153,9 @@ public class WorkspaceInitService {
    * Clones an existing GitHub repository into the run workspace. Used when {@code
    * repoMode=EXISTING} so the workspace starts from real code.
    *
-   * <p>The PAT is injected into the HTTPS URL as {@code oauth2:{pat}@} so no credential helper
-   * configuration is required.
+   * <p>The PAT authenticates via {@link com.navneet.executespec.repo.GitProcessAuth} — an ephemeral
+   * env-backed credential helper — so it never appears in argv or the persisted origin URL
+   * (credential gate 2026-07-17).
    *
    * <p>Idempotent: no-ops if {@code .git/} already exists in the workspace.
    *
@@ -116,6 +164,12 @@ public class WorkspaceInitService {
    * @param pat personal access token (may be null for public repos)
    */
   public void cloneFromRepo(String runId, String repoUrl, String pat) throws Exception {
+    cloneFromRepo(runId, repoUrl, null, pat);
+  }
+
+  /** Provider-neutral clone overload (e.g. Bitbucket app-password username + secret). */
+  public void cloneFromRepo(String runId, String repoUrl, String username, String secret)
+      throws Exception {
     Path workspace = runWorkspacePath(runId);
     if (Files.isDirectory(workspace.resolve(".git"))) {
       log.debug("Workspace for run {} already cloned: {}", runId, workspace);
@@ -123,15 +177,11 @@ public class WorkspaceInitService {
     }
     Files.createDirectories(workspace.getParent());
 
-    // Inject PAT into HTTPS URL for authentication
-    String authUrl =
-        (pat != null && !pat.isBlank())
-            ? repoUrl.replace("https://", "https://oauth2:" + pat + "@")
-            : repoUrl;
-
     log.info("Cloning {} into workspace for run {}", repoUrl, runId);
-    // git clone <authUrl> <workspace-path>  — creates the directory
-    runGitStrict(workspace.getParent(), "git", "clone", authUrl, workspace.toString());
+    // Credential-gate 2026-07-17: the PAT rides the child environment via GitProcessAuth — never
+    // argv, never the persisted origin URL (the workspace .git/config stays token-free).
+    runGitStrictAuthWithUsername(
+        workspace.getParent(), username, secret, "clone", repoUrl, workspace.toString());
 
     // Override commit identity for agent commits
     runGit(workspace, "git", "config", "user.email", "agent@executespec.local");
@@ -140,6 +190,9 @@ public class WorkspaceInitService {
     // path lands the clone at the workspace root rather than a repos/<name>/ subdir, but the
     // class of bug is identical (committed node_modules/ etc.).
     vendoredPathGuard.augmentGitignore(workspace);
+    // RR-1546 — keep ExecuteSpec's internal .agent-context/ evidence out of the customer's tree
+    // without mutating their tracked .gitignore.
+    excludeAgentContextInClone(workspace);
     log.info("Cloned workspace ready for run {}", runId);
   }
 
@@ -197,45 +250,38 @@ public class WorkspaceInitService {
     Process p = pb.start();
     String trackedFilesOutput = new String(p.getInputStream().readAllBytes());
     int exit = p.waitFor();
-    if (exit != 0) {
-      log.warn(
-          "git ls-files failed for source run {} (exit {}); copying all files instead",
+    // RR-153 (P1 data integrity) — whether tracked-file enumeration actually SUCCEEDED gates the
+    // copy. The old code fell back to copying the ENTIRE source directory (minus .git/) when
+    // ls-files failed or returned empty, so a corrupted/non-repository source silently carried
+    // untracked spill files, secrets, build output and tool artifacts into the new run and onward
+    // to
+    // publication. Fail closed: on an enumeration failure copy NOTHING (start from a clean,
+    // git-init'd workspace) rather than copying unfiltered content.
+    boolean enumerationOk = (exit == 0);
+    if (!enumerationOk) {
+      log.error(
+          "git ls-files failed for source run {} (exit {}); starting the target from an EMPTY"
+              + " workspace rather than copying unfiltered content",
           sourceRunId,
           exit);
     }
 
-    List<String> trackedFiles = trackedFilesOutput.lines().filter(l -> !l.isBlank()).toList();
+    List<String> trackedFiles =
+        enumerationOk ? trackedFilesOutput.lines().filter(l -> !l.isBlank()).toList() : List.of();
 
     Files.createDirectories(target);
     runGit(target, "git", "init", "-b", "main");
     runGit(target, "git", "config", "user.email", "agent@executespec.local");
     runGit(target, "git", "config", "user.name", "ExecuteSpec Agent");
 
-    // 3. Copy each tracked file, preserving directory structure
+    // 3. Copy each tracked file, preserving directory structure. RR-153 — there is deliberately NO
+    // "copy everything" fallback: an empty tracked set (a genuinely empty source, or a failed
+    // enumeration handled above) yields an empty initialised workspace, never an unfiltered copy.
     if (trackedFiles.isEmpty()) {
-      // Fallback: copy everything that is not under .git/
       log.info(
-          "No tracked files found in source run {} — performing full directory copy", sourceRunId);
-      Files.walkFileTree(
-          source,
-          new SimpleFileVisitor<>() {
-            @Override
-            public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) {
-              return dir.equals(source.resolve(".git"))
-                  ? FileVisitResult.SKIP_SUBTREE
-                  : FileVisitResult.CONTINUE;
-            }
-
-            @Override
-            public FileVisitResult visitFile(Path file, BasicFileAttributes attrs)
-                throws IOException {
-              Path rel = source.relativize(file);
-              Path dst = target.resolve(rel);
-              Files.createDirectories(dst.getParent());
-              Files.copy(file, dst, StandardCopyOption.REPLACE_EXISTING);
-              return FileVisitResult.CONTINUE;
-            }
-          });
+          "No tracked files copied from source run {} — target starts from an empty initialised"
+              + " workspace",
+          sourceRunId);
     } else {
       for (String relPath : trackedFiles) {
         Path srcFile = source.resolve(relPath);
@@ -280,54 +326,118 @@ public class WorkspaceInitService {
   public void cloneMultipleRepos(String runId, List<RepoToClone> repos, String pat)
       throws Exception {
     if (repos == null || repos.isEmpty()) return;
+    long distinctTargets =
+        repos.stream().map(r -> repoDirectoryName(r.fullName())).distinct().count();
+    if (distinctTargets != repos.size()) {
+      throw new IllegalArgumentException(
+          "selected repositories contain colliding checkout directory names");
+    }
     Path workspace = runWorkspacePath(runId);
     Path reposRoot = workspace.resolve("repos");
     Files.createDirectories(reposRoot);
 
     for (RepoToClone r : repos) {
-      String dirName =
-          r.fullName().contains("/")
-              ? r.fullName().substring(r.fullName().indexOf('/') + 1)
-              : r.fullName();
+      String dirName = repoDirectoryName(r.fullName());
       Path target = reposRoot.resolve(dirName);
       if (Files.isDirectory(target.resolve(".git"))) {
+        // A crash may have left a complete clone before its baseline row was persisted. Reconcile
+        // the immutable baseline before treating the clone as admitted.
+        persistCloneSnapshot(runId, r, target);
         log.debug("Repo {} already cloned for run {}", r.fullName(), runId);
         continue;
       }
       String httpsUrl = r.cloneUrl() != null ? r.cloneUrl() : "https://github.com/" + r.fullName();
-      String authUrl =
-          (pat != null && !pat.isBlank())
-              ? httpsUrl.replace("https://", "https://oauth2:" + pat + "@")
-              : httpsUrl;
       String cloneBranch = (r.branch() == null || r.branch().isBlank()) ? null : r.branch();
       if (cloneBranch != null) {
         log.info(
             "Cloning {} (branch={}) into {} for run {}", r.fullName(), cloneBranch, target, runId);
-        runGitStrict(reposRoot, "git", "clone", "-b", cloneBranch, authUrl, target.toString());
+        runGitStrictAuth(reposRoot, pat, "clone", "-b", cloneBranch, httpsUrl, target.toString());
       } else {
         log.info("Cloning {} into {} for run {}", r.fullName(), target, runId);
-        runGitStrict(reposRoot, "git", "clone", authUrl, target.toString());
+        runGitStrictAuth(reposRoot, pat, "clone", httpsUrl, target.toString());
       }
       persistCloneSnapshot(runId, r, target);
       // 2026-05-02 — augment .gitignore with vendored-path patterns BEFORE the worker starts
       // running. Closes the run-b171fa52 class of bug where the worker added Node code to a
       // Python repo whose .gitignore was Python-only and committed 9605 node_modules/ files.
       vendoredPathGuard.augmentGitignore(target);
+      excludeAgentContextInClone(target); // RR-1546
     }
   }
 
   /**
+   * Deterministic post-clone admission for brownfield runs. The outer seed repository is never
+   * considered evidence; every requested repository must have Git metadata and at least one real
+   * non-hidden file. This check runs before classifier/planner dispatch.
+   */
+  public WorkspaceAdmission verifyMultipleRepos(String runId, List<RepoToClone> repos) {
+    if (repos == null || repos.isEmpty()) {
+      return new WorkspaceAdmission(false, 0, "no repositories were selected");
+    }
+    Path reposRoot = runWorkspacePath(runId).resolve("repos");
+    long totalFiles = 0;
+    for (RepoToClone repo : repos) {
+      String dirName = repoDirectoryName(repo.fullName());
+      Path target = reposRoot.resolve(dirName);
+      if (!Files.isDirectory(target.resolve(".git"))) {
+        return new WorkspaceAdmission(false, totalFiles, "clone missing for " + repo.fullName());
+      }
+      try (var files = Files.walk(target)) {
+        long repoFiles =
+            files
+                .filter(Files::isRegularFile)
+                .filter(path -> !target.relativize(path).startsWith(".git"))
+                .filter(
+                    path -> {
+                      Path relative = target.relativize(path);
+                      for (Path segment : relative) {
+                        if (segment.toString().startsWith(".")) return false;
+                      }
+                      return true;
+                    })
+                .count();
+        if (repoFiles == 0) {
+          return new WorkspaceAdmission(
+              false, totalFiles, "repository has no source files: " + repo.fullName());
+        }
+        totalFiles += repoFiles;
+      } catch (IOException e) {
+        return new WorkspaceAdmission(
+            false, totalFiles, "could not inventory " + repo.fullName() + ": " + e.getMessage());
+      }
+    }
+    return new WorkspaceAdmission(true, totalFiles, null);
+  }
+
+  public record WorkspaceAdmission(boolean admitted, long fileCount, String reason) {}
+
+  static String repoDirectoryName(String fullName) {
+    if (fullName == null || fullName.isBlank()) {
+      throw new IllegalArgumentException("repository full name is required");
+    }
+    int slash = fullName.lastIndexOf('/');
+    String name = slash >= 0 ? fullName.substring(slash + 1) : fullName;
+    // RR-152 — the checkout directory is a single contained segment beneath repos/. A repository
+    // full name ending in a reserved/traversal segment (e.g. "owner/..") would otherwise resolve
+    // the clone target outside the run workspace. Reject it before it becomes a directory name.
+    SafeWorkspacePath.requireSafeRelativePosixPath(name);
+    return name;
+  }
+
+  /**
    * Captures {@code git rev-parse HEAD} in the newly cloned repo and writes a {@link
-   * com.navneet.executespec.state.entity.RunRepoSnapshot} row. Non-fatal on failure — snapshot is
-   * only used by the reset-to-original flow; a missing row means that flow won't be available for
-   * this repo but the run proceeds.
+   * com.navneet.executespec.state.entity.RunRepoSnapshot} row. Baseline persistence is part of
+   * brownfield admission: without the exact branch/SHA the run cannot later prove what changed.
    */
   private void persistCloneSnapshot(String runId, RepoToClone r, Path target) {
     try {
+      boolean alreadyPersisted =
+          snapshotRepo.findByRunId(runId).stream()
+              .anyMatch(snapshot -> r.fullName().equals(snapshot.getRepoFullName()));
+      if (alreadyPersisted) return;
       String sha = captureHeadSha(target);
       if (sha == null || sha.isBlank()) {
-        log.warn("Snapshot skipped for run {} repo {} — empty SHA", runId, r.fullName());
-        return;
+        throw new IllegalStateException("could not capture baseline SHA for " + r.fullName());
       }
       String branch = r.branch() == null || r.branch().isBlank() ? "main" : r.branch();
       com.navneet.executespec.state.entity.RunRepoSnapshot snap =
@@ -341,8 +451,45 @@ public class WorkspaceInitService {
       snapshotRepo.save(snap);
       log.debug("Snapshot saved run={} repo={} branch={} sha={}", runId, r.fullName(), branch, sha);
     } catch (Exception e) {
+      throw new IllegalStateException(
+          "could not persist repository baseline for " + r.fullName(), e);
+    }
+  }
+
+  /**
+   * RR-641 — pin an already-cloned workspace to an exact commit and prove it. {@link
+   * #cloneFromRepo} lands the repository's current default HEAD, so a semantic index that labels
+   * its chunks with a previously recorded {@code lastSyncedSha} would silently publish newer code
+   * under the older SHA once the branch advances between metadata sync and clone. Checking out the
+   * exact commit (detached) and verifying {@code HEAD} byte-for-byte closes that gap.
+   *
+   * <p>A full clone contains all branch history, so an ancestor commit checks out without a network
+   * fetch. A commit that is no longer reachable (force-push / rebase) fails to check out, the HEAD
+   * verification fails, and this returns {@code false} so the caller can stale/fail the index
+   * rather than index a tree that does not match the recorded revision.
+   *
+   * @return {@code true} only when the resulting {@code HEAD} equals {@code commitSha}
+   */
+  public boolean checkoutExactCommit(String runId, String commitSha) {
+    if (commitSha == null || commitSha.isBlank()) return false;
+    Path workspace = runWorkspacePath(runId);
+    try {
+      runGit(workspace, "git", "checkout", "--detach", commitSha);
+      String head = captureHeadSha(workspace);
+      boolean matched = head != null && commitSha.equalsIgnoreCase(head.trim());
+      if (!matched) {
+        log.warn(
+            "RR-641 — workspace {} could not be pinned to {} (HEAD={})", runId, commitSha, head);
+      }
+      return matched;
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+      log.warn("RR-641 — checkoutExactCommit interrupted for {} @ {}", runId, commitSha);
+      return false;
+    } catch (IOException e) {
       log.warn(
-          "persistCloneSnapshot failed run={} repo={}: {}", runId, r.fullName(), e.getMessage());
+          "RR-641 — checkoutExactCommit failed for {} @ {}: {}", runId, commitSha, e.getMessage());
+      return false;
     }
   }
 
@@ -378,6 +525,13 @@ public class WorkspaceInitService {
 
   /** Returns the absolute, normalised path to the per-run workspace directory. */
   public Path runWorkspacePath(String runId) {
+    // RR-152 (P1 filesystem integrity) — the run id is the ONLY user/caller-derived segment
+    // appended
+    // to the configured workspace root. Enforce the containment invariant at the edge (single safe
+    // relative POSIX segment: no traversal, no dot/empty/absolute/encoded separator) so a
+    // non-canonical or legacy run identity cannot turn ordinary read/write/clone into traversal
+    // outside the workspace. Normal UUID run ids pass unchanged.
+    SafeWorkspacePath.requireSafeRelativePosixPath(runId);
     return Path.of(props.getWorkspace(), runId).toAbsolutePath().normalize();
   }
 
@@ -403,6 +557,33 @@ public class WorkspaceInitService {
       // Mask any embedded PAT in the logged command before throwing
       String cmdStr = String.join(" ", cmd).replaceAll("oauth2:[^@]+@", "oauth2:***@");
       throw new RuntimeException("git command [" + cmdStr + "] exited with " + exit + ": " + out);
+    }
+  }
+
+  /**
+   * Strict git execution with environment-carried authentication (credential-gate 2026-07-17). The
+   * token never enters argv or the persisted remote URL; see {@link
+   * com.navneet.executespec.repo.GitProcessAuth}.
+   */
+  private void runGitStrictAuth(Path dir, String pat, String... gitArgs)
+      throws IOException, InterruptedException {
+    runGitStrictAuthWithUsername(dir, null, pat, gitArgs);
+  }
+
+  private void runGitStrictAuthWithUsername(
+      Path dir, String username, String secret, String... gitArgs)
+      throws IOException, InterruptedException {
+    ProcessBuilder pb =
+        com.navneet.executespec.repo.GitProcessAuth.git(
+            secret, username, java.util.List.of(gitArgs));
+    pb.directory(dir.toFile());
+    pb.redirectErrorStream(true);
+    Process p = pb.start();
+    String out = new String(p.getInputStream().readAllBytes());
+    int exit = p.waitFor();
+    if (exit != 0) {
+      throw new RuntimeException(
+          "git command [git " + String.join(" ", gitArgs) + "] exited with " + exit + ": " + out);
     }
   }
 }

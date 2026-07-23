@@ -2,17 +2,21 @@ package com.navneet.executespec.engine;
 
 import java.io.IOException;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.List;
-import java.util.concurrent.TimeUnit;
 
 import jakarta.annotation.PostConstruct;
 
 import com.navneet.executespec.agent.PromptAssembler;
+import com.navneet.executespec.agent.PromptTrustBoundary;
 import com.navneet.executespec.config.featureflag.FeatureFlagService;
 import com.navneet.executespec.cost.RunCostTracker;
+import com.navneet.executespec.executioncontext.LlmExecutionPolicyFactory;
 import com.navneet.executespec.harness.SequentialExecutor;
+import com.navneet.executespec.state.BenchmarkSourceType;
 import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
+import com.navneet.executespec.testgen.BoundedProcess;
 import com.navneet.executespec.tool.ExecutionContext;
 
 import org.springframework.stereotype.Service;
@@ -44,11 +48,23 @@ public class CodeGenEngineImpl implements CodeGenEngine {
   private static final int MAX_TOKENS_PER_CALL = 16_000;
   private static final int DEFAULT_MAX_ITERATIONS = 180;
 
+  /**
+   * RR-1566 — no-progress (no writeFile/editFile) iteration thresholds for a CUSTOMER PATCH run.
+   * The v1 stagnation watchdog is disabled for benchmark runs (their repetition trigger is
+   * progress-v2's job), but a customer autofix worker got NO stagnation force at all and could loop
+   * the full iteration cap with zero writes. These re-enable a tier-appropriate warn+force for
+   * non-benchmark PATCH sources without depending on the default-OFF progress-v2 flag.
+   */
+  private static final int PATCH_STAGNATION_WARN_AFTER = 12;
+
+  private static final int PATCH_STAGNATION_FORCE_AFTER = 20;
+
   private final WorkerAgent workerAgent;
   private final PipelineRunRepository runRepo;
   private final FeatureFlagService featureFlagService;
   private final PromptAssembler promptAssembler;
   private final RunCostTracker costTracker;
+  private final LlmExecutionPolicyFactory executionPolicyFactory;
 
   /** task 11 — deterministic repo-orientation warm start (nullable in tests ⇒ inert). */
   private final RepoOrientationService repoOrientationService;
@@ -61,7 +77,12 @@ public class CodeGenEngineImpl implements CodeGenEngine {
     ExecutionContext ctx;
     try {
       String taskId = request.taskId() != null ? request.taskId() : "__root__";
-      ctx = new ExecutionContext(request.runId(), taskId, workspace.toRealPath());
+      ctx =
+          new ExecutionContext(
+              request.runId(),
+              taskId,
+              workspace.toRealPath(),
+              executionPolicyFactory.forRun(request.runId()));
     } catch (IOException ioe) {
       log.error("engine: workspace realpath failed for run {}", request.runId(), ioe);
       return EngineResult.builder()
@@ -96,7 +117,14 @@ public class CodeGenEngineImpl implements CodeGenEngine {
         request.budget() != null && request.budget().iterCap() != null
             ? request.budget().iterCap()
             : iterCapFor(request.provider());
-    int stagnationDisabled = maxIterations;
+    // RR-1566 — a benchmark PATCH keeps the watchdog disabled (progress-v2 owns loop protection for
+    // held-out target tests); a CUSTOMER PATCH re-enables a bounded warn+force so a no-write worker
+    // stops well before the iteration cap.
+    boolean controlled = isControlledRun(request);
+    int stagnationWarn =
+        controlled ? maxIterations : Math.min(PATCH_STAGNATION_WARN_AFTER, maxIterations);
+    int stagnationForce =
+        controlled ? maxIterations : Math.min(PATCH_STAGNATION_FORCE_AFTER, maxIterations);
 
     return WorkerTaskRequest.builder()
         .provider(request.provider())
@@ -107,10 +135,19 @@ public class CodeGenEngineImpl implements CodeGenEngine {
         .maxIterations(maxIterations)
         .temperature(0.0)
         .maxTokensPerCall(MAX_TOKENS_PER_CALL)
-        .stagnationWarnAfter(stagnationDisabled)
-        .stagnationForceAfter(stagnationDisabled)
+        .stagnationWarnAfter(stagnationWarn)
+        .stagnationForceAfter(stagnationForce)
         .requireTestVerification(requireTestVerification(request))
         .wallClockSeconds(request.budget() == null ? null : request.budget().wallClockSeconds())
+        .absoluteDeadlineEpochMs(
+            request.budget() == null ? null : request.budget().absoluteDeadlineEpochMs())
+        .shutdownReserveMs(request.budget() == null ? null : request.budget().shutdownReserveMs())
+        // RR-1562 — propagate the per-solve dollar ceiling onto the worker request. It was declared
+        // and documented on EngineBudget but silently dropped here, so a benchmark/customer caller
+        // pinning `dollarCap` got NO enforcement and, if it did not also persist a run-row hard
+        // cap,
+        // ran with no dollar cap at all.
+        .dollarCap(request.budget() == null ? null : request.budget().dollarCap())
         .criticPass(featureFlagService.isEnabled("worker.critic-pass.enabled"))
         .verifyBeforeComplete(featureFlagService.isEnabled("worker.verify-before-complete.enabled"))
         // progress-v2 (V255, default OFF): novelty-based progress + repetition force + bounded
@@ -129,18 +166,35 @@ public class CodeGenEngineImpl implements CodeGenEngine {
    * warm-start block for existing-repo work. Fail-open — empty block appends nothing.
    */
   private String withOrientation(String taskSpec, ExecutionContext ctx) {
+    String taskEvidence = PromptTrustBoundary.wrap("PATCH_TASK", taskSpec);
     if (repoOrientationService == null
         || !featureFlagService.isEnabled("worker.localization.enabled")) {
-      return taskSpec;
+      return taskEvidence;
     }
     String orientation = repoOrientationService.orient(ctx.workspaceRoot(), taskSpec);
-    return orientation.isBlank() ? taskSpec : taskSpec + "\n\n" + orientation;
+    return orientation.isBlank()
+        ? taskEvidence
+        : taskEvidence + "\n\n" + PromptTrustBoundary.wrap("REPOSITORY_ORIENTATION", orientation);
+  }
+
+  /**
+   * RR-1566 — true when this run is an operator-controlled blind benchmark worker (SWE-bench /
+   * ProgramBench / Terminal-Bench). Same classifier {@link #requireTestVerification} uses, so the
+   * stagnation-watchdog and test-gate behaviours cannot drift.
+   */
+  private boolean isControlledRun(EngineRequest request) {
+    String src = runRepo.findById(request.runId()).map(PipelineRun::getSourceType).orElse("");
+    return BenchmarkSourceType.isControlledWorkerSource(src);
   }
 
   private boolean requireTestVerification(EngineRequest request) {
     if (request.verifyMode() == VerifyMode.NONE) return false;
     String src = runRepo.findById(request.runId()).map(PipelineRun::getSourceType).orElse("");
-    if (src != null && (src.startsWith("swebench") || src.startsWith("benchmark"))) {
+    // Shared classifier — same set LlmExecutionPolicyFactory.isControlledWorkerRun uses (RR-1590),
+    // so the test-gate-off and no-failover behaviours cannot drift. TERMINAL_BENCH runs execute via
+    // engine.WorkerAgent directly (not this PATCH path), so it is inert for them today, but keeping
+    // one classifier means a future PATCH-shaped benchmark source is correct here automatically.
+    if (BenchmarkSourceType.isControlledWorkerSource(src)) {
       return false;
     }
     // Historical PATCH default: customer autofix/finding sources require a recent passing runTests
@@ -207,18 +261,20 @@ public class CodeGenEngineImpl implements CodeGenEngine {
               ":(exclude)*.egg-info",
               ":(exclude,glob)appendonlydir/**");
       pb.redirectErrorStream(true);
-      Process p = pb.start();
-      String out = new String(p.getInputStream().readAllBytes());
-      if (!p.waitFor(120, TimeUnit.SECONDS)) {
-        p.destroyForcibly();
-        return "";
-      }
-      return p.exitValue() == 0 ? out : "";
-    } catch (IOException e) {
-      log.warn("engine: git diff failed in {}: {}", workspace, e.getMessage());
-      return "";
+      // RR-1565: BoundedProcess makes the 120s deadline reachable and caps the captured output.
+      // Reading stdout to EOF on this thread first (the old shape) let a stalled `git diff` — an
+      // index lock, a hung filter/textconv driver, or a credential-helper prompt — pin the pipeline
+      // thread forever, and the unbounded read materialised a large working tree whole into heap.
+      // (EngineResult.diff() has no production reader today; this keeps the value bounded and
+      // honest
+      // rather than deleting the capture.)
+      BoundedProcess.Outcome outcome = BoundedProcess.run(pb, Duration.ofSeconds(120));
+      return outcome.finished() && outcome.exitCode() == 0 ? outcome.output() : "";
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
+      return "";
+    } catch (Exception e) {
+      log.warn("engine: git diff failed in {}: {}", workspace, e.getMessage());
       return "";
     }
   }
@@ -230,7 +286,7 @@ public class CodeGenEngineImpl implements CodeGenEngine {
       case COMPLETED_BY_STAGNATION -> EngineOutcome.STAGNATED;
       case ITERATION_LIMIT_EXCEEDED -> EngineOutcome.ITER_LIMIT;
       case BUDGET_EXCEEDED -> EngineOutcome.BUDGET;
-      case WALL_CLOCK_EXCEEDED -> EngineOutcome.WALL_CLOCK;
+      case WALL_CLOCK_EXCEEDED, ABSOLUTE_DEADLINE_EXCEEDED -> EngineOutcome.WALL_CLOCK;
       case STOPPED_WITHOUT_COMPLETE -> EngineOutcome.STOPPED;
       case ERROR -> EngineOutcome.ERROR;
     };

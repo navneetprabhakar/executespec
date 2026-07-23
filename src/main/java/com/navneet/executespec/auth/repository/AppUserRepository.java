@@ -30,10 +30,25 @@ public interface AppUserRepository extends JpaRepository<AppUser, String> {
   @Query("SELECT u FROM AppUser u WHERE u.status != 'DELETED' ORDER BY u.createdAt DESC")
   List<AppUser> findAllActive();
 
+  /**
+   * RR-012 — bounded variant of {@link #findAllActive()} so the admin user listing can page instead
+   * of materializing every non-deleted row. Same filter/ordering as the unbounded query.
+   */
+  @Query("SELECT u FROM AppUser u WHERE u.status != 'DELETED' ORDER BY u.createdAt DESC")
+  List<AppUser> findAllActive(org.springframework.data.domain.Pageable pageable);
+
   @Query("SELECT u FROM AppUser u WHERE u.orgId = :orgId AND u.status = 'ACTIVE'")
   List<AppUser> findActiveByOrgId(@Param("orgId") String orgId);
 
   /** Solo users: active, no org (FREE tier individuals). */
   @Query("SELECT u FROM AppUser u WHERE u.status = 'ACTIVE' AND u.orgId IS NULL")
   List<AppUser> findActiveSoloUsers();
+
+  /**
+   * RR-010 — count of usable platform super-admins, so a status/role mutation can refuse to demote
+   * or suspend the last one and lock everyone out of the admin surface.
+   */
+  @Query(
+      "SELECT COUNT(u) FROM AppUser u WHERE u.globalRole = 'SUPER_ADMIN' AND u.status = 'ACTIVE'")
+  long countActiveSuperAdmins();
 }

@@ -1,5 +1,7 @@
 package com.navneet.executespec.agent;
 
+import java.net.http.HttpClient;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -19,7 +21,9 @@ import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
+import org.springframework.web.client.RestClient;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -54,8 +58,35 @@ public class AnthropicForcedToolClient {
 
   private final ObjectMapper objectMapper;
 
+  /**
+   * RR-1180 fallback HTTP read ceiling when the caller does not (yet) forward a live worker
+   * deadline. Matches {@code AgentModelConfig}'s platform-wide LLM read window so a forced salvage
+   * cannot block forever while staying long enough for any legitimate single-turn tool response.
+   */
+  private static final int DEFAULT_FORCED_READ_TIMEOUT_SECONDS = 300;
+
   @Value("${spring.ai.anthropic.api-key:}")
   private String platformApiKey;
+
+  /**
+   * A RestClient builder with a bounded connect + read timeout for the low-level {@link
+   * AnthropicApi} forced-call client (RR-1180). Without this the client uses the JDK default (no
+   * read timeout), so a silent/stalled provider socket blocks {@code chatCompletionEntity} forever.
+   */
+  private static RestClient.Builder boundedRestClientBuilder(Integer readTimeoutSeconds) {
+    int readSeconds =
+        (readTimeoutSeconds != null && readTimeoutSeconds > 0)
+            ? readTimeoutSeconds
+            : DEFAULT_FORCED_READ_TIMEOUT_SECONDS;
+    HttpClient httpClient =
+        HttpClient.newBuilder()
+            .version(HttpClient.Version.HTTP_1_1)
+            .connectTimeout(Duration.ofSeconds(30))
+            .build();
+    JdkClientHttpRequestFactory factory = new JdkClientHttpRequestFactory(httpClient);
+    factory.setReadTimeout(Duration.ofSeconds(readSeconds));
+    return RestClient.builder().requestFactory(factory);
+  }
 
   /**
    * Force one Anthropic tool call. {@code apiKeyOverride} wins (BYOK) over the platform key.
@@ -69,10 +100,64 @@ public class AnthropicForcedToolClient {
       List<ToolCallback> tools,
       Integer maxTokens,
       String apiKeyOverride) {
+    ForcedToolCallOutcome outcome =
+        forcedToolCallOutcome(model, messages, tools, maxTokens, apiKeyOverride);
+    return outcome.usable() ? outcome.response() : null;
+  }
+
+  /** True only when the forced path will issue a physical provider request. */
+  public boolean canAttempt(
+      List<Message> messages, List<ToolCallback> tools, String apiKeyOverride) {
     String key =
         (apiKeyOverride != null && !apiKeyOverride.isBlank()) ? apiKeyOverride : platformApiKey;
-    if (key == null || key.isBlank()) return null;
-    if (tools == null || tools.isEmpty() || messages == null || messages.isEmpty()) return null;
+    return key != null
+        && !key.isBlank()
+        && tools != null
+        && !tools.isEmpty()
+        && messages != null
+        && !messages.isEmpty();
+  }
+
+  /**
+   * Auditable forced-call outcome. A provider HTTP success with no usable tool remains a successful
+   * paid response and carries its usage; transport/parsing failure is separate from "not
+   * attempted".
+   */
+  public ForcedToolCallOutcome forcedToolCallOutcome(
+      String model,
+      List<Message> messages,
+      List<ToolCallback> tools,
+      Integer maxTokens,
+      String apiKeyOverride) {
+    return forcedToolCallOutcome(model, messages, tools, maxTokens, apiKeyOverride, null);
+  }
+
+  /**
+   * RR-1180 deadline-aware overload. The low-level {@link AnthropicApi} used here builds its OWN
+   * RestClient and does NOT inherit the application's 300s read-timeout customizer, so the previous
+   * {@code chatCompletionEntity} call could block indefinitely — a forced salvage / terminal
+   * finalizer could then spend past the worker's shutdown reserve and task wall clock. This binds a
+   * bounded HTTP read timeout to the physical client.
+   *
+   * <p><b>Honest limits.</b> A read timeout aborts a stalled/silent socket, which is the RR-1180
+   * hazard, but it is a fixed HTTP ceiling, not the worker's live remaining budget: the caller
+   * ({@code LlmRouter}, which is outside this file's ownership) does not yet forward {@code
+   * LlmRequest.readTimeoutSeconds} here, so {@code readTimeoutSeconds} is null in production and
+   * the {@link #DEFAULT_FORCED_READ_TIMEOUT_SECONDS} ceiling applies. Wiring the live deadline is a
+   * caller-side change tracked separately.
+   */
+  public ForcedToolCallOutcome forcedToolCallOutcome(
+      String model,
+      List<Message> messages,
+      List<ToolCallback> tools,
+      Integer maxTokens,
+      String apiKeyOverride,
+      Integer readTimeoutSeconds) {
+    if (!canAttempt(messages, tools, apiKeyOverride)) {
+      return new ForcedToolCallOutcome(null, false, null, false);
+    }
+    String key =
+        (apiKeyOverride != null && !apiKeyOverride.isBlank()) ? apiKeyOverride : platformApiKey;
     try {
       // 1) Flatten: system -> system param; everything else -> one user transcript.
       StringBuilder system = new StringBuilder();
@@ -122,7 +207,9 @@ public class AnthropicForcedToolClient {
           transcript.append("\n");
         }
       }
-      if (transcript.length() == 0) return null;
+      if (transcript.length() == 0) {
+        return new ForcedToolCallOutcome(null, false, null, false);
+      }
 
       // 2) Tools -> AnthropicApi.Tool (input schema parsed to a Map).
       List<AnthropicApi.Tool> aTools = new ArrayList<>();
@@ -151,53 +238,95 @@ public class AnthropicForcedToolClient {
               .toolChoice(new AnthropicApi.ToolChoiceAny())
               .build();
 
-      AnthropicApi api = AnthropicApi.builder().apiKey(key).build();
+      AnthropicApi api =
+          AnthropicApi.builder()
+              .apiKey(key)
+              .restClientBuilder(boundedRestClientBuilder(readTimeoutSeconds))
+              .build();
       AnthropicApi.ChatCompletionResponse resp = api.chatCompletionEntity(req).getBody();
-      if (resp == null || resp.content() == null) return null;
-
-      // 4) Parse content blocks -> text + forced tool call(s).
-      StringBuilder text = new StringBuilder();
-      List<AssistantMessage.ToolCall> calls = new ArrayList<>();
-      for (AnthropicApi.ContentBlock cb : resp.content()) {
-        if (cb.type() == AnthropicApi.ContentBlock.Type.TEXT && cb.text() != null) {
-          text.append(cb.text());
-        } else if (cb.type() == AnthropicApi.ContentBlock.Type.TOOL_USE) {
-          String args = objectMapper.writeValueAsString(cb.input() == null ? Map.of() : cb.input());
-          calls.add(new AssistantMessage.ToolCall(cb.id(), "function", cb.name(), args));
-        }
-      }
-      if (calls.isEmpty()) {
-        log.info(
-            "Anthropic forced salvage: model returned no tool call (stopReason={})",
-            resp.stopReason());
-        return null; // nothing to dispatch — fall through
+      if (resp == null || resp.content() == null) {
+        return new ForcedToolCallOutcome(
+            null,
+            false,
+            new IllegalStateException("Anthropic returned an empty forced response"),
+            true);
       }
 
-      ChatResponseMetadata.Builder meta = ChatResponseMetadata.builder().model(model);
-      if (resp.usage() != null) {
-        int in = resp.usage().inputTokens() == null ? 0 : resp.usage().inputTokens();
-        int out = resp.usage().outputTokens() == null ? 0 : resp.usage().outputTokens();
-        int cr =
-            resp.usage().cacheReadInputTokens() == null ? 0 : resp.usage().cacheReadInputTokens();
-        meta.usage(new DefaultUsage(in, out));
-        meta.keyValue("cache_read_input_tokens", cr);
-      }
-      log.info(
-          "Anthropic forced salvage: forced {} tool call(s) via ToolChoiceAny (stopReason={})",
-          calls.size(),
-          resp.stopReason());
-      AssistantMessage msg =
-          AssistantMessage.builder().content(text.toString()).toolCalls(calls).build();
-      return new ChatResponse(
-          List.of(
-              new Generation(
-                  msg, ChatGenerationMetadata.builder().finishReason(resp.stopReason()).build())),
-          meta.build());
+      // 4) Parse content blocks -> outcome (fail-closed on abnormal stop reason, RR-1181).
+      return buildForcedOutcome(resp, model);
     } catch (Exception e) {
       log.warn("Anthropic forced salvage failed — falling back to auto: {}", e.toString());
-      return null;
+      return new ForcedToolCallOutcome(null, false, e, true);
     }
   }
+
+  /**
+   * Normalizes a completed Anthropic forced-call response into a {@link ForcedToolCallOutcome}.
+   * Package-private so the RR-1181 fail-closed stop-reason gate is unit-testable without a live
+   * provider call.
+   *
+   * <p>RR-1181 — a forced tool call is only trustworthy when Anthropic terminated with the
+   * documented complete tool-call stop reason ({@code tool_use}). An abnormal reason ({@code
+   * max_tokens}, {@code refusal}, {@code stop_sequence}, …) means the response was truncated or the
+   * model declined, so a {@code tool_use} block's input JSON may be incomplete or the call
+   * unauthorized. Previously stop reason was metadata only, so a truncated/refused response with
+   * any tool_use block was dispatched as an authorized write/edit/shell mutation. Fail closed: keep
+   * the response for audit/usage but mark it NOT usable so {@code LlmRouter} falls through to the
+   * normal auto path rather than executing mutations from an abnormally-terminated response.
+   */
+  ForcedToolCallOutcome buildForcedOutcome(AnthropicApi.ChatCompletionResponse resp, String model)
+      throws Exception {
+    StringBuilder text = new StringBuilder();
+    List<AssistantMessage.ToolCall> calls = new ArrayList<>();
+    for (AnthropicApi.ContentBlock cb : resp.content()) {
+      if (cb.type() == AnthropicApi.ContentBlock.Type.TEXT && cb.text() != null) {
+        text.append(cb.text());
+      } else if (cb.type() == AnthropicApi.ContentBlock.Type.TOOL_USE) {
+        String args = objectMapper.writeValueAsString(cb.input() == null ? Map.of() : cb.input());
+        calls.add(new AssistantMessage.ToolCall(cb.id(), "function", cb.name(), args));
+      }
+    }
+    ChatResponseMetadata.Builder meta = ChatResponseMetadata.builder().model(model);
+    if (resp.usage() != null) {
+      int in = resp.usage().inputTokens() == null ? 0 : resp.usage().inputTokens();
+      int out = resp.usage().outputTokens() == null ? 0 : resp.usage().outputTokens();
+      int cr =
+          resp.usage().cacheReadInputTokens() == null ? 0 : resp.usage().cacheReadInputTokens();
+      meta.usage(new DefaultUsage(in, out));
+      meta.keyValue("cache_read_input_tokens", cr);
+    }
+    log.info(
+        "Anthropic forced salvage: forced {} tool call(s) via ToolChoiceAny (stopReason={})",
+        calls.size(),
+        resp.stopReason());
+    AssistantMessage msg =
+        AssistantMessage.builder().content(text.toString()).toolCalls(calls).build();
+    ChatResponse response =
+        new ChatResponse(
+            List.of(
+                new Generation(
+                    msg, ChatGenerationMetadata.builder().finishReason(resp.stopReason()).build())),
+            meta.build());
+    if (calls.isEmpty()) {
+      log.info(
+          "Anthropic forced salvage: model returned no tool call (stopReason={})",
+          resp.stopReason());
+      return new ForcedToolCallOutcome(response, false, null, true);
+    }
+    String stopReason = resp.stopReason();
+    if (stopReason != null && !"tool_use".equals(stopReason)) {
+      log.warn(
+          "Anthropic forced salvage: {} tool call(s) present but stopReason={} is not a complete"
+              + " tool_use termination — failing closed, no mutation dispatched",
+          calls.size(),
+          stopReason);
+      return new ForcedToolCallOutcome(response, false, null, true);
+    }
+    return new ForcedToolCallOutcome(response, true, null, true);
+  }
+
+  public record ForcedToolCallOutcome(
+      ChatResponse response, boolean usable, Throwable failure, boolean attempted) {}
 
   private static String trunc(String s, int max) {
     if (s == null) return "";

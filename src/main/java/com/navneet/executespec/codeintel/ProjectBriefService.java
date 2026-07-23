@@ -5,6 +5,8 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import com.navneet.executespec.agent.LlmRouter;
+import com.navneet.executespec.agent.PromptTrustBoundary;
+import com.navneet.executespec.executioncontext.LlmExecutionPolicyFactory;
 import com.navneet.executespec.project.workspace.ProjectWorkspaceService;
 import com.navneet.executespec.router.LlmProvider;
 import com.navneet.executespec.router.ModelResolver;
@@ -44,23 +46,26 @@ public class ProjectBriefService {
   private final LlmRouter llmRouter;
   private final ModelResolver modelResolver;
   private final ProjectProviderResolver projectProviderResolver;
+  private final LlmExecutionPolicyFactory executionPolicyFactory;
 
   @Autowired
   public ProjectBriefService(
       ProjectWorkspaceService workspace,
       LlmRouter llmRouter,
       ModelResolver modelResolver,
-      ProjectProviderResolver projectProviderResolver) {
+      ProjectProviderResolver projectProviderResolver,
+      LlmExecutionPolicyFactory executionPolicyFactory) {
     this.workspace = workspace;
     this.llmRouter = llmRouter;
     this.modelResolver = modelResolver;
     this.projectProviderResolver = projectProviderResolver;
+    this.executionPolicyFactory = executionPolicyFactory;
   }
 
   /** Compatibility constructor for callers that already pass an explicit provider. */
   public ProjectBriefService(
       ProjectWorkspaceService workspace, LlmRouter llmRouter, ModelResolver modelResolver) {
-    this(workspace, llmRouter, modelResolver, null);
+    this(workspace, llmRouter, modelResolver, null, null);
   }
 
   /**
@@ -97,17 +102,49 @@ public class ProjectBriefService {
    * returns a deterministic one-liner derived from the doc.
    */
   public String summarise(String projectId, String archMarkdown, LlmProvider provider) {
+    return summarise(projectId, archMarkdown, provider, null, null);
+  }
+
+  /**
+   * Confirmed architecture path: reuse the initiating actor's shared execution context so the
+   * summary cannot escape the action-scoped provider/model/call/token/USD budget.
+   */
+  public String summarise(
+      String projectId,
+      String archMarkdown,
+      LlmProvider provider,
+      String actorUserId,
+      com.navneet.executespec.executioncontext.LlmExecutionReference sharedReference) {
     if (archMarkdown == null || archMarkdown.isBlank()) return "";
     try {
+      if (provider == null && projectProviderResolver == null) {
+        throw new IllegalStateException("ProjectProviderResolver is required for customer briefs");
+      }
       LlmProvider effective =
-          provider != null
-              ? provider
-              : projectProviderResolver == null
-                  ? ProjectProviderResolver.CANONICAL_DEFAULT
-                  : projectProviderResolver.resolve(projectId);
+          provider != null ? provider : projectProviderResolver.resolve(projectId);
       ResolvedModel resolved = modelResolver.resolve("ProjectBriefService", effective);
+      if (executionPolicyFactory == null) {
+        throw new IllegalStateException("Execution policy factory is required for customer briefs");
+      }
+      String contextId = "brief-" + java.util.UUID.randomUUID();
+      var executionReference =
+          sharedReference != null
+              ? sharedReference
+              : executionPolicyFactory.forProject(
+                  projectId,
+                  "project-brief",
+                  "PROJECT_BRIEF",
+                  contextId,
+                  contextId,
+                  effective.name(),
+                  null,
+                  actorUserId);
       Prompt prompt =
-          new Prompt(List.of(new SystemMessage(SUMMARY_SYSTEM), new UserMessage(archMarkdown)));
+          new Prompt(
+              List.of(
+                  new SystemMessage(SUMMARY_SYSTEM),
+                  new UserMessage(
+                      PromptTrustBoundary.wrap("PROJECT_BRIEF_EVIDENCE", archMarkdown))));
       ChatResponse response =
           llmRouter.callText(
               resolved.providerName(),
@@ -115,11 +152,15 @@ public class ProjectBriefService {
               prompt.getInstructions(),
               "project-brief-" + projectId,
               "ProjectBriefService",
-              "summary");
+              "summary",
+              executionReference);
       String text = response.getResult().getOutput().getText();
       return text == null ? "" : text.trim();
     } catch (Exception e) {
-      log.debug("ProjectBriefService summarise failed for {}: {}", projectId, e.getMessage());
+      log.debug(
+          "ProjectBriefService summarise failed for {} errorClass={}",
+          projectId,
+          e.getClass().getSimpleName());
       String fallback =
           extractHeadings(archMarkdown, 1).stream()
               .findFirst()

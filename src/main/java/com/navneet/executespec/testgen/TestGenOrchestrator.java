@@ -44,6 +44,7 @@ public class TestGenOrchestrator {
   private final ApiProber apiProber;
   private final ApiSurfaceExtractor apiSurfaceExtractor;
   private final com.navneet.executespec.harness.WorkspaceInitService workspaceInitService;
+  private final TestGenerationAdmissionService admissionService;
 
   /**
    * Provider avoids the circular dependency: PreviewService → TestPreviewCoordinator →
@@ -64,6 +65,19 @@ public class TestGenOrchestrator {
       boolean isCli = projectConfig.isCli;
       boolean isStaticHtml = projectConfig.isStaticHtml;
 
+      // RCA-15 — prove a source/runtime surface and a relevant product diff before scaffolding,
+      // persisting a plan, or spending the first planner token. An empty brownfield checkout used
+      // to produce plausible-looking, entirely hallucinated Calculator test tasks.
+      TestGenerationAdmissionService.Admission admission =
+          admissionService.assess(runId, isCli, isStaticHtml);
+      if (!admission.admitted()) {
+        log.warn("[TestGen] Run {} not applicable: {}", runId, admission.reason());
+        emitTestEvent(runId, "TEST_GEN_NOT_APPLICABLE", admission.reason());
+        eventPublisher.publishEvent(
+            new TestExecutionCompletedEvent(runId, 0L, TestExecutionSummary.empty()));
+        return;
+      }
+
       // 2. Scaffold test project (Playwright POM for static HTML, RestAssured for REST APIs)
       testProjectScaffold.scaffold(runId, isStaticHtml);
 
@@ -78,7 +92,33 @@ public class TestGenOrchestrator {
           "Planning integration tests (CLI: " + isCli + ", staticHtml: " + isStaticHtml + ")");
       TestPlan testPlan =
           testPlannerAgent.planTests(runId, userRequest, conventionsDoc, isCli, isStaticHtml);
-      List<TestTask> tasks = testTaskRepository.findByTestPlanId(testPlan.getId());
+      testPlan.setSourceFingerprint(admission.sourceFingerprint());
+      testPlan.setWorkspaceFingerprint(admission.workspaceFingerprint());
+      testPlan.setPromptVersion("test-planner-v1");
+      testPlan = testPlanRepository.save(testPlan);
+      List<TestTask> plannedTasks = testTaskRepository.findByTestPlanId(testPlan.getId());
+      List<TestTask> invalidTargets =
+          plannedTasks.stream()
+              .filter(task -> !admissionService.targetExists(admission, task))
+              .toList();
+      if (!invalidTargets.isEmpty()) {
+        log.warn(
+            "[TestGen] Rejecting {} source-unmatched test target(s) for run {}",
+            invalidTargets.size(),
+            runId);
+        testTaskRepository.deleteAll(invalidTargets);
+      }
+      List<TestTask> tasks =
+          plannedTasks.stream().filter(task -> !invalidTargets.contains(task)).toList();
+      if (tasks.isEmpty()) {
+        testPlan.setStatus(TestPlanStatus.FAILED);
+        testPlanRepository.save(testPlan);
+        emitTestEvent(
+            runId, "TEST_GEN_NOT_APPLICABLE", "No planned test target exists in admitted source");
+        eventPublisher.publishEvent(
+            new TestExecutionCompletedEvent(runId, testPlan.getId(), TestExecutionSummary.empty()));
+        return;
+      }
       emitTestEvent(
           runId,
           "TEST_PLANNING_COMPLETED",
@@ -157,6 +197,7 @@ public class TestGenOrchestrator {
           testCompilationGate.compileTests(runId);
 
       if (compilationResult.success()) {
+        testCompilationGate.markCompiled(testPlan.getId());
         testPlan.setStatus(TestPlanStatus.COMPILED);
         emitTestEvent(runId, "TEST_COMPILATION_PASSED", "All tests compiled successfully");
       } else {
@@ -212,11 +253,17 @@ public class TestGenOrchestrator {
   }
 
   /**
-   * Handle compilation failure: retry failed tasks, re-compile, and determine if any tests
-   * survived.
+   * Handle compilation failure: retry failed tasks, re-compile, and determine whether the test
+   * project now compiles.
    *
-   * @return true if at least some tests compiled successfully, false if all failed (pipeline should
-   *     abort)
+   * <p><strong>RR-1584.</strong> The gate is {@code retryResult.success()} — the compiler's own
+   * exit status — not a survivor count derived from regex attribution. The previous version counted
+   * every task the {@code [ERROR] …Test.java} regex failed to name as a survivor, so a
+   * whole-project failure (dependency resolution, broken POM, compile timeout, absent {@code mvn})
+   * yielded zero named classes, a full survivor count, a "N tests compiled" event, a COMPILED plan
+   * and a {@code TestsReadyEvent} — for a project that does not compile.
+   *
+   * @return true only if the test project compiles; false aborts the pipeline
    */
   private boolean handleCompilationFailure(
       String runId,
@@ -237,31 +284,27 @@ public class TestGenOrchestrator {
     // Re-compile after retries
     TestCompilationGate.CompilationResult retryResult = testCompilationGate.compileTests(runId);
     if (retryResult.success()) {
+      testCompilationGate.markCompiled(testPlan.getId());
       testPlan.setStatus(TestPlanStatus.COMPILED);
       emitTestEvent(runId, "TEST_COMPILATION_PASSED", "Tests compiled after retry");
       return true;
     }
 
-    // Mark remaining failures
+    // Still red after the retry pass. Record the failure and stop — the raw compiler output is
+    // retained on the tasks. No COMPILED plan and no TestsReadyEvent for a project that does not
+    // compile, whether or not the failure could be attributed to specific classes.
     testCompilationGate.markFailedTasks(
         testPlan.getId(), retryResult.failedClasses(), retryResult.output());
 
-    // Check if any tests survived
-    long compiledCount =
-        testTaskRepository.findByTestPlanId(testPlan.getId()).stream()
-            .filter(t -> t.getStatus() != TestTaskStatus.FAILED)
-            .count();
-    if (compiledCount > 0) {
-      testPlan.setStatus(TestPlanStatus.COMPILED);
-      emitTestEvent(
-          runId,
-          "TEST_COMPILATION_PASSED",
-          compiledCount + " tests compiled (" + retryResult.failedClasses().size() + " failed)");
-      return true;
-    }
-
     testPlan.setStatus(TestPlanStatus.FAILED);
-    emitTestEvent(runId, "TEST_COMPILATION_FAILED", "All tests failed compilation");
+    emitTestEvent(
+        runId,
+        "TEST_COMPILATION_FAILED",
+        retryResult.failedClasses().isEmpty()
+            ? "Test project failed to compile (failure could not be attributed to a test class)"
+            : "Test project failed to compile ("
+                + retryResult.failedClasses().size()
+                + " class(es) with errors)");
     testPlanRepository.save(testPlan);
     // Notify that test pipeline ended (no results)
     eventPublisher.publishEvent(

@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import com.navneet.executespec.contracts.detection.DetectorUtils;
+import com.navneet.executespec.standards.enforcement.EvaluationStatus;
 import com.navneet.executespec.standards.model.Standard;
 
 import org.springframework.stereotype.Component;
@@ -29,12 +30,69 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class FilePatternEnforcer {
 
+  /**
+   * RR-1611 — availability-aware evaluation. Reports whether the file-pattern check could actually
+   * run (a standard configured with no usable forbidden/required pattern, or a null inventory, is a
+   * degradation, not a clean pass) alongside its violations.
+   */
+  public FilePatternOutcome evaluate(
+      Standard.FilePatternEnforcement enforcement, List<String> repoFilePaths) {
+    return evaluate(enforcement, repoFilePaths, true);
+  }
+
+  /**
+   * RR-1612 — availability-aware evaluation over a possibly-incomplete file inventory. A {@code
+   * required_patterns} rule asserts a file is ABSENT, which is sound only over a complete
+   * inventory. When {@code inventoryComplete} is false (the workspace walk hit its file cap or
+   * pruned a subtree such as {@code dist/}/{@code build/}/{@code node_modules/}), a "no match" for
+   * a required pattern cannot distinguish "absent from the repository" from "absent from the
+   * truncated list", so the false {@code REQUIRED_FILE_MISSING} violation is suppressed and the
+   * check is reported {@link EvaluationStatus#UNAVAILABLE} (verifier-unavailable evidence) instead
+   * of a BLOCKING violation. Forbidden-pattern matches over the files we DID see remain sound and
+   * are still emitted.
+   */
+  public FilePatternOutcome evaluate(
+      Standard.FilePatternEnforcement enforcement,
+      List<String> repoFilePaths,
+      boolean inventoryComplete) {
+    if (enforcement == null) {
+      return new FilePatternOutcome(EvaluationStatus.INVALID_RULE, List.of());
+    }
+    if (repoFilePaths == null) {
+      return new FilePatternOutcome(EvaluationStatus.UNAVAILABLE, List.of());
+    }
+    boolean hasForbidden = hasUsablePattern(enforcement.forbiddenPatterns());
+    boolean hasRequired = hasUsablePattern(enforcement.requiredPatterns());
+    if (!hasForbidden && !hasRequired) {
+      // A file-pattern standard with no forbidden and no required pattern configured cannot enforce
+      // anything — treat it as a misconfigured rule, not a satisfied one.
+      return new FilePatternOutcome(EvaluationStatus.INVALID_RULE, List.of());
+    }
+    EnforceResult result = enforceInternal(enforcement, repoFilePaths, inventoryComplete);
+    EvaluationStatus status =
+        result.requiredSuppressed() ? EvaluationStatus.UNAVAILABLE : EvaluationStatus.EVALUATED;
+    return new FilePatternOutcome(status, result.violations());
+  }
+
+  private static boolean hasUsablePattern(List<String> patterns) {
+    return patterns != null && patterns.stream().anyMatch(p -> p != null && !p.isBlank());
+  }
+
   public List<Violation> enforce(
       Standard.FilePatternEnforcement enforcement, List<String> repoFilePaths) {
-    List<Violation> out = new ArrayList<>();
-    if (enforcement == null || repoFilePaths == null) return out;
+    // Public contract preserved for callers that own a complete inventory.
+    return enforceInternal(enforcement, repoFilePaths, true).violations();
+  }
 
-    // Forbidden — emit one violation per matching file
+  private EnforceResult enforceInternal(
+      Standard.FilePatternEnforcement enforcement,
+      List<String> repoFilePaths,
+      boolean inventoryComplete) {
+    List<Violation> out = new ArrayList<>();
+    if (enforcement == null || repoFilePaths == null) return new EnforceResult(out, false);
+    boolean requiredSuppressed = false;
+
+    // Forbidden — emit one violation per matching file (sound even on a partial inventory).
     if (enforcement.forbiddenPatterns() != null) {
       for (String pattern : enforcement.forbiddenPatterns()) {
         if (pattern == null || pattern.isBlank()) continue;
@@ -62,6 +120,12 @@ public class FilePatternEnforcer {
           }
         }
         if (!found) {
+          if (!inventoryComplete) {
+            // RR-1612 — a missing-file assertion over an incomplete inventory is unsound; suppress
+            // it and surface verifier-unavailable evidence instead of a false BLOCKING violation.
+            requiredSuppressed = true;
+            continue;
+          }
           out.add(
               new Violation(
                   Violation.Kind.REQUIRED_FILE_MISSING,
@@ -71,8 +135,10 @@ public class FilePatternEnforcer {
         }
       }
     }
-    return out;
+    return new EnforceResult(out, requiredSuppressed);
   }
+
+  private record EnforceResult(List<Violation> violations, boolean requiredSuppressed) {}
 
   /**
    * @param kind FORBIDDEN_FILE_PRESENT or REQUIRED_FILE_MISSING
@@ -86,4 +152,10 @@ public class FilePatternEnforcer {
       REQUIRED_FILE_MISSING
     }
   }
+
+  /**
+   * RR-1611 — the availability-aware result of one file-pattern evaluation: the violations plus
+   * whether the check could actually run against a configured rule and a real inventory.
+   */
+  public record FilePatternOutcome(EvaluationStatus status, List<Violation> violations) {}
 }

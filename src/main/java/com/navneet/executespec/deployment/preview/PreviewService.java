@@ -32,6 +32,7 @@ import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
 import com.navneet.executespec.state.StateStore;
 import com.navneet.executespec.state.entity.PipelineRun;
+import com.navneet.executespec.testgen.BoundedProcess;
 
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -108,6 +109,13 @@ public class PreviewService {
   /** runId → last-used env vars (preserved across rebuild so users don't re-enter secrets) */
   private final ConcurrentHashMap<String, Map<String, String>> lastEnvVars =
       new ConcurrentHashMap<>();
+
+  /**
+   * RR-474: runs whose preview slot + active gauge have already been released. Guards {@code stop}
+   * / {@code fail} / docker-timeout against double-releasing the same acquired slot. Cleared in
+   * {@link #start} when a run (re)acquires a slot.
+   */
+  private final java.util.Set<String> releasedSlots = ConcurrentHashMap.newKeySet();
 
   /**
    * Queue of preview start requests that couldn't start immediately because all VM slots were at
@@ -442,6 +450,7 @@ public class PreviewService {
 
     // Launch async build + start on a virtual thread
     Metrics.ACTIVE_PREVIEWS.incrementAndGet();
+    releasedSlots.remove(runId); // RR-474: this run holds a fresh slot again — re-arm release
     Counter.builder(PREVIEW_STARTS).register(meterRegistry).increment();
     Map<String, String> safeEnvVars = envVars != null ? Map.copyOf(envVars) : Map.of();
     if (!safeEnvVars.isEmpty()) lastEnvVars.put(runId, safeEnvVars);
@@ -483,7 +492,9 @@ public class PreviewService {
       }
       Thread.ofVirtual()
           .name("preview-vm-" + shortId)
-          .start(snapshot.wrap(() -> buildAndStartVm(runId, workspace, type, mode, projectName)));
+          .start(
+              snapshot.wrap(
+                  () -> buildAndStartVm(runId, workspace, type, mode, projectName, safeEnvVars)));
     } else if (isCloudRunMode()) {
       Thread.ofVirtual()
           .name("preview-cr-" + shortId)
@@ -539,9 +550,15 @@ public class PreviewService {
   public void stop(String runId) {
     PreviewSession session = active.remove(runId);
     if (session == null) return;
-    // Note: lastEnvVars NOT removed here — rebuild() needs them after stop()
-    Metrics.ACTIVE_PREVIEWS.decrementAndGet();
-    releaseGlobalPreviewSlot(runId);
+    // RR-475: wipe the retained plaintext environment values on stop. Previously they were kept
+    // "for
+    // rebuild", but a manually stopped preview never reaches cleanupExpired (its active entry is
+    // gone), so the user's API keys / DB passwords lived in heap for the JVM lifetime after the
+    // customer stopped the resource. rebuild() snapshots them BEFORE calling stop(), so removing
+    // them here does not break rebuild; an independent stop now correctly requires re-entry.
+    lastEnvVars.remove(runId);
+    releaseSlotOnce(
+        runId); // RR-474: single-shot — the in-flight build's fail() will not re-release
 
     String mode;
     String enginePreviewId = enginePreviewIds.remove(runId);
@@ -734,13 +751,15 @@ public class PreviewService {
                   "--order",
                   "asc")
               .redirectErrorStream(true);
-      Process process = pb.start();
-      String output = new String(process.getInputStream().readAllBytes()).trim();
-      boolean finished = process.waitFor(30, java.util.concurrent.TimeUnit.SECONDS);
-      if (!finished) {
-        process.destroyForcibly();
+      // RR-477: BoundedProcess drains gcloud output on a separate thread so the 30s timeout is
+      // reachable while the child is alive, and caps the captured log. Reading to EOF first (the
+      // old shape) let a hung gcloud with an open pipe block the request thread indefinitely, and
+      // user-controlled preview logs could be arbitrarily large.
+      BoundedProcess.Outcome outcome = BoundedProcess.run(pb, Duration.ofSeconds(30));
+      if (!outcome.finished()) {
         return "Log fetch timed out.";
       }
+      String output = outcome.output().strip();
       return output.isEmpty() ? "No logs available yet (Cloud Run may still be starting)." : output;
     } catch (Exception e) {
       log.warn("Failed to fetch Cloud Run logs for {}: {}", serviceName, e.getMessage());
@@ -759,7 +778,12 @@ public class PreviewService {
   // Private: build and start with VM
 
   private void buildAndStartVm(
-      String runId, Path workspace, PreviewProjectType type, PreviewMode mode, String projectName) {
+      String runId,
+      Path workspace,
+      PreviewProjectType type,
+      PreviewMode mode,
+      String projectName,
+      Map<String, String> envVars) {
     if (vmPreviewService() == null) {
       fail(
           runId,
@@ -795,21 +819,28 @@ public class PreviewService {
       broadcaster.emit(
           runId, RunEvent.log(runId, null, "Generating Dockerfile and compose config..."));
 
-      Files.writeString(workspace.resolve(".dockerignore"), dockerfileGen.dockerIgnore());
+      PreviewArtifactWriter.writeDockerIgnore(workspace, dockerfileGen.dockerIgnore());
       backupIfExists(
           workspace.resolve("docker-compose.yml"), workspace.resolve("docker-compose.yml.user"));
       backupIfExists(
           workspace.resolve("docker-compose.yaml"), workspace.resolve("docker-compose.yaml.user"));
       String generatedDockerfile = dockerfileGen.generate(type, workspace, mode);
-      Files.writeString(workspace.resolve("Dockerfile"), generatedDockerfile);
+      backupDockerfileIfExists(workspace); // RR-386
+      PreviewArtifactWriter.write(workspace, "Dockerfile", generatedDockerfile);
       log.info("VM preview Dockerfile for run {} (type={}):\n{}", runId, type, generatedDockerfile);
 
-      // Generate docker-compose.yml with port 8080 (standard container port)
-      composeFileGen.generate(workspace, type, mode, dbType, Map.of(), 8080);
+      // Generate docker-compose.yml with port 8080 (standard container port). RR-1050: thread the
+      // validated env vars the user accepted at start() into the compose file so VM previews are
+      // not silently deployed without their required API/DB/config values.
+      Map<String, String> safeEnvVars = envVars != null ? envVars : Map.of();
+      composeFileGen.generate(workspace, type, mode, dbType, safeEnvVars, 8080);
 
-      // Phase 3: SCP + deploy to VM
+      // Phase 3: SCP + deploy to VM. RR-1042: pass the product session's authoritative TTL so the
+      // VM registry/remote-script expiry matches the customer-facing promise instead of diverging
+      // to the VM default.
       broadcaster.emit(runId, RunEvent.log(runId, null, "Deploying preview to VM..."));
-      PreviewVmResult result = vmPreviewService().deploy(projectName, runId, workspace);
+      PreviewVmResult result =
+          vmPreviewService().deploy(projectName, runId, workspace, props.getPreviewTtlMinutes());
 
       String previewUrl = result.getUrl();
       log.info("VM preview deployed for run {}: {}", runId, previewUrl);
@@ -901,7 +932,7 @@ public class PreviewService {
           runId,
           new RunEvent(
               "PREVIEW_ANALYZING", runId, null, "Generating Dockerfile...", Instant.now()));
-      Files.writeString(workspace.resolve(".dockerignore"), dockerfileGen.dockerIgnore());
+      PreviewArtifactWriter.writeDockerIgnore(workspace, dockerfileGen.dockerIgnore());
       backupIfExists(
           workspace.resolve("docker-compose.yml"), workspace.resolve("docker-compose.yml.user"));
       backupIfExists(
@@ -915,7 +946,8 @@ public class PreviewService {
           runId,
           type,
           generatedDockerfile);
-      Files.writeString(workspace.resolve("Dockerfile"), generatedDockerfile);
+      backupDockerfileIfExists(workspace); // RR-386
+      PreviewArtifactWriter.write(workspace, "Dockerfile", generatedDockerfile);
 
       // Phase 2: Build Docker image — store Dockerfile in session for diagnostics
       final String dockerfileContent = generatedDockerfile;
@@ -1196,10 +1228,11 @@ public class PreviewService {
               "Preview-engine handoff: building & pushing image…",
               Instant.now()));
 
-      Files.writeString(workspace.resolve(".dockerignore"), dockerfileGen.dockerIgnore());
+      PreviewArtifactWriter.writeDockerIgnore(workspace, dockerfileGen.dockerIgnore());
       String generatedDockerfile = dockerfileGen.generate(type, workspace, mode);
       Path dockerfilePath = workspace.resolve("Dockerfile");
-      Files.writeString(dockerfilePath, generatedDockerfile);
+      backupDockerfileIfExists(workspace); // RR-386
+      PreviewArtifactWriter.write(workspace, "Dockerfile", generatedDockerfile);
       log.info(
           "[{}] preview-engine handoff starting — workspace={}, type={}", runId, workspace, type);
 
@@ -1321,7 +1354,7 @@ public class PreviewService {
 
       // Phase 2: Generate Dockerfile (standard, no Cloud Run port patching)
       checkDeadline(deadline, "Dockerfile generation");
-      Files.writeString(workspace.resolve(".dockerignore"), dockerfileGen.dockerIgnore());
+      PreviewArtifactWriter.writeDockerIgnore(workspace, dockerfileGen.dockerIgnore());
       // Backup user's docker-compose/Dockerfile if they exist (our generated ones take precedence)
       backupIfExists(
           workspace.resolve("docker-compose.yml"), workspace.resolve("docker-compose.yml.user"));
@@ -1329,7 +1362,8 @@ public class PreviewService {
           workspace.resolve("docker-compose.yaml"), workspace.resolve("docker-compose.yaml.user"));
       String generatedDockerfile = dockerfileGen.generate(type, workspace, mode);
       log.info("Preview Dockerfile for run {} (type={}):\n{}", runId, type, generatedDockerfile);
-      Files.writeString(workspace.resolve("Dockerfile"), generatedDockerfile);
+      backupDockerfileIfExists(workspace); // RR-386
+      PreviewArtifactWriter.write(workspace, "Dockerfile", generatedDockerfile);
 
       // Phase 3: Allocate port + generate docker-compose.yml
       checkDeadline(deadline, "compose file generation");
@@ -1443,8 +1477,9 @@ public class PreviewService {
       } else if (props.getProxy().isEnabled()) {
         // Spring Boot preview proxy mode — PreviewProxyFilter handles preview-*.executespec.ai
         // Traffic flows: LB → Spring Boot :8080 → PreviewProxyFilter → localhost:{port}
-        String shortId = runId.length() > 8 ? runId.substring(0, 8) : runId;
-        previewUrl = "https://preview-" + shortId + "." + props.getPreviewDomain();
+        // RR-158: the host label is an unguessable per-preview capability, not a runId prefix.
+        previewUrl =
+            "https://preview-" + portPool.hostLabel(runId) + "." + props.getPreviewDomain();
       } else {
         // Fallback: direct port access (local dev only).
         String fallbackHost = props.getFallbackHost();
@@ -1558,8 +1593,7 @@ public class PreviewService {
           .tag("reason", "timeout")
           .register(meterRegistry)
           .increment();
-      Metrics.ACTIVE_PREVIEWS.decrementAndGet();
-      releaseGlobalPreviewSlot(runId);
+      releaseSlotOnce(runId); // RR-474
       cleanupOnFailure(runId, projectName, hostPort);
       updateSession(
           runId,
@@ -1589,8 +1623,8 @@ public class PreviewService {
               Instant.now()));
       log.warn("Preview timed out for run {} during: {}", runId, e.getPhase());
 
-    } catch (IOException e) {
-      fail(runId, "Build failed: " + e.getMessage(), hostPort);
+      // NOTE: the former `catch (IOException)` arm became unreachable when the framework-artifact
+      // writes moved to PreviewArtifactWriter, which reports failures as PreviewException.
     } catch (PreviewException e) {
       fail(runId, e.getMessage(), hostPort);
     } catch (Exception e) {
@@ -1693,6 +1727,17 @@ public class PreviewService {
   }
 
   /**
+   * RR-386: preserve a customer/agent-authored {@code Dockerfile} before a preview overwrites it
+   * with the generated one. Previously only the compose files were backed up, so starting a preview
+   * silently replaced a deliverable {@code Dockerfile}, polluting later iterate/sync/push and
+   * making the inspected workspace diverge from the PR and validation evidence. Mirrors the {@code
+   * .user} backup convention so the original can be restored.
+   */
+  private void backupDockerfileIfExists(Path workspace) {
+    backupIfExists(workspace.resolve("Dockerfile"), workspace.resolve("Dockerfile.user"));
+  }
+
+  /**
    * Rename a file if it exists — used to backup user-generated docker-compose/Dockerfile before we
    * overwrite with our generated ones.
    */
@@ -1704,6 +1749,22 @@ public class PreviewService {
       }
     } catch (IOException e) {
       log.warn("Failed to backup {}: {}", source, e.getMessage());
+    }
+  }
+
+  /**
+   * RR-474: releases the preview concurrency slot AND the active gauge exactly once per acquired
+   * slot. {@code stop} (customer cancel), {@code fail} (async build failure) and the docker-timeout
+   * path can all fire for the same run; without single-shot release, a stop during an in-flight
+   * build releases the Redis slot and decrements the gauge, then the still-running build's later
+   * failure releases them a second time — driving the limiter below the real active count (letting
+   * the user exceed preview concurrency) and the gauge negative. The flag is cleared when a run
+   * (re)acquires a slot in {@link #start}.
+   */
+  private void releaseSlotOnce(String runId) {
+    if (releasedSlots.add(runId)) {
+      Metrics.ACTIVE_PREVIEWS.decrementAndGet();
+      releaseGlobalPreviewSlot(runId);
     }
   }
 
@@ -1729,8 +1790,7 @@ public class PreviewService {
         .tag("reason", classifyFailureReason(message))
         .register(meterRegistry)
         .increment();
-    Metrics.ACTIVE_PREVIEWS.decrementAndGet();
-    releaseGlobalPreviewSlot(runId);
+    releaseSlotOnce(runId); // RR-474
 
     PreviewSession session = active.get(runId);
     if (session != null) {
@@ -1827,8 +1887,14 @@ public class PreviewService {
   }
 
   private int getMaxConcurrent(String tier) {
-    return switch (tier) {
-      case "ENTERPRISE", "TEAM" -> props.getConcurrency().getEnterpriseMax();
+    // RR-166: PRO_PLUS and BYOK are paid canonical tiers (see AdminMutationValues); the prior
+    // switch
+    // recognised only ENTERPRISE/TEAM/PRO and dropped every other tier — including PRO+ and BYOK —
+    // into the FREE limit, throttling paying customers to a single preview. Map the paid solo/team
+    // tiers to the high (enterprise/team) allowance.
+    String canonical = tier == null ? "" : tier.toUpperCase();
+    return switch (canonical) {
+      case "ENTERPRISE", "TEAM", "BYOK", "PRO_PLUS" -> props.getConcurrency().getEnterpriseMax();
       case "PRO" -> props.getConcurrency().getProMax();
       default -> props.getConcurrency().getFreeMax();
     };
@@ -1854,6 +1920,9 @@ public class PreviewService {
    */
   @Scheduled(fixedRate = 1800000) // every 30 minutes
   void cleanupOrphans() {
+    if (!props.getCleanup().isOrphanDiscoveryEnabled()) {
+      return;
+    }
     // Docker Compose orphans
     try {
       List<String> projects = composeExecutor.listProjects(COMPOSE_PREFIX);
@@ -1893,6 +1962,14 @@ public class PreviewService {
 
   @PreDestroy
   void shutdownAll() {
+    if (!props.getCleanup().isTeardownOnShutdown()) {
+      if (!active.isEmpty()) {
+        log.info(
+            "Preserving {} active previews across JVM shutdown; TTL cleanup remains authoritative",
+            active.size());
+      }
+      return;
+    }
     int count = active.size();
     if (count > 0) {
       log.info("Shutting down {} active previews", count);

@@ -20,6 +20,7 @@ class StandardsRunnerTest {
   static class StubLintAdapter implements LintAdapter {
     final String tool;
     final List<LintViolation> violations;
+    volatile String observedRunId;
 
     StubLintAdapter(String tool, List<LintViolation> violations) {
       this.tool = tool;
@@ -32,7 +33,8 @@ class StandardsRunnerTest {
     }
 
     @Override
-    public LintResult run(Path repoRoot, Path config, List<Path> changed) {
+    public LintResult run(String runId, Path repoRoot, Path config, List<Path> changed) {
+      this.observedRunId = runId;
       return new LintResult(tool, LintResult.Status.SUCCESS, violations, null);
     }
   }
@@ -41,7 +43,8 @@ class StandardsRunnerTest {
   void emptyEffective_emptyReport() {
     StandardsRunner runner =
         new StandardsRunner(new FilePatternEnforcer(), new AstCheckEnforcer(), List.of());
-    StandardsRunner.RunReport r = runner.run(List.of(), Path.of("."), List.of(), List.of());
+    StandardsRunner.RunReport r =
+        runner.run("run-1", List.of(), Path.of("."), List.of(), List.of());
     assertThat(r.violations()).isEmpty();
     assertThat(r.lintResults()).isEmpty();
   }
@@ -64,6 +67,7 @@ class StandardsRunnerTest {
 
     StandardsRunner.RunReport r =
         runner.run(
+            "run-1",
             List.of(e),
             Path.of("."),
             List.of("db/V42__SKIP_x.sql", "db/V43__legit.sql"),
@@ -97,15 +101,17 @@ class StandardsRunnerTest {
         new StandardsRunner(
             new FilePatternEnforcer(), new AstCheckEnforcer(), List.of(eslint, detekt));
     StandardsRunner.RunReport r =
-        runner.run(List.of(effective(s)), Path.of("."), List.of(), List.of());
+        runner.run("run-1", List.of(effective(s)), Path.of("."), List.of(), List.of());
 
     assertThat(r.violations()).hasSize(1);
     assertThat(r.violations().get(0).enforcementType()).isEqualTo("LINT");
     assertThat(r.lintResults()).containsKey("eslint-rules");
+    // The run id is threaded into the adapter — the scope a sandbox needs to contain the linter.
+    assertThat(eslint.observedRunId).isEqualTo("run-1");
   }
 
   @Test
-  void lintStandard_unknownToolSkipped_noViolation() {
+  void lintStandard_unknownToolIsReportedAsUnavailable() {
     Standard s =
         new Standard(
             "ruff-rules",
@@ -122,8 +128,9 @@ class StandardsRunnerTest {
             new AstCheckEnforcer(),
             List.of(new StubLintAdapter("eslint", List.of())));
     StandardsRunner.RunReport r =
-        runner.run(List.of(effective(s)), Path.of("."), List.of(), List.of());
+        runner.run("run-1", List.of(effective(s)), Path.of("."), List.of(), List.of());
     assertThat(r.violations()).isEmpty();
+    assertThat(r.lintResults().get("ruff-rules").status()).isEqualTo(LintResult.Status.UNAVAILABLE);
   }
 
   @Test
@@ -141,7 +148,7 @@ class StandardsRunnerTest {
     StandardsRunner runner =
         new StandardsRunner(new FilePatternEnforcer(), new AstCheckEnforcer(), List.of());
     StandardsRunner.RunReport r =
-        runner.run(List.of(effective(s)), Path.of("."), List.of(), List.of());
+        runner.run("run-1", List.of(effective(s)), Path.of("."), List.of(), List.of());
     // No deterministic violation for llm-review type — handled separately by reviewer
     assertThat(r.violations()).isEmpty();
   }
@@ -200,6 +207,234 @@ class StandardsRunnerTest {
     String block = new StandardsPromptComposer().compose(List.of(e));
     assertThat(block).contains("(project downgraded from BLOCKING)");
     assertThat(block).contains("[LOCKED]");
+  }
+
+  // RR-1611 — degraded AST / file-pattern checks must be reported as non-EVALUATED, not clean.
+
+  @Test
+  void filePatternStandard_recordsEvaluatedStatus() {
+    Standard s =
+        new Standard(
+            "no-skip-migrations",
+            null,
+            Standard.Severity.BLOCKING,
+            "no SKIP migrations",
+            new Standard.FilePatternEnforcement(List.of("**/V*__SKIP*.sql"), List.of()),
+            null,
+            List.of(),
+            false);
+    StandardsRunner runner =
+        new StandardsRunner(new FilePatternEnforcer(), new AstCheckEnforcer(), List.of());
+    StandardsRunner.RunReport r =
+        runner.run("run-1", List.of(effective(s)), Path.of("."), List.of("db/x.sql"), List.of());
+    assertThat(r.evaluationStatuses().get("no-skip-migrations"))
+        .isEqualTo(com.navneet.executespec.standards.enforcement.EvaluationStatus.EVALUATED);
+  }
+
+  @Test
+  void filePatternStandard_withNoUsablePattern_isInvalidRuleNotClean() {
+    Standard s =
+        new Standard(
+            "empty-file-pattern",
+            null,
+            Standard.Severity.BLOCKING,
+            "misconfigured",
+            new Standard.FilePatternEnforcement(List.of(), List.of()),
+            null,
+            List.of(),
+            false);
+    StandardsRunner runner =
+        new StandardsRunner(new FilePatternEnforcer(), new AstCheckEnforcer(), List.of());
+    StandardsRunner.RunReport r =
+        runner.run("run-1", List.of(effective(s)), Path.of("."), List.of("a.txt"), List.of());
+    assertThat(r.violations()).isEmpty();
+    assertThat(r.evaluationStatuses().get("empty-file-pattern"))
+        .isEqualTo(com.navneet.executespec.standards.enforcement.EvaluationStatus.INVALID_RULE);
+  }
+
+  @Test
+  void astStandard_invalidRegex_isInvalidRuleNotClean() {
+    Standard s =
+        new Standard(
+            "bad-naming",
+            null,
+            Standard.Severity.BLOCKING,
+            "naming",
+            new Standard.AstCheckEnforcement(
+                "naming-pattern", java.util.Map.of("regex", "["), null),
+            null,
+            List.of(),
+            false);
+    StandardsRunner runner =
+        new StandardsRunner(new FilePatternEnforcer(), new AstCheckEnforcer(), List.of());
+    StandardsRunner.RunReport r =
+        runner.run(
+            "run-1", List.of(effective(s)), Path.of("."), List.of(), List.of(Path.of("A.java")));
+    assertThat(r.violations()).isEmpty();
+    assertThat(r.evaluationStatuses().get("bad-naming"))
+        .isEqualTo(com.navneet.executespec.standards.enforcement.EvaluationStatus.INVALID_RULE);
+  }
+
+  @Test
+  void astStandard_missingRequiredParameter_isInvalidRuleNotClean() {
+    Standard s =
+        new Standard(
+            "no-import-param",
+            null,
+            Standard.Severity.BLOCKING,
+            "forbidden import",
+            new Standard.AstCheckEnforcement("forbidden-import", java.util.Map.of(), null),
+            null,
+            List.of(),
+            false);
+    StandardsRunner runner =
+        new StandardsRunner(new FilePatternEnforcer(), new AstCheckEnforcer(), List.of());
+    StandardsRunner.RunReport r =
+        runner.run(
+            "run-1", List.of(effective(s)), Path.of("."), List.of(), List.of(Path.of("A.java")));
+    assertThat(r.evaluationStatuses().get("no-import-param"))
+        .isEqualTo(com.navneet.executespec.standards.enforcement.EvaluationStatus.INVALID_RULE);
+  }
+
+  @Test
+  void astStandard_allFilesUnreadable_isUnavailableNotClean() {
+    Standard s =
+        new Standard(
+            "forbidden-bad",
+            null,
+            Standard.Severity.BLOCKING,
+            "forbidden import",
+            new Standard.AstCheckEnforcement(
+                "forbidden-import", java.util.Map.of("import", "com.bad"), null),
+            null,
+            List.of(),
+            false);
+    StandardsRunner runner =
+        new StandardsRunner(new FilePatternEnforcer(), new AstCheckEnforcer(), List.of());
+    // The path does not exist on disk, so the default reader returns null for every file.
+    StandardsRunner.RunReport r =
+        runner.run(
+            "run-1",
+            List.of(effective(s)),
+            Path.of("."),
+            List.of(),
+            List.of(Path.of("does-not-exist-xyz.java")));
+    assertThat(r.evaluationStatuses().get("forbidden-bad"))
+        .isEqualTo(com.navneet.executespec.standards.enforcement.EvaluationStatus.UNAVAILABLE);
+  }
+
+  @Test
+  void astStandard_unsupportedRuleKind_isInvalidRuleNotClean() {
+    Standard s =
+        new Standard(
+            "future-kind",
+            null,
+            Standard.Severity.BLOCKING,
+            "future",
+            new Standard.AstCheckEnforcement("future-rule", java.util.Map.of(), null),
+            null,
+            List.of(),
+            false);
+    StandardsRunner runner =
+        new StandardsRunner(new FilePatternEnforcer(), new AstCheckEnforcer(), List.of());
+    StandardsRunner.RunReport r =
+        runner.run(
+            "run-1", List.of(effective(s)), Path.of("."), List.of(), List.of(Path.of("A.java")));
+    assertThat(r.evaluationStatuses().get("future-kind"))
+        .isEqualTo(com.navneet.executespec.standards.enforcement.EvaluationStatus.INVALID_RULE);
+  }
+
+  // RR-860 — a BLOCKING llm-review standard is not executed as a structured gate; it must surface
+  // as
+  // verifier-unavailable, never a silent clean pass.
+  @Test
+  void blockingLlmReviewStandard_surfacedUnavailableNotSilentPass() {
+    Standard s =
+        new Standard(
+            "no-pii-in-logs",
+            null,
+            Standard.Severity.BLOCKING,
+            "no PII in logs",
+            new Standard.LlmReviewEnforcement("Check the diff never logs PII."),
+            null,
+            List.of(),
+            false);
+    StandardsRunner runner =
+        new StandardsRunner(new FilePatternEnforcer(), new AstCheckEnforcer(), List.of());
+    StandardsRunner.RunReport r =
+        runner.run("run-1", List.of(effective(s)), Path.of("."), List.of(), List.of());
+    assertThat(r.evaluationStatuses().get("no-pii-in-logs"))
+        .isEqualTo(com.navneet.executespec.standards.enforcement.EvaluationStatus.UNAVAILABLE);
+  }
+
+  // RR-860 — a WARNING/ADVISORY llm-review standard stays advisory (does not gate → no
+  // unavailable).
+  @Test
+  void advisoryLlmReviewStandard_staysAdvisory() {
+    Standard s =
+        new Standard(
+            "prefer-clear-names",
+            null,
+            Standard.Severity.ADVISORY,
+            "prefer clear names",
+            new Standard.LlmReviewEnforcement("Prefer descriptive identifiers."),
+            null,
+            List.of(),
+            false);
+    StandardsRunner runner =
+        new StandardsRunner(new FilePatternEnforcer(), new AstCheckEnforcer(), List.of());
+    StandardsRunner.RunReport r =
+        runner.run("run-1", List.of(effective(s)), Path.of("."), List.of(), List.of());
+    assertThat(r.evaluationStatuses().get("prefer-clear-names")).isNull();
+  }
+
+  // RR-1052 / RR-1632 — scope.languages restricts the AST source set; non-matching files drop out.
+  @Test
+  void scopeFilter_byLanguage_keepsOnlyMatchingExtensions() {
+    List<Path> files =
+        List.of(Path.of("src/A.java"), Path.of("src/b.py"), Path.of("docs/readme.md"));
+    Standard.Scope javaOnly = new Standard.Scope(List.of("java"), null, null, null);
+    List<Path> scoped = StandardsRunner.scopeFilter(files, javaOnly);
+    assertThat(scoped).containsExactly(Path.of("src/A.java"));
+  }
+
+  // RR-1052 — a null/empty scope means "applies everywhere" (no filtering).
+  @Test
+  void scopeFilter_nullScope_passesAllFiles() {
+    List<Path> files = List.of(Path.of("src/A.java"), Path.of("src/b.py"));
+    assertThat(StandardsRunner.scopeFilter(files, null)).isEqualTo(files);
+  }
+
+  // RR-1632 — a naming-pattern standard scoped to [java] no longer flags a .py file.
+  @Test
+  void namingPatternScopedToJava_excludesPythonFile() {
+    Standard s =
+        new Standard(
+            "class-name-service",
+            new Standard.Scope(List.of("java"), null, null, null),
+            Standard.Severity.BLOCKING,
+            "class names end with Service",
+            new Standard.AstCheckEnforcement(
+                "naming-pattern",
+                java.util.Map.of("regex", ".*Service", "declaration", "class"),
+                null),
+            null,
+            List.of(),
+            false);
+    StandardsRunner runner =
+        new StandardsRunner(new FilePatternEnforcer(), new AstCheckEnforcer(), List.of());
+    // A Python file whose "class" content would otherwise be irrelevant — scope excludes it, so the
+    // in-scope set is empty and the check is a clean evaluated pass with no violations.
+    StandardsRunner.RunReport r =
+        runner.run(
+            "run-1",
+            List.of(effective(s)),
+            Path.of("."),
+            List.of(),
+            List.of(Path.of("service.py")));
+    assertThat(r.violations()).isEmpty();
+    assertThat(r.evaluationStatuses().get("class-name-service"))
+        .isEqualTo(com.navneet.executespec.standards.enforcement.EvaluationStatus.EVALUATED);
   }
 
   private EffectiveStandardsResolver.Effective effective(Standard s) {

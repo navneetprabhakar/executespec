@@ -15,6 +15,7 @@ import com.navneet.executespec.auth.repository.OrgMemberRepository;
 import com.navneet.executespec.auth.repository.OrgRepository;
 import com.navneet.executespec.auth.repository.TierConfigRepository;
 import com.navneet.executespec.billing.config.ManagedAiProperties;
+import com.navneet.executespec.config.OperationalReleasePolicy;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -48,6 +49,8 @@ class TierPermissionServiceSoloUserTest {
     tierConfigRepo = mock(TierConfigRepository.class);
     tierEnforcementService = mock(TierEnforcementService.class);
     ManagedAiProperties managedAiProperties = managedAiProperties();
+    OperationalReleasePolicy operationalReleasePolicy = mock(OperationalReleasePolicy.class);
+    when(operationalReleasePolicy.deploymentCreationEnabled()).thenReturn(true);
     svc =
         new TierPermissionService(
             userRepo,
@@ -55,7 +58,8 @@ class TierPermissionServiceSoloUserTest {
             orgMemberRepo,
             tierConfigRepo,
             tierEnforcementService,
-            managedAiProperties);
+            managedAiProperties,
+            operationalReleasePolicy);
   }
 
   private ManagedAiProperties managedAiProperties() {

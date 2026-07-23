@@ -12,7 +12,7 @@ function SharedProjectSurfaceView({surface}: {surface: api.SharedProjectSurface}
   const meta = surface.meta;
   const surfaceText = meta.surface.replace(/_/g, ' ');
   const label = meta.label || surfaceText.toLowerCase();
-  const expires = meta.expiresAt ? new Date(meta.expiresAt).toLocaleDateString() : 'No expiry';
+  const expires = meta.expiresAt ? new Date(meta.expiresAt).toLocaleDateString() : 'Unavailable';
 
   return (
     <div className='public-share-console'>
@@ -31,7 +31,6 @@ function SharedProjectSurfaceView({surface}: {surface: api.SharedProjectSurface}
           <KvList
             pairs={[
               {k: 'Surface', v: surfaceText},
-              {k: 'Project', v: meta.projectId},
               {
                 k: 'Created',
                 v: meta.createdAt ? new Date(meta.createdAt).toLocaleDateString() : '—',
@@ -47,10 +46,8 @@ function SharedProjectSurfaceView({surface}: {surface: api.SharedProjectSurface}
             <Card>
               <KvList
                 pairs={[
-                  {k: 'Name', v: surface.project.name || surface.project.projectId},
+                  {k: 'Name', v: surface.project.name || 'Untitled project'},
                   {k: 'Status', v: surface.project.status || '—'},
-                  {k: 'Provider', v: surface.project.aiProvider || '—'},
-                  {k: 'GitHub owner', v: surface.project.githubOwner || '—'},
                   {
                     k: 'Updated',
                     v: surface.project.updatedAt
@@ -82,13 +79,8 @@ function SharedProjectSurfaceView({surface}: {surface: api.SharedProjectSurface}
             <Card>
               <KvList
                 pairs={[
-                  {k: 'Title', v: surface.run.title || surface.run.runId},
+                  {k: 'Title', v: surface.run.title || 'Untitled run'},
                   {k: 'Status', v: surface.run.status || '—'},
-                  {k: 'Reason', v: surface.run.statusReason || '—'},
-                  {
-                    k: 'Cost',
-                    v: surface.run.costUsd != null ? `$${surface.run.costUsd.toFixed(2)}` : '—',
-                  },
                   {
                     k: 'Completed',
                     v: surface.run.completedAt
@@ -236,30 +228,48 @@ export function SharedPage() {
     setData(null);
     setProjectSurface(null);
     setErr('');
+    // RR-1331 — public share bearers are confidential; a slow response for token A must never be
+    // painted under token B after the viewer navigates. Gate every setter on a per-effect
+    // generation so an out-of-order or superseded completion is discarded.
+    let cancelled = false;
     const legacyOnly = location.pathname.startsWith('/reports/shared/');
     if (legacyOnly) {
       api
         .getSharedReport(token)
         .then((d) => {
+          if (cancelled) return;
           if (d) setData(d);
           else setErr('Share link expired or revoked.');
         })
-        .catch((e: unknown) => setErr(e instanceof Error ? e.message : 'Failed to load.'));
-      return;
+        .catch((e: unknown) => {
+          if (!cancelled) setErr(e instanceof Error ? e.message : 'Failed to load.');
+        });
+      return () => {
+        cancelled = true;
+      };
     }
 
     api
       .getSharedProjectSurface(token)
-      .then(setProjectSurface)
+      .then((s) => {
+        if (!cancelled) setProjectSurface(s);
+      })
       .catch(() => {
+        if (cancelled) return;
         api
           .getSharedReport(token)
           .then((d) => {
+            if (cancelled) return;
             if (d) setData(d);
             else setErr('Share link expired or revoked.');
           })
-          .catch((e: unknown) => setErr(e instanceof Error ? e.message : 'Failed to load.'));
+          .catch((e: unknown) => {
+            if (!cancelled) setErr(e instanceof Error ? e.message : 'Failed to load.');
+          });
       });
+    return () => {
+      cancelled = true;
+    };
   }, [location.pathname, token]);
 
   if (err) {
@@ -324,7 +334,7 @@ export function SharedPage() {
                   : '—',
                 l: 'Tests',
               },
-              {v: cost != null ? `$${cost.toFixed(2)}` : '—', l: 'Cost'},
+              {v: cost != null ? `$${cost.toFixed(4)}` : '—', l: 'Cost'},
               {v: prUrl ? 'open' : '—', l: 'PR'},
             ]}
           />

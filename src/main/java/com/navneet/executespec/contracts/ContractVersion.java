@@ -16,9 +16,9 @@ import lombok.NoArgsConstructor;
  * <p>Two storage strategies:
  *
  * <ul>
- *   <li>{@link #inlineContent} (JSONB) for contracts &lt;~256KB — fastest read, no extra round-trip
- *   <li>{@link #contentPointer} (GCS path) for larger contracts — avoids JSONB write amplification
- *       on multi-MB OpenAPI bundles
+ *   <li>{@link #inlineContent} (TEXT) for contracts &lt;~256KB — fastest read, no extra round-trip
+ *   <li>{@link #contentPointer} (GCS path) for larger contracts — avoids write amplification on
+ *       multi-MB OpenAPI bundles
  * </ul>
  *
  * Exactly one of the two should be non-null per row. The choice is made by the writer (E2.2
@@ -48,8 +48,16 @@ public class ContractVersion {
   @Column(name = "content_pointer", columnDefinition = "TEXT")
   private String contentPointer;
 
-  @Column(name = "inline_content", columnDefinition = "jsonb")
-  @org.hibernate.annotations.JdbcTypeCode(org.hibernate.type.SqlTypes.JSON)
+  /**
+   * Raw contract body, stored as opaque TEXT.
+   *
+   * <p>RR-1629: this was mapped to a {@code jsonb} column, but every detector writes the RAW file
+   * body here — proto / GraphQL SDL / OpenAPI-YAML / AsyncAPI-YAML are not valid JSON, so the
+   * insert threw and no version row was ever written for the most common contract formats. Contract
+   * bodies are opaque source text and are never queried as JSON, so TEXT is the correct type. See
+   * V308.
+   */
+  @Column(name = "inline_content", columnDefinition = "TEXT")
   private String inlineContent;
 
   @Column(name = "detected_at", nullable = false)

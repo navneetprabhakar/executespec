@@ -24,8 +24,8 @@ import lombok.Builder;
  * @param complexity LOW | MEDIUM | HIGH — used to size iteration budgets
  * @param touchesFiles files the planner expects this task to read/write (hint)
  * @param dependsOn prior task IDs that must run before this one
- * @param hardConstraints per-task constraints the worker MUST respect (e.g. "Do NOT use JPA — use
- *     JDBC directly"). Injected into the worker system prompt verbatim.
+ * @param hardConstraints per-task constraints the worker must satisfy (e.g. "Do NOT use JPA — use
+ *     JDBC directly"). Framed as project-controlled worker evidence rather than system authority.
  */
 @Builder
 public record PlannedTask(

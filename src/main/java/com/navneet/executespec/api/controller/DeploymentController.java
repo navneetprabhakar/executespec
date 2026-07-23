@@ -11,6 +11,7 @@ import com.navneet.executespec.api.dto.DeploymentSummary;
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.auth.security.RunAccessGuard;
 import com.navneet.executespec.auth.service.TierPermissionService;
+import com.navneet.executespec.config.OperationalReleasePolicy;
 import com.navneet.executespec.deployment.DeploymentService;
 import com.navneet.executespec.deployment.WorkspaceRestoreService;
 import com.navneet.executespec.deployment.analyzer.DeploymentAnalyzer;
@@ -56,11 +57,16 @@ public class DeploymentController {
   private final CredentialService credentialService;
   private final DeployEngineOrchestrator deployEngine;
   private final TierPermissionService tierPermissionService;
+  private final OperationalReleasePolicy operationalReleasePolicy;
 
   @PostMapping
   public ResponseEntity<DeploymentSummary> deploy(
       @RequestBody DeployRequest request, @AuthenticationPrincipal AppUserDetails userDetails) {
-    guard.requireRunAccess(request.runId(), userDetails);
+    requireDeploymentCreationEnabled();
+    // RR-571: creating paid infrastructure for a run is a mutation of that run's resources, so it
+    // requires run WRITE authority. Read access is deliberately broader (same-org developers,
+    // billing admins, project viewers, external project members) and must not authorize a deploy.
+    guard.requireRunWriteAccess(request.runId(), userDetails);
     // [F-31] (audit Sprint 2, 2026-04-30) — server-side tier gate.
     // Was: only `RunAccessGuard.requireRunAccess` ran, which only
     // checks run ownership. With `freeUserPermissions` returning
@@ -72,14 +78,7 @@ public class DeploymentController {
     // permission map (which post-F-03 reads tier_config) and 403s
     // on canDeploy=false. Quota enforcement stays in DeploymentService
     // (per-user maxDeployments check).
-    if (userDetails != null) {
-      var perms = tierPermissionService.getPermissions(userDetails.getUser().getId());
-      if (!perms.canDeploy()) {
-        throw new ResponseStatusException(
-            HttpStatus.FORBIDDEN,
-            "Deployment is not available on your current tier. Upgrade to enable.");
-      }
-    }
+    requireDeployEntitlement(userDetails);
     try {
       RunRepo.RepoMode mode = RunRepo.RepoMode.valueOf(request.repoMode().toUpperCase());
       Deployment d =
@@ -146,12 +145,16 @@ public class DeploymentController {
                 () ->
                     new ResponseStatusException(
                         HttpStatus.NOT_FOUND, "Deployment not found: " + id));
-    guard.requireRunAccess(d.getRunId(), userDetails);
+    guard.requireRunWriteAccess(d.getRunId(), userDetails);
     try {
       deploymentService.deleteDeployment(id);
       return ResponseEntity.noContent().build();
     } catch (IllegalArgumentException e) {
       throw new ResponseStatusException(HttpStatus.NOT_FOUND, e.getMessage());
+    } catch (DeploymentService.DeploymentCleanupException e) {
+      // RR-1399: do not report success when the cloud resources could not be removed. The row is
+      // marked FAILED and remains retryable; tell the caller the deletion did not settle.
+      throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, e.getMessage());
     }
   }
 
@@ -165,7 +168,7 @@ public class DeploymentController {
                 () ->
                     new ResponseStatusException(
                         HttpStatus.NOT_FOUND, "Deployment not found: " + id));
-    guard.requireRunAccess(d.getRunId(), userDetails);
+    guard.requireRunWriteAccess(d.getRunId(), userDetails);
     try {
       deploymentService.rollback(id);
       return ResponseEntity.ok().build();
@@ -203,19 +206,14 @@ public class DeploymentController {
   @PostMapping("/analyze")
   public ResponseEntity<?> analyze(
       @RequestParam String runId, @AuthenticationPrincipal AppUserDetails userDetails) {
-    guard.requireRunAccess(runId, userDetails);
-
-    PipelineRun run =
-        stateStore
-            .findRun(runId)
-            .orElseThrow(
-                () -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Run not found: " + runId));
-    if (!"COMPLETE".equals(run.getStatus()) && !"FAILED".equals(run.getStatus())) {
-      throw new ResponseStatusException(
-          HttpStatus.BAD_REQUEST,
-          "Run must be complete before analyzing for deployment. Current status: "
-              + run.getStatus());
-    }
+    requireDeploymentCreationEnabled();
+    // RR-571: analyse restores the run workspace from GCS onto local disk before inspecting it,
+    // so it is a state-changing precondition of deploy, not a pure read.
+    guard.requireRunWriteAccess(runId, userDetails);
+    // RR-572 — analyse is a deployment-creation precondition; enforce the tier entitlement here.
+    requireDeployEntitlement(userDetails);
+    // RR-573 — a FAILED run is not a deployable candidate; require COMPLETE.
+    requireDeployableRun(runId);
 
     // Ensure workspace is available (restore from GCS if needed)
     Path workspace;
@@ -251,7 +249,12 @@ public class DeploymentController {
   public ResponseEntity<DeploymentSummary> confirm(
       @RequestBody DeployConfirmRequest request,
       @AuthenticationPrincipal AppUserDetails userDetails) {
-    guard.requireRunAccess(request.runId(), userDetails);
+    requireDeploymentCreationEnabled();
+    guard.requireRunWriteAccess(request.runId(), userDetails);
+    // RR-572 — the confirm path went straight to DeployEngineOrchestrator with no tier gate.
+    requireDeployEntitlement(userDetails);
+    // RR-573 — refuse to build/release a non-COMPLETE (e.g. FAILED) run through the normal API.
+    requireDeployableRun(request.runId());
     String userId = userDetails.getUser().getId();
 
     try {
@@ -304,7 +307,7 @@ public class DeploymentController {
                 () ->
                     new ResponseStatusException(
                         HttpStatus.NOT_FOUND, "Deployment not found: " + id));
-    guard.requireRunAccess(d.getRunId(), userDetails);
+    guard.requireRunWriteAccess(d.getRunId(), userDetails);
 
     try {
       deployEngine.rollback(id, userDetails.getUser().getId());
@@ -331,7 +334,7 @@ public class DeploymentController {
                 () ->
                     new ResponseStatusException(
                         HttpStatus.NOT_FOUND, "Deployment not found: " + id));
-    guard.requireRunAccess(d.getRunId(), userDetails);
+    guard.requireRunWriteAccess(d.getRunId(), userDetails);
 
     try {
       deployEngine.destroy(id, userDetails.getUser().getId());
@@ -342,5 +345,56 @@ public class DeploymentController {
       throw new ResponseStatusException(
           HttpStatus.INTERNAL_SERVER_ERROR, "Destroy failed: " + e.getMessage());
     }
+  }
+
+  private void requireDeploymentCreationEnabled() {
+    if (!operationalReleasePolicy.deploymentCreationEnabled()) {
+      throw new ResponseStatusException(
+          HttpStatus.SERVICE_UNAVAILABLE,
+          "Deployment creation is disabled until durable recovery is configured.");
+    }
+  }
+
+  /**
+   * RR-572 — the tier {@code canDeploy} entitlement gate, shared by EVERY deployment-creation path.
+   * The legacy {@code POST /api/deployments} path enforced it, but {@code /analyze} and {@code
+   * /confirm} reached {@link DeployEngineOrchestrator} after only run access + release-policy
+   * checks, so a user whose tier forbids deployments could still drive Cloud Build/Artifact
+   * Registry/Cloud Run work through the confirm endpoint. UI gating does not protect the API.
+   */
+  private void requireDeployEntitlement(AppUserDetails userDetails) {
+    if (userDetails == null) {
+      return;
+    }
+    var perms = tierPermissionService.getPermissions(userDetails.getUser().getId());
+    if (!perms.canDeploy()) {
+      throw new ResponseStatusException(
+          HttpStatus.FORBIDDEN,
+          "Deployment is not available on your current tier. Upgrade to enable.");
+    }
+  }
+
+  /**
+   * RR-573 — only a COMPLETE run is a deployable candidate. Analyze/confirm previously accepted a
+   * FAILED run and described it as ready for deployment, so a run that failed build, tests,
+   * reviewer or execution could be built and released to Cloud Run as if it were an approved
+   * candidate — bypassing the platform's verification and human-release claims at the final
+   * external side-effect boundary. Deploying a failed/partial run must go through a separately
+   * named break-glass workflow, not the normal deploy API.
+   */
+  private PipelineRun requireDeployableRun(String runId) {
+    PipelineRun run =
+        stateStore
+            .findRun(runId)
+            .orElseThrow(
+                () -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Run not found: " + runId));
+    if (!"COMPLETE".equals(run.getStatus())) {
+      throw new ResponseStatusException(
+          HttpStatus.CONFLICT,
+          "Only a COMPLETE run can be deployed (current: "
+              + run.getStatus()
+              + "). Failed/partial runs are not deployable through this endpoint.");
+    }
+    return run;
   }
 }

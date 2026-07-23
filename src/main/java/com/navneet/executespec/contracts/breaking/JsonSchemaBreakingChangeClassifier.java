@@ -58,12 +58,11 @@ public class JsonSchemaBreakingChangeClassifier implements BreakingChangeClassif
       JsonNode newRoot = mapper.readTree(newContent);
       walk(oldRoot, newRoot, "", changes);
     } catch (Exception ex) {
-      log.warn("[JsonSchemaBreakingChangeClassifier] parse failed: {}", ex.getMessage());
+      log.warn(
+          "[JsonSchemaBreakingChangeClassifier] parse failed errorClass={}",
+          ex.getClass().getSimpleName());
       return new ContractDiff(
-          "JSON parse failed: " + ex.getMessage(),
-          List.of(),
-          ContractDiff.Confidence.UNCLASSIFIED,
-          name());
+          "JSON parse failed", List.of(), ContractDiff.Confidence.UNCLASSIFIED, name());
     }
     long breaking =
         changes.stream().filter(c -> c.severity() == ContractDiff.Change.Severity.BREAKING).count();

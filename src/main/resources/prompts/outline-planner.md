@@ -151,6 +151,10 @@ The plan schema:
 
 {{PROJECT_ADRS}}
 
+## Engineering standards — plan compliant changes
+
+{{ENGINEERING_STANDARDS}}
+
 {{TDD_MODE_BLOCK}}
 
 {{MOBILE_PREFERENCE_BLOCK}}

@@ -6,6 +6,7 @@ import {ScoreBadge} from '@/ide/ScoreBadge';
 import {relTime, runTitleFor} from '@/signal/lib/runUtils';
 import {CommandIcon, PlusIcon, ProjectsIcon, RunsIcon, StatusDot} from '@/ide/IdeIcons';
 import {useAuthStore, selectIsSuperAdmin} from '@/stores/useAuthStore';
+import {fmtCost} from '@/lib/utils';
 
 /**
  * ConsoleHome — product cockpit. It avoids implementation nouns on the first
@@ -32,7 +33,7 @@ function RunRow({r, to, action}: {r: api.RunSummary; to: string; action?: string
         <span className='con-runrow-meta'>
           {(r.projectName || 'Sandbox') + ' · ' + relTime(r.startedAt)}
           {isSuperAdmin && r.actualCostUsd != null && r.actualCostUsd > 0
-            ? ` · $${r.actualCostUsd.toFixed(2)}`
+            ? ` · ${fmtCost(r.actualCostUsd)}`
             : ''}
         </span>
       </span>

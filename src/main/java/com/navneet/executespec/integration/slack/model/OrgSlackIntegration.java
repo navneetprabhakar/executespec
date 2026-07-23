@@ -30,7 +30,10 @@ public class OrgSlackIntegration {
   @Column(name = "team_name")
   private String teamName;
 
+  /** Slack bot token — encrypted at rest (2026-07-17 credential gate) and kept out of toString. */
   @Column(name = "bot_token", nullable = false, columnDefinition = "TEXT")
+  @Convert(converter = com.navneet.executespec.crypto.EncryptedValueConverter.class)
+  @lombok.ToString.Exclude
   private String botToken;
 
   @Column(name = "bot_user_id")

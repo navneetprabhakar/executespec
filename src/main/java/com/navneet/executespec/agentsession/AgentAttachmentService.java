@@ -13,6 +13,7 @@ import com.navneet.executespec.agentsession.dto.AgentSessionDtos.AttachmentRespo
 import com.navneet.executespec.auth.entity.ActivityAudit;
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.auth.service.ActivityAuditService;
+import com.navneet.executespec.config.featureflag.FeatureFlagService;
 import com.navneet.executespec.project.rag.DocumentExtractor;
 import com.navneet.executespec.security.ContextSanitizer;
 import com.navneet.executespec.security.InputSanitizer;
@@ -34,8 +35,13 @@ import lombok.extern.slf4j.Slf4j;
  *
  * <ol>
  *   <li>emptiness + size cap;
- *   <li>magic-byte type detection (Tika) against an allow-list — PDF + {@code text/*} + json/xml
- *       only; images/binaries/archives/SVG are rejected (images are a tracked fast-follow);
+ *   <li>magic-byte type detection (Tika) against an allow-list — PDF + {@code text/*} + json/xml;
+ *       binaries/archives/SVG are rejected. Raster images (PNG/JPEG/GIF/WebP) are accepted only
+ *       when the {@code agent.attachments.images.enabled} flag is ON (default OFF, RR-491): an
+ *       image is not text-extracted or sanitized before it reaches a multimodal model, so it is
+ *       fail-closed until vision-side safety scanning exists. When the flag is ON the bytes must
+ *       additionally decode as a real raster (deny-by-default) and are injected as untrusted media
+ *       evidence;
  *   <li>Tika text extraction; empty / too-short extraction is rejected;
  *   <li>{@link InputSanitizer#scan} — throws 400 on prompt-injection / abuse patterns (NFKC +
  *       zero-width strip + base64 re-scan + homoglyph normalization);
@@ -56,11 +62,35 @@ public class AgentAttachmentService {
   private static final int MIN_EXTRACT_CHARS = 8;
   private static final int MAX_EXTRACT_CHARS = 50_000;
 
+  /**
+   * RR-491 — raster image uploads reach a multimodal model without the text extraction /
+   * InputSanitizer / ContextSanitizer controls applied to documents. They are therefore accepted
+   * only when this flag is explicitly ON. Default OFF (unseeded {@link FeatureFlagService} keys are
+   * false), so the strict document gate is honest again until vision-side safety scanning exists.
+   */
+  static final String IMAGES_FLAG = "agent.attachments.images.enabled";
+
+  /**
+   * RR-490 per-turn aggregate bounds. The per-upload 10 MB cap bounded one file, not one turn: the
+   * turn request accepted an unbounded id list, and both the text and media paths iterated it
+   * without dedupe, so repeating a single valid 10 MB image id a few thousand times expanded into
+   * gigabytes of base64 payload maps before any provider call. These caps are applied to the
+   * requested id list itself, before any load or allocation.
+   */
+  static final int MAX_ATTACHMENTS_PER_TURN = 8;
+
+  /** Aggregate ceiling on injected upload text across one turn. */
+  static final int MAX_TURN_TEXT_CHARS = 150_000;
+
+  /** Aggregate ceiling on raw media bytes across one turn (base64 expands this ~4/3). */
+  static final int MAX_TURN_MEDIA_BYTES = 12 * 1024 * 1024;
+
   private final AgentAttachmentStore store;
   private final DocumentExtractor extractor;
   private final InputSanitizer inputSanitizer;
   private final ContextSanitizer contextSanitizer;
   private final ActivityAuditService auditService;
+  private final FeatureFlagService featureFlags;
   private final Tika tika = new Tika();
 
   /** Validate, extract, sanitize, and store one upload. Throws 400 (audited) on any rejection. */
@@ -98,6 +128,23 @@ public class AgentAttachmentService {
     }
 
     if (isAllowedImage(detected)) {
+      // RR-491 — fail closed unless image support is explicitly enabled, because an image is not
+      // run through the text sanitization gate before a multimodal model sees it.
+      if (featureFlags == null || !featureFlags.isEnabled(IMAGES_FLAG)) {
+        throw reject(
+            sessionId,
+            userId,
+            orgId,
+            filename,
+            "IMAGE_DISABLED",
+            "image attachments are not enabled");
+      }
+      // Deny-by-default: prove the bytes actually decode as a raster of the claimed family. A file
+      // that Tika labels an image but no reader can decode is rejected rather than forwarded raw.
+      if (!decodesAsImage(bytes)) {
+        throw reject(
+            sessionId, userId, orgId, filename, "IMAGE_UNDECODABLE", "image could not be decoded");
+      }
       String attachmentId = UUID.randomUUID().toString();
       store.put(
           StoredAttachment.image(
@@ -166,14 +213,19 @@ public class AgentAttachmentService {
    * session's files.
    */
   public String injectionBlock(String sessionId, List<String> attachmentIds) {
-    if (attachmentIds == null || attachmentIds.isEmpty()) return "";
+    List<String> ids = normalizeTurnIds(attachmentIds);
+    if (ids.isEmpty()) return "";
     StringBuilder sb = new StringBuilder();
     int included = 0;
-    for (String id : attachmentIds) {
+    int chars = 0;
+    for (String id : ids) {
       var found = store.get(sessionId, id);
       if (found.isEmpty()) continue;
       StoredAttachment a = found.get();
       if (a.rawBytes() != null && a.rawBytes().length > 0) continue;
+      String text = a.sanitizedText() == null ? "" : a.sanitizedText();
+      if (chars + text.length() > MAX_TURN_TEXT_CHARS) break;
+      chars += text.length();
       sb.append("\n=== BEGIN UPLOADED FILE: ")
           .append(a.filename())
           .append(" (")
@@ -196,13 +248,46 @@ public class AgentAttachmentService {
         + sb;
   }
 
-  /** Return validated binary attachments for multimodal provider serialization. */
-  public List<StoredAttachment> mediaAttachments(String sessionId, List<String> attachmentIds) {
+  /**
+   * Deduplicates the client-supplied attachment id list, preserving first-seen order, and rejects a
+   * turn that asks for more than {@link #MAX_ATTACHMENTS_PER_TURN} distinct attachments (RR-490).
+   *
+   * <p>Deduplication is the load-bearing half: the amplification did not need many
+   * <em>distinct</em> uploads, only many <em>repetitions</em> of one. The count cap then bounds the
+   * honest case.
+   */
+  static List<String> normalizeTurnIds(List<String> attachmentIds) {
     if (attachmentIds == null || attachmentIds.isEmpty()) return List.of();
-    return attachmentIds.stream()
-        .map(id -> store.get(sessionId, id).orElse(null))
-        .filter(a -> a != null && a.rawBytes() != null && a.rawBytes().length > 0)
-        .toList();
+    java.util.LinkedHashSet<String> unique = new java.util.LinkedHashSet<>();
+    for (String id : attachmentIds) {
+      if (id == null || id.isBlank()) continue;
+      unique.add(id.trim());
+    }
+    if (unique.size() > MAX_ATTACHMENTS_PER_TURN) {
+      throw new ResponseStatusException(
+          HttpStatus.PAYLOAD_TOO_LARGE,
+          "at most " + MAX_ATTACHMENTS_PER_TURN + " attachments may be sent with one turn");
+    }
+    return List.copyOf(unique);
+  }
+
+  /**
+   * Return validated binary attachments for multimodal provider serialization, deduplicated and
+   * bounded by both count and total raw bytes (RR-490).
+   */
+  public List<StoredAttachment> mediaAttachments(String sessionId, List<String> attachmentIds) {
+    List<String> ids = normalizeTurnIds(attachmentIds);
+    if (ids.isEmpty()) return List.of();
+    List<StoredAttachment> media = new java.util.ArrayList<>();
+    long bytes = 0;
+    for (String id : ids) {
+      StoredAttachment a = store.get(sessionId, id).orElse(null);
+      if (a == null || a.rawBytes() == null || a.rawBytes().length == 0) continue;
+      if (bytes + a.rawBytes().length > MAX_TURN_MEDIA_BYTES) break;
+      bytes += a.rawBytes().length;
+      media.add(a);
+    }
+    return List.copyOf(media);
   }
 
   /**
@@ -243,6 +328,11 @@ public class AgentAttachmentService {
       tmp = Files.createTempFile("agent-upload-", "-" + filename);
       Files.write(tmp, bytes);
       return extractor.extract(tmp, mime);
+    } catch (com.navneet.executespec.project.rag.DocumentAdmissionException rejected) {
+      // Typed rejections (encrypted / oversized / corrupt / timed out) must not be laundered into
+      // an empty document; the caller rejects a null extraction the same way it rejects "".
+      log.warn("attachment extract rejected for {}: {}", filename, rejected.code());
+      return null;
     } catch (IOException e) {
       log.warn("attachment extract failed for {}: {}", filename, e.getMessage());
       return null;
@@ -266,6 +356,21 @@ public class AgentAttachmentService {
         || m.equals("application/xml")
         || m.equals("application/x-ndjson")
         || isAllowedImage(m);
+  }
+
+  /**
+   * RR-491 — deny-by-default raster validation. Returns true only when a registered ImageIO reader
+   * can decode the bytes into a real image; a null/failed decode (a disguised or corrupt payload)
+   * returns false. This does not strip embedded metadata or perform vision-side content safety —
+   * those remain the reason the flag is fail-closed by default.
+   */
+  private static boolean decodesAsImage(byte[] bytes) {
+    if (bytes == null || bytes.length == 0) return false;
+    try (var in = new java.io.ByteArrayInputStream(bytes)) {
+      return javax.imageio.ImageIO.read(in) != null;
+    } catch (Exception e) {
+      return false;
+    }
   }
 
   private static boolean isAllowedImage(String mime) {

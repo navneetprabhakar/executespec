@@ -18,6 +18,7 @@ import org.springframework.stereotype.Component;
  *   <li>AUTH — login, register, forgot-password (keyed by IP)
  *   <li>RUNS — POST /api/runs (keyed by userId)
  *   <li>WEBHOOK — all webhook endpoints (keyed by IP, high limit)
+ *   <li>PUBLIC_SHARE — unauthenticated project-share reads (always keyed by IP)
  *   <li>READ — all GET requests (keyed by userId)
  *   <li>WRITE — all POST/PUT/DELETE not in other groups (keyed by userId)
  * </ul>
@@ -31,7 +32,8 @@ import org.springframework.stereotype.Component;
 public class RateLimitPolicy {
 
   /** MEDIUM-level multiplier for these groups; all others stay ×1.0. */
-  private static final Set<String> MEDIUM_HALVED_GROUPS = Set.of("WRITE", "DEPLOY", "PREVIEW");
+  private static final Set<String> MEDIUM_HALVED_GROUPS =
+      Set.of("WRITE", "DEPLOY", "PREVIEW", "PUBLIC_SHARE");
 
   private final GuardrailLevelResolver guardrailLevelResolver;
 
@@ -54,6 +56,15 @@ public class RateLimitPolicy {
                   "login", 10,
                   "register", 5,
                   "forgot", 3,
+                  // Token-redemption steps, matched to real legitimate frequency: reset-password is
+                  // as rare as the forgot-password request that issues its token; verify-email is
+                  // once per signup. refresh is deliberately looser — every active session calls it
+                  // on access-token expiry, so a tight per-IP cap would break shared-NAT offices,
+                  // and a high-entropy refresh JWT is not brute-forceable anyway. All three are
+                  // still far below the WRITE(60)/READ(300) buckets they used to fall into.
+                  "reset", 3,
+                  "verify", 5,
+                  "refresh", 30,
                   "DEFAULT", 10)),
           Map.entry(
               "RUNS",
@@ -64,6 +75,9 @@ public class RateLimitPolicy {
                   "ENTERPRISE", 60,
                   "DEFAULT", 5)),
           Map.entry("WEBHOOK", Map.of("DEFAULT", 100)),
+          // Public bearer links are deliberately isolated from the broad authenticated READ
+          // budget. These calls are IP-keyed by RateLimitFilter and never inherit an org tier.
+          Map.entry("PUBLIC_SHARE", Map.of("FREE", 60, "DEFAULT", 60)),
           Map.entry(
               "READ",
               Map.of(
@@ -136,9 +150,16 @@ public class RateLimitPolicy {
 
   /** Classify a request into an endpoint group. */
   public String classifyGroup(String method, String path) {
+    // reset-password / refresh / verify-email consume the higher-value token, so they belong in the
+    // tight AUTH bucket alongside forgot-password. Previously they fell through to WRITE (60/min)
+    // and READ (300/min) — 20x more permissive than the 3/min forgot-password step that merely
+    // *issues* the token they redeem (RR-1642).
     if (path.startsWith("/api/auth/login")
         || path.startsWith("/api/auth/register")
-        || path.startsWith("/api/auth/forgot")) {
+        || path.startsWith("/api/auth/forgot")
+        || path.startsWith("/api/auth/reset-password")
+        || path.startsWith("/api/auth/refresh")
+        || path.startsWith("/api/auth/verify-email")) {
       return "AUTH";
     }
     if (path.contains("/webhook")) {
@@ -149,6 +170,10 @@ public class RateLimitPolicy {
     }
     if (path.contains("/preview/")) {
       return "PREVIEW";
+    }
+    if (("GET".equalsIgnoreCase(method) || "HEAD".equalsIgnoreCase(method))
+        && path.startsWith("/api/shared/")) {
+      return "PUBLIC_SHARE";
     }
     if (path.contains("/deploy") || path.contains("/push-github")) {
       return "DEPLOY";
@@ -162,11 +187,15 @@ public class RateLimitPolicy {
     return "WRITE";
   }
 
-  /** Get the sub-type for AUTH group (login, register, forgot). */
+  /** Get the sub-type for AUTH group (login, register, forgot, reset, verify, refresh). */
   public String getAuthSubType(String path) {
     if (path.contains("/login")) return "login";
     if (path.contains("/register")) return "register";
+    // Check reset-password before the looser /forgot match so it gets its own bucket.
+    if (path.contains("/reset-password")) return "reset";
     if (path.contains("/forgot")) return "forgot";
+    if (path.contains("/verify-email")) return "verify";
+    if (path.contains("/refresh")) return "refresh";
     return "DEFAULT";
   }
 }

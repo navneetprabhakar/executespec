@@ -49,6 +49,14 @@ public class SsoConfigController {
   private static final Set<String> ALLOWED_PROVIDERS =
       Set.of("GOOGLE_OIDC", "OKTA_SAML", "AZURE_AD_SAML");
 
+  /**
+   * RR-253 — SSO is a paid TEAM/ENTERPRISE (and Team-like BYOK) capability. Enforce it on the
+   * backend, not only by hiding the UI: a direct API client on FREE/PRO must not be able to persist
+   * and advertise an enterprise configuration. {@code @PreAuthorize} only proves the caller is an
+   * org admin, not that the tenant is entitled.
+   */
+  private static final Set<String> SSO_ENTITLED_TIERS = Set.of("TEAM", "BYOK", "ENTERPRISE");
+
   private final OrgRepository orgRepo;
 
   @GetMapping("/config")
@@ -63,6 +71,7 @@ public class SsoConfigController {
   public SsoConfigDto putConfig(
       @AuthenticationPrincipal AppUserDetails principal, @Valid @RequestBody SsoConfigUpdate body) {
     Org org = requireOrgFromPrincipal(principal);
+    assertSsoEntitled(org);
 
     if (body.provider != null && !ALLOWED_PROVIDERS.contains(body.provider)) {
       throw new ResponseStatusException(
@@ -74,6 +83,23 @@ public class SsoConfigController {
         && org.getSsoProvider() == null) {
       throw new ResponseStatusException(
           HttpStatus.BAD_REQUEST, "Cannot enforce SSO without configuring a provider first.");
+    }
+
+    // RR-252 — enforcement is NOT implemented and must not be settable. Repository-wide, the
+    // `ssoEnforced` / `ssoProvider` / `ssoDomain` columns are read by this controller and nothing
+    // else: login, JWT/OAuth mapping and request authorization never consult them. Accepting
+    // `enforced=true` therefore sold an Enterprise admin a security control the platform does not
+    // honor — password login, refresh, PAT and every existing route stayed fully usable while the
+    // UI reported SSO as enforced. Refuse the setting outright until tenant discovery, IdP/domain
+    // binding, a verified login-method check, session/PAT revocation policy and break-glass
+    // controls exist. GOOGLE_OIDC is no exception: piggy-backing on the generic OAuth2 login proves
+    // an identity, it does not prohibit the non-SSO routes.
+    if (Boolean.TRUE.equals(body.enforced)) {
+      throw new ResponseStatusException(
+          HttpStatus.NOT_IMPLEMENTED,
+          "SSO enforcement is not implemented. Configuration can be saved, but no authentication"
+              + " route currently restricts non-SSO sign-in, so this platform will not claim to"
+              + " enforce it. Contact support to schedule enforced-SSO enablement.");
     }
 
     // M-016 (Wave 3) — lockout-prevention guard. Enforcing SSO before
@@ -143,6 +169,7 @@ public class SsoConfigController {
   @PreAuthorize("hasAnyRole('SUPER_ADMIN','ORG_ADMIN')")
   public ResponseEntity<Void> clear(@AuthenticationPrincipal AppUserDetails principal) {
     Org org = requireOrgFromPrincipal(principal);
+    assertSsoEntitled(org);
     org.setSsoProvider(null);
     org.setSsoEnforced(false);
     org.setSsoMetadataUrl(null);
@@ -164,6 +191,27 @@ public class SsoConfigController {
         .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Org not found"));
   }
 
+  /**
+   * RR-253 — refuse SSO configuration writes on tiers that are not entitled to it. Returns a typed
+   * 403 (PaymentRequired-style locked response) so a FREE/PRO API client cannot persist an
+   * enterprise configuration the UI merely hides.
+   */
+  private void assertSsoEntitled(Org org) {
+    String tier = org.getTier() == null ? "FREE" : org.getTier().toUpperCase();
+    if (!SSO_ENTITLED_TIERS.contains(tier)) {
+      throw new ResponseStatusException(
+          HttpStatus.FORBIDDEN,
+          "SSO configuration is a TEAM/ENTERPRISE feature. Your current tier ("
+              + tier
+              + ") cannot save SSO settings. Upgrade to enable SSO.");
+    }
+  }
+
+  private static boolean ssoEntitled(Org org) {
+    String tier = org.getTier() == null ? "FREE" : org.getTier().toUpperCase();
+    return SSO_ENTITLED_TIERS.contains(tier);
+  }
+
   public record SsoConfigUpdate(
       @Pattern(
               regexp = "GOOGLE_OIDC|OKTA_SAML|AZURE_AD_SAML",
@@ -181,15 +229,33 @@ public class SsoConfigController {
               message = "domain must be a valid DNS name")
           String domain) {}
 
+  /**
+   * @param enforced the persisted column value. Historical rows may still read {@code true}; that
+   *     is stored intent only.
+   * @param enforcementSupported always {@code false} until an authentication route actually
+   *     restricts non-SSO sign-in (RR-252). Clients must not present "SSO enforced" as an active
+   *     security control while this is false.
+   * @param entitled RR-253 — whether the tenant's tier may CONFIGURE SSO. When {@code false},
+   *     writes (PUT/DELETE) are rejected with 403 regardless of the caller's ORG_ADMIN role, so the
+   *     UI should present SSO as a locked upsell rather than an editable form.
+   */
   public record SsoConfigDto(
-      String provider, boolean enforced, String metadataUrl, String domain, boolean configured) {
+      String provider,
+      boolean enforced,
+      String metadataUrl,
+      String domain,
+      boolean configured,
+      boolean enforcementSupported,
+      boolean entitled) {
     public static SsoConfigDto from(Org org) {
       return new SsoConfigDto(
           org.getSsoProvider(),
           org.isSsoEnforced(),
           org.getSsoMetadataUrl(),
           org.getSsoDomain(),
-          org.getSsoProvider() != null);
+          org.getSsoProvider() != null,
+          false,
+          ssoEntitled(org));
     }
   }
 }

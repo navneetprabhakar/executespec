@@ -106,7 +106,8 @@ public class AgentSessionService {
         actionLifecycleService.plan(
             session,
             req,
-            capabilities(user, AgentText.firstNonBlank(req.surface(), session.getClientSurface())));
+            capabilities(user, AgentText.firstNonBlank(req.surface(), session.getClientSurface())),
+            user);
     return new ActionPlanResponse(
         planned.actionId(),
         planned.sessionId(),
@@ -163,7 +164,7 @@ public class AgentSessionService {
   @Transactional
   public TurnResponse recordTurn(String sessionId, TurnRequest request, AppUserDetails user) {
     AgentSession session = requireSession(sessionId, user);
-    return recordedTurnService.record(session, sessionId, request);
+    return recordedTurnService.record(session, sessionId, request, user);
   }
 
   @Transactional
@@ -187,7 +188,12 @@ public class AgentSessionService {
 
   @Transactional
   public void failStreamTurn(StreamTurnContext ctx, String message) {
-    streamTurnLifecycle.fail(ctx, message);
+    streamTurnLifecycle.fail(ctx, message, null);
+  }
+
+  @Transactional
+  public void failStreamTurn(StreamTurnContext ctx, String message, RunCostTracker.Snapshot cost) {
+    streamTurnLifecycle.fail(ctx, message, cost);
   }
 
   @Transactional

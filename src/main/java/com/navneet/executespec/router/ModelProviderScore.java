@@ -22,7 +22,8 @@ public record ModelProviderScore(
     boolean observedQualityEvidenceAvailable,
     boolean providerAvailable,
     List<String> reasons,
-    boolean contextFitsRequestedBudget) {
+    boolean contextFitsRequestedBudget,
+    int providerPreferenceOrder) {
 
   public ModelProviderScore {
     if (provider == null || provider.isBlank()) {
@@ -32,6 +33,25 @@ public record ModelProviderScore(
       throw new IllegalArgumentException("model required");
     }
     taskCategory = taskCategory == null || taskCategory.isBlank() ? "UNKNOWN" : taskCategory;
+    // RR-816: provider preference position is a POLICY signal, not empirical quality. It is carried
+    // as a separate value and applied only as a tie-breaker inside the eligible band (see
+    // ModelProviderRankingPolicy), never subtracted from qualityScore before the quality threshold.
+    providerPreferenceOrder = Math.max(0, providerPreferenceOrder);
+    // RR-397 fail-closed: a NaN/infinite quality score or threshold must never be able to pass the
+    // below-threshold check. Java comparisons against NaN are always false, so a NaN qualityScore
+    // would slip past {@code score < threshold} rejection and a NaN threshold would let every score
+    // look eligible. Collapse a non-finite score to the worst quality (0.0 — guaranteed below any
+    // threshold and a stable sort key) and a non-finite threshold to the strictest bar (100.0 —
+    // unsatisfiable by a garbage config), so a malformed input fails the decision rather than
+    // silently making every candidate eligible for automatic continuation. Cost is coerced to a
+    // large sentinel so a NaN cost never ranks as "cheapest".
+    qualityScore = Double.isFinite(qualityScore) ? qualityScore : 0.0;
+    costPerMillionTokens =
+        Double.isFinite(costPerMillionTokens) ? costPerMillionTokens : Double.MAX_VALUE;
+    requiredQualityThreshold =
+        Double.isFinite(requiredQualityThreshold)
+            ? Math.max(0.0, Math.min(100.0, requiredQualityThreshold))
+            : 100.0;
     reasons = reasons == null ? List.of() : List.copyOf(reasons);
   }
 
@@ -58,7 +78,8 @@ public record ModelProviderScore(
         false,
         providerAvailability(reasons),
         reasons,
-        true);
+        true,
+        0);
   }
 
   /**
@@ -92,7 +113,8 @@ public record ModelProviderScore(
         false,
         providerAvailability(reasons),
         reasons,
-        true);
+        true,
+        0);
   }
 
   /** Compatibility constructor retaining the pre-context-budget score shape. */
@@ -122,7 +144,43 @@ public record ModelProviderScore(
         observedQualityEvidenceAvailable,
         providerAvailable,
         reasons,
-        true);
+        true,
+        0);
+  }
+
+  /**
+   * Compatibility constructor retaining the pre-RR-816 score shape (before provider-preference
+   * order was carried separately). Preference defaults to 0 (highest preference / no penalty).
+   */
+  public ModelProviderScore(
+      String provider,
+      String model,
+      String taskCategory,
+      double qualityScore,
+      double costPerMillionTokens,
+      long latencyP50Ms,
+      long latencyP95Ms,
+      double requiredQualityThreshold,
+      boolean benchmarkQualityPriorAvailable,
+      boolean observedQualityEvidenceAvailable,
+      boolean providerAvailable,
+      List<String> reasons,
+      boolean contextFitsRequestedBudget) {
+    this(
+        provider,
+        model,
+        taskCategory,
+        qualityScore,
+        costPerMillionTokens,
+        latencyP50Ms,
+        latencyP95Ms,
+        requiredQualityThreshold,
+        benchmarkQualityPriorAvailable,
+        observedQualityEvidenceAvailable,
+        providerAvailable,
+        reasons,
+        contextFitsRequestedBudget,
+        0);
   }
 
   public boolean meetsQualityThreshold() {

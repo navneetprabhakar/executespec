@@ -9,6 +9,8 @@ import java.util.UUID;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.auth.entity.ActivityAudit;
+import com.navneet.executespec.auth.entity.Project;
+import com.navneet.executespec.auth.repository.ProjectRepository;
 import com.navneet.executespec.auth.service.ActivityAuditService;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -17,6 +19,11 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.slf4j.LoggerFactory;
+
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 
 /**
  * Unit tests for {@link ActivityEventEmitter} — focus on the dual-write contract (ACTIVITY + AUDIT
@@ -28,12 +35,14 @@ class ActivityEventEmitterTest {
 
   @Mock ActivityFeedEntryRepository feedRepo;
   @Mock ActivityAuditService auditService;
+  @Mock ProjectRepository projectRepository;
 
   ActivityEventEmitter emitter;
 
   @BeforeEach
   void setUp() {
-    emitter = new ActivityEventEmitter(feedRepo, auditService, new ObjectMapper());
+    emitter =
+        new ActivityEventEmitter(feedRepo, auditService, new ObjectMapper(), projectRepository);
   }
 
   @Test
@@ -80,6 +89,33 @@ class ActivityEventEmitterTest {
 
     verify(feedRepo, times(1)).save(any(ActivityFeedEntry.class));
     verify(auditService, times(1)).record(any(ActivityAudit.class));
+  }
+
+  @Test
+  void projectAuditCarriesTheOwningOrganizationForEnterpriseQueries() {
+    UUID projectId = UUID.randomUUID();
+    when(projectRepository.findById(projectId.toString()))
+        .thenReturn(
+            java.util.Optional.of(
+                Project.builder()
+                    .id(projectId.toString())
+                    .orgId("org-1")
+                    .name("Project")
+                    .createdBy("user-1")
+                    .build()));
+    ArgumentCaptor<ActivityAudit> audit = ArgumentCaptor.forClass(ActivityAudit.class);
+
+    emitter.emit(
+        projectId,
+        ActivityEventType.MEMBER_ROLE_CHANGED,
+        UUID.randomUUID(),
+        "MEMBER",
+        "user-456",
+        "Role changed",
+        null);
+
+    verify(auditService).record(audit.capture());
+    assertThat(audit.getValue().getOrgId()).isEqualTo("org-1");
   }
 
   @Test
@@ -180,18 +216,31 @@ class ActivityEventEmitterTest {
 
   @Test
   void persistFailureIsSwallowed_neverRethrown() {
-    when(feedRepo.save(any())).thenThrow(new RuntimeException("db boom"));
+    String secret = "jdbc password=customer-secret";
+    when(feedRepo.save(any())).thenThrow(new RuntimeException(secret));
+    Logger logger = (Logger) LoggerFactory.getLogger(ActivityEventEmitter.class);
+    ListAppender<ILoggingEvent> appender = new ListAppender<>();
+    appender.start();
+    logger.addAppender(appender);
 
-    // Must not throw — non-blocking contract per plan §1.9
-    emitter.emit(
-        UUID.randomUUID(),
-        ActivityEventType.RUN_SUBMITTED,
-        UUID.randomUUID(),
-        "RUN",
-        "run-1",
-        "submitted",
-        null);
+    try {
+      // Must not throw — non-blocking contract per plan §1.9.
+      emitter.emit(
+          UUID.randomUUID(),
+          ActivityEventType.RUN_SUBMITTED,
+          UUID.randomUUID(),
+          "RUN",
+          "run-1",
+          "submitted",
+          null);
 
-    verify(feedRepo).save(any());
+      verify(feedRepo).save(any());
+      assertThat(appender.list)
+          .extracting(ILoggingEvent::getFormattedMessage)
+          .allSatisfy(message -> assertThat(message).doesNotContain(secret));
+    } finally {
+      logger.detachAppender(appender);
+      appender.stop();
+    }
   }
 }

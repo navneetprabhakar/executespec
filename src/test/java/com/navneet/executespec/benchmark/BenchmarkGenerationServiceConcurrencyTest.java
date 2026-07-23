@@ -43,6 +43,8 @@ class BenchmarkGenerationServiceConcurrencyTest {
         mock(SwebenchContainerStore.class),
         mock(CodeGenEngine.class),
         mock(PipelineRunRepository.class),
-        mock(RunCostTracker.class));
+        mock(RunCostTracker.class),
+        mock(com.navneet.executespec.cost.RunStepUsageRepository.class),
+        mock(com.navneet.executespec.sse.SseBroadcaster.class));
   }
 }

@@ -7,5 +7,10 @@ public enum TestPlanStatus {
   COMPILED,
   EXECUTING,
   COMPLETED,
+  /**
+   * The workspace no longer matches the V277 fingerprint this plan was generated against (RR-1583),
+   * so its results cannot be published as evidence for the current diff.
+   */
+  STALE,
   FAILED
 }

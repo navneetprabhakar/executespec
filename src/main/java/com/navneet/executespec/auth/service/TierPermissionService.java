@@ -9,6 +9,7 @@ import com.navneet.executespec.auth.repository.OrgMemberRepository;
 import com.navneet.executespec.auth.repository.OrgRepository;
 import com.navneet.executespec.auth.repository.TierConfigRepository;
 import com.navneet.executespec.billing.config.ManagedAiProperties;
+import com.navneet.executespec.config.OperationalReleasePolicy;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -34,6 +35,7 @@ public class TierPermissionService {
   private final TierConfigRepository tierConfigRepo;
   private final TierEnforcementService tierEnforcementService;
   private final ManagedAiProperties managedAiProperties;
+  private final OperationalReleasePolicy operationalReleasePolicy;
 
   public record TierPermissions(
       boolean canManageAiKeys,
@@ -83,12 +85,12 @@ public class TierPermissionService {
 
     // SUPER_ADMIN — unrestricted
     if ("SUPER_ADMIN".equals(user.getGlobalRole())) {
-      return superAdminPermissions(user);
+      return applyOperationalReleasePolicy(superAdminPermissions(user));
     }
 
     // FINANCE role — read-only access to invoices, accounting, audit
     if ("FINANCE".equals(user.getGlobalRole())) {
-      return financePermissions(user);
+      return applyOperationalReleasePolicy(financePermissions(user));
     }
 
     // User with org membership
@@ -111,16 +113,53 @@ public class TierPermissionService {
       // (ORG_ADMIN vs DEVELOPER), not tier-driven.
       Org org = orgRepo.findById(user.getOrgId()).orElse(null);
       if (org != null && org.isPersonal()) {
-        return freeUserPermissions(user);
+        return applyOperationalReleasePolicy(freeUserPermissions(user));
       }
-      return orgMemberPermissions(user);
+      return applyOperationalReleasePolicy(orgMemberPermissions(user));
     }
 
     // Solo user (no org — only possible for users registered before
     // V162's personal-org bootstrap shipped + not yet backfilled by
     // V163. Should be rare on prod after V163; freshux-* test users
     // are the typical case in dev).
-    return freeUserPermissions(user);
+    return applyOperationalReleasePolicy(freeUserPermissions(user));
+  }
+
+  private TierPermissions applyOperationalReleasePolicy(TierPermissions permissions) {
+    if (operationalReleasePolicy == null || operationalReleasePolicy.deploymentCreationEnabled()) {
+      return permissions;
+    }
+    return new TierPermissions(
+        permissions.canManageAiKeys(),
+        permissions.canViewPricing(),
+        permissions.canManageIntegrations(),
+        permissions.canViewMetrics(),
+        permissions.canViewCostBreakdown(),
+        permissions.canViewTokenUsage(),
+        permissions.canUseChat(),
+        permissions.canCreateOrg(),
+        permissions.canInviteMembers(),
+        permissions.canViewOrgMembers(),
+        permissions.canViewAudit(),
+        permissions.canViewLiveLog(),
+        permissions.canViewInvoices(),
+        permissions.canViewAccounting(),
+        permissions.canManageCreditNotes(),
+        permissions.canExportGstr(),
+        permissions.canManageSellerConfig(),
+        permissions.canManageBillingProfile(),
+        permissions.monthlyRunLimit(),
+        permissions.currentRunCount(),
+        permissions.maxOrgMembers(),
+        permissions.currentOrgMembers(),
+        permissions.maxApplySuggestions(),
+        permissions.maxPreviewStarts(),
+        false,
+        0,
+        permissions.quotaModel(),
+        permissions.includedAiCredits(),
+        permissions.unlimitedAiCredits(),
+        permissions.quotaDescription());
   }
 
   private TierPermissions superAdminPermissions(AppUser user) {
@@ -205,8 +244,27 @@ public class TierPermissionService {
     OrgMember membership =
         orgMemberRepo.findByOrgIdAndUserId(org.getId(), user.getId()).orElse(null);
 
-    String orgRole = (membership != null) ? membership.getOrgRole() : "DEVELOPER";
+    // RR-210: fail closed on an orphaned identity. `app_user.org_id` is a denormalized pointer;
+    // `org_member` is the authoritative membership record. Defaulting a missing row to DEVELOPER
+    // handed org-derived product capabilities to a user whose membership had been removed or never
+    // committed. Fall back to the tier-driven solo permission set instead of inventing an org role.
+    if (membership == null) {
+      log.warn(
+          "Orphaned org pointer: user={} references org={} with no org_member row — denying"
+              + " org-derived permissions",
+          user.getId(),
+          org.getId());
+      return freeUserPermissions(user);
+    }
+
+    String orgRole = membership.getOrgRole();
     boolean isOrgAdmin = "ORG_ADMIN".equals(orgRole);
+    // RR-211: BILLING_ADMIN is a canonical org role (SUPER_ADMIN / ORG_ADMIN / BILLING_ADMIN /
+    // DEVELOPER / …) whose entire purpose is billing administration. It previously fell through to
+    // the DEVELOPER branch with every finance flag false, so the dedicated billing role could not
+    // read invoices, manage the billing profile, issue credit notes or export GSTR. Grant it the
+    // org-scoped finance capability set here.
+    boolean isBillingAdmin = "BILLING_ADMIN".equals(orgRole);
 
     int limit = tierEnforcementService.effectiveOrgLimit(org);
     int used = org.getMonthlyRunCount();
@@ -239,6 +297,40 @@ public class TierPermissionService {
           false, // canManageCreditNotes (finance + super admin)
           false, // canExportGstr (finance + super admin)
           false, // canManageSellerConfig
+          true, // canManageBillingProfile
+          limit,
+          used,
+          maxMembers,
+          currentMembers,
+          maxApply,
+          maxPreviews,
+          canDeploy,
+          maxDeploys);
+    }
+
+    if (isBillingAdmin) {
+      // RR-211 — org-scoped finance/billing administrator. Billing surfaces unlocked; product/eng
+      // and org-admin surfaces stay locked (that is ORG_ADMIN's remit). This mirrors the global
+      // FINANCE role but scoped to this org's membership.
+      return withQuota(
+          quota,
+          false, // canManageAiKeys
+          true, // canViewPricing — billing admins reason about plans/spend
+          false, // canManageIntegrations
+          true, // canViewMetrics — unlocked for all tiers
+          false, // canViewCostBreakdown (super admin only)
+          true, // canViewTokenUsage
+          true, // canUseChat
+          false, // canCreateOrg
+          false, // canInviteMembers
+          true, // canViewOrgMembers (read-only)
+          false, // canViewAudit
+          true, // canViewLiveLog — unlocked for all tiers
+          true, // canViewInvoices
+          true, // canViewAccounting
+          true, // canManageCreditNotes
+          true, // canExportGstr
+          false, // canManageSellerConfig (super admin only)
           true, // canManageBillingProfile
           limit,
           used,
