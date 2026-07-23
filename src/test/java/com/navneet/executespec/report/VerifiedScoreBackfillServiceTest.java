@@ -103,6 +103,72 @@ class VerifiedScoreBackfillServiceTest {
     verify(repo, never()).save(any());
   }
 
+  @Test
+  void backfill_cannotInflateScoresAbovePersistedPartialRequirementTruth() {
+    ValidationReportRepository repo = mock(ValidationReportRepository.class);
+    ValidationReport row = backfillableRow();
+    row.setId("vr-partial-gap");
+    row.setRunId("run-partial-gap");
+    row.setVerifiedScore(83);
+    row.setRubricScore(83);
+    row.setAccuracyJson(
+        """
+        {
+          "specAdherenceScore": 83,
+          "testCoverageLevel": "GOOD",
+          "endpointCoverage": {"coveragePercent": 100},
+          "missingRequirements": [],
+          "partialRequirements": ["Schema migration is not implemented"]
+        }
+        """);
+    when(repo.findByRunId("run-partial-gap")).thenReturn(Optional.of(row));
+
+    VerifiedScoreBackfillService svc = new VerifiedScoreBackfillService(repo, scoringService());
+    VerifiedScoreBackfillService.BackfillResult result =
+        svc.backfill(
+            new VerifiedScoreBackfillService.BackfillRequest("run-partial-gap", null, true));
+
+    assertThat(result.changes()).hasSize(1);
+    assertThat(result.changes().getFirst().newVerifiedScore()).isEqualTo(79);
+    assertThat(result.changes().getFirst().newRubricScore()).isEqualTo(79);
+    verify(repo, never()).save(any());
+  }
+
+  @Test
+  void backfill_capsPersistedMissingRequirementAtSixtyNine() {
+    String accuracyJson =
+        """
+        {
+          "specAdherenceScore": 96,
+          "missingRequirements": ["Required startup wiring is absent"],
+          "partialRequirements": []
+        }
+        """;
+
+    assertThat(
+            VerifiedScoreBackfillService.capScoreAtAdmittedSpecGapsFromAccuracyJson(
+                100, accuracyJson))
+        .isEqualTo(69);
+  }
+
+  @Test
+  void backfillLeavesUnknownOnlyAccuracyUncapped() {
+    String accuracyJson =
+        """
+        {
+          "specAdherenceScore": 20,
+          "missingRequirements": [],
+          "partialRequirements": [],
+          "unknownRequirements": ["Could not inspect deployment evidence"]
+        }
+        """;
+
+    assertThat(
+            VerifiedScoreBackfillService.capScoreAtAdmittedSpecGapsFromAccuracyJson(
+                94, accuracyJson))
+        .isEqualTo(94);
+  }
+
   /**
    * RR-1645 — the backfill used to pass {@code bootVerification=null}, so a run that compiled but
    * booted UNHEALTHY (honest BUILD slot 55) was re-scored with BUILD=100, upgrading the headline

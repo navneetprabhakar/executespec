@@ -135,6 +135,15 @@ public class VerifiedScoreBackfillService {
                 endpointCoverage,
                 testCoverageLevel);
 
+        // Score generation caps both summaries when the persisted accuracy assessment admits a
+        // missing or partial requirement. Backfill must reproduce that final policy step too;
+        // otherwise an operator rescore can erase known requirement gaps and inflate a historical
+        // report above the score that the live path would publish.
+        recomputedVerified =
+            capScoreAtAdmittedSpecGapsFromAccuracyJson(recomputedVerified, row.getAccuracyJson());
+        recomputedRubric =
+            capScoreAtAdmittedSpecGapsFromAccuracyJson(recomputedRubric, row.getAccuracyJson());
+
         Integer existingVerified = row.getVerifiedScore();
         Integer existingRubric = row.getRubricScore();
         boolean same =
@@ -272,5 +281,33 @@ public class VerifiedScoreBackfillService {
     } catch (IOException ex) {
       return null;
     }
+  }
+
+  /**
+   * Replays the deterministic truth cap applied during live report generation without asking an LLM
+   * to reassess historical data. The fixed 69/79 bounds also normalize reports written before
+   * {@code AccuracyReportTruthPolicy} began lowering an internally inconsistent adherence score.
+   */
+  static int capScoreAtAdmittedSpecGapsFromAccuracyJson(int score, String accuracyJson) {
+    if (accuracyJson == null || accuracyJson.isBlank()) return score;
+    try {
+      JsonNode root = MAPPER.readTree(accuracyJson);
+      boolean missing = nonEmptyArray(root.path("missingRequirements"));
+      boolean partial = nonEmptyArray(root.path("partialRequirements"));
+      if (!missing && !partial) return score;
+
+      int policyCap = missing ? 69 : 79;
+      JsonNode adherence = root.path("specAdherenceScore");
+      if (adherence.canConvertToInt()) {
+        policyCap = Math.min(policyCap, Math.max(0, Math.min(100, adherence.asInt())));
+      }
+      return Math.min(score, policyCap);
+    } catch (IOException ex) {
+      return score;
+    }
+  }
+
+  private static boolean nonEmptyArray(JsonNode node) {
+    return node.isArray() && !node.isEmpty();
   }
 }
