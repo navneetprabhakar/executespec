@@ -98,7 +98,7 @@ public class LlmExecutionDispatchGuard {
           "Provider failover is disabled by the durable execution policy");
     }
     checkFencing(context, request.llmExecutionAttempt());
-    checkBudget(context);
+    checkBudget(context, request.maxTokens());
 
     if (context.getScopeMode() == LlmExecutionScope.ScopeMode.PLATFORM_INTERNAL) {
       return platformCapabilityDispatch(context, provider, policy);
@@ -186,7 +186,7 @@ public class LlmExecutionDispatchGuard {
           "Provider capability differs from the project's selected provider");
     }
     checkFencing(context, null);
-    checkBudget(context);
+    checkBudget(context, null);
 
     if (context.getScopeMode() == LlmExecutionScope.ScopeMode.PLATFORM_INTERNAL) {
       return platformCapabilityDispatch(context, provider, policy);
@@ -309,8 +309,8 @@ public class LlmExecutionDispatchGuard {
    * dimension. Delegates to {@link LlmExecutionBudgetGate}, which evaluates every dimension under a
    * pessimistic row lock and commits a provider-call reservation before transport.
    */
-  private void checkBudget(LlmExecutionContext context) {
-    budgetGate.reserveProviderCall(context);
+  private void checkBudget(LlmExecutionContext context, Integer requestedMaxOutputTokens) {
+    budgetGate.reserveProviderCall(context, requestedMaxOutputTokens);
   }
 
   /**

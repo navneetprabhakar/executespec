@@ -110,11 +110,8 @@ class ValidationReportGoalProofEvaluatorTest {
         .isEqualTo(RunContinuationDecision.CONTINUE_SAME_MODEL_PROVIDER);
     assertThat(decision.reason()).contains("does not prove run completion");
     assertThat(decision.incompleteItems())
-        .contains(
-            "Report issues is fail",
-            "Spec adherence is fail",
-            "Test coverage judgment is unknown",
-            "Trust cap is unknown");
+        .contains("Report issues is fail", "Spec adherence is fail")
+        .doesNotContain("Test coverage judgment is unknown", "Trust cap is unknown");
     assertThat(decision.anotherModelProviderMightHelp()).isFalse();
   }
 
@@ -171,6 +168,27 @@ class ValidationReportGoalProofEvaluatorTest {
 
     assertThat(decision.state()).isEqualTo(GoalDonenessState.UNCERTAIN);
     assertThat(decision.incompleteItems()).contains("spec adherence evidence unavailable");
+  }
+
+  @Test
+  void optionalUnknownEvidenceDoesNotInvalidateAnOtherwiseProvenRun() {
+    var decision =
+        evaluator.evaluate(
+            "run-static-web",
+            PipelineResult.PASSED,
+            List.of(
+                row("code-delivered", "Code delivered", "PASS", "DETERMINISTIC"),
+                row("build", "Build", "PASS", "DETERMINISTIC"),
+                row("tests", "Tests", "PASS", "DETERMINISTIC"),
+                row("reviewer", "Reviewer", "PASS", "LLM_REVIEWER"),
+                row("report-issues", "Report issues", "PASS", "HYBRID"),
+                row("spec-adherence", "Spec adherence", "PASS", "LLM_ASSESSMENT"),
+                row("endpoint-coverage", "Endpoint coverage", "UNKNOWN", "LLM_ASSISTED_COUNT"),
+                row("test-coverage-judgment", "Test coverage judgment", "PASS", "LLM_ASSESSMENT")));
+
+    assertThat(decision.state()).isEqualTo(GoalDonenessState.DONE);
+    assertThat(decision.recommendedDecision()).isEqualTo(RunContinuationDecision.STOP_DONE);
+    assertThat(decision.incompleteItems()).isEmpty();
   }
 
   private static List<VerificationEvidenceDTO> passingLedger() {

@@ -328,9 +328,8 @@ class ValidationReportServiceVerificationLedgerTest {
     var dto = service.getByRunId("run-4").orElseThrow();
 
     assertNotNull(dto.runGoalDecision());
-    assertEquals("UNCERTAIN", dto.runGoalDecision().state().name());
-    assertEquals(
-        "CONTINUE_SAME_MODEL_PROVIDER", dto.runGoalDecision().recommendedDecision().name());
+    assertEquals("DONE", dto.runGoalDecision().state().name());
+    assertEquals("STOP_DONE", dto.runGoalDecision().recommendedDecision().name());
     assertEquals("run goal: Generate a project setup guide", dto.runGoalDecision().goalSummary());
   }
 

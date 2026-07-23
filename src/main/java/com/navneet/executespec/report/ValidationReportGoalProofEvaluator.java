@@ -146,6 +146,12 @@ public class ValidationReportGoalProofEvaluator {
       if ("PASS".equals(status)) {
         continue;
       }
+      // Optional evidence is informative only when it actually measured something. In particular,
+      // endpoint coverage is legitimately N/A for STATIC_WEB/CLI/LIBRARY output; treating its
+      // UNKNOWN row as a failed proof made clean UI runs say "keep working" after completion.
+      if ("UNKNOWN".equals(status)) {
+        continue;
+      }
       hasUnproven = true;
       String item = label(row) + " is " + status.toLowerCase();
       incomplete.add(item);

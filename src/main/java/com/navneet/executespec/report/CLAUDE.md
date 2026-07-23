@@ -67,6 +67,9 @@ invalid reports are excluded and counted separately.
 - Missing endpoint coverage is explicitly `UNKNOWN` in the ledger and receives neutral midpoint
   rubric credit (8/15), never full endpoint points. This prevents a public/shared score from being
   inflated by absent evidence while preserving partial credit for non-HTTP or unmeasurable work.
+  Run-level goal proof does not treat an `UNKNOWN` optional row (notably endpoint coverage for a
+  STATIC_WEB/CLI/LIBRARY deliverable) as unfinished work; measured WARN/FAIL optional evidence still
+  keeps the proof uncertain, and missing spec-adherence evidence remains explicitly unproven.
 - No approved product diff, deterministic zero spec adherence with named missing requirements, or
   zero required-endpoint coverage forces both headline scores to zero and `pipelineResult=FAILED`.
 - Concrete test evidence is monotonic. The run-end workspace suite may establish positive counts;
