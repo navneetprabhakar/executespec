@@ -26,6 +26,7 @@ public class TestCommandResolver {
   public enum Framework {
     PYTEST,
     JEST,
+    VITEST,
     SUREFIRE, // mvn / gradle JUnit
     GO,
     CARGO,
@@ -59,7 +60,9 @@ public class TestCommandResolver {
       // Only run if a "test" script exists AND it isn't the npm-init placeholder that exits 1.
       String pkg = read(workspaceRoot.resolve("package.json"));
       if (pkg.contains("\"test\"") && !pkg.contains("Error: no test specified")) {
-        return Optional.of(new TestCommand("npm test --silent", 600, Framework.JEST, "npm"));
+        Framework framework =
+            pkg.toLowerCase().contains("vitest") ? Framework.VITEST : Framework.JEST;
+        return Optional.of(new TestCommand("npm test --silent", 600, framework, "npm"));
       }
       return Optional.empty();
     }
@@ -68,7 +71,12 @@ public class TestCommandResolver {
         || exists(workspaceRoot, "requirements.txt")
         || hasPytestFiles(workspaceRoot)) {
       // -q gives the "N passed, M failed" summary line the parser reads.
-      return Optional.of(new TestCommand("python3 -m pytest -q", 600, Framework.PYTEST, "pytest"));
+      String python =
+          exists(workspaceRoot, ".venv/bin/python")
+              ? ".venv/bin/python"
+              : exists(workspaceRoot, "venv/bin/python") ? "venv/bin/python" : "python3";
+      return Optional.of(
+          new TestCommand(python + " -m pytest -q", 600, Framework.PYTEST, "pytest"));
     }
     return Optional.empty();
   }

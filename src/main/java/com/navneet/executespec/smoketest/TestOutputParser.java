@@ -33,6 +33,13 @@ public final class TestOutputParser {
   private static final Pattern JEST_FAILED = Pattern.compile("Tests:.*?(\\d+)\\s+failed");
   private static final Pattern JEST_SKIPPED = Pattern.compile("Tests:.*?(\\d+)\\s+skipped");
 
+  // Vitest: "Tests  4 failed | 10 passed (14)". The failed/skipped clauses are optional.
+  private static final Pattern VITEST_SUMMARY =
+      Pattern.compile("(?m)^\\s*Tests\\s+(.+?)\\((\\d+)\\)\\s*$");
+  private static final Pattern VITEST_PASSED = Pattern.compile("(\\d+)\\s+passed");
+  private static final Pattern VITEST_FAILED = Pattern.compile("(\\d+)\\s+failed");
+  private static final Pattern VITEST_SKIPPED = Pattern.compile("(\\d+)\\s+skipped");
+
   // surefire/gradle: "Tests run: 7, Failures: 2, Errors: 0, Skipped: 1"  (may appear many times;
   // we sum every occurrence so multi-module / multi-class runs aggregate correctly)
   private static final Pattern SUREFIRE_LINE =
@@ -67,6 +74,7 @@ public final class TestOutputParser {
     return switch (framework) {
       case PYTEST -> parsePytest(output);
       case JEST -> parseJest(output);
+      case VITEST -> parseVitest(output);
       case SUREFIRE -> parseSurefire(output);
       case CARGO -> parseCargo(output);
       case GO -> parseGo(output, exitCode);
@@ -96,6 +104,20 @@ public final class TestOutputParser {
     int s = orZero(firstInt(JEST_SKIPPED, out));
     if (invalidCounts(total, p, f, 0, s)) return Optional.empty();
     return Optional.of(summary(total, p, f, 0, s));
+  }
+
+  private static Optional<TestExecutionSummary> parseVitest(String out) {
+    // Runner output may carry ANSI colour sequences even under npm --silent.
+    String clean = out.replaceAll("\\u001B\\[[;\\d]*m", "");
+    Matcher summary = VITEST_SUMMARY.matcher(clean);
+    if (!summary.find()) return Optional.empty();
+    int total = Integer.parseInt(summary.group(2));
+    String counts = summary.group(1);
+    int passed = orZero(firstInt(VITEST_PASSED, counts));
+    int failed = orZero(firstInt(VITEST_FAILED, counts));
+    int skipped = orZero(firstInt(VITEST_SKIPPED, counts));
+    if (invalidCounts(total, passed, failed, 0, skipped)) return Optional.empty();
+    return Optional.of(summary(total, passed, failed, 0, skipped));
   }
 
   private static Optional<TestExecutionSummary> parseSurefire(String out) {

@@ -24,6 +24,14 @@ final class TerminalStatusResolver {
     boolean anyWarn = exec.anyIntermediateWarning();
     boolean anyTaskSucceeded = exec.tasksSuccessful() > 0;
 
+    // A clean reviewer/build cannot erase an unrecoverable or unverified final worker outcome.
+    // Review proves the resulting tree builds; it does not prove the worker completed its task or
+    // that its tests passed.
+    if (exec.finalTaskStatus()
+        == com.navneet.executespec.harness.TaskOutcome.Status.COMPLETED_WITH_WARNING) {
+      return new Result("PARTIAL", "FINAL_TASK_WARNING");
+    }
+
     if (buildPassed
         && verdict != null
         && (verdict == ReviewerResult.Overall.CLEAN
