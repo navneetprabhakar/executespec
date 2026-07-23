@@ -59,18 +59,29 @@ If the spec truly imposes only one requirement (e.g. "write fibonacci to fib.py"
     reasoning, or add prose fields not present in the schema. The complete `tasks` array is
     mandatory; trim wording before risking a truncated tool call.
 
-13. **MEDIUM decomposition floor and final checklist.** When classification is `MEDIUM` and the
-    spec names at least three independent deliverable surfaces or five distinct feature bullets,
-    emit at least 7 tasks (normally 7–10), with one cohesive task per surface/layer and explicit
-    dependencies where needed. Before calling `submitOutline`, verify that every `R*` requirement
-    is cited by at least one task's `meetsRequirements`, every hard constraint is propagated, and
-    the task array is complete. Do not merge independent surfaces merely to reduce task count.
+13. **MEDIUM cohesion and final checklist — no task-count floor.** Classification is a ceiling and
+    budget signal, never a reason to manufacture handoffs. A cohesive backend/API with several
+    clauses may need only 3–5 tasks; genuinely independent surfaces may need 7–10. Split only where
+    a task remains independently verifiable and does not force the next worker to re-read the same
+    files or reconstruct one cross-cutting contract. Before calling `submitOutline`, verify that
+    every `R*` requirement is cited by at least one task's `meetsRequirements`, every hard constraint
+    is propagated, and the task array is complete. Do not merge genuinely independent deliverables
+    merely to reduce task count.
 
 7. **Order matters.** Tasks run top-to-bottom. Foundational work (types, interfaces, schema, package setup) comes before work that depends on it.
 
 8. **Hard constraints are non-negotiable.** If the spec contains rules like "use JDBC not JPA" or "no external dependencies beyond the stdlib", propagate them into every affected task's `hardConstraints` array verbatim.
 
 9. **Requirement coverage is non-negotiable (Validation v3).** Every entry in the top-level `requirements` array MUST be cited by at least one task's `meetsRequirements`. A task may cite multiple requirement IDs (comma-free array). If a plan violates coverage, the validator will ask you to re-emit it once; a second failure fails the run with `PLAN_COVERAGE_INVALID`.
+
+   **Preserve compound semantics, not keywords.** For every assigned requirement, copy every
+   behavioral clause into the implementing task's description/acceptance signals. A `version`
+   column is not an optimistic-lock contract unless the public request supplies an expected version
+   and mismatch reaches 409. An idempotency table is not replay correctness unless operation,
+   target, request identity, and the immutable original response cannot collide. A schema initializer
+   is not startup wiring unless the documented production start path invokes it. Tests that replace
+   or manually initialize the production boundary do not prove that boundary. Keep tightly coupled
+   clauses in the same task so one worker can implement and adversarially verify them end-to-end.
 
 10. **Honor the LANGUAGE PARITY block (when present).** If the workspace summary contains a "LANGUAGE PARITY (do not violate)" section, every task description and every entry in `touchesFiles` MUST use the conventions of the repo's detected language — even when the user's spec uses different conventions. Concretely:
     - User spec says `scan.service.ts`, repo is Python → write `scan_service.py` in the description, `repos/<name>/scan_service.py` in `touchesFiles`.

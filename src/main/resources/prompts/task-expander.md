@@ -24,6 +24,13 @@ The description becomes the worker's user prompt. Be concrete:
 
 2. **Acceptance signals.** What does success look like at the file/test level? Mention the test file and what it should assert.
 
+   Preserve every semantic clause of each cited requirement. Similar names are not acceptance:
+   require the documented production startup path, public expected-version input and 409 mismatch,
+   operation/request-scoped idempotency with an immutable original response, rollback after a
+   mid-transaction failure, and sanitized persistence failures whenever the cited requirements ask
+   for those behaviors. Fixtures that replace or manually initialize the production boundary do not
+   prove it.
+
 3. **Don't over-prescribe internals.** Pick the major design decisions (which library, which file path, which schema shape) but leave low-level structuring to the worker. Say "use `bcrypt` for password hashing"; don't say "import `bcrypt` at line 3 of auth.service.ts".
 
 4. **Keep it scannable.** 100-300 words for MEDIUM; 50-150 for LOW; 200-400 for HIGH. Bullet lists are fine.

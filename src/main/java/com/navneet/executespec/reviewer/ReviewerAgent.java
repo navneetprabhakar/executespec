@@ -611,7 +611,7 @@ public class ReviewerAgent {
     // Preserve the exact validated pair handed across the orchestration boundary.
     String reviewerModel = req.model();
     String reviewerProviderName = reviewerProvider.name().toLowerCase();
-    String userPrompt = composeReviewerUserPrompt(preBuildError);
+    String userPrompt = composeReviewerUserPrompt(req, preBuildError);
     WorkerTaskRequest workerRequest =
         WorkerTaskRequest.builder()
             .provider(reviewerProviderName)
@@ -648,21 +648,29 @@ public class ReviewerAgent {
    * has a concrete target rather than a generic "look around for issues" prompt.
    */
   static String composeReviewerUserPrompt(String preBuildError) {
+    return composeReviewerUserPrompt(null, preBuildError);
+  }
+
+  static String composeReviewerUserPrompt(ReviewerRequest req, String preBuildError) {
+    String contractEvidence = reviewerContractEvidence(req);
+    String prefix = contractEvidence.isBlank() ? "" : contractEvidence + "\n\n";
     if (preBuildError == null || preBuildError.isBlank()) {
-      return "Begin your review now. Use the tools to inspect, fix, build, "
-          + "and then call completeTask.";
+      return prefix
+          + "Begin your review now. Use the tools to inspect, fix, build, and then call"
+          + " completeTask.";
     }
-    return """
-           BUILD IS CURRENTLY FAILING. Your job is to make it pass.
+    return prefix
+        + """
+          BUILD IS CURRENTLY FAILING. Your job is to make it pass.
 
-           The build error below is your spec. Read it carefully — the specific files,
-           line numbers, and error messages name the exact problem. Match the fix to
-           the error: don't refactor unrelated code, don't reorganise; identify the
-           root cause, edit the affected files, run buildProject, and only call
-           completeTask after the build returns exit=0.
+          The build error below is your spec. Read it carefully — the specific files,
+          line numbers, and error messages name the exact problem. Match the fix to
+          the error: don't refactor unrelated code, don't reorganise; identify the
+          root cause, edit the affected files, run buildProject, and only call
+          completeTask after the build returns exit=0.
 
-           --- BUILD ERROR (verbatim, captured before this review pass) ---
-           """
+          --- BUILD ERROR (verbatim, captured before this review pass) ---
+          """
         + PromptTrustBoundary.wrap("BUILD_ERROR", truncateBuildError(preBuildError))
         + """
 
@@ -672,6 +680,38 @@ Begin now. Use readFile / editFile to fix the source files, then call
 buildProject to verify. Do NOT call completeTask before buildProject reports
 exit=0 — the harness will reject premature completions.
 """;
+  }
+
+  private static String reviewerContractEvidence(ReviewerRequest req) {
+    if (req == null) return "";
+    StringBuilder evidence =
+        new StringBuilder(
+            "Review against the customer's exact contracts below, not merely whether the build"
+                + " and generated tests are green. A requirement is not satisfied until every"
+                + " semantic clause is present in production wiring and exercised without test-only"
+                + " substitutions.\n");
+    if (req.originalGoal() != null && !req.originalGoal().isBlank()) {
+      evidence
+          .append('\n')
+          .append(PromptTrustBoundary.wrap("ORIGINAL_SPEC", req.originalGoal().strip()));
+    }
+    if (req.requirements() != null && !req.requirements().isEmpty()) {
+      StringBuilder rows = new StringBuilder();
+      for (com.navneet.executespec.agent.RequirementSpec requirement : req.requirements()) {
+        if (requirement == null) continue;
+        rows.append("- ")
+            .append(requirement.id())
+            .append(" [")
+            .append(requirement.kind())
+            .append("]: ")
+            .append(requirement.text())
+            .append('\n');
+      }
+      evidence
+          .append("\n\n")
+          .append(PromptTrustBoundary.wrap("PLAN_REQUIREMENTS", rows.toString().stripTrailing()));
+    }
+    return evidence.toString().stripTrailing();
   }
 
   /**

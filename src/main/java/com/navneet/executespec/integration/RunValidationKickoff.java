@@ -212,6 +212,7 @@ class RunValidationKickoff {
                 planningModel.providerName(),
                 planningModel,
                 run.getUserRequest() == null ? "" : run.getUserRequest(),
+                plan == null ? java.util.List.of() : plan.requirements(),
                 deterministicReviewIssues);
         review.setAccuracyReport(accuracy);
       } catch (Exception e) {

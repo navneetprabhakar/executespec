@@ -68,6 +68,11 @@ For LARGE and LEGACY specs, use the supplied MAX_TASKS hint as the hard ceiling
 
 2. **Single-responsibility, not single-file — do NOT over-decompose.** Each task is one cohesive change (a feature or a layer) and may span several files. The worker has a large per-task iteration budget, so prefer the FEWEST cohesive tasks over many fine-grained ones — over-fragmentation multiplies fixed per-task overhead (fresh worker context + a build smoke each) and slows the run without improving quality. Cohesion, not file count, is the unit.
 
+   Keep compound contracts together. Startup plus schema initialization, public optimistic-version
+   input plus conflict mapping, and idempotency identity plus immutable replay are end-to-end
+   behaviors; do not split their storage, service, API, and adversarial-test clauses into skeletons
+   that no single worker owns completely.
+
 3. **Unit tests must be planned.** If the spec adds production code, plan a test task immediately after (same file or sibling test file). If the project genuinely cannot be tested (one-file static page), say so in `planSummary`.
 
 4. **README policy** — same rules as full-mode planner. Empty workspace → final README task. Existing-repo run → only update README if install/run/config/public-API surface changes. Multi-repo project → per-repo README task only when that repo's surface changes.

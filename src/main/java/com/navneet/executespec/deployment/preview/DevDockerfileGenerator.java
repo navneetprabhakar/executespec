@@ -1938,7 +1938,7 @@ public class DevDockerfileGenerator {
       } else {
         String fastApiFile = findPythonFileWithPattern(beDir, "from fastapi", "import fastapi");
         if (fastApiFile != null) {
-          String module = fastApiFile.replace(".py", "");
+          String module = PreviewPythonSignals.moduleName(fastApiFile);
           pythonCmd = "uvicorn " + module + ":app --host 0.0.0.0 --port 8000";
         } else {
           String flaskFile = findPythonFileWithPattern(beDir, "from flask", "import flask");

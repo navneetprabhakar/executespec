@@ -1955,6 +1955,7 @@ public class RunOrchestrator implements RunControlPort {
                         requireContinuationBenchmarkPrior)
                     .routePinned(routePinned)
                     .lowComplexityWorkerStartTier(lowComplexityWorkerStartTierOverride)
+                    .originalGoal(userRequest)
                     .designBlock(designBlock)
                     .projectId(projectId)
                     // Multi-repo runs depend on the worker seeing the "MULTI-REPO PROJECT
@@ -2113,6 +2114,8 @@ public class RunOrchestrator implements RunControlPort {
                     .allowedRepoRoots(reviewerRepoRoots(projectId, selectedRepoIds))
                     .approvedNewFiles(reviewerApprovedNewFiles(plan))
                     .allowBuildManifestCreation(false)
+                    .originalGoal(userRequest)
+                    .requirements(plan.requirements())
                     .build());
         persistenceWriter.persistReview(runId, reviewResult);
         // Phase 3 delta: tokens spent by reviewer (general + wiring passes).
@@ -3588,6 +3591,8 @@ public class RunOrchestrator implements RunControlPort {
                   .initialProviderSwitchesUsed(seededUsage.providerSwitches())
                   .initialModelStepUpsUsed(seededUsage.modelStepUps())
                   .initialModelStepDownsUsed(seededUsage.modelStepDowns())
+                  .originalGoal(
+                      runRepo.findById(runId).map(PipelineRun::getUserRequest).orElse(null))
                   .designBlock(designBlock)
                   .projectId(projectId)
                   .workspaceSummary(
@@ -3625,6 +3630,9 @@ public class RunOrchestrator implements RunControlPort {
                     .allowedRepoRoots(reviewerRepoRoots(projectId, selectedRepoIds))
                     .approvedNewFiles(reviewerApprovedNewFiles(plan))
                     .allowBuildManifestCreation(false)
+                    .originalGoal(
+                        runRepo.findById(runId).map(PipelineRun::getUserRequest).orElse(null))
+                    .requirements(plan.requirements())
                     .build());
         persistenceWriter.persistReview(runId, rerunReviewResult);
         RunCostTracker.Snapshot afterRerunReview = costTracker.snapshot(runId);

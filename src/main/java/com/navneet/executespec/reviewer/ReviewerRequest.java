@@ -2,6 +2,7 @@ package com.navneet.executespec.reviewer;
 
 import java.util.List;
 
+import com.navneet.executespec.agent.RequirementSpec;
 import com.navneet.executespec.tool.ExecutionContext;
 
 import lombok.Builder;
@@ -30,7 +31,9 @@ public record ReviewerRequest(
     Boolean brownfield,
     List<String> allowedRepoRoots,
     List<String> approvedNewFiles,
-    Boolean allowBuildManifestCreation) {
+    Boolean allowBuildManifestCreation,
+    String originalGoal,
+    List<RequirementSpec> requirements) {
 
   public ReviewerRequest {
     if (provider == null || provider.isBlank())
@@ -42,5 +45,6 @@ public record ReviewerRequest(
     if (allowedRepoRoots == null) allowedRepoRoots = List.of();
     if (approvedNewFiles == null) approvedNewFiles = List.of();
     if (allowBuildManifestCreation == null) allowBuildManifestCreation = false;
+    if (requirements == null) requirements = List.of();
   }
 }

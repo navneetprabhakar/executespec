@@ -868,6 +868,7 @@ public class RunLifecycleService {
                       .enableSmokeTests(!localRun)
                       .localHandsMode(localRun)
                       .routePinned(row.isRoutePinned())
+                      .originalGoal(row.getUserRequest())
                       .designBlock(null) // not persisted on the row — runs without it on resume
                       .projectId(projectId)
                       .workspaceSummary(
@@ -930,6 +931,8 @@ public class RunLifecycleService {
                     .context(rootCtx)
                     .buildCommand(plan.buildCommand())
                     .skipWiringPass(false)
+                    .originalGoal(row.getUserRequest())
+                    .requirements(plan.requirements())
                     .build());
         persistenceWriter.persistReview(runId, reviewResult);
       } catch (Exception e) {
@@ -1180,6 +1183,7 @@ public class RunLifecycleService {
                             .initialProviderSwitchesUsed(approvedUsage.providerSwitches())
                             .initialModelStepUpsUsed(approvedUsage.modelStepUps())
                             .initialModelStepDownsUsed(approvedUsage.modelStepDowns())
+                            .originalGoal(row == null ? null : row.getUserRequest())
                             .designBlock(null)
                             .projectId(row == null ? null : row.getProjectId())
                             .workspaceSummary(
@@ -1272,6 +1276,9 @@ public class RunLifecycleService {
                   .context(rootCtx)
                   .buildCommand(plan.buildCommand())
                   .skipWiringPass(false)
+                  .originalGoal(
+                      runRepo.findById(runId).map(PipelineRun::getUserRequest).orElse(null))
+                  .requirements(plan.requirements())
                   .build());
       persistenceWriter.persistReview(runId, reviewResult);
       RunCostTracker.Snapshot afterReview = costTracker.snapshot(runId);
@@ -1769,10 +1776,11 @@ public class RunLifecycleService {
     ExecutionContext rootCtx = new ExecutionContext(runId, "_re_review_", workspace);
 
     String buildCommand = null;
+    Plan parsedPlan = null;
     if (run.getPlanJson() != null && !run.getPlanJson().isBlank()) {
       try {
-        Plan plan = objectMapper.readValue(run.getPlanJson(), Plan.class);
-        buildCommand = plan.buildCommand();
+        parsedPlan = objectMapper.readValue(run.getPlanJson(), Plan.class);
+        buildCommand = parsedPlan.buildCommand();
       } catch (Exception e) {
         log.debug(
             "RunOrchestrator reReview run={} could not parse planJson; relying on auto-detect",
@@ -1796,6 +1804,8 @@ public class RunLifecycleService {
                   .context(rootCtx)
                   .buildCommand(buildCommand)
                   .skipWiringPass(false)
+                  .originalGoal(run.getUserRequest())
+                  .requirements(parsedPlan == null ? List.of() : parsedPlan.requirements())
                   .build());
       persistenceWriter.persistReview(runId, reviewResult);
     } catch (Exception e) {

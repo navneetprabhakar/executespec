@@ -6,8 +6,11 @@ import static org.mockito.Mockito.mock;
 
 import java.util.List;
 
+import com.navneet.executespec.agent.Plan;
 import com.navneet.executespec.agent.PlannedTask;
 import com.navneet.executespec.agent.PlannedTask.Complexity;
+import com.navneet.executespec.agent.RequirementSpec;
+import com.navneet.executespec.agent.RequirementSpec.RequirementKind;
 
 import org.junit.jupiter.api.Test;
 
@@ -49,7 +52,7 @@ class MultiRepoWorkerPromptTest {
             .composeSystemPrompt(
                 adversarialTask, injection, injection, null, injection, "deepseek", null, false);
     String evidence =
-        SequentialExecutor.composeWorkerEvidence(
+        PromptComposer.composeWorkerEvidence(
             adversarialTask, injection, injection, injection, injection, injection);
     String user = PromptComposer.composeUserPrompt(adversarialTask, injection, evidence);
 
@@ -68,6 +71,56 @@ class MultiRepoWorkerPromptTest {
             "BUILD_ERROR")) {
       assertTrue(user.contains("<<<UNTRUSTED_" + label), label + " must be bounded");
       assertTrue(user.contains("UNTRUSTED_" + label + ">>>"), label + " must close");
+    }
+  }
+
+  @Test
+  void exactTaskRequirementsAndOriginalSpecReachEveryProviderThroughSharedEvidence() {
+    PlannedTask task =
+        PlannedTask.builder()
+            .id("T4")
+            .title("Implement reservation API")
+            .description("Add the routes.")
+            .complexity(Complexity.MEDIUM)
+            .meetsRequirements(List.of("R4", "R7"))
+            .build();
+    Plan plan =
+        Plan.builder()
+            .tasks(List.of(task))
+            .requirements(
+                List.of(
+                    new RequirementSpec(
+                        "R4",
+                        "GET /items/{sku} includes available and reserved quantities.",
+                        RequirementKind.FUNCTIONAL),
+                    new RequirementSpec(
+                        "R7",
+                        "Requests carry an expected version and mismatches return HTTP 409.",
+                        RequirementKind.FUNCTIONAL),
+                    new RequirementSpec(
+                        "R99", "Unrelated documentation requirement.", RequirementKind.CONSTRAINT)))
+            .build();
+    String original = "Build an inventory API with exact concurrency and replay contracts.";
+
+    String evidence =
+        PromptComposer.composeWorkerEvidence(task, null, null, null, null, null, plan, original);
+    for (String provider :
+        List.of("anthropic", "openai", "gemini", "deepseek", "openrouter", "fireworks")) {
+      String system =
+          newExecutor()
+              .composeSystemPrompt(task, null, null, "python", null, provider, null, false);
+      String user = PromptComposer.composeUserPrompt(task, null, evidence);
+      assertTrue(system.contains("EVERY semantic clause in TASK_REQUIREMENTS"), provider);
+      assertTrue(system.contains("cross-operation reuse of"), provider);
+      assertTrue(system.contains("shared idempotency keys"), provider);
+      assertTrue(system.contains("RUNTIME COMPATIBILITY"), provider);
+      assertTrue(user.contains("<<<UNTRUSTED_ORIGINAL_SPEC"), provider);
+      assertTrue(user.contains("<<<UNTRUSTED_TASK_REQUIREMENTS"), provider);
+      assertTrue(user.contains("R4 [FUNCTIONAL]"), provider);
+      assertTrue(user.contains("available and reserved quantities"), provider);
+      assertTrue(user.contains("R7 [FUNCTIONAL]"), provider);
+      assertTrue(user.contains("mismatches return HTTP 409"), provider);
+      assertFalse(user.contains("R99"), provider);
     }
   }
 
@@ -127,7 +180,7 @@ class MultiRepoWorkerPromptTest {
     String systemPrompt =
         newExecutor().composeSystemPrompt(task(), null, null, null, workspaceSummary);
     String prompt =
-        SequentialExecutor.composeWorkerEvidence(task(), null, null, workspaceSummary, null, null);
+        PromptComposer.composeWorkerEvidence(task(), null, null, workspaceSummary, null, null);
 
     assertFalse(systemPrompt.contains("MULTI-REPO PROJECT WORKSPACE"));
     assertTrue(prompt.contains("<<<UNTRUSTED_WORKSPACE_SUMMARY"));
@@ -244,7 +297,7 @@ class MultiRepoWorkerPromptTest {
 
     String systemPrompt = newExecutor().composeSystemPrompt(t, null, null, null, workspaceSummary);
     String prompt =
-        SequentialExecutor.composeWorkerEvidence(t, null, null, workspaceSummary, null, null);
+        PromptComposer.composeWorkerEvidence(t, null, null, workspaceSummary, null, null);
 
     assertFalse(systemPrompt.contains("MULTI-REPO PROJECT WORKSPACE"));
     assertTrue(prompt.contains("<<<UNTRUSTED_WORKSPACE_SUMMARY"));
