@@ -22,10 +22,11 @@ final class AgentNonRunIntents {
               0.98,
               "capabilities_overview",
               false,
-              "I can inspect and explain linked project or run context, turn a clear code-change"
-                  + " request for a selected writable project into a confirmation-gated remote"
-                  + " run, and follow the run through plan approval, execution, and evidence. You"
-                  + " stay in control of confirmations and the plan gate.",
+              "- Inspect and explain linked project or run context.\n"
+                  + "- Turn a clear code-change request for a selected writable project into a"
+                  + " confirmation-gated remote run.\n"
+                  + "- Follow the run through plan approval, execution, and evidence; you stay in"
+                  + " control of confirmations and the plan gate.",
               null,
               false,
               false,
