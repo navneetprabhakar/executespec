@@ -8,12 +8,7 @@
 # localhost:5432. The per-env Cloud SQL mapping lives in application-{dev,prod}.yml.
 # Without a benchmark profile the VM ran SPRING_PROFILES_ACTIVE=benchmark,gcp → no
 # datasource override → Flyway dialed localhost → crash-loop. This maps the env vars
-# startup.sh writes (POSTGRES_*, REDIS_*) and wires Google/GitHub OAuth for the
-# benchmark.executespec.ai origin.
-#
-# ⚠️ OAuth: register https://benchmark.executespec.ai/api/auth/oauth2/callback/google
-#    (and /github) on the OAuth client's Authorized-redirect-URIs, else Google
-#    returns redirect_uri_mismatch.
+# startup.sh writes (POSTGRES_*, REDIS_*).
 
 spring:
   data:
@@ -43,25 +38,6 @@ spring:
   autoconfigure:
     exclude:
       - org.springframework.boot.actuate.autoconfigure.tracing.otlp.OtlpAutoConfiguration
-  security:
-    oauth2:
-      client:
-        registration:
-          google:
-            # client-id is public (appears in OAuth redirect URLs); only the secret is sensitive → env-only.
-            client-id: ${GOOGLE_OAUTH_CLIENT_ID:1061994342941-5rrf50jalmdkg0l5rck95ucc0fenh0vr.apps.googleusercontent.com}
-            client-secret: ${GOOGLE_OAUTH_CLIENT_SECRET:}
-            scope: openid, email, profile
-            redirect-uri: https://benchmark.executespec.ai/api/auth/oauth2/callback/{registrationId}
-          github:
-            client-id: ${GITHUB_OAUTH_CLIENT_ID:Ov23lijrPPx9fhPemczg}
-            client-secret: ${GITHUB_OAUTH_CLIENT_SECRET:}
-            scope: user:email, read:user
-            redirect-uri: https://benchmark.executespec.ai/api/auth/oauth2/callback/{registrationId}
-        provider:
-          github:
-            user-name-attribute: login
-
 # ── Server (LB terminates TLS, forwards X-Forwarded-Proto) ───────────────────
 server:
   forward-headers-strategy: framework
