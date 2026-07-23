@@ -14,6 +14,20 @@ import org.junit.jupiter.api.Test;
 class AgentNonRunIntentsTest {
 
   @Test
+  void capabilitiesQuestionReturnsTruthfulDeterministicOverview() {
+    var decision = decideBefore("Tell me about your features", null);
+
+    assertThat(decision.route()).isEqualTo("CHAT_ONLY");
+    assertThat(decision.reasonCode()).isEqualTo("capabilities_overview");
+    assertThat(decision.assistantReply())
+        .contains("confirmation-gated remote run")
+        .contains("plan gate")
+        .doesNotContain("cannot submit");
+    assertThat(decision.proposedAction()).isNull();
+    assertThat(decision.policy().runApiAllowed()).isFalse();
+  }
+
+  @Test
   void localDeterministicActionStaysClientSide() {
     var decision = decideBefore("commit all files and push to git", "project-1");
 

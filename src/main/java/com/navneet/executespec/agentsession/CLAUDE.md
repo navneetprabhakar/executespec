@@ -323,7 +323,11 @@ turns separately from runs.
   `AgentActionContext` cannot simultaneously be confirmable and carry blocking reasons.
 - `AgentNonRunIntentsTest` pins non-run routing around the code-change branch: local terminal
   actions, review/plan, vague mutation clarification, read-only code help, cost queries, and
-  project resolution cannot call the run API.
+  project resolution cannot call the run API. Web capability questions are also answered from a
+  deterministic product contract: the agent can inspect linked context, propose a
+  confirmation-gated remote run for a selected writable project, and follow plan/execution/evidence;
+  the provider is not allowed to replace that contract with stale "execution happens elsewhere"
+  copy.
 - `AgentChatFallbackIntentTest` pins the default fallback route as `CHAT_ONLY` with no proposed
   action, no confirmation, and no run API access.
 - `AgentIntentPatternsTest` pins route-vocabulary helpers directly: UUID/short-run-id extraction,

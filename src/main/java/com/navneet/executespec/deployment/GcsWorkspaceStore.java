@@ -28,7 +28,9 @@ import lombok.extern.slf4j.Slf4j;
  *
  * <ul>
  *   <li>{@code roles/storage.objectAdmin} — upload / delete objects in the bucket
- *   <li>{@code roles/iam.serviceAccountTokenCreator} — generate signed URLs
+ *   <li>{@code roles/storage.bucketViewer} — read the configured bucket during startup admission
+ *   <li>{@code roles/iam.serviceAccountTokenCreator} on the runtime service account itself —
+ *       generate signed URLs
  * </ul>
  *
  * <p>GCS object key format: {@code {env}/workspace/{runId}.zip}

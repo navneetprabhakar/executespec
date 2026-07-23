@@ -98,6 +98,10 @@ export default function IdeRunResult() {
   const [run, setRun] = useState<api.RunDetail | null>(null);
   const [costEvidence, setCostEvidence] = useState<api.RunCostEvidence | null>(null);
   const [report, setReport] = useState<api.ValidationReportData | null>(null);
+  // The validation report is produced after the executor's task-boundary decision and can carry
+  // stronger final proof. Prefer it so Steps does not keep saying "Keep working" while Evidence
+  // already says the completed run is proven.
+  const effectiveRunGoal = report?.runGoalDecision ?? run?.runGoalDoneness;
   // D4 — the run-detail surfaces below all render affirmative absence claims
   // ("No evidence report.", "No files", "No timeline data yet.", and the
   // fabricated "patch and benchmark runs aren't scored" explanation). Track the
@@ -1885,29 +1889,29 @@ export default function IdeRunResult() {
         {tab === 'Tasks' && (
           <div className='ide-pane' style={{position: 'absolute', inset: 0, overflowY: 'auto'}}>
             <h1 className='ide-h1'>Steps</h1>
-            {run?.runGoalDoneness && (
+            {effectiveRunGoal && (
               <div className='ide-card' style={{marginBottom: 12}}>
                 <div style={{display: 'flex', alignItems: 'center', gap: 8}}>
-                  <IdeBadge kind={goalStateKind(run.runGoalDoneness.state)}>
-                    {goalStateLabel(run.runGoalDoneness.state)}
+                  <IdeBadge kind={goalStateKind(effectiveRunGoal.state)}>
+                    {goalStateLabel(effectiveRunGoal.state)}
                   </IdeBadge>
-                  {run.runGoalDoneness.recommendedDecision && (
+                  {effectiveRunGoal.recommendedDecision && (
                     <span className='ide-mono' style={{fontSize: 12}}>
-                      {goalDecisionLabel(run.runGoalDoneness.recommendedDecision)}
+                      {goalDecisionLabel(effectiveRunGoal.recommendedDecision)}
                     </span>
                   )}
                 </div>
-                {goalDecisionHelp(run.runGoalDoneness.recommendedDecision) && (
+                {goalDecisionHelp(effectiveRunGoal.recommendedDecision) && (
                   <div style={{fontSize: 12, marginTop: 8, color: 'var(--ide-fg-muted)'}}>
-                    {goalDecisionHelp(run.runGoalDoneness.recommendedDecision)}
+                    {goalDecisionHelp(effectiveRunGoal.recommendedDecision)}
                   </div>
                 )}
-                {run.runGoalDoneness.reason && (
-                  <div style={{fontSize: 13, marginTop: 8}}>{run.runGoalDoneness.reason}</div>
+                {effectiveRunGoal.reason && (
+                  <div style={{fontSize: 13, marginTop: 8}}>{effectiveRunGoal.reason}</div>
                 )}
-                {run.runGoalDoneness.recommendedNextStep && (
+                {effectiveRunGoal.recommendedNextStep && (
                   <div style={{fontSize: 12, marginTop: 8, color: 'var(--ide-fg-muted)'}}>
-                    Next: {run.runGoalDoneness.recommendedNextStep}
+                    Next: {effectiveRunGoal.recommendedNextStep}
                   </div>
                 )}
               </div>
@@ -1921,13 +1925,14 @@ export default function IdeRunResult() {
                   const goalLine = taskComplete ? null : taskGoalLine(t);
                   const continuationActionLine = latestContinuationAction(t);
                   const budgetFacts = taskComplete ? [] : taskBudgetFacts(t);
-                  const incompleteItems = t.goalDoneness?.incompleteItems || [];
-                  const risks = t.goalDoneness?.risks || [];
+                  const incompleteItems = taskComplete ? [] : t.goalDoneness?.incompleteItems || [];
+                  const risks = taskComplete ? [] : t.goalDoneness?.risks || [];
                   const approvalCandidate = continuationApprovalCandidate(t);
                   const approvalReason = continuationApprovalReason(t);
                   const policy = t.continuationDecision?.policy;
                   const rankingCandidates = policy?.topEligibleCandidates?.slice(0, 3) || [];
-                  const showModelRanking = isSuperAdmin && shouldShowModelRanking(t);
+                  const showModelRanking =
+                    isSuperAdmin && !taskComplete && shouldShowModelRanking(t);
                   const rankingDetails = policy ? modelRankingDetails(policy) : [];
                   const rejectedRankingCount =
                     policy?.rejectedBelowQualityThresholdCount ??
