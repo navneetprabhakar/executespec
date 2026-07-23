@@ -80,6 +80,17 @@ final class AgentIntentPatterns {
         "architecture");
   }
 
+  static boolean looksLikeCapabilitiesQuestion(String lower) {
+    return containsAny(
+        lower,
+        "what can you do",
+        "what are your features",
+        "tell me about your features",
+        "what are your capabilities",
+        "tell me about your capabilities",
+        "how can you help me");
+  }
+
   static boolean looksLikeReadOnlyCodeHelp(String lower) {
     if (lower.contains("find ") && lower.contains("bug") && !lower.contains("fix ")) {
       return true;

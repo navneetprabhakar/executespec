@@ -24,6 +24,62 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 class AgentStreamTurnRunnerTest {
 
   @Test
+  void capabilitiesOverviewSkipsProviderAndStreamsDeterministicCopy() throws Exception {
+    AgentSessionService sessionService = mock(AgentSessionService.class);
+    SpecChatService specChatService = mock(SpecChatService.class);
+    FeatureFlagService featureFlags = mock(FeatureFlagService.class);
+    AgentAttachmentService attachmentService = mock(AgentAttachmentService.class);
+    SseEmitter emitter = mock(SseEmitter.class);
+    AgentStreamTurnRunner runner =
+        new AgentStreamTurnRunner(sessionService, specChatService, featureFlags, attachmentService);
+    StreamTurnContext ctx =
+        new StreamTurnContext(
+            "session-1",
+            "turn-1",
+            1,
+            null,
+            null,
+            "org-1",
+            "user-1",
+            "anthropic",
+            null,
+            new OrchestratorDecision(
+                "CHAT_ONLY",
+                0.98,
+                "capabilities_overview",
+                false,
+                "I can propose a confirmation-gated remote run.",
+                null,
+                new OrchestratorPolicy(false, false, "informational"),
+                "trace-1"));
+
+    when(featureFlags.isEnabled("spec.chat.enabled")).thenReturn(true);
+
+    runner.run(emitter, ctx, null, new StreamTurnRequest("features", null, null, null, null, null));
+
+    verify(specChatService, never())
+        .runTurn(
+            any(),
+            any(),
+            anyString(),
+            any(),
+            any(),
+            anyString(),
+            any(),
+            any(),
+            any(),
+            any(),
+            anyString());
+    verify(sessionService)
+        .completeStreamTurn(
+            eq(ctx),
+            eq("I can propose a confirmation-gated remote run."),
+            any(RunCostTracker.Snapshot.class),
+            eq("OK"));
+    verify(emitter).complete();
+  }
+
+  @Test
   void mapsDurableBudgetFailureToActionableCustomerCopy() {
     AgentSessionService sessionService = mock(AgentSessionService.class);
     SpecChatService specChatService = mock(SpecChatService.class);

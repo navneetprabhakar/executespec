@@ -44,7 +44,10 @@ LOCAL-hands runs are excluded from GCS workspace upload queries and the event li
   `uploadArtifact` / `copyObjectTo` methods also back V289 private project-export objects. Generic
   keys are environment-prefixed; project exports must separately opt in through
   `project.exports.gcs-enabled=true`, so configuring workspace archival alone cannot redirect
-  export bytes to GCS.
+  export bytes to GCS. The runtime service account needs bucket-scoped
+  `roles/storage.objectAdmin`, bucket-scoped `roles/storage.bucketViewer` for the startup bucket
+  probe, and self-scoped `roles/iam.serviceAccountTokenCreator` for signed downloads; missing the
+  probe permission disables the store at boot even when object access would otherwise work.
 - `WorkspaceExportService.java` — ZIP/repo handoff now applies `ArtifactPublicationGuard` to every
   included file and to restored GCS ZIP members before returning bytes. Secret-like content blocks
   the export; symlinks are omitted so an archive cannot follow a link outside the run workspace.

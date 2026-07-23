@@ -165,7 +165,8 @@ public class AgentStreamTurnRunner {
       if (ctx.decision().requiresUserConfirmation()
           || "CLARIFY".equals(ctx.decision().route())
           || "SECURITY_REJECT".equals(ctx.decision().route())
-          || "LOCAL_TOOL_ACTION".equals(ctx.decision().route())) {
+          || "LOCAL_TOOL_ACTION".equals(ctx.decision().route())
+          || "capabilities_overview".equals(ctx.decision().reasonCode())) {
         finishDecisionOnlyTurn(emitter, ctx);
         return;
       }
