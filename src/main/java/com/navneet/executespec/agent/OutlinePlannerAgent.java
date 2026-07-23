@@ -265,7 +265,18 @@ public class OutlinePlannerAgent {
   public Plan plan(PlannerRequest req, Mode mode) {
     long start = System.currentTimeMillis();
     try {
-      Plan plan = planOnce(req, null, mode);
+      Plan plan;
+      try {
+        plan = planOnce(req, null, mode);
+      } catch (IllegalStateException firstFailure) {
+        if (!OutlinePlannerSchemaRepairPolicy.isMalformedToolPayload(firstFailure))
+          throw firstFailure;
+        // Provider-native tool calling can still produce a truncated/invalid JSON argument string
+        // on a long outline. One schema-repair attempt is cheaper and safer than either executing
+        // a collapsed synthetic task or asking the customer to resubmit an identical run.
+        log.warn("OutlinePlanner emitted malformed tool JSON — retrying once with schema feedback");
+        plan = planOnce(req, OutlinePlannerSchemaRepairPolicy.FEEDBACK, mode);
+      }
 
       // v2.5.11 (Validation v3 / Pillar 1) — strict validation + one retry.
       // Gated by feature flag; off → log-only behaviour. SKELETON_ONLY mode
@@ -390,7 +401,7 @@ public class OutlinePlannerAgent {
                           .messages(messages)
                           .context(req.context())
                           .agentRole("OutlinePlannerAgent")
-                          .stepId("planner.outline")
+                          .stepId(OutlinePlannerSchemaRepairPolicy.stepId(retryFeedback))
                           .temperature(0.0)
                           .maxTokens(maxTokens)
                           .toolsOverride(List.of(submitOutline))

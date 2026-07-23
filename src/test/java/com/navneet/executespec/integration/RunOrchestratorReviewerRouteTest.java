@@ -209,7 +209,11 @@ class RunOrchestratorReviewerRouteTest {
   @Test
   void highVerifiedScoreDoesNotCountAsValidationReportQualityFailure() {
     ValidationReport report =
-        ValidationReport.builder().verifiedScore(86).pipelineResult(PipelineResult.PASSED).build();
+        ValidationReport.builder()
+            .verifiedScore(86)
+            .pipelineResult(PipelineResult.PASSED)
+            .executableVerificationStatus("PASSED")
+            .build();
 
     assertThat(RunOrchestrator.validationReportQualityFailed(report, 70)).isFalse();
   }
