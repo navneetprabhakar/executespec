@@ -1917,16 +1917,17 @@ export default function IdeRunResult() {
             ) : (
               <div className='ide-card' style={{padding: 0}}>
                 {run.tasks.map((t, i) => {
-                  const goalLine = taskGoalLine(t);
+                  const taskComplete = t.status === 'COMPLETE' || t.status === 'SUCCESS';
+                  const goalLine = taskComplete ? null : taskGoalLine(t);
                   const continuationActionLine = latestContinuationAction(t);
-                  const budgetFacts = taskBudgetFacts(t);
+                  const budgetFacts = taskComplete ? [] : taskBudgetFacts(t);
                   const incompleteItems = t.goalDoneness?.incompleteItems || [];
                   const risks = t.goalDoneness?.risks || [];
                   const approvalCandidate = continuationApprovalCandidate(t);
                   const approvalReason = continuationApprovalReason(t);
                   const policy = t.continuationDecision?.policy;
                   const rankingCandidates = policy?.topEligibleCandidates?.slice(0, 3) || [];
-                  const showModelRanking = shouldShowModelRanking(t);
+                  const showModelRanking = isSuperAdmin && shouldShowModelRanking(t);
                   const rankingDetails = policy ? modelRankingDetails(policy) : [];
                   const rejectedRankingCount =
                     policy?.rejectedBelowQualityThresholdCount ??
@@ -2022,7 +2023,7 @@ export default function IdeRunResult() {
                           {continuationActionLine}
                         </div>
                       )}
-                      {t.goalDoneness?.recommendedNextStep && (
+                      {!taskComplete && t.goalDoneness?.recommendedNextStep && (
                         <div style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 4}}>
                           Next: {t.goalDoneness.recommendedNextStep}
                         </div>

@@ -35,7 +35,11 @@ terminal, cross-tenant, out-of-policy and exhausted contexts fail before provide
 - Chat turns use `forChatTurn`: V283 usage is attributed to the initiating actor, while a
   cross-org project collaborator is bound to the host project's org and credential subject. Its
   V282 budget carries the chat token/USD/provider-call ceilings and is embedded in the immutable
-  `ProjectChatPolicy` used at every model/tool boundary.
+  `ProjectChatPolicy` used at every model/tool boundary. The atomic output reservation uses the
+  current request's real `max_tokens` for the call being admitted; already-authorized concurrent
+  calls retain the conservative largest-allowed-model reservation because their individual caps
+  are not persisted. This prevents a 1.2k chat call from being rejected against a 40k turn budget
+  merely because the org can also access a 131k-output model.
 - `LlmExecutionDispatchGuard` reloads the context and the current encrypted credential immediately
   before every physical provider attempt. A removed key, moved USER→ORG credential, changed
   key-source mode, disabled provider, invalid model, pin violation or call/token/cost exhaustion is

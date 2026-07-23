@@ -130,7 +130,9 @@ class LlmExecutionDispatchGuardTest {
             new LlmDispatchPolicyException(
                 LlmDispatchPolicyException.Reason.BUDGET_EXHAUSTED, "exhausted"))
         .when(budgetGate)
-        .reserveProviderCall(org.mockito.ArgumentMatchers.any());
+        .reserveProviderCall(
+            org.mockito.ArgumentMatchers.any(),
+            org.mockito.ArgumentMatchers.nullable(Integer.class));
 
     assertThatThrownBy(() -> guard.authorize(request("ctx-1", scope, "openai", "gpt-test")))
         .isInstanceOf(LlmDispatchPolicyException.class)

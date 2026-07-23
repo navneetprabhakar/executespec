@@ -203,8 +203,12 @@ public class OutlinePlannerAgent {
     String summarized = titleSummarizer.summarize(req.spec(), provider, runId);
     String title =
         (summarized != null && !summarized.isBlank()) ? summarized : cleanTitle(req.spec(), 70);
+    Plan.RuntimeSurface runtimeSurface = SingleShotSurfaceClassifier.infer(req.spec());
+    String projectType = SingleShotSurfaceClassifier.projectType(runtimeSurface);
+    String surfaceConstraint = SingleShotSurfaceClassifier.taskConstraint(runtimeSurface);
     String description =
         req.spec()
+            + surfaceConstraint
             + "\n\nAlso include unit tests for any new public function, endpoint, "
             + "or module this task adds. If a test framework already exists in the "
             + "workspace (Jest/Vitest, pytest, Go *_test.go, JUnit), extend it; "
@@ -230,9 +234,9 @@ public class OutlinePlannerAgent {
     return Plan.builder()
         .planTitle(title)
         .planSummary(req.spec())
-        .projectType("unknown")
+        .projectType(projectType)
         .smokeTestStrategy(Plan.SmokeTestStrategy.BUILD)
-        .runtimeSurface(Plan.RuntimeSurface.HTTP)
+        .runtimeSurface(runtimeSurface)
         .classification(Classification.SINGLE_SHOT)
         .tasks(List.of(task))
         .requirements(List.of(r1))

@@ -115,6 +115,7 @@ The plan schema:
   - "Build a REST API…" / "Express app…" / "Spring Boot…" → `HTTP`
   - "Write a function that…" / "Compute the nth…" / "Script that reads…" / "CLI tool…" → `CLI` if it has a main entry point, `LIBRARY` if the spec asks for a reusable function/module only
   - "Static site" / "Landing page" → `STATIC_WEB`
+  - "Web app" / "website" / "browser app" / "UI" with no explicit API/backend/server request → `STATIC_WEB`. A user asking for a web app expects a visible browser experience; do not reinterpret it as an API-only backend.
   - "Mobile app…" / "Android app…" / "iOS app…" / "React Native…" / "Expo…" → `MOBILE_APP`
 
   **Deliverables by runtime surface (enforced by the harness — propagate to tasks via `hardConstraints` or `touchesFiles` where appropriate):**

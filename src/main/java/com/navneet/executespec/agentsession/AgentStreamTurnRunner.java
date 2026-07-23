@@ -401,6 +401,15 @@ public class AgentStreamTurnRunner {
   }
 
   private static String userFacingStreamError(Throwable error, String provider) {
+    com.navneet.executespec.executioncontext.LlmDispatchPolicyException policyFailure =
+        findPolicyFailure(error);
+    if (policyFailure != null
+        && policyFailure.reason()
+            == com.navneet.executespec.executioncontext.LlmDispatchPolicyException.Reason
+                .BUDGET_EXHAUSTED) {
+      return "This agent turn reached its AI execution limit before a response was produced. Start"
+          + " a new sandbox and retry; if it happens on the first message, contact support.";
+    }
     String raw = error == null ? "" : error.getMessage();
     if (raw == null || raw.isBlank()) {
       return "Agent stream failed.";
@@ -413,6 +422,19 @@ public class AgentStreamTurnRunner {
     return providerLabel
         + " authentication failed. Check the provider key in Settings > Provider keys, switch to a"
         + " configured provider, or use managed AI credits before retrying.";
+  }
+
+  private static com.navneet.executespec.executioncontext.LlmDispatchPolicyException
+      findPolicyFailure(Throwable error) {
+    Throwable current = error;
+    for (int depth = 0; current != null && depth < 8; depth++) {
+      if (current
+          instanceof com.navneet.executespec.executioncontext.LlmDispatchPolicyException failure) {
+        return failure;
+      }
+      current = current.getCause();
+    }
+    return null;
   }
 
   private static boolean looksLikeProviderCredentialFailure(String raw) {

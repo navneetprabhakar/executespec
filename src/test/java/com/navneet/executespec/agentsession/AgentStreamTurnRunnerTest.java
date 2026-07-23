@@ -24,6 +24,69 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 class AgentStreamTurnRunnerTest {
 
   @Test
+  void mapsDurableBudgetFailureToActionableCustomerCopy() {
+    AgentSessionService sessionService = mock(AgentSessionService.class);
+    SpecChatService specChatService = mock(SpecChatService.class);
+    FeatureFlagService featureFlags = mock(FeatureFlagService.class);
+    AgentAttachmentService attachmentService = mock(AgentAttachmentService.class);
+    AgentEventRecorder eventRecorder = mock(AgentEventRecorder.class);
+    SseEmitter emitter = mock(SseEmitter.class);
+    AgentStreamTurnRunner runner =
+        new AgentStreamTurnRunner(
+            sessionService, specChatService, featureFlags, attachmentService, eventRecorder);
+    StreamTurnContext ctx =
+        new StreamTurnContext(
+            "session-1",
+            "turn-1",
+            1,
+            null,
+            null,
+            "org-1",
+            "user-1",
+            "anthropic",
+            null,
+            new OrchestratorDecision(
+                "ANSWER",
+                0.9,
+                "chat",
+                false,
+                "",
+                null,
+                new OrchestratorPolicy(true, false, "allowed"),
+                "trace-1"));
+
+    when(featureFlags.isEnabled("spec.chat.enabled")).thenReturn(true);
+    when(attachmentService.injectionBlock(anyString(), any())).thenReturn("");
+    doThrow(
+            new com.navneet.executespec.executioncontext.LlmDispatchPolicyException(
+                com.navneet.executespec.executioncontext.LlmDispatchPolicyException.Reason
+                    .BUDGET_EXHAUSTED,
+                "Durable LLM execution-context budget is exhausted"))
+        .when(specChatService)
+        .runTurn(
+            any(),
+            any(),
+            anyString(),
+            any(),
+            any(),
+            anyString(),
+            any(),
+            any(),
+            any(),
+            any(),
+            anyString());
+
+    runner.run(emitter, ctx, null, new StreamTurnRequest("hello", null, null, null, null, null));
+
+    verify(sessionService)
+        .failStreamTurn(
+            ctx,
+            "This agent turn reached its AI execution limit before a response was produced. Start"
+                + " a new sandbox and retry; if it happens on the first message, contact support.",
+            (RunCostTracker.Snapshot) null);
+  }
+
+  @Test
   void persistsBoundedSemanticFramesForReplay() throws Exception {
     AgentSessionService sessionService = mock(AgentSessionService.class);
     SpecChatService specChatService = mock(SpecChatService.class);

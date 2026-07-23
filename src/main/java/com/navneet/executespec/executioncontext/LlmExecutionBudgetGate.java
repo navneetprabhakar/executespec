@@ -33,15 +33,16 @@ import lombok.RequiredArgsConstructor;
  *       transport, so N concurrent callers cannot exceed {@code maxProviderCalls}. Worst-case
  *       equals actual for a call (one authorization is one dispatch), so {@code max(reserved,
  *       recorded)} self-heals with no release path.
- *   <li><b>Output tokens are reserved at their real per-call ceiling.</b> A provider call cannot
- *       emit more than the dispatched model's registered {@code max-output-tokens} — that is the
- *       {@code max_tokens} the transport passes, an API-enforced hard cap, not an estimate. The
- *       gate charges every authorized-but-not-yet-recorded (in-flight) call the worst-case output
- *       of the largest model the context's policy admits, so N concurrent dispatches cannot
- *       collectively cross {@code maxOutputTokens}. This reservation is derived from {@code
- *       reserved_provider_calls} minus recorded terminal rows, so it self-heals as calls
- *       terminalize (recorded output grows, the in-flight count shrinks) and needs no release path
- *       and no extra column. It also tightens the {@code maxTotalTokens} check by its output half.
+ *   <li><b>Output tokens are reserved at their real per-call ceiling.</b> The call being authorized
+ *       is charged its requested {@code max_tokens}, capped by the largest registered output limit
+ *       the policy admits. Earlier in-flight calls are conservatively charged that policy-wide
+ *       maximum because their individual request caps are not persisted. This prevents a normal
+ *       1.2k-token chat call from being rejected against a 40k turn budget merely because an
+ *       unrelated allowed model supports 131k output, while still preventing concurrent calls from
+ *       collectively crossing {@code maxOutputTokens}. The in-flight reservation is derived from
+ *       {@code reserved_provider_calls} minus recorded terminal rows, so it self-heals as calls
+ *       terminalize and needs no release path or extra column. It also tightens the {@code
+ *       maxTotalTokens} check by its output half.
  *   <li><b>Input tokens and dollar cost stay reconciled-after-the-fact.</b> A call's input-token
  *       count and its dollar cost are only known once the provider responds, and the sole a-priori
  *       input bound — the model's full context window — would deny admission far below the real
@@ -67,6 +68,18 @@ class LlmExecutionBudgetGate {
 
   @Transactional(propagation = Propagation.REQUIRES_NEW)
   void reserveProviderCall(LlmExecutionContext snapshot) {
+    reserveProviderCall(snapshot, null);
+  }
+
+  /**
+   * Reserves this dispatch using its real transport output cap when the caller supplied one.
+   * Previously the first call reserved the largest output limit of every model allowed by the org
+   * (up to 131k) even when a chat turn requested only 1.2k tokens and had a 40k total budget. That
+   * made every fresh web-agent turn fail before transport. Existing concurrent calls remain
+   * conservatively charged at the policy-wide maximum because their individual caps are not stored.
+   */
+  @Transactional(propagation = Propagation.REQUIRES_NEW)
+  void reserveProviderCall(LlmExecutionContext snapshot, Integer requestedMaxOutputTokens) {
     LlmExecutionContext context =
         repository
             .findForUpdate(snapshot.getId(), snapshot.getIsolationKey())
@@ -87,13 +100,18 @@ class LlmExecutionBudgetGate {
     long input = value(usageRepository.sumSuccessfulInputTokensByContextId(id));
     long output = value(usageRepository.sumSuccessfulOutputTokensByContextId(id));
 
-    // In-flight = authorized dispatches (including this one) that have not yet written a terminal
-    // usage row. As each call terminalizes, recordedCalls grows and this shrinks, so the token
-    // reservation self-heals to actual with no release path and no crash leak — the same property
-    // the call-count reservation relies on. Never below 1, because this call is itself in flight.
-    long inFlight = Math.max(1L, authorizedAfter - recordedCalls);
+    // Existing in-flight calls have no persisted per-call cap, so retain the policy-wide maximum
+    // for them. The call being authorized is known and can use the smaller transport max_tokens.
+    long existingInFlight = Math.max(0L, reserved - recordedCalls);
     long worstCaseOutputPerCall = worstCaseOutputTokensPerCall(context);
-    long projectedOutput = safeAdd(output, saturatingMul(inFlight, worstCaseOutputPerCall));
+    long currentCallOutput =
+        requestedMaxOutputTokens != null && requestedMaxOutputTokens > 0
+            ? Math.min(requestedMaxOutputTokens.longValue(), worstCaseOutputPerCall)
+            : worstCaseOutputPerCall;
+    long projectedOutput =
+        safeAdd(
+            safeAdd(output, saturatingMul(existingInFlight, worstCaseOutputPerCall)),
+            currentCallOutput);
 
     if (context.getMaxInputTokens() != null && input >= context.getMaxInputTokens()) {
       throw budget();
@@ -121,9 +139,8 @@ class LlmExecutionBudgetGate {
    * The largest per-call output ceiling the context's policy can dispatch. Every model this policy
    * allows carries a registered {@code max-output-tokens} that the transport passes as {@code
    * max_tokens}; a single call cannot exceed its model's value. Taking the maximum across all
-   * allowed models makes the reservation a true upper bound for ANY in-flight call in the context —
-   * one run context is shared by planner/worker/reviewer tiers with different output caps, so using
-   * only the current call's model would understate a concurrent larger-output call.
+   * allowed models makes this a true upper bound for an earlier in-flight call whose individual
+   * request cap was not persisted. The currently authorized call uses its known requested cap.
    */
   private long worstCaseOutputTokensPerCall(LlmExecutionContext context) {
     Map<String, List<String>> allowed = context.policySnapshot().allowedProviderModels();

@@ -69,6 +69,17 @@ class LlmExecutionBudgetGateTest {
   }
 
   @Test
+  void firstBoundedChatCallUsesItsTransportCapNotLargestAllowedModel() {
+    when(context.getMaxTotalTokens()).thenReturn(40_000L);
+    when(models.maxOutputForModel("m")).thenReturn(131_072);
+
+    gate.reserveProviderCall(context, 1_200);
+
+    verify(context).recordProviderCallReservation(1L);
+    verify(repository).save(context);
+  }
+
+  @Test
   void secondConcurrentCallThatWouldCollectivelyExceedOutputCeilingIsRefused() {
     when(context.getMaxOutputTokens()).thenReturn(1000L);
     // One call already authorized and in flight (no terminal row yet).
