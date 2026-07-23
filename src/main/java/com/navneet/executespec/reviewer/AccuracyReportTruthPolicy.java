@@ -38,8 +38,15 @@ final class AccuracyReportTruthPolicy {
   static void enforceConsistency(AccuracyReport report) {
     if (report == null) return;
     reclassifyContradictoryUnknowns(report);
-    if (report.incompleteRequirementsCount() > 0) {
-      report.setSpecAdherenceScore(Math.min(89, report.getSpecAdherenceScore()));
+    int missing =
+        report.getMissingRequirements() == null ? 0 : report.getMissingRequirements().size();
+    int partial =
+        report.getPartialRequirements() == null ? 0 : report.getPartialRequirements().size();
+    if (missing > 0) {
+      report.setSpecAdherenceScore(Math.min(69, report.getSpecAdherenceScore()));
+      report.setOverallAccuracyGrade(gradeFromScore(report.getSpecAdherenceScore()));
+    } else if (partial > 0) {
+      report.setSpecAdherenceScore(Math.min(79, report.getSpecAdherenceScore()));
       report.setOverallAccuracyGrade(gradeFromScore(report.getSpecAdherenceScore()));
     }
   }

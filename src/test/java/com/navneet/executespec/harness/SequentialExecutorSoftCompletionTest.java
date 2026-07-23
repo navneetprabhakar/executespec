@@ -1205,6 +1205,38 @@ class SequentialExecutorSoftCompletionTest {
   }
 
   @Test
+  void successful_api_error_requirement_text_does_not_mark_provider_behavior_poor() {
+    stubTaskRow();
+    WorkerResult completed =
+        WorkerResult.builder()
+            .outcome(WorkerResult.Outcome.COMPLETED)
+            .iterations(8)
+            .toolCallsDispatched(5)
+            .completionSummary("Implemented stable API errors and all tests pass")
+            .finalAssistantText("Stable API errors are covered by integration tests.")
+            .toolCallLog(List.of("writeFile(path=app/api.py)", "buildProject()"))
+            .totalLatencyMs(20_000L)
+            .build();
+    when(worker.run(any(WorkerTaskRequest.class), any())).thenReturn(completed);
+    GoalContinuationAdvisor advisor = mock(GoalContinuationAdvisor.class);
+    when(advisor.advise(any()))
+        .thenReturn(
+            new GoalContinuationPolicyDecision(
+                RunContinuationDecision.STOP_DONE,
+                Optional.empty(),
+                List.of("goal satisfied with validation evidence and required outputs present")));
+
+    SequentialExecutor executor = newExecutor(advisor);
+    ExecutionResult result = executor.execute(req(singleTaskPlan(), false));
+
+    assertEquals(TaskOutcome.Status.SUCCESS, result.perTask().get(0).status());
+    ArgumentCaptor<GoalContinuationAdvisorRequest> requestCaptor =
+        ArgumentCaptor.forClass(GoalContinuationAdvisorRequest.class);
+    verify(advisor).advise(requestCaptor.capture());
+    assertFalse(requestCaptor.getValue().providerBehaviorPoor());
+  }
+
+  @Test
   void no_write_iteration_limit_sets_provider_behavior_poor_for_continuation_advisor() {
     stubTaskRow();
     when(worker.run(any(WorkerTaskRequest.class), any())).thenReturn(workerHitIterLimit(0));
