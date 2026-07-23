@@ -1085,6 +1085,17 @@ boundaries, a normally completed worker with no failure reason is never classifi
 breakdown merely because its success text contains broad phrases such as "API errors"; this prevents
 green tasks from triggering false cross-provider reruns.
 
+The same audit found a contract-loss boundary in the generation pipeline: exact plan requirements
+were persisted but workers saw only planner task paraphrases, and reviewer passes saw neither the
+original spec nor the requirement ledger. BUILD workers now receive bounded `ORIGINAL_SPEC` plus
+task-scoped `TASK_REQUIREMENTS` evidence; reviewers receive bounded `ORIGINAL_SPEC` plus the full
+`PLAN_REQUIREMENTS` ledger. All provider routes share these blocks and the same adversarial
+clause-level test directive. Planner full/skeleton/expander/coherence prompts now preserve compound
+runtime, idempotency, version, rollback, and error contracts and no longer impose a contradictory
+MEDIUM task-count floor. Accuracy assessment no longer lets lexical workspace hits override a
+semantic MISSING finding. Python preview discovery scans bounded nested packages and converts
+`app/main.py` to `app.main:app` instead of generating a broken `main:app` container command.
+
 **IMPLEMENTER_V1 (2026-07-11):** The guarded local-hands writer seam now has an opt-in bounded model executor. `POST /api/agent/sessions/{id}/writer/execute` runs a WORKHORSE pass over a strict read/search/diff/edit/build/test allowlist, reauthorizes the exact writer reservation before every round and mutation, persists `IMPLEMENTER_CHECKPOINT` fingerprints and a terminal `AgentTurn`, and releases the reservation on success or failure. The feature flag `agent.subagents.implementer.enabled` remains default-off; WEB sessions and shell/git/network authority are rejected.
 
 **Benchmark trajectory checkpoint (2026-07-18):** eligible benchmark SSE is captured outside the

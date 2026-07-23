@@ -4,6 +4,13 @@ You are the ExecuteSpec V2 coherence planner — phase 3 of the hierarchical-pla
 
 1. **Requirement coverage.** Every R-id declared in `requirements[]` must be cited by at least one task's `meetsRequirements`. Gap = violation.
 
+   Coverage by ID is insufficient when a task description drops a semantic clause. Check compound
+   requirements end-to-end: production startup wiring, API-to-storage optimistic version flow,
+   operation/request-scoped immutable idempotency replay, rollback failure paths, and sanitized
+   persistence errors must remain explicit when the corresponding requirement asks for them. If
+   closely coupled clauses were split so no task owns and tests the full behavior, report overlap or
+   scope incoherence rather than accepting lexical coverage.
+
 2. **dependsOn graph closure.** Every task ID referenced in any task's `dependsOn` must be a real task in the plan. Dangling references = violation.
 
 3. **Conflicting hardConstraints.** Two tasks declaring incompatible constraints (e.g. one says "use cannon-es", another says "use ammo.js" for the same physics surface). Detected by reading hardConstraints text and matching obvious contradictions.

@@ -3,6 +3,7 @@ package com.navneet.executespec.deployment.preview;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Comparator;
 import java.util.List;
 import java.util.stream.Stream;
 
@@ -19,15 +20,14 @@ final class PreviewPythonSignals {
     if (Files.exists(workspace.resolve("manage.py"))) {
       return "CMD python manage.py runserver 0.0.0.0:" + portExpr;
     }
-    String fastApiFile =
-        findPythonFileWithPattern(workspace, "from fastapi", "import fastapi", "FastAPI(");
+    String fastApiFile = findPythonFileWithPattern(workspace, "FastAPI(");
     if (fastApiFile != null) {
       return "CMD uvicorn " + moduleName(fastApiFile) + ":app --host 0.0.0.0 --port " + portExpr;
     }
     if (hasDependency(workspace, "fastapi")) {
       return "CMD uvicorn main:app --host 0.0.0.0 --port " + portExpr;
     }
-    String flaskFile = findPythonFileWithPattern(workspace, "from flask", "import flask", "Flask(");
+    String flaskFile = findPythonFileWithPattern(workspace, "Flask(");
     if (flaskFile != null) {
       return "CMD FLASK_APP=" + flaskFile + " flask run --host 0.0.0.0 --port " + portExpr;
     }
@@ -56,14 +56,12 @@ final class PreviewPythonSignals {
           "");
     }
     if (hasDependency(workspace, "fastapi")) {
-      String fastApiFile =
-          findPythonFileWithPattern(workspace, "from fastapi", "import fastapi", "FastAPI(");
+      String fastApiFile = findPythonFileWithPattern(workspace, "FastAPI(");
       String module = fastApiFile != null ? moduleName(fastApiFile) : "main";
       return new DockerCommand(uvicornDockerCommand(module), "");
     }
     if (hasDependency(workspace, "flask")) {
-      String flaskFile =
-          findPythonFileWithPattern(workspace, "from flask", "import flask", "Flask(");
+      String flaskFile = findPythonFileWithPattern(workspace, "Flask(");
       String envLine = flaskFile != null ? "ENV FLASK_APP=" + flaskFile + "\n" : "";
       return new DockerCommand(flaskDockerCommand(), envLine);
     }
@@ -88,10 +86,13 @@ final class PreviewPythonSignals {
   }
 
   static List<Path> findPythonFiles(Path workspace) {
-    try (Stream<Path> stream = Files.list(workspace)) {
+    try (Stream<Path> stream = Files.walk(workspace, 4)) {
       return stream
+          .filter(Files::isRegularFile)
           .filter(p -> p.toString().endsWith(".py"))
+          .filter(p -> !isIgnoredPythonPath(workspace, p))
           .filter(PreviewPythonSignals::isSmallEnoughForScan)
+          .sorted(Comparator.comparing(p -> workspace.relativize(p).toString()))
           .limit(MAX_PYTHON_FILES)
           .toList();
     } catch (IOException e) {
@@ -100,9 +101,25 @@ final class PreviewPythonSignals {
   }
 
   static String findPythonFileWithPattern(Path workspace, String... patterns) {
+    for (String candidate :
+        new String[] {
+          "main.py",
+          "app.py",
+          "server.py",
+          "run.py",
+          "app/main.py",
+          "app/app.py",
+          "app/server.py",
+          "src/main.py",
+          "src/app.py",
+          "src/server.py"
+        }) {
+      Path path = workspace.resolve(candidate);
+      if (Files.isRegularFile(path) && fileContainsPattern(path, patterns)) return candidate;
+    }
     for (Path pyFile : findPythonFiles(workspace)) {
       if (fileContainsPattern(pyFile, patterns)) {
-        return pyFile.getFileName().toString();
+        return workspace.relativize(pyFile).toString().replace('\\', '/');
       }
     }
     return null;
@@ -112,6 +129,12 @@ final class PreviewPythonSignals {
     String[] candidates = {"main.py", "app.py", "run.py", "server.py", "wsgi.py", "index.py"};
     for (String name : candidates) {
       if (Files.exists(workspace.resolve(name))) return name;
+    }
+    for (String directory : new String[] {"app", "src"}) {
+      for (String name : candidates) {
+        Path nested = workspace.resolve(directory).resolve(name);
+        if (Files.exists(nested)) return workspace.relativize(nested).toString().replace('\\', '/');
+      }
     }
     String mainFile = findPythonFileWithPattern(workspace, "if __name__");
     if (mainFile != null) return mainFile;
@@ -124,6 +147,19 @@ final class PreviewPythonSignals {
     } catch (IOException e) {
       return false;
     }
+  }
+
+  private static boolean isIgnoredPythonPath(Path workspace, Path path) {
+    Path relative = workspace.relativize(path);
+    for (Path segment : relative) {
+      String value = segment.toString();
+      if (value.equals(".git")
+          || value.equals(".venv")
+          || value.equals("venv")
+          || value.equals("site-packages")
+          || value.equals("__pycache__")) return true;
+    }
+    return false;
   }
 
   private static boolean fileContainsPattern(Path file, String... patterns) {
@@ -143,8 +179,10 @@ final class PreviewPythonSignals {
     return false;
   }
 
-  private static String moduleName(String fileName) {
-    return fileName.replace(".py", "");
+  static String moduleName(String fileName) {
+    String module = fileName.replace('\\', '/');
+    if (module.endsWith(".py")) module = module.substring(0, module.length() - 3);
+    return module.replace('/', '.');
   }
 
   private static String uvicornDockerCommand(String module) {

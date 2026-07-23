@@ -31,6 +31,25 @@ class PreviewPythonSignalsTest {
   }
 
   @Test
+  void commandsResolveNestedFastApiAppInsteadOfAssumingRootMain(@TempDir Path workspace)
+      throws IOException {
+    Files.createDirectories(workspace.resolve("app"));
+    Files.writeString(workspace.resolve("requirements.txt"), "fastapi==0.110\nuvicorn==0.30\n");
+    Files.writeString(
+        workspace.resolve("app/api.py"), "from fastapi import APIRouter\nrouter = APIRouter()\n");
+    Files.writeString(
+        workspace.resolve("app/main.py"),
+        "from fastapi import FastAPI\nfrom app.api import router\napp = FastAPI()\n");
+
+    assertThat(PreviewPythonSignals.cloudRunCommand(workspace, "8081"))
+        .isEqualTo("CMD uvicorn app.main:app --host 0.0.0.0 --port 8081");
+    assertThat(PreviewPythonSignals.dockerCommand(workspace).command())
+        .isEqualTo(
+            "CMD [\"uvicorn\", \"app.main:app\", \"--host\", \"0.0.0.0\", \"--port\","
+                + " \"8000\"]");
+  }
+
+  @Test
   void cloudRunCommandFallsBackToMainModuleWhenFastApiOnlyAppearsInDependencies(
       @TempDir Path workspace) throws IOException {
     Files.writeString(workspace.resolve("requirements.txt"), "fastapi==0.110\n");

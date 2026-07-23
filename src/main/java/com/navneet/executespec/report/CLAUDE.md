@@ -98,7 +98,12 @@ invalid reports are excluded and counted separately.
   negative implementation evidence to PARTIAL before scoring. Any admitted partial requirement
   caps accuracy at 79/C, while an admitted missing requirement caps it at 69/D. The assessor prompt
   requires readable route/runtime/error/idempotency/migration evidence; test names, mocked fixtures,
-  OpenAPI entries, and raw exception strings cannot prove those contracts.
+  OpenAPI entries, and raw exception strings cannot prove those contracts. Lexical grep hits no
+  longer demote semantic MISSING findings to UNKNOWN: the release-blocker audit showed that words
+  such as `rollback` and `version` can exist in code/tests while the required behavior is absent.
+  The assessor receives `Plan.requirements()` as the canonical ledger, classifies every preserved
+  ID/full clause, and falls back to extracting requirements from original prose only for legacy
+  plans with an empty ledger.
 - SUPER_ADMIN verified-score backfill replays the same admitted-gap cap from persisted
   `accuracy_json`. Historical partial requirements cap both recomputed headline scores at 79 (or
   the lower stored adherence score), missing requirements cap them at 69, and UNKNOWN-only evidence

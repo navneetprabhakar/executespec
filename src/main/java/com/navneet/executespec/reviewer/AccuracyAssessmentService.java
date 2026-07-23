@@ -6,6 +6,7 @@ import java.util.List;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.agent.LlmRouter;
 import com.navneet.executespec.agent.PromptTrustBoundary;
+import com.navneet.executespec.agent.RequirementSpec;
 import com.navneet.executespec.reviewer.model.AccuracyReport;
 import com.navneet.executespec.reviewer.model.IssueSeverity;
 import com.navneet.executespec.reviewer.model.ReviewIssue;
@@ -168,9 +169,22 @@ ADVERSARIAL CONTRACT EVIDENCE:
   manually initialize schema, or set configuration absent from the documented run command. If the
   default/runtime wiring uses a different ephemeral store per connection, classify startup/runtime
   persistence as MISSING or PARTIAL.
+- Schema initialization is implemented only when the documented production start path invokes it
+  (for example via an application lifespan/startup hook) or a mandatory pre-start migration command.
+  A standalone initializer used only by tests is negative evidence, not runtime wiring.
 - Idempotency is not proven by replaying one method alone when one global key store is shared by
   several operations. Check that operation/request identity is part of the stored contract so a key
-  cannot return another endpoint's response type.
+  cannot return another endpoint's response type. Replay must preserve the original response
+  snapshot; returning a mutable entity whose later state changes is not "the original result".
+- A compound requirement is IMPLEMENTED only when every clause is proven. A similarly named class,
+  field, table, handler, or test is lexical evidence, not behavioral proof. In particular, a
+  `version` column or unused versioned repository method does not prove that API requests accept an
+  expected version and return 409 on mismatch.
+- Stable public errors are not proven by custom exception handlers if an expected persistence or
+  framework failure can still escape as a raw exception/500. Returning `str(exc)` is negative
+  evidence whenever it can expose database/provider details.
+- Check response contracts field by field. A GET item response that omits required available and
+  reserved quantities is PARTIAL or MISSING even when the route itself exists.
 - Migration support is not proven by one arbitrary DDL call. If version advancement always writes
   the same next version, classify repeated migration support as PARTIAL.
 
@@ -222,6 +236,21 @@ SCORE COMPUTATION GUIDANCE:
       ResolvedModel model,
       String originalGoal,
       List<ReviewIssue> issues) {
+    return assess(runId, provider, model, originalGoal, List.of(), issues);
+  }
+
+  /**
+   * Run the accuracy assessment against the canonical requirement ledger persisted with the plan.
+   * The original goal remains available as context, but the assessor must not silently drop or
+   * rewrite planner-extracted requirements while reconstructing them from prose.
+   */
+  public AccuracyReport assess(
+      String runId,
+      String provider,
+      ResolvedModel model,
+      String originalGoal,
+      List<RequirementSpec> requirements,
+      List<ReviewIssue> issues) {
     log.info(
         "[AccuracyAssessment] Starting assessment for run {} using {}", runId, model.getModel());
 
@@ -232,7 +261,12 @@ SCORE COMPUTATION GUIDANCE:
       String issuesSummary = buildIssuesSummary(issues);
       String userMessage =
           buildAssessmentPrompt(
-              originalGoal, fileTree, keyFileSnippets, testFileSnippets, issuesSummary);
+              originalGoal,
+              requirements,
+              fileTree,
+              keyFileSnippets,
+              testFileSnippets,
+              issuesSummary);
 
       List<Message> messages = new ArrayList<>();
       messages.add(new SystemMessage(SYSTEM_PROMPT));
@@ -323,16 +357,6 @@ SCORE COMPUTATION GUIDANCE:
       // verifiedScore. Runs against `repos/<name>/` subdirs hit this hardest because the
       // workspace evidence is even further from the post-push state.
       filterExecutionTimeRequirements(runId, report);
-
-      // 2026-05-10 — Layer 3 grep-verify: programmatic anti-hallucination pass. The LLM
-      // sometimes marks requirements as MISSING because the implementing file wasn't picked
-      // into the 6/18-file KEY SOURCE FILES snippet, even with the new prompt nudging UNKNOWN
-      // for absence-of-evidence. As a defense-in-depth check, walk each missingRequirements
-      // entry, extract its distinctive tokens, and grep the workspace. If a sufficient
-      // fraction of tokens hit, the requirement is likely implemented somewhere we didn't
-      // read — move it to unknownRequirements (advisory) instead of leaving it as MISSING
-      // (which would synthesize a CRITICAL ReviewIssue and tank the score).
-      verifyMissingByGrep(runId, report);
 
       // UNKNOWN is only valid for absent evidence. Some model responses put a positively observed
       // defect in unknownRequirements (for example, "release accepts no idempotency key"). Repair
@@ -448,234 +472,11 @@ SCORE COMPUTATION GUIDANCE:
     }
   }
 
-  // Layer 3 — grep verification of missing-requirement claims
-
-  /**
-   * Stopwords filtered out of {@link #extractKeywords(String)}. Both common English ("must",
-   * "should", "from") and "spec-shaped" filler ("requirement", "implement", "feature") that adds no
-   * signal because every spec sentence contains them.
-   */
-  private static final java.util.Set<String> KEYWORD_STOPWORDS =
-      java.util.Set.of(
-          // common English
-          "this",
-          "that",
-          "these",
-          "those",
-          "with",
-          "from",
-          "into",
-          "onto",
-          "upon",
-          "have",
-          "been",
-          "must",
-          "should",
-          "would",
-          "could",
-          "shall",
-          "will",
-          "when",
-          "while",
-          "where",
-          "what",
-          "which",
-          "such",
-          "than",
-          "then",
-          "also",
-          "each",
-          "every",
-          "some",
-          "many",
-          "more",
-          "most",
-          "other",
-          "their",
-          "there",
-          "after",
-          "before",
-          "during",
-          "between",
-          "without",
-          "across",
-          "about",
-          "above",
-          "below",
-          "again",
-          "still",
-          "however",
-          "because",
-          "since",
-          // spec/code filler
-          "spec",
-          "specification",
-          "feature",
-          "functionality",
-          "support",
-          "supports",
-          "supported",
-          "implement",
-          "implements",
-          "implemented",
-          "implementation",
-          "requirement",
-          "requirements",
-          "required",
-          "needs",
-          "needed",
-          "create",
-          "creates",
-          "created",
-          "creating",
-          "build",
-          "builds",
-          "built",
-          "building",
-          "allow",
-          "allows",
-          "allowed",
-          "ensure",
-          "ensures",
-          "ensured",
-          "provide",
-          "provides",
-          "provided",
-          "return",
-          "returns",
-          "returned",
-          "handle",
-          "handles",
-          "handled",
-          "process",
-          "processes",
-          "processed",
-          "value",
-          "values",
-          "data",
-          "list",
-          "item",
-          "items",
-          "type",
-          "types",
-          "name",
-          "names",
-          "result",
-          "results");
-
-  /**
-   * Programmatic verification of {@code missingRequirements}. For each item, extract distinctive
-   * keywords and grep the workspace. If ≥ ⌈K/2⌉ of K tokens have hits, demote the entry from
-   * MISSING to UNKNOWN with a "[grep-verified]" marker — the file likely exists but wasn't in the
-   * snippet we showed the LLM.
-   *
-   * <p>Mutates the report in-place. No-op when missingRequirements is null/empty or when {@link
-   * FileSystemTool#searchFiles} is unavailable.
-   */
-  private void verifyMissingByGrep(String runId, AccuracyReport report) {
-    java.util.List<String> missing = report.getMissingRequirements();
-    if (missing == null || missing.isEmpty()) return;
-
-    java.util.List<String> stillMissing = new java.util.ArrayList<>();
-    java.util.List<String> verifiedToUnknown = new java.util.ArrayList<>();
-
-    for (String req : missing) {
-      java.util.Set<String> tokens = extractKeywords(req);
-      if (tokens.isEmpty()) {
-        stillMissing.add(req);
-        continue;
-      }
-      int found = 0;
-      for (String tok : tokens) {
-        try {
-          String result = fileSystemTool.searchFiles(runId, grepLiteralPattern(tok), ".");
-          if (result != null
-              && !result.isBlank()
-              && !"(no matches)".equals(result.trim())
-              && !result.startsWith("Search failed")) {
-            found++;
-          }
-        } catch (Exception ex) {
-          // Don't let a single grep failure abort the whole verify pass.
-          log.debug(
-              "[AccuracyAssessment] grep-verify token search failed for run={} tok={}: {}",
-              runId,
-              tok,
-              ex.getMessage());
-        }
-      }
-      int threshold = Math.max(1, (tokens.size() + 1) / 2);
-      if (found >= threshold) {
-        verifiedToUnknown.add(
-            req
-                + " [grep-verified: "
-                + found
-                + "/"
-                + tokens.size()
-                + " tokens found in workspace]");
-      } else {
-        stillMissing.add(req);
-      }
-    }
-
-    if (!verifiedToUnknown.isEmpty()) {
-      log.info(
-          "[AccuracyAssessment] grep-verify run {}: demoted {} of {} missing → unknown"
-              + " (workspace had hits for the requirement's distinctive tokens)",
-          runId,
-          verifiedToUnknown.size(),
-          missing.size());
-      report.setMissingRequirements(stillMissing);
-
-      java.util.List<String> existingUnknown =
-          report.getUnknownRequirements() != null
-              ? new java.util.ArrayList<>(report.getUnknownRequirements())
-              : new java.util.ArrayList<>();
-      existingUnknown.addAll(verifiedToUnknown);
-      report.setUnknownRequirements(existingUnknown);
-    }
-  }
-
-  /**
-   * Tokenise a requirement string into the distinctive keywords we'll grep for. Strips inline
-   * citations like {@code [src/foo.ts:22-35]}, lowercases, splits on non-word chars, drops
-   * stopwords + numeric-only + tokens shorter than 4 chars. Caps at 6 tokens (first-N) so the
-   * verify pass never balloons the per-call latency.
-   */
-  static java.util.Set<String> extractKeywords(String requirement) {
-    if (requirement == null) return java.util.Set.of();
-    // Drop inline citations / markers — they're either file paths (which the grep would match
-    // against itself) or grep-verified markers from a prior pass.
-    String cleaned = requirement.replaceAll("\\[[^\\]]+\\]", " ");
-    String[] toks = cleaned.toLowerCase(java.util.Locale.ROOT).split("\\W+");
-    java.util.LinkedHashSet<String> out = new java.util.LinkedHashSet<>();
-    for (String t : toks) {
-      if (t.length() < 4) continue;
-      if (KEYWORD_STOPWORDS.contains(t)) continue;
-      if (t.matches("\\d+")) continue;
-      out.add(t);
-      if (out.size() >= 6) break;
-    }
-    return out;
-  }
-
-  static String grepLiteralPattern(String token) {
-    if (token == null || token.isEmpty()) return "";
-    StringBuilder escaped = new StringBuilder(token.length());
-    for (int i = 0; i < token.length(); i++) {
-      char c = token.charAt(i);
-      if (c == '\\' || c == '.' || c == '[' || c == ']' || c == '^' || c == '$' || c == '*') {
-        escaped.append('\\');
-      }
-      escaped.append(c);
-    }
-    return escaped.toString();
-  }
-
   // Prompt builder
 
   private String buildAssessmentPrompt(
       String originalGoal,
+      List<RequirementSpec> requirements,
       String fileTree,
       String keyFileSnippets,
       String testFileSnippets,
@@ -686,9 +487,13 @@ SCORE COMPUTATION GUIDANCE:
             : keyFileSnippets;
     String testsSection =
         testFileSnippets.isBlank() ? "(no readable test files available)" : testFileSnippets;
+    String requirementLedger = renderRequirementLedger(requirements);
     return String.format(
         """
 === ORIGINAL SPECIFICATION (this is what the user asked for) ===
+%s
+
+=== CANONICAL REQUIREMENT LEDGER (classify every row; preserve IDs and full clauses) ===
 %s
 
 === GENERATED FILE TREE (files that were created) ===
@@ -705,17 +510,35 @@ SCORE COMPUTATION GUIDANCE:
 
 === TASK ===
 Based on the specification, file tree, source files, and review issues above:
-1. Extract every explicit requirement from the specification
+1. Classify every canonical requirement ledger row. If the ledger is empty, extract every explicit
+   requirement from the original specification instead
 2. Check KEY SOURCE FILES content to verify each requirement is actually implemented
 3. Mark as IMPLEMENTED only if you find the implementation in source files or file tree
-4. Mark as MISSING only if you find NO evidence in any source file
+4. Mark as MISSING when readable evidence contradicts the requirement or shows the required
+   behavior is absent; use UNKNOWN only when the relevant evidence was not provided
 5. Mark as PARTIAL if a review issue flags it incomplete, or if code exists but is clearly incomplete
 6. For API specs: check KEY SOURCE FILES for route handlers matching each required endpoint
 7. Assign a specAdherenceScore (0-100) — README/doc gaps max 5 pts penalty
 
 Return your assessment as a JSON object. No markdown fences. No explanation outside the JSON.
 """,
-        originalGoal, fileTree, filesSection, testsSection, issuesSummary);
+        originalGoal, requirementLedger, fileTree, filesSection, testsSection, issuesSummary);
+  }
+
+  String renderRequirementLedger(List<RequirementSpec> requirements) {
+    if (requirements == null || requirements.isEmpty()) {
+      return "(legacy/empty plan ledger — extract requirements from the original specification)";
+    }
+    return requirements.stream()
+        .filter(requirement -> requirement != null && requirement.text() != null)
+        .map(
+            requirement ->
+                String.format(
+                    "- %s [%s] %s",
+                    requirement.id() == null ? "(no-id)" : requirement.id(),
+                    requirement.kind(),
+                    requirement.text()))
+        .collect(java.util.stream.Collectors.joining("\n"));
   }
 
   private String buildIssuesSummary(List<ReviewIssue> issues) {

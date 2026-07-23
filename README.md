@@ -37,6 +37,9 @@ Spec-driven AI coding platform. A customer submits a spec in natural language, t
 | CI                  | GitHub Actions: `lint.yml` on PRs to `dev`/`main`; `deploy.yml` on push to `dev` and `benchmark` | [`.github/workflows/lint.yml`](.github/workflows/lint.yml), [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) |
 | Cloud               | GCP us-east4 — single GCE VM serves prod + dev; Cloud Run for on-demand previews; Workload Identity Federation for deploy auth | [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) |
 
+Python previews resolve bounded nested application packages: a FastAPI app declared in
+`app/main.py` is launched as `app.main:app` for both VM/Docker and Cloud Run preview commands.
+
 ## Repository layout
 
 ```

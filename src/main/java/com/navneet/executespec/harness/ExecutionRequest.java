@@ -65,6 +65,12 @@ public record ExecutionRequest(
     Integer initialProviderSwitchesUsed,
     Integer initialModelStepUpsUsed,
     Integer initialModelStepDownsUsed,
+    /**
+     * Original user specification. Workers receive this as untrusted project evidence alongside the
+     * exact requirement rows assigned to their task, so planner paraphrasing cannot silently erase
+     * a contract. Null is allowed for legacy/test callers.
+     */
+    String originalGoal,
     String designBlock,
     /**
      * Project ID for RAG-backed reference-doc injection (v2.5.2+). Null for runs that aren't
