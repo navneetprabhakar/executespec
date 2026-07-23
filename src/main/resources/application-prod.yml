@@ -73,24 +73,6 @@ spring:
     deepseek:
       base-url: https://api.deepseek.com
       api-key: ${DEEPSEEK_API_KEY:}
-  security:
-    oauth2:
-      client:
-        registration:
-          google:
-            client-id: ${GOOGLE_OAUTH_CLIENT_ID:none}
-            client-secret: ${GOOGLE_OAUTH_CLIENT_SECRET:none}
-            scope: openid, email, profile
-            redirect-uri: https://executespec.ai/api/auth/oauth2/callback/{registrationId}
-          github:
-            client-id: ${GITHUB_OAUTH_CLIENT_ID:Ov23lijrPPx9fhPemczg}
-            client-secret: ${GITHUB_OAUTH_CLIENT_SECRET:}
-            scope: user:email, read:user
-            redirect-uri: https://executespec.ai/api/auth/oauth2/callback/{registrationId}
-        provider:
-          github:
-            user-name-attribute: login
-
 # ── Server (Tomcat / forwarded headers) ──────────────────────────────────────
 # The prod LB terminates TLS and forwards X-Forwarded-Proto: https. Without
 # this, Spring sees every request as http and rebuilds absolute URLs

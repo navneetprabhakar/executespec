@@ -238,10 +238,12 @@ jobs:
           # env stores this as BENCHMARK_GITHUB_PAT and writes GITHUB_PAT into
           # the app env file at deploy time.
           BENCHMARK_GITHUB_PAT: ${{ secrets.BENCHMARK_GITHUB_PAT }}
-          BENCHMARK_GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
-          BENCHMARK_GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
-          BENCHMARK_GITHUB_OAUTH_CLIENT_ID: ${{ secrets.GITHUB_OAUTH_CLIENT_ID }}
-          BENCHMARK_GITHUB_OAUTH_CLIENT_SECRET: ${{ secrets.GITHUB_OAUTH_CLIENT_SECRET }}
+          DEPLOY_GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
+          DEPLOY_GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
+          # GitHub reserves the GITHUB_* secret namespace. Repository secrets
+          # therefore use OAUTH_GITHUB_* and are mapped to the Spring names below.
+          DEPLOY_GITHUB_OAUTH_CLIENT_ID: ${{ secrets.OAUTH_GITHUB_CLIENT_ID }}
+          DEPLOY_GITHUB_OAUTH_CLIENT_SECRET: ${{ secrets.OAUTH_GITHUB_CLIENT_SECRET }}
         run: |
           cat > /tmp/env-patch.sh << 'SCRIPT'
           #!/bin/bash
@@ -368,10 +370,14 @@ jobs:
             append_secret DEEPSEEK_API_KEY "$BENCHMARK_DEEPSEEK_API_KEY"
             append_secret OPENROUTER_API_KEY "$BENCHMARK_OPENROUTER_API_KEY"
             append_secret GITHUB_PAT "$BENCHMARK_GITHUB_PAT"
-            append_secret GOOGLE_OAUTH_CLIENT_ID "$BENCHMARK_GOOGLE_OAUTH_CLIENT_ID"
-            append_secret GOOGLE_OAUTH_CLIENT_SECRET "$BENCHMARK_GOOGLE_OAUTH_CLIENT_SECRET"
-            append_secret GITHUB_OAUTH_CLIENT_ID "$BENCHMARK_GITHUB_OAUTH_CLIENT_ID"
-            append_secret GITHUB_OAUTH_CLIENT_SECRET "$BENCHMARK_GITHUB_OAUTH_CLIENT_SECRET"
+          fi
+          # Social login is enabled on shared dev only. Credentials are
+          # environment-scoped GitHub secrets and never committed to profile YAML.
+          if [ "${{ env.DEPLOY_ENV }}" = "dev" ]; then
+            append_secret GOOGLE_OAUTH_CLIENT_ID "$DEPLOY_GOOGLE_OAUTH_CLIENT_ID"
+            append_secret GOOGLE_OAUTH_CLIENT_SECRET "$DEPLOY_GOOGLE_OAUTH_CLIENT_SECRET"
+            append_secret GITHUB_OAUTH_CLIENT_ID "$DEPLOY_GITHUB_OAUTH_CLIENT_ID"
+            append_secret GITHUB_OAUTH_CLIENT_SECRET "$DEPLOY_GITHUB_OAUTH_CLIENT_SECRET"
           fi
           chmod +x /tmp/env-patch.sh
           cat > /tmp/executespec-benchmark.service << 'SERVICE'
