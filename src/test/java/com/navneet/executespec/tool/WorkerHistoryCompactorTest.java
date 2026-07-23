@@ -337,4 +337,127 @@ class WorkerHistoryCompactorTest {
     List<Message> out = compactor.compactIfNeeded(h, "anthropic", CTX, OVER, "goal");
     assertThat(out).isSameAs(h);
   }
+
+  // ---- RR-1601: history index 1 must never simply disappear ------------------------------
+
+  private void stubLengthTruncatedLlm() {
+    when(modelResolver.resolve(anyString(), any(LlmProvider.class)))
+        .thenReturn(
+            ResolvedModel.builder().actualProvider(LlmProvider.ANTHROPIC).model("haiku").build());
+    when(promptAssembler.assemble(anyString(), any())).thenReturn("summariser prompt");
+    ChatResponse resp = Mockito.mock(ChatResponse.class);
+    Generation gen = Mockito.mock(Generation.class);
+    AssistantMessage msg = Mockito.mock(AssistantMessage.class);
+    Mockito.when(resp.getResult()).thenReturn(gen);
+    Mockito.when(gen.getOutput()).thenReturn(msg);
+    Mockito.when(gen.getMetadata())
+        .thenReturn(ChatGenerationMetadata.builder().finishReason("length").build());
+    Mockito.when(msg.getText()).thenReturn("truncated summary");
+    when(router.call(any(LlmRequest.class))).thenReturn(resp);
+  }
+
+  private static List<Message> longHistoryWithIndexOne(Message indexOne) {
+    List<Message> h = longHistory();
+    h.set(1, indexOne);
+    return h;
+  }
+
+  @Test
+  @DisplayName("RR-1601 index 1 as a second SystemMessage is summarised, not silently dropped")
+  void indexOneSystemMessageIsSummarised() {
+    when(featureFlagService.isEnabled(WorkerHistoryCompactor.FLAG_ENABLED)).thenReturn(true);
+    stubSummaryLlm(LlmProvider.ANTHROPIC, "claude-haiku-4-5-20251001");
+    List<Message> h =
+        longHistoryWithIndexOne(new SystemMessage("SECOND SYSTEM BLOCK — task evidence"));
+
+    List<Message> out = compactor.compactIfNeeded(h, "anthropic", CTX, OVER, "goal");
+
+    assertThat(out).isNotSameAs(h);
+    // The summarised block must have INCLUDED index 1 rather than skipping over it.
+    org.mockito.ArgumentCaptor<java.util.Map<String, String>> vars =
+        org.mockito.ArgumentCaptor.forClass(java.util.Map.class);
+    verify(promptAssembler).assemble(anyString(), vars.capture());
+    assertThat(vars.getValue().get("HISTORY")).contains("SECOND SYSTEM BLOCK");
+  }
+
+  @Test
+  @DisplayName("RR-1601 index 1 as an AssistantMessage is summarised, not silently dropped")
+  void indexOneAssistantMessageIsSummarised() {
+    when(featureFlagService.isEnabled(WorkerHistoryCompactor.FLAG_ENABLED)).thenReturn(true);
+    stubSummaryLlm(LlmProvider.ANTHROPIC, "claude-haiku-4-5-20251001");
+    List<Message> h =
+        longHistoryWithIndexOne(
+            AssistantMessage.builder().content("RESUMED ASSISTANT CONTEXT").build());
+
+    compactor.compactIfNeeded(h, "anthropic", CTX, OVER, "goal");
+
+    org.mockito.ArgumentCaptor<java.util.Map<String, String>> vars =
+        org.mockito.ArgumentCaptor.forClass(java.util.Map.class);
+    verify(promptAssembler).assemble(anyString(), vars.capture());
+    assertThat(vars.getValue().get("HISTORY")).contains("RESUMED ASSISTANT CONTEXT");
+  }
+
+  @Test
+  @DisplayName("RR-1601 a text-bearing index 1 is still folded verbatim, not summarised")
+  void textBearingIndexOneIsStillFoldedVerbatim() {
+    when(featureFlagService.isEnabled(WorkerHistoryCompactor.FLAG_ENABLED)).thenReturn(true);
+    stubSummaryLlm(LlmProvider.ANTHROPIC, "claude-haiku-4-5-20251001");
+    List<Message> h = longHistory();
+
+    List<Message> out = compactor.compactIfNeeded(h, "anthropic", CTX, OVER, "goal");
+
+    assertThat(((UserMessage) out.get(1)).getText())
+        .contains("the original task: build a /health endpoint");
+  }
+
+  // ---- RR-1602: a billed failure must not repeat every iteration --------------------------
+
+  @Test
+  @DisplayName("RR-1602 repeated length-truncated responses stop spending after N attempts")
+  void repeatedBilledFailuresStopSpending() {
+    when(featureFlagService.isEnabled(WorkerHistoryCompactor.FLAG_ENABLED)).thenReturn(true);
+    stubLengthTruncatedLlm();
+
+    for (int iteration = 0; iteration < 25; iteration++) {
+      List<Message> h = longHistory();
+      assertThat(compactor.compactIfNeeded(h, "anthropic", CTX, OVER, "goal")).isSameAs(h);
+    }
+
+    verify(router, Mockito.times(WorkerHistoryCompactor.MAX_CONSECUTIVE_COMPACTION_FAILURES))
+        .call(any(LlmRequest.class));
+  }
+
+  @Test
+  @DisplayName("RR-1602 a success clears the failure memo")
+  void successResetsTheFailureBudget() {
+    when(featureFlagService.isEnabled(WorkerHistoryCompactor.FLAG_ENABLED)).thenReturn(true);
+    when(modelResolver.resolve(anyString(), any(LlmProvider.class)))
+        .thenReturn(
+            ResolvedModel.builder().actualProvider(LlmProvider.ANTHROPIC).model("haiku").build());
+    when(promptAssembler.assemble(anyString(), any())).thenReturn("summariser prompt");
+
+    ChatResponse truncated = response("truncated", "length");
+    ChatResponse good = response("Files: created Health.java.", "stop");
+    when(router.call(any(LlmRequest.class))).thenReturn(truncated, good, truncated, truncated);
+
+    // 1 failure, then a success (memo cleared), then 2 more failures = 4 calls total.
+    for (int i = 0; i < 6; i++) {
+      compactor.compactIfNeeded(longHistory(), "anthropic", CTX, OVER, "goal");
+    }
+
+    verify(router, Mockito.times(4)).call(any(LlmRequest.class));
+  }
+
+  private static ChatResponse response(String text, String finishReason) {
+    ChatResponse resp = Mockito.mock(ChatResponse.class);
+    Generation gen = Mockito.mock(Generation.class);
+    AssistantMessage msg = Mockito.mock(AssistantMessage.class);
+    Mockito.lenient().when(resp.getResult()).thenReturn(gen);
+    Mockito.lenient().when(gen.getOutput()).thenReturn(msg);
+    Mockito.lenient()
+        .when(gen.getMetadata())
+        .thenReturn(ChatGenerationMetadata.builder().finishReason(finishReason).build());
+    Mockito.lenient().when(msg.getText()).thenReturn(text);
+    return resp;
+  }
 }

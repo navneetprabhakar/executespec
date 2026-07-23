@@ -11,6 +11,7 @@ import java.util.List;
 import java.util.Set;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.navneet.executespec.security.SensitiveWorkspacePathPolicy;
 
 import org.springframework.stereotype.Component;
 
@@ -114,8 +115,12 @@ public class ListFilesTool implements Tool {
 
               @Override
               public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
+                String rel = rootReal.relativize(file).toString();
+                if (SensitiveWorkspacePathPolicy.isSensitive(rel)) {
+                  return FileVisitResult.CONTINUE; // RR-1547 — never enumerate credential files
+                }
                 if (entries.size() < MAX_ENTRIES) {
-                  entries.add(rootReal.relativize(file).toString());
+                  entries.add(rel);
                 }
                 return entries.size() < MAX_ENTRIES
                     ? FileVisitResult.CONTINUE
@@ -131,7 +136,13 @@ public class ListFilesTool implements Tool {
                     if (HIDDEN_DIRS.contains(p.getFileName().toString())) return;
                     if (entries.size() >= MAX_ENTRIES) return;
                     String rel = rootReal.relativize(p).toString();
-                    entries.add(Files.isDirectory(p) ? rel + "/" : rel);
+                    // RR-1547 — the credential-path policy governs enumeration, not just reads.
+                    if (SensitiveWorkspacePathPolicy.isSensitive(rel)) return;
+                    // RR-1547 — do NOT follow symlinks when deciding the directory marker; a
+                    // symlink to a directory outside the workspace must not be advertised as one.
+                    boolean isDir = Files.isDirectory(p, java.nio.file.LinkOption.NOFOLLOW_LINKS);
+                    boolean isLink = Files.isSymbolicLink(p);
+                    entries.add(isDir ? rel + "/" : (isLink ? rel + " -> (symlink)" : rel));
                   });
         }
       }

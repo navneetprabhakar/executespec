@@ -15,9 +15,11 @@ import com.navneet.executespec.billing.service.ManagedAiUsageService;
 import com.navneet.executespec.billing.service.UsageTrackingService;
 import com.navneet.executespec.config.featureflag.FeatureFlagService;
 import com.navneet.executespec.integration.RunOrchestrator;
+import com.navneet.executespec.project.security.ProjectAccessGuard;
 import com.navneet.executespec.router.ModelAccessService;
 import com.navneet.executespec.run.RunIdempotencyService;
-import com.navneet.executespec.run.RunLocalExecutionFlag;
+import com.navneet.executespec.run.RunIdempotencyStatus;
+import com.navneet.executespec.run.RunRequestFingerprint;
 import com.navneet.executespec.security.InputSanitizer;
 import com.navneet.executespec.state.StateStore;
 import com.navneet.executespec.state.entity.PipelineRun;
@@ -51,7 +53,7 @@ public class AgentRunSubmissionGate {
   private final AiProviderPreferenceService aiProviderPreferenceService;
   private final RunIdempotencyService runIdempotencyService;
   private final StateStore stateStore;
-  private final RunLocalExecutionFlag runLocalExecutionFlag;
+  private final ProjectAccessGuard projectAccessGuard;
 
   public Submission submitConfirmed(
       AgentSession session,
@@ -103,6 +105,12 @@ public class AgentRunSubmissionGate {
     if (projectId == null) {
       throw new ResponseStatusException(HttpStatus.CONFLICT, "project context is required");
     }
+    projectAccessGuard.assertCanWrite(projectId, user);
+    // RR-825 — this surface has no bean validation, so a caller could send "NaN"/"Infinity" as the
+    // hard cost cap and disable the worker ceiling. Reject before the claim, the quota accounting
+    // and any provider spend rather than after the asynchronous pipeline has already started.
+    com.navneet.executespec.cost.CostCapValues.requireValidOptional(
+        request == null ? null : request.userCostCap());
     boolean localExecutionRequested =
         request != null && Boolean.TRUE.equals(request.localExecution());
     if (localExecutionRequested && !featureFlagService.isEnabled("worker.local-hands.enabled")) {
@@ -117,75 +125,119 @@ public class AgentRunSubmissionGate {
           "Local-hands execution requires a CLI or VS Code Personal Access Token session; web UI"
               + " runs execute remotely.");
     }
+    if (localExecutionRequested) {
+      throw new ResponseStatusException(
+          HttpStatus.UNPROCESSABLE_ENTITY,
+          "Agent proposal confirmation cannot bind a local connector and repository selection."
+              + " Submit through the CLI/VS Code local-run command so selectedRepoIds and"
+              + " localInstallationId are verified before any run or provider spend.");
+    }
 
+    // Durable atomic claim (V303): one confirmed turn can only ever produce one run, even when the
+    // same confirmation is dispatched twice in parallel. Taken before quota/usage accounting below.
     String idempotencyKey = IDEMPOTENCY_PREFIX + turn.getId();
-    var priorRunId = runIdempotencyService.lookup(user.getUser().getId(), idempotencyKey);
-    if (priorRunId.isPresent()) {
-      var prior = stateStore.findRun(priorRunId.get());
+    var claim =
+        runIdempotencyService.claim(
+            user.getUser().getId(),
+            idempotencyKey,
+            RunRequestFingerprint.of(java.util.Arrays.asList(projectId, spec)));
+    if (claim.status() == RunIdempotencyStatus.DUPLICATE) {
+      var prior = stateStore.findRun(claim.runId());
       if (prior.isPresent() && user.getUser().getId().equals(prior.get().getCreatedByUserId())) {
         return new Submission(prior.get().getRunId(), false, "ALREADY_SUBMITTED");
       }
     }
-
-    inputSanitizer.scan(spec);
-    if (featureFlagService.isEnabled("submissions.paused")) {
+    if (!claim.owned() && claim.status() != RunIdempotencyStatus.DISABLED) {
       throw new ResponseStatusException(
-          HttpStatus.SERVICE_UNAVAILABLE,
-          "Run submissions are temporarily paused for maintenance. Please try again later.");
+          HttpStatus.CONFLICT,
+          "This confirmation is already being submitted. Reload the session before retrying.");
     }
 
-    String modelName = request == null ? null : AgentText.blankToNull(request.modelName());
-    modelAccessService.assertModelAllowed(user.getUser().getId(), modelName);
-    String lowStartTier =
-        request == null
-            ? null
-            : normalizeLowComplexityWorkerStartTier(request.lowComplexityWorkerStartTier());
-    // Run-count retirement (2026-06-22): gate on managed ES AI credits, not a run cap.
-    managedAiUsageService.assertCanStartRun(
-        user, apiKeyResolver.isOwnKeysMode(user.getUser().getId()));
-    tierEnforcementService.incrementRunCountForAnalytics(user.getUser().getId());
-    apiKeyResolver.validateKeyAvailability(user.getUser().getId());
+    // Everything from here to submitRun is inside the claim's failure handling. A throw from the
+    // validation band used to leave the durable claim held with no run id, so the very next retry
+    // -- after the user topped up credits or fixed their key -- was rejected as a duplicate
+    // submission until the lease elapsed.
+    PipelineRun run;
+    try {
+      inputSanitizer.scan(spec);
+      if (featureFlagService.isEnabled("submissions.paused")) {
+        throw new ResponseStatusException(
+            HttpStatus.SERVICE_UNAVAILABLE,
+            "Run submissions are temporarily paused for maintenance. Please try again later.");
+      }
 
-    String providerOverride = request == null ? null : AgentText.blankToNull(request.aiProvider());
-    String effectiveProvider =
-        providerOverride != null
-            ? aiProviderPreferenceService.updatePreferredProvider(user, providerOverride)
-            : aiProviderPreferenceService.preferredProvider(user);
-    String executionMode = normalizeExecutionMode(request == null ? null : request.executionMode());
+      String explicitModel = request == null ? null : AgentText.blankToNull(request.modelName());
+      String modelName =
+          AgentText.firstNonBlank(explicitModel, AgentText.blankToNull(session.getDefaultModel()));
+      modelAccessService.assertModelAllowed(user.getUser().getId(), modelName);
+      String lowStartTier =
+          request == null
+              ? null
+              : normalizeLowComplexityWorkerStartTier(request.lowComplexityWorkerStartTier());
+      // Run-count retirement (2026-06-22): gate on managed ES AI credits, not a run cap.
+      managedAiUsageService.assertCanStartRun(
+          user, apiKeyResolver.isOwnKeysMode(user.getUser().getId()));
+      tierEnforcementService.incrementRunCountForAnalytics(user.getUser().getId());
+      apiKeyResolver.validateKeyAvailability(user.getUser().getId());
 
-    PipelineRun run =
-        runOrchestrator.submitRun(
-            spec,
-            "AGENT_ORCHESTRATOR",
-            null,
-            "EXISTING",
-            user.getUser().getGithubPat(),
-            user.getUser().getGithubOwner(),
-            false,
-            false,
-            modelName,
-            effectiveProvider,
-            user.getUser().getId(),
-            user.getUser().getOrgId(),
-            projectId,
-            executionMode,
-            null,
-            null,
-            false,
-            null,
-            null,
-            null,
-            null,
-            lowStartTier);
+      String providerOverride =
+          request == null ? null : AgentText.blankToNull(request.aiProvider());
+      String modelProvider =
+          explicitModel == null ? null : modelAccessService.providerForModel(explicitModel);
+      String sessionProvider = AgentText.blankToNull(session.getDefaultProvider());
+      String selectedProvider =
+          AgentText.firstNonBlank(providerOverride, modelProvider, sessionProvider);
+      String effectiveProvider =
+          selectedProvider != null
+              ? (providerOverride != null || modelProvider != null
+                  ? aiProviderPreferenceService.updatePreferredProvider(user, selectedProvider)
+                  : selectedProvider)
+              : aiProviderPreferenceService.preferredProvider(user);
+      modelAccessService.assertProviderModelPair(effectiveProvider, modelName);
+      String executionMode =
+          normalizeExecutionMode(request == null ? null : request.executionMode());
 
+      run =
+          runOrchestrator.submitRun(
+              spec,
+              "AGENT_ORCHESTRATOR",
+              null,
+              "EXISTING",
+              user.getUser().getGithubPat(),
+              user.getUser().getGithubOwner(),
+              false,
+              false,
+              modelName,
+              effectiveProvider,
+              user.getUser().getId(),
+              user.getUser().getOrgId(),
+              projectId,
+              executionMode,
+              null,
+              null,
+              false,
+              null,
+              null,
+              null,
+              null,
+              lowStartTier);
+    } catch (ResponseStatusException e) {
+      if (e.getStatusCode().is4xxClientError()) {
+        runIdempotencyService.failFinal(claim, e.getStatusCode() + " " + e.getReason());
+      } else {
+        runIdempotencyService.releaseForRetry(claim, String.valueOf(e.getStatusCode()));
+      }
+      throw e;
+    } catch (RuntimeException e) {
+      runIdempotencyService.releaseForRetry(claim, e.getClass().getSimpleName());
+      throw e;
+    }
+
+    runIdempotencyService.complete(claim, run.getRunId());
     usageTrackingService.increment(user.getUser().getId(), "RUNS", 1);
     if (request != null && request.userCostCap() != null) {
       stateStore.setUserCostCap(run.getRunId(), request.userCostCap());
     }
-    if (localExecutionRequested) {
-      runLocalExecutionFlag.mark(run.getRunId());
-    }
-    runIdempotencyService.record(user.getUser().getId(), idempotencyKey, run.getRunId());
     return new Submission(run.getRunId(), true, "SUBMITTED");
   }
 

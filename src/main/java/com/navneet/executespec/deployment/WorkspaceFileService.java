@@ -3,15 +3,19 @@ package com.navneet.executespec.deployment;
 import java.io.IOException;
 import java.nio.file.*;
 import java.nio.file.attribute.BasicFileAttributes;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 
 import com.navneet.executespec.config.AgentProperties;
 import com.navneet.executespec.repo.GitHubRepoService;
+import com.navneet.executespec.security.SafeWorkspacePath;
+import com.navneet.executespec.security.SensitiveWorkspacePathPolicy;
 import com.navneet.executespec.state.StateStore;
 import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.entity.RunRepoSnapshot;
 import com.navneet.executespec.state.repository.RunRepoSnapshotRepository;
+import com.navneet.executespec.testgen.BoundedProcess;
 
 import org.springframework.stereotype.Service;
 
@@ -107,9 +111,14 @@ public class WorkspaceFileService {
    * @throws IOException on read errors
    */
   public String readFile(String runId, String relativePath) throws IOException {
-    if (relativePath.contains("..")) {
+    if (relativePath == null || relativePath.isBlank()) {
+      throw new NoSuchFileException(String.valueOf(relativePath));
+    }
+    Path requested = Path.of(relativePath);
+    if (requested.isAbsolute() || relativePath.contains("..")) {
       throw new SecurityException("Path traversal not allowed: " + relativePath);
     }
+    assertModelSafePath(relativePath);
 
     Path root = workspaceRoot(runId);
     if (Files.isDirectory(root)) {
@@ -143,8 +152,12 @@ public class WorkspaceFileService {
           @Override
           public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
             String name = file.getFileName().toString();
-            if (!skipByExtension(name)) {
-              paths.add(root.relativize(file).toString());
+            String relative = root.relativize(file).toString();
+            if (attrs.isRegularFile()
+                && !Files.isSymbolicLink(file)
+                && !skipByExtension(name)
+                && !SensitiveWorkspacePathPolicy.isSensitive(relative)) {
+              paths.add(relative);
             }
             return FileVisitResult.CONTINUE;
           }
@@ -163,6 +176,15 @@ public class WorkspaceFileService {
     if (!Files.exists(file) || !Files.isRegularFile(file)) {
       throw new NoSuchFileException(relativePath);
     }
+    if (Files.isSymbolicLink(file)) {
+      throw new SecurityException("Symbolic-link reads are not allowed: " + relativePath);
+    }
+    Path realRoot = root.toRealPath();
+    Path realFile = file.toRealPath();
+    if (!realFile.startsWith(realRoot)) {
+      throw new SecurityException("Path escapes workspace: " + relativePath);
+    }
+    assertModelSafePath(realRoot.relativize(realFile).toString());
 
     long size = Files.size(file);
     if (size > MAX_FILE_SIZE) {
@@ -179,31 +201,117 @@ public class WorkspaceFileService {
       return List.of();
     }
 
+    // RR-862: read the exact revision the run executed against, never the repository's current
+    // default branch.
+    String ref = resolveRunRef(runId, run);
+    if (ref == null) {
+      log.warn(
+          "[WorkspaceFileService] run {} has no snapshot revision — refusing to list today's"
+              + " default branch for {} (evidence unavailable)",
+          runId,
+          run.getRepoUrl());
+      return List.of();
+    }
+
     String pat = resolveGitHubPat(run);
     log.info(
-        "[WorkspaceFileService] Local workspace missing for run {} — listing from GitHub: {}",
+        "[WorkspaceFileService] Local workspace missing for run {} — listing from GitHub {} @ {}",
         runId,
-        run.getRepoUrl());
-    return gitHubRepoService.listRepoFiles(run.getRepoUrl(), pat);
+        run.getRepoUrl(),
+        ref);
+    return gitHubRepoService.listRepoFiles(run.getRepoUrl(), ref, pat).stream()
+        .filter(path -> !SensitiveWorkspacePathPolicy.isSensitive(path))
+        .toList();
   }
 
   private String readFromGitHub(String runId, String relativePath) throws IOException {
+    assertModelSafePath(relativePath);
     PipelineRun run = stateStore.findRun(runId).orElse(null);
     if (run == null || run.getRepoUrl() == null || run.getRepoUrl().isBlank()) {
       throw new NoSuchFileException(relativePath);
     }
 
-    String pat = resolveGitHubPat(run);
-    log.debug("[WorkspaceFileService] Reading {} from GitHub for run {}", relativePath, runId);
-    String content = gitHubRepoService.readRepoFile(run.getRepoUrl(), relativePath, pat);
-
-    // If the GitHub response starts with "// " it's an error message from the service
-    if (content.startsWith("// File not found")
-        || content.startsWith("// No GitHub PAT")
-        || content.startsWith("// Invalid repo URL")) {
+    // RR-862: bind the fallback read to the run's immutable revision. Without it the branchless
+    // GitHub contents API resolves the repository default branch, so a historical run's file could
+    // be served from today's `main` — hiding branch deletion / force-push and destroying
+    // reproducibility. No revision identity ⇒ evidence-unavailable (404), never a mutable default.
+    String ref = resolveRunRef(runId, run);
+    if (ref == null) {
+      log.warn(
+          "[WorkspaceFileService] run {} has no snapshot revision for GitHub fallback of {} —"
+              + " evidence unavailable",
+          runId,
+          relativePath);
       throw new NoSuchFileException(relativePath);
     }
-    return content;
+
+    String pat = resolveGitHubPat(run);
+    log.debug(
+        "[WorkspaceFileService] Reading {} from GitHub for run {} @ {}", relativePath, runId, ref);
+    var result = gitHubRepoService.readRepoFile(run.getRepoUrl(), relativePath, ref, pat);
+
+    // RR-1631 — failure is out-of-band. Previously a transport failure returned its message AS the
+    // file content ("// Error reading file from GitHub: …"), which then flowed into model context;
+    // and a real source file whose first line was "// File not found…" would 404. Neither now.
+    if (!result.successful()) {
+      throw new NoSuchFileException(relativePath);
+    }
+    return result.content();
+  }
+
+  /**
+   * RR-862: resolve the EXACT revision a single-repo run executed against, for the GitHub fallback.
+   * Prefers the immutable {@link RunRepoSnapshot#commitSha} (the precise cloned revision), then the
+   * recorded branch. Returns {@code null} when the run carries no revision identity at all, so
+   * callers fail closed (evidence-unavailable) instead of substituting the repository's current
+   * default branch.
+   */
+  String resolveRunRef(String runId, PipelineRun run) {
+    try {
+      List<RunRepoSnapshot> snaps = runRepoSnapshotRepository.findByRunId(runId);
+      if (snaps == null || snaps.isEmpty()) {
+        return null;
+      }
+      RunRepoSnapshot match = null;
+      if (snaps.size() == 1) {
+        match = snaps.get(0); // single-repo run — one snapshot is unambiguous
+      } else {
+        String want = shortRepoName(run.getRepoUrl());
+        for (RunRepoSnapshot s : snaps) {
+          String full = s.getRepoFullName();
+          if (full == null) continue;
+          String shortName = full.contains("/") ? full.substring(full.lastIndexOf('/') + 1) : full;
+          if (shortName.equalsIgnoreCase(want)) {
+            match = s;
+            break;
+          }
+        }
+      }
+      if (match == null) {
+        return null;
+      }
+      if (match.getCommitSha() != null && !match.getCommitSha().isBlank()) {
+        return match.getCommitSha();
+      }
+      if (match.getBranch() != null && !match.getBranch().isBlank()) {
+        return match.getBranch();
+      }
+      return null;
+    } catch (Exception e) {
+      log.debug(
+          "[WorkspaceFileService] run-ref resolution failed for {}: {}", runId, e.getMessage());
+      return null;
+    }
+  }
+
+  /** The short {@code repo} name from an owner/repo GitHub URL, {@code .git} suffix stripped. */
+  static String shortRepoName(String repoUrl) {
+    if (repoUrl == null || repoUrl.isBlank()) {
+      return "";
+    }
+    String s = repoUrl.endsWith(".git") ? repoUrl.substring(0, repoUrl.length() - 4) : repoUrl;
+    int slash = s.lastIndexOf('/');
+    return slash >= 0 ? s.substring(slash + 1) : s;
   }
 
   /**
@@ -252,9 +360,15 @@ public class WorkspaceFileService {
    * "added" diff instead of an opaque error.
    */
   public FileDiff readFileDiff(String runId, String relativePath) throws IOException {
-    if (relativePath.contains("..")) {
-      throw new SecurityException("Path traversal not allowed: " + relativePath);
+    // RR-859 — the diff path previously did only a substring "..", check and never consulted the
+    // sensitive-path policy, so a credential file deleted from the head could still be served as
+    // FileDiff.base straight out of `git show <baseSha>:<path>`.
+    if (relativePath == null || relativePath.isBlank()) {
+      throw new NoSuchFileException(String.valueOf(relativePath));
     }
+    // Exact normalized components via the shared helper, not a `contains("..")` substring test.
+    SafeWorkspacePath.requireSafeRelativePosixPath(relativePath);
+    assertModelSafePath(relativePath);
 
     Path root = workspaceRoot(runId);
     if (!Files.isDirectory(root)) {
@@ -365,30 +479,20 @@ public class WorkspaceFileService {
    */
   private String runGitShow(Path repoDir, String sha, String path)
       throws IOException, InterruptedException {
+    // RR-861: the prior code drained the full historical blob to EOF on the calling thread and only
+    // THEN called waitFor(15s), so a large object exhausted heap and a child that kept stdout open
+    // never reached the timeout. BoundedProcess drains on a separate thread (deadline reachable),
+    // caps the captured bytes, and destroys the whole process tree on expiry.
     ProcessBuilder pb =
         new ProcessBuilder("git", "show", sha + ":" + path)
             .directory(repoDir.toFile())
-            .redirectErrorStream(false);
-    Process p = pb.start();
-    StringBuilder sb = new StringBuilder();
-    try (var br =
-        new java.io.BufferedReader(
-            new java.io.InputStreamReader(
-                p.getInputStream(), java.nio.charset.StandardCharsets.UTF_8))) {
-      char[] buf = new char[4096];
-      int n;
-      while ((n = br.read(buf)) > 0) sb.append(buf, 0, n);
-    }
-    boolean done = p.waitFor(15, java.util.concurrent.TimeUnit.SECONDS);
-    if (!done) {
-      p.destroyForcibly();
-      throw new IOException("git show timed out");
-    }
-    if (p.exitValue() != 0) {
+            .redirectErrorStream(true);
+    BoundedProcess.Outcome outcome = runBounded(pb, Duration.ofSeconds(15), "git show");
+    if (outcome.exitCode() != 0) {
       // Most common reason: file didn't exist at that commit. Caller classifies as ADDED.
       return null;
     }
-    return sb.toString();
+    return outcome.output();
   }
 
   private List<String> runGit(Path repoDir, List<String> args, int timeoutSeconds)
@@ -396,26 +500,35 @@ public class WorkspaceFileService {
     List<String> cmd = new ArrayList<>(args.size() + 1);
     cmd.add("git");
     cmd.addAll(args);
+    // RR-861: same bounded, drain-on-separate-thread process runner as runGitShow, so a git command
+    // producing unbounded output (or a silently-open pipe) cannot exhaust heap or defeat the
+    // timeout.
     ProcessBuilder pb =
         new ProcessBuilder(cmd).directory(repoDir.toFile()).redirectErrorStream(true);
-    Process p = pb.start();
-    List<String> lines = new ArrayList<>();
-    try (var br =
-        new java.io.BufferedReader(
-            new java.io.InputStreamReader(
-                p.getInputStream(), java.nio.charset.StandardCharsets.UTF_8))) {
-      String line;
-      while ((line = br.readLine()) != null) lines.add(line);
+    BoundedProcess.Outcome outcome = runBounded(pb, Duration.ofSeconds(timeoutSeconds), "git");
+    if (outcome.exitCode() != 0) {
+      throw new IOException("git exit=" + outcome.exitCode() + " for " + cmd);
     }
-    boolean done = p.waitFor(timeoutSeconds, java.util.concurrent.TimeUnit.SECONDS);
-    if (!done) {
-      p.destroyForcibly();
-      throw new IOException("git command timed out: " + cmd);
+    return outcome.output().isEmpty()
+        ? new ArrayList<>()
+        : new ArrayList<>(outcome.output().lines().toList());
+  }
+
+  /** RR-861 — shared bounded-process invocation for the git helpers. */
+  private BoundedProcess.Outcome runBounded(ProcessBuilder pb, Duration timeout, String label)
+      throws IOException {
+    BoundedProcess.Outcome outcome;
+    try {
+      outcome = BoundedProcess.run(pb, timeout);
+    } catch (IOException e) {
+      throw e;
+    } catch (Exception e) {
+      throw new IOException(label + " failed", e);
     }
-    if (p.exitValue() != 0) {
-      throw new IOException("git exit=" + p.exitValue() + " for " + cmd);
+    if (!outcome.finished()) {
+      throw new IOException(label + " timed out");
     }
-    return lines;
+    return outcome;
   }
 
   /**
@@ -617,5 +730,11 @@ public class WorkspaceFileService {
       if (name.endsWith(ext)) return true;
     }
     return false;
+  }
+
+  private static void assertModelSafePath(String relativePath) {
+    if (SensitiveWorkspacePathPolicy.isSensitive(relativePath)) {
+      throw new SecurityException("Credential-like files are not available through run file APIs");
+    }
   }
 }

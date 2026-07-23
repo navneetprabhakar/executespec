@@ -83,7 +83,19 @@ class AgentEventRecorder {
     try {
       return objectMapper.writeValueAsString(value);
     } catch (Exception e) {
-      return "{\"error\":\"json serialization failed\"}";
+      // RR-888 — never launder an unserializable payload into a valid-looking event. For a terminal
+      // ACTION_RESULT this consumed the V272 first-writer slot with an empty {"error":...} row,
+      // permanently blocking a corrected retry while readers converged on UNKNOWN. Fail loudly so
+      // the insert is not attempted and the unique terminal slot stays open for a real outcome.
+      throw new PayloadSerializationException(
+          "event payload could not be serialized: " + e.getMessage(), e);
+    }
+  }
+
+  /** RR-888 — thrown before any event insert when a payload cannot be serialized. */
+  static final class PayloadSerializationException extends RuntimeException {
+    PayloadSerializationException(String message, Throwable cause) {
+      super(message, cause);
     }
   }
 }

@@ -25,6 +25,11 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.TransactionStatus;
+import org.springframework.transaction.support.SimpleTransactionStatus;
+import org.springframework.transaction.support.TransactionTemplate;
 
 /**
  * Tests for {@link ContractDetectionService} — focused on the upsert decision tree (first detection
@@ -54,7 +59,8 @@ class ContractDetectionServiceTest {
             registryRepo,
             versionRepo,
             projectRepoRepo,
-            emitterProvider);
+            emitterProvider,
+            recordingTxTemplate());
     repoId = UUID.randomUUID();
     projectId = UUID.randomUUID();
     repo = new ProjectRepo();
@@ -193,7 +199,8 @@ class ContractDetectionServiceTest {
             registryRepo,
             versionRepo,
             projectRepoRepo,
-            emitterProvider);
+            emitterProvider,
+            recordingTxTemplate());
 
     Map<String, String> files = Map.of("a.proto", "syntax = \"proto3\";");
     java.util.List<ContractDetectionService.DetectionResult> summary =
@@ -205,7 +212,8 @@ class ContractDetectionServiceTest {
             r -> {
               assertThat(r.status())
                   .isEqualTo(ContractDetectionService.DetectionResult.Status.FAILED);
-              assertThat(r.failureReason()).contains("internal explosion");
+              assertThat(r.failureReason()).isEqualTo("DETECTOR_FAILED:RuntimeException");
+              assertThat(r.failureReason()).doesNotContain("internal explosion");
             });
   }
 
@@ -229,5 +237,109 @@ class ContractDetectionServiceTest {
             },
             p -> null);
     assertThat(summary).isEmpty();
+  }
+
+  // ---------------------------------------------------------------------------------------------
+  // RR-1629 — the version insert used to fail (jsonb column, raw YAML/proto body), get swallowed
+  // into a null return, and leave an already-committed registry row behind. Both halves of that
+  // are now pinned: the write is one transaction, and the failure is reported, not hidden.
+  // ---------------------------------------------------------------------------------------------
+
+  @Test
+  void versionInsertFailure_isReportedAsFailedDetection_notSwallowedIntoACleanScan() {
+    when(registryRepo.findByRepoIdAndName(eq(repoId), eq("openapi"))).thenReturn(Optional.empty());
+    when(registryRepo.save(any(ContractRegistry.class)))
+        .thenAnswer(
+            inv -> {
+              ContractRegistry c = inv.getArgument(0);
+              if (c.getId() == null) c.setId(UUID.randomUUID());
+              return c;
+            });
+    when(versionRepo.save(any(ContractVersion.class)))
+        .thenThrow(
+            new org.springframework.dao.DataIntegrityViolationException("column is of type"));
+
+    Map<String, String> files = Map.of("openapi.yaml", "openapi: 3.0.0\ninfo:\n  version: 1.0.0\n");
+    java.util.List<ContractDetectionService.DetectionResult> summary =
+        service.runForRepo(repoId, projectId, () -> List.copyOf(files.keySet()), files::get);
+
+    assertThat(summary)
+        .singleElement()
+        .satisfies(
+            r -> {
+              assertThat(r.status())
+                  .isEqualTo(ContractDetectionService.DetectionResult.Status.FAILED);
+              assertThat(r.failureReason()).contains("DataIntegrityViolationException");
+              assertThat(r.foundContractIds()).isEmpty();
+            });
+    // Nothing may be reported as detected when its body could not be stored.
+    verifyNoInteractions(emitter);
+  }
+
+  @Test
+  void registryAndVersionWrites_happenInsideOneTransaction() {
+    when(registryRepo.findByRepoIdAndName(eq(repoId), eq("openapi"))).thenReturn(Optional.empty());
+    when(registryRepo.save(any(ContractRegistry.class)))
+        .thenAnswer(
+            inv -> {
+              txDepthDuringRegistrySave = txDepth;
+              ContractRegistry c = inv.getArgument(0);
+              if (c.getId() == null) c.setId(UUID.randomUUID());
+              return c;
+            });
+    when(versionRepo.save(any(ContractVersion.class)))
+        .thenAnswer(
+            inv -> {
+              txDepthDuringVersionSave = txDepth;
+              return inv.getArgument(0);
+            });
+    doAnswer(
+            inv -> {
+              txDepthDuringEmit = txDepth;
+              return null;
+            })
+        .when(emitter)
+        .emit(any(), any(), any(), any(), any(), any(), any());
+
+    Map<String, String> files = Map.of("openapi.yaml", "openapi: 3.0.0\ninfo:\n  version: 1.0.0\n");
+    service.runForRepo(repoId, projectId, () -> List.copyOf(files.keySet()), files::get);
+
+    assertThat(txDepthDuringRegistrySave).isEqualTo(1);
+    assertThat(txDepthDuringVersionSave).isEqualTo(1);
+    // Activity emission must NOT hold the transaction open.
+    assertThat(txDepthDuringEmit).isZero();
+  }
+
+  /** Tracks whether each repository call happened inside the service's transaction callback. */
+  private int txDepth;
+
+  private int txDepthDuringRegistrySave;
+  private int txDepthDuringVersionSave;
+  private int txDepthDuringEmit;
+
+  /**
+   * A {@link TransactionTemplate} over a no-op transaction manager that records nesting depth, so
+   * tests can assert WHICH calls run inside the transactional boundary without a database.
+   */
+  private TransactionTemplate recordingTxTemplate() {
+    PlatformTransactionManager noop =
+        new PlatformTransactionManager() {
+          @Override
+          public TransactionStatus getTransaction(TransactionDefinition definition) {
+            txDepth++;
+            return new SimpleTransactionStatus();
+          }
+
+          @Override
+          public void commit(TransactionStatus status) {
+            txDepth--;
+          }
+
+          @Override
+          public void rollback(TransactionStatus status) {
+            txDepth--;
+          }
+        };
+    return new TransactionTemplate(noop);
   }
 }

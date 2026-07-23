@@ -69,6 +69,14 @@ public class BillingSubscription {
   @Column(name = "downgraded_at")
   private Instant downgradedAt;
 
+  /**
+   * RR-054 — high-water mark of the latest provider webhook event time already applied to this
+   * subscription. A transition whose provider event time predates this value is stale and rejected,
+   * so status/period are decided by provider time rather than webhook arrival order.
+   */
+  @Column(name = "last_provider_event_at")
+  private Instant lastProviderEventAt;
+
   @Column(name = "terms_accepted_at")
   private Instant termsAcceptedAt;
 

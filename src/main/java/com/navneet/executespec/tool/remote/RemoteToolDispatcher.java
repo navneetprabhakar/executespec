@@ -15,6 +15,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.navneet.executespec.agentsession.LocalHandsState;
 import com.navneet.executespec.agentsession.LocalHandsStateService;
+import com.navneet.executespec.engine.AbsoluteDeadlineBudget;
 import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
 
@@ -39,6 +40,16 @@ import lombok.extern.slf4j.Slf4j;
 @Component
 @Slf4j
 public class RemoteToolDispatcher {
+
+  /**
+   * Model-visible tool profile for a remote execution session. LOCAL_HANDS is backed by the
+   * released CLI runtime; TERMINAL_BENCH is deliberately limited to the Harbor adapter's smaller
+   * canonical contract. The profile affects schema advertisement only, never result transport.
+   */
+  public enum ToolProfile {
+    LOCAL_HANDS,
+    TERMINAL_BENCH
+  }
 
   private final SseBroadcaster broadcaster;
   private final ObjectMapper objectMapper;
@@ -84,17 +95,37 @@ public class RemoteToolDispatcher {
   private static final class Session {
     final Map<String, PendingRemoteCall> pending = new ConcurrentHashMap<>();
 
+    final ToolProfile toolProfile;
+
+    final Long absoluteDeadlineEpochMs;
+    final Long shutdownReserveMs;
+
     /** True once this process has an in-memory worker wait that a result can unblock. */
     volatile boolean workerWaitRebound;
 
     volatile boolean connected = true;
 
     Session() {
-      this(true);
+      this(true, ToolProfile.LOCAL_HANDS, null, null);
     }
 
     Session(boolean workerWaitRebound) {
+      this(workerWaitRebound, ToolProfile.LOCAL_HANDS, null, null);
+    }
+
+    Session(boolean workerWaitRebound, ToolProfile toolProfile) {
+      this(workerWaitRebound, toolProfile, null, null);
+    }
+
+    Session(
+        boolean workerWaitRebound,
+        ToolProfile toolProfile,
+        Long absoluteDeadlineEpochMs,
+        Long shutdownReserveMs) {
       this.workerWaitRebound = workerWaitRebound;
+      this.toolProfile = toolProfile;
+      this.absoluteDeadlineEpochMs = absoluteDeadlineEpochMs;
+      this.shutdownReserveMs = shutdownReserveMs;
     }
   }
 
@@ -106,6 +137,8 @@ public class RemoteToolDispatcher {
       String argsJson,
       String permissionKind,
       String frameJson,
+      Long absoluteDeadlineEpochMs,
+      Long shutdownReserveMs,
       AtomicLong deadlineNanos,
       CompletableFuture<String> future) {}
 
@@ -113,12 +146,46 @@ public class RemoteToolDispatcher {
    * Bind a run to remote execution. Called when a LOCAL-mode run starts with a connected client.
    */
   public void register(String runId) {
-    Session existing = sessions.putIfAbsent(runId, new Session());
+    register(runId, ToolProfile.LOCAL_HANDS);
+  }
+
+  /** Bind a run with an explicit model-visible remote tool profile. */
+  public void register(String runId, ToolProfile toolProfile) {
+    register(runId, toolProfile, null, null);
+  }
+
+  /** Bind a deadline-aware benchmark session; product local-hands sessions remain unchanged. */
+  public void register(
+      String runId, ToolProfile toolProfile, Long absoluteDeadlineEpochMs, Long shutdownReserveMs) {
+    ToolProfile resolved = toolProfile == null ? ToolProfile.LOCAL_HANDS : toolProfile;
+    Session existing =
+        sessions.putIfAbsent(
+            runId,
+            new Session(
+                true, resolved, absoluteDeadlineEpochMs, Math.max(0L, orZero(shutdownReserveMs))));
     if (existing == null) {
-      log.info("[RemoteTool] registered local-execution session for run {}", runId);
+      log.info(
+          "[RemoteTool] registered local-execution session for run {} with profile {}",
+          runId,
+          resolved);
       return;
     }
+    if (existing.toolProfile != resolved) {
+      log.warn(
+          "[RemoteTool] run {} already uses profile {}; ignoring conflicting registration {}",
+          runId,
+          existing.toolProfile,
+          resolved);
+    }
     reconnect(runId);
+  }
+
+  /**
+   * Profile used to advertise tools for this remote session, or null when the run is not remote.
+   */
+  public ToolProfile toolProfile(String runId) {
+    Session session = sessions.get(runId);
+    return session == null ? null : session.toolProfile;
   }
 
   /** Bind a run after JVM crash recovery and close stale calls from the old worker future. */
@@ -178,7 +245,10 @@ public class RemoteToolDispatcher {
           .values()
           .forEach(
               call -> {
-                call.deadlineNanos().set(deadlineAfterTimeout());
+                call.deadlineNanos()
+                    .set(
+                        deadlineAfterTimeout(
+                            call.absoluteDeadlineEpochMs(), call.shutdownReserveMs()));
                 record(call, LocalHandsState.CLIENT_RECONNECTED);
                 emit(call);
               });
@@ -248,9 +318,28 @@ public class RemoteToolDispatcher {
    * ran.
    */
   public String dispatch(String runId, String taskId, String toolName, String argsJson) {
+    return dispatch(runId, taskId, toolName, argsJson, null, null);
+  }
+
+  public String dispatch(
+      String runId,
+      String taskId,
+      String toolName,
+      String argsJson,
+      Long absoluteDeadlineEpochMs,
+      Long shutdownReserveMs) {
     Session s = sessions.get(runId);
     if (s == null) {
       return errorEnvelope("INTERNAL", "no remote session bound for run " + runId);
+    }
+    Long effectiveDeadline = earlierDeadline(s.absoluteDeadlineEpochMs, absoluteDeadlineEpochMs);
+    long effectiveReserve = Math.max(orZero(s.shutdownReserveMs), orZero(shutdownReserveMs));
+    long usableMillis =
+        AbsoluteDeadlineBudget.usableMillis(
+            effectiveDeadline, effectiveReserve, System.currentTimeMillis());
+    if (usableMillis < 1L) {
+      return errorEnvelope(
+          "DEADLINE_EXCEEDED", "remote tool refused to preserve terminal shutdown reserve");
     }
     // A crash can happen after the local client executed a mutating command but before the old
     // worker received its HTTP response. Crash recovery resumes from the last context snapshot;
@@ -279,7 +368,8 @@ public class RemoteToolDispatcher {
     CompletableFuture<String> future = new CompletableFuture<>();
     String permissionKind = permissionKind(toolName);
     try {
-      String frameJson = frame(callId, runId, taskId, toolName, argsJson);
+      String frameJson =
+          frame(callId, runId, taskId, toolName, argsJson, effectiveDeadline, effectiveReserve);
       PendingRemoteCall call =
           new PendingRemoteCall(
               callId,
@@ -289,7 +379,9 @@ public class RemoteToolDispatcher {
               argsJson,
               permissionKind,
               frameJson,
-              new AtomicLong(deadlineAfterTimeout()),
+              effectiveDeadline,
+              effectiveReserve,
+              new AtomicLong(deadlineAfterTimeout(effectiveDeadline, effectiveReserve)),
               future);
       s.pending.put(callId, call);
       record(call, LocalHandsState.AWAITING_CLIENT);
@@ -301,8 +393,7 @@ public class RemoteToolDispatcher {
         record(call, LocalHandsState.CLIENT_TIMEOUT);
       }
       return errorEnvelope(
-          "CLIENT_TIMEOUT",
-          "client tool '" + toolName + "' timed out after " + toolTimeoutMs + "ms");
+          "CLIENT_TIMEOUT", "client tool '" + toolName + "' exceeded its bounded deadline");
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
       PendingRemoteCall call = s.pending.get(callId);
@@ -405,8 +496,12 @@ public class RemoteToolDispatcher {
     }
   }
 
-  private long deadlineAfterTimeout() {
-    return System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(toolTimeoutMs);
+  private long deadlineAfterTimeout(Long absoluteDeadlineEpochMs, Long shutdownReserveMs) {
+    long usable =
+        AbsoluteDeadlineBudget.usableMillis(
+            absoluteDeadlineEpochMs, shutdownReserveMs, System.currentTimeMillis());
+    long bounded = usable == Long.MAX_VALUE ? toolTimeoutMs : Math.min(toolTimeoutMs, usable);
+    return System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(Math.max(0L, bounded));
   }
 
   private void emit(PendingRemoteCall call) {
@@ -434,15 +529,35 @@ public class RemoteToolDispatcher {
   }
 
   private String frame(
-      String callId, String runId, String taskId, String toolName, String argsJson) {
+      String callId,
+      String runId,
+      String taskId,
+      String toolName,
+      String argsJson,
+      Long absoluteDeadlineEpochMs,
+      Long shutdownReserveMs) {
     ObjectNode node = objectMapper.createObjectNode();
     node.put("callId", callId);
     node.put("runId", runId);
     if (taskId != null) node.put("taskId", taskId);
     node.put("name", toolName);
     node.put("permissionKind", permissionKind(toolName));
+    if (absoluteDeadlineEpochMs != null && absoluteDeadlineEpochMs > 0) {
+      node.put("absoluteDeadlineEpochMs", absoluteDeadlineEpochMs);
+      node.put("shutdownReserveMs", Math.max(0L, orZero(shutdownReserveMs)));
+    }
     node.set("args", parseArgs(argsJson));
     return node.toString();
+  }
+
+  private static long orZero(Long value) {
+    return value == null ? 0L : value;
+  }
+
+  private static Long earlierDeadline(Long first, Long second) {
+    if (first == null || first <= 0) return second;
+    if (second == null || second <= 0) return first;
+    return Math.min(first, second);
   }
 
   private String permissionKind(String toolName) {

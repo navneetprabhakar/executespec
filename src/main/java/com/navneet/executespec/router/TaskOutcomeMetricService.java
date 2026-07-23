@@ -12,13 +12,41 @@ import org.springframework.stereotype.Service;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
-/** Persists deterministic task quality outcomes for future routing decisions. */
+/**
+ * Persists deterministic task quality outcomes for future routing decisions.
+ *
+ * <p><b>Known route-truth limitation (C1, 2026-07-19; RR-395).</b> {@code model_task_metric} is
+ * keyed on {@code TaskOutcome.dispatchedProvider}/{@code dispatchedModel} — the REQUESTED,
+ * tier-resolved route, not the physical route that served the task. When cross-provider failover or
+ * a managed-AI tier lock substitutes the route, this metric accumulates under a model that did not
+ * do the work, and {@link ModelProviderCandidateService} then consumes it as that model's quality
+ * prior.
+ *
+ * <p>The physical route is now recorded per task in {@code agent_task.effective_provider} / {@code
+ * effective_model} (V305), so the corrected evidence exists. The write key here was deliberately
+ * NOT switched in the same change: this table is read as a rolling window of the newest 200 rows
+ * per {@code (provider, model, tier)} key, so re-keying splits history across two keys. Existing
+ * rows are not migrated, so the effective-route key would start below {@code
+ * execution.continuation.outcome-min-sample-tasks} (default 5) and return no prior at all for a
+ * while, while the stale requested-route key keeps serving a wrong prior from its retained history.
+ * That is a routing-ranking change and needs a measured sample-count check against real data plus
+ * its own {@link ModelProviderCandidateService} regression pass before it lands.
+ */
 @Service
 @RequiredArgsConstructor
 @Slf4j
 public class TaskOutcomeMetricService {
 
   private final ModelTaskMetricRepository repository;
+
+  /**
+   * Sentinel stored in {@code first_error_gate} for an UNMEASURED task outcome — a worker that
+   * reported success but produced no executed smoke/test evidence (RR-396). Such a row is neither a
+   * validation pass nor a failure; it is excluded from the routing quality prior's numerator and
+   * denominator. Distinct from every {@link TaskOutcome.Status} name, so it never collides with a
+   * genuine failure gate.
+   */
+  static final String UNMEASURED_GATE = "SMOKE_UNMEASURED";
 
   public ModelTaskMetric record(
       String runId,
@@ -82,8 +110,31 @@ public class TaskOutcomeMetricService {
         || outcome.dispatchedModel() == null) {
       return null;
     }
-    boolean passed =
-        isSuccessful(outcome.status()) && !Boolean.FALSE.equals(outcome.smokeTestPassed());
+    // RR-396 tri-state outcome: PASSED | FAILED | UNMEASURED.
+    //  - A worker that did NOT complete is a measured FAILED (a genuine negative for this model).
+    //  - A completed worker with an executed smoke gate is PASSED (gate true) or FAILED (gate
+    // false).
+    //  - A completed worker with NO executed smoke evidence (smokeTestPassed == null) is
+    // UNMEASURED:
+    //    it is NOT a deterministic validation pass and must not accrue positive quality evidence.
+    //    Previously null (unmeasured) was read as a pass, inflating a model's validation prior with
+    //    unverified tasks. UNMEASURED rows are persisted but excluded from the prior (see
+    //    qualityPrior), so they neither help nor hurt the numerator/denominator.
+    boolean workerCompleted = isSuccessful(outcome.status());
+    boolean unmeasured = workerCompleted && outcome.smokeTestPassed() == null;
+    boolean passed = workerCompleted && Boolean.TRUE.equals(outcome.smokeTestPassed());
+    String firstErrorGate;
+    int errorCount;
+    if (unmeasured) {
+      firstErrorGate = UNMEASURED_GATE;
+      errorCount = 0;
+    } else if (passed) {
+      firstErrorGate = null;
+      errorCount = 0;
+    } else {
+      firstErrorGate = outcome.status().name();
+      errorCount = 1;
+    }
     ModelTaskMetric metric =
         ModelTaskMetric.builder()
             .runId(runId)
@@ -95,8 +146,8 @@ public class TaskOutcomeMetricService {
             .language(language)
             .attempt(attempt)
             .validationPassed(passed)
-            .errorCount(passed ? 0 : 1)
-            .firstErrorGate(passed ? null : outcome.status().name())
+            .errorCount(errorCount)
+            .firstErrorGate(firstErrorGate)
             .durationMs(outcome.totalLatencyMs())
             .maxOutputTokens(maxOutputTokens)
             .actualOutputTokens(actualOutputTokens)
@@ -138,6 +189,11 @@ public class TaskOutcomeMetricService {
               ? List.of()
               : candidates.stream()
                   .filter(metric -> metric != null)
+                  // RR-396: UNMEASURED tasks (worker success with no executed smoke/test evidence)
+                  // are not deterministic validation outcomes — exclude them from BOTH the
+                  // numerator
+                  // and the denominator so they cannot inflate (or deflate) the pass-rate prior.
+                  .filter(metric -> !UNMEASURED_GATE.equals(metric.getFirstErrorGate()))
                   .filter(
                       metric ->
                           "UNKNOWN".equals(complexity)

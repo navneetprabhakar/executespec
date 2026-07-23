@@ -107,10 +107,13 @@ export function DpaPage() {
       </p>
       <h3>3. Security measures</h3>
       <p>
-        TLS 1.3 in transit; AES-256 at rest (managed Cloud SQL). Role-based access control with
-        tenant-isolation guards enforced in code and pinned by automated tests. Sandboxed,
-        network-isolated code execution; per-run workspaces wiped at run end. Audit-log retention 30
-        days.
+        TLS 1.3 in transit; AES-256 at rest (managed Cloud SQL). Provider credentials are stored
+        under a versioned encryption envelope that fails closed. Role-based access control with
+        tenant-isolation guards enforced in code and pinned by automated tests. Code execution is
+        constrained by a shell-command policy, a filesystem-path sandbox and generated-credential
+        scanning, and runs in a per-run isolated workspace directory. Containerised test execution
+        applies resource limits, drops capabilities and uses a read-only root filesystem. Audit-log
+        retention 30 days.
       </p>
       <h3>4. Cross-border transfers</h3>
       <p>

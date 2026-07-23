@@ -1,6 +1,7 @@
 import {useEffect, useState} from 'react';
 import {Button} from '@/signal/components/Primitives';
 import {ConfirmModal} from '@/signal/components/Modal';
+import {toLoadFailure, type LoadFailure} from '@/lib/loadState';
 import * as api from '@/lib/api';
 
 /**
@@ -17,6 +18,7 @@ import * as api from '@/lib/api';
  */
 export function GcpCredentialPanel({variant}: {variant: 'signal' | 'ide'}) {
   const [cred, setCred] = useState<api.CredentialSummary | null | undefined>(undefined);
+  const [credFailure, setCredFailure] = useState<LoadFailure | null>(null);
   const [json, setJson] = useState('');
   const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState('');
@@ -29,8 +31,14 @@ export function GcpCredentialPanel({variant}: {variant: 'signal' | 'ide'}) {
       .getGcpCredential()
       // `undefined` is the loading sentinel; the endpoint returns an empty body
       // (→ undefined) when no credential is set, so coalesce to null = "none".
-      .then((c) => setCred(c ?? null))
-      .catch(() => setCred(null));
+      .then((c) => {
+        setCred(c ?? null);
+        setCredFailure(null);
+      })
+      // D4: this used to fail to `null`, i.e. "No credential connected." plus a
+      // Connect button — prompting the user to re-paste a service-account key
+      // they may already have stored. A failed read must never read as "none".
+      .catch((e: unknown) => setCredFailure(toLoadFailure(e)));
   }
   useEffect(() => {
     load();
@@ -113,7 +121,31 @@ export function GcpCredentialPanel({variant}: {variant: 'signal' | 'ide'}) {
         </div>
       )}
 
-      {cred === undefined ? (
+      {credFailure ? (
+        // Styled inline rather than via <LoadError>, because this panel also
+        // renders inside the non-IDE Signal chrome.
+        <div style={{fontSize: 13, color: muted}}>
+          <div style={{color: heading, marginBottom: 4}}>
+            {credFailure.kind === 'forbidden'
+              ? 'You do not have access to deploy credentials.'
+              : 'Could not check your GCP credential.'}
+          </div>
+          <div style={{marginBottom: 8}}>
+            This does not mean no credential is connected — we could not find out. Do not re-paste a
+            key until this loads.
+          </div>
+          {credFailure.kind !== 'forbidden' &&
+            (ide ? (
+              <button className='ide-btn' onClick={load}>
+                Retry
+              </button>
+            ) : (
+              <Button kind='secondary' sm onClick={load}>
+                Retry
+              </Button>
+            ))}
+        </div>
+      ) : cred === undefined ? (
         <div style={{fontSize: 13, color: muted}}>Loading…</div>
       ) : cred ? (
         <>

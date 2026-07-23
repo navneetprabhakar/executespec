@@ -1,11 +1,17 @@
 package com.navneet.executespec.agent;
 
+import java.io.IOException;
+import java.io.InputStream;
 import java.net.http.HttpClient;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
+import com.fasterxml.jackson.core.JsonFactory;
+import com.fasterxml.jackson.core.StreamReadConstraints;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -27,6 +33,7 @@ import org.springframework.http.MediaType;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
+import org.springframework.web.client.RestClientResponseException;
 
 import lombok.Builder;
 import lombok.RequiredArgsConstructor;
@@ -73,6 +80,56 @@ public class OpenAiNativeToolClient {
 
   /** Read timeout for the OpenAI HTTP call. Generous because tool-emitting calls can be slow. */
   private static final Duration READ_TIMEOUT = Duration.ofSeconds(120);
+
+  /**
+   * RR-1084 — hard ceiling on the decoded response body. A single legitimate completion (even with
+   * reasoning and large tool arguments) is well under a megabyte; this bound only trips on a faulty
+   * or hostile gateway trying to exhaust heap. Overflow aborts as a typed protocol failure BEFORE
+   * the whole body is buffered, so the router fails over instead of OOMing.
+   */
+  private static final int MAX_RESPONSE_BYTES = 32 * 1024 * 1024;
+
+  /**
+   * RR-1084 — a bounded Jackson reader for UNTRUSTED provider/gateway bodies. Independent of the
+   * injected application {@link ObjectMapper} so its structural limits (nesting depth, string and
+   * number length) apply only to response decoding and never loosen or tighten request building.
+   */
+  private static final ObjectMapper BOUNDED_RESPONSE_MAPPER = boundedResponseMapper();
+
+  private static ObjectMapper boundedResponseMapper() {
+    JsonFactory factory =
+        JsonFactory.builder()
+            .streamReadConstraints(
+                StreamReadConstraints.builder()
+                    .maxNestingDepth(500)
+                    .maxStringLength(50_000_000)
+                    .maxNumberLength(10_000)
+                    .build())
+            .build();
+    return new ObjectMapper(factory);
+  }
+
+  /**
+   * RR-1081 — bounded pool of {@link RestClient}s keyed by base-url + read-timeout class.
+   * Previously every physical attempt built a fresh {@link HttpClient}, request factory and
+   * RestClient, so this path (four providers, 60–180-turn workers, router retries) never reused a
+   * TCP/TLS connection. The API key is applied per-request via the {@code Authorization} header,
+   * never baked into the client, so one client is safe to share across callers with the same
+   * base-url/timeout.
+   */
+  private final ConcurrentHashMap<String, RestClient> clientPool = new ConcurrentHashMap<>();
+
+  private RestClient resolveClient(String effectiveBaseUrl, Duration readTimeout) {
+    String key = effectiveBaseUrl + '|' + readTimeout.toSeconds();
+    return clientPool.computeIfAbsent(
+        key,
+        k -> {
+          HttpClient jdkClient = HttpClient.newBuilder().connectTimeout(CONNECT_TIMEOUT).build();
+          JdkClientHttpRequestFactory factory = new JdkClientHttpRequestFactory(jdkClient);
+          factory.setReadTimeout(readTimeout);
+          return RestClient.builder().baseUrl(effectiveBaseUrl).requestFactory(factory).build();
+        });
+  }
 
   /** Shared default for OpenAI-wire providers; native DeepSeek supplies a longer per-call value. */
   @Value("${executespec.llm.openai-wire.read-timeout-seconds:120}")
@@ -121,15 +178,16 @@ public class OpenAiNativeToolClient {
         request.model(),
         request.tools().stream().map(t -> t.getToolDefinition().name()).toList());
 
-    // Use Java's HttpClient with explicit connect+read timeouts so a hung TCP
-    // connection or stalled body never blocks the harness loop indefinitely.
-    HttpClient jdkClient = HttpClient.newBuilder().connectTimeout(CONNECT_TIMEOUT).build();
-    JdkClientHttpRequestFactory factory = new JdkClientHttpRequestFactory(jdkClient);
-    factory.setReadTimeout(effectiveReadTimeout(request));
-    RestClient client =
-        RestClient.builder().baseUrl(effectiveBaseUrl).requestFactory(factory).build();
+    // RR-1081 — reuse a pooled RestClient (bounded by base-url + read-timeout class) so a hung TCP
+    // connection or stalled body never blocks the harness loop indefinitely while keeping TCP/TLS
+    // pooling across the many attempts a worker makes.
+    RestClient client = resolveClient(effectiveBaseUrl, effectiveReadTimeout(request));
     JsonNode response;
     try {
+      // RR-1084 — decode with an explicit byte ceiling and bounded JSON structural limits instead
+      // of materializing an arbitrarily large body. exchange() replaces retrieve() so we can read
+      // the stream under a cap; error statuses are re-thrown as RestClientResponseException to
+      // preserve the exact failure surface LlmRouter's failover already depends on.
       response =
           client
               .post()
@@ -137,16 +195,67 @@ public class OpenAiNativeToolClient {
               .contentType(MediaType.APPLICATION_JSON)
               .header("Authorization", "Bearer " + apiKey)
               .body(body)
-              .retrieve()
-              .body(JsonNode.class);
+              .exchange(
+                  (clientRequest, clientResponse) -> {
+                    byte[] bytes = readBounded(clientResponse.getBody());
+                    var status = clientResponse.getStatusCode();
+                    if (status.isError()) {
+                      String statusText;
+                      try {
+                        statusText =
+                            org.springframework.http.HttpStatus.valueOf(status.value())
+                                .getReasonPhrase();
+                      } catch (IllegalArgumentException ignored) {
+                        statusText = "";
+                      }
+                      throw new RestClientResponseException(
+                          "OpenAI-wire error " + status.value(),
+                          status,
+                          statusText,
+                          clientResponse.getHeaders(),
+                          bytes,
+                          StandardCharsets.UTF_8);
+                    }
+                    if (bytes.length == 0) {
+                      return null;
+                    }
+                    return BOUNDED_RESPONSE_MAPPER.readTree(bytes);
+                  });
     } catch (Exception e) {
-      log.error("OpenAI native tool call failed", e);
+      if (e instanceof RestClientResponseException responseError) {
+        log.error("OpenAI native tool call failed http={}", responseError.getStatusCode());
+      } else {
+        log.error("OpenAI native tool call failed errorClass={}", e.getClass().getSimpleName());
+      }
       throw e;
     }
     if (response == null) {
       throw new IllegalStateException("OpenAI returned empty response body");
     }
     return parseResponse(response, request.model());
+  }
+
+  /**
+   * RR-1084 — reads an untrusted response stream into memory under a hard byte ceiling. Reads one
+   * byte past {@link #MAX_RESPONSE_BYTES} to detect overflow, then aborts with a typed protocol
+   * failure so an oversized/compromised gateway body can never exhaust heap before the router's
+   * failover runs.
+   */
+  static byte[] readBounded(InputStream in) throws IOException {
+    if (in == null) return new byte[0];
+    java.io.ByteArrayOutputStream buffer = new java.io.ByteArrayOutputStream();
+    byte[] chunk = new byte[8192];
+    int total = 0;
+    int read;
+    while ((read = in.read(chunk)) != -1) {
+      total += read;
+      if (total > MAX_RESPONSE_BYTES) {
+        throw new IllegalStateException(
+            "OpenAI-wire response exceeded the " + MAX_RESPONSE_BYTES + "-byte ceiling");
+      }
+      buffer.write(chunk, 0, read);
+    }
+    return buffer.toByteArray();
   }
 
   /** Resolves an explicit per-call timeout while preserving the shared OpenAI-wire default. */
@@ -319,7 +428,15 @@ public class OpenAiNativeToolClient {
     List<Generation> generations = new ArrayList<>();
     JsonNode choices = response.path("choices");
     if (!choices.isArray()) {
-      throw new IllegalStateException("OpenAI response missing 'choices' array: " + response);
+      throw new IllegalStateException("OpenAI response missing required choices array");
+    }
+    // RR-1083 — a 2xx body with an EMPTY choices array is a malformed provider/gateway response,
+    // not a successful zero-content completion. Previously it parsed into a ChatResponse with no
+    // generations, which LlmRouter recorded as a paid SUCCESS (metering managed credits and caps)
+    // while terminating the agent with nothing usable. Fail closed with a typed protocol failure so
+    // the router retries/fails over instead of projecting a bogus success.
+    if (choices.isEmpty()) {
+      throw new IllegalStateException("OpenAI response returned an empty choices array");
     }
     for (JsonNode choice : choices) {
       JsonNode message = choice.path("message");
@@ -329,10 +446,28 @@ public class OpenAiNativeToolClient {
       JsonNode tcs = message.path("tool_calls");
       if (tcs.isArray()) {
         for (JsonNode tc : tcs) {
+          // RR-1082 — synthesize a stable tool-call id EXACTLY ONCE, here in response
+          // normalization, when the provider/gateway omits it. Previously an empty id survived into
+          // the parsed ToolCall; the request serializer (appendMessage) then minted a fresh RANDOM
+          // assistant id while WorkerAgent independently minted a DIFFERENT result id, so the next
+          // request carried a mismatched assistant tool_call / tool result pairing and 400'd on
+          // strict gateways. Minting the id once at the single normalization boundary means the
+          // same
+          // id flows to dispatch, the tool result, and any replay.
           String id = tc.path("id").asText("");
+          if (id.isBlank()) {
+            id = "call_" + java.util.UUID.randomUUID().toString().replace("-", "");
+          }
           String type = tc.path("type").asText("function");
           JsonNode fn = tc.path("function");
           String name = fn.path("name").asText("");
+          // RR-1083 — a tool_calls entry with no function name is malformed and cannot be
+          // dispatched. Fail closed with a typed protocol failure rather than parsing it into an
+          // un-dispatchable call that LlmRouter would still record as a paid SUCCESS.
+          if (name.isBlank()) {
+            throw new IllegalStateException(
+                "OpenAI response contained a tool call with no function name");
+          }
           String arguments = fn.path("arguments").asText("{}");
           toolCalls.add(new AssistantMessage.ToolCall(id, type, name, arguments));
         }
@@ -386,6 +521,16 @@ public class OpenAiNativeToolClient {
       // hits on a multi-iteration task is a flag that the prefix is mutating.
       int cachedTokens = usage.path("prompt_tokens_details").path("cached_tokens").asInt(0);
       metaBuilder.keyValue("cache_read_input_tokens", cachedTokens);
+
+      // OpenAI-compatible providers expose reasoning as a subset of completion tokens under
+      // completion_tokens_details. Preserve it as a separate audit dimension without adding it to
+      // completion again. DeepSeek variants may also return a top-level reasoning_tokens field.
+      long reasoningTokens =
+          usage.path("completion_tokens_details").path("reasoning_tokens").asLong(0);
+      if (reasoningTokens == 0) reasoningTokens = usage.path("reasoning_tokens").asLong(0);
+      if (reasoningTokens > 0) {
+        metaBuilder.keyValue("reasoning_tokens", reasoningTokens);
+      }
 
       Double providerCost = numberOrNull(usage.path("cost"));
       if (providerCost != null) {

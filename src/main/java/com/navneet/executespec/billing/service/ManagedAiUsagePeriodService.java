@@ -26,6 +26,7 @@ class ManagedAiUsagePeriodService {
   private final ManagedAiTierResolver tierResolver;
   private final PipelineRunRepository pipelineRunRepository;
   private final ManagedAiNotificationService notificationService;
+  private final ManagedAiUsagePeriodInitializer periodInitializer;
 
   ManagedAiUsagePeriod currentOrCreate(
       ManagedAiUserContext user,
@@ -47,7 +48,24 @@ class ManagedAiUsagePeriodService {
       }
       return period;
     }
-    return periodRepository.save(newPeriod(user, policy, now));
+    // RR-228 (2026-07-21): first-use insert is idempotent. The INSERT runs in its own
+    // REQUIRES_NEW transaction so a lost race (the unique index rejects the loser) cannot poison
+    // this transaction; after it returns — whether we won or lost — a current period is guaranteed
+    // to exist, so reload it (under the row lock when requested, which now also locks the
+    // freshly-created row). The `orElse(created)` fallback covers only the impossible reload-empty-
+    // after-a-win case; it never returns null because a lost race means the winner is committed and
+    // visible under READ_COMMITTED.
+    ManagedAiUsagePeriod created;
+    try {
+      created = periodInitializer.insertNew(newPeriod(user, policy, now));
+    } catch (org.springframework.dao.DataIntegrityViolationException race) {
+      created = null;
+    }
+    Optional<ManagedAiUsagePeriod> reloaded =
+        locked
+            ? periodRepository.findCurrentForUpdate(user.userId(), now)
+            : periodRepository.findCurrent(user.userId(), now);
+    return reloaded.orElse(created);
   }
 
   /**

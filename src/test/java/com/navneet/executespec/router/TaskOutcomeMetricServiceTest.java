@@ -36,7 +36,11 @@ class TaskOutcomeMetricServiceTest {
   }
 
   @Test
-  void successfulTaskWithoutSmokeGateIsNotRecordedAsFailure() {
+  void successfulTaskWithoutSmokeGateIsRecordedUnmeasuredNotAsPassOrFailure() {
+    // RR-396: a worker that reported success but produced no executed smoke/test evidence is
+    // UNMEASURED — it must NOT be counted as a deterministic validation pass (the old behaviour),
+    // and equally must not be counted as a failure. It is persisted with the UNMEASURED sentinel
+    // gate and zero error count so the routing quality prior can exclude it entirely.
     ModelTaskMetricRepository repository = mock(ModelTaskMetricRepository.class);
     when(repository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
     var outcome =
@@ -51,7 +55,29 @@ class TaskOutcomeMetricServiceTest {
         new TaskOutcomeMetricService(repository)
             .record("run-1", "BUG_FIX", "LOW", "java", 1, outcome, 0, 4096, 2);
 
-    assertThat(metric.isValidationPassed()).isTrue();
+    assertThat(metric.isValidationPassed()).isFalse();
+    assertThat(metric.getErrorCount()).isZero();
+    assertThat(metric.getFirstErrorGate()).isEqualTo(TaskOutcomeMetricService.UNMEASURED_GATE);
+  }
+
+  @Test
+  void unmeasuredTasksAreExcludedFromValidationPriorNumeratorAndDenominator() {
+    // RR-396: two measured passes + one UNMEASURED row must yield a 100% prior over 2 samples,
+    // not 66.7% over 3 — the unmeasured task is dropped from both numerator and denominator.
+    ModelTaskMetricRepository repository = mock(ModelTaskMetricRepository.class);
+    when(repository
+            .findTop200ByProviderIgnoreCaseAndModelNameIgnoreCaseAndTierIgnoreCaseOrderByCreatedAtDesc(
+                "anthropic", "claude-sonnet-4-6", "BUG_FIX"))
+        .thenReturn(
+            List.of(metric("BUG_FIX", true), metric("BUG_FIX", true), unmeasuredMetric("BUG_FIX")));
+
+    var prior =
+        new TaskOutcomeMetricService(repository)
+            .qualityPrior("anthropic", "claude-sonnet-4-6", "BUG_FIX", 2);
+
+    assertThat(prior).isPresent();
+    assertThat(prior.orElseThrow().sampleSize()).isEqualTo(2);
+    assertThat(prior.orElseThrow().validationPassRate()).isEqualTo(100.0);
   }
 
   @Test
@@ -116,6 +142,19 @@ class TaskOutcomeMetricServiceTest {
 
   private static ModelTaskMetric metric(String category, boolean passed) {
     return metric(category, "MEDIUM", passed);
+  }
+
+  private static ModelTaskMetric unmeasuredMetric(String category) {
+    return ModelTaskMetric.builder()
+        .provider("anthropic")
+        .modelName("claude-sonnet-4-6")
+        .tier(category)
+        .complexity("MEDIUM")
+        .attempt(1)
+        .validationPassed(false)
+        .errorCount(0)
+        .firstErrorGate(TaskOutcomeMetricService.UNMEASURED_GATE)
+        .build();
   }
 
   private static ModelTaskMetric metric(String category, String complexity, boolean passed) {

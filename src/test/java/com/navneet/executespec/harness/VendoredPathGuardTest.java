@@ -2,6 +2,7 @@ package com.navneet.executespec.harness;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
@@ -129,6 +130,148 @@ class VendoredPathGuardTest {
     // No .git/ in tmp — guard should no-op rather than crash.
     new VendoredPathGuard().augmentGitignore(tmp);
     assertFalse(Files.exists(tmp.resolve(".gitignore")));
+  }
+
+  // ---------------------------------------------------------------------------------------------
+  // RR-649 — the removal target must be the exact vendored subtree, never the first path segment.
+  // ---------------------------------------------------------------------------------------------
+
+  @Test
+  void firstVendoredSegmentOf_returnsExactSubtree_notFirstPathSegment() {
+    // The bug: purgeStagedVendored used rootSegmentOf, so this resolved to "frontend" and the
+    // subsequent `git rm --cached -r frontend` unstaged the entire application subtree.
+    assertEquals(
+        "frontend/node_modules",
+        VendoredPathGuard.firstVendoredSegmentOf("frontend/node_modules/pkg/index.js"));
+    assertEquals(
+        "service/target",
+        VendoredPathGuard.firstVendoredSegmentOf("service/target/classes/A.class"));
+    assertEquals(
+        "repos/api/node_modules",
+        VendoredPathGuard.firstVendoredSegmentOf("repos/api/node_modules/foo/index.js"));
+  }
+
+  @Test
+  void firstVendoredSegmentOf_rootLevelVendoredDirResolvesToItself() {
+    assertEquals(
+        "node_modules", VendoredPathGuard.firstVendoredSegmentOf("node_modules/pkg/index.js"));
+    assertEquals("dist", VendoredPathGuard.firstVendoredSegmentOf("dist/bundle.js"));
+  }
+
+  @Test
+  void firstVendoredSegmentOf_isCaseInsensitiveLikeIsVendored() {
+    // isVendored uses a (?i) regex; the old contains() check was case-SENSITIVE, so a path that
+    // passed isVendored fell through to the rootSegmentOf fallback — the same catastrophic
+    // widening, reachable from the committed-history scrub path too.
+    assertTrue(VendoredPathGuard.isVendored("Frontend/Node_Modules/pkg/index.js"));
+    assertEquals(
+        "Frontend/Node_Modules",
+        VendoredPathGuard.firstVendoredSegmentOf("Frontend/Node_Modules/pkg/index.js"));
+  }
+
+  @Test
+  void firstVendoredSegmentOf_returnsNullWhenNoSegmentIsVendored() {
+    // Refusing beats guessing: a null target is skipped by the caller, never widened.
+    assertNull(VendoredPathGuard.firstVendoredSegmentOf("frontend/src/App.tsx"));
+    assertNull(VendoredPathGuard.firstVendoredSegmentOf("build.gradle.kts"));
+    assertNull(VendoredPathGuard.firstVendoredSegmentOf(null));
+    assertNull(VendoredPathGuard.firstVendoredSegmentOf(""));
+  }
+
+  @Test
+  void isSafeVendoredRemovalTarget_acceptsOnlyPathsEndingInAVendoredSegment() {
+    assertTrue(VendoredPathGuard.isSafeVendoredRemovalTarget("frontend/node_modules"));
+    assertTrue(VendoredPathGuard.isSafeVendoredRemovalTarget("node_modules"));
+    assertTrue(VendoredPathGuard.isSafeVendoredRemovalTarget("service/target"));
+
+    // A non-vendored final segment is exactly the catastrophic case; refuse it.
+    assertFalse(VendoredPathGuard.isSafeVendoredRemovalTarget("frontend"));
+    assertFalse(VendoredPathGuard.isSafeVendoredRemovalTarget("src/main/java"));
+  }
+
+  @Test
+  void isSafeVendoredRemovalTarget_refusesAdversarialTargets() {
+    assertFalse(VendoredPathGuard.isSafeVendoredRemovalTarget(null));
+    assertFalse(VendoredPathGuard.isSafeVendoredRemovalTarget(""));
+    assertFalse(VendoredPathGuard.isSafeVendoredRemovalTarget("   "));
+    assertFalse(VendoredPathGuard.isSafeVendoredRemovalTarget("/etc/node_modules")); // absolute
+    assertFalse(VendoredPathGuard.isSafeVendoredRemovalTarget("--force")); // option-looking
+    assertFalse(VendoredPathGuard.isSafeVendoredRemovalTarget("../node_modules")); // traversal
+    assertFalse(VendoredPathGuard.isSafeVendoredRemovalTarget("a/../node_modules"));
+    assertFalse(VendoredPathGuard.isSafeVendoredRemovalTarget("a//node_modules")); // empty segment
+  }
+
+  @Test
+  void purgeStagedVendored_removesOnlyTheNestedVendoredSubtree(@TempDir Path tmp) throws Exception {
+    Path repoDir = tmp.resolve("repo");
+    initBareRepo(repoDir);
+
+    // Tracked application source under the SAME parent directory as the vendored dir.
+    Files.createDirectories(repoDir.resolve("frontend/src"));
+    Files.writeString(repoDir.resolve("frontend/src/App.tsx"), "export default 1;\n");
+    Files.writeString(repoDir.resolve("frontend/package.json"), "{}\n");
+    Files.createDirectories(repoDir.resolve("frontend/node_modules/pkg"));
+    Files.writeString(
+        repoDir.resolve("frontend/node_modules/pkg/index.js"), "module.exports={};\n");
+
+    runCmd(repoDir, "git", "add", "-A");
+
+    int purged = new VendoredPathGuard().purgeStagedVendored(repoDir);
+    assertTrue(purged > 0, "expected the vendored subtree to be purged");
+
+    // NOTE: augmentGitignore (invoked inside purgeStagedVendored) commits the index, so the app
+    // source moves from "staged" to "tracked". The invariant that matters is the INDEX contents:
+    // the application subtree must survive it, the vendored subtree must not.
+    String tracked = capture(repoDir, "git", "ls-files");
+    assertTrue(
+        tracked.contains("frontend/src/App.tsx"),
+        "app source was removed from the index! tracked=" + tracked);
+    assertTrue(
+        tracked.contains("frontend/package.json"),
+        "app source was removed from the index! tracked=" + tracked);
+    assertFalse(
+        tracked.contains("frontend/node_modules/"),
+        "vendored content survived in the index! tracked=" + tracked);
+
+    // The worktree is untouched either way — this guard never deletes files from disk.
+    assertTrue(Files.exists(repoDir.resolve("frontend/src/App.tsx")));
+    assertTrue(Files.exists(repoDir.resolve("frontend/node_modules/pkg/index.js")));
+  }
+
+  // RR-650 — the scrub commit outcome is part of the result contract. Over a real repository the
+  // scrub of committed vendored content must report committed()=true and leave a clean tree with
+  // the
+  // vendored subtree untracked.
+  @Test
+  void scrubCommittedVendored_reportsCommitAndLeavesACleanTree(@TempDir Path tmp) throws Exception {
+    Path repoDir = tmp.resolve("repo");
+    initBareRepo(repoDir);
+
+    Files.createDirectories(repoDir.resolve("src"));
+    Files.writeString(repoDir.resolve("src/App.tsx"), "export default 1;\n");
+    Files.createDirectories(repoDir.resolve("node_modules/pkg"));
+    Files.writeString(repoDir.resolve("node_modules/pkg/index.js"), "module.exports={};\n");
+    runCmd(repoDir, "git", "add", "-A");
+    runCmd(repoDir, "git", "commit", "-q", "-m", "initial with vendored content");
+
+    VendoredPathGuard.ScrubResult result = new VendoredPathGuard().scrubCommittedVendored(repoDir);
+
+    assertTrue(result.changed(), "expected vendored content to be removed");
+    assertTrue(result.committed(), "the scrub must land a durable commit");
+    // The cleanup is durable: no staged residue, and the vendored path is no longer tracked.
+    assertEquals("", capture(repoDir, "git", "status", "--porcelain").trim());
+    String tracked = capture(repoDir, "git", "ls-files");
+    assertTrue(tracked.contains("src/App.tsx"), "app source must survive: " + tracked);
+    assertFalse(tracked.contains("node_modules/"), "vendored content must be gone: " + tracked);
+  }
+
+  private String capture(Path dir, String... cmd) throws IOException, InterruptedException {
+    ProcessBuilder pb = new ProcessBuilder(cmd).directory(dir.toFile()).redirectErrorStream(true);
+    Process p = pb.start();
+    String out =
+        new String(p.getInputStream().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+    p.waitFor();
+    return out;
   }
 
   private void initBareRepo(Path repoDir) throws IOException, InterruptedException {

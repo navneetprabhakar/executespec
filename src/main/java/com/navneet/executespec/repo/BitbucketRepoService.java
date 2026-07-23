@@ -18,8 +18,8 @@ import lombok.extern.slf4j.Slf4j;
  * Manages Bitbucket repositories for pipeline runs. Mirrors {@link GitHubRepoService} but targets
  * the Bitbucket REST API v2.
  *
- * <p>Auth uses HTTP Basic with a Bitbucket app password: {@code Authorization: Basic
- * Base64(username:appPassword)}.
+ * <p>REST auth uses HTTP Basic with an Atlassian account email and scoped Bitbucket API token.
+ * Legacy field/parameter names are retained for database and API compatibility.
  *
  * <p>All methods are non-blocking on failure: they return null/false and log warnings rather than
  * throwing, matching the GitHubRepoService contract.
@@ -39,8 +39,8 @@ public class BitbucketRepoService {
    *
    * @param cloneUrl HTTPS clone URL (e.g. https://bitbucket.org/workspace/repo.git)
    * @param workspacePath local directory to clone into
-   * @param username Bitbucket username
-   * @param appPassword Bitbucket app password
+   * @param username Atlassian account email (legacy parameter name)
+   * @param appPassword Bitbucket API token (legacy parameter name)
    */
   public void cloneRepo(
       String cloneUrl, String workspacePath, String username, String appPassword) {
@@ -50,15 +50,19 @@ public class BitbucketRepoService {
     }
 
     try {
-      // Embed credentials: https://username:appPassword@bitbucket.org/workspace/repo.git
-      String authUrl =
-          cloneUrl.replace("https://", "https://" + username + ":" + appPassword + "@");
-
-      ProcessBuilder pb = new ProcessBuilder("git", "clone", authUrl, workspacePath);
-      pb.inheritIO();
-      int exit = pb.start().waitFor();
+      // Credential-gate 2026-07-17: app password rides the child env (GitProcessAuth), never
+      // argv or the persisted remote URL; inheritIO removed so git output stays captured.
+      ProcessBuilder pb =
+          GitProcessAuth.git(
+              appPassword,
+              "x-bitbucket-api-token-auth",
+              java.util.List.of("clone", cloneUrl, workspacePath));
+      pb.redirectErrorStream(true);
+      Process p = pb.start();
+      String out = new String(p.getInputStream().readAllBytes());
+      int exit = p.waitFor();
       if (exit != 0) {
-        log.error("[BitbucketRepoService] git clone failed with exit code {}", exit);
+        log.error("[BitbucketRepoService] git clone failed with exit code {}: {}", exit, out);
         return;
       }
       log.info("[BitbucketRepoService] Cloned repo to {}", workspacePath);

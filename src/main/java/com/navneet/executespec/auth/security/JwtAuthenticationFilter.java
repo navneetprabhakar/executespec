@@ -28,6 +28,8 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
   public static final String AUTH_SOURCE_ATTRIBUTE = "executespec.auth.source";
   public static final String AUTH_SOURCE_JWT = "JWT";
   public static final String AUTH_SOURCE_PAT = "PAT";
+  public static final String PAT_TOKEN_ID_ATTRIBUTE = "executespec.auth.pat-token-id";
+  public static final String PAT_SCOPES_ATTRIBUTE = "executespec.auth.pat-scopes";
 
   private final JwtUtil jwtUtil;
   private final UserDetailsServiceImpl userDetailsService;
@@ -41,7 +43,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
       String token = extractBearerToken(request);
       if (token != null) {
         if (token.startsWith(PersonalAccessTokenService.TOKEN_PREFIX)) {
-          authenticateWithPat(token, request);
+          if (!authenticateWithPat(token, request, response)) return;
         } else {
           authenticateWithJwt(token, request);
         }
@@ -57,14 +59,24 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
    * binds the SAME {@link AppUserDetails} a JWT would — identical global + org roles, identical
    * tenant — so every downstream access guard behaves the same regardless of credential type.
    */
-  private void authenticateWithPat(String token, HttpServletRequest request) {
-    String userId = personalAccessTokenService.resolveUserId(token);
-    if (userId != null) {
-      UserDetails userDetails = userDetailsService.loadUserById(userId);
+  private boolean authenticateWithPat(
+      String token, HttpServletRequest request, HttpServletResponse response) throws IOException {
+    PersonalAccessTokenService.ResolvedToken resolved =
+        personalAccessTokenService.resolveToken(token);
+    if (resolved != null) {
+      if (!PatScopePolicy.allows(resolved.scopes(), request.getMethod(), request.getRequestURI())) {
+        response.sendError(
+            HttpServletResponse.SC_FORBIDDEN, "PAT scope does not permit this action");
+        return false;
+      }
+      UserDetails userDetails = userDetailsService.loadUserById(resolved.userId());
       if (isActive(userDetails)) {
         setAuthentication(userDetails, request, AUTH_SOURCE_PAT);
+        request.setAttribute(PAT_TOKEN_ID_ATTRIBUTE, resolved.tokenId());
+        request.setAttribute(PAT_SCOPES_ATTRIBUTE, resolved.scopes());
       }
     }
+    return true;
   }
 
   private void authenticateWithJwt(String token, HttpServletRequest request) {
@@ -78,7 +90,9 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
       userInvalidatedAt = appUser.getUser().getTokenInvalidatedAt();
     }
 
-    if (jwtUtil.isTokenValid(token, userInvalidatedAt)) {
+    // RR-128: only a token minted for API access may authenticate here. A refresh cookie value or a
+    // scoped SSE query token replayed as a bearer must not yield a full-authority session.
+    if (jwtUtil.isAccessTokenValid(token, userInvalidatedAt)) {
       if (isActive(userDetails)) {
         setAuthentication(userDetails, request, AUTH_SOURCE_JWT);
       }
@@ -99,15 +113,12 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
   }
 
   private String extractBearerToken(HttpServletRequest request) {
-    // 1. Standard Authorization header
+    // Standard Authorization header only. Query-string credentials are intentionally never
+    // promoted to a general Spring Security authentication: the SSE controllers validate their
+    // short-lived query token against the exact run/execution resource before subscribing.
     String header = request.getHeader("Authorization");
     if (StringUtils.hasText(header) && header.startsWith("Bearer ")) {
       return header.substring(7);
-    }
-    // 2. Query-param fallback for SSE (EventSource can't set headers)
-    String queryToken = request.getParameter("token");
-    if (StringUtils.hasText(queryToken)) {
-      return queryToken;
     }
     return null;
   }

@@ -2,12 +2,93 @@
 
 Auth, account, org, project, RBAC, PAT, OAuth, and user-level client preferences.
 
+## Token purpose (RR-128)
+
+- Every JWT declares `token_use` — `access`, `refresh`, or `sse` — and each consumer validates the
+  exact purpose it accepts. `JwtUtil.isAccessTokenValid` is the ONLY validator the auth filter may
+  use; `isRefreshTokenValid` is the only one rotation and logout may use.
+- `isTokenValid` proves signature/expiry/invalidation ONLY. It is not an authorization decision; do
+  not call it directly from a new consumer.
+- Legacy tolerance is narrow: a token with no `token_use` authenticates only when it also carries
+  neither `type` nor `scope`. A legacy refresh or SSE token is still rejected as a bearer.
+- Reason: a refresh cookie value, and a 5-minute SSE token deliberately designed to be safe in URLs
+  and logs, were both accepted as full-authority `Authorization: Bearer` credentials.
+- Browser logout blocklists the presented refresh JTI and advances the user's
+  `tokenInvalidatedAt`, invalidating both access and refresh JWTs minted before logout. Refresh
+  rotation uses the narrower JTI-only revocation path so it does not invalidate the newly issued
+  session.
+- Newly minted JWTs also carry the additive ISO-8601 `issued_at` claim because JWT NumericDate
+  `iat` is whole-second precision. Invalidation comparisons prefer `issued_at` and fall back to
+  `iat` for legacy tokens, so a re-login in the logout second works without allowing an older token
+  through the epoch.
+
+## Signing-secret boot gate (RR-858)
+
+- `JwtSecretValidator` runs on `prod`, `dev` AND `benchmark`. Shared deployments are reachable and
+  hold real accounts and provider credentials; only `local` is unguarded.
+- It checks secrecy as well as strength: `COMPROMISED_SECRET_DIGESTS` pins the SHA-256 of every JWT
+  secret this repository has ever shipped as a committed default. Entries are permanent — never
+  delete one, and never reintroduce a burned plaintext to source, including "for the deny-list".
+  `app.jwt.denied-secret-sha256` extends the list with digests only, and ships empty.
+- A shared environment with no `JWT_SECRET` now FAILS TO BOOT. That is intended; there is no
+  built-in fallback to silently sign with.
+
+## Password reset (RR-127 / RR-1336)
+
+- `forgotPassword` is unauthenticated and therefore must never mutate a credential. It mints an
+  expiring, single-use capability, persists only its SHA-256 digest in `email_token.token`, and
+  mails a link. It previously replaced the account password with a generated temporary one and
+  emailed the plaintext, so anyone knowing an address could lock the owner out on demand.
+- `resetPassword` claims the token atomically (`EmailTokenRepository.claimIfUnused`) BEFORE touching
+  credentials, then stamps `tokenInvalidatedAt` so sessions minted with the old credential die.
+- The response is unconditionally successful for enumeration resistance.
+
+## OAuth session handoff (RR-130 / RR-1334)
+
+- No credential appears in the OAuth redirect URL. `OAuthSuccessHandler` sets the HttpOnly
+  `refresh_token` cookie (Path `/api/auth`, `SameSite=Lax`) and redirects with `?oauth=1`; the SPA
+  callback trades it for an access token via `POST /api/auth/refresh`. Never reintroduce `?token=`
+  or `?refresh=`.
+
+## Org invitation acceptance (RR-221 / RR-222)
+
+- Acceptance requires the authenticated account's canonical email to equal the invited address —
+  the bearer token alone confers nothing, including on the idempotent already-ACCEPTED path.
+- `PENDING -> ACCEPTED` is claimed atomically via `OrgInvitationRepository.claimPending` BEFORE any
+  membership or project access is created; exactly one caller can win a token.
+
+## Org membership is authoritative (RR-210)
+
+- `app_user.org_id` is a denormalized pointer, not an authority. A missing/inactive `org_member` row
+  fails closed: `RunVisibilitySpec` falls back to own-runs-only and `TierPermissionService` falls
+  back to the solo permission set. Never default an absent membership to a role.
+
+## SSO enforcement is unimplemented (RR-252)
+
+- `PUT /api/auth/sso/config` refuses `enforced=true` with `501 NOT_IMPLEMENTED`, and `SsoConfigDto`
+  reports `enforcementSupported=false`. No authentication route consults these columns, so the
+  platform must not advertise the control. Do not re-enable until domain/IdP binding, verified login
+  method, session/PAT revocation and break-glass all exist with negative tests.
+
 ## Auth Source
 
 - `JwtAuthenticationFilter` tags authenticated requests with `executespec.auth.source`.
 - Values are `JWT` for browser/OAuth/JWT sessions and `PAT` for `es_pat_...` programmatic sessions.
 - Server-only capabilities that require a local approval-capable client, currently `POST /api/runs localExecution=true`, must accept only `PAT`.
 - Normal RBAC still comes from the same `AppUserDetails` regardless of JWT or PAT.
+- PAT scopes are enforceable capabilities, not display metadata. Legacy `full` rows remain
+  compatible; a new request with no explicit scopes receives the least-privilege client set
+  `api:read,runs:write,projects:write,agent:write,settings:write`. Billing, token management,
+  `/api/admin/**`, `/api/v2/test/**`, and unknown mutations require an explicit capability or
+  `full`. The filter stamps resolved token id/scopes request attributes after authorization.
+- Boundary-crossing agent routes require the UNION of both capabilities, decided before the generic
+  `/api/agent/` prefix rule: `POST /api/orchestrator/turn/confirm` creates a billable run and needs
+  `agent:write` AND `runs:write`; `/api/agent/sessions/{id}/writer/**` mutates files on the caller's
+  machine and needs `agent:write` AND the new `local:write`. `local:write` is deliberately excluded
+  from `CLIENT_DEFAULT_SCOPES` — a chat-capable token is not a local-filesystem writer — so a token
+  that wants the writer seam must request it explicitly. `full` tokens are unaffected.
+- Device-cap LRU revocation is returned in `CreatedToken.autoRevokedTokenIds` and the controller
+  appends one `USER_PAT_AUTO_REVOKED` audit event per displaced token.
 
 ## Provider Preference
 
@@ -16,6 +97,61 @@ Auth, account, org, project, RBAC, PAT, OAuth, and user-level client preferences
 - Explicit provider input on a run, chat turn, project create, or project settings update is remembered here.
 - Missing provider input should resolve through `AiProviderPreferenceService` before falling back to project or YAML defaults.
 - Legacy `GOOGLE` input is accepted as `GEMINI`; persistence should use canonical enum names.
+
+## BYOK credential mutation
+
+- User and org provider-key PUTs are patch-style: null/blank fields leave existing credentials
+  unchanged because the Web UI saves one provider at a time.
+- Destructive removal is explicit and provider-scoped: `DELETE
+  /api/auth/settings/ai-keys/{provider}` for personal keys and `DELETE
+  /api/org/me/settings/ai-keys/{provider}` for org keys.
+- Both revoke paths are authenticated, tier/role gated, secret-free in their response and append an
+  audit event (`USER_AI_KEY_REVOKED` or `ORG_AI_KEY_REVOKED`). Never reintroduce blank-means-delete
+  semantics; it can erase unrelated providers through positional client payloads.
+- Credential removal intentionally invalidates subsequent dispatch through V282 current-credential
+  re-authorization. Existing execution snapshots do not preserve plaintext credentials.
+- Programmatic credential mutation requires the explicit `credentials:manage` PAT capability. It
+  is excluded from client-default PATs; routine CLI/device tokens cannot replace, validate or
+  revoke user/org provider, SCM, Jira or Confluence credentials or change org key-source mode.
+  Legacy `full` tokens remain compatible.
+- AI-key validation sends Gemini keys only in `x-goog-api-key` and returns bounded status messages;
+  raw provider/transport exception text and credential-bearing URLs are forbidden.
+
+## External credential validation
+
+- Every server-side credential-validation probe (personal and org GitHub / Jira / Confluence /
+  AI-provider checks) goes through `auth/service/ExternalConnectionValidator`. Controllers must not
+  open their own `HttpClient` against a caller-supplied base URL.
+- Policy: HTTPS only, no URL-embedded credentials, no CR/LF in headers, every resolved address must
+  be public unicast (loopback / any-local / link-local / site-local / multicast / CGNAT / IPv6
+  unique-local / IPv4-mapped equivalents refused).
+- The TCP connection is pinned to the exact validated `InetAddress` while TLS SNI + hostname
+  verification still run against the original hostname, so a second DNS answer cannot be substituted
+  between check and connect.
+- Only the HTTP status line is read (1 KB cap); the body is never buffered and redirects are never
+  followed. Callers receive a coarse category (`OK` / `TARGET_NOT_ALLOWED` / `HTTP_ERROR` /
+  `UNREACHABLE`) — never an exception message, resolved address, or other transport detail.
+
+## Personal Access Token lifetime
+
+- A PAT always has a bounded lifetime. Omitting `expiresInDays` applies
+  `PersonalAccessTokenService.DEFAULT_EXPIRY_DAYS` (90); the maximum accepted is `MAX_EXPIRY_DAYS`
+  (365). There is no "never expires" PAT.
+
+## Project membership
+
+- `GET /api/projects/{id}/member-capabilities` publishes the effective per-action authority
+  (`canManageMembership`, `canManageShareLinks`, `canInviteExternal` + `inviteBlockedReason` of
+  `TIER` / `ROLE` / `ORG_EXTERNAL_SHARING_DISABLED`). Clients must read it rather than re-deriving
+  membership authority from a single role, because membership admin and share-link admin are two
+  different server guards.
+- `PUT /api/projects/{id}/members/{userId}` changes an existing member's role, with the same
+  last-admin guard on demotion that `removeMember` applies on removal. `POST .../members` now
+  returns 409 on an existing membership instead of silently no-op'ing with 201.
+- `ProjectMemberDto` carries `external` and `homeOrgName` so cross-org collaborators are
+  distinguishable from employees on the members screen.
+- External-invite entitlement resolves through `TierEnforcementService.resolveUserTier` +
+  `TierEnforcementService.isPaidTier`; never hardcode a tier-name allow-list.
 
 ## Data Export
 
@@ -50,8 +186,26 @@ Auth, account, org, project, RBAC, PAT, OAuth, and user-level client preferences
 - Project-only external collaborators use the separate V175 project invite surface (`POST /api/projects/{id}/invites`) and are controlled by `org.external_sharing_enabled`.
 - Accepted external project collaborators inherit the highest active host-project org tier through `TierEnforcementService.resolveUserTier` / `EntitlementResolver.resolveTier`. This is an effective entitlement only: do not mutate the collaborator's personal billing tier. Removing the `ProjectMember` row naturally falls back to the user's own org/user tier.
 - Project-scoped read surfaces must honor `ProjectMember` even when the caller's home `orgId` differs from the host project org. This includes project-filtered run lists, single-run reads for runs with `PipelineRun.projectId`, linked repo reads, and project chat. Write access remains stricter: use `ProjectAccessGuard.assertCanWrite` / `RunAccessGuard.requireRunWriteAccess` so `PROJECT_VIEWER` cannot mutate project or run state.
+- Query-string credentials must never be promoted by `JwtAuthenticationFilter` into general
+  authentication. PAT and normal JWT authentication are Authorization-header-only. The run and
+  execution SSE controllers alone may consume a query token, and must validate `scope=sse` plus the
+  exact resource identifier before subscribing.
 - `DELETE /api/org/me/invitations/{id}` cancels pending/escalated org invites by marking them `EXPIRED` and writing an `INVITATION_CANCELLED` audit row.
 - Project member add/remove accepts org admins and super admins in addition to project admins; `ProjectService.requireProjectAdmin` mirrors the controller/access-guard semantics.
+
+## Append-only security audit (V292)
+
+- `activity_audit` is a hash-chained security record, not a mutable application table. V292 installs
+  a PostgreSQL trigger that rejects every UPDATE and DELETE; retention must therefore use an
+  approved archival/partition procedure rather than row mutation.
+- `ActivityAuditService.record` takes a transaction-scoped PostgreSQL advisory lock before reading
+  the chain tail and assigning the next sequence/hash. The database, not a JVM-local monitor,
+  serializes append order across instances.
+- Project Chat confirmation issue/allow/deny/consume/replay/expiry/action-complete/action-fail events
+  record secret-free scope identifiers and hashes. Bearer tokens, canonical target JSON, prompts,
+  tool arguments/results, provider responses, and credentials must never enter the audit payload.
+- Real PostgreSQL evidence covers V291→V292 upgrade, mutation rejection, idempotent rerun, and a
+  concurrent two-consumer race yielding exactly one consume and one replay denial.
 
 ## Migration Trail
 
@@ -59,3 +213,24 @@ Auth, account, org, project, RBAC, PAT, OAuth, and user-level client preferences
 - `V237__provider_key_lanes.sql` adds DeepSeek and Fireworks BYOK lanes on `org` and `app_user`.
 - `V242__user_preferred_ai_provider.sql` adds `app_user.preferred_ai_provider`.
 - `V253__ai_credit_pricing_ladder.sql` refreshes Free/Pro/Pro+/BYOK/Team seed rows and restores Team's 2-seat minimum.
+- `V292__project_chat_scoped_confirmations.sql` adds hashed, actor/tenant/project/route/target-scoped
+  one-shot Project Chat authority and makes the existing `activity_audit` table database-append-only.
+
+## Data-export field allowlist (RR-204, 2026-07-21)
+
+`UserDataExportService` must NEVER serialize a persistence entity. It previously wrote the full
+`Org` row and up to 200 full `PipelineRun` rows into `payload.json`: `Org` has Jackson-visible
+getters for the DECRYPTED Anthropic / OpenAI / Gemini / OpenRouter / DeepSeek / Fireworks keys plus
+the JIRA and Confluence API tokens, and `PipelineRun` exposes the decrypted GitHub PAT and Bitbucket
+app password. `@ToString.Exclude` is not JSON redaction, and the bundle README explicitly claimed
+these were excluded — so any authenticated org member could download all shared org credentials.
+
+Every section (`orgs`, `projects`, `runs`, `notifications`, `billing.*`) is now built by an
+explicit, deny-by-default `export*` projection. Adding a field to an entity does NOT add it to the
+export. `UserDataExportServiceTest.payloadJson_neverContainsOrgOrRunCredentials` is the secret
+canary: it populates every credential field on the org and run rows and asserts no value survives.
+The pre-existing redaction test only ever populated `AppUser` secrets, which is why this survived.
+
+**Operational follow-up owned outside this change:** every org provider key, Atlassian token and
+run-scoped SCM credential that could have been exported should be rotated, and access to
+`GET /api/auth/me/data-export` audited.

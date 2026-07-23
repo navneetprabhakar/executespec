@@ -156,6 +156,56 @@ class RunCostTrackerEstimateStage1Test {
     assertThat(openai.lowUsd()).isGreaterThan(0.0);
   }
 
+  // ── Model-aware estimate (2026-07-17): the estimate must change when the pinned model changes,
+  //    even within one provider. Before the fix, estimateRunTierAware ignored the model entirely
+  //    and always priced the provider's tier defaults. ──
+
+  @Test
+  void estimateChangesWithPinnedModelWithinTheSameProvider() {
+    // Same provider + plan shape, but pin two different models. Haiku (1/5) is far cheaper than
+    // Sonnet (3/15), so the Haiku-pinned estimate must be strictly lower.
+    RunCostTracker.Estimate sonnetPinned =
+        tracker.estimateRunTierAware(
+            "anthropic", List.of("MEDIUM"), PlanStrategy.SMALL, 1, false, ANTHROPIC_SONNET);
+    RunCostTracker.Estimate haikuPinned =
+        tracker.estimateRunTierAware(
+            "anthropic", List.of("MEDIUM"), PlanStrategy.SMALL, 1, false, ANTHROPIC_HAIKU);
+
+    assertThat(haikuPinned.lowUsd())
+        .as("a cheaper pinned model must produce a cheaper estimate")
+        .isLessThan(sonnetPinned.lowUsd());
+    assertThat(haikuPinned.highUsd()).isLessThan(sonnetPinned.highUsd());
+  }
+
+  @Test
+  void pinnedModelPricesEveryTierNotJustTheWorkerTier() {
+    // A HIGH task routes the worker to PLANNING tier (Sonnet default). Pinning Haiku must re-price
+    // the planning-tier worker too — proving the override reaches all tiers, not only WORKHORSE.
+    RunCostTracker.Estimate defaultTiers =
+        tracker.estimateRunTierAware("anthropic", List.of("HIGH"), PlanStrategy.SMALL, 1, false);
+    RunCostTracker.Estimate haikuPinned =
+        tracker.estimateRunTierAware(
+            "anthropic", List.of("HIGH"), PlanStrategy.SMALL, 1, false, ANTHROPIC_HAIKU);
+
+    assertThat(haikuPinned.lowUsd())
+        .as("pinning the cheap model must lower even a PLANNING-tier HIGH task")
+        .isLessThan(defaultTiers.lowUsd());
+  }
+
+  @Test
+  void nullModelOverridePreservesTierDefaultEstimate() {
+    // The nullable-override overload must be byte-identical to the 5-arg default path.
+    RunCostTracker.Estimate viaNull =
+        tracker.estimateRunTierAware(
+            "anthropic", List.of("MEDIUM"), PlanStrategy.SMALL, 2, true, null);
+    RunCostTracker.Estimate viaDefault =
+        tracker.estimateRunTierAware("anthropic", List.of("MEDIUM"), PlanStrategy.SMALL, 2, true);
+
+    assertThat(viaNull.lowUsd()).isEqualTo(viaDefault.lowUsd());
+    assertThat(viaNull.highUsd()).isEqualTo(viaDefault.highUsd());
+    assertThat(viaNull.credits()).isEqualTo(viaDefault.credits());
+  }
+
   private static void stubPricing(
       ModelPricingRepository repo, String provider, String model, double in, double out) {
     ModelPricing mp = new ModelPricing();

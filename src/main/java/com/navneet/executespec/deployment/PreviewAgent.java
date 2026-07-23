@@ -361,6 +361,10 @@ public class PreviewAgent {
                     - ASPNETCORE_URLS=http://+:8080
                   restart: unless-stopped
               """;
+            // RR-1395 — UNKNOWN is the failed-before-detection sentinel and never names a real
+            // buildable strategy, so compose generation must not be reached with it.
+          case UNKNOWN ->
+              throw new IllegalStateException("Cannot generate compose for UNKNOWN strategy");
         };
     Files.writeString(workspace.resolve("docker-compose.yml"), content);
   }

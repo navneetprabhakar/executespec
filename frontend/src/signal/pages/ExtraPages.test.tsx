@@ -18,6 +18,16 @@ const api = vi.hoisted(() => ({
 
 vi.mock('@/lib/api', () => api);
 
+// RR-1327 — AcceptInvitePage now reads auth state. Mock the store (the real one
+// reads localStorage at import, which this environment does not provide) with a
+// mutable flag so both the authenticated-accept and signed-out-redirect paths
+// are exercisable.
+const authState = vi.hoisted(() => ({isAuthenticated: true}));
+vi.mock('@/stores/useAuthStore', () => ({
+  useAuthStore: (selector: (s: {isAuthenticated: boolean}) => unknown) => selector(authState),
+  selectIsSuperAdmin: () => false,
+}));
+
 let host: HTMLDivElement;
 let root: Root;
 
@@ -27,6 +37,7 @@ beforeEach(() => {
   root = createRoot(host);
   api.acceptInvite.mockResolvedValue(undefined);
   api.acceptProjectInvite.mockResolvedValue({projectId: 'p1'});
+  authState.isAuthenticated = true;
 });
 
 afterEach(() => {
@@ -99,6 +110,31 @@ describe('ExtraPages', () => {
     expect(api.acceptInvite).toHaveBeenCalledWith('org-token');
     expect(api.acceptProjectInvite).not.toHaveBeenCalled();
     expect(host.textContent).toContain('Setup opened');
+  });
+
+  // RR-1327 — a signed-out recipient is routed through login with the token-bearing
+  // path preserved, rather than POSTing straight to a 401.
+  it('sends a signed-out invite recipient through login before accepting', async () => {
+    authState.isAuthenticated = false;
+    await act(async () => {
+      root.render(
+        <MemoryRouter
+          initialEntries={['/invites/accept?token=project-token']}
+          future={{v7_relativeSplatPath: true, v7_startTransition: true}}
+        >
+          <Routes>
+            <Route path='/invites/accept' element={<AcceptInvitePage kind='project' />} />
+            <Route path='/login' element={<div>Login opened</div>} />
+          </Routes>
+        </MemoryRouter>,
+      );
+    });
+
+    expect(host.textContent).toContain('Sign in to accept');
+    await clickButton('Sign in to accept');
+
+    expect(host.textContent).toContain('Login opened');
+    expect(api.acceptProjectInvite).not.toHaveBeenCalled();
   });
 });
 

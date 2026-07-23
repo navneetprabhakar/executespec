@@ -1,7 +1,6 @@
 package com.navneet.executespec.deployment;
 
 import java.io.BufferedOutputStream;
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.FileVisitResult;
@@ -17,6 +16,7 @@ import java.util.zip.ZipOutputStream;
 import com.navneet.executespec.config.AgentProperties;
 import com.navneet.executespec.deployment.preview.DevDockerfileGenerator;
 import com.navneet.executespec.deployment.preview.PreviewProjectType;
+import com.navneet.executespec.security.ArtifactPublicationGuard;
 import com.navneet.executespec.state.StateStore;
 import com.navneet.executespec.state.entity.PipelineRun;
 
@@ -42,6 +42,7 @@ public class WorkspaceExportService {
   private final GcsWorkspaceStore gcsStore;
   private final DevDockerfileGenerator dockerfileGen;
   private final WorkspaceRestoreService restoreService;
+  private final ArtifactPublicationGuard publicationGuard;
 
   /**
    * Excluded patterns — internal agent machinery, build artifacts, and VCS metadata that don't
@@ -72,6 +73,60 @@ public class WorkspaceExportService {
           "keyfile.json",
           "secrets.yml",
           "secrets.yaml");
+
+  /**
+   * RR-165 — finite ceilings on an export so a large generated repository cannot exhaust JVM heap
+   * or host disk during an authenticated download. Enforced against the uncompressed bytes copied
+   * into the ZIP and the number of members admitted; exceeding either fails cleanly.
+   */
+  static final long MAX_EXPORT_TOTAL_BYTES = 2L * 1024 * 1024 * 1024; // 2 GiB
+
+  static final int MAX_EXPORT_FILE_COUNT = 200_000;
+
+  /**
+   * Thrown when an export exceeds {@link #MAX_EXPORT_TOTAL_BYTES} or {@link
+   * #MAX_EXPORT_FILE_COUNT}.
+   */
+  public static final class ExportTooLargeException extends IOException {
+    ExportTooLargeException(String message) {
+      super(message);
+    }
+  }
+
+  /**
+   * Mutable running total for a single export walk. Copies each file into the ZIP under the total
+   * byte / file-count ceilings (RR-165), throwing {@link ExportTooLargeException} before any
+   * over-limit content is buffered or written. Limits are constructor-supplied so tests can drive
+   * tiny ceilings.
+   */
+  static final class ExportBudget {
+    private final long maxBytes;
+    private final int maxFiles;
+    private long totalBytes;
+    private int fileCount;
+
+    ExportBudget(long maxBytes, int maxFiles) {
+      this.maxBytes = maxBytes;
+      this.maxFiles = maxFiles;
+    }
+
+    void copyInto(Path file, ZipOutputStream zos) throws IOException {
+      if (++fileCount > maxFiles) {
+        throw new ExportTooLargeException("export exceeds " + maxFiles + " files");
+      }
+      byte[] chunk = new byte[8192];
+      try (java.io.InputStream in = Files.newInputStream(file)) {
+        int n;
+        while ((n = in.read(chunk)) != -1) {
+          totalBytes += n;
+          if (totalBytes > maxBytes) {
+            throw new ExportTooLargeException("export exceeds " + maxBytes + " bytes");
+          }
+          zos.write(chunk, 0, n);
+        }
+      }
+    }
+  }
 
   /**
    * Returns true if the given filename matches a known secret pattern. Covers: .env.* variants and
@@ -110,7 +165,18 @@ public class WorkspaceExportService {
                       "[WorkspaceExportService] Serving run {} from GCS archive: {}",
                       runId,
                       run.getGcsWorkspaceKey());
-                  return gcsStore.downloadToTemp(run.getGcsWorkspaceKey(), runId);
+                  Path archive = gcsStore.downloadToTemp(run.getGcsWorkspaceKey(), runId);
+                  try {
+                    publicationGuard.assertZipSafe(archive);
+                    return archive;
+                  } catch (IOException unsafe) {
+                    try {
+                      Files.deleteIfExists(archive);
+                    } catch (IOException cleanupFailure) {
+                      unsafe.addSuppressed(cleanupFailure);
+                    }
+                    throw new RuntimeException(unsafe.getMessage(), unsafe);
+                  }
                 } catch (IOException e) {
                   throw new RuntimeException(
                       "Failed to download workspace from GCS: " + e.getMessage(), e);
@@ -127,6 +193,7 @@ public class WorkspaceExportService {
     String zipName = "workspace-" + runId.substring(0, Math.min(8, runId.length()));
     Path zipPath = Files.createTempFile(zipName, ".zip");
 
+    ExportBudget budget = new ExportBudget(MAX_EXPORT_TOTAL_BYTES, MAX_EXPORT_FILE_COUNT);
     try (ZipOutputStream zos =
         new ZipOutputStream(new BufferedOutputStream(Files.newOutputStream(zipPath)))) {
 
@@ -145,19 +212,28 @@ public class WorkspaceExportService {
                 throws IOException {
               String relative = workspacePath.relativize(file).toString();
               if (shouldExclude(relative)) return FileVisitResult.CONTINUE;
+              if (Files.isSymbolicLink(file)) {
+                log.info("[WorkspaceExportService] Skipping symlink from ZIP: {}", relative);
+                return FileVisitResult.CONTINUE;
+              }
               if (isSecretFile(file.getFileName().toString())) {
                 log.info("[WorkspaceExportService] Skipping secret file from ZIP: {}", relative);
                 return FileVisitResult.CONTINUE;
               }
+              publicationGuard.assertFileSafe(workspacePath, file);
 
               ZipEntry entry = new ZipEntry(relative);
               entry.setTime(attrs.lastModifiedTime().toMillis());
               zos.putNextEntry(entry);
-              Files.copy(file, zos);
+              budget.copyInto(file, zos); // RR-165: bounded copy
               zos.closeEntry();
               return FileVisitResult.CONTINUE;
             }
           });
+    } catch (IOException e) {
+      // RR-165: never leave a partial/over-limit temp artifact behind.
+      Files.deleteIfExists(zipPath);
+      throw e;
     }
 
     log.info(
@@ -172,8 +248,12 @@ public class WorkspaceExportService {
   /**
    * Export workspace as a clean repo-ready zip with .gitignore and README. Called from
    * RunController GET /api/runs/{runId}/download?format=repo
+   *
+   * <p>RR-165: streams into a temp file under a total-byte / file-count quota instead of
+   * materializing the whole archive in JVM heap. The caller streams the returned path and is
+   * responsible for cleanup (the controller registers it for deletion on exit).
    */
-  public byte[] exportAsRepoZip(String runId) throws IOException {
+  public Path exportAsRepoZip(String runId) throws IOException {
     Path resolved = workspaceRoot(runId);
     if (!Files.isDirectory(resolved)) {
       // Try restoring from GCS before giving up
@@ -181,8 +261,12 @@ public class WorkspaceExportService {
     }
     final Path workspacePath = resolved;
 
-    ByteArrayOutputStream baos = new ByteArrayOutputStream();
-    try (ZipOutputStream zos = new ZipOutputStream(baos)) {
+    String zipName = "repo-" + runId.substring(0, Math.min(8, runId.length()));
+    Path zipPath = Files.createTempFile(zipName, ".zip");
+
+    ExportBudget budget = new ExportBudget(MAX_EXPORT_TOTAL_BYTES, MAX_EXPORT_FILE_COUNT);
+    try (ZipOutputStream zos =
+        new ZipOutputStream(new BufferedOutputStream(Files.newOutputStream(zipPath)))) {
       // Ensure .gitignore exists
       Path gitignorePath = workspacePath.resolve(".gitignore");
       if (!Files.exists(gitignorePath)) {
@@ -237,25 +321,34 @@ public class WorkspaceExportService {
                 throws IOException {
               String relative = workspacePath.relativize(file).toString();
               if (shouldExclude(relative)) return FileVisitResult.CONTINUE;
+              if (Files.isSymbolicLink(file)) {
+                log.info("[WorkspaceExportService] Skipping symlink from repo ZIP: {}", relative);
+                return FileVisitResult.CONTINUE;
+              }
               if (isSecretFile(file.getFileName().toString())) {
                 log.info(
                     "[WorkspaceExportService] Skipping secret file from repo ZIP: {}", relative);
                 return FileVisitResult.CONTINUE;
               }
+              publicationGuard.assertFileSafe(workspacePath, file);
 
               zos.putNextEntry(new ZipEntry(relative));
-              Files.copy(file, zos);
+              budget.copyInto(file, zos); // RR-165: bounded copy
               zos.closeEntry();
               return FileVisitResult.CONTINUE;
             }
           });
+    } catch (IOException e) {
+      // RR-165: never leave a partial/over-limit temp artifact behind.
+      Files.deleteIfExists(zipPath);
+      throw e;
     }
 
     log.info(
         "Exported repo zip for run {} ({})",
         runId.substring(0, Math.min(8, runId.length())),
-        humanReadableSize(baos.size()));
-    return baos.toByteArray();
+        humanReadableSize(Files.size(zipPath)));
+    return zipPath;
   }
 
   private String generateGitignore(Path workspace) {

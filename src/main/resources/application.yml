@@ -1,3 +1,47 @@
+# Project-document admission is fail-closed and content-derived. These are hard server ceilings;
+# the browser's multipart declarations are not security controls.
+project:
+  rag:
+    embedding:
+      max-cosine-distance: 0.55
+      openai:
+        model: text-embedding-3-small
+        dimensions: 1536
+        input-cost-per-million-usd: 0.02
+        connect-timeout-millis: 5000
+        read-timeout-millis: 60000
+  exports:
+    max-jobs-per-project-per-day: 5
+    retention-hours: 24
+    max-repos: 1000
+    max-contracts: 10000
+    max-activity-events: 100000
+    max-uncompressed-bytes: 268435456
+    page-size: 500
+    max-attempts: 3
+    lease-seconds: 600
+    max-parallel-jobs: 2
+    list-limit: 25
+    poll-interval-millis: 2000
+    gcs-enabled: ${PROJECT_EXPORT_GCS_ENABLED:false}
+  documents:
+    max-file-bytes: 10485760
+    max-project-bytes: 104857600
+    max-documents-per-project: 100
+    max-pages-per-file: 500
+    max-project-pages: 5000
+    max-extracted-chars-per-file: 2000000
+    max-project-extracted-chars: 20000000
+    max-tokens-per-file: 500000
+    max-project-tokens: 5000000
+    max-archive-entries: 5000
+    max-archive-inflated-bytes: 52428800
+    max-compression-ratio: 100
+    max-processing-attempts: 3
+    malware-scan-required: true
+    stale-processing-millis: 900000
+    recovery-interval-millis: 60000
+
 spring:
   application:
     name: executespec
@@ -137,6 +181,8 @@ terminal-bench:
   # Internal TB 2.1 runs use Harbor agent timeout 1500s. Keep the ExecuteSpec worker
   # below that outer cap while leaving a 90s buffer for the terminal finalizer.
   worker-wall-clock-seconds: 1410
+  # Protected from new provider/tool work for DB/cost/SSE terminal writes and ATIF flush.
+  shutdown-reserve-seconds: 45
 
 test-generation:
   # HTTP test generation is post-run work. It must not hold terminal completion open forever.
@@ -160,6 +206,10 @@ managed-ai:
       concurrency-enforced: false
       rate-limits-enabled: false
       notification-thresholds-pct: [50, 75, 90, 100]
+      # F2 (founder decision 2026-07-18): FREE is native-DeepSeek-Flash only. Every managed
+      # platform-key call is forced to this route regardless of the requested provider/model.
+      locked-provider: deepseek
+      locked-model: deepseek-v4-flash-native
     PRO:
       included-credits: 2000
       raw-cogs-cap-usd: 16.00
@@ -220,7 +270,7 @@ model-matrix:
   # keeps protecting schema-sensitive ones (RL-2026-05-061). stagnation-*: per-provider worker
   # thresholds (consumed with progress-v2).
   # SHIPPED DARK: entries below are commented out until each passes its k>=3 gate vs the Phase-0
-  # baseline (see infra/benchmark/HARNESS-RESOLUTION-LOG-2026-07-04.md §3). Uncommenting a line IS
+  # baseline (see ../executespec-docs/release-evidence/archive/benchmark-history/HARNESS-RESOLUTION-LOG-2026-07-04.md §3). Uncommenting a line IS
   # the graduation act — do not do it without the eval evidence.
   # Activation is separately gated by worker.capability-profiles.enabled (V271), seeded false;
   # a YAML profile must never widen a worker schema or change thresholds by itself.
@@ -851,6 +901,7 @@ model-matrix:
     CodeReviewAgent: PLANNING
     ToolOutputCompactor: LIGHTWEIGHT
     WorkerHistoryCompactor: LIGHTWEIGHT
+    PreviewRenderAgent: WORKHORSE # translating a screen into standalone HTML is code transformation, not planning
   failover-order:
     anthropic:
       - openai
@@ -866,6 +917,11 @@ model-matrix:
       - fireworks
 
 durability:
+  workspace:
+    # Set only when every run workspace path is a shared, persistent filesystem visible to every
+    # execution node. GCS task archives do not satisfy this until they carry an acknowledged task
+    # frontier that recovery validates.
+    shared-persistent: false
   task-checkpoint:
     enabled: true
   # A workspace-local atomic worker checkpoint complements Redis. It survives a Redis restart
@@ -934,13 +990,18 @@ agent:
     enabled: true
     run-interval: 1
   optimiser:
-    enabled: true
+    # RR-1277 — default OFF. Even in candidate-only mode the optimiser runs an ungated LLM over
+    # global outcomes and spends provider budget; operators opt in deliberately.
+    enabled: false
     run-interval: 10
     analysis-window-runs: 20
     failure-rate-threshold: 0.20
     pattern-min-occurrences: 2
   deployment:
     enabled: true
+    # Release profiles fail closed unless operators explicitly attest that phase recovery and
+    # external-resource reconciliation are configured.
+    recovery-safe-enabled: false
     gcp-project: executespecv1
     gcp-region: us-east4
     artifact-registry:
@@ -997,6 +1058,8 @@ agent:
       base-url: ""
       username: ""
       password: ""
+      # RR-637 — inbound webhooks fail CLOSED while this is blank. Set it before enabling.
+      webhook-secret: ${SERVICENOW_WEBHOOK_SECRET:}
       trigger-categories:
         - "application"
         - "database"
@@ -1015,7 +1078,8 @@ agent:
       skip-approval: false
     bitbucket:
       enabled: false
-      webhook-secret: ""
+      # RR-637 — inbound webhooks fail CLOSED while this is blank. Set it before enabling.
+      webhook-secret: ${BITBUCKET_WEBHOOK_SECRET:}
       dashboard-url: http://localhost:8080
       skip-approval: false
     slack:
@@ -1050,12 +1114,28 @@ preview:
     free-max: 1
     pro-max: 3
     enterprise-max: 10
+  cleanup:
+    # Fail-safe for multi-node deployments: never infer ownership from a JVM-local map.
+    orphan-discovery-enabled: ${PREVIEW_ORPHAN_DISCOVERY_ENABLED:false}
+    # Rolling deploys preserve previews; expiration/explicit stop owns teardown.
+    teardown-on-shutdown: ${PREVIEW_TEARDOWN_ON_SHUTDOWN:false}
+
+  # Static UI render (no container, no deploy). Gated by the preview.render-agent.enabled flag
+  # seeded OFF in V302; these values only bound the work once an operator turns it on.
+  render:
+    # Each surface costs one WORKHORSE call, so this is the primary cost lever.
+    max-surfaces: 6
+    # Total prompt characters across all surfaces. Discovery drops supporting context, then whole
+    # surfaces, to stay under it.
+    character-budget: 180000
+    parallelism: 3
+    timeout-seconds: 300
 
   engine:
     route-via: ${PREVIEW_ENGINE_ROUTE_VIA:true}
     base-url: ${PREVIEW_ENGINE_URL:http://localhost:8090}
     registry-url: ${PREVIEW_ENGINE_REGISTRY_URL:localhost:5500}
-    api-key: ${PREVIEW_ENGINE_API_KEY:change-me-in-prod}
+    api-key: ${PREVIEW_ENGINE_API_KEY:}
     timeout-seconds: 300
 
   vm:
@@ -1110,7 +1190,7 @@ app:
       project-key: ${CONTACT_JIRA_PROJECT_KEY:SUP}
       issue-type: Task
   jwt:
-    secret: executespec-local-dev-secret-key-must-be-at-least-256-bits-long-for-HS256
+    secret: ${JWT_SECRET:local-dev-only-insecure-jwt-secret-must-be-replaced-in-every-shared-environment}
     access-token-expiry-minutes: 360
     refresh-token-expiry-days: 7
   cors:
@@ -1168,7 +1248,9 @@ executespec:
 
   crypto:
     enabled: false
-    gcp-secret-name: projects/${GCP_PROJECT:executespecv1}/secrets/executespec-crypto-key/versions/latest
+    # Remote/shared profiles fail closed when this is absent. When supplied, it must name an
+    # immutable numeric Secret Manager version; aliases such as /versions/latest are rejected.
+    gcp-secret-name: ${CRYPTO_GCP_SECRET_RESOURCE:}
     local-key: ${CRYPTO_LOCAL_KEY:}
 
   validator:
@@ -1219,6 +1301,13 @@ analytics:
     enabled: ${POSTHOG_ENABLED:false}
     api-key: ${POSTHOG_API_KEY:}
     host: ${POSTHOG_HOST:https://us.i.posthog.com}
+
+# Checked-in ADR discovery/synchronization is not implemented yet. Keep planner injection
+# fail-closed so historical cache rows cannot silently become repository policy.
+adrs:
+  injection:
+    enabled: ${ADRS_INJECTION_ENABLED:false}
+    full-body-threshold: 15
 
 management:
   endpoints:

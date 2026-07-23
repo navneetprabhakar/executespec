@@ -34,6 +34,14 @@ class AgentStreamTurnLifecycle {
         turnRepo
             .findById(ctx.turnId())
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "turn not found"));
+    // RR-489 — settle a stream turn at most once. A callback, client retry or provider/emitter
+    // race can re-enter complete(); without this compare-and-set from STREAMING the same provider
+    // spend was appended to the usage ledger and completion event stream on every call. This is an
+    // application-level CAS; a hard cross-JVM guarantee still requires a unique (source_type,
+    // source_id) ledger constraint (migration, deferred).
+    if (!"STREAMING".equals(turn.getStatus())) {
+      return;
+    }
     turn.setAssistantSummary(AgentText.firstNonBlank(assistantSummary, turn.getAssistantSummary()));
     turn.setInputTokens(cost == null ? 0 : cost.inputTokens());
     turn.setOutputTokens(cost == null ? 0 : cost.outputTokens());
@@ -42,6 +50,68 @@ class AgentStreamTurnLifecycle {
     turn.setStatus(AgentText.firstNonBlank(status, "OK"));
     turnRepo.save(turn);
 
+    recordUsage(ctx, cost);
+
+    Map<String, Object> completionEvidence = new LinkedHashMap<>();
+    completionEvidence.put("provider", ctx.provider());
+    completionEvidence.put("model", ctx.model());
+    completionEvidence.put("inputTokens", cost == null ? 0 : cost.inputTokens());
+    completionEvidence.put("outputTokens", cost == null ? 0 : cost.outputTokens());
+    completionEvidence.put("reasoningTokens", cost == null ? 0 : cost.reasoningTokens());
+    completionEvidence.put("cacheReadTokens", cost == null ? 0 : cost.cacheReadTokens());
+    completionEvidence.put("costUsd", cost == null ? 0.0 : cost.costUsd());
+    eventRecorder.append(ctx.sessionId(), ctx.turnId(), "STREAM_COMPLETED", completionEvidence);
+  }
+
+  void fail(AgentSessionService.StreamTurnContext ctx, String message) {
+    fail(ctx, message, null);
+  }
+
+  void fail(
+      AgentSessionService.StreamTurnContext ctx, String message, RunCostTracker.Snapshot cost) {
+    turnRepo
+        .findById(ctx.turnId())
+        .ifPresent(
+            turn -> {
+              // RR-489/RR-1453 — only settle a STREAMING turn: the terminal transition and its
+              // usage-ledger row must fire once even if fail() is retried, and a paid failure must
+              // still record its spend rather than persist zero.
+              if (!"STREAMING".equals(turn.getStatus())) {
+                return;
+              }
+              turn.setStatus("ERROR");
+              turn.setAssistantSummary(
+                  AgentText.firstNonBlank(message, turn.getAssistantSummary()));
+              if (cost != null) {
+                turn.setInputTokens(cost.inputTokens());
+                turn.setOutputTokens(cost.outputTokens());
+                turn.setReasoningTokens(cost.reasoningTokens());
+                turn.setCostUsd(cost.costUsd());
+              }
+              turnRepo.save(turn);
+              if (hasSpend(cost)) {
+                recordUsage(ctx, cost);
+              }
+            });
+    Map<String, Object> payload = new LinkedHashMap<>();
+    payload.put("message", message == null ? "" : message);
+    if (cost != null) {
+      payload.put("inputTokens", cost.inputTokens());
+      payload.put("outputTokens", cost.outputTokens());
+      payload.put("reasoningTokens", cost.reasoningTokens());
+      payload.put("cacheReadTokens", cost.cacheReadTokens());
+      payload.put("costUsd", cost.costUsd());
+    }
+    eventRecorder.append(ctx.sessionId(), ctx.turnId(), "STREAM_FAILED", payload);
+  }
+
+  private static boolean hasSpend(RunCostTracker.Snapshot cost) {
+    return cost != null
+        && (cost.inputTokens() > 0 || cost.outputTokens() > 0 || cost.costUsd() > 0);
+  }
+
+  private void recordUsage(
+      AgentSessionService.StreamTurnContext ctx, RunCostTracker.Snapshot cost) {
     usageRepo.save(
         AgentUsageLedger.builder()
             .id(UUID.randomUUID().toString())
@@ -60,33 +130,6 @@ class AgentStreamTurnLifecycle {
             .billingPolicy("INCLUDED")
             .createdAt(Instant.now())
             .build());
-
-    Map<String, Object> completionEvidence = new LinkedHashMap<>();
-    completionEvidence.put("provider", ctx.provider());
-    completionEvidence.put("model", ctx.model());
-    completionEvidence.put("inputTokens", cost == null ? 0 : cost.inputTokens());
-    completionEvidence.put("outputTokens", cost == null ? 0 : cost.outputTokens());
-    completionEvidence.put("reasoningTokens", cost == null ? 0 : cost.reasoningTokens());
-    completionEvidence.put("cacheReadTokens", cost == null ? 0 : cost.cacheReadTokens());
-    completionEvidence.put("costUsd", cost == null ? 0.0 : cost.costUsd());
-    eventRecorder.append(ctx.sessionId(), ctx.turnId(), "STREAM_COMPLETED", completionEvidence);
-  }
-
-  void fail(AgentSessionService.StreamTurnContext ctx, String message) {
-    turnRepo
-        .findById(ctx.turnId())
-        .ifPresent(
-            turn -> {
-              turn.setStatus("ERROR");
-              turn.setAssistantSummary(
-                  AgentText.firstNonBlank(message, turn.getAssistantSummary()));
-              turnRepo.save(turn);
-            });
-    eventRecorder.append(
-        ctx.sessionId(),
-        ctx.turnId(),
-        "STREAM_FAILED",
-        Map.of("message", message == null ? "" : message));
   }
 
   void disconnect(AgentSessionService.StreamTurnContext ctx) {
@@ -119,26 +162,8 @@ class AgentStreamTurnLifecycle {
                   turn.setCostUsd(cost.costUsd());
                 }
                 turnRepo.save(turn);
-                if (cost != null
-                    && (cost.inputTokens() > 0 || cost.outputTokens() > 0 || cost.costUsd() > 0)) {
-                  usageRepo.save(
-                      AgentUsageLedger.builder()
-                          .id(UUID.randomUUID().toString())
-                          .orgId(ctx.orgId())
-                          .userId(ctx.userId())
-                          .sourceType("AGENT_TURN")
-                          .sourceId(ctx.turnId())
-                          .provider(ctx.provider())
-                          .model(ctx.model())
-                          .inputTokens(cost.inputTokens())
-                          .outputTokens(cost.outputTokens())
-                          .reasoningTokens(cost.reasoningTokens())
-                          .cacheReadTokens(cost.cacheReadTokens())
-                          .costUsd(cost.costUsd())
-                          .billableUnits(0)
-                          .billingPolicy("INCLUDED")
-                          .createdAt(Instant.now())
-                          .build());
+                if (hasSpend(cost)) {
+                  recordUsage(ctx, cost);
                 }
               }
             });

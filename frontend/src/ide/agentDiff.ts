@@ -10,17 +10,41 @@ const INLINE_DIFF_MAX_LINES = 2_500;
 export function boundedInlineDiff(payload: api.FileDiffPayload): {
   lines: DiffLine[];
   truncated: boolean;
+  note: string;
 } {
-  const base = (payload.base ?? '').slice(0, INLINE_DIFF_MAX_CHARS);
-  const head = (payload.head ?? '').slice(0, INLINE_DIFF_MAX_CHARS);
-  const baseLines = toLines(base).slice(0, INLINE_DIFF_MAX_SOURCE_LINES).join('\n');
-  const headLines = toLines(head).slice(0, INLINE_DIFF_MAX_SOURCE_LINES).join('\n');
+  const rawBase = payload.base ?? '';
+  const rawHead = payload.head ?? '';
+  // RR-1494 — the source is clipped (by characters, then by lines) BEFORE the diff
+  // runs, so a change past line 3,000 or past 120,000 chars is excluded from the
+  // comparison entirely. Reporting `truncated` only from the post-diff line count
+  // silently asserts a complete diff for a long file. Detect every clip bound.
+  const charClipped =
+    rawBase.length > INLINE_DIFF_MAX_CHARS || rawHead.length > INLINE_DIFF_MAX_CHARS;
+  const base = rawBase.slice(0, INLINE_DIFF_MAX_CHARS);
+  const head = rawHead.slice(0, INLINE_DIFF_MAX_CHARS);
+  const rawBaseLines = toLines(base);
+  const rawHeadLines = toLines(head);
+  const lineClipped =
+    rawBaseLines.length > INLINE_DIFF_MAX_SOURCE_LINES ||
+    rawHeadLines.length > INLINE_DIFF_MAX_SOURCE_LINES;
+  const baseLines = rawBaseLines.slice(0, INLINE_DIFF_MAX_SOURCE_LINES).join('\n');
+  const headLines = rawHeadLines.slice(0, INLINE_DIFF_MAX_SOURCE_LINES).join('\n');
   const lines =
     payload.status === 'ADDED'
       ? toLines(headLines).map((text) => ({sign: '+' as const, text}))
       : lineDiff(baseLines, headLines);
+  const outputClipped = lines.length > INLINE_DIFF_MAX_LINES;
+  const truncated = charClipped || lineClipped || outputClipped;
+  const note = !truncated
+    ? ''
+    : lineClipped
+      ? `Source clipped at ${INLINE_DIFF_MAX_SOURCE_LINES.toLocaleString()} lines before diffing — changes past that line are not shown. Open Changed files for the full result.`
+      : charClipped
+        ? `Source clipped at ${INLINE_DIFF_MAX_CHARS.toLocaleString()} characters before diffing — later changes are not shown. Open Changed files for the full result.`
+        : `Diff truncated to ${INLINE_DIFF_MAX_LINES.toLocaleString()} lines. Open Changed files for the full result.`;
   return {
     lines: lines.slice(0, INLINE_DIFF_MAX_LINES),
-    truncated: lines.length > INLINE_DIFF_MAX_LINES,
+    truncated,
+    note,
   };
 }

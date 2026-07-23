@@ -6,6 +6,8 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.navneet.executespec.codeintel.entity.ProjectArchitectureDoc;
+import com.navneet.executespec.codeintel.entity.RepoArchitectureDoc;
 
 import org.junit.jupiter.api.Test;
 
@@ -94,5 +96,60 @@ class ProjectArchitectureServiceFingerprintTest {
             ProjectArchitectureService.fingerprintMatches(
                 objectMapper, storedJson, currentFingerprint))
         .isFalse();
+  }
+
+  @Test
+  void fallbackRepoArchitecture_isNeverReusableAfterProviderRecovers() {
+    RepoArchitectureDoc fallback =
+        RepoArchitectureDoc.builder()
+            .content(
+                "# repo — Architecture\n\n_LLM generation failed. Showing raw codemap instead._")
+            .modelUsed("fallback")
+            .build();
+
+    assertThat(ProjectArchitectureService.isReusableRepoArchitecture(fallback)).isFalse();
+  }
+
+  @Test
+  void fallbackRepoArchitecture_neverPersistsProviderExceptionText() {
+    String markdown =
+        ProjectArchitectureService.fallbackRepoArchitectureMarkdown(
+            "owner/repo", "## Files\n- src/App.java");
+
+    assertThat(markdown)
+        .contains("LLM generation failed")
+        .contains("src/App.java")
+        .doesNotContain("api-key", "Bearer", "exception");
+  }
+
+  @Test
+  void providerGeneratedRepoArchitecture_isReusable() {
+    RepoArchitectureDoc generated =
+        RepoArchitectureDoc.builder()
+            .content("# repo — Architecture\n\n## High-Level Design\nGrounded content")
+            .modelUsed("deepseek-chat")
+            .build();
+
+    assertThat(ProjectArchitectureService.isReusableRepoArchitecture(generated)).isTrue();
+  }
+
+  @Test
+  void deterministicCombinedFallback_cannotPoisonTheFingerprintCache() {
+    ProjectArchitectureDoc fallback =
+        ProjectArchitectureDoc.builder()
+            .content("# Project architecture (deterministic)\n\nConcatenated fallback")
+            .build();
+
+    assertThat(ProjectArchitectureService.isReusableProjectArchitecture(fallback)).isFalse();
+  }
+
+  @Test
+  void providerGeneratedCombinedArchitecture_isReusable() {
+    ProjectArchitectureDoc generated =
+        ProjectArchitectureDoc.builder()
+            .content("# TicTacToe — Combined architecture\n\n## Overview\nGrounded content")
+            .build();
+
+    assertThat(ProjectArchitectureService.isReusableProjectArchitecture(generated)).isTrue();
   }
 }

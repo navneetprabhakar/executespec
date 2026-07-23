@@ -7,6 +7,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
@@ -123,6 +124,39 @@ class AgentSessionReadServiceTest {
         .hasMessageContaining("forbidden");
   }
 
+  // RR-1025 — the base query is (user, status) only, so a prior-org session can be returned. The
+  // list must be restricted to the caller's current effective tenant.
+  @Test
+  void listSessionsExcludesPriorOrgSessions() {
+    AgentSession current = session("s1", "u1"); // org-1
+    AgentSession priorOrg = session("s2", "u1");
+    priorOrg.setOrgId("org-other");
+    when(sessionRepo.findByUserIdAndStatusOrderByUpdatedAtDesc(
+            eq("u1"), eq("ACTIVE"), any(Pageable.class)))
+        .thenReturn(List.of(current, priorOrg));
+    when(turnRepo.findLatestLinkedRunTurnsBySessionIds(List.of("s1"))).thenReturn(List.of());
+
+    var sessions = service.listSessions(user(), 25);
+
+    assertThat(sessions).extracting("id").containsExactly("s1");
+  }
+
+  // RR-1025 — a null caller org must not skip the tenant comparison for an org-scoped session.
+  @Test
+  void requireSessionRejectsNullCallerOrgAgainstOrgScopedSession() {
+    AgentSession scoped = session("scoped", "u1"); // org-1
+    when(sessionRepo.findById("scoped")).thenReturn(Optional.of(scoped));
+    AppUser noOrg = new AppUser();
+    noOrg.setId("u1");
+    noOrg.setOrgId(null);
+    noOrg.setGlobalRole("USER");
+    noOrg.setEmail("u1@example.com");
+
+    assertThatThrownBy(() -> service.requireSession("scoped", new AppUserDetails(noOrg, null)))
+        .isInstanceOf(ResponseStatusException.class)
+        .hasMessageContaining("forbidden");
+  }
+
   @Test
   void listsEventsAfterSessionOwnershipCheck() {
     when(sessionRepo.findById("s1")).thenReturn(Optional.of(session("s1", "u1")));
@@ -140,7 +174,8 @@ class AgentSessionReadServiceTest {
   @Test
   void replaysOnlyEventsAfterCursorAndReturnsLastSequence() {
     when(sessionRepo.findById("s1")).thenReturn(Optional.of(session("s1", "u1")));
-    when(eventRepo.findBySessionIdAndStreamSequenceGreaterThanOrderByStreamSequenceAsc("s1", 4))
+    when(eventRepo.findBySessionIdAndStreamSequenceGreaterThanOrderByStreamSequenceAsc(
+            eq("s1"), eq(4L), any(Pageable.class)))
         .thenReturn(
             List.of(
                 AgentActionEvent.builder()
@@ -160,7 +195,8 @@ class AgentSessionReadServiceTest {
   @Test
   void replayPreservesSemanticPostSseFramesForBrowserReconnect() {
     when(sessionRepo.findById("s1")).thenReturn(Optional.of(session("s1", "u1")));
-    when(eventRepo.findBySessionIdAndStreamSequenceGreaterThanOrderByStreamSequenceAsc("s1", 4))
+    when(eventRepo.findBySessionIdAndStreamSequenceGreaterThanOrderByStreamSequenceAsc(
+            eq("s1"), eq(4L), any(Pageable.class)))
         .thenReturn(
             List.of(
                 semanticEvent("route", 5L, "ROUTE_DECISION"),
@@ -176,6 +212,38 @@ class AgentSessionReadServiceTest {
         .containsExactly("ROUTE_DECISION", "TOOL_CALL", "TOOL_RESULT", "TURN_TEXT", "TURN_DONE");
     assertThat(replay.lastSequence()).isEqualTo(9L);
     assertThat(replay.snapshot()).isFalse();
+  }
+
+  @Test
+  void cursorReplayIsBoundedAndReturnsContinuationSequence() {
+    when(sessionRepo.findById("s1")).thenReturn(Optional.of(session("s1", "u1")));
+    List<AgentActionEvent> page = new ArrayList<>();
+    for (long sequence = 11; sequence <= 511; sequence++) {
+      page.add(
+          AgentActionEvent.builder()
+              .id("evt-" + sequence)
+              .sessionId("s1")
+              .streamSequence(sequence)
+              .type("TURN_TEXT")
+              .build());
+    }
+    when(eventRepo.findBySessionIdAndStreamSequenceGreaterThanOrderByStreamSequenceAsc(
+            eq("s1"), eq(10L), any(Pageable.class)))
+        .thenReturn(page);
+
+    var replay = service.replayEvents("s1", 10L, user());
+
+    assertThat(replay.events()).hasSize(500);
+    assertThat(replay.lastSequence()).isEqualTo(510L);
+    assertThat(replay.snapshot()).isFalse();
+    assertThat(replay.truncated()).isTrue();
+    assertThat(replay.hasMore()).isTrue();
+    assertThat(replay.nextSequence()).isEqualTo(510L);
+    var pageable = ArgumentCaptor.forClass(Pageable.class);
+    verify(eventRepo)
+        .findBySessionIdAndStreamSequenceGreaterThanOrderByStreamSequenceAsc(
+            eq("s1"), eq(10L), pageable.capture());
+    assertThat(pageable.getValue().getPageSize()).isEqualTo(501);
   }
 
   private static AgentActionEvent semanticEvent(String id, long sequence, String type) {
@@ -228,7 +296,8 @@ class AgentSessionReadServiceTest {
   @Test
   void replayRejectsStaleRowsAndNeverRegressesCursor() {
     when(sessionRepo.findById("s1")).thenReturn(Optional.of(session("s1", "u1")));
-    when(eventRepo.findBySessionIdAndStreamSequenceGreaterThanOrderByStreamSequenceAsc("s1", 10))
+    when(eventRepo.findBySessionIdAndStreamSequenceGreaterThanOrderByStreamSequenceAsc(
+            eq("s1"), eq(10L), any(Pageable.class)))
         .thenReturn(
             List.of(
                 AgentActionEvent.builder().id("stale").streamSequence(9L).build(),
@@ -253,7 +322,8 @@ class AgentSessionReadServiceTest {
   @Test
   void legacyReplayMarksTruncatedSnapshotWhenHistoryExceedsSafePage() {
     when(sessionRepo.findById("s1")).thenReturn(Optional.of(session("s1", "u1")));
-    when(eventRepo.findBySessionIdAndStreamSequenceGreaterThanOrderByStreamSequenceAsc("s1", 10))
+    when(eventRepo.findBySessionIdAndStreamSequenceGreaterThanOrderByStreamSequenceAsc(
+            eq("s1"), eq(10L), any(Pageable.class)))
         .thenReturn(List.of());
     when(eventRepo.countBySessionIdAndStreamSequenceIsNull("s1")).thenReturn(1L);
     when(eventRepo.countBySessionId("s1")).thenReturn(501L);

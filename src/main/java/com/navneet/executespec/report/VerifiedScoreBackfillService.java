@@ -110,6 +110,10 @@ public class VerifiedScoreBackfillService {
         Integer endpointCoverage = endpointCoverageFromAccuracyJson(row.getAccuracyJson());
         String testCoverageLevel = testCoverageLevelFromAccuracyJson(row.getAccuracyJson());
         int unfixedCritical = countUnfixedCriticalFromIssuesJson(row.getIssuesJson());
+        // RR-1645 — rehydrate the persisted V270 boot verdict exactly like report generation and
+        // concrete-test rescoring do. Dropping it here re-scored a run that compiled but booted
+        // UNHEALTHY (honest BUILD slot 55) as BUILD=100, upgrading the headline above the run's own
+        // recorded evidence, and dropped the BUILD slot entirely when finalBuildPassed was null.
         int recomputedVerified =
             scoreService.computeVerifiedScore(
                 row.getFinalBuildPassed(),
@@ -119,7 +123,8 @@ public class VerifiedScoreBackfillService {
                 unfixedCritical,
                 endpointCoverage,
                 testCoverageLevel,
-                row.getFilesGenerated());
+                row.getFilesGenerated(),
+                ValidationReportService.bootVerification(row));
         int recomputedRubric =
             scoreService.computeRubricScore(
                 row.getFinalBuildPassed(),

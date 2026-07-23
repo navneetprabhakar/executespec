@@ -2,7 +2,6 @@ package com.navneet.executespec.agentsession;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -27,6 +26,7 @@ public class AgentStreamTurnRunner {
   private final AgentAttachmentService attachmentService;
   private final AgentEventRecorder eventRecorder;
   private final RunCostTracker costTracker;
+  private final org.springframework.core.env.Environment environment;
 
   /** Compatibility constructor retained for focused tests and older package-local callers. */
   AgentStreamTurnRunner(
@@ -46,7 +46,6 @@ public class AgentStreamTurnRunner {
     this(sessionService, specChatService, featureFlags, attachmentService, eventRecorder, null);
   }
 
-  @Autowired
   AgentStreamTurnRunner(
       AgentSessionService sessionService,
       SpecChatService specChatService,
@@ -54,12 +53,32 @@ public class AgentStreamTurnRunner {
       AgentAttachmentService attachmentService,
       AgentEventRecorder eventRecorder,
       RunCostTracker costTracker) {
+    this(
+        sessionService,
+        specChatService,
+        featureFlags,
+        attachmentService,
+        eventRecorder,
+        costTracker,
+        null);
+  }
+
+  @Autowired
+  AgentStreamTurnRunner(
+      AgentSessionService sessionService,
+      SpecChatService specChatService,
+      FeatureFlagService featureFlags,
+      AgentAttachmentService attachmentService,
+      AgentEventRecorder eventRecorder,
+      RunCostTracker costTracker,
+      org.springframework.core.env.Environment environment) {
     this.sessionService = sessionService;
     this.specChatService = specChatService;
     this.featureFlags = featureFlags;
     this.attachmentService = attachmentService;
     this.eventRecorder = eventRecorder;
     this.costTracker = costTracker;
+    this.environment = environment;
   }
 
   public void run(
@@ -69,6 +88,11 @@ public class AgentStreamTurnRunner {
       StreamTurnRequest request) {
     AccumulatingSink sink = null;
     StringBuilder fixtureText = new StringBuilder();
+    // RR-488 / RR-1453 — the per-turn cost baseline. Success settles the delta computed inside
+    // SpecChatService, but disconnect and failure happen out here after that internal baseline is
+    // lost. Snapshot the scope before dispatch so a terminal path records only this turn's spend
+    // instead of the whole run/session cumulative total (or zero).
+    RunCostTracker.Snapshot turnBaseline = null;
     try {
       send(
           emitter,
@@ -98,10 +122,27 @@ public class AgentStreamTurnRunner {
               "run_api_allowed", ctx.decision().policy().runApiAllowed(),
               "requires_confirmation", ctx.decision().requiresUserConfirmation()));
 
-      // Provider-free scripted stream used only by the local/dev Web release fixture. The
-      // session id is minted by WebQaFixtureController and never comes from a customer request.
+      // Provider-free scripted stream used only by the local/dev Web release fixture. RR-487:
+      // admission rejects a customer-minted `web-qa-` id (AgentSessionCreationService), and this
+      // branch additionally fails closed in any non-local/dev runtime so a stray fixture session
+      // can
+      // never emit fabricated tool/verification evidence in production.
       if (ctx.sessionId().startsWith("web-qa-")) {
-        runWebQaFixtureStream(emitter, ctx, fixtureText);
+        if (fixtureProfileActive()) {
+          runWebQaFixtureStream(emitter, ctx, fixtureText);
+          return;
+        }
+        String note = "fixture stream unavailable in this environment";
+        sessionService.failStreamTurn(ctx, note);
+        try {
+          send(
+              emitter,
+              "error",
+              Map.of("session_id", ctx.sessionId(), "turn_id", ctx.turnId(), "message", note));
+        } catch (Exception ignored) {
+          // emitter already broken
+        }
+        emitter.complete();
         return;
       }
 
@@ -129,6 +170,7 @@ public class AgentStreamTurnRunner {
         return;
       }
 
+      turnBaseline = latestCost(ctx);
       sink = new AccumulatingSink(emitter, sessionService, ctx, eventRecorder);
       List<Map<String, Object>> conversation =
           AgentStreamTurnSupport.withAttachmentBlock(
@@ -168,12 +210,13 @@ public class AgentStreamTurnRunner {
     } catch (Exception e) {
       if (AgentStreamTurnSupport.isClientDisconnect(e)) {
         String partial = sink == null ? partialText(fixtureText) : sink.partialSummary();
-        sessionService.disconnectStreamTurn(ctx, partial, latestCost(ctx));
+        sessionService.disconnectStreamTurn(ctx, partial, turnDelta(turnBaseline, latestCost(ctx)));
         emitter.complete();
         return;
       }
       String message = userFacingStreamError(e, ctx.provider());
-      sessionService.failStreamTurn(ctx, message);
+      // RR-1453 — a paid provider/tool failure must still settle this turn's usage, not zero.
+      sessionService.failStreamTurn(ctx, message, turnDelta(turnBaseline, latestCost(ctx)));
       try {
         send(
             emitter,
@@ -195,6 +238,37 @@ public class AgentStreamTurnRunner {
     if (costTracker == null) return null;
     String scope = ctx.runId() == null || ctx.runId().isBlank() ? ctx.sessionId() : ctx.runId();
     return costTracker.snapshot(scope);
+  }
+
+  /**
+   * RR-488 — the monotonic per-turn delta between a pre-dispatch baseline and the current scope
+   * snapshot. Clamped at zero so a resettable/replica snapshot can never record negative usage, and
+   * null-safe so a missing tracker or baseline degrades to a zero-cost settlement rather than
+   * attributing cumulative run/session cost to one interrupted turn.
+   */
+  private static RunCostTracker.Snapshot turnDelta(
+      RunCostTracker.Snapshot before, RunCostTracker.Snapshot after) {
+    if (after == null) return null;
+    if (before == null) return after;
+    return new RunCostTracker.Snapshot(
+        Math.max(0, after.inputTokens() - before.inputTokens()),
+        Math.max(0, after.outputTokens() - before.outputTokens()),
+        Math.max(0, after.cacheWriteTokens() - before.cacheWriteTokens()),
+        Math.max(0, after.cacheReadTokens() - before.cacheReadTokens()),
+        Math.max(0.0, after.costUsd() - before.costUsd()),
+        Math.max(0, after.calls() - before.calls()),
+        Math.max(0, after.reasoningTokens() - before.reasoningTokens()));
+  }
+
+  /**
+   * RR-487 — the provider-free fixture stream is only allowed when the local or dev profile is
+   * active. A null environment (focused test constructor) keeps the fixture behaviour tests depend
+   * on; a real runtime that is not local/dev fails closed.
+   */
+  private boolean fixtureProfileActive() {
+    if (environment == null) return true;
+    return environment.acceptsProfiles(
+        org.springframework.core.env.Profiles.of("local", "dev", "test"));
   }
 
   private void runWebQaFixtureStream(
@@ -332,7 +406,7 @@ public class AgentStreamTurnRunner {
       return "Agent stream failed.";
     }
     if (!looksLikeProviderCredentialFailure(raw)) {
-      return raw;
+      return new com.navneet.executespec.security.ContextSanitizer().sanitizeException(error);
     }
     String providerLabel =
         provider == null || provider.isBlank() ? "Selected provider" : provider.trim();
@@ -355,8 +429,11 @@ public class AgentStreamTurnRunner {
     private final SseEmitter emitter;
     private final AgentSessionService sessionService;
     private final AgentSessionService.StreamTurnContext ctx;
-    private final List<String> tokens = new ArrayList<>();
     private final AgentEventRecorder eventRecorder;
+    // RR-492 — a single bounded streaming buffer. The prior code also appended every full delta to
+    // an unbounded List<String> and joined it as the persisted completion summary, so the 16k audit
+    // bound did not protect the actual completion path. This buffer is both the audit text and the
+    // persisted summary.
     private final StringBuilder text = new StringBuilder();
     private boolean textTruncated;
 
@@ -374,7 +451,6 @@ public class AgentStreamTurnRunner {
     @Override
     public void token(String delta) {
       String safeDelta = delta == null ? "" : delta;
-      tokens.add(safeDelta);
       final int maxChars = 16_000;
       int remaining = maxChars - text.length();
       if (remaining > 0) text.append(safeDelta, 0, Math.min(remaining, safeDelta.length()));
@@ -412,7 +488,8 @@ public class AgentStreamTurnRunner {
 
     @Override
     public void done(int turnCount, RunCostTracker.Snapshot cost) {
-      sessionService.completeStreamTurn(ctx, String.join("\n", tokens), cost);
+      // RR-492 — persist the bounded buffer, never an unbounded join of every delta.
+      sessionService.completeStreamTurn(ctx, text.toString(), cost);
       if (text.length() > 0) {
         record("TURN_TEXT", Map.of("text", text.toString(), "truncated", textTruncated));
       }

@@ -16,8 +16,14 @@ import lombok.Builder;
  *     STOPPED_WITHOUT_COMPLETE)
  * @param repeatedAssistantTextCount highest count for the same normalized assistant text seen
  *     during the worker loop
- * @param toolCallLog ordered log of {tool name, args preview, ok/err} per dispatched call
+ * @param toolCallLog ordered log of {tool name, opaque argument signature, safe target, ok/err} per
+ *     dispatched call; raw arguments are never retained
  * @param totalLatencyMs wall-clock time across the whole loop
+ * @param salvagedUnverified RR-260 — true when this result was produced by the best-guess salvage
+ *     path (a single write after the iteration / stagnation / budget limit) rather than a real
+ *     {@code completeTask}. That write is explicitly unverified ("a wrong-file edit beats an empty
+ *     patch"), so the executor must earn promotion through the smoke gate instead of treating it as
+ *     a clean completion. Defaults to false for every normal outcome.
  */
 @Builder
 public record WorkerResult(
@@ -28,7 +34,8 @@ public record WorkerResult(
     String finalAssistantText,
     int repeatedAssistantTextCount,
     List<String> toolCallLog,
-    long totalLatencyMs) {
+    long totalLatencyMs,
+    boolean salvagedUnverified) {
 
   public enum Outcome {
     /** completeTask was called — task succeeded by the worker's own assertion. */
@@ -56,6 +63,8 @@ public record WorkerResult(
      * against expensive long-tail tasks where a slow model burns through the iter budget very fast,
      * AND against tasks where a verbose model uses too many "thin" iterations per write.
      */
-    WALL_CLOCK_EXCEEDED
+    WALL_CLOCK_EXCEEDED,
+    /** Shared benchmark absolute deadline reached; distinct from a relative per-task cap. */
+    ABSOLUTE_DEADLINE_EXCEEDED
   }
 }

@@ -3,13 +3,15 @@ package com.navneet.executespec.apitests;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
-import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import com.navneet.executespec.agent.LlmRouter;
+import com.navneet.executespec.agent.PromptTrustBoundary;
 import com.navneet.executespec.router.ModelResolver;
 import com.navneet.executespec.router.ResolvedModel;
 import com.navneet.executespec.sse.RunEvent;
@@ -64,6 +66,28 @@ public class ApiTestSuiteAgent {
 
   private static final String[] FRONTEND_EXTENSIONS = {".html", ".jsx", ".tsx", ".vue", ".svelte"};
 
+  /**
+   * RR-1282 — the discovery walk used to collect every regular file in the workspace before
+   * filtering, select an unbounded number, and read each selected file in full into one prompt
+   * string. On a large or deep repository that exhausts heap/I/O and then blows the provider
+   * context window. These caps make discovery bounded and deterministic: the walk stops at a file
+   * and wall-clock ceiling, at most {@link #MAX_API_FILES} files are selected, each file is
+   * size-capped before it is opened, and the assembled prompt content is capped in aggregate.
+   */
+  private static final int MAX_CANDIDATES_SCANNED = 20_000;
+
+  /** Largest single source file the agent will open for discovery or read into the prompt. */
+  private static final long MAX_FILE_BYTES = 512_000;
+
+  /** Wall-clock budget for the discovery walk on a pathologically large tree. */
+  private static final long MAX_WALK_MILLIS = 30_000;
+
+  /** Cap on the number of API route/controller files selected. */
+  private static final int MAX_API_FILES = 60;
+
+  /** Aggregate char budget for the assembled source payload sent to the model. */
+  private static final int MAX_TOTAL_PROMPT_CHARS = 400_000;
+
   /** Called post-merge via virtual thread from RunOrchestrator. Non-fatal. */
   public void generateAsync(PipelineRun run) {
     var snapshot = ContextSnapshotFactory.builder().build().captureAll();
@@ -117,9 +141,7 @@ public class ApiTestSuiteAgent {
         new Prompt(
             List.of(
                 new SystemMessage(system),
-                new UserMessage(
-                    "Generate OpenAPI 3.0 YAML for these backend API source files:\n\n"
-                        + controllerContent)));
+                new UserMessage(PromptTrustBoundary.wrap("API_SOURCE_FILES", controllerContent))));
 
     var llmResponse =
         llmRouter.callText(
@@ -144,8 +166,23 @@ public class ApiTestSuiteAgent {
 
     yaml = stripMarkdownFences(yaml);
 
-    if (yaml.isBlank() || !yaml.startsWith("openapi")) {
-      log.warn("ApiTestSuiteAgent: unexpected LLM response for run {} — not saved", runId);
+    // RR-1281 — a prefix check ("starts with openapi") let malformed, hallucinated or incomplete
+    // text become the customer-visible authoritative API contract and poison downstream
+    // detection/docs. Require a bounded safe YAML parse AND a real OpenAPI shape (version + at
+    // least
+    // one path with at least one HTTP operation) before this content is ever committed/flagged.
+    OpenApiValidation validation = validateOpenApi(yaml);
+    if (!validation.valid()) {
+      log.warn(
+          "ApiTestSuiteAgent: generated OpenAPI failed validation for run {} ({}) — not saved",
+          runId,
+          validation.reason());
+      broadcaster.emit(
+          runId,
+          RunEvent.log(
+              runId,
+              "api-test-suite",
+              "OpenAPI spec rejected — " + validation.reason() + "; not committed."));
       return;
     }
 
@@ -156,7 +193,18 @@ public class ApiTestSuiteAgent {
     // This prevents a retried worker's `git add .` from accidentally staging
     // the untracked file onto a task branch, which would cause merge conflicts
     // or silently overwrite the spec during subsequent retry merges.
-    gitTool.commitIfDirty(runId, "chore: update api-docs/openapi.yaml [auto]");
+    //
+    // RR-1283 — stage ONLY the generated spec. The run workspace is shared with concurrently
+    // running post-merge agents, so a whole-workspace `git add -A` here could sweep another
+    // agent's half-written or rejected output into a commit labelled "update openapi.yaml".
+    var commit =
+        gitTool.commitPaths(
+            runId, "chore: update api-docs/openapi.yaml [auto]", List.of("api-docs/openapi.yaml"));
+    if (!commit.persisted()) {
+      log.warn(
+          "ApiTestSuiteAgent: OpenAPI spec not committed for run {} — {}", runId, commit.detail());
+      return;
+    }
 
     stateStore.markApiSpecReady(runId);
     broadcaster.emit(runId, RunEvent.apiSpecReady(runId));
@@ -174,6 +222,74 @@ public class ApiTestSuiteAgent {
       }
     }
     return stripped;
+  }
+
+  /** RR-1281 — the outcome of validating generated OpenAPI content. */
+  record OpenApiValidation(boolean valid, String reason) {
+    static OpenApiValidation ok() {
+      return new OpenApiValidation(true, "ok");
+    }
+
+    static OpenApiValidation invalid(String reason) {
+      return new OpenApiValidation(false, reason);
+    }
+  }
+
+  /** Recognised HTTP operation keys for the OpenAPI {@code paths} objects. */
+  private static final Set<String> HTTP_OPERATIONS =
+      Set.of("get", "put", "post", "delete", "options", "head", "patch", "trace");
+
+  /**
+   * RR-1281 — bounded safe YAML parse plus a deterministic OpenAPI-shape check. Uses SnakeYAML's
+   * {@code SafeConstructor} (no arbitrary Java object instantiation) with explicit code-point and
+   * alias limits so a hostile document cannot cause resource exhaustion, then requires the parsed
+   * document to be a mapping carrying an {@code openapi} version string and at least one path whose
+   * value declares at least one HTTP operation. Returns the first failure reason rather than
+   * throwing, so the caller can log it and skip the commit.
+   */
+  static OpenApiValidation validateOpenApi(String yaml) {
+    if (yaml == null || yaml.isBlank()) {
+      return OpenApiValidation.invalid("empty output");
+    }
+    if (yaml.length() > 5_000_000) {
+      return OpenApiValidation.invalid("document exceeds size bound");
+    }
+    Object parsed;
+    try {
+      org.yaml.snakeyaml.LoaderOptions options = new org.yaml.snakeyaml.LoaderOptions();
+      options.setCodePointLimit(5_000_000);
+      options.setMaxAliasesForCollections(50);
+      options.setAllowRecursiveKeys(false);
+      org.yaml.snakeyaml.Yaml safeYaml =
+          new org.yaml.snakeyaml.Yaml(new org.yaml.snakeyaml.constructor.SafeConstructor(options));
+      parsed = safeYaml.load(yaml);
+    } catch (RuntimeException parseFailure) {
+      return OpenApiValidation.invalid("not parseable YAML");
+    }
+    if (!(parsed instanceof Map<?, ?> root)) {
+      return OpenApiValidation.invalid("root is not a mapping");
+    }
+    Object version = root.get("openapi");
+    if (!(version instanceof String versionStr) || !versionStr.trim().startsWith("3")) {
+      return OpenApiValidation.invalid("missing or unsupported openapi version");
+    }
+    if (!(root.get("info") instanceof Map)) {
+      return OpenApiValidation.invalid("missing info object");
+    }
+    if (!(root.get("paths") instanceof Map<?, ?> paths) || paths.isEmpty()) {
+      return OpenApiValidation.invalid("no paths defined");
+    }
+    for (Object pathItem : paths.values()) {
+      if (pathItem instanceof Map<?, ?> item) {
+        for (Object key : item.keySet()) {
+          if (key instanceof String opKey
+              && HTTP_OPERATIONS.contains(opKey.toLowerCase(java.util.Locale.ROOT))) {
+            return OpenApiValidation.ok();
+          }
+        }
+      }
+    }
+    return OpenApiValidation.invalid("no HTTP operations under any path");
   }
 
   boolean hasFrontendFiles(Path ws) {
@@ -205,18 +321,35 @@ public class ApiTestSuiteAgent {
             "main.go" // Go (often single-file API servers)
             );
 
+    // RR-1282 — bound the walk: stop at a candidate ceiling and a wall-clock deadline, skip
+    // symbolic links (a repository clone is customer-controlled), and cap each file's size before
+    // it is ever opened. The candidate list can no longer grow with the repository without limit.
+    long deadline = System.currentTimeMillis() + MAX_WALK_MILLIS;
     try (Stream<Path> s = Files.walk(ws)) {
-      List<Path> candidates =
-          s.filter(Files::isRegularFile)
-              .filter(p -> !p.toString().contains("node_modules"))
-              .filter(p -> !p.toString().contains(".git"))
-              .filter(p -> !p.toString().contains("__pycache__"))
-              .filter(p -> !p.toString().contains("vendor"))
-              .collect(Collectors.toList());
+      List<Path> candidates = new java.util.ArrayList<>();
+      var iter = s.iterator();
+      while (iter.hasNext()) {
+        if (candidates.size() >= MAX_CANDIDATES_SCANNED || System.currentTimeMillis() > deadline) {
+          log.warn(
+              "ApiTestSuiteAgent: discovery walk hit a bound after {} candidates",
+              candidates.size());
+          break;
+        }
+        Path p = iter.next();
+        String path = p.toString();
+        if (path.contains("node_modules")
+            || path.contains(".git")
+            || path.contains("__pycache__")
+            || path.contains("vendor")) continue;
+        if (Files.isSymbolicLink(p)) continue;
+        if (!Files.isRegularFile(p, LinkOption.NOFOLLOW_LINKS)) continue;
+        candidates.add(p);
+      }
 
       // First pass: collect files matching name patterns
       List<String> results = new java.util.ArrayList<>();
       for (Path p : candidates) {
+        if (results.size() >= MAX_API_FILES) break;
         String name = p.getFileName().toString();
         String rel = ws.relativize(p).toString();
 
@@ -315,6 +448,8 @@ public class ApiTestSuiteAgent {
           || name.endsWith(".rs"))) continue;
 
       try {
+        // RR-1282 — check the size BEFORE reading so a large file is skipped without allocating it.
+        if (Files.size(p) > MAX_FILE_BYTES) continue;
         String content = Files.readString(p);
         if (content.length() > 50_000) continue; // skip large files
         for (String pattern : routePatterns) {
@@ -331,12 +466,27 @@ public class ApiTestSuiteAgent {
     return results;
   }
 
+  /**
+   * RR-1282 — assemble the source payload under an aggregate char budget so a set of large files
+   * cannot blow the provider context window or run up unbounded input cost. Reads stop once the
+   * budget is reached and record how many files were omitted so the omission is explicit rather
+   * than silent.
+   */
   private String readFiles(String runId, List<String> relativePaths) {
     var sb = new StringBuilder();
+    int included = 0;
     for (String f : relativePaths) {
+      if (sb.length() >= MAX_TOTAL_PROMPT_CHARS) {
+        int omitted = relativePaths.size() - included;
+        sb.append("=== (")
+            .append(omitted)
+            .append(" further file(s) omitted — aggregate source budget reached) ===\n");
+        break;
+      }
       String result = fsTool.readFile(runId, f);
       if (!result.startsWith("ERROR")) {
         sb.append("=== ").append(f).append(" ===\n").append(result).append("\n\n");
+        included++;
       }
     }
     return sb.toString();

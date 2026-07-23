@@ -8,12 +8,20 @@ import java.util.UUID;
 import com.navneet.executespec.sharing.entity.ProjectShareLink;
 
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 public interface ProjectShareLinkRepository extends JpaRepository<ProjectShareLink, UUID> {
 
-  Optional<ProjectShareLink> findByToken(String token);
+  Optional<ProjectShareLink> findByTokenHash(String tokenHash);
+
+  /** Atomic counter bump avoids lost updates under concurrent public reads. */
+  @Modifying(clearAutomatically = true, flushAutomatically = true)
+  @Query(
+      "UPDATE ProjectShareLink s SET s.views = COALESCE(s.views, 0) + 1, "
+          + "s.lastViewedAt = :viewedAt WHERE s.id = :linkId")
+  int recordView(@Param("linkId") UUID linkId, @Param("viewedAt") Instant viewedAt);
 
   /** All links for a project, newest first — used by the dashboard share-link panel. */
   List<ProjectShareLink> findByProjectIdOrderByCreatedAtDesc(String projectId);

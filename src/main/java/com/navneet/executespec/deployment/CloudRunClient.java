@@ -7,14 +7,14 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.TimeUnit;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.navneet.executespec.testgen.BoundedProcess;
 
 import org.springframework.stereotype.Service;
 
@@ -42,15 +42,25 @@ public class CloudRunClient {
 
   private final DeploymentProperties props;
   private final ObjectMapper objectMapper;
+
+  /** Read-only enumeration of the preview services this client deployed. */
+  private final CloudRunServiceInventory inventory;
+
+  // RR-1000: the health probe hits a URL served by generated customer code. Following redirects let
+  // that code bounce the server-side probe onto loopback, RFC1918, link-local or the GCE metadata
+  // endpoint and observe reachability/timing (SSRF). Never follow redirects on the probe; a
+  // terminal
+  // 3xx is simply not a 2xx and reads as unhealthy.
   private final HttpClient httpClient =
       HttpClient.newBuilder()
           .connectTimeout(java.time.Duration.ofSeconds(10))
-          .followRedirects(HttpClient.Redirect.NORMAL)
+          .followRedirects(HttpClient.Redirect.NEVER)
           .build();
 
   public CloudRunClient(DeploymentProperties props, ObjectMapper objectMapper) {
     this.props = props;
     this.objectMapper = objectMapper;
+    this.inventory = new CloudRunServiceInventory(props, objectMapper);
   }
 
   private static final int MAX_DEPLOY_RETRIES = 3;
@@ -120,27 +130,20 @@ public class CloudRunClient {
     if (props.cloudRun().allowUnauthenticated()) {
       cmd.add("--allow-unauthenticated");
     }
+    applyRuntimeServiceAccount(cmd);
 
-    ProcessBuilder pb = new ProcessBuilder(cmd);
-    Process process = pb.start();
-    // Read stdout and stderr in parallel to avoid pipe buffer deadlock.
-    var stderrFuture =
-        CompletableFuture.supplyAsync(
-            () -> {
-              try {
-                return new String(process.getErrorStream().readAllBytes()).trim();
-              } catch (Exception e) {
-                return "stderr read failed: " + e.getMessage();
-              }
-            });
-    String stdout = new String(process.getInputStream().readAllBytes()).trim();
-    String stderr = stderrFuture.join();
-    boolean finished = process.waitFor(10, TimeUnit.MINUTES);
-    if (!finished) {
-      process.destroyForcibly();
+    // RR-999: drain stdout and stderr on separate threads (kept apart so the JSON on stdout is not
+    // polluted by gcloud's progress text on stderr) with the deadline started BEFORE the reads.
+    // Reading stdout to EOF on the calling thread first let a hung gcloud that kept its pipe open
+    // defeat the 10-minute timeout entirely.
+    CloudRunProcess.GcloudResult res =
+        CloudRunProcess.runGcloudSeparate(new ProcessBuilder(cmd), Duration.ofMinutes(10));
+    if (!res.finished()) {
       throw new IOException("Cloud Run deploy timed out after 10 minutes");
     }
-    int exit = process.exitValue();
+    String stdout = res.stdout();
+    String stderr = res.stderr();
+    int exit = res.exitCode();
 
     String combined = (stdout + "\n" + stderr).trim();
     if (exit != 0) {
@@ -248,6 +251,7 @@ public class CloudRunClient {
                 "--quiet",
                 "--format",
                 "json"));
+    applyRuntimeServiceAccount(cmd);
 
     // Inject env vars via YAML file to avoid shell escaping issues with special chars
     Path envFile = null;
@@ -266,27 +270,17 @@ public class CloudRunClient {
     }
 
     try {
-      ProcessBuilder pb = new ProcessBuilder(cmd);
-      Process process = pb.start();
-      // Read stdout and stderr in parallel to avoid pipe buffer deadlock.
-      // gcloud writes progress text to stderr even with --format=json and --quiet.
-      var stderrFuture =
-          CompletableFuture.supplyAsync(
-              () -> {
-                try {
-                  return new String(process.getErrorStream().readAllBytes()).trim();
-                } catch (Exception e) {
-                  return "stderr read failed: " + e.getMessage();
-                }
-              });
-      String stdout = new String(process.getInputStream().readAllBytes()).trim();
-      String stderr = stderrFuture.join();
-      boolean finished = process.waitFor(10, TimeUnit.MINUTES);
-      if (!finished) {
-        process.destroyForcibly();
+      // RR-999: drain stdout and stderr on separate threads (gcloud writes progress text to stderr
+      // even with --format=json --quiet, so they must stay apart) with the deadline started BEFORE
+      // the reads. The old shape read stdout to EOF first, so a hung gcloud could never time out.
+      CloudRunProcess.GcloudResult res =
+          CloudRunProcess.runGcloudSeparate(new ProcessBuilder(cmd), Duration.ofMinutes(10));
+      if (!res.finished()) {
         throw new IOException("Cloud Run preview deploy timed out after 10 minutes");
       }
-      int exit = process.exitValue();
+      String stdout = res.stdout();
+      String stderr = res.stderr();
+      int exit = res.exitCode();
 
       String combined = (stdout + "\n" + stderr).trim();
       if (exit != 0) {
@@ -316,8 +310,17 @@ public class CloudRunClient {
 
       log.info("Cloud Run preview deployed: {} → {}", serviceName, serviceUrl);
 
-      // Ensure public access — --allow-unauthenticated may silently fail
-      ensurePublicAccess(serviceName);
+      // Ensure public access — --allow-unauthenticated may silently fail. RR-1001: surface a failed
+      // binding rather than swallowing it. We do not hard-fail here (the deploy already passed
+      // --allow-unauthenticated); the post-deploy 2xx health check is the authoritative
+      // reachability
+      // gate and will fail the preview if the service is genuinely inaccessible.
+      if (!ensurePublicAccess(serviceName)) {
+        log.warn(
+            "Cloud Run preview {} public-access IAM binding could not be confirmed — the service"
+                + " may be unreachable; the health check will decide.",
+            serviceName);
+      }
 
       return new DeployResult(serviceUrl, null);
     } finally {
@@ -331,10 +334,15 @@ public class CloudRunClient {
   }
 
   /**
-   * Explicitly set allUsers → roles/run.invoker on the service. This is a best-effort fallback if
+   * Explicitly set allUsers → roles/run.invoker on the service. This is a fallback if
    * --allow-unauthenticated failed during deploy.
+   *
+   * <p>RR-1001: returns whether the IAM binding was actually confirmed. The prior {@code void}
+   * signature swallowed every failure as a WARN, so the caller could not distinguish a public,
+   * reachable service from one whose public-access binding never took. The reachability gate is the
+   * post-deploy 2xx health check; this signal lets the deploy path surface a binding failure.
    */
-  private void ensurePublicAccess(String serviceName) {
+  private boolean ensurePublicAccess(String serviceName) {
     try {
       ProcessBuilder pb =
           new ProcessBuilder(
@@ -351,21 +359,23 @@ public class CloudRunClient {
                   props.gcpRegion(),
                   "--quiet")
               .redirectErrorStream(true);
-      Process process = pb.start();
-      String output = new String(process.getInputStream().readAllBytes()).trim();
-      boolean finished = process.waitFor(2, TimeUnit.MINUTES);
-      if (!finished) {
-        process.destroyForcibly();
+      BoundedProcess.Outcome outcome = CloudRunProcess.runBounded(pb, Duration.ofMinutes(2));
+      if (!outcome.finished()) {
         log.warn("Setting public access timed out for {}", serviceName);
-        return;
+        return false;
       }
-      if (process.exitValue() != 0) {
-        log.warn("Failed to set public access on {}: {}", serviceName, output);
-      } else {
-        log.info("Public access set on Cloud Run service: {}", serviceName);
+      if (outcome.exitCode() != 0) {
+        log.warn(
+            "Failed to set public access (allUsers→run.invoker) on {}: {}",
+            serviceName,
+            outcome.output());
+        return false;
       }
+      log.info("Public access set on Cloud Run service: {}", serviceName);
+      return true;
     } catch (Exception e) {
       log.warn("Failed to set public access on {}: {}", serviceName, e.getMessage());
+      return false;
     }
   }
 
@@ -374,42 +384,7 @@ public class CloudRunClient {
    * leftover preview services.
    */
   public List<String> listPreviewServices() throws IOException, InterruptedException {
-    ProcessBuilder pb =
-        new ProcessBuilder(
-                "gcloud",
-                "run",
-                "services",
-                "list",
-                "--project",
-                props.gcpProject(),
-                "--region",
-                props.gcpRegion(),
-                "--filter",
-                "metadata.labels.managed-by=executespec-preview",
-                "--format",
-                "value(metadata.name)",
-                "--quiet")
-            .redirectErrorStream(true);
-
-    Process process = pb.start();
-    String output = new String(process.getInputStream().readAllBytes()).trim();
-    boolean finished = process.waitFor(2, TimeUnit.MINUTES);
-    if (!finished) {
-      process.destroyForcibly();
-      log.warn("Listing preview services timed out");
-      return List.of();
-    }
-
-    if (process.exitValue() != 0) {
-      log.warn("Failed to list preview services: {}", output);
-      return List.of();
-    }
-
-    if (output.isBlank()) return List.of();
-    return java.util.Arrays.stream(output.split("\n"))
-        .map(String::trim)
-        .filter(CloudRunClient::isValidCloudRunServiceName)
-        .toList();
+    return inventory.listPreviewServices();
   }
 
   /**
@@ -418,67 +393,7 @@ public class CloudRunClient {
    */
   public Map<String, Map<String, String>> listPreviewServicesWithLabels()
       throws IOException, InterruptedException {
-    ProcessBuilder pb =
-        new ProcessBuilder(
-                "gcloud",
-                "run",
-                "services",
-                "list",
-                "--project",
-                props.gcpProject(),
-                "--region",
-                props.gcpRegion(),
-                "--filter",
-                "metadata.labels.managed-by=executespec-preview",
-                "--format",
-                "json(metadata.name,metadata.labels)",
-                "--quiet")
-            .redirectErrorStream(true);
-
-    Process process = pb.start();
-    String output = new String(process.getInputStream().readAllBytes()).trim();
-    boolean finished = process.waitFor(2, TimeUnit.MINUTES);
-    if (!finished) {
-      process.destroyForcibly();
-      log.warn("Listing preview services with labels timed out");
-      return Map.of();
-    }
-    String json = extractJsonArray(output);
-    if (process.exitValue() != 0 || json.isBlank()) {
-      return Map.of();
-    }
-
-    Map<String, Map<String, String>> result = new java.util.LinkedHashMap<>();
-    try {
-      JsonNode arr = objectMapper.readTree(json);
-      for (JsonNode svc : arr) {
-        String name = svc.path("metadata").path("name").asText(null);
-        if (name == null || !isValidCloudRunServiceName(name)) continue;
-        Map<String, String> labels = new java.util.HashMap<>();
-        JsonNode labelsNode = svc.path("metadata").path("labels");
-        labelsNode.fields().forEachRemaining(e -> labels.put(e.getKey(), e.getValue().asText()));
-        result.put(name, labels);
-      }
-    } catch (Exception e) {
-      log.warn("Failed to parse preview services labels: {}", e.getMessage());
-    }
-    return result;
-  }
-
-  private static boolean isValidCloudRunServiceName(String value) {
-    return value != null && value.matches("[a-z]([-a-z0-9]{0,61}[a-z0-9])?");
-  }
-
-  private static String extractJsonArray(String output) {
-    if (output == null || output.isBlank()) {
-      return "";
-    }
-    int start = output.indexOf('[');
-    int end = output.lastIndexOf(']');
-    if (start < 0 || end < start) {
-      return "";
-    }
-    return output.substring(start, end + 1);
+    return inventory.listPreviewServicesWithLabels();
   }
 
   /** Rollback traffic to a specific revision — instant, no rebuild. */
@@ -501,16 +416,12 @@ public class CloudRunClient {
                 "--quiet")
             .redirectErrorStream(true);
 
-    Process process = pb.start();
-    String output = new String(process.getInputStream().readAllBytes()).trim();
-    boolean finished = process.waitFor(5, TimeUnit.MINUTES);
-    if (!finished) {
-      process.destroyForcibly();
+    BoundedProcess.Outcome outcome = CloudRunProcess.runBounded(pb, Duration.ofMinutes(5));
+    if (!outcome.finished()) {
       throw new IOException("Rollback timed out after 5 minutes for " + serviceName);
     }
-
-    if (process.exitValue() != 0) {
-      throw new IOException("Rollback failed: " + output);
+    if (outcome.exitCode() != 0) {
+      throw new IOException("Rollback failed: " + outcome.output());
     }
     log.info("Rolled back {} to revision {}", serviceName, revisionName);
   }
@@ -538,12 +449,24 @@ public class CloudRunClient {
   }
 
   /**
-   * Post-deploy health check: GET service URL, expect status < 500. Retries 3 times with 5-second
+   * Post-deploy health check: GET service URL, require a real 2xx. Retries 3 times with 5-second
    * delay for cold-start tolerance.
+   *
+   * <p>RR-1001: the old gate accepted any status below 500, so a service returning 401/403/404 —
+   * broken auth/IAM, a missing app route, or an unpublished revision — read as "healthy" and the
+   * preview/deployment was marked RUNNING/LIVE while genuinely inaccessible. A terminal non-2xx now
+   * fails the check.
+   *
+   * <p>RR-1000: the client no longer follows redirects and the target must be an HTTPS Cloud Run
+   * ({@code *.run.app}) origin, so generated code cannot redirect the probe onto internal networks.
    */
   public boolean healthCheck(String serviceUrl) {
     if (serviceUrl == null || serviceUrl.isBlank()) {
       log.error("Health check called with null/empty service URL");
+      return false;
+    }
+    if (!isTrustedCloudRunUrl(serviceUrl)) {
+      log.error("Health check refused non-Cloud-Run/non-HTTPS target (RR-1000): {}", serviceUrl);
       return false;
     }
     for (int attempt = 1; attempt <= 3; attempt++) {
@@ -556,11 +479,15 @@ public class CloudRunClient {
                 .build();
         HttpResponse<Void> resp = httpClient.send(req, HttpResponse.BodyHandlers.discarding());
 
-        if (resp.statusCode() < 500) {
+        if (resp.statusCode() >= 200 && resp.statusCode() < 300) {
           log.info("Health check passed: {} → {}", serviceUrl, resp.statusCode());
           return true;
         }
-        log.warn("Health check attempt {}: {} → {}", attempt, serviceUrl, resp.statusCode());
+        log.warn(
+            "Health check attempt {}: {} → {} (not 2xx — treated as unhealthy)",
+            attempt,
+            serviceUrl,
+            resp.statusCode());
       } catch (Exception e) {
         log.warn("Health check attempt {}: {} → {}", attempt, serviceUrl, e.getMessage());
       }
@@ -577,20 +504,70 @@ public class CloudRunClient {
     return false;
   }
 
+  /**
+   * RR-1000 — the probe target must be an HTTPS Cloud Run origin. Cloud Run public URLs are always
+   * {@code https://…​.run.app}; anything else (a plain-text scheme, an IP literal, an internal
+   * host) is refused so a compromised or redirect-influenced URL cannot steer the server-side probe
+   * at internal infrastructure.
+   */
+  static boolean isTrustedCloudRunUrl(String serviceUrl) {
+    try {
+      URI uri = URI.create(serviceUrl.trim());
+      if (!"https".equalsIgnoreCase(uri.getScheme())) return false;
+      String host = uri.getHost();
+      return host != null && host.toLowerCase().endsWith(".run.app");
+    } catch (RuntimeException e) {
+      return false;
+    }
+  }
+
   private void exec(String... cmd) throws IOException, InterruptedException {
     ProcessBuilder pb = new ProcessBuilder(cmd).redirectErrorStream(true);
-    Process p = pb.start();
-    String output = new String(p.getInputStream().readAllBytes()).trim();
-    boolean finished = p.waitFor(5, TimeUnit.MINUTES);
-    if (!finished) {
-      p.destroyForcibly();
+    BoundedProcess.Outcome outcome = CloudRunProcess.runBounded(pb, Duration.ofMinutes(5));
+    if (!outcome.finished()) {
       throw new IOException("Command timed out after 5 minutes: " + String.join(" ", cmd));
     }
-    if (p.exitValue() != 0) {
+    if (outcome.exitCode() != 0) {
       throw new IOException(
-          "Command failed (exit " + p.exitValue() + "): " + String.join(" ", cmd) + "\n" + output);
+          "Command failed (exit "
+              + outcome.exitCode()
+              + "): "
+              + String.join(" ", cmd)
+              + "\n"
+              + outcome.output());
     }
   }
 
   public record DeployResult(String serviceUrl, String revisionName) {}
+
+  /**
+   * Pins the runtime identity of a generated Cloud Run service (RR-998).
+   *
+   * <p>Without {@code --service-account} the service runs as the project's default compute
+   * identity. Generated customer code can read a token for that identity from the metadata server,
+   * and previews are additionally deployed {@code --allow-unauthenticated}, so anyone reaching the
+   * preview reaches code holding it. Fails closed by default: an unconfigured runtime SA aborts the
+   * deploy rather than quietly granting the default identity.
+   *
+   * <p>Configure {@code agent.deployment.cloud-run.service-account} with a dedicated,
+   * minimal-permission account. Setting {@code require-service-account: false} restores the old
+   * behaviour and is an explicit operator decision.
+   */
+  private void applyRuntimeServiceAccount(List<String> cmd) {
+    String sa = props.cloudRun().serviceAccount();
+    if (sa != null && !sa.isBlank()) {
+      cmd.add("--service-account");
+      cmd.add(sa.trim());
+      return;
+    }
+    if (props.cloudRun().serviceAccountRequired()) {
+      throw new IllegalStateException(
+          "Refusing to deploy without a dedicated runtime service account: set"
+              + " agent.deployment.cloud-run.service-account (or explicitly set"
+              + " require-service-account: false to accept the project default identity).");
+    }
+    log.warn(
+        "Cloud Run deploy has no runtime service account configured — the service will inherit the"
+            + " project default compute identity (agent.deployment.cloud-run.service-account)");
+  }
 }

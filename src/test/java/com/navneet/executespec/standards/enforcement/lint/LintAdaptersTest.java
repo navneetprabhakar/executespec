@@ -15,25 +15,62 @@ import org.junit.jupiter.api.Test;
  */
 class LintAdaptersTest {
 
+  /** A policy that admits everything, so parse/exit-code behaviour can still be asserted. */
+  private static LintExecutionPolicy allowing(String executable) {
+    return new LintExecutionPolicy(new LintExecutionProperties()) {
+      @Override
+      public Admission admit(
+          String tool, Path repoRoot, Path configPath, List<java.nio.file.Path> targetFiles) {
+        return new Admission(executable, null, List.of(), null);
+      }
+    };
+  }
+
+  private static LintProcessRunner stubRunner(LintProcessRunner.Result result) {
+    return new LintProcessRunner(new LintExecutionProperties(), null) {
+      @Override
+      public Result run(String runId, Path workingDir, List<String> argv, long timeoutSeconds) {
+        return result;
+      }
+    };
+  }
+
   @Test
   void eslint_unavailableWhenCliMissing() {
     LintProcessRunner stub =
-        new LintProcessRunner() {
-          @Override
-          public Result run(Path workingDir, List<String> argv, long timeoutSeconds) {
-            return new Result(false, -1, null, null, "CLI 'npx' not available on PATH");
-          }
-        };
-    EslintAdapter a = new EslintAdapter(stub, new ObjectMapper());
-    LintResult r = a.run(Path.of("."), null, List.of());
+        stubRunner(
+            new LintProcessRunner.Result(
+                false, -1, null, null, "linter '/opt/eslint' could not be started"));
+    EslintAdapter a = new EslintAdapter(stub, allowing("/opt/eslint"), new ObjectMapper());
+    LintResult r = a.run("run-1", Path.of("."), null, List.of());
     assertThat(r.status()).isEqualTo(LintResult.Status.UNAVAILABLE);
     assertThat(r.violations()).isEmpty();
     assertThat(r.tool()).isEqualTo("eslint");
   }
 
   @Test
+  void eslint_deniedByPolicy_isUnavailableAndNeverStartsAProcess() {
+    // RR-1051 — with host execution off (the default) no subprocess may start at all.
+    LintProcessRunner explodingRunner =
+        new LintProcessRunner(new LintExecutionProperties(), null) {
+          @Override
+          public Result run(String runId, Path workingDir, List<String> argv, long timeoutSeconds) {
+            throw new AssertionError("policy denied the run; no process may be started");
+          }
+        };
+    EslintAdapter a =
+        new EslintAdapter(
+            explodingRunner,
+            new LintExecutionPolicy(new LintExecutionProperties()),
+            new ObjectMapper());
+    LintResult r = a.run("run-1", Path.of("."), null, List.of());
+    assertThat(r.status()).isEqualTo(LintResult.Status.UNAVAILABLE);
+    assertThat(r.failureReason()).contains("host-execution-enabled=false");
+  }
+
+  @Test
   void eslint_parsesJsonOutput_perFilePerMessage() throws Exception {
-    EslintAdapter a = new EslintAdapter(null, new ObjectMapper());
+    EslintAdapter a = new EslintAdapter(null, null, new ObjectMapper());
     String stdout =
         """
 [
@@ -54,7 +91,7 @@ class LintAdaptersTest {
 
   @Test
   void eslint_emptyStdoutReturnsEmpty() throws Exception {
-    EslintAdapter a = new EslintAdapter(null, new ObjectMapper());
+    EslintAdapter a = new EslintAdapter(null, null, new ObjectMapper());
     assertThat(a.parseJsonOutput(null)).isEmpty();
     assertThat(a.parseJsonOutput("")).isEmpty();
     assertThat(a.parseJsonOutput("   ")).isEmpty();
@@ -65,38 +102,118 @@ class LintAdaptersTest {
     // ESLint exits non-zero when violations found — adapter should still
     // mark SUCCESS and return the parsed violations (not FAILED).
     LintProcessRunner stub =
-        new LintProcessRunner() {
-          @Override
-          public Result run(Path workingDir, List<String> argv, long timeoutSeconds) {
-            String stdout =
-                "[{\"filePath\":\"/repo/a.js\",\"messages\":[{\"ruleId\":\"x\",\"line\":1,\"column\":1,\"message\":\"m\"}]}]";
-            return new Result(true, 1, stdout, "", null);
-          }
-        };
-    EslintAdapter a = new EslintAdapter(stub, new ObjectMapper());
-    LintResult r = a.run(Path.of("."), null, List.of());
+        stubRunner(
+            new LintProcessRunner.Result(
+                true,
+                1,
+                "[{\"filePath\":\"/repo/a.js\",\"messages\":[{\"ruleId\":\"x\",\"line\":1,\"column\":1,\"message\":\"m\"}]}]",
+                "",
+                null));
+    EslintAdapter a = new EslintAdapter(stub, allowing("/opt/eslint"), new ObjectMapper());
+    LintResult r = a.run("run-1", Path.of("."), null, List.of());
     assertThat(r.status()).isEqualTo(LintResult.Status.SUCCESS);
     assertThat(r.violations()).hasSize(1);
+  }
+
+  // RR-1610 — a crashed or silent lint verifier must NOT read as a passing lint (SUCCESS).
+
+  @Test
+  void eslint_killedWithNoOutput_isFailedNotSuccess() {
+    // exit=137 (SIGKILL/OOM), stdout="", stderr="" — the old three-way conjunction let this pass.
+    LintProcessRunner stub = stubRunner(new LintProcessRunner.Result(true, 137, "", "", null));
+    EslintAdapter a = new EslintAdapter(stub, allowing("/opt/eslint"), new ObjectMapper());
+    LintResult r = a.run("run-1", Path.of("."), null, List.of());
+    assertThat(r.status()).isEqualTo(LintResult.Status.FAILED);
+    assertThat(r.failureReason()).contains("137");
+  }
+
+  @Test
+  void eslint_exitZeroButBlankStdout_isFailedNotSuccess() {
+    // A non-eslint binary on PATH: exit=0, stdout="" — no report was produced.
+    LintProcessRunner stub = stubRunner(new LintProcessRunner.Result(true, 0, "", "", null));
+    EslintAdapter a = new EslintAdapter(stub, allowing("/opt/eslint"), new ObjectMapper());
+    LintResult r = a.run("run-1", Path.of("."), null, List.of());
+    assertThat(r.status()).isEqualTo(LintResult.Status.FAILED);
+  }
+
+  @Test
+  void eslint_wellFormedZeroViolationReport_isSuccess() {
+    LintProcessRunner stub = stubRunner(new LintProcessRunner.Result(true, 0, "[]", "", null));
+    EslintAdapter a = new EslintAdapter(stub, allowing("/opt/eslint"), new ObjectMapper());
+    LintResult r = a.run("run-1", Path.of("."), null, List.of());
+    assertThat(r.status()).isEqualTo(LintResult.Status.SUCCESS);
+    assertThat(r.violations()).isEmpty();
+  }
+
+  @Test
+  void eslint_nonArrayOutput_isFailedNotSuccess() {
+    // Structurally-valid JSON that is not a report array must not be scored as a clean lint.
+    LintProcessRunner stub =
+        stubRunner(new LintProcessRunner.Result(true, 0, "{\"unexpected\":true}", "", null));
+    EslintAdapter a = new EslintAdapter(stub, allowing("/opt/eslint"), new ObjectMapper());
+    LintResult r = a.run("run-1", Path.of("."), null, List.of());
+    assertThat(r.status()).isEqualTo(LintResult.Status.FAILED);
+  }
+
+  @Test
+  void checkstyle_killedWithNoOutput_isFailedNotSuccess() {
+    LintProcessRunner stub = stubRunner(new LintProcessRunner.Result(true, 137, "", "", null));
+    CheckstyleAdapter a = new CheckstyleAdapter(stub, allowing("/opt/checkstyle"));
+    LintResult r = a.run("run-1", Path.of("."), null, List.of());
+    assertThat(r.status()).isEqualTo(LintResult.Status.FAILED);
+    assertThat(r.failureReason()).contains("137");
+  }
+
+  @Test
+  void checkstyle_exitZeroButBlankStdout_isFailedNotSuccess() {
+    LintProcessRunner stub = stubRunner(new LintProcessRunner.Result(true, 0, "", "", null));
+    CheckstyleAdapter a = new CheckstyleAdapter(stub, allowing("/opt/checkstyle"));
+    LintResult r = a.run("run-1", Path.of("."), null, List.of());
+    assertThat(r.status()).isEqualTo(LintResult.Status.FAILED);
+  }
+
+  @Test
+  void checkstyle_truncatedReport_isFailedNotSuccess() {
+    // Opening tag written, process killed before the closing tag — not a complete audit.
+    LintProcessRunner stub =
+        stubRunner(
+            new LintProcessRunner.Result(true, 137, "<checkstyle version=\"10.0\">", "", null));
+    CheckstyleAdapter a = new CheckstyleAdapter(stub, allowing("/opt/checkstyle"));
+    LintResult r = a.run("run-1", Path.of("."), null, List.of());
+    assertThat(r.status()).isEqualTo(LintResult.Status.FAILED);
+  }
+
+  @Test
+  void checkstyle_wellFormedZeroViolationReport_isSuccess() {
+    LintProcessRunner stub =
+        stubRunner(
+            new LintProcessRunner.Result(
+                true,
+                0,
+                "<?xml version=\"1.0\"?><checkstyle version=\"10.0\"></checkstyle>",
+                "",
+                null));
+    CheckstyleAdapter a = new CheckstyleAdapter(stub, allowing("/opt/checkstyle"));
+    LintResult r = a.run("run-1", Path.of("."), null, List.of());
+    assertThat(r.status()).isEqualTo(LintResult.Status.SUCCESS);
+    assertThat(r.violations()).isEmpty();
   }
 
   @Test
   void checkstyle_unavailableWhenCliMissing() {
     LintProcessRunner stub =
-        new LintProcessRunner() {
-          @Override
-          public Result run(Path workingDir, List<String> argv, long timeoutSeconds) {
-            return new Result(false, -1, null, null, "CLI 'checkstyle' not available on PATH");
-          }
-        };
-    CheckstyleAdapter a = new CheckstyleAdapter(stub);
-    LintResult r = a.run(Path.of("."), null, List.of());
+        stubRunner(
+            new LintProcessRunner.Result(
+                false, -1, null, null, "linter '/opt/checkstyle' could not be started"));
+    CheckstyleAdapter a = new CheckstyleAdapter(stub, allowing("/opt/checkstyle"));
+    LintResult r = a.run("run-1", Path.of("."), null, List.of());
     assertThat(r.status()).isEqualTo(LintResult.Status.UNAVAILABLE);
     assertThat(r.tool()).isEqualTo("checkstyle");
   }
 
   @Test
   void checkstyle_parsesXmlOutput_perFilePerError() {
-    CheckstyleAdapter a = new CheckstyleAdapter(null);
+    CheckstyleAdapter a = new CheckstyleAdapter(null, null);
     String xml =
         """
 <?xml version="1.0" encoding="UTF-8"?>
@@ -120,7 +237,7 @@ class LintAdaptersTest {
 
   @Test
   void checkstyle_emptyOrMalformedXml_returnsEmpty() {
-    CheckstyleAdapter a = new CheckstyleAdapter(null);
+    CheckstyleAdapter a = new CheckstyleAdapter(null, null);
     assertThat(a.parseXmlOutput(null)).isEmpty();
     assertThat(a.parseXmlOutput("")).isEmpty();
     assertThat(a.parseXmlOutput("not xml")).isEmpty();

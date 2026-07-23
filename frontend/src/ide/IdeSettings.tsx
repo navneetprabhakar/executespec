@@ -1,7 +1,10 @@
-import {useEffect, useState} from 'react';
+import {useCallback, useEffect, useRef, useState} from 'react';
 import * as api from '@/lib/api';
 import {useAuthStore} from '@/stores/useAuthStore';
 import {IdeBadge, IdeLoader} from '@/ide/IdeKit';
+import {LoadError} from '@/ide/LoadError';
+import {toLoadFailure, type LoadFailure} from '@/lib/loadState';
+import {LlmUsageAuditPanel} from '@/ide/LlmUsageAuditPanel';
 import {ConfirmModal, PromptModal} from '@/signal/components/Modal';
 import {
   adminWriteConfirmation,
@@ -18,35 +21,98 @@ export function IdeIntegrations() {
   const user = useAuthStore((s) => s.user);
   const setUser = useAuthStore((s) => s.setUser);
   const [sources, setSources] = useState<string[] | null>(null);
+  // D4 — a failed integration-status read used to render every provider as
+  // "Not connected", and a failed PAT read as "No personal access tokens."
+  const [sourcesFailure, setSourcesFailure] = useState<LoadFailure | null>(null);
+  const [patsFailure, setPatsFailure] = useState<LoadFailure | null>(null);
   const [slack, setSlack] = useState<api.SlackStatus | null>(null);
   const [gh, setGh] = useState<api.GitHubAppStatus | null>(null);
+  // RR-770 — status-read failure is distinct from "not connected".
+  const [slackFailure, setSlackFailure] = useState(false);
+  const [ghFailure, setGhFailure] = useState(false);
   const [connect, setConnect] = useState<ConnectKind | null>(null);
+  const [pats, setPats] = useState<api.PersonalAccessTokenMeta[] | null>(null);
+  const [revokePat, setRevokePat] = useState<api.PersonalAccessTokenMeta | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const [msg, setMsg] = useState('');
+  // RR-772 — Slack disconnect confirmation, with a synchronous one-shot latch.
+  const [disconnectSlack, setDisconnectSlack] = useState(false);
+  const disconnectBusyRef = useRef(false);
 
   const loadSources = () =>
     api
       .getIntegrationStatus()
-      .then((s) => setSources(s.enabledSources ?? []))
-      .catch(() => setSources([]));
+      .then((s) => {
+        setSources(s.enabledSources ?? []);
+        setSourcesFailure(null);
+      })
+      .catch((e: unknown) => setSourcesFailure(toLoadFailure(e)));
+  const loadPats = () =>
+    api
+      .listPats()
+      .then((rows) => {
+        setPats(rows);
+        setPatsFailure(null);
+      })
+      .catch((e: unknown) => setPatsFailure(toLoadFailure(e)));
 
   useEffect(() => {
     loadSources();
+    loadPats();
+    // RR-770 — a failed status read is not "not connected". Track it separately
+    // so the row can say "Status unavailable" instead of asserting the
+    // credential is absent (which invites re-running OAuth over a working setup).
     api
       .getSlackStatus()
-      .then(setSlack)
-      .catch(() => {});
+      .then((s) => {
+        setSlack(s);
+        setSlackFailure(false);
+      })
+      .catch(() => setSlackFailure(true));
     api
       .getGitHubAppStatus()
-      .then(setGh)
-      .catch(() => {});
+      .then((g) => {
+        setGh(g);
+        setGhFailure(false);
+      })
+      .catch(() => setGhFailure(true));
   }, []);
 
   function openInstall(getUrl: () => Promise<{installUrl?: string}>) {
+    setErr('');
     getUrl()
-      .then((r) => r.installUrl && window.open(r.installUrl, '_blank'))
-      .catch(() => {});
+      .then((r) => {
+        const raw = r.installUrl;
+        if (!raw) {
+          setErr('The install link is unavailable right now. Please try again.');
+          return;
+        }
+        // RR-771 — only follow an https destination, and open it with
+        // `noopener,noreferrer` (and null the opener) so the external OAuth /
+        // install page cannot reach `window.opener` and navigate this
+        // signed-in product tab to a phishing target (reverse tabnabbing).
+        let parsed: URL;
+        try {
+          parsed = new URL(raw, window.location.origin);
+        } catch {
+          setErr('The install link was malformed and was not opened.');
+          return;
+        }
+        if (parsed.protocol !== 'https:') {
+          setErr('The install link was not a secure https URL and was not opened.');
+          return;
+        }
+        const win = window.open(parsed.toString(), '_blank', 'noopener,noreferrer');
+        if (win) {
+          win.opener = null;
+        } else {
+          setErr('The install window was blocked. Allow pop-ups for this site and try again.');
+        }
+      })
+      .catch((e: unknown) =>
+        setErr(e instanceof Error ? e.message : 'Could not start the install flow.'),
+      );
   }
 
   // Connected = the source is enabled server-side OR the per-user credential
@@ -143,8 +209,8 @@ export function IdeIntegrations() {
         };
       case 'bitbucket':
         return {
-          title: 'Connect Bitbucket',
-          body: 'Provide a Bitbucket workspace + repo + app password (scopes: repository, pullrequest).',
+          title: 'Connect Bitbucket Cloud',
+          body: 'Provide an Atlassian account email and a scoped Bitbucket API token. The workspace is required for the repository catalogue.',
           fields: [
             {
               name: 'workspace',
@@ -154,23 +220,15 @@ export function IdeIntegrations() {
               required: true,
             },
             {
-              name: 'repoSlug',
-              label: 'Default repo slug',
-              placeholder: 'main-repo',
-              defaultValue: user?.bitbucketRepoSlug ?? '',
-              required: true,
-            },
-            {
               name: 'username',
-              label: 'Username',
-              placeholder: 'you',
+              label: 'Atlassian account email',
+              placeholder: 'you@company.com',
               defaultValue: user?.bitbucketUsername ?? '',
               required: true,
             },
-            {name: 'appPassword', label: 'App password', placeholder: 'ATBB…', required: true},
+            {name: 'appPassword', label: 'API token', placeholder: 'ATATT…', required: true},
           ],
-          run: (v) =>
-            api.updateBitbucketSettings(v.username, v.appPassword, v.workspace, v.repoSlug),
+          run: (v) => api.updateBitbucketSettings(v.username, v.appPassword, v.workspace, ''),
         };
       default:
         throw new Error(`Unknown integration provider: ${String(p)}`);
@@ -202,6 +260,8 @@ export function IdeIntegrations() {
     name: string;
     desc: string;
     connected: boolean;
+    // RR-770 — true when the connection status could not be read at all.
+    statusUnknown?: boolean;
     sub?: string;
     actions?: React.ReactNode;
   }> = [
@@ -209,6 +269,9 @@ export function IdeIntegrations() {
       name: 'GitHub',
       desc: 'Clone repos + open PRs · GitHub App or a personal access token',
       connected: ghConnected,
+      // A set PAT is authoritative on its own; only treat status as unknown when
+      // we have no other signal and the app-status read failed.
+      statusUnknown: ghFailure && !user?.hasGithubPat,
       sub: gh?.installed ? 'app installed' : user?.hasGithubPat ? 'token set' : undefined,
       actions: (
         // RL-2026-05-044 — removed the dead "Install app" button (no system GitHub App is
@@ -222,6 +285,7 @@ export function IdeIntegrations() {
       name: 'Slack',
       desc: 'Work-completion alerts in your channel',
       connected: !!slack?.connected,
+      statusUnknown: slackFailure && !slack,
       sub: slack?.connected ? slack.teamName || undefined : undefined,
       actions: !slack?.connected ? (
         <button
@@ -231,7 +295,17 @@ export function IdeIntegrations() {
         >
           Connect
         </button>
-      ) : undefined,
+      ) : (
+        // RR-772 — a connected integration must be revocable from the surface where
+        // it was connected. The server exposes DELETE /integrations/slack/disconnect.
+        <button
+          className='ide-btn ghost'
+          style={{...INT_BTN, color: 'var(--ide-red)', borderColor: 'var(--ide-red)'}}
+          onClick={() => setDisconnectSlack(true)}
+        >
+          Disconnect
+        </button>
+      ),
     },
     {
       name: 'Jira',
@@ -287,7 +361,9 @@ export function IdeIntegrations() {
         </div>
       )}
 
-      {sources === null ? (
+      {sourcesFailure ? (
+        <LoadError failure={sourcesFailure} what='connected integrations' onRetry={loadSources} />
+      ) : sources === null ? (
         <IdeLoader label='Loading integrations…' />
       ) : (
         <div className='ide-card' style={{padding: 0}}>
@@ -314,9 +390,65 @@ export function IdeIntegrations() {
                 </div>
               </div>
               <IdeBadge kind={r.connected ? 'ok' : 'warn'}>
-                {r.connected ? 'Connected' : 'Not connected'}
+                {r.connected
+                  ? 'Connected'
+                  : r.statusUnknown
+                    ? 'Status unavailable'
+                    : 'Not connected'}
               </IdeBadge>
               {r.actions}
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className='ide-h2' style={{marginTop: 22}}>
+        CLI, OpenTUI and CI tokens
+      </div>
+      <div className='ide-sub'>
+        Revocation takes effect on the next authenticated request. Token secrets are never shown
+        again.
+      </div>
+      {patsFailure ? (
+        <LoadError failure={patsFailure} what='access tokens' onRetry={loadPats} />
+      ) : pats === null ? (
+        <IdeLoader label='Loading access tokens…' />
+      ) : pats.length === 0 ? (
+        <div className='ide-empty'>No personal access tokens.</div>
+      ) : (
+        <div className='ide-card' style={{padding: 0}}>
+          {pats.map((token, i) => (
+            <div
+              key={token.id}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 10,
+                padding: '12px 16px',
+                borderBottom: i < pats.length - 1 ? '1px solid var(--ide-border)' : 'none',
+              }}
+            >
+              <div style={{flex: 1, minWidth: 0}}>
+                <div style={{fontWeight: 500}}>{token.name}</div>
+                <div style={{fontSize: 11.5, color: 'var(--ide-fg-muted)', marginTop: 2}}>
+                  {token.tokenPrefix}… · created {new Date(token.createdAt).toLocaleDateString()}
+                  {token.lastUsedAt
+                    ? ` · last used ${new Date(token.lastUsedAt).toLocaleDateString()}`
+                    : ' · never used'}
+                </div>
+              </div>
+              <IdeBadge kind={token.revoked ? 'warn' : 'ok'}>
+                {token.revoked ? 'Revoked' : 'Active'}
+              </IdeBadge>
+              {!token.revoked && (
+                <button
+                  className='ide-btn ghost'
+                  style={{...INT_BTN, color: 'var(--ide-red)', borderColor: 'var(--ide-red)'}}
+                  onClick={() => setRevokePat(token)}
+                >
+                  Revoke
+                </button>
+              )}
             </div>
           ))}
         </div>
@@ -336,6 +468,67 @@ export function IdeIntegrations() {
           onSubmit={submitConnect}
         />
       )}
+      <ConfirmModal
+        open={!!revokePat}
+        title='Revoke access token'
+        body={
+          revokePat
+            ? `Revoke “${revokePat.name}”? Connected clients using it will stop working.`
+            : ''
+        }
+        confirmLabel='Revoke'
+        danger
+        busy={busy}
+        onConfirm={async () => {
+          const token = revokePat;
+          if (!token) return;
+          setBusy(true);
+          setErr('');
+          try {
+            await api.revokePat(token.id);
+            setMsg(`${token.name} revoked.`);
+            setRevokePat(null);
+            await loadPats();
+          } catch (e: unknown) {
+            setErr(e instanceof Error ? e.message : 'Token revocation failed.');
+          } finally {
+            setBusy(false);
+          }
+        }}
+        onClose={() => setRevokePat(null)}
+      />
+      {/* RR-772 — revoke the connected Slack integration with confirmation + settlement. */}
+      <ConfirmModal
+        open={disconnectSlack}
+        title='Disconnect Slack'
+        body='Disconnect Slack? Work-completion alerts stop and the stored bot token is revoked. You can reconnect later.'
+        confirmLabel='Disconnect'
+        danger
+        busy={busy}
+        onConfirm={async () => {
+          if (disconnectBusyRef.current) return;
+          disconnectBusyRef.current = true;
+          setBusy(true);
+          setErr('');
+          setMsg('');
+          try {
+            await api.disconnectSlack();
+            const s = await api.getSlackStatus().catch(() => null);
+            setSlack(s);
+            setSlackFailure(false);
+            setMsg('Slack disconnected.');
+            setDisconnectSlack(false);
+          } catch (e: unknown) {
+            setErr(e instanceof Error ? e.message : 'Could not disconnect Slack.');
+          } finally {
+            disconnectBusyRef.current = false;
+            setBusy(false);
+          }
+        }}
+        onClose={() => {
+          if (!disconnectBusyRef.current) setDisconnectSlack(false);
+        }}
+      />
     </div>
   );
 }
@@ -382,6 +575,10 @@ function MiniSelect({
   onChange: (v: string) => void;
   disabled?: boolean;
 }) {
+  // RR-773 — always render the current value as a stable option even when it is not in the
+  // assignable list, so a legacy/unknown tier displays truthfully instead of the browser silently
+  // showing the first option (which a subsequent edit would then persist as a corruption).
+  const opts = value && !options.includes(value) ? [value, ...options] : options;
   return (
     <select
       className='ide-select'
@@ -390,7 +587,7 @@ function MiniSelect({
       onChange={(e) => onChange(e.target.value)}
       style={{width: 'auto', padding: '3px 8px', fontSize: 12}}
     >
-      {options.map((o) => (
+      {opts.map((o) => (
         <option key={o} value={o}>
           {o}
         </option>
@@ -399,16 +596,63 @@ function MiniSelect({
   );
 }
 
-const USER_TIERS = ['FREE', 'PRO', 'TEAM', 'ENTERPRISE'];
+// RR-773 — PRO_PLUS and BYOK are first-class billing tiers in current backend policy. Omitting them
+// meant existing PRO+/BYOK values had no matching option (the select rendered blank, and any edit
+// could silently downgrade the entitlement) and operators could not assign them.
+const USER_TIERS = ['FREE', 'PRO', 'PRO_PLUS', 'BYOK', 'TEAM', 'ENTERPRISE'];
 const USER_ROLES = ['USER', 'FINANCE', 'SUPER_ADMIN'];
 const USER_STATUSES = ['ACTIVE', 'SUSPENDED'];
-const ORG_TIERS = ['FREE', 'PRO', 'TEAM', 'ENTERPRISE'];
+const ORG_TIERS = ['FREE', 'PRO', 'PRO_PLUS', 'BYOK', 'TEAM', 'ENTERPRISE'];
 const ORG_STATUSES = ['ACTIVE', 'SUSPENDED'];
 
 type PendingAdminWrite = {
   copy: AdminWriteConfirmation;
   run: () => Promise<void>;
 };
+
+// RR-778 — a confirmation dialog for entitlement/status writes that owns a
+// synchronous one-shot pending latch: the (financial) mutation runs at most once
+// under rapid activation, the dialog stays disabled until it settles, and it
+// closes only on success so a failed write remains visible and retryable.
+function AdminWriteConfirmModal({
+  pending,
+  onDone,
+  onCancel,
+}: {
+  pending: PendingAdminWrite | null;
+  onDone: () => void;
+  onCancel: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const busyRef = useRef(false);
+  return (
+    <ConfirmModal
+      open={!!pending}
+      title={pending?.copy.title ?? 'Confirm admin change'}
+      body={pending?.copy.body ?? ''}
+      confirmLabel={pending?.copy.confirmLabel ?? 'Confirm'}
+      danger={pending?.copy.danger}
+      busy={busy}
+      onConfirm={async () => {
+        if (busyRef.current || !pending) return;
+        busyRef.current = true;
+        setBusy(true);
+        try {
+          await pending.run();
+          onDone();
+        } catch {
+          // The failure was already reported; keep the dialog open for a retry.
+        } finally {
+          busyRef.current = false;
+          setBusy(false);
+        }
+      }}
+      onClose={() => {
+        if (!busyRef.current) onCancel();
+      }}
+    />
+  );
+}
 
 type AdminSection = 'overview' | 'users' | 'orgs' | 'analytics' | 'ops' | 'topups';
 
@@ -477,6 +721,7 @@ export function IdeAdmin() {
 function AdminOverview() {
   const [funnel, setFunnel] = useState<api.ActivationFunnelReport | null>(null);
   const [tiers, setTiers] = useState<api.TierLifecycleDto[]>([]);
+  const [tiersError, setTiersError] = useState('');
 
   useEffect(() => {
     api
@@ -487,7 +732,9 @@ function AdminOverview() {
     api
       .fetchTiersLifecycle()
       .then(setTiers)
-      .catch(() => {});
+      .catch((e: unknown) =>
+        setTiersError(e instanceof Error ? e.message : 'Failed to load tier configuration.'),
+      );
   }, []);
 
   const stage = (k: string) => {
@@ -518,6 +765,11 @@ function AdminOverview() {
       </div>
 
       <div className='ide-h2'>Tiers</div>
+      {tiersError && (
+        <div className='ide-card' role='alert' style={{color: 'var(--ide-red)', marginBottom: 10}}>
+          Tier configuration could not be loaded. {tiersError}
+        </div>
+      )}
       <AdminList>
         {tiers.map((t, i) => (
           <div key={t.tier} style={rowStyle(i === tiers.length - 1)}>
@@ -540,11 +792,16 @@ function AdminUsers({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => vo
   const [confirm, setConfirm] = useState<PendingAdminWrite | null>(null);
   const [grantFor, setGrantFor] = useState<api.AuthUser | null>(null);
 
+  const [usersFailure, setUsersFailure] = useState<LoadFailure | null>(null);
+  // D4 — a failed admin read used to render as a hard zero count.
   const load = () =>
     api
       .adminListUsers()
-      .then(setUsers)
-      .catch(() => setUsers([]));
+      .then((rows) => {
+        setUsers(rows);
+        setUsersFailure(null);
+      })
+      .catch((e: unknown) => setUsersFailure(toLoadFailure(e)));
   useEffect(() => {
     load();
   }, []);
@@ -553,6 +810,12 @@ function AdminUsers({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => vo
   const patch = (u: api.AuthUser) =>
     setUsers((prev) => (prev ? prev.map((x) => (x.id === u.id ? u : x)) : prev));
 
+  // RR-778 — report the failure AND rethrow so the confirmation dialog can keep
+  // itself open (and its one-shot latch honest) instead of closing on a failed write.
+  const reportAndRethrow = (e: unknown) => {
+    bad(e);
+    throw e;
+  };
   function setTier(u: api.AuthUser, tier: string) {
     return api
       .adminUpdateUserTier(u.id, tier)
@@ -560,7 +823,7 @@ function AdminUsers({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => vo
         patch(r);
         ok(`${u.email} → ${tier}`);
       })
-      .catch(bad);
+      .catch(reportAndRethrow);
   }
   function setRole(u: api.AuthUser, role: string) {
     return api
@@ -569,7 +832,7 @@ function AdminUsers({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => vo
         patch(r);
         ok(`${u.email} role → ${role}`);
       })
-      .catch(bad);
+      .catch(reportAndRethrow);
   }
   function applyStatus(u: api.AuthUser, status: string) {
     return api
@@ -578,11 +841,12 @@ function AdminUsers({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => vo
         patch(r);
         ok(`${u.email} → ${status}`);
       })
-      .catch(bad);
+      .catch(reportAndRethrow);
   }
   const confirmWrite = (change: AdminWriteChange, run: () => Promise<void>) =>
     setConfirm({copy: adminWriteConfirmation(change), run});
 
+  if (usersFailure) return <LoadError failure={usersFailure} what='users' onRetry={load} />;
   if (!users) return <IdeLoader label='Loading users…' />;
   return (
     <>
@@ -636,16 +900,10 @@ function AdminUsers({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => vo
         ))}
       </AdminList>
 
-      <ConfirmModal
-        open={!!confirm}
-        title={confirm?.copy.title ?? 'Confirm admin change'}
-        body={confirm?.copy.body ?? ''}
-        confirmLabel={confirm?.copy.confirmLabel ?? 'Confirm'}
-        danger={confirm?.copy.danger}
-        onConfirm={async () => {
-          if (confirm) await confirm.run();
-        }}
-        onClose={() => setConfirm(null)}
+      <AdminWriteConfirmModal
+        pending={confirm}
+        onDone={() => setConfirm(null)}
+        onCancel={() => setConfirm(null)}
       />
       <PromptModal
         open={!!grantFor}
@@ -673,6 +931,8 @@ function AdminUsers({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => vo
 
 function AdminOrgs({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => void}) {
   const [orgs, setOrgs] = useState<api.OrgDto[] | null>(null);
+  // D4 — a failed admin read used to render as a hard zero count.
+  const [orgsFailure, setOrgsFailure] = useState<LoadFailure | null>(null);
   const [confirm, setConfirm] = useState<PendingAdminWrite | null>(null);
   const [limitFor, setLimitFor] = useState<api.OrgDto | null>(null);
   const [grantFor, setGrantFor] = useState<api.OrgDto | null>(null);
@@ -680,8 +940,11 @@ function AdminOrgs({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => voi
   const load = () =>
     api
       .adminListOrgs()
-      .then(setOrgs)
-      .catch(() => setOrgs([]));
+      .then((rows) => {
+        setOrgs(rows);
+        setOrgsFailure(null);
+      })
+      .catch((e: unknown) => setOrgsFailure(toLoadFailure(e)));
   useEffect(() => {
     load();
   }, []);
@@ -689,6 +952,11 @@ function AdminOrgs({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => voi
   const patch = (o: api.OrgDto) =>
     setOrgs((prev) => (prev ? prev.map((x) => (x.id === o.id ? o : x)) : prev));
 
+  // RR-778 — report AND rethrow so the confirmation dialog stays open on failure.
+  const reportAndRethrow = (e: unknown) => {
+    bad(e);
+    throw e;
+  };
   function setTier(o: api.OrgDto, tier: string) {
     return api
       .adminUpdateOrgTier(o.id, tier)
@@ -696,7 +964,7 @@ function AdminOrgs({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => voi
         patch(r);
         ok(`${o.name} → ${tier}`);
       })
-      .catch(bad);
+      .catch(reportAndRethrow);
   }
   function applyStatus(o: api.OrgDto, status: string) {
     return api
@@ -705,11 +973,12 @@ function AdminOrgs({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => voi
         patch(r);
         ok(`${o.name} → ${status}`);
       })
-      .catch(bad);
+      .catch(reportAndRethrow);
   }
   const confirmWrite = (change: AdminWriteChange, run: () => Promise<void>) =>
     setConfirm({copy: adminWriteConfirmation(change), run});
 
+  if (orgsFailure) return <LoadError failure={orgsFailure} what='orgs' onRetry={load} />;
   if (!orgs) return <IdeLoader label='Loading orgs…' />;
   return (
     <>
@@ -762,16 +1031,10 @@ function AdminOrgs({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => voi
         ))}
       </AdminList>
 
-      <ConfirmModal
-        open={!!confirm}
-        title={confirm?.copy.title ?? 'Confirm admin change'}
-        body={confirm?.copy.body ?? ''}
-        confirmLabel={confirm?.copy.confirmLabel ?? 'Confirm'}
-        danger={confirm?.copy.danger}
-        onConfirm={async () => {
-          if (confirm) await confirm.run();
-        }}
-        onClose={() => setConfirm(null)}
+      <AdminWriteConfirmModal
+        pending={confirm}
+        onDone={() => setConfirm(null)}
+        onCancel={() => setConfirm(null)}
       />
       <PromptModal
         open={!!limitFor}
@@ -840,35 +1103,85 @@ function AdminAnalytics({orgId}: {orgId: string | null}) {
   const [usage, setUsage] = useState<api.UsageMetrics | null>(null);
   const [billing, setBilling] = useState<api.BillingOverviewData | null>(null);
   const [members, setMembers] = useState<api.MemberUsage[] | null>(null);
+  const [orgs, setOrgs] = useState<api.OrgDto[]>([]);
+  // RR-774 — the analytics reads used allSettled but recorded only fulfilled values, so a rejected
+  // read silently vanished (its panel is simply not rendered) and the operator saw an apparently
+  // valid but empty page. Track per-resource failures and disclose them.
+  const [usageFailure, setUsageFailure] = useState<LoadFailure | null>(null);
+  const [billingFailure, setBillingFailure] = useState<LoadFailure | null>(null);
+  const [membersFailure, setMembersFailure] = useState<LoadFailure | null>(null);
+  const [orgsFailure, setOrgsFailure] = useState<LoadFailure | null>(null);
+  const [auditOrgId, setAuditOrgId] = useState(orgId ?? '');
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    if (!orgId) {
+  const loadAnalytics = useCallback(() => {
+    setLoading(true);
+    if (orgId) {
+      Promise.allSettled([
+        api.getAnalyticsUsage('org', orgId, 30),
+        api.getAnalyticsBilling('org', orgId),
+        api.getAnalyticsMembers(orgId, 30),
+      ])
+        .then(([u, b, m]) => {
+          if (u.status === 'fulfilled') {
+            setUsage(u.value);
+            setUsageFailure(null);
+          } else setUsageFailure(toLoadFailure(u.reason));
+          if (b.status === 'fulfilled') {
+            setBilling(b.value);
+            setBillingFailure(null);
+          } else setBillingFailure(toLoadFailure(b.reason));
+          if (m.status === 'fulfilled') {
+            setMembers(m.value);
+            setMembersFailure(null);
+          } else setMembersFailure(toLoadFailure(m.reason));
+        })
+        .finally(() => setLoading(false));
+    } else {
       setLoading(false);
-      return;
     }
-    Promise.allSettled([
-      api.getAnalyticsUsage('org', orgId, 30),
-      api.getAnalyticsBilling('org', orgId),
-      api.getAnalyticsMembers(orgId, 30),
-    ])
-      .then(([u, b, m]) => {
-        if (u.status === 'fulfilled') setUsage(u.value);
-        if (b.status === 'fulfilled') setBilling(b.value);
-        if (m.status === 'fulfilled') setMembers(m.value);
+    api
+      .adminListOrgs()
+      .then((items) => {
+        setOrgs(items);
+        setOrgsFailure(null);
+        setAuditOrgId((current) => current || items[0]?.id || '');
       })
-      .finally(() => setLoading(false));
+      .catch((e: unknown) => {
+        setOrgs([]);
+        setOrgsFailure(toLoadFailure(e));
+      });
   }, [orgId]);
 
-  if (!orgId) return <div className='ide-empty'>No org context — analytics are org-scoped.</div>;
+  useEffect(() => {
+    loadAnalytics();
+  }, [loadAnalytics]);
+
   if (loading) return <IdeLoader label='Loading analytics…' />;
 
   const costEntries = usage ? Object.entries(usage.costByModel || {}) : [];
   return (
     <>
-      <div className='ide-sub' style={{marginTop: -6}}>
-        Scoped to your org · last 30d.
-      </div>
+      {orgId && (
+        <div className='ide-sub' style={{marginTop: -6}}>
+          Scoped to your org · last 30d.
+        </div>
+      )}
+
+      {/* RR-774 — disclose failed reads so a partial snapshot is never mistaken for a complete,
+          all-clear analytics page. */}
+      {usageFailure && (
+        <LoadError failure={usageFailure} what='usage metrics' onRetry={loadAnalytics} />
+      )}
+      {billingFailure && (
+        <LoadError failure={billingFailure} what='billing overview' onRetry={loadAnalytics} />
+      )}
+      {membersFailure && (
+        <LoadError failure={membersFailure} what='member usage' onRetry={loadAnalytics} />
+      )}
+      {orgsFailure && (
+        <LoadError failure={orgsFailure} what='organization list' onRetry={loadAnalytics} />
+      )}
 
       {usage && (
         <>
@@ -879,7 +1192,7 @@ function AdminAnalytics({orgId}: {orgId: string | null}) {
               ['Successful', String(usage.successfulRuns)],
               ['Failed', String(usage.failedRuns)],
               ['Partial', String(usage.partialRuns)],
-              ['Total cost', `$${(usage.totalCost ?? 0).toFixed(2)}`],
+              ['Total cost', `$${(usage.totalCost ?? 0).toFixed(4)}`],
             ].map(([label, value]) => (
               <div key={label} className='ide-card' style={{flex: 1, minWidth: 110}}>
                 <div style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}>{label}</div>
@@ -908,7 +1221,7 @@ function AdminAnalytics({orgId}: {orgId: string | null}) {
                 <span className='ide-mono' style={{flex: 1}}>
                   {model}
                 </span>
-                <span style={{color: 'var(--ide-fg-bright)'}}>${cost.toFixed(2)}</span>
+                <span style={{color: 'var(--ide-fg-bright)'}}>${cost.toFixed(4)}</span>
               </div>
             ))}
           </AdminList>
@@ -958,6 +1271,36 @@ function AdminAnalytics({orgId}: {orgId: string | null}) {
             ))}
           </AdminList>
         </>
+      )}
+
+      <div className='ide-h2'>Audit tenant</div>
+      <div className='ide-card'>
+        <label style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}>
+          Organization
+          <select
+            className='ide-input'
+            aria-label='Usage audit organization'
+            value={auditOrgId}
+            onChange={(event) => setAuditOrgId(event.target.value)}
+          >
+            {orgs.map((item) => (
+              <option key={item.id} value={item.id}>
+                {item.name} · {item.id}
+              </option>
+            ))}
+          </select>
+        </label>
+        <div style={{fontSize: 11.5, color: 'var(--ide-fg-muted)', marginTop: 7}}>
+          SUPER_ADMIN can select any tenant. Every query remains explicitly tenant-scoped; there is
+          no accidental cross-tenant combined export.
+        </div>
+      </div>
+      {auditOrgId && (
+        <LlmUsageAuditPanel
+          key={auditOrgId}
+          orgId={auditOrgId}
+          scopeLabel={`Operator view for ${orgs.find((item) => item.id === auditOrgId)?.name || auditOrgId}`}
+        />
       )}
     </>
   );
@@ -1053,38 +1396,51 @@ function FeatureFlagsPanel({ok, bad}: {ok: (s: string) => void; bad: (e: unknown
   const role = useAuthStore((s) => s.user?.globalRole);
   const isSuperAdmin = role === 'SUPER_ADMIN';
   const [flags, setFlags] = useState<api.FeatureFlagDto[] | null>(null);
+  // D4 — a failed admin read used to render as a hard zero count.
+  const [flagsFailure, setFlagsFailure] = useState<LoadFailure | null>(null);
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
+  // RR-777 — a platform-wide flag flip must be confirmed, not applied on a single
+  // stray click. The switch now opens a scope/blast-radius review instead of
+  // mutating global behavior immediately.
+  const [pendingFlag, setPendingFlag] = useState<api.FeatureFlagDto | null>(null);
+  const confirmBusyRef = useRef(false);
+  const [confirmBusy, setConfirmBusy] = useState(false);
 
   useEffect(() => {
     api
       .adminListFeatureFlags()
       .then(setFlags)
-      .catch(() => setFlags([]));
+      .catch((e: unknown) => setFlagsFailure(toLoadFailure(e)));
   }, []);
 
-  function toggle(f: api.FeatureFlagDto) {
+  function requestToggle(f: api.FeatureFlagDto) {
     if (!isSuperAdmin || busy) return;
+    setPendingFlag(f);
+  }
+
+  async function applyToggle(f: api.FeatureFlagDto) {
     const next = f.flagValue === 'true' ? 'false' : 'true';
     // optimistic
     setFlags((prev) =>
       prev ? prev.map((x) => (x.id === f.id ? {...x, flagValue: next} : x)) : prev,
     );
     setBusy(f.flagKey);
-    api
-      .adminUpdateFeatureFlag(f.flagKey, next)
-      .then((updated) => {
-        setFlags((prev) => (prev ? prev.map((x) => (x.id === f.id ? updated : x)) : prev));
-        ok(`${f.flagKey} → ${next}`);
-      })
-      .catch((e) => {
-        // revert
-        setFlags((prev) => (prev ? prev.map((x) => (x.id === f.id ? f : x)) : prev));
-        bad(e);
-      })
-      .finally(() => setBusy(null));
+    try {
+      const updated = await api.adminUpdateFeatureFlag(f.flagKey, next);
+      setFlags((prev) => (prev ? prev.map((x) => (x.id === f.id ? updated : x)) : prev));
+      ok(`${f.flagKey} → ${next}`);
+    } catch (e) {
+      // revert
+      setFlags((prev) => (prev ? prev.map((x) => (x.id === f.id ? f : x)) : prev));
+      bad(e);
+      throw e;
+    } finally {
+      setBusy(null);
+    }
   }
 
+  if (flagsFailure) return <LoadError failure={flagsFailure} what='feature flags' />;
   if (flags === null) return <IdeLoader label='Loading feature flags…' />;
   return (
     <>
@@ -1121,7 +1477,7 @@ function FeatureFlagsPanel({ok, bad}: {ok: (s: string) => void; bad: (e: unknown
                     <IdeSwitch
                       on={f.flagValue === 'true'}
                       disabled={busy === f.flagKey}
-                      onClick={() => toggle(f)}
+                      onClick={() => requestToggle(f)}
                     />
                   ) : (
                     <IdeBadge kind={f.flagValue === 'true' ? 'ok' : 'warn'}>{f.flagValue}</IdeBadge>
@@ -1131,6 +1487,38 @@ function FeatureFlagsPanel({ok, bad}: {ok: (s: string) => void; bad: (e: unknown
             })}
           </AdminList>
         ))}
+      {/* RR-777 — confirm a platform-wide flag change with scope + blast radius. */}
+      <ConfirmModal
+        open={!!pendingFlag}
+        title='Change platform feature flag'
+        danger
+        confirmLabel={
+          pendingFlag?.flagValue === 'true' ? 'Turn OFF platform-wide' : 'Turn ON platform-wide'
+        }
+        busy={confirmBusy}
+        body={
+          pendingFlag
+            ? `Set "${pendingFlag.flagKey}" to ${pendingFlag.flagValue === 'true' ? 'false' : 'true'} for scope ${pendingFlag.scope}. This changes behavior for every org on this deployment and takes effect immediately across all instances.`
+            : ''
+        }
+        onConfirm={async () => {
+          if (confirmBusyRef.current || !pendingFlag) return;
+          confirmBusyRef.current = true;
+          setConfirmBusy(true);
+          try {
+            await applyToggle(pendingFlag);
+            setPendingFlag(null);
+          } catch {
+            // Failure already reported + reverted; keep the dialog open for retry.
+          } finally {
+            confirmBusyRef.current = false;
+            setConfirmBusy(false);
+          }
+        }}
+        onClose={() => {
+          if (!confirmBusyRef.current) setPendingFlag(null);
+        }}
+      />
     </>
   );
 }
@@ -1290,14 +1678,15 @@ function AdminOps({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => void
 
 function AdminTopups({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => void}) {
   const [pkgs, setPkgs] = useState<api.TopupPackageAdmin[] | null>(null);
+  // D4 — a failed admin read used to render as a hard zero count.
+  const [pkgsFailure, setPkgsFailure] = useState<LoadFailure | null>(null);
   const [creating, setCreating] = useState(false);
-  const [deleteFor, setDeleteFor] = useState<api.TopupPackageAdmin | null>(null);
 
   const load = () =>
     api
       .adminListTopupPackages()
       .then(setPkgs)
-      .catch(() => setPkgs([]));
+      .catch((e: unknown) => setPkgsFailure(toLoadFailure(e)));
   useEffect(() => {
     load();
   }, []);
@@ -1312,6 +1701,7 @@ function AdminTopups({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => v
       .catch(bad);
   }
 
+  if (pkgsFailure) return <LoadError failure={pkgsFailure} what='top-up packages' onRetry={load} />;
   if (!pkgs) return <IdeLoader label='Loading top-up packages…' />;
   return (
     <>
@@ -1341,24 +1731,16 @@ function AdminTopups({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => v
                 </div>
               </div>
               <IdeBadge kind={p.active ? 'ok' : 'warn'}>{p.active ? 'Active' : 'Off'}</IdeBadge>
+              {/* RR-776 — the server DELETE only sets active=false (deactivation), and
+                  the list keeps returning the row as "Off". A "Delete" control that
+                  only deactivates was a false claim and duplicated Disable/Enable,
+                  which is the real, reversible lifecycle. Enable is the reactivate. */}
               <button
                 className='ide-btn ghost'
                 style={{padding: '3px 9px', fontSize: 12}}
                 onClick={() => toggleActive(p)}
               >
                 {p.active ? 'Disable' : 'Enable'}
-              </button>
-              <button
-                className='ide-btn ghost'
-                style={{
-                  padding: '3px 9px',
-                  fontSize: 12,
-                  color: 'var(--ide-red)',
-                  borderColor: 'var(--ide-red)',
-                }}
-                onClick={() => setDeleteFor(p)}
-              >
-                Delete
               </button>
             </div>
           ))}
@@ -1391,25 +1773,6 @@ function AdminTopups({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => v
             .catch(bad);
         }}
         onClose={() => setCreating(false)}
-      />
-      <ConfirmModal
-        open={!!deleteFor}
-        title='Delete package'
-        body={deleteFor ? `Delete top-up package "${deleteFor.name}"?` : ''}
-        confirmLabel='Delete'
-        danger
-        onConfirm={async () => {
-          const p = deleteFor;
-          if (!p) return;
-          await api
-            .adminDeleteTopupPackage(p.id)
-            .then(() => {
-              ok(`Deleted ${p.name}`);
-              load();
-            })
-            .catch(bad);
-        }}
-        onClose={() => setDeleteFor(null)}
       />
     </>
   );

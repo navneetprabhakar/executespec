@@ -64,6 +64,15 @@ export function unreadNotificationCount(items: api.NotificationItem[] | null): n
   return (items || []).filter(isNotificationUnread).length;
 }
 
+/** Raw provider spend is an operator-only detail; customer notifications use AI credits. */
+export function customerSafeNotificationText(text: string, isSuperAdmin: boolean): string {
+  if (isSuperAdmin) return text;
+  return text
+    .replace(/(?:US)?\$\s*\d+(?:\.\d+)?\s*(?:[·|,-]\s*)?/gi, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
 export function notificationDotColor(n: api.NotificationItem): string {
   const severity = (n as unknown as {severity?: string}).severity;
   if (severity === 'error') return 'var(--ide-red)';

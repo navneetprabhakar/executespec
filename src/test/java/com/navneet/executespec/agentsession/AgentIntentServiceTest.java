@@ -27,6 +27,20 @@ class AgentIntentServiceTest {
 
   private final AgentIntentService service = new AgentIntentService();
 
+  // RR-667 — the execution/step identity must be collision-resistant. "Aa" and "BB" share a Java
+  // String.hashCode, which the old key used; the SHA-256 digest keeps them distinct, stays stable
+  // for the same session+message, and separates the same message across different sessions.
+  @Test
+  void turnDigestIsCollisionResistantAndSessionScoped() {
+    String aa = AgentIntentService.turnDigest("s1", "Aa");
+    String bb = AgentIntentService.turnDigest("s1", "BB");
+    assertThat("Aa".hashCode()).isEqualTo("BB".hashCode()); // the collision the old key had
+    assertThat(aa).isNotEqualTo(bb);
+    assertThat(aa).isEqualTo(AgentIntentService.turnDigest("s1", "Aa")); // stable
+    assertThat(aa).isNotEqualTo(AgentIntentService.turnDigest("s2", "Aa")); // session-scoped
+    assertThat(aa).hasSize(16);
+  }
+
   @Test
   void codeChangeWithoutLocalToolsProposesCloudRunButRequiresConfirmation() {
     var decision =
@@ -256,7 +270,12 @@ class AgentIntentServiceTest {
             eq("anthropic"),
             eq("claude-haiku-4-5-20251001"),
             anyList(),
-            eq("intent-routing-" + Integer.toHexString("Please handle \"fix\".".hashCode())),
+            // RR-667: the per-turn correlation key is now a SHA-256 digest bound to session+message
+            // rather than a collision-prone String.hashCode. It is an opaque correlation id, not
+            // the
+            // behavior under test, so match it loosely like the sibling classifier tests. The real
+            // assertions below (route == CLARIFY, runApiAllowed == false) are unchanged.
+            anyString(),
             eq("AgentIntentService"),
             eq("orchestrator.intent.classify"),
             eq(400)))
@@ -274,7 +293,9 @@ class AgentIntentServiceTest {
                 "Please handle \"fix\".",
                 "project-1",
                 null,
-                new ClientCapabilities(false, true, true, true)));
+                new ClientCapabilities(false, true, true, true)),
+            "anthropic",
+            null);
 
     assertThat(decision.route()).isEqualTo("CLARIFY");
     assertThat(decision.policy().runApiAllowed()).isFalse();
@@ -307,7 +328,9 @@ class AgentIntentServiceTest {
                 "Could you tell me what changed?",
                 "project-1",
                 null,
-                new ClientCapabilities(false, true, true, true)));
+                new ClientCapabilities(false, true, true, true)),
+            "anthropic",
+            null);
 
     assertThat(decision.route()).isEqualTo("READ_ONLY_CODE_HELP");
     assertThat(decision.policy().runApiAllowed()).isFalse();

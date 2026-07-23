@@ -1,19 +1,44 @@
 import {describe, expect, it} from 'vitest';
 
 import {
+  actorLabel,
   availableOrgMembers,
+  canManageMembership,
   canManageProjectSharing,
+  canManageShareLinks,
   contractDetectorSummary,
   docStamp,
+  driftSummaryMessage,
   filterProjectFiles,
   invariantViolationCounts,
   isExternalProjectMember,
   looksLikeArtifact,
   memberDisplayName,
   parseArchDoc,
+  summarizeDriftResults,
   techDebtCategories,
 } from './projectMoreUtils';
 import type * as api from '@/lib/api';
+
+// RR-1469 — the activity actor column read fields the served ActivityEntry never carries, leaving
+// every row blank. actorLabel resolves the real actorType/actorUserId.
+describe('RR-1469 — activity actor label', () => {
+  it('labels system-authored events as System', () => {
+    expect(actorLabel({actorType: 'SYSTEM', actorUserId: null})).toBe('System');
+  });
+
+  it('shows a legible user identity from actorUserId, never blank', () => {
+    expect(actorLabel({actorType: 'USER', actorUserId: 'abcdef01-2345-6789'})).toBe(
+      'user abcdef01',
+    );
+    expect(actorLabel({actorType: 'USER', actorUserId: 'short'})).toBe('user short');
+  });
+
+  it('falls back to a role word or dash when no id is present, not an empty string', () => {
+    expect(actorLabel({actorType: 'USER'})).toBe('User');
+    expect(actorLabel({})).toBe('—');
+  });
+});
 
 describe('projectMoreUtils', () => {
   it('detects assistant artifacts without classifying short normal answers', () => {
@@ -124,6 +149,41 @@ describe('projectMoreUtils', () => {
     expect(canManageProjectSharing({globalRole: 'SUPER_ADMIN'})).toBe(true);
   });
 
+  it('RR-1507 — membership and share-link authority track their two server guards', () => {
+    // A PROJECT_DEVELOPER may manage share links (isProjectWriter) but NOT
+    // members (requireProjectAdmin). One boolean conflated the two.
+    const dev = {
+      globalRole: 'USER',
+      orgRole: 'DEVELOPER',
+      projectRole: 'PROJECT_DEVELOPER',
+      hasProjectMembership: true,
+    };
+    expect(canManageMembership(dev)).toBe(false);
+    expect(canManageShareLinks(dev)).toBe(true);
+
+    // PROJECT_ADMIN gets both.
+    const admin = {...dev, projectRole: 'PROJECT_ADMIN'};
+    expect(canManageMembership(admin)).toBe(true);
+    expect(canManageShareLinks(admin)).toBe(true);
+
+    // A host-org ORG_ADMIN who is not a project member manages both.
+    const orgAdmin = {globalRole: 'USER', orgRole: 'ORG_ADMIN', hasProjectMembership: false};
+    expect(canManageMembership(orgAdmin)).toBe(true);
+    expect(canManageShareLinks(orgAdmin)).toBe(true);
+
+    // A PROJECT_VIEWER gets neither.
+    const viewer = {...dev, projectRole: 'PROJECT_VIEWER'};
+    expect(canManageMembership(viewer)).toBe(false);
+    expect(canManageShareLinks(viewer)).toBe(false);
+
+    // SUPER_ADMIN always gets both.
+    expect(canManageMembership({globalRole: 'SUPER_ADMIN'})).toBe(true);
+    expect(canManageShareLinks({globalRole: 'SUPER_ADMIN'})).toBe(true);
+
+    // The deprecated alias keeps the wider share-link semantics.
+    expect(canManageProjectSharing(dev)).toBe(true);
+  });
+
   it('splits architecture markdown into preamble and top-level sections', () => {
     expect(
       parseArchDoc(
@@ -145,5 +205,52 @@ describe('projectMoreUtils', () => {
         {heading: 'Storage', body: '| table |'},
       ],
     });
+  });
+});
+
+// RR-1658 — `hasDrift` is false for BOTH NO_DRIFT and UNAVAILABLE (retained that way for
+// wire compatibility), so counting it alone reported an unperformable check as clean.
+describe('contract drift rollup', () => {
+  it('separates an unavailable check from a clean one', () => {
+    const summary = summarizeDriftResults([
+      {contractId: 'a', hasDrift: false, summary: 'no drift', status: 'NO_DRIFT'},
+      {contractId: 'b', hasDrift: true, summary: 'diff', status: 'DRIFT'},
+      {contractId: 'c', hasDrift: false, summary: 'source unreadable', status: 'UNAVAILABLE'},
+    ]);
+    expect(summary).toEqual({drifted: 1, clean: 1, unavailable: 1, total: 3});
+  });
+
+  it('never reports an unavailable-only batch as clean', () => {
+    const summary = summarizeDriftResults([
+      {contractId: 'c', hasDrift: false, summary: 'source unreadable', status: 'UNAVAILABLE'},
+    ]);
+    expect(summary.clean).toBe(0);
+    expect(driftSummaryMessage(summary)).toBe('1 contract could not be checked.');
+  });
+
+  it('falls back to hasDrift for rows from a server predating the tri-state', () => {
+    expect(
+      summarizeDriftResults([
+        {contractId: 'a', hasDrift: false, summary: 'no drift'},
+        {contractId: 'b', hasDrift: true, summary: 'diff'},
+      ]),
+    ).toEqual({drifted: 1, clean: 1, unavailable: 0, total: 2});
+  });
+
+  it('reports drift and unavailable together rather than only the drift count', () => {
+    expect(
+      driftSummaryMessage({
+        drifted: 2,
+        unavailable: 3,
+        total: 6,
+      }),
+    ).toBe('2 drift results detected; 3 contracts could not be checked.');
+  });
+
+  it('still says no drift when every check succeeded and matched', () => {
+    expect(driftSummaryMessage({drifted: 0, unavailable: 0, total: 4})).toBe('No drift detected.');
+    expect(driftSummaryMessage({drifted: 0, unavailable: 0, total: 0})).toBe(
+      'No contracts to check.',
+    );
   });
 });

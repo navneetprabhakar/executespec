@@ -1,17 +1,31 @@
 import {useEffect, useRef} from 'react';
 import {useSseStore} from '@/stores/useSseStore';
 import {useRunStore} from '@/stores/useRunStore';
-import {getMessages, getSseToken} from '@/lib/api';
+import {getMessages, getRunEventLog, getSseToken} from '@/lib/api';
+import {replayEntry, replayNotice, runEventKey} from '@/lib/runReplay';
 
 const BACKOFF = [1000, 2000, 4000, 8000, 16000, 30000];
+/** RR-202 — the advertised reconnect ceiling; jitter never pushes past it. */
+const BACKOFF_MAX = 30000;
+/** RR-202 — a connection must stay open this long before the backoff counter is
+ * reset. A socket that opens then dies milliseconds later must NOT reset to the
+ * 1s delay (that is the reconnect storm); it keeps climbing toward the ceiling. */
+const STABLE_MS = 15000;
+/** RR-202 — retry budget. A stream that never stabilizes stops storming after
+ * this many consecutive attempts and surfaces an error state instead. The
+ * counter is cleared once a connection proves stable, so a healthy long-lived
+ * run never exhausts it. */
+const MAX_ATTEMPTS = 12;
 
 export function useSse(runId: string | null) {
-  const {setStatus, addEntry, clearEntries, setRunId, bumpFileWrittenTick} = useSseStore();
+  const {setStatus, addEntry, hydrateEntries, clearEntries, setRunId, bumpFileWrittenTick} =
+    useSseStore();
   const {patchRunStatus, fetchRun} = useRunStore();
   const esRef = useRef<EventSource | null>(null);
   const attemptRef = useRef(0);
   const lastEventIdRef = useRef<string | null>(null);
   const timeoutRef = useRef<ReturnType<typeof setTimeout>>();
+  const stableTimerRef = useRef<ReturnType<typeof setTimeout>>();
 
   useEffect(() => {
     if (!runId) {
@@ -38,9 +52,24 @@ export function useSse(runId: string | null) {
     attemptRef.current = 0;
     lastEventIdRef.current = null;
 
-    // Pre-populate with historical messages so revisiting a completed run shows its log.
+    // Hydrate the durable event stream before attaching live SSE. The response carries the last
+    // durable sequence, so the subsequent subscription asks the server to replay any event that
+    // landed in the small fetch-to-connect gap.
     // Only do this for NEW run IDs so we don't double-prepend history on remount.
     if (isNewRun) {
+      getRunEventLog(runId)
+        .then((replay) => {
+          if (!active) return;
+          hydrateEntries(replay.events.map(replayEntry), replayNotice(replay));
+          lastEventIdRef.current = replay.lastEventId;
+        })
+        .catch(() => {
+          if (active)
+            hydrateEntries([], 'Earlier activity could not be loaded. Live events will continue.');
+        })
+        .finally(() => {
+          if (active) void connect();
+        });
       getMessages(runId)
         .then((msgs) => {
           msgs.forEach((msg, i) => {
@@ -60,24 +89,60 @@ export function useSse(runId: string | null) {
         });
     }
 
+    function clearStableTimer() {
+      if (stableTimerRef.current) {
+        clearTimeout(stableTimerRef.current);
+        stableTimerRef.current = undefined;
+      }
+    }
+
+    // RR-202 — schedule the next reconnect under a jittered, ceiling-capped
+    // backoff and a retry budget. Called from onerror and from a token failure.
+    function scheduleReconnect() {
+      if (!active) return;
+      clearStableTimer();
+      if (attemptRef.current >= MAX_ATTEMPTS) {
+        // Budget exhausted without ever stabilizing — stop the storm and surface
+        // an error. The RunDetail background poll keeps run data fresh meanwhile.
+        setStatus('ERROR');
+        return;
+      }
+      setStatus('RECONNECTING');
+      const base = BACKOFF[Math.min(attemptRef.current, BACKOFF.length - 1)];
+      // Jitter spreads simultaneous reconnects; capped so the ceiling holds.
+      const jitter = Math.random() * Math.min(1000, base * 0.25);
+      const delay = Math.min(BACKOFF_MAX, base + jitter);
+      attemptRef.current++;
+      timeoutRef.current = setTimeout(() => {
+        if (active) void connect();
+      }, delay);
+    }
+
     async function connect() {
       if (!active) return;
       esRef.current?.close();
+      clearStableTimer();
       setStatus(attemptRef.current === 0 ? 'CONNECTING' : 'RECONNECTING');
 
-      // Fetch a short-lived scoped SSE token (avoids exposing full JWT in URL)
-      let sseUrl = `/api/runs/${runId}/events`;
+      // Fetch a short-lived scoped SSE token (avoids exposing full JWT in URL).
+      // RR-203 — the token is REQUIRED. EventSource cannot attach a bearer, so an
+      // unauthenticated stream would just loop on 401. On token failure, surface
+      // the error via the bounded backoff/budget rather than silently degrading
+      // to an unauthenticated connection.
+      let sseToken: string;
       try {
         // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-        const {token: sseToken} = await getSseToken(runId!);
-        sseUrl = `/api/runs/${runId}/events?token=${encodeURIComponent(sseToken)}`;
+        sseToken = (await getSseToken(runId!)).token;
       } catch {
         if (!active) return;
-        console.warn('Failed to obtain scoped SSE token, connecting without auth');
+        console.warn('Failed to obtain scoped SSE token; will retry');
+        scheduleReconnect();
+        return;
       }
       if (!active) return;
+      let sseUrl = `/api/runs/${runId}/events?token=${encodeURIComponent(sseToken)}`;
       if (lastEventIdRef.current) {
-        sseUrl += `${sseUrl.includes('?') ? '&' : '?'}lastEventId=${encodeURIComponent(lastEventIdRef.current)}`;
+        sseUrl += `&lastEventId=${encodeURIComponent(lastEventIdRef.current)}`;
       }
       const es = new EventSource(sseUrl);
       esRef.current = es;
@@ -86,7 +151,13 @@ export function useSse(runId: string | null) {
         if (!active) return;
         setStatus('CONNECTED');
         const wasReconnect = attemptRef.current > 0;
-        attemptRef.current = 0;
+        // RR-202 — reset the backoff counter only after the connection proves
+        // stable for STABLE_MS, not the instant it opens. This is the fix for the
+        // reconnect storm: a flapping socket keeps climbing to the 30s ceiling.
+        clearStableTimer();
+        stableTimerRef.current = setTimeout(() => {
+          attemptRef.current = 0;
+        }, STABLE_MS);
         // On reconnect, do a full fetch to catch any events missed during the gap.
         // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
         if (wasReconnect) fetchRun(runId!);
@@ -112,7 +183,7 @@ export function useSse(runId: string | null) {
           }
 
           const entry = {
-            id: `${Date.now()}-${Math.random()}`,
+            id: runEventKey(data, ev.lastEventId),
             type: data.type ?? 'LOG',
             data,
             timestamp: Date.now(),
@@ -174,21 +245,18 @@ export function useSse(runId: string | null) {
         if (!active) return;
         es.close();
         esRef.current = null;
-        setStatus('RECONNECTING');
-        const delay = BACKOFF[Math.min(attemptRef.current, BACKOFF.length - 1)];
-        attemptRef.current++;
-        timeoutRef.current = setTimeout(() => {
-          if (active) void connect();
-        }, delay);
+        // RR-202 — go through the shared jittered/budgeted backoff scheduler.
+        scheduleReconnect();
       };
     }
 
-    connect();
+    if (!isNewRun) void connect();
 
     return () => {
       active = false;
       esRef.current?.close();
       clearTimeout(timeoutRef.current);
+      clearStableTimer();
       setStatus('DISCONNECTED');
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps

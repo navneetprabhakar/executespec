@@ -129,6 +129,13 @@ RUN (npm ci --legacy-peer-deps 2>/dev/null) || npm install --legacy-peer-deps
 # "Cannot find module 'hermes-compiler/package.json'" if it's missing.
 # If the worker's package.json didn't include it, add it now so the
 # bundle succeeds. No-op when already present.
+#
+# RR-385: this @latest is deliberately NOT fixed-pinned. hermes-compiler is
+# versioned in lockstep with react-native, so the version this fallback needs
+# depends on the project's own RN — a single fixed pin would break `expo export`
+# for any project not on that exact RN, which is a worse failure than the
+# supply-chain mutability. The durable fix derives the version from the resolved
+# react-native (or an SBOM/lockfile plan), not a constant here. RR-385 stays OPEN.
 RUN node -e "const p=require('./package.json');const deps=(p.dependencies||{});process.exit(deps['hermes-compiler']?0:1)" \\
     || npm install --no-save --legacy-peer-deps hermes-compiler@latest
 COPY . .
@@ -174,7 +181,9 @@ CMD ["nginx", "-g", "daemon off;"]
 """;
   }
 
-  static String cliGo() {
+  /** RR-391: {@code writable} controls whether the terminal accepts input. */
+  static String cliGo(boolean writable) {
+    String w = writable ? " --writable" : "";
     return """
 FROM golang:1.22-alpine
 WORKDIR /app
@@ -185,11 +194,14 @@ RUN go mod download 2>/dev/null || true
 COPY . .
 RUN go build -o app . 2>/dev/null || true
 EXPOSE 8080
-CMD ["sh", "-c", "if [ -f app ]; then ttyd --port 8080 --writable ./app; else ttyd --port 8080 --writable go run .; fi"]
-""";
+CMD ["sh", "-c", "if [ -f app ]; then ttyd --port 8080__TTYD_W__ ./app; else ttyd --port 8080__TTYD_W__ go run .; fi"]
+"""
+        .replace("__TTYD_W__", w);
   }
 
-  static String cliRust() {
+  /** RR-391: {@code writable} controls whether the terminal accepts input. */
+  static String cliRust(boolean writable) {
+    String w = writable ? " --writable" : "";
     return """
 FROM rust:1.77-slim
 RUN apt-get update && apt-get install -y pkg-config libssl-dev wget && rm -rf /var/lib/apt/lists/* \\
@@ -202,8 +214,9 @@ RUN mkdir src && echo "fn main() {}" > src/main.rs && cargo build --release 2>/d
 COPY . .
 RUN cargo build --release 2>/dev/null || true
 EXPOSE 8080
-CMD ["sh", "-c", "bin=$(find target/release -maxdepth 1 -type f -executable | head -1) && if [ -n \\"$bin\\" ]; then exec ttyd --port 8080 --writable \\"$bin\\"; else ttyd --port 8080 --writable cargo run --release; fi"]
-""";
+CMD ["sh", "-c", "bin=$(find target/release -maxdepth 1 -type f -executable | head -1) && if [ -n \\"$bin\\" ]; then exec ttyd --port 8080__TTYD_W__ \\"$bin\\"; else ttyd --port 8080__TTYD_W__ cargo run --release; fi"]
+"""
+        .replace("__TTYD_W__", w);
   }
 
   private static String findJavaMainClass(Path workspace) {

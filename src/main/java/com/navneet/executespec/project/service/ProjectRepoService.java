@@ -18,10 +18,20 @@ import com.navneet.executespec.project.entity.ProjectRepoLink;
 import com.navneet.executespec.project.repository.ProjectRepoLinkRepository;
 import com.navneet.executespec.project.repository.ProjectRepoRepository;
 import com.navneet.executespec.repo.GitHubRepoService;
+import com.navneet.executespec.repo.ScmCapability;
+import com.navneet.executespec.repo.ScmCredential;
+import com.navneet.executespec.repo.ScmCredentialResolver;
+import com.navneet.executespec.repo.ScmProvider;
+import com.navneet.executespec.repo.ScmRemoteRepository;
+import com.navneet.executespec.repo.ScmRepositoryClient;
+import com.navneet.executespec.repo.ScmRepositoryClientRegistry;
+import com.navneet.executespec.repo.ScmSourceInventory;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.server.ResponseStatusException;
 
 import lombok.RequiredArgsConstructor;
@@ -46,6 +56,8 @@ public class ProjectRepoService {
   private final ProjectMemberRepository projectMemberRepo;
   private final StackDetector stackDetector;
   private final GitHubRepoService gitHub;
+  private final ScmRepositoryClientRegistry scmClients;
+  private final ScmCredentialResolver scmCredentials;
   private final com.navneet.executespec.auth.repository.AppUserRepository userRepo;
 
   /** V140 — gate per-tier repos-per-project cap on link + create-and-link. */
@@ -64,12 +76,9 @@ public class ProjectRepoService {
 
   /* ────────────────────────────── repo lifecycle ─────────────────────────── */
 
-  @Transactional
   public ProjectRepoDto createRepo(
       CreateRepoRequest req, String callerUserId, String callerOrgId, boolean isOrgAdmin) {
-
     ProjectRepo.Scope scope = ProjectRepo.Scope.valueOf(req.scope());
-
     if (scope == ProjectRepo.Scope.ORG) {
       if (callerOrgId == null) {
         throw new ResponseStatusException(
@@ -79,38 +88,48 @@ public class ProjectRepoService {
         throw new ResponseStatusException(
             HttpStatus.FORBIDDEN, "Only ORG_ADMIN can create organization-scoped repos");
       }
-      repoRepo
-          .findByOwnerOrgIdAndGithubRepoFullName(callerOrgId, req.githubRepoFullName())
-          .ifPresent(
-              existing -> {
-                throw new ResponseStatusException(
-                    HttpStatus.CONFLICT, "Repo already exists for this organization");
-              });
-    } else {
-      repoRepo
-          .findByOwnerUserIdAndGithubRepoFullName(callerUserId, req.githubRepoFullName())
-          .ifPresent(
-              existing -> {
-                throw new ResponseStatusException(
-                    HttpStatus.CONFLICT, "Repo already exists for this user");
-              });
+    }
+    String requestedFullName = req.requestedFullName();
+    if (requestedFullName == null || requestedFullName.isBlank()) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "repoFullName is required");
+    }
+    ScmProvider provider = ScmProvider.require(req.scmProvider());
+    ScmRepositoryClient client = scmClients.require(provider);
+    requireClientCapability(client, ScmCapability.ATTACH, "attach repositories");
+    ScmCredential credential = scmCredentials.require(callerUserId, provider);
+    ScmRemoteRepository remote = client.inspect(requestedFullName, credential);
+    if (remote.immutableId() == null || remote.immutableId().isBlank()) {
+      throw new ResponseStatusException(
+          HttpStatus.BAD_GATEWAY, "SCM provider did not return an immutable repository id");
+    }
+    if (req.scmRepositoryId() != null
+        && !req.scmRepositoryId().isBlank()
+        && !remote.immutableId().equals(req.scmRepositoryId().trim())) {
+      throw new ResponseStatusException(
+          HttpStatus.CONFLICT, "Repository identity changed; refresh the provider catalogue");
+    }
+    var duplicate =
+        scope == ProjectRepo.Scope.ORG
+            ? repoRepo.findByOwnerOrgIdAndScmProviderAndScmRepositoryId(
+                callerOrgId, provider.name(), remote.immutableId())
+            : repoRepo.findByOwnerUserIdAndScmProviderAndScmRepositoryId(
+                callerUserId, provider.name(), remote.immutableId());
+    if (duplicate.isPresent()) {
+      throw new ResponseStatusException(
+          HttpStatus.CONFLICT,
+          scope == ProjectRepo.Scope.ORG
+              ? "Repo already exists for this organization"
+              : "Repo already exists for this user");
     }
 
-    String githubOwner = extractOwner(req.githubRepoFullName());
-
-    String branch = req.defaultBranch() != null ? req.defaultBranch() : "main";
-    String repoUrl = "https://github.com/" + req.githubRepoFullName();
-    // R-323 — hard size gate (skipped when threshold = -1).
-    // R-325 — when the request opts in via {@code attachAnyway},
-    // the gate is bypassed and the attach proceeds; the actual size
-    // + the opt-in flag are persisted on the row so downstream cost
-    // calc can apply a credit surcharge to runs that touch this
-    // repo. The size lookup runs unconditionally so we always have
-    // a population baseline, regardless of opt-in path.
-    long observedSizeKb = -1L;
+    String branch =
+        req.defaultBranch() == null || req.defaultBranch().isBlank()
+            ? remote.defaultBranch()
+            : req.defaultBranch().trim();
+    if (branch == null || branch.isBlank()) branch = "main";
+    long observedSizeKb = remote.sizeKb() == null ? -1L : remote.sizeKb();
     boolean attachAnywayRequested = Boolean.TRUE.equals(req.attachAnyway());
     if (repoMaxSizeKb > 0) {
-      observedSizeKb = gitHub.getRepoSizeKb(repoUrl, null);
       boolean exceeds = observedSizeKb > 0 && observedSizeKb > repoMaxSizeKb;
       if (exceeds && !attachAnywayRequested) {
         long thresholdMb = repoMaxSizeKb / 1024;
@@ -130,27 +149,34 @@ public class ProjectRepoService {
         long actualMb = observedSizeKb / 1024;
         log.info(
             "[R-325] attachAnyway accepted for {} (~{} MB) — credit surcharge will apply",
-            req.githubRepoFullName(),
+            remote.fullName(),
             actualMb);
       }
     }
     boolean attachedAnywayPersisted =
         attachAnywayRequested && observedSizeKb > 0 && observedSizeKb > repoMaxSizeKb;
-    // R-322 — read the .executespec/root.yml monorepo marker on attach
-    // so monorepo customers get correct project-root behaviour without
-    // a separate config step. NULL stays the default (repo root).
-    String subdir = detectMonorepoSubdir(repoUrl, branch, null);
+    String subdir = detectMonorepoSubdir(remote, branch, client, credential);
+    String headSha = client.branchHeadSha(remote, branch, credential);
+    ScmSourceInventory sourceInventory = client.inventory(remote, branch, credential);
     ProjectRepo entity =
         ProjectRepo.builder()
             .id(UUID.randomUUID())
             .scope(scope)
             .ownerOrgId(scope == ProjectRepo.Scope.ORG ? callerOrgId : null)
             .ownerUserId(scope == ProjectRepo.Scope.USER ? callerUserId : null)
-            .githubRepoFullName(req.githubRepoFullName())
-            .githubOwner(githubOwner)
+            // Legacy columns stay populated for GitHub compatibility only.
+            .githubRepoFullName(provider == ScmProvider.GITHUB ? remote.fullName() : null)
+            .githubOwner(provider == ScmProvider.GITHUB ? extractOwner(remote.fullName()) : null)
+            .sourceType(ProjectRepo.SourceType.SCM.name())
+            .scmProvider(provider.name())
+            .scmRepositoryId(remote.immutableId())
+            .scmCloneUrl(requireCredentialFreeCloneUrl(remote.cloneUrl()))
+            .sourceKey(remote.fullName())
+            .sourceDisplayName(remote.displayName())
+            .sourceCapabilities(remote.capabilities().stream().sorted().toList())
             .defaultBranch(branch)
-            .detectedStack(stackDetector.detect(req.githubRepoFullName(), null))
-            .lastSyncedSha(gitHub.getBranchHeadSha(repoUrl, branch, null))
+            .detectedStack(stackDetector.detect(remote, sourceInventory, client, credential))
+            .lastSyncedSha(headSha)
             .subdir(subdir)
             // R-325 — persist the observed size + opt-in flag so the
             // credit-surcharge calc can run later. Negative observed
@@ -159,6 +185,7 @@ public class ProjectRepoService {
             .sizeKb(observedSizeKb > 0 ? observedSizeKb : null)
             .attachedAnyway(attachedAnywayPersisted)
             .build();
+    applySourceReadiness(entity, headSha, sourceInventory);
     repoRepo.save(entity);
 
     log.info(
@@ -212,33 +239,88 @@ public class ProjectRepoService {
       String callerOrgId,
       boolean isOrgAdmin,
       String overridePat) {
-    ProjectRepo repo = loadRepoForRead(repoId, callerUserId, callerOrgId);
+    ProjectRepo repo = loadRepoForWrite(repoId, callerUserId, callerOrgId, isOrgAdmin);
+    requireScmSource(repo, "sync");
+    ScmProvider provider = ScmProvider.require(repo.getScmProvider());
+    ScmRepositoryClient client = scmClients.require(provider);
+    requireClientCapability(client, ScmCapability.SYNC, "sync repositories");
+    ScmCredential credential =
+        provider == ScmProvider.GITHUB && overridePat != null && !overridePat.isBlank()
+            ? new ScmCredential(null, overridePat)
+            : scmCredentials.require(callerUserId, provider);
+    String currentName = canonicalDisplayIdentity(repo);
+    ScmRemoteRepository remote = client.inspect(currentName, repo.getScmRepositoryId(), credential);
+    if (repo.getScmRepositoryId() != null
+        && !repo.getScmRepositoryId().equals(remote.immutableId())) {
+      throw new ResponseStatusException(
+          HttpStatus.CONFLICT, "Remote repository identity no longer matches this project source");
+    }
+    // Safe legacy upgrade: immutable id comes only from a successful authenticated provider read.
+    repo.setScmRepositoryId(remote.immutableId());
+    repo.setScmCloneUrl(requireCredentialFreeCloneUrl(remote.cloneUrl()));
+    repo.setSourceKey(remote.fullName());
+    repo.setSourceDisplayName(remote.displayName());
+    repo.setSourceCapabilities(remote.capabilities().stream().sorted().toList());
+    if (provider == ScmProvider.GITHUB) {
+      repo.setGithubRepoFullName(remote.fullName());
+      repo.setGithubOwner(extractOwner(remote.fullName()));
+    }
+    if (remote.sizeKb() != null) repo.setSizeKb(remote.sizeKb());
 
-    // Metadata refresh only. These are GitHub network calls — run OUTSIDE any transaction.
-    String detected = stackDetector.detect(repo.getGithubRepoFullName(), null);
+    // Metadata refresh only. Provider calls run OUTSIDE a transaction.
+    String headSha = client.branchHeadSha(remote, repo.getDefaultBranch(), credential);
+    ScmSourceInventory inventory = client.inventory(remote, repo.getDefaultBranch(), credential);
+    String detected = stackDetector.detect(remote, inventory, client, credential);
     if (detected != null) repo.setDetectedStack(detected);
-    String headSha =
-        gitHub.getBranchHeadSha(
-            "https://github.com/" + repo.getGithubRepoFullName(),
-            repo.getDefaultBranch(),
-            overridePat);
     if (headSha != null) repo.setLastSyncedSha(headSha);
+    applySourceReadiness(repo, headSha, inventory);
     // R-322 — re-read the monorepo marker on every sync so a customer
     // who drops .executespec/root.yml after attach gets the subdir
     // picked up on the next sync. We never clear back to NULL on a
     // miss — that's a deletion signal that we want explicit, not
     // accidental from a transient GH 5xx.
-    String subdir =
-        detectMonorepoSubdir(
-            "https://github.com/" + repo.getGithubRepoFullName(),
-            repo.getDefaultBranch(),
-            overridePat);
+    String subdir = detectMonorepoSubdir(remote, repo.getDefaultBranch(), client, credential);
     if (subdir != null) repo.setSubdir(subdir);
     repo.setUpdatedAt(Instant.now());
     // repoRepo.save is itself transactional (Spring Data wraps each call) — a short write tx, not
     // one held across the network probes above. Architecture regen is now an explicit action.
     ProjectRepo saved = repoRepo.save(repo);
     return ProjectRepoDto.from(saved);
+  }
+
+  private static void applySourceReadiness(
+      ProjectRepo repo, String headSha, ScmSourceInventory sourceInventory) {
+    repo.setSourceReadinessCheckedAt(Instant.now());
+    repo.setSourceFileCount(
+        sourceInventory != null && sourceInventory.successful()
+            ? (long) sourceInventory.files().size()
+            : null);
+    if (headSha == null || headSha.isBlank()) {
+      repo.setSourceReadinessStatus(ProjectRepo.SourceReadiness.BLOCKED.name());
+      repo.setSourceReadinessReason(
+          sourceInventory == null || sourceInventory.errorCode() == null
+              ? "BRANCH_UNREADABLE"
+              : sourceInventory.errorCode());
+      return;
+    }
+    if (sourceInventory == null || !sourceInventory.successful()) {
+      repo.setSourceReadinessStatus(ProjectRepo.SourceReadiness.BLOCKED.name());
+      repo.setSourceReadinessReason(
+          sourceInventory == null ? "SOURCE_INVENTORY_FAILED" : sourceInventory.errorCode());
+      return;
+    }
+    if (sourceInventory.files().isEmpty()) {
+      repo.setSourceReadinessStatus(ProjectRepo.SourceReadiness.BLOCKED.name());
+      repo.setSourceReadinessReason("EMPTY_REPOSITORY");
+      return;
+    }
+    if (sourceInventory.truncated()) {
+      repo.setSourceReadinessStatus(ProjectRepo.SourceReadiness.INVENTORIED.name());
+      repo.setSourceReadinessReason("SOURCE_INVENTORY_TRUNCATED");
+      return;
+    }
+    repo.setSourceReadinessStatus(ProjectRepo.SourceReadiness.READY.name());
+    repo.setSourceReadinessReason("SOURCE_INVENTORY_CONFIRMED");
   }
 
   /**
@@ -315,6 +397,7 @@ public class ProjectRepoService {
             HttpStatus.FORBIDDEN, "Only the repo owner can link their personal repo");
       }
     }
+    requireScmSource(repo, "link through /api/projects/{projectId}/repos/{repoId}");
 
     linkRepo
         .findByProjectIdAndRepoId(projectId, repoId)
@@ -340,14 +423,28 @@ public class ProjectRepoService {
     // PUTs + open PR) runs on the background executor. Failures persist
     // BOOTSTRAP_FAILED on the project_repo row + emit an activity event;
     // they never bubble back to this thread.
+    //
+    // RR-311 — dispatch bootstrap AFTER this transaction commits. Firing it inline (before the
+    // linkToProject transaction returns) let the async worker query/update repo/link state while
+    // the
+    // creating transaction was still invisible: it could report false-missing rows, race a
+    // rollback,
+    // or open a bootstrap PR for a link that never committed. Registering an after-commit callback
+    // guarantees the link row is durable before any background work observes it; if the transaction
+    // rolls back, afterCommit never runs and no orphan bootstrap is dispatched.
     com.navneet.executespec.folder.BootstrapService bootstrap =
         bootstrapServiceProvider.getIfAvailable();
-    if (bootstrap != null) {
+    if (bootstrap != null && supportsCapability(repo, ScmCapability.BOOTSTRAP)) {
       String pat = userRepo.findById(callerUserId).map(u -> u.getGithubPat()).orElse(null);
       UUID actorUserId = parseUuidOrNull(callerUserId);
       UUID projectUuid = parseUuidOrNull(projectId);
+      UUID repoIdForBootstrap = repo.getId();
+      String projectName = project.getName();
       if (projectUuid != null) {
-        bootstrap.bootstrapAsync(repo.getId(), projectUuid, project.getName(), actorUserId, pat);
+        dispatchAfterCommit(
+            () ->
+                bootstrap.bootstrapAsync(
+                    repoIdForBootstrap, projectUuid, projectName, actorUserId, pat));
       }
     }
 
@@ -359,6 +456,24 @@ public class ProjectRepoService {
       return s == null ? null : UUID.fromString(s);
     } catch (IllegalArgumentException ex) {
       return null;
+    }
+  }
+
+  /**
+   * RR-311 — run {@code action} only after the current transaction commits. When there is no active
+   * transaction (defensive / test paths) the action runs inline.
+   */
+  private static void dispatchAfterCommit(Runnable action) {
+    if (TransactionSynchronizationManager.isSynchronizationActive()) {
+      TransactionSynchronizationManager.registerSynchronization(
+          new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+              action.run();
+            }
+          });
+    } else {
+      action.run();
     }
   }
 
@@ -406,6 +521,171 @@ public class ProjectRepoService {
         .map(l -> repoRepo.findById(l.getRepoId()).orElse(null))
         .filter(r -> r != null)
         .collect(Collectors.toList());
+  }
+
+  /**
+   * Resolve the exact brownfield code boundary for a run. Unlike the historical compatibility
+   * helper above, this method is fail-closed: a missing, duplicated, or no-longer-linked id is a
+   * request error rather than an invitation to execute against a partial/empty workspace.
+   */
+  public List<ProjectRepo> resolveForRunStrict(String projectId, List<UUID> repoIds) {
+    List<ProjectRepo> resolved = resolveLinkedStrict(projectId, repoIds);
+    if (resolved.stream()
+        .anyMatch(r -> ProjectRepo.SourceType.LOCAL.name().equals(r.getSourceType()))) {
+      throw new ResponseStatusException(
+          HttpStatus.UNPROCESSABLE_ENTITY,
+          "LOCAL sources require an active local client execution session");
+    }
+    for (ProjectRepo repo : resolved) {
+      requireCapability(repo, ScmCapability.CLOUD_RUN, "run in the cloud execution pipeline");
+    }
+    // RR-313 (2026-07-22) — attach/sync persist an explicit source-readiness verdict (BLOCKED when
+    // the branch is unreadable, the source inventory failed, or the repository is empty), but run
+    // admission previously checked only link + LOCAL + CLOUD_RUN capability and never consulted it.
+    // A known-unreadable source therefore passed submission, charged quota/credits, and only failed
+    // later during clone/planning. Refuse a repo whose last readiness check concluded BLOCKED so
+    // the
+    // failure surfaces as an actionable preflight error before any spend. Null/legacy readiness
+    // (rows that predate the readiness contract) is left permissive here; requiring positive READY
+    // evidence for freshly created sources is tracked separately (RR-318).
+    for (ProjectRepo repo : resolved) {
+      if (ProjectRepo.SourceReadiness.BLOCKED.name().equals(repo.getSourceReadinessStatus())) {
+        String reason =
+            repo.getSourceReadinessReason() == null ? "UNKNOWN" : repo.getSourceReadinessReason();
+        throw new ResponseStatusException(
+            HttpStatus.UNPROCESSABLE_ENTITY,
+            "Repository "
+                + repo.getGithubRepoFullName()
+                + " is not ready for execution ("
+                + reason
+                + "). Re-sync the source before submitting.");
+      }
+    }
+    return resolved;
+  }
+
+  /**
+   * Resolve the repository identity accepted by the GitHub-backed PR/code-review surfaces.
+   *
+   * <p>The caller-provided full name is only an assertion, never the source of truth. The durable
+   * {@link ProjectRepo} row and its {@link ProjectRepoLink} define the target. This prevents a
+   * caller with write access to project A from naming an arbitrary GitHub repository (or a repo
+   * linked only to project B) and spending project A's review quota against it.
+   *
+   * @param projectId project that must own the link
+   * @param repoId required linked repository id
+   * @param assertedFullName optional compatibility assertion; rejected when it disagrees with the
+   *     canonical row
+   */
+  public ProjectRepo resolveGitHubReviewRepoStrict(
+      String projectId, UUID repoId, String assertedFullName) {
+    if (repoId == null) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "repoId is required");
+    }
+    // Review admission is scoped to the durable project link, but it is not a cloud-run
+    // admission check. Keep the two capability boundaries independent so an unsupported SCM is
+    // rejected for the actual review contract rather than for an unrelated execution contract.
+    ProjectRepo repo = resolveLinkedStrict(projectId, List.of(repoId)).getFirst();
+    if (ProjectRepo.SourceType.LOCAL.name().equals(repo.getSourceType())) {
+      throw new ResponseStatusException(
+          HttpStatus.UNPROCESSABLE_ENTITY,
+          "PR and code review currently require a linked GitHub repository");
+    }
+    String provider = repo.getScmProvider();
+    if (provider != null && !"GITHUB".equalsIgnoreCase(provider)) {
+      throw new ResponseStatusException(
+          HttpStatus.UNPROCESSABLE_ENTITY,
+          "PR and code review currently require a linked GitHub repository");
+    }
+    String canonicalFullName = repo.getGithubRepoFullName();
+    if (canonicalFullName == null || canonicalFullName.isBlank()) {
+      throw new ResponseStatusException(
+          HttpStatus.UNPROCESSABLE_ENTITY,
+          "Linked GitHub repository has no canonical repository identity");
+    }
+    if (assertedFullName != null
+        && !assertedFullName.isBlank()
+        && !canonicalFullName.equalsIgnoreCase(assertedFullName.trim())) {
+      throw new ResponseStatusException(
+          HttpStatus.BAD_REQUEST, "repoFullName does not match the linked repoId");
+    }
+    return repo;
+  }
+
+  /**
+   * Local-hands run admission (V278 binding contract). LOCAL sources are admitted only when the
+   * submitting client proves it is the connector holding the lease: caller owns the source, the
+   * request's installation identity matches the registered one, and the lease is currently ONLINE.
+   * SCM sources pass through unchanged (the client works in its own clone). Cloud runs never reach
+   * this method — {@link #resolveForRunStrict} keeps rejecting LOCAL sources there.
+   */
+  @Transactional
+  public List<ProjectRepo> resolveForLocalRunStrict(
+      String projectId, List<UUID> repoIds, UUID localInstallationId, String callerUserId) {
+    List<ProjectRepo> resolved = resolveLinkedStrict(projectId, repoIds);
+    List<ProjectRepo> localSources =
+        resolved.stream()
+            .filter(r -> ProjectRepo.SourceType.LOCAL.name().equals(r.getSourceType()))
+            .toList();
+    for (ProjectRepo source : resolved) {
+      if (!ProjectRepo.SourceType.LOCAL.name().equals(source.getSourceType())) {
+        requireCapability(source, ScmCapability.LOCAL_RUN, "run through local hands");
+      }
+    }
+    if (localSources.isEmpty()) {
+      return resolved;
+    }
+    if (localInstallationId == null) {
+      throw new ResponseStatusException(
+          HttpStatus.UNPROCESSABLE_ENTITY,
+          "Selected LOCAL sources require localInstallationId from the registered local"
+              + " connector");
+    }
+    Instant now = Instant.now();
+    for (ProjectRepo source : localSources) {
+      if (callerUserId == null || !callerUserId.equals(source.getOwnerUserId())) {
+        throw new ResponseStatusException(
+            HttpStatus.UNPROCESSABLE_ENTITY,
+            "LOCAL source " + source.getId() + " is not owned by the submitting user");
+      }
+      if (!localInstallationId.equals(source.getLocalInstallationId())) {
+        throw new ResponseStatusException(
+            HttpStatus.UNPROCESSABLE_ENTITY,
+            "LOCAL source " + source.getId() + " is registered to a different client installation");
+      }
+      if (!"ONLINE".equals(source.localConnectionStatus(now))) {
+        throw new ResponseStatusException(
+            HttpStatus.UNPROCESSABLE_ENTITY,
+            "LOCAL source "
+                + source.getId()
+                + " is OFFLINE; start the local connector so its lease is active");
+      }
+      source.setSourceLastSeenAt(now);
+      repoRepo.save(source);
+    }
+    return resolved;
+  }
+
+  private List<ProjectRepo> resolveLinkedStrict(String projectId, List<UUID> repoIds) {
+    if (projectId == null || projectId.isBlank()) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "projectId is required");
+    }
+    if (repoIds == null || repoIds.isEmpty()) {
+      if (!linkRepo.findByProjectId(projectId).isEmpty()) {
+        throw new ResponseStatusException(
+            HttpStatus.UNPROCESSABLE_ENTITY,
+            "Select at least one linked repository before starting project work");
+      }
+      return List.of();
+    }
+    List<UUID> distinct = repoIds.stream().distinct().toList();
+    List<ProjectRepo> resolved = resolveForRun(projectId, distinct);
+    if (resolved.size() != distinct.size()) {
+      throw new ResponseStatusException(
+          HttpStatus.UNPROCESSABLE_ENTITY,
+          "One or more selected repositories are missing or are not linked to this project");
+    }
+    return resolved;
   }
 
   /**
@@ -468,11 +748,25 @@ public class ProjectRepoService {
             .ownerUserId(project.getOrgId() != null ? null : callerUserId)
             .githubRepoFullName(fullName)
             .githubOwner(extractOwner(fullName))
+            // RR-318 — a created source must carry the same neutral SCM identity contract as an
+            // attached one, not just legacy name/owner columns, so run admission can reason about
+            // it.
+            .sourceType(ProjectRepo.SourceType.SCM.name())
+            .scmProvider(ScmProvider.GITHUB.name())
+            .sourceKey(fullName)
+            .sourceDisplayName(fullName)
             .defaultBranch("main")
             .detectedStack(null) // fresh repo — no stack detected yet
             .lastSyncedSha(null)
             .webhookInstalled(webhookOk)
             .build();
+    // RR-318 — pass the created repo through the same canonical inspect/inventory/readiness
+    // finalizer as attach so it persists an immutable provider id, credential-free clone URL,
+    // capabilities, branch SHA and an honest readiness verdict. A brand-new repo has no commits, so
+    // this correctly persists BLOCKED (BRANCH_UNREADABLE/EMPTY_REPOSITORY) readiness — RR-313 run
+    // admission then refuses it until the user pushes code and re-syncs, instead of admitting a
+    // just-created source with false identity and no proven readability.
+    hydrateCreatedSourceIdentity(entity, fullName, pat);
     repoRepo.save(entity);
 
     linkRepo.save(
@@ -497,8 +791,11 @@ public class ProjectRepoService {
    * "already exists" path is treated as success.
    */
   @Transactional
-  public boolean installWebhook(UUID repoId, String pat, String callerUserId, String callerOrgId) {
-    ProjectRepo repo = loadRepoForRead(repoId, callerUserId, callerOrgId);
+  public boolean installWebhook(
+      UUID repoId, String pat, String callerUserId, String callerOrgId, boolean isOrgAdmin) {
+    ProjectRepo repo = loadRepoForWrite(repoId, callerUserId, callerOrgId, isOrgAdmin);
+    requireScmSource(repo, "install a webhook");
+    requireCapability(repo, ScmCapability.WEBHOOK, "install webhooks");
     boolean ok = gitHub.installWebhook(repo.getGithubRepoFullName(), pat);
     if (ok) {
       repo.setWebhookInstalled(true);
@@ -506,6 +803,49 @@ public class ProjectRepoService {
       repoRepo.save(repo);
     }
     return ok;
+  }
+
+  /**
+   * RR-318 — hydrate the immutable source identity + readiness of a just-created GitHub repository
+   * from an authenticated provider read, mirroring the attach path. Fails closed: any inability to
+   * verify the identity leaves the source BLOCKED so it cannot be admitted for a run.
+   */
+  private void hydrateCreatedSourceIdentity(ProjectRepo entity, String fullName, String pat) {
+    try {
+      ScmRepositoryClient client = scmClients.require(ScmProvider.GITHUB);
+      ScmCredential credential = new ScmCredential(null, pat);
+      ScmRemoteRepository remote = client.inspect(fullName, credential);
+      if (remote.immutableId() != null && !remote.immutableId().isBlank()) {
+        entity.setScmRepositoryId(remote.immutableId());
+      }
+      entity.setScmCloneUrl(requireCredentialFreeCloneUrl(remote.cloneUrl()));
+      entity.setSourceKey(remote.fullName());
+      entity.setSourceDisplayName(remote.displayName());
+      entity.setSourceCapabilities(remote.capabilities().stream().sorted().toList());
+      String branch = entity.getDefaultBranch();
+      String headSha = null;
+      try {
+        headSha = client.branchHeadSha(remote, branch, credential);
+      } catch (RuntimeException noCommitsYet) {
+        // A repository created moments ago has no commits — leave headSha null.
+      }
+      ScmSourceInventory inventory = null;
+      try {
+        inventory = client.inventory(remote, branch, credential);
+      } catch (RuntimeException inventoryFailure) {
+        // Fall through with a null inventory → applySourceReadiness marks it BLOCKED.
+      }
+      if (headSha != null && !headSha.isBlank()) entity.setLastSyncedSha(headSha);
+      applySourceReadiness(entity, headSha, inventory);
+    } catch (RuntimeException identityFailure) {
+      log.warn(
+          "RR-318 — created repo {} identity could not be verified; marking source BLOCKED: {}",
+          fullName,
+          identityFailure.getMessage());
+      entity.setSourceReadinessCheckedAt(Instant.now());
+      entity.setSourceReadinessStatus(ProjectRepo.SourceReadiness.BLOCKED.name());
+      entity.setSourceReadinessReason("SOURCE_IDENTITY_UNVERIFIED");
+    }
   }
 
   private static String extractFullNameFromCloneUrl(String cloneUrl) {
@@ -516,6 +856,74 @@ public class ProjectRepoService {
     String tail = cloneUrl.substring(host + "github.com/".length());
     if (tail.endsWith(".git")) tail = tail.substring(0, tail.length() - 4);
     return tail.contains("/") ? tail : null;
+  }
+
+  private static void requireScmSource(ProjectRepo repo, String operation) {
+    if (ProjectRepo.SourceType.LOCAL.name().equals(repo.getSourceType())) {
+      throw new ResponseStatusException(
+          HttpStatus.UNPROCESSABLE_ENTITY,
+          "LOCAL sources cannot " + operation + "; renew them through the local connector");
+    }
+  }
+
+  /** Server-side provider gate for every provider-specific project action. */
+  public void requireCapability(ProjectRepo repo, ScmCapability capability, String operation) {
+    if (!supportsCapability(repo, capability)) {
+      throw new ResponseStatusException(
+          HttpStatus.UNPROCESSABLE_ENTITY,
+          (repo.getScmProvider() == null ? "GITHUB" : repo.getScmProvider())
+              + " project sources do not support "
+              + operation);
+    }
+  }
+
+  public ProjectRepo requireLinkedCapability(
+      String projectId, UUID repoId, ScmCapability capability, String operation) {
+    linkRepo
+        .findByProjectIdAndRepoId(projectId, repoId)
+        .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Repo not linked"));
+    ProjectRepo repo =
+        repoRepo
+            .findById(repoId)
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Repo not found"));
+    requireCapability(repo, capability, operation);
+    return repo;
+  }
+
+  public void requireProjectCapability(
+      String projectId, ScmCapability capability, String operation) {
+    // RR-315 (2026-07-22) — this is the admission gate for provider-backed project actions
+    // (architecture regeneration, confirmed chat actions). It previously returned normally when the
+    // project had no repos, only LOCAL repos, or dangling links, so an action requiring an SCM
+    // capability advanced vacuously past the check and then failed later or operated against an
+    // empty source boundary. Require at least one non-LOCAL, resolvable linked repository that
+    // actually carries the capability.
+    int capableScmRepos = 0;
+    for (ProjectRepoLink link : linkRepo.findByProjectId(projectId)) {
+      ProjectRepo repo = repoRepo.findById(link.getRepoId()).orElse(null);
+      if (repo == null) continue; // dangling link — a missing repo cannot vouch for the capability
+      if (ProjectRepo.SourceType.LOCAL.name().equals(repo.getSourceType())) continue;
+      requireCapability(repo, capability, operation);
+      capableScmRepos++;
+    }
+    if (capableScmRepos == 0) {
+      throw new ResponseStatusException(
+          HttpStatus.UNPROCESSABLE_ENTITY,
+          "No linked SCM repository can " + operation + "; link a supported repository first.");
+    }
+  }
+
+  private boolean supportsCapability(ProjectRepo repo, ScmCapability capability) {
+    if (ProjectRepo.SourceType.LOCAL.name().equals(repo.getSourceType())) return false;
+    return scmClients.require(ScmProvider.require(repo.getScmProvider())).supports(capability);
+  }
+
+  private static void requireClientCapability(
+      ScmRepositoryClient client, ScmCapability capability, String operation) {
+    if (!client.supports(capability)) {
+      throw new ResponseStatusException(
+          HttpStatus.UNPROCESSABLE_ENTITY, client.provider() + " does not support " + operation);
+    }
   }
 
   /* ──────────────────────────────── helpers ──────────────────────────────── */
@@ -558,7 +966,7 @@ public class ProjectRepoService {
     return repo;
   }
 
-  private ProjectRepo loadRepoForWrite(
+  public ProjectRepo loadRepoForWrite(
       UUID repoId, String callerUserId, String callerOrgId, boolean isOrgAdmin) {
     ProjectRepo repo = loadRepoForRead(repoId, callerUserId, callerOrgId);
     if (repo.getScope() == ProjectRepo.Scope.ORG && !isOrgAdmin) {
@@ -611,15 +1019,72 @@ public class ProjectRepoService {
    */
   String detectMonorepoSubdir(String repoUrl, String branch, String overridePat) {
     try {
-      String body = gitHub.readRepoFile(repoUrl, ".executespec/root.yml", branch, overridePat);
-      // GitHubRepoService surfaces failures as a "// ..." sentinel
-      // rather than throwing; treat those as "no marker present".
-      if (body == null || body.isBlank() || body.startsWith("// ")) return null;
+      // RR-1631 — failure is out-of-band now, so a root.yml that legitimately opens with a "#
+      // "/"//"
+      // comment is no longer mistaken for a failed read.
+      String body =
+          gitHub
+              .readRepoFile(repoUrl, ".executespec/root.yml", branch, overridePat)
+              .contentOrNull();
+      if (body == null || body.isBlank()) return null;
       return parseRootYamlSubdir(body);
     } catch (Exception e) {
       log.debug(
           "[R-322] subdir marker probe failed for {} ({}): {}", repoUrl, branch, e.getMessage());
       return null;
+    }
+  }
+
+  private String detectMonorepoSubdir(
+      ScmRemoteRepository repository,
+      String branch,
+      ScmRepositoryClient client,
+      ScmCredential credential) {
+    try {
+      String body = client.readFile(repository, branch, ".executespec/root.yml", credential);
+      // No `startsWith("// ")` guard: read failures now surface as ScmProviderException (caught
+      // below) rather than as an in-band "// ..." sentinel string, so inspecting content for
+      // failure is both dead and wrong — it would discard a legitimate file whose first line
+      // happens to start with "// " (RR-1631 root cause). The sibling overload above was already
+      // migrated; this second call site was missed.
+      if (body == null || body.isBlank()) return null;
+      return parseRootYamlSubdir(body);
+    } catch (Exception ex) {
+      log.debug(
+          "[R-322] subdir marker probe failed for {} ({}): {}",
+          repository.fullName(),
+          branch,
+          ex.getMessage());
+      return null;
+    }
+  }
+
+  private static String canonicalDisplayIdentity(ProjectRepo repo) {
+    if (repo.getSourceKey() != null && !repo.getSourceKey().isBlank()) return repo.getSourceKey();
+    if (repo.getGithubRepoFullName() != null && !repo.getGithubRepoFullName().isBlank()) {
+      return repo.getGithubRepoFullName();
+    }
+    throw new ResponseStatusException(
+        HttpStatus.UNPROCESSABLE_ENTITY, "SCM source has no repository display identity");
+  }
+
+  private static String requireCredentialFreeCloneUrl(String cloneUrl) {
+    try {
+      java.net.URI uri = java.net.URI.create(cloneUrl);
+      String host = uri.getHost();
+      boolean knownHost =
+          "github.com".equalsIgnoreCase(host) || "bitbucket.org".equalsIgnoreCase(host);
+      if (!"https".equalsIgnoreCase(uri.getScheme())
+          || uri.getUserInfo() != null
+          || !knownHost
+          || uri.getQuery() != null
+          || uri.getFragment() != null) {
+        throw new IllegalArgumentException("unsafe clone URL");
+      }
+      return uri.toString();
+    } catch (Exception ex) {
+      throw new ResponseStatusException(
+          HttpStatus.BAD_GATEWAY, "SCM provider returned an unsafe clone URL");
     }
   }
 

@@ -1,5 +1,10 @@
-import {useState, type Dispatch, type RefObject, type UIEvent} from 'react';
+import {useRef, useState, type Dispatch, type RefObject, type UIEvent} from 'react';
 import * as api from '@/lib/api';
+import {
+  providerIsDispatchable,
+  providerOptionLabel,
+  providerReadinessLabel,
+} from '@/ide/providerReadiness';
 import {Markdown} from '@/signal/components/Markdown';
 import {
   CommandIcon,
@@ -11,8 +16,11 @@ import {
   StatusDot,
 } from '@/ide/IdeIcons';
 import {IdeCodeViewer, type DiffLine} from '@/ide/IdeKit';
-import {extractAgentArtifacts, type AgentArtifact} from '@/ide/agentArtifacts';
+import {extractAgentArtifacts} from '@/ide/agentArtifacts';
+import {ArtifactRail} from '@/ide/agentArtifactRail';
 import {boundedInlineDiff} from '@/ide/agentDiff';
+import {isCloudRunAction, isConfirmableCloudRun} from '@/ide/agentActionPolicy';
+import {AgentBlockedActionCard} from '@/ide/AgentBlockedActionCard';
 import {
   asText,
   friendlyTool,
@@ -34,60 +42,7 @@ import {
 } from '@/ide/agentState';
 import {hasUnlimitedAiCredits} from '@/ide/planUtils';
 import {useAuthStore, selectIsSuperAdmin} from '@/stores/useAuthStore';
-
-const Paperclip = () => (
-  <svg
-    width='17'
-    height='17'
-    viewBox='0 0 24 24'
-    fill='none'
-    stroke='currentColor'
-    strokeWidth='2'
-    strokeLinecap='round'
-    strokeLinejoin='round'
-    aria-hidden='true'
-  >
-    <path d='M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48' />
-  </svg>
-);
-
-const ArrowUp = () => (
-  <svg
-    width='16'
-    height='16'
-    viewBox='0 0 24 24'
-    fill='none'
-    stroke='currentColor'
-    strokeWidth='2.5'
-    strokeLinecap='round'
-    strokeLinejoin='round'
-    aria-hidden='true'
-  >
-    <path d='M12 19V5M5 12l7-7 7 7' />
-  </svg>
-);
-
-const StopIcon = () => (
-  <svg width='15' height='15' viewBox='0 0 24 24' aria-hidden='true'>
-    <rect x='6' y='6' width='12' height='12' rx='2' fill='currentColor' />
-  </svg>
-);
-
-const FolderIcon = () => (
-  <svg
-    width='13'
-    height='13'
-    viewBox='0 0 24 24'
-    fill='none'
-    stroke='currentColor'
-    strokeWidth='2'
-    strokeLinecap='round'
-    strokeLinejoin='round'
-    aria-hidden='true'
-  >
-    <path d='M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z' />
-  </svg>
-);
+import {Paperclip, ArrowUp, StopIcon, FolderIcon} from '@/ide/agentIcons';
 
 const SUGGESTIONS = [
   'Create a remote sandbox to add audit logging',
@@ -116,7 +71,7 @@ function tokenCount(value: number): string {
 
 function totalTokens(usage?: AgentUsageSummary | null): number {
   if (!usage) return 0;
-  return usage.inputTokens + usage.outputTokens + usage.reasoningTokens;
+  return usage.inputTokens + usage.outputTokens;
 }
 
 function hasRenderableAssistantContent(content: string): boolean {
@@ -157,6 +112,10 @@ export function AgentTopBar({
   onToggleChats,
   onToggleSettings,
   availableModels,
+  providerReadiness,
+  providerReadinessSupported,
+  providerReadinessLoading,
+  providerReadinessError,
   selectedProvider,
   selectedModel,
   onProviderChange,
@@ -177,6 +136,10 @@ export function AgentTopBar({
   onToggleChats: () => void;
   onToggleSettings: () => void;
   availableModels?: api.ProviderEntry[];
+  providerReadiness?: ReadonlyMap<string, api.ProviderReadiness>;
+  providerReadinessSupported?: boolean;
+  providerReadinessLoading?: boolean;
+  providerReadinessError?: boolean;
   selectedProvider?: string;
   selectedModel?: string;
   onProviderChange?: (provider: string) => void;
@@ -240,6 +203,10 @@ export function AgentTopBar({
             routingState={routingState}
             capabilities={capabilities}
             availableModels={availableModels ?? []}
+            providerReadiness={providerReadiness ?? new Map()}
+            providerReadinessSupported={providerReadinessSupported ?? false}
+            providerReadinessLoading={providerReadinessLoading ?? false}
+            providerReadinessError={providerReadinessError ?? false}
             selectedProvider={selectedProvider ?? ''}
             selectedModel={selectedModel ?? ''}
             onProviderChange={onProviderChange ?? (() => {})}
@@ -259,6 +226,10 @@ function SettingsPopover({
   capabilities,
   onClose,
   availableModels,
+  providerReadiness,
+  providerReadinessSupported,
+  providerReadinessLoading,
+  providerReadinessError,
   selectedProvider,
   selectedModel,
   onProviderChange,
@@ -270,13 +241,22 @@ function SettingsPopover({
   capabilities: api.AgentCapabilityTool[];
   onClose: () => void;
   availableModels: api.ProviderEntry[];
+  providerReadiness: ReadonlyMap<string, api.ProviderReadiness>;
+  providerReadinessSupported: boolean;
+  providerReadinessLoading: boolean;
+  providerReadinessError: boolean;
   selectedProvider: string;
   selectedModel: string;
   onProviderChange: (provider: string) => void;
   onModelChange: (model: string) => void;
 }) {
-  const provider = availableModels.find((entry) => entry.id === selectedProvider);
+  const provider = availableModels.find(
+    (entry) => entry.id.toUpperCase() === selectedProvider.toUpperCase(),
+  );
   const models = provider?.models ?? availableModels.flatMap((entry) => entry.models);
+  const selectedReadiness = selectedProvider
+    ? providerReadiness.get(selectedProvider.toUpperCase())
+    : null;
   return (
     <>
       <div
@@ -324,11 +304,36 @@ function SettingsPopover({
           >
             <option value=''>Default</option>
             {availableModels.map((entry) => (
-              <option key={entry.id} value={entry.id}>
-                {entry.label || entry.id}
+              <option
+                key={entry.id}
+                value={entry.id}
+                disabled={
+                  providerReadinessSupported &&
+                  !providerIsDispatchable(providerReadiness.get(entry.id.toUpperCase()))
+                }
+              >
+                {providerOptionLabel(
+                  entry.label || entry.id,
+                  providerReadiness.get(entry.id.toUpperCase()),
+                )}
               </option>
             ))}
           </select>
+          <small
+            role={
+              selectedProvider && !providerIsDispatchable(selectedReadiness) ? 'alert' : 'status'
+            }
+          >
+            {!providerReadinessSupported
+              ? 'Provider readiness is not exposed by this server; dispatch policy still applies.'
+              : !selectedProvider
+                ? 'Account default; the server verifies its effective route.'
+                : providerReadinessError
+                  ? 'Provider readiness unavailable; explicit routing is disabled.'
+                  : providerReadinessLoading
+                    ? 'Checking provider readiness…'
+                    : providerReadinessLabel(selectedReadiness)}
+          </small>
           <label htmlFor='agent-model-select'>Model</label>
           <select
             id='agent-model-select'
@@ -343,7 +348,10 @@ function SettingsPopover({
               </option>
             ))}
           </select>
-          <small>Applies to the next turn.</small>
+          <small>
+            Provider changes use that provider's default route. Choosing a model pins that exact
+            account-eligible model for the next turn.
+          </small>
         </div>
         {managedAi && <ManagedAiBalance balance={managedAi} />}
         <details className='agent-pop-diagnostics'>
@@ -396,7 +404,7 @@ function ManagedAiBalance({balance}: {balance: api.ManagedAiBalance}) {
           </div>
           {isSuperAdmin && (
             <small>
-              Raw spend ${balance.rawCogsUsedUsd.toFixed(2)} of ${balance.rawCogsCapUsd.toFixed(2)}{' '}
+              Raw spend ${balance.rawCogsUsedUsd.toFixed(4)} of ${balance.rawCogsCapUsd.toFixed(4)}{' '}
               monthly cap.
             </small>
           )}
@@ -486,6 +494,9 @@ export function AgentChatsDrawer({
                     <button
                       className='ide-btn agent-btn-primary'
                       onClick={() => onApproveGate(gate)}
+                      // RR-1489 — no one-click approval while cost is unknown; a null
+                      // credit value also disables the server's stale-approval guard.
+                      disabled={gate.creditsRequired == null}
                     >
                       Approve &amp; run
                     </button>
@@ -556,9 +567,13 @@ function gateAge(gate: api.AgentGateDecisionCard): string {
   return relTime(gate.submittedAt);
 }
 
-function gateCostLabel(gate: api.AgentGateDecisionCard): string {
-  const parts = [];
+// RR-1489 — the gate authorizes provider spend, so the card must show the USD
+// estimate and the hard cap that bounds the run, not credits alone.
+export function gateCostLabel(gate: api.AgentGateDecisionCard): string {
+  const parts: string[] = [];
+  if (gate.estimatedCostUsd != null) parts.push(`~$${gate.estimatedCostUsd.toFixed(2)}`);
   if (gate.creditsRequired != null) parts.push(`${gate.creditsRequired} credits`);
+  if (gate.hardCapUsd != null) parts.push(`cap $${gate.hardCapUsd.toFixed(2)}`);
   return parts.length ? parts.join(' / ') : 'cost pending';
 }
 
@@ -619,145 +634,6 @@ function MessageBubble({
       )}
     </div>
   );
-}
-
-function ArtifactRail({
-  artifacts,
-  dispatch,
-}: {
-  artifacts: AgentArtifact[];
-  dispatch: Dispatch<AgentAction>;
-}) {
-  const [copiedId, setCopiedId] = useState<string | null>(null);
-  const [copyErrorId, setCopyErrorId] = useState<string | null>(null);
-  const [previewErrorId, setPreviewErrorId] = useState<string | null>(null);
-  if (!artifacts.length) return null;
-
-  async function copyArtifact(artifact: AgentArtifact) {
-    try {
-      if (!navigator.clipboard?.writeText) throw new Error('Clipboard unavailable');
-      await navigator.clipboard.writeText(artifact.content);
-      setCopyErrorId(null);
-      setCopiedId(artifact.id);
-      window.setTimeout(
-        () => setCopiedId((current) => (current === artifact.id ? null : current)),
-        1600,
-      );
-    } catch {
-      setCopiedId(null);
-      setCopyErrorId(artifact.id);
-      window.setTimeout(
-        () => setCopyErrorId((current) => (current === artifact.id ? null : current)),
-        3000,
-      );
-    }
-  }
-
-  function downloadArtifact(artifact: AgentArtifact) {
-    const blob = new Blob([artifact.content], {type: mimeForArtifact(artifact)});
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = artifact.filename;
-    a.click();
-    URL.revokeObjectURL(url);
-  }
-
-  function previewArtifact(artifact: AgentArtifact) {
-    const blob = new Blob([artifact.content], {type: mimeForArtifact(artifact)});
-    const url = URL.createObjectURL(blob);
-    try {
-      const preview = window.open(url, '_blank', 'noopener,noreferrer');
-      if (!preview) throw new Error('Preview popup blocked');
-      setPreviewErrorId(null);
-    } catch {
-      setPreviewErrorId(artifact.id);
-    }
-    window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
-  }
-
-  function requestSandbox(artifact: AgentArtifact) {
-    dispatch({
-      type: 'input:set',
-      input: `Create a remote sandbox from the generated artifact ${artifact.filename}. Preserve the artifact content from the previous assistant message and return evidence, changed files, and the handoff path.`,
-    });
-  }
-
-  return (
-    <div className='agent-artifact-rail' aria-label='Generated artifacts'>
-      <div className='agent-artifact-head'>
-        <span>Generated artifacts</span>
-        <span>
-          {artifacts.length} file{artifacts.length === 1 ? '' : 's'}
-        </span>
-      </div>
-      <div className='agent-artifact-list'>
-        {artifacts.map((artifact) => (
-          <div className='agent-artifact-item' key={artifact.id}>
-            <div className='agent-artifact-main'>
-              <code>{artifact.filename}</code>
-              <span>
-                {artifact.language.toUpperCase()} · {artifact.lineCount} line
-                {artifact.lineCount === 1 ? '' : 's'}
-              </span>
-            </div>
-            <div className='agent-artifact-actions'>
-              <button className='ide-btn ghost' onClick={() => void copyArtifact(artifact)}>
-                {copiedId === artifact.id
-                  ? 'Copied'
-                  : copyErrorId === artifact.id
-                    ? 'Copy unavailable'
-                    : 'Copy'}
-              </button>
-              <button className='ide-btn ghost' onClick={() => downloadArtifact(artifact)}>
-                Download
-              </button>
-              <button
-                className='ide-btn ghost'
-                onClick={() => previewArtifact(artifact)}
-                disabled={!artifact.previewable}
-                title={
-                  artifact.previewable
-                    ? 'Open a browser preview'
-                    : 'Preview is unavailable for this file type'
-                }
-              >
-                Preview
-              </button>
-              <button className='ide-btn ghost' onClick={() => requestSandbox(artifact)}>
-                Use in sandbox
-              </button>
-            </div>
-            {copyErrorId === artifact.id && (
-              <div className='agent-artifact-action-error' role='alert'>
-                Clipboard access was denied. Use Download instead.
-              </div>
-            )}
-            {previewErrorId === artifact.id && (
-              <div className='agent-artifact-action-error' role='alert'>
-                Preview was blocked. Allow pop-ups or use Download instead.
-              </div>
-            )}
-          </div>
-        ))}
-      </div>
-      <div className='agent-artifact-handoff'>
-        <span>Remote sandbox keeps local files untouched.</span>
-        <a href='/cli-login'>Open local handoff</a>
-      </div>
-    </div>
-  );
-}
-
-function mimeForArtifact(artifact: AgentArtifact): string {
-  const ext = artifact.filename.split('.').pop()?.toLowerCase();
-  if (ext === 'html' || ext === 'htm') return 'text/html';
-  if (ext === 'svg') return 'image/svg+xml';
-  if (ext === 'json') return 'application/json';
-  if (ext === 'md' || ext === 'markdown') return 'text/markdown';
-  if (ext === 'css') return 'text/css';
-  if (ext === 'js' || ext === 'ts' || ext === 'tsx' || ext === 'jsx') return 'text/javascript';
-  return 'text/plain';
 }
 
 /** Friendly activity chips for tool/run events — no raw JSON. */
@@ -904,8 +780,8 @@ function SandboxRunCard({
           {isSuperAdmin && (
             <>
               {' · $'}
-              {cost.toFixed(2)}
-              {est ? ` / ~$${est.toFixed(2)}` : ''}
+              {cost.toFixed(4)}
+              {est ? ` / ~$${est.toFixed(4)}` : ''}
             </>
           )}
         </span>
@@ -952,7 +828,18 @@ function SandboxRunCard({
       </div>
       {prog.total > 0 && (
         <div className='agent-runcard-bar'>
-          <span style={{width: `${terminal && !failed && !cancelled ? 100 : prog.pct}%`}} />
+          {/* RR-1492 — the fill reflects the measured succeeded-task percentage.
+              It is never forced to 100% on a terminal run, so a PARTIAL run with
+              failed tasks does not render as fully done. Failed/blocked tasks are
+              shown as a distinct trailing segment rather than counted as progress. */}
+          <span style={{width: `${prog.pct}%`}} />
+          {prog.failed > 0 && (
+            <span
+              className='agent-runcard-bar-failed'
+              style={{width: `${Math.round((prog.failed / prog.total) * 100)}%`}}
+              title={`${prog.failed} failed or blocked`}
+            />
+          )}
         </div>
       )}
       <div className='agent-runcard-actions'>
@@ -1001,7 +888,11 @@ function InlineRunDiff({runId, onOpen}: {runId: string; onOpen: (path: string) =
   const [expanded, setExpanded] = useState(false);
   const [files, setFiles] = useState<api.FileWithStatus[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
-  const [diff, setDiff] = useState<DiffLine[] | null>(null);
+  // RR-624 — the rendered diff carries the path it was fetched for, so a slower
+  // earlier response can never be shown (and reverted) under a later selection.
+  const [diff, setDiff] = useState<{path: string; lines: DiffLine[]} | null>(null);
+  // Monotonic request generation; only the newest `open()` may commit its result.
+  const openGenRef = useRef(0);
   const [status, setStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
   const [message, setMessage] = useState('');
   const [pendingRevert, setPendingRevert] = useState<{
@@ -1039,20 +930,22 @@ function InlineRunDiff({runId, onOpen}: {runId: string; onOpen: (path: string) =
   }
 
   async function open(path: string) {
+    const gen = ++openGenRef.current;
     setSelected(path);
     setDiff(null);
     setMessage('Loading diff…');
     try {
       const payload = await api.getFileDiff(runId, path);
+      // RR-624 — a superseded request (the user clicked another file, or an
+      // earlier fetch resolved after a later one) must not publish its result.
+      if (gen !== openGenRef.current) return;
       // Keep the chat surface responsive even if a backend returns a very large file.
       const shaped = boundedInlineDiff(payload);
-      setDiff(shaped.lines);
-      setMessage(
-        shaped.truncated
-          ? 'Diff truncated to 2,500 lines. Open Changed files for the full result.'
-          : '',
-      );
+      setDiff({path, lines: shaped.lines});
+      // RR-1494 — surface the exact clip bound (source lines/chars or post-diff lines).
+      setMessage(shaped.truncated ? shaped.note : '');
     } catch {
+      if (gen !== openGenRef.current) return;
       setDiff(null);
       setMessage('This file diff is unavailable. Open Changed files for the full result.');
     }
@@ -1118,13 +1011,16 @@ function InlineRunDiff({runId, onOpen}: {runId: string; onOpen: (path: string) =
                 ))}
               </div>
               <div className='agent-inline-diff-view'>
-                {selected && diff ? (
+                {/* RR-624 — render only when the loaded diff matches the current
+                    selection, and bind the viewer + revert target to the diff's
+                    own path so a hunk revert can never capture the wrong file. */}
+                {diff && diff.path === selected ? (
                   <IdeCodeViewer
-                    filename={selected}
-                    content={diff.map((line) => line.text).join('\n')}
-                    diff={diff}
+                    filename={diff.path}
+                    content={diff.lines.map((line) => line.text).join('\n')}
+                    diff={diff.lines}
                     onRevertHunk={(hunkIndex, request) =>
-                      setPendingRevert({filePath: selected, hunkIndex, request})
+                      setPendingRevert({filePath: diff.path, hunkIndex, request})
                     }
                   />
                 ) : (
@@ -1190,10 +1086,12 @@ function ActionCard({
   onDismiss: () => void;
   busy: boolean;
 }) {
-  const isCloudRun = pending.action.type === 'create_cloud_run';
   const isLocal =
     pending.action.type === 'local_tool_action' || pending.action.type === 'local_code_task';
-  if (isCloudRun) {
+  // The same predicate the confirmation dispatcher uses. A cloud-run proposal
+  // that is not confirmable renders as a blocked explanation instead of a
+  // confirm button that would be dropped on click.
+  if (isConfirmableCloudRun(pending.action)) {
     return (
       <SandboxProposalCard
         pending={pending}
@@ -1202,6 +1100,9 @@ function ActionCard({
         onDismiss={onDismiss}
       />
     );
+  }
+  if (isCloudRunAction(pending.action)) {
+    return <AgentBlockedActionCard action={pending.action} onDismiss={onDismiss} busy={busy} />;
   }
   if (isLocal) return <LocalHandoffCard pending={pending} onDismiss={onDismiss} />;
   const args = Object.entries(pending.action.arguments || {});
@@ -1259,8 +1160,8 @@ function SandboxProposalCard({
         <span className='agent-card-meta'>plan gate before spend</span>
       </div>
       <div className='agent-card-sub'>
-        ExecuteSpec will create an isolated remote workspace, draft a plan, then stop for your
-        approval before coding or charging run credits.
+        ExecuteSpec will create a remote workspace, draft a plan, then stop for your approval before
+        coding or charging run credits.
       </div>
       {pending.action.confirmationPrompt && (
         <div className='agent-card-sub'>{pending.action.confirmationPrompt}</div>
@@ -1357,11 +1258,20 @@ function GateCard({
       <div className='agent-card-consequence-row'>
         <span>{gate.projectName || 'standalone sandbox'}</span>
         {gate.tasks.length > 0 && <span>{gate.tasks.length} tasks</span>}
+        {/* RR-1489 — render the USD estimate and the hard cap that bound the spend. */}
+        {gate.estimatedCostUsd != null && <span>~${gate.estimatedCostUsd.toFixed(2)}</span>}
         {gate.creditsRequired != null && <span>~{gate.creditsRequired} credits</span>}
+        {gate.hardCapUsd != null && <span>cap ${gate.hardCapUsd.toFixed(2)}</span>}
         {gate.provider && <span>{gate.provider}</span>}
         {gateAge(gate) && <span>{gateAge(gate)}</span>}
         <span>opens a PR</span>
       </div>
+      {gate.creditsRequired == null && (
+        <div className='agent-card-sub' role='status'>
+          Cost is still being estimated. Approval is unavailable until the run credit count is
+          known.
+        </div>
+      )}
       {gate.summary && <div className='agent-card-sub'>{gate.summary}</div>}
       {gate.tasks.length > 0 && (
         <ul className='agent-card-tasks'>
@@ -1375,7 +1285,8 @@ function GateCard({
         <button
           className='ide-btn agent-btn-primary'
           onClick={() => onApprove(gate)}
-          disabled={busy}
+          // RR-1489 — cost must be known before spend is authorized.
+          disabled={busy || gate.creditsRequired == null}
         >
           Approve &amp; run
         </button>
@@ -1397,7 +1308,7 @@ function SandboxContractPanel() {
       <div className='agent-contract-grid'>
         <span>
           <b>Workspace</b>
-          isolated remote clone
+          remote clone
         </span>
         <span>
           <b>Branch</b>
@@ -1425,14 +1336,18 @@ function SandboxContractPanel() {
 }
 
 function TrustBoundaryPanel({compact = false}: {compact?: boolean}) {
+  // RR-839 — state only properties the runtime actually enforces. The prior
+  // "repo token scoped to selected project" and "secrets are not displayed in
+  // chat" lines asserted a credential/isolation boundary the current
+  // policy-guarded server workspace does not prove (RR-118..RR-120, RR-142), so
+  // they are removed rather than shown as a security guarantee.
   return (
     <div className={compact ? 'agent-trust-panel compact' : 'agent-trust-panel'}>
-      <span>Repo token scoped to selected project</span>
-      <span>Secrets are not displayed in chat</span>
-      <span>Run events stay in audit trail</span>
-      <span>Approval required before code execution</span>
-      <span>Retention follows workspace cleanup policy</span>
-      <span>Outbound network follows sandbox policy</span>
+      <span>Runs on a policy-guarded server workspace</span>
+      <span>Your local files are never touched</span>
+      <span>Approval required before any code runs</span>
+      <span>Every run event is recorded in the audit trail</span>
+      <span>Cost is capped before the run starts</span>
     </div>
   );
 }
@@ -1489,7 +1404,7 @@ function EmptyState({onPick}: {onPick: (text: string) => void}) {
       </div>
       <strong>Remote sandbox ready</strong>
       <p>
-        Describe the change, review the generated plan, then let ExecuteSpec work in an isolated
+        Describe the change, review the generated plan, then let ExecuteSpec work in a remote
         sandbox. Browser sessions never get local shell authority.
       </p>
       <div className='agent-empty-chips'>

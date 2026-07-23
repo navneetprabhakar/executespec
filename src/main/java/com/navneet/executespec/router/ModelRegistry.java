@@ -1,5 +1,6 @@
 package com.navneet.executespec.router;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -40,17 +41,29 @@ public class ModelRegistry {
     Map<String, String> aliases = getAliases();
     Map<String, List<ModelMatrixProperties.FallbackEntry>> chains = getChains();
 
+    // RR-114 (2026-07-22) configuration safety: an invalid routing/pricing matrix used to only
+    // log.error and let the application start, so production could become ready with a partially
+    // broken matrix and fail only AFTER customer spend began (a missing provider/fallback model
+    // resolving to null, or a stale alias). Every violation is now aggregated and the whole set
+    // fails startup, so the misconfiguration is caught before any dispatch. The billing-critical
+    // free-tier check (RR-115) is one of the aggregated violations rather than a separate throw.
+    List<String> violations = new ArrayList<>();
+
     // 1. Every model referenced in providers matrix must exist in models map
     if (matrixProps.getProviders() != null) {
       for (var entry : matrixProps.getProviders().entrySet()) {
         String provider = entry.getKey();
         var pm = entry.getValue();
         validateModelExists(
-            models, aliases, pm.getPlanning(), "providers." + provider + ".planning");
+            models, aliases, pm.getPlanning(), "providers." + provider + ".planning", violations);
         validateModelExists(
-            models, aliases, pm.getWorkhorse(), "providers." + provider + ".workhorse");
+            models, aliases, pm.getWorkhorse(), "providers." + provider + ".workhorse", violations);
         validateModelExists(
-            models, aliases, pm.getLightweight(), "providers." + provider + ".lightweight");
+            models,
+            aliases,
+            pm.getLightweight(),
+            "providers." + provider + ".lightweight",
+            violations);
       }
     }
 
@@ -59,7 +72,8 @@ public class ModelRegistry {
       for (var entry : chains.entrySet()) {
         String tier = entry.getKey();
         for (var fb : entry.getValue()) {
-          validateModelExists(models, aliases, fb.getModel(), "fallback-chains." + tier);
+          validateModelExists(
+              models, aliases, fb.getModel(), "fallback-chains." + tier, violations);
         }
       }
     }
@@ -69,17 +83,47 @@ public class ModelRegistry {
       for (var entry : aliases.entrySet()) {
         String target = entry.getValue();
         if (!models.containsKey(target)) {
-          log.error(
-              "[ModelRegistry] Legacy alias '{}' → '{}' targets unknown model!",
-              entry.getKey(),
-              target);
+          violations.add(
+              "legacy-alias '" + entry.getKey() + "' → '" + target + "' targets unknown model");
         }
       }
     }
 
-    // 4. Free-tier model must exist
-    if (matrixProps.getFreeTier() != null && matrixProps.getFreeTier().getModel() != null) {
-      validateModelExists(models, aliases, matrixProps.getFreeTier().getModel(), "free-tier.model");
+    // 4. Free-tier routing is billing-critical: it MUST resolve to a known, enabled model, and
+    // there is no safe behavioural fallback. RR-115 (2026-07-21) — a missing/blank/unknown
+    // free-tier cell previously fell through to a hardcoded PAID route (gpt-5.4-mini / openai) in
+    // freeTierModel()/freeTierProvider(); a configuration omission would then silently move Free
+    // traffic onto a billed provider while the product still labels it Free-tier locked.
+    ModelMatrixProperties.FreeTierConfig freeTier = matrixProps.getFreeTier();
+    if (freeTier == null
+        || freeTier.getProvider() == null
+        || freeTier.getProvider().isBlank()
+        || freeTier.getModel() == null
+        || freeTier.getModel().isBlank()) {
+      violations.add(
+          "model-matrix.free-tier.provider and .model are required — Free-tier routing is"
+              + " billing-critical and has no safe fallback (RR-115)");
+    } else {
+      String freeCanonical =
+          aliases != null && aliases.containsKey(freeTier.getModel())
+              ? aliases.get(freeTier.getModel())
+              : freeTier.getModel();
+      if (!models.containsKey(freeCanonical)) {
+        violations.add(
+            "free-tier.model '"
+                + freeTier.getModel()
+                + "' is not present in model-matrix.models — unresolvable Free-tier route"
+                + " (RR-115)");
+      }
+    }
+
+    if (!violations.isEmpty()) {
+      throw new IllegalStateException(
+          "[ModelRegistry] refusing to start with an invalid model-matrix ("
+              + violations.size()
+              + " violation(s)) — routing/pricing configuration must be fixed before dispatch"
+              + " (RR-114): "
+              + String.join("; ", violations));
     }
 
     log.info(
@@ -93,15 +137,18 @@ public class ModelRegistry {
       Map<String, ModelMatrixProperties.ModelConfig> models,
       Map<String, String> aliases,
       String modelName,
-      String context) {
+      String context,
+      List<String> violations) {
     if (modelName == null) return;
     String canonical =
         aliases != null && aliases.containsKey(modelName) ? aliases.get(modelName) : modelName;
     if (!models.containsKey(canonical)) {
-      log.error(
-          "[ModelRegistry] Model '{}' referenced in {} not found in model-matrix.models!",
-          modelName,
-          context);
+      violations.add(
+          "model '"
+              + modelName
+              + "' referenced in "
+              + context
+              + " not found in model-matrix.models");
     }
   }
 
@@ -269,6 +316,17 @@ public class ModelRegistry {
   }
 
   /**
+   * Returns the configured routing chain tier for a concrete model. This is the canonical
+   * model-tier dimension used by usage/FinOps evidence; callers must not infer it from model-name
+   * prefixes. Unknown forward-compatible models are reported honestly as {@code UNKNOWN}.
+   */
+  public String chainTierFor(String modelName) {
+    ModelMatrixProperties.ModelConfig config = lookupConfig(modelName);
+    String tier = config == null ? null : config.getChainTier();
+    return tier == null || tier.isBlank() ? "UNKNOWN" : tier.toUpperCase(java.util.Locale.ROOT);
+  }
+
+  /**
    * Returns the fallback chain for a model based on its chain-tier. Each entry is a {@code
    * String[]{provider, model}}.
    *
@@ -327,16 +385,33 @@ public class ModelRegistry {
     return entries.stream().map(e -> new String[] {e.getProvider(), e.getModel()}).toList();
   }
 
-  /** Returns the FREE tier locked model name. */
+  /**
+   * Returns the FREE tier locked model name. RR-115 — no behavioural fallback: startup {@link
+   * #validate()} guarantees a configured free-tier cell, so a missing one here is a fail-closed
+   * error rather than a silent paid route.
+   */
   public String freeTierModel() {
-    return matrixProps.getFreeTier() != null
-        ? matrixProps.getFreeTier().getModel()
-        : "gpt-5.4-mini";
+    ModelMatrixProperties.FreeTierConfig freeTier = matrixProps.getFreeTier();
+    if (freeTier == null || freeTier.getModel() == null || freeTier.getModel().isBlank()) {
+      throw new IllegalStateException(
+          "model-matrix.free-tier.model is not configured — Free-tier routing has no safe fallback"
+              + " (RR-115).");
+    }
+    return freeTier.getModel();
   }
 
-  /** Returns the FREE tier locked provider name. */
+  /**
+   * Returns the FREE tier locked provider name. RR-115 — no behavioural fallback (see {@link
+   * #freeTierModel()}).
+   */
   public String freeTierProvider() {
-    return matrixProps.getFreeTier() != null ? matrixProps.getFreeTier().getProvider() : "openai";
+    ModelMatrixProperties.FreeTierConfig freeTier = matrixProps.getFreeTier();
+    if (freeTier == null || freeTier.getProvider() == null || freeTier.getProvider().isBlank()) {
+      throw new IllegalStateException(
+          "model-matrix.free-tier.provider is not configured — Free-tier routing has no safe"
+              + " fallback (RR-115).");
+    }
+    return freeTier.getProvider();
   }
 
   /**

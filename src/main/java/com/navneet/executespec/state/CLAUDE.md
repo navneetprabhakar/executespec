@@ -6,7 +6,15 @@ Persistence layer for pipeline runs, tasks, and all mutable state.
 
 ## Key Files
 - `StateStore.java` — Central state manager. All run/task state mutations go through here. 1500+ lines. Key batch methods: `resetTaskForRetry()` (resets task to PENDING for batch auto-retry), `setTaskModelProvider()` (sets resolved model/provider after batch resume).
-- `entity/PipelineRun.java` — JPA entity for runs. Key fields: status, plan, costEstimate, actualCostUsd, creditsCharged, hardCapUsd, failureReason, githubPrUrl, approvedExecutionMode, batchId, batchProvider, batchCredits, batchAvailable, creditSavings, batchProgressCompleted, batchProgressTotal, batchSubmittedAt, **`statusReason` (V107 — explicit PARTIAL/COMPLETE reason: CLEAN_COMPLETION / CLEAN_WITH_INTERMEDIATE_WARNINGS / FINAL_BUILD_FAILED / TESTS_FAILED:N_OF_M / REVIEWER_UNRESOLVED / REVIEWER_FAILED / ALL_TASKS_FAILED / LEGACY_UNKNOWN)**, **`planRequirementsJson` (V109 — JSON array of `RequirementSpec{id,text,kind}` for Validation v3 / Pillar 1)**, **V251 `runGoalDonenessJson` — durable final run-level goal proof derived from the validation-report ledger**, **v2.6.2-track (V130, on `feature/hierarchical-planner`): `planStrategy` (SINGLE_SHOT \| SMALL \| MEDIUM \| LARGE \| LEGACY), `planOutlineJson`, `classifierReasoning`, plus per-phase cost columns `{classifier,outline,expansion,coherence}_{input,output}_tokens` + `_cost_usd` populated by the hierarchical planner phases**.
+- Startup crash recovery considers a run stale from its durable `execution_heartbeat` (refreshed
+  every 30 seconds), not merely its original start time; `started_at` is the legacy fallback. This
+  keeps legitimate >6h runs eligible for the existing run/task CAS and GCS checkpoint recovery.
+- Cross-host crash recovery now fails closed unless `durability.workspace.shared-persistent=true`.
+  Same-host process restart remains eligible. The asynchronous GCS task archive is not treated as
+  an acknowledged task frontier: it can lag a terminal task-row commit, so using it blindly could
+  skip a task whose files are absent. Until a versioned frontier is persisted and validated,
+  different-host takeover terminates/refunds with `UNTRUSTED_WORKSPACE_FRONTIER`.
+- `entity/PipelineRun.java` — JPA entity for runs. Key fields include status/reason, ownership, cost, plan/review evidence and **V275 route policy**: `requestedProvider`, `requestedModel`, `routingMode` (`AUTO | PROVIDER_PREFERRED | EXACT_LOCK`) and `routePinned`. Exact routes are immutable execution contracts consumed by `RunRoutePolicyService` and rebound during recovery/retry; they are not merely UI preferences. The legacy asynchronous SCM snapshots `githubPat` and `bitbucketAppPassword` use `EncryptedValueConverter` and are excluded from Lombok `toString`; they remain temporary credential copies until a reference-based credential lease replaces them.
 - **V261 `localExecutionRequested`** — durable CLI/VS Code local-hands intent used by crash recovery so a client-owned run never silently downgrades to server shell execution.
 - `entity/AgentTask.java` — JPA entity for individual tasks within a run. Includes subtask decomposition fields: `parentTaskId` (null for top-level), `subtaskIndex` (1-based), `subtaskTotal`. **v2.5.11 (V109): `meetsRequirementsJson` — JSON array of requirement IDs from `PipelineRun.planRequirementsJson` this task is expected to implement.** **v2.6.2-track (V130): `taskType` (LEAF \| EPIC), `expansionStatus` (PENDING \| EXPANDED \| FAILED \| null), `expandedAt` — populated by Phase 2 (TaskExpanderAgent) of the hierarchical planner.** **V250:** `goalDonenessJson` + `continuationDecisionJson` persist executor task-boundary goal state and next-action advice for run detail clients. **V252:** `continuationActionsJson` persists executed/skipped continuation actions so automatic model/provider upgrades survive final decision overwrites and reloads.
 - `entity/PlanVersion.java` — JPA entity for plan version history. Columns widened in V45 (id/run_id/created_by → VARCHAR(255), source → VARCHAR(64)).
@@ -49,7 +57,7 @@ Persistence layer for pipeline runs, tasks, and all mutable state.
 - **V185** (2026-05-09 — single-surface retirement follow-up to V179): retires the Solo tier branding introduced by V176/V177. Un-renames PRO → "Pro" (PRO row stays HIDDEN, grandfathered as before); drops Solo monthly/yearly + founder pricing seed.
 - **V186** (2026-05-11): pull_request CI status columns. `PullRequestSnapshot.headSha` is added so `RunController.refreshPrs` can poll the `check-runs` endpoint alongside the open/merged state.
 - **V189** (PR-A, 2026-05-13): one-shot UPDATE that backfills `execution_run.{actual_cost_usd,total_actual_tokens}` from the unified V188 `pipelineRunId` link + legacy `execution_solution_run` history. Repairs the 28 historical executions whose totals were wrong because the broken incremental accumulator dropped CAS-conflict contributions.
-- **V190** (PR-A, 2026-05-13): `agent_task.failure_diagnostic_json TEXT` — compact JSON capturing worker outcome + iter budget + final-LLM-failure fingerprint at the WORKER_FAILED call site so operators can diagnose task failures without SSH'ing the VM.
+- **V190** (PR-A, 2026-05-13): `agent_task.failure_diagnostic_json TEXT` — compact JSON capturing worker outcome + iter budget + a secret-free tool-name/opaque-signature/status diagnostic at the WORKER_FAILED call site. Current writers never persist assistant text, tool arguments, commands or provider bodies in this field.
 - **V250** (RL-2026-06-198): `agent_task.goal_doneness_json TEXT` + `agent_task.continuation_decision_json TEXT` — durable goal-state and continuation advice emitted by `SequentialExecutor`; surfaced through `TaskSummary` and the IDE run result task cards.
 - **V251** (RL-2026-06-198): `pipeline_run.run_goal_doneness_json TEXT` — durable final run-level goal proof derived from the validation-report ledger; surfaced through `RunDetail.runGoalDoneness`.
 - **V252** (RL-2026-06-205): `agent_task.continuation_actions_json TEXT` — append-only executed/skipped continuation action history emitted by `SequentialExecutor`; surfaced through `TaskSummary.continuationActions` and the IDE run result Steps card.
@@ -58,6 +66,29 @@ Persistence layer for pipeline runs, tasks, and all mutable state.
 - **V266**: graduates bounded provider failover after same-provider transient retries; BYOK boundaries remain enforced.
 - **V267**: graduates evidence-gated initial worker routing; no observed quality evidence or available provider means the caller route is preserved.
 - **V270**: persists deterministic validation boot-verification verdict, health, and reason so concrete-test rescoring preserves BUILD evidence.
+- **V273**: persists provider-independent executable-verification status, failure stage and bounded evidence on validation reports.
+- **V274**: persists bounded Ganesh worker-attempt evidence and seeds its default-off feature flag.
+- **V275**: persists the run provider/model routing contract used by submit, restart, retry, reviewer, chat and background dispatch; exact locks fail closed at the transport boundary.
+- **V276**: persists linked `project_repo` source-readiness status, source count and bounded failure evidence for brownfield admission.
+- **V277**: persists authoritative source/change fingerprints on generated test plans so stale or unrelated tests are excluded rather than scored.
+- **V279**: widens account/org integration credential columns for the versioned AES-GCM envelope. Existing applied migration remains immutable.
+- **V280**: widens the remaining account/run Bitbucket secret columns to `TEXT`; strict startup backfill now includes `pipeline_run` SCM snapshots and addresses them by `run_id`. A standalone PostgreSQL V278→V281 rehearsal covers a 480-character legacy secret, encrypt/decrypt and restart idempotence.
+- **V281**: adds durable `pr_review.repo_id` and project/repository-scoped PR-review idempotency for linked-repository admission.
+- **V282**: creates the exact, tenant-scoped durable LLM execution-context contract used across run, project, agent-session, review, benchmark, and explicitly internal work.
+- **V320** (RR-339 / RR-340): adds `integration_run.org_id` + `created_by_user_id` and an
+  `(org_id, created_at DESC)` index. `IntegrationRun.tenantId` is populated opportunistically by
+  `TenantInterceptor` from a request-scoped thread local and defaults to the literal `'default'` on
+  unauthenticated webhook threads, so it was never an ownership fact; these columns are. Reads
+  (`GET /api/integrations/runs`) scope on `org_id`; legacy rows keep NULL and are visible only to
+  SUPER_ADMIN. `created_by_user_id` records the actor that caused an interactive trigger, which now
+  runs under the caller's identity rather than the global `run-on-behalf-of-user-id` runner.
+- **V338** (RR-1446): `agent_task.plan_index INTEGER` (nullable) — persists the planner-intent order
+  of each task so the approval gate renders the planner's sequence rather than the unspecified
+  database row order (all tasks are PENDING at the gate, so the old status-only sort was a no-op).
+  Written by `StateStore.savePlan` / `RunPersistenceWriter.persistTasks` (and appended plans);
+  `RunMapper.TASK_DISPLAY_ORDER` sorts by it first, status is decoration only, legacy NULL rows sort
+  last. Pinned by `RunMapperTaskOrderTest`.
+- **V283**: expands `run_step_usage` into the canonical physical-provider-attempt ledger with tenant/context, feature, key source, retry/failure, latency, BIGINT call-index, and safe numeric usage metadata. Historical arbitrary raw JSON is scrubbed during upgrade.
 - **V191** (PR-B-part-2, 2026-05-13): `project.{archived_at,deleted_at}` columns + partial indexes (`idx_project_active` on `(org_id) WHERE archived_at IS NULL AND deleted_at IS NULL`, `idx_project_deleted_at` for the PR-H cleanup sweeper). Backfills `archived_at = updated_at` on legacy `status='ARCHIVED'` rows. Companion code change: project archive is now reversible (`POST /api/projects/{id}/unarchive`), `DELETE /api/projects/{id}` performs a soft-delete with a 30-day undo window (restored via `POST /api/projects/{id}/restore`). PipelineRun already carried the same two columns from V60 / V60.1 — same lifecycle endpoints (`/runs/{id}/unarchive`, `/runs/{id}/soft-delete`, `/runs/{id}/restore`) wired on the run side too.
 - **V192** (PR-M, 2026-05-13): `project_architecture_doc.generated_from_branches jsonb` — captures the branch each per-repo codemap was generated from. Fixes the permanent-STALE-badge bug on projects regenerated with a `?branch=<non-default>` override: `StalenessService.compute` now probes the SAME branch the codemap came from instead of always assuming `defaultBranch`. Nullable; legacy pre-V192 rows fall through to existing defaultBranch behaviour.
 - **V193** (PR-I, 2026-05-13): `execution_run.failure_reason TEXT` — populated on every non-clean terminal path by `ExecutionOrchestrator` (V2 submitRun crash, planner deadline, mirrored V2 statusReason). Surfaces the "why did this fail" string on the V3 dashboard so operators don't have to SSH the VM. Companion `mirrorV2Terminal` change propagates V2's `statusReason` / `failureReason` into ExecutionRun.failureReason.
@@ -80,3 +111,33 @@ Persistence layer for pipeline runs, tasks, and all mutable state.
 - Token usage tracked per run via atomic `addTokens()` SQL update (no read-modify-write race)
 - Quota enforcement: `TierEnforcementService.assertAndIncrementRunCount(userId, credits)` uses pessimistic lock + single TX (TOCTOU fix). Multi-credit support: increments by N at plan approval (not submission). Refunds via `decrementRunCount(userId, credits)` on FAILURE.
 - Plan versioning via `savePlanVersion()` / `incrementPlanVersion()` — used by apply-suggestion flows
+
+## Erasure and heartbeat lifecycle (RR-090 / RR-071, 2026-07-21)
+
+- `PipelineRunRepository.TERMINAL_STATUSES` is the shared fail-closed terminal set
+  (`COMPLETE`/`FAILED`/`PARTIAL`/`CANCELLED`/`ABORTED`/`REJECTED`). GDPR erasure
+  (`softDeleteTerminalByUserId`, replacing `softDeleteByUserId`) and the hard-delete sweep
+  (`findSoftDeletedOlderThan`) are now `IN` ALLOWLISTS against it. The old erasure query was a
+  `NOT IN` denylist naming only the obsolete `PENDING`/`IN_PROGRESS`/`IN_PROGRESS_BATCH` spellings,
+  so four of the six live V2 states (`QUEUED`, `AWAITING_APPROVAL`, `APPROVAL_RESUMING`, `WORKING`,
+  `REVIEWING`) were unprotected — erasure tombstoned live runs and the 7-day sweep hard-deleted the
+  row while the worker was still spending. A new or unrecognised status is now REFUSED, not
+  tombstoned.
+- **Erasure now COMPLETES rather than skipping live runs (RR-090, 2026-07-21).** The earlier fix
+  stopped tombstoning live runs but merely SKIPPED them and logged "erasure INCOMPLETE" — the
+  Article-17 obligation was left unmet. `DataRetentionService.eraseUserData` now: (1) settles every
+  live run through the real `RunLifecycleService.cancel(runId)` path (atomic `CANCELLED` + plan-gate
+  signal + pipeline-future interrupt + PR close, not a status hack), (2) waits bounded
+  (`ERASURE_SETTLE_TIMEOUT`, 10s) via `runRepository.findNonTerminalByUserId` /
+  `countNonTerminalByUserId` for terminalisation, (3) tombstones the now-terminal rows through
+  `ErasureObligationStore.softDeleteTerminal` (the transactional half, kept out of the
+  cancel/sleep orchestration so no DB connection is held across a sleep), and (4) if any run still
+  cannot be confirmed terminal, records a durable `pending_erasure_obligation` (V334) instead of a
+  log line. `DataRetentionService.retryPendingErasures` (in the daily sweep) re-drives each open
+  obligation to completion and clears it when no live run remains, so user data cannot survive
+  erasure indefinitely. The residual is a tracked, retryable state.
+- `StateStore.updateHeartbeat` delegates to `claimExecutionOwner` instead of doing
+  `findById` → mutate → `save`. `PipelineRun` has no `@Version`, so that read-modify-write wrote
+  back every field as loaded and could revert a concurrent terminal status, gate, token/cost or
+  cancellation write. (It had no production caller; `RunOrchestrator` already used the narrow fenced
+  queries. The dead method's javadoc invited exactly the wrong reuse.)

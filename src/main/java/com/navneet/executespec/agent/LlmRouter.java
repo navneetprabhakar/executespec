@@ -10,14 +10,20 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.navneet.executespec.billing.service.ManagedAiUsageService;
 import com.navneet.executespec.cost.RunCostTracker;
 import com.navneet.executespec.cost.RunStepUsageRecorder;
+import com.navneet.executespec.executioncontext.LlmExecutionDispatchGuard;
+import com.navneet.executespec.executioncontext.LlmExecutionPolicyFactory;
+import com.navneet.executespec.executioncontext.LlmExecutionReference;
 import com.navneet.executespec.observability.Metrics;
 import com.navneet.executespec.router.OpenRouterModelMapper;
+import com.navneet.executespec.security.ContextSanitizer;
 import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
 import com.navneet.executespec.tool.ToolRegistry;
@@ -60,13 +66,15 @@ import lombok.extern.slf4j.Slf4j;
  *       1.1.4's broken {@code extra_body} serialization. Verified working in Phase 0.
  * </ul>
  *
- * <p><b>Per-run API-key resolution (V165+):</b> the router resolves customer-configured BYOK keys
- * via {@link RunKeyContextStore} keyed by {@code request.context().runId()} and threads them into
- * provider-side dispatch. When no customer key is present the call falls through to the platform
- * default (HYBRID semantics). For Anthropic the per-key model cache ({@link #anthropicByKey}) wraps
- * Spring AI's singleton bean — keyed by SHA-256(apiKey), Caffeine LRU 128 × 1h TTL — so customer
- * prompt-caching stays on the customer's API account. OpenAI + Gemini wrappers already accept a
- * per-request key, so the router just threads it through.
+ * <p><b>Durable API-key resolution (V282+):</b> every customer request carries an exact execution
+ * context id plus tenant scope. {@link LlmExecutionDispatchGuard} reloads its immutable
+ * provider/model/key-source policy and resolves the current encrypted credential immediately before
+ * each physical attempt. Missing, stale, cross-tenant, out-of-policy or exhausted contexts fail
+ * before transport; OWN_KEYS never falls through to a platform key. The legacy per-run key cache
+ * remains only as compatibility plumbing when enforcement is explicitly disabled. For Anthropic the
+ * per-key model cache ({@link #anthropicByKey}) wraps Spring AI's singleton bean — keyed by
+ * SHA-256(apiKey), Caffeine LRU 128 × 1h TTL — so customer prompt-caching stays on the customer's
+ * API account. OpenAI + Gemini wrappers accept the per-request resolved key directly.
  *
  * <p><strong>Audit 2026-05-12 review item M #68 — CLOSED (RL-2026-05-062):</strong> multi-provider
  * failover is now wired in {@link #maybeFailover}. After the same-provider bounded transient retry
@@ -98,10 +106,31 @@ public class LlmRouter {
   private final RunStepUsageRecorder stepUsageRecorder;
   private final SseBroadcaster broadcaster;
   private final RunKeyContextStore keyContextStore;
+  private final LlmExecutionDispatchGuard executionDispatchGuard;
+  private final LlmExecutionPolicyFactory executionPolicyFactory;
+  private final RunKeySourceModeResolver runKeySourceModeResolver;
   private final AnthropicForcedToolClient anthropicForcedToolClient;
   private final com.navneet.executespec.router.ModelRegistry modelRegistry;
   private final com.navneet.executespec.config.featureflag.FeatureFlagService featureFlagService;
   private final ManagedAiUsageService managedAiUsageService;
+  private final com.navneet.executespec.router.RunRoutePolicyService runRoutePolicyService;
+
+  /**
+   * RR-392 (2026-07-20) — the shared last-mile spend authorization. This router previously
+   * re-implemented the live-LLM kill switch and the test-reservation guard inline from its own
+   * {@code @Value} fields, so {@link ProviderDispatchAuthorization} — the class documented as
+   * guarding "every provider-spending transport" — existed only on operator fixture controllers and
+   * was not the production boundary it claimed to be. There is now exactly one implementation of
+   * the rule, and it is injected here.
+   */
+  private final ProviderDispatchAuthorization providerDispatchAuthorization;
+
+  /**
+   * RR-044 (2026-07-22, P1) — provider exceptions can echo request headers/bodies (including API
+   * keys and customer content). Every raw {@code e.getMessage()} that reaches a log line is routed
+   * through the shared redactor so credentials cannot enter application logs or telemetry.
+   */
+  private final ContextSanitizer contextSanitizer;
 
   @Qualifier("anthropicChatModel") private final ObjectProvider<AnthropicChatModel> anthropicModelProvider;
 
@@ -112,19 +141,8 @@ public class LlmRouter {
   @Value("${spring.ai.anthropic.api-key:}")
   private String platformAnthropicApiKey;
 
-  /**
-   * Provider-transport kill switch. Maven test forks force this off; live tests must opt in
-   * explicitly after reserving provider budget. Initialized true so constructor-only unit tests
-   * that use mocked transports remain unchanged outside a Spring context.
-   */
-  @Value("${executespec.live-llm.enabled:true}")
-  private boolean liveLlmEnabled = true;
-
-  @Value("${executespec.live-llm.test-mode:false}")
-  private boolean liveLlmTestMode;
-
-  @Value("${executespec.live-llm.reservation-id:}")
-  private String liveLlmReservationId;
+  @Value("${executespec.llm.execution-context-enforcement.enabled:true}")
+  private boolean executionContextEnforcementEnabled = true;
 
   /**
    * Multi-provider failover (closes audit M #68). When the same-provider transient retry below is
@@ -158,7 +176,76 @@ public class LlmRouter {
       String runId,
       String agentRole,
       String stepId) {
-    return callText(provider, model, messages, runId, agentRole, stepId, null);
+    return callText(provider, model, messages, runId, agentRole, stepId, (Integer) null);
+  }
+
+  /** Customer-safe text seam: the durable tenant/policy identity is explicit on the request. */
+  public ChatResponse callText(
+      String provider,
+      String model,
+      List<Message> messages,
+      String runId,
+      String agentRole,
+      String stepId,
+      LlmExecutionReference reference) {
+    return callText(
+        provider,
+        model,
+        messages,
+        runId,
+        agentRole,
+        stepId,
+        null,
+        LlmRequest.PromptCacheStrategy.DEFAULT,
+        reference,
+        false);
+  }
+
+  /** Customer-safe strict text seam for an exact provider/model pin. */
+  public ChatResponse callTextStrict(
+      String provider,
+      String model,
+      List<Message> messages,
+      String runId,
+      String agentRole,
+      String stepId,
+      Integer maxTokens,
+      LlmExecutionReference reference) {
+    return callText(
+        provider,
+        model,
+        messages,
+        runId,
+        agentRole,
+        stepId,
+        maxTokens,
+        LlmRequest.PromptCacheStrategy.DEFAULT,
+        reference,
+        true);
+  }
+
+  /** Customer-safe bounded text seam with an explicit prompt-cache policy. */
+  public ChatResponse callText(
+      String provider,
+      String model,
+      List<Message> messages,
+      String runId,
+      String agentRole,
+      String stepId,
+      Integer maxTokens,
+      LlmRequest.PromptCacheStrategy promptCacheStrategy,
+      LlmExecutionReference reference) {
+    return callText(
+        provider,
+        model,
+        messages,
+        runId,
+        agentRole,
+        stepId,
+        maxTokens,
+        promptCacheStrategy,
+        reference,
+        false);
   }
 
   /** Text seam with strict provider pinning; transient failures never fail over cross-provider. */
@@ -180,28 +267,17 @@ public class LlmRouter {
       String agentRole,
       String stepId,
       Integer maxTokens) {
-    return call(
-        LlmRequest.builder()
-            .provider(provider)
-            .model(model)
-            .messages(messages)
-            .context(
-                new com.navneet.executespec.tool.ExecutionContext(
-                    (runId == null || runId.isBlank())
-                        ? "text-" + Integer.toHexString(messages.hashCode())
-                        : runId,
-                    (agentRole == null || agentRole.isBlank())
-                        ? "__text__"
-                        : "__text__-" + agentRole,
-                    Path.of(System.getProperty("java.io.tmpdir", "/tmp"))
-                        .toAbsolutePath()
-                        .normalize()))
-            .toolsOverride(List.of())
-            .agentRole(agentRole)
-            .stepId(stepId)
-            .maxTokens(maxTokens)
-            .strictProvider(true)
-            .build());
+    return callText(
+        provider,
+        model,
+        messages,
+        runId,
+        agentRole,
+        stepId,
+        maxTokens,
+        LlmRequest.PromptCacheStrategy.DEFAULT,
+        null,
+        true);
   }
 
   /** Text seam with an explicit output cap for compatibility surfaces with a bounded contract. */
@@ -238,10 +314,37 @@ public class LlmRouter {
       String stepId,
       Integer maxTokens,
       LlmRequest.PromptCacheStrategy promptCacheStrategy) {
+    return callText(
+        provider,
+        model,
+        messages,
+        runId,
+        agentRole,
+        stepId,
+        maxTokens,
+        promptCacheStrategy,
+        null,
+        false);
+  }
+
+  private ChatResponse callText(
+      String provider,
+      String model,
+      List<Message> messages,
+      String runId,
+      String agentRole,
+      String stepId,
+      Integer maxTokens,
+      LlmRequest.PromptCacheStrategy promptCacheStrategy,
+      LlmExecutionReference reference,
+      boolean strictProvider) {
     String effectiveRunId =
         (runId == null || runId.isBlank())
             ? "text-" + Integer.toHexString(messages.hashCode())
             : runId;
+    if (reference == null) {
+      reference = executionPolicyFactory.findForRun(effectiveRunId).orElse(null);
+    }
     String taskId =
         (agentRole == null || agentRole.isBlank()) ? "__text__" : "__text__-" + agentRole;
     // Anthropic's current API requires an explicit max_tokens field even for text-only calls.
@@ -264,11 +367,13 @@ public class LlmRouter {
                     taskId,
                     Path.of(System.getProperty("java.io.tmpdir", "/tmp"))
                         .toAbsolutePath()
-                        .normalize()))
+                        .normalize(),
+                    reference))
             .toolsOverride(List.of())
             .agentRole(agentRole)
             .stepId(stepId)
             .maxTokens(effectiveMaxTokens)
+            .strictProvider(strictProvider)
             .promptCacheStrategy(promptCacheStrategy)
             .build());
   }
@@ -333,15 +438,17 @@ public class LlmRouter {
    * @return Spring AI {@link ChatResponse} (uniform shape regardless of provider)
    */
   public ChatResponse call(LlmRequest request) {
-    if (!liveLlmEnabled) {
-      throw new IllegalStateException(
-          "Live LLM transport is disabled. Explicitly authorize the live-llm-test profile and"
-              + " reserve provider budget before dispatch.");
+    // RR-392 — one shared fail-closed authorization for every provider-spending dispatch.
+    providerDispatchAuthorization.authorize(
+        request.provider(), request.model(), request.context().runId());
+    if (executionContextEnforcementEnabled && request.llmExecutionContextId() == null) {
+      throw new com.navneet.executespec.executioncontext.LlmDispatchPolicyException(
+          com.navneet.executespec.executioncontext.LlmDispatchPolicyException.Reason
+              .CONTEXT_REQUIRED,
+          "Provider dispatch requires an explicit durable customer or PLATFORM_INTERNAL context");
     }
-    if (liveLlmTestMode) {
-      ProviderTestBudgetGuard.authorize(
-          liveLlmReservationId, request.provider(), request.model(), request.context().runId());
-    }
+    var routePolicy = runRoutePolicyService.forRun(request.context().runId());
+    request = enforceDurableRoutePolicy(request, routePolicy);
     // If the caller supplied an explicit tool list (e.g. the planner restricting
     // to just submitPlan), honor it; otherwise bind every registered V2 tool.
     List<ToolCallback> tools =
@@ -349,15 +456,29 @@ public class LlmRouter {
             ? request.toolsOverride()
             : toolRegistry.bind(request.context());
 
+    // V282 exact dispatch policy takes precedence over every cache. Legacy internal/test callers
+    // without a durable reference keep the old path only until their explicit PLATFORM_INTERNAL
+    // contexts are migrated; customer entry points attach the reference before reaching here.
+    LlmExecutionDispatchGuard.ResolvedDispatch durableDispatch =
+        request.llmExecutionContextId() == null ? null : executionDispatchGuard.authorize(request);
+
     // Per-run BYOK lookup — null when the run hasn't pre-resolved keys
     // (test harnesses, smoke endpoints) or when the customer has no
     // configured keys. Either case falls through to platform defaults
     // for HYBRID semantics; OWN_KEYS hard-fail mode is enforced by
     // ApiKeyResolver.validateKeyAvailability at submit time.
-    RunKeyContext keys = keyContextStore.get(request.context().runId());
-    String resolvedKey = (keys == null) ? null : keys.keyFor(request.provider());
+    RunKeyContext keys =
+        durableDispatch == null
+            ? keyContextStore.get(request.context().runId())
+            : contextForManagedAi(durableDispatch);
+    String resolvedKey =
+        durableDispatch == null
+            ? ((keys == null) ? null : keys.keyFor(request.provider()))
+            : durableDispatch.apiKey();
     RunKeyContext.Source source =
-        (keys == null) ? RunKeyContext.Source.PLATFORM : keys.sourceFor(request.provider());
+        durableDispatch == null
+            ? ((keys == null) ? RunKeyContext.Source.PLATFORM : keys.sourceFor(request.provider()))
+            : durableDispatch.keySource();
     // No-key fallback is reflected as PLATFORM source for the metric,
     // even when the run has BYOK configured for *another* provider.
     if (resolvedKey == null) source = RunKeyContext.Source.PLATFORM;
@@ -371,18 +492,49 @@ public class LlmRouter {
             keys,
             source);
     if (authorization.modelChanged()) {
+      if (routePolicy.exactLock()) {
+        throw new IllegalStateException(
+            "Exact run route cannot be changed by managed-AI policy: " + authorization.reason());
+      }
       request =
           request.toBuilder()
               .provider(authorization.provider())
               .model(authorization.model())
               .build();
-      resolvedKey = (keys == null) ? null : keys.keyFor(request.provider());
-      source = (keys == null) ? RunKeyContext.Source.PLATFORM : keys.sourceFor(request.provider());
+      if (durableDispatch != null) {
+        durableDispatch = executionDispatchGuard.authorize(request);
+        resolvedKey = durableDispatch.apiKey();
+        source = durableDispatch.keySource();
+        keys = contextForManagedAi(durableDispatch);
+      } else {
+        resolvedKey = (keys == null) ? null : keys.keyFor(request.provider());
+        source =
+            (keys == null) ? RunKeyContext.Source.PLATFORM : keys.sourceFor(request.provider());
+      }
       if (resolvedKey == null) source = RunKeyContext.Source.PLATFORM;
       broadcaster.emit(
           request.context().runId(),
           RunEvent.log(
               request.context().runId(), request.context().taskId(), authorization.reason()));
+    }
+
+    // BYOK boundary — fail CLOSED (deep-dive §7 #2, 2026-07-17). If this call is about to dispatch
+    // on a PLATFORM key but the run is a pure-BYOK (OWN_KEYS) run, the customer key context was
+    // lost
+    // (cache eviction / Redis outage / cross-JVM resume) or routing moved to a provider the
+    // customer
+    // did not key. Either way, spending on platform credentials would violate the customer's cost +
+    // data boundary. Refuse the dispatch rather than silently fall back. HYBRID/SYSTEM runs keep
+    // their intentional platform fallback. Guarded so a missing/unattributable run stays
+    // permissive.
+    if (source == RunKeyContext.Source.PLATFORM
+        && runKeySourceModeResolver.isOwnKeysRun(request.context().runId())) {
+      throw new ByokContextUnavailableException(
+          "BYOK_CONTEXT_UNAVAILABLE: run "
+              + request.context().runId()
+              + " is OWN_KEYS but no customer key is available for provider "
+              + request.provider()
+              + " at dispatch — refusing to spend on platform credentials.");
     }
 
     log.info(
@@ -401,6 +553,55 @@ public class LlmRouter {
     }
   }
 
+  private static RunKeyContext contextForManagedAi(
+      LlmExecutionDispatchGuard.ResolvedDispatch dispatch) {
+    var context = dispatch.context();
+    RunKeyContext.Source source = dispatch.keySource();
+    String key = dispatch.apiKey();
+    return new RunKeyContext(
+        "anthropic".equalsIgnoreCase(context.getRequestedProvider()) ? key : null,
+        "openai".equalsIgnoreCase(context.getRequestedProvider()) ? key : null,
+        "gemini".equalsIgnoreCase(context.getRequestedProvider()) ? key : null,
+        "openrouter".equalsIgnoreCase(context.getRequestedProvider()) ? key : null,
+        "deepseek".equalsIgnoreCase(context.getRequestedProvider()) ? key : null,
+        "fireworks".equalsIgnoreCase(context.getRequestedProvider()) ? key : null,
+        source,
+        source,
+        source,
+        source,
+        source,
+        source,
+        context.getUserId(),
+        context.getOrgId());
+  }
+
+  LlmRequest enforceDurableRoutePolicy(
+      LlmRequest request, com.navneet.executespec.router.RunRoutePolicyService.RoutePolicy policy) {
+    if (policy == null || !policy.exactLock()) return request;
+    String expectedProvider = normalizeProvider(policy.requestedProvider());
+    String actualProvider = normalizeProvider(request.provider());
+    String expectedModel = modelRegistry.canonicalize(policy.requestedModel());
+    String actualModel = modelRegistry.canonicalize(request.model());
+    if (!expectedProvider.equals(actualProvider) || !expectedModel.equals(actualModel)) {
+      throw new IllegalStateException(
+          "Exact run route violation: requested "
+              + expectedProvider
+              + "/"
+              + expectedModel
+              + " but dispatch attempted "
+              + actualProvider
+              + "/"
+              + actualModel);
+    }
+    return request.strictProvider() ? request : request.toBuilder().strictProvider(true).build();
+  }
+
+  private static String normalizeProvider(String provider) {
+    if (provider == null) return "";
+    String normalized = provider.trim().toLowerCase(Locale.ROOT);
+    return "google".equals(normalized) ? "gemini" : normalized;
+  }
+
   /**
    * Same-provider bounded transient retry (the original {@link #call} body). Returns on the first
    * success (recording cost + metrics) or throws the last error once attempts are exhausted / the
@@ -413,52 +614,61 @@ public class LlmRouter {
       RunKeyContext.Source source,
       RunKeyContext keys) {
     RuntimeException lastError = null;
+    boolean geminiAuditedTransport = "gemini".equalsIgnoreCase(request.provider());
+    boolean anthropicAuditedTransport = "anthropic".equalsIgnoreCase(request.provider());
+    boolean providerOwnsPhysicalAccounting = geminiAuditedTransport || anthropicAuditedTransport;
+    AtomicInteger physicalAttemptOrdinal = new AtomicInteger();
+    AtomicReference<String> parentAttemptId = new AtomicReference<>(request.retryOf());
+    GeminiNativeToolClient.AuditContext geminiAuditContext =
+        geminiAuditedTransport
+            ? new GeminiNativeToolClient.AuditContext(
+                request, source.name(), physicalAttemptOrdinal, parentAttemptId)
+            : null;
+    PhysicalAttemptChain anthropicAuditContext =
+        anthropicAuditedTransport
+            ? new PhysicalAttemptChain(
+                request, source.name(), keys, source, physicalAttemptOrdinal, parentAttemptId)
+            : null;
     for (int attempt = 1; attempt <= TRANSIENT_RETRY_MAX_ATTEMPTS; attempt++) {
+      // Audit intent is write-ahead and fail-closed. If this durable append fails, the provider
+      // transport is never invoked and no unaccounted Enterprise spend can occur.
+      if (!providerOwnsPhysicalAccounting) {
+        stepUsageRecorder.prepareAttempt(
+            request, request.provider(), request.model(), source.name(), attempt);
+      }
       long start = System.currentTimeMillis();
+      ChatResponse resp;
+      CanonicalDispatchResult canonicalResult = null;
       try {
-        ChatResponse resp = dispatch(request, tools, resolvedKey);
-        long elapsed = System.currentTimeMillis() - start;
-        metrics.recordLlmLatency(
-            request.provider(), request.model(), "ok", java.time.Duration.ofMillis(elapsed));
-        metrics.recordKeySource(request.provider(), source.name());
-        String runId = request.context().runId();
-        String taskId = request.context().taskId();
-        RunCostTracker.CallUsage callUsage =
-            costTracker.record(runId, taskId, request.provider(), request.model(), resp);
-        stepUsageRecorder.record(
-            runId,
-            taskId,
-            request.agentRole(),
-            request.stepId(),
-            retryOf(request, attempt),
-            request.provider(),
-            request.model(),
-            callUsage);
-        managedAiUsageService.recordSuccessfulCall(
-            runId,
-            taskId,
-            request.agentRole(),
-            request.stepId(),
-            request.provider(),
-            request.model(),
-            callUsage,
-            keys,
-            source);
-        RunCostTracker.Snapshot snap = costTracker.snapshot(runId);
-        broadcaster.emit(
-            runId, RunEvent.tokenUsage(runId, taskId, request.provider(), request.model(), snap));
-        log.info(
-            "LlmRouter <- {} {} ok in {}ms (attempt {})",
-            request.provider(),
-            request.model(),
-            elapsed,
-            attempt);
-        return resp;
+        // Keep this try/catch strictly around the provider transport. Once a provider has returned
+        // successfully, no cost/accounting/telemetry projection is allowed to turn that physical
+        // success into a provider failure or cause the exact same request to be spent again.
+        if (geminiAuditedTransport) {
+          GeminiNativeToolClient.AuditedCallResult geminiResult =
+              callGeminiAudited(request, tools, resolvedKey, geminiAuditContext);
+          canonicalResult =
+              new CanonicalDispatchResult(
+                  geminiResult.response(),
+                  geminiResult.callUsage(),
+                  geminiResult.usageEventId(),
+                  geminiResult.costProjectionAvailable());
+          resp = canonicalResult.response();
+        } else if (anthropicAuditedTransport) {
+          canonicalResult =
+              callAnthropicAudited(request, tools, resolvedKey, anthropicAuditContext);
+          resp = canonicalResult.response();
+        } else {
+          resp = dispatch(request, tools, resolvedKey);
+        }
       } catch (RuntimeException e) {
         long elapsed = System.currentTimeMillis() - start;
         metrics.recordLlmLatency(
             request.provider(), request.model(), "failed", java.time.Duration.ofMillis(elapsed));
         metrics.recordKeySource(request.provider(), source.name());
+        if (!providerOwnsPhysicalAccounting) {
+          stepUsageRecorder.recordFailure(
+              request, request.provider(), request.model(), source.name(), attempt, elapsed, e);
+        }
         log.warn(
             "LlmRouter <- {} {} FAILED in {}ms (attempt {}/{}): {}",
             request.provider(),
@@ -466,7 +676,7 @@ public class LlmRouter {
             elapsed,
             attempt,
             TRANSIENT_RETRY_MAX_ATTEMPTS,
-            e.getMessage());
+            contextSanitizer.sanitizeException(e));
         lastError = e;
         if (attempt < TRANSIENT_RETRY_MAX_ATTEMPTS && isTransientError(e)) {
           long backoffMs = TRANSIENT_RETRY_BASE_MS * (1L << (attempt - 1));
@@ -477,8 +687,157 @@ public class LlmRouter {
         }
         throw e;
       }
+
+      long elapsed = System.currentTimeMillis() - start;
+      recordPostSuccessMetric(
+          "transport_metrics",
+          () -> {
+            metrics.recordLlmLatency(
+                request.provider(), request.model(), "ok", java.time.Duration.ofMillis(elapsed));
+            metrics.recordKeySource(request.provider(), source.name());
+          });
+      String runId = request.context().runId();
+      String taskId = request.context().taskId();
+
+      RunCostTracker.CallUsage callUsage;
+      boolean costProjectionAvailable;
+      String canonicalUsageEventId;
+      if (canonicalResult != null) {
+        callUsage = canonicalResult.callUsage();
+        costProjectionAvailable = canonicalResult.costProjectionAvailable();
+        canonicalUsageEventId = canonicalResult.usageEventId();
+        metrics.recordLlmPostSuccessProjection(
+            "run_cost", costProjectionAvailable ? "ok" : "failed");
+      } else {
+        costProjectionAvailable = true;
+        canonicalUsageEventId = null;
+        try {
+          callUsage = costTracker.record(runId, taskId, request.provider(), request.model(), resp);
+          metrics.recordLlmPostSuccessProjection("run_cost", "ok");
+        } catch (RuntimeException projectionFailure) {
+          costProjectionAvailable = false;
+          callUsage = unknownCostUsage(request, resp);
+          recordPostSuccessProjectionFailure(request, "run_cost", projectionFailure);
+        }
+      }
+
+      final RunCostTracker.CallUsage usageForLedger = callUsage;
+      final int physicalAttempt = attempt;
+      final String[] usageEventId = {canonicalUsageEventId};
+      if (canonicalResult == null) {
+        recordPostSuccessMetric(
+            "attempt_ledger",
+            () ->
+                usageEventId[0] =
+                    stepUsageRecorder.recordSuccess(
+                        request,
+                        request.provider(),
+                        request.model(),
+                        source.name(),
+                        physicalAttempt,
+                        elapsed,
+                        usageForLedger,
+                        resp));
+      }
+
+      if (costProjectionAvailable) {
+        recordPostSuccessMetric(
+            "managed_ai",
+            () ->
+                managedAiUsageService.recordSuccessfulCall(
+                    usageEventId[0],
+                    runId,
+                    taskId,
+                    request.agentRole(),
+                    request.stepId(),
+                    request.provider(),
+                    request.model(),
+                    usageForLedger,
+                    keys,
+                    source));
+      } else {
+        // A negative sentinel in the canonical row makes the cost explicitly unknown. Do not feed
+        // it into the managed-credit projection; reconciliation will expose the missing projection.
+        metrics.recordLlmPostSuccessProjection("managed_ai", "skipped_unknown_cost");
+      }
+
+      recordPostSuccessMetric(
+          "token_event",
+          () -> {
+            RunCostTracker.Snapshot snap = costTracker.snapshot(runId);
+            broadcaster.emit(
+                runId,
+                RunEvent.tokenUsage(runId, taskId, request.provider(), request.model(), snap));
+          });
+      log.info(
+          "LlmRouter <- {} {} ok in {}ms (attempt {})",
+          request.provider(),
+          request.model(),
+          elapsed,
+          attempt);
+      return resp;
     }
     throw lastError; // unreachable: loop body always returns or throws
+  }
+
+  private void recordPostSuccessMetric(String projection, Runnable action) {
+    try {
+      action.run();
+      metrics.recordLlmPostSuccessProjection(projection, "ok");
+    } catch (RuntimeException projectionFailure) {
+      metrics.recordLlmPostSuccessProjection(projection, "failed");
+      log.error(
+          "LLM post-success projection failed projection={} (provider response will not be"
+              + " retried): {}",
+          projection,
+          projectionFailure.getClass().getSimpleName());
+    }
+  }
+
+  private void recordPostSuccessProjectionFailure(
+      LlmRequest request, String projection, RuntimeException failure) {
+    metrics.recordLlmPostSuccessProjection(projection, "failed");
+    log.error(
+        "LLM post-success projection failed run={} task={} provider={} projection={}"
+            + " (provider response will not be retried): {}",
+        request.context().runId(),
+        request.context().taskId(),
+        request.provider(),
+        projection,
+        failure.getClass().getSimpleName());
+  }
+
+  /**
+   * Preserve the successful physical-attempt fact when the in-memory cost projection itself fails.
+   * Cost {@code -1} is the report's explicit unknown-cost sentinel; it must never be projected into
+   * managed credits. Generic token fields remain useful evidence without inventing a price.
+   */
+  private static RunCostTracker.CallUsage unknownCostUsage(LlmRequest request, ChatResponse resp) {
+    var usage = resp == null || resp.getMetadata() == null ? null : resp.getMetadata().getUsage();
+    long input = usage == null || usage.getPromptTokens() == null ? 0 : usage.getPromptTokens();
+    long output =
+        usage == null || usage.getCompletionTokens() == null ? 0 : usage.getCompletionTokens();
+    long cacheWrite = responseMetadataLong(resp, "cache_creation_input_tokens");
+    long cacheRead = responseMetadataLong(resp, "cache_read_input_tokens");
+    long thinking = responseMetadataLong(resp, "thinking_tokens");
+    long reasoning = thinking > 0 ? thinking : responseMetadataLong(resp, "reasoning_tokens");
+    if (thinking > 0) output = Math.min(Long.MAX_VALUE, output + thinking);
+    return new RunCostTracker.CallUsage(
+        request.provider(),
+        request.model(),
+        input,
+        output,
+        cacheWrite,
+        cacheRead,
+        -1.0,
+        0,
+        reasoning);
+  }
+
+  private static long responseMetadataLong(ChatResponse response, String key) {
+    if (response == null || response.getMetadata() == null) return 0;
+    Object value = response.getMetadata().get(key);
+    return value instanceof Number number ? Math.max(0, number.longValue()) : 0;
   }
 
   /** Backoff sleep between same-provider retries. Package-private so tests can no-op it (spy). */
@@ -526,17 +885,41 @@ public class LlmRouter {
       String altModel = entry[1];
       if (altProvider.isEmpty() || altModel == null) continue;
       if (altProvider.equals(primaryProvider)) continue;
-      String altKey = (keys == null) ? null : keys.keyFor(altProvider);
+      LlmRequest altRequest =
+          request.toBuilder()
+              .provider(altProvider)
+              .model(altModel)
+              .retryOf(attributionKey(request))
+              .build();
+      LlmExecutionDispatchGuard.ResolvedDispatch durableAlt = null;
+      if (request.llmExecutionContextId() != null) {
+        try {
+          durableAlt = executionDispatchGuard.authorize(altRequest);
+        } catch (com.navneet.executespec.executioncontext.LlmDispatchPolicyException rejected) {
+          log.info(
+              "LlmRouter failover skipping {}/{} — durable policy rejected it ({})",
+              altProvider,
+              altModel,
+              rejected.reason());
+          continue;
+        }
+      }
+      String altKey =
+          durableAlt == null
+              ? ((keys == null) ? null : keys.keyFor(altProvider))
+              : durableAlt.apiKey();
       // Don't cross a BYOK run onto a platform key for a provider it never keyed.
-      if (primaryUsedCustomerKey && altKey == null) {
+      if (durableAlt == null && primaryUsedCustomerKey && altKey == null) {
         log.info(
             "LlmRouter failover skipping {} — BYOK run has no customer key for it", altProvider);
         continue;
       }
       RunKeyContext.Source altSource =
-          (altKey == null || keys == null)
-              ? RunKeyContext.Source.PLATFORM
-              : keys.sourceFor(altProvider);
+          durableAlt == null
+              ? ((altKey == null || keys == null)
+                  ? RunKeyContext.Source.PLATFORM
+                  : keys.sourceFor(altProvider))
+              : durableAlt.keySource();
 
       log.warn(
           "LlmRouter FAILOVER {} {} -> {} {} (primary error: {})",
@@ -544,7 +927,7 @@ public class LlmRouter {
           request.model(),
           altProvider,
           altModel,
-          primaryError.getMessage());
+          contextSanitizer.sanitizeException(primaryError));
       String runId = request.context().runId();
       broadcaster.emit(
           runId,
@@ -558,12 +941,6 @@ public class LlmRouter {
                   + " ("
                   + altModel
                   + ")"));
-      LlmRequest altRequest =
-          request.toBuilder()
-              .provider(altProvider)
-              .model(altModel)
-              .retryOf(attributionKey(request))
-              .build();
       ManagedAiUsageService.CallAuthorization authorization =
           managedAiUsageService.authorizeCall(
               altRequest.context().runId(),
@@ -578,11 +955,17 @@ public class LlmRouter {
                 .provider(authorization.provider())
                 .model(authorization.model())
                 .build();
-        altKey = (keys == null) ? null : keys.keyFor(altRequest.provider());
-        altSource =
-            (altKey == null || keys == null)
-                ? RunKeyContext.Source.PLATFORM
-                : keys.sourceFor(altRequest.provider());
+        if (durableAlt != null) {
+          durableAlt = executionDispatchGuard.authorize(altRequest);
+          altKey = durableAlt.apiKey();
+          altSource = durableAlt.keySource();
+        } else {
+          altKey = (keys == null) ? null : keys.keyFor(altRequest.provider());
+          altSource =
+              (altKey == null || keys == null)
+                  ? RunKeyContext.Source.PLATFORM
+                  : keys.sourceFor(altRequest.provider());
+        }
         broadcaster.emit(
             runId, RunEvent.log(runId, altRequest.context().taskId(), authorization.reason()));
       }
@@ -590,16 +973,13 @@ public class LlmRouter {
         return dispatchWithRetry(altRequest, tools, altKey, altSource, keys);
       } catch (RuntimeException altError) {
         log.warn(
-            "LlmRouter failover target {} also failed: {}", altProvider, altError.getMessage());
+            "LlmRouter failover target {} also failed: {}",
+            altProvider,
+            contextSanitizer.sanitizeException(altError));
         // try the next alternate
       }
     }
     return null;
-  }
-
-  private static String retryOf(LlmRequest request, int attempt) {
-    if (attempt > 1) return attributionKey(request) + "#attempt-" + (attempt - 1);
-    return request.retryOf();
   }
 
   private static String attributionKey(LlmRequest request) {
@@ -671,6 +1051,16 @@ public class LlmRouter {
   }
 
   private ChatResponse callAnthropic(LlmRequest r, List<ToolCallback> tools, String apiKey) {
+    return callAnthropicInternal(r, tools, apiKey, null).response();
+  }
+
+  private CanonicalDispatchResult callAnthropicAudited(
+      LlmRequest r, List<ToolCallback> tools, String apiKey, PhysicalAttemptChain auditContext) {
+    return callAnthropicInternal(r, tools, apiKey, auditContext);
+  }
+
+  private CanonicalDispatchResult callAnthropicInternal(
+      LlmRequest r, List<ToolCallback> tools, String apiKey, PhysicalAttemptChain auditContext) {
     // Pick the per-customer-key model when BYOK is in play; fall back to
     // the platform singleton otherwise. The cache lookup is keyed by
     // SHA-256(apiKey) so the plaintext never sits in the cache key.
@@ -689,11 +1079,28 @@ public class LlmRouter {
     // bypass to the low-level AnthropicApi with ToolChoiceAny (the model MUST emit a tool call).
     // Fail-safe: null result → fall through to the normal AnthropicChatModel path, so this can
     // never regress production Anthropic traffic and only runs on an already-failing salvage call.
-    if ("required".equals(r.toolChoice())) {
-      ChatResponse forced =
-          anthropicForcedToolClient.forcedToolCall(
+    if ("required".equals(r.toolChoice())
+        && anthropicForcedToolClient.canAttempt(r.messages(), tools, apiKey)) {
+      RunStepUsageRecorder.AttemptHandle forcedHandle = prepareAnthropicAttempt(auditContext);
+      long forcedStartedAt = System.currentTimeMillis();
+      AnthropicForcedToolClient.ForcedToolCallOutcome forced =
+          anthropicForcedToolClient.forcedToolCallOutcome(
               r.model(), r.messages(), tools, r.maxTokens(), apiKey);
-      if (forced != null) return forced;
+      if (forced.failure() != null || forced.response() == null) {
+        recordAnthropicFailure(
+            auditContext,
+            forcedHandle,
+            forcedStartedAt,
+            forced.failure() == null
+                ? new IllegalStateException("Anthropic forced tool attempt returned no response")
+                : forced.failure());
+      } else if (forced.usable()) {
+        return completeAnthropicSuccess(
+            r, forced.response(), auditContext, forcedHandle, forcedStartedAt);
+      } else {
+        completeAnthropicIntermediateSuccess(
+            r, forced.response(), auditContext, forcedHandle, forcedStartedAt);
+      }
       log.info("Anthropic forced-salvage produced nothing — falling through to auto tool-choice");
     }
     // Prompt caching — must-have for cost control on multi-iteration tasks.
@@ -736,9 +1143,15 @@ public class LlmRouter {
     if (cache != null) b.cacheOptions(cache);
     if (!dropTemperature) b.temperature(r.temperature());
     if (r.maxTokens() != null) b.maxTokens(r.maxTokens());
+    RunStepUsageRecorder.AttemptHandle primaryHandle = prepareAnthropicAttempt(auditContext);
+    long primaryStartedAt = System.currentTimeMillis();
+    ChatResponse primaryResponse;
     try {
-      return model.call(new Prompt(r.messages(), b.build()));
+      primaryResponse = model.call(new Prompt(r.messages(), b.build()));
+      if (primaryResponse == null)
+        throw new IllegalStateException("Anthropic returned empty response");
     } catch (RuntimeException ex) {
+      recordAnthropicFailure(auditContext, primaryHandle, primaryStartedAt, ex);
       if (!AnthropicModelOptions.isTemperatureDeprecatedError(ex)) throw ex;
       ANTHROPIC_DEPRECATED_TEMP_MODELS.add(r.model());
       log.warn(
@@ -755,8 +1168,116 @@ public class LlmRouter {
               .internalToolExecutionEnabled(false);
       if (cache != null) retry.cacheOptions(cache);
       if (r.maxTokens() != null) retry.maxTokens(r.maxTokens());
-      return model.call(new Prompt(r.messages(), retry.build()));
+      RunStepUsageRecorder.AttemptHandle retryHandle = prepareAnthropicAttempt(auditContext);
+      long retryStartedAt = System.currentTimeMillis();
+      ChatResponse retryResponse;
+      try {
+        retryResponse = model.call(new Prompt(r.messages(), retry.build()));
+        if (retryResponse == null)
+          throw new IllegalStateException("Anthropic returned empty response");
+      } catch (RuntimeException retryFailure) {
+        recordAnthropicFailure(auditContext, retryHandle, retryStartedAt, retryFailure);
+        throw retryFailure;
+      }
+      return completeAnthropicSuccess(r, retryResponse, auditContext, retryHandle, retryStartedAt);
     }
+    return completeAnthropicSuccess(
+        r, primaryResponse, auditContext, primaryHandle, primaryStartedAt);
+  }
+
+  private RunStepUsageRecorder.AttemptHandle prepareAnthropicAttempt(
+      PhysicalAttemptChain auditContext) {
+    if (auditContext == null) return null;
+    int ordinal = auditContext.attemptOrdinal().incrementAndGet();
+    String attemptKind =
+        ordinal == 1 && auditContext.request().retryOf() != null
+            ? "FAILOVER"
+            : ordinal == 1 ? "PRIMARY" : "RETRY";
+    return stepUsageRecorder.prepareAttempt(
+        auditContext.request(),
+        "anthropic",
+        auditContext.request().model(),
+        auditContext.keySource(),
+        ordinal,
+        attemptKind,
+        auditContext.parentAttemptId().get());
+  }
+
+  private void recordAnthropicFailure(
+      PhysicalAttemptChain auditContext,
+      RunStepUsageRecorder.AttemptHandle handle,
+      long startedAt,
+      Throwable failure) {
+    if (auditContext == null || handle == null) return;
+    stepUsageRecorder.recordFailure(
+        handle,
+        auditContext.request(),
+        Math.max(0, System.currentTimeMillis() - startedAt),
+        failure);
+    auditContext.parentAttemptId().set(handle.physicalAttemptId());
+  }
+
+  private CanonicalDispatchResult completeAnthropicSuccess(
+      LlmRequest request,
+      ChatResponse response,
+      PhysicalAttemptChain auditContext,
+      RunStepUsageRecorder.AttemptHandle handle,
+      long startedAt) {
+    if (auditContext == null || handle == null) {
+      return new CanonicalDispatchResult(response, null, null, true);
+    }
+    RunCostTracker.CallUsage usage;
+    boolean costProjectionAvailable = true;
+    try {
+      usage =
+          costTracker.record(
+              request.context().runId(),
+              request.context().taskId(),
+              "anthropic",
+              request.model(),
+              response);
+    } catch (RuntimeException projectionFailure) {
+      costProjectionAvailable = false;
+      usage = unknownCostUsage(request, response);
+      log.error(
+          "Anthropic final HTTP success cost projection failed; provider response will not be"
+              + " retried: {}",
+          projectionFailure.getClass().getSimpleName());
+    }
+    String usageEventId =
+        stepUsageRecorder.recordSuccess(
+            handle, request, Math.max(0, System.currentTimeMillis() - startedAt), usage, response);
+    auditContext.parentAttemptId().set(handle.physicalAttemptId());
+    return new CanonicalDispatchResult(response, usage, usageEventId, costProjectionAvailable);
+  }
+
+  /** Account a paid but semantically unusable HTTP 200 before issuing the fallback request. */
+  private void completeAnthropicIntermediateSuccess(
+      LlmRequest request,
+      ChatResponse response,
+      PhysicalAttemptChain auditContext,
+      RunStepUsageRecorder.AttemptHandle handle,
+      long startedAt) {
+    CanonicalDispatchResult result =
+        completeAnthropicSuccess(request, response, auditContext, handle, startedAt);
+    if (!result.costProjectionAvailable()) {
+      metrics.recordLlmPostSuccessProjection("managed_ai", "skipped_unknown_cost");
+      return;
+    }
+    recordPostSuccessMetric(
+        "managed_ai",
+        () ->
+            managedAiUsageService.recordSuccessfulCall(
+                result.usageEventId(),
+                request.context().runId(),
+                request.context().taskId(),
+                request.agentRole(),
+                request.stepId(),
+                "anthropic",
+                request.model(),
+                result.callUsage(),
+                auditContext.keys(),
+                auditContext.source()));
   }
 
   /**
@@ -839,18 +1360,30 @@ public class LlmRouter {
     // to submitPlan only), force Gemini to ANY mode — the model MUST emit a function
     // call. This prevents gemini-2.5-flash's "emit Python code as function call"
     // degradation under heavy prompts that otherwise causes MALFORMED_FUNCTION_CALL.
+    return geminiNativeToolClient.call(geminiRequest(r, tools, apiKey));
+  }
+
+  private GeminiNativeToolClient.AuditedCallResult callGeminiAudited(
+      LlmRequest r,
+      List<ToolCallback> tools,
+      String apiKey,
+      GeminiNativeToolClient.AuditContext auditContext) {
+    return geminiNativeToolClient.callAudited(geminiRequest(r, tools, apiKey), auditContext);
+  }
+
+  private GeminiNativeToolClient.GeminiToolCallRequest geminiRequest(
+      LlmRequest r, List<ToolCallback> tools, String apiKey) {
     boolean forceToolCall = r.toolsOverride() != null && !r.toolsOverride().isEmpty();
-    return geminiNativeToolClient.call(
-        GeminiNativeToolClient.GeminiToolCallRequest.builder()
-            .model(r.model())
-            .messages(r.messages())
-            .tools(tools)
-            .temperature(r.temperature())
-            .maxOutputTokens(r.maxTokens())
-            .forceToolCall(forceToolCall)
-            .apiKey(apiKey)
-            .readTimeoutSeconds(r.readTimeoutSeconds())
-            .build());
+    return GeminiNativeToolClient.GeminiToolCallRequest.builder()
+        .model(r.model())
+        .messages(r.messages())
+        .tools(tools)
+        .temperature(r.temperature())
+        .maxOutputTokens(r.maxTokens())
+        .forceToolCall(forceToolCall)
+        .apiKey(apiKey)
+        .readTimeoutSeconds(r.readTimeoutSeconds())
+        .build();
   }
 
   private ChatResponse callOpenAi(LlmRequest r, List<ToolCallback> tools, String apiKey) {
@@ -971,4 +1504,18 @@ public class LlmRouter {
         ? model.substring(0, model.length() - "-native".length())
         : model;
   }
+
+  private record PhysicalAttemptChain(
+      LlmRequest request,
+      String keySource,
+      RunKeyContext keys,
+      RunKeyContext.Source source,
+      AtomicInteger attemptOrdinal,
+      AtomicReference<String> parentAttemptId) {}
+
+  private record CanonicalDispatchResult(
+      ChatResponse response,
+      RunCostTracker.CallUsage callUsage,
+      String usageEventId,
+      boolean costProjectionAvailable) {}
 }

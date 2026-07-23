@@ -2,11 +2,21 @@ package com.navneet.executespec.auth.repository;
 
 import java.util.List;
 
+import jakarta.persistence.LockModeType;
+
 import com.navneet.executespec.auth.entity.Project;
 
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 public interface ProjectRepository extends JpaRepository<Project, String> {
+
+  /** Serializes project-scoped quota admission across application nodes. */
+  @Lock(LockModeType.PESSIMISTIC_WRITE)
+  @Query("select p from Project p where p.id=:id")
+  java.util.Optional<Project> findByIdForQuotaUpdate(@Param("id") String id);
 
   /**
    * Raw all-rows-by-org lookup including archived AND soft-deleted entries. Most call sites should

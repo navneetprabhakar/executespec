@@ -3,8 +3,11 @@ package com.navneet.executespec.deployment.preview;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
+import java.util.TreeSet;
 import java.util.stream.Stream;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -19,6 +22,79 @@ import lombok.extern.slf4j.Slf4j;
 public class DevDockerfileGenerator {
 
   private static final ObjectMapper mapper = new ObjectMapper();
+
+  /**
+   * Pinned versions for the global npm tools these previews install (RR-385 partial). {@code
+   * @latest} let a preview build silently drift onto whatever the registry served that day — a
+   * mutable, unaudited supply-chain input. These pins are tag-based (not integrity/digest-pinned)
+   * and, like the {@code node:20-bookworm-slim} tag pin, need a human to bump them on a security
+   * release; that rotation belongs with the lockfile/SBOM work. RR-385 stays OPEN: lifecycle scripts
+   * still run and no dependency plan is validated.
+   */
+  private static final String SERVE_VERSION = "14.2.4";
+
+  private static final String MCP_INSPECTOR_PKG = "@modelcontextprotocol/inspector@0.14.0";
+
+  private final PreviewProperties previewProperties;
+
+  @org.springframework.beans.factory.annotation.Autowired
+  public DevDockerfileGenerator(PreviewProperties previewProperties) {
+    this.previewProperties = previewProperties;
+  }
+
+  /** Test-only: defaults, i.e. interactive surfaces disabled. */
+  DevDockerfileGenerator() {
+    this(new PreviewProperties());
+  }
+
+  /**
+   * Whether the CLI terminal preview accepts keyboard input (RR-391). Default OFF: {@code ttyd
+   * --writable} on an unauthenticated URL is an anonymous interactive shell into the generated
+   * program.
+   */
+  private String ttydWritableArg() {
+    return previewProperties.getInteractive().isWritableTerminalEnabled() ? "\"--writable\", " : "";
+  }
+
+  /**
+   * Pinned Node distribution image used as a {@code COPY --from} source (RR-385, partial).
+   *
+   * <p>Replaces the previous bootstrap, which appeared at nine generation sites:
+   *
+   * <pre>{@code curl -fsSL https://deb.nodesource.com/setup_20.x | bash -}</pre>
+   *
+   * <p>That form fetched a shell script over the network at image-build time and executed it as
+   * root with no integrity check, so whoever controlled (or could intercede in) that endpoint on
+   * the day of the build chose what ran in the build. Copying the interpreter out of a tagged
+   * upstream image removes the remote-shell-execution primitive entirely and makes the Node version
+   * a declared input rather than "whatever the vendor script installs today".
+   *
+   * <p><b>Deliberately a tag, not a digest.</b> A {@code sha256:} pin would be strictly stronger,
+   * but it must be refreshed by a human on every upstream security release or previews silently age
+   * onto an unpatched Node. Digest pinning belongs with the lockfile/SBOM work in the RR-385
+   * architectural remainder, which has somewhere to record and rotate the expected digest. Until
+   * then this still trusts Docker Hub to serve the same content for the tag.
+   */
+  private static final String PINNED_NODE_IMAGE = "node:20-bookworm-slim";
+
+  /**
+   * Dockerfile lines that install Node + npm from {@link #PINNED_NODE_IMAGE}.
+   *
+   * <p>Emitted in place of the NodeSource bootstrap. Every call site's base image ({@code
+   * eclipse-temurin:21}, {@code python:3.12-slim}, {@code rust:1.77-slim}) is glibc-based, which is
+   * what makes copying a bookworm-built binary across valid — do NOT reuse this on an Alpine/musl
+   * base without swapping the source image for the matching variant.
+   */
+  static String pinnedNodeInstall() {
+    return "COPY --from="
+        + PINNED_NODE_IMAGE
+        + " /usr/local/bin/node /usr/local/bin/node\n"
+        + "COPY --from="
+        + PINNED_NODE_IMAGE
+        + " /usr/local/lib/node_modules /usr/local/lib/node_modules\n"
+        + "RUN ln -sf /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm && \\\n"
+        + "    ln -sf /usr/local/lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx\n";
+  }
 
   /** Captures the layout of a full-stack project with separate frontend/backend subdirectories. */
   record FullStackLayout(
@@ -329,7 +405,7 @@ public class DevDockerfileGenerator {
       cmd = "CMD npx vite --host 0.0.0.0 --port ${PORT:-8080}";
     } else {
       cmd = "CMD npx serve -s . -l ${PORT:-8080}";
-      viteInstall = " && npm install -g serve";
+      viteInstall = " && npm install -g serve@" + SERVE_VERSION;
     }
 
     var sb = new StringBuilder();
@@ -380,6 +456,21 @@ public class DevDockerfileGenerator {
     return PreviewSpringBootDockerfiles.cloudRun(workspace);
   }
 
+  /**
+   * RR-388: the Python manifest COPY line, or empty when neither {@code requirements.txt} nor
+   * {@code pyproject.toml} exists. A bare {@code COPY requirements.txt* pyproject.toml* ./} with no
+   * matching source aborts the Docker/BuildKit build before the documented no-requirements fallback
+   * can run, so the simplest supported Python script/CLI could not build a preview. The wildcard
+   * form is safe as soon as at least one manifest is present; the subsequent {@code COPY . .}
+   * copies everything when none is.
+   */
+  private static String pythonManifestCopy(Path workspace) {
+    boolean hasManifest =
+        Files.exists(workspace.resolve("requirements.txt"))
+            || Files.exists(workspace.resolve("pyproject.toml"));
+    return hasManifest ? "COPY requirements.txt* pyproject.toml* ./\n" : "";
+  }
+
   private String cloudRun_Python(Path workspace) {
     String installStep;
     if (Files.exists(workspace.resolve("requirements.txt"))) {
@@ -406,7 +497,7 @@ public class DevDockerfileGenerator {
     sb.append("LABEL preview=true\n");
     sb.append("ENV PORT=8080\n");
     sb.append("ENV HOST=0.0.0.0\n");
-    sb.append("COPY requirements.txt* pyproject.toml* ./\n");
+    sb.append(pythonManifestCopy(workspace)); // RR-388
     sb.append(installStep).append("\n");
     sb.append("COPY . .\n");
     sb.append("EXPOSE 8080\n");
@@ -548,8 +639,8 @@ public class DevDockerfileGenerator {
     sb.append("LABEL preview=true\n");
     sb.append("ENV PORT=8080\n");
     sb.append("RUN apt-get update && apt-get install -y curl maven && \\\n");
-    sb.append("    curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \\\n");
-    sb.append("    apt-get install -y nodejs && rm -rf /var/lib/apt/lists/*\n");
+    sb.append("    rm -rf /var/lib/apt/lists/*\n");
+    sb.append(pinnedNodeInstall());
 
     // Install backend Maven deps
     if (be != null) {
@@ -601,8 +692,8 @@ public class DevDockerfileGenerator {
     sb.append("LABEL preview=true\n");
     sb.append("ENV PORT=8080\n");
     sb.append("RUN apt-get update && apt-get install -y curl && \\\n");
-    sb.append("    curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \\\n");
-    sb.append("    apt-get install -y nodejs && rm -rf /var/lib/apt/lists/*\n");
+    sb.append("    rm -rf /var/lib/apt/lists/*\n");
+    sb.append(pinnedNodeInstall());
 
     // Install backend Python deps
     if (be != null) {
@@ -721,8 +812,8 @@ public class DevDockerfileGenerator {
     sb.append("LABEL preview=true\n");
     sb.append("ENV PORT=8080\n");
     sb.append("RUN apt-get update && apt-get install -y curl pkg-config libssl-dev && \\\n");
-    sb.append("    curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \\\n");
-    sb.append("    apt-get install -y nodejs && rm -rf /var/lib/apt/lists/*\n");
+    sb.append("    rm -rf /var/lib/apt/lists/*\n");
+    sb.append(pinnedNodeInstall());
 
     // Pre-build backend deps (cargo fetch)
     if (be != null) {
@@ -804,8 +895,8 @@ public class DevDockerfileGenerator {
     sb.append("LABEL preview=true\n");
     sb.append("ENV PORT=8080\n");
     sb.append("RUN apt-get update && apt-get install -y curl && \\\n");
-    sb.append("    curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \\\n");
-    sb.append("    apt-get install -y nodejs && rm -rf /var/lib/apt/lists/*\n");
+    sb.append("    rm -rf /var/lib/apt/lists/*\n");
+    sb.append(pinnedNodeInstall());
 
     // Install frontend Node deps
     if (fe != null) {
@@ -1056,8 +1147,7 @@ public class DevDockerfileGenerator {
     sb.append("COPY package.json package-lock.json* ./\n");
 
     // Copy each workspace's package.json
-    for (JsonNode ws : rootPkg.get("workspaces")) {
-      String wsName = ws.asText();
+    for (String wsName : resolveWorkspaceDirs(rootPkg.get("workspaces"), workspace)) {
       Path wsDir = workspace.resolve(wsName);
       if (Files.exists(wsDir.resolve("package.json"))) {
         sb.append("COPY ").append(wsName).append("/package.json ./").append(wsName).append("/\n");
@@ -1070,8 +1160,7 @@ public class DevDockerfileGenerator {
     // Detect frontend and backend workspaces
     String frontendWs = null;
     String backendWs = null;
-    for (JsonNode ws : rootPkg.get("workspaces")) {
-      String wsName = ws.asText();
+    for (String wsName : resolveWorkspaceDirs(rootPkg.get("workspaces"), workspace)) {
       Path wsDir = workspace.resolve(wsName);
       Path wsPkg = wsDir.resolve("package.json");
       if (!Files.exists(wsPkg)) continue;
@@ -1121,29 +1210,123 @@ public class DevDockerfileGenerator {
     return sb.toString();
   }
 
-  /** Returns .dockerignore content. */
+  /**
+   * Returns .dockerignore content for the generated build context.
+   *
+   * <p>RR-384: generated images use {@code COPY . .}, so every path not excluded here is baked into
+   * a layer that anyone with registry or runtime access can extract — regardless of whether the
+   * application routes it. The list therefore covers three families beyond ordinary build noise:
+   * ExecuteSpec's own control directories ({@code .agent-context}, {@code .executespec}), package
+   * manager credential files ({@code .npmrc}, {@code .pypirc}, …), and key/certificate material.
+   *
+   * <p>This is the generated block only; {@link PreviewArtifactWriter#writeDockerIgnore} merges it
+   * onto any customer-authored {@code .dockerignore} rather than overwriting it (RR-384), appending
+   * these security exclusions last so a customer re-include cannot pull a secret back in.
+   *
+   * <p><b>RR-384 (2026-07-22) — every security pattern is anchored with {@code **&#47;} as well as
+   * at the context root.</b> A {@code .dockerignore} pattern is matched against the whole path
+   * relative to the build-context root using {@code filepath.Match} semantics, so a bare {@code
+   * .env} / {@code *.pem} / {@code id_rsa} excluded ONLY the root-level file: {@code backend/.env},
+   * {@code config/id_rsa} and {@code certs/server.pem} were still copied into the image by {@code
+   * COPY . .}. Since a monorepo or any two-service repository keeps its credentials one directory
+   * down, the exclusion list was missing the common case it exists for. Both forms are emitted
+   * rather than only the recursive one so the block does not depend on a particular engine's
+   * treatment of the zero-directory branch of {@code **}.
+   *
+   * <p><b>Not closed here:</b> this is still a deny-list over the customer's tree, not an
+   * allowlisted staged context. A repository secret under an unrecognised name is still copied.
+   */
   public String dockerIgnore() {
     return """
            .git
+           .gitignore
            node_modules
            target
            build
            dist
            .idea
+           .vscode
            *.log
            .dockerignore
+           .dockerignore.user
            Dockerfile
-           .env
-           .env.*
-           .env.local
-           .env.production
-           credentials.json
-           service-account.json
-           key.json
-           keyfile.json
-           secrets.yml
-           secrets.yaml
-           """;
+
+           """
+        + securityExclusions();
+  }
+
+  /**
+   * The credential / control-directory families of the generated {@code .dockerignore}, each
+   * emitted twice: once anchored at the build-context root and once as {@code **&#47;<pattern>} so
+   * the same name is excluded at ANY depth (RR-384). Grouped, and package-visible, so the
+   * regression test can assert the recursive form for every entry rather than a sampled few.
+   */
+  static final java.util.Map<String, java.util.List<String>> SECURITY_EXCLUSIONS =
+      java.util.Map.of(
+          "ExecuteSpec control directories — planner/spec context, never product source",
+              java.util.List.of(".agent-context", ".executespec"),
+          "Environment / configuration secrets",
+              java.util.List.of(
+                  ".env",
+                  ".env.*",
+                  ".env.local",
+                  ".env.production",
+                  "credentials.json",
+                  "service-account.json",
+                  "service_account.json",
+                  "key.json",
+                  "keyfile.json",
+                  "secrets.yml",
+                  "secrets.yaml",
+                  "secrets.json"),
+          "Package manager + registry credentials",
+              java.util.List.of(
+                  ".npmrc",
+                  ".yarnrc",
+                  ".yarnrc.yml",
+                  ".pypirc",
+                  ".netrc",
+                  "_netrc",
+                  "pip.conf",
+                  ".docker/config.json",
+                  ".m2/settings.xml"),
+          "Cloud and CI credentials",
+              java.util.List.of(
+                  ".aws", ".gcloud", ".config/gcloud", ".azure", ".kube", "gha-creds-*.json"),
+          "Keys, certificates, keystores",
+              java.util.List.of(
+                  ".ssh",
+                  "id_rsa",
+                  "id_rsa.*",
+                  "id_ed25519",
+                  "id_ed25519.*",
+                  "*.pem",
+                  "*.key",
+                  "*.p12",
+                  "*.pfx",
+                  "*.jks",
+                  "*.keystore",
+                  "*.der"));
+
+  /** Deterministic order for the emitted blocks — a generated artifact must not vary per JVM. */
+  private static final java.util.List<String> SECURITY_EXCLUSION_ORDER =
+      java.util.List.of(
+          "ExecuteSpec control directories — planner/spec context, never product source",
+          "Environment / configuration secrets",
+          "Package manager + registry credentials",
+          "Cloud and CI credentials",
+          "Keys, certificates, keystores");
+
+  private static String securityExclusions() {
+    StringBuilder sb = new StringBuilder();
+    for (String heading : SECURITY_EXCLUSION_ORDER) {
+      sb.append("\n# ").append(heading).append('\n');
+      for (String pattern : SECURITY_EXCLUSIONS.get(heading)) {
+        sb.append(pattern).append('\n');
+        sb.append("**/").append(pattern).append('\n');
+      }
+    }
+    return sb.toString();
   }
 
   /**
@@ -1253,9 +1436,9 @@ public class DevDockerfileGenerator {
       // `serve` defaults to localhost; `-l tcp://0.0.0.0:5173` binds to all
       // interfaces so Docker's port-forward can reach it from the host.
       cmd =
-          """
-          RUN npm install -g serve
-          CMD ["npx", "serve", "-s", ".", "-l", "tcp://0.0.0.0:5173"]""";
+          "RUN npm install -g serve@"
+              + SERVE_VERSION
+              + "\nCMD [\"npx\", \"serve\", \"-s\", \".\", \"-l\", \"tcp://0.0.0.0:5173\"]";
     }
 
     // Ensure vite and common React dependencies are installed at build time
@@ -1385,8 +1568,8 @@ public class DevDockerfileGenerator {
            FROM python:3.12-slim
            WORKDIR /app
            LABEL preview=true
-           COPY requirements.txt* pyproject.toml* ./
            """
+        + pythonManifestCopy(workspace) // RR-388
         + installStep
         + "\n"
         + "COPY . .\n"
@@ -1670,8 +1853,8 @@ public class DevDockerfileGenerator {
     // Use JDK image with Node installed
     sb.append("FROM eclipse-temurin:21\nWORKDIR /app\nLABEL preview=true\n");
     sb.append("RUN apt-get update && apt-get install -y curl maven && \\\n");
-    sb.append("    curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \\\n");
-    sb.append("    apt-get install -y nodejs && rm -rf /var/lib/apt/lists/*\n");
+    sb.append("    rm -rf /var/lib/apt/lists/*\n");
+    sb.append(pinnedNodeInstall());
 
     // Install backend Maven deps first (slow, cached)
     if (be != null) {
@@ -1716,8 +1899,8 @@ public class DevDockerfileGenerator {
     // Use Python image with Node installed
     sb.append("FROM python:3.12-slim\nWORKDIR /app\nLABEL preview=true\n");
     sb.append("RUN apt-get update && apt-get install -y curl && \\\n");
-    sb.append("    curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \\\n");
-    sb.append("    apt-get install -y nodejs && rm -rf /var/lib/apt/lists/*\n");
+    sb.append("    rm -rf /var/lib/apt/lists/*\n");
+    sb.append(pinnedNodeInstall());
 
     // Install backend Python deps
     if (be != null) {
@@ -1838,8 +2021,8 @@ public class DevDockerfileGenerator {
     var sb = new StringBuilder();
     sb.append("FROM rust:1.77-slim\nWORKDIR /app\nLABEL preview=true\n");
     sb.append("RUN apt-get update && apt-get install -y curl pkg-config libssl-dev && \\\n");
-    sb.append("    curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \\\n");
-    sb.append("    apt-get install -y nodejs && rm -rf /var/lib/apt/lists/*\n");
+    sb.append("    rm -rf /var/lib/apt/lists/*\n");
+    sb.append(pinnedNodeInstall());
 
     if (be != null) {
       sb.append("COPY ")
@@ -1908,8 +2091,8 @@ public class DevDockerfileGenerator {
     var sb = new StringBuilder();
     sb.append("FROM eclipse-temurin:21\nWORKDIR /app\nLABEL preview=true\n");
     sb.append("RUN apt-get update && apt-get install -y curl && \\\n");
-    sb.append("    curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \\\n");
-    sb.append("    apt-get install -y nodejs && rm -rf /var/lib/apt/lists/*\n");
+    sb.append("    rm -rf /var/lib/apt/lists/*\n");
+    sb.append(pinnedNodeInstall());
 
     if (fe != null) {
       sb.append("COPY ").append(fe).append("/package*.json ./").append(fe).append("/\n");
@@ -2070,17 +2253,96 @@ public class DevDockerfileGenerator {
 
   private boolean isMonorepo(JsonNode pkg, Path workspace) {
     JsonNode workspaces = pkg.get("workspaces");
-    if (workspaces == null || !workspaces.isArray() || workspaces.isEmpty()) {
+    if (workspaces == null) {
       return false;
     }
-    // Verify at least one workspace dir exists with its own package.json
-    for (JsonNode ws : workspaces) {
-      Path wsDir = workspace.resolve(ws.asText());
-      if (Files.exists(wsDir.resolve("package.json"))) {
-        return true;
+    // RR-387: a workspace value can be a glob (packages/*, apps/*), so a literal directory check
+    // never matches. Resolve the declaration to real package directories.
+    return !resolveWorkspaceDirs(workspaces, workspace).isEmpty();
+  }
+
+  /**
+   * RR-387: expand an npm/Yarn/pnpm {@code workspaces} declaration into the actual on-disk package
+   * directories. Standard declarations such as {@code packages/*} and {@code apps/*} are globs, not
+   * literal directories, so treating each value verbatim (looking for {@code <value>/package.json})
+   * never finds {@code packages/*} and misclassifies common monorepos as single packages. This
+   * parses both the array form ({@code ["packages/*"]}) and Yarn's object form ({@code
+   * {"packages":[...]}}), expands a single trailing {@code /*} or {@code /**} glob one level within
+   * the canonical workspace root, keeps only directories that actually contain a {@code
+   * package.json}, and returns a de-duplicated, sorted list of workspace-relative directory names.
+   * Absolute or traversing patterns are rejected.
+   */
+  List<String> resolveWorkspaceDirs(JsonNode workspacesNode, Path root) {
+    JsonNode patterns = workspacesNode;
+    if (workspacesNode != null && workspacesNode.isObject()) {
+      patterns = workspacesNode.get("packages"); // Yarn object form
+    }
+    if (patterns == null || !patterns.isArray()) {
+      return List.of();
+    }
+    Path canonicalRoot;
+    try {
+      canonicalRoot = root.toRealPath();
+    } catch (IOException e) {
+      canonicalRoot = root.toAbsolutePath().normalize();
+    }
+    Set<String> dirs = new TreeSet<>();
+    for (JsonNode p : patterns) {
+      String pattern = p.asText("").trim();
+      if (!pattern.isEmpty()) {
+        addWorkspaceMatches(pattern, root, canonicalRoot, dirs);
       }
     }
-    return false;
+    return new ArrayList<>(dirs);
+  }
+
+  private void addWorkspaceMatches(String pattern, Path root, Path canonicalRoot, Set<String> out) {
+    // Reject anything that could escape the workspace root.
+    if (pattern.startsWith("/") || pattern.contains("..")) {
+      return;
+    }
+    int star = pattern.indexOf('*');
+    if (star < 0) {
+      addIfWorkspaceDir(pattern, root, canonicalRoot, out);
+      return;
+    }
+    // Support a single trailing glob segment: "packages/*" or "apps/**".
+    String prefix = pattern.substring(0, star);
+    String base = prefix.endsWith("/") ? prefix.substring(0, prefix.length() - 1) : prefix;
+    if (base.contains("*")) {
+      return; // multi-segment globs (packages/*/lib) are not supported — skip rather than guess
+    }
+    Path baseDir = base.isEmpty() ? root : root.resolve(base);
+    if (!Files.isDirectory(baseDir)) {
+      return;
+    }
+    try (Stream<Path> children = Files.list(baseDir)) {
+      children
+          .filter(Files::isDirectory)
+          .forEach(
+              child -> {
+                String name = child.getFileName().toString();
+                String rel = base.isEmpty() ? name : base + "/" + name;
+                addIfWorkspaceDir(rel, root, canonicalRoot, out);
+              });
+    } catch (IOException e) {
+      log.debug("Failed to expand workspace glob {}: {}", pattern, e.getMessage());
+    }
+  }
+
+  private void addIfWorkspaceDir(String rel, Path root, Path canonicalRoot, Set<String> out) {
+    Path dir = root.resolve(rel).normalize();
+    try {
+      Path real = dir.toRealPath();
+      if (!real.startsWith(canonicalRoot)) {
+        return; // containment: resolved dir escaped the workspace root
+      }
+    } catch (IOException e) {
+      return; // does not exist / unreadable
+    }
+    if (Files.exists(dir.resolve("package.json"))) {
+      out.add(rel.replace('\\', '/'));
+    }
   }
 
   /**
@@ -2092,8 +2354,8 @@ public class DevDockerfileGenerator {
     boolean hasFrontend = false;
     boolean hasBackend = false;
 
-    for (JsonNode ws : rootPkg.get("workspaces")) {
-      Path wsDir = workspace.resolve(ws.asText());
+    for (String wsName : resolveWorkspaceDirs(rootPkg.get("workspaces"), workspace)) {
+      Path wsDir = workspace.resolve(wsName);
       Path wsPkg = wsDir.resolve("package.json");
       if (!Files.exists(wsPkg)) continue;
 
@@ -2136,8 +2398,7 @@ public class DevDockerfileGenerator {
     sb.append("COPY package.json package-lock.json* ./\n");
 
     // Copy each workspace's package.json
-    for (JsonNode ws : rootPkg.get("workspaces")) {
-      String wsName = ws.asText();
+    for (String wsName : resolveWorkspaceDirs(rootPkg.get("workspaces"), workspace)) {
       Path wsDir = workspace.resolve(wsName);
       if (Files.exists(wsDir.resolve("package.json"))) {
         sb.append("COPY ").append(wsName).append("/package.json ./").append(wsName).append("/\n");
@@ -2157,8 +2418,7 @@ public class DevDockerfileGenerator {
     int frontendPort = 5173;
     int backendPort = 3000;
 
-    for (JsonNode ws : rootPkg.get("workspaces")) {
-      String wsName = ws.asText();
+    for (String wsName : resolveWorkspaceDirs(rootPkg.get("workspaces"), workspace)) {
       Path wsDir = workspace.resolve(wsName);
       Path wsPkg = wsDir.resolve("package.json");
       if (!Files.exists(wsPkg)) continue;
@@ -2269,7 +2529,18 @@ public class DevDockerfileGenerator {
   /** Generate Dockerfile content for the given project type and preview mode. */
   public String generate(PreviewProjectType type, Path workspace, PreviewMode mode) {
     if (mode == PreviewMode.CLI_TERMINAL) return cliDockerfile(type, workspace);
-    if (mode == PreviewMode.MCP_INSPECTOR) return mcpDockerfile(type, workspace);
+    if (mode == PreviewMode.MCP_INSPECTOR) {
+      // RR-391: the Inspector can invoke the generated server's tools with no authentication, and
+      // a preview URL is not an authenticated channel. Opt-in only; otherwise serve the ordinary
+      // web preview, which does not expose a tool-invocation surface.
+      if (!previewProperties.getInteractive().isMcpInspectorEnabled()) {
+        log.info(
+            "MCP Inspector preview is disabled (preview.interactive.mcp-inspector-enabled=false);"
+                + " falling back to web preview");
+        return generate(type, workspace);
+      }
+      return mcpDockerfile(type, workspace);
+    }
     return generate(type, workspace); // existing WEB behaviour
   }
 
@@ -2300,7 +2571,9 @@ public class DevDockerfileGenerator {
         + """
           COPY . .
           EXPOSE 8080
-          CMD ["ttyd", "--port", "8080", "--writable", "node", \""""
+          CMD ["ttyd", "--port", "8080", """
+        + ttydWritableArg()
+        + "\"node\", \""
         + entryFile
         + "\"]\n";
   }
@@ -2334,7 +2607,9 @@ RUN apt-get update && apt-get install -y wget && rm -rf /var/lib/apt/lists/* \\
 COPY . .
 RUN javac *.java 2>/dev/null || true
 EXPOSE 8080
-CMD ["ttyd", "--port", "8080", "--writable", "java", \""""
+CMD ["ttyd", "--port", "8080", """
+        + ttydWritableArg()
+        + "\"java\", \""
         + mainClass
         + "\"]\n";
   }
@@ -2356,24 +2631,28 @@ LABEL preview=true
 RUN apt-get update && apt-get install -y wget && rm -rf /var/lib/apt/lists/* \\
     && wget https://github.com/tsl0922/ttyd/releases/download/1.7.7/ttyd.x86_64 -O /usr/local/bin/ttyd \\
     && chmod +x /usr/local/bin/ttyd
-COPY requirements.txt* pyproject.toml* ./
 """
+        + pythonManifestCopy(workspace) // RR-388
         + installStep
         + "\n"
         + """
           COPY . .
           EXPOSE 8080
-          CMD ["ttyd", "--port", "8080", "--writable", "python", \""""
+          CMD ["ttyd", "--port", "8080", """
+        + ttydWritableArg()
+        + "\"python\", \""
         + entryFile
         + "\"]\n";
   }
 
   private String cliGoDockerfile() {
-    return PreviewStandaloneDockerfiles.cliGo();
+    return PreviewStandaloneDockerfiles.cliGo(
+        previewProperties.getInteractive().isWritableTerminalEnabled());
   }
 
   private String cliRustDockerfile() {
-    return PreviewStandaloneDockerfiles.cliRust();
+    return PreviewStandaloneDockerfiles.cliRust(
+        previewProperties.getInteractive().isWritableTerminalEnabled());
   }
 
   private String mcpDockerfile(PreviewProjectType type, Path workspace) {
@@ -2403,14 +2682,19 @@ COPY requirements.txt* pyproject.toml* ./
            FROM node:20-alpine
            WORKDIR /app
            LABEL preview=true
-           RUN npm install -g @modelcontextprotocol/inspector
-           COPY package*.json ./
-           RUN npm install --legacy-peer-deps
-           COPY . .
-           EXPOSE 8080
-           ENV CLIENT_PORT=8080
-           ENV SERVER_PORT=9315
-           CMD ["sh", "-c", "npx @modelcontextprotocol/inspector --port 8080 -- """
+           RUN npm install -g\s"""
+        + MCP_INSPECTOR_PKG
+        + """
+
+COPY package*.json ./
+RUN npm install --legacy-peer-deps
+COPY . .
+EXPOSE 8080
+ENV CLIENT_PORT=8080
+ENV SERVER_PORT=9315
+CMD ["sh", "-c", "npx\s"""
+        + MCP_INSPECTOR_PKG
+        + " --port 8080 -- "
         + serverCmd
         + "\"]\n";
   }
@@ -2430,11 +2714,13 @@ COPY requirements.txt* pyproject.toml* ./
            WORKDIR /app
            LABEL preview=true
            RUN apt-get update && apt-get install -y curl && \
-               curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
-               apt-get install -y nodejs && rm -rf /var/lib/apt/lists/*
-           RUN npm install -g @modelcontextprotocol/inspector
-           COPY requirements.txt* pyproject.toml* ./
+               rm -rf /var/lib/apt/lists/*
            """
+        + pinnedNodeInstall()
+        + "RUN npm install -g "
+        + MCP_INSPECTOR_PKG
+        + "\n"
+        + pythonManifestCopy(workspace) // RR-388
         + installStep
         + "\n"
         + """
@@ -2442,7 +2728,9 @@ COPY requirements.txt* pyproject.toml* ./
           EXPOSE 8080
           ENV CLIENT_PORT=8080
           ENV SERVER_PORT=9315
-          CMD ["sh", "-c", "npx @modelcontextprotocol/inspector --port 8080 -- python """
+          CMD ["sh", "-c", "npx\s"""
+        + MCP_INSPECTOR_PKG
+        + " --port 8080 -- python "
         + entryFile
         + "\"]\n";
   }

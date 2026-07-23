@@ -160,4 +160,16 @@ public record RunRequest(
      * The shipped CLI sends this on {@code run local}; older backends drop it (default false →
      * today's remote execution). Inert unless the feature flag is on.
      */
-    Boolean localExecution) {}
+    Boolean localExecution,
+    /**
+     * V278 local-source binding — the opaque installation identity of the local connector
+     * submitting a {@code localExecution=true} run. Required whenever the selected project sources
+     * include a LOCAL folder: admission verifies the installation matches the registered connector
+     * and its lease is currently ONLINE. Never a filesystem path; ignored for remote runs.
+     */
+    java.util.UUID localInstallationId,
+    /**
+     * Path-only, client-generated repository inventory for local-hands planning. The server treats
+     * it as untrusted evidence and never accepts absolute filesystem paths or file contents here.
+     */
+    @Size(max = 20_000, message = "Local repository inventory must not exceed 20,000 characters") String localRepositoryInventory) {}

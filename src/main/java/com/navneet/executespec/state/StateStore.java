@@ -88,6 +88,11 @@ public class StateStore {
   public void savePlan(String runId, TaskPlan plan) {
     PipelineRun run = runRepo.findById(runId).orElseThrow();
 
+    // RR-073: reject a structurally invalid graph (null/blank/duplicate ids, dependencies on
+    // unknown tasks, cycles) BEFORE rewriting anything, so a plan that cannot execute never reaches
+    // the database. Validation is pure and runs on the planner-local ids.
+    PlanGraphValidator.validate(plan);
+
     // Make task IDs globally unique
     // agent_task PK is task_id alone (not composite with run_id).
     // Planner generates predictable IDs like "project_setup", "readme" — if
@@ -95,9 +100,11 @@ public class StateStore {
     // overwrite run B's tasks.  Prefixing with the run hash prevents this.
     String prefix = runId.substring(0, 8) + "_";
 
-    // Build old→new ID mapping so we can rewrite depends_on references
+    // Build old→new ID mapping so we can rewrite depends_on references.
+    // RR-073: prefixing is idempotent — an id already carrying the run prefix (a re-saved/retried
+    // plan object) is left as-is instead of being prefixed a second time.
     Map<String, String> idMap = new java.util.HashMap<>();
-    plan.getTasks().forEach(t -> idMap.put(t.getTaskId(), prefix + t.getTaskId()));
+    plan.getTasks().forEach(t -> idMap.put(t.getTaskId(), prefixOnce(prefix, t.getTaskId())));
 
     // Rewrite task IDs and dependency references in-place
     plan.getTasks()
@@ -106,7 +113,7 @@ public class StateStore {
               if (t.getDependsOn() != null) {
                 t.setDependsOn(
                     t.getDependsOn().stream()
-                        .map(dep -> idMap.getOrDefault(dep, prefix + dep))
+                        .map(dep -> idMap.getOrDefault(dep, prefixOnce(prefix, dep)))
                         .toList());
               }
               t.setTaskId(idMap.get(t.getTaskId()));
@@ -120,24 +127,32 @@ public class StateStore {
     run.setTechStack(detectTechStack(plan, run.getUserRequest()));
     runRepo.save(run);
 
-    plan.getTasks()
-        .forEach(
-            t ->
-                taskRepo.save(
-                    AgentTask.builder()
-                        .taskId(t.getTaskId())
-                        .runId(runId)
-                        .title(t.getTitle())
-                        .complexity(t.getComplexity())
-                        .assignedModel(
-                            t.getAssignedModel()) // planner routes: Sonnet for HIGH/MEDIUM,
-                        // Haiku for LOW
-                        .status("PENDING")
-                        .taskJson(toJson(t))
-                        .compactionCount(0)
-                        .build()));
+    // RR-1446 — persist the planner-intent order so the approval gate renders the planner's
+    // sequence rather than the unspecified database row order (all tasks are PENDING at the gate).
+    List<TaskDefinition> planTasks = plan.getTasks();
+    for (int i = 0; i < planTasks.size(); i++) {
+      TaskDefinition t = planTasks.get(i);
+      taskRepo.save(
+          AgentTask.builder()
+              .taskId(t.getTaskId())
+              .runId(runId)
+              .title(t.getTitle())
+              .complexity(t.getComplexity())
+              .assignedModel(t.getAssignedModel()) // planner routes: Sonnet for HIGH/MEDIUM,
+              // Haiku for LOW
+              .status("PENDING")
+              .taskJson(toJson(t))
+              .planIndex(i)
+              .compactionCount(0)
+              .build());
+    }
 
     savePlanVersion(runId, "PLANNER", null);
+  }
+
+  /** Idempotent run-prefixing (RR-073): never double-prefixes an already-namespaced id. */
+  static String prefixOnce(String prefix, String id) {
+    return id != null && id.startsWith(prefix) ? id : prefix + id;
   }
 
   public void markApproved(String runId) {
@@ -233,21 +248,32 @@ public class StateStore {
   }
 
   /**
-   * Marks the run complete. If any non-gap worker tasks are BLOCKED or PARTIAL, the run is marked
-   * PARTIAL (merged but incomplete) rather than COMPLETE so the UI reflects reality. Gap-closing
-   * tasks (_gap_ in taskId) are excluded — they run after the ≥85% threshold path and their
-   * failures should not downgrade an otherwise-successful run.
+   * Task statuses that count as a clean success. Any non-gap task NOT in this set downgrades a
+   * {@link #markComplete} to PARTIAL. RR-072: the previous check only looked for BLOCKED/PARTIAL,
+   * so a FAILED (or CANCELLED / still-active) non-gap task let the run be reported COMPLETE with
+   * failed work. This is an exhaustive allowlist so any new persisted status defaults to "not
+   * clean" rather than silently passing.
+   */
+  private static final Set<String> CLEAN_SUCCESS_TASK_STATUSES =
+      Set.of("COMPLETE", "SKIPPED", "DONE");
+
+  /**
+   * Marks the run complete. If any non-gap worker task is not in a clean-success state (COMPLETE /
+   * SKIPPED / DONE) — which now includes FAILED, BLOCKED, PARTIAL, CANCELLED and any still-active
+   * status — the run is marked PARTIAL (merged but incomplete) rather than COMPLETE so the UI
+   * reflects reality. Gap-closing tasks (_gap_ in taskId) are excluded — they run after the ≥85%
+   * threshold path and their failures should not downgrade an otherwise-successful run.
    */
   public void markComplete(String runId) {
     PipelineRun run = runRepo.findById(runId).orElseThrow();
     boolean hasIncomplete =
         taskRepo.findByRunId(runId).stream()
             .filter(t -> !t.getTaskId().contains("_gap_"))
-            .anyMatch(t -> "BLOCKED".equals(t.getStatus()) || "PARTIAL".equals(t.getStatus()));
+            .anyMatch(t -> !CLEAN_SUCCESS_TASK_STATUSES.contains(t.getStatus()));
     finaliseRun(
         run,
         hasIncomplete ? "PARTIAL" : "COMPLETE",
-        hasIncomplete ? "Merged with incomplete tasks (BLOCKED/PARTIAL)" : null);
+        hasIncomplete ? "Merged with incomplete tasks (non-success task status)" : null);
   }
 
   public void markFailed(String runId, String reason) {
@@ -319,6 +345,11 @@ public class StateStore {
   public void markRetryingWithFeedback(String runId, String taskId, String reworkFeedback) {
     taskRepo
         .findById(taskId)
+        // RR-074: agent_task is keyed by task_id alone, so a mismatched (runId, taskId) pair would
+        // reset one run's task while subtracting its tokens from a *different* run — corrupting two
+        // runs at once. Constrain the mutation to the task actually owned by the supplied run; the
+        // full relational fix (composite (run_id, task_id) key) is deferred to a migration lane.
+        .filter(task -> runId.equals(task.getRunId()))
         .ifPresent(
             task -> {
               // Subtract old token counts from run totals before resetting (prevents
@@ -511,6 +542,10 @@ public class StateStore {
    */
   public void setUserCostCap(String runId, Double userCostCap) {
     if (userCostCap == null) return;
+    // RR-825 — fail closed on a cap the enforcement path cannot honour (NaN / ±Infinity / out of
+    // band). Validated here rather than only in RunRequest because the agent confirmation surface
+    // reaches this method without bean validation.
+    com.navneet.executespec.cost.CostCapValues.requireValidOptional(userCostCap);
     runRepo
         .findById(runId)
         .ifPresent(
@@ -1117,6 +1152,25 @@ public class StateStore {
 
   // Tier 4: Timeline and model comparison
 
+  /** Provider bucket for tasks with no recorded provider (RR-076). */
+  static final String UNKNOWN_PROVIDER = "UNKNOWN";
+
+  /** Model bucket for tasks with no recorded model (RR-076). */
+  static final String UNATTRIBUTED_MODEL = "UNATTRIBUTED";
+
+  /**
+   * Grouping key for provider/model comparison. RR-076: a null provider/model used to be relabeled
+   * as {@code anthropic/<current workhorse>}, presenting legacy or unknown usage as real Anthropic
+   * performance and corrupting provider comparisons. Missing attribution is now its own first-class
+   * {@code UNKNOWN/UNATTRIBUTED} bucket — historical provider identity is never inferred from
+   * current defaults.
+   */
+  static String modelComparisonKey(AgentTask t) {
+    String provider = t.getProvider() != null ? t.getProvider() : UNKNOWN_PROVIDER;
+    String model = t.getModel() != null ? t.getModel() : UNATTRIBUTED_MODEL;
+    return provider + "/" + model;
+  }
+
   public TimelineData buildTimeline(String runId) {
     PipelineRun run = runRepo.findById(runId).orElseThrow();
     List<AgentTask> tasks = taskRepo.findByRunIdOrderByStartedAtAsc(runId);
@@ -1134,12 +1188,7 @@ public class StateStore {
 
     Map<String, List<AgentTask>> grouped = new LinkedHashMap<>();
     for (AgentTask t : allTasks) {
-      String key =
-          (t.getProvider() != null ? t.getProvider() : "anthropic")
-              + "/"
-              + (t.getModel() != null
-                  ? t.getModel()
-                  : modelRegistry.workhouseModelFor("anthropic"));
+      String key = modelComparisonKey(t);
       grouped.computeIfAbsent(key, k -> new ArrayList<>()).add(t);
     }
 
@@ -1195,12 +1244,7 @@ public class StateStore {
 
     Map<String, List<AgentTask>> grouped = new LinkedHashMap<>();
     for (AgentTask t : allTasks) {
-      String key =
-          (t.getProvider() != null ? t.getProvider() : "anthropic")
-              + "/"
-              + (t.getModel() != null
-                  ? t.getModel()
-                  : modelRegistry.workhouseModelFor("anthropic"));
+      String key = modelComparisonKey(t);
       grouped.computeIfAbsent(key, k -> new ArrayList<>()).add(t);
     }
 
@@ -1288,14 +1332,60 @@ public class StateStore {
   /** Global (SUPER_ADMIN) variant: no org filter. */
   public UserRunsSummaryData computeUserRunsSummaryGlobal(int days) {
     Instant since = days > 0 ? Instant.now().minus(Duration.ofDays(days)) : null;
-    // N2 (audit 2026-05-29) — windowed query in the DB; all-time global stays a full scan as
-    // before.
-    List<PipelineRun> runs =
-        since == null ? runRepo.findAll() : runRepo.findByStartedAtAfter(since);
-    Map<String, AppUser> userMap =
-        appUserRepo.findAllActive().stream()
-            .collect(Collectors.toMap(AppUser::getId, u -> u, (a, b) -> a));
-    return buildUserStats(runs, userMap);
+    // RR-079: the all-time global summary used to load every pipeline_run AND every active user
+    // into heap, then group in Java. Now the per-user counts/token sums are aggregated in SQL
+    // (one row per distinct run owner) and only the owning users' display names are batch-fetched,
+    // so heap and query count no longer scale with the total run/user count.
+    List<PipelineRunRepository.UserRunAggregate> aggregates =
+        since == null ? runRepo.aggregateUserRunStats() : runRepo.aggregateUserRunStatsSince(since);
+    return buildUserStatsFromAggregates(aggregates);
+  }
+
+  /**
+   * RR-079 — builds the summary from SQL aggregate rows, batch-resolving run-owner display names.
+   * Preserves the DELETED-exclusion the previous {@code findAllActive()} userMap applied (a DELETED
+   * owner falls back to a truncated id, exactly as before), and the run-count-descending ordering.
+   */
+  private UserRunsSummaryData buildUserStatsFromAggregates(
+      List<PipelineRunRepository.UserRunAggregate> aggregates) {
+    List<String> userIds =
+        aggregates.stream()
+            .map(PipelineRunRepository.UserRunAggregate::getUid)
+            .filter(Objects::nonNull)
+            .distinct()
+            .collect(Collectors.toList());
+    Map<String, AppUser> userMap = new HashMap<>();
+    if (!userIds.isEmpty()) {
+      for (AppUser u : appUserRepo.findAllById(userIds)) {
+        if (!"DELETED".equals(u.getStatus())) {
+          userMap.put(u.getId(), u);
+        }
+      }
+    }
+
+    List<UserRunStat> stats =
+        aggregates.stream()
+            .map(
+                a -> {
+                  String uid = a.getUid();
+                  AppUser user = userMap.get(uid);
+                  String displayName =
+                      user != null
+                          ? (user.getFirstName() + " " + user.getLastName()).trim()
+                          : uid.substring(0, Math.min(8, uid.length())) + "…";
+                  return new UserRunStat(
+                      uid,
+                      displayName,
+                      (int) a.getRunCount(),
+                      (int) a.getCompleted(),
+                      (int) a.getFailed(),
+                      a.getTotalIn(),
+                      a.getTotalOut());
+                })
+            .sorted(Comparator.comparingInt(UserRunStat::runCount).reversed())
+            .toList();
+
+    return new UserRunsSummaryData(stats);
   }
 
   private UserRunsSummaryData buildUserStats(List<PipelineRun> runs, Map<String, AppUser> userMap) {
@@ -1499,11 +1589,17 @@ public class StateStore {
       String parentTaskId, String runId, List<TaskDefinition> subtaskDefs, String tenantId) {
     int total = subtaskDefs.size();
     List<AgentTask> rows = new ArrayList<>();
+    // RR-075: planner-supplied subtask IDs were saved directly as the global agent_task primary
+    // key, unlike savePlan's run-prefixing, so two runs whose planners emit a common subtask id
+    // (e.g. "setup") overwrote each other's rows. Namespace each subtask under its parent task id,
+    // which is itself already globally unique (savePlan run-prefixes it), and skip re-prefixing an
+    // id that already carries the namespace so a retry is idempotent.
     for (int i = 0; i < total; i++) {
       TaskDefinition def = subtaskDefs.get(i);
+      String subtaskId = namespacedSubtaskId(parentTaskId, def.getTaskId());
       AgentTask st =
           AgentTask.builder()
-              .taskId(def.getTaskId())
+              .taskId(subtaskId)
               .runId(runId)
               .title(def.getTitle())
               .complexity(def.getComplexity())
@@ -1519,6 +1615,19 @@ public class StateStore {
     }
     log.info("Created {} subtasks for parent task {}", total, parentTaskId);
     return rows;
+  }
+
+  /**
+   * Run-scoped subtask identity factory (RR-075). Namespaces a planner-local subtask id under its
+   * globally-unique parent task id. Idempotent: an id already carrying the namespace is returned
+   * unchanged so recovery/retry does not double-prefix.
+   */
+  static String namespacedSubtaskId(String parentTaskId, String plannerSubtaskId) {
+    String prefix = parentTaskId + "::";
+    if (plannerSubtaskId == null || plannerSubtaskId.isBlank()) {
+      throw new IllegalArgumentException("subtask id must not be null/blank");
+    }
+    return plannerSubtaskId.startsWith(prefix) ? plannerSubtaskId : prefix + plannerSubtaskId;
   }
 
   /** Returns subtasks for a parent task, ordered by subtask index. */
@@ -1698,6 +1807,24 @@ public class StateStore {
     return runRepo.countByStatus("COMPLETE");
   }
 
+  /**
+   * RR-1299 — recent TERMINAL runs across COMPLETE/PARTIAL/FAILED (started rows only). The
+   * optimiser's failure-rate trigger previously sampled COMPLETE-only runs and then looked for
+   * FAILED/BLOCKED tasks, but a run that actually failed terminalizes as FAILED/PARTIAL and never
+   * has status COMPLETE — so the failure-rate threshold could never fire on the failures it claims
+   * to monitor. Including PARTIAL/FAILED here lets the cohort contain real failures. CANCELLED is
+   * excluded because a user-initiated cancel is not a prompt-quality signal.
+   */
+  public List<PipelineRun> getRecentTerminalRuns(int limit) {
+    Specification<PipelineRun> terminal =
+        (root, q, cb) ->
+            cb.and(
+                root.get("status").in("COMPLETE", "PARTIAL", "FAILED"),
+                cb.isNotNull(root.get("startedAt")));
+    Pageable sorted = PageRequest.of(0, limit, Sort.by(Sort.Direction.DESC, "startedAt"));
+    return runRepo.findAll(terminal, sorted).getContent();
+  }
+
   public TaskReviewReport getReviewReport(String runId) {
     return runRepo
         .findById(runId)
@@ -1863,8 +1990,19 @@ public class StateStore {
     }
 
     // Create AgentTask rows for each new task
+    // RR-1446 — appended tasks keep planner-intent order by continuing past the run's current
+    // highest plan_index so the DTO renders them after the already-planned tasks.
     List<AgentTask> created = new ArrayList<>();
-    for (TaskDefinition t : miniPlan.getTasks()) {
+    int planIndexBase =
+        taskRepo.findByRunId(runId).stream()
+                .map(AgentTask::getPlanIndex)
+                .filter(Objects::nonNull)
+                .max(Integer::compareTo)
+                .orElse(-1)
+            + 1;
+    List<TaskDefinition> miniTasks = miniPlan.getTasks();
+    for (int i = 0; i < miniTasks.size(); i++) {
+      TaskDefinition t = miniTasks.get(i);
       AgentTask task =
           taskRepo.save(
               AgentTask.builder()
@@ -1875,6 +2013,7 @@ public class StateStore {
                   .assignedModel(t.getAssignedModel())
                   .status("PENDING")
                   .taskJson(toJson(t))
+                  .planIndex(planIndexBase + i)
                   .compactionCount(0)
                   .build());
       created.add(task);
@@ -2085,18 +2224,26 @@ public class StateStore {
   }
 
   /**
-   * Updates the instance heartbeat for a run. Called every 30s by RunOrchestrator. Uses a
-   * lightweight JPA update to avoid loading the full entity.
+   * RR-071 (2026-07-21) — claims/refreshes the execution lease for a run.
+   *
+   * <p>This previously did a read-modify-write: {@code findById} → mutate two fields → {@code
+   * save}. {@code PipelineRun} has no {@code @Version}, so that {@code save} wrote back EVERY field
+   * of the entity as it looked when the transaction loaded it — a heartbeat could therefore
+   * silently revert a concurrent terminal status, gate, token/cost, publication or cancellation
+   * write. Its javadoc also claimed to be both "called every 30s by RunOrchestrator" and a
+   * "lightweight JPA update to avoid loading the full entity"; neither was true.
+   *
+   * <p>It now delegates to {@link PipelineRunRepository#claimExecutionOwner}, the same fenced
+   * narrow UPDATE the live {@code RunOrchestrator} heartbeat path already uses: it touches only
+   * {@code executing_instance} + {@code execution_heartbeat}, requires the row to still be in a
+   * live execution status, and compare-and-sets the owner (unowned, or already this instance). A
+   * run that has gone terminal, or that another JVM owns, is left alone.
+   *
+   * @return {@code true} when the lease was claimed/refreshed; {@code false} when the row was
+   *     terminal, missing, or owned by a different instance.
    */
-  public void updateHeartbeat(String runId, String instanceId, java.time.Instant heartbeat) {
-    runRepo
-        .findById(runId)
-        .ifPresent(
-            run -> {
-              run.setExecutingInstance(instanceId);
-              run.setExecutionHeartbeat(heartbeat);
-              runRepo.save(run);
-            });
+  public boolean updateHeartbeat(String runId, String instanceId, java.time.Instant heartbeat) {
+    return runRepo.claimExecutionOwner(runId, instanceId, heartbeat) > 0;
   }
 
   private String toJson(Object obj) {

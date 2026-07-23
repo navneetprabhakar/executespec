@@ -8,7 +8,6 @@ import java.util.UUID;
 
 import com.navneet.executespec.activity.ActivityEventEmitter;
 import com.navneet.executespec.activity.ActivityEventType;
-import com.navneet.executespec.auth.repository.AppUserRepository;
 import com.navneet.executespec.contracts.ContractDriftEvent;
 import com.navneet.executespec.contracts.ContractDriftEventRepository;
 import com.navneet.executespec.contracts.ContractRegistry;
@@ -51,7 +50,6 @@ public class ContractDriftController {
   private final ProjectRepoLinkRepository linkRepo;
   private final ExecutespecFolderWriter folderWriter;
   private final GitHubRepoService gitHub;
-  private final AppUserRepository userRepo;
   private final com.navneet.executespec.project.pr.PullRequestRecordService prRecordService;
   private final com.navneet.executespec.project.security.ProjectAccessGuard projectAccessGuard;
   private final org.springframework.beans.factory.ObjectProvider<ActivityEventEmitter>
@@ -60,7 +58,8 @@ public class ContractDriftController {
   @PostMapping("/contracts/{contractId}/check-drift")
   public ResponseEntity<DriftDetectionService.DriftCheckResult> checkContract(
       @PathVariable String projectId, @PathVariable UUID contractId, Authentication auth) {
-    projectAccessGuard.assertCanRead(projectId, principal(auth));
+    projectAccessGuard.assertCanWrite(projectId, principal(auth));
+    ensureContractLinked(projectId, contractId);
     return ResponseEntity.ok(
         driftService.checkContract(contractId, parseUuidOrNull(projectId), patFor(auth)));
   }
@@ -68,7 +67,7 @@ public class ContractDriftController {
   @PostMapping("/repos/{repoId}/check-drift")
   public ResponseEntity<List<DriftDetectionService.DriftCheckResult>> checkRepo(
       @PathVariable String projectId, @PathVariable UUID repoId, Authentication auth) {
-    projectAccessGuard.assertCanRead(projectId, principal(auth));
+    projectAccessGuard.assertCanWrite(projectId, principal(auth));
     ensureLinked(projectId, repoId);
     return ResponseEntity.ok(
         driftService.checkAllForRepo(repoId, parseUuidOrNull(projectId), patFor(auth)));
@@ -77,7 +76,7 @@ public class ContractDriftController {
   @PostMapping("/check-drift")
   public ResponseEntity<List<DriftDetectionService.DriftCheckResult>> checkProject(
       @PathVariable String projectId, Authentication auth) {
-    projectAccessGuard.assertCanRead(projectId, principal(auth));
+    projectAccessGuard.assertCanWrite(projectId, principal(auth));
     List<UUID> repoIds =
         linkRepo.findByProjectId(projectId).stream().map(l -> l.getRepoId()).toList();
     return ResponseEntity.ok(
@@ -92,6 +91,7 @@ public class ContractDriftController {
         registryRepo
             .findById(contractId)
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "contract"));
+    ensureLinked(projectId, contract.getRepoId());
     ProjectRepo repo =
         projectRepoRepo
             .findById(contract.getRepoId())
@@ -102,14 +102,23 @@ public class ContractDriftController {
     }
     String pat = patFor(auth);
     String repoUrl = "https://github.com/" + repo.getGithubRepoFullName();
-    String sourceContent = gitHub.readRepoFile(repoUrl, contract.getDetectedPath(), pat);
-    if (sourceContent == null || sourceContent.startsWith("// ")) {
+    var sourceRead = gitHub.readRepoFile(repoUrl, contract.getDetectedPath(), pat);
+    // RR-1631 — failure is out-of-band now. A proto/GraphQL source file whose first line is
+    // `// Copyright …` is a successful read and stays refreshable; only a real transport/auth/
+    // missing-file failure raises here, and the response carries a code, never file bytes.
+    if (!sourceRead.successful()) {
       throw new ResponseStatusException(
-          HttpStatus.BAD_GATEWAY, "could not read source: " + sourceContent);
+          HttpStatus.BAD_GATEWAY,
+          "could not read source: " + DriftDetectionService.describe(sourceRead));
     }
+    String sourceContent = sourceRead.content();
+    // RR-525 — contract names are source/customer-derived strings, not a constrained filename
+    // type. A name such as `../../../.github/workflows/release` would give this narrow "refresh
+    // one contract" action repository-wide write authority. Derive a bounded slug instead of
+    // interpolating the raw name, and let the folder writer re-validate the final path.
     String folderPath =
         ".executespec/contracts/produced/"
-            + contract.getName()
+            + safeContractFileSlug(contract.getName(), contract.getId().toString())
             + DriftDetectionService.extensionFor(contract.typeEnum());
     Optional<ExecutespecFolderWriter.PullRequestInfo> pr =
         folderWriter.writeFiles(
@@ -150,11 +159,13 @@ public class ContractDriftController {
 
     // Mark every unresolved drift event for this contract as REFRESHED
     Instant now = Instant.now();
-    UUID actorUserId = parseUuidOrNull(auth.getName());
+    // RR-524 — attribute resolution + activity to the immutable actor id, not the email.
+    String actorId = resolvedUserId(auth);
+    UUID actorUserId = parseUuidOrNull(actorId);
     for (ContractDriftEvent open : driftRepo.findUnresolvedByContractId(contractId)) {
       open.setResolvedAction(ContractDriftEvent.ResolvedAction.REFRESHED.name());
       open.setResolvedAt(now);
-      open.setResolvedByUserId(auth.getName());
+      open.setResolvedByUserId(actorId);
       open.setResolvedRationale("Refreshed via dashboard PR " + pr.get().prUrl());
       driftRepo.save(open);
     }
@@ -179,16 +190,19 @@ public class ContractDriftController {
       @RequestBody DismissRequest body,
       Authentication auth) {
     projectAccessGuard.assertCanWrite(projectId, principal(auth));
+    ensureContractLinked(projectId, contractId);
     if (body == null || body.rationale() == null || body.rationale().trim().length() < 10) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "rationale required (≥10 chars)");
     }
     Instant now = Instant.now();
-    UUID actorUserId = parseUuidOrNull(auth.getName());
+    // RR-524 — attribute resolution + activity to the immutable actor id, not the email.
+    String actorId = resolvedUserId(auth);
+    UUID actorUserId = parseUuidOrNull(actorId);
     int dismissed = 0;
     for (ContractDriftEvent open : driftRepo.findUnresolvedByContractId(contractId)) {
       open.setResolvedAction(ContractDriftEvent.ResolvedAction.DISMISSED.name());
       open.setResolvedAt(now);
-      open.setResolvedByUserId(auth.getName());
+      open.setResolvedByUserId(actorId);
       open.setResolvedRationale(body.rationale().trim());
       driftRepo.save(open);
       dismissed++;
@@ -218,13 +232,35 @@ public class ContractDriftController {
 
   private void ensureLinked(String projectId, UUID repoId) {
     if (linkRepo.findByProjectIdAndRepoId(projectId, repoId).isEmpty()) {
-      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "repo not linked to project");
+      throw new ResponseStatusException(HttpStatus.NOT_FOUND, "contract or repo not found");
     }
   }
 
+  private void ensureContractLinked(String projectId, UUID contractId) {
+    ContractRegistry contract =
+        registryRepo
+            .findById(contractId)
+            .orElseThrow(
+                () ->
+                    new ResponseStatusException(
+                        HttpStatus.NOT_FOUND, "contract or repo not found"));
+    ensureLinked(projectId, contract.getRepoId());
+  }
+
   private String patFor(Authentication auth) {
-    if (auth == null || auth.getName() == null) return null;
-    return userRepo.findById(auth.getName()).map(u -> u.getGithubPat()).orElse(null);
+    // RR-524 — auth.getName() is AppUserDetails.getUsername(), i.e. the user's EMAIL, not the id
+    // used as the AppUser primary key. userRepo.findById(email) therefore always returned null, so
+    // every private-repository drift check / refresh silently passed a null PAT to SCM and failed
+    // (a public-repo smoke hid it). Resolve the decrypted PAT from the already-authenticated
+    // principal instead.
+    return principal(auth).getUser().getGithubPat();
+  }
+
+  /**
+   * RR-524 — the immutable actor id (UUID string), never the email, for resolution/audit writes.
+   */
+  private String resolvedUserId(Authentication auth) {
+    return principal(auth).getUser().getId();
   }
 
   private static UUID parseUuidOrNull(String s) {
@@ -240,4 +276,19 @@ public class ContractDriftController {
   public record DismissResponse(int dismissedCount) {}
 
   public record RefreshResponse(String prUrl, String branchName) {}
+
+  /**
+   * RR-525 — bound a customer/source-derived contract name to a single safe path segment. Anything
+   * outside {@code [A-Za-z0-9._-]} is collapsed; leading dots, empty results and over-long names
+   * fall back to the contract's own immutable id, so the produced filename can never contain a
+   * separator, dot segment or control character.
+   */
+  static String safeContractFileSlug(String contractName, String contractId) {
+    String slug = contractName == null ? "" : contractName.replaceAll("[^A-Za-z0-9._-]", "-");
+    slug = slug.replaceAll("^[.-]+", "");
+    if (slug.length() > 100) slug = slug.substring(0, 100);
+    slug = slug.replaceAll("[.-]+$", "");
+    if (slug.isBlank()) return "contract-" + contractId;
+    return slug;
+  }
 }

@@ -35,6 +35,16 @@ public class ConversationController {
   private static final int MAX_MESSAGES = 50;
 
   /**
+   * RR-960 / RR-599 — the only prior bound was a message COUNT, so a caller could still submit
+   * arbitrarily large turns that consume heap and provider context/spend on this platform-key
+   * pinned endpoint. Bound the content bytes too. This is a defensive transport cap; the deeper
+   * entitlement/managed-credit migration for this flow is tracked separately (RR-959 / RR-960).
+   */
+  static final int MAX_MESSAGE_CHARS = 24_000;
+
+  static final int MAX_TOTAL_CONTENT_CHARS = 120_000;
+
+  /**
    * System prompt loaded from {@code prompts/conversation-system.md} at boot. Externalized per
    * CLAUDE.md MUST-pattern + audit 2026-05-12 review item E #32.
    */
@@ -58,9 +68,31 @@ public class ConversationController {
     // to help them craft better run goals. Post-run chat remains PRO+ gated.
     List<ConversationMessage> incoming = req.messages() == null ? List.of() : req.messages();
 
-    // Server-side guard: honour the same 10-message cap enforced in the UI
+    // RR-960 / RR-599 — reject oversize turns before building the provider request.
+    long totalChars = 0;
+    for (ConversationMessage m : incoming) {
+      String content = m == null ? null : m.content();
+      int len = content == null ? 0 : content.length();
+      if (len > MAX_MESSAGE_CHARS) {
+        throw new org.springframework.web.server.ResponseStatusException(
+            org.springframework.http.HttpStatus.PAYLOAD_TOO_LARGE,
+            "A conversation message exceeds the " + MAX_MESSAGE_CHARS + "-character limit.");
+      }
+      totalChars += len;
+    }
+    if (totalChars > MAX_TOTAL_CONTENT_CHARS) {
+      throw new org.springframework.web.server.ResponseStatusException(
+          org.springframework.http.HttpStatus.PAYLOAD_TOO_LARGE,
+          "Conversation content exceeds the " + MAX_TOTAL_CONTENT_CHARS + "-character limit.");
+    }
+
+    // RR-961 — keep the NEWEST `allowed` messages, not the oldest. subList(0, allowed) dropped
+    // every turn after the 50th — including the latest user request and the finalize instruction —
+    // so once the history crossed the cap the model only ever saw stale context. Take the tail so
+    // the newest turn is always present.
     int allowed = Math.min(incoming.size(), MAX_MESSAGES);
-    List<ConversationMessage> messages = incoming.subList(0, allowed);
+    List<ConversationMessage> messages =
+        incoming.subList(incoming.size() - allowed, incoming.size());
 
     log.info("POST /api/conversation — {} message(s)", messages.size());
 

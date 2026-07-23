@@ -55,7 +55,9 @@ public class JsonSchemaDetector implements FileBasedContractDetector {
                 DetectorUtils.sha256(content),
                 null));
       } catch (Exception ex) {
-        log.warn("[JsonSchemaDetector] failed to read {}: {}", path, ex.getMessage());
+        log.warn(
+            "[JsonSchemaDetector] candidate read failed errorClass={}",
+            ex.getClass().getSimpleName());
       }
     }
     return out;

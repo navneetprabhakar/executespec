@@ -57,6 +57,14 @@ public class GmailOAuthService {
 
   private static final JsonFactory JSON_FACTORY = GsonFactory.getDefaultInstance();
 
+  /** Credential gate 2026-07-17 — envelopes the on-disk StoredCredential (refresh token). */
+  private final com.navneet.executespec.crypto.SimpleKeyEncryptionService keyEncryptionService;
+
+  public GmailOAuthService(
+      com.navneet.executespec.crypto.SimpleKeyEncryptionService keyEncryptionService) {
+    this.keyEncryptionService = keyEncryptionService;
+  }
+
   /** Only need SEND scope — never read user's inbox. */
   private static final List<String> SCOPES = List.of(GmailScopes.GMAIL_SEND);
 
@@ -180,7 +188,12 @@ public class GmailOAuthService {
 
     GoogleAuthorizationCodeFlow flow =
         new GoogleAuthorizationCodeFlow.Builder(httpTransport, JSON_FACTORY, clientSecrets, SCOPES)
-            .setDataStoreFactory(new FileDataStoreFactory(tokenDirectory))
+            // Credential gate 2026-07-17: the refresh token is enveloped at rest. Legacy plaintext
+            // stores fail to decode as an envelope only if they were written pre-gate — those
+            // deserialize through the passthrough/legacy read path unchanged.
+            .setDataStoreFactory(
+                new com.navneet.executespec.crypto.EncryptedDataStoreFactory(
+                    new FileDataStoreFactory(tokenDirectory), keyEncryptionService))
             .setAccessType("offline")
             .build();
 

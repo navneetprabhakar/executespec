@@ -13,11 +13,42 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
+import com.navneet.executespec.router.RunModelOverrides;
 import com.navneet.executespec.sse.SseBroadcaster;
 
 import org.junit.jupiter.api.Test;
 
 class BoundedTestGenKickoffTest {
+
+  @Test
+  void propagatesRouteContextAndRunsOwnedCleanup() throws Exception {
+    SseBroadcaster broadcaster = mock(SseBroadcaster.class);
+    ExecutorService worker = Executors.newSingleThreadExecutor();
+    ScheduledExecutorService timer = Executors.newSingleThreadScheduledExecutor();
+    CountDownLatch finished = new CountDownLatch(1);
+    java.util.concurrent.atomic.AtomicReference<String> observed =
+        new java.util.concurrent.atomic.AtomicReference<>();
+    try {
+      RunModelOverrides.bind(java.util.Map.of("deepseek:planning", "deepseek-v4-pro-native"));
+      BoundedTestGenKickoff kickoff =
+          new BoundedTestGenKickoff(broadcaster, Duration.ofSeconds(1), worker, timer);
+      kickoff.kickoff(
+          "run-context",
+          () ->
+              observed.set(
+                  RunModelOverrides.lookup(
+                      com.navneet.executespec.router.LlmProvider.DEEPSEEK,
+                      com.navneet.executespec.router.AgentTier.PLANNING)),
+          finished::countDown);
+
+      org.junit.jupiter.api.Assertions.assertTrue(finished.await(1, TimeUnit.SECONDS));
+      org.junit.jupiter.api.Assertions.assertEquals("deepseek-v4-pro-native", observed.get());
+    } finally {
+      RunModelOverrides.clear();
+      worker.shutdownNow();
+      timer.shutdownNow();
+    }
+  }
 
   @Test
   void kickoffDoesNotBlockTerminalCaller() throws Exception {

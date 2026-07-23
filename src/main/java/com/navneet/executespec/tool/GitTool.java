@@ -463,38 +463,120 @@ public class GitTool {
   }
 
   /**
-   * Stage and commit any pending changes on the current branch. No-ops silently if the working tree
-   * is already clean (nothing to commit). Used by post-merge agents (e.g. ApiTestSuiteAgent) to
-   * persist generated files into git so they are not accidentally picked up by a retried worker's
-   * {@code git add .}.
+   * RR-1283 — outcome of a scoped commit. {@code COMMITTED} carries the resulting SHA; {@code
+   * NOTHING_TO_COMMIT} means the named paths were already identical to HEAD; {@code FAILED} carries
+   * a reason. Callers must not report an artefact as persisted on anything but {@code COMMITTED} or
+   * {@code NOTHING_TO_COMMIT}.
    */
-  public void commitIfDirty(String runId, String message) {
-    Path workDir = getWorkspacePath(runId);
-    try {
-      ProcessBuilder statusPb =
-          new ProcessBuilder("git", "status", "--porcelain")
-              .directory(workDir.toFile())
-              .redirectErrorStream(true);
-      Process statusProc = statusPb.start();
-      String statusOutput = new String(statusProc.getInputStream().readAllBytes());
-      statusProc.waitFor();
-      if (statusOutput.isBlank()) return;
+  public record CommitOutcome(Status status, String sha, String detail) {
 
-      new ProcessBuilder("git", "add", "-A")
-          .directory(workDir.toFile())
-          .redirectErrorStream(true)
-          .start()
-          .waitFor();
-      ProcessBuilder commitPb =
-          new ProcessBuilder("git", "commit", "-m", message)
-              .directory(workDir.toFile())
-              .redirectErrorStream(true);
-      Process commitProc = commitPb.start();
-      commitProc.getInputStream().readAllBytes();
-      commitProc.waitFor();
-      log.debug("commitIfDirty: committed on run {} — {}", runId, message);
-    } catch (Exception e) {
-      log.warn("commitIfDirty failed for run {}: {}", runId, e.getMessage());
+    public enum Status {
+      COMMITTED,
+      NOTHING_TO_COMMIT,
+      FAILED
+    }
+
+    public boolean persisted() {
+      return status == Status.COMMITTED || status == Status.NOTHING_TO_COMMIT;
+    }
+
+    static CommitOutcome committed(String sha) {
+      return new CommitOutcome(Status.COMMITTED, sha, "committed");
+    }
+
+    static CommitOutcome nothingToCommit() {
+      return new CommitOutcome(Status.NOTHING_TO_COMMIT, null, "no change in the named paths");
+    }
+
+    static CommitOutcome failed(String detail) {
+      return new CommitOutcome(Status.FAILED, null, detail);
+    }
+  }
+
+  /** Serializes index/commit operations per run workspace — the index is a single shared file. */
+  private static final java.util.concurrent.ConcurrentMap<String, Object> WORKSPACE_GIT_LOCKS =
+      new java.util.concurrent.ConcurrentHashMap<>();
+
+  /**
+   * RR-1283 — stage and commit ONLY the named workspace-relative paths.
+   *
+   * <p>The previous {@code commitIfDirty} ran {@code git add -A} over the entire run workspace,
+   * which is shared with concurrently running post-merge agents. An "update openapi.yaml" commit
+   * could therefore sweep in another agent's half-written context files, rejected model output, or
+   * unrelated customer files — with the content decided by timing. Staging is now restricted to an
+   * explicit path list, and the commit itself carries the same pathspec so anything another thread
+   * left in the index is excluded too.
+   *
+   * @param relativePaths workspace-relative paths; must be non-empty, relative, and traversal-free
+   */
+  public CommitOutcome commitPaths(
+      String runId, String message, java.util.List<String> relativePaths) {
+    if (relativePaths == null || relativePaths.isEmpty()) {
+      return CommitOutcome.failed("no paths supplied");
+    }
+    Path workDir = getWorkspacePath(runId);
+    Path root = workDir.toAbsolutePath().normalize();
+    for (String relative : relativePaths) {
+      if (relative == null || relative.isBlank()) return CommitOutcome.failed("blank path");
+      Path resolved = root.resolve(relative).normalize();
+      if (!resolved.startsWith(root)) return CommitOutcome.failed("path escapes the workspace");
+      if (!java.nio.file.Files.exists(resolved)) {
+        return CommitOutcome.failed("path does not exist: " + relative);
+      }
+    }
+
+    synchronized (WORKSPACE_GIT_LOCKS.computeIfAbsent(runId, k -> new Object())) {
+      try {
+        java.util.List<String> add =
+            new java.util.ArrayList<>(java.util.List.of("git", "add", "--"));
+        add.addAll(relativePaths);
+        Process addProc =
+            new ProcessBuilder(add).directory(workDir.toFile()).redirectErrorStream(true).start();
+        String addOut = new String(addProc.getInputStream().readAllBytes());
+        if (addProc.waitFor() != 0) return CommitOutcome.failed("git add failed: " + addOut);
+
+        // Nothing staged for these paths → the file already matches HEAD.
+        java.util.List<String> diff =
+            new java.util.ArrayList<>(
+                java.util.List.of("git", "diff", "--cached", "--quiet", "--"));
+        diff.addAll(relativePaths);
+        Process diffProc =
+            new ProcessBuilder(diff).directory(workDir.toFile()).redirectErrorStream(true).start();
+        diffProc.getInputStream().readAllBytes();
+        if (diffProc.waitFor() == 0) return CommitOutcome.nothingToCommit();
+
+        // Pathspec on commit: only the named paths are committed even if a concurrent agent left
+        // unrelated entries staged in the shared index.
+        java.util.List<String> commit =
+            new java.util.ArrayList<>(java.util.List.of("git", "commit", "-m", message, "--"));
+        commit.addAll(relativePaths);
+        Process commitProc =
+            new ProcessBuilder(commit)
+                .directory(workDir.toFile())
+                .redirectErrorStream(true)
+                .start();
+        String commitOut = new String(commitProc.getInputStream().readAllBytes());
+        if (commitProc.waitFor() != 0)
+          return CommitOutcome.failed("git commit failed: " + commitOut);
+
+        Process revParse =
+            new ProcessBuilder("git", "rev-parse", "HEAD")
+                .directory(workDir.toFile())
+                .redirectErrorStream(true)
+                .start();
+        String sha = new String(revParse.getInputStream().readAllBytes()).trim();
+        if (revParse.waitFor() != 0 || sha.isBlank()) {
+          return CommitOutcome.failed("commit succeeded but HEAD could not be read");
+        }
+        log.debug("commitPaths: run {} committed {} as {}", runId, relativePaths, sha);
+        return CommitOutcome.committed(sha);
+      } catch (InterruptedException interrupted) {
+        Thread.currentThread().interrupt();
+        return CommitOutcome.failed("interrupted");
+      } catch (Exception e) {
+        log.warn("commitPaths failed for run {}: {}", runId, e.getMessage());
+        return CommitOutcome.failed("commit error: " + e.getMessage());
+      }
     }
   }
 
@@ -583,13 +665,19 @@ public class GitTool {
   /**
    * Pushes the main branch in the run's workspace to a remote GitHub repository. Non-fatal —
    * returns GitToolResult.err() on failure.
+   *
+   * <p>RR-900 — this used to pass {@code --force}, so any caller reaching it overwrote the remote
+   * default branch and discarded whatever was there. The only legitimate caller is publication into
+   * a repository ExecuteSpec just created (and which is therefore empty), where a fast-forward push
+   * always succeeds. The force flag is gone: a rejected non-fast-forward now means the remote had
+   * content we were about to destroy, and refusing is the correct outcome.
    */
   public GitToolResult pushToRemote(String runId, String repoUrl, String pat) {
     try {
-      String authUrl = repoUrl.replace("https://", "https://oauth2:" + pat + "@");
       String wsPath = Path.of(workspaceRoot, runId).toAbsolutePath().normalize().toString();
       ProcessBuilder pb =
-          new ProcessBuilder("git", "-C", wsPath, "push", authUrl, "main", "--force");
+          com.navneet.executespec.repo.GitProcessAuth.git(
+              pat, java.util.List.of("-C", wsPath, "push", repoUrl, "main"));
       pb.redirectErrorStream(true);
       Process p = pb.start();
       String output = new String(p.getInputStream().readAllBytes());
@@ -608,6 +696,67 @@ public class GitTool {
   }
 
   /**
+   * RR-1668 — build the {@code git push} argument tail for a feature-branch push that must not
+   * unconditionally force.
+   *
+   * <p>When {@code expectedRemoteSha} is a non-blank commit id (the SHA this run cloned the target
+   * branch from), the push uses an EXPLICIT {@code --force-with-lease=<branch>:<sha>}. The explicit
+   * expected value is mandatory: a bare {@code --force-with-lease} compares against the local
+   * remote-tracking ref, which any intervening fetch (many flows fetch) can advance so the lease
+   * matches whatever was just fetched and protects nothing. The explicit form pins the exact commit
+   * the remote branch is expected to still be at, so a human commit pushed after the clone makes
+   * the push abort ({@code stale info}) instead of being silently overwritten.
+   *
+   * <p>When {@code expectedRemoteSha} is null/blank the run did NOT clone this branch — it is a
+   * fresh {@code executespec/<runId>} branch created off a different base (or a re-run's {@code
+   * branchNamingPattern} output). There is no cloned SHA to lease against, and pinning an unrelated
+   * SHA would reject even the legitimate create. So a plain, non-forced push is used: it creates
+   * the branch when the remote does not have it and fast-forwards the run's own branch, but a
+   * divergent remote (a re-run over a branch a human advanced) is rejected as non-fast-forward
+   * rather than clobbered. Either way, no {@code --force}.
+   */
+  private static java.util.List<String> pushRefArgs(
+      String dir, String remote, String branch, String expectedRemoteSha) {
+    if (expectedRemoteSha != null && !expectedRemoteSha.isBlank()) {
+      return java.util.List.of(
+          "-C",
+          dir,
+          "push",
+          remote,
+          branch,
+          "--force-with-lease=" + branch + ":" + expectedRemoteSha.trim());
+    }
+    return java.util.List.of("-C", dir, "push", remote, branch);
+  }
+
+  /**
+   * RR-1668 — classify a rejected push so the failure reads as a deliberate safety refusal, not a
+   * transient error, and is never retried with {@code --force}. A {@code --force-with-lease}
+   * rejection surfaces as {@code stale info}; a plain non-forced push to a divergent remote
+   * surfaces as {@code non-fast-forward} / {@code fetch first}.
+   */
+  private static String describePushFailure(
+      String branch, String expectedRemoteSha, String output) {
+    String lower = output == null ? "" : output.toLowerCase(java.util.Locale.ROOT);
+    if (lower.contains("stale info") || lower.contains("force-with-lease")) {
+      return "Push refused (branch "
+          + branch
+          + "): the remote branch advanced past the commit this run started from ("
+          + (expectedRemoteSha == null ? "unknown" : expectedRemoteSha.trim())
+          + ") — someone else pushed to it. Refusing to overwrite; not force-pushing. "
+          + output;
+    }
+    if (lower.contains("non-fast-forward") || lower.contains("fetch first")) {
+      return "Push refused (branch "
+          + branch
+          + "): the remote branch already exists with commits this run did not build on. Refusing"
+          + " to overwrite; not force-pushing. "
+          + output;
+    }
+    return output;
+  }
+
+  /**
    * Creates a new branch from main and pushes it to the remote. Used for existing repos where we
    * don't want to push directly to the default branch.
    *
@@ -615,11 +764,15 @@ public class GitTool {
    * @param repoUrl HTTPS clone URL
    * @param pat GitHub PAT for authentication
    * @param branchName name for the new branch (e.g. "executespec/abc123")
+   * @param expectedRemoteSha RR-1668 — the SHA this run cloned {@code branchName} from, or {@code
+   *     null} when the run did not clone that branch. Non-null ⇒ {@code
+   *     --force-with-lease=<branch>:<sha>}; null ⇒ a plain non-forced push (create / fast-forward
+   *     only). Never an unconditional {@code --force}.
    * @return GitToolResult.ok on success, GitToolResult.err on failure
    */
-  public GitToolResult pushToBranch(String runId, String repoUrl, String pat, String branchName) {
+  public GitToolResult pushToBranch(
+      String runId, String repoUrl, String pat, String branchName, String expectedRemoteSha) {
     try {
-      String authUrl = repoUrl.replace("https://", "https://oauth2:" + pat + "@");
       String wsPath = Path.of(workspaceRoot, runId).toAbsolutePath().normalize().toString();
 
       // Create the branch from current HEAD (main)
@@ -634,9 +787,11 @@ public class GitTool {
         return GitToolResult.err("Branch creation failed: " + out1);
       }
 
-      // Push the branch to remote
+      // Push the branch to remote — RR-1668: force-with-lease pinned to the cloned SHA, or a plain
+      // non-forced push for a fresh branch. Never an unconditional --force.
       ProcessBuilder push =
-          new ProcessBuilder("git", "-C", wsPath, "push", authUrl, branchName, "--force");
+          com.navneet.executespec.repo.GitProcessAuth.git(
+              pat, pushRefArgs(wsPath, repoUrl, branchName, expectedRemoteSha));
       push.redirectErrorStream(true);
       Process p2 = push.start();
       String out2 = new String(p2.getInputStream().readAllBytes());
@@ -652,8 +807,9 @@ public class GitTool {
         log.info("[GitTool] Pushed branch {} to remote: {}", branchName, repoUrl);
         return GitToolResult.ok("Pushed branch " + branchName + " to " + repoUrl);
       } else {
-        log.warn("[GitTool] Push branch failed (exit {}): {}", exit2, out2);
-        return GitToolResult.err("Push branch failed: " + out2);
+        String detail = describePushFailure(branchName, expectedRemoteSha, out2);
+        log.warn("[GitTool] Push branch failed (exit {}): {}", exit2, detail);
+        return GitToolResult.err("Push branch failed: " + detail);
       }
     } catch (Exception e) {
       log.warn("[GitTool] Push branch failed: {}", e.getMessage());
@@ -663,9 +819,15 @@ public class GitTool {
 
   /**
    * Pilot v3.0 — for multi-repo runs. Each cloned subdirectory under {@code
-   * workspace/<runId>/repos/<name>} is its own git repo. Stages + commits + creates a branch +
-   * force-pushes. Returns OK with the branch name on success, OK with "CLEAN" if no changes, ERR
+   * workspace/<runId>/repos/<name>} is its own git repo. Stages + commits + creates a branch, then
+   * publishes it. Returns OK with the branch name on success, OK with "CLEAN" if no changes, ERR
    * otherwise.
+   *
+   * <p>RR-1668 — {@code expectedRemoteSha} is the SHA this run cloned {@code branchName} from, or
+   * {@code null} when the run did not clone that branch. Non-null ⇒ {@code
+   * --force-with-lease=<branch>:<sha>} (a human commit pushed after the clone aborts the push);
+   * null ⇒ a plain non-forced push (create / fast-forward only). Never an unconditional {@code
+   * --force}.
    */
   public GitToolResult commitAndPushSubdir(
       String runId,
@@ -673,7 +835,8 @@ public class GitTool {
       String remoteUrl,
       String pat,
       String branchName,
-      String commitMessage) {
+      String commitMessage,
+      String expectedRemoteSha) {
     try {
       String repoDir =
           Path.of(workspaceRoot, runId, subPath).toAbsolutePath().normalize().toString();
@@ -699,14 +862,16 @@ public class GitTool {
       if (commitExit != 0) return GitToolResult.err("commit failed: " + commitOut);
 
       runQuietly(repoDir, "git", "-C", repoDir, "checkout", "-B", branchName);
-      String authUrl = remoteUrl.replace("https://", "https://oauth2:" + pat + "@");
       ProcessBuilder push =
-          new ProcessBuilder("git", "-C", repoDir, "push", authUrl, branchName, "--force");
+          com.navneet.executespec.repo.GitProcessAuth.git(
+              pat, pushRefArgs(repoDir, remoteUrl, branchName, expectedRemoteSha));
       push.redirectErrorStream(true);
       Process pp = push.start();
       String pushOut = new String(pp.getInputStream().readAllBytes());
       int pushExit = pp.waitFor();
-      if (pushExit != 0) return GitToolResult.err("push failed: " + pushOut);
+      if (pushExit != 0)
+        return GitToolResult.err(
+            "push failed: " + describePushFailure(branchName, expectedRemoteSha, pushOut));
       return GitToolResult.ok(branchName);
     } catch (Exception e) {
       log.warn("[GitTool] commitAndPushSubdir failed: {}", e.getMessage());
@@ -753,8 +918,9 @@ public class GitTool {
       if (commitExit != 0) return GitToolResult.err("commit failed: " + commitOut);
 
       // Push WITHOUT --force (fast-forward only → safe for existing PR branches)
-      String authUrl = remoteUrl.replace("https://", "https://oauth2:" + pat + "@");
-      ProcessBuilder push = new ProcessBuilder("git", "-C", repoDir, "push", authUrl, branchName);
+      ProcessBuilder push =
+          com.navneet.executespec.repo.GitProcessAuth.git(
+              pat, java.util.List.of("-C", repoDir, "push", remoteUrl, branchName));
       push.redirectErrorStream(true);
       Process pp = push.start();
       String pushOut = new String(pp.getInputStream().readAllBytes());
@@ -776,21 +942,29 @@ public class GitTool {
   }
 
   /**
-   * Push workspace to a Bitbucket branch using Basic auth (username:appPassword). Mirrors {@link
-   * #pushToBranch} but uses Bitbucket credential format.
+   * Push workspace to a Bitbucket branch using a scoped API token. The static Git username is the
+   * Bitbucket-supported {@code x-bitbucket-api-token-auth}; the legacy username parameter remains
+   * for call compatibility and REST operations.
    *
    * @param runId run whose workspace to push
    * @param cloneUrl HTTPS clone URL (e.g. https://bitbucket.org/workspace/repo.git)
    * @param username Bitbucket username
    * @param appPassword Bitbucket app password
    * @param branchName name for the new branch (e.g. "executespec/abc123")
+   * @param expectedRemoteSha RR-1668 — the SHA this run cloned {@code branchName} from, or {@code
+   *     null} when the run did not clone that branch. Non-null ⇒ {@code
+   *     --force-with-lease=<branch>:<sha>}; null ⇒ a plain non-forced push. Never an unconditional
+   *     {@code --force}.
    * @return GitToolResult.ok on success, GitToolResult.err on failure
    */
   public GitToolResult pushToBranchBitbucket(
-      String runId, String cloneUrl, String username, String appPassword, String branchName) {
+      String runId,
+      String cloneUrl,
+      String username,
+      String appPassword,
+      String branchName,
+      String expectedRemoteSha) {
     try {
-      String authUrl =
-          cloneUrl.replace("https://", "https://" + username + ":" + appPassword + "@");
       String wsPath = Path.of(workspaceRoot, runId).toAbsolutePath().normalize().toString();
 
       // Create the branch from current HEAD (main)
@@ -805,9 +979,13 @@ public class GitTool {
         return GitToolResult.err("Branch creation failed: " + out1);
       }
 
-      // Push the branch to remote
+      // Push the branch to remote — RR-1668: force-with-lease pinned to the cloned SHA, or a plain
+      // non-forced push for a fresh branch. Never an unconditional --force.
       ProcessBuilder push =
-          new ProcessBuilder("git", "-C", wsPath, "push", authUrl, branchName, "--force");
+          com.navneet.executespec.repo.GitProcessAuth.git(
+              appPassword,
+              "x-bitbucket-api-token-auth",
+              pushRefArgs(wsPath, cloneUrl, branchName, expectedRemoteSha));
       push.redirectErrorStream(true);
       Process p2 = push.start();
       String out2 = new String(p2.getInputStream().readAllBytes());
@@ -823,8 +1001,9 @@ public class GitTool {
         log.info("[GitTool] Pushed branch {} to Bitbucket: {}", branchName, cloneUrl);
         return GitToolResult.ok("Pushed branch " + branchName + " to " + cloneUrl);
       } else {
-        log.warn("[GitTool] Bitbucket push failed (exit {}): {}", exit2, out2);
-        return GitToolResult.err("Push branch failed: " + out2);
+        String detail = describePushFailure(branchName, expectedRemoteSha, out2);
+        log.warn("[GitTool] Bitbucket push failed (exit {}): {}", exit2, detail);
+        return GitToolResult.err("Push branch failed: " + detail);
       }
     } catch (Exception e) {
       log.warn("[GitTool] Bitbucket push failed: {}", e.getMessage());

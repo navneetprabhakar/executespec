@@ -598,19 +598,27 @@ public class OrgService {
       }
       org.setOpenRouterApiKey(openRouter);
     }
+    // RR-834 — DeepSeek and Fireworks are BYOK provider lanes (V237 documents them at both user AND
+    // org scope), and TEAM/BYOK/ENTERPRISE are exactly the tiers granted `canManageAiKeys`
+    // (TierPermissionService). Gating the ORG lane to ENTERPRISE-only contradicted both the
+    // documented contract and the personal-key path, so a Team/BYOK admin was shown key management
+    // yet could not configure these providers for the team — an availability difference by storage
+    // location. Allow the BYOK-capable tiers here so org and personal scope agree. OpenRouter stays
+    // Enterprise-only above: it is the gateway that AvailableProviderResolver treats as the
+    // Enterprise signal, not a direct BYOK provider lane.
     String deepSeek = blankToNull(deepSeekKey);
     if (deepSeek != null) {
-      if (!"ENTERPRISE".equalsIgnoreCase(org.getTier())) {
+      if (!isByokCapableTier(org.getTier())) {
         throw new ResponseStatusException(
-            HttpStatus.FORBIDDEN, "DeepSeek native keys are an Enterprise-tier feature");
+            HttpStatus.FORBIDDEN, "DeepSeek native keys require a TEAM, BYOK or Enterprise tier");
       }
       org.setDeepSeekApiKey(deepSeek);
     }
     String fireworks = blankToNull(fireworksKey);
     if (fireworks != null) {
-      if (!"ENTERPRISE".equalsIgnoreCase(org.getTier())) {
+      if (!isByokCapableTier(org.getTier())) {
         throw new ResponseStatusException(
-            HttpStatus.FORBIDDEN, "Fireworks is an Enterprise-tier feature");
+            HttpStatus.FORBIDDEN, "Fireworks requires a TEAM, BYOK or Enterprise tier");
       }
       org.setFireworksApiKey(fireworks);
     }
@@ -642,13 +650,46 @@ public class OrgService {
     return result;
   }
 
+  /** Explicitly revoke one org provider credential; blank PUT fields never perform deletion. */
+  @Transactional
+  public OrgDto revokeAiKey(String orgId, String provider, String actorId) {
+    Org org =
+        orgRepo
+            .findById(orgId)
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Org not found"));
+    String normalized = normalizeProvider(provider);
+    boolean existed =
+        switch (normalized) {
+          case "anthropic" ->
+              clearPresent(org.getAnthropicApiKey(), () -> org.setAnthropicApiKey(null));
+          case "openai" -> clearPresent(org.getOpenAiApiKey(), () -> org.setOpenAiApiKey(null));
+          case "gemini" -> clearPresent(org.getGeminiApiKey(), () -> org.setGeminiApiKey(null));
+          case "openrouter" ->
+              clearPresent(org.getOpenRouterApiKey(), () -> org.setOpenRouterApiKey(null));
+          case "deepseek" ->
+              clearPresent(org.getDeepSeekApiKey(), () -> org.setDeepSeekApiKey(null));
+          case "fireworks" ->
+              clearPresent(org.getFireworksApiKey(), () -> org.setFireworksApiKey(null));
+          default ->
+              throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unsupported provider");
+        };
+    org.setUpdatedAt(Instant.now());
+    OrgDto result = OrgDto.from(orgRepo.save(org));
+    auditOrgEvent(
+        "ORG_AI_KEY_REVOKED",
+        orgId,
+        actorId,
+        Map.of("provider", normalized, "previouslyPresent", existed));
+    return result;
+  }
+
   // Key source mode & provider restriction settings
 
   private static final java.util.Set<String> VALID_KEY_SOURCE_MODES =
       java.util.Set.of("SYSTEM", "OWN_KEYS", "HYBRID");
 
   private static final java.util.Set<String> VALID_PROVIDERS =
-      java.util.Set.of("anthropic", "openai", "openrouter", "deepseek", "fireworks");
+      java.util.Set.of("anthropic", "openai", "gemini", "openrouter", "deepseek", "fireworks");
 
   @Transactional
   public OrgDto updateKeySourceSettings(
@@ -659,25 +700,26 @@ public class OrgService {
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Org not found"));
 
     if (keySourceMode != null) {
-      if (!VALID_KEY_SOURCE_MODES.contains(keySourceMode)) {
+      String normalizedMode = keySourceMode.trim().toUpperCase(java.util.Locale.ROOT);
+      if (!VALID_KEY_SOURCE_MODES.contains(normalizedMode)) {
         throw new ResponseStatusException(
             HttpStatus.BAD_REQUEST,
             "Invalid keySourceMode: " + keySourceMode + ". Must be SYSTEM, OWN_KEYS, or HYBRID.");
       }
-      org.setKeySourceMode(keySourceMode);
+      org.setKeySourceMode(normalizedMode);
     }
 
     if (enabledProviders != null) {
       // Validate and normalize
       for (String p : enabledProviders) {
-        String normalized = p.toLowerCase();
+        String normalized = normalizeProvider(p);
         if (!VALID_PROVIDERS.contains(normalized)
             || ModelAccessService.isDisabledProvider(normalized)) {
           throw new ResponseStatusException(
               HttpStatus.BAD_REQUEST,
               "Invalid provider: "
                   + p
-                  + ". Must be anthropic, openai, openrouter, deepseek, or fireworks.");
+                  + ". Must be anthropic, openai, gemini, openrouter, deepseek, or fireworks.");
         }
       }
       if (enabledProviders.isEmpty()) {
@@ -685,7 +727,7 @@ public class OrgService {
       } else {
         org.setEnabledProviders(
             enabledProviders.stream()
-                .map(String::toLowerCase)
+                .map(OrgService::normalizeProvider)
                 .distinct()
                 .collect(Collectors.joining(",")));
       }
@@ -708,6 +750,12 @@ public class OrgService {
             "providers", String.valueOf(org.getEnabledProviders())));
 
     return result;
+  }
+
+  private static String normalizeProvider(String provider) {
+    if (provider == null) return "";
+    String normalized = provider.trim().toLowerCase(java.util.Locale.ROOT);
+    return "google".equals(normalized) ? "gemini" : normalized;
   }
 
   @Transactional
@@ -798,8 +846,25 @@ public class OrgService {
     return s != null && !s.isBlank();
   }
 
+  private static boolean clearPresent(String current, Runnable clear) {
+    boolean present = present(current);
+    clear.run();
+    return present;
+  }
+
   private static String blankToNull(String s) {
     return (s != null && !s.isBlank()) ? s.strip() : null;
+  }
+
+  /**
+   * RR-834 — the tiers entitled to configure BYOK provider keys, matching {@code
+   * TierPermissionService}'s {@code canManageAiKeys} grant (TEAM/BYOK/ENTERPRISE). Used to gate the
+   * DeepSeek/Fireworks org lanes consistently with the personal-key path.
+   */
+  private static boolean isByokCapableTier(String tier) {
+    if (tier == null) return false;
+    String t = tier.toUpperCase();
+    return t.equals("TEAM") || t.equals("BYOK") || t.equals("ENTERPRISE");
   }
 
   private void auditOrgEvent(String eventType, String orgId, String actorId, Object newValue) {

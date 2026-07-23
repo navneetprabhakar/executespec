@@ -5,16 +5,21 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+import com.navneet.executespec.auth.entity.ActivityAudit;
 import com.navneet.executespec.auth.entity.AppUser;
 import com.navneet.executespec.auth.entity.PaymentAudit;
 import com.navneet.executespec.auth.repository.AppUserRepository;
 import com.navneet.executespec.auth.security.AppUserDetails;
+import com.navneet.executespec.auth.service.ActivityAuditService;
 import com.navneet.executespec.notification.Notification;
 import com.navneet.executespec.notification.NotificationRepository;
 import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
 
+import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.http.CacheControl;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -71,12 +76,13 @@ public class DsarController {
   private final PipelineRunRepository runRepo;
   private final NotificationRepository notifRepo;
   private final com.navneet.executespec.auth.repository.PaymentAuditRepository paymentRepo;
+  private final ActivityAuditService auditService;
 
   @GetMapping(value = "/me", produces = MediaType.APPLICATION_JSON_VALUE)
   public ResponseEntity<Map<String, Object>> exportSelf(
       @AuthenticationPrincipal AppUserDetails principal) {
     if (principal == null) throw new ResponseStatusException(HttpStatus.UNAUTHORIZED);
-    return ResponseEntity.ok(buildExport(principal.getUser().getId()));
+    return sensitiveExport(buildExport(principal.getUser().getId()));
   }
 
   @GetMapping(value = "/users/{userId}", produces = MediaType.APPLICATION_JSON_VALUE)
@@ -85,8 +91,57 @@ public class DsarController {
       @AuthenticationPrincipal AppUserDetails admin, @PathVariable String userId) {
     log.warn(
         "[DSAR] act-on-behalf export by admin={} for user={}", admin.getUser().getId(), userId);
-    return ResponseEntity.ok(buildExport(userId));
+    // RR-232 — a privileged act-on-behalf personal-data export must leave a durable,
+    // tenant-queryable
+    // accountability trail, not just a log line that disappears with log retention. Record an
+    // immutable ActivityAudit intent BEFORE the export is built, and fail closed if the audit store
+    // is unavailable — an unaudited access to another subject's data is refused, not silently
+    // served.
+    AppUser subject = userRepo.findById(userId).orElse(null);
+    try {
+      auditService.record(
+          ActivityAudit.builder()
+              .eventType("DSAR_ADMIN_EXPORT")
+              .entityType("USER")
+              .entityId(userId)
+              .actorId(admin.getUser().getId())
+              .orgId(subject != null ? subject.getOrgId() : null)
+              .newValue("{\"purpose\":\"act-on-behalf DSAR export\"}")
+              .build());
+    } catch (RuntimeException e) {
+      log.error(
+          "[DSAR] refusing admin export — durable audit could not be established for user={} by"
+              + " admin={} errorClass={}",
+          userId,
+          admin.getUser().getId(),
+          e.getClass().getSimpleName());
+      throw new ResponseStatusException(
+          HttpStatus.SERVICE_UNAVAILABLE,
+          "Export refused: the access-audit record could not be established.");
+    }
+    return sensitiveExport(buildExport(userId));
   }
+
+  /**
+   * RR-231 — a DSAR bundle carries identity, complete specs/prompts, financial ids and notification
+   * content, so it must never be cached by browsers, shared-device history or debugging proxies.
+   * Return it as a short-lived, non-cacheable attachment with nosniff.
+   */
+  private static ResponseEntity<Map<String, Object>> sensitiveExport(Map<String, Object> body) {
+    return ResponseEntity.ok()
+        .cacheControl(CacheControl.noStore().cachePrivate())
+        .header(HttpHeaders.PRAGMA, "no-cache")
+        .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"dsar-export.json\"")
+        .header("X-Content-Type-Options", "nosniff")
+        .body(body);
+  }
+
+  /**
+   * Per-section row ceiling. RR-230: a DSAR is a legal export that claims completeness, so every
+   * section must either return all rows or state explicitly that it was truncated — a silent cap is
+   * a false claim of completeness, and an unbounded section is a heap/response-size hazard.
+   */
+  static final int MAX_ROWS = 1000;
 
   private Map<String, Object> buildExport(String userId) {
     AppUser user =
@@ -118,23 +173,29 @@ public class DsarController {
     // Secrets themselves are intentionally OMITTED — DSAR mandates
     // disclosure of WHAT we hold, not handing back live credentials.
 
-    // PaymentAudit rows touching this user or their org.
-    List<PaymentAudit> payments = paymentRepo.findByUserIdOrOrgId(user.getId(), user.getOrgId());
-    List<Map<String, Object>> paymentRows = payments.stream().map(this::serializePayment).toList();
+    // RR-229: PaymentAudit rows attributable to THIS SUBJECT ONLY. The prior query
+    // (findByUserIdOrOrgId) returned every payment row for the caller's whole org regardless of the
+    // row's data subject, so any ordinary org member's "personal data export" leaked other members'
+    // payment reference ids, amounts, tier changes and gateway metadata. A DSAR must disclose only
+    // the requesting subject's own personal data; organization financial portability is a separate,
+    // capability-gated concern. RR-230: bounded, with an explicit truncation marker.
+    Page<PaymentAudit> paymentPage =
+        paymentRepo.findByUserIdOrderByCreatedAtDesc(user.getId(), PageRequest.of(0, MAX_ROWS));
+    List<Map<String, Object>> paymentRows =
+        paymentPage.getContent().stream().map(this::serializePayment).toList();
 
-    // Runs the user authored — capped at 1000 to keep the response sane.
-    List<PipelineRun> runs =
-        runRepo
-            .findByCreatedByUserIdOrderByStartedAtDesc(user.getId(), PageRequest.of(0, 1000))
-            .getContent();
-    List<Map<String, Object>> runRows = runs.stream().map(this::serializeRun).toList();
+    // Runs the user authored — bounded with an explicit truncation marker (RR-230).
+    Page<PipelineRun> runPage =
+        runRepo.findByCreatedByUserIdOrderByStartedAtDesc(
+            user.getId(), PageRequest.of(0, MAX_ROWS));
+    List<Map<String, Object>> runRows =
+        runPage.getContent().stream().map(this::serializeRun).toList();
 
-    // Notifications.
-    List<Notification> notifs =
-        notifRepo
-            .findByUserIdOrderByCreatedAtDesc(user.getId(), PageRequest.of(0, 1000))
-            .getContent();
-    List<Map<String, Object>> notifRows = notifs.stream().map(this::serializeNotif).toList();
+    // Notifications — bounded with an explicit truncation marker (RR-230).
+    Page<Notification> notifPage =
+        notifRepo.findByUserIdOrderByCreatedAtDesc(user.getId(), PageRequest.of(0, MAX_ROWS));
+    List<Map<String, Object>> notifRows =
+        notifPage.getContent().stream().map(this::serializeNotif).toList();
 
     Map<String, Object> root = new LinkedHashMap<>();
     root.put("schemaVersion", 1);
@@ -143,6 +204,16 @@ public class DsarController {
     root.put("payments", paymentRows);
     root.put("runs", runRows);
     root.put("notifications", notifRows);
+    // RR-230: completeness is stated, never implied. Each section reports its returned count, the
+    // true total, and whether rows were withheld by the cap, so an active subject can tell a
+    // complete export from a truncated one and request the remainder.
+    root.put(
+        "truncation",
+        Map.of(
+            "maxRowsPerSection", MAX_ROWS,
+            "payments", sectionTruncation(paymentPage),
+            "runs", sectionTruncation(runPage),
+            "notifications", sectionTruncation(notifPage)));
     root.put(
         "note",
         "Per GDPR Art. 15 / CCPA / DPDP this is the machine-readable copy "
@@ -152,6 +223,19 @@ public class DsarController {
             + "we hold, not handing back active secrets. To request "
             + "deletion (right to be forgotten), email admin@executespec.ai.");
     return root;
+  }
+
+  /**
+   * RR-230 — per-section completeness evidence: returned count, true total, and truncation flag.
+   */
+  private static Map<String, Object> sectionTruncation(Page<?> page) {
+    long total = page.getTotalElements();
+    int returned = page.getNumberOfElements();
+    Map<String, Object> m = new LinkedHashMap<>();
+    m.put("returned", returned);
+    m.put("total", total);
+    m.put("truncated", total > returned);
+    return m;
   }
 
   private Map<String, Object> serializePayment(PaymentAudit p) {

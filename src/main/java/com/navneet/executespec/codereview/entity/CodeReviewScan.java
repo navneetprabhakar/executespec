@@ -61,6 +61,15 @@ public class CodeReviewScan {
   @Builder.Default
   private Integer totalLoc = 0;
 
+  /**
+   * RR-1696 (persisted half of RR-1685) — whether {@link #totalFilesScanned} / {@link #totalLoc}
+   * are exact or a lower bound. One of {@code CodeReviewAgent.ScanCoverage} (COMPLETE |
+   * TRUNCATED_FILE_LIMIT | TRUNCATED_READ_BUDGET | TRUNCATED_TIME_BUDGET | TRUNCATED_WALK_FAILED).
+   * Null legacy rows are read as UNKNOWN — a lower bound.
+   */
+  @Column(name = "scan_coverage", length = 32)
+  private String scanCoverage;
+
   @Column(name = "static_findings_count")
   @Builder.Default
   private Integer staticFindingsCount = 0;

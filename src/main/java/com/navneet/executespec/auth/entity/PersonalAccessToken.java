@@ -44,7 +44,7 @@ public class PersonalAccessToken {
   @Column(name = "token_prefix", nullable = false, length = 16)
   private String tokenPrefix;
 
-  /** Comma-separated scopes. v1 issues "full" (acts as the user). */
+  /** Comma-separated capabilities enforced by {@code PatScopePolicy}; legacy rows use full. */
   @Column(nullable = false, length = 255)
   @Builder.Default
   private String scopes = "full";

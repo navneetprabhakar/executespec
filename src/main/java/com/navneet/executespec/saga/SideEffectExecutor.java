@@ -3,47 +3,51 @@ package com.navneet.executespec.saga;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
-import java.time.Instant;
-import java.util.List;
 import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+
+import jakarta.annotation.PreDestroy;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * Processes {@link SideEffectOutboxEntry} records every 30 seconds.
+ * Processes {@link SideEffectOutboxEntry} records through a committed cross-JVM lease.
  *
  * <p>For each due entry:
  *
  * <ol>
- *   <li>Atomically claims it (PENDING → PROCESSING) to prevent duplicate execution
+ *   <li>Claims it in a separate committed transaction (PENDING/stale PROCESSING → PROCESSING)
  *   <li>Dispatches to the appropriate handler by {@code effectType}
- *   <li>Marks COMPLETED on success, or FAILED with exponential backoff on error
+ *   <li>Heartbeats during the handler and fences every terminal/retry update by lease token
  * </ol>
  *
- * <p>Backoff schedule: 1 min → 5 min → 30 min between attempts (capped at max_attempts). After
- * max_attempts, status is permanently FAILED — no further retries.
+ * <p>Delivery is at-least-once, not exactly-once: a process can die after an external system
+ * accepts a request. {@link SideEffectHandlerContract} therefore admits only handlers whose replay
+ * behavior is explicitly idempotent. Backoff is 1 min → 5 min → 30 min, capped by {@code
+ * max_attempts}.
  */
 @Service
-@RequiredArgsConstructor
 @Slf4j
 public class SideEffectExecutor {
 
-  private static final int BATCH_SIZE = 20;
   private static final Duration[] BACKOFF = {
     Duration.ofMinutes(1), Duration.ofMinutes(5), Duration.ofMinutes(30)
   };
 
-  private final SideEffectOutboxRepository repository;
+  private final SideEffectClaimStore claimStore;
   private final ObjectMapper mapper;
   private final MeterRegistry meterRegistry;
   private final com.navneet.executespec.deployment.WorkspaceExportService exportService;
@@ -53,128 +57,179 @@ public class SideEffectExecutor {
   // RL-2026-05-041 (audit #16) — real branch-delete compensation.
   private final com.navneet.executespec.repo.GitHubRepoService gitHubRepoService;
   private final com.navneet.executespec.auth.repository.AppUserRepository appUserRepository;
+  private final SideEffectOutboxProperties properties;
+  private final String workerId = hostLabel() + ":" + UUID.randomUUID();
+  private final ScheduledExecutorService heartbeatExecutor =
+      Executors.newSingleThreadScheduledExecutor(
+          runnable -> {
+            Thread thread = new Thread(runnable, "side-effect-outbox-heartbeat");
+            thread.setDaemon(true);
+            return thread;
+          });
 
-  @Scheduled(fixedRate = 30_000)
+  public SideEffectExecutor(
+      SideEffectClaimStore claimStore,
+      ObjectMapper mapper,
+      MeterRegistry meterRegistry,
+      com.navneet.executespec.deployment.WorkspaceExportService exportService,
+      com.navneet.executespec.deployment.GcsWorkspaceStore gcsStore,
+      com.navneet.executespec.config.AgentProperties agentProps,
+      com.navneet.executespec.state.StateStore stateStore,
+      com.navneet.executespec.repo.GitHubRepoService gitHubRepoService,
+      com.navneet.executespec.auth.repository.AppUserRepository appUserRepository,
+      SideEffectOutboxProperties properties) {
+    this.claimStore = claimStore;
+    this.mapper = mapper;
+    this.meterRegistry = meterRegistry;
+    this.exportService = exportService;
+    this.gcsStore = gcsStore;
+    this.agentProps = agentProps;
+    this.stateStore = stateStore;
+    this.gitHubRepoService = gitHubRepoService;
+    this.appUserRepository = appUserRepository;
+    this.properties = properties;
+  }
+
+  @Scheduled(fixedDelayString = "${side-effect-outbox.poll-interval-millis:30000}")
   public void processDue() {
-    List<SideEffectOutboxEntry> due = repository.findDue(Instant.now(), BATCH_SIZE);
-    if (due.isEmpty()) return;
-
-    log.debug("[SideEffectExecutor] Processing {} due entries", due.size());
-    for (SideEffectOutboxEntry entry : due) {
-      processEntry(entry);
+    int recoveredFailures = claimStore.failExpiredExhausted(properties.getBatchSize());
+    if (recoveredFailures > 0) {
+      log.error(
+          "[SideEffectExecutor] Marked {} exhausted crashed deliveries FAILED", recoveredFailures);
+    }
+    // This worker executes handlers sequentially, so claim one immediately before dispatch. A
+    // pre-claimed batch could expire behind one slow handler and consume attempts without running.
+    for (int processed = 0; processed < properties.getBatchSize(); processed++) {
+      var claimed =
+          claimStore.claimDue(workerId, 1, Duration.ofSeconds(properties.getLeaseSeconds()));
+      if (claimed.isEmpty()) {
+        break;
+      }
+      processLease(claimed.getFirst());
     }
   }
 
-  @Transactional
+  /** Backward-compatible single-entry trigger; the durable store still owns the committed claim. */
   public void processEntry(SideEffectOutboxEntry entry) {
-    // Atomic claim — skip if another instance already took it
-    int claimed = repository.markProcessing(entry.getId());
-    if (claimed == 0) {
+    if (entry == null || entry.getId() == null) {
+      return;
+    }
+    var claimed =
+        claimStore.tryClaim(
+            entry.getId(),
+            workerId,
+            Duration.ofSeconds(properties.getLeaseSeconds()),
+            entry.getMaxAttempts());
+    if (claimed.isEmpty()) {
       log.debug("[SideEffectExecutor] Entry {} already claimed — skipping", entry.getId());
       return;
     }
+    processLease(claimed.get());
+  }
+
+  void processLease(SideEffectClaimStore.Lease lease) {
+    AtomicBoolean leaseValid = new AtomicBoolean(true);
+    ScheduledFuture<?> heartbeat = startHeartbeat(lease, leaseValid);
 
     try {
-      Map<String, Object> payload = parsePayload(entry.getPayload());
-      dispatch(entry.getEffectType(), entry.getRunId(), payload);
-
-      entry.setStatus("COMPLETED");
-      entry.setCompletedAt(Instant.now());
-      entry.setLastError(null);
-      repository.save(entry);
+      ensureLease(lease, leaseValid);
+      SideEffectHandlerContract contract = verifiedContract(lease);
+      Map<String, Object> payload = parsePayload(lease.payload());
+      String handlerResult = dispatch(contract, lease.runId(), payload);
+      ensureLease(lease, leaseValid);
+      if (!claimStore.complete(lease, handlerResult)) {
+        throw new LeaseLostException();
+      }
 
       Counter.builder("executespec.side_effect.completed")
-          .tag("type", entry.getEffectType())
+          .tag("type", lease.effectType())
           .register(meterRegistry)
           .increment();
       log.info(
-          "[SideEffectExecutor] Completed {} for run {} (attempt={})",
-          entry.getEffectType(),
-          entry.getRunId(),
-          entry.getAttempt() + 1);
-
+          "[SideEffectExecutor] Completed {} for run {} attempt={} token={} key={}",
+          lease.effectType(),
+          lease.runId(),
+          lease.attempt(),
+          lease.fencingToken(),
+          lease.idempotencyKey());
+    } catch (LeaseLostException lost) {
+      Counter.builder("executespec.side_effect.lease_lost")
+          .tag("type", lease.effectType())
+          .register(meterRegistry)
+          .increment();
+      log.warn(
+          "[SideEffectExecutor] Lease lost for {} run={} token={}; stale outcome discarded",
+          lease.effectType(),
+          lease.runId(),
+          lease.fencingToken());
+    } catch (NonRetryableSideEffectException nonRetryable) {
+      SideEffectClaimStore.DeliveryResult result = claimStore.failPermanently(lease, nonRetryable);
+      recordFailureMetric(lease.effectType(), result);
+      log.error(
+          "[SideEffectExecutor] Permanently FAILED non-retryable {} run={} attempt={}: {}",
+          lease.effectType(),
+          lease.runId(),
+          lease.attempt(),
+          nonRetryable.getMessage());
     } catch (Exception e) {
-      int nextAttempt = entry.getAttempt() + 1;
-      entry.setAttempt(nextAttempt);
-
-      if (nextAttempt >= entry.getMaxAttempts()) {
-        entry.setStatus("FAILED");
-        entry.setLastError("Max attempts reached. Last error: " + e.getMessage());
-        log.error(
-            "[SideEffectExecutor] Permanently FAILED {} for run {} after {} attempts: {}",
-            entry.getEffectType(),
-            entry.getRunId(),
-            nextAttempt,
-            e.getMessage());
-        Counter.builder("executespec.side_effect.failed")
-            .tag("type", entry.getEffectType())
-            .register(meterRegistry)
-            .increment();
-      } else {
-        Duration backoff = BACKOFF[Math.min(nextAttempt - 1, BACKOFF.length - 1)];
-        entry.setStatus("PENDING");
-        entry.setNextRetryAt(Instant.now().plus(backoff));
-        entry.setLastError(e.getMessage());
-        log.warn(
-            "[SideEffectExecutor] Retry {}/{} for {} run {} in {} — {}",
-            nextAttempt,
-            entry.getMaxAttempts(),
-            entry.getEffectType(),
-            entry.getRunId(),
-            backoff,
-            e.getMessage());
-        Counter.builder("executespec.side_effect.retried")
-            .tag("type", entry.getEffectType())
-            .register(meterRegistry)
-            .increment();
-      }
-      repository.save(entry);
+      Duration backoff = BACKOFF[Math.min(lease.attempt() - 1, BACKOFF.length - 1)];
+      SideEffectClaimStore.DeliveryResult result = claimStore.failOrRetry(lease, e, backoff);
+      recordFailureMetric(lease.effectType(), result);
+      log.warn(
+          "[SideEffectExecutor] {} {} run={} attempt={}/{} token={} — {}",
+          result,
+          lease.effectType(),
+          lease.runId(),
+          lease.attempt(),
+          lease.maxAttempts(),
+          lease.fencingToken(),
+          e.getMessage());
+    } finally {
+      heartbeat.cancel(false);
     }
   }
 
-  private void dispatch(String effectType, String runId, Map<String, Object> payload) {
-    switch (effectType) {
-      case "COMPENSATE_GITHUB_BRANCH" -> compensateGitHubBranch(runId, payload);
-      case "COMPENSATE_JIRA_COMMENT" ->
-          log.info(
-              "[SideEffectExecutor] JIRA compensation for run {} — posting failure comment", runId);
-      case "COMPENSATE_CLOUD_RUN" ->
-          log.info(
-              "[SideEffectExecutor] Cloud Run compensation for run {} — would delete service",
-              runId);
-      case "GCS_ARCHIVE" -> retryGcsArchive(runId, payload);
-      default ->
-          log.warn(
-              "[SideEffectExecutor] Unknown effect type '{}' for run {} — no-op",
-              effectType,
-              runId);
-    }
+  private String dispatch(
+      SideEffectHandlerContract contract, String runId, Map<String, Object> payload) {
+    return switch (contract) {
+      case COMPENSATE_GITHUB_BRANCH -> compensateGitHubBranch(runId, payload);
+      case GCS_ARCHIVE -> retryGcsArchive(runId, payload);
+    };
   }
 
-  private void retryGcsArchive(String runId, Map<String, Object> payload) {
+  private String retryGcsArchive(String runId, Map<String, Object> payload) {
     // Idempotent: skip if already uploaded
     var run = stateStore.findRun(runId).orElse(null);
     if (run != null && run.getGcsWorkspaceKey() != null) {
       log.info(
           "[SideEffectExecutor] GCS archive already complete for run {} — skipping retry", runId);
-      return;
+      return "ALREADY_ARCHIVED";
     }
 
     Path workspace = Path.of(agentProps.getWorkspace(), runId);
     if (!Files.isDirectory(workspace)) {
-      log.warn("[SideEffectExecutor] Local workspace absent for run {} — cannot archive", runId);
-      return;
+      throw new NonRetryableSideEffectException(
+          "Local workspace absent; archive cannot be reconstructed for run " + runId);
     }
 
     try {
       Path zipPath = exportService.exportWorkspace(runId);
       try {
         String gcsKey = gcsStore.uploadZip(runId, zipPath);
+        // RR-1676: a nonblank key is not proof the object landed. Require it to actually exist in
+        // GCS
+        // before persisting it as the run's durable archive key, so a persisted key can never read
+        // as
+        // "archived" over an absent object.
+        if (gcsKey == null || gcsKey.isBlank() || !gcsStore.exists(gcsKey)) {
+          throw new IllegalStateException("GCS archive returned no durable, present object key");
+        }
         if (run != null) {
           run.setGcsWorkspaceKey(gcsKey);
           stateStore.saveRun(run);
         }
         log.info("[SideEffectExecutor] GCS archive retry succeeded for run {} → {}", runId, gcsKey);
+        return "ARCHIVED:" + gcsKey;
       } finally {
         Files.deleteIfExists(zipPath);
       }
@@ -195,7 +250,7 @@ public class SideEffectExecutor {
    * deleteBranch} refuses protected branches (main/master/develop) as a safety net, so this can
    * never delete a real target branch.
    */
-  private void compensateGitHubBranch(String runId, Map<String, Object> payload) {
+  private String compensateGitHubBranch(String runId, Map<String, Object> payload) {
     String repoFullName = (String) payload.get("repoFullName");
     String branch = (String) payload.get("branch");
     // Back-compat with the legacy owner/repo payload shape.
@@ -205,21 +260,35 @@ public class SideEffectExecutor {
       if (owner != null && repo != null) repoFullName = owner + "/" + repo;
     }
     if (repoFullName == null || branch == null || branch.isBlank()) {
-      log.warn(
-          "[SideEffectExecutor] COMPENSATE_GITHUB_BRANCH missing repoFullName/branch for run {}",
-          runId);
-      return; // malformed payload — not retryable
+      throw new NonRetryableSideEffectException(
+          "COMPENSATE_GITHUB_BRANCH missing repoFullName/branch for run " + runId);
     }
     String pat = resolveOwnerPat(runId);
     if (pat == null || pat.isBlank()) {
-      // No system PAT exists; if the owner has none, retrying won't help — give up cleanly.
+      throw new NonRetryableSideEffectException(
+          "No GitHub PAT for run owner; cannot delete orphan branch "
+              + branch
+              + " on "
+              + repoFullName);
+    }
+    // RR-146 — a compensation enqueued from a stale belief must not delete live review material.
+    // Re-read the remote at execution time: if any open pull request references this head, the
+    // branch is NOT an orphan and the compensation is retired as a no-op.
+    var openPr = gitHubRepoService.findOpenPullRequestForHead(repoFullName, branch, pat);
+    if (openPr.present()) {
       log.warn(
-          "[SideEffectExecutor] No GitHub PAT for run {} owner — cannot delete orphan branch {} on"
-              + " {}",
-          runId,
+          "[SideEffectExecutor] COMPENSATE skipped: branch {} on {} backs open PR {} (run {})",
           branch,
-          repoFullName);
-      return;
+          repoFullName,
+          openPr.prNumber(),
+          runId);
+      return "BRANCH_RETAINED_OPEN_PR:" + repoFullName + ":" + branch;
+    }
+    if (!openPr.known()) {
+      // GitHub did not answer. Deleting on an unverified assumption is exactly the failure mode
+      // this guard exists to prevent — retry later instead.
+      throw new RuntimeException(
+          "Cannot verify pull-request state for " + repoFullName + " branch " + branch);
     }
     boolean ok = gitHubRepoService.deleteBranch(repoFullName, branch, pat);
     if (ok) {
@@ -228,6 +297,7 @@ public class SideEffectExecutor {
           branch,
           repoFullName,
           runId);
+      return "BRANCH_ABSENT:" + repoFullName + ":" + branch;
     } else {
       // Real failure (network / 403 / 401) — throw so the outbox retries with backoff.
       throw new RuntimeException(
@@ -253,9 +323,101 @@ public class SideEffectExecutor {
   @SuppressWarnings("unchecked")
   private Map<String, Object> parsePayload(String json) {
     try {
-      return mapper.readValue(json, new TypeReference<>() {});
+      Map<String, Object> payload = mapper.readValue(json, new TypeReference<>() {});
+      if (payload == null) {
+        throw new NonRetryableSideEffectException("Side-effect payload must be a JSON object");
+      }
+      return payload;
+    } catch (NonRetryableSideEffectException invalidPayload) {
+      throw invalidPayload;
     } catch (Exception e) {
-      return Map.of();
+      throw new NonRetryableSideEffectException("Malformed side-effect payload", e);
+    }
+  }
+
+  private SideEffectHandlerContract verifiedContract(SideEffectClaimStore.Lease lease) {
+    final SideEffectHandlerContract contract;
+    try {
+      contract = SideEffectHandlerContract.require(lease.effectType());
+    } catch (IllegalArgumentException unsupported) {
+      throw new NonRetryableSideEffectException(unsupported.getMessage(), unsupported);
+    }
+    if (!contract.version().equals(lease.handlerContractVersion())) {
+      throw new NonRetryableSideEffectException(
+          "Handler contract mismatch for "
+              + lease.effectType()
+              + ": persisted="
+              + lease.handlerContractVersion()
+              + ", runtime="
+              + contract.version());
+    }
+    return contract;
+  }
+
+  private ScheduledFuture<?> startHeartbeat(
+      SideEffectClaimStore.Lease lease, AtomicBoolean leaseValid) {
+    long intervalSeconds =
+        Math.max(
+            1,
+            Math.min(
+                properties.getHeartbeatSeconds(), Math.max(1, properties.getLeaseSeconds() / 3)));
+    return heartbeatExecutor.scheduleAtFixedRate(
+        () -> {
+          try {
+            if (!claimStore.heartbeat(lease, Duration.ofSeconds(properties.getLeaseSeconds()))) {
+              leaseValid.set(false);
+            }
+          } catch (Exception heartbeatFailure) {
+            leaseValid.set(false);
+            log.warn(
+                "[SideEffectExecutor] Heartbeat failed entry={} token={}: {}",
+                lease.id(),
+                lease.fencingToken(),
+                heartbeatFailure.getMessage());
+          }
+        },
+        intervalSeconds,
+        intervalSeconds,
+        TimeUnit.SECONDS);
+  }
+
+  private void ensureLease(SideEffectClaimStore.Lease lease, AtomicBoolean leaseValid) {
+    if (!leaseValid.get()
+        || !claimStore.heartbeat(lease, Duration.ofSeconds(properties.getLeaseSeconds()))) {
+      leaseValid.set(false);
+      throw new LeaseLostException();
+    }
+  }
+
+  private void recordFailureMetric(String effectType, SideEffectClaimStore.DeliveryResult result) {
+    String metric =
+        switch (result) {
+          case RETRY_SCHEDULED -> "executespec.side_effect.retried";
+          case FAILED -> "executespec.side_effect.failed";
+          case LEASE_LOST -> "executespec.side_effect.lease_lost";
+        };
+    Counter.builder(metric).tag("type", effectType).register(meterRegistry).increment();
+  }
+
+  @PreDestroy
+  void shutdownHeartbeatExecutor() {
+    heartbeatExecutor.shutdownNow();
+  }
+
+  private static String hostLabel() {
+    String host = System.getenv("HOSTNAME");
+    return host == null || host.isBlank() ? "local" : host;
+  }
+
+  private static final class LeaseLostException extends RuntimeException {}
+
+  private static final class NonRetryableSideEffectException extends RuntimeException {
+    private NonRetryableSideEffectException(String message) {
+      super(message);
+    }
+
+    private NonRetryableSideEffectException(String message, Throwable cause) {
+      super(message, cause);
     }
   }
 }

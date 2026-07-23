@@ -20,6 +20,9 @@ import com.navneet.executespec.project.entity.ProjectRepoLink;
 import com.navneet.executespec.project.repository.ProjectRepoLinkRepository;
 import com.navneet.executespec.project.repository.ProjectRepoRepository;
 import com.navneet.executespec.repo.GitHubRepoService;
+import com.navneet.executespec.repo.GitHubScmRepositoryClient;
+import com.navneet.executespec.repo.ScmCredentialResolver;
+import com.navneet.executespec.repo.ScmRepositoryClientRegistry;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.ObjectProvider;
@@ -40,6 +43,9 @@ class ProjectRepoServiceProjectMemberTest {
           projectMemberRepo,
           mock(StackDetector.class),
           mock(GitHubRepoService.class),
+          new ScmRepositoryClientRegistry(
+              List.of(new GitHubScmRepositoryClient(mock(GitHubRepoService.class)))),
+          mock(ScmCredentialResolver.class),
           userRepo,
           mock(TierEnforcementService.class),
           mock(GovernanceGuard.class),

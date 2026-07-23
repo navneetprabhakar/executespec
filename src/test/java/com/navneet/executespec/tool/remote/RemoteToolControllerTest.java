@@ -1,20 +1,25 @@
 package com.navneet.executespec.tool.remote;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import jakarta.servlet.http.HttpServletRequest;
+
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.agentsession.LocalHandsStateService;
+import com.navneet.executespec.auth.security.JwtAuthenticationFilter;
 import com.navneet.executespec.auth.security.RunAccessGuard;
 import com.navneet.executespec.state.entity.PipelineRun;
 
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.access.AccessDeniedException;
 
 class RemoteToolControllerTest {
 
@@ -22,6 +27,7 @@ class RemoteToolControllerTest {
   private final RemoteToolDispatcher dispatcher = mock(RemoteToolDispatcher.class);
   private final RunAccessGuard guard = mock(RunAccessGuard.class);
   private final RemoteToolController controller = new RemoteToolController(dispatcher, guard, om);
+  private final HttpServletRequest patRequest = patRequest();
 
   @Test
   void submitToolResult_normalizesSuccessEnvelopeBeforeDispatch() throws Exception {
@@ -32,7 +38,7 @@ class RemoteToolControllerTest {
             "call-1",
             om.readTree("{\"ok\":true,\"content\":{\"nested\":true},\"extra\":\"drop\"}"));
 
-    var response = controller.submitToolResult(null, "run-1", body);
+    var response = controller.submitToolResult(null, "run-1", body, patRequest);
 
     assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NO_CONTENT);
     ArgumentCaptor<String> envelope = ArgumentCaptor.forClass(String.class);
@@ -48,7 +54,7 @@ class RemoteToolControllerTest {
     var body =
         new RemoteToolController.ToolResultBody("call-2", om.readTree("\"not an envelope\""));
 
-    var response = controller.submitToolResult(null, "run-1", body);
+    var response = controller.submitToolResult(null, "run-1", body, patRequest);
 
     assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
     verify(dispatcher).rejectMalformed("run-1", "call-2");
@@ -60,7 +66,8 @@ class RemoteToolControllerTest {
         controller.submitToolResult(
             null,
             "run-1",
-            new RemoteToolController.ToolResultBody(" ", om.createObjectNode().put("ok", true)));
+            new RemoteToolController.ToolResultBody(" ", om.createObjectNode().put("ok", true)),
+            patRequest);
 
     assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
   }
@@ -76,11 +83,89 @@ class RemoteToolControllerTest {
                 java.util.List.<LocalHandsStateService.PendingCall>of(),
                 java.util.List.of("call-1")));
 
-    var response = controller.reconnectStatus(null, "run-1");
+    var response = controller.reconnectStatus(null, "run-1", patRequest);
 
     assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
     assertThat(response.getBody().state()).isEqualTo("RESTART_REQUIRES_NEW_RUN");
     assertThat(response.getBody().workerWaitRebound()).isFalse();
     assertThat(response.getBody().staleCallIds()).containsExactly("call-1");
+  }
+
+  @Test
+  void submitToolResult_boundsOversizedContent() throws Exception {
+    when(guard.requireRunWriteAccess(eq("run-1"), any())).thenReturn(new PipelineRun());
+    String huge = "x".repeat(RemoteToolController.MAX_FIELD_CHARS + 5_000);
+    var body =
+        new RemoteToolController.ToolResultBody(
+            "call-1", om.createObjectNode().put("ok", true).put("content", huge));
+
+    controller.submitToolResult(null, "run-1", body, patRequest);
+
+    ArgumentCaptor<String> envelope = ArgumentCaptor.forClass(String.class);
+    verify(dispatcher).complete(eq("run-1"), eq("call-1"), envelope.capture());
+    String content = om.readTree(envelope.getValue()).get("content").asText();
+    assertThat(content.length())
+        .isLessThanOrEqualTo(RemoteToolController.MAX_FIELD_CHARS + "…[truncated]".length());
+    assertThat(content).endsWith("…[truncated]");
+  }
+
+  @Test
+  void submitToolResult_collapsesUnknownErrorKindToInternal() throws Exception {
+    when(guard.requireRunWriteAccess(eq("run-1"), any())).thenReturn(new PipelineRun());
+    var body =
+        new RemoteToolController.ToolResultBody(
+            "call-1",
+            om.createObjectNode()
+                .put("ok", false)
+                .put("kind", "TOTALLY_MADE_UP")
+                .put("message", "boom"));
+
+    controller.submitToolResult(null, "run-1", body, patRequest);
+
+    ArgumentCaptor<String> envelope = ArgumentCaptor.forClass(String.class);
+    verify(dispatcher).complete(eq("run-1"), eq("call-1"), envelope.capture());
+    assertThat(om.readTree(envelope.getValue()).get("kind").asText()).isEqualTo("INTERNAL");
+  }
+
+  @Test
+  void submitToolResult_preservesDeclaredErrorKind() throws Exception {
+    when(guard.requireRunWriteAccess(eq("run-1"), any())).thenReturn(new PipelineRun());
+    var body =
+        new RemoteToolController.ToolResultBody(
+            "call-1",
+            om.createObjectNode()
+                .put("ok", false)
+                .put("kind", "NOT_FOUND")
+                .put("message", "missing"));
+
+    controller.submitToolResult(null, "run-1", body, patRequest);
+
+    ArgumentCaptor<String> envelope = ArgumentCaptor.forClass(String.class);
+    verify(dispatcher).complete(eq("run-1"), eq("call-1"), envelope.capture());
+    assertThat(om.readTree(envelope.getValue()).get("kind").asText()).isEqualTo("NOT_FOUND");
+  }
+
+  @Test
+  void browserJwtCannotSubmitLocalToolResults() {
+    HttpServletRequest request = mock(HttpServletRequest.class);
+    when(request.getAttribute(JwtAuthenticationFilter.AUTH_SOURCE_ATTRIBUTE))
+        .thenReturn(JwtAuthenticationFilter.AUTH_SOURCE_JWT);
+
+    assertThatThrownBy(
+            () ->
+                controller.submitToolResult(
+                    null,
+                    "run-1",
+                    new RemoteToolController.ToolResultBody(
+                        "call-1", om.createObjectNode().put("ok", true)),
+                    request))
+        .isInstanceOf(AccessDeniedException.class);
+  }
+
+  private static HttpServletRequest patRequest() {
+    HttpServletRequest request = mock(HttpServletRequest.class);
+    when(request.getAttribute(JwtAuthenticationFilter.AUTH_SOURCE_ATTRIBUTE))
+        .thenReturn(JwtAuthenticationFilter.AUTH_SOURCE_PAT);
+    return request;
   }
 }

@@ -1,0 +1,264 @@
+{
+  "schemaVersion": 1,
+  "artifactPurpose": "Frozen ordered GLM 5.2 OpenRouter SWE-bench Lite-10 focused evaluation input",
+  "decision": "NO_GO_ZERO_PROVIDER_SPEND_UNTIL_READINESS_GATE_CLOSES",
+  "dataset": {
+    "sourceDataset": "SWE-bench/SWE-bench_Lite",
+    "split": "test",
+    "sourceFileName": "swebench_lite_test.json",
+    "sourceRowCount": 300,
+    "sourceFileSha256": "a1d8b49a4118716578646889417ad860535567a19298e61fc146fc7fa217cd9a",
+    "frozenFile": "infra/benchmark/datasets/swebench-lite10-glm-5.2-2026-07-18.json",
+    "frozenRowCount": 10,
+    "frozenFileSha256": "b498cf6d7af26f6f97ddbf7927f0cd5e0e47d115d3d775318b4515f3887a3950",
+    "serialization": "UTF-8 JSON array; indent=2; ensure_ascii=false; trailing newline; rows copied structurally without field removal or value mutation",
+    "orderIsContract": true
+  },
+  "generationConfig": {
+    "provider": "openrouter",
+    "matrixModel": "glm-5.2",
+    "upstreamModel": "z-ai/glm-5.2",
+    "strictProvider": true,
+    "temperature": 0.0,
+    "effectivePatchMaxOutputTokens": 16000,
+    "matrixModelMaxOutputTokens": 32000,
+    "effectiveTokenSource": "CodeGenEngineImpl.MAX_TOKENS_PER_CALL overrides the larger model-registry ceiling",
+    "workerIterations": 220,
+    "sameProviderMaxAttempts": 4,
+    "crossProviderFallback": false,
+    "k": 1,
+    "generationConcurrency": 4,
+    "qualificationNewTaskWaves": [1, 2, 4, 3],
+    "adaptiveConcurrencyLadder": [4, 2, 1],
+    "expectedTotal": 10,
+    "perTaskCapUsd": "2.00",
+    "campaignCapUsd": "20.00",
+    "recordedOpeningBalanceUsd": "24.897977",
+    "taskTimeoutSeconds": 3600,
+    "shutdownReserveSeconds": 120,
+    "assembledPatchPromptCharacters": 7583,
+    "assembledPatchPromptSha256": "2aec80c6af57ac09686723496c3025d9c7ef4019c3c8ea36407c55ed83e332b1"
+  },
+  "scoringConfig": {
+    "package": "swebench",
+    "requiredVersion": "4.1.0",
+    "datasetName": "SWE-bench/SWE-bench_Lite",
+    "split": "test",
+    "maxWorkers": 4,
+    "timeoutSeconds": 1800,
+    "cacheLevel": "instance",
+    "denominator": 10,
+    "emptyPatchPolicy": "retain as explicit unresolved; never omit from denominator"
+  },
+  "provenance": {
+    "repositoryGitCommitAtFreeze": "f49ee95d94e135112ff1c51d1003ce656ff96340",
+    "repositoryDirtyAtFreeze": true,
+    "runnerFile": "infra/benchmark/scripts/k-eval.py",
+    "runnerSha256": "ff76ac1ef1917370790a07c0d831ef648b2a992765e62a954097b3a7dc419fb2",
+    "imageDigestResolution": "docker manifest inspect --verbose against docker.io on 2026-07-18; descriptor and config digests recorded",
+    "localExtractionPython": "3.x json module only; local swebench 3.0.17 was not used to transform rows",
+    "dispatchTupleStillRequired": "Record deployed Git/JAR/tool-schema/prompt bytes and actual OpenRouter upstream per physical attempt before spend"
+  },
+  "cases": [
+    {
+      "position": 1,
+      "instanceId": "astropy__astropy-12907",
+      "repo": "astropy/astropy",
+      "version": "4.3",
+      "baseCommit": "d16bfe05a744909de4b27f5875fe0d4ed41ce607",
+      "canonicalRowSha256": "4976f6de9539757d3e04625bad9dafb09c7dc058673fbb88901fddb30aa462da",
+      "image": {
+        "mutableReference": "docker.io/swebench/sweb.eval.x86_64.astropy_1776_astropy-12907:latest",
+        "immutableReference": "docker.io/swebench/sweb.eval.x86_64.astropy_1776_astropy-12907@sha256:f3f63bb87d581c0e7b47f900dd82165b71040e1758d3c29e915e2b18da9baf63",
+        "manifestDigest": "sha256:f3f63bb87d581c0e7b47f900dd82165b71040e1758d3c29e915e2b18da9baf63",
+        "configDigest": "sha256:cce639c4d4c4f8a47893a81a1a1894d3f2c77e603694da4000581450783ef532",
+        "platform": {
+          "os": "linux",
+          "architecture": "amd64"
+        },
+        "mediaType": "application/vnd.docker.distribution.manifest.v2+json",
+        "manifestSizeBytes": 3452
+      }
+    },
+    {
+      "position": 2,
+      "instanceId": "astropy__astropy-14182",
+      "repo": "astropy/astropy",
+      "version": "5.1",
+      "baseCommit": "a5917978be39d13cd90b517e1de4e7a539ffaa48",
+      "canonicalRowSha256": "270872e883dc54d072b5db31f3e152e7fa8346239fddf0f71d3206df0ea88621",
+      "image": {
+        "mutableReference": "docker.io/swebench/sweb.eval.x86_64.astropy_1776_astropy-14182:latest",
+        "immutableReference": "docker.io/swebench/sweb.eval.x86_64.astropy_1776_astropy-14182@sha256:374a7f3206d23fd41aaf6ac3361a34dad941bdbe92ec81ff1b4c3e0163e38453",
+        "manifestDigest": "sha256:374a7f3206d23fd41aaf6ac3361a34dad941bdbe92ec81ff1b4c3e0163e38453",
+        "configDigest": "sha256:770f48b2842d8115639b73b022994b2e1b20af676367509244b9dcbad3f903e9",
+        "platform": {
+          "os": "linux",
+          "architecture": "amd64"
+        },
+        "mediaType": "application/vnd.docker.distribution.manifest.v2+json",
+        "manifestSizeBytes": 3452
+      }
+    },
+    {
+      "position": 3,
+      "instanceId": "astropy__astropy-14365",
+      "repo": "astropy/astropy",
+      "version": "5.1",
+      "baseCommit": "7269fa3e33e8d02485a647da91a5a2a60a06af61",
+      "canonicalRowSha256": "acfbaa8025dad1294a4be0bf34837ed149040b78a7828dbc7d891be59d85c0a0",
+      "image": {
+        "mutableReference": "docker.io/swebench/sweb.eval.x86_64.astropy_1776_astropy-14365:latest",
+        "immutableReference": "docker.io/swebench/sweb.eval.x86_64.astropy_1776_astropy-14365@sha256:bb1ec8d27d478ab7469805680c824a4030fa3f32a592558f7a02485b76f3226b",
+        "manifestDigest": "sha256:bb1ec8d27d478ab7469805680c824a4030fa3f32a592558f7a02485b76f3226b",
+        "configDigest": "sha256:3925b434247f8fc7aabe79a902d03d4566d697c4f35b7a39fdfa209263efb358",
+        "platform": {
+          "os": "linux",
+          "architecture": "amd64"
+        },
+        "mediaType": "application/vnd.docker.distribution.manifest.v2+json",
+        "manifestSizeBytes": 3452
+      }
+    },
+    {
+      "position": 4,
+      "instanceId": "astropy__astropy-14995",
+      "repo": "astropy/astropy",
+      "version": "5.2",
+      "baseCommit": "b16c7d12ccbc7b2d20364b89fb44285bcbfede54",
+      "canonicalRowSha256": "6e69dde70d8b8f6b2ebfb03e603683eb000cf0a70b0b4f7f1422c69d95622b19",
+      "image": {
+        "mutableReference": "docker.io/swebench/sweb.eval.x86_64.astropy_1776_astropy-14995:latest",
+        "immutableReference": "docker.io/swebench/sweb.eval.x86_64.astropy_1776_astropy-14995@sha256:b29a3bf3daebe6055a2bba46bc98db070043acd53801bd783c2f620813a87eae",
+        "manifestDigest": "sha256:b29a3bf3daebe6055a2bba46bc98db070043acd53801bd783c2f620813a87eae",
+        "configDigest": "sha256:99afb65d48b892e0d2e015eeb0794175d26e6a092c81598aa5a32fb0978b30cc",
+        "platform": {
+          "os": "linux",
+          "architecture": "amd64"
+        },
+        "mediaType": "application/vnd.docker.distribution.manifest.v2+json",
+        "manifestSizeBytes": 3452
+      }
+    },
+    {
+      "position": 5,
+      "instanceId": "astropy__astropy-7746",
+      "repo": "astropy/astropy",
+      "version": "1.3",
+      "baseCommit": "d5bd3f68bb6d5ce3a61bdce9883ee750d1afade5",
+      "canonicalRowSha256": "d18cfa4b5f50317729134a089fabc4e5c185b63a8d248564bf6d3262a6fc013d",
+      "image": {
+        "mutableReference": "docker.io/swebench/sweb.eval.x86_64.astropy_1776_astropy-7746:latest",
+        "immutableReference": "docker.io/swebench/sweb.eval.x86_64.astropy_1776_astropy-7746@sha256:199db612955506b1d1f112d74e7cbdd3f8c0f1e62dbb40f9ec43156fd2be5b21",
+        "manifestDigest": "sha256:199db612955506b1d1f112d74e7cbdd3f8c0f1e62dbb40f9ec43156fd2be5b21",
+        "configDigest": "sha256:fcff2dbfdb652cf78c582caab234e8f5c42876ade80b25b3abd379dd0d626496",
+        "platform": {
+          "os": "linux",
+          "architecture": "amd64"
+        },
+        "mediaType": "application/vnd.docker.distribution.manifest.v2+json",
+        "manifestSizeBytes": 3039
+      }
+    },
+    {
+      "position": 6,
+      "instanceId": "astropy__astropy-6938",
+      "repo": "astropy/astropy",
+      "version": "1.3",
+      "baseCommit": "c76af9ed6bb89bfba45b9f5bc1e635188278e2fa",
+      "canonicalRowSha256": "f7680b37b2c1421216a3da25a85fd2da9703ba21a76254c8d2ca6bc52f2af4c0",
+      "image": {
+        "mutableReference": "docker.io/swebench/sweb.eval.x86_64.astropy_1776_astropy-6938:latest",
+        "immutableReference": "docker.io/swebench/sweb.eval.x86_64.astropy_1776_astropy-6938@sha256:1d9ed8562dd73ee344f654f3748e238c75d476b32182d348d7e8e913beb473e7",
+        "manifestDigest": "sha256:1d9ed8562dd73ee344f654f3748e238c75d476b32182d348d7e8e913beb473e7",
+        "configDigest": "sha256:2736972550e973b4b35349b4e2f4dd65d17d2b97fc97053408831213538e4620",
+        "platform": {
+          "os": "linux",
+          "architecture": "amd64"
+        },
+        "mediaType": "application/vnd.docker.distribution.manifest.v2+json",
+        "manifestSizeBytes": 3039
+      }
+    },
+    {
+      "position": 7,
+      "instanceId": "django__django-10914",
+      "repo": "django/django",
+      "version": "3.0",
+      "baseCommit": "e7fd69d051eaa67cb17f172a39b57253e9cb831a",
+      "canonicalRowSha256": "fd96a5abc717798e478db4c1373345c8a3d65fc14e25dbbfef0caa35e870cd36",
+      "image": {
+        "mutableReference": "docker.io/swebench/sweb.eval.x86_64.django_1776_django-10914:latest",
+        "immutableReference": "docker.io/swebench/sweb.eval.x86_64.django_1776_django-10914@sha256:f821080544e1fe3d31e483adbfdf2cc25850f42add4068de5b1dda8935f4d2cb",
+        "manifestDigest": "sha256:f821080544e1fe3d31e483adbfdf2cc25850f42add4068de5b1dda8935f4d2cb",
+        "configDigest": "sha256:066b8664701219b1c4c5cd5cb149a79c5718b5e8577c2124c399cf641aa1892b",
+        "platform": {
+          "os": "linux",
+          "architecture": "amd64"
+        },
+        "mediaType": "application/vnd.docker.distribution.manifest.v2+json",
+        "manifestSizeBytes": 3452
+      }
+    },
+    {
+      "position": 8,
+      "instanceId": "django__django-11001",
+      "repo": "django/django",
+      "version": "3.0",
+      "baseCommit": "ef082ebb84f00e38af4e8880d04e8365c2766d34",
+      "canonicalRowSha256": "91295bfa019051173849245bc2e36d72bf19e9b462f81431ad7f97f8933b2dc4",
+      "image": {
+        "mutableReference": "docker.io/swebench/sweb.eval.x86_64.django_1776_django-11001:latest",
+        "immutableReference": "docker.io/swebench/sweb.eval.x86_64.django_1776_django-11001@sha256:18ac9f84fc01826170eb08a4b097a3e40cbe70efc6340449ca4c48b21e0a3e64",
+        "manifestDigest": "sha256:18ac9f84fc01826170eb08a4b097a3e40cbe70efc6340449ca4c48b21e0a3e64",
+        "configDigest": "sha256:53f38064f46b5550f608bbc3490f8c965df7228015cfbd0a44dcdb2734442501",
+        "platform": {
+          "os": "linux",
+          "architecture": "amd64"
+        },
+        "mediaType": "application/vnd.docker.distribution.manifest.v2+json",
+        "manifestSizeBytes": 3039
+      }
+    },
+    {
+      "position": 9,
+      "instanceId": "django__django-10924",
+      "repo": "django/django",
+      "version": "3.0",
+      "baseCommit": "bceadd2788dc2dad53eba0caae172bd8522fd483",
+      "canonicalRowSha256": "9fa6e95f02cc3e2a3b2ebde3cbfc450c35ea8859348cebb564f6fd0cca71f52c",
+      "image": {
+        "mutableReference": "docker.io/swebench/sweb.eval.x86_64.django_1776_django-10924:latest",
+        "immutableReference": "docker.io/swebench/sweb.eval.x86_64.django_1776_django-10924@sha256:16d7b2e3241e5904fd3ec217b1007e6229cd302be0b0ff07ea82e4e9329ed664",
+        "manifestDigest": "sha256:16d7b2e3241e5904fd3ec217b1007e6229cd302be0b0ff07ea82e4e9329ed664",
+        "configDigest": "sha256:f52f349a6df267ccdd1e18790e84fa533728ceba235665f475cd48134a3663ea",
+        "platform": {
+          "os": "linux",
+          "architecture": "amd64"
+        },
+        "mediaType": "application/vnd.docker.distribution.manifest.v2+json",
+        "manifestSizeBytes": 3039
+      }
+    },
+    {
+      "position": 10,
+      "instanceId": "django__django-11019",
+      "repo": "django/django",
+      "version": "3.0",
+      "baseCommit": "93e892bb645b16ebaf287beb5fe7f3ffe8d10408",
+      "canonicalRowSha256": "54202703365b28436fecc9b1a8f2241a3b86888bf594963faa7c1dd254664965",
+      "image": {
+        "mutableReference": "docker.io/swebench/sweb.eval.x86_64.django_1776_django-11019:latest",
+        "immutableReference": "docker.io/swebench/sweb.eval.x86_64.django_1776_django-11019@sha256:3b892b8cd6a3e37bcb5aa97050e2b4a052a9affe203dc77c260408f529e133a3",
+        "manifestDigest": "sha256:3b892b8cd6a3e37bcb5aa97050e2b4a052a9affe203dc77c260408f529e133a3",
+        "configDigest": "sha256:5051a1e75c41393c91d16aa508cdf469ac31e0ecc05186981b7d61fec1678ebe",
+        "platform": {
+          "os": "linux",
+          "architecture": "amd64"
+        },
+        "mediaType": "application/vnd.docker.distribution.manifest.v2+json",
+        "manifestSizeBytes": 3039
+      }
+    }
+  ]
+}

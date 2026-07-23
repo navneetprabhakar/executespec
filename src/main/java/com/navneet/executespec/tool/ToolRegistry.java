@@ -9,6 +9,7 @@ import java.util.stream.Collectors;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.navneet.executespec.security.ContextSanitizer;
 import com.navneet.executespec.tool.remote.RemoteToolDispatcher;
 
 import org.springframework.ai.tool.ToolCallback;
@@ -38,6 +39,14 @@ public class ToolRegistry {
 
   /** Evidence gate for model/provider capability overlays (seeded OFF; V271). */
   public static final String FLAG_CAPABILITY_PROFILES = "worker.capability-profiles.enabled";
+
+  /**
+   * RR-538 — secret-redaction + length-bound contract for model/client-visible error text. {@link
+   * ContextSanitizer} is a stateless pattern-based helper (no injected dependencies), so it is held
+   * statically rather than threaded through {@link ContextBoundToolCallback} and every {@code
+   * bind*} + test construction site. Full exception detail stays in server telemetry only.
+   */
+  static final ContextSanitizer ERROR_SANITIZER = new ContextSanitizer();
 
   private final List<Tool> allTools;
   private final ObjectMapper objectMapper;
@@ -90,7 +99,43 @@ public class ToolRegistry {
    * worker behavior. Remote/local-hands runs explicitly retain the compatibility surface below.
    */
   public static final Set<String> SERVER_WORKER_EXCLUDED_TOOLS =
-      Set.of("ast_search", "astSearch", "ast_edit", "astEdit", "lsp", "mcp_client", "mcpClient");
+      Set.of(
+          // misleading / unwired capability claims
+          "ast_search",
+          "astSearch",
+          "ast_edit",
+          "astEdit",
+          "lsp",
+          "mcp_client",
+          "mcpClient",
+          // RR-548 — network egress. A server-side coding worker runs against a cloned workspace
+          // (and, for SWE-bench / ProgramBench, a `--network none` cleanroom); it has no legitimate
+          // need to fetch a URL, while a spec or an injected repository instruction absolutely can
+          // steer it at an internal service. The guarded fetch seam still applies wherever these
+          // tools remain bound (local-hands, generic bind), but the server worker is simply never
+          // shown them. This exclusion is unconditional and does not depend on
+          // `worker.lean-toolset.enabled`, whose default-OFF state is what exposed them before.
+          "web_fetch",
+          "web_search",
+          // RR-1599 — redundant alias spellings of a capability the worker already has under its
+          // canonical name. `executeCommand`/`runCommand`/`terminalCommand` ARE `shell`,
+          // `build`/`runBuild` ARE `buildProject`, `rename` IS `move`, `deletePath` IS `delete`,
+          // `backgroundProcess` IS `background_process`. Every worker safety/evidence gate
+          // downstream (WorkerAgent's write/shell/verified-pass classification,
+          // SequentialExecutor's
+          // repeated-failure and mutation-path signatures) matches on the literal tool NAME, so an
+          // alias executed a privileged action while staying invisible to the guard policing it.
+          // Until those gates key on ToolCapability, a server worker is never shown a second
+          // spelling for a capability it already has. Dispatch compatibility is unaffected —
+          // find(String) still resolves the alias for a persisted or replayed call.
+          "executeCommand",
+          "runCommand",
+          "terminalCommand",
+          "build",
+          "runBuild",
+          "rename",
+          "deletePath",
+          "backgroundProcess");
 
   /**
    * Harness-resolution T1 (flag {@code worker.lean-toolset.enabled}, V255, default OFF) — the
@@ -101,8 +146,8 @@ public class ToolRegistry {
    * stall class), splits model behavior across aliases with DIFFERENT error semantics ({@code bash}
    * errs on non-zero exit, {@code shell} returns ok+exit=N), and teaches models the tool surface is
    * unreliable when they hit a stub. When the flag is ON, server-side (non-remote) workers bind
-   * ONLY this set; remote/local-hands runs keep the full parity set — the aliases exist for those
-   * clients.
+   * ONLY this set. Remote workers always use one canonical schema per capability; compatibility
+   * aliases remain registered for replay/backward-compatible dispatch but are not advertised.
    *
    * <p>Membership rule: core tools + genuinely ADDITIVE capabilities with no core equivalent (glob,
    * move, delete). Pure duplicates, web tools (cleanroom is network-none; SSRF surface), and
@@ -134,9 +179,71 @@ public class ToolRegistry {
           "runWorkspaceTests",
           "verifyBoot");
 
+  /**
+   * Canonical schemas supported by the released CLI local-hands runtime. This retains genuinely
+   * additive client capabilities (structural search/edit, LSP, MCP, web, background jobs, and
+   * focused project commands) while removing alternate spellings and compatibility stubs. Legacy
+   * aliases remain in {@link #allTools}, so an in-flight/replayed older turn can still dispatch
+   * them through {@link #find(String)}.
+   */
+  public static final Set<String> REMOTE_LOCAL_HANDS_WORKER_TOOLS =
+      Set.of(
+          "readFile",
+          "writeFile",
+          "editFile",
+          "listFiles",
+          "searchFiles",
+          "glob",
+          "move",
+          "delete",
+          "gitStatus",
+          "gitDiff",
+          "shell",
+          "background_process",
+          "web_fetch",
+          "web_search",
+          "diagnostics",
+          "ast_search",
+          "ast_edit",
+          "lsp",
+          "mcp_client",
+          "buildProject",
+          "runTests",
+          "installDependencies",
+          "lintProject",
+          "formatProject",
+          "completeTask");
+
+  /** Canonical schemas implemented by the Terminal-Bench Harbor adapter. */
+  public static final Set<String> REMOTE_TERMINAL_BENCH_WORKER_TOOLS =
+      Set.of(
+          "readFile",
+          "writeFile",
+          "editFile",
+          "listFiles",
+          "searchFiles",
+          "gitStatus",
+          "gitDiff",
+          "shell",
+          "buildProject",
+          "runTests",
+          "completeTask");
+
   /** Names of all registered tools. */
   public List<String> toolNames() {
     return allTools.stream().map(Tool::name).sorted().toList();
+  }
+
+  /**
+   * Canonical capability behind a tool NAME (RR-1599). Empty when the name is unregistered or
+   * unclassified — callers must fail closed on empty, never treat it as harmless.
+   */
+  public java.util.Optional<ToolCapability> capabilityOf(String toolName) {
+    Tool tool = find(toolName);
+    if (tool != null && tool.capability() != null) {
+      return java.util.Optional.of(tool.capability());
+    }
+    return ToolCapabilities.of(toolName);
   }
 
   /** Look up a tool by name; null if not registered. */
@@ -217,12 +324,15 @@ public class ToolRegistry {
    */
   public List<ToolCallback> bindForWorker(ExecutionContext ctx, String provider, String model) {
     final boolean remote = isRemoteRun(ctx);
-    // T1 lean toolset: server-side workers get the canonical set only; remote/local-hands runs
-    // keep the full alias set for client parity. Flag default OFF ⇒ byte-identical binding.
+    // T1 lean toolset: server-side workers get the canonical set only when enabled. Remote workers
+    // are always canonical because transmitting duplicate aliases on every LLM turn is pure schema
+    // cost and increases tool-selection ambiguity; alias dispatch compatibility remains below the
+    // binding layer.
     final boolean lean =
         featureFlagService != null
             && featureFlagService.isEnabled("worker.lean-toolset.enabled")
             && !remote;
+    final Set<String> remoteTools = remote ? remoteWorkerTools(ctx) : Set.of();
     final java.util.Set<String> profileTools = profileOptionalTools(provider, model);
     return allTools.stream()
         .filter(t -> !WORKER_DENY_TOOLS.contains(t.name()))
@@ -231,12 +341,22 @@ public class ToolRegistry {
         // OFF. This keeps old persisted flag state from reintroducing misleading schemas.
         .filter(t -> remote || !SERVER_WORKER_EXCLUDED_TOOLS.contains(t.name()))
         .filter(t -> isToolBound(t) || profileTools.contains(t.name()))
+        .filter(t -> !remote || remoteTools.contains(t.name()))
         .filter(t -> !lean || LEAN_WORKER_TOOLS.contains(t.name()))
         .map(
             t ->
                 (ToolCallback)
                     new ContextBoundToolCallback(t, ctx, objectMapper, remoteToolDispatcher))
         .collect(Collectors.toList());
+  }
+
+  private Set<String> remoteWorkerTools(ExecutionContext ctx) {
+    if (remoteToolDispatcher != null
+        && remoteToolDispatcher.toolProfile(ctx.runId())
+            == RemoteToolDispatcher.ToolProfile.TERMINAL_BENCH) {
+      return REMOTE_TERMINAL_BENCH_WORKER_TOOLS;
+    }
+    return REMOTE_LOCAL_HANDS_WORKER_TOOLS;
   }
 
   private java.util.Set<String> profileOptionalTools(String provider) {
@@ -288,6 +408,17 @@ public class ToolRegistry {
    */
   public String dispatchRemote(ExecutionContext ctx, String toolName, String argsJson) {
     return remoteToolDispatcher.dispatch(ctx.runId(), ctx.taskId(), toolName, argsJson);
+  }
+
+  /** Deadline-aware variant used by the benchmark worker; local-hands callers keep the old API. */
+  public String dispatchRemote(
+      ExecutionContext ctx,
+      String toolName,
+      String argsJson,
+      Long absoluteDeadlineEpochMs,
+      Long shutdownReserveMs) {
+    return remoteToolDispatcher.dispatch(
+        ctx.runId(), ctx.taskId(), toolName, argsJson, absoluteDeadlineEpochMs, shutdownReserveMs);
   }
 
   /**
@@ -364,8 +495,7 @@ public class ToolRegistry {
       }
       try {
         ToolResult result =
-            authorizedMutation != null
-                    && ("writeFile".equals(tool.name()) || "editFile".equals(tool.name()))
+            authorizedMutation != null && requiresMutationAuthorization(tool)
                 ? authorizedMutation.apply(tool.name(), args)
                 : tool.execute(args, ctx);
         return switch (result) {
@@ -373,16 +503,39 @@ public class ToolRegistry {
           case ToolResult.Err err -> errorEnvelope(err.kind(), err.message());
         };
       } catch (Exception unexpected) {
+        // Full throwable (message + stack) is logged to protected server telemetry only.
         log.error(
             "Tool '{}' threw unexpected exception (ctx run={} task={})",
             tool.name(),
             ctx.runId(),
             ctx.taskId(),
             unexpected);
+        // RR-538 — never hand a raw exception message to the model/SSE/local client. Provider,
+        // filesystem and process libraries routinely embed credentials, host paths, URLs, headers
+        // and response bodies in getMessage(); route it through ContextSanitizer for secret
+        // redaction and a hard length bound before it enters the worker context.
         return errorEnvelope(
-            ToolResult.ErrorKind.INTERNAL,
-            unexpected.getClass().getSimpleName() + ": " + unexpected.getMessage());
+            ToolResult.ErrorKind.INTERNAL, ERROR_SANITIZER.sanitizeException(unexpected));
       }
+    }
+
+    /**
+     * RR-1607 — inverted predicate. This used to be {@code name.equals("writeFile") ||
+     * name.equals("editFile")}, so adding any other write-capable name to the implementer's
+     * allowlist ({@code multiEdit}, {@code applyPatch}, {@code move}, {@code delete}, …) would have
+     * silently bypassed the persisted single-writer reservation this seam exists to enforce. The
+     * predicate is now capability-derived and fail-closed: any capability that can change files (or
+     * git history) is authorized, and an UNCLASSIFIED name is authorized too rather than executed.
+     *
+     * <p>Build/test capabilities deliberately still execute directly — the reservation is a
+     * single-WRITER lease, and the current authorizer only knows how to arbitrate file mutations.
+     * Widening it to command execution is a separate change with its own contract.
+     */
+    private static boolean requiresMutationAuthorization(Tool tool) {
+      ToolCapability capability = tool.capability();
+      return capability == null
+          || capability.mutatesFiles()
+          || capability == ToolCapability.GIT_WRITE;
     }
 
     private String okEnvelope(String content) {

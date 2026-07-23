@@ -365,6 +365,7 @@ public interface PipelineRunRepository
         AND r.completedAt < :cutoff
         AND r.gcsArchivedAt IS NULL
         AND r.gcsWorkspaceKey IS NULL
+        AND r.localExecutionRequested = false
       ORDER BY r.completedAt ASC
       """)
   List<PipelineRun> findRunsToArchive(@Param("cutoff") Instant cutoff, Pageable pageable);
@@ -393,6 +394,7 @@ public interface PipelineRunRepository
       WHERE r.status IN ('COMPLETE', 'FAILED', 'PARTIAL', 'CANCELLED')
         AND r.completedAt < :cutoff
         AND r.gcsWorkspaceKey IS NULL
+        AND r.localExecutionRequested = false
       ORDER BY r.completedAt ASC
       """)
   List<PipelineRun> findTerminalRunsWithoutGcsKey(
@@ -412,9 +414,19 @@ public interface PipelineRunRepository
   List<PipelineRun> findExpiredRunsForTier(
       @Param("tier") String tier, @Param("cutoff") Instant cutoff);
 
-  /** Returns soft-deleted runs that are ready for hard deletion. */
-  @Query("SELECT r FROM PipelineRun r WHERE r.deletedAt IS NOT NULL AND r.deletedAt < :cutoff")
-  List<PipelineRun> findSoftDeletedOlderThan(@Param("cutoff") Instant cutoff);
+  /**
+   * Returns soft-deleted runs that are ready for hard deletion.
+   *
+   * <p>RR-090 second safety net: the status filter is new. Hard deletion is irreversible and severs
+   * cost, ownership, evidence and workspace lifecycle records, so it must never fire on a row that
+   * is not positively proven terminal — including a row tombstoned by an older build of the erasure
+   * path, or one whose worker outlived the 7-day grace window.
+   */
+  @Query(
+      "SELECT r FROM PipelineRun r WHERE r.deletedAt IS NOT NULL AND r.deletedAt < :cutoff "
+          + "AND r.status IN :terminalStatuses")
+  List<PipelineRun> findSoftDeletedOlderThan(
+      @Param("cutoff") Instant cutoff, @Param("terminalStatuses") List<String> terminalStatuses);
 
   /** Returns QUEUED runs that were queued due to a provider outage (for automatic retry). */
   @Query(
@@ -422,13 +434,60 @@ public interface PipelineRunRepository
           + "AND r.failureReason LIKE '%providers unavailable%'")
   List<PipelineRun> findOutageQueuedRuns();
 
-  /** Soft-deletes all non-active runs belonging to a user (GDPR right-to-erasure). */
+  /**
+   * RR-090 (2026-07-21) — the canonical terminal-status set for lifecycle decisions that must fail
+   * CLOSED, i.e. must refuse to act on anything they do not positively recognise as finished.
+   *
+   * <p>This mirrors {@code RunPipelineSupport.isTerminal} plus the two additional statuses that
+   * genuinely never resume ({@code ABORTED}, {@code REJECTED}) and are already treated as terminal
+   * by {@code findActiveByTriggeredByFinding}. It deliberately does NOT include {@code PAUSED} or
+   * {@code AWAITING_APPROVAL}, which are resumable.
+   */
+  List<String> TERMINAL_STATUSES =
+      List.of("COMPLETE", "FAILED", "PARTIAL", "CANCELLED", "ABORTED", "REJECTED");
+
+  /**
+   * Soft-deletes the terminal runs belonging to a user (GDPR right-to-erasure).
+   *
+   * <p>RR-090: this was a {@code NOT IN} DENYLIST naming only the obsolete spellings {@code
+   * PENDING} / {@code PLANNING} / {@code IN_PROGRESS} / {@code IN_PROGRESS_BATCH}. The live V2
+   * statuses are {@code QUEUED}, {@code PLANNING}, {@code AWAITING_APPROVAL}, {@code
+   * APPROVAL_RESUMING}, {@code WORKING} and {@code REVIEWING}, so four of the six live states were
+   * not protected at all — erasure could tombstone a currently spending, writing or reviewing run
+   * without cancelling its worker, and the 7-day retention sweep would then hard-delete the row out
+   * from under it.
+   *
+   * <p>It is now an {@code IN} ALLOWLIST of terminal statuses. A status that is unknown, new, or
+   * not positively proven finished is left untouched rather than tombstoned; adding a future
+   * execution state can no longer silently open this hole again.
+   */
   @Modifying
   @Query(
       "UPDATE PipelineRun r SET r.deletedAt = :now "
           + "WHERE r.createdByUserId = :userId AND r.deletedAt IS NULL "
-          + "AND r.status NOT IN ('PENDING', 'PLANNING', 'IN_PROGRESS', 'IN_PROGRESS_BATCH')")
-  int softDeleteByUserId(@Param("userId") String userId, @Param("now") Instant now);
+          + "AND r.status IN :terminalStatuses")
+  int softDeleteTerminalByUserId(
+      @Param("userId") String userId,
+      @Param("now") Instant now,
+      @Param("terminalStatuses") List<String> terminalStatuses);
+
+  /** Counts a user's runs that erasure must refuse to tombstone because they are not terminal. */
+  @Query(
+      "SELECT COUNT(r) FROM PipelineRun r WHERE r.createdByUserId = :userId "
+          + "AND r.deletedAt IS NULL AND r.status NOT IN :terminalStatuses")
+  long countNonTerminalByUserId(
+      @Param("userId") String userId, @Param("terminalStatuses") List<String> terminalStatuses);
+
+  /**
+   * RR-090 — a user's live (non-terminal) runs. GDPR erasure settles each one through the real
+   * cancellation path BEFORE tombstoning terminal rows, so no live run is left un-erased and none
+   * is tombstoned out from under an active worker.
+   */
+  @Query(
+      "SELECT r FROM PipelineRun r WHERE r.createdByUserId = :userId "
+          + "AND r.deletedAt IS NULL AND r.status NOT IN :terminalStatuses")
+  List<PipelineRun> findNonTerminalByUserId(
+      @Param("userId") String userId, @Param("terminalStatuses") List<String> terminalStatuses);
 
   /**
    * V183 (2026-05-08) — find an active patch-mode run already dispatched for a finding. Used by
@@ -487,4 +546,43 @@ public interface PipelineRunRepository
    * summary is inherently a full scan, exactly as before.
    */
   List<PipelineRun> findByStartedAtAfter(Instant since);
+
+  /**
+   * RR-079 — per-user run aggregate computed in SQL (GROUP BY owner). Replaces the global user-runs
+   * summary's {@code findAll()}/{@code findByStartedAtAfter()} + in-Java grouping, which loaded
+   * every pipeline_run into heap. Bounded to one row per distinct run owner.
+   */
+  interface UserRunAggregate {
+    String getUid();
+
+    long getRunCount();
+
+    long getCompleted();
+
+    long getFailed();
+
+    long getTotalIn();
+
+    long getTotalOut();
+  }
+
+  @Query(
+      "SELECT r.createdByUserId AS uid, COUNT(r) AS runCount,"
+          + " SUM(CASE WHEN r.status = 'COMPLETE' THEN 1L ELSE 0L END) AS completed,"
+          + " SUM(CASE WHEN r.status = 'FAILED' THEN 1L ELSE 0L END) AS failed,"
+          + " COALESCE(SUM(r.totalInputTokens), 0L) AS totalIn,"
+          + " COALESCE(SUM(r.totalOutputTokens), 0L) AS totalOut"
+          + " FROM PipelineRun r WHERE r.createdByUserId IS NOT NULL"
+          + " GROUP BY r.createdByUserId")
+  List<UserRunAggregate> aggregateUserRunStats();
+
+  @Query(
+      "SELECT r.createdByUserId AS uid, COUNT(r) AS runCount,"
+          + " SUM(CASE WHEN r.status = 'COMPLETE' THEN 1L ELSE 0L END) AS completed,"
+          + " SUM(CASE WHEN r.status = 'FAILED' THEN 1L ELSE 0L END) AS failed,"
+          + " COALESCE(SUM(r.totalInputTokens), 0L) AS totalIn,"
+          + " COALESCE(SUM(r.totalOutputTokens), 0L) AS totalOut"
+          + " FROM PipelineRun r WHERE r.createdByUserId IS NOT NULL AND r.startedAt > :since"
+          + " GROUP BY r.createdByUserId")
+  List<UserRunAggregate> aggregateUserRunStatsSince(@Param("since") Instant since);
 }

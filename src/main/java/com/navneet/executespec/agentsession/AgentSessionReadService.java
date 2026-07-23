@@ -33,6 +33,7 @@ import lombok.RequiredArgsConstructor;
 class AgentSessionReadService {
 
   private static final int LEGACY_SNAPSHOT_PAGE_SIZE = 500;
+  private static final int CURSOR_REPLAY_PAGE_SIZE = 500;
 
   private final AgentSessionRepository sessionRepo;
   private final AgentTurnRepository turnRepo;
@@ -42,9 +43,17 @@ class AgentSessionReadService {
 
   List<AgentSessionResponse> listSessions(AppUserDetails user, int limit) {
     int capped = Math.max(1, Math.min(100, limit));
+    String userOrgId = user.getUser().getOrgId();
+    // RR-1025 — the base query is (user, status) only, so after an org move/revocation a user could
+    // still list prior-org session titles/status/PR URLs. Restrict the result to the caller's
+    // current effective tenant before any linked-run projection is loaded.
     List<AgentSession> sessions =
-        sessionRepo.findByUserIdAndStatusOrderByUpdatedAtDesc(
-            user.getUser().getId(), "ACTIVE", PageRequest.of(0, capped));
+        sessionRepo
+            .findByUserIdAndStatusOrderByUpdatedAtDesc(
+                user.getUser().getId(), "ACTIVE", PageRequest.of(0, capped))
+            .stream()
+            .filter(session -> belongsToTenant(session, userOrgId))
+            .toList();
     Map<String, PipelineRun> latestRuns = latestLinkedRunsBySessionId(sessions);
     return sessions.stream()
         .map(session -> toResponse(session, latestRuns.get(session.getId())))
@@ -68,12 +77,24 @@ class AgentSessionReadService {
 
   AgentEventReplayResponse replayEvents(String sessionId, Long after, AppUserDetails user) {
     AgentSession session = requireSession(sessionId, user);
-    List<AgentActionEvent> events =
-        after == null || after < 0
-            ? eventRepo.findBySessionIdOrderByStreamSequenceAsc(
-                sessionId, PageRequest.of(0, LEGACY_SNAPSHOT_PAGE_SIZE))
-            : eventRepo.findBySessionIdAndStreamSequenceGreaterThanOrderByStreamSequenceAsc(
-                sessionId, after);
+    boolean snapshot = after == null || after < 0;
+    List<AgentActionEvent> events;
+    boolean deltaTruncated = false;
+    if (snapshot) {
+      events =
+          eventRepo.findBySessionIdOrderByStreamSequenceAsc(
+              sessionId, PageRequest.of(0, LEGACY_SNAPSHOT_PAGE_SIZE));
+    } else {
+      // Fetch one sentinel row beyond the response ceiling so a stale reconnect cursor cannot
+      // materialise an unbounded long-lived session and the client still gets an exact next cursor.
+      events =
+          eventRepo.findBySessionIdAndStreamSequenceGreaterThanOrderByStreamSequenceAsc(
+              sessionId, after, PageRequest.of(0, CURSOR_REPLAY_PAGE_SIZE + 1));
+      deltaTruncated = events.size() > CURSOR_REPLAY_PAGE_SIZE;
+      if (deltaTruncated) {
+        events = List.copyOf(events.subList(0, CURSOR_REPLAY_PAGE_SIZE));
+      }
+    }
     long last = after == null || after < 0 ? 0 : after;
     if (after != null && after >= 0) {
       // Keep the cursor contract defensive even if a replica/query implementation returns a stale
@@ -96,11 +117,10 @@ class AgentSessionReadService {
         last = Math.max(last, event.getStreamSequence());
       }
     }
-    boolean snapshot = after == null || after < 0;
     boolean legacyEventsOmitted =
         !snapshot && eventRepo.countBySessionIdAndStreamSequenceIsNull(sessionId) > 0;
-    boolean truncated = false;
-    boolean hasMore = false;
+    boolean truncated = deltaTruncated;
+    boolean hasMore = deltaTruncated;
     if (snapshot) {
       truncated = eventRepo.countBySessionId(sessionId) > LEGACY_SNAPSHOT_PAGE_SIZE;
       hasMore = truncated;
@@ -182,11 +202,23 @@ class AgentSessionReadService {
     if (!user.getUser().getId().equals(session.getUserId())) {
       throw new ResponseStatusException(HttpStatus.FORBIDDEN, "forbidden");
     }
-    String userOrgId = user.getUser().getOrgId();
-    if (userOrgId != null && session.getOrgId() != null && !userOrgId.equals(session.getOrgId())) {
+    if (!belongsToTenant(session, user.getUser().getOrgId())) {
       throw new ResponseStatusException(HttpStatus.FORBIDDEN, "forbidden");
     }
     return session;
+  }
+
+  /**
+   * RR-1025 — one effective-tenant rule shared by list, detail and idempotency replay. A session
+   * with no org is a legacy pre-org row that the owner check already covers. Otherwise the caller's
+   * current org must be present and match; a null caller org (org moved/revoked) no longer skips
+   * the comparison and silently authorizes prior-org access.
+   */
+  private static boolean belongsToTenant(AgentSession session, String userOrgId) {
+    if (session.getOrgId() == null) {
+      return true;
+    }
+    return userOrgId != null && userOrgId.equals(session.getOrgId());
   }
 
   AgentSessionResponse toResponse(AgentSession s) {

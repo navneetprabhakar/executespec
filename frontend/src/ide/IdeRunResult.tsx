@@ -1,17 +1,29 @@
-import {useEffect, useRef, useState} from 'react';
-import {useNavigate, useParams} from 'react-router-dom';
+import {useEffect, useMemo, useRef, useState} from 'react';
+import {Link, useNavigate, useParams} from 'react-router-dom';
 import {PrCommentInbox} from '@/signal/components/PrCommentInbox';
 import {humanStatusReason, providerLabel} from '@/signal/lib/runUtils';
 import {RunTimeline} from '@/ide/RunTimeline';
+import {LoadError} from '@/ide/LoadError';
+import {toLoadFailure, type LoadFailure} from '@/lib/loadState';
+import IdeRunScreens from '@/ide/IdeRunScreens';
 import Crumbs from '@/ide/Crumbs';
 import {useDocumentTitle} from '@/hooks/useDocumentTitle';
 import {Markdown} from '@/signal/components/Markdown';
 import {ConfirmModal} from '@/signal/components/Modal';
 import * as api from '@/lib/api';
-import {normalizeUiProvider, uiSlashHelp, uiSlashSuggestions, uiSlashUsage} from '@/lib/uiSlash';
+import {
+  normalizeUiProvider,
+  UI_PROVIDER_USAGE,
+  uiSlashHelp,
+  uiSlashSuggestions,
+  uiSlashUsage,
+} from '@/lib/uiSlash';
 import {agentTurnToRunChatMessages} from '@/ide/agentChatHistory';
 import {selectScopedAgentSession, webAgentSessionRequest} from '@/ide/agentSession';
 import {streamWebAgentChatReply} from '@/ide/agentChatStream';
+import {costReconciliation, phaseCostRows, stepCallsView} from '@/ide/runCostLedger';
+import {providerIsDispatchable} from '@/ide/providerReadiness';
+import {useProviderReadiness} from '@/ide/useProviderReadiness';
 import {useAuthStore, selectIsSuperAdmin} from '@/stores/useAuthStore';
 import {
   IdeBadge,
@@ -81,24 +93,45 @@ export default function IdeRunResult() {
   const params = useParams();
   const navigate = useNavigate();
   const isSuperAdmin = useAuthStore(selectIsSuperAdmin);
+  const providerReadiness = useProviderReadiness();
   const runId = params.runId || params.runShort || '';
   const [run, setRun] = useState<api.RunDetail | null>(null);
+  const [costEvidence, setCostEvidence] = useState<api.RunCostEvidence | null>(null);
   const [report, setReport] = useState<api.ValidationReportData | null>(null);
+  // D4 — the run-detail surfaces below all render affirmative absence claims
+  // ("No evidence report.", "No files", "No timeline data yet.", and the
+  // fabricated "patch and benchmark runs aren't scored" explanation). Track the
+  // failure separately so a fetch error can never masquerade as one of them.
+  const [reportFailure, setReportFailure] = useState<LoadFailure | null>(null);
+  const [filesFailure, setFilesFailure] = useState<LoadFailure | null>(null);
+  const [timelineFailure, setTimelineFailure] = useState<LoadFailure | null>(null);
   const [tests, setTests] = useState<api.TestReportData | null>(null);
+  // D4 — a failed read here rendered "No test report yet." and disabled the
+  // Re-run button with "No generated code or test plan is available to re-run".
+  const [testsFailure, setTestsFailure] = useState<LoadFailure | null>(null);
+  const [costEvidenceFailure, setCostEvidenceFailure] = useState<LoadFailure | null>(null);
+  // RR-1552 — separates "the ledger was withheld from this reader" from "this run made no
+  // provider calls"; both used to render as the latter.
+  const stepCalls = useMemo(() => stepCallsView(costEvidence), [costEvidence]);
   const [testPlan, setTestPlan] = useState<api.TestPlanData | null>(null);
   const [testRunPending, setTestRunPending] = useState(false);
   const [files, setFiles] = useState<string[]>([]);
   const [openFiles, setOpenFiles] = useState<string[]>([]);
   const [activeFile, setActiveFile] = useState<string | null>(null);
-  const [cache, setCache] = useState<Record<string, {content: string; diff: DiffLine[] | null}>>(
-    {},
-  );
+  // RR-767 — a cache entry is either loaded source (`content`/`diff`) or an
+  // explicit `failure`. A failed read must NOT be stored as diagnostic prose in
+  // `content`, which the code viewer would render indistinguishably from real
+  // workspace source (copyable, reviewable, revertable).
+  const [cache, setCache] = useState<
+    Record<string, {content: string; diff: DiffLine[] | null; failure?: LoadFailure}>
+  >({});
   const [filesWidth, setFilesWidth] = useState(240);
   const [tab, setTab] = useState<Tab>('Overview');
   const [tabMenuOpen, setTabMenuOpen] = useState(false);
   const [msg, setMsg] = useState('');
   const [busy, setBusy] = useState('');
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<'not-found' | 'forbidden' | 'error' | null>(null);
   // Single confirm-modal slot — multiple destructive actions on this page
   // (delete run / deploy / stop preview / mark-test-invalid) drive it via a
   // discriminated payload that carries the action to run on confirm.
@@ -107,13 +140,25 @@ export default function IdeRunResult() {
     body: string;
     confirmLabel: string;
     danger?: boolean;
-    onConfirm: () => void;
+    onConfirm: () => void | Promise<void>;
   } | null>(null);
+  // RR-763 — a one-shot pending latch so a confirmation dialog cannot fire its
+  // (paid / destructive) callback twice while the first is still in flight. The
+  // ref decides synchronously; the state drives the disabled/'…' rendering.
+  const [confirmBusy, setConfirmBusy] = useState(false);
+  const confirmBusyRef = useRef(false);
+  // RR-768 — the single in-flight exclusive run-lifecycle op. A second conflicting
+  // mutation is refused while this is set, and the shared busy label is cleared
+  // only by the op that still owns it (no last-writer-wins clobber).
+  const exclusiveBusyRef = useRef<string | null>(null);
   // RES-1 — run-management overflow menu (Fork / Archive / Delete).
   const [moreOpen, setMoreOpen] = useState(false);
   // Timeline + Chat — IDE parity with Signal ResultPage.
   const [timeline, setTimeline] = useState<api.TimelineData | null>(null);
   const [chat, setChat] = useState<api.RunChatMessage[] | null>(null);
+  // RR-766 — a failed history read is not an empty conversation. Track it so the
+  // panel shows a retryable error instead of a false "No messages yet".
+  const [chatFailure, setChatFailure] = useState<LoadFailure | null>(null);
   const [runAgentSessionId, setRunAgentSessionId] = useState<string | null>(null);
   const [chatInput, setChatInput] = useState('');
   const [chatBusy, setChatBusy] = useState(false);
@@ -124,25 +169,79 @@ export default function IdeRunResult() {
   const [previewStarted, setPreviewStarted] = useState(false);
   // RL-2026-05-046 — Logs tab: the run's live-log events (persisted SSE replay, 24h).
   const [eventLog, setEventLog] = useState<api.RunLogEvent[] | null>(null);
+  const [eventReplay, setEventReplay] = useState<api.RunReplayLog | null>(null);
+
+  async function loadEventLog() {
+    const replay = await api.getRunEventLog(runId);
+    setEventReplay(replay);
+    setEventLog(replay.events);
+  }
+
+  // RR-757 — the [runId] load effect launches run/report/files requests. Without a request
+  // generation it can commit run A's response under run B's URL after navigation or out-of-order
+  // completion — an evidence-integrity issue that can also surface stale data across project
+  // contexts. `loadGen` is bumped per load; every commit checks it, and openFile() captures it too.
+  const loadGen = useRef(0);
+
+  // D4 — extracted so the Overview and Evidence failure states can offer Retry.
+  function reloadReport() {
+    if (!runId) return;
+    const gen = loadGen.current;
+    api
+      .getValidationReport(runId)
+      .then((r) => {
+        if (gen !== loadGen.current) return;
+        setReport(r);
+        setReportFailure(null);
+      })
+      .catch((e: unknown) => {
+        if (gen !== loadGen.current) return;
+        setReportFailure(toLoadFailure(e));
+      });
+  }
 
   useEffect(() => {
     if (!runId) return;
+    const gen = ++loadGen.current;
+    // Reset run-scoped state synchronously so the previous run's data is never shown under the new
+    // URL while requests are in flight (RR-757).
+    setRun(null);
+    setReport(null);
+    setReportFailure(null);
+    setFiles([]);
+    setFilesFailure(null);
+    setOpenFiles([]);
+    setActiveFile(null);
+    setCache({});
+    setLoadError(null);
+    setLoading(true);
     api
       .getRun(runId)
-      .then(setRun)
-      .catch(() => {})
-      .finally(() => setLoading(false));
-    api
-      .getValidationReport(runId)
-      .then(setReport)
-      .catch(() => setReport(null));
+      .then((r) => {
+        if (gen !== loadGen.current) return;
+        setRun(r);
+      })
+      .catch((e: unknown) => {
+        if (gen !== loadGen.current) return;
+        const status = typeof e === 'object' && e ? Number((e as {status?: number}).status) : 0;
+        setLoadError(status === 404 ? 'not-found' : status === 403 ? 'forbidden' : 'error');
+      })
+      .finally(() => {
+        if (gen === loadGen.current) setLoading(false);
+      });
+    reloadReport();
     api
       .getFiles(runId)
       .then((f) => {
+        if (gen !== loadGen.current) return;
         setFiles(f);
+        setFilesFailure(null);
         if (f.length) openFile(f[0]);
       })
-      .catch(() => setFiles([]));
+      .catch((e: unknown) => {
+        if (gen !== loadGen.current) return;
+        setFilesFailure(toLoadFailure(e));
+      });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [runId]);
 
@@ -180,8 +279,11 @@ export default function IdeRunResult() {
     if (tab === 'Tests' && !tests)
       api
         .getTestReport(runId)
-        .then(setTests)
-        .catch(() => setTests(null));
+        .then((t) => {
+          setTests(t);
+          setTestsFailure(null);
+        })
+        .catch((e: unknown) => setTestsFailure(toLoadFailure(e)));
     if (tab === 'Tests' && !testPlan)
       api
         .getTestPlan(runId)
@@ -190,14 +292,34 @@ export default function IdeRunResult() {
     if (tab === 'Timeline' && !timeline)
       api
         .getTimeline(runId)
-        .then(setTimeline)
-        .catch(() => setTimeline({tasks: []}));
+        .then((t) => {
+          setTimeline(t);
+          setTimelineFailure(null);
+        })
+        .catch((e: unknown) => setTimelineFailure(toLoadFailure(e)));
     if (tab === 'Logs' && !eventLog)
+      void loadEventLog().catch(() => {
+        setEventReplay({
+          events: [],
+          available: false,
+          reason: 'STORE_UNAVAILABLE',
+          retainedUntil: null,
+          lastEventId: null,
+          truncated: false,
+        });
+        setEventLog([]);
+      });
+    if (tab === 'Cost' && !costEvidence)
       api
-        .getRunEventLog(runId)
-        .then(setEventLog)
-        .catch(() => setEventLog([]));
-    if (tab === 'Chat' && !chat) void loadRunChat();
+        .getLiveCost(runId)
+        .then((c) => {
+          setCostEvidence(c);
+          setCostEvidenceFailure(null);
+        })
+        .catch((e: unknown) => setCostEvidenceFailure(toLoadFailure(e)));
+    // RR-766 — do not re-fire the load when the last attempt failed (chat stays
+    // null on failure); the Retry button owns the re-attempt.
+    if (tab === 'Chat' && !chat && !chatFailure) void loadRunChat();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab]);
 
@@ -213,13 +335,34 @@ export default function IdeRunResult() {
 
     const poll = async () => {
       polls += 1;
-      const [nextTests, nextPlan] = await Promise.all([
-        api.getTestReport(runId),
-        api.getTestPlan(runId),
-      ]);
+      // RR-758 — a single rejected read used to escape as an unhandled rejection
+      // that never scheduled another timer and never cleared `testRunPending`,
+      // leaving a permanent "Tests running" banner + disabled rerun. Handle the
+      // failure: keep polling within the budget, then terminate into an explicit
+      // recoverable failure state rather than spinning forever.
+      let nextTests: Awaited<ReturnType<typeof api.getTestReport>> | null = null;
+      let nextPlan: Awaited<ReturnType<typeof api.getTestPlan>> | null = null;
+      try {
+        [nextTests, nextPlan] = await Promise.all([
+          api.getTestReport(runId),
+          api.getTestPlan(runId),
+        ]);
+      } catch (e: unknown) {
+        if (cancelled) return;
+        if (polls >= TEST_EXECUTION_MAX_POLLS) {
+          setTestRunPending(false);
+          setTestsFailure(toLoadFailure(e));
+          return;
+        }
+        timer = setTimeout(poll, TEST_EXECUTION_POLL_INTERVAL_MS);
+        return;
+      }
       if (cancelled) return;
       if (nextTests) setTests(nextTests);
       if (nextPlan) setTestPlan(nextPlan);
+      // A recovered poll clears any earlier failure so a stale error cannot keep
+      // hiding a now-successful result.
+      setTestsFailure(null);
 
       const status = nextTests?.status || nextPlan?.status;
       if (isTestExecutionTerminal(status)) {
@@ -250,10 +393,26 @@ export default function IdeRunResult() {
     if (!runId || eventLog) return;
     const s = (run?.status || '').toUpperCase();
     if (!['REVIEWING', 'VALIDATING', 'GENERATING_REPORT', 'REPORTING'].includes(s)) return;
-    api
+    void api
       .getRunEventLog(runId)
-      .then(setEventLog)
-      .catch(() => setEventLog([]));
+      .then((replay) => {
+        setEventReplay(replay);
+        setEventLog(replay.events);
+      })
+      // D4: this used to fall through to "No activity is retained for this
+      // run." The honest STORE_UNAVAILABLE branch already exists two effects
+      // up; route the failure into it instead of inventing a retention claim.
+      .catch(() => {
+        setEventReplay({
+          events: [],
+          available: false,
+          reason: 'STORE_UNAVAILABLE',
+          retainedUntil: null,
+          lastEventId: null,
+          truncated: false,
+        });
+        setEventLog([]);
+      });
   }, [eventLog, run?.status, runId]);
 
   // Keep the chat thread pinned to the newest message — but only when the user
@@ -299,8 +458,10 @@ export default function IdeRunResult() {
     setActiveFile(path);
     setOpenFiles((o) => (o.includes(path) ? o : [...o, path]));
     if (cache[path]) return;
+    const gen = loadGen.current; // RR-757: discard reads that resolve after a run change.
     try {
       const d = await api.getFileDiff(runId, path);
+      if (gen !== loadGen.current) return;
       // ADDED → every head line is an addition. MODIFIED → real LCS diff over
       // base (old) + head (new). UNCHANGED/other → no diff toggle.
       let diff: DiffLine[] | null = null;
@@ -313,11 +474,24 @@ export default function IdeRunResult() {
     } catch {
       try {
         const content = await api.getFile(runId, path);
+        if (gen !== loadGen.current) return;
         setCache((c) => ({...c, [path]: {content, diff: null}}));
-      } catch {
-        setCache((c) => ({...c, [path]: {content: '// could not load', diff: null}}));
+      } catch (e: unknown) {
+        if (gen !== loadGen.current) return;
+        // RR-767 — record a typed failure, not fabricated source content.
+        setCache((c) => ({...c, [path]: {content: '', diff: null, failure: toLoadFailure(e)}}));
       }
     }
+  }
+
+  // RR-767 — drop a failed entry and re-read the file for the Retry button.
+  function retryOpenFile(path: string) {
+    setCache((c) => {
+      const next = {...c};
+      delete next[path];
+      return next;
+    });
+    void openFile(path);
   }
   function closeFile(path: string, e?: React.MouseEvent) {
     e?.stopPropagation();
@@ -328,16 +502,98 @@ export default function IdeRunResult() {
     });
   }
 
-  async function action(name: string, fn: () => Promise<unknown>, ok: (r: unknown) => string) {
+  // RR-764 — reconcile the authoritative run + report (+ visible tests) after a
+  // mutation settles, so controls do not stay enabled against stale status and
+  // invalidated tests/scores reflect the new state without a full reload.
+  async function reloadRun() {
+    if (!runId) return;
+    const gen = loadGen.current;
+    try {
+      const r = await api.getRun(runId);
+      if (gen === loadGen.current) setRun(r);
+    } catch {
+      // Keep the last-known run; the action already surfaced any failure message.
+    }
+    reloadReport();
+    if (tab === 'Tests') {
+      try {
+        const t = await api.getTestReport(runId);
+        if (gen === loadGen.current) {
+          setTests(t);
+          setTestsFailure(null);
+        }
+      } catch (e: unknown) {
+        if (gen === loadGen.current) setTestsFailure(toLoadFailure(e));
+      }
+    }
+  }
+
+  // RR-768 — downloads are independent and non-conflicting; every other op is a
+  // run-lifecycle mutation that must be serialized against the others.
+  function isExclusiveAction(name: string): boolean {
+    return name !== 'pdf' && name !== 'pdf2' && name !== 'code' && name !== 'share';
+  }
+
+  async function action(
+    name: string,
+    fn: () => Promise<unknown>,
+    ok: (r: unknown) => string,
+    settle?: () => void | Promise<void>,
+  ) {
+    const exclusive = isExclusiveAction(name);
+    // RR-768 — refuse a second conflicting mutation while one is already running.
+    if (exclusive && exclusiveBusyRef.current) return;
+    if (exclusive) exclusiveBusyRef.current = name;
     setBusy(name);
     setMsg('');
     try {
       const r = await fn();
       setMsg(ok(r));
+      // RR-764 — settle the affected resources on success.
+      if (settle) await settle();
     } catch (e: unknown) {
       setMsg(e instanceof Error ? e.message : 'Failed.');
     } finally {
-      setBusy('');
+      if (exclusive) exclusiveBusyRef.current = null;
+      // RR-768 — clear the label only if this op still owns it.
+      setBusy((prev) => (prev === name ? '' : prev));
+    }
+  }
+
+  // RR-762 — human label for the SCM provider that opened the PR; falls back to the neutral "SCM".
+  function scmProviderLabel(provider?: string | null): string {
+    switch ((provider || '').toUpperCase()) {
+      case 'GITHUB':
+        return 'GitHub';
+      case 'BITBUCKET':
+        return 'Bitbucket';
+      default:
+        return 'SCM';
+    }
+  }
+
+  // RR-897 — /push-scm returns HTTP 200 for logical FAILED / NO_CONFIGURATION / PARTIAL / NO_CHANGES
+  // outcomes, so an unconditional "Pushed — PR opening." success message hid missing credentials, an
+  // empty diff, total failure and partial multi-repo failure. Map the logical status to honest copy;
+  // only a real success claims a PR is opening.
+  function pushOutcomeMessage(r: unknown): string {
+    const res = (r ?? {}) as {status?: string; repoUrl?: string};
+    const status = (res.status || '').toUpperCase();
+    switch (status) {
+      case 'SUCCESS':
+      case 'OK':
+      case 'PUSHED':
+        return res.repoUrl ? `Pushed — PR opening at ${res.repoUrl}` : 'Pushed — PR opening.';
+      case 'NO_CHANGES':
+        return 'Nothing to push — the workspace has no changes.';
+      case 'NO_CONFIGURATION':
+        return 'No repository provider is configured for this run — connect one under Integrations first.';
+      case 'PARTIAL':
+        return 'Partial push — some repositories failed. Check the PR tab for per-repo status.';
+      case 'FAILED':
+        return 'Push failed — no pull request was opened.';
+      default:
+        return status ? `Push result: ${status}` : 'Push complete.';
     }
   }
 
@@ -425,23 +681,70 @@ export default function IdeRunResult() {
     }
   }
 
+  // RR-766 — durable turns are paginated (limit + `before` cursor). Replay the
+  // full transcript in bounded pages instead of silently reading only the first
+  // 50, so older evidence is not dropped from the view.
+  async function loadAllRunAgentTurns(sessionId: string): Promise<api.AgentTurnResponse[]> {
+    const PAGE = 100;
+    const MAX_PAGES = 20; // hard bound: at most 2,000 turns rendered
+    const byId = new Map<string, api.AgentTurnResponse>();
+    let before: string | null = null;
+    for (let page = 0; page < MAX_PAGES; page++) {
+      const batch = await api.listAgentTurns(sessionId, {limit: PAGE, before});
+      if (!batch.length) break;
+      const sizeBefore = byId.size;
+      for (const t of batch) byId.set(t.turnId, t);
+      // Stop if the cursor made no progress (server without a `before` contract
+      // would otherwise return the same page forever).
+      if (byId.size === sizeBefore || batch.length < PAGE) break;
+      // Cursor on the oldest turn seen so far so the next page walks further back.
+      before = batch.reduce((min, t) => (t.sequence < min.sequence ? t : min), batch[0]).turnId;
+    }
+    // Present oldest → newest regardless of page order.
+    return [...byId.values()].sort((a, b) => a.sequence - b.sequence);
+  }
+
   async function loadRunChat() {
     if (!runId) return;
+    setChatFailure(null);
+    // RR-766 — legacy and durable reads fail independently. A real outage must
+    // surface as an error, not collapse into a false "No messages yet".
+    let legacy: api.RunChatMessage[] = [];
+    let legacyFailed = false;
     try {
-      const [legacy, sessions] = await Promise.all([
-        api.getRunChat(runId).catch(() => []),
-        api.listAgentSessions(100).catch(() => []),
-      ]);
-      const session = selectScopedAgentSession(sessions, {projectId: run?.projectId, runId});
-      if (session) {
-        setRunAgentSessionId(session.id);
-        const turns = await api.listAgentTurns(session.id, {limit: 50}).catch(() => []);
-        setChat([...legacy, ...turns.flatMap(agentTurnToRunChatMessages)]);
-        return;
-      }
-      setChat(legacy);
+      legacy = await api.getRunChat(runId);
     } catch {
-      setChat([]);
+      legacyFailed = true;
+    }
+    let sessions: api.AgentSessionResponse[];
+    try {
+      sessions = await api.listAgentSessions(100);
+    } catch (e: unknown) {
+      if (legacyFailed) {
+        setChatFailure(toLoadFailure(e));
+        setChat(null);
+      } else {
+        setChat(legacy);
+      }
+      return;
+    }
+    const session = selectScopedAgentSession(sessions, {projectId: run?.projectId, runId});
+    if (!session) {
+      setChat(legacy);
+      return;
+    }
+    setRunAgentSessionId(session.id);
+    try {
+      const turns = await loadAllRunAgentTurns(session.id);
+      setChat([...legacy, ...turns.flatMap(agentTurnToRunChatMessages)]);
+    } catch (e: unknown) {
+      if (legacyFailed) {
+        setChatFailure(toLoadFailure(e));
+        setChat(null);
+      } else {
+        // Show the legacy history we do have; durable turns are unavailable.
+        setChat(legacy);
+      }
     }
   }
 
@@ -526,7 +829,14 @@ export default function IdeRunResult() {
     if (cmd === '/clear') {
       const session = await ensureRunAgentSession();
       await api.clearAgentSessionHistory(session.id);
-      setChat([]);
+      // RR-766 — only the durable agent-session transcript is clearable; the legacy
+      // /runs/{id}/chat history is immutable server-side. Reload so the view reflects
+      // the real persisted state (legacy retained) instead of a local blank that
+      // silently reappears on the next reload.
+      await loadRunChat();
+      appendRunChatNote(
+        'Cleared this session’s durable history. Earlier read-only run chat is retained and will still appear on reload.',
+      );
       return true;
     }
     if (cmd === '/projects') {
@@ -561,7 +871,7 @@ export default function IdeRunResult() {
     if (cmd === '/provider') {
       const provider = normalizeUiProvider(arg);
       if (!provider) {
-        appendRunChatNote('Usage: /provider anthropic|openai|deepseek');
+        appendRunChatNote(`Usage: ${UI_PROVIDER_USAGE}`);
         return true;
       }
       const saved = await api.updateProviderPreference(provider);
@@ -655,6 +965,28 @@ export default function IdeRunResult() {
     return (
       <div style={{position: 'absolute', inset: 0}}>
         <IdeLoader label='Loading run…' />
+      </div>
+    );
+  }
+
+  if (loadError || !run) {
+    const forbidden = loadError === 'forbidden';
+    const unavailable = loadError === 'error';
+    return (
+      <div className='ide-pane' role='alert'>
+        <div className='ide-empty'>
+          <strong>
+            {forbidden ? 'Run access denied' : unavailable ? 'Run unavailable' : 'Run not found'}
+          </strong>
+          <div>
+            {forbidden
+              ? 'You do not have access to this run.'
+              : unavailable
+                ? 'The run could not be loaded. Try again shortly.'
+                : 'This run does not exist or was removed.'}
+          </div>
+          <Link to='/runs'>Back to work</Link>
+        </div>
       </div>
     );
   }
@@ -839,7 +1171,15 @@ export default function IdeRunResult() {
             <div style={{display: 'flex', gap: 12, flexWrap: 'wrap'}}>
               {/* RES-3 — when nothing was measured (patch/bench runs), one honest
                   line beats a wall of em-dashes that reads as "broken". */}
-              {!report && !tests && score == null ? (
+              {reportFailure ? (
+                <div className='ide-card' style={{flex: 1, minWidth: 240}}>
+                  <LoadError
+                    failure={reportFailure}
+                    what='verified score evidence'
+                    onRetry={reloadReport}
+                  />
+                </div>
+              ) : !report && !tests && score == null ? (
                 <div
                   className='ide-card'
                   style={{flex: 1, minWidth: 240, color: 'var(--ide-fg-muted)', fontSize: 12}}
@@ -934,7 +1274,27 @@ export default function IdeRunResult() {
                   Execution details
                 </div>
                 <Kv k='Status' v={run?.status ?? '—'} />
+                {/* RR-761 — always render the run's PERSISTED provider/model. The viewer's current
+                    FREE tier lock is prospective policy, not what a historical run used (it may
+                    predate the lock, or have run under another tier / explicit route / failover).
+                    Overwriting the recorded route with today's tier corrupts audit + debug evidence. */}
                 <Kv k='Provider' v={(run?.aiProvider || '—').toLowerCase()} />
+                <Kv
+                  k='Requested route'
+                  v={
+                    run?.requestedProvider
+                      ? `${run.requestedProvider.toLowerCase()}${run.requestedModel ? ` / ${run.requestedModel}` : ''}`
+                      : '—'
+                  }
+                />
+                <Kv
+                  k='Route policy'
+                  v={
+                    run?.routingMode
+                      ? `${run.routingMode}${run.routePinned ? ' (locked)' : ''}`
+                      : '—'
+                  }
+                />
                 <Kv
                   k='Worker'
                   v={
@@ -975,6 +1335,7 @@ export default function IdeRunResult() {
                       'resume',
                       () => api.resumeRun(runId),
                       () => 'Run resumed.',
+                      reloadRun,
                     )
                   }
                 >
@@ -991,14 +1352,10 @@ export default function IdeRunResult() {
                     className='ide-btn'
                     disabled={busy === 'push'}
                     onClick={() =>
-                      action(
-                        'push',
-                        () => api.pushToScm(runId),
-                        () => 'Pushed — PR opening.',
-                      )
+                      action('push', () => api.pushToScm(runId), pushOutcomeMessage, reloadRun)
                     }
                   >
-                    {busy === 'push' ? 'Pushing…' : '⤴ Push to GitHub'}
+                    {busy === 'push' ? 'Pushing…' : '⤴ Push changes'}
                   </button>
                 ) : (
                   <button className='ide-btn' onClick={() => setTab('Chat')}>
@@ -1044,6 +1401,7 @@ export default function IdeRunResult() {
                                 ? 'Workspace revert failed.'
                                 : `Workspace reverted (${response.reposSynced ?? 0} repos).`;
                             },
+                            reloadRun,
                           ),
                       })
                     }
@@ -1133,7 +1491,12 @@ export default function IdeRunResult() {
               >
                 ⌁ Share
               </button>
-              {['anthropic', 'openai']
+              {(providerReadiness.supported
+                ? providerReadiness.rows
+                    .filter((row) => providerIsDispatchable(row))
+                    .map((row) => row.provider.toLowerCase())
+                : ['anthropic', 'openai']
+              )
                 .filter((p) => p !== (run?.aiProvider || '').toLowerCase())
                 .map((p) => (
                   <button
@@ -1152,6 +1515,19 @@ export default function IdeRunResult() {
                     ↻ Try {providerLabel(p)}
                   </button>
                 ))}
+              {providerReadiness.supported &&
+                !providerReadiness.loading &&
+                providerReadiness.rows.every(
+                  (row) =>
+                    row.provider.toLowerCase() === (run?.aiProvider || '').toLowerCase() ||
+                    !providerIsDispatchable(row),
+                ) && (
+                  <span style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}>
+                    {providerReadiness.error
+                      ? 'Provider readiness unavailable; re-run choices are disabled.'
+                      : 'No other provider is currently ready for dispatch.'}
+                  </span>
+                )}
               {/* Run management lives in an overflow so the row stays scannable. */}
               <div style={{position: 'relative'}}>
                 <button
@@ -1423,6 +1799,10 @@ export default function IdeRunResult() {
               </div>
               {files.length ? (
                 <IdeFileTree files={files} activePath={activeFile} onOpen={openFile} />
+              ) : filesFailure ? (
+                <div className='ide-empty' style={{padding: 14}}>
+                  File list unavailable
+                </div>
               ) : (
                 <div className='ide-empty' style={{padding: 14}}>
                   No files
@@ -1437,6 +1817,7 @@ export default function IdeRunResult() {
                 <div className='ide-mobile-file-picker'>
                   <select
                     className='ide-select'
+                    aria-label='Select a file to view'
                     value={activeFile || ''}
                     onChange={(e) => {
                       if (e.target.value) void openFile(e.target.value);
@@ -1469,7 +1850,15 @@ export default function IdeRunResult() {
                   ))}
                 </div>
               )}
-              {active ? (
+              {active?.failure ? (
+                // RR-767 — the file could not be read; show a retryable failure
+                // rather than fabricated "// could not load" source text.
+                <LoadError
+                  failure={active.failure}
+                  what='this file'
+                  onRetry={() => activeFile && retryOpenFile(activeFile)}
+                />
+              ) : active ? (
                 <IdeCodeViewer
                   filename={activeFile || ''}
                   content={active.content}
@@ -1481,6 +1870,8 @@ export default function IdeRunResult() {
                       : undefined
                   }
                 />
+              ) : filesFailure ? (
+                <LoadError failure={filesFailure} what='generated files' />
               ) : (
                 <div className='ide-empty'>
                   {emptyCodeTabMessage({hasFiles: files.length > 0, status: run?.status})}
@@ -1578,6 +1969,7 @@ export default function IdeRunResult() {
                                 t.taskId,
                                 () => api.retryTask(runId, t.taskId),
                                 () => 'Retry started.',
+                                reloadRun,
                               )
                             }
                           >
@@ -1598,6 +1990,7 @@ export default function IdeRunResult() {
                                   typeof r === 'object' && r && 'message' in r
                                     ? String(r.message)
                                     : 'Continuation approved.',
+                                reloadRun,
                               )
                             }
                           >
@@ -1783,19 +2176,16 @@ export default function IdeRunResult() {
                     className='ide-mono'
                     style={{fontSize: 11, color: 'var(--ide-fg-muted)', fontWeight: 400}}
                   >
-                    · replay, retained 24h
+                    {eventReplay?.available && eventReplay.retainedUntil
+                      ? `· replay available until ${new Date(eventReplay.retainedUntil).toLocaleString()}`
+                      : '· replay retained for up to 24h'}
                   </span>
                   <span style={{flex: 1}} />
                   {/* RES-6 — the replay is a snapshot; let the user re-pull it. */}
                   <button
                     className='ide-btn ghost'
                     style={{padding: '3px 10px', fontSize: 12}}
-                    onClick={() =>
-                      api
-                        .getRunEventLog(runId)
-                        .then(setEventLog)
-                        .catch(() => {})
-                    }
+                    onClick={() => void loadEventLog().catch(() => {})}
                   >
                     ↻ Refresh
                   </button>
@@ -1804,8 +2194,9 @@ export default function IdeRunResult() {
                   <IdeLoader label='Loading event log…' />
                 ) : visibleLog.length === 0 ? (
                   <div className='ide-empty'>
-                    No log events retained for this run. The live log is kept for 24h after each
-                    event.
+                    {eventReplay?.reason === 'STORE_UNAVAILABLE'
+                      ? 'Activity replay is temporarily unavailable. Refresh to try again.'
+                      : 'No activity is retained for this run. Replay expires 24 hours after the last event.'}
                   </div>
                 ) : (
                   <div
@@ -1921,7 +2312,9 @@ export default function IdeRunResult() {
                 <RunTimeline tasks={timeline.tasks} />
               </div>
             )}
-            {timeline == null ? (
+            {timelineFailure ? (
+              <LoadError failure={timelineFailure} what='timeline data' />
+            ) : timeline == null ? (
               <IdeLoader label='Loading timeline…' />
             ) : (timeline.tasks || []).length === 0 ? (
               <div className='ide-empty'>No timeline data yet. Tasks populate as the run runs.</div>
@@ -2029,7 +2422,9 @@ export default function IdeRunResult() {
                 </button>
               )}
             </h1>
-            {!report ? (
+            {reportFailure ? (
+              <LoadError failure={reportFailure} what='evidence report' onRetry={reloadReport} />
+            ) : !report ? (
               <div className='ide-empty'>No evidence report.</div>
             ) : (
               <>
@@ -2212,11 +2607,14 @@ export default function IdeRunResult() {
             <div className='ide-card'>
               <Kv k='AI credits used' v={run?.aiCreditsCharged ?? '—'} />
               <Kv k='Run credits reserved' v={run?.creditsCharged ?? '—'} />
-              <Kv k='Input tokens' v={num(run?.totalInputTokens)} />
-              <Kv k='Output tokens' v={num(run?.totalOutputTokens)} />
+              <Kv k='Input tokens' v={num(costEvidence?.inputTokens ?? run?.totalInputTokens)} />
+              <Kv k='Output tokens' v={num(costEvidence?.outputTokens ?? run?.totalOutputTokens)} />
+              <Kv k='Cache-read tokens' v={num(costEvidence?.cacheReadTokens)} />
+              <Kv k='Cache-write tokens' v={num(costEvidence?.cacheWriteTokens)} />
+              <Kv k='Reasoning tokens' v={num(costEvidence?.reasoningTokens)} />
               {isSuperAdmin && (
                 <>
-                  <Kv k='Actual cost' v={usd(run?.actualCostUsd)} />
+                  <Kv k='Actual cost' v={usd(costEvidence?.costUsd ?? run?.actualCostUsd)} />
                   <Kv k='Hard cap' v={usd(run?.hardCapUsd)} />
                   <Kv
                     k='Estimate range'
@@ -2250,10 +2648,120 @@ export default function IdeRunResult() {
               <>
                 <div className='ide-h2'>Per phase</div>
                 <div className='ide-card'>
-                  <Kv k='Classifier' v={usd(run?.classifierCostUsd)} />
-                  <Kv k='Outline' v={usd(run?.outlineCostUsd)} />
-                  <Kv k='Expansion' v={usd(run?.expansionCostUsd)} />
+                  {phaseCostRows(run, costEvidence).map(([label, cost]) => (
+                    <Kv key={label} k={label} v={usd(cost)} />
+                  ))}
                 </div>
+                <div className='ide-h2'>Pipeline agents</div>
+                <div className='ide-card'>
+                  {(run?.agentTokens ?? []).length === 0 ? (
+                    <div className='ide-empty'>No persisted agent-token attribution.</div>
+                  ) : (
+                    run?.agentTokens?.map((agent, index) => (
+                      <div
+                        key={`${agent.role}-${index}`}
+                        className='ide-kv'
+                        style={{alignItems: 'start'}}
+                      >
+                        <span>{agent.role}</span>
+                        <span className='ide-mono' style={{fontSize: 11, textAlign: 'right'}}>
+                          {agent.provider || '—'} · {agent.model || '—'}
+                          <br />
+                          {agent.inputTokens.toLocaleString()} in ·{' '}
+                          {agent.outputTokens.toLocaleString()} out
+                        </span>
+                      </div>
+                    ))
+                  )}
+                </div>
+                <div className='ide-h2'>Provider calls</div>
+                <div className='ide-card' style={{overflowX: 'auto'}}>
+                  {costEvidenceFailure ? (
+                    <LoadError failure={costEvidenceFailure} what='per-call attribution' />
+                  ) : stepCalls.kind === 'restricted' ? (
+                    // RR-1552 — the ledger exposes per-attempt key source, routing and spend, so
+                    // the backend restricts it to org admins. Saying "none available" here would
+                    // be a claim about the run; this is a claim about the reader's access.
+                    <div className='ide-empty'>
+                      Per-call attribution is restricted to organization admins.
+                      {stepCalls.total > 0
+                        ? ` This run recorded ${stepCalls.total.toLocaleString()} provider ${
+                            stepCalls.total === 1 ? 'call' : 'calls'
+                          }; the totals above include them.`
+                        : ' The totals above still reflect the full run.'}
+                    </div>
+                  ) : stepCalls.kind !== 'rows' ? (
+                    <div className='ide-empty'>
+                      No per-call attribution is available for this run.
+                    </div>
+                  ) : (
+                    <table style={{width: '100%', borderCollapse: 'collapse', fontSize: 11}}>
+                      <thead>
+                        <tr style={{textAlign: 'left', color: 'var(--ide-fg-muted)'}}>
+                          <th>Role / task</th>
+                          <th>Provider / model</th>
+                          <th>Tokens</th>
+                          <th>Cache / reasoning</th>
+                          <th>Retry</th>
+                          <th style={{textAlign: 'right'}}>Cost</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {stepCalls.rows.map((call) => (
+                          <tr key={call.id} style={{borderTop: '1px solid var(--ide-border)'}}>
+                            <td style={{padding: '7px 8px 7px 0'}}>
+                              {call.agentRole || 'unattributed'}
+                              <div style={{color: 'var(--ide-fg-muted)'}}>
+                                {call.taskId || call.stepId || 'run-level'}
+                              </div>
+                            </td>
+                            <td>
+                              {call.provider || '—'}
+                              <div className='ide-mono'>{call.model || '—'}</div>
+                            </td>
+                            <td>
+                              {call.inputTokens.toLocaleString()} in ·{' '}
+                              {call.outputTokens.toLocaleString()} out
+                            </td>
+                            <td>
+                              {call.cacheReadTokens.toLocaleString()} read ·{' '}
+                              {call.cacheWriteTokens.toLocaleString()} write
+                              <div>{call.reasoningTokens.toLocaleString()} reasoning</div>
+                            </td>
+                            <td>{call.retryOf || '—'}</td>
+                            <td style={{textAlign: 'right'}}>{usd(call.costUsd)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                  {stepCalls.kind === 'rows' && stepCalls.hasMore && (
+                    // RR-1558 paged the ledger newest-first. Without this the table silently
+                    // looks like the complete history of the run.
+                    <div style={{marginTop: 8, fontSize: 11, color: 'var(--ide-fg-muted)'}}>
+                      Showing the {stepCalls.rows.length.toLocaleString()} most recent of{' '}
+                      {stepCalls.total.toLocaleString()} provider calls.
+                    </div>
+                  )}
+                </div>
+                {(() => {
+                  const reconciliation = costReconciliation(costEvidence);
+                  if (!reconciliation) return null;
+                  return (
+                    <div className='ide-card' style={{marginTop: 12}}>
+                      <Kv k='Displayed run total' v={usd(reconciliation.total)} />
+                      <Kv k='Attributed provider calls' v={usd(reconciliation.attributed)} />
+                      <Kv
+                        k={
+                          reconciliation.reconciled
+                            ? 'Unattributed remainder'
+                            : 'Unattributed / pending attribution'
+                        }
+                        v={usd(reconciliation.remainder)}
+                      />
+                    </div>
+                  );
+                })()}
               </>
             )}
           </div>
@@ -2268,17 +2776,20 @@ export default function IdeRunResult() {
                 {msg}
               </div>
             )}
-            {run?.githubPrUrl ? (
+            {/* RR-762 — consume the provider-neutral SCM PR URL (scmPrUrl || githubPrUrl) and label
+                by the actual provider, so Bitbucket/provider-neutral runs are not shown as having no
+                PR and prompted to configure GitHub. */}
+            {prUrl ? (
               <>
                 <div className='ide-card'>
                   <div
                     className='ide-mono'
                     style={{fontSize: 12, wordBreak: 'break-all', marginBottom: 10}}
                   >
-                    {run.githubPrUrl}
+                    {prUrl}
                   </div>
-                  <a className='ide-btn' href={run.githubPrUrl} target='_blank' rel='noreferrer'>
-                    ↗ Open on GitHub
+                  <a className='ide-btn' href={prUrl} target='_blank' rel='noreferrer'>
+                    ↗ Open on {scmProviderLabel(run?.scmProvider)}
                   </a>
                 </div>
                 <PrCommentInbox runId={runId} variant='ide' />
@@ -2287,23 +2798,27 @@ export default function IdeRunResult() {
               <div className='ide-card'>
                 <div style={{marginBottom: 10, color: 'var(--ide-fg-muted)'}}>
                   No pull request yet. Push the generated changes when you are ready to open one.
-                  Pushing requires a GitHub token under Integrations.
+                  Pushing requires a connected repository provider under Integrations.
                 </div>
                 <button
                   className='ide-btn'
                   disabled={busy === 'push'}
                   onClick={() =>
-                    action(
-                      'push',
-                      () => api.pushToScm(runId),
-                      () => 'Pushed — PR opening.',
-                    )
+                    action('push', () => api.pushToScm(runId), pushOutcomeMessage, reloadRun)
                   }
                 >
-                  {busy === 'push' ? 'Pushing…' : '⤴ Push to GitHub'}
+                  {busy === 'push' ? 'Pushing…' : '⤴ Push changes'}
                 </button>
               </div>
             )}
+          </div>
+        )}
+
+        {/* ── Screens ── static UI render; builds and deploys nothing. */}
+        {tab === 'Screens' && (
+          <div className='ide-pane' style={{position: 'absolute', inset: 0, overflowY: 'auto'}}>
+            <h1 className='ide-h1'>Screens</h1>
+            <IdeRunScreens runId={runId} />
           </div>
         )}
 
@@ -2331,7 +2846,9 @@ export default function IdeRunResult() {
                 Tests are running against the preview. This panel will refresh automatically.
               </div>
             )}
-            {!tests ? (
+            {testsFailure ? (
+              <LoadError failure={testsFailure} what='test results' />
+            ) : !tests ? (
               <div className='ide-empty'>{noCodeTestMessage}</div>
             ) : (
               <>
@@ -2491,7 +3008,13 @@ export default function IdeRunResult() {
                 {/* Per-test result rows + mark-invalid on failed/error rows. */}
                 {(tests.results?.length ?? 0) > 0 && (
                   <>
-                    <div className='ide-h2'>All tests · {tests.results.length}</div>
+                    {/* RR-765 — the list renders at most 60 rows; do not claim "All tests" when the
+                        set is larger, or failures beyond row 60 look like they do not exist. */}
+                    <div className='ide-h2'>
+                      {tests.results.length > 60
+                        ? `Tests · showing first 60 of ${tests.results.length}`
+                        : `All tests · ${tests.results.length}`}
+                    </div>
                     <div className='ide-card' style={{padding: 0}}>
                       {tests.results.slice(0, 60).map((r, i) => {
                         const st = (r.status || 'UNKNOWN').toUpperCase();
@@ -2538,6 +3061,7 @@ export default function IdeRunResult() {
                                           `invalid-${r.testResultId}`,
                                           () => api.markTestInvalid(r.testResultId),
                                           () => 'Marked invalid.',
+                                          reloadRun,
                                         ),
                                     })
                                   }
@@ -2564,6 +3088,19 @@ export default function IdeRunResult() {
                         );
                       })}
                     </div>
+                    {tests.results.length > 60 && (
+                      <div
+                        style={{
+                          fontSize: 11,
+                          color: 'var(--ide-fg-muted)',
+                          marginTop: 8,
+                        }}
+                      >
+                        {tests.results.length - 60} more result
+                        {tests.results.length - 60 === 1 ? '' : 's'} not shown. Download the full
+                        test report to inspect every result.
+                      </div>
+                    )}
                   </>
                 )}
               </>
@@ -2598,7 +3135,10 @@ export default function IdeRunResult() {
                 marginBottom: 12,
               }}
             >
-              {chat == null ? (
+              {chatFailure ? (
+                // RR-766 — an outage is not an empty conversation.
+                <LoadError failure={chatFailure} what='chat history' onRetry={loadRunChat} />
+              ) : chat == null ? (
                 <IdeLoader label='Loading chat…' />
               ) : chat.length === 0 && !chatBusy ? (
                 <div className='ide-empty'>
@@ -2708,8 +3248,28 @@ export default function IdeRunResult() {
         body={confirm?.body ?? ''}
         confirmLabel={confirm?.confirmLabel ?? 'Confirm'}
         danger={confirm?.danger}
-        onConfirm={() => confirm?.onConfirm()}
-        onClose={() => setConfirm(null)}
+        busy={confirmBusy}
+        // RR-763 — a synchronous one-shot latch: the confirm callback (often a paid
+        // or destructive mutation) runs at most once even under rapid double-click
+        // or repeated keyboard activation, and the dialog stays disabled until it
+        // settles.
+        onConfirm={async () => {
+          if (confirmBusyRef.current) return;
+          const c = confirm;
+          if (!c) return;
+          confirmBusyRef.current = true;
+          setConfirmBusy(true);
+          try {
+            await c.onConfirm();
+          } finally {
+            confirmBusyRef.current = false;
+            setConfirmBusy(false);
+            setConfirm(null);
+          }
+        }}
+        onClose={() => {
+          if (!confirmBusyRef.current) setConfirm(null);
+        }}
       />
     </div>
   );

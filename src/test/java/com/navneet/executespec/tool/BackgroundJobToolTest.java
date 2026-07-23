@@ -114,4 +114,23 @@ class BackgroundJobToolTest {
     assertThat(tool.execute(args("{\"action\":\"frobnicate\"}"), ctx))
         .isInstanceOf(ToolResult.Err.class);
   }
+
+  @Test
+  @DisplayName("RR-1542 a brownfield reviewer pass cannot start a background job")
+  void reviewerBrownfieldScopeBlocksStart() {
+    flagOn();
+    var policy =
+        new ReviewerMutationScope.Policy(
+            true, java.util.List.of("repos/api"), java.util.List.of(), false);
+
+    ToolResult r =
+        ReviewerMutationScope.withPolicy(
+            policy,
+            () -> tool.execute(args("{\"action\":\"start\",\"command\":\"echo hi\"}"), ctx));
+
+    assertThat(r).isInstanceOf(ToolResult.Err.class);
+    assertThat(((ToolResult.Err) r).kind()).isEqualTo(ToolResult.ErrorKind.FORBIDDEN);
+    // The process must never have been launched.
+    org.mockito.Mockito.verifyNoInteractions(jobs);
+  }
 }

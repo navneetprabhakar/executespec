@@ -16,6 +16,8 @@ import com.navneet.executespec.auth.repository.ProjectRepository;
 import com.navneet.executespec.billing.repository.ManagedAiUsageEventRepository;
 import com.navneet.executespec.codeintel.entity.RunCodeMap;
 import com.navneet.executespec.codeintel.repository.RunCodeMapRepository;
+import com.navneet.executespec.cost.EffectiveRouteProjection;
+import com.navneet.executespec.cost.RunEffectiveRouteService;
 import com.navneet.executespec.report.ValidationReportRepository;
 import com.navneet.executespec.report.entity.ValidationReport;
 import com.navneet.executespec.state.entity.AgentTask;
@@ -26,9 +28,11 @@ import com.navneet.executespec.testgen.repository.TestPlanRepository;
 import org.springframework.stereotype.Component;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
 @Component
 @RequiredArgsConstructor
+@Slf4j
 public class RunMapper {
 
   private final IntegrationRunRepository integrationRunRepository;
@@ -38,6 +42,7 @@ public class RunMapper {
   private final RunCodeMapRepository runCodeMapRepository;
   private final ValidationReportRepository validationReportRepository;
   private final ManagedAiUsageEventRepository managedAiUsageEventRepository;
+  private final RunEffectiveRouteService runEffectiveRouteService;
   private final ObjectMapper objectMapper;
 
   public RunSummary toSummary(PipelineRun r) {
@@ -216,6 +221,10 @@ public class RunMapper {
     // need a second request for the headline verifiedScore / accuracyScore.
     ValidationReport report = validationReportRepository.findByRunId(r.getRunId()).orElse(null);
 
+    // C1 (G4) — DERIVED effective route. Read from the physical-attempt ledger rather than stored,
+    // so it can never drift from the usage facts it summarises.
+    EffectiveRouteProjection effectiveRoute = runEffectiveRouteService.forRun(r.getRunId());
+
     return RunDetail.builder()
         .runId(r.getRunId())
         .status(r.getStatus())
@@ -235,10 +244,13 @@ public class RunMapper {
         .statusReason(r.getStatusReason())
         .planJson(r.getPlanJson())
         .reviewJson(r.getReviewJson())
-        .runGoalDoneness(parseJson(r.getRunGoalDonenessJson()))
+        .runGoalDoneness(parseJson(r.getRunGoalDonenessJson(), "runGoalDoneness", r.getRunId()))
         .tasks(
             tasks.stream()
-                .sorted(Comparator.comparingInt((AgentTask t) -> taskStatusOrder(t.getStatus())))
+                // RR-1446 — order by the persisted planner-intent index first so the approval gate
+                // shows the planner's sequence; status is a decoration-only tiebreaker (and the
+                // sole ordering for legacy rows that predate plan_index, which sort last).
+                .sorted(TASK_DISPLAY_ORDER)
                 .map(this::toTaskSummary)
                 .toList())
         .integrationSource(integrationSource)
@@ -298,6 +310,16 @@ public class RunMapper {
         .batchProgressCompleted(r.getBatchProgressCompleted())
         .batchProgressTotal(r.getBatchProgressTotal())
         .aiProvider(r.getAiProvider())
+        .requestedProvider(r.getRequestedProvider())
+        .requestedModel(r.getRequestedModel())
+        .routingMode(r.getRoutingMode())
+        .routePinned(r.isRoutePinned())
+        .effectiveProvider(effectiveRoute.provider())
+        .effectiveModel(effectiveRoute.model())
+        .effectiveRouteAttribution(effectiveRoute.attribution().name())
+        .routeDiverged(
+            effectiveRoute.divergesFromRequestedRoute(
+                r.getRequestedProvider(), r.getRequestedModel()))
         .harnessVersion(r.getHarnessVersion())
         .runMode(r.getRunMode())
         .triggeredByFinding(r.getTriggeredByFinding())
@@ -321,6 +343,20 @@ public class RunMapper {
    * Sort order for tasks in the detail view: WORKING first (in-flight), then PENDING/LOCKED
    * (queued), then PARTIAL/BLOCKED (stalled), then FAILED, and finally COMPLETE at the bottom.
    */
+  /**
+   * RR-1446 — task display order for the run detail view and the approval gate. The persisted
+   * planner-intent index is the primary key so the human sees the planner's sequence; status is a
+   * decoration-only tiebreaker, and it is the sole ordering for legacy rows that predate plan_index
+   * (they sort after every indexed task).
+   */
+  static final Comparator<AgentTask> TASK_DISPLAY_ORDER =
+      Comparator.comparingInt((AgentTask t) -> planOrder(t.getPlanIndex()))
+          .thenComparingInt(t -> taskStatusOrder(t.getStatus()));
+
+  private static int planOrder(Integer planIndex) {
+    return planIndex == null ? Integer.MAX_VALUE : planIndex;
+  }
+
   private static int taskStatusOrder(String status) {
     return switch (status != null ? status : "") {
       case "WORKING" -> 0;
@@ -349,9 +385,9 @@ public class RunMapper {
         t.getStartedAt(),
         t.getCompletedAt(),
         extractFailureReason(t),
-        parseJson(t.getGoalDonenessJson()),
-        parseJson(t.getContinuationDecisionJson()),
-        parseJson(t.getContinuationActionsJson()),
+        parseJson(t.getGoalDonenessJson(), "goalDoneness", t.getTaskId()),
+        parseJson(t.getContinuationDecisionJson(), "continuationDecision", t.getTaskId()),
+        parseJson(t.getContinuationActionsJson(), "continuationActions", t.getTaskId()),
         extractObjective(t.getTaskJson()),
         t.getCompletionNotes(),
         t.getParentTaskId(),
@@ -365,15 +401,35 @@ public class RunMapper {
     try {
       return objectMapper.readTree(taskJson).path("objective").asText(null);
     } catch (Exception e) {
+      // RR-1124 — a non-blank but malformed taskJson is corruption/schema drift, not "no
+      // objective". Emit a repair signal instead of swallowing it.
+      log.warn(
+          "RR-1124 malformed persisted taskJson while extracting objective: {}", e.getMessage());
       return null;
     }
   }
 
   private JsonNode parseJson(String json) {
+    return parseJson(json, "unknown", "unknown");
+  }
+
+  /**
+   * RR-1124 — this used to catch every parse failure and return null with no log or metric, so a
+   * corrupted/schema-drifted proof field looked identical to "never measured" and the UI silently
+   * omitted mandatory proof and controls with no repair signal. The DTO contract is unchanged
+   * (still null on failure), but a non-blank field that fails to parse now logs a warning carrying
+   * the owning entity id and field so corruption is visible and diagnosable.
+   */
+  private JsonNode parseJson(String json, String field, String entityId) {
     if (json == null || json.isBlank()) return null;
     try {
       return objectMapper.readTree(json);
     } catch (Exception e) {
+      log.warn(
+          "RR-1124 malformed persisted JSON: field={} id={} — proof rendered absent ({})",
+          field,
+          entityId,
+          e.getMessage());
       return null;
     }
   }
@@ -404,7 +460,14 @@ public class RunMapper {
           String selfReview = report.path("self_review").asText("");
           if (!selfReview.isBlank()) return selfReview;
         }
-      } catch (Exception ignored) {
+      } catch (Exception e) {
+        // RR-1124 — a non-blank but malformed worker report is corruption, not "no failure
+        // reason". Log a repair signal; the lastLlmFailure fallback below still applies.
+        log.warn(
+            "RR-1124 malformed persisted workerReportJson: taskId={} — failure reason from report"
+                + " unavailable ({})",
+            t.getTaskId(),
+            e.getMessage());
       }
     }
     // Fallback: lastLlmFailure (set by blockTask / recovery)

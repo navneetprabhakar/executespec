@@ -1,6 +1,9 @@
 package com.navneet.executespec.integration.scm;
 
 import java.util.List;
+import java.util.Locale;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.auth.entity.AppUser;
@@ -15,10 +18,14 @@ import com.navneet.executespec.project.pr.PullRequestRecordService;
 import com.navneet.executespec.project.repository.ProjectRepoRepository;
 import com.navneet.executespec.repo.BitbucketRepoService;
 import com.navneet.executespec.repo.GitHubRepoService;
+import com.navneet.executespec.repo.ScmProvider;
+import com.navneet.executespec.security.ArtifactPublicationGuard;
 import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
 import com.navneet.executespec.state.StateStore;
 import com.navneet.executespec.state.entity.PipelineRun;
+import com.navneet.executespec.state.entity.RunRepoSnapshot;
+import com.navneet.executespec.state.repository.RunRepoSnapshotRepository;
 import com.navneet.executespec.tool.GitTool;
 import com.navneet.executespec.tool.GitToolResult;
 
@@ -32,9 +39,10 @@ import lombok.extern.slf4j.Slf4j;
  * SCM push orchestration. Originally extracted from the V1 pipeline; now called from the V2 run
  * orchestrator's post-merge path.
  *
- * <p>Decides between Bitbucket and GitHub based on credentials present on the run / user, creates a
- * feature branch (or new repo), pushes the workspace, and opens a pull request. Used by the {@code
- * /api/runs/{id}/push-scm} and legacy {@code /push-github} endpoints.
+ * <p>Routes from the run's durable SCM/source identity. Credentials authorize the selected route;
+ * they never choose it. Legacy runs without a durable route may infer one from an unambiguous
+ * remote URL or a single configured provider. Used by the {@code /api/runs/{id}/push-scm} and
+ * legacy {@code /push-github} endpoints.
  *
  * <p>Harness-agnostic — lives in the {@code integration.scm} package so it survives V1 deletion.
  */
@@ -89,8 +97,57 @@ public class ScmPushService {
   private final PullRequestRecordRepository pullRequestRecordRepository;
   private final ProjectRepoRepository projectRepoRepository;
   private final ObjectMapper objectMapper;
+  private final ArtifactPublicationGuard publicationGuard;
   // RL-2026-05-041 (audit #16) — enqueue orphan-branch cleanup when a push succeeds but PR fails.
   private final com.navneet.executespec.saga.SideEffectOutbox sideEffectOutbox;
+  // RR-1668 — per-run cloned-branch SHA snapshots, used to pin --force-with-lease on the push.
+  private final RunRepoSnapshotRepository runRepoSnapshotRepository;
+
+  /**
+   * RR-1668 — the exact remote SHA to pin a {@code --force-with-lease} against for {@code
+   * branchName} in this repo, or {@code null} when this run did not clone that branch (so the push
+   * must NOT force).
+   *
+   * <p>A run records a {@code run_repo_snapshot} row only for a branch it actually cloned,
+   * capturing that branch's HEAD SHA at clone time. When the branch the run pushes to is that same
+   * branch, the captured SHA is what the remote is expected to still be at — so a commit a human
+   * pushed to the branch after the run cloned it makes the lease fail and the push abort, instead
+   * of being silently overwritten. A fresh {@code executespec/<runId>} branch (or a re-run's {@code
+   * branchNamingPattern} output) was never cloned, so there is no matching snapshot and this
+   * returns {@code null}: the caller then does a plain, non-forced push that creates the branch
+   * when absent and refuses a divergent remote rather than clobbering it.
+   *
+   * <p>Fails SAFE: any lookup error returns {@code null} (plain non-forced push), never a blind
+   * force. A plain push still fast-forwards the run's own branch and rejects a human-advanced one,
+   * so the null fallback keeps the RR-1668 protection.
+   */
+  private String expectedRemoteShaFor(String runId, String repoFullName, String branchName) {
+    if (!StringUtils.hasText(runId) || !StringUtils.hasText(branchName)) return null;
+    try {
+      return runRepoSnapshotRepository.findByRunId(runId).stream()
+          .filter(s -> branchName.equals(s.getBranch()))
+          .filter(s -> repoFullName == null || sameRepo(repoFullName, s.getRepoFullName()))
+          .map(RunRepoSnapshot::getCommitSha)
+          .filter(StringUtils::hasText)
+          .findFirst()
+          .orElse(null);
+    } catch (Exception e) {
+      log.warn(
+          "[{}] RR-1668 could not resolve clone snapshot for branch {} (defaulting to non-forced"
+              + " push): {}",
+          runId,
+          branchName,
+          e.getMessage());
+      return null;
+    }
+  }
+
+  /** Match a snapshot repo to a push repo by full name, tolerating {@code owner/repo} vs slug. */
+  private static boolean sameRepo(String a, String b) {
+    if (a == null || b == null) return false;
+    if (a.equalsIgnoreCase(b)) return true;
+    return lastPathSegment(a).equalsIgnoreCase(lastPathSegment(b));
+  }
 
   /**
    * Entry point for manual SCM push from {@code RunController}. Resolves the user creds off the
@@ -105,23 +162,118 @@ public class ScmPushService {
     return pushIfConfigured(run, scmUser);
   }
 
-  /** Dispatch to Bitbucket or GitHub based on credentials. */
+  /** Dispatch to the durable source provider; credentials only authorize that provider. */
   private PushResult pushIfConfigured(PipelineRun run, AppUser user) {
-    if (StringUtils.hasText(run.getBitbucketUsername())
-        && StringUtils.hasText(run.getBitbucketWorkspace())) {
-      return pushToBitbucket(run);
+    ProviderDecision decision = resolveProviderDecision(run, user);
+    if (decision.error() != null) {
+      log.warn("[{}] SCM publication blocked: {}", run.getRunId(), decision.error());
+      return PushResult.failed(decision.error(), decision.provider());
     }
-    if (user != null
-        && StringUtils.hasText(user.getBitbucketUsername())
-        && StringUtils.hasText(user.getBitbucketWorkspace())) {
-      run.setBitbucketUsername(user.getBitbucketUsername());
-      run.setBitbucketAppPassword(user.getBitbucketAppPassword());
-      run.setBitbucketWorkspace(user.getBitbucketWorkspace());
-      run.setBitbucketRepoSlug(user.getBitbucketRepoSlug());
-      run.setScmProvider("BITBUCKET");
+    if (ScmProvider.BITBUCKET.name().equals(decision.provider())) {
+      hydrateBitbucketCredentials(run, user);
       return pushToBitbucket(run);
     }
     return pushToGitHubIfConfigured(run, user);
+  }
+
+  private record ProviderDecision(String provider, String error) {
+    static ProviderDecision route(ScmProvider provider) {
+      return new ProviderDecision(provider.name(), null);
+    }
+
+    static ProviderDecision blocked(String provider, String error) {
+      return new ProviderDecision(provider == null ? "" : provider, error);
+    }
+  }
+
+  private ProviderDecision resolveProviderDecision(PipelineRun run, AppUser user) {
+    List<java.util.UUID> selectedIds = parseRepoIds(run.getSelectedRepoIds());
+    if (StringUtils.hasText(run.getSelectedRepoIds())) {
+      if (selectedIds.isEmpty()) {
+        return ProviderDecision.blocked("", "Selected repository identity is invalid");
+      }
+      List<ProjectRepo> selectedRepos = projectRepoRepository.findAllById(selectedIds);
+      if (selectedRepos.size() != selectedIds.size()) {
+        return ProviderDecision.blocked("", "Selected repository identity is incomplete");
+      }
+      Set<ScmProvider> providers =
+          selectedRepos.stream()
+              .map(ProjectRepo::getScmProvider)
+              .map(ScmProvider::require)
+              .collect(Collectors.toSet());
+      if (providers.size() != 1) {
+        return ProviderDecision.blocked("", "Mixed-provider SCM publication is not supported");
+      }
+      ScmProvider selectedProvider = providers.iterator().next();
+      if (selectedProvider == ScmProvider.BITBUCKET) {
+        return ProviderDecision.blocked(
+            ScmProvider.BITBUCKET.name(),
+            "Bitbucket project publication is not supported on this release");
+      }
+      return ProviderDecision.route(selectedProvider);
+    }
+
+    if (StringUtils.hasText(run.getScmProvider())) {
+      try {
+        return ProviderDecision.route(
+            ScmProvider.valueOf(run.getScmProvider().trim().toUpperCase(Locale.ROOT)));
+      } catch (IllegalArgumentException unknown) {
+        return ProviderDecision.blocked("", "Unsupported SCM provider on run");
+      }
+    }
+
+    String repoUrl = run.getRepoUrl();
+    if (StringUtils.hasText(repoUrl)) {
+      String normalized = repoUrl.toLowerCase(Locale.ROOT);
+      if (normalized.contains("bitbucket.org/")) {
+        return ProviderDecision.route(ScmProvider.BITBUCKET);
+      }
+      if (normalized.contains("github.com/")) {
+        return ProviderDecision.route(ScmProvider.GITHUB);
+      }
+    }
+
+    boolean bitbucketConfigured = hasBitbucketConfiguration(run, user);
+    boolean githubConfigured = StringUtils.hasText(resolvePat(run, user));
+    if (bitbucketConfigured && githubConfigured) {
+      return ProviderDecision.blocked(
+          "", "Legacy run has multiple SCM credentials and no durable provider route");
+    }
+    return ProviderDecision.route(bitbucketConfigured ? ScmProvider.BITBUCKET : ScmProvider.GITHUB);
+  }
+
+  private static boolean hasBitbucketConfiguration(PipelineRun run, AppUser user) {
+    return bitbucketComplete(run) || bitbucketComplete(user);
+  }
+
+  /** A complete Bitbucket identity has all three of username, workspace and app password. */
+  private static boolean bitbucketComplete(PipelineRun run) {
+    return run != null
+        && StringUtils.hasText(run.getBitbucketUsername())
+        && StringUtils.hasText(run.getBitbucketWorkspace())
+        && StringUtils.hasText(run.getBitbucketAppPassword());
+  }
+
+  private static boolean bitbucketComplete(AppUser user) {
+    return user != null
+        && StringUtils.hasText(user.getBitbucketUsername())
+        && StringUtils.hasText(user.getBitbucketWorkspace())
+        && StringUtils.hasText(user.getBitbucketAppPassword());
+  }
+
+  private static void hydrateBitbucketCredentials(PipelineRun run, AppUser user) {
+    // RR-867 — resolve ONE complete Bitbucket identity from ONE source. The old guard gated
+    // hydration on `run.getBitbucketUsername()` alone, so a run carrying only a username (a partial
+    // identity) suppressed a complete user credential and then push read a null workspace/password
+    // from the still-partial run. A run that already holds a COMPLETE identity is authoritative and
+    // untouched; a run with a partial (or empty) identity is replaced wholesale from the user's
+    // complete config — never mixed field-by-field between two identities.
+    if (bitbucketComplete(run)) return;
+    if (!bitbucketComplete(user)) return;
+    run.setBitbucketUsername(user.getBitbucketUsername());
+    run.setBitbucketAppPassword(user.getBitbucketAppPassword());
+    run.setBitbucketWorkspace(user.getBitbucketWorkspace());
+    run.setBitbucketRepoSlug(user.getBitbucketRepoSlug());
   }
 
   private PushResult pushToBitbucket(PipelineRun run) {
@@ -147,8 +299,12 @@ public class ScmPushService {
               : null;
       String branchName = resolveBranchName(project, run);
       String cloneUrl = "https://bitbucket.org/" + workspace + "/" + repoSlug + ".git";
+      String expectedRemoteSha =
+          expectedRemoteShaFor(run.getRunId(), workspace + "/" + repoSlug, branchName);
 
-      gitTool.pushToBranchBitbucket(run.getRunId(), cloneUrl, username, appPassword, branchName);
+      publicationGuard.assertGitWorkspaceSafe(run.getRunId());
+      gitTool.pushToBranchBitbucket(
+          run.getRunId(), cloneUrl, username, appPassword, branchName, expectedRemoteSha);
 
       String title =
           StringUtils.hasText(run.getRunTitle()) ? run.getRunTitle() : "ExecuteSpec changes";
@@ -175,6 +331,48 @@ public class ScmPushService {
     }
   }
 
+  /**
+   * RR-900 — the run's repository mode, parsed exactly. The previous code compared the raw string
+   * against {@code "EXISTING"} and sent EVERY other value — {@code null}, {@code "NONE"}, a typo, a
+   * crafted value — down the direct-publication branch, which force-pushes the remote default
+   * branch. A mode that is not understood must never resolve to the most destructive operation.
+   */
+  enum RepoMode {
+    /** Publish into a repository ExecuteSpec creates for this run. */
+    NEW,
+    /** Publish as a branch + pull request against a repository the customer already owns. */
+    EXISTING,
+    /** No repository is attached to this run; publication is not defined. */
+    NONE;
+
+    /**
+     * @return the parsed mode, or empty when the value is absent/blank (caller decides the safe
+     *     default) — an unrecognised NON-blank value throws so it can never be defaulted.
+     */
+    static java.util.Optional<RepoMode> parse(String raw) {
+      if (raw == null || raw.isBlank()) return java.util.Optional.empty();
+      try {
+        return java.util.Optional.of(RepoMode.valueOf(raw.trim().toUpperCase(Locale.ROOT)));
+      } catch (IllegalArgumentException unknown) {
+        throw new UnknownRepoModeException(raw);
+      }
+    }
+  }
+
+  /** Raised when a run carries a repository mode this release does not understand. */
+  static final class UnknownRepoModeException extends RuntimeException {
+    UnknownRepoModeException(String raw) {
+      super("Unsupported repository mode");
+      this.raw = raw;
+    }
+
+    private final String raw;
+
+    String raw() {
+      return raw;
+    }
+  }
+
   private PushResult pushToGitHubIfConfigured(PipelineRun run, AppUser user) {
     // Pilot v3.0 — multi-repo runs: push each cloned subdirectory as its own
     // branch + PR. Falls through to the single-repo path if no project repos
@@ -188,10 +386,25 @@ public class ScmPushService {
       return pushMultiRepo(run, pat);
     }
 
-    String repoMode = run.getRepoMode();
+    RepoMode repoMode;
+    try {
+      // Absent/blank is the legacy shape and stays permitted, but it resolves to the SAFE mode
+      // (branch + PR), never to direct publication onto the default branch.
+      repoMode = RepoMode.parse(run.getRepoMode()).orElse(RepoMode.EXISTING);
+    } catch (UnknownRepoModeException unknown) {
+      log.warn(
+          "[{}] SCM publication refused — unsupported repository mode {}",
+          run.getRunId(),
+          unknown.raw());
+      return PushResult.failed(
+          "Unsupported repository mode on run — publication refused", "GITHUB");
+    }
+    if (repoMode == RepoMode.NONE) {
+      return PushResult.noConfiguration("GITHUB", "Run has no attached repository");
+    }
     String repoUrl = run.getRepoUrl();
 
-    if (!StringUtils.hasText(repoUrl) && !"NEW".equals(repoMode))
+    if (!StringUtils.hasText(repoUrl) && repoMode != RepoMode.NEW)
       return PushResult.noConfiguration("GITHUB", "GitHub repository is not configured");
 
     String pat = resolvePat(run, user);
@@ -205,11 +418,23 @@ public class ScmPushService {
       return PushResult.noConfiguration("GITHUB", "GitHub PAT is not configured");
     }
 
+    try {
+      publicationGuard.assertGitWorkspaceSafe(run.getRunId());
+    } catch (Exception unsafe) {
+      log.warn("[{}] SCM publication rejected: {}", run.getRunId(), unsafe.getMessage());
+      return PushResult.failed(unsafe.getMessage(), "GITHUB");
+    }
+
     String remote = repoUrl;
-    if ("NEW".equals(repoMode) && (repoUrl == null || repoUrl.isBlank())) {
+    // RR-900 — direct publication force-pushes the default branch, so it is permitted ONLY for a
+    // repository this invocation just created (and which is therefore empty). A NEW-mode run
+    // pointed at a pre-existing repository falls through to the branch + PR path.
+    boolean createdThisInvocation = false;
+    if (repoMode == RepoMode.NEW && (repoUrl == null || repoUrl.isBlank())) {
       log.info("Creating new GitHub repo for run {} (owner={})", run.getRunId(), owner);
       remote = gitHubRepoService.createRepo(run.getUserRequest(), null, "private", pat, owner);
       if (remote != null) {
+        createdThisInvocation = true;
         PipelineRun freshRun = stateStore.findRun(run.getRunId()).orElse(run);
         freshRun.setRepoUrl(remote);
         stateStore.save(freshRun);
@@ -225,14 +450,17 @@ public class ScmPushService {
 
     log.info("Pushing workspace to GitHub: {}", remote);
 
-    if ("EXISTING".equals(repoMode)) {
+    if (!createdThisInvocation) {
       // Pilot R5 — project settings may override branch naming / target branch / reviewers.
       Project project =
           run.getProjectId() != null
               ? projectRepository.findById(run.getProjectId()).orElse(null)
               : null;
       String branchName = resolveBranchName(project, run);
-      GitToolResult result = gitTool.pushToBranch(run.getRunId(), remote, pat, branchName);
+      String expectedRemoteSha =
+          expectedRemoteShaFor(run.getRunId(), repoFullNameFromUrl(remote), branchName);
+      GitToolResult result =
+          gitTool.pushToBranch(run.getRunId(), remote, pat, branchName, expectedRemoteSha);
       if (!result.isOk()) {
         log.warn("GitHub branch push failed for run {}: {}", run.getRunId(), result.value());
         return PushResult.failed("GitHub branch push failed: " + result.value(), "GITHUB");
@@ -243,10 +471,13 @@ public class ScmPushService {
               : gitHubRepoService.getDefaultBranch(remote, pat);
       String prTitle = run.getRunTitle() != null ? run.getRunTitle() : "ExecuteSpec changes";
       String prBody = run.getRunSummary() != null ? run.getRunSummary() : run.getUserRequest();
-      String prUrl =
-          gitHubRepoService.createPullRequest(
+      // RR-146 — an existing PR for this head is NOT a failure. Only a typed FAILED outcome may
+      // authorize deleting the branch we just pushed.
+      GitHubRepoService.PullRequestCreation creation =
+          gitHubRepoService.createPullRequestDetailed(
               remote, branchName, targetBranch, prTitle, prBody, pat);
-      if (prUrl != null) {
+      String prUrl = creation.prUrl();
+      if (creation.prExists() && prUrl != null) {
         PipelineRun freshRun = stateStore.findRun(run.getRunId()).orElse(run);
         freshRun.setGithubPrUrl(prUrl);
         freshRun.setScmPrUrl(prUrl);
@@ -275,11 +506,26 @@ public class ScmPushService {
           }
         }
         gitHubRepoService.updateRepoDescription(remote, run.getUserRequest(), pat);
-        return PushResult.pushed("GITHUB", prUrl, "GitHub pull request created");
+        return PushResult.pushed(
+            "GITHUB",
+            prUrl,
+            creation.outcome() == GitHubRepoService.PullRequestCreation.Outcome.ALREADY_EXISTS
+                ? "Existing GitHub pull request updated"
+                : "GitHub pull request created");
+      } else if (creation.prExists()) {
+        // ALREADY_EXISTS but the discovery lookup could not be answered. A pull request is open on
+        // this branch, so cleanup is forbidden; we simply cannot report its URL.
+        log.info(
+            "[{}] Pull request already exists for branch {} — URL unresolved, no cleanup enqueued",
+            run.getRunId(),
+            branchName);
+        gitHubRepoService.updateRepoDescription(remote, run.getUserRequest(), pat);
+        return PushResult.pushed("GITHUB", "", "Branch pushed to an existing GitHub pull request");
       } else {
-        // RL-2026-05-041 (audit #16) — the branch pushed but PR creation failed: it's now an
-        // orphan. Enqueue the saga compensation to delete it (PAT resolved from the run owner at
-        // execution time — not stored in the payload).
+        // RL-2026-05-041 (audit #16) — the branch pushed but PR creation definitively failed: it's
+        // now an orphan. Enqueue the saga compensation to delete it (PAT resolved from the run
+        // owner at execution time — not stored in the payload). RR-146: reached only for a typed
+        // FAILED outcome, never for "a pull request already exists".
         enqueueOrphanBranchCleanup(run.getRunId(), repoFullNameFromUrl(remote), branchName);
         gitHubRepoService.updateRepoDescription(remote, run.getUserRequest(), pat);
         return PushResult.failed("GitHub branch pushed but pull request creation failed", "GITHUB");
@@ -426,8 +672,29 @@ public class ScmPushService {
       // run-title message regardless of what actually changed in that repo.
       String commitMsg = buildPerRepoCommitMessage(run, runTitle, repo, subPath);
 
+      try {
+        publicationGuard.assertGitWorkspaceSafe(run.getRunId(), subPath);
+      } catch (Exception unsafe) {
+        log.warn(
+            "[{}] SCM publication rejected for {}: {}",
+            run.getRunId(),
+            repo.getGithubRepoFullName(),
+            unsafe.getMessage());
+        broadcaster.emit(
+            run.getRunId(),
+            RunEvent.log(
+                run.getRunId(),
+                "scm",
+                "Push blocked for " + repo.getGithubRepoFullName() + ": " + unsafe.getMessage()));
+        failed++;
+        continue;
+      }
+
+      String expectedRemoteSha =
+          expectedRemoteShaFor(run.getRunId(), repo.getGithubRepoFullName(), branchName);
       var pushResult =
-          gitTool.commitAndPushSubdir(run.getRunId(), subPath, remote, pat, branchName, commitMsg);
+          gitTool.commitAndPushSubdir(
+              run.getRunId(), subPath, remote, pat, branchName, commitMsg, expectedRemoteSha);
       if (!pushResult.isOk()) {
         log.warn(
             "[{}] multi-repo push failed for {}: {}",
@@ -454,13 +721,24 @@ public class ScmPushService {
           (project != null && StringUtils.hasText(project.getTargetBranch()))
               ? project.getTargetBranch()
               : (repo.getDefaultBranch() != null ? repo.getDefaultBranch() : "main");
-      String prUrl =
-          gitHubRepoService.createPullRequest(
+      GitHubRepoService.PullRequestCreation creation =
+          gitHubRepoService.createPullRequestDetailed(
               remote, branchName, targetBranch, prTitle, prBodyBase, pat);
-      if (prUrl == null) {
+      if (creation.failed()) {
         // RL-2026-05-041 (audit #16) — branch pushed but PR creation failed → orphan branch.
+        // RR-146: only a typed FAILED outcome reaches here; "a pull request already exists" does
+        // not, because that branch is live review material.
         enqueueOrphanBranchCleanup(run.getRunId(), repo.getGithubRepoFullName(), branchName);
         failed++;
+        continue;
+      }
+      String prUrl = creation.prUrl();
+      if (prUrl == null) {
+        log.info(
+            "[{}] Pull request already exists for {} branch {} — URL unresolved",
+            run.getRunId(),
+            repo.getGithubRepoFullName(),
+            branchName);
         continue;
       }
 
@@ -795,6 +1073,14 @@ public class ScmPushService {
         String remote = "https://github.com/" + repoFullName;
         String branchName = repoToBranch.getOrDefault(repoFullName, fallbackBranch);
 
+        try {
+          publicationGuard.assertGitWorkspaceSafe(run.getRunId(), subPath);
+        } catch (Exception unsafe) {
+          outcomes.add(
+              new ApplyRepoOutcome(repoFullName, branchName, false, false, unsafe.getMessage()));
+          continue;
+        }
+
         GitToolResult res =
             gitTool.pushToExistingBranch(
                 run.getRunId(), subPath, remote, pat, branchName, commitMessage);
@@ -825,6 +1111,13 @@ public class ScmPushService {
           branch = rec.getHeadBranch();
           break;
         }
+      }
+      try {
+        publicationGuard.assertGitWorkspaceSafe(run.getRunId());
+      } catch (Exception unsafe) {
+        return ApplyPushResult.singleRepo(
+            new ApplyRepoOutcome(
+                repoFullNameFromUrl(run.getRepoUrl()), branch, false, false, unsafe.getMessage()));
       }
       GitToolResult res =
           gitTool.pushToExistingBranch(

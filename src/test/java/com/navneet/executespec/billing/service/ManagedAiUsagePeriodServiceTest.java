@@ -27,6 +27,7 @@ class ManagedAiUsagePeriodServiceTest {
   private ManagedAiTierResolver tierResolver;
   private PipelineRunRepository pipelineRunRepository;
   private ManagedAiNotificationService notificationService;
+  private ManagedAiUsagePeriodInitializer periodInitializer;
   private ManagedAiUsagePeriodService service;
 
   @BeforeEach
@@ -35,15 +36,23 @@ class ManagedAiUsagePeriodServiceTest {
     tierResolver = mock(ManagedAiTierResolver.class);
     pipelineRunRepository = mock(PipelineRunRepository.class);
     notificationService = mock(ManagedAiNotificationService.class);
+    periodInitializer = mock(ManagedAiUsagePeriodInitializer.class);
     when(periodRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+    when(periodInitializer.insertNew(any())).thenAnswer(inv -> inv.getArgument(0));
     service =
         new ManagedAiUsagePeriodService(
-            periodRepository, tierResolver, pipelineRunRepository, notificationService);
+            periodRepository,
+            tierResolver,
+            pipelineRunRepository,
+            notificationService,
+            periodInitializer);
   }
 
   @Test
   void createsUtcMonthlyPeriodWhenNoCurrentPeriodExists() {
     Instant now = Instant.parse("2026-06-20T18:30:00Z");
+    // findCurrent is empty both at the existence check and the post-insert reload, so the created
+    // period (from the idempotent initializer) is returned via the orElse(created) fallback.
     when(periodRepository.findCurrent("u1", now)).thenReturn(Optional.empty());
 
     ManagedAiUsagePeriod period = service.currentOrCreate(user(), policy(), now, false);
@@ -57,7 +66,40 @@ class ManagedAiUsagePeriodServiceTest {
     assertThat(period.getIncludedAiCredits()).isEqualTo(2000);
     assertThat(period.getHardStopAfterRawUsd()).isEqualTo(16.0);
     assertThat(period.getRoutingState()).isEqualTo(ManagedAiRoutingPolicy.FULL);
-    verify(periodRepository).save(period);
+    verify(periodInitializer).insertNew(period);
+  }
+
+  @Test
+  void firstUseInsertRaceReloadsWinnerInsteadOfThrowing() {
+    // RR-228 — two concurrent first-use calls both find no period and both INSERT; the unique index
+    // rejects the loser. The loser must catch the violation and return the winner, not surface a
+    // data-integrity 500.
+    Instant now = Instant.parse("2026-06-20T18:30:00Z");
+    ManagedAiUsagePeriod winner = period();
+    when(periodRepository.findCurrent("u1", now)).thenReturn(Optional.empty(), Optional.of(winner));
+    when(periodInitializer.insertNew(any()))
+        .thenThrow(new org.springframework.dao.DataIntegrityViolationException("unique violation"));
+
+    ManagedAiUsagePeriod period = service.currentOrCreate(user(), policy(), now, false);
+
+    assertThat(period).isSameAs(winner);
+  }
+
+  @Test
+  void firstUseInsertRaceReloadsWinnerUnderLockWhenRequested() {
+    // RR-228 — the same idempotent reload holds for the locked (spend-decision) path, and the
+    // reload uses findCurrentForUpdate so the winner is returned under the row lock.
+    Instant now = Instant.parse("2026-06-20T18:30:00Z");
+    ManagedAiUsagePeriod winner = period();
+    when(periodRepository.findCurrentForUpdate("u1", now))
+        .thenReturn(Optional.empty(), Optional.of(winner));
+    when(periodInitializer.insertNew(any()))
+        .thenThrow(new org.springframework.dao.DataIntegrityViolationException("unique violation"));
+
+    ManagedAiUsagePeriod period = service.currentOrCreate(user(), policy(), now, true);
+
+    assertThat(period).isSameAs(winner);
+    verify(periodRepository, never()).findCurrent("u1", now);
   }
 
   @Test

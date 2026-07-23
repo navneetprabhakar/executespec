@@ -8,9 +8,12 @@ import static org.mockito.Mockito.when;
 
 import java.util.List;
 
+import com.navneet.executespec.api.dto.DeployRequest;
 import com.navneet.executespec.auth.entity.AppUser;
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.auth.security.RunAccessGuard;
+import com.navneet.executespec.config.OperationalReleasePolicy;
+import com.navneet.executespec.deployment.DeploymentService;
 import com.navneet.executespec.state.entity.Deployment;
 import com.navneet.executespec.state.repository.DeploymentRepository;
 
@@ -20,9 +23,46 @@ class DeploymentControllerTest {
 
   private final DeploymentRepository deploymentRepo = mock(DeploymentRepository.class);
   private final RunAccessGuard guard = mock(RunAccessGuard.class);
+  private final DeploymentService deploymentService = mock(DeploymentService.class);
+  private final OperationalReleasePolicy releasePolicy = mock(OperationalReleasePolicy.class);
   private final DeploymentController controller =
       new DeploymentController(
-          null, deploymentRepo, null, guard, null, null, null, null, null, null, null);
+          deploymentService,
+          deploymentRepo,
+          null,
+          guard,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          releasePolicy);
+
+  @Test
+  void deployFailsClosedBeforeAccessOrDeploymentMutationWhenReleasePolicyDisablesCreation() {
+    when(releasePolicy.deploymentCreationEnabled()).thenReturn(false);
+
+    org.assertj.core.api.Assertions.assertThatThrownBy(
+            () ->
+                controller.deploy(
+                    new DeployRequest("run-1", "NONE", null, null),
+                    principal("user-1", "org-a", "USER")))
+        .isInstanceOf(org.springframework.web.server.ResponseStatusException.class)
+        .hasMessageContaining("503 SERVICE_UNAVAILABLE");
+
+    verify(guard, never())
+        .requireRunAccess(
+            org.mockito.ArgumentMatchers.anyString(),
+            org.mockito.ArgumentMatchers.any(AppUserDetails.class));
+    verify(deploymentService, never())
+        .deploy(
+            org.mockito.ArgumentMatchers.anyString(),
+            org.mockito.ArgumentMatchers.any(),
+            org.mockito.ArgumentMatchers.any(),
+            org.mockito.ArgumentMatchers.any());
+  }
 
   @Test
   void listWithoutRunIdUsesCallerOrgForNonSuperAdmin() {

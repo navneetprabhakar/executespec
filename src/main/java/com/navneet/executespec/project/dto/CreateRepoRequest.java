@@ -11,8 +11,17 @@ import jakarta.validation.constraints.Pattern;
 public record CreateRepoRequest(
     @NotBlank @Pattern(regexp = "ORG|USER", message = "scope must be ORG or USER") String scope,
 
-    /** e.g. "owner/repo". */
-    @NotBlank String githubRepoFullName,
+    /** GITHUB (default for backward compatibility) or BITBUCKET. */
+    String scmProvider,
+
+    /** Provider-neutral canonical slug assertion, e.g. "workspace/repo". */
+    String repoFullName,
+
+    /** Compatibility alias for older web/CLI clients. New clients send repoFullName. */
+    String githubRepoFullName,
+
+    /** Optional assertion from the provider catalogue. The server re-resolves and verifies it. */
+    String scmRepositoryId,
     String defaultBranch,
 
     /**
@@ -24,4 +33,9 @@ public record CreateRepoRequest(
      *
      * <p>Defaults to {@code false} (i.e. honour the gate) when omitted by the client.
      */
-    Boolean attachAnyway) {}
+    Boolean attachAnyway) {
+  public String requestedFullName() {
+    if (repoFullName != null && !repoFullName.isBlank()) return repoFullName.trim();
+    return githubRepoFullName == null ? null : githubRepoFullName.trim();
+  }
+}

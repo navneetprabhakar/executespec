@@ -4,6 +4,9 @@ import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
+
 import com.navneet.executespec.auth.entity.AppUser;
 import com.navneet.executespec.auth.entity.Project;
 import com.navneet.executespec.auth.repository.AppUserRepository;
@@ -26,9 +29,12 @@ import com.navneet.executespec.sse.SseBroadcaster;
 
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
+import org.springframework.http.HttpStatus;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.server.ResponseStatusException;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -67,6 +73,27 @@ public class ExecutionOrchestrator {
   private final ExecutionCostAggregator costAggregator;
 
   /**
+   * RR-343 — self reference through the Spring proxy.
+   *
+   * <p>{@link #kickoffPlanning} used to call {@link #dispatchUnified} directly on {@code this},
+   * which never traverses the {@code @Async} proxy. The callee then polled every five seconds for
+   * up to four hours <em>on the servlet thread</em>, so the controller's claimed HTTP 202 could not
+   * be returned until planning finished: each plan request pinned a request thread and connection
+   * for minutes to hours, clients timed out and retried, and a handful of launches could exhaust
+   * the web tier. Routing through the proxy restores the asynchronous contract the endpoint
+   * advertises.
+   *
+   * <p>{@code @Lazy} breaks the self-injection cycle at construction time.
+   */
+  private final org.springframework.beans.factory.ObjectProvider<ExecutionOrchestrator> self;
+
+  /** RR-527 — used for the transaction-scoped advisory lock in {@link #admitAndCreateExecution}. */
+  @PersistenceContext private EntityManager em;
+
+  /** RR-348 — bounded, context-propagating executor for per-layer solution dispatch. */
+  private final com.navneet.executespec.integration.PipelineExecutorPool executorPool;
+
+  /**
    * V188 (2026-05-13) — toggle for the unified V2-dispatch path. When true (default), V3 launches
    * dispatch a single V2 run rather than fanning out per-{@link ExecutionSolution}. The legacy
    * Solution-dispatch path is still wired for existing executions and emergency rollback.
@@ -81,6 +108,35 @@ public class ExecutionOrchestrator {
    */
   private static final java.util.Set<String> V2_TERMINAL =
       java.util.Set.of("COMPLETE", "PARTIAL", "FAILED", "CANCELLED", "ABORTED");
+
+  /** RR-349 / RR-350 / RR-351 — launch states from which no further work may start. */
+  // RR-345 — PARTIAL is a first-class terminal launch status. A V2 PARTIAL carries a concrete
+  // failure reason (FINAL_BUILD_FAILED, TESTS_FAILED:N_OF_M, REVIEWER_UNRESOLVED, ...) and must be
+  // terminal here so it is neither re-executed/resumed nor overwritten by applyTerminalStatus.
+  private static final java.util.Set<String> LAUNCH_TERMINAL =
+      java.util.Set.of("COMPLETE", "PARTIAL", "FAILED", "CANCELLED", "ABORTED");
+
+  /**
+   * RR-905 — a launch whose row was written more recently than this is presumed live and is not a
+   * boot-recovery candidate.
+   */
+  private static final java.time.Duration RECOVERY_QUIET_PERIOD = java.time.Duration.ofMinutes(5);
+
+  /** RR-905 — takeover timeout: another instance may claim a lease older than this. */
+  private static final java.time.Duration RECOVERY_LEASE_TIMEOUT = java.time.Duration.ofMinutes(30);
+
+  /** RR-905 — hard cap on boot recoveries, so a poisoned launch is not recovered forever. */
+  private static final int MAX_BOOT_RECOVERY_ATTEMPTS = 3;
+
+  /** Stable-per-JVM identity recorded on the recovery lease. */
+  private static String recoveryInstanceId() {
+    return RECOVERY_INSTANCE_ID;
+  }
+
+  private static final String RECOVERY_INSTANCE_ID =
+      (System.getenv("HOSTNAME") == null ? "local" : System.getenv("HOSTNAME"))
+          + ":"
+          + java.util.UUID.randomUUID().toString().substring(0, 8);
 
   private static final long UNIFIED_POLL_INTERVAL_MS = 5_000L;
   private static final long UNIFIED_MAX_WAIT_MS = 4L * 60L * 60L * 1000L; // 4 hours
@@ -110,8 +166,14 @@ public class ExecutionOrchestrator {
   @EventListener(ApplicationReadyEvent.class)
   public void onApplicationReady() {
     try {
+      Instant now = Instant.now();
+      // RR-905 — only launches whose row has actually gone quiet are recovery candidates. The old
+      // call passed Instant.now(), which made the `updatedAt < :cutoff` predicate vacuously true
+      // and selected EVERY executing row on every instance's boot.
+      Instant quietBefore = now.minus(RECOVERY_QUIET_PERIOD);
+      Instant staleBefore = now.minus(RECOVERY_LEASE_TIMEOUT);
       List<ExecutionRun> resumable =
-          runRepo.findStaleNonTerminal(java.time.Instant.now()).stream()
+          runRepo.findStaleNonTerminal(quietBefore).stream()
               .filter(r -> "EXECUTING".equals(r.getStatus()))
               .toList();
       if (resumable.isEmpty()) {
@@ -119,10 +181,33 @@ public class ExecutionOrchestrator {
         return;
       }
       log.warn(
-          "ExecutionOrchestrator boot-resume: re-dispatching {} EXECUTING ExecutionRun(s)",
+          "ExecutionOrchestrator boot-resume: {} EXECUTING ExecutionRun(s) are recovery candidates",
           resumable.size());
       for (ExecutionRun r : resumable) {
         try {
+          // RR-905 — take the durable fenced lease BEFORE any side effect. Exactly one instance in
+          // a rolling deploy / scaled-out fleet can win this compare-and-set; the losers skip the
+          // launch entirely rather than re-running the same LLM, Git, PR and cost side effects.
+          int observed = r.getRecoveryAttempts() == null ? 0 : r.getRecoveryAttempts();
+          if (observed >= MAX_BOOT_RECOVERY_ATTEMPTS) {
+            log.warn(
+                "ExecutionOrchestrator boot-resume: exec={} exhausted recovery attempts ({}/{});"
+                    + " leaving for operator reconciliation",
+                r.getId(),
+                observed,
+                MAX_BOOT_RECOVERY_ATTEMPTS);
+            continue;
+          }
+          int claimed =
+              runRepo.claimBootRecovery(
+                  r.getId(), observed, observed + 1, now, staleBefore, recoveryInstanceId());
+          if (claimed != 1) {
+            log.info(
+                "ExecutionOrchestrator boot-resume: exec={} claimed by another instance or no"
+                    + " longer eligible; skipping",
+                r.getId());
+            continue;
+          }
           if (r.getPipelineRunId() != null && !r.getPipelineRunId().isBlank()) {
             // V188 (2026-05-13) unified path: the @Async pollAndMirrorV2 thread died with the
             // previous JVM; rearm it so the V3 terminal-status mirror still fires. The underlying
@@ -131,13 +216,15 @@ public class ExecutionOrchestrator {
                 "ExecutionOrchestrator boot-resume: re-polling unified exec={} V2={}",
                 r.getId(),
                 r.getPipelineRunId());
-            pollAndMirrorV2(r.getId(), r.getPipelineRunId());
+            // Through the proxy: these are 4-hour poll loops and must not run serially on the boot
+            // listener thread.
+            self.getObject().pollAndMirrorV2(r.getId(), r.getPipelineRunId());
           } else {
             log.info(
                 "ExecutionOrchestrator boot-resume: re-dispatching legacy exec={} (status was"
                     + " EXECUTING at boot)",
                 r.getId());
-            executeApprovedPlan(r.getId());
+            self.getObject().executeApprovedPlan(r.getId());
           }
         } catch (Exception e) {
           // Per-row safety net — one bad row never blocks the rest.
@@ -181,6 +268,55 @@ public class ExecutionOrchestrator {
                     .findById(pipelineRunId)
                     .filter(v2 -> V2_TERMINAL.contains(v2.getStatus()))
                     .ifPresent(v2 -> mirrorV2Terminal(er.getId(), v2)));
+  }
+
+  /**
+   * RR-527 — atomic single-active-execution admission. The controller previously read {@code
+   * findActiveByProjectId} and then, in a separate step, called {@link #createExecution}, so two
+   * concurrent requests (a double-click or parallel clients) could both observe no active row and
+   * both create an execution for the same project — each then analysing, spending, opening gates
+   * and mutating overlapping repos, defeating the explicit single-active-run contract.
+   *
+   * <p>Serialize admission per project with a transaction-scoped PostgreSQL advisory lock (the same
+   * idiom {@code ActivityAuditService} uses): the lock releases at commit, the re-check runs while
+   * it is held, and the create + persist happen in the same transaction, so a concurrent admission
+   * blocks until the winner commits and then observes the winner's active row and is rejected with
+   * a 409.
+   */
+  @Transactional
+  public ExecutionRun admitAndCreateExecution(
+      Project project, AppUser user, CreateExecutionRequest req) {
+    em.createNativeQuery(
+            "SELECT pg_advisory_xact_lock(hashtext('executespec')," + " hashtext(:key))")
+        .setParameter("key", "exec_admission:" + project.getId())
+        .getSingleResult();
+
+    var activeRuns = runRepo.findActiveByProjectId(project.getId());
+    if (!activeRuns.isEmpty()) {
+      ExecutionRun active = activeRuns.get(0);
+      String status = active.getStatus() == null ? "" : active.getStatus().toUpperCase();
+      String reason =
+          switch (status) {
+            case "PAUSED" ->
+                "Previous execution is paused awaiting a user decision on a failed solution. "
+                    + "Resolve it (retry / skip / fix manually) or abort it to start a new one.";
+            case "AWAITING_APPROVAL", "ARCH_REVIEW" ->
+                "Previous execution is waiting for your approval ("
+                    + status
+                    + "). Approve it or abort it to start a new one.";
+            case "EXECUTING", "PLANNING", "ANALYSING", "SETUP" ->
+                "Previous execution is still running (status="
+                    + status
+                    + "). Wait for it to finish or abort it to start a new one.";
+            default ->
+                "Previous execution has not finished or been cancelled (status="
+                    + status
+                    + "). Finish it or abort it to start a new one.";
+          };
+      throw new ResponseStatusException(
+          HttpStatus.CONFLICT, reason + " [execution id: " + active.getId() + "]");
+    }
+    return createExecution(project, user, req);
   }
 
   public ExecutionRun createExecution(Project project, AppUser user, CreateExecutionRequest req) {
@@ -254,7 +390,7 @@ public class ExecutionOrchestrator {
             // the planner can scope decomposition + the SSE/UI can
             // surface what's actually in scope. NULL when the user
             // didn't select anything (every linked repo is in scope).
-            .selectedRepoIds(serializeRepoIds(effectiveRepoIds))
+            .selectedRepoIds(serializeRepoIds(effectiveRepoIds, project.getId()))
             .build();
     return runRepo.save(run);
   }
@@ -267,12 +403,42 @@ public class ExecutionOrchestrator {
    * <p>Plain string concatenation is safe here because every entry is a UUID-shaped string, which
    * has no characters needing JSON escaping.
    */
-  private static String serializeRepoIds(java.util.List<String> ids) {
+  private String serializeRepoIds(java.util.List<String> ids) {
+    return serializeRepoIds(ids, null);
+  }
+
+  /**
+   * RR-344 — serialise + VALIDATE the launch repository selection before it is persisted.
+   *
+   * <p>Every entry must be a syntactically valid UUID, and (when {@code projectId} is supplied)
+   * must name a repository actually linked to this project. Rejecting at the write boundary means
+   * the read boundary can no longer face a value it must guess about; the two halves together are
+   * what prevent a malformed selection from being reinterpreted as "all repositories".
+   *
+   * <p>Returns {@code null} for a genuinely empty selection, which remains the explicit "no subset
+   * chosen — every linked repo is in scope" encoding.
+   */
+  private String serializeRepoIds(java.util.List<String> ids, String projectId) {
     if (ids == null || ids.isEmpty()) return null;
+    List<UUID> parsed = new ArrayList<>();
+    for (String raw : ids) {
+      if (raw == null || raw.isBlank()) {
+        throw new IllegalArgumentException("Repository selection contains a blank id");
+      }
+      try {
+        parsed.add(UUID.fromString(raw.trim()));
+      } catch (IllegalArgumentException e) {
+        throw new IllegalArgumentException("Repository selection contains a non-UUID id: " + raw);
+      }
+    }
+    if (projectId != null) {
+      // Fail-closed membership + capability check against the durable project links.
+      projectRepoService.resolveForRunStrict(projectId, parsed);
+    }
     StringBuilder sb = new StringBuilder("[");
-    for (int i = 0; i < ids.size(); i++) {
+    for (int i = 0; i < parsed.size(); i++) {
       if (i > 0) sb.append(',');
-      sb.append('"').append(ids.get(i)).append('"');
+      sb.append('"').append(parsed.get(i)).append('"');
     }
     return sb.append(']').toString();
   }
@@ -394,7 +560,9 @@ public class ExecutionOrchestrator {
    */
   public void kickoffPlanning(String executionRunId) {
     if (unifiedDispatchEnabled) {
-      dispatchUnified(executionRunId);
+      // RR-343 — MUST go through the proxy, otherwise @Async is bypassed and the 4-hour poll loop
+      // below runs on the caller's (servlet) thread. See the `self` field javadoc.
+      self.getObject().dispatchUnified(executionRunId);
     } else {
       plannerService.generatePlan(executionRunId);
     }
@@ -598,15 +766,29 @@ public class ExecutionOrchestrator {
 
   /**
    * V188 (2026-05-13) — map V2 terminal status to V3 ExecutionRun status + bubble token / cost
-   * totals up. PARTIAL collapses to COMPLETE on the V3 surface because the PR is still raised and
-   * the customer can review it; the per-Solution skip/retry granularity that used to live at V3 is
-   * moot in the unified architecture (the V2 task list + reviewer issues carry the same signal).
+   * totals up. RR-345 — PARTIAL is preserved as a first-class terminal status (it is NOT collapsed
+   * to COMPLETE) and its V2 status/failure reason is always propagated, so failed tests / red final
+   * builds / unresolved reviewer issues stay visible on the execution dashboard instead of reading
+   * as a clean pass.
+   *
+   * <p>Package-private for unit-test access (RR-345 mirror behaviour).
    */
-  private void mirrorV2Terminal(
+  void mirrorV2Terminal(
       String executionRunId, com.navneet.executespec.state.entity.PipelineRun v2Run) {
     String v3Status =
         switch (v2Run.getStatus()) {
-          case "COMPLETE", "PARTIAL" -> "COMPLETE";
+          case "COMPLETE" -> "COMPLETE";
+            // RR-345 — a V2 PARTIAL is NOT a clean COMPLETE. Collapsing it presented failed tests,
+            // red final builds and unresolved reviewer issues as a passing product result and,
+            // because
+            // the derived status then read "clean", it also suppressed the V2 status/failure
+            // reason.
+            // Preserve PARTIAL as a first-class terminal status and always surface its reason
+            // (below).
+            // PR availability is carried separately by the solution/PR rows and is never inferred
+            // as
+            // implementation quality.
+          case "PARTIAL" -> "PARTIAL";
           case "CANCELLED", "ABORTED" -> "ABORTED";
           default -> "FAILED";
         };
@@ -635,8 +817,11 @@ public class ExecutionOrchestrator {
     // raced our poll). The aggregator handles both unified (single linked pipeline_run) and any
     // legacy attempt history on this execution row.
     costAggregator.recomputeAndPersist(executionRunId);
+    // RR-345 — PARTIAL is terminal-with-a-PR: it reaches the same completion event as COMPLETE so
+    // the frontend stops polling, but the ExecutionRun.status (PARTIAL) + failureReason carry the
+    // honest nuance rather than the event masking it.
     String eventType =
-        "COMPLETE".equals(v3Status)
+        ("COMPLETE".equals(v3Status) || "PARTIAL".equals(v3Status))
             ? ExecutionEventTypes.EXEC_COMPLETE
             : "FAILED".equals(v3Status)
                 ? ExecutionEventTypes.EXEC_FAILED
@@ -650,29 +835,65 @@ public class ExecutionOrchestrator {
         v3Status);
   }
 
+  /**
+   * RR-344 — parse the persisted launch repository selection, fail-closed.
+   *
+   * <p>Downstream treats an EMPTY list as "every linked repository is in scope". The previous
+   * implementation silently dropped malformed entries and returned an empty list for unparseable
+   * JSON, so a typo, a stale frontend ID, or a crafted request could <em>widen</em> a launch from
+   * the subset the user picked to the whole project — reading and modifying repositories the launch
+   * never selected. An unreadable selection means the scope is unknown, which must be an error.
+   */
   private static java.util.List<java.util.UUID> parseSelectedRepoIds(String json) {
     if (json == null || json.isBlank() || "[]".equals(json.trim())) return java.util.List.of();
     java.util.List<java.util.UUID> out = new java.util.ArrayList<>();
     com.fasterxml.jackson.databind.ObjectMapper mapper =
         new com.fasterxml.jackson.databind.ObjectMapper();
+    java.util.List<String> ids;
     try {
-      java.util.List<String> ids =
-          mapper.readValue(json, new com.fasterxml.jackson.core.type.TypeReference<>() {});
-      for (String s : ids) {
-        try {
-          out.add(java.util.UUID.fromString(s));
-        } catch (IllegalArgumentException ignored) {
-          // skip malformed ids; legacy rows may have non-UUID strings
-        }
-      }
+      ids = mapper.readValue(json, new com.fasterxml.jackson.core.type.TypeReference<>() {});
     } catch (Exception e) {
-      // unparseable → empty list; downstream will treat as "all linked repos"
+      throw new IllegalStateException(
+          "Launch repository selection is unparseable; refusing to widen scope to every linked"
+              + " repository",
+          e);
+    }
+    if (ids == null) return java.util.List.of();
+    for (String s : ids) {
+      try {
+        out.add(java.util.UUID.fromString(s));
+      } catch (IllegalArgumentException e) {
+        throw new IllegalStateException(
+            "Launch repository selection contains a non-UUID entry; refusing to widen scope to"
+                + " every linked repository");
+      }
+    }
+    if (out.isEmpty()) {
+      throw new IllegalStateException(
+          "Launch repository selection parsed to an empty set from a non-empty stored value");
     }
     return out;
   }
 
   // Phase 5: plan approval + execute
 
+  /**
+   * RR-346 — the launch-level plan approval, now fail-CLOSED.
+   *
+   * <p>Previously this method logged-and-continued when the approval record could not be persisted,
+   * logged-and-continued when the V2 plan-gate claim returned {@code false}, and then
+   * unconditionally flipped the launch to {@code EXECUTING}. That meant a launch could advertise
+   * and enter execution with no durable record of human approval; a missing gate could leave V3
+   * EXECUTING while V2 sat forever in AWAITING_APPROVAL; and a gate the user had already
+   * <em>rejected</em> was briefly reported as started.
+   *
+   * <p>Now: the approval timestamp must be durably recorded before anything else happens, and the
+   * gate claim is consumed as a typed result. Only {@code CLAIMED} (this call won the one-shot
+   * approval) or {@code ALREADY_APPROVED} (idempotent repeat of the same positive decision) may
+   * proceed to EXECUTING. {@code ALREADY_REJECTED} takes the canonical terminal path instead of
+   * starting work, and a gate that cannot be resolved at all fails the launch rather than executing
+   * without proof.
+   */
   @Async
   public void approvePlanAndExecute(String executionRunId) {
     // 2026-04-26 hotfix — covered by ExecutionRunCasUpdater. The find-then-
@@ -684,10 +905,14 @@ public class ExecutionOrchestrator {
     Instant approvedAt = Instant.now();
     boolean ok = runCas.casUpdate(executionRunId, r -> r.setPlanApprovedAt(approvedAt));
     if (!ok) {
-      log.warn(
-          "approvePlanAndExecute: failed to record plan approval for exec {} (stale row);"
-              + " proceeding to execute regardless",
+      // RR-346 — no durable approval record means no authority to spend. Fail the launch instead
+      // of executing on an unrecorded approval.
+      log.error(
+          "approvePlanAndExecute: could not durably record plan approval for exec {}; refusing to"
+              + " execute",
           executionRunId);
+      failLaunch(executionRunId, "Plan approval could not be durably recorded; execution refused.");
+      return;
     }
     // V188 (2026-05-13) — when the unified-dispatch path is in use, the V3
     // plan-approve click maps to V2's plan gate. Claim the gate; V2 resumes
@@ -695,29 +920,89 @@ public class ExecutionOrchestrator {
     ExecutionRun run = runRepo.findById(executionRunId).orElse(null);
     if (run != null && run.getPipelineRunId() != null) {
       String pipelineRunId = run.getPipelineRunId();
-      boolean claimed = gateStore.tryClaimPlanGate(pipelineRunId, true);
-      if (!claimed) {
+      com.navneet.executespec.harness.GateStore.PlanGateClaim claim;
+      try {
+        claim = gateStore.claimPlanGate(pipelineRunId, true);
+      } catch (RuntimeException e) {
+        log.error(
+            "approvePlanAndExecute: V2 plan gate for exec {} (V2 run {}) could not be resolved: {}",
+            executionRunId,
+            pipelineRunId,
+            e.getMessage());
+        failLaunch(
+            executionRunId,
+            "Plan gate could not be resolved; execution refused: " + safeMessage(e));
+        return;
+      }
+      if (claim == com.navneet.executespec.harness.GateStore.PlanGateClaim.ALREADY_REJECTED) {
         log.warn(
-            "approvePlanAndExecute: V2 plan gate already resolved for exec {} (V2 run {});"
-                + " polling anyway to mirror terminal state",
+            "approvePlanAndExecute: V2 plan gate for exec {} (V2 run {}) was already REJECTED;"
+                + " not starting execution",
             executionRunId,
             pipelineRunId);
+        runCas.casUpdate(executionRunId, r -> r.setStatus("ABORTED"));
+        emit(executionRunId, ExecutionEventTypes.EXEC_ABORTED, pipelineRunId);
+        return;
       }
+      // CLAIMED (we won the one-shot) or ALREADY_APPROVED (idempotent repeat) — both are a durable
+      // positive decision, so mirroring EXECUTING is truthful.
       runCas.casUpdate(executionRunId, r -> r.setStatus("EXECUTING"));
       emit(executionRunId, ExecutionEventTypes.EXEC_STARTED, pipelineRunId);
-      pollAndMirrorV2(executionRunId, pipelineRunId);
+      self.getObject().pollAndMirrorV2(executionRunId, pipelineRunId);
       return;
     }
     // Legacy path — per-Solution dispatch, retained for in-flight executions
     // that were created before V188 and emergency rollback when the unified
-    // flag is off.
-    executeApprovedPlan(executionRunId);
+    // flag is off. The approval timestamp written above is the proof
+    // executeApprovedPlan re-checks (RR-351).
+    self.getObject().executeApprovedPlan(executionRunId);
   }
 
+  /** RR-346 — terminal failure for a launch that must not proceed without proven authority. */
+  private void failLaunch(String executionRunId, String reason) {
+    String bounded = truncate(reason, 3900);
+    runCas.casUpdate(
+        executionRunId,
+        r -> {
+          r.setStatus("FAILED");
+          r.setFailureReason(bounded);
+        });
+    emit(executionRunId, ExecutionEventTypes.EXEC_FAILED, null);
+  }
+
+  /**
+   * RR-351 — the legacy per-solution executor, now gated on proven plan approval.
+   *
+   * <p>The public {@code POST /api/executions/{id}/resume} action calls straight into this method.
+   * Before this change it required neither {@code planApprovedAt} nor a resolved V2 plan gate and
+   * immediately set {@code EXECUTING}, so ANY writable launch — including one still in SETUP /
+   * ANALYSING / PLANNING, or one whose plan the user had explicitly rejected — could skip
+   * architecture and plan approval and enter solution execution (and therefore provider spend and
+   * PR publication).
+   *
+   * <p>The durable {@code planApprovedAt} stamp written by {@link #approvePlanAndExecute} is now
+   * the required authority, and the launch must be in a state from which execution is legal. Boot
+   * recovery re-enters through the same door, so recovery cannot launder an unapproved plan either.
+   */
   @Async
   public void executeApprovedPlan(String executionRunId) {
     ExecutionRun run = runRepo.findById(executionRunId).orElse(null);
     if (run == null) return;
+    if (run.getPlanApprovedAt() == null) {
+      log.warn(
+          "executeApprovedPlan: exec {} has no durable plan approval; refusing to execute"
+              + " (status={})",
+          executionRunId,
+          run.getStatus());
+      return;
+    }
+    if (LAUNCH_TERMINAL.contains(run.getStatus())) {
+      log.warn(
+          "executeApprovedPlan: exec {} is already terminal at {}; refusing to (re)execute",
+          executionRunId,
+          run.getStatus());
+      return;
+    }
     // 2026-04-26 hotfix — covered by ExecutionRunCasUpdater. The save below
     // races with the SSE update path + with abort/cancel callers; the
     // long solution-dispatch loop downstream then operates on a stale `run`
@@ -749,23 +1034,51 @@ public class ExecutionOrchestrator {
       return;
     }
 
-    for (List<ExecutionSolution> layer : layers) {
-      List<CompletableFuture<Void>> futures = new ArrayList<>();
-      for (ExecutionSolution s : layer) {
-        // Re-read to catch status changes (RETRY / SKIP decisions):
-        ExecutionSolution fresh = solutionRepo.findById(s.getId()).orElse(s);
-        if (!"QUEUED".equals(fresh.getStatus())) continue;
-        futures.add(
-            CompletableFuture.runAsync(() -> solutionExecService.executeSolution(fresh, run)));
-      }
-      CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+    // RR-348 — dispatch each dependency layer on the bounded pipeline executor (per-org/run limits,
+    // no starvation of the JVM common pool by wide layers) with traceId/tenant context propagated
+    // across the thread boundary, and always settle the launch terminally. Previously a child
+    // exception propagated out of the un-caught allOf().join(), so an @Async method with no advice
+    // to catch it simply died — leaving the launch pinned in EXECUTING forever with no PR/terminal
+    // handling. Catch it here and mark the launch FAILED.
+    var contextSnapshot =
+        io.micrometer.context.ContextSnapshotFactory.builder().build().captureAll();
+    try {
+      for (List<ExecutionSolution> layer : layers) {
+        List<CompletableFuture<Void>> futures = new ArrayList<>();
+        for (ExecutionSolution s : layer) {
+          // Re-read to catch status changes (RETRY / SKIP decisions):
+          ExecutionSolution fresh = solutionRepo.findById(s.getId()).orElse(s);
+          if (!"QUEUED".equals(fresh.getStatus())) continue;
+          futures.add(
+              CompletableFuture.runAsync(
+                  contextSnapshot.wrap(() -> solutionExecService.executeSolution(fresh, run)),
+                  executorPool.executor()));
+        }
+        CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
 
-      // If something paused the run during this layer, bail out —
-      // resumption happens via SolutionExecutionService.processDecision.
-      ExecutionRun latest = runRepo.findById(executionRunId).orElse(run);
-      if ("PAUSED".equals(latest.getStatus()) || "ABORTED".equals(latest.getStatus())) {
-        return;
+        // If something paused the run during this layer, bail out —
+        // resumption happens via SolutionExecutionService.processDecision.
+        ExecutionRun latest = runRepo.findById(executionRunId).orElse(run);
+        if ("PAUSED".equals(latest.getStatus()) || "ABORTED".equals(latest.getStatus())) {
+          return;
+        }
       }
+    } catch (RuntimeException layerError) {
+      log.error(
+          "executeApprovedPlan: layer dispatch for exec {} failed unexpectedly; settling FAILED",
+          executionRunId,
+          layerError);
+      runCas.casUpdate(
+          executionRunId,
+          r -> {
+            if (!LAUNCH_TERMINAL.contains(r.getStatus())) {
+              r.setStatus("FAILED");
+              r.setFailureReason(
+                  "Execution dispatch failed: " + truncate(safeMessage(layerError), 3900));
+            }
+          });
+      emit(executionRunId, ExecutionEventTypes.EXEC_FAILED, null);
+      return;
     }
 
     // All layers complete → open final PRs per repo (skip for follow-up
@@ -817,14 +1130,48 @@ public class ExecutionOrchestrator {
     // CAS-style re-fetch + retry so the @Async thread doesn't crash on
     // ObjectOptimisticLockingFailureException (no @RestControllerAdvice
     // catches async exceptions).
-    boolean ok = applyTerminalStatus(executionRunId, "COMPLETE");
+    // RR-349 — derive the terminal state from the immutable per-solution outcomes instead of
+    // unconditionally applying COMPLETE. Before this, an execution whose solutions had FAILED (or
+    // whose concurrent writers had already recorded a FAILED launch) still ended as COMPLETE,
+    // producing false reports and downstream publication eligibility.
+    String derived = deriveTerminalStatus(executionRunId);
+    boolean ok = applyTerminalStatus(executionRunId, derived);
     if (!ok) {
       log.warn(
-          "executeApprovedPlan: terminal COMPLETE for exec {} could not be applied",
+          "executeApprovedPlan: terminal {} for exec {} could not be applied",
+          derived,
           executionRunId);
       return;
     }
-    emit(executionRunId, ExecutionEventTypes.EXEC_COMPLETE, null);
+    emit(
+        executionRunId,
+        "COMPLETE".equals(derived)
+            ? ExecutionEventTypes.EXEC_COMPLETE
+            : ExecutionEventTypes.EXEC_FAILED,
+        null);
+  }
+
+  /**
+   * RR-349 — terminal state as a function of the persisted solution outcomes.
+   *
+   * <p>Any FAILED solution, or any solution that never reached a terminal state, means the launch
+   * did not complete. Only a launch whose every solution is DONE or explicitly SKIPPED is COMPLETE.
+   */
+  private String deriveTerminalStatus(String executionRunId) {
+    List<ExecutionSolution> solutions =
+        solutionRepo.findByExecutionRun_IdOrderBySequenceNumberAsc(executionRunId);
+    if (solutions.isEmpty()) return "COMPLETE"; // nothing to execute; unchanged legacy behaviour
+    for (ExecutionSolution s : solutions) {
+      String status = s.getStatus() == null ? "" : s.getStatus().trim().toUpperCase(Locale.ROOT);
+      if ("DONE".equals(status) || "SKIPPED".equals(status)) continue;
+      log.warn(
+          "deriveTerminalStatus: exec {} solution {} is {} — launch is not COMPLETE",
+          executionRunId,
+          s.getId(),
+          status.isEmpty() ? "(unknown)" : status);
+      return "FAILED";
+    }
+    return "COMPLETE";
   }
 
   /**
@@ -839,7 +1186,11 @@ public class ExecutionOrchestrator {
       try {
         ExecutionRun fresh = runRepo.findById(runId).orElse(null);
         if (fresh == null) return false;
-        if ("ABORTED".equals(fresh.getStatus()) || "COMPLETE".equals(fresh.getStatus())) {
+        // RR-349 — the protected terminal set now includes FAILED and CANCELLED. Previously only
+        // ABORTED and COMPLETE were protected, so an existing FAILED terminal state (written by a
+        // concurrent writer that had real failure evidence) was silently overwritten by whatever
+        // status the caller requested — including COMPLETE.
+        if (LAUNCH_TERMINAL.contains(fresh.getStatus())) {
           log.info(
               "applyTerminalStatus: exec {} already terminal at {}; skipping {}",
               runId,
@@ -891,23 +1242,63 @@ public class ExecutionOrchestrator {
    * Failed compensations surface as {@code status:"FAILED"} payloads with a deep-link the user can
    * act on.
    */
+  /**
+   * RR-350 — cancellation is now an atomic claim from an explicitly cancellable state, and the
+   * destructive compensations run only for the caller that WON that claim.
+   *
+   * <p>Previously the endpoint had no lifecycle precondition and this method attempted an
+   * unconditional mutation to ABORTED, then proceeded to cancel descendants and close every
+   * solution's pull request <em>even when that mutation failed</em>, operating on the stale
+   * controller-loaded row. A late or retried cancel could therefore rewrite an already-COMPLETE
+   * launch as ABORTED or — worse — lose the database transition yet still close pull requests that
+   * had already been delivered to the customer.
+   *
+   * <p>Now: a terminal launch is a no-op, and a lost CAS means another writer owns the lifecycle,
+   * so this call performs no side effects at all.
+   */
   public void abortExecution(ExecutionRun run) {
-    // 2026-04-26 hotfix — covered by ExecutionRunCasUpdater. The `run`
-    // parameter is loaded by the controller (request thread, OSIV off);
-    // by the time the abort reaches this save, a parallel @Async writer
-    // (executeApprovedPlan, triggerAnalysis, accumulateExecutionRunTotals)
-    // may have already bumped @Version. Without CAS the abort throws
-    // OptimisticLockException, the row never flips to ABORTED, and the
-    // user's cancel button silently fails.
-    boolean ok = runCas.casUpdate(run.getId(), r -> r.setStatus("ABORTED"));
-    if (!ok) {
+    // Re-read: the `run` parameter was loaded by the controller (request thread, OSIV off) and may
+    // be arbitrarily stale by now. Never make an irreversible decision from it.
+    ExecutionRun fresh = runRepo.findById(run.getId()).orElse(null);
+    if (fresh == null) return;
+    if (LAUNCH_TERMINAL.contains(fresh.getStatus())) {
+      log.info(
+          "abortExecution: exec {} is already terminal at {}; no cancellation performed",
+          run.getId(),
+          fresh.getStatus());
+      return;
+    }
+    // 2026-04-26 hotfix — covered by ExecutionRunCasUpdater. The CAS refetches + retries, so a
+    // concurrent @Async writer bumping @Version does not silently drop the user's cancel. The
+    // guard inside the mutator makes the claim conditional on the row still being cancellable at
+    // the moment of the write.
+    boolean[] claimed = {false};
+    boolean ok =
+        runCas.casUpdate(
+            run.getId(),
+            r -> {
+              if (LAUNCH_TERMINAL.contains(r.getStatus())) {
+                claimed[0] = false;
+                return;
+              }
+              r.setStatus("ABORTED");
+              claimed[0] = true;
+            });
+    if (!ok || !claimed[0]) {
+      // RR-350 — losing the claim (or racing a terminal transition) means we are NOT the owner of
+      // this cancellation. Running compensations here is what closed already-delivered PRs.
       log.warn(
-          "abortExecution: failed to mark exec {} as ABORTED (stale row); proceeding with cleanup",
-          run.getId());
+          "abortExecution: did not win the cancellation claim for exec {} (casApplied={},"
+              + " claimed={}); skipping all compensations",
+          run.getId(),
+          ok,
+          claimed[0]);
+      return;
     }
     emit(run.getId(), ExecutionEventTypes.EXEC_ABORTED, null);
-    cancelActiveV2Runs(run);
-    runCompensations(run);
+    ExecutionRun owned = runRepo.findById(run.getId()).orElse(fresh);
+    cancelActiveV2Runs(owned);
+    runCompensations(owned);
   }
 
   /**

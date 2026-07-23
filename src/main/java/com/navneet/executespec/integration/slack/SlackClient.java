@@ -4,7 +4,10 @@ import java.util.List;
 import java.util.Map;
 
 import org.springframework.http.*;
+import org.springframework.util.LinkedMultiValueMap;
+import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.RestTemplate;
+import org.springframework.web.util.UriComponentsBuilder;
 
 import lombok.extern.slf4j.Slf4j;
 
@@ -61,17 +64,17 @@ public class SlackClient {
     HttpHeaders headers = new HttpHeaders();
     headers.setContentType(MediaType.APPLICATION_FORM_URLENCODED);
 
-    String formBody =
-        "client_id="
-            + clientId
-            + "&client_secret="
-            + clientSecret
-            + "&code="
-            + code
-            + "&redirect_uri="
-            + redirectUri;
+    // RR-523 — build the form body through a MultiValueMap so RestTemplate's form converter
+    // percent-encodes every value exactly once. Raw string concatenation reinterpreted any legal
+    // value containing `&`, `+`, `=`, `%` or spaces as new form fields, which could fail the OAuth
+    // exchange or bind a different redirect URI than the configured callback.
+    MultiValueMap<String, String> form = new LinkedMultiValueMap<>();
+    form.add("client_id", clientId);
+    form.add("client_secret", clientSecret);
+    form.add("code", code);
+    form.add("redirect_uri", redirectUri);
 
-    HttpEntity<String> entity = new HttpEntity<>(formBody, headers);
+    HttpEntity<MultiValueMap<String, String>> entity = new HttpEntity<>(form, headers);
     ResponseEntity<Map> resp =
         restTemplate.exchange(SLACK_API + "/oauth.v2.access", HttpMethod.POST, entity, Map.class);
 
@@ -94,12 +97,18 @@ public class SlackClient {
   /** Lists Slack channels the bot can post to. */
   @SuppressWarnings("unchecked")
   public Map<String, Object> conversationsList(String botToken, String cursor, int limit) {
-    String url =
-        SLACK_API
-            + "/conversations.list?types=public_channel,private_channel"
-            + "&exclude_archived=true&limit="
-            + limit;
-    if (cursor != null && !cursor.isBlank()) url += "&cursor=" + cursor;
+    // RR-523 — encode the pagination cursor through a URI builder instead of raw concatenation, so
+    // a cursor value containing reserved characters cannot be reinterpreted as extra query fields
+    // (which truncated/corrupted pagination in the live integration).
+    UriComponentsBuilder builder =
+        UriComponentsBuilder.fromHttpUrl(SLACK_API + "/conversations.list")
+            .queryParam("types", "public_channel,private_channel")
+            .queryParam("exclude_archived", "true")
+            .queryParam("limit", limit);
+    if (cursor != null && !cursor.isBlank()) {
+      builder.queryParam("cursor", cursor);
+    }
+    String url = builder.encode().toUriString();
 
     HttpHeaders headers = new HttpHeaders();
     headers.setBearerAuth(botToken);

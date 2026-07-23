@@ -67,7 +67,12 @@ public class GlobalExceptionAdvice {
   public ResponseEntity<Map<String, Object>> onErrorResponse(ErrorResponseException ex) {
     HttpStatus status = HttpStatus.resolve(ex.getStatusCode().value());
     if (status == null) status = HttpStatus.INTERNAL_SERVER_ERROR;
-    String error = status.name().toLowerCase().replace('_', '-');
+    // RR-1119 — the status-derived error code must use the underscore convention the CLI/core
+    // classifiers recognize (and that onNoResource and ValidationAdvice already emit). This
+    // handler previously produced "not-found" for a 404, so client 404-classification and
+    // self-healing silently failed against a real Spring ResponseStatusException. The enum name is
+    // already underscore-delimited (NOT_FOUND); do not hyphenate it.
+    String error = status.name().toLowerCase();
     String message =
         ex instanceof ResponseStatusException rse && rse.getReason() != null
             ? rse.getReason()

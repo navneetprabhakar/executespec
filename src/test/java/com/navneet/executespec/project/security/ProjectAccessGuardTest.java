@@ -10,7 +10,9 @@ import static org.mockito.Mockito.when;
 import java.util.Optional;
 
 import com.navneet.executespec.auth.entity.AppUser;
+import com.navneet.executespec.auth.entity.OrgMember;
 import com.navneet.executespec.auth.entity.Project;
+import com.navneet.executespec.auth.entity.ProjectMember;
 import com.navneet.executespec.auth.repository.ProjectMemberRepository;
 import com.navneet.executespec.auth.repository.ProjectRepository;
 import com.navneet.executespec.auth.security.AppUserDetails;
@@ -89,6 +91,168 @@ class ProjectAccessGuardTest {
   }
 
   @Test
+  void crossOrgProjectViewerIsBlockedFromWrites() {
+    Project p = project("p1", "host-org");
+    when(projectRepo.findById("p1")).thenReturn(Optional.of(p));
+    AppUserDetails viewer = userDetails("u-viewer", "other-org", "USER");
+    when(memberRepo.existsByProjectIdAndUserId("p1", "u-viewer")).thenReturn(true);
+    when(memberRepo.findByProjectIdAndUserId("p1", "u-viewer"))
+        .thenReturn(
+            Optional.of(
+                ProjectMember.builder()
+                    .projectId("p1")
+                    .userId("u-viewer")
+                    .projectRole("PROJECT_VIEWER")
+                    .external(true)
+                    .build()));
+
+    ResponseStatusException ex =
+        assertThrows(ResponseStatusException.class, () -> guard.assertCanWrite("p1", viewer));
+
+    assertEquals(403, ex.getStatusCode().value());
+  }
+
+  @Test
+  void sameOrgProjectViewerIsBlockedFromWrites() {
+    Project p = project("p1", "host-org");
+    when(projectRepo.findById("p1")).thenReturn(Optional.of(p));
+    AppUserDetails viewer = userDetails("u-viewer", "host-org", "USER");
+    when(memberRepo.findByProjectIdAndUserId("p1", "u-viewer"))
+        .thenReturn(
+            Optional.of(
+                ProjectMember.builder()
+                    .projectId("p1")
+                    .userId("u-viewer")
+                    .projectRole("PROJECT_VIEWER")
+                    .build()));
+
+    ResponseStatusException ex =
+        assertThrows(ResponseStatusException.class, () -> guard.assertCanWrite("p1", viewer));
+
+    assertEquals(403, ex.getStatusCode().value());
+  }
+
+  @Test
+  void sameOrgUserWithoutProjectSpecificRoleIsBlockedFromWrites() {
+    Project p = project("p1", "host-org");
+    when(projectRepo.findById("p1")).thenReturn(Optional.of(p));
+    AppUserDetails user = userDetails("u-org", "host-org", "USER");
+    when(memberRepo.findByProjectIdAndUserId("p1", "u-org")).thenReturn(Optional.empty());
+
+    ResponseStatusException ex =
+        assertThrows(ResponseStatusException.class, () -> guard.assertCanWrite("p1", user));
+
+    assertEquals(403, ex.getStatusCode().value());
+  }
+
+  @Test
+  void sameOrgProjectDeveloperMayWrite() {
+    Project p = project("p1", "host-org");
+    when(projectRepo.findById("p1")).thenReturn(Optional.of(p));
+    AppUserDetails developer = userDetails("u-developer", "host-org", "USER");
+    when(memberRepo.findByProjectIdAndUserId("p1", "u-developer"))
+        .thenReturn(
+            Optional.of(
+                ProjectMember.builder()
+                    .projectId("p1")
+                    .userId("u-developer")
+                    .projectRole("PROJECT_DEVELOPER")
+                    .build()));
+
+    assertSame(p, guard.assertCanWrite("p1", developer));
+  }
+
+  @Test
+  void hostOrgAdminMayWriteWithoutProjectMembership() {
+    Project p = project("p1", "host-org");
+    when(projectRepo.findById("p1")).thenReturn(Optional.of(p));
+    AppUserDetails orgAdmin = orgUserDetails("u-admin", "host-org", "ORG_ADMIN");
+    when(memberRepo.findByProjectIdAndUserId("p1", "u-admin")).thenReturn(Optional.empty());
+
+    assertSame(p, guard.assertCanWrite("p1", orgAdmin));
+  }
+
+  @Test
+  void billingAdminCannotWriteWithoutProjectMembership() {
+    Project p = project("p1", "host-org");
+    when(projectRepo.findById("p1")).thenReturn(Optional.of(p));
+    AppUserDetails billing = orgUserDetails("u-billing", "host-org", "BILLING_ADMIN");
+    when(memberRepo.findByProjectIdAndUserId("p1", "u-billing")).thenReturn(Optional.empty());
+
+    ResponseStatusException ex =
+        assertThrows(ResponseStatusException.class, () -> guard.assertCanWrite("p1", billing));
+
+    assertEquals(403, ex.getStatusCode().value());
+  }
+
+  @Test
+  void crossOrgProjectDeveloperMayWrite() {
+    Project p = project("p1", "host-org");
+    when(projectRepo.findById("p1")).thenReturn(Optional.of(p));
+    AppUserDetails developer = userDetails("u-developer", "other-org", "USER");
+    when(memberRepo.existsByProjectIdAndUserId("p1", "u-developer")).thenReturn(true);
+    when(memberRepo.findByProjectIdAndUserId("p1", "u-developer"))
+        .thenReturn(
+            Optional.of(
+                ProjectMember.builder()
+                    .projectId("p1")
+                    .userId("u-developer")
+                    .projectRole("PROJECT_DEVELOPER")
+                    .external(true)
+                    .build()));
+
+    assertSame(p, guard.assertCanWrite("p1", developer));
+  }
+
+  @Test
+  void projectDeveloperCannotReadAdministrativeActivity() {
+    Project p = project("p1", "host-org");
+    when(projectRepo.findById("p1")).thenReturn(Optional.of(p));
+    AppUserDetails developer = userDetails("u-developer", "host-org", "USER");
+    when(memberRepo.findByProjectIdAndUserId("p1", "u-developer"))
+        .thenReturn(
+            Optional.of(
+                ProjectMember.builder()
+                    .projectId("p1")
+                    .userId("u-developer")
+                    .projectRole("PROJECT_DEVELOPER")
+                    .build()));
+
+    ResponseStatusException ex =
+        assertThrows(ResponseStatusException.class, () -> guard.assertCanAdmin("p1", developer));
+
+    assertEquals(403, ex.getStatusCode().value());
+  }
+
+  @Test
+  void explicitExternalProjectAdminMayReadAdministrativeActivity() {
+    Project p = project("p1", "host-org");
+    when(projectRepo.findById("p1")).thenReturn(Optional.of(p));
+    AppUserDetails admin = userDetails("u-external-admin", "other-org", "USER");
+    when(memberRepo.existsByProjectIdAndUserId("p1", "u-external-admin")).thenReturn(true);
+    when(memberRepo.findByProjectIdAndUserId("p1", "u-external-admin"))
+        .thenReturn(
+            Optional.of(
+                ProjectMember.builder()
+                    .projectId("p1")
+                    .userId("u-external-admin")
+                    .projectRole("PROJECT_ADMIN")
+                    .external(true)
+                    .build()));
+
+    assertSame(p, guard.assertCanAdmin("p1", admin));
+  }
+
+  @Test
+  void hostOrgAdminMayReadAdministrativeActivity() {
+    Project p = project("p1", "host-org");
+    when(projectRepo.findById("p1")).thenReturn(Optional.of(p));
+    AppUserDetails admin = orgUserDetails("u-admin", "host-org", "ORG_ADMIN");
+
+    assertSame(p, guard.assertCanAdmin("p1", admin));
+  }
+
+  @Test
   void anonymous_caller_returns_401() {
     Project p = project("p1", "host-org");
     when(projectRepo.findById("p1")).thenReturn(Optional.of(p));
@@ -114,6 +278,39 @@ class ProjectAccessGuardTest {
     assertEquals(400, ex.getStatusCode().value());
   }
 
+  // RR-832 — a soft-deleted (tombstoned) project must fail closed for write and admin access, even
+  // for an otherwise-authorized same-org ORG_ADMIN. Only assertCanRestore may load it.
+  @Test
+  void softDeletedProject_failsWrite_with404() {
+    Project p = project("p1", "host-org");
+    p.setDeletedAt(java.time.Instant.now());
+    when(projectRepo.findById("p1")).thenReturn(Optional.of(p));
+    AppUserDetails admin = userDetails("admin1", "host-org", "SUPER_ADMIN");
+    ResponseStatusException ex =
+        assertThrows(ResponseStatusException.class, () -> guard.assertCanWrite("p1", admin));
+    assertEquals(404, ex.getStatusCode().value());
+  }
+
+  @Test
+  void softDeletedProject_failsAdmin_with404() {
+    Project p = project("p1", "host-org");
+    p.setDeletedAt(java.time.Instant.now());
+    when(projectRepo.findById("p1")).thenReturn(Optional.of(p));
+    AppUserDetails admin = userDetails("admin1", "host-org", "SUPER_ADMIN");
+    ResponseStatusException ex =
+        assertThrows(ResponseStatusException.class, () -> guard.assertCanAdmin("p1", admin));
+    assertEquals(404, ex.getStatusCode().value());
+  }
+
+  @Test
+  void softDeletedProject_isLoadableForRestore() {
+    Project p = project("p1", "host-org");
+    p.setDeletedAt(java.time.Instant.now());
+    when(projectRepo.findById("p1")).thenReturn(Optional.of(p));
+    AppUserDetails admin = userDetails("admin1", "host-org", "SUPER_ADMIN");
+    assertSame(p, guard.assertCanRestore("p1", admin));
+  }
+
   private static Project project(String id, String orgId) {
     Project p = new Project();
     p.setId(id);
@@ -129,5 +326,16 @@ class ProjectAccessGuardTest {
     u.setGlobalRole(globalRole);
     u.setEmail(userId + "@example.com");
     return new AppUserDetails(u, null);
+  }
+
+  private static AppUserDetails orgUserDetails(String userId, String orgId, String orgRole) {
+    AppUser u = new AppUser();
+    u.setId(userId);
+    u.setOrgId(orgId);
+    u.setGlobalRole("USER");
+    u.setEmail(userId + "@example.com");
+    OrgMember member =
+        OrgMember.builder().id("om-" + userId).orgId(orgId).userId(userId).orgRole(orgRole).build();
+    return new AppUserDetails(u, member);
   }
 }

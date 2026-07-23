@@ -6,6 +6,7 @@ import static com.navneet.executespec.agentsession.AgentIntentDecisions.decision
 import java.util.Map;
 import java.util.Optional;
 
+import com.navneet.executespec.agentsession.dto.AgentActionContext;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.ClientCapabilities;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.InterpretIntentRequest;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.OrchestratorDecision;
@@ -48,30 +49,53 @@ final class AgentCodeChangeIntents {
 
   private static OrchestratorDecision cloudRunProposal(
       String message, InterpretIntentRequest request) {
-    Map<String, Object> args =
-        request != null && request.projectId() != null && !request.projectId().isBlank()
-            ? Map.of("spec", message, "projectId", request.projectId())
-            : Map.of("spec", message);
-    boolean hasProject = args.containsKey("projectId");
+    boolean hasProject =
+        request != null && request.projectId() != null && !request.projectId().isBlank();
+    if (!hasProject) {
+      return decision(
+          "IMPLEMENTATION_PROPOSAL",
+          0.8,
+          "code_mutation_missing_project_context",
+          false,
+          "I can turn this into an implementation, but select a project/repository first. No run"
+              + " has been proposed.",
+          null,
+          false,
+          false,
+          "Missing project/repo context blocks run submission and confirmation.",
+          AgentActionContext.requiresProjectSelection());
+    }
+    if (Boolean.FALSE.equals(request.projectWriteAuthorized())) {
+      // The caller can read this project but cannot submit runs against it. Emitting a confirmable
+      // card here would produce a button whose confirmation is rejected by the submission gate.
+      return decision(
+          "IMPLEMENTATION_PROPOSAL",
+          0.8,
+          "code_mutation_missing_write_scope",
+          false,
+          "I can describe the change, but you have read-only access to this project, so I cannot"
+              + " propose a run against it. No run has been proposed.",
+          null,
+          false,
+          false,
+          "Caller lacks project write authority; run submission and confirmation are blocked.",
+          AgentActionContext.writeScopeRequired());
+    }
+    Map<String, Object> args = Map.of("spec", message, "projectId", request.projectId());
+    AgentActionContext context = AgentActionContext.ready();
+    String prompt =
+        "Create a cloud run? No run credits are charged until the generated plan is approved.";
     return decision(
-        hasProject ? "CODE_RUN_REQUIRED" : "IMPLEMENTATION_PROPOSAL",
+        "CODE_RUN_REQUIRED",
         0.8,
-        hasProject ? "explicit_code_mutation_request" : "code_mutation_missing_project_context",
+        "explicit_code_mutation_request",
         true,
-        hasProject
-            ? "Create a cloud run? No run credits are charged until the generated plan is approved."
-            : "I can turn this into an implementation, but I need a project/repo context before a"
-                + " cloud run can be submitted.",
+        prompt,
         new TypedAction(
-            "create_cloud_run",
-            args,
-            true,
-            billingImpact("create_cloud_run"),
-            "Create a cloud run? No run credits are charged until the generated plan is approved."),
-        hasProject,
+            "create_cloud_run", args, true, billingImpact("create_cloud_run"), prompt, context),
         true,
-        hasProject
-            ? "Clear code mutation request with project context; submit only after confirmation."
-            : "Missing project/repo context blocks run submission.");
+        true,
+        "Clear code mutation request with project context; submit only after confirmation.",
+        context);
   }
 }

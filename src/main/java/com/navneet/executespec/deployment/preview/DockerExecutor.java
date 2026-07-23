@@ -1,13 +1,11 @@
 package com.navneet.executespec.deployment.preview;
 
-import java.io.ByteArrayOutputStream;
-import java.io.IOException;
-import java.io.InputStream;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.Arrays;
 import java.util.List;
-import java.util.concurrent.TimeUnit;
+
+import com.navneet.executespec.testgen.BoundedProcess;
 
 import org.springframework.stereotype.Component;
 
@@ -17,7 +15,6 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class DockerExecutor {
 
-  private static final int MAX_OUTPUT_BYTES = 1_048_576; // 1 MB
   private static final int BUILD_TIMEOUT_SECONDS = 300;
 
   public record DockerBuildResult(boolean success, String imageId, String logs, long durationMs) {}
@@ -67,7 +64,48 @@ public class DockerExecutor {
     }
   }
 
-  /** Run a container in detached mode with resource limits. Returns the container ID. */
+  /**
+   * Run a container in detached mode with resource limits. Returns the container ID.
+   *
+   * <p>RR-157: the direct Docker path used to pass only CPU/memory/port, so previewed customer code
+   * ran with the full default capability set and no PID ceiling — materially weaker than the
+   * Compose path next to it. The flags below bring the two paths to the same floor:
+   *
+   * <ul>
+   *   <li>{@code --cap-drop ALL} and {@code --security-opt no-new-privileges} — no ambient
+   *       capabilities, no setuid escalation inside the container.
+   *   <li>{@code --pids-limit} — a fork bomb exhausts its own container, not the host.
+   *   <li>{@code --add-host} entries pinning the cloud metadata <em>names</em> AND the link-local
+   *       address string to loopback, matching {@code ComposeFileGenerator} exactly. Docker's
+   *       default seccomp profile is also applied because this call never passes {@code
+   *       seccomp=unconfined}.
+   * </ul>
+   *
+   * <p>Non-root is enforced at the image layer, not here: {@code DevDockerfileGenerator} injects a
+   * {@code USER} directive (app / nginx) into the generated WEB Dockerfiles, so forcing {@code
+   * --user} at run time (which would collide with the image's own uid/gid ownership of the app dir
+   * and break writes) is neither needed nor safe.
+   *
+   * <p><b>Deliberately NOT added, because each would break real previews or needs host infra —
+   * reported, not silently dropped (RR-157 remainder):</b>
+   *
+   * <ul>
+   *   <li><b>Raw-IP egress to the metadata server (169.254.169.254) is NOT blocked.</b> An {@code
+   *       /etc/hosts} entry only rewrites a <em>name</em> lookup; a socket opened to the numeric IP
+   *       never consults it, so the {@code --add-host} for the IP string (like Compose's) is parity
+   *       theatre, not a control. Actually denying that IP requires a host firewall rule, a
+   *       dedicated egress-denied preview network, or a separate preview VM/worker boundary — none
+   *       of which a {@code docker run} flag can supply, and a blanket {@code --internal} network
+   *       would break previews that legitimately call external APIs at runtime.
+   *   <li><b>Read-only root filesystem ({@code --read-only}).</b> The generated node dev-server
+   *       previews (vite/next) write cache and build output back into their {@code /app} WORKDIR on
+   *       the image rootfs, so a read-only root breaks the common preview outright. A durable fix
+   *       stages an allowlisted context onto named writable volumes.
+   *   <li><b>A custom (tightened) seccomp profile.</b> The Docker default profile is already
+   *       active; a stricter custom profile needs a shipped, tested artifact and risks breaking
+   *       legitimate syscalls in arbitrary customer runtimes.
+   * </ul>
+   */
   public String run(
       String imageTag,
       String containerName,
@@ -85,6 +123,18 @@ public class DockerExecutor {
                 containerName,
                 "--cpus=" + cpuLimit,
                 "--memory=" + memoryLimit,
+                "--pids-limit",
+                "512",
+                "--cap-drop",
+                "ALL",
+                "--security-opt",
+                "no-new-privileges",
+                "--add-host",
+                "metadata.google.internal:127.0.0.1",
+                "--add-host",
+                "metadata:127.0.0.1",
+                "--add-host",
+                "169.254.169.254:127.0.0.1",
                 "-p",
                 hostPort + ":" + containerPort,
                 imageTag),
@@ -198,42 +248,14 @@ public class DockerExecutor {
         pb.directory(workDir.toFile());
       }
 
-      Process process = pb.start();
-      ByteArrayOutputStream captured = new ByteArrayOutputStream();
-      Thread outputReader =
-          Thread.ofVirtual()
-              .start(
-                  () -> {
-                    try (InputStream is = process.getInputStream()) {
-                      is.transferTo(captured);
-                    } catch (IOException e) {
-                      log.debug("Process output read failed: {}", e.getMessage());
-                    }
-                  });
-
-      // Start the timeout while the child is running. Reading stdout synchronously before
-      // waitFor() lets a stalled Docker daemon defeat the timeout by keeping its pipe open.
-      boolean finished = process.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS);
-      if (!finished) {
-        process.destroyForcibly();
-        process.waitFor(1, TimeUnit.SECONDS);
-      }
-
-      outputReader.join(TimeUnit.SECONDS.toMillis(1));
-      byte[] bytes = captured.toByteArray();
-      String output =
-          new String(
-              bytes,
-              0,
-              Math.min(bytes.length, MAX_OUTPUT_BYTES),
-              java.nio.charset.StandardCharsets.UTF_8);
-
-      if (!finished) {
-        return new ProcessResult(-1, output, true);
-      }
-
-      return new ProcessResult(process.exitValue(), output, false);
-    } catch (IOException | InterruptedException e) {
+      // RR-155: the previous drain used an unbounded ByteArrayOutputStream and only truncated after
+      // the child exited, so a container emitting gigabytes of logs could exhaust the heap before
+      // the 1 MB limit applied. BoundedProcess drains on a separate thread (timeout stays
+      // reachable)
+      // AND caps the retained output while reading, destroying the whole tree on expiry.
+      BoundedProcess.Outcome outcome = BoundedProcess.run(pb, timeout);
+      return new ProcessResult(outcome.exitCode(), outcome.output(), !outcome.finished());
+    } catch (Exception e) {
       if (e instanceof InterruptedException) {
         Thread.currentThread().interrupt();
       }

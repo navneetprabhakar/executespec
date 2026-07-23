@@ -6,7 +6,8 @@ import {
   PagedResponse,
   RunChatMessage,
   RunDetail,
-  RunLogEvent,
+  RunCostEvidence,
+  RunReplayLog,
   RunSummary,
   TaskGraphNode,
   TestPlanData,
@@ -100,11 +101,66 @@ export const createRun = (body: {
   lowComplexityWorkerStartTier?: 'WORKHORSE' | 'LIGHTWEIGHT';
 }) => req<{runId: string}>('/runs', {method: 'POST', body: JSON.stringify(body)});
 
+/**
+ * RR-819 — one registered contract this plan intends to modify, as composed by the server while
+ * the run parked at AWAITING_APPROVAL. `declaredConsumers` is the reason the friction exists: those
+ * repositories declared themselves consumers of this contract, so the planned change breaks them.
+ */
+export interface PlanContractGateRow {
+  contractId?: string | null;
+  contractName?: string | null;
+  type?: string | null;
+  detectedPath?: string | null;
+  declaredConsumers?: string[] | null;
+  matchedPlanTasks?: string[] | null;
+}
+
+/**
+ * RR-819 — the durable plan-approval contract gate report.
+ *
+ * `reportJson` is a serialized `PlanContractGateRow[]`. `reportDigest` is the server's SHA-256 over
+ * that exact string; approval must echo it back so an acknowledgement collected against one set of
+ * contracts cannot be replayed against a different one.
+ */
+export interface PlanContractGateReport {
+  runId?: string | null;
+  projectId?: string | null;
+  reportJson?: string | null;
+  reportDigest?: string | null;
+  requiresTypedAck?: boolean | null;
+  contractCount?: number | null;
+  createdAt?: string | null;
+  acknowledgedAt?: string | null;
+  acknowledgedByUserId?: string | null;
+  acknowledgementText?: string | null;
+}
+
+/**
+ * RR-819 — what the approver must be shown before approving. The server answers 204 (no body) when
+ * this plan touches no registered contract, which is the overwhelming majority of runs; `req`
+ * surfaces that as `undefined`, and the gate UI stays absent.
+ */
+export const getPlanContractGate = (runId: string) =>
+  req<PlanContractGateReport | undefined>(`/runs/${runId}/plan-contract-gate`);
+
 export const approveRun = (
   id: string,
   approved: boolean,
   creditsConfirmed?: number,
   executionMode?: string,
+  /**
+   * RR-1459 — SHA-256 of the exact plan JSON the approver reviewed. `creditsConfirmed` is a price
+   * check, not an identity check, so it passes whenever two runs happen to cost the same. The
+   * server answers 409 on a mismatch; an omitted value is "not supplied", never "matched".
+   */
+  planFingerprint?: string,
+  /**
+   * RR-819 — the literal text the approver typed to acknowledge that this plan breaks contracts
+   * other repositories declared themselves consumers of, together with the digest of the exact
+   * report they were shown. The server refuses approval with 409 when the text is absent/wrong, and
+   * with a distinct 409 when the digest is not the one currently on the run.
+   */
+  breakingChange?: {ack: string; reportDigest: string},
 ) =>
   req<void>(`/runs/${id}/approve`, {
     method: 'POST',
@@ -112,6 +168,9 @@ export const approveRun = (
       approved,
       creditsConfirmed: creditsConfirmed ?? null,
       executionMode: executionMode ?? null,
+      planFingerprint: planFingerprint ?? null,
+      breakingChangeAck: breakingChange?.ack ?? null,
+      breakingChangeReportDigest: breakingChange?.reportDigest ?? null,
     }),
   });
 
@@ -146,11 +205,9 @@ export const resumeRun = (runId: string) => req<void>(`/runs/${runId}/resume`, {
 export const getUserRunsSummary = (days = 30) =>
   req<UserRunsSummaryData>(`/user-runs-summary?days=${days}`);
 
-export const getLiveCost = (runId: string) =>
-  req<{runId: string; costUsd: number; inputTokens?: number; outputTokens?: number}>(
-    `/runs/${runId}/cost`,
-  );
-export const getRunEventLog = (runId: string) => req<RunLogEvent[]>(`/runs/${runId}/event-log`);
+export const getLiveCost = (runId: string) => req<RunCostEvidence>(`/runs/${runId}/cost`);
+export const getRunEventLog = (runId: string) =>
+  req<RunReplayLog>(`/runs/${runId}/event-log/replay`);
 
 export const submitContactForm = (subject: string, body: string) =>
   req<{message: string}>('/contact', {
@@ -235,10 +292,17 @@ export const syncRun = (runId: string, branch?: string) =>
     `/runs/${runId}/sync${branch ? `?branch=${encodeURIComponent(branch)}` : ''}`,
     {method: 'POST'},
   );
-export const estimateRun = (projectId: string, requirement: string) =>
-  req<LaunchEstimate>(
-    `/projects/${projectId}/estimate?requirement=${encodeURIComponent(requirement)}`,
-  );
+export const estimateRun = (
+  projectId: string,
+  requirement: string,
+  provider?: string,
+  model?: string,
+) => {
+  const params = new URLSearchParams({requirement});
+  if (provider) params.set('provider', provider);
+  if (model) params.set('model', model);
+  return req<LaunchEstimate>(`/projects/${projectId}/estimate?${params.toString()}`);
+};
 
 // v2.5.2 — reset workspace to the exact commit SHAs captured at run start.
 // Returns { reposSynced: 0, details: ["no snapshot — run predates v2.5.2"] }
@@ -262,7 +326,11 @@ export const getRunPrs = (runId: string) =>
 export function requiresCostCap(user: AuthUser | null | undefined): boolean {
   if (!user) return true; // anonymous → treat as FREE-equivalent
   const tier = user.tier;
-  if (tier === 'ENTERPRISE' || tier === 'TEAM') return false;
+  // RR-1338 — BYOK is an own-keys tier (keySourceMode=OWN_KEYS) and, like
+  // TEAM/ENTERPRISE, is exempt from the platform cost cap on the server. It was
+  // previously falling through to the `return true` default and being shown the
+  // cap input it should never see.
+  if (tier === 'ENTERPRISE' || tier === 'TEAM' || tier === 'BYOK') return false;
   const hasByok = !!(
     user.hasOpenAiKey ||
     user.hasAnthropicKey ||
@@ -270,6 +338,8 @@ export function requiresCostCap(user: AuthUser | null | undefined): boolean {
     user.hasDeepSeekKey ||
     user.hasFireworksKey
   );
-  if (tier === 'PRO') return !hasByok;
+  // PRO_PLUS is a managed-credit tier (HYBRID/SYSTEM keys stay capped); it and
+  // PRO keep the platform cost cap unless the user has attached their own keys.
+  if (tier === 'PRO' || tier === 'PRO_PLUS') return !hasByok;
   return true; // FREE
 }

@@ -31,9 +31,9 @@ import lombok.extern.slf4j.Slf4j;
  * <ul>
  *   <li>≤ {@code contracts.injection.full-body-threshold} contracts (default 15): pre-fetch every
  *       contract body inline as {@link Mode#FULL_BODY}
- *   <li>&gt; threshold: emit {@link Mode#INDEX_ONLY} — one compact line per contract; planner uses
- *       the {@code getContract} tool to fetch bodies on demand (tool registration deferred to a
- *       follow-up)
+ *   <li>&gt; threshold: emit {@link Mode#INDEX_ONLY} — one compact line per contract. Full-body
+ *       retrieval is not currently model-bound, so the index explicitly reports that evidence
+ *       limitation instead of advertising a nonexistent tool.
  * </ul>
  *
  * <p>Service is read-only; per-call cost is bounded by the threshold so the planner cold start
@@ -130,7 +130,7 @@ public class ContractInjectionService {
       if (latest.isPresent() && latest.get().getInlineContent() != null) {
         sb.append(latest.get().getInlineContent()).append("\n");
       } else {
-        sb.append("(content not inlined — use getContract tool to fetch)\n");
+        sb.append("(content is unavailable in this planning context)\n");
       }
       sb.append("\n");
     }
@@ -142,8 +142,9 @@ public class ContractInjectionService {
     sb.append("=== CONTRACTS_INDEX ===\n");
     sb.append("Project has ")
         .append(contracts.size())
-        .append(" contracts. Use the getContract(id, version) tool to fetch ")
-        .append("specific bodies on demand.\n\n");
+        .append(" contracts. This is an index-only context; full contract bodies are not ")
+        .append("available to the planner for this run. Do not claim full contract compliance ")
+        .append("from this index alone.\n\n");
     List<UUID> ids = new ArrayList<>();
     for (ContractRegistry c : contracts) {
       ids.add(c.getId());

@@ -76,6 +76,17 @@ public class TestPlan {
   @Column(name = "worker_model")
   private String workerModel;
 
+  /** SHA-256 fingerprint of the admitted repository baseline(s). */
+  @Column(name = "source_fingerprint", length = 64)
+  private String sourceFingerprint;
+
+  /** SHA-256 of the relevant product diff at test-planning time. */
+  @Column(name = "workspace_fingerprint", length = 64)
+  private String workspaceFingerprint;
+
+  @Column(name = "prompt_version", length = 32)
+  private String promptVersion;
+
   @Column(name = "created_at", nullable = false)
   @Builder.Default
   private Instant createdAt = Instant.now();

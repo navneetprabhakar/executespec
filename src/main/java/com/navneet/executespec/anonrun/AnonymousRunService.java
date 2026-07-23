@@ -93,8 +93,8 @@ public class AnonymousRunService {
     sessionStore.save(session);
 
     log.info(
-        "v3 anon-run created token={} ip={} realDispatch={} specLen={}",
-        token.substring(0, 8),
+        "v3 anon-run created session={} ip={} realDispatch={} specLen={}",
+        AnonymousRunSessionStore.fingerprint(token),
         clientIp,
         realDispatch,
         spec.length());
@@ -109,7 +109,10 @@ public class AnonymousRunService {
         sessionStore.save(result);
         return Outcome.accepted(result);
       } catch (RuntimeException dispatchErr) {
-        log.warn("v3 anon-run dispatch failed token={}: {}", token, dispatchErr.getMessage());
+        log.warn(
+            "v3 anon-run dispatch failed session={}: {}",
+            AnonymousRunSessionStore.fingerprint(token),
+            dispatchErr.getMessage());
         AnonymousRunSession failed =
             session.withStatus(
                 "FAILED",

@@ -1,15 +1,19 @@
-import {useEffect, useState} from 'react';
+import {useEffect, useRef, useState} from 'react';
 import {useParams} from 'react-router-dom';
 import * as api from '@/lib/api';
 import {IdeBadge, IdeLoader} from '@/ide/IdeKit';
+import {LoadError} from '@/ide/LoadError';
+import {useAsyncData} from '@/lib/loadState';
 import {ProjectTabs} from '@/ide/IdeProjectTabs';
 import {ConfirmModal} from '@/signal/components/Modal';
 import {useAuthStore} from '@/stores/useAuthStore';
 import {
   availableOrgMembers,
-  canManageProjectSharing,
+  canManageMembership,
+  canManageShareLinks,
   isExternalProjectMember,
   memberDisplayName,
+  shareLinkStatus,
 } from '@/ide/projectMoreUtils';
 import {ProjectBanner as Banner} from '@/ide/projectUi';
 
@@ -22,11 +26,36 @@ const INVITE_ROLES: api.ProjectInviteRole[] = [
 export function IdeProjectMembers() {
   const {projectId = ''} = useParams();
   const user = useAuthStore((s) => s.user);
-  const [members, setMembers] = useState<api.ProjectMemberDto[] | null>(null);
-  const [orgMembers, setOrgMembers] = useState<api.OrgMemberDto[]>([]);
-  const [invites, setInvites] = useState<api.ProjectInviteDto[] | null>(null);
-  const [shareLinks, setShareLinks] = useState<api.ShareLinkDto[] | null>(null);
-  const [externalSharingEnabled, setExternalSharingEnabled] = useState<boolean | null>(null);
+  // D4: each of these renders an affirmative "you have no X" empty state, so a
+  // failed load must stay distinguishable from a genuinely empty result.
+  const membersState = useAsyncData(
+    () => api.getProjectMembers(projectId),
+    [projectId],
+    !!projectId,
+  );
+  const shareLinksState = useAsyncData(
+    () => api.listShareLinks(projectId).then((r) => r.links ?? []),
+    [projectId],
+    !!projectId,
+  );
+  const invitesState = useAsyncData(
+    () => api.listProjectInvites(projectId),
+    [projectId],
+    !!projectId,
+  );
+  const orgMembersState = useAsyncData(() => api.getOrgMembers(), [projectId], !!projectId);
+  const orgState = useAsyncData(() => api.getMyOrg(), [projectId], !!projectId);
+
+  const members = membersState.data;
+  const setMembers = membersState.setData;
+  const invites = invitesState.data;
+  const setInvites = invitesState.setData;
+  const shareLinks = shareLinksState.data;
+  const setShareLinks = shareLinksState.setData;
+  const orgMembers = orgMembersState.data ?? [];
+  // Unknown (load failed) stays falsy, exactly as the previous `false` fallback
+  // did, so a failure cannot silently widen invite authority.
+  const externalSharingEnabled = orgState.data ? !!orgState.data.externalSharingEnabled : null;
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState<api.ProjectInviteRole>('PROJECT_DEVELOPER');
   const [orgMemberUserId, setOrgMemberUserId] = useState('');
@@ -34,47 +63,53 @@ export function IdeProjectMembers() {
   const [busy, setBusy] = useState('');
   const [err, setErr] = useState('');
   const [msg, setMsg] = useState('');
+  const [newShareUrl, setNewShareUrl] = useState('');
+  const [shareAuditLinkId, setShareAuditLinkId] = useState<string | null>(null);
+  const [shareAudit, setShareAudit] = useState<api.ShareLinkAuditDto[] | null>(null);
   const [revokeFor, setRevokeFor] = useState<string | null>(null);
   const [revokeInviteFor, setRevokeInviteFor] = useState<string | null>(null);
   const [removeFor, setRemoveFor] = useState<string | null>(null);
 
-  function load() {
-    api
-      .getProjectMembers(projectId)
-      .then(setMembers)
-      .catch(() => setMembers([]));
-    api
-      .listShareLinks(projectId)
-      .then((r) => setShareLinks(r.links ?? []))
-      .catch(() => setShareLinks([]));
-    api
-      .listProjectInvites(projectId)
-      .then(setInvites)
-      .catch(() => setInvites([]));
-    api
-      .getOrgMembers()
-      .then(setOrgMembers)
-      .catch(() => setOrgMembers([]));
-  }
+  // RR-1332 — the authoritative "which project is mounted now" for guarding in-flight async writes.
+  const projectIdRef = useRef(projectId);
+  projectIdRef.current = projectId;
 
+  // RR-1332 — React reuses this route component across `/projects/:projectId` navigations, so
+  // project A's one-time share bearer (and its audit / revoke / status message) would remain
+  // visible and copyable under project B, contradicting the shown-once semantics and misattributing
+  // authority. Clear every scope-bound bit of state when the project changes.
   useEffect(() => {
-    if (!projectId) return;
-    load();
-    api
-      .getMyOrg()
-      .then((o) => setExternalSharingEnabled(!!o.externalSharingEnabled))
-      .catch(() => setExternalSharingEnabled(false));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    setNewShareUrl('');
+    setShareAuditLinkId(null);
+    setShareAudit(null);
+    setRevokeFor(null);
+    setRevokeInviteFor(null);
+    setRemoveFor(null);
+    setMsg('');
+    setErr('');
   }, [projectId]);
+
+  function load() {
+    membersState.reload();
+    shareLinksState.reload();
+    invitesState.reload();
+    orgMembersState.reload();
+  }
 
   const isSuperAdmin = user?.globalRole === 'SUPER_ADMIN';
   const currentMember = members?.find((m) => m.userId === user?.id);
-  const canManage = canManageProjectSharing({
+  // RR-1507 — membership and share-links have different server guards. A
+  // PROJECT_DEVELOPER may manage share links (isProjectWriter) but NOT members
+  // (requireProjectAdmin); a single boolean would show them a member-admin
+  // surface that 403s after every confirm.
+  const authorityInput = {
     globalRole: user?.globalRole,
     orgRole: user?.orgRole,
     projectRole: currentMember?.projectRole,
     hasProjectMembership: !!currentMember,
-  });
+  };
+  const canManageMembers = canManageMembership(authorityInput);
+  const canManageShares = canManageShareLinks(authorityInput);
   const canInviteExternals = isSuperAdmin || externalSharingEnabled === true;
 
   async function invite() {
@@ -116,15 +151,27 @@ export function IdeProjectMembers() {
     setBusy('share');
     setErr('');
     setMsg('');
+    // RR-1332 — pin the project this credential belongs to. If the user navigates to another
+    // project while the create is in flight, discard the result rather than rendering project A's
+    // one-time bearer under project B.
+    const forProject = projectId;
     try {
-      await api.createShareLink(projectId, {surface: 'PROJECT_OVERVIEW', expiresInDays: 30});
-      setMsg('Share link created.');
-      const r = await api.listShareLinks(projectId);
+      const created = await api.createShareLink(forProject, {
+        surface: 'PROJECT_OVERVIEW',
+        expiresInDays: 30,
+      });
+      if (forProject !== projectIdRef.current) return;
+      if (!created.token) throw new Error('Server did not return the one-time share credential.');
+      setNewShareUrl(api.shareLinkPublicUrl(created.token));
+      setMsg('Share link created. Copy it now; the credential will not be shown again.');
+      const r = await api.listShareLinks(forProject);
+      if (forProject !== projectIdRef.current) return;
       setShareLinks(r.links ?? []);
     } catch (e: unknown) {
+      if (forProject !== projectIdRef.current) return;
       setErr(e instanceof Error ? e.message : 'Create failed.');
     } finally {
-      setBusy('');
+      if (forProject === projectIdRef.current) setBusy('');
     }
   }
 
@@ -135,6 +182,23 @@ export function IdeProjectMembers() {
       setMsg('Share link revoked.');
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : 'Revoke failed.');
+    }
+  }
+
+  async function showShareAudit(linkId: string) {
+    if (shareAuditLinkId === linkId) {
+      setShareAuditLinkId(null);
+      setShareAudit(null);
+      return;
+    }
+    setShareAuditLinkId(linkId);
+    setShareAudit(null);
+    setErr('');
+    try {
+      setShareAudit(await api.getShareLinkAudit(projectId, linkId));
+    } catch (e: unknown) {
+      setShareAuditLinkId(null);
+      setErr(e instanceof Error ? e.message : 'Audit lookup failed.');
     }
   }
 
@@ -180,8 +244,10 @@ export function IdeProjectMembers() {
       <h1 className='ide-h1'>Members &amp; sharing</h1>
       <Banner err={err} msg={msg} />
 
-      <div className='ide-h2'>Project access · {members?.length ?? 0}</div>
-      {members === null ? (
+      <div className='ide-h2'>Project access{members ? ` · ${members.length}` : ''}</div>
+      {membersState.failure ? (
+        <LoadError failure={membersState.failure} what='members' onRetry={membersState.reload} />
+      ) : members === null ? (
         <IdeLoader label='Loading members…' />
       ) : members.length === 0 ? (
         <div className='ide-empty'>No members.</div>
@@ -227,7 +293,7 @@ export function IdeProjectMembers() {
                 </span>
                 <span style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}>{m.email}</span>
                 <IdeBadge kind='ok'>{role}</IdeBadge>
-                {canManage && !isMe && (
+                {canManageMembers && !isMe && (
                   <button
                     className='ide-btn ghost'
                     style={{padding: '3px 8px', color: 'var(--ide-red)'}}
@@ -242,7 +308,7 @@ export function IdeProjectMembers() {
         </div>
       )}
 
-      {canManage && selectableOrgMembers.length > 0 && (
+      {canManageMembers && selectableOrgMembers.length > 0 && (
         <>
           <div className='ide-h2'>Add org member</div>
           <div className='ide-card'>
@@ -293,7 +359,7 @@ export function IdeProjectMembers() {
         </>
       )}
 
-      {canManage &&
+      {canManageMembers &&
         (canInviteExternals ? (
           <>
             <div className='ide-h2'>Invite external collaborator</div>
@@ -366,7 +432,7 @@ export function IdeProjectMembers() {
           </>
         ))}
 
-      {!canManage && (
+      {!canManageMembers && (
         <div className='ide-card' style={{borderColor: 'var(--ide-blue)', marginTop: 12}}>
           <div
             style={{
@@ -387,10 +453,16 @@ export function IdeProjectMembers() {
         </div>
       )}
 
-      {canManage && (
+      {canManageMembers && (
         <>
-          <div className='ide-h2'>Pending invites · {invites?.length ?? 0}</div>
-          {invites === null ? (
+          <div className='ide-h2'>Pending invites{invites ? ` · ${invites.length}` : ''}</div>
+          {invitesState.failure ? (
+            <LoadError
+              failure={invitesState.failure}
+              what='pending invites'
+              onRetry={invitesState.reload}
+            />
+          ) : invites === null ? (
             <IdeLoader label='Loading invites…' />
           ) : invites.length === 0 ? (
             <div className='ide-empty'>No pending invites.</div>
@@ -445,15 +517,46 @@ export function IdeProjectMembers() {
         </>
       )}
 
-      <div className='ide-h2'>Share links · {shareLinks?.length ?? 0}</div>
-      {shareLinks === null ? (
+      <div className='ide-h2'>
+        Share links
+        {shareLinks
+          ? ` · ${shareLinks.filter((s) => shareLinkStatus(s) === 'Active').length} active`
+          : ''}
+      </div>
+      {newShareUrl && (
+        <div className='ide-card' style={{marginBottom: 10}} role='status'>
+          <div style={{fontWeight: 650, marginBottom: 6}}>New link — shown once</div>
+          <div className='ide-mono' style={{fontSize: 11, overflowWrap: 'anywhere'}}>
+            {newShareUrl}
+          </div>
+          <div style={{display: 'flex', gap: 8, marginTop: 10}}>
+            <button
+              className='ide-btn'
+              onClick={() =>
+                void navigator.clipboard.writeText(newShareUrl).then(() => setMsg('Link copied.'))
+              }
+            >
+              Copy link
+            </button>
+            <button className='ide-btn ghost' onClick={() => setNewShareUrl('')}>
+              I have saved it
+            </button>
+          </div>
+        </div>
+      )}
+      {shareLinksState.failure ? (
+        <LoadError
+          failure={shareLinksState.failure}
+          what='share links'
+          onRetry={shareLinksState.reload}
+        />
+      ) : shareLinks === null ? (
         <IdeLoader label='Loading share links…' />
       ) : shareLinks.length === 0 ? (
         <div className='ide-empty'>No share links yet.</div>
       ) : (
         <div className='ide-card' style={{padding: 0}}>
           {shareLinks.map((s, i) => {
-            const url = canManage && s.token ? `${window.location.origin}/shared/${s.token}` : '';
             return (
               <div
                 key={s.id}
@@ -466,7 +569,19 @@ export function IdeProjectMembers() {
                 }}
               >
                 <div style={{flex: 1, minWidth: 0}}>
-                  <div style={{fontWeight: 600}}>{s.surface}</div>
+                  <div style={{display: 'flex', alignItems: 'center', gap: 8}}>
+                    <span style={{fontWeight: 600}}>{s.surface}</span>
+                    {/* RR-1511 — an explicit per-row state so a revoked/expired link is not shown
+                        as if it still grants access. */}
+                    {(() => {
+                      const st = shareLinkStatus(s);
+                      return (
+                        <IdeBadge kind={st === 'Active' ? 'ok' : st === 'Revoked' ? 'bad' : 'warn'}>
+                          {st}
+                        </IdeBadge>
+                      );
+                    })()}
+                  </div>
                   <div
                     className='ide-mono'
                     style={{
@@ -477,28 +592,34 @@ export function IdeProjectMembers() {
                       whiteSpace: 'nowrap',
                     }}
                   >
-                    {canManage ? url : 'Share link details are managed by project writers.'}
+                    {canManageShares
+                      ? `Credential ${s.tokenPrefix}… · URL hidden after creation`
+                      : 'Share link details are managed by project writers.'}
                     {s.expiresAt && ` · expires ${new Date(s.expiresAt).toLocaleDateString()}`}
+                    {` · ${s.views} view${s.views === 1 ? '' : 's'}`}
+                    {s.lastViewedAt &&
+                      ` · last viewed ${new Date(s.lastViewedAt).toLocaleDateString()}`}
                   </div>
                 </div>
-                {canManage && (
+                {canManageShares && (
                   <>
                     <button
                       className='ide-btn ghost'
                       style={{padding: '3px 8px'}}
-                      onClick={() =>
-                        void navigator.clipboard.writeText(url).then(() => setMsg('Link copied.'))
-                      }
+                      onClick={() => void showShareAudit(s.id)}
                     >
-                      Copy
+                      {shareAuditLinkId === s.id ? 'Hide audit' : 'Audit'}
                     </button>
-                    <button
-                      className='ide-btn ghost'
-                      style={{padding: '3px 8px', color: 'var(--ide-red)'}}
-                      onClick={() => setRevokeFor(s.id)}
-                    >
-                      Revoke
-                    </button>
+                    {/* RR-1511 — Revoke only makes sense on a still-active link. */}
+                    {shareLinkStatus(s) === 'Active' && (
+                      <button
+                        className='ide-btn ghost'
+                        style={{padding: '3px 8px', color: 'var(--ide-red)'}}
+                        onClick={() => setRevokeFor(s.id)}
+                      >
+                        Revoke
+                      </button>
+                    )}
                   </>
                 )}
               </div>
@@ -506,7 +627,36 @@ export function IdeProjectMembers() {
           })}
         </div>
       )}
-      {canManage && (
+      {shareAuditLinkId && (
+        <div className='ide-card' style={{marginTop: 10}} aria-live='polite'>
+          <div style={{fontWeight: 650, marginBottom: 8}}>Latest share-link activity</div>
+          {shareAudit === null ? (
+            <IdeLoader label='Loading audit…' />
+          ) : shareAudit.length === 0 ? (
+            <div className='ide-empty'>No activity recorded.</div>
+          ) : (
+            shareAudit.map((event) => (
+              <div
+                key={event.id}
+                style={{
+                  display: 'flex',
+                  gap: 10,
+                  padding: '7px 0',
+                  borderBottom: '1px solid var(--ide-border)',
+                  fontSize: 12,
+                }}
+              >
+                <span style={{fontWeight: 650}}>{event.eventType}</span>
+                <span>{event.outcome}</span>
+                <span style={{marginLeft: 'auto', color: 'var(--ide-fg-muted)'}}>
+                  {new Date(event.occurredAt).toLocaleString()}
+                </span>
+              </div>
+            ))
+          )}
+        </div>
+      )}
+      {canManageShares && (
         <button
           className='ide-btn ghost'
           style={{marginTop: 10}}

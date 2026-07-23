@@ -78,12 +78,24 @@ class PreviewStandaloneDockerfilesTest {
   @Test
   @DisplayName("CLI Go and Rust Dockerfiles wrap binaries with ttyd")
   void cliDockerfiles() {
-    assertThat(PreviewStandaloneDockerfiles.cliGo())
+    assertThat(PreviewStandaloneDockerfiles.cliGo(true))
         .contains("RUN apk add --no-cache ttyd")
         .contains("ttyd --port 8080 --writable ./app");
 
-    assertThat(PreviewStandaloneDockerfiles.cliRust())
+    assertThat(PreviewStandaloneDockerfiles.cliRust(true))
         .contains("ttyd.x86_64")
         .contains("exec ttyd --port 8080 --writable");
+  }
+
+  @Test
+  @DisplayName("RR-391: CLI terminals are not writable unless explicitly enabled")
+  void cliDockerfilesAreReadOnlyByDefault() {
+    assertThat(PreviewStandaloneDockerfiles.cliGo(false))
+        .contains("ttyd --port 8080 ./app")
+        .doesNotContain("--writable");
+
+    assertThat(PreviewStandaloneDockerfiles.cliRust(false))
+        .contains("exec ttyd --port 8080")
+        .doesNotContain("--writable");
   }
 }

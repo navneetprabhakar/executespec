@@ -31,7 +31,7 @@ export function insightCards(metrics: api.MetricsResponse | null): InsightCards 
   const avgDuration =
     mAny.avgDurationMs != null ? durationLabel(mAny.avgDurationMs) : metricsLoaded ? '0m 0s' : '-';
   const spend =
-    mAny.totalSpend != null ? `$${mAny.totalSpend.toFixed(2)}` : metricsLoaded ? '$0.00' : '-';
+    mAny.totalSpend != null ? `$${mAny.totalSpend.toFixed(4)}` : metricsLoaded ? '$0.0000' : '-';
   return {
     total: mAny.totalRuns ?? 0,
     shipped: mAny.shipped ?? 0,
@@ -58,7 +58,7 @@ export function providerRows(
   };
   return (mcAny.byProvider || []).map((p) => ({
     provider: p.provider ?? '-',
-    value: `${p.spend != null ? `$${p.spend.toFixed(2)}` : '-'}${
+    value: `${p.spend != null ? `$${p.spend.toFixed(4)}` : '-'}${
       p.cacheHitRate != null ? ` (${Math.round(p.cacheHitRate * 100)}% cache)` : ''
     }`,
   }));

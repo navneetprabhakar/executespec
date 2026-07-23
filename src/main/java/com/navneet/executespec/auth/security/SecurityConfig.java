@@ -198,6 +198,8 @@ public class SecurityConfig {
                     // SSE streaming (authenticated via ?token= query param)
                     .requestMatchers("/api/runs/*/events")
                     .permitAll()
+                    .requestMatchers("/api/executions/*/events")
+                    .permitAll()
                     // Public shared validation reports (no auth)
                     .requestMatchers(HttpMethod.GET, "/api/reports/shared/*")
                     .permitAll()
@@ -242,7 +244,9 @@ public class SecurityConfig {
                     .authenticated()
                     // Entity-scoped analytics is under /api/admin for legacy frontend routes, but
                     // the controller has its own org/user RBAC. Keep it before the blanket
-                    // SUPER_ADMIN admin matcher so ORG_ADMIN/BILLING_ADMIN can read their own org.
+                    // SUPER_ADMIN admin matcher so entity-scoped controller RBAC can apply.
+                    // Detailed LLM attempt JSON/CSV is stricter: own-org ORG_ADMIN or
+                    // SUPER_ADMIN only; BILLING_ADMIN receives aggregate billing surfaces only.
                     .requestMatchers("/api/admin/analytics/**")
                     .authenticated()
                     // Admin endpoints — SUPER_ADMIN only
@@ -256,15 +260,10 @@ public class SecurityConfig {
                     // / eval-script / test caller relies on anonymous access (verified).
                     .requestMatchers("/api/v2/test/**")
                     .hasRole("SUPER_ADMIN")
-                    // v2.5.12 — V2 Phase 9 canary retired; V2 is the only harness and is accessed
-                    // via the regular /api/runs surface (RunController -> RunOrchestrator, which
-                    // enforces tier / quota / cost-cap / tenant). The retired rollout RunService
-                    // behind /api/v2/runs still spins up the REAL planner/executor/reviewer LLM
-                    // pipeline with NONE of those gates, so any authenticated user could burn
-                    // unlimited platform spend through it. Lock it to operator-only (C2 — audit
-                    // 2026-05-29; no frontend / client / eval-script caller — verified).
-                    .requestMatchers("/api/v2/runs", "/api/v2/runs/**")
-                    .hasRole("SUPER_ADMIN")
+                    // RR-934 — the retired rollout RunService behind `/api/v2/runs` was deleted
+                    // (dead endpoint that duplicated the pipeline with none of its gates). No route
+                    // matcher is needed for a nonexistent controller; the path now falls through to
+                    // the authenticated `/api/**` rule and returns 404 with no handler.
                     // All other API endpoints require authentication
                     .requestMatchers("/api/**")
                     .authenticated()

@@ -11,6 +11,7 @@ import java.util.Optional;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.config.featureflag.FeatureFlagService;
+import com.navneet.executespec.deployment.preview.verify.BootHealthEvaluator;
 import com.navneet.executespec.report.entity.PipelineResult;
 import com.navneet.executespec.report.entity.ValidationReport;
 
@@ -99,6 +100,60 @@ class VerifiedScoreBackfillServiceTest {
     assertThat(result.changes().getFirst().oldVerifiedScore()).isEqualTo(95);
     assertThat(result.changes().getFirst().newVerifiedScore()).isEqualTo(70);
     assertThat(row.getVerifiedScore()).isEqualTo(95);
+    verify(repo, never()).save(any());
+  }
+
+  /**
+   * RR-1645 — the backfill used to pass {@code bootVerification=null}, so a run that compiled but
+   * booted UNHEALTHY (honest BUILD slot 55) was re-scored with BUILD=100, upgrading the headline
+   * above the run's own recorded evidence. The recompute must reproduce the score generation would
+   * have produced from the same persisted row.
+   */
+  @Test
+  void backfill_honoursPersistedBootVerdict() {
+    ValidationReportRepository repo = mock(ValidationReportRepository.class);
+    ValidationReport row = backfillableRow();
+    row.setId("vr-boot");
+    row.setRunId("run-boot");
+    row.setBootVerdict(BootHealthEvaluator.Verdict.UNHEALTHY.name());
+    row.setBootHealthy(false);
+    row.setBootReason("started but /health never returned 200");
+    when(repo.findByRunId("run-boot")).thenReturn(Optional.of(row));
+
+    VerifiedScoreBackfillService svc = new VerifiedScoreBackfillService(repo, scoringService());
+    VerifiedScoreBackfillService.BackfillResult result =
+        svc.backfill(new VerifiedScoreBackfillService.BackfillRequest("run-boot", null, true));
+
+    // BUILD slot reads the boot verdict (UNHEALTHY = 55) instead of the compile-only 100:
+    //   (30*100 + 25*55 + 20*100 + 20*100 + 5*100) / 100 = 88.75 → 89 raw.
+    // RR-296 — a non-HEALTHY boot must not read PASS: the trust cap bounds the headline at 84
+    // (below the 85 PASS threshold), so a service that compiles + tests + reviews clean but fails
+    // its health probe can no longer show a passing 89.
+    assertThat(result.changes().getFirst().newVerifiedScore()).isEqualTo(84);
+  }
+
+  /** RR-1645 — the recompute must be a pure function of the persisted row, so it is idempotent. */
+  @Test
+  void backfill_isIdempotentOnAnUnhealthyBootRow() {
+    ValidationReportRepository repo = mock(ValidationReportRepository.class);
+    ValidationReport row = backfillableRow();
+    row.setId("vr-boot-2");
+    row.setRunId("run-boot-2");
+    row.setBootVerdict(BootHealthEvaluator.Verdict.UNHEALTHY.name());
+    row.setBootHealthy(false);
+    // RR-296 — the recompute is a pure function of the persisted row; an UNHEALTHY boot lands at
+    // the boot-aware trust cap of 84, so seed the already-correct value to prove idempotency.
+    row.setVerifiedScore(84);
+    row.setRubricScore(100);
+    when(repo.findByRunId("run-boot-2")).thenReturn(Optional.of(row));
+
+    VerifiedScoreBackfillService svc = new VerifiedScoreBackfillService(repo, scoringService());
+    VerifiedScoreBackfillService.BackfillResult result =
+        svc.backfill(new VerifiedScoreBackfillService.BackfillRequest("run-boot-2", null, false));
+
+    assertThat(result.unchanged()).isEqualTo(1);
+    assertThat(result.updated()).isZero();
+    assertThat(row.getVerifiedScore()).isEqualTo(84);
     verify(repo, never()).save(any());
   }
 

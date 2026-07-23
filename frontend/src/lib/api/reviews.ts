@@ -9,7 +9,9 @@ import {
   PrReviewWithComments,
   PreviewAnalysis,
   PreviewLogs,
+  PreviewRenderManifest,
   req,
+  reqText,
 } from './core';
 
 export const analyzePreview = (runId: string) =>
@@ -42,19 +44,56 @@ export const execPreviewCommand = (runId: string, cmd: string, args: string[] = 
     body: JSON.stringify({cmd, args}),
   });
 
+/**
+ * Static UI render. Unlike startPreview, this builds nothing and deploys nothing — it renders the
+ * run's screens as offline HTML, so it also works when the build is red.
+ */
+export const startPreviewRender = (runId: string) =>
+  req<{jobId: string; status: string}>(`/runs/${runId}/preview-render`, {method: 'POST'});
+
+export const getPreviewRender = (runId: string) =>
+  req<PreviewRenderManifest>(`/runs/${runId}/preview-render`);
+
+/**
+ * HTML for one rendered screen.
+ *
+ * Fetched as text rather than pointed at with an iframe `src`, because auth is a bearer header an
+ * iframe cannot send. The caller must mount the result via `srcdoc` on a sandboxed iframe WITHOUT
+ * `allow-same-origin`, so this model-authored document executes on an opaque origin and cannot
+ * reach the app's session.
+ */
+export const getPreviewRenderSurfaceHtml = (runId: string, surfaceId: string) =>
+  reqText(`/runs/${runId}/preview-render/surfaces/${encodeURIComponent(surfaceId)}`);
+
 /** v2.5.7 — Fetch PR review comments (inline + top-level reviews) for the Address Review flow. */
-export const fetchPrReviewComments = (projectId: string, prNumber: number, repoFullName: string) =>
+export const fetchPrReviewComments = (
+  projectId: string,
+  prNumber: number,
+  repoId: string,
+  repoFullName: string,
+) =>
   req<{comments: string}>(
-    `/projects/${projectId}/prs/${prNumber}/reviews?repo=${encodeURIComponent(repoFullName)}`,
+    `/projects/${projectId}/prs/${prNumber}/reviews?repoId=${encodeURIComponent(repoId)}&repo=${encodeURIComponent(repoFullName)}`,
   );
 
-export const submitPrReview = (body: {projectId: string; repoFullName: string; prNumber: number}) =>
-  req<PrReviewDto>('/pr-reviews', {method: 'POST', body: JSON.stringify(body)});
+export const submitPrReview = (body: {
+  projectId: string;
+  repoId: string;
+  repoFullName: string;
+  prNumber: number;
+}) => req<PrReviewDto>('/pr-reviews', {method: 'POST', body: JSON.stringify(body)});
 
 export const getPrReview = (id: string) => req<PrReviewWithComments>(`/pr-reviews/${id}`);
 
-export const listPrReviewsForPr = (repoFullName: string, prNumber: number) =>
-  req<PrReviewDto[]>(`/pr-reviews?repo=${encodeURIComponent(repoFullName)}&number=${prNumber}`);
+export const listPrReviewsForPr = (
+  projectId: string,
+  repoId: string,
+  repoFullName: string,
+  prNumber: number,
+) =>
+  req<PrReviewDto[]>(
+    `/pr-reviews?projectId=${encodeURIComponent(projectId)}&repoId=${encodeURIComponent(repoId)}&repo=${encodeURIComponent(repoFullName)}&number=${prNumber}`,
+  );
 
 /**
  * Phase 1 (V183) — dispatch a patch-mode run that addresses every comment on a PR
@@ -65,11 +104,8 @@ export const listPrReviewsForPr = (repoFullName: string, prNumber: number) =>
 export const dispatchPrReviewAutofix = (reviewId: string) =>
   req<PrReviewAutofixResponse>(`/pr-reviews/${reviewId}/autofix`, {method: 'POST'});
 
-export const submitCodeReview = (body: {
-  projectId: string;
-  repoId?: string;
-  repoFullName: string;
-}) => req<CodeReviewScanDto>('/code-reviews', {method: 'POST', body: JSON.stringify(body)});
+export const submitCodeReview = (body: {projectId: string; repoId: string; repoFullName: string}) =>
+  req<CodeReviewScanDto>('/code-reviews', {method: 'POST', body: JSON.stringify(body)});
 
 export const getCodeReview = (id: string) => req<CodeReviewScanWithIssues>(`/code-reviews/${id}`);
 

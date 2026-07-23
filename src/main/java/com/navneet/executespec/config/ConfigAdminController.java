@@ -7,11 +7,15 @@ import java.util.Map;
 
 import com.google.cloud.secretmanager.v1.*;
 import com.google.protobuf.ByteString;
+import com.navneet.executespec.auth.entity.ActivityAudit;
+import com.navneet.executespec.auth.security.AppUserDetails;
+import com.navneet.executespec.auth.service.ActivityAuditService;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -47,6 +51,7 @@ public class ConfigAdminController {
 
   private final GcsRuntimeConfig gcsRuntimeConfig;
   private final ConfigRefreshService configRefreshService;
+  private final ActivityAuditService auditService;
 
   @Value("${GCP_PROJECT:}")
   private String gcpProject;
@@ -66,19 +71,38 @@ public class ConfigAdminController {
 
   @PutMapping("/{key}")
   public ResponseEntity<Map<String, String>> putConfig(
-      @PathVariable String key, @RequestBody Map<String, String> body) {
+      @PathVariable String key,
+      @RequestBody Map<String, String> body,
+      @AuthenticationPrincipal AppUserDetails user) {
     String value = body.get("value");
     if (value == null) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Missing 'value' in request body");
     }
-    gcsRuntimeConfig.put(key, value);
+    try {
+      gcsRuntimeConfig.put(key, value);
+    } catch (IllegalArgumentException invalid) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, invalid.getMessage());
+    } catch (IllegalStateException unavailable) {
+      throw new ResponseStatusException(
+          HttpStatus.SERVICE_UNAVAILABLE, "Runtime configuration could not be persisted");
+    }
+    recordConfigAudit(user, "RUNTIME_CONFIG_UPDATED", key, true);
     log.info("[ConfigAdmin] Updated config key '{}' (persisted to GCS)", key);
     return ResponseEntity.ok(Map.of("key", key, "status", "updated"));
   }
 
   @DeleteMapping("/{key}")
-  public ResponseEntity<Map<String, String>> deleteConfig(@PathVariable String key) {
-    gcsRuntimeConfig.remove(key);
+  public ResponseEntity<Map<String, String>> deleteConfig(
+      @PathVariable String key, @AuthenticationPrincipal AppUserDetails user) {
+    try {
+      gcsRuntimeConfig.remove(key);
+    } catch (IllegalArgumentException invalid) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, invalid.getMessage());
+    } catch (IllegalStateException unavailable) {
+      throw new ResponseStatusException(
+          HttpStatus.SERVICE_UNAVAILABLE, "Runtime configuration could not be persisted");
+    }
+    recordConfigAudit(user, "RUNTIME_CONFIG_REMOVED", key, false);
     log.info("[ConfigAdmin] Removed config key '{}' (persisted to GCS)", key);
     return ResponseEntity.ok(Map.of("key", key, "status", "removed"));
   }
@@ -113,9 +137,9 @@ public class ConfigAdminController {
                 "createTime", secret.getCreateTime().toString()));
       }
     } catch (Exception e) {
-      log.warn("[ConfigAdmin] Failed to list secrets: {}", e.getMessage());
+      log.warn("[ConfigAdmin] Failed to list secrets type={}", e.getClass().getSimpleName());
       return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
-          .body(Map.of("error", "Failed to connect to Secret Manager: " + e.getMessage()));
+          .body(Map.of("error", "Failed to connect to Secret Manager"));
     }
 
     Map<String, Object> result = new LinkedHashMap<>();
@@ -128,7 +152,9 @@ public class ConfigAdminController {
 
   @PutMapping("/secrets/{name}")
   public ResponseEntity<Map<String, String>> putSecret(
-      @PathVariable String name, @RequestBody Map<String, String> body) {
+      @PathVariable String name,
+      @RequestBody Map<String, String> body,
+      @AuthenticationPrincipal AppUserDetails user) {
     if (gcpProject == null || gcpProject.isBlank()) {
       throw new ResponseStatusException(
           HttpStatus.SERVICE_UNAVAILABLE, "GCP_PROJECT not configured");
@@ -170,27 +196,47 @@ public class ConfigAdminController {
       // Add new version with the value
       SecretPayload payload =
           SecretPayload.newBuilder().setData(ByteString.copyFromUtf8(value)).build();
-      client.addSecretVersion(
-          AddSecretVersionRequest.newBuilder()
-              .setParent(secretName.toString())
-              .setPayload(payload)
-              .build());
+      SecretVersion version =
+          client.addSecretVersion(
+              AddSecretVersionRequest.newBuilder()
+                  .setParent(secretName.toString())
+                  .setPayload(payload)
+                  .build());
 
       log.info("[ConfigAdmin] Updated secret '{}' with new version", secretId);
-      return ResponseEntity.ok(Map.of("name", secretId, "status", "updated"));
+      recordSecretAudit(user, secretId, version == null ? "unknown" : version.getName());
+      return ResponseEntity.ok(
+          Map.of(
+              "name",
+              secretId,
+              "version",
+              version == null ? "unknown" : extractSecretId(version.getName()),
+              "status",
+              "updated",
+              "restartRequired",
+              "true"));
 
     } catch (com.google.api.gax.rpc.NotFoundException e) {
       throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Secret not found: " + secretId);
     } catch (Exception e) {
-      log.error("[ConfigAdmin] Failed to update secret '{}': {}", secretId, e.getMessage());
+      log.error(
+          "[ConfigAdmin] Failed to update secret '{}' type={}",
+          secretId,
+          e.getClass().getSimpleName());
       throw new ResponseStatusException(
-          HttpStatus.INTERNAL_SERVER_ERROR, "Failed to update secret: " + e.getMessage());
+          HttpStatus.INTERNAL_SERVER_ERROR, "Failed to update secret");
     }
   }
 
   @PostMapping("/refresh")
-  public ResponseEntity<Map<String, Object>> refresh() {
+  public ResponseEntity<Map<String, Object>> refresh(@AuthenticationPrincipal AppUserDetails user) {
     ConfigRefreshService.RefreshResult result = configRefreshService.refresh();
+    // RR-533 — a refresh activates externally-edited routing/concurrency/continuation/tracing
+    // policy
+    // in the running JVM. Like the PUT/DELETE config and secret-version paths, it MUST leave a
+    // durable actor record so incident review can distinguish automatic startup state from a manual
+    // live policy change. Secret VALUES are never recorded — only the changed key NAMES.
+    recordRefreshAudit(user, result.changedKeys());
     Map<String, Object> response = new LinkedHashMap<>();
     response.put("changedKeys", result.changedKeys());
     response.put("refreshedAt", result.refreshedAt().toString());
@@ -198,8 +244,53 @@ public class ConfigAdminController {
     return ResponseEntity.ok(response);
   }
 
+  private void recordRefreshAudit(AppUserDetails user, List<String> changedKeys) {
+    String actorId = user == null || user.getUser() == null ? null : user.getUser().getId();
+    String keysJson =
+        changedKeys.stream()
+            .map(k -> "\"" + k.replace("\\", "\\\\").replace("\"", "\\\"") + "\"")
+            .collect(java.util.stream.Collectors.joining(",", "[", "]"));
+    auditService.record(
+        ActivityAudit.builder()
+            .eventType("RUNTIME_CONFIG_REFRESHED")
+            .entityType("RUNTIME_CONFIG")
+            .entityId("refresh")
+            .actorId(actorId)
+            .newValue(
+                "{\"changedKeyCount\":" + changedKeys.size() + ",\"changedKeys\":" + keysJson + "}")
+            .build());
+  }
+
   private static String extractSecretId(String fullName) {
     int lastSlash = fullName.lastIndexOf('/');
     return lastSlash >= 0 ? fullName.substring(lastSlash + 1) : fullName;
+  }
+
+  private void recordConfigAudit(
+      AppUserDetails user, String eventType, String key, boolean present) {
+    String actorId = user == null || user.getUser() == null ? null : user.getUser().getId();
+    auditService.record(
+        ActivityAudit.builder()
+            .eventType(eventType)
+            .entityType("RUNTIME_CONFIG")
+            .entityId(key)
+            .actorId(actorId)
+            .newValue("{\"present\":" + present + "}")
+            .build());
+  }
+
+  private void recordSecretAudit(AppUserDetails user, String secretId, String versionName) {
+    String actorId = user == null || user.getUser() == null ? null : user.getUser().getId();
+    auditService.record(
+        ActivityAudit.builder()
+            .eventType("SECRET_VERSION_ADDED")
+            .entityType("SECRET_MANAGER_SECRET")
+            .entityId(secretId)
+            .actorId(actorId)
+            .newValue(
+                "{\"version\":\""
+                    + extractSecretId(versionName).replace("\"", "")
+                    + "\",\"restartRequired\":true}")
+            .build());
   }
 }

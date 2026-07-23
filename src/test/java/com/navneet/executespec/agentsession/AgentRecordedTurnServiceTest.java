@@ -31,6 +31,8 @@ class AgentRecordedTurnServiceTest {
   @Mock AgentTurnRepository turnRepo;
   @Mock AgentActionEventRepository eventRepo;
   @Mock AgentSessionRepository sessionRepo;
+  @Mock com.navneet.executespec.project.security.ProjectAccessGuard projectAccessGuard;
+  @Mock com.navneet.executespec.specchat.ChatSecurityAuditService chatSecurityAuditService;
 
   private AgentRecordedTurnService service;
 
@@ -42,7 +44,9 @@ class AgentRecordedTurnServiceTest {
             new AgentIntentService(),
             new AgentTurnRecorder(turnRepo, objectMapper),
             new AgentEventRecorder(eventRepo, objectMapper),
-            sessionRepo);
+            sessionRepo,
+            projectAccessGuard,
+            chatSecurityAuditService);
     when(turnRepo.save(any(AgentTurn.class))).thenAnswer(inv -> inv.getArgument(0));
     when(eventRepo.save(any(AgentActionEvent.class))).thenAnswer(inv -> inv.getArgument(0));
     when(sessionRepo.save(any(AgentSession.class))).thenAnswer(inv -> inv.getArgument(0));
@@ -58,7 +62,8 @@ class AgentRecordedTurnServiceTest {
             session,
             "s1",
             new TurnRequest(
-                "Find the auth bug", null, new ClientCapabilities(false, true, true, true)));
+                "Find the auth bug", null, new ClientCapabilities(false, true, true, true)),
+            principal());
 
     assertThat(response.sessionId()).isEqualTo("s1");
     assertThat(response.status()).isEqualTo("OK");
@@ -85,7 +90,7 @@ class AgentRecordedTurnServiceTest {
     AgentSession session = session("Existing title");
     when(turnRepo.countBySessionId("s1")).thenReturn(4L);
 
-    var response = service.record(session, "s1", null);
+    var response = service.record(session, "s1", null, principal());
 
     assertThat(response.sessionId()).isEqualTo("s1");
     assertThat(response.status()).isIn("OK", "NEEDS_CONFIRMATION");
@@ -122,16 +127,33 @@ class AgentRecordedTurnServiceTest {
             intentService,
             new AgentTurnRecorder(turnRepo, new ObjectMapper()),
             new AgentEventRecorder(eventRepo, new ObjectMapper()),
-            sessionRepo);
+            sessionRepo,
+            projectAccessGuard,
+            chatSecurityAuditService);
     when(turnRepo.countBySessionId("s1")).thenReturn(0L);
 
     var response =
         service.record(
-            session("Existing title"), "s1", new TurnRequest("Explain the auth flow", null, null));
+            session("Existing title"),
+            "s1",
+            new TurnRequest("Explain the auth flow", null, null),
+            principal());
 
     assertThat(response.decision().intent()).isEqualTo("CHAT");
     verify(intentService).decide(any(), any(), any());
     verify(intentService, never()).interpret(any());
+  }
+
+  @Test
+  void aRecordedTurnWithoutAnActorIsRejectedRatherThanSilentlyUnauthorized() {
+    org.assertj.core.api.Assertions.assertThatThrownBy(
+            () -> service.record(session("Existing title"), "s1", null, null))
+        .isInstanceOf(SecurityException.class);
+    verify(turnRepo, org.mockito.Mockito.never()).save(any(AgentTurn.class));
+
+    // The same call with a real actor still succeeds, so the rejection is about the missing
+    // principal rather than an unrelated failure.
+    assertThat(service.record(session("Existing title"), "s1", null, principal())).isNotNull();
   }
 
   private static AgentSession session(String title) {
@@ -143,5 +165,15 @@ class AgentRecordedTurnServiceTest {
         .clientSurface("CLI")
         .title(title)
         .build();
+  }
+
+  private static com.navneet.executespec.auth.security.AppUserDetails principal() {
+    var user = new com.navneet.executespec.auth.entity.AppUser();
+    user.setId("u1");
+    user.setOrgId("org-1");
+    user.setGlobalRole("USER");
+    user.setTier("PRO");
+    user.setEmail("u1@example.com");
+    return new com.navneet.executespec.auth.security.AppUserDetails(user, null);
   }
 }

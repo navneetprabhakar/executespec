@@ -24,6 +24,11 @@ const api = vi.hoisted(() => ({
   archiveProject: vi.fn(),
   deleteProject: vi.fn(),
   uploadProjectDocument: vi.fn(),
+  listProjectExports: vi.fn(),
+  createProjectExport: vi.fn(),
+  cancelProjectExport: vi.fn(),
+  downloadProjectExport: vi.fn(),
+  getProjectExportAudit: vi.fn(),
 }));
 
 vi.mock('@/lib/api', () => api);
@@ -76,6 +81,7 @@ beforeEach(() => {
     },
     fullContext: 'Recent project context',
   });
+  api.listProjectExports.mockResolvedValue([]);
 });
 
 afterEach(() => {
@@ -125,5 +131,27 @@ describe('IdeProjectSettings', () => {
     expect(host.textContent).toContain('Architecture.md');
     expect(host.textContent).toContain('1.0 KB');
     expect(host.textContent).toContain('READY');
+  });
+
+  it('queues a durable project export from the admin-only settings tab', async () => {
+    api.createProjectExport.mockResolvedValue({
+      id: 'job-1',
+      status: 'QUEUED',
+      fileName: 'project-p1-export.tar.gz',
+    });
+    await renderSettings();
+
+    const exportsTab = Array.from(host.querySelectorAll('button')).find(
+      (button) => button.textContent === 'Exports',
+    ) as HTMLButtonElement;
+    act(() => exportsTab.click());
+    const create = Array.from(host.querySelectorAll('button')).find(
+      (button) => button.textContent === 'Create export',
+    ) as HTMLButtonElement;
+    await act(async () => create.click());
+    await flush();
+
+    expect(api.createProjectExport).toHaveBeenCalledWith('p1', expect.any(String));
+    expect(host.textContent).toContain('Export queued');
   });
 });

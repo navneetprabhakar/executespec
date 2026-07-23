@@ -15,11 +15,15 @@ public record ProjectRepoLinkDto(
     Instant linkedAt,
     String linkedBy) {
   public static ProjectRepoLinkDto from(ProjectRepoLink link, ProjectRepo repo) {
+    return from(link, repo, Instant.now());
+  }
+
+  public static ProjectRepoLinkDto from(ProjectRepoLink link, ProjectRepo repo, Instant now) {
     return new ProjectRepoLinkDto(
         link.getId(),
         link.getProjectId(),
         link.getRepoId(),
-        ProjectRepoDto.from(repo),
+        ProjectRepoDto.from(repo, now),
         link.getRelationships(),
         link.getLinkedAt(),
         link.getLinkedBy());

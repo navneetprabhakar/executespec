@@ -32,6 +32,7 @@ public class InvitationService {
   private final OrgRepository orgRepo;
   private final OrgMemberRepository orgMemberRepo;
   private final AppUserRepository userRepo;
+  private final ProjectRepository projectRepo;
   private final ProjectMemberRepository projectMemberRepo;
   private final TierConfigRepository tierConfigRepo;
   private final BillingSubscriptionRepository subRepo;
@@ -111,9 +112,46 @@ public class InvitationService {
             .findById(orgId)
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Org not found"));
 
-    String email = req.email().toLowerCase();
-    String orgRole = req.orgRole() != null ? req.orgRole() : "DEVELOPER";
-    String projectIdsStr = req.projectIds() != null ? String.join(",", req.projectIds()) : null;
+    // RR-824 — a personal org is a single-person workspace, not a business-billable scope; the
+    // entity/service contract says these cannot be invited into and must be converted through
+    // POST /api/org first. Enforce it here (the invite chokepoint), not just in the UI: forwarding
+    // the caller's current org straight to createInvitation previously let a paid personal-org
+    // owner
+    // add members with no conversion, no seat initialization and no business billing.
+    if (org.isPersonal()) {
+      throw new ResponseStatusException(
+          HttpStatus.CONFLICT,
+          "This is a personal workspace. Convert it to an organization (POST /api/org) before"
+              + " inviting members.");
+    }
+
+    String email = req.email().trim().toLowerCase();
+    String orgRole =
+        req.orgRole() == null || req.orgRole().isBlank()
+            ? "DEVELOPER"
+            : req.orgRole().trim().toUpperCase(java.util.Locale.ROOT);
+    if (!Set.of("ORG_ADMIN", "DEVELOPER", "BILLING_ADMIN").contains(orgRole)) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid organization role");
+    }
+
+    // RR-1291 — the PRO single-ORG_ADMIN invariant is enforced on the direct role-change path
+    // (OrgController.changeMemberRole) but was bypassable by inviting a second ORG_ADMIN. Apply the
+    // same rule at the invite chokepoint: a PRO org that already has an admin (or a pending
+    // ORG_ADMIN
+    // invite) cannot mint another. ENTERPRISE allows multiple admins.
+    if ("ORG_ADMIN".equals(orgRole) && "PRO".equals(org.getTier())) {
+      long existingAdmins = orgMemberRepo.countByOrgIdAndOrgRole(orgId, "ORG_ADMIN");
+      long pendingAdminInvites =
+          invitationRepo.countByOrgIdAndOrgRoleAndStatus(orgId, "ORG_ADMIN", "PENDING");
+      if (existingAdmins + pendingAdminInvites >= 1) {
+        throw new ResponseStatusException(
+            HttpStatus.FORBIDDEN,
+            "PRO organizations can only have one ORG_ADMIN. Upgrade to ENTERPRISE for multiple"
+                + " administrators.");
+      }
+    }
+    List<String> projectIds = validateProjectAssignments(orgId, req.projectIds());
+    String projectIdsStr = projectIds.isEmpty() ? null : String.join(",", projectIds);
 
     // ENTERPRISE: always blocked. PRO: blocked only if admin has enabled it.
     boolean shouldBlockCommon = "ENTERPRISE".equals(org.getTier()) || org.isBlockCommonDomains();
@@ -289,6 +327,16 @@ public class InvitationService {
     log.info("Escalated invitation {} rejected by {}", invitationId, adminUserId);
   }
 
+  /**
+   * Canonical form used to compare an authenticated account against an invited address (RR-221).
+   * Trims surrounding whitespace and lower-cases with {@link java.util.Locale#ROOT} so a
+   * locale-sensitive default (Turkish dotless i, for instance) cannot make two different addresses
+   * compare equal.
+   */
+  private static String canonicalEmail(String email) {
+    return email == null ? "" : email.trim().toLowerCase(java.util.Locale.ROOT);
+  }
+
   @Transactional
   public void acceptInvitation(String token, String currentUserId) {
     OrgInvitation invitation =
@@ -296,6 +344,41 @@ public class InvitationService {
             .findByToken(token)
             .orElseThrow(
                 () -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Invitation not found"));
+
+    // Resolve the user BEFORE any status branch, so the recipient check applies to the idempotent
+    // path too.
+    String userId;
+    if (currentUserId != null) {
+      userId = currentUserId;
+    } else {
+      // User must have just registered via the abbreviated invite form
+      AppUser existing = userRepo.findByEmail(invitation.getInvitedEmail()).orElse(null);
+      if (existing == null) {
+        throw new ResponseStatusException(
+            HttpStatus.BAD_REQUEST, "Please register first then accept the invitation");
+      }
+      userId = existing.getId();
+    }
+
+    AppUser user =
+        userRepo
+            .findById(userId)
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));
+
+    // RR-221: bind acceptance to the invited identity. The bearer token alone must not confer the
+    // invited role — forwarded mail, browser history, logs and support tooling make token leakage
+    // realistic, and the invited role can be ORG_ADMIN / BILLING_ADMIN. Compare canonical
+    // (trimmed, lower-cased) addresses; anything else is a different account taking the seat.
+    if (!canonicalEmail(user.getEmail()).equals(canonicalEmail(invitation.getInvitedEmail()))) {
+      log.warn(
+          "Invitation {} presented by user {} whose email does not match the invited address",
+          invitation.getId(),
+          userId);
+      throw new ResponseStatusException(
+          HttpStatus.FORBIDDEN,
+          "This invitation was issued to a different email address. Sign in as the invited user to"
+              + " accept it.");
+    }
 
     // Idempotent: if already accepted, return success silently
     if ("ACCEPTED".equals(invitation.getStatus())) {
@@ -315,29 +398,22 @@ public class InvitationService {
       throw new ResponseStatusException(HttpStatus.GONE, "Invitation has expired");
     }
 
-    // Resolve the user
-    String userId;
-    if (currentUserId != null) {
-      userId = currentUserId;
-    } else {
-      // User must have just registered via the abbreviated invite form
-      AppUser existing = userRepo.findByEmail(invitation.getInvitedEmail()).orElse(null);
-      if (existing == null) {
-        throw new ResponseStatusException(
-            HttpStatus.BAD_REQUEST, "Please register first then accept the invitation");
-      }
-      userId = existing.getId();
-    }
-
-    AppUser user =
-        userRepo
-            .findById(userId)
-            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));
-
     if (user.getOrgId() != null && !user.getOrgId().equals(invitation.getOrgId())) {
       throw new ResponseStatusException(
           HttpStatus.CONFLICT, "User is already a member of another org");
     }
+
+    // RR-222: claim PENDING -> ACCEPTED atomically BEFORE granting anything. The old code created
+    // memberships first and wrote ACCEPTED last, so two concurrent holders of one token could both
+    // pass the status read and both receive the invited org role (and its project access) from a
+    // single seat. The conditional UPDATE has exactly one winner.
+    Instant claimedAt = Instant.now();
+    if (invitationRepo.claimPending(invitation.getId(), claimedAt) != 1) {
+      throw new ResponseStatusException(
+          HttpStatus.CONFLICT, "Invitation is no longer available for acceptance");
+    }
+    invitation.setStatus("ACCEPTED");
+    invitation.setResolvedAt(claimedAt);
 
     // Add to org — catch constraint violation from concurrent/duplicate requests
     if (!orgMemberRepo.existsByOrgIdAndUserId(invitation.getOrgId(), userId)) {
@@ -377,6 +453,16 @@ public class InvitationService {
       for (String pid : projectIds) {
         String trimmedPid = pid.trim();
         if (trimmedPid.isEmpty()) continue;
+        // Revalidate at acceptance time. A project may have been deleted or transferred after the
+        // invitation was created; never let stale invitation data create cross-org membership.
+        Project targetProject = projectRepo.findById(trimmedPid).orElse(null);
+        if (targetProject == null || !invitation.getOrgId().equals(targetProject.getOrgId())) {
+          log.warn(
+              "Skipping stale/cross-org project assignment {} on org invitation {}",
+              trimmedPid,
+              invitation.getId());
+          continue;
+        }
         if (!projectMemberRepo.existsByProjectIdAndUserId(trimmedPid, userId)) {
           try {
             projectMemberRepo.save(
@@ -393,10 +479,6 @@ public class InvitationService {
         }
       }
     }
-
-    invitation.setStatus("ACCEPTED");
-    invitation.setResolvedAt(Instant.now());
-    invitationRepo.save(invitation);
 
     auditService.record(
         ActivityAudit.builder()
@@ -431,6 +513,30 @@ public class InvitationService {
             .build());
 
     log.info("Invitation {} accepted by user {}", invitation.getId(), userId);
+  }
+
+  private List<String> validateProjectAssignments(String orgId, List<String> requestedProjectIds) {
+    if (requestedProjectIds == null || requestedProjectIds.isEmpty()) return List.of();
+    if (requestedProjectIds.size() > 100) {
+      throw new ResponseStatusException(
+          HttpStatus.BAD_REQUEST, "An invitation can assign at most 100 projects");
+    }
+    java.util.LinkedHashSet<String> normalized = new java.util.LinkedHashSet<>();
+    for (String projectId : requestedProjectIds) {
+      if (projectId == null || projectId.isBlank()) continue;
+      String id = projectId.trim();
+      Project project =
+          projectRepo
+              .findById(id)
+              .orElseThrow(
+                  () -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unknown project"));
+      if (!orgId.equals(project.getOrgId())) {
+        throw new ResponseStatusException(
+            HttpStatus.BAD_REQUEST, "Project assignment is outside this organization");
+      }
+      normalized.add(id);
+    }
+    return List.copyOf(normalized);
   }
 
   /**
@@ -482,12 +588,21 @@ public class InvitationService {
    * invitations (re-activates expired ones).
    */
   @Transactional
-  public void resendInvitation(String invitationId, String actorUserId) {
+  public void resendInvitation(String orgId, String invitationId, String actorUserId) {
     OrgInvitation invitation =
         invitationRepo
             .findById(invitationId)
             .orElseThrow(
                 () -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Invitation not found"));
+
+    // RR-224 — tenant isolation: an invitation is only resendable by an admin of the org that owns
+    // it. cancelInvitation already enforced this; resend previously loaded by global id alone, so
+    // an
+    // ORG_ADMIN could reactivate/extend and mail another tenant's invitation. Return 404 (not 403)
+    // so a foreign UUID cannot be confirmed to exist.
+    if (!invitation.getOrgId().equals(orgId)) {
+      throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Invitation not found");
+    }
 
     if ("ACCEPTED".equals(invitation.getStatus())) {
       throw new ResponseStatusException(

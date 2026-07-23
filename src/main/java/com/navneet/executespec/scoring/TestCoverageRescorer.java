@@ -46,22 +46,14 @@ public class TestCoverageRescorer {
 
     ValidationReport report = rescored.get();
     log.info(
-        "TestCoverageRescorer: run {} rescored verifiedScore={} rubricScore={} (total={}"
-            + " passed={})",
+        "TestCoverageRescorer: run {} reconciled verifiedScore={} rubricScore={} (report total={}"
+            + " passed={}, event total={} passed={})",
         event.runId(),
         report.getVerifiedScore(),
         report.getRubricScore(),
+        report.getTestsTotal(),
+        report.getTestsPassed(),
         s.getTotalTests(),
         s.getPassed());
-  }
-
-  static int deriveScore(TestExecutionSummary s) {
-    int total = s.getTotalTests();
-    if (total <= 0) return 20;
-    double ratio = (double) s.getPassed() / total;
-    if (ratio >= 0.90) return 95;
-    if (ratio >= 0.60) return 75;
-    if (ratio >= 0.30) return 55;
-    return 35;
   }
 }

@@ -958,7 +958,9 @@ class DevDockerfileGeneratorTest {
       String df = gen.generate(PreviewProjectType.FULL_STACK, ws);
 
       assertThat(df).contains("FROM eclipse-temurin:21");
-      assertThat(df).contains("nodejs"); // npm bundled via nodesource
+      // Node toolchain present. Was `apt-get install -y nodejs` after the NodeSource
+      // bootstrap; now copied from a pinned upstream image (RR-385, partial).
+      assertThat(df).contains("COPY --from=node:20-bookworm-slim");
       assertThat(df).contains("COPY server/pom.xml ./server/");
       assertThat(df).contains("mvn dependency:go-offline");
       assertThat(df).contains("COPY client/package*.json ./client/");
@@ -984,7 +986,9 @@ class DevDockerfileGeneratorTest {
       String df = gen.generate(PreviewProjectType.FULL_STACK, ws);
 
       assertThat(df).contains("FROM python:3.12-slim");
-      assertThat(df).contains("nodejs"); // npm bundled via nodesource
+      // Node toolchain present. Was `apt-get install -y nodejs` after the NodeSource
+      // bootstrap; now copied from a pinned upstream image (RR-385, partial).
+      assertThat(df).contains("COPY --from=node:20-bookworm-slim");
       assertThat(df).contains("COPY api/requirements.txt");
       assertThat(df).contains("pip install");
       assertThat(df).contains("COPY frontend/package*.json ./frontend/");
@@ -1007,6 +1011,86 @@ class DevDockerfileGeneratorTest {
       assertThat(content).contains("target");
       assertThat(content).contains(".idea");
       assertThat(content).contains("Dockerfile");
+    }
+  }
+
+  @Nested
+  @DisplayName("Node toolchain bootstrap (RR-385, partial)")
+  class NodeBootstrap {
+
+    /**
+     * Builds a workspace that exercises the separate-frontend/backend generators, which are where
+     * the NodeSource bootstrap used to live (a Node frontend beside a non-Node backend is exactly
+     * the case that needed Node grafted onto a JDK/Python/Rust base image).
+     */
+    private Path fullStackWorkspace(Path ws, String backendFile, String backendContent)
+        throws IOException {
+      Path fe = ws.resolve("frontend");
+      Files.createDirectories(fe);
+      Files.writeString(
+          fe.resolve("package.json"), "{\"name\":\"fe\",\"dependencies\":{\"react\":\"^18\"}}");
+      Path be = ws.resolve("backend");
+      Files.createDirectories(be);
+      Files.writeString(be.resolve(backendFile), backendContent);
+      return ws;
+    }
+
+    @Test
+    @DisplayName("No generated Dockerfile pipes a remote script into a shell")
+    void neverPipesRemoteScriptIntoShell(@TempDir Path root) throws IOException {
+      // One workspace per backend runtime, plus a plain Node app, plus every standalone type.
+      Path springBoot =
+          fullStackWorkspace(
+              Files.createDirectories(root.resolve("sb")),
+              "pom.xml",
+              "<project><dependencies><dependency><artifactId>spring-boot-starter"
+                  + "</artifactId></dependency></dependencies></project>");
+      Path python =
+          fullStackWorkspace(
+              Files.createDirectories(root.resolve("py")), "requirements.txt", "fastapi\n");
+      Path rust =
+          fullStackWorkspace(
+              Files.createDirectories(root.resolve("rs")),
+              "Cargo.toml",
+              "[package]\nname=\"api\"\nversion=\"0.1.0\"\n");
+
+      for (Path ws : new Path[] {springBoot, python, rust, root}) {
+        for (PreviewProjectType type : PreviewProjectType.values()) {
+          for (String df :
+              new String[] {gen.generate(type, ws), gen.generateForCloudRun(type, ws)}) {
+            assertThat(df)
+                .as("generate(%s) under %s must not fetch-and-execute a remote script", type, ws)
+                .doesNotContain("nodesource")
+                .doesNotContain("| bash -")
+                .doesNotContain("| sh -");
+          }
+        }
+      }
+    }
+
+    @Test
+    @DisplayName("Node is copied from a pinned upstream image, not installed from a vendor script")
+    void copiesNodeFromPinnedImage() {
+      String install = DevDockerfileGenerator.pinnedNodeInstall();
+      assertThat(install).contains("COPY --from=node:20-bookworm-slim /usr/local/bin/node");
+      assertThat(install).contains("/usr/local/lib/node_modules");
+      // npm/npx must resolve, or every downstream `RUN npm install` in the image breaks.
+      assertThat(install).contains("/usr/local/bin/npm");
+      assertThat(install).contains("/usr/local/bin/npx");
+      assertThat(install).doesNotContain("curl");
+    }
+
+    @Test
+    @DisplayName("A Node-on-JDK image still ends up with a Node toolchain")
+    void fullStackJdkImageStillGetsNode(@TempDir Path ws) throws IOException {
+      fullStackWorkspace(
+          ws,
+          "pom.xml",
+          "<project><dependencies><dependency><artifactId>spring-boot-starter"
+              + "</artifactId></dependency></dependencies></project>");
+      String df = gen.generate(PreviewProjectType.FULL_STACK, ws);
+      assertThat(df).contains("COPY --from=node:20-bookworm-slim");
+      assertThat(df).doesNotContain("apt-get install -y nodejs");
     }
   }
 }

@@ -92,10 +92,22 @@ public class BillingWebhookController {
       // Log webhook event (deduplicate by gateway + eventId)
       String eventId =
           result.message() != null ? result.message().replace("Event validated: ", "") : "unknown";
-      logWebhookEvent("STRIPE", eventId, result.eventType(), rawPayload);
+      // RR-052 (2026-07-22, P1) — record the event as PROCESSING BEFORE business handling so the
+      // admin audit status cannot claim PROCESSED for an event whose processing later throws. The
+      // status is transitioned to PROCESSED/FAILED from the real outcome below.
+      WebhookEventLog logEntry =
+          recordWebhookReceived("STRIPE", eventId, result.eventType(), rawPayload);
 
-      // Delegate event processing to BillingService
-      billingService.processStripeWebhook(rawPayload, signature, result.eventType());
+      try {
+        // Delegate event processing to BillingService
+        billingService.processStripeWebhook(rawPayload, signature, result.eventType());
+        markWebhookStatus(logEntry, "PROCESSED");
+      } catch (Exception e) {
+        markWebhookStatus(logEntry, "FAILED");
+        // Log but return 200 — prevent Stripe from retrying; the raw payload is stored for
+        // reprocess.
+        log.error("Stripe webhook processing error (returning 200): {}", e.getMessage(), e);
+      }
     } catch (Exception e) {
       // Log but return 200 — prevent Stripe from retrying
       log.error("Stripe webhook processing error (returning 200): {}", e.getMessage(), e);
@@ -104,7 +116,12 @@ public class BillingWebhookController {
     return ResponseEntity.ok().build();
   }
 
-  private void logWebhookEvent(
+  /**
+   * RR-052 — persist the webhook as received/PROCESSING (or bump attempts + IGNORED on a duplicate)
+   * BEFORE business processing. Returns the row whose status should reflect the processing outcome,
+   * or {@code null} for a duplicate/persistence failure (no status to transition).
+   */
+  private WebhookEventLog recordWebhookReceived(
       String gateway, String eventId, String eventType, String rawPayload) {
     try {
       var existing = webhookEventLogRepo.findByGatewayAndEventId(gateway, eventId);
@@ -114,25 +131,44 @@ public class BillingWebhookController {
         entry.setProcessingStatus("IGNORED");
         webhookEventLogRepo.save(entry);
         log.info("Duplicate webhook ignored: gateway={}, eventId={}", gateway, eventId);
-        return;
+        return null;
       }
 
       String payloadHash = sha256(rawPayload);
-      webhookEventLogRepo.save(
+      return webhookEventLogRepo.save(
           WebhookEventLog.builder()
               .gateway(gateway)
               .eventId(eventId)
               .eventType(eventType)
               .payloadHash(payloadHash)
               .rawPayload(rawPayload)
-              .processingStatus("PROCESSED")
-              .processedAt(Instant.now())
+              .processingStatus("PROCESSING")
               .build());
     } catch (Exception e) {
       log.error(
           "CRITICAL: Failed to persist webhook event gateway={} eventId={} — audit trail gap",
           gateway,
           eventId,
+          e);
+      return null;
+    }
+  }
+
+  /** RR-052 — transition a recorded webhook row to its terminal processing status. */
+  private void markWebhookStatus(WebhookEventLog logEntry, String status) {
+    if (logEntry == null) return;
+    try {
+      logEntry.setProcessingStatus(status);
+      if ("PROCESSED".equals(status)) {
+        logEntry.setProcessedAt(Instant.now());
+      }
+      webhookEventLogRepo.save(logEntry);
+    } catch (Exception e) {
+      log.error(
+          "Failed to update webhook event status gateway={} eventId={} status={}",
+          logEntry.getGateway(),
+          logEntry.getEventId(),
+          status,
           e);
     }
   }

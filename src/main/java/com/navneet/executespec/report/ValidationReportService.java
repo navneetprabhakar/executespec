@@ -1,6 +1,5 @@
 package com.navneet.executespec.report;
 
-import java.security.SecureRandom;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.*;
@@ -130,6 +129,19 @@ public class ValidationReportService {
    * Main entry point — called after ReviewerAgent completes, before MergeGate. Non-blocking on
    * failure: catches all exceptions and returns Optional.empty().
    */
+  /**
+   * RR-295 — reuse the existing report's primary key so persistence is an atomic PK upsert (JPA
+   * merge) rather than a destructive delete-then-save. The prior {@code delete} opened a window in
+   * which a save/serialization/DB failure erased the only durable validation report, share data and
+   * score. Overwriting in place leaves the previous good row untouched when the new save fails.
+   */
+  String resolveReportId(String runId) {
+    return repository
+        .findByRunId(runId)
+        .map(ValidationReport::getId)
+        .orElseGet(() -> UUID.randomUUID().toString());
+  }
+
   public Optional<ValidationReport> generateAndPersist(String runId, ReportInput input) {
     long startTime = System.currentTimeMillis();
 
@@ -182,6 +194,22 @@ public class ValidationReportService {
         }
       }
 
+      // RCA-13/14 — fail closed when the run did not deliver an approved product diff, or when
+      // deterministic requirement evidence says the requested product was not implemented. Build
+      // success and a friendly reviewer verdict are not substitutes for delivered code.
+      String evidenceFailure = scoreEvidenceFailure(filesGenerated, accuracyReport);
+      if (evidenceFailure != null) {
+        pipelineResult = PipelineResult.FAILED;
+        issues.add(
+            new ReportIssueDTO(
+                evidenceFailure,
+                "WOULD_CAUSE_BUG",
+                "Do not approve or aggregate this run until product-diff evidence exists.",
+                "DETERMINISTIC_PROVENANCE",
+                null));
+        issuesJson = objectMapper.writeValueAsString(issues);
+      }
+
       // 3b. v2.5.10 — verified signals (build outcome, test counts, reviewer verdict).
       // These replace the LLM-only anchor in ReviewScoringService when the
       // scoring.v2-verified flag is on, and always persist alongside the
@@ -209,30 +237,38 @@ public class ValidationReportService {
       String testCoverageLevel =
           accuracyReport != null ? accuracyReport.getTestCoverageLevel() : null;
       int verifiedScore =
-          computeVerifiedScore(
-              finalBuildPassed,
-              testsPassedCount,
-              testsTotalCount,
-              reviewerVerdict,
-              unfixedCritical,
-              endpointCoveragePercent,
-              testCoverageLevel,
-              filesGenerated,
-              input.bootVerification());
+          evidenceFailure != null
+              ? 0
+              : computeVerifiedScore(
+                  finalBuildPassed,
+                  testsPassedCount,
+                  testsTotalCount,
+                  reviewerVerdict,
+                  unfixedCritical,
+                  endpointCoveragePercent,
+                  testCoverageLevel,
+                  filesGenerated,
+                  input.bootVerification());
 
       // PR-E Phase A (2026-05-13) — additive rubric companion. Fixes the verifiedScore=0
       // cliff where any single zero factor (failed build, REVIEW_FAILED) collapses the entire
       // headline. The rubric awards points dimension-by-dimension so a run that compiled
       // cleanly but had a flaky test still reads 80/100 instead of 0/100.
       int rubricScore =
-          computeRubricScore(
-              finalBuildPassed,
-              testsPassedCount,
-              testsTotalCount,
-              reviewerVerdict,
-              unfixedCritical,
-              endpointCoveragePercent,
-              testCoverageLevel);
+          evidenceFailure != null
+              ? 0
+              : computeRubricScore(
+                  finalBuildPassed,
+                  testsPassedCount,
+                  testsTotalCount,
+                  reviewerVerdict,
+                  unfixedCritical,
+                  endpointCoveragePercent,
+                  testCoverageLevel);
+
+      ExecutableVerificationEvidence executableVerification =
+          executableVerification(
+              finalBuildPassed, ts != null, testsPassedCount, testsTotalCount, evidenceFailure);
 
       boolean verifiedScoreFlag = featureFlagService.isEnabled(FLAG_VERIFIED_SCORE);
 
@@ -252,7 +288,7 @@ public class ValidationReportService {
       // 4. Build and persist entity
       var report =
           ValidationReport.builder()
-              .id(UUID.randomUUID().toString())
+              .id(resolveReportId(runId))
               .runId(runId)
               .filesGenerated(filesGenerated)
               .languages(String.join(",", languages))
@@ -277,6 +313,9 @@ public class ValidationReportService {
               .finalBuildPassed(finalBuildPassed)
               .testsPassed(ts != null ? testsPassedCount : null)
               .testsTotal(ts != null ? testsTotalCount : null)
+              // RR-1660 — carry the producer's execution-provenance token, three-valued. A summary
+              // with no signal stays null (unproven), never false.
+              .testExecutionVerified(ts == null ? null : ts.getExecutionVerified())
               .reviewerVerdict(reviewerVerdict)
               .verifiedScore(verifiedScore)
               .rubricScore(rubricScore)
@@ -288,6 +327,11 @@ public class ValidationReportService {
                   input.bootVerification() == null ? null : input.bootVerification().healthy())
               .bootReason(
                   input.bootVerification() == null ? null : input.bootVerification().reason())
+              .executableTestsRun(executableVerification.testsRun())
+              .executableTestsPassed(executableVerification.testsPassed())
+              .executableVerificationStatus(executableVerification.status())
+              .executionFailureStage(executableVerification.failureStage())
+              .executableEvidenceJson(executableVerification.evidenceJson())
               .previewUrl(input.previewUrl())
               .status("COMPLETE")
               .build();
@@ -301,8 +345,7 @@ public class ValidationReportService {
         log.warn("Failed to accumulate report tokens to run {}: {}", runId, tokenEx.getMessage());
       }
 
-      // Delete any existing report for this run (rework edge case)
-      repository.findByRunId(runId).ifPresent(existing -> repository.delete(existing));
+      // RR-295 — atomic PK upsert (see the id-reuse note above); no destructive pre-delete.
       var saved = repository.save(report);
       List<VerificationEvidenceDTO> verificationLedger = buildVerificationLedger(saved, issues);
       GoalDonenessDecision runGoalDecision =
@@ -417,18 +460,62 @@ public class ValidationReportService {
     }
 
     ValidationReport report = found.get();
-    int total = Math.max(0, summary.getTotalTests());
-    int passed = Math.max(0, Math.min(summary.getPassed(), total));
+    int incomingTotal = Math.max(0, summary.getTotalTests());
+    int incomingPassed = Math.max(0, Math.min(summary.getPassed(), incomingTotal));
+    // The background HTTP/preview test generator publishes a 0/0 completion event when a run is
+    // not applicable (for example a Python library with no HTTP surface). That event is not
+    // evidence that the worker's already-executed tests disappeared. Never let weaker, empty
+    // downstream evidence erase a positive concrete workspace-test result captured during report
+    // generation.
+    if (incomingTotal == 0 && report.getTestsTotal() != null && report.getTestsTotal() > 0) {
+      log.info(
+          "Ignoring empty downstream test summary for run={} because report already has {}/{}"
+              + " concrete workspace tests",
+          runId,
+          report.getTestsPassed(),
+          report.getTestsTotal());
+      return Optional.of(report);
+    }
+    // RR-1647 — the incoming summary is the generated HTTP/preview suite, a DIFFERENT population
+    // from the worker's own workspace suite captured at report generation. Replacing one with the
+    // other silently discarded a passing 10/10 worker suite the moment a 2/3 generated smoke
+    // landed, dropping the TESTS slot and tripping the trust cap on evidence that never
+    // contradicted the worker suite. Combine the populations instead so both suites stay counted.
+    //
+    // The merge is anchored on a persisted baseline (the pre-rescore counts) rather than on the
+    // current row, so a repeated or re-delivered execution event recomputes the same result
+    // instead of stacking increments.
+    TestPopulationBaseline baseline = testPopulationBaseline(report);
+    int total = baseline.total() + incomingTotal;
+    int passed = Math.min(total, baseline.passed() + incomingPassed);
     List<ReportIssueDTO> issues = parseIssues(report.getIssuesJson());
     ValidationVerificationLedgerBuilder.AccuracyFacts accuracy =
         verificationLedgerBuilder.parseAccuracyFacts(report.getAccuracyJson());
     int criticals = verificationLedgerBuilder.countUnfixedCriticalIssues(issues);
-    // A concrete runner returning 0/0 is evidence that no tests were executed. Do not
-    // fall back to an optimistic LLM coverage label from the original report.
+    // A concrete runner returning 0/0 with no prior population is evidence that no tests were
+    // executed. Do not fall back to an optimistic LLM coverage label from the original report.
     String concreteCoverageLevel = total == 0 ? "NONE" : accuracy.testCoverageLevel();
 
     report.setTestsTotal(total);
     report.setTestsPassed(passed);
+    // RR-1660 — the merged population is only as proven as its weakest contributor: the incoming
+    // summary must prove itself AND the persisted baseline it is being combined with must already
+    // have been proven. Anything else keeps the row unproven.
+    report.setTestExecutionVerified(
+        mergedExecutionProvenance(report.getTestExecutionVerified(), baseline, summary));
+    ExecutableVerificationEvidence executableVerification =
+        executableVerification(
+            report.getFinalBuildPassed(),
+            true,
+            passed,
+            total,
+            scoreEvidenceFailure(report),
+            baseline);
+    report.setExecutableTestsRun(executableVerification.testsRun());
+    report.setExecutableTestsPassed(executableVerification.testsPassed());
+    report.setExecutableVerificationStatus(executableVerification.status());
+    report.setExecutionFailureStage(executableVerification.failureStage());
+    report.setExecutableEvidenceJson(executableVerification.evidenceJson());
     // Keep the existing six-dimension test axis in sync for callers that still render it.
     report.setTestCoverageScore(deriveConcreteTestCoverageScore(total, passed));
     report.setVerifiedScore(
@@ -474,29 +561,149 @@ public class ValidationReportService {
     return 35;
   }
 
-  public Optional<ValidationReportShareDTO> getByShareToken(String shareToken) {
-    return repository.findByShareToken(shareToken).map(this::toShareDTO);
+  private String scoreEvidenceFailure(ValidationReport report) {
+    AccuracyReport accuracy = null;
+    if (report.getAccuracyJson() != null && !report.getAccuracyJson().isBlank()) {
+      try {
+        accuracy = objectMapper.readValue(report.getAccuracyJson(), AccuracyReport.class);
+      } catch (Exception ex) {
+        log.debug(
+            "Executable verification could not parse accuracy evidence for run={}: {}",
+            report.getRunId(),
+            ex.getMessage());
+      }
+    }
+    return scoreEvidenceFailure(report.getFilesGenerated(), accuracy);
   }
 
-  public String share(String runId) {
-    var report =
-        repository
-            .findByRunId(runId)
-            .orElseThrow(() -> new IllegalArgumentException("Report not found for run " + runId));
+  /**
+   * RR-1647 — the pre-rescore concrete-test population (the worker's own workspace suite captured
+   * at report generation). Persisted inside the executable-evidence JSON so repeated concrete-test
+   * rescores merge against a stable anchor instead of stacking increments onto themselves.
+   */
+  private record TestPopulationBaseline(int total, int passed) {}
 
-    if (report.getShareToken() != null) {
-      return report.getShareToken();
+  /**
+   * RR-1660 — provenance of a MERGED test population.
+   *
+   * <p>{@code rescoreAfterConcreteTests} sums a persisted baseline with an incoming summary, so the
+   * combined counts can only be labelled proven when BOTH contributors were proven. A baseline that
+   * contributes no tests is not a contributor and cannot dilute the incoming proof.
+   *
+   * <p>Three-valued throughout: {@code null} means unproven, never proven-false.
+   */
+  private static Boolean mergedExecutionProvenance(
+      Boolean persisted, TestPopulationBaseline baseline, TestExecutionSummary incoming) {
+    boolean incomingProven = incoming != null && incoming.isExecutionProven();
+    if (!incomingProven) {
+      return incoming == null ? persisted : incoming.getExecutionVerified();
+    }
+    if (baseline.total() == 0) {
+      return Boolean.TRUE;
+    }
+    return Boolean.TRUE.equals(persisted) ? Boolean.TRUE : persisted;
+  }
+
+  private TestPopulationBaseline testPopulationBaseline(ValidationReport report) {
+    String json = report.getExecutableEvidenceJson();
+    if (json != null && !json.isBlank()) {
+      try {
+        var root = objectMapper.readTree(json);
+        if (root.hasNonNull("baselineTestsTotal") && root.hasNonNull("baselineTestsPassed")) {
+          int total = Math.max(0, root.get("baselineTestsTotal").asInt());
+          int passed = Math.max(0, Math.min(root.get("baselineTestsPassed").asInt(), total));
+          return new TestPopulationBaseline(total, passed);
+        }
+      } catch (Exception ex) {
+        log.debug(
+            "Could not read the persisted test-population baseline for run={}: {}",
+            report.getRunId(),
+            ex.getMessage());
+      }
+    }
+    int total = report.getTestsTotal() == null ? 0 : Math.max(0, report.getTestsTotal());
+    int passed =
+        report.getTestsPassed() == null ? 0 : Math.max(0, Math.min(report.getTestsPassed(), total));
+    return new TestPopulationBaseline(total, passed);
+  }
+
+  private ExecutableVerificationEvidence executableVerification(
+      Boolean buildPassed,
+      boolean testSummaryPresent,
+      int testsPassed,
+      int testsTotal,
+      String provenanceFailure) {
+    return executableVerification(
+        buildPassed, testSummaryPresent, testsPassed, testsTotal, provenanceFailure, null);
+  }
+
+  private ExecutableVerificationEvidence executableVerification(
+      Boolean buildPassed,
+      boolean testSummaryPresent,
+      int testsPassed,
+      int testsTotal,
+      String provenanceFailure,
+      TestPopulationBaseline baseline) {
+    boolean testsRun = testSummaryPresent && testsTotal > 0;
+    Boolean testsPassedSignal = testsRun ? testsPassed == testsTotal : null;
+    String status;
+    String failureStage = null;
+    if (provenanceFailure != null) {
+      status = "FAILED";
+      failureStage = "PRODUCT_EVIDENCE";
+    } else if (Boolean.FALSE.equals(buildPassed)) {
+      status = "FAILED";
+      failureStage = "BUILD";
+    } else if (testsRun && !Boolean.TRUE.equals(testsPassedSignal)) {
+      status = "FAILED";
+      failureStage = "TESTS";
+    } else if (!Boolean.TRUE.equals(buildPassed)) {
+      status = "UNAVAILABLE";
+      failureStage = "BUILD";
+    } else if (testsRun) {
+      status = "PASSED";
+    } else {
+      status = "BUILD_ONLY";
     }
 
-    String token = generateShareToken();
-    report.setShareToken(token);
-    report.setSharedAt(Instant.now());
-    repository.save(report);
+    var evidence = objectMapper.createObjectNode();
+    if (buildPassed == null) evidence.putNull("buildPassed");
+    else evidence.put("buildPassed", buildPassed);
+    evidence.put("testsRun", testsRun);
+    evidence.put("testsPassed", Math.max(0, testsPassed));
+    evidence.put("testsTotal", Math.max(0, testsTotal));
+    evidence.put("status", status);
+    if (failureStage != null) evidence.put("failureStage", failureStage);
+    if (provenanceFailure != null) evidence.put("provenanceFailure", provenanceFailure);
+    if (baseline != null) {
+      evidence.put("baselineTestsTotal", baseline.total());
+      evidence.put("baselineTestsPassed", baseline.passed());
+    }
+    return new ExecutableVerificationEvidence(
+        testsRun, testsPassedSignal, status, failureStage, evidence.toString());
+  }
 
-    log.info("Validation report shared: run={} token={}", runId, token);
-    meterRegistry.counter("executespec.report.shared").increment();
+  private record ExecutableVerificationEvidence(
+      Boolean testsRun,
+      Boolean testsPassed,
+      String status,
+      String failureStage,
+      String evidenceJson) {}
 
-    return token;
+  public Optional<ValidationReportShareDTO> getByShareToken(String shareToken) {
+    if (shareToken == null || !shareToken.matches("^[A-Za-z0-9_-]{40,64}$")) {
+      return Optional.empty();
+    }
+    String digest = org.apache.commons.codec.digest.DigestUtils.sha256Hex(shareToken);
+    Instant now = Instant.now();
+    return repository
+        .findByShareTokenHash(digest)
+        .filter(
+            report ->
+                report.getShareRevokedAt() == null
+                    && report.getShareExpiresAt() != null
+                    && now.isBefore(report.getShareExpiresAt()))
+        .map(this::toShareDTO);
   }
 
   private List<ReportIssueDTO> extractIssues(ReportInput input) {
@@ -659,13 +866,8 @@ public class ValidationReportService {
         && !input.compileResult().skipped()) {
       passed.add("COMPILATION");
     }
-    if (input.review() != null) {
-      // V2: check mergeBlockers (populated from unfixed CRITICAL issues)
-      boolean hasBlockers =
-          input.review().getMergeBlockers() != null && !input.review().getMergeBlockers().isEmpty();
-      if (!hasBlockers) {
-        passed.add("CODE_REVIEW");
-      }
+    if (input.review() != null && reviewCheckPassed(input.review())) {
+      passed.add("CODE_REVIEW");
     }
     // Integration tests
     if (input.testSummary() != null && input.testSummary().getTotalTests() > 0) {
@@ -674,6 +876,30 @@ public class ValidationReportService {
       }
     }
     return passed;
+  }
+
+  /**
+   * RR-290 — single chokepoint for the CODE_REVIEW badge. Previously the badge was granted whenever
+   * the unused V1 {@code mergeBlockers} list was empty, which kickoff never populates, so an
+   * UNRESOLVED_ISSUES / REVIEW_FAILED verdict (or a reviewer that never ran, RR-289) still showed a
+   * passing code-review check. The badge is now derived from the reviewer's actual verdict AND its
+   * unresolved structured issues: it passes only for an APPROVED / APPROVED_WITH_NOTES verdict with
+   * no unresolved CRITICAL issue. This is tighten-only — it can only remove a badge, never add one.
+   */
+  static boolean reviewCheckPassed(ReviewReport review) {
+    if (review == null) return false;
+    ReviewVerdict verdict = review.getVerdict();
+    boolean verdictPassed =
+        verdict == ReviewVerdict.APPROVED || verdict == ReviewVerdict.APPROVED_WITH_NOTES;
+    if (!verdictPassed) return false;
+    if (review.getIssues() != null) {
+      boolean hasUnresolvedCritical =
+          review.getIssues().stream()
+              .filter(i -> i.getSeverity() == IssueSeverity.CRITICAL)
+              .anyMatch(i -> !i.isAutoFixed() || !i.isFixSucceeded());
+      if (hasUnresolvedCritical) return false;
+    }
+    return true;
   }
 
   private int countFilesGenerated(ReportInput input) {
@@ -685,6 +911,28 @@ public class ValidationReportService {
       }
     }
     return count;
+  }
+
+  static String scoreEvidenceFailure(int productFilesChanged, AccuracyReport accuracy) {
+    if (productFilesChanged <= 0) {
+      return "No approved product-code diff was proven against the admitted Git baseline.";
+    }
+    if (accuracy == null) return null;
+    boolean hasDeterministicMissingRequirements =
+        accuracy.getMissingRequirements() != null && !accuracy.getMissingRequirements().isEmpty();
+    if (accuracy.getSpecAdherenceScore() == 0 && hasDeterministicMissingRequirements) {
+      return "Spec adherence is zero and required product behavior is deterministically missing.";
+    }
+    AccuracyReport.EndpointCoverage endpoints = accuracy.getEndpointCoverage();
+    if (endpoints != null
+        && endpoints.getRequired() != null
+        && !endpoints.getRequired().isEmpty()
+        && endpoints.getCoveragePercent() == 0
+        && endpoints.getMissing() != null
+        && !endpoints.getMissing().isEmpty()) {
+      return "Required runtime surface has zero deterministic endpoint coverage.";
+    }
+    return null;
   }
 
   private PipelineResult computeResult(List<ReportIssueDTO> issues, ReportInput input) {
@@ -778,9 +1026,16 @@ public class ValidationReportService {
     PipelineResult fromReason =
         switch (reason) {
           case "CLEAN_COMPLETION", "CLEAN_WITH_INTERMEDIATE_WARNINGS" ->
-              heuristic == PipelineResult.PASSED_WITH_FIXES
-                  ? PipelineResult.PASSED_WITH_FIXES
-                  : PipelineResult.PASSED;
+              // RR-288 — status text may tighten a result but must never upgrade failed
+              // deterministic evidence. The heuristic returns FAILED only on a compilation failure
+              // or an unresolved CRITICAL issue; a racy/erroneous CLEAN_* terminal reason cannot
+              // rewrite that into PASSED (which would let a shared report say PASSED while its own
+              // issue ledger says FAIL). Preserve FAILED; otherwise report PASSED[_WITH_FIXES].
+              heuristic == PipelineResult.FAILED
+                  ? PipelineResult.FAILED
+                  : (heuristic == PipelineResult.PASSED_WITH_FIXES
+                      ? PipelineResult.PASSED_WITH_FIXES
+                      : PipelineResult.PASSED);
           case "FINAL_BUILD_FAILED", "ALL_TASKS_FAILED", "EXECUTION_ABORTED" ->
               PipelineResult.FAILED;
           case "REVIEWER_UNRESOLVED",
@@ -834,8 +1089,8 @@ public class ValidationReportService {
         countBySeverity(issues, "WOULD_FAIL_REVIEW"),
         countBySeverity(issues, "WOULD_CAUSE_BUG"),
         countBySeverity(issues, "WOULD_FAIL_LINT"),
-        entity.getShareToken() != null,
-        entity.getShareToken() != null ? "/reports/shared/" + entity.getShareToken() : null,
+        legacyShareActive(entity),
+        null,
         entity.isGeneratedAfterImprovements(),
         entity.getAccuracyScore(),
         entity.getAccuracyGrade(),
@@ -928,8 +1183,15 @@ public class ValidationReportService {
         verificationLedger);
   }
 
-  /** Rehydrate the deterministic boot signal for a later concrete-test rescore. */
-  private static BootVerification bootVerification(ValidationReport report) {
+  /**
+   * Rehydrate the deterministic boot signal from a persisted report.
+   *
+   * <p>Package-visible on purpose (RR-1645): every path that re-derives a persisted report's score
+   * — concrete-test rescoring AND the SUPER_ADMIN {@link VerifiedScoreBackfillService} — must
+   * reconstruct boot evidence identically. Passing {@code null} merely because the original {@code
+   * ReportInput} is gone silently upgrades an UNHEALTHY boot to a full BUILD slot.
+   */
+  static BootVerification bootVerification(ValidationReport report) {
     if (report == null || report.getBootVerdict() == null) return null;
     try {
       return new BootVerification(
@@ -957,10 +1219,11 @@ public class ValidationReportService {
     return (int) issues.stream().filter(i -> severity.equals(i.severity())).count();
   }
 
-  private String generateShareToken() {
-    byte[] bytes = new byte[32];
-    new SecureRandom().nextBytes(bytes);
-    return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
+  private boolean legacyShareActive(ValidationReport report) {
+    return report.getShareTokenHash() != null
+        && report.getShareRevokedAt() == null
+        && report.getShareExpiresAt() != null
+        && Instant.now().isBefore(report.getShareExpiresAt());
   }
 
   private String detectLanguage(String filePath) {

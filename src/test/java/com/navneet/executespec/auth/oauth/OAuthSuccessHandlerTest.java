@@ -37,8 +37,23 @@ class OAuthSuccessHandlerTest {
     handler.onAuthenticationSuccess(new MockHttpServletRequest(), response, authToken());
 
     assertThat(response.getRedirectedUrl())
-        .startsWith("http://localhost:5174/auth/callback?token=access-token&refresh=refresh-token");
+        .startsWith("http://localhost:5174/auth/callback?oauth=1");
     assertThat(response.getRedirectedUrl()).doesNotStartWith("http://localhost:8080");
+    // RR-130 / RR-1334 — no credential may appear in the redirect URL.
+    assertThat(response.getRedirectedUrl()).doesNotContain("access-token");
+    assertThat(response.getRedirectedUrl()).doesNotContain("refresh-token");
+    assertThat(response.getRedirectedUrl()).doesNotContain("token=");
+    assertThat(response.getRedirectedUrl()).doesNotContain("refresh=");
+    // ...and the refresh credential is delivered as an HttpOnly cookie instead, so OAuth sessions
+    // can actually renew.
+    assertThat(response.getHeaders("Set-Cookie"))
+        .anySatisfy(
+            cookie ->
+                assertThat(cookie)
+                    .contains("refresh_token=refresh-token")
+                    .contains("Path=/api/auth")
+                    .contains("HttpOnly")
+                    .contains("SameSite=Lax"));
   }
 
   @Test
@@ -97,9 +112,10 @@ class OAuthSuccessHandlerTest {
         .thenReturn(null);
     when(mapper.toProfile(eq("google"), any(), any()))
         .thenReturn(
-            new OAuthProfile("google", "user-sub", "oauth-user@test.local", "OAuth User", null));
+            new OAuthProfile(
+                "google", "user-sub", "oauth-user@test.local", "OAuth User", null, true));
     when(authService.findOrCreateFromOAuth(
-            "google", "user-sub", "oauth-user@test.local", "OAuth User", null))
+            "google", "user-sub", "oauth-user@test.local", "OAuth User", null, true))
         .thenReturn(
             AppUser.builder()
                 .id("user-1")

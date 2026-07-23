@@ -49,16 +49,20 @@ public class SignupClaimController {
       // session may have rolled over its 24h TTL while they took
       // their time signing up.
       log.info("v3 anon-run claim: token not found user={}", userId);
-      return ResponseEntity.ok(new ClaimResponse(false, null, null, "session_not_found"));
+      return ResponseEntity.ok(new ClaimResponse(false, null, "session_not_found"));
     }
     AnonymousRunSession s = bound.get();
     boolean nowMine = userId.equals(s.boundUserId());
+    // RR-665 — the anonymous-session token is a bearer credential and is deliberately NOT echoed
+    // back. The caller already holds it (they just sent it), and once the session is bound the
+    // runId is the only handle they need; returning the bearer only widens where it can be
+    // captured. The field is gone from the response rather than nulled, so no client can start
+    // depending on it again.
     return ResponseEntity.ok(
-        new ClaimResponse(
-            nowMine, s.token(), s.runId(), nowMine ? null : "already_bound_to_another_user"));
+        new ClaimResponse(nowMine, s.runId(), nowMine ? null : "already_bound_to_another_user"));
   }
 
   public record ClaimRequest(@NotBlank String sessionToken) {}
 
-  public record ClaimResponse(boolean claimed, String sessionToken, String runId, String reason) {}
+  public record ClaimResponse(boolean claimed, String runId, String reason) {}
 }

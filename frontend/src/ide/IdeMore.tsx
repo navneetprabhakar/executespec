@@ -4,6 +4,8 @@ import * as api from '@/lib/api';
 import {useAuthStore, selectNormalizedTier, selectIsSuperAdmin} from '@/stores/useAuthStore';
 import {useUiStore} from '@/stores/useUiStore';
 import {IdeBadge, IdeLoader, statusKind} from '@/ide/IdeKit';
+import {LoadError} from '@/ide/LoadError';
+import {toLoadFailure, type LoadFailure} from '@/lib/loadState';
 import {ScoreBadge} from '@/ide/ScoreBadge';
 import {runTitleFor, relTime, providerLabel} from '@/signal/lib/runUtils';
 import {GcpCredentialPanel} from '@/signal/components/GcpCredentialPanel';
@@ -211,7 +213,7 @@ export function IdeRuns() {
                       </span>
                     )}
                     {isSuperAdmin && cost != null && (
-                      <span className='ide-mono ide-work-cost'>${cost.toFixed(2)}</span>
+                      <span className='ide-mono ide-work-cost'>${cost.toFixed(4)}</span>
                     )}
                   </span>
                 </Link>
@@ -270,6 +272,7 @@ export function IdeAccount() {
   const theme = useUiStore((s) => s.theme);
   const setTheme = useUiStore((s) => s.setTheme);
   const [notifPrefs, setNotifPrefs] = useState<api.NotificationPrefRow[] | null>(null);
+  const [notifFailure, setNotifFailure] = useState<LoadFailure | null>(null);
   const [notifBusy, setNotifBusy] = useState<string | null>(null);
   const [notifOpen, setNotifOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
@@ -297,8 +300,12 @@ export function IdeAccount() {
   useEffect(() => {
     api
       .getNotificationPreferences()
-      .then(setNotifPrefs)
-      .catch(() => setNotifPrefs([]));
+      .then((rows) => {
+        setNotifPrefs(rows);
+        setNotifFailure(null);
+      })
+      // D4: an empty list renders "No notification events to configure yet."
+      .catch((e: unknown) => setNotifFailure(toLoadFailure(e)));
   }, []);
 
   async function togglePref(eventType: string, channel: 'IN_APP' | 'EMAIL', enabled: boolean) {
@@ -411,7 +418,7 @@ export function IdeAccount() {
   const email = accountEmail(user);
   const name = accountDisplayName(user);
   const usage = usageLabel(permissions);
-  const limits = limitRows(permissions);
+  const limits = limitRows(permissions, tier);
 
   function Seg({
     on,
@@ -446,7 +453,10 @@ export function IdeAccount() {
         <div style={{fontSize: 15, fontWeight: 600, color: 'var(--ide-fg-bright)'}}>{name}</div>
         <div style={{display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap'}}>
           <IdeBadge kind='ok'>{tier} tier</IdeBadge>
-          <IdeBadge kind='warn'>{usage} work items</IdeBadge>
+          <IdeBadge kind='warn'>
+            {usage}
+            {usage === 'Managed AI credits' ? '' : ' work items'}
+          </IdeBadge>
           {user?.globalRole === 'SUPER_ADMIN' && <IdeBadge kind='bad'>SUPER_ADMIN</IdeBadge>}
         </div>
       </div>
@@ -593,7 +603,9 @@ export function IdeAccount() {
         <span className='ide-tree-chev'>{notifOpen ? '▾' : '▸'}</span>
         <span>Notifications{notifPrefs ? ` · ${notifPrefs.length}` : ''}</span>
       </button>
-      {!notifOpen ? null : notifPrefs === null ? (
+      {!notifOpen ? null : notifFailure ? (
+        <LoadError failure={notifFailure} what='notification settings' />
+      ) : notifPrefs === null ? (
         <IdeLoader label='Loading notification preferences…' />
       ) : notifPrefs.length === 0 ? (
         <div className='ide-empty'>No notification events to configure yet.</div>
@@ -769,6 +781,9 @@ export function IdeDeployments() {
   const [items, setItems] = useState<api.DeploymentSummary[] | null>(null);
   const [busy, setBusy] = useState('');
   const [msg, setMsg] = useState('');
+  // A failed load must not render as "no deployments yet" — that is an
+  // affirmative claim the app cannot make when the request never succeeded.
+  const [loadErr, setLoadErr] = useState('');
   // A destructive deployment action awaiting confirmation (rollback / delete).
   const [pendingAct, setPendingAct] = useState<{
     key: string;
@@ -781,8 +796,16 @@ export function IdeDeployments() {
   function load() {
     api
       .getDeployments()
-      .then(setItems)
-      .catch(() => setItems([]));
+      .then((d) => {
+        setLoadErr('');
+        setItems(d);
+      })
+      .catch((e: unknown) => {
+        setLoadErr(
+          e instanceof Error ? e.message : 'Could not load deployments. Please try again.',
+        );
+        setItems([]);
+      });
   }
   useEffect(() => {
     load();
@@ -817,6 +840,8 @@ export function IdeDeployments() {
       )}
       {items === null ? (
         <IdeLoader label='Loading deployments…' />
+      ) : loadErr ? (
+        <div className='ide-empty'>Could not load deployments. {loadErr}</div>
       ) : items.length === 0 ? (
         <div className='ide-empty'>No permanent deployments yet.</div>
       ) : (

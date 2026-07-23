@@ -10,9 +10,11 @@ import java.util.UUID;
 import com.navneet.executespec.activity.ActivityEventEmitter;
 import com.navneet.executespec.activity.ActivityEventType;
 import com.navneet.executespec.auth.entity.AppUser;
+import com.navneet.executespec.auth.entity.Project;
+import com.navneet.executespec.auth.repository.ProjectRepository;
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.project.security.ProjectAccessGuard;
-import com.navneet.executespec.standards.OrgStandardRepository;
+import com.navneet.executespec.standards.EffectiveStandardsResolver;
 import com.navneet.executespec.standards.ProjectStandardOverride;
 import com.navneet.executespec.standards.ProjectStandardOverrideRepository;
 import com.navneet.executespec.standards.StandardsViolation;
@@ -34,7 +36,8 @@ class StandardsOverrideControllerTest {
 
   @Mock ProjectStandardOverrideRepository overrideRepo;
   @Mock StandardsViolationRepository violationRepo;
-  @Mock OrgStandardRepository orgStandardRepo;
+  @Mock ProjectRepository projectRepository;
+  @Mock EffectiveStandardsResolver effectiveStandardsResolver;
   @Mock ProjectAccessGuard projectAccessGuard;
   @Mock ActivityEventEmitter emitter;
   @Mock ObjectProvider<ActivityEventEmitter> emitterProvider;
@@ -72,6 +75,8 @@ class StandardsOverrideControllerTest {
         fakeAuth(),
         fakeUserDetails());
 
+    verify(projectAccessGuard).assertCanAdmin(eq(projectId), any(AppUserDetails.class));
+    verify(projectAccessGuard, never()).assertCanWrite(anyString(), any(AppUserDetails.class));
     verify(violationRepo)
         .save(
             argThat(
@@ -150,6 +155,18 @@ class StandardsOverrideControllerTest {
 
   @Test
   void addProjectException_persistsNotApplicable_andEmits() {
+    // RR-596 — the write path now resolves the project's org and validates the target org standard.
+    Project project = new Project();
+    project.setOrgId("org-1");
+    when(projectRepository.findById(projectId)).thenReturn(Optional.of(project));
+    when(effectiveStandardsResolver.validateProjectException(
+            eq("org-1"),
+            eq("std-a"),
+            eq(ProjectStandardOverride.OverrideType.NOT_APPLICABLE),
+            any()))
+        .thenReturn(
+            new EffectiveStandardsResolver.ExceptionWriteCheck(
+                EffectiveStandardsResolver.ExceptionWriteCheck.Result.OK, null));
     when(overrideRepo.findByProjectIdAndStandardId(projectId, "std-a"))
         .thenReturn(Optional.empty());
     when(overrideRepo.save(any(ProjectStandardOverride.class))).thenAnswer(i -> i.getArgument(0));
@@ -164,6 +181,8 @@ class StandardsOverrideControllerTest {
         fakeAuth(),
         fakeUserDetails());
 
+    verify(projectAccessGuard).assertCanAdmin(eq(projectId), any(AppUserDetails.class));
+    verify(projectAccessGuard, never()).assertCanWrite(anyString(), any(AppUserDetails.class));
     verify(overrideRepo)
         .save(
             argThat(
@@ -212,6 +231,8 @@ class StandardsOverrideControllerTest {
 
     controller.removeProjectException(projectId, "std-a", fakeAuth(), fakeUserDetails());
 
+    verify(projectAccessGuard).assertCanAdmin(eq(projectId), any(AppUserDetails.class));
+    verify(projectAccessGuard, never()).assertCanWrite(anyString(), any(AppUserDetails.class));
     verify(overrideRepo).delete(existing);
     verify(emitter)
         .emit(

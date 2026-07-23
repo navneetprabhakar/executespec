@@ -6,8 +6,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
 
@@ -36,10 +38,23 @@ public class CodeChunkStore {
 
   private final JdbcTemplate jdbc;
 
-  /** Insert all chunks for ONE source file at a given content SHA. */
-  public void insertFileChunks(
-      String projectId,
-      String repoId,
+  @Value("${project.rag.embedding.max-cosine-distance:0.55}")
+  private double maxCosineDistance = 0.55;
+
+  /** Raised when a stale/expired index worker attempts to publish after losing its DB fence. */
+  public static final class LeaseLostException extends RuntimeException {
+    public LeaseLostException() {
+      super("code-index lease is no longer current");
+    }
+  }
+
+  /**
+   * Atomically replace all chunks for one file, guarded by the current lease owner + fencing token.
+   * A stale JVM cannot delete a newer worker's chunks or publish after lease expiry.
+   */
+  @Transactional
+  public void replaceFileChunks(
+      CodeIndexStateStore.Lease lease,
       String repoFullName,
       String filePath,
       String fileSha,
@@ -48,27 +63,67 @@ public class CodeChunkStore {
     if (chunks.size() != embeddings.size()) {
       throw new IllegalArgumentException("chunks/embeddings size mismatch");
     }
+    assertLease(lease);
+    jdbc.update(
+        "DELETE FROM project_code_chunk c WHERE c.project_id=? AND c.repo_id=? AND c.file_path=?"
+            + " AND EXISTS (SELECT 1 FROM project_code_index_state s WHERE s.project_id=?"
+            + " AND s.repo_id=? AND s.status='INDEXING' AND s.lease_owner=? AND s.lease_token=?"
+            + " AND s.lease_expires_at>NOW())",
+        lease.projectId(),
+        lease.repoId().toString(),
+        filePath,
+        lease.projectId(),
+        lease.repoId(),
+        lease.owner(),
+        lease.fencingToken());
     for (int i = 0; i < chunks.size(); i++) {
       ChunkingService.Chunk c = chunks.get(i);
-      jdbc.update(
-          "INSERT INTO project_code_chunk(id, project_id, repo_id, repo_full_name, file_path,"
-              + " file_sha, chunk_index, content, token_count, embedding)"
-              + " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?::vector)",
-          UUID.randomUUID().toString(),
-          projectId,
-          repoId,
-          repoFullName,
-          filePath,
-          fileSha,
-          c.index(),
-          c.content(),
-          c.tokenCount(),
-          toVectorLiteral(embeddings.get(i)));
+      int inserted =
+          jdbc.update(
+              "INSERT INTO project_code_chunk(id, project_id, repo_id, repo_full_name, file_path,"
+                  + " file_sha, chunk_index, content, token_count, embedding) SELECT ?, ?, ?, ?, ?,"
+                  + " ?, ?, ?, ?, ?::vector WHERE EXISTS (SELECT 1 FROM project_code_index_state"
+                  + " WHERE project_id=? AND repo_id=? AND status='INDEXING' AND lease_owner=? AND"
+                  + " lease_token=? AND lease_expires_at>NOW())",
+              UUID.randomUUID().toString(),
+              lease.projectId(),
+              lease.repoId().toString(),
+              repoFullName,
+              filePath,
+              fileSha,
+              c.index(),
+              c.content(),
+              c.tokenCount(),
+              toVectorLiteral(embeddings.get(i)),
+              lease.projectId(),
+              lease.repoId(),
+              lease.owner(),
+              lease.fencingToken());
+      if (inserted != 1) throw new LeaseLostException();
     }
   }
 
-  /** Nearest code chunks across the project, optionally narrowed to one repo. */
+  /**
+   * Nearest code chunks across the project, optionally narrowed to one repo.
+   *
+   * <p>The configured cosine-distance ceiling is applied here, exactly as it is for the document
+   * corpus: without it an off-topic query still returns k confident-looking snippets, and the
+   * caller has no signal that the lexical {@code search_repo_files} path is the honest fallback.
+   */
   public List<RetrievedCodeChunk> nearest(String projectId, String repoId, float[] query, int k) {
+    return nearest(projectId, repoId, query, k, maxCosineDistance);
+  }
+
+  public List<RetrievedCodeChunk> nearest(
+      String projectId, String repoId, float[] query, int k, double maxDistance) {
+    double ceiling = Math.max(0.0, Math.min(2.0, maxDistance));
+    return rawNearest(projectId, repoId, query, k).stream()
+        .filter(hit -> Double.isFinite(hit.distance()) && hit.distance() <= ceiling)
+        .toList();
+  }
+
+  private List<RetrievedCodeChunk> rawNearest(
+      String projectId, String repoId, float[] query, int k) {
     StringBuilder sql =
         new StringBuilder(
             "SELECT repo_id, repo_full_name, file_path, chunk_index, content, token_count,"
@@ -98,31 +153,72 @@ public class CodeChunkStore {
   }
 
   /** Map of {@code file_path → file_sha} already indexed for a repo (for incremental reindex). */
-  public Map<String, String> indexedFileShas(String repoId) {
+  public Map<String, String> indexedFileShas(String projectId, String repoId) {
     Map<String, String> out = new HashMap<>();
     jdbc.query(
-        "SELECT DISTINCT file_path, file_sha FROM project_code_chunk WHERE repo_id = ?",
+        "SELECT DISTINCT file_path, file_sha FROM project_code_chunk WHERE project_id=? AND"
+            + " repo_id=?",
         (java.sql.ResultSet rs) -> {
           out.put(rs.getString("file_path"), rs.getString("file_sha"));
         },
+        projectId,
         repoId);
     return out;
   }
 
-  public void deleteFile(String repoId, String filePath) {
-    jdbc.update(
-        "DELETE FROM project_code_chunk WHERE repo_id = ? AND file_path = ?", repoId, filePath);
+  /** Delete one removed/no-longer-indexable file under the same fencing contract. */
+  public boolean deleteFile(CodeIndexStateStore.Lease lease, String filePath) {
+    int deleted =
+        jdbc.update(
+            "DELETE FROM project_code_chunk c WHERE c.project_id=? AND c.repo_id=? AND"
+                + " c.file_path=? AND EXISTS (SELECT 1 FROM project_code_index_state s WHERE"
+                + " s.project_id=? AND s.repo_id=? AND s.status='INDEXING' AND s.lease_owner=? AND"
+                + " s.lease_token=? AND s.lease_expires_at>NOW())",
+            lease.projectId(),
+            lease.repoId().toString(),
+            filePath,
+            lease.projectId(),
+            lease.repoId(),
+            lease.owner(),
+            lease.fencingToken());
+    if (deleted == 0) {
+      assertLease(lease); // zero chunks is fine; an invalid fence is not
+    }
+    return deleted > 0;
   }
 
-  public void deleteRepo(String repoId) {
-    jdbc.update("DELETE FROM project_code_chunk WHERE repo_id = ?", repoId);
-  }
-
-  public boolean hasAnyForRepo(String repoId) {
+  public int countChunks(String projectId, String repoId) {
     Integer n =
         jdbc.queryForObject(
-            "SELECT COUNT(*) FROM project_code_chunk WHERE repo_id = ?", Integer.class, repoId);
+            "SELECT COUNT(*) FROM project_code_chunk WHERE project_id=? AND repo_id=?",
+            Integer.class,
+            projectId,
+            repoId);
+    return n == null ? 0 : n;
+  }
+
+  public boolean hasAnyForRepo(String projectId, String repoId) {
+    Integer n =
+        jdbc.queryForObject(
+            "SELECT COUNT(*) FROM project_code_chunk WHERE project_id=? AND repo_id=?",
+            Integer.class,
+            projectId,
+            repoId);
     return n != null && n > 0;
+  }
+
+  private void assertLease(CodeIndexStateStore.Lease lease) {
+    Integer current =
+        jdbc.queryForObject(
+            "SELECT COUNT(*) FROM project_code_index_state WHERE project_id=? AND repo_id=?"
+                + " AND status='INDEXING' AND lease_owner=? AND lease_token=?"
+                + " AND lease_expires_at>NOW()",
+            Integer.class,
+            lease.projectId(),
+            lease.repoId(),
+            lease.owner(),
+            lease.fencingToken());
+    if (current == null || current != 1) throw new LeaseLostException();
   }
 
   private static String toVectorLiteral(float[] v) {

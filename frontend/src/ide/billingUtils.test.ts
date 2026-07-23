@@ -2,15 +2,57 @@ import {describe, expect, it} from 'vitest';
 
 import {
   billingUsageSummary,
-  FALLBACK_PLAN_CARDS,
   invoiceDisplay,
   managedKind,
   money,
+  paymentAuditToRow,
   planCardsFrom,
   planMoney,
 } from './billingUtils';
 import type * as api from '@/lib/api';
 import type {BillingPlan} from '@/lib/api/billing';
+
+describe('RR-359 — payment audit rows map to invoice display', () => {
+  it('converts minor units, provider and captured event into a Paid invoice, not amount — / Pending', () => {
+    const row = paymentAuditToRow({
+      id: 'p1',
+      amountMinor: 42500,
+      currency: 'INR',
+      gatewayProvider: 'razorpay',
+      gatewayPaymentId: 'pay_abc',
+      eventType: 'PAYMENT_CAPTURED',
+      createdAt: '2026-07-01T00:00:00Z',
+    });
+    expect(row.amount).toBe(425);
+    expect(row.gateway).toBe('razorpay');
+    expect(row.paidAt).toBe('2026-07-01T00:00:00Z');
+    const display = invoiceDisplay(row);
+    expect(display.amount).toBe('INR 425.00');
+    expect(display.paid).toBe(true);
+    expect(display.number).toBe('pay_abc');
+  });
+
+  it('leaves a non-captured lifecycle event unpaid but still shows the real amount', () => {
+    const row = paymentAuditToRow({
+      id: 'p2',
+      amountMinor: 2000,
+      currency: 'USD',
+      gatewayProvider: 'stripe',
+      eventType: 'PAYMENT_FAILED',
+      createdAt: '2026-07-02T00:00:00Z',
+    });
+    expect(row.amount).toBe(20);
+    expect(row.paidAt).toBeUndefined();
+    expect(invoiceDisplay(row).paid).toBe(false);
+    expect(invoiceDisplay(row).amount).toBe('USD 20.00');
+  });
+
+  it('renders a null amount as — rather than crashing', () => {
+    const row = paymentAuditToRow({id: 'p3', amountMinor: null, eventType: 'SUBSCRIPTION_CREATED'});
+    expect(row.amount).toBeUndefined();
+    expect(invoiceDisplay(row).amount).toBe('—');
+  });
+});
 
 describe('billingUtils', () => {
   it('formats dashboard and plan money values', () => {
@@ -129,17 +171,24 @@ describe('billingUtils', () => {
     expect(cards.find((card) => card.tier === 'ENTERPRISE')?.monthly).toBeNull();
   });
 
-  it('keeps the degraded fallback ladder explicit', () => {
-    expect(FALLBACK_PLAN_CARDS.map((card) => card.tier)).toEqual([
-      'FREE',
-      'PRO',
-      'TEAM',
-      'ENTERPRISE',
-    ]);
-    expect(FALLBACK_PLAN_CARDS.find((card) => card.tier === 'PRO')).toMatchObject({
-      monthly: 29,
-      yearly: 289,
-    });
+  // RR-357: the previous test here PINNED the stale invented ladder (PRO $29/$289, TEAM
+  // $39/seat, no BYOK) as expected behaviour, while V253's canonical rows are PRO $20,
+  // PRO+ $100, BYOK $50 and TEAM $50/seat. Commerce now fails closed instead: when the
+  // plans API cannot be trusted there are no prices to render and no checkout to enter.
+  it('exposes no hardcoded saleable price ladder', async () => {
+    const mod = (await import('./billingUtils')) as Record<string, unknown>;
+    expect(mod.FALLBACK_PLAN_CARDS).toBeUndefined();
+  });
+
+  // planCardsFrom synthesizes the FREE and ENTERPRISE bookends unconditionally, so an empty
+  // API response still produces two cards with no price. Callers must therefore detect the
+  // pricing-unavailable state from the raw rows, not from the derived card count — IdeBilling
+  // keys `pricingUnavailable` off `planRows.length === 0` for exactly this reason.
+  it('yields only unpriced bookends for an empty plan list', () => {
+    const cards = planCardsFrom([]);
+    expect(cards.map((card) => card.tier)).toEqual(['FREE', 'ENTERPRISE']);
+    expect(cards.every((card) => card.monthly == null || card.monthly === 0)).toBe(true);
+    expect(cards.some((card) => (card.monthly ?? 0) > 0)).toBe(false);
   });
 });
 

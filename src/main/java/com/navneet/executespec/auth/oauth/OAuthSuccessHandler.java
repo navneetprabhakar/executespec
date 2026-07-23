@@ -60,6 +60,12 @@ public class OAuthSuccessHandler implements AuthenticationSuccessHandler {
       "${auth.oauth.app-return-url:${app.cors.app-return-url:http://localhost:5173/auth/callback}}")
   private String appReturnUrl;
 
+  /** Mirrors {@code AuthController.REFRESH_COOKIE_MAX_AGE_SECONDS} (7 days). */
+  private static final int REFRESH_COOKIE_MAX_AGE_SECONDS = 7 * 24 * 3600;
+
+  @Value("${auth.refresh-cookie.secure:false}")
+  private boolean refreshCookieSecure;
+
   @Override
   public void onAuthenticationSuccess(
       HttpServletRequest request, HttpServletResponse response, Authentication authentication)
@@ -97,11 +103,21 @@ public class OAuthSuccessHandler implements AuthenticationSuccessHandler {
               profile.oauthId(),
               profile.email(),
               profile.name(),
-              profile.avatarUrl());
+              profile.avatarUrl(),
+              profile.emailVerified());
 
-      // Generate JWT tokens
-      String accessToken = jwtUtil.generateAccessToken(user, null);
+      // RR-130 / RR-1334: no credential ever goes in the redirect URL. Query parameters land in
+      // browser history, referrers, reverse-proxy and access logs, and screenshots — an
+      // unacceptable
+      // home for a bearer token, let alone a seven-day refresh credential. Instead the refresh
+      // token
+      // is set as an HttpOnly cookie exactly as the password-login path does, and the callback page
+      // exchanges it for an access token through the existing POST /api/auth/refresh rotation
+      // endpoint. This also fixes the second half of RR-1334: OAuth sessions previously had NO
+      // refresh cookie at all (the frontend discarded the URL copy), so they died at access-token
+      // expiry with no way to renew.
       String refreshToken = jwtUtil.generateRefreshToken(user);
+      setRefreshCookie(request, response, refreshToken);
 
       log.info(
           "OAuth login success: provider={}, email={}, userId={}",
@@ -114,12 +130,7 @@ public class OAuthSuccessHandler implements AuthenticationSuccessHandler {
       // forward it so the browser lands back on /cli-login (the email+password path already
       // preserves this via ?redirect=).
       String postLoginRedirect = consumeRedirectCookie(request, response);
-      String redirectUrl =
-          baseRedirectUrl
-              + "?token="
-              + URLEncoder.encode(accessToken, StandardCharsets.UTF_8)
-              + "&refresh="
-              + URLEncoder.encode(refreshToken, StandardCharsets.UTF_8);
+      String redirectUrl = baseRedirectUrl + "?oauth=1";
       if (postLoginRedirect != null) {
         redirectUrl += "&redirect=" + URLEncoder.encode(postLoginRedirect, StandardCharsets.UTF_8);
       }
@@ -136,6 +147,26 @@ public class OAuthSuccessHandler implements AuthenticationSuccessHandler {
       response.sendRedirect(
           loginUrl() + "?error=" + URLEncoder.encode("oauth_failed", StandardCharsets.UTF_8));
     }
+  }
+
+  /**
+   * Sets the same {@code refresh_token} cookie the password-login path issues — HttpOnly, scoped to
+   * {@code /api/auth}, {@code SameSite=Lax} so it survives the top-level redirect back from the
+   * provider. {@code Secure} follows {@code auth.refresh-cookie.secure} (true on dev/prod) and is
+   * additionally forced on when the request itself arrived over TLS.
+   */
+  private void setRefreshCookie(
+      HttpServletRequest request, HttpServletResponse response, String refreshToken) {
+    StringBuilder cookie =
+        new StringBuilder("refresh_token=")
+            .append(refreshToken)
+            .append("; Path=/api/auth; Max-Age=")
+            .append(REFRESH_COOKIE_MAX_AGE_SECONDS)
+            .append("; HttpOnly; SameSite=Lax");
+    if (refreshCookieSecure || request.isSecure()) {
+      cookie.append("; Secure");
+    }
+    response.addHeader("Set-Cookie", cookie.toString());
   }
 
   private String callbackUrl() {

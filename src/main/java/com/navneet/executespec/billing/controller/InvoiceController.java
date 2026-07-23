@@ -45,6 +45,11 @@ public class InvoiceController {
 
   @GetMapping("/api/billing/profile")
   public BillingProfile getProfile(@AuthenticationPrincipal AppUserDetails principal) {
+    // RR-183: billing profile + invoice reads were authorized for any authenticated org member off
+    // principal.getOrgId() with no billing capability. In a real (multi-member) org a plain
+    // DEVELOPER could read the whole org's tax identity + every invoice and (via PUT) rewrite the
+    // legal billing profile. Gate every customer billing surface on the billing capability.
+    requireBillingRead(principal);
     String userId = principal.getUser().getId();
     String orgId = principal.getUser().getOrgId();
 
@@ -57,6 +62,9 @@ public class InvoiceController {
   @PutMapping("/api/billing/profile")
   public BillingProfile updateProfile(
       @AuthenticationPrincipal AppUserDetails principal, @RequestBody BillingProfile body) {
+    // RR-183: rewriting the org's legal billing profile (GSTIN / PAN / legal name / tax address /
+    // currency) requires explicit billing-profile-management authority, not mere org membership.
+    requireBillingProfileManage(principal);
     String userId = principal.getUser().getId();
     String orgId = principal.getUser().getOrgId();
 
@@ -95,6 +103,7 @@ public class InvoiceController {
   @GetMapping("/api/billing/invoices")
   public Page<Invoice> myInvoices(
       @AuthenticationPrincipal AppUserDetails principal, Pageable pageable) {
+    requireBillingRead(principal);
     String userId = principal.getUser().getId();
     String orgId = principal.getUser().getOrgId();
     if (orgId != null) {
@@ -106,6 +115,7 @@ public class InvoiceController {
   @GetMapping("/api/billing/invoices/{id}")
   public InvoiceDetail myInvoiceDetail(
       @AuthenticationPrincipal AppUserDetails principal, @PathVariable UUID id) {
+    requireBillingRead(principal);
     Invoice invoice =
         invoiceService
             .getInvoice(id)
@@ -118,6 +128,7 @@ public class InvoiceController {
   @GetMapping("/api/billing/invoices/{id}/pdf")
   public ResponseEntity<?> downloadPdf(
       @AuthenticationPrincipal AppUserDetails principal, @PathVariable UUID id) {
+    requireBillingRead(principal);
     Invoice invoice =
         invoiceService
             .getInvoice(id)
@@ -281,6 +292,28 @@ public class InvoiceController {
         userId.equals(invoice.getUserId()) || (orgId != null && orgId.equals(invoice.getOrgId()));
     if (!owns) {
       throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Not your invoice");
+    }
+  }
+
+  /**
+   * RR-183 — reading billing profile / own invoices requires the billing-view capability. Solo
+   * (personal-org) paid users retain it via {@code freeUserPermissions}; a plain DEVELOPER in a
+   * real multi-member org does not, so cross-member org billing is no longer readable by anyone
+   * with a mere org pointer.
+   */
+  private void requireBillingRead(AppUserDetails principal) {
+    var perms = permissionService.getPermissions(principal.getUser().getId());
+    if (!perms.canViewInvoices()) {
+      throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Billing access required");
+    }
+  }
+
+  /** RR-183 — mutating the legal billing profile requires billing-profile-management authority. */
+  private void requireBillingProfileManage(AppUserDetails principal) {
+    var perms = permissionService.getPermissions(principal.getUser().getId());
+    if (!perms.canManageBillingProfile()) {
+      throw new ResponseStatusException(
+          HttpStatus.FORBIDDEN, "Billing profile management access required");
     }
   }
 

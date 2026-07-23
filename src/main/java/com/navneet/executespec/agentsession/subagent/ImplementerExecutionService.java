@@ -24,6 +24,7 @@ import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.config.featureflag.FeatureFlagService;
 import com.navneet.executespec.cost.RunCostTracker;
 import com.navneet.executespec.router.AgentTier;
+import com.navneet.executespec.router.ModelAccessService;
 import com.navneet.executespec.specchat.SpecChatService;
 import com.navneet.executespec.tool.ExecutionContext;
 import com.navneet.executespec.tool.ToolRegistry;
@@ -59,10 +60,12 @@ public class ImplementerExecutionService {
   private final AgentTurnRepository turnRepository;
   private final AgentActionEventRepository eventRepository;
   private final ImplementerMutationService mutationService;
+  private final ImplementerWorkspaceScope workspaceScope;
   private final SubagentProtocolService protocolService;
   private final ToolRegistry toolRegistry;
   private final SpecChatService specChatService;
   private final ObjectMapper objectMapper;
+  private final ModelAccessService modelAccessService;
 
   public ExecutionResult execute(
       String parentSessionId,
@@ -98,13 +101,23 @@ public class ImplementerExecutionService {
     if (!isLocalSurface(session)) {
       throw new SecurityException("IMPLEMENTER requires a CLI or VS Code session");
     }
-    Path root = Path.of(scope).toAbsolutePath().normalize();
-    if (!Files.isDirectory(root))
-      throw new IllegalArgumentException("writer scope must be a directory");
+    // Server-authoritative scope. The loop below binds SERVER read/write/build/test tools, so the
+    // directory must come from server state; a caller-named absolute host path is refused.
+    Path root = workspaceScope.resolve(session, scope);
 
     // Validate before any model call. Every mutation callback repeats this check.
     protocolService.authorizeWriter(
         parentSessionId, reservationId, root.toString(), session.getUserId(), orgId);
+
+    // RR-497 — the writer-execute path forwarded caller provider/model straight to the model loop,
+    // skipping the account/org model entitlement checks the normal stream startup enforces. Resolve
+    // the effective route and validate it so a PAT user cannot drive a model outside their picker
+    // entitlement or an impossible provider/model pair. A null (tier-routed) model is a no-op.
+    String effectiveProvider =
+        provider == null || provider.isBlank() ? session.getDefaultProvider() : provider;
+    String effectiveModel = model == null || model.isBlank() ? session.getDefaultModel() : model;
+    modelAccessService.assertModelAllowed(String.valueOf(user.getUser().getId()), effectiveModel);
+    modelAccessService.assertProviderModelPair(effectiveProvider, effectiveModel);
     int rounds = Math.max(1, Math.min(MAX_ROUNDS, maxRounds <= 0 ? MAX_ROUNDS : maxRounds));
     String turnId = UUID.randomUUID().toString();
     checkpoint(parentSessionId, turnId, reservationId, root, "PREPARED", objective);
@@ -115,8 +128,8 @@ public class ImplementerExecutionService {
             context,
             TOOLS,
             (tool, args) ->
-                mutationService.mutate(
-                    parentSessionId, reservationId, root.toString(), tool, args, user, orgId));
+                mutationService.mutateResolved(
+                    parentSessionId, reservationId, root, tool, args, user, orgId));
     String systemPrompt = systemPrompt(root, rounds);
     try {
       specChatService.runTurnBoundedWithTools(
@@ -125,8 +138,8 @@ public class ImplementerExecutionService {
           parentSessionId,
           orgId,
           List.of(Map.of("role", "user", "content", objective)),
-          provider == null || provider.isBlank() ? session.getDefaultProvider() : provider,
-          model == null || model.isBlank() ? session.getDefaultModel() : model,
+          effectiveProvider,
+          effectiveModel,
           AgentTier.WORKHORSE,
           "ImplementerExecutionService",
           systemPrompt,

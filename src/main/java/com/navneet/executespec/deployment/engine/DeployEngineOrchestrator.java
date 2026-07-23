@@ -55,6 +55,13 @@ public class DeployEngineOrchestrator {
   private static final String DEFAULT_AR_REPO = "executespec-apps";
   private static final int DEFAULT_TTL_DAYS = 30;
 
+  /**
+   * Placeholder for the NOT NULL {@code image_uri} column between row creation and the build
+   * completing. Deliberately not a resolvable reference, so a half-finished row can never be
+   * mistaken for a deployable image.
+   */
+  private static final String PENDING_IMAGE_URI = "pending://build-not-started";
+
   private final UserGcpCredentialProvider credentialProvider;
   private final UserCloudRunDeployer cloudRunDeployer;
   private final UserImageBuilder imageBuilder;
@@ -64,6 +71,8 @@ public class DeployEngineOrchestrator {
   private final StateStore stateStore;
   private final SseBroadcaster sseBroadcaster;
   private final ObjectMapper objectMapper;
+  private final com.navneet.executespec.deployment.credential.DeploymentCredentialRepository
+      credentialRepo;
 
   /**
    * Initiate a Path A (Cloud Run Direct) deployment. Returns immediately with a PENDING deployment;
@@ -143,7 +152,24 @@ public class DeployEngineOrchestrator {
     deployment.setAppPort(appPort);
     deployment.setCreatedAt(Instant.now().toString());
     deployment.setTtlExpiresAt(Instant.now().plus(DEFAULT_TTL_DAYS, ChronoUnit.DAYS).toString());
-    deployment.setCredentialId(gcpProject); // reference to credential's project
+
+    // RR-1394: this row previously could not be persisted at all.
+    //  * `strategy` and `image_uri` are legacy NOT NULL columns (V1 baseline) but were only set
+    //    later in the async pipeline, after the row had to exist.
+    //  * `credential_id` is a foreign key to deployment_credential.id (V30) and was being given
+    //    the GCP *project string*, which is not an id in that table.
+    // The confirm endpoint therefore failed at persistence every time. Both columns now carry
+    // schema-valid placeholders that the pipeline overwrites with the real strategy and image
+    // once they are known, and credential_id resolves to the actual credential row (or stays
+    // null, which the FK permits, rather than pointing at a row that does not exist).
+    deployment.setStrategy(Deployment.DeployStrategy.NODE);
+    deployment.setImageUri(PENDING_IMAGE_URI);
+    deployment.setCredentialId(
+        credentialRepo
+            .findByUserIdAndProjectIdAndCloudProvider(userId, gcpProject, "gcp")
+            .or(() -> credentialRepo.findByUserIdAndCloudProvider(userId, "gcp"))
+            .map(com.navneet.executespec.deployment.credential.DeploymentCredential::getId)
+            .orElse(null));
 
     deploymentRepo.save(deployment);
 

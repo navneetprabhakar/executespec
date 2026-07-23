@@ -74,7 +74,7 @@ const ResetPasswordPage = lazy(() =>
   import('@/signal/pages/AuthRecoveryPages').then((m) => ({default: m.ResetPasswordPage})),
 );
 const AcceptInvitePage = lazy(() =>
-  import('@/signal/pages/ExtraPages').then((m) => ({default: m.AcceptInvitePage})),
+  import('@/signal/pages/AcceptInvitePage').then((m) => ({default: m.AcceptInvitePage})),
 );
 const TermsPage = lazy(() =>
   import('@/signal/pages/LegalPages').then((m) => ({default: m.TermsPage})),
@@ -93,8 +93,10 @@ function LegacyRedirect() {
   let path = location.pathname;
   // /signal/* prefix dropped — the app IS Signal now
   if (path.startsWith('/signal/')) path = path.replace(/^\/signal/, '');
-  // v3-era prefixes
+  // v3-era prefixes. `/v4/*` is routed to this mapper too, so it needs the same
+  // strip — without it a `/v4/...` URL fell through unmapped (see the guard below).
   path = path.replace(/^\/v3/, '');
+  path = path.replace(/^\/v4/, '');
   path = path.replace(/^\/p\/empty\b/, '/projects/empty');
   path = path.replace(/^\/p\/([^/]+)\/r\//, '/projects/$1/runs/');
   path = path.replace(/^\/p\//, '/projects/');
@@ -119,6 +121,12 @@ function LegacyRedirect() {
     path = '/admin';
   if (path === '/claim') path = '/welcome';
   if (path === '/landing' || path === '') path = '/home';
+  // An unmapped legacy path still matches the legacy catcher route that rendered
+  // this component (e.g. `/team/:userId`, `/org/<anything>`). Redirecting to it
+  // would re-render LegacyRedirect, and <Navigate> renders null with stable
+  // effect deps — so the user gets a permanently blank screen instead of falling
+  // through to the catch-all. Send unmapped legacy paths to /home explicitly.
+  if (path === location.pathname) path = '/home';
   return <Navigate to={path + location.search + location.hash} replace />;
 }
 

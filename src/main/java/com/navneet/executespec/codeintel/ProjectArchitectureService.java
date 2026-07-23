@@ -14,6 +14,7 @@ import com.navneet.executespec.codeintel.entity.RepoArchitectureDoc;
 import com.navneet.executespec.codeintel.repository.ProjectArchitectureDocRepository;
 import com.navneet.executespec.codeintel.repository.ProjectCodeMapRepository;
 import com.navneet.executespec.codeintel.repository.RepoArchitectureDocRepository;
+import com.navneet.executespec.executioncontext.LlmExecutionReference;
 import com.navneet.executespec.project.entity.ProjectRepo;
 import com.navneet.executespec.project.entity.ProjectRepoLink;
 import com.navneet.executespec.project.repository.ProjectRepoLinkRepository;
@@ -103,7 +104,35 @@ public class ProjectArchitectureService {
    */
   public ProjectArchitectureDoc generate(
       String projectId, String branchOverride, String patOverride, LlmProvider providerOverride) {
-    return generateInternal(projectId, branchOverride, patOverride, providerOverride);
+    return generateInternal(projectId, branchOverride, patOverride, providerOverride, null, null);
+  }
+
+  /** Confirmed Project Chat path with immutable initiating-actor attribution. */
+  public ProjectArchitectureDoc generate(
+      String projectId,
+      String branchOverride,
+      String patOverride,
+      LlmProvider providerOverride,
+      String actorUserId) {
+    return generateInternal(
+        projectId, branchOverride, patOverride, providerOverride, actorUserId, null);
+  }
+
+  /** Confirmed action path: all downstream LLM calls share one durable hard budget. */
+  public ProjectArchitectureDoc generate(
+      String projectId,
+      String branchOverride,
+      String patOverride,
+      LlmProvider providerOverride,
+      String actorUserId,
+      LlmExecutionReference confirmedActionReference) {
+    return generateInternal(
+        projectId,
+        branchOverride,
+        patOverride,
+        providerOverride,
+        actorUserId,
+        confirmedActionReference);
   }
 
   /**
@@ -141,16 +170,37 @@ public class ProjectArchitectureService {
    */
   public ProjectArchitectureDoc generate(
       String projectId, String branchOverride, String patOverride) {
-    return generateInternal(projectId, branchOverride, patOverride, null);
+    return generateInternal(projectId, branchOverride, patOverride, null, null, null);
   }
 
   private ProjectArchitectureDoc generateInternal(
-      String projectId, String branchOverride, String patOverride, LlmProvider providerOverride) {
+      String projectId,
+      String branchOverride,
+      String patOverride,
+      LlmProvider providerOverride,
+      String actorUserId,
+      LlmExecutionReference confirmedActionReference) {
     List<ProjectRepoLink> links = linkRepo.findByProjectId(projectId);
     if (links.isEmpty()) {
       throw new ResponseStatusException(
           HttpStatus.BAD_REQUEST,
           "Project has no linked repos — link repos before generating architecture");
+    }
+
+    // RR-457 — decide up front which linked sources this pipeline can actually read. Every step
+    // below constructs "https://github.com/" + githubRepoFullName and calls GitHubRepoService, so a
+    // Bitbucket or LOCAL source used to be fed through as the literal repository "null": codemap,
+    // per-repo architecture, the combined document and downstream planner context were all
+    // generated against a repository that does not exist, or the whole regen threw with a message
+    // that never named the real cause. Non-GitHub sources are now excluded explicitly and the
+    // exclusion is carried into the document instead of being silently absent.
+    SourceAdmission admission = admitSources(links);
+    if (admission.generatable().isEmpty()) {
+      throw new ResponseStatusException(
+          HttpStatus.NOT_IMPLEMENTED,
+          "Architecture generation is not available for this project's linked sources: "
+              + admission.excludedSummary()
+              + ". Code intelligence currently reads GitHub sources only.");
     }
 
     LlmProvider provider = projectProviderResolver.resolve(projectId, providerOverride);
@@ -165,9 +215,7 @@ public class ProjectArchitectureService {
     // defaultBranch (fixes permanent-STALE for non-default-branch regenerations).
     java.util.LinkedHashMap<String, String> branchesByRepo = new java.util.LinkedHashMap<>();
 
-    for (ProjectRepoLink link : links) {
-      ProjectRepo repo = repoRepo.findById(link.getRepoId()).orElse(null);
-      if (repo == null) continue;
+    for (ProjectRepo repo : admission.generatable()) {
       String effectiveBranch = hasOverride ? branchOverride : repo.getDefaultBranch();
 
       // Step 1: per-repo codemap (idempotent by SHA)
@@ -178,7 +226,8 @@ public class ProjectArchitectureService {
       branchesByRepo.put(repo.getGithubRepoFullName(), effectiveBranch);
 
       // Step 2: per-repo architecture doc (idempotent by codemap)
-      RepoArchitectureDoc rad = ensureRepoArchDoc(projectId, repo, cm, provider);
+      RepoArchitectureDoc rad =
+          ensureRepoArchDoc(projectId, repo, cm, provider, actorUserId, confirmedActionReference);
       repoArchDocs.add(rad);
     }
 
@@ -194,10 +243,14 @@ public class ProjectArchitectureService {
     // preserves insertion order and we sort keys before serialise so the comparison isn't
     // sensitive to repo-link iteration order changing across calls.
     String currentFingerprint = serialiseFingerprint(shasByRepo);
+    boolean allRepoArchitecturesReusable =
+        repoArchDocs.stream().allMatch(ProjectArchitectureService::isReusableRepoArchitecture);
     ProjectArchitectureDoc cached =
         archDocRepo
             .findFirstByProjectIdOrderByVersionDesc(projectId)
             .filter(d -> d.getContent() != null && !d.getContent().isBlank())
+            .filter(ProjectArchitectureService::isReusableProjectArchitecture)
+            .filter(d -> allRepoArchitecturesReusable)
             .filter(d -> fingerprintMatches(d.getGeneratedFromShas(), currentFingerprint))
             .orElse(null);
     if (cached != null) {
@@ -211,12 +264,19 @@ public class ProjectArchitectureService {
     // Step 3: combined architecture doc (always regenerates)
     ArchitectureDocGenerator.Result combined;
     try {
-      combined = archDocGenerator.generate(projectId, repoArchDocs, repoFullNames, provider);
+      combined =
+          archDocGenerator.generate(
+              projectId,
+              repoArchDocs,
+              repoFullNames,
+              provider,
+              actorUserId,
+              confirmedActionReference);
     } catch (Exception e) {
       log.warn(
-          "[{}] LLM combined-arch failed ({}) — falling back to deterministic combine",
+          "[{}] LLM combined-arch failed (type={}) — falling back to deterministic combine",
           projectId,
-          e.getMessage());
+          e.getClass().getSimpleName());
       java.util.LinkedHashMap<String, String> byRepo = new java.util.LinkedHashMap<>();
       for (int i = 0; i < repoArchDocs.size(); i++) {
         byRepo.put(
@@ -230,6 +290,10 @@ public class ProjectArchitectureService {
               0,
               "deterministic");
     }
+
+    // RR-457 — a document that silently omits half the project reads as complete coverage. When
+    // some linked sources could not be read, say so inside the document itself.
+    String combinedMarkdown = admission.appendExclusionNotice(combined.markdown());
 
     int nextVersion =
         archDocRepo
@@ -263,7 +327,7 @@ public class ProjectArchitectureService {
         ProjectArchitectureDoc.builder()
             .projectId(projectId)
             .version(nextVersion)
-            .content(combined.markdown())
+            .content(combinedMarkdown)
             .generatedFromShas(shasJson)
             .generatedFromBranches(branchesJson)
             .costUsd(archCost)
@@ -279,11 +343,19 @@ public class ProjectArchitectureService {
         projectId,
         codeMaps.size(),
         nextVersion,
-        combined.markdown().length(),
+        combinedMarkdown.length(),
         combined.inputTokens(),
         combined.outputTokens());
 
-    persistToWorkspace(projectId, codeMaps, repoArchDocs, repoFullNames, combined.markdown());
+    persistToWorkspace(
+        projectId,
+        codeMaps,
+        repoArchDocs,
+        repoFullNames,
+        combinedMarkdown,
+        provider,
+        actorUserId,
+        confirmedActionReference);
     workspaceWarmer.warmDiskCache(projectId);
     // E1.2 — also publish each per-repo codemap to .executespec/arch/codemap.md
     // on the customer repo. Best-effort: never fails the regen flow.
@@ -365,11 +437,22 @@ public class ProjectArchitectureService {
    */
   private RepoArchitectureDoc ensureRepoArchDoc(
       String projectId, ProjectRepo repo, ProjectCodeMap codeMap, LlmProvider provider) {
+    return ensureRepoArchDoc(projectId, repo, codeMap, provider, null, null);
+  }
+
+  private RepoArchitectureDoc ensureRepoArchDoc(
+      String projectId,
+      ProjectRepo repo,
+      ProjectCodeMap codeMap,
+      LlmProvider provider,
+      String actorUserId,
+      LlmExecutionReference confirmedActionReference) {
     Optional<RepoArchitectureDoc> latest =
         repoArchRepo.findFirstByProjectIdAndRepoIdOrderByVersionDesc(projectId, repo.getId());
     if (latest.isPresent()
         && codeMap.getId() != null
-        && codeMap.getId().equals(latest.get().getSourceCodeMapId())) {
+        && codeMap.getId().equals(latest.get().getSourceCodeMapId())
+        && isReusableRepoArchitecture(latest.get())) {
       log.info(
           "[{}] repo-arch for {} up-to-date @ codemap v{} — reusing v{}",
           projectId,
@@ -382,23 +465,22 @@ public class ProjectArchitectureService {
     RepoArchitectureGenerator.Result rar;
     try {
       rar =
-          repoArchGenerator.generate(repo.getGithubRepoFullName(), codeMap.getContent(), provider);
+          repoArchGenerator.generate(
+              projectId,
+              repo.getGithubRepoFullName(),
+              codeMap.getContent(),
+              provider,
+              actorUserId,
+              confirmedActionReference);
     } catch (Exception e) {
       log.warn(
-          "[{}] repo-arch LLM failed for {} ({}) — falling back to codemap as arch content",
+          "[{}] repo-arch LLM failed for {} (type={}) — falling back to codemap as arch content",
           projectId,
           repo.getGithubRepoFullName(),
-          e.getMessage());
+          e.getClass().getSimpleName());
       rar =
           new RepoArchitectureGenerator.Result(
-              "# "
-                  + repo.getGithubRepoFullName()
-                  + " — Architecture\n\n"
-                  + "_LLM generation failed ("
-                  + e.getMessage()
-                  + "). "
-                  + "Showing raw codemap instead._\n\n"
-                  + codeMap.getContent(),
+              fallbackRepoArchitectureMarkdown(repo.getGithubRepoFullName(), codeMap.getContent()),
               0,
               0,
               "fallback");
@@ -435,6 +517,30 @@ public class ProjectArchitectureService {
         rar.outputTokens(),
         rar.modelUsed());
     return doc;
+  }
+
+  static boolean isReusableRepoArchitecture(RepoArchitectureDoc doc) {
+    if (doc == null || doc.getContent() == null || doc.getContent().isBlank()) return false;
+    String model = doc.getModelUsed();
+    return model != null
+        && !model.isBlank()
+        && !"fallback".equalsIgnoreCase(model)
+        && !doc.getContent().contains("LLM generation failed");
+  }
+
+  static String fallbackRepoArchitectureMarkdown(String repoFullName, String codeMap) {
+    return "# "
+        + repoFullName
+        + " — Architecture\n\n"
+        + "_LLM generation failed. Showing raw codemap instead._\n\n"
+        + codeMap;
+  }
+
+  static boolean isReusableProjectArchitecture(ProjectArchitectureDoc doc) {
+    if (doc == null || doc.getContent() == null || doc.getContent().isBlank()) return false;
+    String content = doc.getContent();
+    return !content.startsWith("# Project architecture (deterministic)")
+        && !content.contains("LLM generation failed");
   }
 
   /**
@@ -508,7 +614,10 @@ public class ProjectArchitectureService {
       List<ProjectCodeMap> codeMaps,
       List<RepoArchitectureDoc> repoArchDocs,
       List<String> repoFullNames,
-      String archMarkdown) {
+      String archMarkdown,
+      LlmProvider provider,
+      String actorUserId,
+      LlmExecutionReference confirmedActionReference) {
     try {
       workspace.initIfMissing(projectId);
 
@@ -540,13 +649,111 @@ public class ProjectArchitectureService {
       workspace.writeAndCommit(
           projectId, "architecture.md", archMarkdown, "architecture: combined regenerated");
 
-      LlmProvider provider = projectProviderResolver.resolve(projectId);
-      String summary = briefService.summarise(projectId, archMarkdown, provider);
+      String summary =
+          summariseBrief(
+              briefService,
+              projectId,
+              archMarkdown,
+              provider,
+              actorUserId,
+              confirmedActionReference);
       if (summary != null && !summary.isBlank()) {
         workspace.writeAndCommit(projectId, "summary.md", summary, "summary: regenerated");
       }
     } catch (Exception e) {
-      log.warn("Failed to persist project workspace files for {}: {}", projectId, e.getMessage());
+      log.warn(
+          "Failed to persist project workspace files for {} errorClass={}",
+          projectId,
+          e.getClass().getSimpleName());
+    }
+  }
+
+  static String summariseBrief(
+      ProjectBriefService briefService,
+      String projectId,
+      String archMarkdown,
+      LlmProvider provider,
+      String actorUserId,
+      LlmExecutionReference confirmedActionReference) {
+    return briefService.summarise(
+        projectId, archMarkdown, provider, actorUserId, confirmedActionReference);
+  }
+
+  /**
+   * RR-457 — split linked sources into the ones this GitHub-shaped pipeline can genuinely read and
+   * the ones it cannot, with a stated reason per exclusion.
+   *
+   * <p>This is deliberately an explicit typed unavailable result rather than Bitbucket support. The
+   * per-repo path is GitHub API calls all the way down — {@code CodeMapGenerator} builds {@code
+   * https://github.com/<name>} and reads blobs through {@code GitHubRepoService}. Making it
+   * provider-neutral means routing through {@code ScmRepositoryClient} and giving the codemap
+   * reader a provider-neutral file/blob contract; that is a real port, not a rename, and it belongs
+   * with the repo-client lane. Until then the honest behaviour is to name the gap rather than
+   * fabricate a {@code github.com/null} repository and present the output as project-wide truth.
+   */
+  private SourceAdmission admitSources(List<ProjectRepoLink> links) {
+    List<ProjectRepo> generatable = new ArrayList<>();
+    List<String> excluded = new ArrayList<>();
+    for (ProjectRepoLink link : links) {
+      ProjectRepo repo = repoRepo.findById(link.getRepoId()).orElse(null);
+      if (repo == null) {
+        excluded.add("linked source " + link.getRepoId() + " (registry row not found)");
+        continue;
+      }
+      String reason = unsupportedSourceReason(repo);
+      if (reason == null) {
+        generatable.add(repo);
+      } else {
+        excluded.add(sourceLabel(repo) + " (" + reason + ")");
+      }
+    }
+    return new SourceAdmission(List.copyOf(generatable), List.copyOf(excluded));
+  }
+
+  /** Null when the source can be read by the GitHub-shaped code-intelligence pipeline. */
+  static String unsupportedSourceReason(ProjectRepo repo) {
+    if (ProjectRepo.SourceType.LOCAL.name().equals(repo.getSourceType())) {
+      return "LOCAL source — there is no remote to read a codemap from";
+    }
+    String provider = repo.getScmProvider();
+    if (provider != null && !"GITHUB".equalsIgnoreCase(provider)) {
+      return provider + " source — code intelligence has no provider-neutral reader yet";
+    }
+    if (repo.getGithubRepoFullName() == null || repo.getGithubRepoFullName().isBlank()) {
+      return "no GitHub repository name recorded";
+    }
+    return null;
+  }
+
+  private static String sourceLabel(ProjectRepo repo) {
+    if (repo.getSourceKey() != null && !repo.getSourceKey().isBlank()) return repo.getSourceKey();
+    if (repo.getGithubRepoFullName() != null && !repo.getGithubRepoFullName().isBlank()) {
+      return repo.getGithubRepoFullName();
+    }
+    return String.valueOf(repo.getId());
+  }
+
+  /**
+   * The readable and unreadable halves of a project's linked sources.
+   *
+   * @param generatable sources the pipeline may read, in link order
+   * @param excluded human-readable "name (reason)" strings for sources it may not
+   */
+  record SourceAdmission(List<ProjectRepo> generatable, List<String> excluded) {
+
+    String excludedSummary() {
+      return String.join("; ", excluded);
+    }
+
+    /** Append a coverage caveat so the document never implies it covers every linked source. */
+    String appendExclusionNotice(String markdown) {
+      String base = markdown == null ? "" : markdown;
+      if (excluded.isEmpty()) return base;
+      StringBuilder sb = new StringBuilder(base);
+      sb.append("\n\n## Sources excluded from this architecture\n\n");
+      sb.append("The following linked sources were not read, so nothing below describes them:\n\n");
+      for (String entry : excluded) sb.append("* ").append(entry).append('\n');
+      return sb.toString();
     }
   }
 
@@ -721,6 +928,14 @@ public class ProjectArchitectureService {
     if (!linked) {
       throw new ResponseStatusException(
           HttpStatus.BAD_REQUEST, "repo " + repoId + " is not linked to project " + projectId);
+    }
+    // RR-457 — same GitHub-only boundary as the project-wide pipeline. Without this the Bitbucket
+    // and LOCAL cases reach ensureCodeMap and read "https://github.com/null".
+    String unsupported = unsupportedSourceReason(repo);
+    if (unsupported != null) {
+      throw new ResponseStatusException(
+          HttpStatus.NOT_IMPLEMENTED,
+          "Architecture generation is not available for " + sourceLabel(repo) + ": " + unsupported);
     }
 
     LlmProvider provider = projectProviderResolver.resolve(projectId);

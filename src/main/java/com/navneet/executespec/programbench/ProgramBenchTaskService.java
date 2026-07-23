@@ -19,9 +19,10 @@ import com.navneet.executespec.integration.RunOrchestrator;
 import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
 
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.event.EventListener;
+import org.springframework.core.task.TaskExecutor;
 import org.springframework.http.HttpStatus;
-import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -80,6 +81,8 @@ public class ProgramBenchTaskService {
   private final PipelineRunRepository runRepo;
   private final AgentProperties agentProps;
 
+  @Qualifier("benchmarkCaptureExecutor") private final TaskExecutor captureExecutor;
+
   /**
    * ThreadLocal slot for the cleanroom setup recipe. Set inside {@link #submit} before calling
    * {@code orchestrator.submitRun(...)}; the {@link #onRunStarted} listener reads it on the same
@@ -99,7 +102,7 @@ public class ProgramBenchTaskService {
 
   /**
    * Setup info needed by the {@link #onRunStarted} listener. The container name is pre-allocated in
-   * {@link #submit} so the caller can pass it through to {@link #captureOnTerminalAsync}
+   * {@link #submit} so the caller can pass it through to {@link #captureOnTerminal}
    * deterministically (the listener may register a different containerId, but the human-readable
    * name we use for {@code docker rm -f} is stable).
    */
@@ -336,13 +339,15 @@ public class ProgramBenchTaskService {
         Paths.get(agentProps.getWorkspace(), run.getRunId()).toAbsolutePath().normalize();
 
     // Async background captures the submission on terminal status.
-    captureOnTerminalAsync(run.getRunId(), containerName, workspaceHost, outputDir, taskId);
+    Runnable capture =
+        () -> captureOnTerminal(run.getRunId(), containerName, workspaceHost, outputDir, taskId);
+    captureExecutor.execute(
+        io.micrometer.context.ContextSnapshotFactory.builder().build().captureAll().wrap(capture));
 
     return new TaskSubmitResult(run.getRunId(), taskId, containerName, workspaceHost);
   }
 
-  @Async
-  protected void captureOnTerminalAsync(
+  protected void captureOnTerminal(
       String runId, String containerName, Path workspaceHost, Path outputDir, String taskId) {
     Instant deadline = Instant.now().plus(Duration.ofMinutes(props.getTaskWallTimeoutMinutes()));
     try {

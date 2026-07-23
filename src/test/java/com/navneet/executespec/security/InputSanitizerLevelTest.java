@@ -71,10 +71,40 @@ class InputSanitizerLevelTest {
   }
 
   @Test
-  void nullLevelTreatedAsLow() {
+  void nullLevelFailsSafeAsHigh() {
     String payload = randomBenignText(9_000, 42);
-    // null level → LOW → no cap → no throw
-    assertThatCode(() -> sanitizer.scan(payload, null)).doesNotThrowAnyException();
+    assertThatThrownBy(() -> sanitizer.scan(payload, null))
+        .isInstanceOf(ResponseStatusException.class);
     assertThat(sanitizer).isNotNull();
+  }
+
+  @Test
+  void normalizeRemovesInvisibleCharactersBeforePersistence() {
+    assertThat(sanitizer.normalize("ig\u200Bnore")).isEqualTo("ignore");
+  }
+
+  @Test
+  void lowBlocksRepetitiveTokenStuffing() {
+    // RR-038: detection verdict preserved \u2014 the same 50-char block repeated > MAX_REPETITIONS
+    // times
+    // is still blocked as token-stuffing. The trailing space keeps it out of the base64 path so the
+    // repetition check is what fires.
+    String block = "x".repeat(49) + " ";
+    String payload = block.repeat(25);
+    assertThatThrownBy(() -> sanitizer.scan(payload, GuardrailLevel.LOW))
+        .isInstanceOf(ResponseStatusException.class)
+        .hasMessageContaining("suspicious repetitive content");
+  }
+
+  @Test
+  void lowRepetitionScanIsBoundedOnLargePathologicalInput() {
+    // RR-038: 500 KB of non-repetitive text at LOW (no payload cap). The previous O(n^2) indexOf
+    // sweep would pin a CPU; the linear, budgeted scan must finish quickly and accept the input.
+    String payload = randomBenignText(500_000, 99);
+    org.junit.jupiter.api.Assertions.assertTimeoutPreemptively(
+        java.time.Duration.ofSeconds(5),
+        () ->
+            assertThatCode(() -> sanitizer.scan(payload, GuardrailLevel.LOW))
+                .doesNotThrowAnyException());
   }
 }

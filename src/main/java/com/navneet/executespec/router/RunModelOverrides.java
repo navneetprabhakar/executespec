@@ -45,6 +45,22 @@ public final class RunModelOverrides {
     CTX.remove();
   }
 
+  /** Immutable snapshot for explicit propagation across executor boundaries. */
+  public static Map<String, String> capture() {
+    Map<String, String> current = CTX.get();
+    return current == null ? Map.of() : Map.copyOf(current);
+  }
+
+  /** Runs one child task with the captured route context and always clears the pooled thread. */
+  public static void runWith(Map<String, String> snapshot, Runnable task) {
+    bind(snapshot);
+    try {
+      task.run();
+    } finally {
+      clear();
+    }
+  }
+
   /**
    * Per-run provider+model pin (Beta, Enterprise-only — 2026-05-22). Builds the override map the
    * pipeline binds for a single run: a mutable copy of the org's {@code (provider:tier)→model}

@@ -16,6 +16,8 @@ import com.navneet.executespec.agentsession.dto.AgentSessionDtos.InterpretIntent
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.OrchestratorDecision;
 import com.navneet.executespec.agentsession.entity.AgentSession;
 import com.navneet.executespec.agentsession.repository.AgentSessionRepository;
+import com.navneet.executespec.auth.security.AppUserDetails;
+import com.navneet.executespec.project.security.ProjectAccessGuard;
 
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Component;
@@ -29,18 +31,24 @@ class AgentActionLifecycleService {
   private final AgentIntentService intentService;
   private final AgentEventRecorder eventRecorder;
   private final AgentSessionRepository sessionRepo;
+  private final ProjectAccessGuard projectAccessGuard;
 
   PlannedAction plan(
-      AgentSession session, ActionPlanRequest request, List<CapabilityTool> capabilities) {
+      AgentSession session,
+      ActionPlanRequest request,
+      List<CapabilityTool> capabilities,
+      AppUserDetails user) {
     ActionPlanRequest req =
         request == null ? new ActionPlanRequest("", null, null, null, null) : request;
+    String projectId = AgentText.firstNonBlank(req.projectId(), session.getProjectId());
     InterpretIntentRequest intentRequest =
         new InterpretIntentRequest(
             session.getId(),
             req.message(),
-            AgentText.firstNonBlank(req.projectId(), session.getProjectId()),
+            projectId,
             req.repoContext(),
-            req.clientCapabilities());
+            req.clientCapabilities(),
+            AgentWriteAuthority.resolve(projectAccessGuard, projectId, user));
     OrchestratorDecision orchestratorDecision =
         intentService.decide(
             intentRequest, session.getDefaultProvider(), session.getDefaultModel());
@@ -126,6 +134,14 @@ class AgentActionLifecycleService {
                   request == null || request.verification() == null
                       ? Map.of()
                       : request.verification()));
+    } catch (AgentEventRecorder.PayloadSerializationException unserializable) {
+      // RR-888 — the terminal ACTION_RESULT slot was NOT consumed (no row was inserted). Surface a
+      // retryable recording error instead of poisoning the first-writer slot, so a corrected retry
+      // can record the real outcome.
+      throw new org.springframework.web.server.ResponseStatusException(
+          org.springframework.http.HttpStatus.UNPROCESSABLE_ENTITY,
+          "action result payload could not be recorded; retry with a serializable result",
+          unserializable);
     } catch (DataIntegrityViolationException race) {
       // Another JVM can win the partial unique index between our read and insert. Resolve the
       // expected retry to that committed first result instead of leaking a 500 to the reconnecting

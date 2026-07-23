@@ -12,8 +12,11 @@ import com.navneet.executespec.agentsession.entity.AgentTurn;
 import com.navneet.executespec.agentsession.repository.AgentSessionRepository;
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.auth.service.AiProviderPreferenceService;
+import com.navneet.executespec.project.security.ProjectAccessGuard;
 import com.navneet.executespec.router.ModelAccessService;
 import com.navneet.executespec.router.ModelRegistry;
+import com.navneet.executespec.specchat.ChatSecurityAuditService;
+import com.navneet.executespec.specchat.ChatToolPolicy;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
@@ -32,6 +35,8 @@ class AgentStreamTurnStarter {
   private final AiProviderPreferenceService aiProviderPreferenceService;
   private final ModelAccessService modelAccessService;
   private final ModelRegistry modelRegistry;
+  private final ProjectAccessGuard projectAccessGuard;
+  private final ChatSecurityAuditService chatSecurityAuditService;
 
   /** Compatibility seam for focused tests and older package-local callers. */
   AgentStreamTurnStarter(
@@ -49,40 +54,86 @@ class AgentStreamTurnStarter {
         sessionRepo,
         aiProviderPreferenceService,
         null,
+        null,
+        null,
         null);
   }
 
   AgentSessionService.StreamTurnContext begin(
       AgentSession session, String sessionId, StreamTurnRequest request, AppUserDetails user) {
-    String message = request == null ? "" : request.message();
+    if (session.getProjectId() != null && !session.getProjectId().isBlank()) {
+      if (projectAccessGuard == null) {
+        throw new org.springframework.web.server.ResponseStatusException(
+            org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE,
+            "project authorization unavailable");
+      }
+      // Streaming a turn can invoke the routing model and therefore spends provider tokens.
+      try {
+        projectAccessGuard.assertCanWrite(session.getProjectId(), user);
+      } catch (RuntimeException denied) {
+        if (chatSecurityAuditService != null) {
+          chatSecurityAuditService.record(
+              "CHAT_TURN_DENIED",
+              sessionId,
+              session.getProjectId(),
+              user,
+              "agent_stream_turn",
+              ChatToolPolicy.Capability.SPEND_AI,
+              "DENIED");
+        }
+        throw denied;
+      }
+      if (chatSecurityAuditService == null) {
+        throw new org.springframework.web.server.ResponseStatusException(
+            org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE,
+            "chat security audit unavailable");
+      }
+      chatSecurityAuditService.record(
+          "CHAT_TURN_ALLOWED",
+          sessionId,
+          session.getProjectId(),
+          user,
+          "agent_stream_turn",
+          ChatToolPolicy.Capability.SPEND_AI,
+          "ALLOWED");
+    }
+    // Route, guard and persist the exact text the provider will execute. `request.message()` is
+    // discarded by the runner whenever `conversation` is non-empty, so routing on it left
+    // conversation-only content unrouted, unguarded and absent from the durable transcript.
+    String message = AgentStreamTurnSupport.routedUserText(request);
     String explicitProvider =
         request == null ? null : AgentText.blankToNull(request.providerOverride());
     String explicitModel = request == null ? null : AgentText.blankToNull(request.modelOverride());
-    String modelProvider =
-        explicitModel == null || modelRegistry == null
-            ? null
-            : modelRegistry.providerFor(explicitModel);
+    String sessionProvider = AgentText.blankToNull(session.getDefaultProvider());
+    String accountProvider = aiProviderPreferenceService.preferredProvider(user);
+    String effectiveProvider =
+        explicitProvider != null
+            ? aiProviderPreferenceService.updatePreferredProvider(user, explicitProvider)
+            : sessionProvider != null ? sessionProvider : accountProvider;
     if (explicitModel != null) {
       if (modelAccessService != null) {
         modelAccessService.assertModelAllowed(user.getUser().getId(), explicitModel);
       }
-      if (modelProvider == null) {
+      String modelProvider =
+          modelRegistry == null ? null : modelRegistry.providerFor(explicitModel);
+      if (modelProvider == null || modelProvider.isBlank()) {
         throw new org.springframework.web.server.ResponseStatusException(
             org.springframework.http.HttpStatus.BAD_REQUEST, "Unknown model: " + explicitModel);
       }
-      if (explicitProvider != null && !modelProvider.equalsIgnoreCase(explicitProvider)) {
-        throw new org.springframework.web.server.ResponseStatusException(
-            org.springframework.http.HttpStatus.BAD_REQUEST,
-            "Model '" + explicitModel + "' is not served by provider '" + explicitProvider + "'.");
+      if (effectiveProvider == null) effectiveProvider = modelProvider;
+      if (modelAccessService != null) {
+        modelAccessService.assertProviderModelPair(effectiveProvider, explicitModel);
       }
-      if (explicitProvider == null) explicitProvider = modelProvider;
-    }
-    String effectiveProvider =
-        explicitProvider != null
-            ? aiProviderPreferenceService.updatePreferredProvider(user, explicitProvider)
-            : aiProviderPreferenceService.preferredProvider(user);
-    if (effectiveProvider == null) {
-      effectiveProvider = session.getDefaultProvider();
+    } else if (explicitProvider != null
+        && session.getDefaultModel() != null
+        && modelAccessService != null) {
+      try {
+        modelAccessService.assertProviderModelPair(effectiveProvider, session.getDefaultModel());
+      } catch (org.springframework.web.server.ResponseStatusException incompatibleSessionModel) {
+        // A provider-only switch returns to tier routing; never retain a stale exact model from the
+        // previous provider and create an impossible pair.
+        session.setDefaultModel(null);
+      }
     }
     if (effectiveProvider != null) {
       session.setDefaultProvider(effectiveProvider);
@@ -91,16 +142,38 @@ class AgentStreamTurnStarter {
       session.setDefaultModel(
           modelRegistry == null ? explicitModel : modelRegistry.canonicalize(explicitModel));
     }
-    var decision =
-        intentService.decide(
-            new InterpretIntentRequest(
-                sessionId,
-                message,
-                session.getProjectId(),
-                request == null ? null : request.repoContext(),
-                request == null ? null : request.clientCapabilities()),
-            effectiveProvider,
-            session.getDefaultModel());
+    AgentIntentService.RoutedDecision routed;
+    try {
+      routed =
+          intentService.decideWithAttribution(
+              new InterpretIntentRequest(
+                  sessionId,
+                  message,
+                  session.getProjectId(),
+                  request == null ? null : request.repoContext(),
+                  request == null ? null : request.clientCapabilities(),
+                  // A project-scoped stream turn only reaches this line after assertCanWrite above,
+                  // so write authority is already proven for this actor and project.
+                  session.getProjectId() == null || session.getProjectId().isBlank()
+                      ? null
+                      : Boolean.TRUE),
+              effectiveProvider,
+              session.getDefaultModel());
+    } catch (org.springframework.web.server.ResponseStatusException inputDenied) {
+      if (chatSecurityAuditService != null) {
+        chatSecurityAuditService.record(
+            "CHAT_INPUT_DENIED",
+            sessionId,
+            session.getProjectId(),
+            user,
+            "agent_stream_input",
+            ChatToolPolicy.Capability.SPEND_AI,
+            "DENIED");
+      }
+      throw inputDenied;
+    }
+    com.navneet.executespec.agentsession.dto.AgentSessionDtos.OrchestratorDecision decision =
+        routed.decision();
     AgentTurn turn =
         turnRecorder.record(
             session,
@@ -138,7 +211,8 @@ class AgentStreamTurnStarter {
             message,
             false,
             null,
-            "deterministic_pre_router");
+            "deterministic_pre_router",
+            routed.attribution());
     // Persist the resolved route alongside the decision. Replay clients must not infer the
     // provider/model from the current account preference after a later provider switch.
     startPayload.put("provider", effectiveProvider);

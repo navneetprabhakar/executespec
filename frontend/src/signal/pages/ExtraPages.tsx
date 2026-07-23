@@ -1,11 +1,5 @@
-import {useState} from 'react';
-import {useNavigate, useSearchParams} from 'react-router-dom';
 import {TopBar, SectionHeader} from '@/signal/components/Chrome';
 import {Feed, Card, Button, KvList} from '@/signal/components/Primitives';
-import AuthLayout from '@/signal/components/AuthLayout';
-import * as api from '@/lib/api';
-
-const MERGE_RAIL_MARK = '/assets/brand/merge-rail/executespec-merge-rail-mark-light.svg';
 
 export function TrustPage() {
   return (
@@ -55,11 +49,11 @@ export function TrustPage() {
           </ul>
         </Card>
 
-        <SectionHeader>How execution is isolated</SectionHeader>
+        <SectionHeader>How execution is constrained</SectionHeader>
         <Card>
           <ul style={{padding: '0 0 0 18px', margin: 0, fontSize: 14, lineHeight: 1.7}}>
-            <li>Every run gets its own workspace, wiped at run end</li>
-            <li>Shell + file access run inside a sandbox policy, not on a shared host account</li>
+            <li>Every run gets its own workspace directory, retained for run evidence</li>
+            <li>Shell commands and file access are restricted by an enforced policy</li>
             <li>Generated code is scanned for abuse patterns before execution</li>
             <li>Test execution runs in read-only, capability-dropped containers</li>
             <li>Tenant access guards are enforced in code and pinned by automated tests</li>
@@ -280,98 +274,7 @@ export function PublicPricingPage() {
   );
 }
 
-function FormError({msg}: {msg: string}) {
-  if (!msg) return null;
-  return (
-    <div
-      style={{
-        background: 'var(--signal-coral-soft)',
-        color: 'var(--signal-coral-text)',
-        border: '1px solid var(--signal-coral)',
-        borderRadius: 10,
-        padding: '10px 14px',
-        marginBottom: 12,
-        fontSize: 13,
-      }}
-    >
-      {msg}
-    </div>
-  );
-}
-
-export function AcceptInvitePage({kind = 'project'}: {kind?: 'org' | 'project'}) {
-  const navigate = useNavigate();
-  const [params] = useSearchParams();
-  const token = params.get('token') || '';
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState('');
-  const noun = kind === 'org' ? 'organization' : 'project';
-
-  async function accept() {
-    if (!token) {
-      setErr('No invite token in the URL. Use the link from your invite email.');
-      return;
-    }
-    setErr('');
-    setBusy(true);
-    try {
-      if (kind === 'org') {
-        await api.acceptInvite(token);
-        navigate('/setup', {replace: true});
-      } else {
-        const r = await api.acceptProjectInvite(token);
-        navigate(r?.projectId ? `/projects/${r.projectId}` : '/setup', {replace: true});
-      }
-    } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : 'Could not accept this invite.');
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <AuthLayout>
-      <div className='signal-splash'>
-        <div className='brand'>
-          <img className='logo' src={MERGE_RAIL_MARK} alt='' />
-          <div style={{fontSize: 16, fontWeight: 600}}>ExecuteSpec</div>
-        </div>
-        <h1>Accept invite.</h1>
-        <p className='lede'>
-          Open this from your email invite link. We will add you to the {noun} and take you there.
-        </p>
-        <FormError msg={err} />
-        <Card style={{marginBottom: 18}}>
-          <KvList
-            pairs={[
-              {
-                k: 'Invite token',
-                v: token ? (
-                  token.slice(0, 12) + '…'
-                ) : (
-                  <span style={{color: 'var(--signal-coral-text)'}}>(missing)</span>
-                ),
-              },
-              {
-                k: 'Status',
-                v: token ? (
-                  'Ready to accept'
-                ) : (
-                  <span style={{color: 'var(--signal-coral-text)'}}>
-                    Open the link in your email
-                  </span>
-                ),
-              },
-            ]}
-          />
-        </Card>
-        <Button kind='mint' block onClick={accept} disabled={busy || !token}>
-          {busy ? 'Accepting…' : kind === 'org' ? 'Accept & continue' : 'Accept & open project'}
-        </Button>
-        <Button kind='ghost' block to='/compose' style={{color: 'var(--signal-coral-text)'}}>
-          Decline invite
-        </Button>
-      </div>
-    </AuthLayout>
-  );
-}
+// RR-1327 — AcceptInvitePage (and its FormError helper) were extracted into a
+// dedicated file so ExtraPages stays within its size ceiling. Re-exported here
+// for existing import sites.
+export {AcceptInvitePage} from './AcceptInvitePage';

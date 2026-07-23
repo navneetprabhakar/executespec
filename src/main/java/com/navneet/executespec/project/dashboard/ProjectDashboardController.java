@@ -3,11 +3,15 @@ package com.navneet.executespec.project.dashboard;
 import java.util.List;
 import java.util.Set;
 
+import com.navneet.executespec.auth.entity.Project;
+import com.navneet.executespec.auth.repository.ProjectRepository;
 import com.navneet.executespec.codeintel.ProjectArchitectureService;
 import com.navneet.executespec.codeintel.StalenessService;
+import com.navneet.executespec.cost.CostVisibilityPolicy;
 import com.navneet.executespec.project.pr.PullRequestRecord;
 import com.navneet.executespec.project.pr.PullRequestRecordRepository;
 import com.navneet.executespec.report.ValidationReportRepository;
+import com.navneet.executespec.report.ValidationReportValidityService;
 import com.navneet.executespec.report.entity.ValidationReport;
 import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
@@ -19,6 +23,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RestController;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * Pilot R1 — aggregates project-level metrics for the dashboard header. Single endpoint; all five
@@ -26,6 +31,7 @@ import lombok.RequiredArgsConstructor;
  */
 @RestController
 @RequiredArgsConstructor
+@Slf4j
 public class ProjectDashboardController {
 
   private static final Set<String> ACTIVE_STATUSES =
@@ -33,6 +39,7 @@ public class ProjectDashboardController {
 
   private final PipelineRunRepository runRepo;
   private final ValidationReportRepository reportRepo;
+  private final ValidationReportValidityService reportValidityService;
   private final PullRequestRecordRepository prRepo;
   private final ProjectArchitectureService archService;
   private final StalenessService stalenessService;
@@ -64,6 +71,7 @@ public class ProjectDashboardController {
       generatedDocRepo;
 
   private final com.navneet.executespec.project.security.ProjectAccessGuard projectAccessGuard;
+  private final ProjectRepository projectRepository;
 
   public record TaskSummary(
       String taskId, String runId, String name, String status, Integer score, String createdAt) {}
@@ -121,9 +129,15 @@ public class ProjectDashboardController {
       int completedRuns,
       int failedRuns,
       double avgScore,
+      int excludedScoreReports,
       long totalTokens,
       double totalCostUsd,
       CostBreakdown costBreakdown,
+      // RR-563: true only for billing-role viewers of the project's own org. When false,
+      // totalCostUsd
+      // and every costBreakdown field are zeroed (raw provider-dollar COGS is not a general
+      // project-read figure). tokens/credits remain visible. Clients should branch on this flag.
+      boolean costVisible,
       List<TaskSummary> recentTasks,
       List<PrSummaryDto> recentPrs,
       String architectureDocStatus,
@@ -174,23 +188,32 @@ public class ProjectDashboardController {
     double generatedDocCost = generatedDocRepo.sumCostUsdByProject(projectId);
 
     long totalTokens = pipelineTokens + execTokens + codeReviewTokens + prReviewTokens;
+
+    // RR-563: raw provider-dollar spend is a billing figure hidden from ordinary customer surfaces
+    // (managed AI credits are shown instead). Only a billing-role viewer of the project's own org
+    // sees the USD rollup; for everyone else the dollar figures are zeroed and costVisible=false so
+    // the client renders "hidden"/credits rather than a real COGS number. Tokens stay visible.
+    String projectOrgId = projectRepository.findById(projectId).map(Project::getOrgId).orElse(null);
+    boolean costVisible = CostVisibilityPolicy.canViewRawCost(userDetails, projectOrgId);
     double totalCost =
-        pipelineCost + execCost + codeReviewCost + prReviewCost + archCost + generatedDocCost;
+        costVisible
+            ? pipelineCost + execCost + codeReviewCost + prReviewCost + archCost + generatedDocCost
+            : 0.0;
     CostBreakdown costBreakdown =
-        new CostBreakdown(
-            pipelineCost, execCost, codeReviewCost, prReviewCost, archCost, generatedDocCost);
+        costVisible
+            ? new CostBreakdown(
+                pipelineCost, execCost, codeReviewCost, prReviewCost, archCost, generatedDocCost)
+            : new CostBreakdown(0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
 
     List<ValidationReport> reports = reportRepo.findAllByProjectId(projectId);
     // v2.5.10+: aggregate only verifiedScore (objective build+tests+verdict signal).
     // Legacy accuracyScore is an LLM self-assessment and must never be promoted into
     // a dashboard aggregate when deterministic evidence is absent.
-    double avgScore =
-        reports.stream()
-            .map(ProjectDashboardController::preferredScore)
-            .filter(s -> s != null)
-            .mapToInt(Integer::intValue)
-            .average()
-            .orElse(0.0);
+    ValidationReportValidityService.Aggregate scoreAggregate =
+        reportValidityService.aggregate(reports);
+    List<ValidationReport> canonicalReports = scoreAggregate.canonicalReports();
+    int excludedScoreReports = scoreAggregate.excludedCount();
+    double avgScore = scoreAggregate.averageScore();
 
     List<TaskSummary> recentTasks =
         recentRuns.stream()
@@ -201,7 +224,7 @@ public class ProjectDashboardController {
                         r.getRunId(),
                         r.getRunTitle() != null ? r.getRunTitle() : r.getUserRequest(),
                         r.getStatus(),
-                        latestScoreForRun(reports, r.getRunId()),
+                        latestScoreForRun(canonicalReports, r.getRunId()),
                         r.getStartedAt() != null ? r.getStartedAt().toString() : null))
             .toList();
 
@@ -219,9 +242,27 @@ public class ProjectDashboardController {
     } else {
       try {
         String pat = userDetails != null ? userDetails.getUser().getGithubPat() : null;
-        archStatus = stalenessService.report(projectId, pat).stale() ? "STALE" : "GENERATED";
+        var staleness = stalenessService.report(projectId, pat);
+        // RR-1657: "GENERATED" is an affirmative claim that the architecture matches the current
+        // repository state, so it must only be made when the probe actually verified that. A
+        // project whose repos could not be read (SCM outage, expired PAT) or that has only
+        // LOCAL/non-GitHub sources is UNVERIFIED, not current. Collapsing those into GENERATED was
+        // the user-visible half of the fail-open that RR-1585 closed inside StalenessService.
+        if (staleness.stale()) {
+          archStatus = "STALE";
+        } else if (staleness.verified()) {
+          archStatus = "GENERATED";
+        } else {
+          archStatus = "UNVERIFIED";
+        }
       } catch (Exception e) {
-        archStatus = "GENERATED";
+        // RR-1657: a failed staleness probe proves nothing about freshness. It previously reported
+        // GENERATED, which is the strongest possible claim on the weakest possible evidence.
+        log.warn(
+            "[Dashboard] Staleness probe failed for project {}; reporting UNVERIFIED: {}",
+            projectId,
+            e.toString());
+        archStatus = "UNVERIFIED";
       }
     }
     Integer archVersion = arch.map(a -> a.getVersion()).orElse(null);
@@ -232,9 +273,11 @@ public class ProjectDashboardController {
             (int) completed,
             (int) failed,
             avgScore,
+            excludedScoreReports,
             totalTokens,
             totalCost,
             costBreakdown,
+            costVisible,
             recentTasks,
             recentPrs,
             archStatus,
@@ -283,16 +326,22 @@ public class ProjectDashboardController {
                   value = "requirement",
                   required = false)
               String requirement,
+          @org.springframework.web.bind.annotation.RequestParam(
+                  value = "provider",
+                  required = false)
+              String provider,
+          @org.springframework.web.bind.annotation.RequestParam(value = "model", required = false)
+              String model,
           @org.springframework.security.core.annotation.AuthenticationPrincipal
               com.navneet.executespec.auth.security.AppUserDetails userDetails) {
     projectAccessGuard.assertCanRead(projectId, userDetails);
-    return ResponseEntity.ok(estimationService.estimate(projectId, requirement));
+    return ResponseEntity.ok(estimationService.estimate(projectId, requirement, provider, model));
   }
 
   /**
    * v2.5.2 — Tech Debt rollup: issues-by-category/severity, top-5 file hotspots, dimension-score
    * trend. All derived from existing ValidationReport rows; no LLM call. {@code since} filters to
-   * the last N days (default: all history).
+   * the last N days (default and operational maximum: 366 days; at most 1,000 reports).
    */
   @GetMapping("/api/projects/{projectId}/tech-debt")
   public ResponseEntity<com.navneet.executespec.project.techdebt.TechDebtService.Report> techDebt(

@@ -35,6 +35,16 @@ public record AnonymousRunSession(
         token, runId, spec, newStatus, newMessage, createdAt, result, boundUserId);
   }
 
+  /**
+   * RR-665 — the bearer is never persisted: {@code AnonymousRunSessionStore} strips it before
+   * writing to Redis and re-attaches the caller's own token on read, so a Redis snapshot or
+   * keyspace listing yields no usable credential.
+   */
+  public AnonymousRunSession withToken(String newToken) {
+    return new AnonymousRunSession(
+        newToken, runId, spec, status, message, createdAt, resultJson, boundUserId);
+  }
+
   public AnonymousRunSession boundTo(String userId) {
     return new AnonymousRunSession(
         token, runId, spec, status, message, createdAt, resultJson, userId);

@@ -61,8 +61,10 @@ class SseBroadcasterReplaySequenceTest {
     assertThat(last.path("payload").asText()).isEqualTo("{\"type\":\"C\"}");
 
     when(lists.range(anyString(), any(Long.class), any(Long.class))).thenReturn(writes);
-    assertThat(broadcaster.getReplayLog("run-1")).hasSize(3);
-    assertThat(broadcaster.getReplayLog("run-1").get(2)).containsEntry("type", "C");
+    assertThat(broadcaster.getReplayLog("run-1").events()).hasSize(3);
+    assertThat(broadcaster.getReplayLog("run-1").events().get(2)).containsEntry("type", "C");
+    assertThat(broadcaster.getReplayLog("run-1").lastEventId()).isEqualTo("501");
+    assertThat(broadcaster.getReplayLog("run-1").truncated()).isFalse();
   }
 
   private static long invokeAppend(SseBroadcaster broadcaster, String runId, String payload) {

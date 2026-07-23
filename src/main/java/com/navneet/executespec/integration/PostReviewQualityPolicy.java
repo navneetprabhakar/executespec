@@ -25,10 +25,46 @@ final class PostReviewQualityPolicy {
         || reviewResult.overall() == ReviewerResult.Overall.REVIEW_FAILED;
   }
 
+  /** RR-826 — the three states final verification can actually be in. */
+  enum FinalVerification {
+    /** A report exists and clears the quality bar. */
+    PASSED,
+    /** A report exists and is below the bar (or reports FAILED / NEEDS_ATTENTION). */
+    LOW_QUALITY,
+    /**
+     * No report exists at all — generation threw, the run row vanished, or persistence failed. This
+     * is NOT low quality: nothing was measured. Escalating to a stronger model on this state would
+     * turn a persistent report-generation bug into a recurring provider charge on every run, which
+     * is why {@code RunOrchestrator} stamps it and stops rather than re-running the work.
+     */
+    UNAVAILABLE
+  }
+
+  static FinalVerification finalVerification(
+      ValidationReport report, double requiredQualityThreshold) {
+    if (report == null) {
+      return FinalVerification.UNAVAILABLE;
+    }
+    return validationReportQualityFailed(report, requiredQualityThreshold)
+        ? FinalVerification.LOW_QUALITY
+        : FinalVerification.PASSED;
+  }
+
+  /**
+   * RR-826 — final verification is {@code PASSED | FAILED | UNAVAILABLE}, and only PASSED may leave
+   * a run success-shaped.
+   *
+   * <p>A null report means report generation threw, the run row vanished, or persistence failed —
+   * i.e. the deterministic verification artifact this product's central claim rests on does not
+   * exist. This previously returned false, so the caller retained its pre-report COMPLETE and
+   * continued to publication: verification became optional exactly when the verifier failed. The
+   * companion goal decision already labelled the same absence {@code FAILED/STOP_FAILED}, so the
+   * policy computed failed evidence and the boolean gate discarded it.
+   */
   static boolean validationReportQualityFailed(
       ValidationReport report, double requiredQualityThreshold) {
     if (report == null) {
-      return false;
+      return true;
     }
     if (report.getPipelineResult() == PipelineResult.FAILED
         || report.getPipelineResult() == PipelineResult.NEEDS_ATTENTION) {

@@ -7,8 +7,9 @@ import java.util.Set;
  * key (application.yml).
  *
  * <p>A null value for any field means "use the system singleton bean" for that provider. Populated
- * once at run-start by {@link ApiKeyResolver} and stored in {@link RunKeyStore} so that agents do
- * not need any signature changes.
+ * once at run-start by {@link ApiKeyResolver}. Production dispatch re-authorizes the current
+ * encrypted credential through the durable V282 execution-context policy before every physical
+ * provider attempt; this record remains a compatibility value for legacy callers.
  *
  * @param keySourceMode SYSTEM | OWN_KEYS | HYBRID — controls fallback behaviour
  * @param enabledProviders null = all providers allowed; non-null = only these (lowercase)
