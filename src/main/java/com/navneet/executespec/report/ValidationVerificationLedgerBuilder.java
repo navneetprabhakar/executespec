@@ -369,6 +369,7 @@ final class ValidationVerificationLedgerBuilder {
     int count = 0;
     for (ReportIssueDTO issue : issues) {
       if (issue == null || issue.severity() == null) continue;
+      if ("Auto-fixed successfully".equals(issue.fix())) continue;
       if (!"WOULD_FAIL_LINT".equals(issue.severity())) count++;
     }
     return count;

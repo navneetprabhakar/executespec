@@ -50,11 +50,11 @@ class ValidationReportServiceR09Test {
   }
 
   @Test
-  void clean_with_intermediate_warnings_promotes_needs_attention_to_passed() {
+  void clean_with_intermediate_warnings_does_not_erase_new_report_warning() {
     PipelineResult result =
         svc.reconcileForTest(
             PipelineResult.NEEDS_ATTENTION, inputWith("CLEAN_WITH_INTERMEDIATE_WARNINGS"));
-    assertEquals(PipelineResult.PASSED, result);
+    assertEquals(PipelineResult.NEEDS_ATTENTION, result);
   }
 
   @Test

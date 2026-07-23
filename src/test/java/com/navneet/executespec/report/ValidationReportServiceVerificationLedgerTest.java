@@ -212,6 +212,36 @@ class ValidationReportServiceVerificationLedgerTest {
   }
 
   @Test
+  void ledger_does_not_count_successfully_auto_fixed_visibility_issue_as_open() {
+    ValidationReport report =
+        ValidationReport.builder()
+            .id("vr-fixed")
+            .runId("run-fixed")
+            .filesGenerated(3)
+            .pipelineResult(PipelineResult.PASSED_WITH_FIXES)
+            .finalBuildPassed(true)
+            .testsPassed(10)
+            .testsTotal(10)
+            .reviewerVerdict("FIXED_ISSUES")
+            .verifiedScore(95)
+            .accuracyJson("{\"specAdherenceScore\":95,\"testCoverageLevel\":\"GOOD\"}")
+            .build();
+
+    List<VerificationEvidenceDTO> ledger =
+        svc.buildVerificationLedger(
+            report,
+            List.of(
+                new ReportIssueDTO(
+                    "Reviewer corrected route wiring",
+                    "WOULD_FAIL_REVIEW",
+                    "Auto-fixed successfully",
+                    "REVIEWER_AGENT",
+                    null)));
+
+    assertEntry(ledger, "report-issues", "PASS", "HYBRID", "MEDIUM");
+  }
+
+  @Test
   void generateAndPersistPublishesValidationEvidenceEventAfterSave() throws Exception {
     ValidationReportRepository repository = mock(ValidationReportRepository.class);
     ValidationReportGenerator generator = mock(ValidationReportGenerator.class);
