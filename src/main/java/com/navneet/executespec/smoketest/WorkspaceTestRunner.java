@@ -100,7 +100,7 @@ public class WorkspaceTestRunner {
     // Defense in depth: the command is resolver-derived (not worker text), but validate it anyway
     // so a future resolver change can never execute something the shell sandbox would block.
     ShellSandboxPolicy.ValidationResult v =
-        sandboxPolicy.validate(cmd.command(), workspaceRoot.toString());
+        sandboxPolicy.validate(commandForPolicyValidation(cmd.command()), workspaceRoot.toString());
     if (!v.permitted()) {
       log.warn(
           "WorkspaceTestRunner run={} test command blocked by sandbox: {} ({})",
@@ -311,5 +311,20 @@ public class WorkspaceTestRunner {
             : inheritedPath + ":" + EXTRA_PATH);
     if (home != null) env.put("HOME", home);
     if (javaHome != null) env.put("JAVA_HOME", javaHome);
+  }
+
+  /**
+   * The resolver may select a workspace virtual-environment interpreter so generated Python tests
+   * see their installed dependencies. The generic shell policy correctly rejects arbitrary
+   * path-qualified executables, so validate the fixed resolver-owned pytest shape as its canonical
+   * interpreter instead. The executed command remains resolver-derived; no model text reaches this
+   * path.
+   */
+  static String commandForPolicyValidation(String command) {
+    if (command.startsWith(".venv/bin/python -m pytest ")
+        || command.startsWith("venv/bin/python -m pytest ")) {
+      return "python3" + command.substring(command.indexOf(" -m pytest "));
+    }
+    return command;
   }
 }

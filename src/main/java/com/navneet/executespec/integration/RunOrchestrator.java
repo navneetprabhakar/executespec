@@ -1820,12 +1820,7 @@ public class RunOrchestrator implements RunControlPort {
                   runId,
                   effective,
                   outlineEx);
-              terminate(
-                  runId,
-                  "FAILED",
-                  "PLANNER_UNAVAILABLE",
-                  "planning could not produce a safe executable plan",
-                  startedAt);
+              failPlannerUnavailable(runId, startedAt, "produce a safe executable plan");
               return;
             }
           } else if (effective == PlanStrategy.LARGE) {
@@ -1839,12 +1834,7 @@ public class RunOrchestrator implements RunControlPort {
                   "V2 run={} LARGE planner pipeline failed — refusing scope collapse",
                   runId,
                   largeEx);
-              terminate(
-                  runId,
-                  "FAILED",
-                  "PLANNER_UNAVAILABLE",
-                  "planning could not produce a safe executable plan",
-                  startedAt);
+              failPlannerUnavailable(runId, startedAt, "produce a safe executable plan");
               return;
             }
           } else if (effective == PlanStrategy.SINGLE_SHOT) {
@@ -1855,12 +1845,7 @@ public class RunOrchestrator implements RunControlPort {
           } else {
             log.error(
                 "V2 run={} no usable planning strategy — refusing synthetic execution", runId);
-            terminate(
-                runId,
-                "FAILED",
-                "PLANNER_UNAVAILABLE",
-                "planning could not select a safe executable strategy",
-                startedAt);
+            failPlannerUnavailable(runId, startedAt, "select a safe executable strategy");
             return;
           }
         } catch (Exception e) {
@@ -3038,6 +3023,10 @@ public class RunOrchestrator implements RunControlPort {
         .filter(s -> s != null)
         .map(s -> s.startsWith("swebench-codegen"))
         .orElse(false);
+  }
+
+  private void failPlannerUnavailable(String runId, Instant startedAt, String failure) {
+    terminate(runId, "FAILED", "PLANNER_UNAVAILABLE", "planning could not " + failure, startedAt);
   }
 
   @Override
