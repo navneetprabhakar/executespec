@@ -225,6 +225,22 @@ public class WorkspaceTestRunner {
         xmlProvenanceProven = reportsReset && !admission.staleReportsPresent();
       }
 
+      // A non-zero runner exit is deterministic red evidence even when the runner crashed before
+      // printing a framework summary (missing dependency, collection error, segmentation fault,
+      // coverage gate, etc.). Treat it as "at least one failed" instead of falling back to an LLM
+      // coverage guess, which previously allowed a red workspace to end CLEAN/75.
+      if (parsed.isEmpty() && exit != 0) {
+        TestExecutionSummary failed = new TestExecutionSummary();
+        failed.setTotalTests(1);
+        failed.setPassed(0);
+        failed.setFailed(1);
+        failed.setErrors(0);
+        failed.setSkipped(0);
+        failed.setExecutionVerified(true);
+        failed.setUnverifiedReason("runner exited non-zero before an exact count was available");
+        parsed = Optional.of(failed);
+      }
+
       // RR-283 — the process exit code is the framework's own verdict and outranks whatever the
       // summary line says. A suite can print "all passed" and still exit non-zero because of a
       // coverage threshold, a plugin/compilation error, a package-level failure or a teardown

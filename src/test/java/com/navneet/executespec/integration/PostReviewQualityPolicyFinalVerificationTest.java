@@ -19,6 +19,7 @@ class PostReviewQualityPolicyFinalVerificationTest {
     ValidationReport r = new ValidationReport();
     r.setPipelineResult(result);
     r.setVerifiedScore(score);
+    r.setExecutableVerificationStatus("PASSED");
     return r;
   }
 
@@ -55,5 +56,12 @@ class PostReviewQualityPolicyFinalVerificationTest {
     // The new enum only stops it being MISLABELLED as measured low quality.
     org.junit.jupiter.api.Assertions.assertTrue(
         PostReviewQualityPolicy.validationReportQualityFailed(null, 70));
+  }
+
+  @Test
+  void buildOnlyReportIsLowQualityEvenWithHighScore() {
+    ValidationReport r = report(PipelineResult.PASSED, 95);
+    r.setExecutableVerificationStatus("BUILD_ONLY");
+    assertEquals(FinalVerification.LOW_QUALITY, PostReviewQualityPolicy.finalVerification(r, 70));
   }
 }

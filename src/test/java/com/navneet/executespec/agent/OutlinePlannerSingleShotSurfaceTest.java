@@ -30,4 +30,12 @@ class OutlinePlannerSingleShotSurfaceTest {
     assertThat(SingleShotSurfaceClassifier.infer("create a reusable todo library"))
         .isEqualTo(Plan.RuntimeSurface.LIBRARY);
   }
+
+  @Test
+  void negatedHttpConstraintDoesNotOverrideCliSurface() {
+    assertThat(
+            SingleShotSurfaceClassifier.infer(
+                "Create a TypeScript CLI. Do not create an HTTP server."))
+        .isEqualTo(Plan.RuntimeSurface.CLI);
+  }
 }

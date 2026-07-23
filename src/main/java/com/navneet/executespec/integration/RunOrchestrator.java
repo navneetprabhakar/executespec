@@ -1811,9 +1811,22 @@ public class RunOrchestrator implements RunControlPort {
               planStrategyBreaker.recordSuccess(effective);
             } catch (Exception outlineEx) {
               planStrategyBreaker.recordFailure(effective);
-              log.warn(
-                  "V2 run={} outline planner ({}) failed → SINGLE_SHOT fallback", runId, effective);
-              plan = outlinePlanner.synthesizeSingleShot(plannerReq);
+              // A multi-task request cannot safely degrade to one LOW synthetic task. That path
+              // discards structured requirements and can execute a materially different product
+              // after a provider/auth failure. Fail before the plan gate and preserve the raw
+              // exception only in operator logs.
+              log.error(
+                  "V2 run={} outline planner ({}) failed — refusing scope collapse",
+                  runId,
+                  effective,
+                  outlineEx);
+              terminate(
+                  runId,
+                  "FAILED",
+                  "PLANNER_UNAVAILABLE",
+                  "planning could not produce a safe executable plan",
+                  startedAt);
+              return;
             }
           } else if (effective == PlanStrategy.LARGE) {
             try {
@@ -1822,11 +1835,17 @@ public class RunOrchestrator implements RunControlPort {
               planStrategyBreaker.recordSuccess(PlanStrategy.LARGE);
             } catch (Exception largeEx) {
               planStrategyBreaker.recordFailure(PlanStrategy.LARGE);
-              log.warn(
-                  "V2 run={} LARGE pipeline failed → SINGLE_SHOT fallback: {}",
+              log.error(
+                  "V2 run={} LARGE planner pipeline failed — refusing scope collapse",
                   runId,
-                  largeEx.getMessage());
-              plan = outlinePlanner.synthesizeSingleShot(plannerReq);
+                  largeEx);
+              terminate(
+                  runId,
+                  "FAILED",
+                  "PLANNER_UNAVAILABLE",
+                  "planning could not produce a safe executable plan",
+                  startedAt);
+              return;
             }
           } else if (effective == PlanStrategy.SINGLE_SHOT) {
             // v2.6.2 slice 5b — heuristic-fast-path classification.
@@ -1834,12 +1853,15 @@ public class RunOrchestrator implements RunControlPort {
             // spec verbatim.
             plan = outlinePlanner.synthesizeSingleShot(plannerReq);
           } else {
-            // Classifier failed (effective == null) or returned an
-            // unhandled value. Treat as SINGLE_SHOT — same shape as
-            // the legacy synthesised path, no LLM cost beyond the
-            // optional title summarizer.
-            log.warn("V2 run={} no usable strategy verdict → synthesised SINGLE_SHOT plan", runId);
-            plan = outlinePlanner.synthesizeSingleShot(plannerReq);
+            log.error(
+                "V2 run={} no usable planning strategy — refusing synthetic execution", runId);
+            terminate(
+                runId,
+                "FAILED",
+                "PLANNER_UNAVAILABLE",
+                "planning could not select a safe executable strategy",
+                startedAt);
+            return;
           }
         } catch (Exception e) {
           log.error("RunOrchestrator run={} planner failed", runId, e);

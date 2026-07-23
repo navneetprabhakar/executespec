@@ -70,6 +70,11 @@ final class PostReviewQualityPolicy {
         || report.getPipelineResult() == PipelineResult.NEEDS_ATTENTION) {
       return true;
     }
+    // Tests are mandatory for generated product code. BUILD_ONLY means the system proved syntax
+    // or compilation but did not prove behaviour; it must not retain a clean terminal status.
+    if (!"PASSED".equals(report.getExecutableVerificationStatus())) {
+      return true;
+    }
     Integer verifiedScore = report.getVerifiedScore();
     return verifiedScore != null
         && verifiedScore < sanitizeRequiredQualityThreshold(requiredQualityThreshold);

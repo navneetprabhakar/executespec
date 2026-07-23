@@ -57,6 +57,19 @@ class TestOutputParserTest {
   }
 
   @Test
+  void vitest_summary_drives_count() {
+    var s =
+        ok(
+            TestOutputParser.parse(
+                Framework.VITEST,
+                " Test Files  1 failed | 2 passed (3)\n Tests  4 failed | 10 passed (14)\n",
+                1));
+    assertEquals(14, s.getTotalTests());
+    assertEquals(10, s.getPassed());
+    assertEquals(4, s.getFailed());
+  }
+
+  @Test
   void surefire_sums_multiple_classes() {
     String out =
         "Tests run: 4, Failures: 0, Errors: 0, Skipped: 0\n"
@@ -99,6 +112,8 @@ class TestOutputParserTest {
     // LLM coverage, which is better than a wrong hard number.
     assertTrue(TestOutputParser.parse(Framework.PYTEST, "Segmentation fault", 139).isEmpty());
     assertTrue(TestOutputParser.parse(Framework.JEST, "command not found: jest", 127).isEmpty());
+    assertTrue(
+        TestOutputParser.parse(Framework.VITEST, "command not found: vitest", 127).isEmpty());
     assertTrue(TestOutputParser.parse(Framework.SUREFIRE, "BUILD FAILURE\nno tests", 1).isEmpty());
     assertTrue(TestOutputParser.parse(Framework.CARGO, "error[E0433]", 101).isEmpty());
     assertTrue(TestOutputParser.parse(Framework.UNKNOWN, "5 passed", 0).isEmpty());
