@@ -158,6 +158,22 @@ KEY SOURCE FILES content for the route handler — not just file names. If you c
 router file, leave coverage at the percent you can confirm and note the unread file in
 gradingNotes; do NOT default to 0%.
 
+ADVERSARIAL CONTRACT EVIDENCE:
+- Never infer an endpoint from a test name, service method, OpenAPI entry, or the phrase "implied".
+  Only a readable registered route/handler is implementation evidence.
+- "Stable errors without leaking internals" is IMPLEMENTED only when readable production error
+  handling maps raw persistence/provider failures to a sanitized public response. A test that only
+  checks for a `detail` field is insufficient; returning `str(exception)` is negative evidence.
+- A runnable service is not proven when integration fixtures replace the connection factory,
+  manually initialize schema, or set configuration absent from the documented run command. If the
+  default/runtime wiring uses a different ephemeral store per connection, classify startup/runtime
+  persistence as MISSING or PARTIAL.
+- Idempotency is not proven by replaying one method alone when one global key store is shared by
+  several operations. Check that operation/request identity is part of the stored contract so a key
+  cannot return another endpoint's response type.
+- Migration support is not proven by one arbitrary DDL call. If version advancement always writes
+  the same next version, classify repeated migration support as PARTIAL.
+
 SCORE COMPUTATION GUIDANCE:
 - Base score primarily on the IMPLEMENTED count vs the IMPLEMENTED+MISSING+PARTIAL count.
   Formula heuristic: score ≈ 100 × (implemented + 0.5×partial) / max(1, implemented + missing + partial).
@@ -321,7 +337,7 @@ SCORE COMPUTATION GUIDANCE:
       // UNKNOWN is only valid for absent evidence. Some model responses put a positively observed
       // defect in unknownRequirements (for example, "release accepts no idempotency key"). Repair
       // that contradiction deterministically so an admitted hard gap cannot retain an A grade.
-      AccuracyReportTruthPolicy.reclassifyContradictoryUnknowns(report);
+      AccuracyReportTruthPolicy.enforceConsistency(report);
 
       log.info(
           "[AccuracyAssessment] Complete for run {}: {} ({}/100) — {} missing, {} partial,"

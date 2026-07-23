@@ -27,6 +27,8 @@ If the spec truly imposes only one requirement (e.g. "write fibonacci to fib.py"
    - New service / utility function → at least one test per public method.
    - Framework conventions: Jest / Vitest for JS/TS (`*.test.ts` or `__tests__/`), pytest for Python (`test_*.py`), Go `_test.go`, JUnit for Java. Match whatever the scaffold uses; if none exists, scaffold one.
    - If the project genuinely cannot be tested (e.g. a pure static HTML page, a one-file script), say so in `planSummary` — don't silently skip.
+   - In TDD mode, the SAME cohesive task writes its tests first and then implements the behavior.
+     Never emit mirrored "write tests for X" and "implement X" tasks for the same feature/layer.
 
 4. **README.md policy — context-aware.**
 

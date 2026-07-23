@@ -575,12 +575,16 @@ public class OutlinePlannerAgent {
     target.append(PromptTrustBoundary.wrap(label, value)).append("\n\n");
   }
 
-  private static String renderTddBlock(boolean tddMode) {
+  static String renderTddBlock(boolean tddMode) {
     if (!tddMode) return "";
     return """
            ## TDD MODE
-           The user requested test-first ordering. Lead with test tasks. Implementation
-           tasks must declare `dependsOn` the test task IDs they implement against.
+           The user requested test-first execution. Do NOT split one feature into a test-only task
+           followed by an implementation-only task; that duplicates context and lets later tasks
+           rewrite already-completed work. Each cohesive feature/layer task must first add failing
+           tests, then implement the production behavior, then run those tests before completion.
+           Separate test tasks are allowed only for a genuinely independent cross-cutting suite
+           (for example, whole-system concurrency or browser E2E) that spans multiple features.
            """;
   }
 

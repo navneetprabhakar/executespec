@@ -11,6 +11,14 @@ IMPLICIT TEST CASES — the spec often implies tests it doesn't state explicitly
 - If spec has related entities (User has Posts) → test FK integrity (delete user with posts)
 - If spec mentions "list" endpoint → test empty list returns [] not null, test pagination if >10 items
 - If spec mentions "authentication" → test every protected endpoint WITHOUT a token returns 401
+- If spec requires a runnable service → test the documented/default startup configuration without
+  manually initializing, replacing, or monkey-patching the persistence/runtime boundary
+- If spec mentions "idempotency" → test same-operation replay AND reuse of the same raw key across
+  two different operations; it must not return another operation's cached response shape
+- If spec requires stable/non-leaking errors → trigger a real persistence conflict and assert the
+  response contains no table names, constraint text, stack trace, SQL, or provider internals
+- If spec mentions schema migration(s) → apply at least two sequential migrations and verify the
+  version advances without collision
 Generate these even if the spec doesn't spell them out — they are inherent in the requirements.
 - Each test task produces ONE test class. Keep classes focused on a single entity or concern.
 

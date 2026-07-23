@@ -31,11 +31,21 @@ final class AccuracyReportTruthPolicy {
   private AccuracyReportTruthPolicy() {}
 
   /**
-   * Moves UNKNOWN entries that state positive negative-evidence to PARTIAL and removes impossible A
-   * grades. UNKNOWN remains valid when the text merely describes an evidence-access limitation.
+   * Reclassifies UNKNOWN entries that actually admit a defect and prevents incomplete requirement
+   * assessments from receiving an impossible A grade. UNKNOWN remains valid when the text merely
+   * describes an evidence-access limitation.
    */
-  static void reclassifyContradictoryUnknowns(AccuracyReport report) {
-    if (report == null || report.getUnknownRequirements() == null) return;
+  static void enforceConsistency(AccuracyReport report) {
+    if (report == null) return;
+    reclassifyContradictoryUnknowns(report);
+    if (report.incompleteRequirementsCount() > 0) {
+      report.setSpecAdherenceScore(Math.min(89, report.getSpecAdherenceScore()));
+      report.setOverallAccuracyGrade(gradeFromScore(report.getSpecAdherenceScore()));
+    }
+  }
+
+  private static void reclassifyContradictoryUnknowns(AccuracyReport report) {
+    if (report.getUnknownRequirements() == null) return;
     List<String> unknown = new ArrayList<>();
     List<String> contradicted = new ArrayList<>();
     for (String requirement : report.getUnknownRequirements()) {
@@ -51,8 +61,6 @@ final class AccuracyReportTruthPolicy {
     partial.addAll(contradicted);
     report.setUnknownRequirements(List.copyOf(unknown));
     report.setPartialRequirements(List.copyOf(partial));
-    report.setSpecAdherenceScore(Math.min(89, report.getSpecAdherenceScore()));
-    report.setOverallAccuracyGrade(gradeFromScore(report.getSpecAdherenceScore()));
   }
 
   private static boolean isContradictoryUnknown(String requirement) {

@@ -1062,6 +1062,14 @@ because "delivered nothing and verification is red" was being read as "environme
 **Expect verified scores to move DOWN, never up, apart from proven-test runs whose ledger label
 recovers.**
 
+**Release-blocker generated-output audit (2026-07-23).** TDD planning now keeps failing tests and
+implementation in one cohesive task instead of emitting mirrored test-only then implementation-only
+passes. Any accuracy assessment that admits a missing or partial requirement is capped below the A
+band (89/B), and the reviewer/accuracy/test-planner prompts explicitly challenge documented default
+startup, persistence fixtures that bypass production wiring, cross-operation idempotency collisions,
+raw internal error leakage, and repeated migration advancement. These checks were added after a
+96/96 self-green generated FastAPI suite failed all four independent acceptance probes.
+
 **IMPLEMENTER_V1 (2026-07-11):** The guarded local-hands writer seam now has an opt-in bounded model executor. `POST /api/agent/sessions/{id}/writer/execute` runs a WORKHORSE pass over a strict read/search/diff/edit/build/test allowlist, reauthorizes the exact writer reservation before every round and mutation, persists `IMPLEMENTER_CHECKPOINT` fingerprints and a terminal `AgentTurn`, and releases the reservation on success or failure. The feature flag `agent.subagents.implementer.enabled` remains default-off; WEB sessions and shell/git/network authority are rejected.
 
 **Benchmark trajectory checkpoint (2026-07-18):** eligible benchmark SSE is captured outside the
