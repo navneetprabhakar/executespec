@@ -75,13 +75,16 @@ spring:
       client:
         registration:
           google:
-            client-id: ${GOOGLE_OAUTH_CLIENT_ID:}
-            client-secret: ${GOOGLE_OAUTH_CLIENT_SECRET:}
+            # Spring validates every declared registration during startup. Keep
+            # boot-safe sentinels when dev OAuth credentials are not provisioned;
+            # authorization remains unavailable until real values are supplied.
+            client-id: ${GOOGLE_OAUTH_CLIENT_ID:none}
+            client-secret: ${GOOGLE_OAUTH_CLIENT_SECRET:none}
             scope: openid, email, profile
             redirect-uri: https://dev.executespec.ai/api/auth/oauth2/callback/{registrationId}
           github:
-            client-id: ${GITHUB_OAUTH_CLIENT_ID:}
-            client-secret: ${GITHUB_OAUTH_CLIENT_SECRET:}
+            client-id: ${GITHUB_OAUTH_CLIENT_ID:none}
+            client-secret: ${GITHUB_OAUTH_CLIENT_SECRET:none}
             scope: user:email, read:user
             redirect-uri: https://dev.executespec.ai/api/auth/oauth2/callback/{registrationId}
         provider:
