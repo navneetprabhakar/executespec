@@ -99,6 +99,11 @@ invalid reports are excluded and counted separately.
   caps accuracy at 79/C, while an admitted missing requirement caps it at 69/D. The assessor prompt
   requires readable route/runtime/error/idempotency/migration evidence; test names, mocked fixtures,
   OpenAPI entries, and raw exception strings cannot prove those contracts.
+- SUPER_ADMIN verified-score backfill replays the same admitted-gap cap from persisted
+  `accuracy_json`. Historical partial requirements cap both recomputed headline scores at 79 (or
+  the lower stored adherence score), missing requirements cap them at 69, and UNKNOWN-only evidence
+  remains uncapped. A maintenance rescore must never erase known requirement gaps or inflate a row
+  above the live report policy.
 
 ## Migration
 
