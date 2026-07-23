@@ -112,6 +112,10 @@ to recover deployment while `CRYPTO_GCP_SECRET_RESOURCE` is provisioned with an 
 Secret Manager version and the VM IAM binding is verified. This means dev credential writes are
 plaintext passthrough during the exception; remove it immediately after the governed key is live.
 
+**Dev OAuth boot fallback (2026-07-23):** declared Google/GitHub registrations use the non-empty
+sentinel `none` when the VM has no OAuth environment variables, because Spring validates declared
+registrations at startup. OAuth is unavailable until the VM supplies real client IDs and secrets.
+
 **Anonymous-session bearers (2026-07-21, RR-665).** The `anonrun/` trial-session token is a bearer
 credential and is now treated as one. `AnonymousRunSessionStore.bindToUser` was read-check-write, so
 two concurrent claims of one unbound token could both be told they succeeded and race to overwrite
