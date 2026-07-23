@@ -23,7 +23,7 @@ class AccuracyReportTruthPolicyTest {
             .partialRequirements(List.of())
             .build();
 
-    AccuracyReportTruthPolicy.reclassifyContradictoryUnknowns(report);
+    AccuracyReportTruthPolicy.enforceConsistency(report);
 
     assertThat(report.getUnknownRequirements()).isEmpty();
     assertThat(report.getPartialRequirements()).hasSize(1);
@@ -42,11 +42,45 @@ class AccuracyReportTruthPolicyTest {
             .partialRequirements(List.of())
             .build();
 
-    AccuracyReportTruthPolicy.reclassifyContradictoryUnknowns(report);
+    AccuracyReportTruthPolicy.enforceConsistency(report);
 
     assertThat(report.getUnknownRequirements()).hasSize(1);
     assertThat(report.getPartialRequirements()).isEmpty();
     assertThat(report.getSpecAdherenceScore()).isEqualTo(95);
     assertThat(report.getOverallAccuracyGrade()).isEqualTo("A");
+  }
+
+  @Test
+  void llm_admitted_partial_requirement_cannot_keep_grade_a() {
+    AccuracyReport report =
+        AccuracyReport.builder()
+            .specAdherenceScore(100)
+            .overallAccuracyGrade("A")
+            .missingRequirements(List.of())
+            .partialRequirements(List.of("Documented startup fails with the default database"))
+            .unknownRequirements(List.of())
+            .build();
+
+    AccuracyReportTruthPolicy.enforceConsistency(report);
+
+    assertThat(report.getSpecAdherenceScore()).isEqualTo(89);
+    assertThat(report.getOverallAccuracyGrade()).isEqualTo("B");
+  }
+
+  @Test
+  void llm_admitted_missing_requirement_cannot_keep_grade_a() {
+    AccuracyReport report =
+        AccuracyReport.builder()
+            .specAdherenceScore(94)
+            .overallAccuracyGrade("A")
+            .missingRequirements(List.of("Required release idempotency is absent"))
+            .partialRequirements(List.of())
+            .unknownRequirements(List.of())
+            .build();
+
+    AccuracyReportTruthPolicy.enforceConsistency(report);
+
+    assertThat(report.getSpecAdherenceScore()).isEqualTo(89);
+    assertThat(report.getOverallAccuracyGrade()).isEqualTo("B");
   }
 }

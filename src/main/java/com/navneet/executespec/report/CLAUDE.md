@@ -95,7 +95,10 @@ invalid reports are excluded and counted separately.
   `NEEDS_ATTENTION` result; successfully auto-fixed visibility issues are not open blockers; and an
   accuracy report with admitted missing/partial requirements caps the headline/rubric score at its
   spec-adherence score. `AccuracyReportTruthPolicy` moves UNKNOWN entries that themselves state
-  negative implementation evidence to PARTIAL before scoring.
+  negative implementation evidence to PARTIAL before scoring, and any admitted missing/partial
+  requirement forces the accuracy score/grade below the A band (maximum 89/B). The assessor prompt
+  requires readable route/runtime/error/idempotency/migration evidence; test names, mocked fixtures,
+  OpenAPI entries, and raw exception strings cannot prove those contracts.
 
 ## Migration
 
