@@ -5,6 +5,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import java.util.List;
 import java.util.Optional;
 
+import com.navneet.executespec.agent.Plan;
+import com.navneet.executespec.agent.PlannedTask;
 import com.navneet.executespec.execution.model.GoalContinuationPolicyDecision;
 import com.navneet.executespec.execution.model.RunContinuationDecision;
 import com.navneet.executespec.harness.ExecutionResult;
@@ -19,13 +21,17 @@ import org.junit.jupiter.api.Test;
 class RunOrchestratorReviewerRouteTest {
 
   /**
-   * Characterization seam for post-review continuation: only explicit reviewer failure evidence (or
-   * an exception) may open the continuation path; missing optional evidence stays fail-open.
+   * Reviewer infrastructure failure is unavailable evidence, not a reason to spend on a different
+   * coding model. Only a completed reviewer with concrete red evidence opens continuation.
    */
   @Test
-  void postReviewQualityBoundaryTreatsReviewerExceptionAsFailureButMissingReviewAsUnknown() {
-    assertThat(RunOrchestrator.reviewerQualityFailed(null, true)).isTrue();
+  void postReviewQualityBoundaryDoesNotAutoContinueReviewerException() {
+    assertThat(RunOrchestrator.reviewerQualityFailed(null, true)).isFalse();
     assertThat(RunOrchestrator.reviewerQualityFailed(null, false)).isFalse();
+
+    ReviewerResult failed =
+        ReviewerResult.builder().overall(ReviewerResult.Overall.REVIEW_FAILED).build();
+    assertThat(RunOrchestrator.reviewerQualityFailed(failed, false)).isFalse();
 
     var decision = RunOrchestrator.reviewerLowQualityGoalDecision(null, false);
     assertThat(decision.reason()).contains("UNKNOWN");
@@ -296,6 +302,77 @@ class RunOrchestratorReviewerRouteTest {
 
     assertThat(target).isPresent();
     assertThat(target.get().taskId()).isEqualTo("T1");
+  }
+
+  @Test
+  void reviewerContinuationTargetSkipsDocumentationTailTask() {
+    ExecutionResult execution =
+        result(
+            task(
+                "T3",
+                TaskOutcome.Status.SUCCESS,
+                null,
+                null,
+                null,
+                "deepseek",
+                "deepseek-v4-pro-native"),
+            task(
+                "T4",
+                TaskOutcome.Status.SUCCESS,
+                null,
+                null,
+                null,
+                "deepseek",
+                "deepseek-v4-pro-native"));
+    Plan plan =
+        Plan.builder()
+            .tasks(
+                List.of(
+                    PlannedTask.builder()
+                        .id("T3")
+                        .title("Implement API")
+                        .touchesFiles(List.of("main.py", "tests/test_api.py"))
+                        .build(),
+                    PlannedTask.builder()
+                        .id("T4")
+                        .title("Write docs")
+                        .touchesFiles(List.of("README.md"))
+                        .build()))
+            .build();
+
+    assertThat(RunOrchestrator.reviewerContinuationTarget(execution, plan))
+        .get()
+        .extracting(TaskOutcome::taskId)
+        .isEqualTo("T3");
+  }
+
+  @Test
+  void reviewerContinuationTargetFallsBackForDocumentationOnlyRun() {
+    ExecutionResult execution =
+        result(
+            task(
+                "T1",
+                TaskOutcome.Status.SUCCESS,
+                null,
+                null,
+                null,
+                "deepseek",
+                "deepseek-v4-pro-native"));
+    Plan plan =
+        Plan.builder()
+            .tasks(
+                List.of(
+                    PlannedTask.builder()
+                        .id("T1")
+                        .title("Write docs")
+                        .touchesFiles(List.of("docs/guide.md"))
+                        .build()))
+            .build();
+
+    assertThat(RunOrchestrator.reviewerContinuationTarget(execution, plan))
+        .get()
+        .extracting(TaskOutcome::taskId)
+        .isEqualTo("T1");
   }
 
   /** Pins recovery behavior when continuation evidence exists but has no usable route. */

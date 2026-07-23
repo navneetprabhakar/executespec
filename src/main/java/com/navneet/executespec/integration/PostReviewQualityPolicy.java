@@ -14,15 +14,17 @@ final class PostReviewQualityPolicy {
   private PostReviewQualityPolicy() {}
 
   static boolean reviewerQualityFailed(ReviewerResult reviewResult, boolean reviewerErrored) {
-    if (reviewerErrored) {
-      return true;
-    }
+    // A reviewer exception/timeout is unavailable verification, not measured evidence that a
+    // different coding model can repair. Auto-continuing here turns verifier infrastructure
+    // failures into provider spend and can rerun an unrelated task. Preserve REVIEWER_FAILED and
+    // stop; only a completed review with concrete red evidence may open continuation.
+    if (reviewerErrored) return false;
     if (reviewResult == null || reviewResult.overall() == null) {
       return false;
     }
+    if (reviewResult.overall() == ReviewerResult.Overall.REVIEW_FAILED) return false;
     return Boolean.FALSE.equals(reviewResult.finalBuildPassed())
-        || reviewResult.overall() == ReviewerResult.Overall.UNRESOLVED_ISSUES
-        || reviewResult.overall() == ReviewerResult.Overall.REVIEW_FAILED;
+        || reviewResult.overall() == ReviewerResult.Overall.UNRESOLVED_ISSUES;
   }
 
   /** RR-826 — the three states final verification can actually be in. */
