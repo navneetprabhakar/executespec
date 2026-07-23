@@ -149,6 +149,10 @@ RULES — REQUIREMENT CLASSIFICATION (strict, four-way):
   more harmful (they tank the score and surface as critical issues to the user) than false
   positives on UNKNOWN (which are advisory).
 
+  UNKNOWN means evidence is unavailable. Never put a requirement in UNKNOWN when your own text
+  says the implementation is missing, lacks support, accepts no required field, does not enforce
+  the contract, or behaves differently from the requirement. Those are MISSING or PARTIAL.
+
 ENDPOINT COVERAGE: extract ALL endpoints from the spec (e.g., "POST /api/users"), then check
 KEY SOURCE FILES content for the route handler — not just file names. If you cannot read the
 router file, leave coverage at the percent you can confirm and note the unread file in
@@ -313,6 +317,11 @@ SCORE COMPUTATION GUIDANCE:
       // read — move it to unknownRequirements (advisory) instead of leaving it as MISSING
       // (which would synthesize a CRITICAL ReviewIssue and tank the score).
       verifyMissingByGrep(runId, report);
+
+      // UNKNOWN is only valid for absent evidence. Some model responses put a positively observed
+      // defect in unknownRequirements (for example, "release accepts no idempotency key"). Repair
+      // that contradiction deterministically so an admitted hard gap cannot retain an A grade.
+      AccuracyReportTruthPolicy.reclassifyContradictoryUnknowns(report);
 
       log.info(
           "[AccuracyAssessment] Complete for run {}: {} ({}/100) — {} missing, {} partial,"

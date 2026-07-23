@@ -249,6 +249,7 @@ public class ValidationReportService {
                   testCoverageLevel,
                   filesGenerated,
                   input.bootVerification());
+      verifiedScore = capScoreAtAdmittedSpecGaps(verifiedScore, accuracyReport);
 
       // PR-E Phase A (2026-05-13) — additive rubric companion. Fixes the verifiedScore=0
       // cliff where any single zero factor (failed build, REVIEW_FAILED) collapses the entire
@@ -265,6 +266,7 @@ public class ValidationReportService {
                   unfixedCritical,
                   endpointCoveragePercent,
                   testCoverageLevel);
+      rubricScore = capScoreAtAdmittedSpecGaps(rubricScore, accuracyReport);
 
       ExecutableVerificationEvidence executableVerification =
           executableVerification(
@@ -489,6 +491,7 @@ public class ValidationReportService {
     int total = baseline.total() + incomingTotal;
     int passed = Math.min(total, baseline.passed() + incomingPassed);
     List<ReportIssueDTO> issues = parseIssues(report.getIssuesJson());
+    AccuracyReport persistedAccuracy = parseAccuracyReport(report);
     ValidationVerificationLedgerBuilder.AccuracyFacts accuracy =
         verificationLedgerBuilder.parseAccuracyFacts(report.getAccuracyJson());
     int criticals = verificationLedgerBuilder.countUnfixedCriticalIssues(issues);
@@ -519,25 +522,29 @@ public class ValidationReportService {
     // Keep the existing six-dimension test axis in sync for callers that still render it.
     report.setTestCoverageScore(deriveConcreteTestCoverageScore(total, passed));
     report.setVerifiedScore(
-        computeVerifiedScore(
-            report.getFinalBuildPassed(),
-            passed,
-            total,
-            report.getReviewerVerdict(),
-            criticals,
-            accuracy.endpointCoverage(),
-            concreteCoverageLevel,
-            report.getFilesGenerated(),
-            bootVerification(report)));
+        capScoreAtAdmittedSpecGaps(
+            computeVerifiedScore(
+                report.getFinalBuildPassed(),
+                passed,
+                total,
+                report.getReviewerVerdict(),
+                criticals,
+                accuracy.endpointCoverage(),
+                concreteCoverageLevel,
+                report.getFilesGenerated(),
+                bootVerification(report)),
+            persistedAccuracy));
     report.setRubricScore(
-        computeRubricScore(
-            report.getFinalBuildPassed(),
-            passed,
-            total,
-            report.getReviewerVerdict(),
-            criticals,
-            accuracy.endpointCoverage(),
-            concreteCoverageLevel));
+        capScoreAtAdmittedSpecGaps(
+            computeRubricScore(
+                report.getFinalBuildPassed(),
+                passed,
+                total,
+                report.getReviewerVerdict(),
+                criticals,
+                accuracy.endpointCoverage(),
+                concreteCoverageLevel),
+            persistedAccuracy));
 
     ValidationReport saved = repository.save(report);
     List<VerificationEvidenceDTO> ledger = buildVerificationLedger(saved, issues);
@@ -562,6 +569,10 @@ public class ValidationReportService {
   }
 
   private String scoreEvidenceFailure(ValidationReport report) {
+    return scoreEvidenceFailure(report.getFilesGenerated(), parseAccuracyReport(report));
+  }
+
+  private AccuracyReport parseAccuracyReport(ValidationReport report) {
     AccuracyReport accuracy = null;
     if (report.getAccuracyJson() != null && !report.getAccuracyJson().isBlank()) {
       try {
@@ -573,7 +584,7 @@ public class ValidationReportService {
             ex.getMessage());
       }
     }
-    return scoreEvidenceFailure(report.getFilesGenerated(), accuracy);
+    return accuracy;
   }
 
   /**
@@ -935,6 +946,16 @@ public class ValidationReportService {
     return null;
   }
 
+  /**
+   * A summary score cannot exceed the assessor's own spec-adherence score once that assessor has
+   * identified a concrete missing or partial requirement. UNKNOWN-only reports remain uncapped
+   * because absence of evidence is not evidence of a gap.
+   */
+  static int capScoreAtAdmittedSpecGaps(int score, AccuracyReport accuracy) {
+    if (accuracy == null || accuracy.incompleteRequirementsCount() == 0) return score;
+    return Math.min(score, Math.max(0, Math.min(100, accuracy.getSpecAdherenceScore())));
+  }
+
   private PipelineResult computeResult(List<ReportIssueDTO> issues, ReportInput input) {
     PipelineResult heuristic = computeResultHeuristic(issues, input);
     // R-09 (UX audit, 2026-05-04) — reconcile against the run's
@@ -993,15 +1014,15 @@ public class ValidationReportService {
   }
 
   /**
-   * R-09 — when the run's status_reason gives an authoritative verdict, override the heuristic.
-   * Trust order: status_reason > heuristic > status fallback.
+   * R-09 — reconcile the pre-report run status with evidence discovered while generating the
+   * report. A failure/warning may tighten a clean pre-report status, but clean status text must
+   * never erase a newly measured report gap.
    *
    * <p>Mapping (matches the state machine in {@code RunOrchestrator.resolveTerminalStatus}):
    *
    * <ul>
-   *   <li>{@code CLEAN_COMPLETION} / {@code CLEAN_WITH_INTERMEDIATE_WARNINGS} → {@code PASSED} (or
-   *       {@code PASSED_WITH_FIXES} when the heuristic spotted successfully auto-fixed review
-   *       issues)
+   *   <li>{@code CLEAN_COMPLETION} / {@code CLEAN_WITH_INTERMEDIATE_WARNINGS} → preserve the
+   *       heuristic, including {@code NEEDS_ATTENTION} discovered during final assessment
    *   <li>{@code FINAL_BUILD_FAILED} / {@code ALL_TASKS_FAILED} / {@code EXECUTION_ABORTED} →
    *       {@code FAILED}
    *   <li>{@code REVIEWER_UNRESOLVED} / {@code REVIEWER_FAILED} / {@code TESTS_FAILED:N_OF_M} →
@@ -1011,9 +1032,8 @@ public class ValidationReportService {
    *       pre-v2.5.10 runs and edge cases where the orchestrator didn't set a reason)
    * </ul>
    *
-   * <p>When the heuristic is FAILED and the run says CLEAN_*, the run wins — the orchestrator
-   * considers the reviewer's overall verdict + final build, which is a tighter signal than
-   * per-issue severity. A logged warning records the drift for debugging.
+   * <p>The clean reason is stamped before report generation and therefore cannot be authoritative
+   * about evidence that did not exist yet. It may preserve a passing result, never manufacture one.
    */
   private PipelineResult reconcileWithRunStatus(PipelineResult heuristic, ReportInput input) {
     if (input.run() == null) return heuristic;
@@ -1025,17 +1045,7 @@ public class ValidationReportService {
 
     PipelineResult fromReason =
         switch (reason) {
-          case "CLEAN_COMPLETION", "CLEAN_WITH_INTERMEDIATE_WARNINGS" ->
-              // RR-288 — status text may tighten a result but must never upgrade failed
-              // deterministic evidence. The heuristic returns FAILED only on a compilation failure
-              // or an unresolved CRITICAL issue; a racy/erroneous CLEAN_* terminal reason cannot
-              // rewrite that into PASSED (which would let a shared report say PASSED while its own
-              // issue ledger says FAIL). Preserve FAILED; otherwise report PASSED[_WITH_FIXES].
-              heuristic == PipelineResult.FAILED
-                  ? PipelineResult.FAILED
-                  : (heuristic == PipelineResult.PASSED_WITH_FIXES
-                      ? PipelineResult.PASSED_WITH_FIXES
-                      : PipelineResult.PASSED);
+          case "CLEAN_COMPLETION", "CLEAN_WITH_INTERMEDIATE_WARNINGS" -> heuristic;
           case "FINAL_BUILD_FAILED", "ALL_TASKS_FAILED", "EXECUTION_ABORTED" ->
               PipelineResult.FAILED;
           case "REVIEWER_UNRESOLVED",

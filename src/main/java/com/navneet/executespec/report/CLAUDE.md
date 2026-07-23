@@ -91,6 +91,11 @@ invalid reports are excluded and counted separately.
   (six files / 30K characters). Production-file inference still excludes tests, but the LLM coverage
   judgment must inspect real test content rather than infer `NONE` from an intentionally test-free
   source snippet.
+- Final assessment is tighten-only: `CLEAN_*` pre-report status cannot erase a newly measured
+  `NEEDS_ATTENTION` result; successfully auto-fixed visibility issues are not open blockers; and an
+  accuracy report with admitted missing/partial requirements caps the headline/rubric score at its
+  spec-adherence score. `AccuracyReportTruthPolicy` moves UNKNOWN entries that themselves state
+  negative implementation evidence to PARTIAL before scoring.
 
 ## Migration
 
