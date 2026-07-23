@@ -20,9 +20,11 @@ class AgentNonRunIntentsTest {
     assertThat(decision.route()).isEqualTo("CHAT_ONLY");
     assertThat(decision.reasonCode()).isEqualTo("capabilities_overview");
     assertThat(decision.assistantReply())
+        .startsWith("- Inspect")
         .contains("confirmation-gated remote run")
         .contains("plan gate")
         .doesNotContain("cannot submit");
+    assertThat(decision.assistantReply().lines()).hasSize(3);
     assertThat(decision.proposedAction()).isNull();
     assertThat(decision.policy().runApiAllowed()).isFalse();
   }
