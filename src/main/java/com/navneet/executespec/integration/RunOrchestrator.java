@@ -2138,6 +2138,7 @@ public class RunOrchestrator implements RunControlPort {
       Optional<PostReviewContinuation> postReviewContinuation =
           maybeEmitPostReviewContinuationDecision(
               runId,
+              plan,
               execResult,
               reviewResult,
               reviewerErrored,
@@ -2278,6 +2279,7 @@ public class RunOrchestrator implements RunControlPort {
       Optional<PostReviewContinuation> postValidationContinuation =
           maybeEmitPostValidationContinuationDecision(
               runId,
+              plan,
               execResult,
               validationReport.orElse(null),
               requireContinuationConfirmation,
@@ -3256,6 +3258,7 @@ public class RunOrchestrator implements RunControlPort {
 
   private Optional<PostReviewContinuation> maybeEmitPostReviewContinuationDecision(
       String runId,
+      Plan plan,
       ExecutionResult execResult,
       ReviewerResult reviewResult,
       boolean reviewerErrored,
@@ -3265,7 +3268,7 @@ public class RunOrchestrator implements RunControlPort {
     if (!postReviewContinuationEnabled || !reviewerQualityFailed(reviewResult, reviewerErrored)) {
       return Optional.empty();
     }
-    Optional<TaskOutcome> target = reviewerContinuationTarget(execResult);
+    Optional<TaskOutcome> target = reviewerContinuationTarget(execResult, plan);
     if (target.isEmpty()) {
       log.warn(
           "RunOrchestrator run={} post-review continuation skipped: no retryable worker task",
@@ -3367,6 +3370,7 @@ public class RunOrchestrator implements RunControlPort {
 
   private Optional<PostReviewContinuation> maybeEmitPostValidationContinuationDecision(
       String runId,
+      Plan plan,
       ExecutionResult execResult,
       ValidationReport report,
       boolean confirmationRequired,
@@ -3382,7 +3386,7 @@ public class RunOrchestrator implements RunControlPort {
             != PostReviewQualityPolicy.FinalVerification.LOW_QUALITY) {
       return Optional.empty();
     }
-    Optional<TaskOutcome> target = reviewerContinuationTarget(execResult);
+    Optional<TaskOutcome> target = reviewerContinuationTarget(execResult, plan);
     if (target.isEmpty()) {
       log.warn(
           "RunOrchestrator run={} post-validation continuation skipped: no retryable worker task",
@@ -3880,19 +3884,11 @@ public class RunOrchestrator implements RunControlPort {
   }
 
   static Optional<TaskOutcome> reviewerContinuationTarget(ExecutionResult execResult) {
-    if (execResult == null || execResult.perTask() == null || execResult.perTask().isEmpty()) {
-      return Optional.empty();
-    }
-    List<TaskOutcome> perTask = execResult.perTask();
-    for (int i = perTask.size() - 1; i >= 0; i--) {
-      TaskOutcome task = perTask.get(i);
-      if (successfulEnoughForReviewPromotion(task)
-          && hasText(task.dispatchedProvider())
-          && hasText(task.dispatchedModel())) {
-        return Optional.of(task);
-      }
-    }
-    return Optional.empty();
+    return PostReviewContinuationTargetPolicy.select(execResult, null);
+  }
+
+  static Optional<TaskOutcome> reviewerContinuationTarget(ExecutionResult execResult, Plan plan) {
+    return PostReviewContinuationTargetPolicy.select(execResult, plan);
   }
 
   static List<String> reviewerProviderPreferenceOrder(String currentProvider) {

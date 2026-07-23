@@ -1070,6 +1070,14 @@ startup, persistence fixtures that bypass production wiring, cross-operation ide
 raw internal error leakage, and repeated migration advancement. These checks were added after a
 96/96 self-green generated FastAPI suite failed all four independent acceptance probes.
 
+Post-review continuation now opens only for completed, measured red review evidence. A reviewer
+exception/timeout remains `REVIEWER_FAILED` and cannot trigger provider spend, because a stronger
+coding model cannot repair unavailable verification. When measured review or final-validation
+quality does justify continuation, the target selector prefers the latest executable task and skips
+documentation-only tail tasks (while retaining a docs-only fallback). This closes the 2026-07-23
+failure where a timed-out wiring verifier switched providers and reran `README.md` instead of the
+API/service task that contained the defects.
+
 **IMPLEMENTER_V1 (2026-07-11):** The guarded local-hands writer seam now has an opt-in bounded model executor. `POST /api/agent/sessions/{id}/writer/execute` runs a WORKHORSE pass over a strict read/search/diff/edit/build/test allowlist, reauthorizes the exact writer reservation before every round and mutation, persists `IMPLEMENTER_CHECKPOINT` fingerprints and a terminal `AgentTurn`, and releases the reservation on success or failure. The feature flag `agent.subagents.implementer.enabled` remains default-off; WEB sessions and shell/git/network authority are rejected.
 
 **Benchmark trajectory checkpoint (2026-07-18):** eligible benchmark SSE is captured outside the
