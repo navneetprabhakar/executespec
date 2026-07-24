@@ -53,6 +53,12 @@ The description becomes the worker's user prompt. Be concrete:
 
 3. **Don't over-prescribe internals.** Pick the major design decisions (which library, which file path, which schema shape) but leave low-level structuring to the worker. Say "use `bcrypt` for password hashing"; don't say "import `bcrypt` at line 3 of auth.service.ts".
 
+   Put every contract another task consumes in `hardConstraints`, even when it is also explained
+   in the description: exact schema/entity/DTO fields, enum/status values, identifier types,
+   endpoint/header names, authentication/tenant source, hash or signature encoding, interface
+   methods, and configuration keys. Copy the prerequisite's established value verbatim. Tests must
+   name the same production contract; never invent an alternate fixture encoding or missing column.
+
 4. **Keep it scannable.** 100-300 words for MEDIUM; 50-150 for LOW; 200-400 for HIGH. Bullet lists are fine.
 
 # Blast radius — when the task changes a SHARED mechanism, enumerate EVERY call-site

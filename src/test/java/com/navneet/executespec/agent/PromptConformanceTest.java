@@ -226,7 +226,10 @@ class PromptConformanceTest {
 
     assertThat(prompt)
         .contains("appends the corrected constraint")
-        .contains("later conflicting constraints as higher precedence");
+        .contains("later conflicting constraints as higher precedence")
+        .contains("Cross-task contract registry")
+        .contains("lowercase-hex HMAC in production versus Base64 in a test")
+        .contains("append the exact canonical contract to every affected task");
     assertThat(prompt).doesNotContain("replaces the incompatible constraint");
   }
 
