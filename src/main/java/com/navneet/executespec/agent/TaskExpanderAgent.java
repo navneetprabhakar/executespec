@@ -265,11 +265,11 @@ public class TaskExpanderAgent {
     return sb.toString();
   }
 
-  private static String renderSkeletons(Plan plan, String currentId) {
+  private static String renderSiblingContracts(Plan plan, PlannedTask current) {
     if (plan.tasks() == null || plan.tasks().isEmpty()) return "(no sibling tasks)";
     StringBuilder sb = new StringBuilder();
     for (PlannedTask t : plan.tasks()) {
-      if (t.id().equals(currentId)) continue; // skip self
+      if (t.id().equals(current.id())) continue; // skip self
       sb.append("- ")
           .append(t.id())
           .append(" [")
@@ -279,6 +279,17 @@ public class TaskExpanderAgent {
           .append("] ")
           .append(t.title())
           .append("\n");
+      if (current.dependsOn() != null && current.dependsOn().contains(t.id())) {
+        sb.append(
+                "  ESTABLISHED PREREQUISITE CONTRACT — reuse exact symbols and do not redefine:\n")
+            .append("  files: ")
+            .append(t.touchesFiles() == null ? List.of() : t.touchesFiles())
+            .append("\n  constraints: ")
+            .append(t.hardConstraints() == null ? List.of() : t.hardConstraints())
+            .append("\n  description: ")
+            .append(truncate(t.description(), 8_000))
+            .append("\n");
+      }
     }
     return sb.length() == 0 ? "(no sibling tasks)" : sb.toString();
   }
@@ -296,7 +307,7 @@ public class TaskExpanderAgent {
             + "\nrequirements:\n"
             + renderRequirements(plan)
             + "\nsibling tasks:\n"
-            + renderSkeletons(plan, skeleton.id());
+            + renderSiblingContracts(plan, skeleton);
     String taskContext =
         "id="
             + safe(skeleton.id())

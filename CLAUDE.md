@@ -19,7 +19,7 @@ Spec-driven AI coding platform. Customer submits a spec in natural language → 
 RunOrchestrator
   ├─ SmartClassifierAgent (LIGHTWEIGHT)            classify spec: SINGLE_SHOT | SMALL | MEDIUM | LARGE | LEGACY
   ├─ OutlinePlannerAgent (PLANNING)                emit Plan via submitPlan tool
-  │   └─ for LARGE/LEGACY: SKELETON_ONLY → parallel TaskExpanderAgent (WORKHORSE) → CoherencePlannerAgent (LIGHTWEIGHT)
+  │   └─ for LARGE/LEGACY: SKELETON_ONLY → dependency-wave TaskExpanderAgent (WORKHORSE) → CoherencePlannerAgent (LIGHTWEIGHT)
   ├─ plan gate (PRODUCTION pauses at AWAITING_APPROVAL; PROTOTYPE bypasses)
   ├─ SequentialExecutor                            per-task tier-routed WorkerAgent + per-task buildProject smoke
   ├─ ReviewerAgent (PLANNING)                      general + wiring passes (project-type aware) + PostEditFormatter + fix-build third pass (if final build red)
