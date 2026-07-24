@@ -1,7 +1,5 @@
 package com.navneet.executespec.engine;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -21,8 +19,6 @@ import com.navneet.executespec.testgen.model.TestExecutionSummary;
 import com.navneet.executespec.tool.CompleteTaskTool;
 import com.navneet.executespec.tool.ExecutionContext;
 import com.navneet.executespec.tool.Tool;
-import com.navneet.executespec.tool.ToolCapabilities;
-import com.navneet.executespec.tool.ToolCapability;
 import com.navneet.executespec.tool.ToolOutputCompactor;
 import com.navneet.executespec.tool.ToolRegistry;
 import com.navneet.executespec.tool.ToolResult;
@@ -398,6 +394,7 @@ public class WorkerAgent {
     final java.util.Set<String> seenCallSignatures = new java.util.HashSet<>();
     // v2: consecutive failures per signature (a success on the same signature clears its streak).
     final java.util.Map<String, Integer> failedSignatureStreaks = new java.util.HashMap<>();
+    final WorkerMutationChurnGuard mutationChurn = new WorkerMutationChurnGuard();
     int textOnlyForcedRetries = 0;
     boolean forceToolChoiceNextCall = false;
     // task 9 — context-overflow recovery attempts used (compactNow, then hard-trim, then ERROR).
@@ -1302,12 +1299,18 @@ public class WorkerAgent {
                 : dispatchOne(tc, req, isImmediatelyPriorToolCall);
         if (isWriteTool(tc.name()) && isOkEnvelope(envelope)) {
           successfulEditsThisIter++;
+          mutationChurn.recordMutation(mutationTarget(tc.name(), tc.arguments()));
         }
         // RR-259 — a progress-class call counts only when it succeeded.
         if (isProgressTool(tc.name(), terminalTaskMode)
             && isOkEnvelope(envelope)
             && !isFailureEnvelope(envelope)) {
           successfulProgressThisIter = true;
+        }
+        if (terminalVerifierCommand(tc.name(), commandFromArgs(tc.arguments()))
+            && isOkEnvelope(envelope)
+            && envelopeProvesExitZero(tc.name(), envelope)) {
+          mutationChurn.recordPassingVerification();
         }
         // V182 layer-3 — track successful runTests for the completeTask gate.
         // 2026-05-08 strengthened: only count runs where tests ACTUALLY PASSED, not just
@@ -1376,6 +1379,25 @@ public class WorkerAgent {
         emitToolCallLog(req, tc);
       }
       history.add(ToolResponseMessage.builder().responses(toolResponses).build());
+
+      WorkerMutationChurnGuard.Decision churnDecision =
+          mutationChurn.evaluate(
+              progressV2 && !terminalTaskMode, req.context().runId(), req.context().taskId(), iter);
+      if (churnDecision == WorkerMutationChurnGuard.Decision.NUDGE) {
+        history.add(new UserMessage(WorkerMutationChurnGuard.nudgeMessage()));
+      } else if (churnDecision == WorkerMutationChurnGuard.Decision.FORCE) {
+        recordTerminal(WorkerResult.Outcome.ITERATION_LIMIT_EXCEEDED, req, iter);
+        return WorkerResult.builder()
+            .outcome(WorkerResult.Outcome.ITERATION_LIMIT_EXCEEDED)
+            .iterations(iter)
+            .toolCallsDispatched(toolsDispatched)
+            .finalAssistantText(
+                "Repeated same-path mutation without passing maintained verification")
+            .repeatedAssistantTextCount(maxRepeatedAssistantTextCount)
+            .toolCallLog(toolLog)
+            .totalLatencyMs(System.currentTimeMillis() - start)
+            .build();
+      }
 
       // Progress signal (RL-2026-05-005)
       // Reset the counter on any write-class tool call (writeFile / editFile); otherwise
@@ -2403,14 +2425,7 @@ public class WorkerAgent {
   }
 
   static String argumentSignature(String args) {
-    if (args == null || args.isBlank()) return "none";
-    try {
-      byte[] digest =
-          MessageDigest.getInstance("SHA-256").digest(args.getBytes(StandardCharsets.UTF_8));
-      return java.util.HexFormat.of().formatHex(digest, 0, 8);
-    } catch (java.security.NoSuchAlgorithmException impossible) {
-      throw new IllegalStateException("SHA-256 unavailable", impossible);
-    }
+    return WorkerMutationChurnGuard.argumentSignature(args);
   }
 
   private String toolCallLogEntry(AssistantMessage.ToolCall tc, String envelope) {
@@ -2432,41 +2447,7 @@ public class WorkerAgent {
    * evidence.
    */
   private String mutationTarget(String toolName, String arguments) {
-    if (toolName == null || arguments == null) return "";
-    // RR-1599 — was a literal lowercase-name set ({writefile, editfile, multiedit, applypatch}),
-    // which silently omitted `ast_edit` / `astEdit`, `move` / `rename` and `delete` / `deletePath`.
-    // Those calls really do change product files, so producing no [target=] marker made a genuine
-    // delivery unattributable in edit-churn evidence and in the goal-DONE intersection with the
-    // admitted product diff.
-    // Deliberately NOT the fail-closed WorkerToolPolicy.isWriteTool: an unclassified tool must
-    // not have its arguments claimed as a delivered product path.
-    if (!ToolCapabilities.of(toolName).map(ToolCapability::mutatesFiles).orElse(false)) {
-      return "";
-    }
-    try {
-      JsonNode node = objectMapper.readTree(arguments);
-      // `dst` before `src` so a move is attributed to the path that now exists.
-      for (String field : List.of("path", "file", "filePath", "dst", "src")) {
-        if (node.hasNonNull(field)) return safeMutationTarget(node.get(field).asText());
-      }
-      String patch = node.path("patch").asText("");
-      for (String line : patch.lines().toList()) {
-        String trimmed = line.trim();
-        for (String marker : List.of("*** Add File:", "*** Update File:")) {
-          if (trimmed.startsWith(marker)) {
-            return safeMutationTarget(trimmed.substring(marker.length()).trim());
-          }
-        }
-      }
-    } catch (Exception ignored) {
-      // Malformed arguments fail closed: no target is attributed to the task.
-    }
-    return "";
-  }
-
-  private static String safeMutationTarget(String path) {
-    if (path == null) return "";
-    return path.replace('\n', ' ').replace('\r', ' ').replace(']', '_').trim();
+    return WorkerMutationChurnGuard.mutationTarget(objectMapper, toolName, arguments);
   }
 
   private WorkerResult errorResult(

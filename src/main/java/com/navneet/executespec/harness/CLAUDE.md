@@ -39,6 +39,13 @@ the executor must not silently return to tier defaults.
 | `WorkerResult.java` | Worker terminal result contract. In addition to outcome, iteration/tool counts, transient final assistant text, tool log, and latency, it carries `repeatedAssistantTextCount` so `SequentialExecutor` can record stale repeated explanations in memory without persisting the text. Durable tool-log entries contain only tool name, opaque argument signature, safe mutation target and `-> OK` / `-> ERR`; `SequentialExecutor` groups repeated failures by that signature. For code-changing tasks, goal evidence intersects this task's successful mutating tool paths with `RunChangeEvidenceService`'s admitted baseline-to-final product diff; raw write-call counts remain diagnostics and cannot satisfy DONE. |
 | `ProviderBehaviorPolicy.java` | Failure-scoped classification of real provider breakdown. Completed workers with no explicit failure do not scan success prose for broad transport phrases, preventing requirement text such as "API errors" from causing a false provider switch. |
 | `PromptComposer.java` / `ExecutionRequest.originalGoal` | Every BUILD provider receives the same trust-bounded original specification and exact task-scoped requirement rows. The planner's task description remains implementation guidance and cannot silently replace or weaken the persisted requirement ledger. Shared worker policy derives adversarial tests from every semantic clause, so provider-specific fragments remain transport/efficiency tuning only. |
+
+BUILD planning and worker policy must agree on verification ownership: focused maintained tests
+travel in the same task as the production code they verify. A later test-only task may add broader
+integration/concurrency/E2E coverage, but cannot be the first verification of an earlier task. All
+six provider BUILD fragments repeat the conventional-test-tree rule and direct one-off repros to
+`/tmp`; root-level scratch smoke files are not product artifacts. Soft-completion counts are
+successful mutation calls, not distinct files, and customer/operator wording must say so.
 | `TaskOutcomeMetric` wiring | `SequentialExecutor` records each real terminal task through `TaskOutcomeMetricService` after any bounded continuation rerun, including the final provider/model, semantic task category, deterministic validation result, task-scoped output tokens, worker iterations, and latency. Synthetic skipped outcomes have no provider/model and are ignored by the fail-soft recorder. |
 
 Provider-breakdown text classification is failure-scoped. A worker that reached `completeTask` with

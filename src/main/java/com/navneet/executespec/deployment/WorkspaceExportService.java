@@ -55,11 +55,18 @@ public class WorkspaceExportService {
           "target",
           "build",
           "node_modules",
+          "__pycache__",
+          ".pytest_cache",
+          ".mypy_cache",
+          ".ruff_cache",
+          ".tox",
           ".gradle",
           ".idea",
           ".vscode",
           "*.class",
-          "*.jar");
+          "*.jar",
+          "*.pyc",
+          "*.pyo");
 
   /**
    * Exact filenames that are stripped from ZIP exports for security. Prevents accidentally
@@ -395,14 +402,17 @@ public class WorkspaceExportService {
     return Path.of(agentProps.getWorkspace(), runId).toAbsolutePath().normalize();
   }
 
-  private boolean shouldExclude(String relativePath) {
+  static boolean shouldExclude(String relativePath) {
     if (relativePath.isEmpty()) return false;
-    String name = Path.of(relativePath).getFileName().toString();
+    Path relative = Path.of(relativePath);
+    String name = relative.getFileName().toString();
     for (String pattern : EXCLUDE_PATTERNS) {
       if (pattern.startsWith("*")) {
         if (name.endsWith(pattern.substring(1))) return true;
       } else {
-        if (name.equals(pattern)) return true;
+        for (Path segment : relative) {
+          if (segment.toString().equals(pattern)) return true;
+        }
       }
     }
     return false;

@@ -131,6 +131,26 @@ class PromptConformanceTest {
   }
 
   @Test
+  void plannerAndExpanderKeepFocusedTestsWithProductionWork() throws IOException {
+    String full = prompt("prompts/outline-planner.md");
+    String skeleton = prompt("prompts/outline-planner-skeleton.md");
+    String expander = prompt("prompts/task-expander.md");
+
+    assertThat(full)
+        .contains("Tests travel with production code")
+        .contains("in the SAME task")
+        .contains("replay returns the original result")
+        .contains("Bound task breadth");
+    assertThat(skeleton)
+        .contains("Tests travel with production code")
+        .contains("first/only verification")
+        .contains("Bound task breadth");
+    assertThat(expander)
+        .contains("focused maintained tests belong in this SAME task")
+        .contains("do not create disposable root-level smoke scripts");
+  }
+
+  @Test
   void patchPromptNamesRunTestsGate() throws IOException {
     String patch = prompt("prompts/patch-agent.md");
 
@@ -153,6 +173,11 @@ class PromptConformanceTest {
           .doesNotContain("patch SOURCE ONLY")
           .doesNotContain("scratch repro")
           .doesNotContain("SWE-bench");
+      assertThat(build)
+          .as(provider + " build verification-artifact parity")
+          .contains("maintained conventional test suite")
+          .contains("root-level scratch smoke file")
+          .contains("`/tmp`");
     }
   }
 
