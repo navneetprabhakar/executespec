@@ -32,7 +32,7 @@ class AccuracyReportTruthPolicyTest {
   }
 
   @Test
-  void genuine_evidence_limitation_remains_unknown() {
+  void genuine_evidence_limitation_remains_unknown_but_cannot_prove_grade_a() {
     AccuracyReport report =
         AccuracyReport.builder()
             .specAdherenceScore(95)
@@ -46,8 +46,8 @@ class AccuracyReportTruthPolicyTest {
 
     assertThat(report.getUnknownRequirements()).hasSize(1);
     assertThat(report.getPartialRequirements()).isEmpty();
-    assertThat(report.getSpecAdherenceScore()).isEqualTo(95);
-    assertThat(report.getOverallAccuracyGrade()).isEqualTo("A");
+    assertThat(report.getSpecAdherenceScore()).isEqualTo(89);
+    assertThat(report.getOverallAccuracyGrade()).isEqualTo("B");
   }
 
   @Test

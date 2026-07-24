@@ -285,7 +285,7 @@ public class VerifiedScoreBackfillService {
 
   /**
    * Replays the deterministic truth cap applied during live report generation without asking an LLM
-   * to reassess historical data. The fixed 69/79 bounds also normalize reports written before
+   * to reassess historical data. The fixed 69/79/89 bounds also normalize reports written before
    * {@code AccuracyReportTruthPolicy} began lowering an internally inconsistent adherence score.
    */
   static int capScoreAtAdmittedSpecGapsFromAccuracyJson(int score, String accuracyJson) {
@@ -294,9 +294,10 @@ public class VerifiedScoreBackfillService {
       JsonNode root = MAPPER.readTree(accuracyJson);
       boolean missing = nonEmptyArray(root.path("missingRequirements"));
       boolean partial = nonEmptyArray(root.path("partialRequirements"));
-      if (!missing && !partial) return score;
+      boolean unknown = nonEmptyArray(root.path("unknownRequirements"));
+      if (!missing && !partial && !unknown) return score;
 
-      int policyCap = missing ? 69 : 79;
+      int policyCap = missing ? 69 : partial ? 79 : 89;
       JsonNode adherence = root.path("specAdherenceScore");
       if (adherence.canConvertToInt()) {
         policyCap = Math.min(policyCap, Math.max(0, Math.min(100, adherence.asInt())));

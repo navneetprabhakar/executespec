@@ -93,10 +93,12 @@ invalid reports are excluded and counted separately.
   source snippet.
 - Final assessment is tighten-only: `CLEAN_*` pre-report status cannot erase a newly measured
   `NEEDS_ATTENTION` result; successfully auto-fixed visibility issues are not open blockers; and an
-  accuracy report with admitted missing/partial requirements caps the headline/rubric score at its
-  spec-adherence score. `AccuracyReportTruthPolicy` moves UNKNOWN entries that themselves state
+  accuracy report with admitted missing/partial/unknown requirements caps the headline/rubric score
+  at its spec-adherence score. `AccuracyReportTruthPolicy` moves UNKNOWN entries that themselves state
   negative implementation evidence to PARTIAL before scoring. Any admitted partial requirement
-  caps accuracy at 79/C, while an admitted missing requirement caps it at 69/D. The assessor prompt
+  caps accuracy at 79/C, an admitted missing requirement caps it at 69/D, and genuinely unverified
+  requirements cap it at 89/B. UNKNOWN is not treated as a defect, but its ledger row is WARN and
+  cannot prove the run goal DONE. The assessor prompt
   requires readable route/runtime/error/idempotency/migration evidence; test names, mocked fixtures,
   OpenAPI entries, and raw exception strings cannot prove those contracts. Lexical grep hits no
   longer demote semantic MISSING findings to UNKNOWN: the release-blocker audit showed that words
@@ -107,7 +109,7 @@ invalid reports are excluded and counted separately.
 - SUPER_ADMIN verified-score backfill replays the same admitted-gap cap from persisted
   `accuracy_json`. Historical partial requirements cap both recomputed headline scores at 79 (or
   the lower stored adherence score), missing requirements cap them at 69, and UNKNOWN-only evidence
-  remains uncapped. A maintenance rescore must never erase known requirement gaps or inflate a row
+  caps them at 89. A maintenance rescore must never erase known requirement gaps or inflate a row
   above the live report policy.
 
 ## Migration

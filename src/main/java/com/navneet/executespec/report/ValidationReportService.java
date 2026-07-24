@@ -948,11 +948,13 @@ public class ValidationReportService {
 
   /**
    * A summary score cannot exceed the assessor's own spec-adherence score once that assessor has
-   * identified a concrete missing or partial requirement. UNKNOWN-only reports remain uncapped
-   * because absence of evidence is not evidence of a gap.
+   * identified a concrete missing/partial requirement or could not verify one. UNKNOWN is not a
+   * defect, but it also cannot support a headline score above the assessor's bounded confidence.
    */
   static int capScoreAtAdmittedSpecGaps(int score, AccuracyReport accuracy) {
-    if (accuracy == null || accuracy.incompleteRequirementsCount() == 0) return score;
+    if (accuracy == null
+        || (accuracy.incompleteRequirementsCount() == 0
+            && accuracy.unknownRequirementsCount() == 0)) return score;
     return Math.min(score, Math.max(0, Math.min(100, accuracy.getSpecAdherenceScore())));
   }
 

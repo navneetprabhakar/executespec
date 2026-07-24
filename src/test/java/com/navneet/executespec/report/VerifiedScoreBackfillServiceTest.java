@@ -152,11 +152,11 @@ class VerifiedScoreBackfillServiceTest {
   }
 
   @Test
-  void backfillLeavesUnknownOnlyAccuracyUncapped() {
+  void backfillCapsUnknownOnlyAccuracyAtTruthPolicyCeiling() {
     String accuracyJson =
         """
         {
-          "specAdherenceScore": 20,
+          "specAdherenceScore": 96,
           "missingRequirements": [],
           "partialRequirements": [],
           "unknownRequirements": ["Could not inspect deployment evidence"]
@@ -166,7 +166,7 @@ class VerifiedScoreBackfillServiceTest {
     assertThat(
             VerifiedScoreBackfillService.capScoreAtAdmittedSpecGapsFromAccuracyJson(
                 94, accuracyJson))
-        .isEqualTo(94);
+        .isEqualTo(89);
   }
 
   /**

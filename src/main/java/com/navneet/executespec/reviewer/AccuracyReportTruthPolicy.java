@@ -32,8 +32,9 @@ final class AccuracyReportTruthPolicy {
 
   /**
    * Reclassifies UNKNOWN entries that actually admit a defect and prevents incomplete requirement
-   * assessments from receiving an impossible A grade. UNKNOWN remains valid when the text merely
-   * describes an evidence-access limitation.
+   * assessments from receiving an impossible A grade. Genuine UNKNOWN remains distinct from a
+   * defect, but it still caps the claim below A: unavailable evidence cannot prove complete spec
+   * adherence.
    */
   static void enforceConsistency(AccuracyReport report) {
     if (report == null) return;
@@ -42,11 +43,16 @@ final class AccuracyReportTruthPolicy {
         report.getMissingRequirements() == null ? 0 : report.getMissingRequirements().size();
     int partial =
         report.getPartialRequirements() == null ? 0 : report.getPartialRequirements().size();
+    int unknown =
+        report.getUnknownRequirements() == null ? 0 : report.getUnknownRequirements().size();
     if (missing > 0) {
       report.setSpecAdherenceScore(Math.min(69, report.getSpecAdherenceScore()));
       report.setOverallAccuracyGrade(gradeFromScore(report.getSpecAdherenceScore()));
     } else if (partial > 0) {
       report.setSpecAdherenceScore(Math.min(79, report.getSpecAdherenceScore()));
+      report.setOverallAccuracyGrade(gradeFromScore(report.getSpecAdherenceScore()));
+    } else if (unknown > 0) {
+      report.setSpecAdherenceScore(Math.min(89, report.getSpecAdherenceScore()));
       report.setOverallAccuracyGrade(gradeFromScore(report.getSpecAdherenceScore()));
     }
   }
