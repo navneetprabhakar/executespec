@@ -53,6 +53,7 @@ public final class PlanSafetyContractEnricher {
     int applied = 0;
     for (PlannedTask task : plan.tasks()) {
       List<String> constraints = new ArrayList<>(task.hardConstraints());
+      String description = task.description();
       String taskEvidence = taskEvidence(task);
       boolean apiOrServiceTask =
           containsAny(
@@ -129,6 +130,17 @@ public final class PlanSafetyContractEnricher {
               "reservation_service",
               "concurrent",
               "thread")) {
+        RewriteResult sqliteRewrite = rewriteUnsafeSqliteConcurrency(description, constraints);
+        description = sqliteRewrite.description();
+        constraints = sqliteRewrite.constraints();
+        if (sqliteRewrite.rewrites() > 0) {
+          applied += sqliteRewrite.rewrites();
+          summaries.add(
+              task.id()
+                  + " removed "
+                  + sqliteRewrite.rewrites()
+                  + " ineffective SELECT FOR UPDATE instruction(s) · SQLite concurrency boundary");
+        }
         applied +=
             addConstraint(
                 constraints,
@@ -172,19 +184,22 @@ public final class PlanSafetyContractEnricher {
                 summaries);
       }
 
-      patchedTasks.add(withConstraints(task, constraints));
+      patchedTasks.add(withDescriptionAndConstraints(task, description, constraints));
     }
 
     if (applied == 0) return new Result(plan, 0, List.of());
     return new Result(withTasks(plan, patchedTasks), applied, List.copyOf(summaries));
   }
 
-  private static PlannedTask withConstraints(PlannedTask task, List<String> constraints) {
-    if (constraints.equals(task.hardConstraints())) return task;
+  private static PlannedTask withDescriptionAndConstraints(
+      PlannedTask task, String description, List<String> constraints) {
+    if (description.equals(task.description()) && constraints.equals(task.hardConstraints())) {
+      return task;
+    }
     return PlannedTask.builder()
         .id(task.id())
         .title(task.title())
-        .description(task.description())
+        .description(description)
         .complexity(task.complexity())
         .touchesFiles(task.touchesFiles())
         .dependsOn(task.dependsOn())
@@ -192,6 +207,50 @@ public final class PlanSafetyContractEnricher {
         .meetsRequirements(task.meetsRequirements())
         .taskType(task.taskType())
         .build();
+  }
+
+  private record RewriteResult(String description, List<String> constraints, int rewrites) {}
+
+  /**
+   * SQLite ignores {@code SELECT FOR UPDATE}; leaving a positive instruction anywhere in the
+   * executable task makes the plan internally contradictory even when a correct hard constraint is
+   * appended later. Rewrite descriptions and discard positive hard constraints before adding the
+   * canonical SQLite contract.
+   */
+  private static RewriteResult rewriteUnsafeSqliteConcurrency(
+      String description, List<String> constraints) {
+    String rewrittenDescription =
+        description.replaceAll(
+            "(?i)(?:via\\s+)?row-level\\s+lock\\s*\\(\\s*SELECT\\s+FOR\\s+UPDATE\\s*\\)",
+            "using a SQLite-effective atomic mutation (BEGIN IMMEDIATE or a conditional UPDATE"
+                + " with affected-row verification)");
+    if (containsUnsafePositiveSelectForUpdate(rewrittenDescription)) {
+      rewrittenDescription =
+          rewrittenDescription.replaceAll(
+              "(?i)SELECT\\s+FOR\\s+UPDATE",
+              "BEGIN IMMEDIATE or a conditional UPDATE with affected-row verification");
+    }
+
+    int rewrites = description.equals(rewrittenDescription) ? 0 : 1;
+    List<String> rewrittenConstraints = new ArrayList<>(constraints.size());
+    for (String constraint : constraints) {
+      if (containsUnsafePositiveSelectForUpdate(constraint)) {
+        rewrites++;
+      } else {
+        rewrittenConstraints.add(constraint);
+      }
+    }
+    return new RewriteResult(rewrittenDescription, rewrittenConstraints, rewrites);
+  }
+
+  private static boolean containsUnsafePositiveSelectForUpdate(String value) {
+    String normalized = safe(value).toLowerCase(Locale.ROOT);
+    if (!normalized.contains("select for update")) return false;
+    return !normalized.contains("does not provide effective")
+        && !normalized.contains("not effective")
+        && !normalized.contains("ineffective")
+        && !normalized.contains("must not use")
+        && !normalized.contains("do not use");
   }
 
   private static Plan withTasks(Plan plan, List<PlannedTask> tasks) {

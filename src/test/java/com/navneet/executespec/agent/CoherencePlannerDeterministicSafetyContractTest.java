@@ -126,6 +126,51 @@ class CoherencePlannerDeterministicSafetyContractTest {
         .noneMatch(value -> value.toLowerCase().contains("reservation"));
   }
 
+  @Test
+  void sqliteReservationPlanRemovesContradictorySelectForUpdateInstructions() {
+    Plan plan =
+        Plan.builder()
+            .planTitle("Reservation service")
+            .requirements(
+                List.of(
+                    requirement("R1", "Use SQLite for persistence."),
+                    requirement("R2", "Stock decrement must be atomic under concurrent requests.")))
+            .tasks(
+                List.of(
+                    PlannedTask.builder()
+                        .id("T1")
+                        .title("Create reservation")
+                        .description(
+                            "POST /reservations atomically decrements via row-level lock (SELECT"
+                                + " FOR UPDATE) and tests concurrent last-unit requests.")
+                        .touchesFiles(
+                            List.of("app/services/reservation_service.py", "tests/test_race.py"))
+                        .hardConstraints(
+                            List.of(
+                                "Atomic stock decrement via row-level lock: use SELECT FOR UPDATE"
+                                    + " within a SERIALIZABLE transaction"))
+                        .build()))
+            .build();
+
+    PlanSafetyContractEnricher.Result result = PlanSafetyContractEnricher.enrich(plan);
+    PlannedTask enriched = result.plan().tasks().getFirst();
+
+    assertThat(enriched.description())
+        .doesNotContainIgnoringCase("SELECT FOR UPDATE")
+        .contains("SQLite-effective atomic mutation");
+    assertThat(enriched.hardConstraints())
+        .noneMatch(
+            CoherencePlannerDeterministicSafetyContractTest::positivelyRequiresSelectForUpdate)
+        .anyMatch(value -> value.contains("SQLite does not provide effective SELECT FOR UPDATE"));
+    assertThat(result.contractsApplied()).isEqualTo(3);
+  }
+
+  private static boolean positivelyRequiresSelectForUpdate(String value) {
+    String normalized = value.toLowerCase();
+    return normalized.contains("select for update")
+        && !normalized.contains("does not provide effective");
+  }
+
   private static RequirementSpec requirement(String id, String text) {
     return new RequirementSpec(id, text, RequirementSpec.RequirementKind.FUNCTIONAL);
   }
