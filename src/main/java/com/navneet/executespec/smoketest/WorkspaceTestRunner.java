@@ -1,20 +1,18 @@
 package com.navneet.executespec.smoketest;
 
-import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.concurrent.TimeUnit;
 
 import com.navneet.executespec.programbench.ProgramBenchContainerStore;
 import com.navneet.executespec.sandbox.SandboxExecResult;
 import com.navneet.executespec.sandboxroute.SandboxCommandRoutingService;
 import com.navneet.executespec.smoketest.TestCommandResolver.TestCommand;
 import com.navneet.executespec.swebench.SwebenchContainerStore;
+import com.navneet.executespec.testgen.BoundedProcess;
 import com.navneet.executespec.testgen.model.TestExecutionSummary;
 import com.navneet.executespec.tool.ShellSandboxPolicy;
 
@@ -188,10 +186,9 @@ public class WorkspaceTestRunner {
         hardenEnv(pb);
         pb.redirectErrorStream(true);
 
-        Process proc = pb.start();
-        boolean finished = proc.waitFor(cmd.timeoutSeconds(), TimeUnit.SECONDS);
-        if (!finished) {
-          proc.destroyForcibly();
+        BoundedProcess.Outcome outcome =
+            BoundedProcess.run(pb, java.time.Duration.ofSeconds(cmd.timeoutSeconds()));
+        if (!outcome.finished()) {
           log.warn(
               "WorkspaceTestRunner run={} test command exceeded {}s — fallback to coverage: {}",
               runId,
@@ -199,8 +196,8 @@ public class WorkspaceTestRunner {
               cmd.command());
           return Optional.empty();
         }
-        output = new String(proc.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-        exit = proc.exitValue();
+        output = outcome.output();
+        exit = outcome.exitCode();
       }
 
       Optional<TestExecutionSummary> parsed = TestOutputParser.parse(cmd.framework(), output, exit);
@@ -284,12 +281,11 @@ public class WorkspaceTestRunner {
               ? output
               : "... [head omitted] ...\n" + output.substring(output.length() - DETAIL_TAIL_CHARS);
       return parsed.map(s -> new DetailedResult(s, tail, cmd.command(), exit));
-    } catch (IOException e) {
+    } catch (Exception e) {
       log.warn(
-          "WorkspaceTestRunner run={} IO error — fallback to coverage: {}", runId, e.getMessage());
-      return Optional.empty();
-    } catch (InterruptedException e) {
-      Thread.currentThread().interrupt();
+          "WorkspaceTestRunner run={} process error — fallback to coverage: {}",
+          runId,
+          e.getMessage());
       return Optional.empty();
     }
   }

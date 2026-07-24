@@ -140,13 +140,18 @@ class PromptConformanceTest {
         .contains("Tests travel with production code")
         .contains("in the SAME task")
         .contains("replay returns the original result")
+        .contains("schema initialization")
+        .contains("No invented deliverables")
         .contains("Bound task breadth");
     assertThat(skeleton)
         .contains("Tests travel with production code")
         .contains("first/only verification")
+        .contains("forward migrations")
+        .contains("No invented deliverables")
         .contains("Bound task breadth");
     assertThat(expander)
         .contains("focused maintained tests belong in this SAME task")
+        .contains("one baseline DDL file proves initialization, not migration")
         .contains("do not create disposable root-level smoke scripts");
   }
 

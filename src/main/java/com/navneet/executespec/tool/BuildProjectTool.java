@@ -4,7 +4,6 @@ import java.io.IOException;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.TimeUnit;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.navneet.executespec.programbench.ProgramBenchContainerStore;
@@ -12,6 +11,7 @@ import com.navneet.executespec.sandbox.SandboxExecResult;
 import com.navneet.executespec.sandboxroute.SandboxCommandRoutingService;
 import com.navneet.executespec.smoketest.BuildCommand;
 import com.navneet.executespec.smoketest.BuildCommandResolver;
+import com.navneet.executespec.testgen.BoundedProcess;
 
 import org.springframework.stereotype.Component;
 
@@ -239,24 +239,23 @@ public class BuildProjectTool implements Tool {
       if (javaHome != null) env.put("JAVA_HOME", javaHome);
       pb.redirectErrorStream(true);
 
-      Process proc = pb.start();
-      boolean finished = proc.waitFor(bc.timeoutSeconds(), TimeUnit.SECONDS);
-      if (!finished) {
-        proc.destroyForcibly();
+      BoundedProcess.Outcome outcome =
+          BoundedProcess.run(pb, java.time.Duration.ofSeconds(bc.timeoutSeconds()));
+      if (!outcome.finished()) {
         return ToolResult.err(
             ToolResult.ErrorKind.TIMEOUT,
             "build exceeded " + bc.timeoutSeconds() + "s timeout: " + bc.command());
       }
-      String output = new String(proc.getInputStream().readAllBytes());
-      int exit = proc.exitValue();
+      String output = outcome.output();
+      int exit = outcome.exitCode();
       // Return Ok regardless of exit code — the LLM/harness reads exit and decides.
       return ToolResult.ok(buildSummary(ctx, bc, exit, output));
     } catch (IOException ioe) {
       log.warn("buildProject IO error command={}", bc.command(), ioe);
       return ToolResult.err(ToolResult.ErrorKind.IO_ERROR, ioe.getMessage());
-    } catch (InterruptedException ie) {
-      Thread.currentThread().interrupt();
-      return ToolResult.err(ToolResult.ErrorKind.INTERNAL, "interrupted");
+    } catch (Exception e) {
+      log.warn("buildProject process error command={}", bc.command(), e);
+      return ToolResult.err(ToolResult.ErrorKind.INTERNAL, e.getMessage());
     }
   }
 

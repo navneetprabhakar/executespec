@@ -1092,6 +1092,12 @@ startup, persistence fixtures that bypass production wiring, cross-operation ide
 raw internal error leakage, and repeated migration advancement. These checks were added after a
 96/96 self-green generated FastAPI suite failed all four independent acceptance probes.
 
+The 2026-07-24 live rerun exposed a separate execution deadlock: worker `shell`, `runTests`,
+`buildProject`, and final `WorkspaceTestRunner` host/container paths waited for the child before
+reading merged output, so verbose pytest/build processes blocked forever in `pipe_write` once the OS
+pipe filled. Those paths now share `testgen.BoundedProcess`, which drains concurrently, caps captured
+output, enforces a reachable timeout, and destroys the process tree on expiry.
+
 Post-review continuation now opens only for completed, measured red review evidence. A reviewer
 exception/timeout remains `REVIEWER_FAILED` and cannot trigger provider spend, because a stronger
 coding model cannot repair unavailable verification. When measured review or final-validation
@@ -1114,7 +1120,10 @@ task-scoped `TASK_REQUIREMENTS` evidence; reviewers receive bounded `ORIGINAL_SP
 `PLAN_REQUIREMENTS` ledger. All provider routes share these blocks and the same adversarial
 clause-level test directive. Planner full/skeleton/expander/coherence prompts now preserve compound
 runtime, idempotency, version, rollback, and error contracts and no longer impose a contradictory
-MEDIUM task-count floor. Accuracy assessment no longer lets lexical workspace hits override a
+MEDIUM task-count floor. They also preserve forward migration as an ordered/versioned upgrade of an
+existing schema instead of accepting initialization, and reject standalone OpenAPI/Swagger/auth/
+deploy/dashboard tasks invented from generic "production-quality" wording. Accuracy assessment no
+longer lets lexical workspace hits override a
 semantic MISSING finding. Python preview discovery scans bounded nested packages and converts
 `app/main.py` to `app.main:app` instead of generating a broken `main:app` container command.
 

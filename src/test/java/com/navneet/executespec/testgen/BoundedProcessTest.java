@@ -56,4 +56,22 @@ class BoundedProcessTest {
     assertEquals(3, outcome.exitCode());
     assertTrue(outcome.output().contains("hello"));
   }
+
+  @Test
+  void drainsMoreThanTheOsPipeBufferWhileTheChildRuns() throws Exception {
+    // Waiting before reading deadlocks once the pipe fills. Keep this comfortably above the
+    // common 64 KiB pipe capacity so every tool that delegates here inherits a real regression
+    // gate for the live pytest failure seen on 2026-07-24.
+    ProcessBuilder pb =
+        new ProcessBuilder(
+            "sh", "-c", "i=0; while [ $i -lt 12000 ]; do echo output-$i; i=$((i+1)); done");
+    pb.redirectErrorStream(true);
+
+    BoundedProcess.Outcome outcome = BoundedProcess.run(pb, Duration.ofSeconds(10));
+
+    assertTrue(outcome.finished());
+    assertEquals(0, outcome.exitCode());
+    assertTrue(outcome.output().length() > 65_536);
+    assertTrue(outcome.output().contains("output-11999"));
+  }
 }
