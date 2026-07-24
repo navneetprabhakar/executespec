@@ -156,6 +156,27 @@ class PromptConformanceTest {
   }
 
   @Test
+  void generationPromptsProtectCrossFeatureJourneysAndVisualEvidence() throws IOException {
+    String full = prompt("prompts/outline-planner.md");
+    String skeleton = prompt("prompts/outline-planner-skeleton.md");
+    String expander = prompt("prompts/task-expander.md");
+    String reviewer = prompt("prompts/reviewer-general.md");
+
+    assertThat(full)
+        .contains("Preserve cross-feature journeys")
+        .contains("DOM structure alone does not prove responsive CSS");
+    assertThat(skeleton)
+        .contains("creating the first item without seeding demo data")
+        .contains("DOM order alone is not proof");
+    assertThat(expander)
+        .contains("the first item can still be created without invoking optional demo data")
+        .contains("actual CSS/computed/browser evidence");
+    assertThat(reviewer)
+        .contains("Cross-feature journey regressions and false visual tests")
+        .contains("asserting that an empty board hides every create control");
+  }
+
+  @Test
   void patchPromptNamesRunTestsGate() throws IOException {
     String patch = prompt("prompts/patch-agent.md");
 

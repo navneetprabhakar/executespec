@@ -73,6 +73,12 @@ For LARGE and LEGACY specs, use the supplied MAX_TASKS hint as the hard ceiling
    behaviors; do not split their storage, service, API, and adversarial-test clauses into skeletons
    that no single worker owns completely.
 
+   Preserve cross-feature journeys on shared UI/state/storage surfaces. A later empty/loading/error
+   state must keep required primary actions reachable (including creating the first item without
+   seeding demo data), and a persistence task must validate the complete restored invariant rather
+   than accepting a partial shape. Put the interaction and its clean-state end-to-end test in one
+   skeleton; DOM order alone is not proof of responsive CSS, focus, or contrast.
+
 3. **Tests travel with production code.** Every production-code skeleton must include its focused
    conventional test file(s) in `touchesFiles`; the expander will make those tests part of the same
    task. A separate later test task is allowed only for additional cross-cutting integration,

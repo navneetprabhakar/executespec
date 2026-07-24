@@ -232,6 +232,17 @@ also create or extend a test that exercises it before calling completeTask:
     handling of expected persistence failures, and an ordered/versioned later migration applied to
     an already-initialized schema whenever those contracts are assigned to this task. `CREATE IF NOT
     EXISTS` or one baseline DDL file proves initialization, not forward migration.
+  - Preserve complete user journeys across task boundaries. When adding an empty/loading/error
+    state or another conditional branch to a shared page, prove that a fresh user can still perform
+    every required primary action (for example create the first item without loading demo data).
+    Do not make a newly added secondary action the only path into an existing feature.
+  - Validate recovery data as a whole invariant, not field-by-field only: required collection
+    members must be present exactly once, stable identities must remain unique, and values rejected
+    by the public mutation boundary (such as blank titles) must also be rejected on restore.
+  - A DOM-shape assertion does not prove responsive layout, visual focus, or contrast. When the spec
+    requires those properties, verify the actual CSS rule/computed style or use the project's
+    browser/visual accessibility test convention; do not claim a viewport test merely because the
+    same elements exist in DOM order at every width.
   - Tests are maintained product artifacts in the conventional test tree; root-level scratch smoke files are forbidden, and one-off reproduction files belong under `/tmp` outside the deliverable.
 Untested code is an INCOMPLETE task. Do not call completeTask on a code change
 with zero tests unless the task is genuinely untestable (pure static asset, a
@@ -3683,8 +3694,10 @@ to boot — skip it for those.""";
       String failureReason) {
     int fileWrites = workerResult == null ? 0 : countFileWrites(workerResult.toolCallLog());
     int meaningfulProductDiffs = meaningfulProductDiffCount(runId, workerResult, fileWrites);
-    RunCostTracker.Snapshot cost = costSnapshot(runId);
+    RunCostTracker.Snapshot cost = taskCostSnapshot(runId, task.id());
     int totalTokens = totalTrackedTokens(cost);
+    RunCostTracker.Snapshot runCost = costSnapshot(runId);
+    int runTotalTokens = totalTrackedTokens(runCost);
     long wallClockMs = workerResult == null ? 0L : workerResult.totalLatencyMs();
     boolean completeTaskClaimed =
         workerResult != null && workerResult.outcome() == WorkerResult.Outcome.COMPLETED;
@@ -3745,7 +3758,8 @@ to boot — skip it for those.""";
       evidence.add("smokePassed=" + smokePassed);
     }
 
-    String budgetCeilingReason = budgetCeilingReason(workerResult, cost, totalTokens, wallClockMs);
+    String budgetCeilingReason =
+        budgetCeilingReason(workerResult, runCost, runTotalTokens, wallClockMs);
     boolean budgetCeilingReached = budgetCeilingReason != null && !validationPassed;
     boolean blockedByEnvironment = blockedByEnvironment(workerResult, failureReason);
     boolean unsafeContinuation = unsafeContinuation(workerResult, failureReason);
@@ -3997,6 +4011,23 @@ to boot — skip it for those.""";
       return snapshot == null ? new RunCostTracker.Snapshot(0, 0, 0, 0, 0.0, 0) : snapshot;
     } catch (Exception ex) {
       log.debug("goalEvidence: cost snapshot failed for run={}: {}", runId, ex.getMessage());
+      return new RunCostTracker.Snapshot(0, 0, 0, 0, 0.0, 0);
+    }
+  }
+
+  private RunCostTracker.Snapshot taskCostSnapshot(String runId, String taskId) {
+    if (costTracker == null) {
+      return new RunCostTracker.Snapshot(0, 0, 0, 0, 0.0, 0);
+    }
+    try {
+      RunCostTracker.Snapshot snapshot = costTracker.snapshotTask(runId, taskId);
+      return snapshot == null ? new RunCostTracker.Snapshot(0, 0, 0, 0, 0.0, 0) : snapshot;
+    } catch (Exception ex) {
+      log.debug(
+          "goalEvidence: task cost snapshot failed for run={} task={}: {}",
+          runId,
+          taskId,
+          ex.getMessage());
       return new RunCostTracker.Snapshot(0, 0, 0, 0, 0.0, 0);
     }
   }

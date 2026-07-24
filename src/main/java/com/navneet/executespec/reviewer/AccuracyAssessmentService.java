@@ -198,6 +198,15 @@ ADVERSARIAL CONTRACT EVIDENCE:
   MISSING or PARTIAL and downgrade test coverage when the suite omits the adversarial case.
 - A migration file in the tree does not prove migration-backed startup when the documented/default
   application path calls ORM `create_all`/schema auto-creation instead of the migration runner.
+- Cross-feature reachability is part of implementation. If an empty/loading/error branch hides the
+  only create/retry control, classify the affected primary action as MISSING even when isolated CRUD
+  tests pass after pre-seeding state. Optional demo data must not be the only way to start.
+- Persisted/recovered state must enforce the complete invariant: every required collection member
+  exists exactly once, stable identities are unique, and values rejected interactively (for example
+  blank titles) are also rejected during restore. Field type checks alone are not safe recovery.
+- Do not infer responsive layout, visible focus, or WCAG contrast from component presence or DOM
+  order. Require readable CSS/computed/browser evidence. A README claim is not proof, and a viewport
+  test that asserts the same DOM structure at every width is not coverage of responsive rendering.
 
 SCORE COMPUTATION GUIDANCE:
 - Base score primarily on the IMPLEMENTED count vs the IMPLEMENTED+MISSING+PARTIAL count.

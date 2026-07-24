@@ -912,6 +912,9 @@ class SequentialExecutorSoftCompletionTest {
     when(costTracker.snapshot(anyString()))
         .thenReturn(
             new com.navneet.executespec.cost.RunCostTracker.Snapshot(120, 40, 0, 0, 0.25, 2));
+    when(costTracker.snapshotTask(anyString(), anyString()))
+        .thenReturn(
+            new com.navneet.executespec.cost.RunCostTracker.Snapshot(120, 40, 0, 0, 0.25, 2));
 
     SequentialExecutor executor = newExecutor();
     ReflectionTestUtils.setField(executor, "maxGoalTotalCostUsd", 0.10);
@@ -934,6 +937,32 @@ class SequentialExecutorSoftCompletionTest {
   }
 
   @Test
+  void goal_decision_exposes_task_usage_instead_of_cumulative_run_usage() {
+    stubTaskRow();
+    when(worker.run(any(WorkerTaskRequest.class), any())).thenReturn(workerCompleted(1));
+    when(buildProjectTool.execute(any(), any())).thenReturn(new ToolResult.Ok("exit=0\nBUILD OK"));
+    when(costTracker.snapshot(anyString()))
+        .thenReturn(
+            new com.navneet.executespec.cost.RunCostTracker.Snapshot(1_000, 200, 800, 0, 0.20, 20));
+    when(costTracker.snapshotTask(anyString(), anyString()))
+        .thenReturn(
+            new com.navneet.executespec.cost.RunCostTracker.Snapshot(100, 20, 80, 0, 0.02, 2));
+
+    newExecutor().execute(req(singleTaskPlan(), true));
+
+    verify(broadcaster)
+        .emit(
+            anyString(),
+            argThat(
+                event ->
+                    isGoalDecisionEvent(event)
+                        && Integer.valueOf(100).equals(event.data().get("inputTokens"))
+                        && Integer.valueOf(20).equals(event.data().get("outputTokens"))
+                        && Integer.valueOf(200).equals(event.data().get("totalTokens"))
+                        && Double.valueOf(0.02).equals(event.data().get("costUsd"))));
+  }
+
+  @Test
   void goal_decision_uses_configured_token_ceiling_evidence() {
     stubTaskRow();
     when(worker.run(any(WorkerTaskRequest.class), any())).thenReturn(workerCompleted(2));
@@ -943,6 +972,9 @@ class SequentialExecutorSoftCompletionTest {
             new ToolResult.Ok("exit=1\nSyntaxError: unexpected token"),
             new ToolResult.Ok("exit=1\nSyntaxError: unexpected token"));
     when(costTracker.snapshot(anyString()))
+        .thenReturn(
+            new com.navneet.executespec.cost.RunCostTracker.Snapshot(100, 80, 10, 15, 0.01, 2));
+    when(costTracker.snapshotTask(anyString(), anyString()))
         .thenReturn(
             new com.navneet.executespec.cost.RunCostTracker.Snapshot(100, 80, 10, 15, 0.01, 2));
 

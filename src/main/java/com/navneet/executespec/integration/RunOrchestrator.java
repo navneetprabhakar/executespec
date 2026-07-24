@@ -1841,7 +1841,7 @@ public class RunOrchestrator implements RunControlPort {
           }
         } catch (Exception e) {
           log.error("RunOrchestrator run={} planner failed", runId, e);
-          terminate(runId, "FAILED", INTERNAL_ERROR_REASON, startedAt);
+          terminate(runId, "FAILED", INTERNAL_ERROR_REASON, INTERNAL_ERROR_REASON, startedAt);
           return;
         }
         if (plan.tasks() == null || plan.tasks().isEmpty()) {
@@ -1970,7 +1970,7 @@ public class RunOrchestrator implements RunControlPort {
           return;
         }
         log.error("RunOrchestrator run={} executor failed", runId, e);
-        terminate(runId, "FAILED", INTERNAL_ERROR_REASON, startedAt);
+        terminate(runId, "FAILED", INTERNAL_ERROR_REASON, INTERNAL_ERROR_REASON, startedAt);
         return;
       }
       persistenceWriter.applyExecutionResultToTasks(runId, execResult);
@@ -2500,7 +2500,7 @@ public class RunOrchestrator implements RunControlPort {
         return;
       }
       log.error("RunOrchestrator run={} unexpected failure", runId, unexpected);
-      terminate(runId, "FAILED", INTERNAL_ERROR_REASON, startedAt);
+      terminate(runId, "FAILED", INTERNAL_ERROR_REASON, INTERNAL_ERROR_REASON, startedAt);
     } finally {
       perky.stop(runId);
       // F3 — drop the run-scoped model-override binding so it never leaks to the

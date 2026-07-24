@@ -44,6 +44,13 @@ The description becomes the worker's user prompt. Be concrete:
    behaviors. `CREATE IF NOT EXISTS` or one baseline DDL file proves initialization, not migration.
    Fixtures that replace or manually initialize the production boundary do not prove it.
 
+   Preserve prerequisite user journeys when this task changes a shared page/state/schema. Empty,
+   loading, and error branches must not hide an established primary action; prove from clean state
+   that the first item can still be created without invoking optional demo data. Restored state must
+   satisfy the complete required shape and the same validation rules as interactive writes. For
+   responsive/focus/contrast requirements, test actual CSS/computed/browser evidence rather than
+   DOM order that is identical at every viewport.
+
 3. **Don't over-prescribe internals.** Pick the major design decisions (which library, which file path, which schema shape) but leave low-level structuring to the worker. Say "use `bcrypt` for password hashing"; don't say "import `bcrypt` at line 3 of auth.service.ts".
 
 4. **Keep it scannable.** 100-300 words for MEDIUM; 50-150 for LOW; 200-400 for HIGH. Bullet lists are fine.

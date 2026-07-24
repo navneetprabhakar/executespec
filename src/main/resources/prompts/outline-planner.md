@@ -102,6 +102,14 @@ internal wiring belongs inside the task that owns the requested behavior.
    that boundary. Keep tightly coupled clauses in the same task so one worker can implement and
    adversarially verify them end-to-end.
 
+   **Preserve cross-feature journeys.** When a later task edits a shared page, reducer, schema, or
+   persistence validator created by an earlier task, its description must name the established
+   user actions/invariants that must remain reachable. In particular, an empty/loading/error state
+   cannot hide the only create/retry action, and restored state must preserve the complete required
+   shape and the same validation rules as interactive writes. Require one clean-state end-to-end
+   test across the interaction; DOM structure alone does not prove responsive CSS, focus, or
+   contrast.
+
 10. **Honor the LANGUAGE PARITY block (when present).** If the workspace summary contains a "LANGUAGE PARITY (do not violate)" section, every task description and every entry in `touchesFiles` MUST use the conventions of the repo's detected language — even when the user's spec uses different conventions. Concretely:
     - User spec says `scan.service.ts`, repo is Python → write `scan_service.py` in the description, `repos/<name>/scan_service.py` in `touchesFiles`.
     - User spec says `os.getenv("X")`, repo is TypeScript → translate to `process.env.X` in the description.

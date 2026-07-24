@@ -40,6 +40,18 @@ the executor must not silently return to tier defaults.
 | `ProviderBehaviorPolicy.java` | Failure-scoped classification of real provider breakdown. Completed workers with no explicit failure do not scan success prose for broad transport phrases, preventing requirement text such as "API errors" from causing a false provider switch. |
 | `PromptComposer.java` / `ExecutionRequest.originalGoal` | Every BUILD provider receives the same trust-bounded original specification and exact task-scoped requirement rows. The planner's task description remains implementation guidance and cannot silently replace or weaken the persisted requirement ledger. Shared worker policy derives adversarial tests from every semantic clause, including applying a later ordered/versioned migration to an already initialized schema; `CREATE IF NOT EXISTS` or one baseline DDL file is initialization only. Provider-specific fragments remain transport/efficiency tuning only. |
 
+Shared worker policy also preserves clean-state journeys across task boundaries. Conditional empty,
+loading, or error branches cannot hide required primary actions; restored collections must retain
+complete/unique shape and interactive validation; DOM order/component presence cannot substitute
+for responsive, focus, or contrast evidence. The same contract is present in full/skeleton planning,
+task expansion, general review, and accuracy assessment, so provider-specific overlays cannot bypass it.
+
+Task-level `GOAL_DECISION` usage fields come from `RunCostTracker.snapshotTask(runId, taskId)`, not
+the cumulative run snapshot. Run-wide cost/token snapshots remain separate inputs to configured
+`max-total-*` waste ceilings. Do not expose cumulative spend as if each later task consumed it; the
+2026-07-24 Kanban run made task 7 appear to use 2.4M input tokens although its attributed calls used
+about 98K.
+
 BUILD planning and worker policy must agree on verification ownership: focused maintained tests
 travel in the same task as the production code they verify. A later test-only task may add broader
 integration/concurrency/E2E coverage, but cannot be the first verification of an earlier task. All
