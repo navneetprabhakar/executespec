@@ -369,11 +369,17 @@ public class RunMapper {
   }
 
   public TaskSummary toTaskSummary(AgentTask t) {
+    JsonNode goalDoneness = parseJson(t.getGoalDonenessJson(), "goalDoneness", t.getTaskId());
+    String displayStatus = displayTaskStatus(t.getStatus(), goalDoneness);
+    String failureReason = extractFailureReason(t);
+    if (failureReason == null && "PARTIAL".equals(displayStatus) && goalDoneness != null) {
+      failureReason = goalDoneness.path("reason").asText(null);
+    }
     return new TaskSummary(
         t.getTaskId(),
         t.getTitle(),
         t.getComplexity(),
-        t.getStatus(),
+        displayStatus,
         t.getAssignedModel(),
         t.getProvider(),
         t.getModel(),
@@ -384,8 +390,8 @@ public class RunMapper {
         t.getDurationMs(),
         t.getStartedAt(),
         t.getCompletedAt(),
-        extractFailureReason(t),
-        parseJson(t.getGoalDonenessJson(), "goalDoneness", t.getTaskId()),
+        failureReason,
+        goalDoneness,
         parseJson(t.getContinuationDecisionJson(), "continuationDecision", t.getTaskId()),
         parseJson(t.getContinuationActionsJson(), "continuationActions", t.getTaskId()),
         extractObjective(t.getTaskJson()),
@@ -393,6 +399,20 @@ public class RunMapper {
         t.getParentTaskId(),
         t.getSubtaskIndex(),
         t.getSubtaskTotal());
+  }
+
+  /**
+   * A persisted COMPLETE row means the worker stopped at this task boundary; it does not override
+   * the task's later evidence-backed goal decision. Keep the persistence status unchanged for
+   * crash-resume bookkeeping, but fail closed in the customer-facing DTO whenever goal proof is
+   * present and not DONE. Legacy COMPLETE rows without goal proof remain backward compatible.
+   */
+  static String displayTaskStatus(String persistedStatus, JsonNode goalDoneness) {
+    if (!"COMPLETE".equals(persistedStatus) || goalDoneness == null) {
+      return persistedStatus;
+    }
+    String goalState = goalDoneness.path("state").asText("");
+    return goalState.isBlank() || "DONE".equals(goalState) ? persistedStatus : "PARTIAL";
   }
 
   /** Parses the objective field from the planner's TaskDefinition JSON stored in the task. */
