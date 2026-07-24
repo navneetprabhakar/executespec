@@ -156,3 +156,7 @@ Persistence layer for pipeline runs, tasks, and all mutable state.
   back every field as loaded and could revert a concurrent terminal status, gate, token/cost or
   cancellation write. (It had no production caller; `RunOrchestrator` already used the narrow fenced
   queries. The dead method's javadoc invited exactly the wrong reuse.)
+- `RunMapper` treats persisted COMPLETE as an execution-boundary fact, not proof of completion. A
+  COMPLETE task with non-DONE durable goal evidence renders PARTIAL, and a COMPLETE run containing
+  any such task renders PARTIAL with `TASK_PROOF_INCOMPLETE`; list hydration batches task reads by
+  run id so summary and detail surfaces agree without rewriting recovery state.

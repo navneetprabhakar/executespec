@@ -53,6 +53,7 @@ class RunDetailEffectiveRouteTest {
         validationReportRepository,
         managedAiUsageEventRepository,
         new RunEffectiveRouteService(usageRepository),
+        null,
         new ObjectMapper());
   }
 

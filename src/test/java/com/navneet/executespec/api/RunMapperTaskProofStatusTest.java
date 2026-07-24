@@ -5,13 +5,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.api.dto.TaskSummary;
 import com.navneet.executespec.state.entity.AgentTask;
+import com.navneet.executespec.state.entity.PipelineRun;
 
 import org.junit.jupiter.api.Test;
 
 class RunMapperTaskProofStatusTest {
 
   private final RunMapper mapper =
-      new RunMapper(null, null, null, null, null, null, null, null, new ObjectMapper());
+      new RunMapper(null, null, null, null, null, null, null, null, null, new ObjectMapper());
 
   @Test
   void completeWorkerBoundaryWithUnprovenGoalIsExposedAsPartial() {
@@ -43,5 +44,36 @@ class RunMapperTaskProofStatusTest {
 
     assertThat(mapper.toTaskSummary(proven).status()).isEqualTo("COMPLETE");
     assertThat(mapper.toTaskSummary(legacy).status()).isEqualTo("COMPLETE");
+  }
+
+  @Test
+  void completeRunWithAnyUnprovenTaskIsExposedAsPartial() {
+    PipelineRun run = new PipelineRun();
+    run.setRunId("run-1");
+    run.setStatus("COMPLETE");
+    run.setStatusReason("CLEAN_COMPLETION");
+    AgentTask uncertain =
+        AgentTask.builder()
+            .taskId("T1")
+            .status("COMPLETE")
+            .goalDonenessJson("{\"state\":\"NOT_DONE_BUT_PROGRESSING\"}")
+            .build();
+
+    assertThat(mapper.displayRunStatus(run.getStatus(), java.util.List.of(uncertain)))
+        .isEqualTo("PARTIAL");
+  }
+
+  @Test
+  void completeRunRemainsCompleteWhenEveryTaskIsProvenOrLegacyComplete() {
+    AgentTask proven =
+        AgentTask.builder()
+            .taskId("T1")
+            .status("COMPLETE")
+            .goalDonenessJson("{\"state\":\"DONE\"}")
+            .build();
+    AgentTask legacy = AgentTask.builder().taskId("T2").status("COMPLETE").build();
+
+    assertThat(mapper.displayRunStatus("COMPLETE", java.util.List.of(proven, legacy)))
+        .isEqualTo("COMPLETE");
   }
 }

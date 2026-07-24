@@ -1231,4 +1231,8 @@ evidence, and horizontally scaled JVMs require a shared persistent trajectory ro
 - ~~**Bug #1c (router strict-provider bypass)**~~ — **mostly mitigated** (corrected 2026-05-24). `ModelResolver` now gates adaptive routing behind `!strict && featureFlagService.isEnabled("routing.adaptive-routing.enabled")` ([line 84-88](src/main/java/com/navneet/executespec/router/ModelResolver.java)), flag default OFF — so `-Dexecutespec.strict-provider=true` DOES block the switch now. DeepSeek is additionally excluded from adaptive replacement so native-first ordering remains deterministic; explicit provider selection still wins. Residual: non-DeepSeek adaptive switches remain silent when the flag is ON; no per-org opt-out.
 - ~~**Planner model sourced from run model, not tier**~~ — FIXED / stale note (RL-2026-05-015). Planner/worker/reviewer all resolve via `ModelResolver` (worker through `SequentialExecutor.tierConfigFor`); YAML-matrix + F3 per-org overrides take effect.
 - ~~**10 legacy access-guard sites**~~ — **resolved** (corrected 2026-05-24). `AccessGuardCoverageTest.KNOWN_LEGACY_DRIFT` is now an empty, closed set (35/35 cleared); any new violator fails the build.
+- **Run completion DTO truthfulness** — persisted COMPLETE remains an execution/recovery boundary,
+  not sufficient customer proof. If any task has durable non-DONE goal evidence, run detail and
+  list DTOs expose the task and run as PARTIAL with `TASK_PROOF_INCOMPLETE` without rewriting
+  recovery state.
 - **JAVADOC.md is stale** — head reference corrected V202→V208 (2026-05-24), but a full rewrite is still queued; the authoritative surface lives in CLAUDE.md / ARCHITECTURE.md / per-package `CLAUDE.md`.
