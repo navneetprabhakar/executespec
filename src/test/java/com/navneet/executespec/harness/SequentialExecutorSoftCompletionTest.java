@@ -956,9 +956,9 @@ class SequentialExecutorSoftCompletionTest {
             argThat(
                 event ->
                     isGoalDecisionEvent(event)
-                        && Integer.valueOf(100).equals(event.data().get("inputTokens"))
-                        && Integer.valueOf(20).equals(event.data().get("outputTokens"))
-                        && Integer.valueOf(200).equals(event.data().get("totalTokens"))
+                        && ((Number) event.data().get("inputTokens")).longValue() == 100L
+                        && ((Number) event.data().get("outputTokens")).longValue() == 20L
+                        && ((Number) event.data().get("totalTokens")).longValue() == 200L
                         && Double.valueOf(0.02).equals(event.data().get("costUsd"))));
   }
 
