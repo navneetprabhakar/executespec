@@ -989,16 +989,16 @@ public class RunOrchestrator implements RunControlPort {
             .createdByUserId(createdByUserId)
             .orgId(effectiveOrgId)
             .projectId(projectId)
-            // RR-233 — the customer's hard ceiling must be visible to persistEstimate, which runs
-            // the moment the planner returns. Written after submit, a fast planner clamped to the
-            // platform cap first.
+            // RR-233 — expose the hard ceiling before the planner can persist its estimate; a
+            // post-submit write races a fast planner and clamps against the wrong cap.
             .userCostCap(policy.userCostCap())
-            // RR-234 — publication consent is durable, not a Redis-only intent whose documented
-            // failure mode ("crash loses the intent and resumes default auto-push") turns "do not
-            // publish" into "publish".
+            // RR-234 — publication consent is durable; losing it on crash turns "do not publish"
+            // into "publish".
             .skipAutoPush(policy.skipAutoPush())
             .queuePosition(0)
             .startedAt(Instant.now())
+            .executingInstance(EXECUTION_INSTANCE_ID)
+            .executionHeartbeat(Instant.now())
             .totalInputTokens(0)
             .totalOutputTokens(0)
             .figmaUrl(figmaUrl)
