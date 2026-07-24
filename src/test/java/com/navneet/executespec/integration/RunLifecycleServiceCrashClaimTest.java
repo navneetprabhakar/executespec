@@ -16,6 +16,9 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
+import com.navneet.executespec.executioncontext.LlmExecutionPolicyFactory;
+import com.navneet.executespec.executioncontext.LlmExecutionReference;
+import com.navneet.executespec.executioncontext.LlmExecutionScope;
 import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.state.entity.AgentTask;
 import com.navneet.executespec.state.entity.PipelineRun;
@@ -27,6 +30,28 @@ import org.mockito.Mockito;
 
 /** Regression coverage for the rolling-restart crash-recovery ownership claim. */
 class RunLifecycleServiceCrashClaimTest {
+
+  @Test
+  void recoveredRootContextRebindsOriginalDurableLlmPolicy() throws Exception {
+    LlmExecutionPolicyFactory policyFactory = mock(LlmExecutionPolicyFactory.class);
+    LlmExecutionReference reference =
+        new LlmExecutionReference("llmctx-recovered", LlmExecutionScope.customer("org-1"));
+    when(policyFactory.forRun("recovered-run")).thenReturn(reference);
+    Path workspace = Files.createTempDirectory("executespec-recovery-context-");
+
+    RunLifecycleService service =
+        new RunLifecycleService(
+            null, null, null, null, null, null, null, null, null, null, null, null, null, null,
+            null, null, null, null, null, null);
+    org.springframework.test.util.ReflectionTestUtils.setField(
+        service, "llmExecutionPolicyFactory", policyFactory);
+
+    var context = service.durableRunRootContext("recovered-run", workspace);
+
+    assertThat(context.llmExecutionContextId()).isEqualTo("llmctx-recovered");
+    assertThat(context.llmExecutionScope()).isEqualTo(LlmExecutionScope.customer("org-1"));
+    verify(policyFactory).forRun("recovered-run");
+  }
 
   @Test
   void freshTaskActivityFencesRecoveryBeforeRunLevelClaim() {
