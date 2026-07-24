@@ -22,6 +22,7 @@ import com.navneet.executespec.cost.RunCostTracker;
 import com.navneet.executespec.cost.RunTokenAttributor;
 import com.navneet.executespec.deployment.WorkspaceRestoreService;
 import com.navneet.executespec.execution.model.RunContinuationDecision;
+import com.navneet.executespec.executioncontext.LlmExecutionPolicyFactory;
 import com.navneet.executespec.harness.ExecutionRequest;
 import com.navneet.executespec.harness.ExecutionResult;
 import com.navneet.executespec.harness.GateStore;
@@ -133,6 +134,7 @@ public class RunLifecycleService {
         null,
         null,
         null,
+        null,
         null);
   }
 
@@ -176,6 +178,7 @@ public class RunLifecycleService {
   private final OrgModelOverrideService orgModelOverrideService;
   private final ModelRegistry modelRegistry;
   private final OperationalReleasePolicy operationalReleasePolicy;
+  private final LlmExecutionPolicyFactory llmExecutionPolicyFactory;
 
   public enum PlanApprovalOutcome {
     RESUME_QUEUED,
@@ -814,7 +817,7 @@ public class RunLifecycleService {
         log.warn("resume run={} BYOK resolution failed: {}", runId, keyEx.getMessage());
       }
 
-      ExecutionContext rootCtx = new ExecutionContext(runId, "__root__", workspace.toRealPath());
+      ExecutionContext rootCtx = durableRunRootContext(runId, workspace);
 
       PipelineRun row = runRepo.findById(runId).orElse(null);
       if (row == null) {
@@ -960,6 +963,23 @@ public class RunLifecycleService {
           log.debug("resume run={} local-hands unregister failed", runId);
         }
       }
+    }
+  }
+
+  /**
+   * Rebind the original immutable customer route and budget before resumed run work calls an LLM.
+   */
+  ExecutionContext durableRunRootContext(String runId, Path workspace) {
+    if (llmExecutionPolicyFactory == null) {
+      throw new IllegalStateException(
+          "LLM execution policy factory unavailable for resumed run work");
+    }
+    try {
+      return new ExecutionContext(
+          runId, "__root__", workspace.toRealPath(), llmExecutionPolicyFactory.forRun(runId));
+    } catch (java.io.IOException workspaceFailure) {
+      throw new IllegalStateException(
+          "Run workspace cannot be resolved for durable LLM dispatch: " + runId, workspaceFailure);
     }
   }
 
@@ -1145,8 +1165,7 @@ public class RunLifecycleService {
                       runId);
                 }
 
-                ExecutionContext rootCtx =
-                    new ExecutionContext(runId, "__root__", retryWorkspace.toRealPath());
+                ExecutionContext rootCtx = durableRunRootContext(runId, retryWorkspace);
                 List<UUID> selectedRepoIds =
                     row == null ? List.of() : deserializeRepoIds(row.getSelectedRepoIds());
                 RunCostTracker.Snapshot beforeRetry = costTracker.snapshot(runId);
@@ -1764,7 +1783,7 @@ public class RunLifecycleService {
       RunModelOverrides.clear(); // RR-486
       return;
     }
-    ExecutionContext rootCtx = new ExecutionContext(runId, "_re_review_", workspace);
+    ExecutionContext rootCtx = durableRunRootContext(runId, workspace).child("_re_review_");
 
     String buildCommand = null;
     Plan parsedPlan = null;

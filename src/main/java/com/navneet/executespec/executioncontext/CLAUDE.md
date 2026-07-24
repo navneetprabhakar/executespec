@@ -113,6 +113,10 @@ terminal, cross-tenant, out-of-policy and exhausted contexts fail before provide
 ## Adopted customer surfaces
 
 - Pipeline planning, worker, reviewer and child compaction calls inherit one run context.
+- `RunLifecycleService` reconstructs crash-resume, task-retry, approved-continuation and manual
+  re-review roots with `LlmExecutionPolicyFactory.forRun(runId)`. A recreated filesystem tool
+  context must never omit the durable tenant reference: doing so makes the first recovered provider
+  call fail closed with `CONTEXT_REQUIRED` and can incorrectly terminalize untouched tasks.
 - `LlmExecutionPolicyFactory.forRun` first recovers the original tenant-scoped idempotent
   `pipeline/PIPELINE_RUN/{runId}/route-v1` reference. `OWN_KEYS` runs use
   `route-v2-own-keys-provider-lock`, deliberately bypassing any legacy multi-provider route-v1
@@ -155,7 +159,7 @@ terminal, cross-tenant, out-of-policy and exhausted contexts fail before provide
 | Surface | Current behavior with enforcement ON | Required disposition |
 | --- | --- | --- |
 | `project/rag/EmbeddingService` and its document/code/query callers | V290 uses a project EMBEDDING_JOB context, current exact credential source and V283 attempt rows; unsupported routes are lexical | Run V289→V290 PostgreSQL rehearsal and deployed OWN_KEYS zero-platform-attempt journey |
-| `integration/RunLifecycleService` resume/retry/re-review roots | Recreated contexts do not yet carry `forRun(runId)` | Hydrate V282 on all three recovery roots; add restart/retry tests |
+| `integration/RunLifecycleService` resume/retry/re-review roots | V282 is rehydrated through `durableRunRootContext`; missing factory wiring fails before executor/reviewer dispatch | Keep the recovery-root regression test and verify a real rolling-restart run |
 | `agentsession/subagent/ImplementerExecutionService` / `ImplementerMutationService` | Parent-session worker context lacks a turn reference | Bind the approved parent session/turn policy before any model mutation |
 | `terminalbench/TerminalBenchRunService` | Operator benchmark worker has no explicit context | Create a bounded explicit PLATFORM_INTERNAL benchmark context |
 | `eval/v2/TierEvalRunner`, `eval/ModelEvaluator`, `eval/LlmJudgeValidator`, `agentsession/OrchestratorRoutingPromptEvalRunner`, router/worker/planner/reviewer test controllers and benchmark fixture harnesses | Synthetic ids are rejected before transport | Create explicit PLATFORM_INTERNAL contexts only on authenticated operator/test paths |
