@@ -870,6 +870,13 @@ public class RunLifecycleService {
                       .build(),
                   new com.navneet.executespec.harness.SequentialExecutor.ResumeRequest(null));
         } catch (Exception e) {
+          if (Thread.currentThread().isInterrupted() || pool.isShuttingDown()) {
+            log.info(
+                "resume run={} executor interrupted for application shutdown; preserving WORKING"
+                    + " checkpoint",
+                runId);
+            return;
+          }
           log.error("resume run={} executor failed", runId, e);
           controlPort.terminate(runId, "FAILED", RunOrchestrator.INTERNAL_ERROR_REASON, startedAt);
           return;
@@ -930,6 +937,13 @@ public class RunLifecycleService {
                     .build());
         persistenceWriter.persistReview(runId, reviewResult);
       } catch (Exception e) {
+        if (Thread.currentThread().isInterrupted() || pool.isShuttingDown()) {
+          log.info(
+              "resume run={} reviewer interrupted for application shutdown; preserving REVIEWING"
+                  + " checkpoint",
+              runId);
+          return;
+        }
         log.warn("resume run={} reviewer failed — recording partial review", runId, e);
         persistenceWriter.persistReviewFailure(runId, e);
       }
@@ -951,6 +965,11 @@ public class RunLifecycleService {
           upperProvider,
           model);
     } catch (Exception e) {
+      if (Thread.currentThread().isInterrupted() || pool.isShuttingDown()) {
+        log.info(
+            "resume run={} unwound for application shutdown; preserving resumable state", runId);
+        return;
+      }
       log.error("resume run={} pipeline failed unexpectedly", runId, e);
       controlPort.terminate(runId, "FAILED", RunOrchestrator.INTERNAL_ERROR_REASON, startedAt);
     } finally {

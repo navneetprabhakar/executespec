@@ -1962,7 +1962,13 @@ public class RunOrchestrator implements RunControlPort {
                         contextComposer.buildMultiRepoSummary(projectId, selectedRepoIds))
                     .build());
       } catch (Exception e) {
-        if (Thread.currentThread().isInterrupted()) return;
+        if (Thread.currentThread().isInterrupted() || pool.isShuttingDown()) {
+          log.info(
+              "RunOrchestrator run={} interrupted for application shutdown; preserving WORKING"
+                  + " checkpoint",
+              runId);
+          return;
+        }
         log.error("RunOrchestrator run={} executor failed", runId, e);
         terminate(runId, "FAILED", INTERNAL_ERROR_REASON, startedAt);
         return;
@@ -2487,6 +2493,12 @@ public class RunOrchestrator implements RunControlPort {
         }
       }
     } catch (Exception unexpected) {
+      if (Thread.currentThread().isInterrupted() || pool.isShuttingDown()) {
+        log.info(
+            "RunOrchestrator run={} unwound for application shutdown; preserving resumable state",
+            runId);
+        return;
+      }
       log.error("RunOrchestrator run={} unexpected failure", runId, unexpected);
       terminate(runId, "FAILED", INTERNAL_ERROR_REASON, startedAt);
     } finally {

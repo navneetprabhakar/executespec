@@ -223,7 +223,9 @@ final class ValidationVerificationLedgerBuilder {
             "SPEC",
             accuracy.score() == null
                 ? "UNKNOWN"
-                : accuracy.score() >= 85 ? "PASS" : accuracy.score() >= 70 ? "WARN" : "FAIL",
+                : accuracy.unknownRequirements() > 0
+                    ? "WARN"
+                    : accuracy.score() >= 85 ? "PASS" : accuracy.score() >= 70 ? "WARN" : "FAIL",
             "LLM_ASSESSMENT",
             "LOW",
             "The delivered code appears to satisfy the natural-language spec.",
@@ -233,6 +235,9 @@ final class ValidationVerificationLedgerBuilder {
                     + accuracy.score()
                     + "/100"
                     + (accuracy.grade() == null ? "" : " (" + accuracy.grade() + ")")
+                    + (accuracy.unknownRequirements() > 0
+                        ? "; " + accuracy.unknownRequirements() + " requirement(s) unverified"
+                        : "")
                     + ".",
             "validation_report.accuracy_json",
             accuracy.score(),
@@ -388,11 +393,15 @@ final class ValidationVerificationLedgerBuilder {
   }
 
   record AccuracyFacts(
-      Integer score, String grade, Integer endpointCoverage, String testCoverageLevel) {}
+      Integer score,
+      String grade,
+      Integer endpointCoverage,
+      String testCoverageLevel,
+      int unknownRequirements) {}
 
   AccuracyFacts parseAccuracyFacts(String accuracyJson) {
     if (accuracyJson == null || accuracyJson.isBlank()) {
-      return new AccuracyFacts(null, null, null, null);
+      return new AccuracyFacts(null, null, null, null, 0);
     }
     try {
       JsonNode root = objectMapper.readTree(accuracyJson);
@@ -407,10 +416,12 @@ final class ValidationVerificationLedgerBuilder {
           endpoint.hasNonNull("coveragePercent") ? endpoint.get("coveragePercent").asInt() : null;
       String testCoverage =
           root.hasNonNull("testCoverageLevel") ? root.get("testCoverageLevel").asText() : null;
-      return new AccuracyFacts(score, grade, endpointCoverage, testCoverage);
+      JsonNode unknown = root.path("unknownRequirements");
+      int unknownCount = unknown.isArray() ? unknown.size() : 0;
+      return new AccuracyFacts(score, grade, endpointCoverage, testCoverage, unknownCount);
     } catch (Exception e) {
       log.warn("Failed to parse accuracy facts for verification ledger: {}", e.getMessage());
-      return new AccuracyFacts(null, null, null, null);
+      return new AccuracyFacts(null, null, null, null, 0);
     }
   }
 

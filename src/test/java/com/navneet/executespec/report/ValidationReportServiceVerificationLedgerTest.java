@@ -102,6 +102,58 @@ class ValidationReportServiceVerificationLedgerTest {
   }
 
   @Test
+  void unknownRequirementsKeepSpecProofAndRunGoalUncertain() {
+    ValidationReportRepository repository = mock(ValidationReportRepository.class);
+    StateStore stateStore = mock(StateStore.class);
+    ValidationReportService service =
+        new ValidationReportService(
+            repository, null, new ObjectMapper(), null, stateStore, null, flags);
+    ValidationReport report =
+        ValidationReport.builder()
+            .id("vr-unknown")
+            .runId("run-unknown")
+            .filesGenerated(3)
+            .pipelineResult(PipelineResult.PASSED)
+            .issuesJson("[]")
+            .finalBuildPassed(true)
+            .testsPassed(12)
+            .testsTotal(12)
+            .reviewerVerdict("CLEAN")
+            .verifiedScore(89)
+            .accuracyJson(
+                """
+                {
+                  "specAdherenceScore": 89,
+                  "overallAccuracyGrade": "B",
+                  "unknownRequirements": [
+                    "Could not verify that caller identity comes from an authenticated principal"
+                  ]
+                }
+                """)
+            .build();
+    when(repository.findByRunId("run-unknown")).thenReturn(Optional.of(report));
+    when(stateStore.findRun("run-unknown"))
+        .thenReturn(
+            Optional.of(
+                PipelineRun.builder()
+                    .runId("run-unknown")
+                    .userRequest("Build an authenticated inventory reservation API")
+                    .build()));
+
+    var dto = service.getByRunId("run-unknown").orElseThrow();
+
+    assertEntry(dto.verificationLedger(), "spec-adherence", "WARN", "LLM_ASSESSMENT", "LOW");
+    assertTrue(
+        find(dto.verificationLedger(), "spec-adherence")
+            .summary()
+            .contains("1 requirement(s) unverified"));
+    assertNotNull(dto.runGoalDecision());
+    assertEquals("UNCERTAIN", dto.runGoalDecision().state().name());
+    assertEquals(
+        "CONTINUE_SAME_MODEL_PROVIDER", dto.runGoalDecision().recommendedDecision().name());
+  }
+
+  @Test
   void extracted_builder_matches_service_compatibility_delegate() {
     ValidationReport report =
         ValidationReport.builder()

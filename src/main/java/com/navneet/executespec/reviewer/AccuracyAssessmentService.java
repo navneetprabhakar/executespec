@@ -107,9 +107,9 @@ C = 70-79: Core requirements met, some features missing
 D = 60-69: Basic skeleton present, significant features absent
 F = 0-59: Major portions of the spec are not implemented
 
-UNKNOWN is NOT counted as a gap. Score and grade reflect implemented + missing + partial only —
-absence of evidence is NOT evidence of absence. A spec with 8 IMPLEMENTED + 0 MISSING + 0 PARTIAL +
-4 UNKNOWN should grade A, not D, because we have no evidence anything is wrong.
+UNKNOWN is not a defect and is excluded from the implementation denominator, but unavailable
+evidence cannot prove complete adherence. Any UNKNOWN requirement caps specAdherenceScore at 89/B.
+Absence of evidence is not evidence of absence; it is also not evidence of completion.
 
 RULES — REQUIREMENT CLASSIFICATION (strict, four-way):
 
@@ -187,11 +187,23 @@ ADVERSARIAL CONTRACT EVIDENCE:
   reserved quantities is PARTIAL or MISSING even when the route itself exists.
 - Migration support is not proven by one arbitrary DDL call. If version advancement always writes
   the same next version, classify repeated migration support as PARTIAL.
+- "Authenticated customer" is not proven by accepting a caller-controlled customer-id header,
+  query parameter, or request field. Require readable credential/session/token verification that
+  derives a trusted principal, binds the idempotency scope to that principal, and enforces the same
+  owner boundary on read/cancel/update routes. A raw `X-Customer-Id` used as identity is negative
+  evidence, even when its variable name says authenticated.
+- Validate numeric business inputs at the public request boundary. If zero or negative quantities
+  can reach arithmetic such as `stock = stock - quantity`, non-negative stock is not enough: a
+  negative request can increase stock and create an invalid reservation. Classify that contract as
+  MISSING or PARTIAL and downgrade test coverage when the suite omits the adversarial case.
+- A migration file in the tree does not prove migration-backed startup when the documented/default
+  application path calls ORM `create_all`/schema auto-creation instead of the migration runner.
 
 SCORE COMPUTATION GUIDANCE:
 - Base score primarily on the IMPLEMENTED count vs the IMPLEMENTED+MISSING+PARTIAL count.
   Formula heuristic: score ≈ 100 × (implemented + 0.5×partial) / max(1, implemented + missing + partial).
-  UNKNOWN does not enter the denominator — it's neither credit nor penalty.
+  UNKNOWN does not enter the denominator, but one or more UNKNOWN rows cap the score at 89 because
+  the evidence cannot support an A-grade completeness claim.
 - README and documentation gaps count at most 5 points total toward specAdherenceScore.
 - The specAdherenceScore must primarily reflect FUNCTIONAL compliance (endpoints, features,
   business logic).

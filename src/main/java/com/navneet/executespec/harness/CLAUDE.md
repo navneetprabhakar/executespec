@@ -95,6 +95,10 @@ for bounded retry/recovery, not a claim that an in-flight provider future surviv
 1. `RunOrchestrator.submitRun(req)` persists the run row + estimate.
 2. `SmartClassifierAgent.classify(spec)` → `PlanStrategy`.
 3. Strategy router emits the plan via `OutlinePlannerAgent` (FULL_PLAN / SKELETON_ONLY) + optional `TaskExpanderAgent` dependency-wave expansion (parallel only within each independent wave; established prerequisite contracts flow into consumers) + `CoherencePlannerAgent` patch.
+   `PipelineExecutorPool` owns these orchestration/expansion executors as a maximum-phase
+   `SmartLifecycle`: deployment shutdown interrupts them before Redis/JPA teardown, and pipeline
+   owners preserve the durable non-terminal checkpoint for boot recovery rather than terminalizing
+   a lifecycle cancellation as FAILED.
 4. **Plan approval gate** — `GateStore.openPlanGate(runId)`. SSE `GATE_OPENED` includes credits + estimated cost. PRODUCTION pauses; PROTOTYPE / `skipApproval` bypasses. Cancellation resolves the durable decision and eagerly clears the transient Redis signal when no local waiter remains, avoiding a stale gate lease after restart.
 5. On approval: charges credits via `TierEnforcementService.assertAndIncrementRunCount(userId, credits)`. FREE blocks specs requiring >1 credit. BYOK orgs skip the platform cap entirely.
 6. **`SequentialExecutor.execute(req)`** runs tasks one at a time. Tier-routed per-task model. Soft-completion gate covers `COMPLETED_BY_STAGNATION` / `STOPPED_WITHOUT_COMPLETE` paths. Final-task smoke + one-retry on fail, except selected-candidate continuation can step up/change provider before that same-provider retry.

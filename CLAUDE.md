@@ -1092,11 +1092,27 @@ startup, persistence fixtures that bypass production wiring, cross-operation ide
 raw internal error leakage, and repeated migration advancement. These checks were added after a
 96/96 self-green generated FastAPI suite failed all four independent acceptance probes.
 
+The 2026-07-24 deployed inventory rerun then reported 97/100 and 55/55 while failing 6/6 independent
+acceptance checks: zero and negative reservations were accepted, a caller-controlled customer-id
+header was treated as authentication, unauthenticated read/cancel succeeded, cancellation restored
+stock for the unauthenticated caller, and startup bypassed Alembic via ORM `create_all`. Accuracy
+assessment now explicitly distinguishes a trusted authenticated principal from raw identity input,
+checks positive numeric boundaries and negative-stock arithmetic, and requires runtime migration
+wiring rather than a migration file alone. Genuinely unverified requirements cap accuracy at 89/B,
+render spec evidence WARN, and keep final goal proof UNCERTAIN instead of falsely DONE.
+
 The 2026-07-24 live rerun exposed a separate execution deadlock: worker `shell`, `runTests`,
 `buildProject`, and final `WorkspaceTestRunner` host/container paths waited for the child before
 reading merged output, so verbose pytest/build processes blocked forever in `pipe_write` once the OS
 pipe filled. Those paths now share `testgen.BoundedProcess`, which drains concurrently, caps captured
 output, enforces a reachable timeout, and destroys the process tree on expiry.
+
+The same rerun proved deployment shutdown ordering was unsafe: orchestration threads kept making
+provider/tool calls after Redis and JPA had stopped, so checkpoints and terminal usage writes failed
+before systemd killed the old JVM. `PipelineExecutorPool` is now a maximum-phase `SmartLifecycle`:
+it rejects/interrupts all orchestration and expansion work before infrastructure destruction, and
+the original/resumed pipeline owners recognize that lifecycle stop as a resumable interruption
+instead of marking the run FAILED. `@PreDestroy` remains only an idempotent fallback.
 
 Post-review continuation now opens only for completed, measured red review evidence. A reviewer
 exception/timeout remains `REVIEWER_FAILED` and cannot trigger provider spend, because a stronger
