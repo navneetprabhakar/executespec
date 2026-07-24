@@ -591,6 +591,34 @@ class SequentialExecutorSoftCompletionTest {
   }
 
   @Test
+  void interrupted_worker_stop_with_writes_remains_non_terminal_for_recovery() {
+    stubTaskRow();
+    WorkerResult interruptedStop = workerStoppedWithoutComplete(10);
+    when(worker.run(any(WorkerTaskRequest.class), any()))
+        .thenAnswer(
+            ignored -> {
+              Thread.currentThread().interrupt();
+              return interruptedStop;
+            });
+
+    try {
+      org.junit.jupiter.api.Assertions.assertThrows(
+          CancellationException.class, () -> newExecutor().execute(req(singleTaskPlan(), false)));
+    } finally {
+      Thread.interrupted();
+    }
+
+    assertFalse(
+        saveLog.stream()
+            .anyMatch(
+                saved ->
+                    "COMPLETE".equals(saved.status())
+                        || "PARTIAL".equals(saved.status())
+                        || "FAILED".equals(saved.status())),
+        "Interrupted stop must remain recoverable, not be soft-completed: " + saveLog);
+  }
+
+  @Test
   void goal_decision_uses_configured_no_progress_iteration_limit() {
     stubTaskRow();
     when(worker.run(any(WorkerTaskRequest.class), any()))
