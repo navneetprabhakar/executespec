@@ -3,6 +3,7 @@ package com.navneet.executespec.recovery;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
@@ -13,6 +14,7 @@ import com.navneet.executespec.state.repository.PipelineRunRepository;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Async;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -70,6 +72,7 @@ public class StartupRunResumer {
   private final PipelineRunRepository runRepo;
   private final AgentTaskRepository taskRepo;
   private final SseBroadcaster broadcaster;
+  private final AtomicBoolean scanInProgress = new AtomicBoolean();
 
   /**
    * 2026-05-04 — lazy {@code RunLifecycleService} reference (was RunOrchestrator before the inc-6b
@@ -86,19 +89,57 @@ public class StartupRunResumer {
   @Async
   @EventListener(ApplicationReadyEvent.class)
   public void onApplicationReady() {
+    runRecoveryScan("startup");
+  }
+
+  /**
+   * Retry candidates that were legitimately unclaimable during the boot scan because the dead
+   * predecessor's last heartbeat or task update had not yet crossed the two-minute stale fence.
+   * The database compare-and-set in {@code resumeAfterCrash} remains the takeover authority; this
+   * sweep only makes a prior NOT_APPLICABLE decision non-permanent.
+   */
+  @Scheduled(
+      fixedDelayString = "${execution.recovery.scan-interval-ms:60000}",
+      initialDelayString = "${execution.recovery.scan-initial-delay-ms:60000}")
+  void scheduledRecoverySweep() {
+    runRecoveryScan("scheduled");
+  }
+
+  private void runRecoveryScan(String trigger) {
+    if (!scanInProgress.compareAndSet(false, true)) {
+      log.debug("StartupRunResumer: {} scan skipped because another scan is active", trigger);
+      return;
+    }
     try {
-      scanAndRecover();
+      scanAndRecover("scheduled".equals(trigger));
     } catch (Exception e) {
       // Never let recovery failures block startup.
-      log.error("StartupRunResumer: unexpected error during scan", e);
+      log.error("StartupRunResumer: unexpected error during {} scan", trigger, e);
+    } finally {
+      scanInProgress.set(false);
     }
   }
 
   @Transactional
   public void scanAndRecover() {
+    scanAndRecover(false);
+  }
+
+  private void scanAndRecover(boolean scheduledSweep) {
+    Instant heartbeatCutoff = Instant.now().minus(Duration.ofMinutes(2));
     List<PipelineRun> candidates =
         runRepo.findByStatusIn(RESUMABLE_STATUSES).stream()
             .filter(r -> "v2".equalsIgnoreCase(r.getHarnessVersion()))
+            // Periodic recovery must not poll every live run or durable plan gate. It exists only
+            // to revisit takeover candidates once the previous owner's heartbeat can satisfy the
+            // same two-minute stale fence enforced by RunLifecycleService.claimCrashResume.
+            .filter(
+                r ->
+                    !scheduledSweep
+                        || (!("AWAITING_APPROVAL".equals(r.getStatus())
+                                || "APPROVAL_RESUMING".equals(r.getStatus()))
+                            && (r.getExecutionHeartbeat() == null
+                                || !r.getExecutionHeartbeat().isAfter(heartbeatCutoff))))
             .toList();
 
     if (candidates.isEmpty()) {
@@ -112,6 +153,7 @@ public class StartupRunResumer {
     int failedInterrupted = 0;
     int failedCapped = 0;
     int failedStale = 0;
+    int deferred = 0;
     Instant cutoff = Instant.now().minus(STALE_CUTOFF);
     for (PipelineRun run : candidates) {
       String status = run.getStatus();
@@ -187,8 +229,16 @@ public class StartupRunResumer {
           failedInterrupted++; // counted under "interrupted-then-resumed" in the summary log
           continue;
         }
-        // Any non-OK outcome (NOT_FOUND / WORKSPACE_GONE / PLAN_MISSING / EXHAUSTED /
-        // NOT_APPLICABLE) was already terminate()'d inside resumeAfterCrash. Move on.
+        if (outcome
+            == com.navneet.executespec.integration.RunOrchestrator.CrashResumeOutcome
+                .NOT_APPLICABLE) {
+          // A fresh predecessor heartbeat/task lease is expected immediately after a rolling
+          // restart. Leave the row untouched; the scheduled sweep will retry after the stale
+          // fence expires. This used to be a one-shot boot decision and stranded runs forever.
+          deferred++;
+          continue;
+        }
+        // Other non-OK outcomes are terminalized inside resumeAfterCrash.
         failedInterrupted++;
       } catch (Exception e) {
         // If the resume entry-point itself blew up, fall back to the old fail-cleanly path so
@@ -207,9 +257,10 @@ public class StartupRunResumer {
     }
     log.warn(
         "StartupRunResumer: recovery complete — awaiting-approval={} "
-            + "interrupted={} cap-exceeded={} stale={}",
+            + "interrupted={} deferred={} cap-exceeded={} stale={}",
         awaitingApproval,
         failedInterrupted,
+        deferred,
         failedCapped,
         failedStale);
   }

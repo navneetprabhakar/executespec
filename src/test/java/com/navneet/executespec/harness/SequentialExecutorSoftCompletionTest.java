@@ -21,6 +21,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.CancellationException;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.agent.Plan;
@@ -550,6 +551,44 @@ class SequentialExecutorSoftCompletionTest {
                 event ->
                     isGoalDecisionLog(event)
                         && event.payload().contains("WASTE_RISK -> STOP_WASTE_GUARD")));
+  }
+
+  @Test
+  void interrupted_worker_error_with_writes_remains_non_terminal_for_recovery() {
+    stubTaskRow();
+    WorkerResult interruptedError =
+        WorkerResult.builder()
+            .outcome(WorkerResult.Outcome.ERROR)
+            .iterations(7)
+            .toolCallsDispatched(9)
+            .finalAssistantText("router error: interrupted during retry backoff")
+            .toolCallLog(List.of("writeFile(path=app.py) -> OK"))
+            .totalLatencyMs(30_000L)
+            .build();
+    when(worker.run(any(WorkerTaskRequest.class), any()))
+        .thenAnswer(
+            ignored -> {
+              Thread.currentThread().interrupt();
+              return interruptedError;
+            });
+
+    try {
+      org.junit.jupiter.api.Assertions.assertThrows(
+          CancellationException.class,
+          () -> newExecutor().execute(req(singleTaskPlan(), false)));
+    } finally {
+      // JUnit reuses its worker thread; do not leak the deliberately asserted interrupt.
+      Thread.interrupted();
+    }
+
+    assertFalse(
+        saveLog.stream()
+            .anyMatch(
+                saved ->
+                    "COMPLETE".equals(saved.status())
+                        || "PARTIAL".equals(saved.status())
+                        || "FAILED".equals(saved.status())),
+        "Interrupted work must remain recoverable, not be persisted terminal: " + saveLog);
   }
 
   @Test
