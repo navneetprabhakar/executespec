@@ -1149,6 +1149,17 @@ child exits non-zero; the worker incorrectly counted that as progress and contin
 stagnation watchdog. Build progress now requires the existing structured exit-zero verdict. This is
 provider-neutral and applies to BUILD, PATCH, and reviewer consumers of the shared worker loop.
 
+The retained Go artifact passed its generated suite and `go test -race`, but failed 5/5 independent
+acceptance probes: concurrent same-key callers produced different decisions and consumed quota
+twice; delimiter-concatenated tenant/subject keys collided; 501 idle limiter buckets remained after
+clock advancement; cancellation could not reach an in-flight core `Check`; and a raw caller-selected
+`X-Tenant-ID` was accepted as authentication. `main` also started eviction on a detached store while
+`New(clock)` constructed the store actually used by requests. Shared worker, reviewer, and accuracy
+policy now require atomic first-decision persistence, collision-safe structured keys, observable
+eviction of the live instance, propagated cancellation, and verified credential-derived tenant
+identity. Generated concurrency tests must force the initial-miss race rather than rely on scheduler
+luck.
+
 Post-review continuation now opens only for completed, measured red review evidence. A reviewer
 exception/timeout remains `REVIEWER_FAILED` and cannot trigger provider spend, because a stronger
 coding model cannot repair unavailable verification. When measured review or final-validation

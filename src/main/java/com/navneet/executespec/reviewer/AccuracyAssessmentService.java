@@ -198,6 +198,18 @@ ADVERSARIAL CONTRACT EVIDENCE:
   MISSING or PARTIAL and downgrade test coverage when the suite omits the adversarial case.
 - A migration file in the tree does not prove migration-backed startup when the documented/default
   application path calls ORM `create_all`/schema auto-creation instead of the migration runner.
+- Concurrent idempotency is not proven by a race test that happens to schedule the first store
+  before other lookups. Require one atomic lookup + business mutation + first-decision persistence
+  boundary, exact replay responses, and quota/state consumption exactly once. Raw delimiter-
+  concatenated tenant/subject/idempotency keys are collision evidence unless components are escaped
+  or length-prefixed.
+- "Bounded memory" requires readable eviction of all live request-serving buckets/maps and a test
+  that advances the injected clock then observes their size fall. Starting eviction on a detached
+  store while the limiter constructs another store is MISSING. Cancellation checked only before a
+  blocking core call is PARTIAL/MISSING when the core interface cannot receive cancellation.
+- A configurable tenant header copied directly into context is caller-selected identity, not
+  authenticated middleware. Require credential verification that derives the tenant and a negative
+  test proving the raw tenant header alone is rejected.
 - Cross-feature reachability is part of implementation. If an empty/loading/error branch hides the
   only create/retry control, classify the affected primary action as MISSING even when isolated CRUD
   tests pass after pre-seeding state. Optional demo data must not be the only way to start.

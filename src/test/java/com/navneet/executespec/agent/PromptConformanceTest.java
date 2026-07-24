@@ -6,6 +6,8 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 
+import com.navneet.executespec.harness.SequentialExecutor;
+
 import org.junit.jupiter.api.Test;
 import org.springframework.core.io.ClassPathResource;
 
@@ -174,6 +176,22 @@ class PromptConformanceTest {
     assertThat(reviewer)
         .contains("Cross-feature journey regressions and false visual tests")
         .contains("asserting that an empty board hides every create control");
+  }
+
+  @Test
+  void generationPromptsChallengeConcurrentIdempotencyAndBoundedMemory() throws IOException {
+    String reviewer = prompt("prompts/reviewer-general.md");
+
+    assertThat(SequentialExecutor.workerSystemPromptBase())
+        .contains("one atomic critical section/transaction")
+        .contains("first-decision")
+        .contains("Raw delimiter concatenation")
+        .contains("eviction of every live bucket/index/map")
+        .contains("raw configurable header copied into context");
+    assertThat(reviewer)
+        .contains("force concurrent callers to observe the initial miss")
+        .contains("detached cleanup store is not proof")
+        .contains("Cancellation must reach blocking core work");
   }
 
   @Test
