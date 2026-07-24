@@ -216,6 +216,22 @@ final class ValidationVerificationLedgerBuilder {
             null));
 
     AccuracyFacts accuracy = parseAccuracyFacts(entity.getAccuracyJson());
+    Integer effectiveVerifiedScore =
+        entity.getVerifiedScore() == null
+            ? null
+            : ValidationReportScorePolicy.capForAdmittedSpecGaps(
+                entity.getVerifiedScore(),
+                accuracy.score() == null ? 0 : accuracy.score(),
+                accuracy.incompleteRequirements(),
+                accuracy.unknownRequirements());
+    Integer effectiveRubricScore =
+        entity.getRubricScore() == null
+            ? null
+            : ValidationReportScorePolicy.capForAdmittedSpecGaps(
+                entity.getRubricScore(),
+                accuracy.score() == null ? 0 : accuracy.score(),
+                accuracy.incompleteRequirements(),
+                accuracy.unknownRequirements());
     out.add(
         evidence(
             "spec-adherence",
@@ -322,23 +338,21 @@ final class ValidationVerificationLedgerBuilder {
             "score-summary",
             "Internal score",
             "SCORE",
-            entity.getVerifiedScore() == null
+            effectiveVerifiedScore == null
                 ? "UNKNOWN"
-                : entity.getVerifiedScore() >= 85
+                : effectiveVerifiedScore >= 85
                     ? "PASS"
-                    : entity.getVerifiedScore() >= 70 ? "WARN" : "FAIL",
+                    : effectiveVerifiedScore >= 70 ? "WARN" : "FAIL",
             "INTERNAL_FORMULA",
             "MEDIUM",
             "The internal routing score summarizes the available evidence.",
             "verifiedScore="
-                + (entity.getVerifiedScore() == null ? "n/a" : entity.getVerifiedScore())
-                + (entity.getRubricScore() == null
-                    ? ""
-                    : ", rubricScore=" + entity.getRubricScore())
+                + (effectiveVerifiedScore == null ? "n/a" : effectiveVerifiedScore)
+                + (effectiveRubricScore == null ? "" : ", rubricScore=" + effectiveRubricScore)
                 + ". Treat this as a summary, not independent proof.",
             "validation_report.verified_score",
-            entity.getVerifiedScore(),
-            entity.getVerifiedScore() == null ? null : 100));
+            effectiveVerifiedScore,
+            effectiveVerifiedScore == null ? null : 100));
 
     return List.copyOf(out);
   }
@@ -397,11 +411,12 @@ final class ValidationVerificationLedgerBuilder {
       String grade,
       Integer endpointCoverage,
       String testCoverageLevel,
+      int incompleteRequirements,
       int unknownRequirements) {}
 
   AccuracyFacts parseAccuracyFacts(String accuracyJson) {
     if (accuracyJson == null || accuracyJson.isBlank()) {
-      return new AccuracyFacts(null, null, null, null, 0);
+      return new AccuracyFacts(null, null, null, null, 0, 0);
     }
     try {
       JsonNode root = objectMapper.readTree(accuracyJson);
@@ -418,10 +433,15 @@ final class ValidationVerificationLedgerBuilder {
           root.hasNonNull("testCoverageLevel") ? root.get("testCoverageLevel").asText() : null;
       JsonNode unknown = root.path("unknownRequirements");
       int unknownCount = unknown.isArray() ? unknown.size() : 0;
-      return new AccuracyFacts(score, grade, endpointCoverage, testCoverage, unknownCount);
+      JsonNode missing = root.path("missingRequirements");
+      JsonNode partial = root.path("partialRequirements");
+      int incompleteCount =
+          (missing.isArray() ? missing.size() : 0) + (partial.isArray() ? partial.size() : 0);
+      return new AccuracyFacts(
+          score, grade, endpointCoverage, testCoverage, incompleteCount, unknownCount);
     } catch (Exception e) {
       log.warn("Failed to parse accuracy facts for verification ledger: {}", e.getMessage());
-      return new AccuracyFacts(null, null, null, null, 0);
+      return new AccuracyFacts(null, null, null, null, 0, 0);
     }
   }
 

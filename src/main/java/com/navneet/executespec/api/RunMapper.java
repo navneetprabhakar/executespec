@@ -36,6 +36,8 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class RunMapper {
 
+  private static final int UNPROVEN_COMPLETION_SCORE_CAP = 84;
+
   private final IntegrationRunRepository integrationRunRepository;
   private final ProjectRepository projectRepository;
   private final AppUserRepository appUserRepository;
@@ -135,7 +137,7 @@ public class RunMapper {
         // scmPrUrl; the legacy githubPrUrl ships alongside for pre-SCM-split back-compat.
         r.getScmPrUrl(),
         r.getGithubPrUrl(),
-        verifiedScore,
+        displayVerifiedScore(verifiedScore, displayStatus),
         localExecutionRequested,
         localExecutionAccepted);
   }
@@ -355,7 +357,8 @@ public class RunMapper {
         // V2 runs expose validation state through the validation report itself.
         .validationStatus(null)
         .validationPhase(null)
-        .verifiedScore(report != null ? report.getVerifiedScore() : null)
+        .verifiedScore(
+            displayVerifiedScore(report != null ? report.getVerifiedScore() : null, displayStatus))
         .accuracyScore(report != null ? report.getAccuracyScore() : null)
         .reviewerVerdict(report != null ? report.getReviewerVerdict() : null)
         .finalBuildPassed(report != null ? report.getFinalBuildPassed() : null)
@@ -446,6 +449,11 @@ public class RunMapper {
     }
     boolean allTasksProvenComplete = tasks.stream().allMatch(this::isTaskProvenCompleteForDisplay);
     return allTasksProvenComplete ? persistedStatus : "PARTIAL";
+  }
+
+  static Integer displayVerifiedScore(Integer persistedScore, String displayStatus) {
+    if (persistedScore == null || "COMPLETE".equals(displayStatus)) return persistedScore;
+    return Math.min(persistedScore, UNPROVEN_COMPLETION_SCORE_CAP);
   }
 
   private boolean isTaskProvenCompleteForDisplay(AgentTask task) {

@@ -151,6 +151,8 @@ class ValidationReportServiceVerificationLedgerTest {
     assertEquals("UNCERTAIN", dto.runGoalDecision().state().name());
     assertEquals(
         "CONTINUE_SAME_MODEL_PROVIDER", dto.runGoalDecision().recommendedDecision().name());
+    assertEquals(84, dto.verifiedScore());
+    assertEquals("WARN", find(dto.verificationLedger(), "score-summary").status());
   }
 
   @Test

@@ -952,10 +952,12 @@ public class ValidationReportService {
    * defect, but it also cannot support a headline score above the assessor's bounded confidence.
    */
   static int capScoreAtAdmittedSpecGaps(int score, AccuracyReport accuracy) {
-    if (accuracy == null
-        || (accuracy.incompleteRequirementsCount() == 0
-            && accuracy.unknownRequirementsCount() == 0)) return score;
-    return Math.min(score, Math.max(0, Math.min(100, accuracy.getSpecAdherenceScore())));
+    if (accuracy == null) return score;
+    return ValidationReportScorePolicy.capForAdmittedSpecGaps(
+        score,
+        accuracy.getSpecAdherenceScore(),
+        accuracy.incompleteRequirementsCount(),
+        accuracy.unknownRequirementsCount());
   }
 
   private PipelineResult computeResult(List<ReportIssueDTO> issues, ReportInput input) {
@@ -1076,6 +1078,15 @@ public class ValidationReportService {
   private ValidationReportDTO toDTO(ValidationReport entity) {
     List<ReportIssueDTO> issues = parseIssues(entity.getIssuesJson());
     List<VerificationEvidenceDTO> verificationLedger = buildVerificationLedger(entity, issues);
+    AccuracyReport accuracy = parseAccuracyReport(entity);
+    Integer effectiveVerifiedScore =
+        entity.getVerifiedScore() == null
+            ? null
+            : capScoreAtAdmittedSpecGaps(entity.getVerifiedScore(), accuracy);
+    Integer effectiveRubricScore =
+        entity.getRubricScore() == null
+            ? null
+            : capScoreAtAdmittedSpecGaps(entity.getRubricScore(), accuracy);
     List<String> languages =
         entity.getLanguages() != null && !entity.getLanguages().isBlank()
             ? Arrays.asList(entity.getLanguages().split(","))
@@ -1117,14 +1128,14 @@ public class ValidationReportService {
         entity.getTestsPassed(),
         entity.getTestsTotal(),
         entity.getReviewerVerdict(),
-        entity.getVerifiedScore(),
+        effectiveVerifiedScore,
         verificationLedger,
         goalProofEvaluator.evaluate(
             entity.getRunId(),
             runGoalSummary(findRunForReport(entity.getRunId())),
             entity.getPipelineResult(),
             verificationLedger),
-        entity.getRubricScore(),
+        effectiveRubricScore,
         entity.getPreviewUrl());
   }
 
@@ -1169,6 +1180,15 @@ public class ValidationReportService {
   private ValidationReportShareDTO toShareDTO(ValidationReport entity) {
     List<ReportIssueDTO> issues = parseIssues(entity.getIssuesJson());
     List<VerificationEvidenceDTO> verificationLedger = buildVerificationLedger(entity, issues);
+    AccuracyReport accuracy = parseAccuracyReport(entity);
+    Integer effectiveVerifiedScore =
+        entity.getVerifiedScore() == null
+            ? null
+            : capScoreAtAdmittedSpecGaps(entity.getVerifiedScore(), accuracy);
+    Integer effectiveRubricScore =
+        entity.getRubricScore() == null
+            ? null
+            : capScoreAtAdmittedSpecGaps(entity.getRubricScore(), accuracy);
     List<String> languages =
         entity.getLanguages() != null && !entity.getLanguages().isBlank()
             ? Arrays.asList(entity.getLanguages().split(","))
@@ -1186,8 +1206,8 @@ public class ValidationReportService {
         checksPassed,
         entity.getReportMarkdown(),
         entity.getCreatedAt(),
-        entity.getVerifiedScore(),
-        entity.getRubricScore(),
+        effectiveVerifiedScore,
+        effectiveRubricScore,
         entity.getFinalBuildPassed(),
         entity.getTestsPassed(),
         entity.getTestsTotal(),

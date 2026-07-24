@@ -76,4 +76,10 @@ class RunMapperTaskProofStatusTest {
     assertThat(mapper.displayRunStatus("COMPLETE", java.util.List.of(proven, legacy)))
         .isEqualTo("COMPLETE");
   }
+
+  @Test
+  void unprovenRunCannotExposeAPassingVerifiedScore() {
+    assertThat(RunMapper.displayVerifiedScore(97, "PARTIAL")).isEqualTo(84);
+    assertThat(RunMapper.displayVerifiedScore(97, "COMPLETE")).isEqualTo(97);
+  }
 }
