@@ -202,4 +202,29 @@ class StartupRunResumerRestartSemanticsTest {
     verify(runRepo, never()).save(any(PipelineRun.class));
     assertThat(run.getStatus()).isEqualTo("WORKING");
   }
+
+  @Test
+  void scheduledSweepDoesNotStealFreshRunBeforeItsFirstHeartbeat() {
+    PipelineRun run =
+        PipelineRun.builder()
+            .runId(RUN_ID)
+            .status("PLANNING")
+            .harnessVersion("v2")
+            .startedAt(Instant.now())
+            .build();
+    PipelineRunRepository runRepo = mock(PipelineRunRepository.class);
+    AgentTaskRepository taskRepo = mock(AgentTaskRepository.class);
+    SseBroadcaster broadcaster = mock(SseBroadcaster.class);
+    @SuppressWarnings("unchecked")
+    ObjectProvider<RunLifecycleService> lifecycleProvider = mock(ObjectProvider.class);
+
+    when(runRepo.findByStatusIn(any())).thenReturn(List.of(run));
+
+    new StartupRunResumer(runRepo, taskRepo, broadcaster, lifecycleProvider)
+        .scheduledRecoverySweep();
+
+    verify(lifecycleProvider, never()).getObject();
+    verify(runRepo, never()).save(any(PipelineRun.class));
+    assertThat(run.getStatus()).isEqualTo("PLANNING");
+  }
 }

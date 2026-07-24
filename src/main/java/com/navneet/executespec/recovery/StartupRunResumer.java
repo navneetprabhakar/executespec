@@ -138,8 +138,10 @@ public class StartupRunResumer {
                     !scheduledSweep
                         || (!("AWAITING_APPROVAL".equals(r.getStatus())
                                 || "APPROVAL_RESUMING".equals(r.getStatus()))
-                            && (r.getExecutionHeartbeat() == null
-                                || !r.getExecutionHeartbeat().isAfter(heartbeatCutoff))))
+                            && (r.getExecutionHeartbeat() != null
+                                ? !r.getExecutionHeartbeat().isAfter(heartbeatCutoff)
+                                : r.getStartedAt() == null
+                                    || !r.getStartedAt().isAfter(heartbeatCutoff))))
             .toList();
 
     if (candidates.isEmpty()) {
