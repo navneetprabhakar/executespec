@@ -58,6 +58,12 @@ class ShellSandboxPolicyTest {
     }
 
     @Test
+    @DisplayName("standard stderr-to-stdout redirection is not parsed as command chaining")
+    void stderrToStdoutRedirection() {
+      assertThat(policy.validate("npm test 2>&1", "/ws").permitted()).isTrue();
+    }
+
+    @Test
     @DisplayName("chmod +x compile.sh (relative workspace path) is allowed")
     void chmodWorkspaceRelative() {
       // 2026-05-07 — programbench-driven: workers were trying chmod to make their generated

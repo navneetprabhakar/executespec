@@ -36,7 +36,7 @@ import lombok.extern.slf4j.Slf4j;
 /**
  * PR Review Agent — runs a senior-engineer-style review against a PR diff and emits a structured
  * {@link AgentReview} via the {@code submitReview} tool. PLANNING-tier model (Sonnet 4.6 on
- * Anthropic, gpt-5.4 on OpenAI, gemini-3-pro-preview on Gemini) for quality.
+ * Anthropic, gpt-5.4 on OpenAI, and the configured Gemini PLANNING route) for quality.
  *
  * <p>Single-call agent: no multi-turn loop, no shell, no read tools, no file mutation. The agent
  * emits exactly one {@code submitReview} tool call and the response is the review.

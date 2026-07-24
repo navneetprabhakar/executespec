@@ -7,7 +7,7 @@ import java.util.Set;
 public final class AnthropicModelOptions {
 
   private static final Set<String> TEMPERATURE_DEPRECATED_PREFIXES =
-      Set.of("claude-opus-4-7", "claude-opus-4-8", "claude-sonnet-5");
+      Set.of("claude-opus-4-7", "claude-opus-4-8", "claude-sonnet-5", "claude-fable-5");
 
   private AnthropicModelOptions() {}
 

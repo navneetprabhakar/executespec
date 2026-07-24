@@ -425,6 +425,9 @@ public class GeminiNativeToolClient {
             ObjectNode p = parts.addObject();
             ObjectNode fc = p.putObject("functionCall");
             fc.put("name", tc.name());
+            if (requiresFunctionCallIds(request.model()) && tc.id() != null && !tc.id().isBlank()) {
+              fc.put("id", tc.id());
+            }
             JsonNode argsNode;
             try {
               argsNode =
@@ -452,6 +455,11 @@ public class GeminiNativeToolClient {
           ObjectNode p = parts.addObject();
           ObjectNode fr = p.putObject("functionResponse");
           fr.put("name", resp.name());
+          if (requiresFunctionCallIds(request.model())
+              && resp.id() != null
+              && !resp.id().isBlank()) {
+            fr.put("id", resp.id());
+          }
           JsonNode respNode;
           try {
             respNode =
@@ -516,10 +524,23 @@ public class GeminiNativeToolClient {
     }
 
     ObjectNode gen = body.putObject("generationConfig");
-    if (request.temperature() != null) gen.put("temperature", request.temperature());
+    // Gemini 3.6 Flash and 3.5 Flash-Lite deprecate sampling parameters and future releases will
+    // reject them. Their default thinking levels are the supported control surface, so preserve
+    // the caller's temperature only for older model generations.
+    if (request.temperature() != null && !rejectsSamplingParameters(request.model())) {
+      gen.put("temperature", request.temperature());
+    }
     if (request.maxOutputTokens() != null) gen.put("maxOutputTokens", request.maxOutputTokens());
 
     return body;
+  }
+
+  private static boolean rejectsSamplingParameters(String model) {
+    return "gemini-3.6-flash".equals(model) || "gemini-3.5-flash-lite".equals(model);
+  }
+
+  private static boolean requiresFunctionCallIds(String model) {
+    return rejectsSamplingParameters(model);
   }
 
   /**
@@ -684,8 +705,8 @@ public class GeminiNativeToolClient {
       //                                 client mints a /v1beta/cachedContents resource and
       //                                 references it by ID, with fail-safe inline retry on any
       //                                 stale/unsupported cache response.
-      //   thoughtsTokenCount      — Gemini 2.5+ reasoning tokens (we use gemini-3-pro-preview
-      //                             and gemini-3-flash-preview). Gemini bills these at the
+      //   thoughtsTokenCount      — Gemini 2.5+ reasoning tokens (including Gemini 3.x). Gemini
+      //                             bills these at the
       //                             OUTPUT rate. Previously dropped → under-billing whenever
       //                             thinking was active, which on complex prompts can be 2-5x
       //                             visible-output volume.
@@ -965,8 +986,8 @@ public class GeminiNativeToolClient {
       /**
        * Optional per-call HTTP read-timeout override (seconds). Falls through to the static {@link
        * #READ_TIMEOUT} default when null. Used by {@code OutlinePlannerAgent} to give large
-       * single-shot planner calls on gemini-3-pro-preview enough headroom — the default 60s is too
-       * tight for a thinking model emitting a multi-task plan, and the call would error with
+       * single-shot planner calls on Gemini thinking models enough headroom — the default 60s is
+       * too tight for a thinking model emitting a multi-task plan, and the call would error with
        * "Request timed out: null" after which RunOrchestrator silently fell back to a 1-task
        * SINGLE_SHOT plan (cmatrix run a0b81542 on 2026-05-07).
        */

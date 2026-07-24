@@ -104,7 +104,7 @@ public class GoalContinuationAdvisor {
     policy.put("rankingPolicy", "quality_desc_then_cost_asc_then_latency_asc");
     policy.put("rankingQualityTieBand", qualityTieBand);
     policy.put("routePinned", routePinned);
-    policy.put("rankingReasons", ranking == null ? List.of() : ranking.reasons());
+    policy.put("rankingReasons", decisionAwareRankingReasons(decision, ranking));
     policy.put(
         "eligibleCandidateCount", ranking == null ? 0 : Math.max(0, ranking.eligible().size()));
     policy.put(
@@ -118,6 +118,38 @@ public class GoalContinuationAdvisor {
         ranking == null ? List.of() : candidateSummaries(ranking.rejectedBelowThreshold(), 5));
     return new GoalContinuationPolicyDecision(
         decision.decision(), decision.selectedCandidate(), decision.reasons(), policy);
+  }
+
+  private static List<String> decisionAwareRankingReasons(
+      GoalContinuationPolicyDecision decision, ModelProviderRankingDecision ranking) {
+    if (decision == null || ranking == null) {
+      return List.of();
+    }
+    ModelProviderScore selected = decision.selectedCandidate().orElse(null);
+    ModelProviderScore top = ranking.eligible().isEmpty() ? null : ranking.eligible().getFirst();
+    if (selected == null || top == null || sameCandidate(selected, top)) {
+      return ranking.reasons();
+    }
+    return List.of(
+        "retained "
+            + selected.provider()
+            + "/"
+            + selected.model()
+            + " because decision="
+            + decision.decision()
+            + "; the globally top-ranked candidate was not selected for this continuation",
+        "top ranked candidate "
+            + top.provider()
+            + "/"
+            + top.model()
+            + " remains visible in topEligibleCandidates for comparison");
+  }
+
+  private static boolean sameCandidate(ModelProviderScore left, ModelProviderScore right) {
+    return left != null
+        && right != null
+        && normalize(left.provider()).equals(normalize(right.provider()))
+        && normalize(left.model()).equals(normalize(right.model()));
   }
 
   private static List<Map<String, Object>> candidateSummaries(

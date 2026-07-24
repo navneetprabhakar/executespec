@@ -106,7 +106,11 @@ class GoalDonenessEvaluatorTest {
     assertThat(decision.state()).isEqualTo(GoalDonenessState.UNCERTAIN);
     assertThat(decision.recommendedDecision())
         .isEqualTo(RunContinuationDecision.CONTINUE_SAME_MODEL_PROVIDER);
-    assertThat(decision.incompleteItems()).contains("validation not proven");
+    assertThat(decision.incompleteItems())
+        .contains(
+            "no task-level validation result was recorded; completion requires downstream build,"
+                + " test, or reviewer proof");
+    assertThat(decision.budgetCeilingReason()).isEmpty();
   }
 
   @Test

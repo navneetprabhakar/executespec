@@ -1349,6 +1349,7 @@ public class LlmRouter {
     ANTHROPIC_DEPRECATED_TEMP_MODELS.add("claude-opus-4-7");
     ANTHROPIC_DEPRECATED_TEMP_MODELS.add("claude-opus-4-8");
     ANTHROPIC_DEPRECATED_TEMP_MODELS.add("claude-sonnet-5");
+    ANTHROPIC_DEPRECATED_TEMP_MODELS.add("claude-fable-5");
   }
 
   private ChatResponse callGemini(LlmRequest r, List<ToolCallback> tools, String apiKey) {
@@ -1465,7 +1466,26 @@ public class LlmRouter {
             .apiKey(key)
             .readTimeoutSeconds(deepSeekReadTimeoutSeconds)
             .baseUrl(deepSeekBaseUrl)
+            .extraBody(deepSeekExtraBody(r))
             .build());
+  }
+
+  static Map<String, Object> deepSeekExtraBody(LlmRequest request) {
+    // Coherence is a small bounded schema-patch decision. DeepSeek thinking consumed the entire
+    // enforced 1,500-token ceiling before emitting patchPlan. Reviewer passes have the same
+    // failure mode at larger scale: run dc6df05f spent three separate 8K completions entirely on
+    // hidden reasoning, emitted no tool call, and failed the review protocol after nine minutes.
+    // Review is already an iterative inspect/edit/verify loop; disable single-call thinking for
+    // that bounded tool loop so the model must expose an action instead of silently consuming the
+    // complete output budget. Normal generation workers retain provider-default thinking.
+    String taskId =
+        request.context() == null || request.context().taskId() == null
+            ? ""
+            : request.context().taskId();
+    if ("CoherencePlannerAgent".equals(request.agentRole()) || taskId.contains("-reviewer-")) {
+      return Map.of("thinking", Map.of("type", "disabled"));
+    }
+    return Map.of();
   }
 
   /**

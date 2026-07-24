@@ -102,6 +102,102 @@ class PlannerOutputUtilsValidationTest {
   }
 
   @Test
+  void taskWithoutRequirementOwnershipIsRejectedAsLikelyInventedDeliverable() {
+    Plan plan =
+        buildPlan(
+            List.of(new RequirementSpec("R1", "Implement POST /jobs", RequirementKind.FUNCTIONAL)),
+            List.of(
+                task("T1", "Implement POST /jobs and tests", List.of("R1")),
+                task("T2", "Create unrequested OpenAPI specification", List.of())),
+            Plan.RuntimeSurface.HTTP,
+            Classification.MEDIUM);
+
+    assertThat(PlannerOutputUtils.validatePlan(plan))
+        .anyMatch(
+            violation ->
+                violation.contains("likely invented deliverables")
+                    && violation.contains("T2")
+                    && violation.contains("OpenAPI"));
+  }
+
+  @Test
+  void unrequestedStandaloneOpenApiFileIsRejectedEvenWhenBundledIntoARealTask() {
+    PlannedTask apiTask =
+        PlannedTask.builder()
+            .id("T1")
+            .title("Implement routes, tests, and OpenAPI")
+            .description("Implement POST /jobs and export openapi.yaml")
+            .complexity(PlannedTask.Complexity.MEDIUM)
+            .touchesFiles(List.of("src/routes.py", "tests/test_routes.py", "openapi.yaml"))
+            .meetsRequirements(List.of("R1"))
+            .build();
+    Plan plan =
+        buildPlan(
+            List.of(new RequirementSpec("R1", "Implement POST /jobs", RequirementKind.FUNCTIONAL)),
+            List.of(apiTask),
+            Plan.RuntimeSurface.HTTP,
+            Classification.MEDIUM);
+
+    assertThat(PlannerOutputUtils.validatePlan(plan))
+        .anyMatch(
+            violation ->
+                violation.contains("Unrequested OpenAPI/Swagger") && violation.contains("T1"));
+  }
+
+  @Test
+  void explicitlyRequestedOpenApiFileIsAllowed() {
+    PlannedTask apiTask =
+        PlannedTask.builder()
+            .id("T1")
+            .title("Implement routes, tests, and OpenAPI")
+            .description("Implement POST /jobs and export openapi.yaml")
+            .complexity(PlannedTask.Complexity.MEDIUM)
+            .touchesFiles(List.of("src/routes.py", "tests/test_routes.py", "openapi.yaml"))
+            .meetsRequirements(List.of("R1", "R2"))
+            .build();
+    Plan plan =
+        buildPlan(
+            List.of(
+                new RequirementSpec("R1", "Implement POST /jobs", RequirementKind.FUNCTIONAL),
+                new RequirementSpec("R2", "Deliver openapi.yaml", RequirementKind.CONSTRAINT)),
+            List.of(apiTask),
+            Plan.RuntimeSurface.HTTP,
+            Classification.MEDIUM);
+
+    assertThat(PlannerOutputUtils.validatePlan(plan))
+        .noneMatch(violation -> violation.contains("Unrequested OpenAPI/Swagger"));
+  }
+
+  @Test
+  void runtimeOpenApiEndpointMentionDoesNotAuthorizeStandaloneSpecificationFile() {
+    PlannedTask apiTask =
+        PlannedTask.builder()
+            .id("T1")
+            .title("Implement routes and tests")
+            .description("Implement POST /jobs and export openapi.yaml")
+            .complexity(PlannedTask.Complexity.MEDIUM)
+            .touchesFiles(List.of("src/routes.py", "tests/test_routes.py", "openapi.yaml"))
+            .meetsRequirements(List.of("R1", "R2"))
+            .build();
+    Plan plan =
+        buildPlan(
+            List.of(
+                new RequirementSpec("R1", "Implement POST /jobs", RequirementKind.FUNCTIONAL),
+                new RequirementSpec(
+                    "R2",
+                    "Poll /openapi.json only to detect when the runtime server is ready",
+                    RequirementKind.TEST)),
+            List.of(apiTask),
+            Plan.RuntimeSurface.HTTP,
+            Classification.MEDIUM);
+
+    assertThat(PlannerOutputUtils.validatePlan(plan))
+        .anyMatch(violation -> violation.contains("Unrequested OpenAPI/Swagger"));
+    assertThat(PlannerOutputUtils.validateScopeIntegrity(plan))
+        .anyMatch(violation -> violation.contains("Unrequested OpenAPI/Swagger"));
+  }
+
+  @Test
   void httpSurfaceWithoutTestRequirementFlagged() {
     Plan plan =
         buildPlan(

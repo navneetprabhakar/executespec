@@ -33,16 +33,29 @@ public class BuildCommandResolver {
   public BuildCommand resolve(Path workspaceRoot, String plannerDeclaredCommand) {
     if (plannerDeclaredCommand != null && !plannerDeclaredCommand.isBlank()) {
       String cmd = normalizePython(plannerDeclaredCommand.trim());
-      // Planner commands often assume the workspace IS the project (single-repo
-      // runs). For multi-repo Launches the real project sits under repos/<name>/ —
-      // if the workspace root has no recognisable marker but repos/ does, wrap
-      // the planner command with `cd` so it executes in the right directory.
-      String wrapped = wrapForReposSubdirIfNeeded(workspaceRoot, cmd);
-      return BuildCommand.builder()
-          .command(wrapped)
-          .timeoutSeconds(180)
-          .sourceDescription("planner-declared")
-          .build();
+      // A build smoke must be a repeatable verification command. Model-authored plans sometimes
+      // put environment setup (`pip install`, `npm install`) or the long-running server command in
+      // this field. Those commands mutate the host/toolchain, fail under externally-managed Python
+      // (PEP 668), or hang until timeout; none proves the source compiles. Ignore them and use the
+      // deterministic framework resolver below. The shell sandbox remains the authority for
+      // command safety; this check is the narrower semantic contract for build evidence.
+      if (!isRepeatableBuildSmoke(cmd)) {
+        log.warn(
+            "BuildCommandResolver: ignoring non-build planner command; using framework inference"
+                + " command={}",
+            cmd);
+      } else {
+        // Planner commands often assume the workspace IS the project (single-repo
+        // runs). For multi-repo Launches the real project sits under repos/<name>/ —
+        // if the workspace root has no recognisable marker but repos/ does, wrap
+        // the planner command with `cd` so it executes in the right directory.
+        String wrapped = wrapForReposSubdirIfNeeded(workspaceRoot, cmd);
+        return BuildCommand.builder()
+            .command(wrapped)
+            .timeoutSeconds(180)
+            .sourceDescription("planner-declared")
+            .build();
+      }
     }
     // 1) Root markers (single-repo + V1-style runs)
     Optional<BuildCommand> root = inferFromFramework(workspaceRoot);
@@ -206,7 +219,26 @@ public class BuildCommandResolver {
     // python = literal
     // (?!\d|_) = not followed by a digit (prevents touching python3, python2.7, python_utils)
     // (?=\s|$) = followed by whitespace or end (only matches whole-word python before args)
-    return command.replaceAll("(?<![./\\w])python(?!\\d|_)(?=\\s|$)", "python3");
+    String normalized = command.replaceAll("(?<![./\\w])python(?!\\d|_)(?=\\s|$)", "python3");
+    // Planner-authored Python build commands also frequently use the bare `pip` executable.
+    // Modern macOS and several minimal Linux images expose pip only through the interpreter,
+    // even when `python3 -m pip` is available. Treat this exactly like bare `python`: normalize
+    // only the standalone executable, never pip3, a path, or a word containing "pip".
+    return normalized.replaceAll("(?<!-m )(?<![./\\w])pip(?!\\d|_)(?=\\s|$)", "python3 -m pip");
+  }
+
+  static boolean isRepeatableBuildSmoke(String command) {
+    if (command == null || command.isBlank()) return false;
+    String normalized = command.trim().toLowerCase(java.util.Locale.ROOT).replaceAll("\\s+", " ");
+    // Python setup (including normalizePython's rewrite of bare pip).
+    if (normalized.matches("^(?:python(?:3(?:\\.\\d+)?)? -m )?pip(?:3)? install(?: |$).*")
+        || normalized.matches("^uv (?:pip install|sync|venv)(?: |$).*$")) return false;
+    // JavaScript dependency installation/package mutation.
+    if (normalized.matches("^(?:npm|pnpm|yarn|bun) (?:install|i|ci|add)(?: |$).*$")) return false;
+    // Long-running application/dev-server commands are runtime checks, not bounded build smokes.
+    return !normalized.matches(
+        "^(?:uvicorn|gunicorn|flask run|npm start|npm run dev|pnpm dev|yarn dev|bun run dev|java"
+            + " -jar)(?: |$).*$");
   }
 
   private static boolean exists(Path root, String relative) {

@@ -56,13 +56,43 @@ public class RunCostEvidenceService {
     var pageRequest = PageBounds.request(page, size, MAX_STEP_CALLS_PAGE_SIZE);
 
     long total = orZero(repository.countByRunId(run.getRunId()));
+    long successfulCalls = orZero(repository.countByRunIdAndAttemptStatus(run.getRunId(), SUCCESS));
     // A FAILED attempt is persisted with a hard costUsd=0, and a route with no pricing row is
     // priced at 0 too. Neither is a PROVEN zero-cost call, so both are counted as unknown rather
     // than folded into the aggregate as fact (RR-1556).
     long unknownCostAttempts = orZero(repository.countUnknownCostAttemptsByRunId(run.getRunId()));
     double knownCostLowerBound = orZero(repository.sumKnownCostByRunId(run.getRunId()));
+    long ledgerInputTokens = orZero(repository.sumSuccessfulInputTokensByRunId(run.getRunId()));
+    long ledgerOutputTokens = orZero(repository.sumSuccessfulOutputTokensByRunId(run.getRunId()));
+    long ledgerCacheRead = orZero(repository.sumSuccessfulCacheReadTokensByRunId(run.getRunId()));
+    long ledgerCacheWrite = orZero(repository.sumSuccessfulCacheWriteTokensByRunId(run.getRunId()));
+    long ledgerReasoning = orZero(repository.sumSuccessfulReasoningTokensByRunId(run.getRunId()));
 
-    double runTotal = ((Number) body.getOrDefault("costUsd", 0d)).doubleValue();
+    double trackerTotal = ((Number) body.getOrDefault("costUsd", 0d)).doubleValue();
+    // Async post-run calls can land in run_step_usage after the terminal RunCostTracker snapshot
+    // was persisted. The attempt ledger is then a higher known lower bound than costUsd, which
+    // previously produced a nonsensical negative unattributedCostUsd. Never under-report evidence
+    // we already possess: use the greater total and retain the tracker value for diagnosis.
+    double runTotal = Math.max(trackerTotal, knownCostLowerBound);
+    long trackerInput = numberOrZero(body.get("inputTokens")).longValue();
+    long trackerOutput = numberOrZero(body.get("outputTokens")).longValue();
+    body.put("costUsd", runTotal);
+    body.put("pipelineRecordedCostUsd", trackerTotal);
+    body.put("calls", Math.max(numberOrZero(body.get("calls")).longValue(), successfulCalls));
+    if (knownCostLowerBound > trackerTotal + ABSOLUTE_TOLERANCE_USD) {
+      body.put("source", "stored_total+attempt_ledger");
+    }
+    body.put("inputTokens", Math.max(trackerInput, ledgerInputTokens));
+    body.put("outputTokens", Math.max(trackerOutput, ledgerOutputTokens));
+    body.put(
+        "cacheReadTokens",
+        Math.max(numberOrZero(body.get("cacheReadTokens")).longValue(), ledgerCacheRead));
+    body.put(
+        "cacheWriteTokens",
+        Math.max(numberOrZero(body.get("cacheWriteTokens")).longValue(), ledgerCacheWrite));
+    body.put(
+        "reasoningTokens",
+        Math.max(numberOrZero(body.get("reasoningTokens")).longValue(), ledgerReasoning));
     double difference = runTotal - knownCostLowerBound;
     double tolerance = Math.max(ABSOLUTE_TOLERANCE_USD, RELATIVE_TOLERANCE * knownCostLowerBound);
 
@@ -111,6 +141,10 @@ public class RunCostEvidenceService {
             "outline", nullToZero(run.getOutlineCostUsd()),
             "expansion", nullToZero(run.getExpansionCostUsd()),
             "coherence", nullToZero(run.getCoherenceCostUsd())));
+  }
+
+  private static Number numberOrZero(Object value) {
+    return value instanceof Number number ? number : 0L;
   }
 
   /**

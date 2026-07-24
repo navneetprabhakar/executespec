@@ -1,6 +1,7 @@
 package com.navneet.executespec.agent;
 
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
@@ -26,25 +27,38 @@ public final class PlanSafetyContractEnricher {
                 .filter(Objects::nonNull)
                 .map(text -> text.toLowerCase(Locale.ROOT))
                 .reduce("", (left, right) -> left + "\n" + right);
-    boolean authenticatedPrincipalRequired = requirements.contains("authenticated");
+    boolean authenticatedPrincipalRequired =
+        containsAny(
+            requirements, "authenticated", "authenticate", "authentication", "api key", "bearer");
+    boolean principalScopedIdempotencyRequired =
+        authenticatedPrincipalRequired && requirements.contains("idempotency");
     boolean migrationsRequired = requirements.contains("migration");
     boolean reservationArithmetic =
         requirements.contains("reservation")
             && (requirements.contains("stock") || requirements.contains("quantity"));
     boolean sqliteConcurrencyRequired =
         requirements.contains("sqlite")
-            && requirements.contains("stock")
             && (requirements.contains("atomic") || requirements.contains("concurrent"));
+    boolean sqliteStockConcurrencyRequired =
+        sqliteConcurrencyRequired
+            && (requirements.contains("stock") || requirements.contains("quantity"));
+    boolean sqliteOverlapConcurrencyRequired =
+        sqliteConcurrencyRequired
+            && requirements.contains("reservation")
+            && requirements.contains("overlap");
     boolean invalidCancellationRequired =
         requirements.contains("cancel")
             && requirements.contains("invalid state")
             && requirements.contains("double cancellation");
+    boolean blackBoxHttpRequired = plan.runtimeSurface() == Plan.RuntimeSurface.HTTP;
 
     if (!authenticatedPrincipalRequired
         && !migrationsRequired
         && !reservationArithmetic
         && !sqliteConcurrencyRequired
-        && !invalidCancellationRequired) {
+        && !sqliteOverlapConcurrencyRequired
+        && !invalidCancellationRequired
+        && !blackBoxHttpRequired) {
       return new Result(plan, 0, List.of());
     }
 
@@ -52,24 +66,112 @@ public final class PlanSafetyContractEnricher {
     List<String> summaries = new ArrayList<>();
     int applied = 0;
     for (PlannedTask task : plan.tasks()) {
-      List<String> constraints = new ArrayList<>(task.hardConstraints());
+      List<String> constraints = new ArrayList<>(new LinkedHashSet<>(task.hardConstraints()));
+      int duplicateConstraints = task.hardConstraints().size() - constraints.size();
+      if (duplicateConstraints > 0) {
+        applied += duplicateConstraints;
+        summaries.add(
+            task.id() + " removed " + duplicateConstraints + " duplicate hard constraint(s)");
+      }
       String description = task.description();
       String taskEvidence = taskEvidence(task);
-      boolean apiOrServiceTask =
+      String taskIdentityEvidence = taskIdentityEvidence(task);
+      boolean documentationTask =
           containsAny(
               taskEvidence,
-              "post /reservations",
-              "get /reservations",
-              "cancel_reservation",
-              "get_reservation",
-              "reservationservice",
-              "reservation_service",
-              "routes.py",
-              "dependencies.py");
+              "openapi specification",
+              "openapi.yaml",
+              "swagger ui",
+              "readme",
+              "documentation");
+      boolean apiOrServiceTask =
+          !documentationTask
+              && containsAny(
+                  taskEvidence,
+                  "post /reservations",
+                  "get /reservations",
+                  "cancel_reservation",
+                  "get_reservation",
+                  "reservationservice",
+                  "reservation_service",
+                  "reservation route",
+                  "authentication",
+                  "auth.py",
+                  "idempotency service",
+                  "idempotency middleware",
+                  "idempotency.py",
+                  "routes.py",
+                  "dependencies.py");
       boolean testTask =
-          containsAny(taskEvidence, "tests/", "pytest", "testclient", "test fixture", "test_");
+          containsAny(taskEvidence, "tests/", "pytest test", "testclient", "test fixture", "test_");
       boolean credentialTask =
-          containsAny(taskEvidence, "api_key", "api key", "bearer token", "credential", "token");
+          !documentationTask
+              && containsAny(
+                  taskEvidence, "api_key", "api key", "bearer token", "credential", "token");
+      boolean dedicatedAcceptanceTestTask =
+          testTask
+              && containsAny(
+                  taskEvidence,
+                  "integration test",
+                  "functional test",
+                  "acceptance test",
+                  "end-to-end",
+                  "concurrency test",
+                  "test_concurrency",
+                  "pytest suite",
+                  "pytest tests",
+                  "pytest api tests",
+                  "test happy paths",
+                  "over http");
+      boolean authenticationProofTask =
+          testTask && (apiOrServiceTask || credentialTask || dedicatedAcceptanceTestTask);
+      boolean ownedResourceBehaviorTask =
+          !documentationTask
+              && containsAny(
+                  taskEvidence,
+                  "post /reservations",
+                  "get /reservations",
+                  "cancel_reservation",
+                  "get_reservation",
+                  "reservationservice",
+                  "reservation_service",
+                  "reservation route",
+                  "routes.py");
+      boolean idempotencyBehaviorTask =
+          !documentationTask
+              && containsAny(
+                  taskIdentityEvidence,
+                  "idempotency service",
+                  "idempotency middleware",
+                  "idempotency.py");
+      boolean createReservationTask =
+          !documentationTask
+              && (dedicatedAcceptanceTestTask
+                  || containsCreateReservationEndpoint(taskEvidence)
+                  || containsAny(
+                      taskEvidence,
+                      "create_reservation",
+                      "stock decrement",
+                      "decrement stock",
+                      "reservation core logic",
+                      "last unit"));
+      boolean stockMutationTask =
+          !documentationTask
+              && (dedicatedAcceptanceTestTask
+                  || containsAny(
+                      taskEvidence,
+                      "create_reservation",
+                      "stock decrement",
+                      "decrement stock",
+                      "last unit")
+                  || containsAny(
+                      taskIdentityEvidence, "reservation service", "reservation_service"));
+      boolean cancellationBehaviorTask =
+          !documentationTask
+              && (dedicatedAcceptanceTestTask
+                  || containsAny(taskEvidence, "cancel_reservation")
+                  || containsAny(
+                      taskIdentityEvidence, "reservation service", "reservation_service"));
 
       if (authenticatedPrincipalRequired && apiOrServiceTask) {
         applied +=
@@ -81,14 +183,35 @@ public final class PlanSafetyContractEnricher {
                 task.id(),
                 "verified principal and owned-resource boundary",
                 summaries);
-        if (testTask) {
+      }
+      if (authenticatedPrincipalRequired && authenticationProofTask) {
+        if (credentialTask || dedicatedAcceptanceTestTask) {
           applied +=
               addConstraint(
                   constraints,
-                  "Test that forged identity input and cross-principal owned-resource access are"
-                      + " rejected.",
+                  "Test that forged credentials and caller-selected identity input are rejected.",
+                  task.id(),
+                  "adversarial authentication proof",
+                  summaries);
+        }
+        if (ownedResourceBehaviorTask || dedicatedAcceptanceTestTask) {
+          applied +=
+              addConstraint(
+                  constraints,
+                  "Test that cross-principal owned-resource access is rejected.",
                   task.id(),
                   "adversarial ownership proof",
+                  summaries);
+        }
+        if (principalScopedIdempotencyRequired
+            && (idempotencyBehaviorTask || dedicatedAcceptanceTestTask)) {
+          applied +=
+              addConstraint(
+                  constraints,
+                  "Test that two authenticated principals can reuse the same Idempotency-Key"
+                      + " without collision or response leakage.",
+                  task.id(),
+                  "principal-scoped idempotency proof",
                   summaries);
         }
       }
@@ -96,21 +219,32 @@ public final class PlanSafetyContractEnricher {
         applied +=
             addConstraint(
                 constraints,
-                "Never store or compare API keys or bearer tokens in plaintext; store a one-way"
-                    + " verifier and never expose credentials in logs or responses.",
+                "Never persist or log raw API keys or bearer tokens. If the service owns credential"
+                    + " persistence, store a one-way verifier; an explicitly requested external"
+                    + " token map may be compared only in memory and must fail closed.",
                 task.id(),
                 "credential storage boundary",
                 summaries);
+        applied +=
+            addConstraint(
+                constraints,
+                "Production/runtime code must not seed, ship, log, document, or accept predictable"
+                    + " default credentials or bearer tokens; credential fixtures belong only in"
+                    + " isolated test code.",
+                task.id(),
+                "no runtime credential fixtures",
+                summaries);
+        applied +=
+            addConstraint(
+                constraints,
+                "Any persisted credential-verifier record must reference a stable"
+                    + " principal/customer ID; never use a credential hash as principal identity.",
+                task.id(),
+                "credential verifier identity boundary",
+                summaries);
       }
 
-      if (reservationArithmetic
-          && containsAny(
-              taskEvidence,
-              "post /reservations",
-              "create_reservation",
-              "quantity",
-              "stock decrement",
-              "reservation_service")) {
+      if (reservationArithmetic && createReservationTask) {
         applied +=
             addConstraint(
                 constraints,
@@ -122,15 +256,10 @@ public final class PlanSafetyContractEnricher {
       }
 
       if (sqliteConcurrencyRequired
-          && containsAny(
-              taskEvidence,
-              "post /reservations",
-              "create_reservation",
-              "stock decrement",
-              "reservation_service",
-              "concurrent",
-              "thread")) {
-        RewriteResult sqliteRewrite = rewriteUnsafeSqliteConcurrency(description, constraints);
+          && (createReservationTask || stockMutationTask || cancellationBehaviorTask)) {
+        PlanSafetyInstructionCanonicalizer.RewriteResult sqliteRewrite =
+            PlanSafetyInstructionCanonicalizer.rewriteUnsafeSqliteConcurrency(
+                description, constraints);
         description = sqliteRewrite.description();
         constraints = sqliteRewrite.constraints();
         if (sqliteRewrite.rewrites() > 0) {
@@ -139,20 +268,54 @@ public final class PlanSafetyContractEnricher {
               task.id()
                   + " removed "
                   + sqliteRewrite.rewrites()
-                  + " ineffective SELECT FOR UPDATE instruction(s) · SQLite concurrency boundary");
+                  + " ineffective SQLite row-lock instruction(s) · SQLite concurrency boundary");
         }
-        applied +=
-            addConstraint(
-                constraints,
-                "SQLite does not provide effective SELECT FOR UPDATE row locks; use BEGIN"
-                    + " IMMEDIATE or one conditional UPDATE with stock >= quantity and verify the"
-                    + " affected-row count using separate-connection race tests.",
-                task.id(),
-                "SQLite-effective atomic stock mutation",
-                summaries);
+        if (sqliteStockConcurrencyRequired && stockMutationTask) {
+          applied +=
+              addConstraint(
+                  constraints,
+                  "SQLite does not provide effective SELECT FOR UPDATE row locks; use BEGIN"
+                      + " IMMEDIATE or one conditional UPDATE with stock >= quantity and verify"
+                      + " the affected-row count using separate-connection race tests.",
+                  task.id(),
+                  "SQLite-effective atomic stock mutation",
+                  summaries);
+        }
+        if (sqliteOverlapConcurrencyRequired && createReservationTask) {
+          applied +=
+              addConstraint(
+                  constraints,
+                  "SQLite overlap protection must serialize the overlap check plus insert with"
+                      + " BEGIN IMMEDIATE or an equivalent database-enforced guard; a SELECT then"
+                      + " INSERT in a deferred transaction is not concurrency-safe. Prove it with"
+                      + " separate connections synchronized before the decision, asserting one"
+                      + " 201, one 409, no 5xx, and final persisted state.",
+                  task.id(),
+                  "SQLite-effective concurrent overlap guard",
+                  summaries);
+        }
       }
 
-      if (invalidCancellationRequired && containsAny(taskEvidence, "cancel", "cancellation")) {
+      PlanSafetyInstructionCanonicalizer.RewriteResult executableRewrite =
+          PlanSafetyInstructionCanonicalizer.rewriteContradictoryExecutableInstructions(
+              description,
+              constraints,
+              authenticatedPrincipalRequired && apiOrServiceTask,
+              authenticatedPrincipalRequired && credentialTask,
+              invalidCancellationRequired && cancellationBehaviorTask,
+              blackBoxHttpRequired && dedicatedAcceptanceTestTask);
+      description = executableRewrite.description();
+      constraints = executableRewrite.constraints();
+      if (executableRewrite.rewrites() > 0) {
+        applied += executableRewrite.rewrites();
+        summaries.add(
+            task.id()
+                + " canonicalized "
+                + executableRewrite.rewrites()
+                + " contradictory executable instruction(s) · worker prompt consistency");
+      }
+
+      if (invalidCancellationRequired && cancellationBehaviorTask) {
         applied +=
             addConstraint(
                 constraints,
@@ -163,7 +326,10 @@ public final class PlanSafetyContractEnricher {
                 summaries);
       }
 
-      if (migrationsRequired && isRuntimeOrMigrationTask(taskEvidence)) {
+      boolean runtimeOrMigrationTask =
+          isRuntimeOrMigrationTask(taskEvidence)
+              && (!documentationTask || containsAny(taskEvidence, "readme", "running the server"));
+      if (migrationsRequired && runtimeOrMigrationTask) {
         applied +=
             addConstraint(
                 constraints,
@@ -181,6 +347,18 @@ public final class PlanSafetyContractEnricher {
                     + " create_all or manually create the schema.",
                 task.id(),
                 "migration-backed test fixture",
+                summaries);
+      }
+      if (blackBoxHttpRequired && dedicatedAcceptanceTestTask) {
+        applied +=
+            addConstraint(
+                constraints,
+                "Functional tests must launch the documented production server, apply the real"
+                    + " migrations to a fresh database, and exercise public behavior over real"
+                    + " HTTP; in-process TestClient, dependency overrides, and unit tests are"
+                    + " supplemental and cannot be the only acceptance proof.",
+                task.id(),
+                "black-box HTTP acceptance boundary",
                 summaries);
       }
 
@@ -207,50 +385,6 @@ public final class PlanSafetyContractEnricher {
         .meetsRequirements(task.meetsRequirements())
         .taskType(task.taskType())
         .build();
-  }
-
-  private record RewriteResult(String description, List<String> constraints, int rewrites) {}
-
-  /**
-   * SQLite ignores {@code SELECT FOR UPDATE}; leaving a positive instruction anywhere in the
-   * executable task makes the plan internally contradictory even when a correct hard constraint is
-   * appended later. Rewrite descriptions and discard positive hard constraints before adding the
-   * canonical SQLite contract.
-   */
-  private static RewriteResult rewriteUnsafeSqliteConcurrency(
-      String description, List<String> constraints) {
-    String rewrittenDescription =
-        description.replaceAll(
-            "(?i)(?:via\\s+)?row-level\\s+lock\\s*\\(\\s*SELECT\\s+FOR\\s+UPDATE\\s*\\)",
-            "using a SQLite-effective atomic mutation (BEGIN IMMEDIATE or a conditional UPDATE"
-                + " with affected-row verification)");
-    if (containsUnsafePositiveSelectForUpdate(rewrittenDescription)) {
-      rewrittenDescription =
-          rewrittenDescription.replaceAll(
-              "(?i)SELECT\\s+FOR\\s+UPDATE",
-              "BEGIN IMMEDIATE or a conditional UPDATE with affected-row verification");
-    }
-
-    int rewrites = description.equals(rewrittenDescription) ? 0 : 1;
-    List<String> rewrittenConstraints = new ArrayList<>(constraints.size());
-    for (String constraint : constraints) {
-      if (containsUnsafePositiveSelectForUpdate(constraint)) {
-        rewrites++;
-      } else {
-        rewrittenConstraints.add(constraint);
-      }
-    }
-    return new RewriteResult(rewrittenDescription, rewrittenConstraints, rewrites);
-  }
-
-  private static boolean containsUnsafePositiveSelectForUpdate(String value) {
-    String normalized = safe(value).toLowerCase(Locale.ROOT);
-    if (!normalized.contains("select for update")) return false;
-    return !normalized.contains("does not provide effective")
-        && !normalized.contains("not effective")
-        && !normalized.contains("ineffective")
-        && !normalized.contains("must not use")
-        && !normalized.contains("do not use");
   }
 
   private static Plan withTasks(Plan plan, List<PlannedTask> tasks) {
@@ -288,11 +422,20 @@ public final class PlanSafetyContractEnricher {
         .toLowerCase(Locale.ROOT);
   }
 
+  private static String taskIdentityEvidence(PlannedTask task) {
+    return (safe(task.title()) + "\n" + String.join("\n", task.touchesFiles()))
+        .toLowerCase(Locale.ROOT);
+  }
+
   private static boolean containsAny(String evidence, String... needles) {
     for (String needle : needles) {
       if (evidence.contains(needle)) return true;
     }
     return false;
+  }
+
+  private static boolean containsCreateReservationEndpoint(String evidence) {
+    return evidence.matches("(?s).*post\\s+/reservations(?:\\s|,|\\.|$).*");
   }
 
   private static boolean isRuntimeOrMigrationTask(String evidence) {

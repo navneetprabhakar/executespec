@@ -106,6 +106,31 @@ async function render() {
 }
 
 describe('IdePlan approval gate identity (RR-1459)', () => {
+  it('recovers when SSE misses the transition from planning to the durable approval gate', async () => {
+    vi.useFakeTimers();
+    api.getRun
+      .mockResolvedValueOnce({
+        ...runDetail('run-a', '{"tasks":["a"]}', 3),
+        status: 'PLANNING',
+      })
+      .mockResolvedValue(runDetail('run-a', '{"tasks":["a"]}', 3));
+
+    try {
+      await render();
+      expect(text()).toContain('Planning — classifying + outlining your request');
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(3_000);
+      });
+
+      expect(text()).toContain('3 credit(s)');
+      expect(button('Approve and start work')).toBeTruthy();
+      expect(api.getRun).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('does not carry run A gate state across a runId change to run B', async () => {
     let resolveB: ((value: unknown) => void) | undefined;
     api.getRun.mockImplementation((id: string) => {
@@ -341,12 +366,17 @@ describe('IdePlan breaking-change acknowledgement gate (RR-819)', () => {
       button('Approve and start work')?.click();
     });
 
-    expect(text()).toContain('reload');
-    // The stale acknowledgement is dropped and the report is re-read, so the user re-acknowledges
-    // the change they will actually ship.
-    expect(ackInput()?.value).toBe('');
-    expect(button('Approve and start work')?.disabled).toBe(true);
-    expect(api.getPlanContractGate.mock.calls.length).toBeGreaterThan(1);
+    // The click starts with an async SHA-256 plan fingerprint. Under the full parallel Vitest run,
+    // that digest can resolve after React's initial act turn, so wait for the actual rejection
+    // recovery instead of asserting while the button still says "Approving…".
+    await vi.waitFor(() => {
+      expect(text()).toContain('reload');
+      // The stale acknowledgement is dropped and the report is re-read, so the user
+      // re-acknowledges the change they will actually ship.
+      expect(ackInput()?.value).toBe('');
+      expect(button('Approve and start work')?.disabled).toBe(true);
+      expect(api.getPlanContractGate.mock.calls.length).toBeGreaterThan(1);
+    });
   });
 
   it('does not add any friction to a run with no contract gate (the 204 case)', async () => {

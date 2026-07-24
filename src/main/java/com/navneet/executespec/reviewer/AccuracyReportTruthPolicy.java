@@ -6,6 +6,8 @@ import java.util.Locale;
 import java.util.regex.Pattern;
 
 import com.navneet.executespec.reviewer.model.AccuracyReport;
+import com.navneet.executespec.reviewer.model.IssueSeverity;
+import com.navneet.executespec.reviewer.model.ReviewIssue;
 
 /** Deterministic consistency rules for the LLM-produced accuracy report. */
 final class AccuracyReportTruthPolicy {
@@ -55,6 +57,45 @@ final class AccuracyReportTruthPolicy {
       report.setSpecAdherenceScore(Math.min(89, report.getSpecAdherenceScore()));
       report.setOverallAccuracyGrade(gradeFromScore(report.getSpecAdherenceScore()));
     }
+  }
+
+  /**
+   * A model cannot award full adherence while deterministic validation has an unresolved critical
+   * failure. Passing tests remain only supporting evidence, but a failed build or an actually
+   * executed failing test is positive evidence that the produced output is internally inconsistent.
+   * Preserve the LLM's requirement ledger for diagnosis while preventing an objectively false A/100
+   * claim.
+   */
+  static void enforceDeterministicFailures(
+      AccuracyReport report, List<ReviewIssue> deterministicIssues) {
+    if (report == null || deterministicIssues == null) return;
+    List<String> failures =
+        deterministicIssues.stream()
+            .filter(issue -> issue != null && issue.getSeverity() == IssueSeverity.CRITICAL)
+            .filter(issue -> !issue.isFixSucceeded())
+            .map(ReviewIssue::getDescription)
+            .filter(description -> description != null && !description.isBlank())
+            .distinct()
+            .limit(3)
+            .toList();
+    if (failures.isEmpty()) return;
+
+    List<String> partial =
+        report.getPartialRequirements() == null
+            ? new ArrayList<>()
+            : new ArrayList<>(report.getPartialRequirements());
+    failures.stream()
+        .map(failure -> "Deterministic validation failure: " + failure)
+        .filter(failure -> !partial.contains(failure))
+        .forEach(partial::add);
+    report.setPartialRequirements(List.copyOf(partial));
+    report.setSpecAdherenceScore(Math.min(69, report.getSpecAdherenceScore()));
+    report.setOverallAccuracyGrade(gradeFromScore(report.getSpecAdherenceScore()));
+    String prefix = "Deterministic validation contradicts a complete-adherence claim.";
+    report.setGradingNotes(
+        report.getGradingNotes() == null || report.getGradingNotes().isBlank()
+            ? prefix
+            : prefix + " " + report.getGradingNotes());
   }
 
   private static void reclassifyContradictoryUnknowns(AccuracyReport report) {

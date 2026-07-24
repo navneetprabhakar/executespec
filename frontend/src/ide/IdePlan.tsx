@@ -101,6 +101,32 @@ export default function IdePlan() {
     };
   }, [runId, navigate]);
 
+  // SSE is the fast path, but plan approval must not depend on an uninterrupted event stream.
+  // A run can finish planning between the initial detail read and SSE subscription (or while a
+  // laptop briefly loses the stream). In that case the old page stayed on PLANNING forever even
+  // though the durable run was already AWAITING_APPROVAL. Poll quickly while planning and retain a
+  // low-frequency fallback at the gate so changes made from another client also become visible.
+  const durablePlanStatus = (run?.status || '').toUpperCase();
+  useEffect(() => {
+    if (!runId || !durablePlanStatus) return;
+    const status = durablePlanStatus;
+    if (isPlanExecutingStatus(status) || isPlanTerminalStatus(status)) return;
+    const intervalMs = status === 'AWAITING_APPROVAL' ? 15_000 : 3_000;
+    let cancelled = false;
+    const timer = window.setInterval(() => {
+      void api
+        .getRun(runId)
+        .then((fresh) => {
+          if (!cancelled && fresh?.runId === runId) setLoadedRun(fresh);
+        })
+        .catch(() => {});
+    }, intervalMs);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [runId, durablePlanStatus]);
+
   // RR-819 — fetch the gate report the server composed for this run. A 204 (no contract touched,
   // the overwhelming majority of runs) resolves to `undefined`, which stores a null report and
   // leaves approval with exactly the friction it had before this existed. A failed fetch is also

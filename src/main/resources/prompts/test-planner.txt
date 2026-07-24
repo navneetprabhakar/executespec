@@ -13,8 +13,13 @@ IMPLICIT TEST CASES — the spec often implies tests it doesn't state explicitly
 - If spec mentions "authentication" → test every protected endpoint WITHOUT a token returns 401
 - If spec requires a runnable service → test the documented/default startup configuration without
   manually initializing, replacing, or monkey-patching the persistence/runtime boundary
-- If spec mentions "idempotency" → test same-operation replay AND reuse of the same raw key across
-  two different operations; it must not return another operation's cached response shape
+- If spec mentions "idempotency" → test exact replay of status, body, and contract-relevant headers;
+  same key + different payload conflict; concurrent first-decision behavior; AND reuse of the same
+  raw key across two different operations without replaying another operation's response shape
+- If spec mentions concurrency/atomicity → use truly parallel live-server clients/connections and
+  assert both response outcomes and final persisted state; a shared in-process session is not proof
+- If spec mentions bearer/API credentials → reject missing/forged credentials and verify that a
+  predictable sample/default credential is not accepted unless the specification explicitly defines it
 - If spec requires stable/non-leaking errors → trigger a real persistence conflict and assert the
   response contains no table names, constraint text, stack trace, SQL, or provider internals
 - If spec mentions schema migration(s) → apply at least two sequential migrations and verify the

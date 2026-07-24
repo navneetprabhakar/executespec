@@ -48,8 +48,7 @@ invalid reports are excluded and counted separately.
   `executable-verification` row whenever `executable_tests_run` is true, read
   `DETERMINISTIC`/HIGH on TRUE and `UNVERIFIED_COUNT`/MEDIUM otherwise.
   **`null` is unproven, never proven-false** — every pre-V317 row and every producer that
-  establishes no freshness lands there and keeps the conservative label. `merged` populations are
-  only as proven as their weakest contributor. Row *status* is unchanged, and
+  establishes no freshness lands there and keeps the conservative label. Row *status* is unchanged, and
   `ValidationReportGoalProofEvaluator` keys on status rather than source/confidence, so restoring
   the strong label does not by itself change run-level goal proof.
 - `RunChangeEvidenceService` requires an admitted run-start baseline. When no `run_repo_snapshot`
@@ -72,13 +71,13 @@ invalid reports are excluded and counted separately.
   keeps the proof uncertain, and missing spec-adherence evidence remains explicitly unproven.
 - No approved product diff, deterministic zero spec adherence with named missing requirements, or
   zero required-endpoint coverage forces both headline scores to zero and `pipelineResult=FAILED`.
-- Concrete test evidence is monotonic. The run-end workspace suite may establish positive counts;
-  a later HTTP/preview test-generation `NOT_APPLICABLE` event carries 0/0 and must not erase those
-  counts or lower the score. A later positive concrete summary is **combined** with the workspace
-  suite, never substituted for it: the two are different populations, so a 2/3 generated smoke may
-  not discard a passing 10/10 worker suite. The merge is anchored on a `baselineTestsTotal` /
-  `baselineTestsPassed` pair persisted inside `executable_evidence_json`, so a re-delivered
-  execution event recomputes the same counts instead of stacking increments.
+- Worker-authored workspace tests are supplemental repair diagnostics and never populate the
+  customer-facing quality score. The independently generated black-box suite exercises the real
+  preview/runtime and replaces any earlier test population. Its event is idempotent overwrite, not
+  arithmetic merge: unit tests cannot dilute a failing functional result. Missing, failed, stale,
+  zero-test, or provenance-unverified functional execution persists 0/0/unverified evidence and
+  caps both verified/rubric headlines at 75; only a non-empty provenance-verified external suite can
+  earn full test credit.
 - Anti-gaming guards (`scoring.gaming-guards`) are tighten-only and must not be defeated by absent
   evidence. With the guards on, a null endpoint-coverage reading gives CODE_DELIVERED the midpoint
   of the guarded range (75), not the full slot, and a missing or unrecognised test-coverage

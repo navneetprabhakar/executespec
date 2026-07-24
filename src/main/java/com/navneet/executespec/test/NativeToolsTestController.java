@@ -71,7 +71,7 @@ public class NativeToolsTestController {
       @Value("${spring.ai.openai.chat.options.model:gpt-5.4-mini}") String openAiModelName,
       @Value("${spring.ai.anthropic.chat.options.model:claude-haiku-4-5-20251001}")
           String anthropicModelName,
-      @Value("${spring.ai.google.genai.chat.options.model:gemini-3-flash-preview}")
+      @Value("${spring.ai.google.genai.chat.options.model:gemini-3.5-flash-lite}")
           String geminiModelName,
       ProviderDispatchAuthorization dispatchAuthorization) {
     this.openAiNativeToolClient = openAiNativeToolClient;
@@ -147,21 +147,25 @@ public class NativeToolsTestController {
   }
 
   /**
-   * Tests every model in the V2 plan matrix for native tool calling support. Single curl for full
-   * Phase 0 verification.
+   * Tests the current non-frontier direct-provider cohort for native tool calling support. Single
+   * curl for Phase 0 verification without silently spending on frontier routes.
    */
   @GetMapping("/native-tools/all")
   public Map<String, Object> testAll(
       @RequestParam(defaultValue = "native-tools-matrix") String runId) {
-    // V2 model matrix (per application.yml model-matrix) + control models for OpenAI.
+    // Direct-provider non-frontier cohort + compatibility controls for OpenAI.
     List<String[]> matrix =
         List.of(
-            new String[] {"anthropic", "claude-sonnet-4-6"},
+            new String[] {"anthropic", "claude-sonnet-5"},
             new String[] {"anthropic", "claude-haiku-4-5-20251001"},
-            new String[] {"gemini", "gemini-2.5-flash"},
-            new String[] {"gemini", "gemini-3-flash-preview"},
+            new String[] {"gemini", "gemini-3.1-flash-lite"},
+            new String[] {"gemini", "gemini-3.5-flash-lite"},
+            new String[] {"gemini", "gemini-3.5-flash"},
+            new String[] {"gemini", "gemini-3.6-flash"},
             new String[] {"openai", "gpt-5.4"},
             new String[] {"openai", "gpt-5.4-mini"},
+            new String[] {"openai", "gpt-5.6-terra"},
+            new String[] {"openai", "gpt-5.6-luna"},
             new String[] {"openai", "gpt-4o"}, // control: standard model
             new String[] {"openai", "gpt-4o-mini"} // control: standard model
             );
@@ -219,7 +223,6 @@ public class NativeToolsTestController {
     dispatchAuthorization.authorize("gemini", modelToUse, runId);
     var b =
         GoogleGenAiChatOptions.builder()
-            .temperature(0.0)
             .maxOutputTokens(512)
             .toolCallbacks(callbacks)
             .internalToolExecutionEnabled(false);

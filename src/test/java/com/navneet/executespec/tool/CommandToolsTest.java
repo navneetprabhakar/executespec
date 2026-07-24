@@ -148,6 +148,38 @@ class CommandToolsTest {
   }
 
   @Test
+  void buildProject_rejectsUnsafePlannerCommand_andFallsBackToSafeInference() {
+    BuildCommandResolver resolver = mock(BuildCommandResolver.class);
+    MavenDependencyValidator validator = mock(MavenDependencyValidator.class);
+    when(validator.validate(root))
+        .thenReturn(new MavenDependencyValidator.ValidationResult(true, List.of(), 0));
+    when(resolver.resolve(eq(root), eq("uv python3 -m pip install -e .")))
+        .thenReturn(
+            BuildCommand.builder()
+                .command("uv python3 -m pip install -e .")
+                .timeoutSeconds(180)
+                .sourceDescription("planner-declared")
+                .build());
+    when(resolver.resolve(eq(root), eq((String) null)))
+        .thenReturn(
+            BuildCommand.builder()
+                .command("printf inferred-ok")
+                .timeoutSeconds(5)
+                .sourceDescription("inferred:python")
+                .build());
+    BuildProjectTool tool =
+        new BuildProjectTool(resolver, validator, null, null, new ShellSandboxPolicy(), null);
+
+    ToolResult result =
+        tool.execute(json("{\"plannerCommand\":\"uv python3 -m pip install -e .\"}"), ctx());
+
+    assertThat(result).isInstanceOf(ToolResult.Ok.class);
+    assertThat(((ToolResult.Ok) result).content())
+        .contains("command=printf inferred-ok", "source=inferred:python", "inferred-ok")
+        .doesNotContain("uv python3");
+  }
+
+  @Test
   void buildProject_marks_unknown_stack_noOp_as_unavailable_evidence() {
     BuildCommandResolver resolver = mock(BuildCommandResolver.class);
     MavenDependencyValidator validator = mock(MavenDependencyValidator.class);
@@ -443,6 +475,24 @@ class CommandToolsTest {
     assertThat(((ToolResult.Ok) result).content())
         .contains("[REDACTED]")
         .doesNotContain("abcdefghijklmnopsecret");
+  }
+
+  @Test
+  void shellContractExplainsWorkspaceRelativeSingleCommandPolicy() {
+    Tool tool = new ShellTool(new ShellSandboxPolicy(), null, null);
+
+    assertThat(tool.description())
+        .contains("already set as the working directory")
+        .contains("Do not prefix with cd")
+        .contains("separate tool calls");
+    assertThat(tool.inputSchema()).contains("No cd prefix").contains("chaining");
+
+    ToolResult result = tool.execute(json("{\"command\":\"cd /tmp && pytest\"}"), ctx());
+    assertThat(result).isInstanceOf(ToolResult.Err.class);
+    assertThat(((ToolResult.Err) result).message())
+        .contains("existing workspace")
+        .contains("do not use cd")
+        .contains("command chaining");
   }
 
   private static ReadFileTool readFileTool(ReadFileStateStore readState) {

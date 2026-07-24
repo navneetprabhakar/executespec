@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -144,10 +145,46 @@ class RunLifecycleServiceContinuationApprovalTest {
     when(runRepo.findById(RUN_ID))
         .thenReturn(
             Optional.of(PipelineRun.builder().runId(RUN_ID).status("AWAITING_APPROVAL").build()));
+    when(runRepo.claimTerminalTransitionWithReasons(
+            eq(RUN_ID), eq("CANCELLED"), isNull(), any(), any()))
+        .thenReturn(1);
     assertThat(service.cancel(RUN_ID)).isTrue();
 
     verify(gateStore).setPlanGate(RUN_ID, false);
     verify(gateStore).clearPlanGate(RUN_ID);
+  }
+
+  @Test
+  void cancelPersistsLiveUsageFloorWithoutSavingStaleRunEntity() {
+    PipelineRun run = PipelineRun.builder().runId(RUN_ID).status("WORKING").build();
+    when(runRepo.findById(RUN_ID)).thenReturn(Optional.of(run));
+    when(runRepo.claimTerminalTransitionWithReasons(
+            eq(RUN_ID), eq("CANCELLED"), isNull(), any(), any()))
+        .thenReturn(1);
+    when(costTracker.snapshot(RUN_ID))
+        .thenReturn(new RunCostTracker.Snapshot(409_127, 14_706, 0, 372_736, 0.010256, 27));
+
+    assertThat(service.cancel(RUN_ID)).isTrue();
+
+    verify(tokenAttributor).reconcileRunTotalsFromLedger(RUN_ID);
+    verify(persistenceWriter)
+        .raiseUsageFloor(
+            RUN_ID, new RunCostTracker.Snapshot(409_127, 14_706, 0, 372_736, 0.010256, 27));
+    verify(runRepo, never()).save(run);
+  }
+
+  @Test
+  void cancelLosingTerminalClaimDoesNotInterruptOrEmitCancelledState() {
+    when(runRepo.findById(RUN_ID))
+        .thenReturn(Optional.of(PipelineRun.builder().runId(RUN_ID).status("WORKING").build()));
+    when(runRepo.claimTerminalTransitionWithReasons(
+            eq(RUN_ID), eq("CANCELLED"), isNull(), any(), any()))
+        .thenReturn(0);
+
+    assertThat(service.cancel(RUN_ID)).isFalse();
+
+    verify(controlPort, never()).removeActiveRun(RUN_ID);
+    verify(broadcaster, never()).complete(RUN_ID);
   }
 
   @Test

@@ -112,6 +112,26 @@ export function fmtDur(ms?: number | null) {
   return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
 }
 
+export function testResultSummary(
+  tests: Pick<api.TestReportData, 'totalTests' | 'passed' | 'failed' | 'errors'>,
+) {
+  if (tests.totalTests <= 0) {
+    return {
+      measured: false,
+      headline: 'Not measured',
+      label: 'No tests executed',
+      explanation:
+        'A compiled test plan is not execution evidence. Re-run tests to publish measured pass/fail results.',
+    };
+  }
+  return {
+    measured: true,
+    headline: `${tests.passed}/${tests.totalTests}`,
+    label: 'passed',
+    explanation: null,
+  };
+}
+
 /** Human-readable source for a continuation decision. */
 export function continuationSourceLabel(source?: string | null): string | null {
   switch ((source || '').toUpperCase()) {

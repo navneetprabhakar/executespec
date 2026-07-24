@@ -41,6 +41,10 @@
   it repairs physical attempts persisted before an interrupted executor reached its normal
   in-memory attribution boundary, without replacing larger phase/task totals or double-counting
   replayed reconciliation.
+- The run cost read model also raises terminal totals to the successful `run_step_usage` ledger.
+  This covers post-terminal consumers such as Screens and Ask, whose calls occur after the pipeline
+  snapshot was frozen. Null legacy cache/reasoning fields mean “not projected”, not numeric zero;
+  aggregation must tolerate them and return the ledger totals rather than failing or under-reporting.
 - `PlannerPhaseSplit` / `PlannerPhaseAttribution` own how pre-executor spend is booked (RR-1561).
   `RunOrchestrator` used to hand `attributePhase(PLANNER, …)` the WHOLE-RUN snapshot, so the smart
   classifier — which runs on every run, before the planner — was always booked to

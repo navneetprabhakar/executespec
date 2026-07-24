@@ -395,6 +395,7 @@ SCORE COMPUTATION GUIDANCE:
       // defect in unknownRequirements (for example, "release accepts no idempotency key"). Repair
       // that contradiction deterministically so an admitted hard gap cannot retain an A grade.
       AccuracyReportTruthPolicy.enforceConsistency(report);
+      AccuracyReportTruthPolicy.enforceDeterministicFailures(report, issues);
 
       log.info(
           "[AccuracyAssessment] Complete for run {}: {} ({}/100) — {} missing, {} partial,"

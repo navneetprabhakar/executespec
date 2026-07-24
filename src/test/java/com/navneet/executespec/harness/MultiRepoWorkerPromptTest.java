@@ -199,6 +199,62 @@ class MultiRepoWorkerPromptTest {
   }
 
   @Test
+  void multiTaskWorkerOmitsGlobalSpecAndNamesLaterReservedScope() {
+    PlannedTask scaffold =
+        PlannedTask.builder()
+            .id("T1")
+            .title("Create models and migrations")
+            .description("Create the database schema only.")
+            .complexity(Complexity.MEDIUM)
+            .touchesFiles(List.of("app/models.py", "migrations/001.py"))
+            .meetsRequirements(List.of("R1"))
+            .build();
+    PlannedTask routes =
+        PlannedTask.builder()
+            .id("T2")
+            .title("Implement reservation endpoints")
+            .description("Create POST and cancel routes.")
+            .complexity(Complexity.HIGH)
+            .touchesFiles(List.of("app/routes.py", "tests/test_http.py"))
+            .dependsOn(List.of("T1"))
+            .meetsRequirements(List.of("R1"))
+            .build();
+    Plan plan =
+        Plan.builder()
+            .tasks(List.of(scaffold, routes))
+            .requirements(
+                List.of(
+                    new RequirementSpec(
+                        "R1", "Build the complete reservation API.", RequirementKind.FUNCTIONAL)))
+            .build();
+
+    String evidence =
+        PromptComposer.composeWorkerEvidence(
+            scaffold,
+            null,
+            null,
+            null,
+            null,
+            null,
+            plan,
+            "Build the entire application, including every endpoint and test.");
+    String system =
+        newExecutor()
+            .composeSystemPrompt(scaffold, null, null, "python", null, "gemini", null, false);
+
+    assertFalse(evidence.contains("<<<UNTRUSTED_ORIGINAL_SPEC"));
+    assertTrue(evidence.contains("<<<UNTRUSTED_RESERVED_FUTURE_SCOPE"));
+    assertTrue(evidence.contains("T2: Implement reservation endpoints"));
+    assertTrue(evidence.contains("app/routes.py"));
+    assertTrue(system.contains("WORKER_TASK is the sole deliverable"));
+    assertTrue(system.contains("untrusted intermediate output"));
+    assertTrue(system.contains("hardcoded signing secret"));
+    assertTrue(system.contains("insecure path remains reachable"));
+    assertTrue(system.contains("does not prove immutable replay"));
+    assertTrue(system.contains("do NOT implement it now"));
+  }
+
+  @Test
   void single_repo_run_does_not_receive_multi_repo_block() {
     // RunOrchestrator passes null when buildMultiRepoSummary returns null (single-repo
     // / scratch workspace). The executor must not invent a header in that case.

@@ -324,6 +324,15 @@ class RunPersistenceWriter {
     }
   }
 
+  /** Monotonically persists the live tracker floor without touching lifecycle/evidence fields. */
+  void raiseUsageFloor(String runId, RunCostTracker.Snapshot cost) {
+    runRepo.raiseUsageTotalsToAtLeast(
+        runId,
+        RunCostTracker.saturatedInt(cost.inputTokens()),
+        RunCostTracker.saturatedInt(cost.outputTokens()),
+        cost.costUsd());
+  }
+
   void writeRunCostLog(PipelineRun r, RunCostTracker.Snapshot cost) {
     try {
       double estimated = r.getCostEstimateHigh() != null ? r.getCostEstimateHigh() : 0.0;

@@ -33,6 +33,18 @@ If the spec truly imposes only one requirement (e.g. "write fibonacci to fib.py"
      assertions in its description. Never plan disposable root-level smoke scripts as substitutes
      for maintained tests.
 
+3a. **One primary owner per production file.** A greenfield scaffold task may create manifests,
+package directories, migration configuration, and empty package markers; it MUST NOT create
+placeholder production modules that later feature tasks also own. Assign each production source
+file to the task that implements its real behavior. A later task may revisit a file only when its
+description names the concrete extension to already-working behavior and the dependency requires
+that handoff. Avoid broad scaffold `touchesFiles` lists copied again into every later task.
+
+3b. **Dependency lists must be executable, not illustrative.** If a task enumerates the runtime or
+test dependencies, include every adapter/driver required by the chosen implementation (for example
+an async database driver for an async ORM engine). Never add "no dependencies beyond this list" or
+another closed-world constraint unless the user explicitly imposed it.
+
 4. **README.md policy — context-aware.**
 
    **Empty scratch workspace** (no existing files beyond `.git`, scaffolding from zero): include a final "Create README.md" task covering what was built, how to install/run, and any config the user must supply.
@@ -102,6 +114,20 @@ internal wiring belongs inside the task that owns the requested behavior.
    that boundary. Keep tightly coupled clauses in the same task so one worker can implement and
    adversarially verify them end-to-end.
 
+   **For every runnable HTTP/API deliverable, acceptance tests are black-box functional tests.**
+   At least one task description must launch the documented production server as a separate
+   process, apply the real ordered migrations to a fresh database, and exercise the public API over
+   real HTTP. Framework-internal clients (`TestClient`, `MockMvc`, `supertest` bound directly to an
+   app object), dependency overrides, repository/service tests, and unit tests are useful
+   supplements but MUST NOT be described as the sole acceptance proof. Concurrency requirements
+   must use parallel requests with independent connections against that running server.
+
+   **Never leave contradictory executable text in a task.** `description` becomes the worker's user
+   prompt, so it must already agree with `hardConstraints`: do not ask for caller-selected identity
+   headers when authentication is required, successful replay when the spec requires an invalid
+   state error, or a database primitive unsupported by the selected database. A later correcting
+   hard-constraint bullet does not make an internally contradictory task valid.
+
    **Preserve cross-feature journeys.** When a later task edits a shared page, reducer, schema, or
    persistence validator created by an earlier task, its description must name the established
    user actions/invariants that must remain reachable. In particular, an empty/loading/error state
@@ -149,7 +175,7 @@ The plan schema:
 - `planTitle`: short one-line title (≤ 80 chars)
 - `planSummary`: one-paragraph summary of what the plan accomplishes
 - `projectType`: one of `java-spring-boot`, `node-backend`, `node-frontend`, `python`, `go`, `rust`, `cli`, `react-native-expo`, `unknown`. Infer from the spec. The `react-native-expo` value is gated behind the `codegen.react_native.enabled` feature flag — if disabled, the run will be rejected with 501 before this plan is accepted.
-- `buildCommand`: explicit shell build command (e.g. `mvn -q -DskipTests compile`, `npm run build`, `cargo build --quiet`). Omit / use null only if you genuinely cannot determine one — the harness will fall back to framework inference.
+- `buildCommand`: optional, direct compile/build command using the repository's existing toolchain (for example `mvn -q -DskipTests compile`, `npm run build`, `cargo build --quiet`, or `python3 -m compileall -q .`). It is a repeatable smoke check: NEVER install dependencies, create an environment, start a server, use `cd`, chain commands, pipe, or invent a wrapper. Omit / use null when framework inference is safer. Tests belong in task acceptance criteria, not in this field.
 
   **Runtime conventions — do NOT violate these:**
   - For Python projects, **always emit `python3`** (never bare `python`). Python 2 is deprecated; many systems (modern macOS, minimal containers) only install `python3` and bare `python` returns exit 127 "command not found".

@@ -275,6 +275,56 @@ public class ManagedAiUsageService {
   }
 
   /**
+   * Fail-fast approval gate for a plan whose conservative provider-cost estimate no longer fits the
+   * caller's managed-AI allowance. Submission reserves only the minimum one-credit admission claim
+   * because no plan estimate exists yet; once planning has produced {@code estimateHighUsd},
+   * approving a run that cannot fit would knowingly create a partial workspace and then deny its
+   * later worker/reviewer calls. Per-call authorization remains the hard source of truth because an
+   * estimate is not a spend reservation.
+   */
+  @Transactional
+  public void assertCanApproveEstimatedSpend(
+      AppUserDetails userDetails, boolean ownKeysMode, double estimateHighUsd) {
+    if (!properties.isEnabled() || ownKeysMode || estimateHighUsd <= 0.0) return;
+    String userId = userDetails.getUser().getId();
+    ManagedAiUserContext user =
+        new ManagedAiUserContext(
+            userId, userDetails.getUser().getOrgId(), tierResolver.resolveUserTier(userId));
+    ManagedAiProperties.TierPolicy policy = properties.policyFor(user.tier());
+    if (!isManaged(policy)) return;
+
+    ManagedAiUsagePeriod period = periodService.currentOrCreate(user, policy, Instant.now(), true);
+    long grant = period.getIncludedAiCredits() + period.getPurchasedAiCredits();
+    long committed = Math.max(period.getAiCreditsUsed(), period.getReservedAiCredits());
+    long remainingCredits = Math.max(0L, grant - committed);
+    long estimatedCredits =
+        creditCalculator.creditsFor(
+            estimateHighUsd, policy.getRetailMultiplier(), properties.getCreditsPerUsd());
+    if (grant > 0 && estimatedCredits > remainingCredits) {
+      throw new org.springframework.web.server.ResponseStatusException(
+          org.springframework.http.HttpStatus.PAYMENT_REQUIRED,
+          "This plan is estimated to require up to "
+              + estimatedCredits
+              + " AI credits, but only "
+              + remainingCredits
+              + " remain. Add AI credits, use your own provider key, or reduce the plan before"
+              + " approving.");
+    }
+
+    double hardRaw =
+        period.getHardStopAfterRawUsd() > 0.0
+            ? period.getHardStopAfterRawUsd()
+            : period.getRawCogsCapUsd();
+    double remainingRaw = Math.max(0.0, hardRaw - period.getRawCogsUsedUsd());
+    if (hardRaw > 0.0 && estimateHighUsd > remainingRaw) {
+      throw new org.springframework.web.server.ResponseStatusException(
+          org.springframework.http.HttpStatus.PAYMENT_REQUIRED,
+          "This plan's high estimate exceeds the remaining managed-AI provider budget. Use your"
+              + " own provider key or reduce the plan before approving.");
+    }
+  }
+
+  /**
    * Read-only ES-credit rollup for the v3 entitlements surface (no period creation). Returns {@code
    * managed=false} (ungated) for TEAM/ENTERPRISE/own-key tiers; for managed tiers it reflects the
    * live period when one exists, else the policy grant with zero usage.

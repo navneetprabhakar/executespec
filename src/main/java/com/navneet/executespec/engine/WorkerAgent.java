@@ -1,5 +1,7 @@
 package com.navneet.executespec.engine;
 
+import static com.navneet.executespec.engine.WorkerCompletionPolicy.maxIterations;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -61,15 +63,6 @@ import lombok.extern.slf4j.Slf4j;
  *       compaction yet — Phase 8 owns context persistence + crash recovery)
  *   <li>Native completeTask signal (no JSON-prefix heuristic)
  *   <li>40-iteration default cap (overridable via WorkerTaskRequest.maxIterations)
- * </ul>
- *
- * <p>Deferred to later phases (per execution plan):
- *
- * <ul>
- *   <li>Hybrid context (upfront file fill from planner-declared dependencyFiles) — Phase 4
- *   <li>Sliding-window compaction at 75% context limit — Phase 8
- *   <li>Redis context persistence + crash recovery — Phase 8
- *   <li>Stall detection / model escalation — Phase 2.x
  * </ul>
  */
 @Service
@@ -411,6 +404,7 @@ public class WorkerAgent {
     int editsSinceAutoVerify = 0;
     boolean lastIterHadWrite = false;
     int autoVerifyRuns = 0;
+    WorkerCompletionPolicy completionPolicy = WorkerCompletionPolicy.create();
     // One-shot: at most one corrective nudge per task, whether triggered by the progress counter
     // crossing progressWarnAfter mid-loop or by a premature text-only stop. After it fires once,
     // the next failure terminates (force threshold, or another text-only stop).
@@ -692,8 +686,8 @@ public class WorkerAgent {
                     // ToolRegistry#WORKER_DENY_TOOLS for the rationale.
                     .toolsOverride(workerTools)
                     // 2026-05-08 — Gemini's static GeminiNativeToolClient.READ_TIMEOUT is 60s,
-                    // calibrated to fail fast on stalled worker calls. But gemini-3-pro-preview
-                    // (thinking model) regularly takes 60-90s on dense tool-call iterations,
+                    // calibrated to fail fast on stalled worker calls. But Gemini thinking models
+                    // regularly take 60-90s on dense tool-call iterations,
                     // tripping the timeout mid-task. Cmatrix run 84252898 task T3 FAILED with
                     // ResourceAccessException I/O error after the worker burned 17m of work.
                     // 120s gives 2× headroom while still detecting genuinely stuck calls within
@@ -825,7 +819,7 @@ public class WorkerAgent {
         // the tool). Fire the SAME one-shot progress nudge used mid-loop: if we haven't nudged
         // yet, give the model one more iteration to either call completeTask or make the next
         // concrete edit. If we've already spent the nudge, stop with STOPPED_WITHOUT_COMPLETE.
-        history.add(new AssistantMessage(assistantText));
+        WorkerCompletionPolicy.appendTextTurn(history, assistantText);
         if (terminalVerifiedPass) {
           String summary =
               "terminal verifier-shaped check passed; preserving verified candidate"
@@ -911,6 +905,22 @@ public class WorkerAgent {
             .build();
       }
 
+      if (completionPolicy.shouldComplete(totalWriteCalls, calls)) {
+        contextStore.delete(req.context());
+        recordTerminal(WorkerResult.Outcome.COMPLETED, req, iter);
+        return WorkerCompletionPolicy.greenAutoComplete(
+            runId,
+            req.context().taskId(),
+            iter,
+            toolsDispatched,
+            maxRepeatedAssistantTextCount,
+            assistantText,
+            calls,
+            toolLog,
+            start);
+      }
+      completionPolicy.beforeSubstantiveTurn();
+
       // Append the assistant turn (text + tool_calls + optional metadata) to history.
       AssistantMessage.Builder assistantBuilder =
           AssistantMessage.builder().content(assistantText).toolCalls(calls);
@@ -927,8 +937,10 @@ public class WorkerAgent {
       // test run.  The broader progress watchdog still records the attempted tool call below so
       // a model cannot hide a stuck loop behind repeated failed writes.
       int successfulEditsThisIter = 0;
+      boolean fullSuitePassedThisIter = false;
       boolean successfulProgressThisIter =
           false; // RR-259 — set on a SUCCESSFUL progress-class call
+      boolean successfulNoveltyThisIter = false;
       // RL-2026-05-052 Phase 5+6 — the LAST tool call in this batch is the "immediately prior"
       // call for the next LLM turn; its output is the most likely to be re-referenced by the
       // worker's next decision, so ToolOutputCompactor preserves it verbatim (skip compaction).
@@ -1299,7 +1311,9 @@ public class WorkerAgent {
                 : dispatchOne(tc, req, isImmediatelyPriorToolCall);
         if (isWriteTool(tc.name()) && isOkEnvelope(envelope)) {
           successfulEditsThisIter++;
-          mutationChurn.recordMutation(mutationTarget(tc.name(), tc.arguments()));
+          String mutationPath = mutationTarget(tc.name(), tc.arguments());
+          mutationChurn.recordMutation(mutationPath);
+          completionPolicy.recordWrite(mutationPath);
         }
         // RR-259 — a progress-class call counts only when it succeeded.
         // A build tool reports a transport-success Ok envelope even when the child exits non-zero.
@@ -1333,6 +1347,9 @@ public class WorkerAgent {
             && envelope.contains("\\\"errored\\\":[]")
             && envelope.contains("\\\"exit_code\\\":0")) {
           lastTestRunIter = iter;
+          fullSuitePassedThisIter =
+              fullSuitePassedThisIter
+                  || WorkerCompletionPolicy.isFullSuiteRunTestsCall(objectMapper, tc.arguments());
         }
         // 2026-05-08 — track successful buildProject (exit=0) for the build-verification gate.
         // BuildProjectTool's content includes a "\nexit=<n>\n" line; in the JSON-encoded ok
@@ -1372,6 +1389,8 @@ public class WorkerAgent {
         // anything is the true stagnation-loop shape.
         if (progressV2) {
           String sig = callSignature(tc);
+          boolean novel = seenCallSignatures.add(sig);
+          if (novel && !isFailureEnvelope(envelope)) successfulNoveltyThisIter = true;
           if (isFailureEnvelope(envelope)) {
             failedSignatureStreaks.merge(sig, 1, Integer::sum);
           } else {
@@ -1385,6 +1404,9 @@ public class WorkerAgent {
         emitToolCallLog(req, tc);
       }
       history.add(ToolResponseMessage.builder().responses(toolResponses).build());
+
+      completionPolicy.afterToolBatch(
+          successfulEditsThisIter, fullSuitePassedThisIter, totalWriteCalls);
 
       WorkerMutationChurnGuard.Decision churnDecision =
           mutationChurn.evaluate(
@@ -1419,12 +1441,9 @@ public class WorkerAgent {
         wroteThisIter = successfulEditsThisIter > 0;
       }
       if (progressV2) {
-        // v2 — novelty IS progress: a new (tool, normalized-args) signature resets the counter.
-        boolean novelThisIter = false;
-        for (AssistantMessage.ToolCall tc : calls) {
-          if (seenCallSignatures.add(callSignature(tc))) novelThisIter = true;
-        }
-        wroteThisIter = wroteThisIter || novelThisIter;
+        // v2 — successful novelty is progress. Remember failed signatures too, but do not let a
+        // model keep the worker alive by varying blocked/invalid shell commands every turn.
+        wroteThisIter = wroteThisIter || successfulNoveltyThisIter;
       }
       if (wroteThisIter) {
         itersSinceProgress = 0;
@@ -1448,6 +1467,7 @@ public class WorkerAgent {
           String observation = autoVerifyObservation(req.context(), editsSinceAutoVerify);
           if (observation != null) {
             editsSinceAutoVerify = 0;
+            completionPolicy.observeAutoVerify(observation);
             history.add(new UserMessage(observation));
             toolLog.add("AUTO_VERIFY → " + observation.lines().findFirst().orElse(""));
             log.info(
@@ -1805,10 +1825,13 @@ public class WorkerAgent {
       if (CompleteTaskTool.NAME.equals(tc.name())) {
         salvageSummary = "salvage path: " + extractSummary(tc.arguments());
         log.info("WorkerAgent SALVAGE got completeTask: {}", salvageSummary);
-        recordTerminal(WorkerResult.Outcome.ITERATION_LIMIT_EXCEEDED, req, maxIterOf(req));
+        recordTerminal(
+            WorkerResult.Outcome.ITERATION_LIMIT_EXCEEDED,
+            req,
+            maxIterations(req, DEFAULT_MAX_ITER));
         return WorkerResult.builder()
             .outcome(WorkerResult.Outcome.ITERATION_LIMIT_EXCEEDED)
-            .iterations(maxIterOf(req))
+            .iterations(maxIterations(req, DEFAULT_MAX_ITER))
             .toolCallsDispatched(toolsDispatched)
             .completionSummary(salvageSummary)
             .toolCallLog(toolLog)
@@ -1830,10 +1853,10 @@ public class WorkerAgent {
 
     if (wroteAnything) {
       log.info("WorkerAgent SALVAGE produced an edit — returning COMPLETED (unverified)");
-      recordTerminal(WorkerResult.Outcome.COMPLETED, req, maxIterOf(req));
+      recordTerminal(WorkerResult.Outcome.COMPLETED, req, maxIterations(req, DEFAULT_MAX_ITER));
       return WorkerResult.builder()
           .outcome(WorkerResult.Outcome.COMPLETED)
-          .iterations(maxIterOf(req))
+          .iterations(maxIterations(req, DEFAULT_MAX_ITER))
           .toolCallsDispatched(toolsDispatched + calls.size())
           .completionSummary("salvage: best-guess edit produced after iter-limit")
           .toolCallLog(toolLog)
@@ -2110,12 +2133,6 @@ public class WorkerAgent {
     List<ToolCallback> filtered =
         all.stream().filter(t -> allow.contains(t.getToolDefinition().name())).toList();
     return filtered.isEmpty() ? all : filtered;
-  }
-
-  private static int maxIterOf(WorkerTaskRequest req) {
-    return req.maxIterations() != null && req.maxIterations() > 0
-        ? req.maxIterations()
-        : DEFAULT_MAX_ITER;
   }
 
   /** Emit worker outcome + iterations metrics at every terminal path. */
@@ -2970,15 +2987,8 @@ public class WorkerAgent {
       TestExecutionSummary s = opt.get().summary();
       if (s.getTotalTests() == 0) return null;
       if (s.getFailed() == 0 && s.getErrors() == 0) {
-        return "AUTO-VERIFY — the platform ran `"
-            + opt.get().command()
-            + "` after your last "
-            + editsInBurst
-            + " edit(s): "
-            + s.getPassed()
-            + "/"
-            + s.getTotalTests()
-            + " passed (exit 0). Tests are green — continue.";
+        return WorkerCompletionPolicy.passingAutoVerifyObservation(
+            opt.get().command(), editsInBurst, s.getPassed(), s.getTotalTests());
       }
       return "AUTO-VERIFY — the platform ran `"
           + opt.get().command()

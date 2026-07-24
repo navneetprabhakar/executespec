@@ -19,6 +19,8 @@ public interface RunStepUsageRepository extends JpaRepository<RunStepUsage, Stri
 
   long countByRunId(String runId);
 
+  long countByRunIdAndAttemptStatus(String runId, String attemptStatus);
+
   /**
    * Sum of the attempts whose cost is PROVEN. Deliberately excludes non-SUCCESS attempts (persisted
    * with a hard zero cost) and SUCCESS attempts that consumed tokens yet priced to exactly zero —
@@ -66,6 +68,21 @@ public interface RunStepUsageRepository extends JpaRepository<RunStepUsage, Stri
       "select coalesce(sum(u.outputTokens), 0) from RunStepUsage u "
           + "where u.runId = :runId and u.attemptStatus = 'SUCCESS'")
   Long sumSuccessfulOutputTokensByRunId(@Param("runId") String runId);
+
+  @Query(
+      "select coalesce(sum(u.cacheReadTokens), 0) from RunStepUsage u "
+          + "where u.runId = :runId and u.attemptStatus = 'SUCCESS'")
+  Long sumSuccessfulCacheReadTokensByRunId(@Param("runId") String runId);
+
+  @Query(
+      "select coalesce(sum(u.cacheWriteTokens), 0) from RunStepUsage u "
+          + "where u.runId = :runId and u.attemptStatus = 'SUCCESS'")
+  Long sumSuccessfulCacheWriteTokensByRunId(@Param("runId") String runId);
+
+  @Query(
+      "select coalesce(sum(u.reasoningTokens), 0) from RunStepUsage u "
+          + "where u.runId = :runId and u.attemptStatus = 'SUCCESS'")
+  Long sumSuccessfulReasoningTokensByRunId(@Param("runId") String runId);
 
   @Query(
       "select coalesce(sum(u.costUsd), 0.0) from RunStepUsage u "

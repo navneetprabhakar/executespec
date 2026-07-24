@@ -80,6 +80,11 @@ pass the provider already resolved from the explicit turn/session/account/org po
 unknown providers are rejected, and failure to resolve the selected provider's model returns 503;
 there is no implicit Anthropic or system-key fallback.
 
+Native structured tool calls are the only executable chat protocol. If a provider emits
+DSML/XML-style tool syntax as ordinary text, `ToolProtocolLeakGuard` prevents the token from being
+streamed and forces one tool-free synthesis; protocol markup from that synthesis is replaced with
+a bounded safe failure. The same guard is used by run Ask and persistent project chat.
+
 Security decisions are durable: agent-session route/tool/result/confirmation evidence remains in
 append-only `agent_action_event`; legacy/project-chat admission and tool allow/deny/result evidence
 is additionally written through `ChatSecurityAuditService` to the hash-chained `activity_audit`.

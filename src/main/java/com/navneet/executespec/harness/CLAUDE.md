@@ -234,3 +234,14 @@ Fail-closed / evidence-honest corrections; no migration.
 - **RR-1563** — `seedInitialContinuationActionState` reconstructs consumed escalation counters from
   durable `agent_task.continuation_actions_json` (EXECUTED/APPROVED rows) on every resume, so
   crash-recovery no longer restores a fresh full escalation budget.
+- **2026-07-24 task-proof presentation correction** — an intermediate task with no task-level
+  validation remains `UNCERTAIN` evidence pending downstream build/test/reviewer proof; the
+  customer Steps view hides that internal continuation detail once the durable task status is
+  complete instead of falsely upgrading deferred validation to `DONE`. Empty budget-ceiling text
+  also stays empty unless a real ceiling fired.
+- **2026-07-24 multi-task scope and trust correction** — `PromptComposer` omits `ORIGINAL_SPEC`
+  from multi-task worker evidence and emits `RESERVED_FUTURE_SCOPE` with later task/file ownership.
+  The shared worker contract treats the current task as the sole deliverable and treats earlier
+  generated code/tests as untrusted intermediate output: later tasks remove contradictory security
+  fallbacks instead of preserving them to keep self-authored tests green. Immutable replay tests
+  compare serialized status/body/contract headers, not only parsed fields.

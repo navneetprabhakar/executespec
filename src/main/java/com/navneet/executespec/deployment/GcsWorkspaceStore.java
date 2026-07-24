@@ -53,12 +53,21 @@ public class GcsWorkspaceStore {
     this.props = props;
     this.environment = environment;
     Storage s = null;
+    String configuredBucket = bucket();
+    if (props.workspace() == null
+        || !props.workspace().gcsEnabled()
+        || configuredBucket == null
+        || configuredBucket.isBlank()) {
+      log.info("[GcsWorkspaceStore] Disabled — workspace GCS bucket is not configured");
+      this.storage = null;
+      return;
+    }
     try {
       s = StorageOptions.getDefaultInstance().getService();
       // Verify bucket exists — if not, disable GCS operations to prevent
       // repeated 404 upload failures that spam logs every 5 minutes.
-      String b = bucket();
-      if (b != null && !b.isBlank() && s.get(b) == null) {
+      String b = configuredBucket;
+      if (s.get(b) == null) {
         log.warn(
             "[GcsWorkspaceStore] Bucket '{}' does not exist — disabling GCS workspace operations. "
                 + "Create the bucket or set GCS_WORKSPACE_BUCKET='' to silence this.",

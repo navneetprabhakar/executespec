@@ -11,6 +11,7 @@ import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.AgentTaskRepository;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Async;
@@ -74,6 +75,9 @@ public class StartupRunResumer {
   private final SseBroadcaster broadcaster;
   private final AtomicBoolean scanInProgress = new AtomicBoolean();
 
+  @Value("${agent.recovery.auto-resume-on-startup:false}")
+  private boolean automaticRecoveryEnabled = true;
+
   /**
    * 2026-05-04 — lazy {@code RunLifecycleService} reference (was RunOrchestrator before the inc-6b
    * god-class split; {@code resumeAfterCrash} moved to the lifecycle service). Direct constructor
@@ -89,6 +93,10 @@ public class StartupRunResumer {
   @Async
   @EventListener(ApplicationReadyEvent.class)
   public void onApplicationReady() {
+    if (!automaticRecoveryEnabled) {
+      log.info("StartupRunResumer: automatic recovery disabled by configuration");
+      return;
+    }
     runRecoveryScan("startup");
   }
 
@@ -102,6 +110,7 @@ public class StartupRunResumer {
       fixedDelayString = "${execution.recovery.scan-interval-ms:60000}",
       initialDelayString = "${execution.recovery.scan-initial-delay-ms:60000}")
   void scheduledRecoverySweep() {
+    if (!automaticRecoveryEnabled) return;
     runRecoveryScan("scheduled");
   }
 

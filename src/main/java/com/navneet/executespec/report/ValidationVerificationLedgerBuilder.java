@@ -169,15 +169,20 @@ final class ValidationVerificationLedgerBuilder {
             total <= 0 ? "UNKNOWN" : passed == total ? "PASS" : passed > 0 ? "WARN" : "FAIL",
             total <= 0 ? UNPROVEN_TEST_COUNT_SOURCE : testCountSource(entity),
             total <= 0 ? UNPROVEN_TEST_COUNT_CONFIDENCE : testCountConfidence(entity),
-            total > 0 && testCountsProven(entity)
-                ? "Generated or workspace tests passed. The counts are bound to this run's own"
-                    + " execution: report files were reset before launch, the runner's exit status"
-                    + " was checked, and every parsed report postdates the launch."
-                : "Generated or workspace tests passed. Counts are read from persisted test-runner"
-                    + " output; the report carries no execution-freshness token, so a stale or"
-                    + " absent run cannot be ruled out.",
             total <= 0
-                ? "No concrete test execution was captured."
+                ? "No independently admissible functional-test result is attached to this report."
+                    + " Worker-authored workspace tests are diagnostic and cannot prove product"
+                    + " quality by themselves."
+                : total > 0 && testCountsProven(entity)
+                    ? "Generated or workspace tests passed. The counts are bound to this run's own"
+                        + " execution: report files were reset before launch, the runner's exit"
+                        + " status was checked, and every parsed report postdates the launch."
+                    : "Generated or workspace tests passed. Counts are read from persisted"
+                        + " test-runner output; the report carries no execution-freshness token, so"
+                        + " a stale or absent run cannot be ruled out.",
+            total <= 0
+                ? "Independent end-to-end/functional verification is pending; workspace tests are"
+                    + " diagnostic only."
                 : passed + "/" + total + " tests passed.",
             "validation_report.tests_passed/tests_total",
             total <= 0 ? null : passed,
