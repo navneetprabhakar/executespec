@@ -43,7 +43,8 @@ import lombok.extern.slf4j.Slf4j;
  * <p>inc-4b also moved the LARGE-pipeline driver ({@code runLargePipeline}) + EPIC recursion
  * ({@code expandEpic}) here: both fan out task expansion across the now-shared {@link
  * PipelineExecutorPool} bean (lifted out of RunOrchestrator in the same increment), so they belong
- * with the other planning phases. Behaviour byte-identical to the originals.
+ * with the other planning phases. LARGE expansion now uses dependency waves so downstream task
+ * bodies inherit established prerequisite contracts while independent work remains concurrent.
  */
 @Component
 @RequiredArgsConstructor
@@ -279,9 +280,11 @@ class RunPlanningCoordinator {
    * <ol>
    *   <li>Phase 1: outline planner in SKELETON_ONLY mode (id/title/complexity/ repos/dependsOn/type
    *       only).
-   *   <li>Phase 2: parallel expansion of every LEAF task via {@link TaskExpanderAgent}. Bounded
-   *       concurrency via the existing pipeline pool. EPIC tasks are NOT recursed yet — slice 4
-   *       brings depth-2 expansion; for slice 3 they're treated as LEAFs.
+   *   <li>Phase 2: dependency-wave expansion of every LEAF task via {@link TaskExpanderAgent}.
+   *       Independent tasks in one wave expand in parallel, while downstream tasks receive the
+   *       established descriptions, files, and constraints of their expanded prerequisites. EPIC
+   *       tasks are NOT recursed yet — slice 4 brings depth-2 expansion; for slice 3 they're
+   *       treated as LEAFs.
    *   <li>Phase 3: coherence pass via {@link CoherencePlannerAgent} + apply any patches.
    * </ol>
    *
@@ -315,88 +318,60 @@ class RunPlanningCoordinator {
     java.util.concurrent.ConcurrentMap<String, Throwable> expansionFailures =
         new java.util.concurrent.ConcurrentHashMap<>();
 
-    List<java.util.concurrent.CompletableFuture<Void>> futures = new ArrayList<>();
     java.util.Map<String, String> routeContext =
         com.navneet.executespec.router.RunModelOverrides.capture();
-    for (PlannedTask t : tasksToExpand) {
-      futures.add(
-          java.util.concurrent.CompletableFuture.runAsync(
-              () ->
-                  com.navneet.executespec.router.RunModelOverrides.runWith(
-                      routeContext,
-                      () -> {
-                        try {
-                          if (enableEpicRecursion && t.taskType() == PlannedTask.TaskType.EPIC) {
-                            List<PlannedTask> children =
-                                expandEpic(runId, t, skeleton, effectiveReq, rootCtx);
-                            expanded.put(t.id(), children);
-                          } else {
-                            ExecutionContext taskCtx = rootCtx.child("_expand_" + t.id());
-                            PlannedTask full =
-                                taskExpander.expand(t, skeleton, effectiveReq, taskCtx);
-                            expanded.put(t.id(), List.of(full));
+    long expansionDeadlineNanos = System.nanoTime() + java.time.Duration.ofMinutes(20).toNanos();
+    for (List<PlannedTask> wave : expansionWaves(tasksToExpand)) {
+      Plan waveContext = expansionContext(skeleton, expanded);
+      List<java.util.concurrent.CompletableFuture<Void>> futures = new ArrayList<>();
+      log.info(
+          "V2 run={} expansion wave tasks={} establishedPrerequisites={}",
+          runId,
+          wave.stream().map(PlannedTask::id).toList(),
+          expanded.keySet());
+      for (PlannedTask t : wave) {
+        futures.add(
+            java.util.concurrent.CompletableFuture.runAsync(
+                () ->
+                    com.navneet.executespec.router.RunModelOverrides.runWith(
+                        routeContext,
+                        () -> {
+                          try {
+                            if (enableEpicRecursion && t.taskType() == PlannedTask.TaskType.EPIC) {
+                              List<PlannedTask> children =
+                                  expandEpic(runId, t, waveContext, effectiveReq, rootCtx);
+                              expanded.put(t.id(), children);
+                            } else {
+                              ExecutionContext taskCtx = rootCtx.child("_expand_" + t.id());
+                              PlannedTask full =
+                                  taskExpander.expand(t, waveContext, effectiveReq, taskCtx);
+                              expanded.put(t.id(), List.of(full));
+                            }
+                          } catch (Exception ex) {
+                            recordExpansionFailure(runId, t, ex, expanded, expansionFailures);
                           }
-                        } catch (Exception ex) {
-                          // RR-449 — catch only recoverable Exceptions; a fatal Error (OOM,
-                          // linkage,
-                          // thread-death) now propagates to the future instead of being concealed
-                          // as
-                          // a low-quality fallback plan. A cancellation (cancel(true) sets the
-                          // thread's interrupt flag) is likewise not a planning failure: fail the
-                          // future rather than masking it as a fallback task.
-                          if (Thread.currentThread().isInterrupted()
-                              || ex instanceof InterruptedException) {
-                            Thread.currentThread().interrupt();
-                            throw new java.util.concurrent.CompletionException(ex);
-                          }
-                          log.warn(
-                              "V2 run={} task expansion failed for {}: {}",
-                              runId,
-                              t.id(),
-                              ex.getMessage());
-                          expansionFailures.put(t.id(), ex);
-                          // Fall back to a LEAF carrying just the title-derived
-                          // description so the pipeline can still progress.
-                          expanded.put(
-                              t.id(),
-                              List.of(
-                                  PlannedTask.builder()
-                                      .id(t.id())
-                                      .title(t.title())
-                                      .description(
-                                          "Implement: "
-                                              + t.title()
-                                              + " (expansion failed; worker will figure it out)")
-                                      .complexity(t.complexity())
-                                      .touchesFiles(t.touchesFiles())
-                                      .dependsOn(t.dependsOn())
-                                      .hardConstraints(List.of())
-                                      .meetsRequirements(List.of())
-                                      .taskType(PlannedTask.TaskType.LEAF)
-                                      .build()));
-                        }
-                      }),
-              // RR-442 — the level-1 expansion pool, deliberately NOT the orchestration pool this
-              // thread is running on. The blocking allOf(...).get(20 min) below would otherwise be
-              // waiting for children that cannot be scheduled once enough concurrent LARGE runs
-              // occupy every orchestration worker.
-              pool.expansionExecutor()));
-    }
-    try {
-      java.util.concurrent.CompletableFuture.allOf(
-              futures.toArray(new java.util.concurrent.CompletableFuture[0]))
-          .get(20, java.util.concurrent.TimeUnit.MINUTES);
-    } catch (Exception expandWaitEx) {
-      // RR-1175 — cancel every still-running sibling so the expansion pool is not left holding
-      // zombie provider work that keeps spending + mutating shared state after we synthesize a
-      // fallback. cancel(true) interrupts the worker thread; the lambda's RR-449
-      // InterruptedException
-      // branch then fails that future cleanly instead of writing a late fallback task.
-      for (var f : futures) f.cancel(true);
-      if (expandWaitEx instanceof InterruptedException) Thread.currentThread().interrupt();
-      throw new IllegalStateException(
-          "LARGE expansion phase exceeded 20-minute timeout: " + expandWaitEx.getMessage(),
-          expandWaitEx);
+                        }),
+                // RR-442 — the level-1 expansion pool, deliberately NOT the orchestration pool this
+                // thread is running on. The blocking allOf(...).get below would otherwise wait for
+                // children that cannot be scheduled once enough LARGE runs occupy every
+                // orchestration worker.
+                pool.expansionExecutor()));
+      }
+      try {
+        long remainingNanos = expansionDeadlineNanos - System.nanoTime();
+        if (remainingNanos <= 0) throw new java.util.concurrent.TimeoutException();
+        java.util.concurrent.CompletableFuture.allOf(
+                futures.toArray(new java.util.concurrent.CompletableFuture[0]))
+            .get(remainingNanos, java.util.concurrent.TimeUnit.NANOSECONDS);
+      } catch (Exception expandWaitEx) {
+        // RR-1175 — cancel every still-running sibling so the expansion pool is not left holding
+        // zombie provider work that keeps spending after the overall expansion deadline.
+        for (var f : futures) f.cancel(true);
+        if (expandWaitEx instanceof InterruptedException) Thread.currentThread().interrupt();
+        throw new IllegalStateException(
+            "LARGE expansion phase exceeded 20-minute timeout: " + expandWaitEx.getMessage(),
+            expandWaitEx);
+      }
     }
 
     // Stitch expanded bodies back onto the plan in original order. EPIC
@@ -490,6 +465,94 @@ class RunPlanningCoordinator {
     }
 
     return patchResult.patchedPlan();
+  }
+
+  /**
+   * Return deterministic topological expansion waves. Unknown dependency IDs do not block a task;
+   * the coherence pass owns dangling-reference reporting. A dependency cycle fails planning before
+   * any cyclic consumer is expanded; executing an order-dependent plan with no valid order would
+   * only spend worker tokens on contradictory state.
+   */
+  static List<List<PlannedTask>> expansionWaves(List<PlannedTask> tasks) {
+    if (tasks == null || tasks.isEmpty()) return List.of();
+    java.util.LinkedHashMap<String, PlannedTask> pending = new java.util.LinkedHashMap<>();
+    for (PlannedTask task : tasks) pending.put(task.id(), task);
+    java.util.Set<String> knownIds = java.util.Set.copyOf(pending.keySet());
+    java.util.Set<String> completed = new java.util.LinkedHashSet<>();
+    List<List<PlannedTask>> waves = new ArrayList<>();
+
+    while (!pending.isEmpty()) {
+      List<PlannedTask> ready =
+          pending.values().stream()
+              .filter(
+                  task ->
+                      task.dependsOn() == null
+                          || task.dependsOn().stream()
+                              .filter(knownIds::contains)
+                              .allMatch(completed::contains))
+              .toList();
+      if (ready.isEmpty()) {
+        throw new IllegalStateException("cyclic task dependencies: " + pending.keySet());
+      }
+      waves.add(ready);
+      for (PlannedTask task : ready) {
+        pending.remove(task.id());
+        completed.add(task.id());
+      }
+    }
+    return List.copyOf(waves);
+  }
+
+  /** Build the next wave's context by replacing completed skeletons with their full expansions. */
+  private static Plan expansionContext(
+      Plan skeleton, java.util.Map<String, List<PlannedTask>> expanded) {
+    List<PlannedTask> contextualTasks = new ArrayList<>();
+    for (PlannedTask task : skeleton.tasks()) {
+      List<PlannedTask> full = expanded.get(task.id());
+      if (full == null || full.isEmpty()) contextualTasks.add(task);
+      else contextualTasks.addAll(full);
+    }
+    return Plan.builder()
+        .planTitle(skeleton.planTitle())
+        .planSummary(skeleton.planSummary())
+        .projectType(skeleton.projectType())
+        .buildCommand(skeleton.buildCommand())
+        .smokeTestStrategy(skeleton.smokeTestStrategy())
+        .runtimeSurface(skeleton.runtimeSurface())
+        .tasks(contextualTasks)
+        .classification(skeleton.classification())
+        .requirements(skeleton.requirements())
+        .build();
+  }
+
+  private static void recordExpansionFailure(
+      String runId,
+      PlannedTask task,
+      Exception failure,
+      java.util.concurrent.ConcurrentMap<String, List<PlannedTask>> expanded,
+      java.util.concurrent.ConcurrentMap<String, Throwable> expansionFailures) {
+    // RR-449 — fatal errors propagate naturally. Cancellation is not a low-quality fallback plan.
+    if (Thread.currentThread().isInterrupted() || failure instanceof InterruptedException) {
+      Thread.currentThread().interrupt();
+      throw new java.util.concurrent.CompletionException(failure);
+    }
+    log.warn("V2 run={} task expansion failed for {}: {}", runId, task.id(), failure.getMessage());
+    expansionFailures.put(task.id(), failure);
+    expanded.put(
+        task.id(),
+        List.of(
+            PlannedTask.builder()
+                .id(task.id())
+                .title(task.title())
+                .description(
+                    "Implement: " + task.title() + " (expansion failed; worker will figure it out)")
+                .complexity(task.complexity())
+                .touchesFiles(task.touchesFiles())
+                .dependsOn(task.dependsOn())
+                .hardConstraints(List.of())
+                .meetsRequirements(List.of())
+                .taskType(PlannedTask.TaskType.LEAF)
+                .build()));
   }
 
   /**

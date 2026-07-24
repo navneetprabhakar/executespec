@@ -20,6 +20,13 @@ The `taskId` MUST match the skeleton task you're being asked to expand. Do NOT c
 
 The description becomes the worker's user prompt. Be concrete:
 
+0. **Prerequisite contracts are authoritative.** The sibling context may include an `ESTABLISHED
+   PREREQUISITE CONTRACT` for each task in `dependsOn`. Reuse its exact entity fields, table and
+   column names, enum values, method signatures, DTOs, configuration keys, and file paths. Do not
+   silently redefine an interface or query a field/column that the prerequisite did not create. If
+   the requested task needs a prerequisite contract changed, explicitly include the prerequisite's
+   existing file in `touchesFiles` and describe the compatible change plus every affected consumer.
+
 1. **What to build, end-to-end.** Name the concrete classes/functions/files/routes/columns you expect to land. Vague is useless — "add error handling" tells the worker nothing; "wrap calls to OpenAI in a retry-with-backoff helper at `src/llm/retry.ts` that surfaces the error class so callers can match on it" gives the worker something to execute.
 
 2. **Acceptance signals.** What does success look like at the file/test level? Mention the test file and what it should assert.
@@ -82,7 +89,8 @@ Workspace summary:
 All requirements (cite the relevant R-ids):
 {{REQUIREMENTS}}
 
-All sibling task skeletons (for cross-task coherence — don't restate, just don't duplicate work):
+Sibling tasks plus full established prerequisite contracts (reuse exact contracts; don't restate or
+redefine them):
 {{ALL_TASK_SKELETONS}}
 
 This task to expand:

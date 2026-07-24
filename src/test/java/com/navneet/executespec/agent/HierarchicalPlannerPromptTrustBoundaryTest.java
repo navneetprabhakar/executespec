@@ -33,6 +33,50 @@ class HierarchicalPlannerPromptTrustBoundaryTest {
   }
 
   @Test
+  void taskExpansionCarriesTheEstablishedPrerequisiteContract() {
+    PlannedTask prerequisite =
+        PlannedTask.builder()
+            .id("T1")
+            .title("Define persistence contract")
+            .description("Create outbox.leased_at and DeliveryService.dispatch(OutboxRecord).")
+            .complexity(Complexity.MEDIUM)
+            .taskType(TaskType.LEAF)
+            .touchesFiles(List.of("src/DeliveryService.java", "db/V1.sql"))
+            .hardConstraints(List.of("Use leased_at; do not invent leased_until."))
+            .build();
+    PlannedTask consumer =
+        PlannedTask.builder()
+            .id("T2")
+            .title("Implement dispatcher")
+            .complexity(Complexity.HIGH)
+            .taskType(TaskType.LEAF)
+            .dependsOn(List.of("T1"))
+            .build();
+    Plan plan =
+        Plan.builder()
+            .planTitle("Plan")
+            .planSummary("Summary")
+            .projectType("java")
+            .runtimeSurface(RuntimeSurface.HTTP)
+            .classification(Classification.MULTI_TASK)
+            .requirements(
+                List.of(
+                    new RequirementSpec(
+                        "R1", "Dispatch safely", RequirementSpec.RequirementKind.FUNCTIONAL)))
+            .tasks(List.of(prerequisite, consumer))
+            .build();
+
+    String message =
+        TaskExpanderAgent.buildExpansionEvidence(plan, consumer, plannerRequest("workspace"));
+
+    assertThat(message)
+        .contains("ESTABLISHED PREREQUISITE CONTRACT")
+        .contains("outbox.leased_at")
+        .contains("DeliveryService.dispatch(OutboxRecord)")
+        .contains("Use leased_at; do not invent leased_until.");
+  }
+
+  @Test
   void coherencePassFramesWorkspaceAndAssembledPlanAsUntrustedEvidence() {
     PlannedTask task = task(INJECTION);
     String message =
