@@ -195,6 +195,28 @@ class PromptConformanceTest {
   }
 
   @Test
+  void planningPromptsPreserveTrustInputAndMigrationSemantics() throws IOException {
+    String plannerSecurity = prompt("prompts/fragments/security-rules-planner.md");
+    String expander = prompt("prompts/task-expander.md");
+    String coherence = prompt("prompts/coherence-planner.md");
+
+    assertThat(plannerSecurity)
+        .contains("Never translate it into a raw caller-selected identity header")
+        .contains("zero/negative reservation")
+        .contains("must run the migration mechanism");
+    assertThat(expander)
+        .contains("never invent a raw")
+        .contains("caller-selected identity header/query/body field")
+        .contains("zero/negative adversarial tests")
+        .contains("migration runner rather than ORM");
+    assertThat(coherence)
+        .contains("weakens an authenticated")
+        .contains("principal into a caller-selected identity")
+        .contains("zero/negative business quantities")
+        .contains("instead of exercising the migration runner");
+  }
+
+  @Test
   void patchPromptNamesRunTestsGate() throws IOException {
     String patch = prompt("prompts/patch-agent.md");
 
