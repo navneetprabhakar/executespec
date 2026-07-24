@@ -1130,6 +1130,18 @@ instead of passing that value as an unstructured note through the compatibility 
 only for configured total-spend ceilings. The Steps tab must not label cumulative usage as each
 later task's cost/token consumption.
 
+A second Java/webhook plan generated after dependency-contract propagation still contradicted itself
+before approval: migrations omitted signing-secret columns consumed by auth/tests, production API-key
+lookup used SHA-256 while a later fixture specified BCrypt, production HMAC used lowercase hex while
+a later concurrency test specified Base64, and lifecycle tests required a status absent from the
+schema/enum. The coherence pass previously saw only the first 240 description characters and was
+explicitly told not to repair description conflicts. Full/skeleton planning and expansion now put
+exact producer/consumer contracts in `hardConstraints`; coherence receives bounded high-signal
+contract excerpts from the full descriptions and appends canonical overriding constraints to every
+affected task. Model/tool/JSON/no-applicable-patch protocol failures now fail hierarchical planning
+closed rather than silently returning the unpatched plan. Spending worker turns on a known-
+incoherent approved plan is a process failure.
+
 Post-review continuation now opens only for completed, measured red review evidence. A reviewer
 exception/timeout remains `REVIEWER_FAILED` and cannot trigger provider spend, because a stronger
 coding model cannot repair unavailable verification. When measured review or final-validation

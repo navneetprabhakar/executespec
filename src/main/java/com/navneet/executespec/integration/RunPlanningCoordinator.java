@@ -417,12 +417,15 @@ class RunPlanningCoordinator {
     CoherencePlannerAgent.PatchResult patchResult;
     try {
       patchResult = coherencePlanner.patchIfNeeded(assembled, effectiveReq, coherenceCtx);
+      if (!patchResult.validated()) {
+        throw new IllegalStateException(patchResult.validationFailure());
+      }
     } catch (Exception coherenceEx) {
-      log.warn(
-          "V2 run={} coherence pass failed (non-fatal — using unpatched plan): {}",
+      log.error(
+          "V2 run={} coherence pass failed — refusing to execute an unvalidated hierarchical plan",
           runId,
-          coherenceEx.getMessage());
-      patchResult = new CoherencePlannerAgent.PatchResult(assembled, 0, List.of());
+          coherenceEx);
+      throw new IllegalStateException("hierarchical plan coherence validation failed", coherenceEx);
     }
     RunCostTracker.Snapshot afterCoherence = costTracker.snapshot(runId);
     long cohIn = Math.max(0, afterCoherence.inputTokens() - beforeCoherence.inputTokens());

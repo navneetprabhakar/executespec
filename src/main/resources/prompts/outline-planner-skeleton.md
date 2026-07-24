@@ -74,10 +74,15 @@ For LARGE and LEGACY specs, use the supplied MAX_TASKS hint as the hard ceiling
    that no single worker owns completely.
 
    Preserve cross-feature journeys on shared UI/state/storage surfaces. A later empty/loading/error
-   state must keep required primary actions reachable (including creating the first item without
-   seeding demo data), and a persistence task must validate the complete restored invariant rather
+   state must keep required primary actions reachable (including creating the first item without seeding demo data),
+   and a persistence task must validate the complete restored invariant rather
    than accepting a partial shape. Put the interaction and its clean-state end-to-end test in one
    skeleton; DOM order alone is not proof of responsive CSS, focus, or contrast.
+
+   Treat `hardConstraints` as the cross-task contract registry. Record exact shared schema fields,
+   enum/status values, identifier types, wire encodings, auth/tenant source, endpoint/header names,
+   and interface methods on every producer/consumer skeleton so expansion cannot invent a second
+   version of the same contract.
 
 3. **Tests travel with production code.** Every production-code skeleton must include its focused
    conventional test file(s) in `touchesFiles`; the expander will make those tests part of the same

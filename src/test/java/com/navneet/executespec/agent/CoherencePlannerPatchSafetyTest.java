@@ -87,4 +87,35 @@ class CoherencePlannerPatchSafetyTest {
     assertThat(result.patchesApplied()).isZero();
     assertThat(result.patchedPlan().tasks().get(0).touchesFiles()).containsExactly("old/A.java");
   }
+
+  @Test
+  void contractEvidencePrioritizesLateWireFormatContradictions() {
+    String description =
+        java.util.stream.IntStream.range(0, 80)
+                .mapToObj(i -> "Tenant request setup detail " + i + " with repository fixture")
+                .collect(java.util.stream.Collectors.joining("\n"))
+            + "\nHMAC signature helper returns Base64 encoded bytes"
+            + "\nAPI key fixture uses BCrypt hashing";
+
+    assertThat(CoherencePlannerAgent.extractContractEvidence(description))
+        .contains("HMAC signature helper returns Base64 encoded bytes")
+        .contains("API key fixture uses BCrypt hashing");
+  }
+
+  @Test
+  void malformedOrInapplicablePatchOutputIsNotValidated() {
+    Plan plan = planWith("src/A.java");
+
+    CoherencePlannerAgent.PatchResult malformed = apply(plan, "not-json");
+    CoherencePlannerAgent.PatchResult inapplicable =
+        apply(
+            plan,
+            "{\"patches\":[{\"kind\":\"MOVE_FILE_TO_REPO_SUBDIR\",\"taskId\":\"T1\","
+                + "\"from\":\"missing.java\",\"to\":\"src/B.java\",\"reason\":\"fix\"}]}");
+
+    assertThat(malformed.validated()).isFalse();
+    assertThat(malformed.validationFailure()).contains("invalid JSON");
+    assertThat(inapplicable.validated()).isFalse();
+    assertThat(inapplicable.validationFailure()).contains("no applicable patches");
+  }
 }

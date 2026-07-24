@@ -53,13 +53,79 @@ public class CoherencePlannerAgent {
 
   private static final String PROMPT_PATH = "prompts/coherence-planner.md";
   private static final int COHERENCE_MAX_TOKENS = 1_500;
+  private static final int DESCRIPTION_SUMMARY_CHARS = 320;
+  private static final int CONTRACT_EVIDENCE_CHARS = 3_000;
+  private static final List<String> HIGH_SIGNAL_CONTRACT_MARKERS =
+      List.of(
+          "base64",
+          "bcrypt",
+          "column",
+          "dead_letter",
+          "enum",
+          "header format",
+          "hex",
+          "hmac",
+          "sha-256",
+          "signature",
+          "status",
+          "table");
+  private static final List<String> CONTRACT_MARKERS =
+      List.of(
+          "api key",
+          "authentication",
+          "base64",
+          "bcrypt",
+          "column",
+          "config",
+          "constraint",
+          "contract",
+          "dead letter",
+          "dead_letter",
+          "dto",
+          "encoding",
+          "endpoint",
+          "entity",
+          "enum",
+          "field",
+          "format",
+          "hash",
+          "header",
+          "hex",
+          "hmac",
+          "idempot",
+          "identifier",
+          "interface",
+          "method",
+          "outbox",
+          "property",
+          "repository",
+          "request",
+          "response",
+          "replay",
+          "schema",
+          "secret",
+          "sha-256",
+          "status",
+          "table",
+          "tenant",
+          "timestamp",
+          "uuid");
 
-  public record PatchResult(Plan patchedPlan, int patchesApplied, List<String> patchSummaries) {}
+  public record PatchResult(
+      Plan patchedPlan,
+      int patchesApplied,
+      List<String> patchSummaries,
+      boolean validated,
+      String validationFailure) {
+    public PatchResult(Plan patchedPlan, int patchesApplied, List<String> patchSummaries) {
+      this(patchedPlan, patchesApplied, patchSummaries, true, null);
+    }
+  }
 
   /**
    * Run the coherence pass over an assembled plan. Returns a possibly-patched plan along with
-   * summary strings for each applied patch. On LLM failure the input plan is returned unchanged
-   * with {@code patchesApplied=0}.
+   * summary strings for each applied patch. Protocol/model failures return {@code validated=false};
+   * hierarchical planning must fail closed rather than execute an unvalidated assembled plan.
    */
   public PatchResult patchIfNeeded(Plan plan, PlannerRequest req, ExecutionContext context) {
     if (plan == null || plan.tasks() == null || plan.tasks().isEmpty()) {
@@ -78,7 +144,7 @@ public class CoherencePlannerAgent {
     } catch (Exception promptEx) {
       log.warn(
           "CoherencePlanner prompt assembly failed — skipping pass: {}", promptEx.getMessage());
-      return new PatchResult(plan, 0, List.of());
+      return failed(plan, "prompt assembly failed");
     }
 
     List<Message> messages =
@@ -92,7 +158,7 @@ public class CoherencePlannerAgent {
       resolved = modelResolver.resolve("CoherencePlannerAgent", provider, AgentTier.LIGHTWEIGHT);
     } catch (Exception e) {
       log.warn("CoherencePlanner model resolve failed — skipping pass: {}", e.getMessage());
-      return new PatchResult(plan, 0, List.of());
+      return failed(plan, "model resolution failed");
     }
 
     log.info(
@@ -119,7 +185,7 @@ public class CoherencePlannerAgent {
                   .build());
     } catch (Exception e) {
       log.warn("CoherencePlanner LLM call failed — using unpatched plan: {}", e.getMessage());
-      return new PatchResult(plan, 0, List.of());
+      return failed(plan, "LLM call failed");
     }
 
     AssistantMessage.ToolCall patchCall = null;
@@ -136,7 +202,7 @@ public class CoherencePlannerAgent {
     }
     if (patchCall == null) {
       log.warn("CoherencePlanner did not call patchPlan — using unpatched plan");
-      return new PatchResult(plan, 0, List.of());
+      return failed(plan, "patchPlan tool was not called");
     }
 
     return applyPatches(plan, patchCall.arguments());
@@ -148,10 +214,13 @@ public class CoherencePlannerAgent {
       root = objectMapper.readTree(argsJson);
     } catch (Exception e) {
       log.warn("patchPlan args are not valid JSON — using unpatched plan: {}", e.getMessage());
-      return new PatchResult(plan, 0, List.of());
+      return failed(plan, "patchPlan arguments were invalid JSON");
     }
     JsonNode patches = root.path("patches");
-    if (!patches.isArray() || patches.size() == 0) {
+    if (!patches.isArray()) {
+      return failed(plan, "patchPlan omitted the patches array");
+    }
+    if (patches.size() == 0) {
       log.info("CoherencePlanner: 0 patches needed — plan is clean");
       return new PatchResult(plan, 0, List.of());
     }
@@ -269,8 +338,8 @@ public class CoherencePlannerAgent {
     }
 
     if (applied == 0) {
-      log.info("CoherencePlanner: 0 patches applied (LLM emitted patches but none were valid)");
-      return new PatchResult(plan, 0, List.of());
+      log.warn("CoherencePlanner: emitted patches but none were valid — validation failed");
+      return failed(plan, "patchPlan emitted no applicable patches");
     }
 
     List<PlannedTask> patchedTasks = new ArrayList<>(byId.size());
@@ -292,6 +361,10 @@ public class CoherencePlannerAgent {
 
     log.info("CoherencePlanner applied {} patches", applied);
     return new PatchResult(patchedPlan, applied, summaries);
+  }
+
+  private static PatchResult failed(Plan plan, String reason) {
+    return new PatchResult(plan, 0, List.of(), false, reason);
   }
 
   private ToolCallback buildPatchPlanCallback() {
@@ -385,7 +458,13 @@ public class CoherencePlannerAgent {
           .append(t.title())
           .append("\n");
       if (t.description() != null && !t.description().isBlank()) {
-        sb.append("  description: ").append(truncate(t.description(), 240)).append("\n");
+        sb.append("  descriptionSummary: ")
+            .append(truncate(t.description(), DESCRIPTION_SUMMARY_CHARS))
+            .append("\n");
+        String contractEvidence = extractContractEvidence(t.description());
+        if (!contractEvidence.isBlank()) {
+          sb.append("  contractEvidence: ").append(contractEvidence).append("\n");
+        }
       }
       if (t.dependsOn() != null && !t.dependsOn().isEmpty()) {
         sb.append("  dependsOn: ").append(String.join(", ", t.dependsOn())).append("\n");
@@ -405,6 +484,32 @@ public class CoherencePlannerAgent {
       }
     }
     return sb.toString();
+  }
+
+  static String extractContractEvidence(String description) {
+    if (description == null || description.isBlank()) return "";
+    List<String> lines =
+        description.lines().map(String::trim).filter(line -> !line.isBlank()).toList();
+    java.util.LinkedHashSet<String> selected = new java.util.LinkedHashSet<>();
+    selectContractLines(lines, HIGH_SIGNAL_CONTRACT_MARKERS, selected);
+    selectContractLines(lines, CONTRACT_MARKERS, selected);
+    StringBuilder evidence = new StringBuilder();
+    for (String line : selected) {
+      if (evidence.length() > 0) evidence.append(" | ");
+      int remaining = CONTRACT_EVIDENCE_CHARS - evidence.length();
+      if (remaining <= 0) break;
+      evidence.append(truncate(line, remaining));
+      if (evidence.length() >= CONTRACT_EVIDENCE_CHARS) break;
+    }
+    return evidence.toString();
+  }
+
+  private static void selectContractLines(
+      List<String> lines, List<String> markers, java.util.Set<String> selected) {
+    for (String line : lines) {
+      String normalized = line.toLowerCase(Locale.ROOT);
+      if (markers.stream().anyMatch(normalized::contains)) selected.add(line);
+    }
   }
 
   static String buildCoherenceEvidence(Plan plan, PlannerRequest req) {

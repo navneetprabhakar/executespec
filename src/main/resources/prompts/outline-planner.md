@@ -110,6 +110,11 @@ internal wiring belongs inside the task that owns the requested behavior.
    test across the interaction; DOM structure alone does not prove responsive CSS, focus, or
    contrast.
 
+   Use `hardConstraints` as a cross-task contract registry. For every producer/consumer boundary,
+   repeat the exact schema/entity/DTO fields, enum/status values, identifier types, auth/tenant
+   source, signature/hash encoding, endpoint/header names, interface methods, and configuration
+   keys on all affected tasks. A dependency edge without an agreed exact contract is incomplete.
+
 10. **Honor the LANGUAGE PARITY block (when present).** If the workspace summary contains a "LANGUAGE PARITY (do not violate)" section, every task description and every entry in `touchesFiles` MUST use the conventions of the repo's detected language — even when the user's spec uses different conventions. Concretely:
     - User spec says `scan.service.ts`, repo is Python → write `scan_service.py` in the description, `repos/<name>/scan_service.py` in `touchesFiles`.
     - User spec says `os.getenv("X")`, repo is TypeScript → translate to `process.env.X` in the description.
