@@ -317,7 +317,7 @@ public class RunOrchestrator implements RunControlPort {
   private final ConcurrentMap<String, Future<?>> activeRuns = new ConcurrentHashMap<>();
 
   /** Stable process label used by the database-backed execution lease. */
-  private static final String EXECUTION_INSTANCE_ID = executionInstanceId();
+  private static final String EXECUTION_INSTANCE_ID = ExecutionHostIdentity.current();
 
   @Value("${execution.continuation.post-review.enabled:true}")
   private boolean postReviewContinuationEnabled = true;
@@ -366,15 +366,6 @@ public class RunOrchestrator implements RunControlPort {
           }
           runRepo.refreshExecutionHeartbeat(runId, EXECUTION_INSTANCE_ID, heartbeat);
         });
-  }
-
-  private static String executionInstanceId() {
-    String host = System.getenv("HOSTNAME");
-    if (host == null || host.isBlank()) {
-      host = java.lang.management.ManagementFactory.getRuntimeMXBean().getName();
-    }
-    host = host == null || host.isBlank() ? "unknown" : host.trim();
-    return host.length() <= 128 ? host : host.substring(0, 128);
   }
 
   /**

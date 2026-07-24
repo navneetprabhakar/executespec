@@ -574,8 +574,7 @@ class SequentialExecutorSoftCompletionTest {
 
     try {
       org.junit.jupiter.api.Assertions.assertThrows(
-          CancellationException.class,
-          () -> newExecutor().execute(req(singleTaskPlan(), false)));
+          CancellationException.class, () -> newExecutor().execute(req(singleTaskPlan(), false)));
     } finally {
       // JUnit reuses its worker thread; do not leak the deliberately asserted interrupt.
       Thread.interrupted();

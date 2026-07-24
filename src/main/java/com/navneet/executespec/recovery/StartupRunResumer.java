@@ -94,9 +94,9 @@ public class StartupRunResumer {
 
   /**
    * Retry candidates that were legitimately unclaimable during the boot scan because the dead
-   * predecessor's last heartbeat or task update had not yet crossed the two-minute stale fence.
-   * The database compare-and-set in {@code resumeAfterCrash} remains the takeover authority; this
-   * sweep only makes a prior NOT_APPLICABLE decision non-permanent.
+   * predecessor's last heartbeat or task update had not yet crossed the two-minute stale fence. The
+   * database compare-and-set in {@code resumeAfterCrash} remains the takeover authority; this sweep
+   * only makes a prior NOT_APPLICABLE decision non-permanent.
    */
   @Scheduled(
       fixedDelayString = "${execution.recovery.scan-interval-ms:60000}",
