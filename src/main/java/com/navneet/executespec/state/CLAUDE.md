@@ -9,6 +9,10 @@ Persistence layer for pipeline runs, tasks, and all mutable state.
 - Startup crash recovery considers a run stale from its durable `execution_heartbeat` (refreshed
   every 30 seconds), not merely its original start time; `started_at` is the legacy fallback. This
   keeps legitimate >6h runs eligible for the existing run/task CAS and GCS checkpoint recovery.
+- `StartupRunResumer` runs both at application readiness and on a configurable 60-second sweep.
+  A boot-time `NOT_APPLICABLE` caused by the dead predecessor's still-fresh run/task heartbeat is
+  deferred and retried after the existing two-minute CAS stale fence; it is no longer a permanent
+  stuck-`WORKING` outcome. An in-process guard prevents overlapping scans.
 - Cross-host crash recovery now fails closed unless `durability.workspace.shared-persistent=true`.
   Same-host process restart remains eligible. The asynchronous GCS task archive is not treated as
   an acknowledged task frontier: it can lag a terminal task-row commit, so using it blindly could

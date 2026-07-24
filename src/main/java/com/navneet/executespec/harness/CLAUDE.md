@@ -183,6 +183,11 @@ Fail-closed / evidence-honest corrections; no migration.
   admission path; the orphaned `worker.cross-provider-fallback.enabled` flag (V220) is now unread.
 - **RR-271** — a cancelled run summarises as `ABORTED` (never `ALL_SUCCESS`), appends `SKIPPED`
   outcomes for the un-run tasks, and preserves the thread interrupt.
+- **2026-07-23 deploy-interruption correction** — `WorkerResult.ERROR` is never eligible for the
+  write-based soft-completion path while the executor thread is interrupted.
+  `WorkerInterruptionPolicy` throws a cancellation signal before any terminal task write, and
+  `RunOrchestrator` preserves the durable lifecycle row instead of overwriting cancellation or a
+  crash-recoverable `WORKING` checkpoint.
 - **RR-650** — `VendoredPathGuard.ScrubResult` gained `committed`; a failed scrub commit (removals
   staged only) is surfaced instead of reported as a durable success.
 - **RR-685** — `GateStore.openPlanGate` distinguishes a genuine duplicate-key race

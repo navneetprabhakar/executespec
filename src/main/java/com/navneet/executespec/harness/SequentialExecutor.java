@@ -79,7 +79,6 @@ import lombok.extern.slf4j.Slf4j;
  * </ol>
  *
  * <p>Phase 5 baseline scope:
- *
  * <ul>
  *   <li>Rule-based failure handling (retry once, then warn). A future TaskSupervisorV2 can add
  *       LLM-tier triage (CASCADING / FIXABLE / STRUCTURAL) for smarter decisions.
@@ -2064,6 +2063,7 @@ to boot — skip it for those.""";
         primary.toolCallsDispatched(),
         countFileWrites(primary.toolCallLog()));
 
+    WorkerInterruptionPolicy.throwIfInterruptedError(primary, task.id());
     // Worker didn't reach COMPLETED. Check whether it still wrote files — if so
     // the task produced real output and shouldn't be marked FAILED outright.
     // Common case: Gemini hits its iteration cap on HIGH tasks but has already

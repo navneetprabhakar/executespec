@@ -1971,6 +1971,7 @@ public class RunOrchestrator implements RunControlPort {
                         contextComposer.buildMultiRepoSummary(projectId, selectedRepoIds))
                     .build());
       } catch (Exception e) {
+        if (Thread.currentThread().isInterrupted()) return;
         log.error("RunOrchestrator run={} executor failed", runId, e);
         terminate(runId, "FAILED", INTERNAL_ERROR_REASON, startedAt);
         return;

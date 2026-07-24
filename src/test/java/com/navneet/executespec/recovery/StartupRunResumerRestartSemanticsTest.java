@@ -174,4 +174,32 @@ class StartupRunResumerRestartSemanticsTest {
     verify(runRepo, never()).save(any(PipelineRun.class));
     assertThat(run.getStatus()).isEqualTo("WORKING");
   }
+
+  @Test
+  void scheduledSweepRetriesRunDeferredByFreshPredecessorHeartbeat() {
+    PipelineRun run =
+        PipelineRun.builder().runId(RUN_ID).status("WORKING").harnessVersion("v2").build();
+    PipelineRunRepository runRepo = mock(PipelineRunRepository.class);
+    AgentTaskRepository taskRepo = mock(AgentTaskRepository.class);
+    SseBroadcaster broadcaster = mock(SseBroadcaster.class);
+    @SuppressWarnings("unchecked")
+    ObjectProvider<RunLifecycleService> lifecycleProvider = mock(ObjectProvider.class);
+    RunLifecycleService lifecycle = mock(RunLifecycleService.class);
+
+    when(runRepo.findByStatusIn(any())).thenReturn(List.of(run));
+    when(lifecycleProvider.getObject()).thenReturn(lifecycle);
+    when(lifecycle.resumeAfterCrash(RUN_ID))
+        .thenReturn(
+            com.navneet.executespec.integration.RunOrchestrator.CrashResumeOutcome.NOT_APPLICABLE,
+            com.navneet.executespec.integration.RunOrchestrator.CrashResumeOutcome.OK);
+
+    StartupRunResumer resumer =
+        new StartupRunResumer(runRepo, taskRepo, broadcaster, lifecycleProvider);
+    resumer.scanAndRecover();
+    resumer.scheduledRecoverySweep();
+
+    verify(lifecycle, org.mockito.Mockito.times(2)).resumeAfterCrash(RUN_ID);
+    verify(runRepo, never()).save(any(PipelineRun.class));
+    assertThat(run.getStatus()).isEqualTo("WORKING");
+  }
 }
