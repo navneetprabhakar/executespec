@@ -27,6 +27,21 @@ public interface PipelineRunRepository
           + " = r.totalOutputTokens + :out WHERE r.runId = :runId")
   void addTokens(@Param("runId") String runId, @Param("inp") int inp, @Param("out") int out);
 
+  /** Raise persisted usage to the canonical attempt-ledger floor without ever shrinking totals. */
+  @Modifying
+  @Transactional
+  @Query(
+      "UPDATE PipelineRun r SET r.totalInputTokens = CASE WHEN COALESCE(r.totalInputTokens, 0) <"
+          + " :inp THEN :inp ELSE r.totalInputTokens END, r.totalOutputTokens = CASE WHEN"
+          + " COALESCE(r.totalOutputTokens, 0) < :out THEN :out ELSE r.totalOutputTokens END,"
+          + " r.actualCostUsd = CASE WHEN r.actualCostUsd IS NULL OR r.actualCostUsd < :cost THEN"
+          + " :cost ELSE r.actualCostUsd END WHERE r.runId = :runId")
+  void raiseUsageTotalsToAtLeast(
+      @Param("runId") String runId,
+      @Param("inp") int inputTokens,
+      @Param("out") int outputTokens,
+      @Param("cost") double knownCostUsd);
+
   /**
    * Atomic status update that only touches status + currentGate — avoids overwriting concurrent
    * field changes.

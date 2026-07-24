@@ -3040,6 +3040,10 @@ public class RunOrchestrator implements RunControlPort {
   public void terminate(
       String runId, String finalStatus, String statusReason, String note, Instant startedAt) {
     RunCostTracker.Snapshot cost = costTracker.finalizeRun(runId);
+    // A phase interrupted before its normal attribution boundary still has immutable physical
+    // attempt rows. Reconcile those facts before publishing terminal totals; the operation only
+    // raises persisted usage and is safe on ordinary uninterrupted runs too.
+    tokenAttributor.reconcileRunTotalsFromLedger(runId);
     String[] persistedStatus = {finalStatus};
     String[] persistedReason = {statusReason};
     // v2.5.8 — provider attribution log: makes it easy to grep logs and confirm
@@ -3088,10 +3092,11 @@ public class RunOrchestrator implements RunControlPort {
               if (terminalClaim == 0) {
                 return;
               }
-              // Only overwrite actualCostUsd with a positive tracker reading; an empty
-              // snapshot (e.g. tracker evicted across a deploy boundary) must not
-              // clobber a previously-persisted cost.
-              if (cost.costUsd() > 0d) {
+              // Keep the larger of the live tracker and the persisted attempt-ledger floor. An
+              // interrupted/recovered tracker may contain only the post-restart tail and must not
+              // shrink physical spend already reconciled above.
+              double persistedCost = r.getActualCostUsd() == null ? 0d : r.getActualCostUsd();
+              if (cost.costUsd() > persistedCost) {
                 r.setActualCostUsd(cost.costUsd());
               } else if (r.getActualCostUsd() == null) {
                 r.setActualCostUsd(0d); // never leave NULL on a terminal run
