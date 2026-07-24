@@ -6,7 +6,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.concurrent.TimeUnit;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -14,6 +13,7 @@ import com.navneet.executespec.programbench.ProgramBenchContainerStore;
 import com.navneet.executespec.sandbox.SandboxExecResult;
 import com.navneet.executespec.sandboxroute.SandboxCommandRoutingService;
 import com.navneet.executespec.smoketest.TestCommandResolver;
+import com.navneet.executespec.testgen.BoundedProcess;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
@@ -356,10 +356,8 @@ public class RunTestsTool implements Tool {
       if (dockerHost != null) env.put("DOCKER_HOST", dockerHost);
       pb.redirectErrorStream(true);
 
-      Process proc = pb.start();
-      boolean finished = proc.waitFor(timeout, TimeUnit.SECONDS);
-      if (!finished) {
-        proc.destroyForcibly();
+      BoundedProcess.Outcome outcome = BoundedProcess.run(pb, Duration.ofSeconds(timeout));
+      if (!outcome.finished()) {
         return ToolResult.err(
             ToolResult.ErrorKind.TIMEOUT,
             framework
@@ -369,8 +367,8 @@ public class RunTestsTool implements Tool {
                 + MAX_TIMEOUT_SEC
                 + ").");
       }
-      String output = new String(proc.getInputStream().readAllBytes());
-      int exit = proc.exitValue();
+      String output = outcome.output();
+      int exit = outcome.exitCode();
       log.info(
           "runTests run={} framework={} ids={} exit={} outBytes={}",
           ctx.runId(),
@@ -387,9 +385,9 @@ public class RunTestsTool implements Tool {
     } catch (IOException ioe) {
       log.warn("runTests IO error: {}", ioe.getMessage());
       return ToolResult.err(ToolResult.ErrorKind.IO_ERROR, ioe.getMessage());
-    } catch (InterruptedException ie) {
-      Thread.currentThread().interrupt();
-      return ToolResult.err(ToolResult.ErrorKind.INTERNAL, "interrupted");
+    } catch (Exception e) {
+      log.warn("runTests process error: {}", e.getMessage());
+      return ToolResult.err(ToolResult.ErrorKind.INTERNAL, e.getMessage());
     }
   }
 

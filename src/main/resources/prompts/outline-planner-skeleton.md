@@ -39,7 +39,7 @@ A single `submitOutline` tool call with this shape:
 
 # Step 1 — enumerate every requirement (MANDATORY)
 
-Same as full-mode planner: read the spec and emit a numbered list of EVERY requirement it imposes as the `requirements` field. One requirement per entry — exactly one sentence. Preserve the user's operative wording losslessly; never weaken "replay returns the original result" to "prevents duplicates", specific response fields to a generic state/stock response, or a public expected-version contract to an internal version column. Keep every coupled clause or split it into multiple requirement entries. Kinds: `FUNCTIONAL` (endpoints, behaviour), `NON_FUNCTIONAL` (auth, perf, reliability), `TEST` (explicit test mandates), `CONSTRAINT` (hard rules — port, library, language).
+Same as full-mode planner: read the spec and emit a numbered list of EVERY requirement it imposes as the `requirements` field. One requirement per entry — exactly one sentence. Preserve the user's operative wording losslessly; never weaken "replay returns the original result" to "prevents duplicates", specific response fields to a generic state/stock response, a public expected-version contract to an internal version column, or forward migrations to `CREATE IF NOT EXISTS`/one baseline DDL file. If migrations are requested, preserve an ordered/versioned upgrade path and verification that a later migration advances an existing schema. Keep every coupled clause or split it into multiple requirement entries. Kinds: `FUNCTIONAL` (endpoints, behaviour), `NON_FUNCTIONAL` (auth, perf, reliability), `TEST` (explicit test mandates), `CONSTRAINT` (hard rules — port, library, language).
 
 IDs are short tags — `R1`, `R2`, `R3`, …
 
@@ -83,6 +83,11 @@ For LARGE and LEGACY specs, use the supplied MAX_TASKS hint as the hard ceiling
 4. **README policy** — same rules as full-mode planner. Empty workspace → final README task. Existing-repo run → only update README if install/run/config/public-API surface changes. Multi-repo project → per-repo README task only when that repo's surface changes.
 
 5. **Multi-repo file paths.** When the workspace summary lists `repos/<name>/` subdirectories, every `touchesFiles` entry MUST live under the matching subdir. The expander enforces this hard.
+
+5a. **No invented deliverables.** Every skeleton must implement at least one specific requirement.
+Do not add OpenAPI export, Swagger UI, authentication, deployment, dashboards, or another common
+stack surface unless the spec requests it. Generic "production-quality" wording does not authorize
+an unrelated standalone task; necessary internal wiring belongs with the requested behavior.
 
 6. **MAX_TASKS hint.** {{MAX_TASKS}} is the cap your classification permits. Don't exceed it. If the spec genuinely needs more, mark coarse-grained items as `EPIC` and let the expander recurse.
 

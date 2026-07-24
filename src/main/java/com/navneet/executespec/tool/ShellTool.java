@@ -3,11 +3,11 @@ package com.navneet.executespec.tool;
 import java.io.IOException;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.TimeUnit;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.navneet.executespec.programbench.ProgramBenchContainerStore;
 import com.navneet.executespec.security.ContextSanitizer;
+import com.navneet.executespec.testgen.BoundedProcess;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
@@ -186,16 +186,14 @@ public class ShellTool implements Tool {
       if (dockerHost != null) env.put("DOCKER_HOST", dockerHost);
       pb.redirectErrorStream(true);
 
-      Process proc = pb.start();
-      boolean finished = proc.waitFor(timeout, TimeUnit.SECONDS);
-      if (!finished) {
-        proc.destroyForcibly();
+      BoundedProcess.Outcome outcome =
+          BoundedProcess.run(pb, java.time.Duration.ofSeconds(timeout));
+      if (!outcome.finished()) {
         return ToolResult.err(
             ToolResult.ErrorKind.TIMEOUT, "command exceeded " + timeout + "s timeout: " + command);
       }
-      String output =
-          contextSanitizer.sanitizeOutput(new String(proc.getInputStream().readAllBytes()));
-      int exit = proc.exitValue();
+      String output = contextSanitizer.sanitizeOutput(outcome.output());
+      int exit = outcome.exitCode();
       // Output budget (#6): large output is persisted to .agent-context/tool-output and the worker
       // gets a preview + a readFile path, so it can see a FULL failure trace instead of a 4 KB
       // fragment (the inline preview alone could not show why a test failed).
@@ -209,9 +207,9 @@ public class ShellTool implements Tool {
     } catch (IOException ioe) {
       log.warn("shell IO error command={}", command, ioe);
       return ToolResult.err(ToolResult.ErrorKind.IO_ERROR, ioe.getMessage());
-    } catch (InterruptedException ie) {
-      Thread.currentThread().interrupt();
-      return ToolResult.err(ToolResult.ErrorKind.INTERNAL, "interrupted");
+    } catch (Exception e) {
+      log.warn("shell process error command={}", command, e);
+      return ToolResult.err(ToolResult.ErrorKind.INTERNAL, e.getMessage());
     }
   }
 }

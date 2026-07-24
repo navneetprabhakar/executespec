@@ -113,6 +113,7 @@ class MultiRepoWorkerPromptTest {
       assertTrue(system.contains("EVERY semantic clause in TASK_REQUIREMENTS"), provider);
       assertTrue(system.contains("cross-operation reuse of"), provider);
       assertTrue(system.contains("shared idempotency keys"), provider);
+      assertTrue(system.contains("one baseline DDL file proves initialization"), provider);
       assertTrue(system.contains("RUNTIME COMPATIBILITY"), provider);
       assertTrue(user.contains("<<<UNTRUSTED_ORIGINAL_SPEC"), provider);
       assertTrue(user.contains("<<<UNTRUSTED_TASK_REQUIREMENTS"), provider);

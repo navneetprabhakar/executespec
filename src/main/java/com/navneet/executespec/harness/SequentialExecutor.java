@@ -228,8 +228,10 @@ also create or extend a test that exercises it before calling completeTask:
   - Derive adversarial tests from EVERY semantic clause in TASK_REQUIREMENTS. A symbol with the
     right name is not proof: exercise the documented/default startup path, cross-operation reuse of
     shared idempotency keys, immutable replay responses after later state changes, version mismatch
-    through the public request boundary, rollback after a mid-transaction failure, and sanitized
-    handling of expected persistence failures whenever those contracts are assigned to this task.
+    through the public request boundary, rollback after a mid-transaction failure, sanitized
+    handling of expected persistence failures, and an ordered/versioned later migration applied to
+    an already-initialized schema whenever those contracts are assigned to this task. `CREATE IF NOT
+    EXISTS` or one baseline DDL file proves initialization, not forward migration.
   - Tests are maintained product artifacts in the conventional test tree; root-level scratch smoke files are forbidden, and one-off reproduction files belong under `/tmp` outside the deliverable.
 Untested code is an INCOMPLETE task. Do not call completeTask on a code change
 with zero tests unless the task is genuinely untestable (pure static asset, a

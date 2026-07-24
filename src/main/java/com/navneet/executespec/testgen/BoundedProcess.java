@@ -88,8 +88,15 @@ public final class BoundedProcess {
   }
 
   private static void destroyTree(Process process) {
-    process.descendants().forEach(ProcessHandle::destroyForcibly);
-    process.destroyForcibly();
+    try {
+      process.descendants().forEach(ProcessHandle::destroyForcibly);
+    } catch (RuntimeException e) {
+      // ProcessHandle.descendants() may be denied by restricted hosts (for example macOS sysctl
+      // sandboxing). The direct child must still be killed so timeout enforcement remains useful.
+      log.debug("[BoundedProcess] Could not enumerate child process tree: {}", e.getMessage());
+    } finally {
+      process.destroyForcibly();
+    }
   }
 
   /**
