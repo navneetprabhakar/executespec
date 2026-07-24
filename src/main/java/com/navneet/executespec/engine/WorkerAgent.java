@@ -1302,9 +1302,15 @@ public class WorkerAgent {
           mutationChurn.recordMutation(mutationTarget(tc.name(), tc.arguments()));
         }
         // RR-259 — a progress-class call counts only when it succeeded.
+        // A build tool reports a transport-success Ok envelope even when the child exits non-zero.
+        // Treating that as progress lets a reviewer reset the watchdog forever by repeating the
+        // same red build. Only an exit-zero build is progress; writes/moves/deletes keep their
+        // normal successful-envelope semantics. Terminal shell progress remains separately scoped
+        // by WorkerToolPolicy.
         if (isProgressTool(tc.name(), terminalTaskMode)
             && isOkEnvelope(envelope)
-            && !isFailureEnvelope(envelope)) {
+            && !isFailureEnvelope(envelope)
+            && (!isBuildTool(tc.name()) || isSuccessfulBuildEnvelope(envelope))) {
           successfulProgressThisIter = true;
         }
         if (terminalVerifierCommand(tc.name(), commandFromArgs(tc.arguments()))

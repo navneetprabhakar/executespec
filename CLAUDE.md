@@ -1142,6 +1142,13 @@ affected task. Model/tool/JSON/no-applicable-patch protocol failures now fail hi
 closed rather than silently returning the unpatched plan. Spending worker turns on a known-
 incoherent approved plan is a process failure.
 
+The Go rate-limiter rerun exposed another token loop: 295 worker/reviewer calls had already submitted
+about 12.65M input tokens, including a general reviewer that reached 38 iterations while repeatedly
+running a red `buildProject`. The build tool returns a transport-level Ok envelope even when the
+child exits non-zero; the worker incorrectly counted that as progress and continually reset the
+stagnation watchdog. Build progress now requires the existing structured exit-zero verdict. This is
+provider-neutral and applies to BUILD, PATCH, and reviewer consumers of the shared worker loop.
+
 Post-review continuation now opens only for completed, measured red review evidence. A reviewer
 exception/timeout remains `REVIEWER_FAILED` and cannot trigger provider spend, because a stronger
 coding model cannot repair unavailable verification. When measured review or final-validation
