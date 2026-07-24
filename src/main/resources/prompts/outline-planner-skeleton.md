@@ -39,7 +39,7 @@ A single `submitOutline` tool call with this shape:
 
 # Step 1 — enumerate every requirement (MANDATORY)
 
-Same as full-mode planner: read the spec and emit a numbered list of EVERY requirement it imposes as the `requirements` field. One requirement per entry — exactly one sentence. Kinds: `FUNCTIONAL` (endpoints, behaviour), `NON_FUNCTIONAL` (auth, perf, reliability), `TEST` (explicit test mandates), `CONSTRAINT` (hard rules — port, library, language).
+Same as full-mode planner: read the spec and emit a numbered list of EVERY requirement it imposes as the `requirements` field. One requirement per entry — exactly one sentence. Preserve the user's operative wording losslessly; never weaken "replay returns the original result" to "prevents duplicates", specific response fields to a generic state/stock response, or a public expected-version contract to an internal version column. Keep every coupled clause or split it into multiple requirement entries. Kinds: `FUNCTIONAL` (endpoints, behaviour), `NON_FUNCTIONAL` (auth, perf, reliability), `TEST` (explicit test mandates), `CONSTRAINT` (hard rules — port, library, language).
 
 IDs are short tags — `R1`, `R2`, `R3`, …
 
@@ -73,7 +73,12 @@ For LARGE and LEGACY specs, use the supplied MAX_TASKS hint as the hard ceiling
    behaviors; do not split their storage, service, API, and adversarial-test clauses into skeletons
    that no single worker owns completely.
 
-3. **Unit tests must be planned.** If the spec adds production code, plan a test task immediately after (same file or sibling test file). If the project genuinely cannot be tested (one-file static page), say so in `planSummary`.
+3. **Tests travel with production code.** Every production-code skeleton must include its focused
+   conventional test file(s) in `touchesFiles`; the expander will make those tests part of the same
+   task. A separate later test task is allowed only for additional cross-cutting integration,
+   concurrency, migration, or end-to-end coverage. It must never be the first/only verification of
+   earlier production code. If the project genuinely cannot be tested (one-file static page), say
+   so in `planSummary`.
 
 4. **README policy** — same rules as full-mode planner. Empty workspace → final README task. Existing-repo run → only update README if install/run/config/public-API surface changes. Multi-repo project → per-repo README task only when that repo's surface changes.
 
@@ -82,6 +87,12 @@ For LARGE and LEGACY specs, use the supplied MAX_TASKS hint as the hard ceiling
 6. **MAX_TASKS hint.** {{MAX_TASKS}} is the cap your classification permits. Don't exceed it. If the spec genuinely needs more, mark coarse-grained items as `EPIC` and let the expander recurse.
 
 7. **Blast radius — for EXISTING-code changes, the task SET must cover all affected sites.** Fires only on existing-repo/multi-repo runs (not greenfield scaffolding). When a requirement modifies behavior that lives in a **shared mechanism** (callers, serialization/storage layers, sibling implementations of one interface, registration/config), your skeleton must include task(s) — and `touchesFiles` — covering EVERY affected site, and mark such cross-cutting items `HIGH` / `EPIC` so the expander fans them out. A skeleton that lists only the obvious entry point under-scopes the change and the worker will ship an incomplete fix. Do NOT invent ripples that aren't there — mirror the repo's actual structure.
+
+8. **Bound task breadth.** Do not use one HIGH skeleton as a bucket for service logic, API routes,
+   error mapping, startup wiring, API-spec generation, and tests. A task normally spans at most two
+   architectural layers plus its focused tests. Split unrelated deliverables at independently
+   verifiable seams so one worker does not carry a single growing conversation across the rest of
+   the application.
 
 # Inputs
 

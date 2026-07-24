@@ -2,6 +2,12 @@
 
 Spec-driven AI coding platform. A customer submits a spec in natural language, the V2 pipeline plans, codes across one or more repos, builds + tests, and opens a pull request with a deterministic verified score. A human approves at the plan gate; everything after is automatic. Backend is a single Spring Boot 3.5 JAR (Java 21) serving the React 18 / Vite 5 frontend out of `static/`. Postgres + Redis are the only required infra; observability and billing are pluggable. The codebase is structured so the same Worker tool surface drives both the build-from-scratch path (`runMode=BUILD`) and the patch-mode path (`runMode=PATCH`) that powers the SWE-bench / ProgramBench adapters and four customer-facing autofix surfaces.
 
+The BUILD planner preserves exact behavioral clauses, keeps focused maintained tests with the
+production task they verify, and bounds task breadth to avoid one runaway worker context. Workers
+reject disposable root-level smoke scripts as test substitutes and stop repeated same-path rewrite
+loops that do not obtain a passing test/build. Downloadable source archives omit interpreter and
+test-runner caches such as `__pycache__`, `.pytest_cache`, and compiled Python bytecode.
+
 ## Versions
 
 | Component         | Version             | Source                                                                 |

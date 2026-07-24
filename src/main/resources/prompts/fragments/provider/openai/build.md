@@ -5,3 +5,5 @@ PROVIDER-SPECIFIC BUILD NOTES (OpenAI / GPT):
 - Prompt caching is silent and automatic for stable prefixes. Do not vary the prefix with timestamps, counters, or meta commentary.
 - Prefer one large editFile with many {oldStr,newStr} pairs over many small editFile calls.
 - completeTask summary should be one concise line.
+- Put verification in the maintained conventional test suite; never create or churn on a
+  root-level scratch smoke file. One-off reproducers belong under `/tmp`.

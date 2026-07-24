@@ -23,7 +23,9 @@ import com.navneet.executespec.observability.Metrics;
 import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
 import com.navneet.executespec.tool.ExecutionContext;
+import com.navneet.executespec.tool.Tool;
 import com.navneet.executespec.tool.ToolRegistry;
+import com.navneet.executespec.tool.ToolResult;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.messages.AssistantMessage;
@@ -60,6 +62,10 @@ class WorkerAgentProgressV2Test {
   }
 
   private WorkerAgent newWorker(List<ChatResponse> seq) {
+    return newWorker(seq, List.of());
+  }
+
+  private WorkerAgent newWorker(List<ChatResponse> seq, List<Tool> tools) {
     LlmRouter router = mock(LlmRouter.class);
     ToolRegistry registry = mock(ToolRegistry.class);
     ContextStore contextStore = mock(ContextStore.class);
@@ -71,6 +77,9 @@ class WorkerAgentProgressV2Test {
     runRow.setHardCapUsd(null);
     lenient().when(runRepo.findById(anyString())).thenReturn(Optional.of(runRow));
     lenient().when(registry.isRemoteRun(any())).thenReturn(false);
+    for (Tool tool : tools) {
+      lenient().when(registry.find(tool.name())).thenReturn(tool);
+    }
     // registry.find(name) → null ⇒ dispatchOne returns an {"ok":false,...} error envelope for
     // every non-completeTask tool call — the deterministic "failing tool" for these tests.
 
@@ -92,6 +101,14 @@ class WorkerAgentProgressV2Test {
         null,
         null,
         null);
+  }
+
+  private static Tool successfulTool(String name, String schema, String content) {
+    Tool tool = mock(Tool.class);
+    lenient().when(tool.name()).thenReturn(name);
+    lenient().when(tool.inputSchema()).thenReturn(schema);
+    lenient().when(tool.execute(any(), any())).thenReturn(ToolResult.ok(content));
+    return tool;
   }
 
   private static WorkerTaskRequest req(boolean progressV2, Integer warnAfter, Integer forceAfter) {
@@ -200,6 +217,30 @@ class WorkerAgentProgressV2Test {
         WorkerResult.Outcome.COMPLETED_BY_STAGNATION,
         r.outcome(),
         "identical failing signature x" + WorkerAgent.PROGRESS_V2_REPEAT_FAILURE_FORCE_AT);
+  }
+
+  @Test
+  void v2_stops_rewriting_the_same_path_without_passing_verification() {
+    Tool write =
+        successfulTool(
+            "writeFile",
+            """
+{"type":"object","required":["path","content"],"properties":{"path":{"type":"string"},"content":{"type":"string"}}}
+""",
+            "wrote file");
+    List<ChatResponse> seq = new ArrayList<>();
+    for (int i = 0; i < 10; i++) {
+      seq.add(
+          responseWithCalls(
+              toolCall(
+                  "writeFile", "{\"path\":\"smoke_test.py\",\"content\":\"attempt " + i + "\"}")));
+    }
+
+    WorkerResult result = newWorker(seq, List.of(write)).run(req(true, null, null));
+
+    assertEquals(WorkerResult.Outcome.ITERATION_LIMIT_EXCEEDED, result.outcome());
+    assertEquals(10, result.iterations());
+    assertThat(result.finalAssistantText()).contains("same-path mutation");
   }
 
   // ---------------------------------------------------------------- static helpers

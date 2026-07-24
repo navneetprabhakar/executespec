@@ -51,6 +51,8 @@ LOCAL-hands runs are excluded from GCS workspace upload queries and the event li
 - `WorkspaceExportService.java` — ZIP/repo handoff now applies `ArtifactPublicationGuard` to every
   included file and to restored GCS ZIP members before returning bytes. Secret-like content blocks
   the export; symlinks are omitted so an archive cannot follow a link outside the run workspace.
+  Runtime/test caches (`__pycache__`, `.pytest_cache`, `.mypy_cache`, `.ruff_cache`, `.tox`,
+  `*.pyc`, `*.pyo`) are excluded from both workspace and repo ZIPs, including nested paths.
 - `WorkspaceArchiveJob.java` — Hourly archive + local cleanup. RR-163: `requireRemoteArchive`
   proves a nonblank object key AND a live `GcsWorkspaceStore.exists` hit before any local deletion,
   so a skipped upload (`uploadZip` returns `null` when the Storage client was disabled at startup)

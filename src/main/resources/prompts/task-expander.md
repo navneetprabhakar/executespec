@@ -24,6 +24,11 @@ The description becomes the worker's user prompt. Be concrete:
 
 2. **Acceptance signals.** What does success look like at the file/test level? Mention the test file and what it should assert.
 
+   Production code and its focused maintained tests belong in this SAME task. Put conventional
+   test paths in `touchesFiles`; do not defer the first verification to a sibling "tests later"
+   task and do not create disposable root-level smoke scripts. A sibling test task may add only
+   extra cross-cutting integration/concurrency/end-to-end coverage.
+
    Preserve every semantic clause of each cited requirement. Similar names are not acceptance:
    require the documented production startup path, public expected-version input and 409 mismatch,
    operation/request-scoped idempotency with an immutable original response, rollback after a

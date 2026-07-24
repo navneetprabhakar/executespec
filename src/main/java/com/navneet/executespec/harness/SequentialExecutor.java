@@ -79,6 +79,7 @@ import lombok.extern.slf4j.Slf4j;
  * </ol>
  *
  * <p>Phase 5 baseline scope:
+ *
  * <ul>
  *   <li>Rule-based failure handling (retry once, then warn). A future TaskSupervisorV2 can add
  *       LLM-tier triage (CASCADING / FIXABLE / STRUCTURAL) for smarter decisions.
@@ -229,6 +230,7 @@ also create or extend a test that exercises it before calling completeTask:
     shared idempotency keys, immutable replay responses after later state changes, version mismatch
     through the public request boundary, rollback after a mid-transaction failure, and sanitized
     handling of expected persistence failures whenever those contracts are assigned to this task.
+  - Tests are maintained product artifacts in the conventional test tree; root-level scratch smoke files are forbidden, and one-off reproduction files belong under `/tmp` outside the deliverable.
 Untested code is an INCOMPLETE task. Do not call completeTask on a code change
 with zero tests unless the task is genuinely untestable (pure static asset, a
 one-line config) — and if so, say why in your completeTask summary.
@@ -2129,16 +2131,16 @@ to boot — skip it for those.""";
       }
       // Soft completion: worker wrote files; fall through to smoke gate.
       log.warn(
-          "Executor task={} worker outcome={} but wrote {} files — falling through to"
-              + " smoke gate (soft completion)",
+          "Executor task={} worker outcome={} but made {} successful file mutations — falling"
+              + " through to smoke gate (soft completion)",
           task.id(),
           primary.outcome(),
           fileWrites);
       softCompletion = true;
       softWarnReason =
-          "Worker stopped without completion but wrote "
+          "Worker stopped without completion but made "
               + fileWrites
-              + " file"
+              + " successful file mutation"
               + (fileWrites == 1 ? "" : "s")
               + " — "
               + WorkerFailureDescriber.describe(primary);
