@@ -118,9 +118,12 @@ Three provider-neutral borrows on the worker dispatch path (default-on unless no
 Fail-closed / evidence-honest corrections; no migration.
 
 - **RR-259** — worker progress and `totalWriteCalls` now derive from SUCCESSFUL mutations /
-  verification transitions (`isOkEnvelope && !isFailureEnvelope`), not tool-name matches. A rejected
-  write or failing build no longer resets the no-progress watchdog, and a single failed write no
-  longer inflates `totalWriteCalls` (which had disabled zero-write Lever-B salvage).
+  verification transitions, not tool-name matches. A rejected write or non-zero build no longer
+  resets the no-progress watchdog: `buildProject` returns a transport-level Ok envelope even for a
+  red child process, so build progress additionally requires structured exit-zero evidence. A
+  single failed write no longer inflates `totalWriteCalls` (which had disabled zero-write Lever-B
+  salvage). The 2026-07-24 Go reviewer demonstrated the old mismatch by repeating red buildProject
+  calls through 38 iterations while each transport Ok reset stagnation.
 - **RR-260** — `WorkerResult.salvagedUnverified` flags a best-guess salvage write; the executor
   treats a salvaged `COMPLETED` as a soft completion so it must pass the smoke gate to reach SUCCESS
   (COMPLETED_WITH_WARNING when smoke is skipped). "file changed" is no longer "task completed".
