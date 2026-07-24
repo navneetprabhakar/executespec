@@ -17,9 +17,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 public interface PipelineRunRepository
     extends JpaRepository<PipelineRun, String>, JpaSpecificationExecutor<PipelineRun> {
-
   // Atomic token counter updates (avoids read-modify-write race)
-
   @Modifying
   @Transactional
   @Query(
@@ -27,7 +25,6 @@ public interface PipelineRunRepository
           + " = r.totalOutputTokens + :out WHERE r.runId = :runId")
   void addTokens(@Param("runId") String runId, @Param("inp") int inp, @Param("out") int out);
 
-  /** Raise persisted usage to the canonical attempt-ledger floor without ever shrinking totals. */
   @Modifying
   @Transactional
   @Query(

@@ -1606,16 +1606,8 @@ to boot — skip it for those.""";
             new AtomicInteger(req.initialModelStepDownsUsed()));
       }
     }
-    // RR-1563 (P1 spend guard) — the escalation counters live only in process memory and are seeded
-    // exclusively from ExecutionRequest.initial*Used, which the approval retry path supplies but
-    // the
-    // crash-recovery resume path does NOT. A run that already spent its one provider switch / model
-    // step-up, then crashed and was resumed, therefore got a fresh full escalation budget once per
-    // crash-resume cycle. Derive the ALREADY-CONSUMED counters from durable task state
-    // (agent_task.continuation_actions_json, V252) on every resume so a process restart cannot
-    // reset
-    // a spend ceiling. putIfAbsent keeps an explicit approval-path seed (already put above)
-    // winning.
+    // RR-1563 — crash recovery reconstructs consumed escalation counters from durable task action
+    // history. putIfAbsent preserves the explicit approval-path seed above.
     if (resume != null) {
       seedConsumedContinuationCountersFromDurableState(runId);
     }
@@ -2414,13 +2406,8 @@ to boot — skip it for those.""";
 
     int totalToolCalls = primary.toolCallsDispatched() + retry.toolCallsDispatched();
     if (retry.outcome() != WorkerResult.Outcome.COMPLETED) {
-      // RR-269 (P1 routing-policy bypass) — the legacy same-provider-retry-then-next-YAML-provider
-      // fallback lane was DELETED here (2026-07-22). It dispatched the next failover provider
-      // directly, consulting neither route pins, org key policy, provider availability, strict mode
-      // nor benchmark/confirmation policy, and its per-run ceiling was racy — so it could spend
-      // against an unavailable/disallowed provider or override an Enterprise pin. Every provider or
-      // model change now flows through the single continuation-policy / admission path
-      // (maybeActOnContinuation) with exact authority and atomic durable reservations.
+      // RR-269 — every route change must flow through maybeActOnContinuation; the deleted YAML
+      // fallback bypassed route pins, org policy, availability, confirmation, and spend fences.
       log.warn(
           "Executor task={} retry WORKER_FAILED outcome={}; marking COMPLETED_WITH_WARNING",
           task.id(),
@@ -4061,28 +4048,7 @@ to boot — skip it for those.""";
     return null;
   }
 
-  /**
-   * RR-268 (P1 waste-guard accounting) — a canonical, provider-safe, NON-overlapping physical-token
-   * count for the {@code max-total-tokens} waste guard.
-   *
-   * <p>The previous sum added {@code reasoningTokens} and {@code cacheReadTokens} on top of
-   * input+output, but both are diagnostic SUBSETS for the providers that report them:
-   *
-   * <ul>
-   *   <li><b>reasoningTokens</b> — Gemini {@code thinking_tokens} is already folded into {@code
-   *       outputTokens} by {@code RunCostTracker}; OpenAI/DeepSeek {@code reasoning_tokens} is a
-   *       subset of completion. Adding it double-counts output.
-   *   <li><b>cacheReadTokens</b> — OpenAI/Gemini include cached tokens INSIDE prompt/input tokens
-   *       (a subset); adding it double-counts input. Anthropic reports it disjointly, so excluding
-   *       it slightly UNDER-counts a cache-heavy Anthropic run — the safe direction for a guard
-   *       that must not stop before the real ceiling.
-   * </ul>
-   *
-   * <p>{@code cacheWriteTokens} is Anthropic-only and genuinely disjoint from input/output (the
-   * first-time prompt tokens processed to populate the cache), and is zero for every other
-   * provider, so it is summed. Never sum a subset dimension into a physical total without set
-   * normalisation.
-   */
+  /** RR-268 — physical total excludes cache-read/reasoning subsets; cache-write is disjoint. */
   private static int totalTrackedTokens(RunCostTracker.Snapshot cost) {
     if (cost == null) {
       return 0;

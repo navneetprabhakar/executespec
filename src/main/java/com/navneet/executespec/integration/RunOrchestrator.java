@@ -1963,10 +1963,7 @@ public class RunOrchestrator implements RunControlPort {
                     .build());
       } catch (Exception e) {
         if (Thread.currentThread().isInterrupted() || pool.isShuttingDown()) {
-          log.info(
-              "RunOrchestrator run={} interrupted for application shutdown; preserving WORKING"
-                  + " checkpoint",
-              runId);
+          log.info("RunOrchestrator run={} shutdown interrupted; preserving WORKING", runId);
           return;
         }
         log.error("RunOrchestrator run={} executor failed", runId, e);
@@ -2494,9 +2491,7 @@ public class RunOrchestrator implements RunControlPort {
       }
     } catch (Exception unexpected) {
       if (Thread.currentThread().isInterrupted() || pool.isShuttingDown()) {
-        log.info(
-            "RunOrchestrator run={} unwound for application shutdown; preserving resumable state",
-            runId);
+        log.info("RunOrchestrator run={} shutdown unwound; preserving resumable state", runId);
         return;
       }
       log.error("RunOrchestrator run={} unexpected failure", runId, unexpected);
@@ -2817,12 +2812,7 @@ public class RunOrchestrator implements RunControlPort {
    * <p>Best-effort — a failed commit (e.g. nothing to commit, user had a .git/index.lock problem)
    * is logged but doesn't fail the run.
    */
-  /**
-   * RR-034 (2026-07-22, P1) — bounded, kill-on-timeout final commit. The hardened implementation
-   * lives in {@link WorkspaceGitCommitService} so this god class does not grow; see that class for
-   * the rationale (previously the inline version ignored the add wait boolean, never killed a
-   * timed-out process, committed with no timeout, and left the output pipe undrained).
-   */
+  /** RR-034 — bounded, kill-on-timeout final commit delegated out of this orchestrator. */
   private void commitWorkspaceOutputs(String runId, Path workspace) {
     workspaceGitCommitService.commitWorkspaceOutputs(runId, workspace);
   }

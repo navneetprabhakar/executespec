@@ -24,6 +24,9 @@ import com.navneet.executespec.cost.RunCostTracker;
 import com.navneet.executespec.cost.RunTokenAttributor;
 import com.navneet.executespec.deployment.WorkspaceRestoreService;
 import com.navneet.executespec.execution.model.RunContinuationDecision;
+import com.navneet.executespec.executioncontext.LlmExecutionPolicyFactory;
+import com.navneet.executespec.executioncontext.LlmExecutionReference;
+import com.navneet.executespec.executioncontext.LlmExecutionScope;
 import com.navneet.executespec.harness.ExecutionRequest;
 import com.navneet.executespec.harness.ExecutionResult;
 import com.navneet.executespec.harness.GateStore;
@@ -76,6 +79,8 @@ class RunLifecycleServiceContinuationApprovalTest {
   private final ModelResolver modelResolver = mock(ModelResolver.class);
   private final ValidationReportRepository validationReportRepository =
       mock(ValidationReportRepository.class);
+  private final LlmExecutionPolicyFactory llmExecutionPolicyFactory =
+      mock(LlmExecutionPolicyFactory.class);
 
   private RunLifecycleService service;
 
@@ -105,6 +110,12 @@ class RunLifecycleServiceContinuationApprovalTest {
             validationKickoff,
             modelResolver,
             validationReportRepository);
+    when(llmExecutionPolicyFactory.forRun(any()))
+        .thenReturn(
+            new LlmExecutionReference(
+                "llmctx-continuation-test", LlmExecutionScope.customer("test-org")));
+    org.springframework.test.util.ReflectionTestUtils.setField(
+        service, "llmExecutionPolicyFactory", llmExecutionPolicyFactory);
   }
 
   @Test
