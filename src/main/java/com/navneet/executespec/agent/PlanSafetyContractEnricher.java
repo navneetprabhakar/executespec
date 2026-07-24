@@ -31,8 +31,20 @@ public final class PlanSafetyContractEnricher {
     boolean reservationArithmetic =
         requirements.contains("reservation")
             && (requirements.contains("stock") || requirements.contains("quantity"));
+    boolean sqliteConcurrencyRequired =
+        requirements.contains("sqlite")
+            && requirements.contains("stock")
+            && (requirements.contains("atomic") || requirements.contains("concurrent"));
+    boolean invalidCancellationRequired =
+        requirements.contains("cancel")
+            && requirements.contains("invalid state")
+            && requirements.contains("double cancellation");
 
-    if (!authenticatedPrincipalRequired && !migrationsRequired && !reservationArithmetic) {
+    if (!authenticatedPrincipalRequired
+        && !migrationsRequired
+        && !reservationArithmetic
+        && !sqliteConcurrencyRequired
+        && !invalidCancellationRequired) {
       return new Result(plan, 0, List.of());
     }
 
@@ -55,6 +67,8 @@ public final class PlanSafetyContractEnricher {
               "dependencies.py");
       boolean testTask =
           containsAny(taskEvidence, "tests/", "pytest", "testclient", "test fixture", "test_");
+      boolean credentialTask =
+          containsAny(taskEvidence, "api_key", "api key", "bearer token", "credential", "token");
 
       if (authenticatedPrincipalRequired && apiOrServiceTask) {
         applied +=
@@ -77,6 +91,16 @@ public final class PlanSafetyContractEnricher {
                   summaries);
         }
       }
+      if (authenticatedPrincipalRequired && credentialTask) {
+        applied +=
+            addConstraint(
+                constraints,
+                "Never store or compare API keys or bearer tokens in plaintext; store a one-way"
+                    + " verifier and never expose credentials in logs or responses.",
+                task.id(),
+                "credential storage boundary",
+                summaries);
+      }
 
       if (reservationArithmetic
           && containsAny(
@@ -93,6 +117,37 @@ public final class PlanSafetyContractEnricher {
                     + " quantities through the public API.",
                 task.id(),
                 "positive reservation domain",
+                summaries);
+      }
+
+      if (sqliteConcurrencyRequired
+          && containsAny(
+              taskEvidence,
+              "post /reservations",
+              "create_reservation",
+              "stock decrement",
+              "reservation_service",
+              "concurrent",
+              "thread")) {
+        applied +=
+            addConstraint(
+                constraints,
+                "SQLite does not provide effective SELECT FOR UPDATE row locks; use BEGIN"
+                    + " IMMEDIATE or one conditional UPDATE with stock >= quantity and verify the"
+                    + " affected-row count using separate-connection race tests.",
+                task.id(),
+                "SQLite-effective atomic stock mutation",
+                summaries);
+      }
+
+      if (invalidCancellationRequired && containsAny(taskEvidence, "cancel", "cancellation")) {
+        applied +=
+            addConstraint(
+                constraints,
+                "A second cancellation must return the stable invalid-state error, not a success"
+                    + " replay; stock must remain restored exactly once.",
+                task.id(),
+                "double-cancel state transition",
                 summaries);
       }
 
