@@ -631,8 +631,8 @@ Return your assessment as a JSON object. No markdown fences. No explanation outs
   /**
    * Reads key source files (routes, controllers, models, entry points) and returns their content as
    * annotated snippets for the accuracy scorer. Cap is whatever {@link #inferKeyFilePaths} hands
-   * back — single-repo runs stay at 6, multi-repo runs scale up to {@code MULTI_REPO_TOTAL_CAP} (18
-   * by default = 6 per repo × 3 repos).
+   * back — single-repo runs stay bounded at 10, multi-repo runs scale up to {@code
+   * MULTI_REPO_TOTAL_CAP}.
    *
    * <p>P1.1 (2026-05-06, GA-readiness audit follow-up): the previous per-file cap was 2,500 chars,
    * which truncated FastAPI / Express routers with 5+ endpoints to imports + the first 2 handlers —
@@ -779,16 +779,16 @@ Return your assessment as a JSON object. No markdown fences. No explanation outs
    * or more distinct names get a per-repo budget of this size, capped at {@link
    * #MULTI_REPO_TOTAL_CAP} total files.
    */
-  static final int PER_REPO_BUDGET = 6;
+  static final int PER_REPO_BUDGET = 8;
 
   /** Read budget for single-repo / no-repos-prefix workspaces. */
-  static final int SINGLE_REPO_BUDGET = 6;
+  static final int SINGLE_REPO_BUDGET = 10;
 
   /**
    * Hard cap on total files read for the accuracy assessment regardless of how many repos a run
    * touches. Keeps per-call token cost bounded (18 × 2,500 chars ≈ 45K chars ≈ 11K extra tokens).
    */
-  static final int MULTI_REPO_TOTAL_CAP = 18;
+  static final int MULTI_REPO_TOTAL_CAP = 24;
 
   /**
    * Heuristically identifies key structural files from the file tree listing. Targets route
@@ -926,6 +926,12 @@ Return your assessment as a JSON object. No markdown fences. No explanation outs
   private static final java.util.regex.Pattern BOILERPLATE_FILENAME =
       java.util.regex.Pattern.compile("(?i)(^|/)(index|main|app|server)\\.[a-z0-9]+$");
 
+  private static final java.util.regex.Pattern RUNTIME_EVIDENCE_FILENAME =
+      java.util.regex.Pattern.compile(
+          "(?i)(^|/)(index|main|app|server|database|db|config|settings|security|auth|middleware)\\.[a-z0-9]+$");
+
+  private static final int RUNTIME_EVIDENCE_SLOTS = 3;
+
   /**
    * TIER A — files inside a structural directory ({@code routers/}, {@code services/}, …). These
    * are nearly always the deliverable: the worker added a route to {@code app/routers/ai.py}, not
@@ -947,9 +953,12 @@ Return your assessment as a JSON object. No markdown fences. No explanation outs
   }
 
   /**
-   * Pick {@code budget} files from {@code source}, preferring structural directories over
-   * structural filenames over non-structural fallbacks. Within a tier, shortest path wins as a
-   * tiebreaker (smallest-first ordering preserved from caller via {@code source} sort).
+   * Pick {@code budget} files from {@code source}, preferring structural directories and filenames
+   * while reserving bounded slots for the default runtime path. Without that reservation, route,
+   * service, model, and migration files can consume the entire sample while the application
+   * entrypoint, database initialization, or authentication middleware is omitted. That exact shape
+   * allowed a FastAPI run whose tests manually called {@code create_all} to receive 97/100 even
+   * though production startup bypassed its required Alembic migration.
    *
    * <p>2026-05-02 cap-at-10 from R-343 retained per tier to keep the read budget honest when a
    * Spring Boot project has 30 files in {@code controllers/}.
@@ -962,6 +971,21 @@ Return your assessment as a JSON object. No markdown fences. No explanation outs
     java.util.List<String> tierB =
         source.stream().filter(p -> structuralTier(p, structural) == 1).limit(10).toList();
     java.util.LinkedHashSet<String> picked = new java.util.LinkedHashSet<>();
+    int structuralBudget = Math.max(0, budget - RUNTIME_EVIDENCE_SLOTS);
+    for (String p : tierA) {
+      if (picked.size() >= structuralBudget) break;
+      picked.add(p);
+    }
+    for (String p : tierB) {
+      if (picked.size() >= structuralBudget) break;
+      picked.add(p);
+    }
+    source.stream()
+        .filter(p -> RUNTIME_EVIDENCE_FILENAME.matcher(p).find())
+        .filter(p -> !picked.contains(p))
+        .limit(RUNTIME_EVIDENCE_SLOTS)
+        .forEach(picked::add);
+    // If fewer runtime files exist, restore unused reserved slots to structural evidence.
     for (String p : tierA) {
       if (picked.size() >= budget) break;
       picked.add(p);

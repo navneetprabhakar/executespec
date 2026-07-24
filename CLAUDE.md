@@ -1160,6 +1160,15 @@ eviction of the live instance, propagated cancellation, and verified credential-
 identity. Generated concurrency tests must force the initial-miss race rather than rely on scheduler
 luck.
 
+A separate medium FastAPI reservation run was reported as `CLEAN_COMPLETION`, verified score 97,
+and 55/55 tests, yet failed 4/4 independent acceptance probes: negative quantity increased stock,
+zero quantity created a reservation, a caller-selected `X-Customer-Id` was accepted as
+authentication, and default startup called ORM `create_all` rather than the required Alembic
+migration. The accuracy assessor's six-file heuristic had omitted the runtime database/startup
+path while generated fixtures manually created schema. Single-repo accuracy evidence is now bounded
+at 10 files, with three reserved runtime evidence slots; multi-repo evidence uses 8 files per repo
+up to 24 total, still constrained by the existing 100K source-character cap.
+
 Post-review continuation now opens only for completed, measured red review evidence. A reviewer
 exception/timeout remains `REVIEWER_FAILED` and cannot trigger provider spend, because a stronger
 coding model cannot repair unavailable verification. When measured review or final-validation
