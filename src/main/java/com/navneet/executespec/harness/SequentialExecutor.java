@@ -379,9 +379,7 @@ to boot — skip it for those.""";
   /** Optional only for source-compatible unit construction; Spring always supplies it. */
   private com.navneet.executespec.router.TaskOutcomeMetricService taskOutcomeMetricService;
 
-  /**
-   * Canonical admitted-baseline product-diff evidence; optional only in legacy unit constructors.
-   */
+  /** Canonical admitted-baseline product-diff evidence; nullable only in legacy unit tests. */
   private RunChangeEvidenceService runChangeEvidenceService;
 
   /**

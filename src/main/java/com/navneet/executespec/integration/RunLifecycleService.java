@@ -84,7 +84,7 @@ public class RunLifecycleService {
       java.time.Duration.ofMinutes(2);
 
   /** Stable, non-secret owner label persisted with a recovery claim for operator diagnostics. */
-  private static final String RECOVERY_INSTANCE_ID = recoveryInstanceId();
+  private static final String RECOVERY_INSTANCE_ID = ExecutionHostIdentity.current();
 
   /** Compatibility constructor retained for focused lifecycle tests and older embedders. */
   public RunLifecycleService(
@@ -788,15 +788,6 @@ public class RunLifecycleService {
       }
     }
     return true;
-  }
-
-  private static String recoveryInstanceId() {
-    String host = System.getenv("HOSTNAME");
-    if (host == null || host.isBlank()) {
-      host = java.lang.management.ManagementFactory.getRuntimeMXBean().getName();
-    }
-    host = host == null || host.isBlank() ? "unknown" : host.trim();
-    return host.length() <= 128 ? host : host.substring(0, 128);
   }
 
   /**
