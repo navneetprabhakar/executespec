@@ -66,7 +66,10 @@ public class GoalDonenessEvaluator {
           evidence,
           GoalDonenessState.DONE,
           RunContinuationDecision.STOP_DONE,
-          "goal satisfied with validation evidence and required outputs present",
+          evidence.validationDeferredToFinalReviewer()
+              ? "task goal satisfied; task-level validation is intentionally deferred to the final"
+                  + " reviewer"
+              : "goal satisfied with validation evidence and required outputs present",
           false,
           false);
     }
@@ -182,9 +185,10 @@ public class GoalDonenessEvaluator {
   private static boolean isDone(GoalEvidence evidence) {
     // A positive validation flag without an attempted validation is contradictory evidence. Do
     // not allow hand-built or partially persisted payloads to turn that inconsistency into DONE.
-    return evidence.validationAttempted()
+    return (evidence.validationAttempted() || evidence.validationDeferredToFinalReviewer())
         && Boolean.TRUE.equals(evidence.goalCriteriaSatisfied())
-        && Boolean.TRUE.equals(evidence.validationPassed())
+        && (Boolean.TRUE.equals(evidence.validationPassed())
+            || evidence.validationDeferredToFinalReviewer())
         && evidence.requiredOutputsPresent()
         && evidence.constraintsRespected();
   }
@@ -251,8 +255,13 @@ public class GoalDonenessEvaluator {
     if (!Boolean.TRUE.equals(evidence.goalCriteriaSatisfied())) {
       items.add("goal criteria not proven satisfied");
     }
-    if (!Boolean.TRUE.equals(evidence.validationPassed())) {
-      items.add(evidence.validationUnavailable() ? "validation not proven" : "validation failed");
+    if (!Boolean.TRUE.equals(evidence.validationPassed())
+        && !evidence.validationDeferredToFinalReviewer()) {
+      items.add(
+          evidence.validationUnavailable()
+              ? "no task-level validation result was recorded; completion requires downstream"
+                  + " build, test, or reviewer proof"
+              : "validation failed");
     }
     if (!evidence.requiredOutputsPresent()) {
       items.add("required outputs not proven present");

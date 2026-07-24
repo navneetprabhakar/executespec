@@ -2053,24 +2053,8 @@ to boot — skip it for those.""";
         countFileWrites(primary.toolCallLog()));
 
     WorkerInterruptionPolicy.throwIfInterruptedError(primary, task.id());
-    // Worker didn't reach COMPLETED. Check whether it still wrote files — if so
-    // the task produced real output and shouldn't be marked FAILED outright.
-    // Common case: Gemini hits its iteration cap on HIGH tasks but has already
-    // written the schema / entities / controller and just failed to call
-    // `completeTask`. Marking these FAILED made the run look broken even though
-    // the code was fine, and tanked the accuracy score.
-    //
-    // Fix C (2026-05-03, run a076c876 T2 diagnosis): when the worker wrote
-    // files but didn't call completeTask, do NOT pre-mark PARTIAL. Fall
-    // through to the SAME gate the COMPLETED path uses (multi-task skip /
-    // smoke test) and let that decide between COMPLETE / COMPLETED_WITH_WARNING
-    // / PARTIAL. The worker's premature-exit reason is carried in
-    // softWarnReason and persisted on lastLlmFailure regardless of final
-    // status, so the UI still surfaces "worker hit iter cap" even when the
-    // task lands COMPLETE because the smoke passed. Without this an
-    // intermediate task in a multi-task plan that the worker exited early
-    // on would be marked PARTIAL even though the reviewer's final build is
-    // the authoritative gate — exactly what happened to T2.
+    // A worker that stopped after writing files still flows through the normal smoke gate. Its
+    // premature-stop reason remains visible even when later validation proves the output.
     final boolean softCompletion;
     final String softWarnReason;
     if (primary.outcome() != WorkerResult.Outcome.COMPLETED) {
@@ -2082,12 +2066,7 @@ to boot — skip it for those.""";
             primary.outcome(),
             primary.iterations());
         String failureReason = WorkerFailureDescriber.describe(primary);
-        // v2.5.12 — populate a concrete failureReason for every terminal
-        // worker outcome so RunMapper doesn't have to fall back to
-        // "unknown — see worker logs". This closes Bug D from the eval.
-        // V190 (2026-05-13, PR-A) — also persist the structured diagnostic JSON so the UI can
-        // surface "outcome=STOPPED_WITHOUT_COMPLETE, iters=47/75, last tool call: writeFile
-        // app/x.py failed" without operators SSHing the VM log.
+        // Persist a concrete failure plus structured diagnostics for UI/operator evidence.
         persistTaskStatus(
             runId,
             task.id(),
@@ -2104,7 +2083,8 @@ to boot — skip it for those.""";
                 null,
                 failureReason,
                 cfg.provider,
-                cfg.model);
+                cfg.model,
+                false);
         return TaskOutcome.builder()
             .taskId(task.id())
             .taskTitle(task.title())
@@ -2159,7 +2139,7 @@ to boot — skip it for those.""";
       broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "COMPLETE"));
       GoalTaskDecision goalDecision =
           emitGoalDecision(
-              runId, task, primary, status, null, softWarnReason, cfg.provider, cfg.model);
+              runId, task, primary, status, null, softWarnReason, cfg.provider, cfg.model, false);
       return TaskOutcome.builder()
           .taskId(task.id())
           .taskTitle(task.title())
@@ -2174,12 +2154,7 @@ to boot — skip it for those.""";
           .build();
     }
 
-    // Skip per-task smoke for non-final tasks in multi-task plans:
-    // intermediate tasks (T1 scaffold, T2 partial wiring, ...) cannot
-    // possibly satisfy a full project build because later tasks haven't
-    // landed yet. The reviewer's final build at the end of the run is
-    // the authoritative gate. This eliminates false-negative PARTIAL
-    // statuses on tasks whose code is later wired up correctly.
+    // Partial multi-task workspaces defer validation to the final task and reviewer.
     boolean multiTask = plan.tasks().size() > 1;
     if (multiTask && !isFinalTask) {
       TaskOutcome.Status status =
@@ -2193,7 +2168,7 @@ to boot — skip it for those.""";
       broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "COMPLETE"));
       GoalTaskDecision goalDecision =
           emitGoalDecision(
-              runId, task, primary, status, null, softWarnReason, cfg.provider, cfg.model);
+              runId, task, primary, status, null, softWarnReason, cfg.provider, cfg.model, true);
       return TaskOutcome.builder()
           .taskId(task.id())
           .taskTitle(task.title())
@@ -2222,7 +2197,7 @@ to boot — skip it for those.""";
       broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "COMPLETE"));
       GoalTaskDecision goalDecision =
           emitGoalDecision(
-              runId, task, primary, status, true, softWarnReason, cfg.provider, cfg.model);
+              runId, task, primary, status, true, softWarnReason, cfg.provider, cfg.model, false);
       return TaskOutcome.builder()
           .taskId(task.id())
           .taskTitle(task.title())
@@ -2268,7 +2243,8 @@ to boot — skip it for those.""";
               false,
               reason,
               cfg.provider,
-              cfg.model);
+              cfg.model,
+              false);
       return TaskOutcome.builder()
           .taskId(task.id())
           .taskTitle(task.title())
@@ -2397,12 +2373,8 @@ to boot — skip it for those.""";
           task.id(),
           retry.outcome());
       String retryFailureReason = WorkerFailureDescriber.describe(retry);
-      // RR-263 (P1 durable-state divergence) — this return path used to construct the terminal
-      // outcome WITHOUT persisting a terminal task status, so the row stayed WORKING (set before
-      // the primary attempt) until the run-level reconciliation. A crash in that window let DB
-      // polling/recovery see an in-flight task the executor already considered terminal, risking a
-      // duplicate rerun or a permanently "running" UI. Cross the durable terminalization seam
-      // (COMPLETED_WITH_WARNING maps to the V1 PARTIAL status) before constructing the outcome.
+      // Persist the terminal warning before returning so recovery cannot replay a stale WORKING
+      // row.
       persistTaskStatus(runId, task.id(), "PARTIAL", retryFailureReason);
       broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "PARTIAL"));
       GoalTaskDecision goalDecision =
@@ -2414,7 +2386,8 @@ to boot — skip it for those.""";
               false,
               retryFailureReason,
               cfg.provider,
-              cfg.model);
+              cfg.model,
+              false);
       return TaskOutcome.builder()
           .taskId(task.id())
           .taskTitle(task.title())
@@ -2449,7 +2422,8 @@ to boot — skip it for those.""";
               true,
               null,
               cfg.provider,
-              cfg.model);
+              cfg.model,
+              false);
       return TaskOutcome.builder()
           .taskId(task.id())
           .taskTitle(task.title())
@@ -2498,7 +2472,8 @@ to boot — skip it for those.""";
               false,
               zeroWriteReason,
               cfg.provider,
-              cfg.model);
+              cfg.model,
+              false);
       return TaskOutcome.builder()
           .taskId(task.id())
           .taskTitle(task.title())
@@ -2575,7 +2550,8 @@ to boot — skip it for those.""";
                   true,
                   null,
                   cfg.provider,
-                  cfg.model);
+                  cfg.model,
+                  false);
           return TaskOutcome.builder()
               .taskId(task.id())
               .taskTitle(task.title())
@@ -2634,7 +2610,8 @@ to boot — skip it for those.""";
             false,
             reason,
             cfg.provider,
-            cfg.model);
+            cfg.model,
+            false);
     return TaskOutcome.builder()
         .taskId(task.id())
         .taskTitle(task.title())
@@ -2662,10 +2639,18 @@ to boot — skip it for those.""";
       Boolean smokePassed,
       String failureReason,
       String dispatchedProvider,
-      String dispatchedModel) {
+      String dispatchedModel,
+      boolean validationDeferredToFinalReviewer) {
     GoalDonenessDecision decision =
         goalDonenessEvaluator.evaluate(
-            buildGoalEvidence(runId, task, workerResult, finalStatus, smokePassed, failureReason));
+            buildGoalEvidence(
+                runId,
+                task,
+                workerResult,
+                finalStatus,
+                smokePassed,
+                failureReason,
+                validationDeferredToFinalReviewer));
     GoalContinuationPolicyDecision continuationDecision =
         decideContinuation(
             runId,
@@ -2736,7 +2721,13 @@ to boot — skip it for those.""";
     GoalDonenessDecision goalDecision =
         goalDonenessEvaluator.evaluate(
             buildGoalEvidence(
-                runId, task, primary, TaskOutcome.Status.COMPLETED_WITH_WARNING, false, reason));
+                runId,
+                task,
+                primary,
+                TaskOutcome.Status.COMPLETED_WITH_WARNING,
+                false,
+                reason,
+                false));
     GoalContinuationPolicyDecision continuationDecision =
         decideContinuation(
             runId,
@@ -3662,7 +3653,8 @@ to boot — skip it for those.""";
       WorkerResult workerResult,
       TaskOutcome.Status finalStatus,
       Boolean smokePassed,
-      String failureReason) {
+      String failureReason,
+      boolean validationDeferredToFinalReviewer) {
     int fileWrites = workerResult == null ? 0 : countFileWrites(workerResult.toolCallLog());
     int meaningfulProductDiffs = meaningfulProductDiffCount(runId, workerResult, fileWrites);
     RunCostTracker.Snapshot cost = taskCostSnapshot(runId, task.id());
@@ -3680,7 +3672,7 @@ to boot — skip it for those.""";
     String category = taskCategory(task);
     boolean meaningfulDiffRequired = requiresMeaningfulDiff(category);
     boolean requiredOutputsPresent =
-        validationPassed && statusClean && (!meaningfulDiffRequired || meaningfulProductDiffs > 0);
+        statusClean && (!meaningfulDiffRequired || meaningfulProductDiffs > 0);
     List<String> completed = new ArrayList<>();
     if (completeTaskClaimed) {
       completed.add("worker called completeTask");
@@ -3690,6 +3682,9 @@ to boot — skip it for those.""";
     }
     if (validationPassed) {
       completed.add("smoke validation passed");
+    }
+    if (validationDeferredToFinalReviewer) {
+      completed.add("task-level validation deferred to final reviewer");
     }
 
     List<String> incomplete = new ArrayList<>();
@@ -3728,6 +3723,9 @@ to boot — skip it for those.""";
     if (smokePassed != null) {
       evidence.add("smokePassed=" + smokePassed);
     }
+    if (validationDeferredToFinalReviewer) {
+      evidence.add("validationDeferredToFinalReviewer=true");
+    }
 
     String budgetCeilingReason =
         budgetCeilingReason(workerResult, runCost, runTotalTokens, wallClockMs);
@@ -3765,6 +3763,7 @@ to boot — skip it for those.""";
         .goalCriteriaSatisfied(completeTaskClaimed && requiredOutputsPresent)
         .validationAttempted(validationAttempted)
         .validationPassed(smokePassed)
+        .validationDeferredToFinalReviewer(validationDeferredToFinalReviewer)
         .requiredOutputsPresent(requiredOutputsPresent)
         .constraintsRespected(statusClean && (failureReason == null || failureReason.isBlank()))
         .meaningfulDiffCount(meaningfulProductDiffs)

@@ -414,6 +414,11 @@ class SequentialExecutorSoftCompletionTest {
         TaskOutcome.Status.COMPLETED_WITH_WARNING,
         t1.status(),
         "Multi-task intermediate + iter-limit + writes should be COMPLETED_WITH_WARNING.");
+    assertEquals(
+        com.navneet.executespec.execution.model.GoalDonenessState.WASTE_RISK,
+        t1.goalDonenessDecision().state(),
+        "A worker that hit its iteration ceiling is not proven merely because validation is"
+            + " deferred.");
 
     // Verify the T1-key save landed COMPLETE in the DB with the warning persisted.
     boolean sawCompleteWithWarningOnT1 =
@@ -429,6 +434,27 @@ class SequentialExecutorSoftCompletionTest {
         "Expected T1 save with status=COMPLETE + lastLlmFailure containing the iter-cap warning."
             + " Saw: "
             + saveLog);
+  }
+
+  @Test
+  void clean_intermediate_task_is_done_only_via_explicit_final_reviewer_deferral() {
+    stubTaskRow();
+    when(worker.run(any(WorkerTaskRequest.class), any())).thenReturn(workerCompleted(1));
+    when(buildProjectTool.execute(any(), any())).thenReturn(new ToolResult.Ok("exit=0\nbuild ok"));
+
+    ExecutionResult result = newExecutor().execute(req(multiTaskPlan(), true));
+
+    TaskOutcome intermediate = result.perTask().get(0);
+    assertEquals(TaskOutcome.Status.SUCCESS, intermediate.status());
+    assertEquals(
+        com.navneet.executespec.execution.model.GoalDonenessState.DONE,
+        intermediate.goalDonenessDecision().state());
+    assertTrue(intermediate.goalDonenessDecision().reason().contains("intentionally deferred"));
+    assertTrue(
+        intermediate
+            .goalDonenessDecision()
+            .completedItems()
+            .contains("task-level validation deferred to final reviewer"));
   }
 
   // 2: Single-task + iter-limit + writes + smoke pass → COMPLETE+warning
@@ -524,7 +550,13 @@ class SequentialExecutorSoftCompletionTest {
     SequentialExecutor executor = newExecutor();
     ExecutionResult result = executor.execute(req(singleTaskPlan(), false));
 
-    assertEquals(TaskOutcome.Status.SUCCESS, result.perTask().get(0).status());
+    TaskOutcome outcome = result.perTask().get(0);
+    assertEquals(TaskOutcome.Status.SUCCESS, outcome.status());
+    assertEquals(
+        com.navneet.executespec.execution.model.GoalDonenessState.NOT_DONE_BUT_PROGRESSING,
+        outcome.goalDonenessDecision().state(),
+        "Globally disabled smoke tests must remain unproven; only the explicit intermediate-task"
+            + " branch may defer validation.");
   }
 
   @Test

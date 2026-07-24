@@ -52,6 +52,12 @@ the cumulative run snapshot. Run-wide cost/token snapshots remain separate input
 2026-07-24 Kanban run made task 7 appear to use 2.4M input tokens although its attributed calls used
 about 98K.
 
+Intermediate tasks in a multi-task BUILD plan may report validation as explicitly deferred to the
+final task and reviewer, because the partial workspace is not expected to build yet. That explicit
+executor branch can satisfy task-level doneness without triggering a model/provider rerun. A null
+smoke result anywhere else—including runs with smoke tests disabled—remains unproven and must not
+be inferred as deferred validation. `budgetCeilingReason` is empty unless a ceiling actually fired.
+
 BUILD planning and worker policy must agree on verification ownership: focused maintained tests
 travel in the same task as the production code they verify. A later test-only task may add broader
 integration/concurrency/E2E coverage, but cannot be the first verification of an earlier task. All

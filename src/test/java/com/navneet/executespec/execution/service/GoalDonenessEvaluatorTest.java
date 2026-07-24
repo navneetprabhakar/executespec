@@ -37,6 +37,50 @@ class GoalDonenessEvaluatorTest {
   }
 
   @Test
+  void doneWhenIntermediateTaskValidationIsExplicitlyDeferredToFinalReviewer() {
+    GoalDonenessDecision decision =
+        evaluator.evaluate(
+            base()
+                .goalCriteriaSatisfied(true)
+                .validationAttempted(false)
+                .validationPassed(null)
+                .validationDeferredToFinalReviewer(true)
+                .requiredOutputsPresent(true)
+                .constraintsRespected(true)
+                .completedItems(
+                    List.of(
+                        "worker called completeTask",
+                        "task-level validation deferred to final reviewer"))
+                .evidence(List.of("validationDeferredToFinalReviewer=true"))
+                .build());
+
+    assertThat(decision.state()).isEqualTo(GoalDonenessState.DONE);
+    assertThat(decision.recommendedDecision()).isEqualTo(RunContinuationDecision.STOP_DONE);
+    assertThat(decision.reason()).contains("intentionally deferred to the final reviewer");
+    assertThat(decision.incompleteItems()).isEmpty();
+  }
+
+  @Test
+  void smokeDisabledCompletionIsNotImplicitlyTreatedAsDeferredValidation() {
+    GoalDonenessDecision decision =
+        evaluator.evaluate(
+            base()
+                .goalCriteriaSatisfied(true)
+                .validationAttempted(false)
+                .validationPassed(null)
+                .validationDeferredToFinalReviewer(false)
+                .requiredOutputsPresent(true)
+                .constraintsRespected(true)
+                .completeTaskClaimed(true)
+                .meaningfulDiffCount(1)
+                .build());
+
+    assertThat(decision.state()).isEqualTo(GoalDonenessState.NOT_DONE_BUT_PROGRESSING);
+    assertThat(decision.recommendedDecision())
+        .isEqualTo(RunContinuationDecision.CONTINUE_SAME_MODEL_PROVIDER);
+  }
+
+  @Test
   void modelCompleteTaskClaimIsNotDoneWhenValidationFails() {
     GoalDonenessDecision decision =
         evaluator.evaluate(
@@ -106,7 +150,11 @@ class GoalDonenessEvaluatorTest {
     assertThat(decision.state()).isEqualTo(GoalDonenessState.UNCERTAIN);
     assertThat(decision.recommendedDecision())
         .isEqualTo(RunContinuationDecision.CONTINUE_SAME_MODEL_PROVIDER);
-    assertThat(decision.incompleteItems()).contains("validation not proven");
+    assertThat(decision.incompleteItems())
+        .contains(
+            "no task-level validation result was recorded; completion requires downstream build,"
+                + " test, or reviewer proof");
+    assertThat(decision.budgetCeilingReason()).isEmpty();
   }
 
   @Test

@@ -17,6 +17,7 @@ public record GoalEvidence(
     Boolean goalCriteriaSatisfied,
     Boolean validationPassed,
     boolean validationAttempted,
+    boolean validationDeferredToFinalReviewer,
     boolean requiredOutputsPresent,
     boolean constraintsRespected,
     int meaningfulDiffCount,
@@ -59,7 +60,9 @@ public record GoalEvidence(
     maxStaleExplanations = maxStaleExplanations <= 0 ? Integer.MAX_VALUE : maxStaleExplanations;
     budgetCeilingReason =
         budgetCeilingReason == null || budgetCeilingReason.isBlank()
-            ? "budget, token, iteration, or wall-clock ceiling reached"
+            ? (budgetCeilingReached
+                ? "budget, token, iteration, or wall-clock ceiling reached"
+                : "")
             : budgetCeilingReason;
     inputTokens = Math.max(0, inputTokens);
     outputTokens = Math.max(0, outputTokens);
@@ -84,6 +87,6 @@ public record GoalEvidence(
   }
 
   public boolean validationUnavailable() {
-    return !validationAttempted || validationPassed == null;
+    return !validationDeferredToFinalReviewer && (!validationAttempted || validationPassed == null);
   }
 }
