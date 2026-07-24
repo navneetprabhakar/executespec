@@ -39,8 +39,9 @@ import lombok.extern.slf4j.Slf4j;
  * executor.
  *
  * <p>LIGHTWEIGHT-tier model — coherence is a structural pattern-match, not a judgement call. Single
- * LLM round-trip, ≤1k output tokens. Failure of the coherence pass is non-fatal: the unpatched plan
- * flows through and the worker / reviewer catch any remaining issues at execution time.
+ * LLM round-trip, ≤1k output tokens. Provider-neutral deterministic safety contracts are applied
+ * before the model pass so predictable authentication, numeric-domain, and migration invariants do
+ * not depend on a model noticing them. Protocol/model failure is fatal to hierarchical planning.
  */
 @Service
 @Slf4j
@@ -132,6 +133,9 @@ public class CoherencePlannerAgent {
       return new PatchResult(plan, 0, List.of());
     }
 
+    PlanSafetyContractEnricher.Result deterministic = PlanSafetyContractEnricher.enrich(plan);
+    Plan planWithSafetyContracts = deterministic.plan();
+
     String systemPrompt;
     try {
       systemPrompt =
@@ -144,12 +148,13 @@ public class CoherencePlannerAgent {
     } catch (Exception promptEx) {
       log.warn(
           "CoherencePlanner prompt assembly failed — skipping pass: {}", promptEx.getMessage());
-      return failed(plan, "prompt assembly failed");
+      return failed(planWithSafetyContracts, "prompt assembly failed");
     }
 
     List<Message> messages =
         List.of(
-            new SystemMessage(systemPrompt), new UserMessage(buildCoherenceEvidence(plan, req)));
+            new SystemMessage(systemPrompt),
+            new UserMessage(buildCoherenceEvidence(planWithSafetyContracts, req)));
 
     ToolCallback patchPlan = buildPatchPlanCallback();
     LlmProvider provider = resolveProvider(req.provider());
@@ -158,15 +163,17 @@ public class CoherencePlannerAgent {
       resolved = modelResolver.resolve("CoherencePlannerAgent", provider, AgentTier.LIGHTWEIGHT);
     } catch (Exception e) {
       log.warn("CoherencePlanner model resolve failed — skipping pass: {}", e.getMessage());
-      return failed(plan, "model resolution failed");
+      return failed(planWithSafetyContracts, "model resolution failed");
     }
 
     log.info(
         "CoherencePlanner -> {} {} (tasks={}, requirements={})",
         resolved.providerName(),
         resolved.getModel(),
-        plan.tasks().size(),
-        plan.requirements() == null ? 0 : plan.requirements().size());
+        planWithSafetyContracts.tasks().size(),
+        planWithSafetyContracts.requirements() == null
+            ? 0
+            : planWithSafetyContracts.requirements().size());
 
     ChatResponse resp;
     try {
@@ -185,7 +192,7 @@ public class CoherencePlannerAgent {
                   .build());
     } catch (Exception e) {
       log.warn("CoherencePlanner LLM call failed — using unpatched plan: {}", e.getMessage());
-      return failed(plan, "LLM call failed");
+      return failed(planWithSafetyContracts, "LLM call failed");
     }
 
     AssistantMessage.ToolCall patchCall = null;
@@ -202,10 +209,19 @@ public class CoherencePlannerAgent {
     }
     if (patchCall == null) {
       log.warn("CoherencePlanner did not call patchPlan — using unpatched plan");
-      return failed(plan, "patchPlan tool was not called");
+      return failed(planWithSafetyContracts, "patchPlan tool was not called");
     }
 
-    return applyPatches(plan, patchCall.arguments());
+    PatchResult modelResult = applyPatches(planWithSafetyContracts, patchCall.arguments());
+    if (!modelResult.validated()) return modelResult;
+    if (deterministic.contractsApplied() == 0) return modelResult;
+
+    List<String> summaries = new ArrayList<>(deterministic.summaries());
+    summaries.addAll(modelResult.patchSummaries());
+    return new PatchResult(
+        modelResult.patchedPlan(),
+        deterministic.contractsApplied() + modelResult.patchesApplied(),
+        List.copyOf(summaries));
   }
 
   private PatchResult applyPatches(Plan plan, String argsJson) {
