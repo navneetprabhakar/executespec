@@ -1168,6 +1168,13 @@ migration. The accuracy assessor's six-file heuristic had omitted the runtime da
 path while generated fixtures manually created schema. Single-repo accuracy evidence is now bounded
 at 10 files, with three reserved runtime evidence slots; multi-repo evidence uses 8 files per repo
 up to 24 total, still constrained by the existing 100K source-character cap.
+The generation defect began earlier than scoring: the planner rewrote "authenticated customer" as
+an unverified `X-Customer-Id` header and planned fixtures that manually created schema despite an
+Alembic requirement. The shared full/skeleton planner security fragment, task expander, coherence
+planner, worker, reviewer, and accuracy prompts now all preserve verified-principal identity,
+positive numeric domains, and migration-backed default startup/test boundaries. These prompts are
+provider-neutral and therefore apply identically to Anthropic, OpenAI, Gemini, DeepSeek,
+OpenRouter, and Fireworks routes.
 
 Post-review continuation now opens only for completed, measured red review evidence. A reviewer
 exception/timeout remains `REVIEWER_FAILED` and cannot trigger provider spend, because a stronger

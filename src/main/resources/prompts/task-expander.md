@@ -44,6 +44,14 @@ The description becomes the worker's user prompt. Be concrete:
    behaviors. `CREATE IF NOT EXISTS` or one baseline DDL file proves initialization, not migration.
    Fixtures that replace or manually initialize the production boundary do not prove it.
 
+   Preserve trust and input-domain semantics exactly. "Authenticated customer/tenant/user" means
+   middleware verifies a credential/session/token and derives identity from it; never invent a raw
+   caller-selected identity header/query/body field. Apply the same owner boundary to read/update/
+   delete operations unless explicitly public. Require positive-domain validation for quantities
+   before arithmetic, with zero/negative adversarial tests. If migrations are required, the
+   documented/default startup and test fixture must exercise the migration runner rather than ORM
+   `create_all` or equivalent manual schema creation.
+
    Preserve prerequisite user journeys when this task changes a shared page/state/schema. Empty,
    loading, and error branches must not hide an established primary action; prove from clean state
    that the first item can still be created without invoking optional demo data. Restored state must
