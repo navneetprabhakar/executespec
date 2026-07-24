@@ -181,17 +181,50 @@ class PromptConformanceTest {
   @Test
   void generationPromptsChallengeConcurrentIdempotencyAndBoundedMemory() throws IOException {
     String reviewer = prompt("prompts/reviewer-general.md");
+    String testPlanner = prompt("prompts/test-planner.txt");
+    String testWorker = prompt("prompts/test-worker.txt");
 
     assertThat(SequentialExecutor.workerSystemPromptBase())
         .contains("one atomic critical section/transaction")
         .contains("first-decision")
         .contains("Raw delimiter concatenation")
         .contains("eviction of every live bucket/index/map")
-        .contains("raw configurable header copied into context");
+        .contains("raw configurable header copied into context")
+        .contains("black-box functional tests through the real HTTP/runtime boundary")
+        .contains("unit tests are supplemental and never sufficient quality proof")
+        .contains("test-only app factory, dependency override, or shared session")
+        .contains("reject the same key with a different payload")
+        .contains("assert every response plus final persisted state");
     assertThat(reviewer)
         .contains("force concurrent callers to observe the initial miss")
+        .contains("reject the same key with a different payload")
+        .contains("transaction races that surface intermittent 500s")
+        .contains("Wildcard CORS combined with credentials")
+        .contains("exact original status, body, and contract-relevant headers")
+        .contains("must not ship predictable/sample bearer tokens")
         .contains("detached cleanup store is not proof")
         .contains("Cancellation must reach blocking core work");
+    assertThat(testPlanner)
+        .contains("exact replay of status, body, and contract-relevant headers")
+        .contains("truly parallel live-server clients/connections")
+        .contains("predictable sample/default credential is not accepted");
+    assertThat(testWorker)
+        .contains("genuinely parallel requests to the live server")
+        .contains("compare the first and replayed status, body, and contract-relevant headers")
+        .contains("intermittent 5xx responses fail the contract");
+  }
+
+  @Test
+  void scaffoldPromptsDoNotMandateUnsafeWildcardCors() throws IOException {
+    for (String scaffold : List.of("all.md", "python.md", "spring-boot.md", "fullstack.md")) {
+      String content = prompt("prompts/scaffolds/" + scaffold);
+      assertThat(content)
+          .as(scaffold)
+          .containsAnyOf("explicit origin allow-list", "explicit allowed origins")
+          .doesNotContain("allowedOriginPatterns(\"*\")")
+          .doesNotContain("CORS_ALLOW_ALL_ORIGINS=True")
+          .doesNotContain("allow_origins=['*']");
+    }
   }
 
   @Test

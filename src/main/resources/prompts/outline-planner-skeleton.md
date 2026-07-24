@@ -11,7 +11,7 @@ A single `submitOutline` tool call with this shape:
   "planTitle": "...",
   "planSummary": "...",  // 1-2 sentences
   "projectType": "...",   // java-spring-boot | node-backend | node-frontend | python | go | rust | cli | react-native-expo | unknown
-  "buildCommand": "...",  // optional, omit to fall back to inference
+  "buildCommand": "...",  // optional direct compile/build only; no installs, servers, cd, pipes, or chained commands; omit to infer
   "smokeTestStrategy": "BUILD" | "PREVIEW_HEALTH" | "TEST_SUITE",
   "runtimeSurface": "HTTP" | "CLI" | "LIBRARY" | "STATIC_WEB" | "MOBILE_APP",
   "requirements": [
@@ -61,6 +61,10 @@ For LARGE and LEGACY specs, use the supplied MAX_TASKS hint as the hard ceiling
 4. **dependsOn** — list prior task IDs that must complete before this one. Sequential plan = T2 dependsOn T1, T3 dependsOn T2, … Where the dependency is real (data model created before service that uses it), say so. Where it isn't (parallel-safe leaves), leave empty.
 
 5. **touchesFiles** — best-guess file paths the task will touch. Optional; the expander revises with full visibility into the spec + sibling tasks.
+   Give each production file one primary owner. A scaffold skeleton owns manifests, directories,
+   migration config, and empty package markers—not placeholder production modules later skeletons
+   implement again. Never invent a closed dependency allow-list; any enumerated dependency set must
+   include the actual drivers/adapters implied by the selected stack.
 
 # Invariants
 

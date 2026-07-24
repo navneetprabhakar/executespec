@@ -218,6 +218,29 @@ class GoalContinuationAdvisorTest {
   }
 
   @Test
+  void rankingReasonsDescribeRetainedCurrentRouteInsteadOfContradictoryTopCandidate() {
+    ModelProviderScore current = score("deepseek", "v4", 86, 70, 0.4);
+    ModelProviderScore top = score("openrouter", "grok", 92, 70, 3.75);
+    when(candidateService.buildCandidates(any())).thenReturn(List.of(current, top));
+
+    var decision =
+        advisor.advise(
+            GoalContinuationAdvisorRequest.builder()
+                .goalDecision(progressing())
+                .currentProvider("deepseek")
+                .currentModel("v4")
+                .taskCategory("GREENFIELD_BUILD")
+                .build());
+
+    assertThat(decision.decision()).isEqualTo(RunContinuationDecision.CONTINUE_SAME_MODEL_PROVIDER);
+    assertThat(decision.selectedCandidate()).contains(current);
+    assertThat(decision.policy().get("rankingReasons"))
+        .asString()
+        .contains("retained deepseek/v4")
+        .contains("top ranked candidate openrouter/grok");
+  }
+
+  @Test
   void providerBreakdownAutoChangesToBenchmarkBackedProviderBeforeHigherUnbenchmarkedCandidate() {
     ModelProviderScore current = score("deepseek", "deepseek-v4-pro", 78, 70, 0.4, true);
     ModelProviderScore higherUnbenchmarked =

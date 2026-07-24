@@ -47,6 +47,25 @@ class RunMapperTaskProofStatusTest {
   }
 
   @Test
+  void intermediateTaskDeferredToFinalValidationRemainsCompleteWithoutOverclaimingDone() {
+    AgentTask deferred =
+        AgentTask.builder()
+            .taskId("T1")
+            .status("COMPLETE")
+            .goalDonenessJson(
+                "{\"state\":\"NOT_DONE_BUT_PROGRESSING\","
+                    + "\"evidence\":[\"downstreamValidationDeferred=true\"]}")
+            .build();
+
+    TaskSummary summary = mapper.toTaskSummary(deferred);
+
+    assertThat(summary.status()).isEqualTo("COMPLETE");
+    assertThat(summary.goalDoneness().path("state").asText()).isEqualTo("NOT_DONE_BUT_PROGRESSING");
+    assertThat(mapper.displayRunStatus("COMPLETE", java.util.List.of(deferred)))
+        .isEqualTo("COMPLETE");
+  }
+
+  @Test
   void completeRunWithAnyUnprovenTaskIsExposedAsPartial() {
     PipelineRun run = new PipelineRun();
     run.setRunId("run-1");

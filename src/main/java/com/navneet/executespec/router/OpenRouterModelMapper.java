@@ -7,13 +7,11 @@ import java.util.Map;
  *
  * <p>OpenRouter exposes the same models as our matrix, but under vendor-prefixed, dot-versioned
  * slugs with no date suffix. The mapping below was verified against the live catalogue
- * (https://openrouter.ai/api/v1/models) on 2026-05-21 — every actively tier-routed matrix model has
- * an exact OpenRouter slug.
+ * (https://openrouter.ai/api/v1/models), most recently on 2026-07-24 — every entry has an exact
+ * account-visible OpenRouter slug and advertises function tools.
  *
  * <p>The allow-list is <strong>explicit</strong>: a model id with no verified OpenRouter equivalent
- * throws rather than silently sending an unverified slug. {@code gemini-3-pro-preview} is omitted
- * on purpose — it has no exact OpenRouter slug (closest is {@code google/gemini-3.1-pro-preview})
- * and is not tier-routed, so routing it through OpenRouter should fail loudly.
+ * throws rather than silently sending an unverified slug.
  */
 public final class OpenRouterModelMapper {
 
@@ -22,13 +20,23 @@ public final class OpenRouterModelMapper {
   private static final Map<String, String> SLUGS =
       Map.ofEntries(
           Map.entry("claude-opus-4-6", "anthropic/claude-opus-4.6"),
+          Map.entry("claude-opus-4-7", "anthropic/claude-opus-4.7"),
+          Map.entry("claude-opus-4-8", "anthropic/claude-opus-4.8"),
           Map.entry("claude-sonnet-4-6", "anthropic/claude-sonnet-4.6"),
+          Map.entry("claude-sonnet-5", "anthropic/claude-sonnet-5"),
+          Map.entry("claude-fable-5", "anthropic/claude-fable-5"),
           Map.entry("claude-haiku-4-5-20251001", "anthropic/claude-haiku-4.5"),
-          Map.entry("claude-haiku-4-5", "anthropic/claude-haiku-4.5"),
           Map.entry("gpt-5.4", "openai/gpt-5.4"),
           Map.entry("gpt-5.4-mini", "openai/gpt-5.4-mini"),
+          Map.entry("gpt-5.5", "openai/gpt-5.5"),
+          Map.entry("gpt-5.6-sol", "openai/gpt-5.6-sol"),
+          Map.entry("gpt-5.6-terra", "openai/gpt-5.6-terra"),
+          Map.entry("gpt-5.6-luna", "openai/gpt-5.6-luna"),
+          Map.entry("gemini-3.1-flash-lite", "google/gemini-3.1-flash-lite"),
+          Map.entry("gemini-3.1-pro-preview", "google/gemini-3.1-pro-preview"),
           Map.entry("gemini-3.5-flash", "google/gemini-3.5-flash"),
-          Map.entry("gemini-3-flash-preview", "google/gemini-3-flash-preview"),
+          Map.entry("gemini-3.5-flash-lite", "google/gemini-3.5-flash-lite"),
+          Map.entry("gemini-3.6-flash", "google/gemini-3.6-flash"),
           // RL-2026-05-048 — DeepSeek + Kimi (OpenRouter-only, ENTERPRISE BYOK). Slugs verified
           // against the live catalogue 2026-05-26. These have no native ExecuteSpec provider
           // client;
@@ -56,7 +64,13 @@ public final class OpenRouterModelMapper {
           Map.entry("glm-5.2", "z-ai/glm-5.2"),
           Map.entry("kimi-k2.7-code", "moonshotai/kimi-k2.7-code"),
           Map.entry("minimax-m2.7", "minimax/minimax-m2.7"),
-          Map.entry("qwen3-coder-next", "qwen/qwen3-coder-next"));
+          Map.entry("qwen3-coder-next", "qwen/qwen3-coder-next"),
+          // 2026-07-24 catalogue refresh. These coding/agentic models are account-visible and
+          // advertise tools + tool_choice; they remain selectable BYOK routes, not tier defaults.
+          Map.entry("kimi-k3", "moonshotai/kimi-k3"),
+          Map.entry("qwen3.7-plus", "qwen/qwen3.7-plus"),
+          Map.entry("qwen3.7-max", "qwen/qwen3.7-max"),
+          Map.entry("grok-4.5", "x-ai/grok-4.5"));
 
   /**
    * @return the OpenRouter slug for a matrix model id

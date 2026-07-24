@@ -74,9 +74,11 @@ public class ShellTool implements Tool {
 
   @Override
   public String description() {
-    return "Executes a sandboxed shell command in the run's workspace. Use for build commands, test"
-        + " runs, package installs, and running your reproduction script. Subshells ($(...))"
-        + " and backticks are blocked. Large output is saved to a file — you'll get a"
+    return "Executes one sandboxed shell command with the run workspace already set as the working"
+        + " directory. Do not prefix with cd, an absolute workspace path, timeout, env, or a shell"
+        + " wrapper. Do not chain commands with &&, ||, ;, or pipes; make separate tool calls. Use"
+        + " buildProject/runTests when they fit. Subshells ($(...)) and backticks are blocked."
+        + " Large output is saved to a file — you'll get a"
         + " preview plus a path you can readFile for the complete output (e.g. a full"
         + " failure trace).";
   }
@@ -84,24 +86,24 @@ public class ShellTool implements Tool {
   @Override
   public String inputSchema() {
     return """
-           {
-             "type": "object",
-             "properties": {
-               "command": {
-                 "type": "string",
-                 "description": "Shell command to execute"
-               },
-               "timeoutSeconds": {
-                 "type": "integer",
-                 "description": "Optional timeout (default 60, max 300)",
-                 "minimum": 1,
-                 "maximum": 300
-               }
-             },
-             "required": ["command"],
-             "additionalProperties": false
-           }
-           """;
+{
+  "type": "object",
+  "properties": {
+    "command": {
+      "type": "string",
+      "description": "One command, relative to the existing workspace. No cd prefix, absolute workspace path, timeout/env/shell wrapper, chaining, pipe, subshell, or backticks."
+    },
+    "timeoutSeconds": {
+      "type": "integer",
+      "description": "Optional timeout (default 60, max 300)",
+      "minimum": 1,
+      "maximum": 300
+    }
+  },
+  "required": ["command"],
+  "additionalProperties": false
+}
+""";
   }
 
   @Override
@@ -158,7 +160,11 @@ public class ShellTool implements Tool {
           sandboxPolicy.validate(command, workspacePath);
       if (!validation.permitted()) {
         return ToolResult.err(
-            ToolResult.ErrorKind.FORBIDDEN, "command blocked by sandbox: " + validation.reason());
+            ToolResult.ErrorKind.FORBIDDEN,
+            "command blocked by sandbox: "
+                + validation.reason()
+                + ". Retry only the underlying command from the existing workspace; do not use cd,"
+                + " absolute workspace paths, timeout/env/shell wrappers, or command chaining.");
       }
     }
 

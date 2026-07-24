@@ -37,6 +37,11 @@ Exact duplicate read/search calls are also served from the first bounded envelop
 dispatched again. This avoids paying for repeated reads while preserving the original result for
 the model to use.
 
+Provider text that serializes DSML/XML-style tool transport instead of returning native structured
+tool calls is never rendered as an answer. The shared `ToolProtocolLeakGuard` suppresses it and
+forces the next project-chat turn to be tool-free; repeated protocol text fails closed to a bounded
+customer-safe explanation.
+
 Project chat is a strict read-only model tool surface. `ProjectChatTools` classifies every tool as
 `PROJECT_READ` / `PROJECT_ANALYSE` / `SPEND_AI` / `WRITE_REPO` and currently binds only
 `PROJECT_READ`; architecture/doc generation and code-review scans remain available through their

@@ -127,6 +127,35 @@ class RunChangeEvidenceServiceTest {
     assertThat(service.meaningfulProductDiffCount(runId)).isZero();
   }
 
+  @Test
+  void managedFreshWorkspaceRemainsProvableAfterRunOutputCommit() throws Exception {
+    String runId = "run-3";
+    Path workspace = temp.resolve(runId);
+    Files.createDirectories(workspace);
+    git(workspace, "init", "-b", "main");
+    git(workspace, "config", "user.email", "test@example.com");
+    git(workspace, "config", "user.name", "Test");
+    Files.writeString(workspace.resolve(".gitignore"), "__pycache__/\n");
+    git(workspace, "add", ".");
+    git(workspace, "commit", "-m", "init agent workspace");
+    Files.createDirectories(workspace.resolve("app"));
+    Files.writeString(workspace.resolve("app/main.py"), "print('ready')\n");
+    git(workspace, "add", ".");
+    git(workspace, "commit", "-m", "V2 run output for " + runId);
+
+    RunRepoSnapshotRepository snapshots = mock(RunRepoSnapshotRepository.class);
+    when(snapshots.findByRunId(runId)).thenReturn(List.of());
+    AgentProperties properties = new AgentProperties();
+    properties.setWorkspace(temp.toString());
+    RunChangeEvidenceService service = new RunChangeEvidenceService(properties, snapshots);
+
+    var evidence = service.inspect(runId, List.of());
+    assertThat(evidence.valid()).isTrue();
+    assertThat(evidence.productFiles())
+        .extracting(RunChangeEvidenceService.ChangedFile::path)
+        .containsExactly("app/main.py");
+  }
+
   private static void git(Path dir, String... args) throws Exception {
     java.util.List<String> command = new java.util.ArrayList<>();
     command.add("git");

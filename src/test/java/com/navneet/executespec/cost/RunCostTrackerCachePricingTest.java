@@ -121,25 +121,25 @@ class RunCostTrackerCachePricingTest {
   // ─
 
   @Test
-  void gemini_cacheRead_billedAtYaml0_35_perM() throws Exception {
-    // YAML 2026-05-21: cached-input-per-1m = $0.35 (10% of $3.50 input).
-    seedPricing("gemini", "gemini-3-pro-preview", 3.50, 0.35, 21.00);
+  void gemini31Pro_cacheRead_usesConservativeLongContextRate() throws Exception {
+    // YAML 2026-07-24 uses Google's >200K tier until stepped pricing is representable.
+    seedPricing("gemini", "gemini-3.1-pro-preview", 4.00, 0.40, 18.00);
     // 1M promptTokenCount (includes 200K cachedContentTokenCount).
-    // Uncached portion = 800K × $3.50 = $2.80.
-    // Cache portion = 200K × $0.35 = $0.07.
-    // Total = $2.87.
-    double cost = price("gemini", "gemini-3-pro-preview", 1_000_000, 0, 0, 200_000);
-    assertThat(cost).isEqualTo(2.87, within(0.001));
+    // Uncached portion = 800K × $4.00 = $3.20.
+    // Cache portion = 200K × $0.40 = $0.08.
+    // Total = $3.28.
+    double cost = price("gemini", "gemini-3.1-pro-preview", 1_000_000, 0, 0, 200_000);
+    assertThat(cost).isEqualTo(3.28, within(0.001));
   }
 
   @Test
-  void gemini_flash_cacheRate_0_05_perM() throws Exception {
-    // YAML 2026-05-21: gemini-3-flash-preview input $0.50, cached $0.05 (10% of input).
-    seedPricing("gemini", "gemini-3-flash-preview", 0.50, 0.05, 3.00);
-    // 100K total in, 50K cached → 50K uncached × $0.50/M + 50K cached × $0.05/M
-    // = $0.025 + $0.0025 = $0.0275
-    double cost = price("gemini", "gemini-3-flash-preview", 100_000, 0, 0, 50_000);
-    assertThat(cost).isEqualTo(0.0275, within(0.0001));
+  void gemini36Flash_cacheRate_0_15_perM() throws Exception {
+    // YAML 2026-07-24: Gemini 3.6 Flash input $1.50, cached $0.15.
+    seedPricing("gemini", "gemini-3.6-flash", 1.50, 0.15, 7.50);
+    // 100K total in, 50K cached → 50K uncached × $1.50/M + 50K cached × $0.15/M
+    // = $0.075 + $0.0075 = $0.0825
+    double cost = price("gemini", "gemini-3.6-flash", 100_000, 0, 0, 50_000);
+    assertThat(cost).isEqualTo(0.0825, within(0.0001));
   }
 
   @Test

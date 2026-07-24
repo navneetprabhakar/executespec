@@ -73,4 +73,26 @@ class BuildCommandResolverRnTest {
     assertThat(cmd.command()).isEqualTo("npx expo prebuild --no-install");
     assertThat(cmd.sourceDescription()).isEqualTo("planner-declared");
   }
+
+  @Test
+  void plannerDependencyInstallIsNotAcceptedAsBuildEvidence(@TempDir Path workspace)
+      throws IOException {
+    Files.writeString(workspace.resolve("pyproject.toml"), "[project]\nname='demo'\n");
+
+    BuildCommand cmd = resolver.resolve(workspace, "pip install -e .");
+
+    assertThat(cmd.command()).isEqualTo("python3 -m compileall -q .");
+    assertThat(cmd.sourceDescription()).isEqualTo("inferred:python");
+  }
+
+  @Test
+  void plannerServerCommandIsNotAcceptedAsBuildEvidence(@TempDir Path workspace)
+      throws IOException {
+    Files.writeString(workspace.resolve("pyproject.toml"), "[project]\nname='demo'\n");
+
+    BuildCommand cmd = resolver.resolve(workspace, "uvicorn app.main:app");
+
+    assertThat(cmd.command()).isEqualTo("python3 -m compileall -q .");
+    assertThat(cmd.sourceDescription()).isEqualTo("inferred:python");
+  }
 }

@@ -440,7 +440,11 @@ public class RunMapper {
       return persistedStatus;
     }
     String goalState = goalDoneness.path("state").asText("");
-    return goalState.isBlank() || "DONE".equals(goalState) ? persistedStatus : "PARTIAL";
+    return goalState.isBlank()
+            || "DONE".equals(goalState)
+            || downstreamValidationDeferred(goalDoneness)
+        ? persistedStatus
+        : "PARTIAL";
   }
 
   String displayRunStatus(String persistedStatus, List<AgentTask> tasks) {
@@ -463,7 +467,7 @@ public class RunMapper {
     try {
       JsonNode proof = objectMapper.readTree(json);
       String state = proof.path("state").asText("");
-      return state.isBlank() || "DONE".equals(state);
+      return state.isBlank() || "DONE".equals(state) || downstreamValidationDeferred(proof);
     } catch (Exception error) {
       log.warn(
           "Malformed goal proof cannot certify run completion: taskId={} ({})",
@@ -471,6 +475,15 @@ public class RunMapper {
           error.getMessage());
       return false;
     }
+  }
+
+  private static boolean downstreamValidationDeferred(JsonNode goalDoneness) {
+    JsonNode evidence = goalDoneness == null ? null : goalDoneness.path("evidence");
+    if (evidence == null || !evidence.isArray()) return false;
+    for (JsonNode item : evidence) {
+      if ("downstreamValidationDeferred=true".equals(item.asText())) return true;
+    }
+    return false;
   }
 
   private static String displayRunStatusReason(

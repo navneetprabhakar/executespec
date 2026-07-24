@@ -60,8 +60,8 @@ public class ToolRegistry {
   private final RemoteToolDispatcher remoteToolDispatcher;
 
   /**
-   * Gates the T1 lean-toolset worker binding ({@code worker.lean-toolset.enabled}). Nullable in
-   * unit tests (null ⇒ flag treated as OFF ⇒ legacy full binding).
+   * Gates the T1 lean-toolset worker binding ({@code worker.lean-toolset.enabled}, graduated ON by
+   * V340). Nullable in unit tests (null ⇒ flag treated as OFF ⇒ legacy full binding).
    */
   private final com.navneet.executespec.config.featureflag.FeatureFlagService featureFlagService;
 
@@ -138,8 +138,8 @@ public class ToolRegistry {
           "backgroundProcess");
 
   /**
-   * Harness-resolution T1 (flag {@code worker.lean-toolset.enabled}, V255, default OFF) — the
-   * canonical toolset for SERVER-SIDE workers. The registry also carries ~25 CLI-parity
+   * Harness-resolution T1 (flag {@code worker.lean-toolset.enabled}, V255, graduated ON by V340) —
+   * the canonical toolset for SERVER-SIDE workers. The registry also carries ~25 CLI-parity
    * alias/fallback tools ({@code read_file} / {@code bash} / {@code grep} / {@code multiEdit} /
    * {@code executeCommand} / {@code lsp} / stubs — see {@link CommandToolConfiguration}); binding
    * those to server workers duplicates the schema 2-3× (schema-token bloat, the RL-2026-05-061

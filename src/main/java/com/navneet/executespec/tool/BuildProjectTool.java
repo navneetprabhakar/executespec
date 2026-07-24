@@ -158,6 +158,27 @@ public class BuildProjectTool implements Tool {
     if (containerId == null && sandboxPolicy != null) {
       ShellSandboxPolicy.ValidationResult validation =
           sandboxPolicy.validate(bc.command(), ctx.workspaceRoot().toString());
+      // A planner command is advisory model output, not an executable contract. If it is unsafe
+      // or malformed, retain the sandbox denial but recover with the deterministic framework
+      // resolver. Otherwise one bad planning token poisons every task smoke and every reviewer
+      // pass even when the repository compiles and its tests pass. Never apply this fallback to an
+      // inferred command: a resolver/policy disagreement there is a platform defect that must stay
+      // visible, and never apply it inside benchmark cleanrooms whose container is the boundary.
+      if (!validation.permitted() && "planner-declared".equals(bc.sourceDescription())) {
+        BuildCommand inferred = resolver.resolve(ctx.workspaceRoot(), null);
+        ShellSandboxPolicy.ValidationResult inferredValidation =
+            sandboxPolicy.validate(inferred.command(), ctx.workspaceRoot().toString());
+        if (inferredValidation.permitted()) {
+          log.warn(
+              "buildProject rejected planner command={} reason={}; using safe {} command={}",
+              bc.command(),
+              validation.reason(),
+              inferred.sourceDescription(),
+              inferred.command());
+          bc = inferred;
+          validation = inferredValidation;
+        }
+      }
       if (!validation.permitted()) {
         log.warn(
             "buildProject blocked by sandbox command={} source={} reason={}",

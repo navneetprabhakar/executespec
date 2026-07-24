@@ -625,7 +625,10 @@ public class ReviewerAgent {
             // the future.cancel(true) interrupt. Belt-and-braces with the worker's interrupt check.
             .wallClockSeconds((int) wallClockSeconds)
             .temperature(0.0)
-            .maxTokensPerCall(8192)
+            // Review turns should produce one bounded tool decision, not another long-form code
+            // generation. This also caps non-DeepSeek providers; native DeepSeek additionally
+            // disables hidden thinking for reviewer task ids in LlmRouter.
+            .maxTokensPerCall(4096)
             // 2026-05-08 — when build is failing pre-review, force completeTask gate to require
             // a successful buildProject call before terminating. Mirrors the patch-mode test gate
             // shape (V182 layer-3). Without this, reviewer can call completeTask after a few edits

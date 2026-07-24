@@ -1396,14 +1396,15 @@ public class RunOrchestrator implements RunControlPort {
 
         if (validatedPin != null) {
           routePinned = true;
-          log.info(
-              "V2 run={} ENTERPRISE per-run pin: {} ({}) overrides org+YAML for all tiers",
-              runId,
-              validatedPin,
-              pinProvider.name());
         }
         RunModelOverrides.bind(
-            RunModelOverrides.withRunPin(orgOverrides, pinProvider, validatedPin));
+            ManagedTierRouteLock.apply(
+                managedAiProperties,
+                modelRegistry,
+                ownerTier,
+                orgOverrides,
+                pinProvider,
+                validatedPin));
       } catch (Exception ovEx) {
         RunModelOverrides.clear();
         boolean exactRoute = runRepo.findById(runId).map(PipelineRun::isRoutePinned).orElse(false);
@@ -2328,11 +2329,11 @@ public class RunOrchestrator implements RunControlPort {
       } else {
         sr = applyFinalVerificationStatus(runId, validationReport.orElse(null), sr);
       }
-      // V1's test generation assumes HTTP endpoints — it runs ApiProber against a
-      // live preview and synthesizes REST tests. For CLI / LIBRARY / STATIC_WEB
-      // projects that does not apply; skip until the dedicated CLI stdin/stdout
-      // harness lands (see docs/runtime-surface-plan).
-      if (!"FAILED".equals(sr.status()) && plan.runtimeSurface() == Plan.RuntimeSurface.HTTP) {
+      // V1's test generation assumes HTTP endpoints — it runs ApiProber against a live preview and
+      // synthesizes REST tests. Skip CLI / LIBRARY / STATIC_WEB until a dedicated stdin/stdout
+      // harness exists (see docs/runtime-surface-plan).
+      if (IndependentTestGenAdmissionPolicy.shouldKickoff(
+          sr.status(), plan.runtimeSurface(), reviewResult)) {
         try {
           String planJson = objectMapper.writeValueAsString(plan);
           boundedTestGenKickoff.kickoff(
@@ -3092,6 +3093,7 @@ public class RunOrchestrator implements RunControlPort {
               // save the entity at all: even cost/token enrichment must not reintroduce the stale
               // status from this thread's persistence context.
               if (terminalClaim == 0) {
+                persistenceWriter.raiseUsageFloor(runId, cost);
                 return;
               }
               // Keep the larger of the live tracker and the persisted attempt-ledger floor. An

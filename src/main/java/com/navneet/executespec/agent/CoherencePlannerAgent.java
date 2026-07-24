@@ -53,7 +53,7 @@ public class CoherencePlannerAgent {
   private final ModelResolver modelResolver;
 
   private static final String PROMPT_PATH = "prompts/coherence-planner.md";
-  private static final int COHERENCE_MAX_TOKENS = 1_500;
+  private static final int COHERENCE_MAX_TOKENS = 3_000;
   private static final int DESCRIPTION_SUMMARY_CHARS = 320;
   private static final int CONTRACT_EVIDENCE_CHARS = 3_000;
 
@@ -133,6 +133,8 @@ public class CoherencePlannerAgent {
                   .stepId("planner.coherence")
                   .temperature(0.0)
                   .maxTokens(COHERENCE_MAX_TOKENS)
+                  .toolChoice(
+                      "deepseek".equalsIgnoreCase(resolved.providerName()) ? "required" : null)
                   .toolsOverride(List.of(patchPlan))
                   .build());
     } catch (Exception e) {
@@ -159,13 +161,23 @@ public class CoherencePlannerAgent {
 
     PatchResult modelResult = applyPatches(planWithSafetyContracts, patchCall.arguments());
     if (!modelResult.validated()) return modelResult;
-    if (deterministic.contractsApplied() == 0) return modelResult;
+    // The model patch can itself append text that contradicts deterministic safety contracts.
+    // Canonicalize once more before persistence so coherence cannot reintroduce the exact unsafe
+    // instruction the pre-pass removed.
+    PlanSafetyContractEnricher.Result postModel =
+        PlanSafetyContractEnricher.enrich(modelResult.patchedPlan());
+    if (deterministic.contractsApplied() == 0 && postModel.contractsApplied() == 0) {
+      return modelResult;
+    }
 
     List<String> summaries = new ArrayList<>(deterministic.summaries());
     summaries.addAll(modelResult.patchSummaries());
+    summaries.addAll(postModel.summaries());
     return new PatchResult(
-        modelResult.patchedPlan(),
-        deterministic.contractsApplied() + modelResult.patchesApplied(),
+        postModel.plan(),
+        deterministic.contractsApplied()
+            + modelResult.patchesApplied()
+            + postModel.contractsApplied(),
         List.copyOf(summaries));
   }
 

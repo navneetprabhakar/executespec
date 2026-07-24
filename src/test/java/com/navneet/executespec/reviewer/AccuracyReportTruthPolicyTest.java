@@ -5,10 +5,42 @@ import static org.assertj.core.api.Assertions.assertThat;
 import java.util.List;
 
 import com.navneet.executespec.reviewer.model.AccuracyReport;
+import com.navneet.executespec.reviewer.model.IssueCategory;
+import com.navneet.executespec.reviewer.model.IssueSeverity;
+import com.navneet.executespec.reviewer.model.ReviewIssue;
 
 import org.junit.jupiter.api.Test;
 
 class AccuracyReportTruthPolicyTest {
+
+  @Test
+  void unresolvedCriticalDeterministicFailurePreventsFalsePerfectScore() {
+    AccuracyReport report =
+        AccuracyReport.builder()
+            .specAdherenceScore(100)
+            .overallAccuracyGrade("A")
+            .implementedRequirements(List.of("all requirements"))
+            .partialRequirements(List.of())
+            .build();
+    ReviewIssue failedTest =
+        ReviewIssue.builder()
+            .id("SYNTH-TEST-DIAGNOSTIC")
+            .severity(IssueSeverity.CRITICAL)
+            .category(IssueCategory.LOGIC_ERROR)
+            .description("Workspace test suite executed with 1 failed test")
+            .fixSucceeded(false)
+            .build();
+
+    AccuracyReportTruthPolicy.enforceDeterministicFailures(report, List.of(failedTest));
+
+    assertThat(report.getSpecAdherenceScore()).isEqualTo(69);
+    assertThat(report.getOverallAccuracyGrade()).isEqualTo("D");
+    assertThat(report.getPartialRequirements())
+        .containsExactly(
+            "Deterministic validation failure: Workspace test suite executed with 1 failed test");
+    assertThat(report.getGradingNotes())
+        .startsWith("Deterministic validation contradicts a complete-adherence claim.");
+  }
 
   @Test
   void admitted_missing_behavior_cannot_remain_unknown_or_grade_a() {

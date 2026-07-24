@@ -268,6 +268,7 @@ public class OpenAiNativeToolClient {
   private ObjectNode buildRequestBody(OpenAiToolCallRequest request) {
     ObjectNode body = objectMapper.createObjectNode();
     body.put("model", request.model());
+    boolean isDeepSeek = request.baseUrl() != null && request.baseUrl().contains("deepseek");
 
     ArrayNode messages = body.putArray("messages");
     // Two input modes:
@@ -307,22 +308,25 @@ public class OpenAiNativeToolClient {
               "Invalid JSON schema for tool '" + tc.getToolDefinition().name() + "'", e);
         }
       }
-      // RL-2026-06-004 — DeepSeek's thinking-mode models 400 on ANY tool_choice
-      // ("Thinking mode does not support this tool_choice"), so NEVER send it on the native
-      // DeepSeek
-      // base-url. OpenAI/OpenRouter, by contrast, NEED the "auto" default sent when tools are
-      // present
-      // (omitting it makes gpt-5.x return text instead of calling tools) — so keep the default
-      // there.
-      boolean isDeepSeek = request.baseUrl() != null && request.baseUrl().contains("deepseek");
-      if (!isDeepSeek) {
+      // DeepSeek rejects tool_choice in thinking mode but supports it when thinking is explicitly
+      // disabled. OpenAI/aggregators always retain their normal auto/required behavior.
+      if (supportsToolChoice(request)) {
         body.put("tool_choice", request.toolChoice() == null ? "auto" : request.toolChoice());
       }
     }
 
-    if (request.temperature() != null) body.put("temperature", request.temperature());
-    if (request.maxCompletionTokens() != null)
-      body.put("max_completion_tokens", request.maxCompletionTokens());
+    // GPT-5.6 exposes reasoning effort rather than sampling temperature. The direct OpenAI and
+    // OpenRouter catalogues omit temperature from this family's supported parameters, so do not
+    // turn an otherwise valid selectable model into a deterministic 400.
+    if (request.temperature() != null && !rejectsSamplingTemperature(request.model())) {
+      body.put("temperature", request.temperature());
+    }
+    if (request.maxCompletionTokens() != null) {
+      // Native DeepSeek's Chat Completions contract uses `max_tokens`; it silently ignored our
+      // OpenAI-specific `max_completion_tokens`, allowing a 1,500-token coherence request to emit
+      // 12,840 billed completion tokens. Aggregators/OpenAI retain the OpenAI field.
+      body.put(isDeepSeek ? "max_tokens" : "max_completion_tokens", request.maxCompletionTokens());
+    }
     if (request.extraBody() != null && !request.extraBody().isEmpty()) {
       for (var entry : request.extraBody().entrySet()) {
         if (entry.getKey() != null && entry.getValue() != null) {
@@ -332,6 +336,18 @@ public class OpenAiNativeToolClient {
     }
 
     return body;
+  }
+
+  private static boolean rejectsSamplingTemperature(String model) {
+    return model != null && model.startsWith("gpt-5.6-");
+  }
+
+  static boolean supportsToolChoice(OpenAiToolCallRequest request) {
+    boolean isDeepSeek = request.baseUrl() != null && request.baseUrl().contains("deepseek");
+    if (!isDeepSeek) return true;
+    Object thinking = request.extraBody() == null ? null : request.extraBody().get("thinking");
+    if (!(thinking instanceof Map<?, ?> thinkingMap)) return false;
+    return "disabled".equals(thinkingMap.get("type"));
   }
 
   /**

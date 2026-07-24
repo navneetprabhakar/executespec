@@ -83,7 +83,7 @@ public class OutlinePlannerAgent {
     },
     "buildCommand": {
       "type": "string",
-      "description": "Explicit build command, or omit to fall back to framework inference"
+      "description": "Optional direct compile/build command using the repository's existing toolchain. Never install dependencies, start a server, chain shell commands, or invent wrappers; omit to use framework inference."
     },
     "smokeTestStrategy": {
       "type": "string",
@@ -278,6 +278,11 @@ public class OutlinePlannerAgent {
         plan = planOnce(req, OutlinePlannerSchemaRepairPolicy.FEEDBACK, mode);
       }
 
+      // Scope integrity stays active even when the broader validation-v3 graph gate is disabled.
+      if (mode == Mode.FULL_PLAN) {
+        plan = PlannerScopeIntegrityPolicy.enforce(plan, feedback -> planOnce(req, feedback, mode));
+      }
+
       // v2.5.11 (Validation v3 / Pillar 1) — strict validation + one retry.
       // Gated by feature flag; off → log-only behaviour. SKELETON_ONLY mode
       // skips this — meetsRequirements is intentionally blank pre-expansion;
@@ -406,7 +411,7 @@ public class OutlinePlannerAgent {
                           .maxTokens(maxTokens)
                           .toolsOverride(List.of(submitOutline))
                           // 2026-05-07 — Gemini's HTTP read-timeout default is 60s, but
-                          // gemini-3-pro-preview is a thinking model and a single multi-task
+                          // Gemini thinking models can take longer on a single multi-task
                           // plan call can take 90-120s wall on warm-cache, much longer on
                           // cold-cache. The 60s ceiling tripped on cmatrix run a0b81542
                           // (gemini, 2026-05-07) — error "Request timed out: null" — and the

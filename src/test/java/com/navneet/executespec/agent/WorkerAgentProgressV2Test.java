@@ -188,17 +188,35 @@ class WorkerAgentProgressV2Test {
 
   @Test
   void v2_lets_novel_investigation_run_and_complete() {
-    // Same six novel calls + same tight thresholds — novelty resets the counter each iter, so
-    // the worker survives to its completeTask.
+    // Six different SUCCESSFUL investigation calls reset the counter, so the worker survives.
     List<ChatResponse> seq = new ArrayList<>();
     for (int i = 0; i < 6; i++) {
       seq.add(responseWithCalls(toolCall("shell", "{\"command\":\"cat file" + i + ".txt\"}")));
     }
     seq.add(responseWithCalls(toolCall("completeTask", "{\"summary\":\"done\"}")));
-    WorkerAgent w = newWorker(seq);
+    Tool shell =
+        successfulTool(
+            "shell",
+            "{\"type\":\"object\",\"properties\":{\"command\":{\"type\":\"string\"}}}",
+            "exit=0\ninspected");
+    WorkerAgent w = newWorker(seq, List.of(shell));
     WorkerResult r = w.run(req(true, 2, 6));
     assertEquals(WorkerResult.Outcome.COMPLETED, r.outcome());
     assertEquals(7, r.iterations(), "six novel investigation iters + completeTask.");
+  }
+
+  @Test
+  void v2_doesNotTreatNovelFailingCommandsAsProgress() {
+    List<ChatResponse> seq = new ArrayList<>();
+    for (int i = 0; i < 6; i++) {
+      seq.add(responseWithCalls(toolCall("shell", "{\"command\":\"blocked variant " + i + "\"}")));
+    }
+    seq.add(textOnly("salvage declines"));
+
+    WorkerResult result = newWorker(seq).run(req(true, 2, 6));
+
+    assertEquals(WorkerResult.Outcome.COMPLETED_BY_STAGNATION, result.outcome());
+    assertEquals(6, result.iterations());
   }
 
   @Test

@@ -154,17 +154,9 @@ mutate git state (`git add`, `git commit`, `git reset`, `git stash`,
 
 BUILD ONLY WHAT THE TASK ASKS — match complexity to the requirement (applies to
 ALL tasks, new features as well as fixes):
-  - Write the minimum implementation that satisfies the task. Do not add options,
-    config, abstraction, or "future-proofing" the task did not request.
-  - No defensive code for cases that cannot occur given how the code is called.
-  - Validate inputs only at real trust boundaries (external/untrusted input); trust
-    your own internal callers rather than re-checking between private functions.
-  - Do NOT add comments or docstrings to code you did not change. Any new comment
-    states the non-obvious WHY, never a restatement of what the code does.
-  - If code becomes unused, delete it outright — do not comment it out or rename it
-    to `_unused`. Dead code left behind is not cleanup.
-  - Prefer a few similar concrete lines over a premature abstraction; add a helper
-    only when duplication is real and repeated, not merely anticipated.
+"""
+          + WorkerScopeQualityPrompt.TEXT
+          + """
 This does NOT waive the test requirement below — tests that exercise what you build
 are part of the task, not gold-plating.
 
@@ -213,9 +205,9 @@ Report honestly + recover deliberately:
 TESTS ARE PART OF THE TASK — NOT OPTIONAL.
 If your task adds or changes a function, endpoint, route, or module, you MUST
 also create or extend a test that exercises it before calling completeTask:
-  - At least one happy-path test per public function / endpoint you touched.
-  - At least one error / edge-case test (invalid input, not-found, failure path)
-    where the spec or the code has an obvious failure mode.
+"""
+          + WorkerScopeQualityPrompt.TEST_TEXT
+          + """
   - Put tests in the project's conventional location + framework (pytest
     `test_*.py`, Jest `*.test.ts` / `__tests__/`, Go `*_test.go`, JUnit
     `src/test/java/...`). If no test scaffold exists, create the minimal one.
@@ -885,7 +877,7 @@ to boot — skip it for those.""";
         (primary == null ? 0 : primary.iterations()) + (retry == null ? 0 : retry.iterations());
     taskOutcomeMetricService.record(
         runId,
-        taskCategory(task),
+        TaskCategoryClassifier.classify(task),
         task.complexity().name(),
         taskLanguage(task),
         outcome.retryAttempted() ? 2 : 1,
@@ -1740,7 +1732,7 @@ to boot — skip it for those.""";
           List.of(),
           List.of("route pinned; initial routing kept the explicit provider/model"));
     }
-    String category = taskCategory(task);
+    String category = TaskCategoryClassifier.classify(task);
     try {
       return initialRoutingService.decide(
           currentProvider,
@@ -2193,7 +2185,7 @@ to boot — skip it for those.""";
       broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "COMPLETE"));
       GoalTaskDecision goalDecision =
           emitGoalDecision(
-              runId, task, primary, status, null, softWarnReason, cfg.provider, cfg.model);
+              runId, task, primary, status, null, softWarnReason, cfg.provider, cfg.model, true);
       return TaskOutcome.builder()
           .taskId(task.id())
           .taskTitle(task.title())
@@ -2663,9 +2655,38 @@ to boot — skip it for those.""";
       String failureReason,
       String dispatchedProvider,
       String dispatchedModel) {
+    return emitGoalDecision(
+        runId,
+        task,
+        workerResult,
+        finalStatus,
+        smokePassed,
+        failureReason,
+        dispatchedProvider,
+        dispatchedModel,
+        false);
+  }
+
+  private GoalTaskDecision emitGoalDecision(
+      String runId,
+      PlannedTask task,
+      WorkerResult workerResult,
+      TaskOutcome.Status finalStatus,
+      Boolean smokePassed,
+      String failureReason,
+      String dispatchedProvider,
+      String dispatchedModel,
+      boolean downstreamValidationDeferred) {
     GoalDonenessDecision decision =
         goalDonenessEvaluator.evaluate(
-            buildGoalEvidence(runId, task, workerResult, finalStatus, smokePassed, failureReason));
+            buildGoalEvidence(
+                runId,
+                task,
+                workerResult,
+                finalStatus,
+                smokePassed,
+                failureReason,
+                downstreamValidationDeferred));
     GoalContinuationPolicyDecision continuationDecision =
         decideContinuation(
             runId,
@@ -2855,7 +2876,7 @@ to boot — skip it for those.""";
       String provider,
       String model,
       boolean providerBehaviorPoor) {
-    String taskCategory = taskCategory(task);
+    String taskCategory = TaskCategoryClassifier.classify(task);
     double requiredQualityThreshold = requiredGoalQualityThreshold(taskCategory);
     boolean confirmationRequired = requireConfirmationBeforeExpensiveContinuation(runId);
     boolean benchmarkPriorRequired = requireBenchmarkPriorForAutomaticContinuation(runId);
@@ -3081,108 +3102,8 @@ to boot — skip it for those.""";
     }
   }
 
-  private static String taskCategory(PlannedTask task) {
-    if (task == null || task.complexity() == null) {
-      return "TASK_MEDIUM";
-    }
-    String text = normalizedTaskText(task);
-    if (containsAny(text, "swe-bench", "terminal-bench", "programbench", "benchmark")) {
-      return "BENCHMARK_PATCH";
-    }
-    if (touchesTestFiles(task)
-        || containsAny(
-            text,
-            "failing test",
-            "test failure",
-            "fix test",
-            "unit test",
-            "integration test",
-            "pytest",
-            "junit",
-            "jest")) {
-      return "TEST_FIX";
-    }
-    if (containsAny(
-        text,
-        "bug",
-        "fix",
-        "error",
-        "exception",
-        "failure",
-        "regression",
-        "broken",
-        "failing",
-        "crash")) {
-      return "BUG_FIX";
-    }
-    if (containsAny(
-        text, "refactor", "cleanup", "clean up", "rename", "extract", "restructure", "decompose")) {
-      return "REFACTOR";
-    }
-    if (containsAny(text, "terminal", "cli", "command-line", "command line", "shell", "script")) {
-      return "TERMINAL_TASK";
-    }
-    if (containsAny(
-        text, "read-only", "read only", "investigate", "analyze", "analyse", "explain")) {
-      return "READ_ONLY_HELP";
-    }
-    if (containsAny(text, "create", "implement", "build", "add", "new", "scaffold", "generate")) {
-      return "GREENFIELD_BUILD";
-    }
-    if (!taskValues(task.touchesFiles()).isEmpty()) {
-      return "PROJECT_PATCH";
-    }
-    return "TASK_" + task.complexity().name();
-  }
-
-  private static String normalizedTaskText(PlannedTask task) {
-    StringBuilder text = new StringBuilder();
-    appendTaskText(text, task.title());
-    appendTaskText(text, task.description());
-    taskValues(task.hardConstraints()).forEach(value -> appendTaskText(text, value));
-    taskValues(task.touchesFiles()).forEach(value -> appendTaskText(text, value));
-    return text.toString().toLowerCase(Locale.ROOT);
-  }
-
   private static List<String> taskValues(List<String> values) {
     return values == null ? List.of() : values;
-  }
-
-  private static void appendTaskText(StringBuilder text, String value) {
-    if (value != null && !value.isBlank()) {
-      text.append(' ').append(value);
-    }
-  }
-
-  private static boolean containsAny(String text, String... needles) {
-    if (text == null || text.isBlank()) {
-      return false;
-    }
-    for (String needle : needles) {
-      if (needle != null && !needle.isBlank() && text.contains(needle)) {
-        return true;
-      }
-    }
-    return false;
-  }
-
-  private static boolean touchesTestFiles(PlannedTask task) {
-    return taskValues(task.touchesFiles()).stream()
-        .map(value -> value == null ? "" : value.toLowerCase(Locale.ROOT))
-        .anyMatch(
-            path ->
-                path.contains("/test/")
-                    || path.contains("/tests/")
-                    || path.contains("__tests__")
-                    || path.endsWith("test.java")
-                    || path.endsWith("tests.java")
-                    || path.endsWith(".test.ts")
-                    || path.endsWith(".test.tsx")
-                    || path.endsWith(".spec.ts")
-                    || path.endsWith(".spec.tsx")
-                    || path.endsWith("_test.go")
-                    || path.startsWith("test_")
-                    || path.endsWith("_test.py"));
   }
 
   private static Map<String, Object> goalDecisionData(GoalDonenessDecision decision) {
@@ -3663,6 +3584,18 @@ to boot — skip it for those.""";
       TaskOutcome.Status finalStatus,
       Boolean smokePassed,
       String failureReason) {
+    return buildGoalEvidence(
+        runId, task, workerResult, finalStatus, smokePassed, failureReason, false);
+  }
+
+  private GoalEvidence buildGoalEvidence(
+      String runId,
+      PlannedTask task,
+      WorkerResult workerResult,
+      TaskOutcome.Status finalStatus,
+      Boolean smokePassed,
+      String failureReason,
+      boolean downstreamValidationDeferred) {
     int fileWrites = workerResult == null ? 0 : countFileWrites(workerResult.toolCallLog());
     int meaningfulProductDiffs = meaningfulProductDiffCount(runId, workerResult, fileWrites);
     RunCostTracker.Snapshot cost = taskCostSnapshot(runId, task.id());
@@ -3677,8 +3610,8 @@ to boot — skip it for those.""";
     boolean statusClean =
         finalStatus == TaskOutcome.Status.SUCCESS
             || finalStatus == TaskOutcome.Status.SUCCESS_AFTER_RETRY;
-    String category = taskCategory(task);
-    boolean meaningfulDiffRequired = requiresMeaningfulDiff(category);
+    String category = TaskCategoryClassifier.classify(task);
+    boolean meaningfulDiffRequired = TaskCategoryClassifier.requiresMeaningfulDiff(category, task);
     boolean requiredOutputsPresent =
         validationPassed && statusClean && (!meaningfulDiffRequired || meaningfulProductDiffs > 0);
     List<String> completed = new ArrayList<>();
@@ -3727,6 +3660,9 @@ to boot — skip it for those.""";
     evidence.add("meaningfulProductDiffs=" + meaningfulProductDiffs);
     if (smokePassed != null) {
       evidence.add("smokePassed=" + smokePassed);
+    }
+    if (downstreamValidationDeferred) {
+      evidence.add("downstreamValidationDeferred=true");
     }
 
     String budgetCeilingReason =
@@ -3797,11 +3733,6 @@ to boot — skip it for those.""";
         .evidence(evidence)
         .risks(risksFor(workerResult, failureReason, budgetCeilingReason, completionConfidenceLow))
         .build();
-  }
-
-  static boolean requiresMeaningfulDiff(String category) {
-    if (category == null) return true;
-    return !"READ_ONLY_HELP".equals(category);
   }
 
   private int meaningfulProductDiffCount(

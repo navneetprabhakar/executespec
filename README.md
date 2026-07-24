@@ -28,7 +28,7 @@ test-runner caches such as `__pycache__`, `.pytest_cache`, and compiled Python b
 | Framework           | Spring Boot 3.5.14 (Web, Data JPA, Security, OAuth2 client, Mail, Thymeleaf, Actuator, AOP, Validation, Retry, Data Redis) | [`pom.xml`](pom.xml) deps 1, 5, 14–20, 30, 36–39, 60 |
 | LLM SDK             | Spring AI 1.1.6 starters for Anthropic, OpenAI, Google GenAI                        | [`pom.xml`](pom.xml) deps 2–4                                                    |
 | LLM auto-config     | Provider auto-configurations disabled in favor of manual `AgentModelConfig` beans   | [`src/main/java/com/navneet/executespec/ExecutespecApplication.java`](src/main/java/com/navneet/executespec/ExecutespecApplication.java) |
-| Database            | PostgreSQL (Cloud SQL in prod), Flyway migrations head V304                         | [`pom.xml`](pom.xml) deps 6–8, `src/main/resources/db/migration/`                 |
+| Database            | PostgreSQL (Cloud SQL in prod), Flyway migrations head V340                         | [`pom.xml`](pom.xml) deps 6–8, `src/main/resources/db/migration/`                 |
 | Cache / lock        | Redis (Lettuce), ShedLock 7.7.0                                                     | [`pom.xml`](pom.xml) deps 30–32                                                  |
 | Auth                | JJWT 0.13.0 + Spring Security OAuth2 client (Google, GitHub)                        | [`pom.xml`](pom.xml) deps 14–18                                                  |
 | Billing             | Stripe 32.1.0, Razorpay (HMAC), invoice PDFs via OpenPDF 2.0.3 + flying-saucer 9.4.0 | [`pom.xml`](pom.xml) deps 21–22, 56; HMAC via commons-codec 1.22.0 (dep 35)     |
@@ -45,6 +45,20 @@ test-runner caches such as `__pycache__`, `.pytest_cache`, and compiled Python b
 
 Python previews resolve bounded nested application packages: a FastAPI app declared in
 `app/main.py` is launched as `app.main:app` for both VM/Docker and Cloud Run preview commands.
+
+### Current model catalog
+
+The 2026-07-24 provider-catalog refresh adds account-visible Claude Fable 5, GPT-5.6
+Sol/Terra/Luna, Gemini 3.6 Flash, Gemini 3.5 Flash-Lite, Gemini 3.1 Flash-Lite, and the latest
+curated OpenRouter agentic routes (Kimi K3, Qwen 3.7 Plus/Max, Grok 4.5). Native DeepSeek V4
+Pro/Flash remains current. The Fireworks allow-list now contains only the four serverless coding
+models its live account catalog actually returns: DeepSeek V4 Pro, Kimi K2.6, GLM 5.1, and GLM
+5.2; persisted removed IDs resolve to a live replacement.
+
+New frontier routes are selectable but not tier defaults until they pass ExecuteSpec's
+output-quality evaluation. Models with stepped long-context pricing use the conservative upper
+rate so managed-AI usage cannot be undercharged. Existing tier defaults remain benchmark-based: Sonnet 5, GPT-5.4,
+Gemini 3.5 Flash/3.5 Flash-Lite, native DeepSeek V4, and the surviving Fireworks routes.
 
 ## Repository layout
 
@@ -69,7 +83,7 @@ Python previews resolve bounded nested application packages: a FastAPI app decla
 │   └── ... (76 package roots total under com.navneet.executespec)
 ├── src/main/resources/
 │   ├── application.yml           Single source of truth for model matrix, provider routes, pricing, failover
-│   ├── db/migration/             Flyway V*.sql (head V304, immutable post-apply)
+│   ├── db/migration/             Flyway V*.sql (head V340, immutable post-apply)
 │   ├── prompts/                  External LLM prompts (assembled by PromptAssembler)
 │   └── static/                   Vite build output served by Spring Boot
 ├── src/test/java/                Unit + ArchUnit guard tests (e.g. AccessGuardCoverageTest)
@@ -221,6 +235,9 @@ Validation evidence is fail-closed: code-changing tasks require an admitted base
 diff attributable to that task, and persisted executable verification distinguishes `PASSED`,
 `BUILD_ONLY`, `FAILED`, and `UNAVAILABLE`. The Web evidence ledger exposes those deterministic facts;
 the headline score is a summary and must not be treated as independent proof.
+Post-run Ask follows the same rule: configured build success is not test success, missing concrete
+test counts remain an explicit verification gap, and provider tool-protocol markup is suppressed
+rather than displayed to customers.
 
 **Frontend**
 

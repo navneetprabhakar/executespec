@@ -5,7 +5,9 @@ SPRING_BOOT (Java + Spring Boot) — complexity MEDIUM:
 Use base package from pom.xml groupId. Create IN ORDER: 1) pom.xml with ALL dependencies
 (spring-boot-starter-web, spring-boot-starter-data-jpa, postgresql/h2, lombok, etc.).
 2) @SpringBootApplication main class. 3) application.yml (server port, datasource host='db',
-user='preview', database='preview'). 4) @Configuration CORS class (allowedOriginPatterns("*")).
+environment-configurable datasource settings with documented local defaults). 4) @Configuration
+CORS class using an explicit origin allow-list from configuration; never combine wildcard origins
+with credentials.
 
 JAVA (no Spring Boot) — complexity LOW:
 Create pom.xml + Main.java entry point. Declare base package in groupId.
@@ -18,11 +20,13 @@ NODE_BACKEND — complexity LOW:
 Create package.json with all server dependencies. Declare ESM or CJS module system.
 
 PYTHON (FastAPI/Flask) — complexity LOW:
-Create requirements.txt + main.py/app.py with app instance, CORS configured, server bound to 0.0.0.0.
+Create requirements.txt + main.py/app.py with app instance, environment-configurable explicit-origin
+CORS (safe local defaults; never wildcard origins with credentials), server bound to 0.0.0.0.
 
 PYTHON (Django) — complexity MEDIUM:
-Create ONLY 5 files: requirements.txt, manage.py, <project>/settings.py (ALLOWED_HOSTS=['*'],
-DB host='db' user='preview' database='preview'), <project>/urls.py, <project>/wsgi.py.
+Create ONLY 5 files: requirements.txt, manage.py, <project>/settings.py (allowed hosts, CORS origins,
+and database settings from environment with documented safe local defaults), <project>/urls.py,
+<project>/wsgi.py.
 Do NOT create app directories (__init__.py, models.py, etc.) — those go in first domain task.
 
 GO — complexity LOW:

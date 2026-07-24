@@ -74,6 +74,7 @@ import {
   testRerunState,
   taskBudgetFacts,
   taskGoalLine,
+  testResultSummary,
   type Tab,
   toLines,
   usd,
@@ -934,6 +935,7 @@ export default function IdeRunResult() {
   const measuredTestsTotal = tests?.totalTests ?? report?.testsTotal ?? null;
   const measuredTestsPassed = tests?.passed ?? report?.testsPassed ?? null;
   const testsMeasured = measuredTestsTotal != null && measuredTestsTotal > 0;
+  const testsSummary = tests ? testResultSummary(tests) : null;
   const scoredWithoutMeasuredTests = score != null && !testsMeasured;
   const prUrl = run?.scmPrUrl || run?.githubPrUrl || null;
   const active = activeFile ? cache[activeFile] : null;
@@ -2860,21 +2862,25 @@ export default function IdeRunResult() {
               <>
                 <div className='ide-card' style={{display: 'flex', gap: 18}}>
                   <div>
-                    <div style={{fontSize: 22, fontWeight: 700}}>
-                      {tests.passed}/{tests.totalTests}
+                    <div style={{fontSize: 22, fontWeight: 700}}>{testsSummary?.headline}</div>
+                    <div style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}>
+                      {testsSummary?.label}
                     </div>
-                    <div style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}>passed</div>
                   </div>
-                  <div>
-                    <div style={{fontSize: 22, fontWeight: 700, color: 'var(--ide-red)'}}>
-                      {tests.failed}
-                    </div>
-                    <div style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}>failed</div>
-                  </div>
-                  <div>
-                    <div style={{fontSize: 22, fontWeight: 700}}>{tests.errors}</div>
-                    <div style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}>errors</div>
-                  </div>
+                  {testsSummary?.measured && (
+                    <>
+                      <div>
+                        <div style={{fontSize: 22, fontWeight: 700, color: 'var(--ide-red)'}}>
+                          {tests.failed}
+                        </div>
+                        <div style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}>failed</div>
+                      </div>
+                      <div>
+                        <div style={{fontSize: 22, fontWeight: 700}}>{tests.errors}</div>
+                        <div style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}>errors</div>
+                      </div>
+                    </>
+                  )}
                   <div
                     style={{
                       marginLeft: 'auto',
@@ -2886,6 +2892,11 @@ export default function IdeRunResult() {
                     {fmtDur(tests.executionDurationMs)}
                   </div>
                 </div>
+                {testsSummary?.explanation && (
+                  <div className='ide-card' style={{marginTop: 10, color: 'var(--ide-yellow)'}}>
+                    {testsSummary.explanation}
+                  </div>
+                )}
 
                 {/* Test plan — generated test tasks + compile status. */}
                 {(testPlan?.tasks?.length ?? 0) > 0 && (

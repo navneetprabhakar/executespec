@@ -75,16 +75,26 @@ public class RouterTestController {
                       + "and stop — do not emit explanatory text."),
               new UserMessage("Read the file 'secret.txt' and report what it contains."));
 
-      // Same matrix as Phase 0's /native-tools/all (excluding the gpt-4o controls
-      // since they're not in the V2 production matrix).
+      // Current non-frontier tier/default cohort across every configured provider. Frontier models
+      // remain selectable but are intentionally excluded from this spend-bearing operator smoke.
       List<String[]> matrix =
           List.of(
-              new String[] {"anthropic", "claude-sonnet-4-6"},
+              new String[] {"anthropic", "claude-sonnet-5"},
               new String[] {"anthropic", "claude-haiku-4-5-20251001"},
-              new String[] {"gemini", "gemini-2.5-flash"},
-              new String[] {"gemini", "gemini-3-flash-preview"},
+              new String[] {"gemini", "gemini-3.1-flash-lite"},
+              new String[] {"gemini", "gemini-3.5-flash-lite"},
+              new String[] {"gemini", "gemini-3.5-flash"},
+              new String[] {"gemini", "gemini-3.6-flash"},
               new String[] {"openai", "gpt-5.4"},
-              new String[] {"openai", "gpt-5.4-mini"});
+              new String[] {"openai", "gpt-5.4-mini"},
+              new String[] {"openai", "gpt-5.6-terra"},
+              new String[] {"openai", "gpt-5.6-luna"},
+              new String[] {"deepseek", "deepseek-v4-pro-native"},
+              new String[] {"deepseek", "deepseek-v4-flash-native"},
+              new String[] {"openrouter", "deepseek-v4-pro"},
+              new String[] {"openrouter", "deepseek-v4-flash"},
+              new String[] {"fireworks", "deepseek-v4-pro-fw"},
+              new String[] {"fireworks", "kimi-k2p6-fw"});
 
       List<Map<String, Object>> results = new ArrayList<>();
       for (String[] pair : matrix) {

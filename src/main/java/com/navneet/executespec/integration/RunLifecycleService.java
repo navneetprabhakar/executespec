@@ -315,6 +315,15 @@ public class RunLifecycleService {
 
     log.info("RunOrchestrator cancel: run={} prev={}", runId, status);
 
+    // Claim cancellation before touching transient state. A reviewer/validation thread may reach
+    // terminal at the same time; only one terminal writer is allowed to win, and this narrow query
+    // avoids saving a stale PipelineRun entity over concurrent usage/evidence fields.
+    if (runRepo.claimTerminalTransitionWithReasons(
+            runId, "CANCELLED", null, "Cancelled by user from status " + status, Instant.now())
+        != 1) {
+      return false;
+    }
+
     // Resolve the durable gate for auditability, then release the transient Redis signal. Approval
     // never blocks a pipeline thread; it queues a fresh continuation from the persisted run row.
     try {
@@ -324,24 +333,20 @@ public class RunLifecycleService {
       log.debug("cancel: plan gate signal failed (likely no gate open): {}", e.getMessage());
     }
 
-    // Persist + SSE so the UI reflects the cancel immediately, even if the
-    // pipeline thread hasn't unwound yet.
-    run.setStatus("CANCELLED");
-    run.setCompletedAt(Instant.now());
-    if (run.getFailureReason() == null) {
-      run.setFailureReason("Cancelled by user from status " + status);
-    }
-    runRepo.save(run);
+    // Interrupt before snapshotting so an in-flight provider request is asked to unwind first.
+    // The tracker snapshot is an immediate floor; the pipeline's late terminate path raises it
+    // again after all already-recorded calls have settled.
+    java.util.concurrent.Future<?> future = controlPort.removeActiveRun(runId);
+    if (future != null) future.cancel(true);
+    tokenAttributor.reconcileRunTotalsFromLedger(runId);
+    RunCostTracker.Snapshot cost = costTracker.snapshot(runId);
+    persistenceWriter.raiseUsageFloor(runId, cost);
+
+    // SSE makes the UI reflect the already-persisted cancellation immediately.
     broadcaster.emit(runId, RunEvent.runStatus(runId, "CANCELLED"));
     broadcaster.emit(runId, RunEvent.complete(runId, "CANCELLED"));
     broadcaster.complete(runId);
     metrics.recordRunOutcome("CANCELLED");
-
-    // Interrupt the pipeline thread as a backstop. The pipeline itself is
-    // not cancellation-aware at every step, so it may continue briefly —
-    // but its terminal writes are no-ops because the run is already terminal.
-    java.util.concurrent.Future<?> future = controlPort.removeActiveRun(runId);
-    if (future != null) future.cancel(true);
     return true;
   }
 

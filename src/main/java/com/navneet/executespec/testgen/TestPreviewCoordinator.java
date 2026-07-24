@@ -107,7 +107,10 @@ public class TestPreviewCoordinator {
                           e);
                       eventPublisher.publishEvent(
                           new TestExecutionCompletedEvent(
-                              event.runId(), event.testPlanId(), TestExecutionSummary.empty()));
+                              event.runId(),
+                              event.testPlanId(),
+                              TestExecutionSummary.unavailable(
+                                  "headless-test-failed", "Headless test execution failed")));
                     } finally {
                       stateMap.remove(event.runId());
                     }
@@ -204,7 +207,8 @@ public class TestPreviewCoordinator {
                         new TestExecutionCompletedEvent(
                             runId,
                             stateMap.containsKey(runId) ? stateMap.get(runId).getTestPlanId() : 0L,
-                            TestExecutionSummary.empty()));
+                            TestExecutionSummary.unavailable(
+                                "preview-start-failed", "Preview failed to start")));
                     stateMap.remove(runId);
                   }
                 }));
@@ -260,7 +264,11 @@ public class TestPreviewCoordinator {
                       // Publish empty summary so the validation report future isn't blocked
                       eventPublisher.publishEvent(
                           new TestExecutionCompletedEvent(
-                              runId, state.getTestPlanId(), TestExecutionSummary.empty()));
+                              runId,
+                              state.getTestPlanId(),
+                              TestExecutionSummary.unavailable(
+                                  "functional-test-execution-failed",
+                                  "Functional test execution failed")));
                     } finally {
                       stateMap.remove(runId);
                     }
@@ -295,7 +303,10 @@ public class TestPreviewCoordinator {
               runId, null, "[TestExec] Test execution skipped — tests did not compile in time"));
       eventPublisher.publishEvent(
           new TestExecutionCompletedEvent(
-              runId, state.getTestPlanId(), TestExecutionSummary.empty()));
+              runId,
+              state.getTestPlanId(),
+              TestExecutionSummary.unavailable(
+                  "functional-tests-not-compiled", "Functional tests did not compile in time")));
       stateMap.remove(runId);
     } else if (state != null && !state.isExecutionStarted() && state.isTestsReady()) {
       // Tests are ready and preview is starting (or about to start).

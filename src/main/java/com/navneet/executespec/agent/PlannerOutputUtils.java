@@ -255,12 +255,20 @@ public final class PlannerOutputUtils {
 
     Set<String> covered = new HashSet<>();
     Set<String> unknownRefs = new LinkedHashSet<>();
+    Set<String> unownedTasks = new LinkedHashSet<>();
     for (PlannedTask t : plan.tasks()) {
-      if (t.meetsRequirements() == null) continue;
+      if (t.meetsRequirements() == null || t.meetsRequirements().isEmpty()) {
+        unownedTasks.add(t.id() + " (" + truncate(t.title(), 60) + ")");
+        continue;
+      }
       for (String refId : t.meetsRequirements()) {
         if (!ids.contains(refId)) unknownRefs.add(refId);
         else covered.add(refId);
       }
+    }
+    if (!unownedTasks.isEmpty()) {
+      out.add(
+          "Tasks with no requirement ownership (likely invented deliverables): " + unownedTasks);
     }
     if (!unknownRefs.isEmpty()) {
       out.add("Task meetsRequirements references unknown ids: " + unknownRefs);
@@ -270,6 +278,39 @@ public final class PlannerOutputUtils {
     if (!uncovered.isEmpty()) {
       out.add("Requirements not covered by any task: " + uncovered);
     }
+    String requirementText =
+        reqs.stream()
+            .map(RequirementSpec::text)
+            .filter(java.util.Objects::nonNull)
+            .map(value -> value.toLowerCase(Locale.ROOT))
+            .collect(java.util.stream.Collectors.joining("\n"));
+    if (!explicitlyRequestsStandaloneApiSpecification(requirementText)) {
+      Set<String> inventedOpenApi = new LinkedHashSet<>();
+      for (PlannedTask task : plan.tasks()) {
+        boolean ownsOpenApiFile =
+            task.touchesFiles() != null
+                && task.touchesFiles().stream()
+                    .filter(java.util.Objects::nonNull)
+                    .map(value -> value.replace('\\', '/').toLowerCase(Locale.ROOT))
+                    .anyMatch(
+                        value ->
+                            value.endsWith("/openapi.yaml")
+                                || value.endsWith("/openapi.yml")
+                                || value.equals("openapi.yaml")
+                                || value.equals("openapi.yml")
+                                || value.endsWith("/swagger.json")
+                                || value.equals("swagger.json"));
+        if (ownsOpenApiFile) inventedOpenApi.add(task.id());
+      }
+      if (!inventedOpenApi.isEmpty()) {
+        out.add(
+            "Unrequested OpenAPI/Swagger deliverable in task(s) "
+                + inventedOpenApi
+                + "; framework-generated runtime docs are not authorization to create a"
+                + " standalone specification file.");
+      }
+    }
+    out.addAll(PlanTaskOwnershipValidator.validate(plan.tasks()));
 
     Plan.RuntimeSurface surface = plan.runtimeSurface();
     // RR-1220 — STATIC_WEB was blanket-exempt from the strict test gate even though the planner
@@ -299,6 +340,39 @@ public final class PlannerOutputUtils {
       }
     }
     return out;
+  }
+
+  /**
+   * Scope-integrity checks that are safe to enforce independently of the broader validation-v3
+   * rollout flag. These reject work the customer did not authorize; they are not advisory quality
+   * heuristics.
+   */
+  public static List<String> validateScopeIntegrity(Plan plan) {
+    return validatePlan(plan).stream()
+        .filter(
+            violation ->
+                violation.startsWith("Tasks with no requirement ownership")
+                    || violation.startsWith("Unrequested OpenAPI/Swagger deliverable"))
+        .toList();
+  }
+
+  private static boolean explicitlyRequestsStandaloneApiSpecification(String requirementText) {
+    if (requirementText == null || requirementText.isBlank()) return false;
+    return containsAny(
+        requirementText,
+        "openapi.yaml",
+        "openapi.yml",
+        "swagger.json",
+        "deliver openapi",
+        "provide openapi",
+        "create openapi",
+        "generate openapi",
+        "export openapi",
+        "deliver swagger",
+        "provide swagger",
+        "create swagger",
+        "generate swagger",
+        "export swagger");
   }
 
   /**
@@ -333,6 +407,14 @@ public final class PlannerOutputUtils {
 
   private static final java.util.regex.Pattern TEST_WORD =
       java.util.regex.Pattern.compile("\\btest(s|ing|ed)?\\b");
+
+  private static boolean containsAny(String text, String... needles) {
+    if (text == null || text.isBlank()) return false;
+    for (String needle : needles) {
+      if (needle != null && !needle.isBlank() && text.contains(needle)) return true;
+    }
+    return false;
+  }
 
   /**
    * Logs a WARN when the spec carries obvious constraint signals ({@code do NOT}, {@code only},

@@ -181,6 +181,35 @@ class ValidationReportServiceVerificationLedgerTest {
   }
 
   @Test
+  void missingIndependentTestsExplainWhyWorkspaceTestsAreNotProof() {
+    ValidationReport report =
+        ValidationReport.builder()
+            .id("vr-tests-pending")
+            .runId("run-tests-pending")
+            .filesGenerated(2)
+            .pipelineResult(PipelineResult.NEEDS_ATTENTION)
+            .finalBuildPassed(true)
+            .testsPassed(0)
+            .testsTotal(0)
+            .testExecutionVerified(false)
+            .reviewerVerdict("CLEAN")
+            .verifiedScore(70)
+            .build();
+
+    var tests =
+        new ValidationVerificationLedgerBuilder(new ObjectMapper())
+            .build(report, List.of()).stream()
+                .filter(entry -> entry.id().equals("tests"))
+                .findFirst()
+                .orElseThrow();
+
+    assertEquals("UNKNOWN", tests.status());
+    assertTrue(tests.claim().contains("Worker-authored workspace tests are diagnostic"));
+    assertTrue(
+        tests.summary().contains("Independent end-to-end/functional verification is pending"));
+  }
+
+  @Test
   void ledger_marks_missing_delivery_and_unmeasured_tests_honestly() {
     ValidationReport report =
         ValidationReport.builder()

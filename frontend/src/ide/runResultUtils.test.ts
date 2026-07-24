@@ -35,9 +35,31 @@ import {
   testRerunState,
   taskBudgetFacts,
   taskGoalLine,
+  testResultSummary,
   usd,
   verdictFor,
 } from './runResultUtils';
+
+describe('testResultSummary', () => {
+  it('does not present a zero-test report as a passing measurement', () => {
+    expect(testResultSummary({totalTests: 0, passed: 0, failed: 0, errors: 0})).toEqual({
+      measured: false,
+      headline: 'Not measured',
+      label: 'No tests executed',
+      explanation:
+        'A compiled test plan is not execution evidence. Re-run tests to publish measured pass/fail results.',
+    });
+  });
+
+  it('preserves real measured counts', () => {
+    expect(testResultSummary({totalTests: 4, passed: 3, failed: 1, errors: 0})).toEqual({
+      measured: true,
+      headline: '3/4',
+      label: 'passed',
+      explanation: null,
+    });
+  });
+});
 import type * as api from '@/lib/api';
 
 describe('runResultUtils', () => {
