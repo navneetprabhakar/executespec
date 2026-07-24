@@ -12,6 +12,7 @@ import com.navneet.executespec.agent.ClassificationResult;
 import com.navneet.executespec.agent.CoherencePlannerAgent;
 import com.navneet.executespec.agent.OutlinePlannerAgent;
 import com.navneet.executespec.agent.Plan;
+import com.navneet.executespec.agent.PlanSafetyContractEnricher;
 import com.navneet.executespec.agent.PlanStrategy;
 import com.navneet.executespec.agent.PlannedTask;
 import com.navneet.executespec.agent.PlannerRequest;
@@ -201,6 +202,41 @@ class RunPlanningCoordinator {
       long inTok = Math.max(0, after.inputTokens() - before.inputTokens());
       long outTok = Math.max(0, after.outputTokens() - before.outputTokens());
       double cost = Math.max(0.0, after.costUsd() - before.costUsd());
+      long coherenceIn = 0;
+      long coherenceOut = 0;
+      double coherenceCost = 0.0;
+
+      if (mode == OutlinePlannerAgent.Mode.FULL_PLAN
+          && effectiveReq.planStrategy() == PlanStrategy.MEDIUM) {
+        ExecutionContext coherenceCtx = effectiveReq.context().child("_coherence_");
+        CoherencePlannerAgent.PatchResult patchResult =
+            coherencePlanner.patchIfNeeded(plan, effectiveReq, coherenceCtx);
+        if (!patchResult.validated()) {
+          throw new IllegalStateException(
+              "MEDIUM plan coherence validation failed: " + patchResult.validationFailure());
+        }
+        plan = patchResult.patchedPlan();
+        RunCostTracker.Snapshot afterCoherence = costTracker.snapshot(runId);
+        coherenceIn = Math.max(0, afterCoherence.inputTokens() - after.inputTokens());
+        coherenceOut = Math.max(0, afterCoherence.outputTokens() - after.outputTokens());
+        coherenceCost = Math.max(0.0, afterCoherence.costUsd() - after.costUsd());
+        log.info(
+            "V2 run={} MEDIUM coherence: {} patches/contracts applied, in/out={}/{}, ${}",
+            runId,
+            patchResult.patchesApplied(),
+            coherenceIn,
+            coherenceOut,
+            String.format("%.6f", coherenceCost));
+      } else if (mode == OutlinePlannerAgent.Mode.FULL_PLAN) {
+        PlanSafetyContractEnricher.Result enriched = PlanSafetyContractEnricher.enrich(plan);
+        plan = enriched.plan();
+        if (enriched.contractsApplied() > 0) {
+          log.info(
+              "V2 run={} deterministic plan safety: {} contracts applied",
+              runId,
+              enriched.contractsApplied());
+        }
+      }
 
       log.info(
           "V2 run={} outline planner [{}] → {} tasks, in/out={}/{}, ${}",
@@ -223,6 +259,9 @@ class RunPlanningCoordinator {
           fresh.setOutlineInputTokens(inTok);
           fresh.setOutlineOutputTokens(outTok);
           fresh.setOutlineCostUsd(cost);
+          fresh.setCoherenceInputTokens(coherenceIn);
+          fresh.setCoherenceOutputTokens(coherenceOut);
+          fresh.setCoherenceCostUsd(coherenceCost);
           runRepo.save(fresh);
         }
       } catch (Exception persistEx) {
@@ -231,7 +270,9 @@ class RunPlanningCoordinator {
       return plan;
     } catch (Exception e) {
       log.warn(
-          "V2 run={} outline planner failed: {} — bubbling up for fallback", runId, e.getMessage());
+          "V2 run={} outline/coherence planning failed: {} — bubbling up for fallback",
+          runId,
+          e.getMessage());
       throw e;
     }
   }
