@@ -36,6 +36,11 @@
 - `RunTokenAttributor` writes the V305 effective columns from the ledger and falls back to the
   requested route ONLY when the task has no successful attempt, in which case the attribution stays
   `UNATTRIBUTED` so an unproven fallback is never mistaken for ledger proof.
+- Terminal run publication reconciles `pipeline_run.total_input_tokens`, `total_output_tokens`, and
+  `actual_cost` upward from successful canonical `run_step_usage` rows. This is a raise-only floor:
+  it repairs physical attempts persisted before an interrupted executor reached its normal
+  in-memory attribution boundary, without replacing larger phase/task totals or double-counting
+  replayed reconciliation.
 - `PlannerPhaseSplit` / `PlannerPhaseAttribution` own how pre-executor spend is booked (RR-1561).
   `RunOrchestrator` used to hand `attributePhase(PLANNER, …)` the WHOLE-RUN snapshot, so the smart
   classifier — which runs on every run, before the planner — was always booked to

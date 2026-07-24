@@ -58,6 +58,16 @@ public interface RunStepUsageRepository extends JpaRepository<RunStepUsage, Stri
   Long sumSuccessfulOutputTokensByContextId(@Param("contextId") String contextId);
 
   @Query(
+      "select coalesce(sum(u.inputTokens), 0) from RunStepUsage u "
+          + "where u.runId = :runId and u.attemptStatus = 'SUCCESS'")
+  Long sumSuccessfulInputTokensByRunId(@Param("runId") String runId);
+
+  @Query(
+      "select coalesce(sum(u.outputTokens), 0) from RunStepUsage u "
+          + "where u.runId = :runId and u.attemptStatus = 'SUCCESS'")
+  Long sumSuccessfulOutputTokensByRunId(@Param("runId") String runId);
+
+  @Query(
       "select coalesce(sum(u.costUsd), 0.0) from RunStepUsage u "
           + "where u.llmExecutionContextId = :contextId and u.attemptStatus = 'SUCCESS'")
   Double sumSuccessfulCostByContextId(@Param("contextId") String contextId);

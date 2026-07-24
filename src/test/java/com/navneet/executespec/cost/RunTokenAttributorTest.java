@@ -29,7 +29,18 @@ class RunTokenAttributorTest {
   private final RunStepUsageRepository usageRepo = mock(RunStepUsageRepository.class);
   private final RunEffectiveRouteService effectiveRoutes = new RunEffectiveRouteService(usageRepo);
   private final RunTokenAttributor attributor =
-      new RunTokenAttributor(runRepo, taskRepo, costTracker, effectiveRoutes);
+      new RunTokenAttributor(runRepo, taskRepo, costTracker, effectiveRoutes, usageRepo);
+
+  @Test
+  void terminalReconciliationRaisesRunTotalsFromCanonicalAttempts() {
+    when(usageRepo.sumSuccessfulInputTokensByRunId(RUN_ID)).thenReturn(612_345L);
+    when(usageRepo.sumSuccessfulOutputTokensByRunId(RUN_ID)).thenReturn(23_456L);
+    when(usageRepo.sumKnownCostByRunId(RUN_ID)).thenReturn(0.08125d);
+
+    attributor.reconcileRunTotalsFromLedger(RUN_ID);
+
+    verify(runRepo).raiseUsageTotalsToAtLeast(RUN_ID, 612_345, 23_456, 0.08125d);
+  }
 
   private static RunStepUsage successRow(String taskId, String provider, String model) {
     return RunStepUsage.builder()

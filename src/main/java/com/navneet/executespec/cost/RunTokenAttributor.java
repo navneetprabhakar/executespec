@@ -31,10 +31,29 @@ public class RunTokenAttributor {
   private final AgentTaskRepository taskRepo;
   private final RunCostTracker costTracker;
   private final RunEffectiveRouteService effectiveRoutes;
+  private final RunStepUsageRepository usageRepository;
 
   public enum Phase {
     PLANNER,
     REVIEWER
+  }
+
+  /**
+   * Repair run-level usage after an interrupted phase from the immutable physical-attempt ledger.
+   * Normal phase attribution is incremental and executes only after a phase returns; a JVM crash
+   * mid-worker can therefore leave hundreds of thousands of already-recorded task tokens absent
+   * from the run summary. This operation is idempotent and raise-only.
+   */
+  public void reconcileRunTotalsFromLedger(String runId) {
+    long input = safeLong(usageRepository.sumSuccessfulInputTokensByRunId(runId));
+    long output = safeLong(usageRepository.sumSuccessfulOutputTokensByRunId(runId));
+    double cost =
+        java.util.Optional.ofNullable(usageRepository.sumKnownCostByRunId(runId)).orElse(0d);
+    runRepo.raiseUsageTotalsToAtLeast(
+        runId,
+        RunCostTracker.saturatedInt(input),
+        RunCostTracker.saturatedInt(output),
+        Math.max(0d, cost));
   }
 
   /**
@@ -282,6 +301,10 @@ public class RunTokenAttributor {
 
   private static int safe(Integer value) {
     return value == null ? 0 : Math.max(0, value);
+  }
+
+  private static long safeLong(Long value) {
+    return value == null ? 0L : Math.max(0L, value);
   }
 
   private static int saturatingAdd(int left, int right) {
