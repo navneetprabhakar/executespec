@@ -724,7 +724,12 @@ public class RunLifecycleService {
           runId,
           status,
           e.getMessage());
-      controlPort.terminate(runId, "FAILED", RunOrchestrator.INTERNAL_ERROR_REASON, null);
+      controlPort.terminate(
+          runId,
+          "FAILED",
+          RunOrchestrator.INTERNAL_ERROR_REASON,
+          RunOrchestrator.INTERNAL_ERROR_REASON,
+          null);
       return RunOrchestrator.CrashResumeOutcome.PLAN_MISSING;
     }
 
@@ -878,7 +883,12 @@ public class RunLifecycleService {
             return;
           }
           log.error("resume run={} executor failed", runId, e);
-          controlPort.terminate(runId, "FAILED", RunOrchestrator.INTERNAL_ERROR_REASON, startedAt);
+          controlPort.terminate(
+              runId,
+              "FAILED",
+              RunOrchestrator.INTERNAL_ERROR_REASON,
+              RunOrchestrator.INTERNAL_ERROR_REASON,
+              startedAt);
           return;
         }
         persistenceWriter.applyExecutionResultToTasks(runId, execResult);
@@ -971,7 +981,12 @@ public class RunLifecycleService {
         return;
       }
       log.error("resume run={} pipeline failed unexpectedly", runId, e);
-      controlPort.terminate(runId, "FAILED", RunOrchestrator.INTERNAL_ERROR_REASON, startedAt);
+      controlPort.terminate(
+          runId,
+          "FAILED",
+          RunOrchestrator.INTERNAL_ERROR_REASON,
+          RunOrchestrator.INTERNAL_ERROR_REASON,
+          startedAt);
     } finally {
       RunModelOverrides.clear();
       keyContextStore.evict(runId);
@@ -1265,7 +1280,12 @@ public class RunLifecycleService {
               } catch (Exception e) {
                 log.error(
                     "RunOrchestrator retryTask dispatch failed run={} task={}", runId, taskId, e);
-                controlPort.terminate(runId, "FAILED", RunOrchestrator.INTERNAL_ERROR_REASON, null);
+                controlPort.terminate(
+                    runId,
+                    "FAILED",
+                    RunOrchestrator.INTERNAL_ERROR_REASON,
+                    RunOrchestrator.INTERNAL_ERROR_REASON,
+                    null);
               } finally {
                 RunModelOverrides.clear();
                 keyContextStore.evict(runId);

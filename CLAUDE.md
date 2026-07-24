@@ -1101,6 +1101,15 @@ checks positive numeric boundaries and negative-stock arithmetic, and requires r
 wiring rather than a migration file alone. Genuinely unverified requirements cap accuracy at 89/B,
 render spec evidence WARN, and keep final goal proof UNCERTAIN instead of falsely DONE.
 
+The parallel React/Kanban rerun reported 84 with 81/81 generated tests, yet failed 3/3 independent
+functional acceptance checks: a fresh user could not create the first card without seeding demo
+data, restored state accepted a board missing two required columns, and restore accepted a blank
+title rejected by the interactive form. Its claimed mobile test asserted only invariant DOM order,
+and CSS tokens used 30%/40% white on `#1f2228` (about 2.69:1/3.72:1) despite the README claiming
+WCAG AA. Planner, expander, worker, reviewer, and accuracy prompts now preserve cross-feature clean-
+state journeys, whole-state recovery invariants, and actual CSS/computed/browser evidence across all
+provider routes; isolated tests may not encode a regression or substitute DOM shape for visual proof.
+
 The 2026-07-24 live rerun exposed a separate execution deadlock: worker `shell`, `runTests`,
 `buildProject`, and final `WorkspaceTestRunner` host/container paths waited for the child before
 reading merged output, so verbose pytest/build processes blocked forever in `pipe_write` once the OS
@@ -1113,6 +1122,13 @@ before systemd killed the old JVM. `PipelineExecutorPool` is now a maximum-phase
 it rejects/interrupts all orchestration and expansion work before infrastructure destruction, and
 the original/resumed pipeline owners recognize that lifecycle stop as a resumable interruption
 instead of marking the run FAILED. `@PreDestroy` remains only an idempotent fallback.
+
+The interrupted Java/webhook run also exposed two reporting defects. Exception paths in the original,
+resumed, and retry pipelines now call structured termination with `statusReason=INTERNAL_ERROR`
+instead of passing that value as an unstructured note through the compatibility overload. Task
+`GOAL_DECISION` evidence now reads `RunCostTracker.snapshotTask`; the run-wide snapshot is retained
+only for configured total-spend ceilings. The Steps tab must not label cumulative usage as each
+later task's cost/token consumption.
 
 Post-review continuation now opens only for completed, measured red review evidence. A reviewer
 exception/timeout remains `REVIEWER_FAILED` and cannot trigger provider spend, because a stronger
