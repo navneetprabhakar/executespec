@@ -225,13 +225,6 @@ also create or extend a test that exercises it before calling completeTask:
   - Never disable, replace, monkeypatch, or no-op authentication, authorization, CSRF, validation,
     middleware, persistence, or another requirement under test merely to make the suite green.
     Mock only a true external dependency while keeping the required production boundary active.
-  - Derive adversarial tests from EVERY semantic clause in TASK_REQUIREMENTS. A symbol with the
-    right name is not proof: exercise the documented/default startup path, cross-operation reuse of
-    shared idempotency keys, immutable replay responses after later state changes, version mismatch
-    through the public request boundary, rollback after a mid-transaction failure, sanitized
-    handling of expected persistence failures, and an ordered/versioned later migration applied to
-    an already-initialized schema whenever those contracts are assigned to this task. `CREATE IF NOT
-    EXISTS` or one baseline DDL file proves initialization, not forward migration.
 """
           + WorkerVerificationContractPrompt.TEXT
           + """
@@ -4760,10 +4753,11 @@ to boot — skip it for those.""";
       // tests in-loop. BUILD's tests-are-mandatory directive WRITES tests; this verifies they PASS.
       // Language-neutral (TestCommandResolver → pytest / jest|vitest / go test / mvn|gradle /
       // cargo).
-      // Flag-gated + fail-safe: no runner / empty summary → skip (today's compile-only behavior). A
-      // real test failure flips this gate to FAILED, transparently reusing the existing build-fail
-      // retry path (which re-invokes the worker with this failure text injected).
-      if (passed && featureFlagService.isEnabled("build.test-exec-gate.enabled")) {
+      // No runner / empty summary remains fail-safe. A concrete red suite is authoritative.
+      if (passed
+          && WorkerTestGatePolicy.shouldRunTests(
+              featureFlagService.isEnabled("build.test-exec-gate.enabled"),
+              featureFlagService.isEnabled("worker.auto-verify.enabled"))) {
         try {
           java.util.Optional<com.navneet.executespec.testgen.model.TestExecutionSummary> ts =
               inLoopTestRunner.runTests(ctx.runId(), ctx.workspaceRoot());

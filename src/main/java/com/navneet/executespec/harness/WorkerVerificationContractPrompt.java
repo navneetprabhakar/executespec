@@ -7,6 +7,13 @@ final class WorkerVerificationContractPrompt {
 
   static final String TEXT =
       """
+  - Derive adversarial tests from EVERY semantic clause in TASK_REQUIREMENTS. A symbol with the
+    right name is not proof: exercise the documented/default startup path, cross-operation reuse of
+    shared idempotency keys, immutable replay responses after later state changes, version mismatch
+    through the public request boundary, rollback after a mid-transaction failure, sanitized
+    handling of expected persistence failures, and an ordered/versioned later migration applied to
+    an already-initialized schema whenever those contracts are assigned to this task. `CREATE IF NOT
+    EXISTS` or one baseline DDL file proves initialization, not forward migration.
   - For concurrent idempotency, the lookup, business-state decision/mutation, and first-decision
     persistence must be one atomic critical section/transaction. A race test must force concurrent
     callers to observe the initial miss before either stores; scheduler luck is not proof. Replays
