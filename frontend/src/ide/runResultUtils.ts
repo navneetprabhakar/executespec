@@ -541,15 +541,7 @@ export function shouldShowModelRanking(
   const goalDecision = (t.goalDoneness?.recommendedDecision || '').toUpperCase();
   if (decision === 'STOP_DONE' || goalDecision === 'STOP_DONE') return false;
 
-  return [
-    'STEP_UP_MODEL',
-    'STEP_DOWN_MODEL',
-    'CHANGE_PROVIDER',
-    'STOP_BLOCKED',
-    'STOP_FAILED',
-    'STOP_WASTE_GUARD',
-    'CONTINUE_SAME_MODEL_PROVIDER',
-  ].includes(decision);
+  return ['STEP_UP_MODEL', 'STEP_DOWN_MODEL', 'CHANGE_PROVIDER', 'STOP_BLOCKED'].includes(decision);
 }
 
 type ContinuationPolicy = NonNullable<
