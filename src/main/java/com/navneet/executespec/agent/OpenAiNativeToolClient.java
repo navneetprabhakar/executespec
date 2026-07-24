@@ -2,13 +2,11 @@ package com.navneet.executespec.agent;
 
 import java.io.IOException;
 import java.io.InputStream;
-import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 
 import com.fasterxml.jackson.core.JsonFactory;
 import com.fasterxml.jackson.core.StreamReadConstraints;
@@ -29,10 +27,7 @@ import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.MediaType;
-import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
-import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientResponseException;
 
 import lombok.Builder;
@@ -75,19 +70,8 @@ public class OpenAiNativeToolClient {
   private static final String DEFAULT_BASE_URL = "https://api.openai.com";
   private static final String CHAT_COMPLETIONS_PATH = "/v1/chat/completions";
 
-  /** Connect timeout for the OpenAI HTTP call. */
-  private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(10);
-
   /** Read timeout for the OpenAI HTTP call. Generous because tool-emitting calls can be slow. */
   private static final Duration READ_TIMEOUT = Duration.ofSeconds(120);
-
-  /**
-   * RR-1084 — hard ceiling on the decoded response body. A single legitimate completion (even with
-   * reasoning and large tool arguments) is well under a megabyte; this bound only trips on a faulty
-   * or hostile gateway trying to exhaust heap. Overflow aborts as a typed protocol failure BEFORE
-   * the whole body is buffered, so the router fails over instead of OOMing.
-   */
-  private static final int MAX_RESPONSE_BYTES = 32 * 1024 * 1024;
 
   /**
    * RR-1084 — a bounded Jackson reader for UNTRUSTED provider/gateway bodies. Independent of the
@@ -109,27 +93,7 @@ public class OpenAiNativeToolClient {
     return new ObjectMapper(factory);
   }
 
-  /**
-   * RR-1081 — bounded pool of {@link RestClient}s keyed by base-url + read-timeout class.
-   * Previously every physical attempt built a fresh {@link HttpClient}, request factory and
-   * RestClient, so this path (four providers, 60–180-turn workers, router retries) never reused a
-   * TCP/TLS connection. The API key is applied per-request via the {@code Authorization} header,
-   * never baked into the client, so one client is safe to share across callers with the same
-   * base-url/timeout.
-   */
-  private final ConcurrentHashMap<String, RestClient> clientPool = new ConcurrentHashMap<>();
-
-  private RestClient resolveClient(String effectiveBaseUrl, Duration readTimeout) {
-    String key = effectiveBaseUrl + '|' + readTimeout.toSeconds();
-    return clientPool.computeIfAbsent(
-        key,
-        k -> {
-          HttpClient jdkClient = HttpClient.newBuilder().connectTimeout(CONNECT_TIMEOUT).build();
-          JdkClientHttpRequestFactory factory = new JdkClientHttpRequestFactory(jdkClient);
-          factory.setReadTimeout(readTimeout);
-          return RestClient.builder().baseUrl(effectiveBaseUrl).requestFactory(factory).build();
-        });
-  }
+  private final OpenAiWireHttpTransport httpTransport = new OpenAiWireHttpTransport();
 
   /** Shared default for OpenAI-wire providers; native DeepSeek supplies a longer per-call value. */
   @Value("${executespec.llm.openai-wire.read-timeout-seconds:120}")
@@ -178,56 +142,46 @@ public class OpenAiNativeToolClient {
         request.model(),
         request.tools().stream().map(t -> t.getToolDefinition().name()).toList());
 
-    // RR-1081 — reuse a pooled RestClient (bounded by base-url + read-timeout class) so a hung TCP
-    // connection or stalled body never blocks the harness loop indefinitely while keeping TCP/TLS
-    // pooling across the many attempts a worker makes.
-    RestClient client = resolveClient(effectiveBaseUrl, effectiveReadTimeout(request));
+    // JdkClientHttpRequestFactory exposes provider responses as InputStreams. Its request timeout
+    // stops waiting for response headers but does not bound a partial body read, which left two
+    // production orchestrator threads parked indefinitely on DeepSeek. Use the JDK client directly
+    // and apply one absolute deadline across headers AND the bounded body read.
+    Duration timeout = effectiveReadTimeout(request);
     JsonNode response;
     try {
-      // RR-1084 — decode with an explicit byte ceiling and bounded JSON structural limits instead
-      // of materializing an arbitrarily large body. exchange() replaces retrieve() so we can read
-      // the stream under a cap; error statuses are re-thrown as RestClientResponseException to
-      // preserve the exact failure surface LlmRouter's failover already depends on.
-      response =
-          client
-              .post()
-              .uri(completionsPath)
-              .contentType(MediaType.APPLICATION_JSON)
-              .header("Authorization", "Bearer " + apiKey)
-              .body(body)
-              .exchange(
-                  (clientRequest, clientResponse) -> {
-                    byte[] bytes = readBounded(clientResponse.getBody());
-                    var status = clientResponse.getStatusCode();
-                    if (status.isError()) {
-                      String statusText;
-                      try {
-                        statusText =
-                            org.springframework.http.HttpStatus.valueOf(status.value())
-                                .getReasonPhrase();
-                      } catch (IllegalArgumentException ignored) {
-                        statusText = "";
-                      }
-                      throw new RestClientResponseException(
-                          "OpenAI-wire error " + status.value(),
-                          status,
-                          statusText,
-                          clientResponse.getHeaders(),
-                          bytes,
-                          StandardCharsets.UTF_8);
-                    }
-                    if (bytes.length == 0) {
-                      return null;
-                    }
-                    return BOUNDED_RESPONSE_MAPPER.readTree(bytes);
-                  });
+      OpenAiWireHttpTransport.Response httpResponse =
+          httpTransport.execute(
+              effectiveBaseUrl + completionsPath, apiKey, body, objectMapper, timeout);
+      byte[] bytes = httpResponse.body();
+      int statusCode = httpResponse.statusCode();
+      if (statusCode >= 400) {
+        org.springframework.http.HttpHeaders responseHeaders =
+            new org.springframework.http.HttpHeaders();
+        httpResponse.headers().forEach(responseHeaders::put);
+        String statusText;
+        try {
+          statusText = org.springframework.http.HttpStatus.valueOf(statusCode).getReasonPhrase();
+        } catch (IllegalArgumentException ignored) {
+          statusText = "";
+        }
+        throw new RestClientResponseException(
+            "OpenAI-wire error " + statusCode,
+            statusCode,
+            statusText,
+            responseHeaders,
+            bytes,
+            StandardCharsets.UTF_8);
+      }
+      response = bytes.length == 0 ? null : BOUNDED_RESPONSE_MAPPER.readTree(bytes);
     } catch (Exception e) {
       if (e instanceof RestClientResponseException responseError) {
         log.error("OpenAI native tool call failed http={}", responseError.getStatusCode());
       } else {
         log.error("OpenAI native tool call failed errorClass={}", e.getClass().getSimpleName());
       }
-      throw e;
+      if (e instanceof InterruptedException) Thread.currentThread().interrupt();
+      if (e instanceof RuntimeException runtime) throw runtime;
+      throw new IllegalStateException("OpenAI-wire call failed: " + e.getMessage(), e);
     }
     if (response == null) {
       throw new IllegalStateException("OpenAI returned empty response body");
@@ -242,20 +196,7 @@ public class OpenAiNativeToolClient {
    * failover runs.
    */
   static byte[] readBounded(InputStream in) throws IOException {
-    if (in == null) return new byte[0];
-    java.io.ByteArrayOutputStream buffer = new java.io.ByteArrayOutputStream();
-    byte[] chunk = new byte[8192];
-    int total = 0;
-    int read;
-    while ((read = in.read(chunk)) != -1) {
-      total += read;
-      if (total > MAX_RESPONSE_BYTES) {
-        throw new IllegalStateException(
-            "OpenAI-wire response exceeded the " + MAX_RESPONSE_BYTES + "-byte ceiling");
-      }
-      buffer.write(chunk, 0, read);
-    }
-    return buffer.toByteArray();
+    return OpenAiWireHttpTransport.readBounded(in);
   }
 
   /** Resolves an explicit per-call timeout while preserving the shared OpenAI-wire default. */
