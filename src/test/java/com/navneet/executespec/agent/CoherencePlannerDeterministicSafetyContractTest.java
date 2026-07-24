@@ -23,19 +23,24 @@ class CoherencePlannerDeterministicSafetyContractTest {
                         "R2",
                         "POST /reservations uses an Idempotency-Key scoped to the authenticated"
                             + " customer."),
-                    requirement("R3", "Include schema migrations.")))
+                    requirement("R3", "Include schema migrations."),
+                    requirement("R4", "Use SQLite for persistence."),
+                    requirement("R5", "Stock decrement must be atomic under concurrent requests."),
+                    requirement("R6", "Return a stable error for invalid state transitions."),
+                    requirement("R7", "Test double cancellation.")))
             .tasks(
                 List.of(
                     task(
                         "T1",
                         "Models and Alembic",
-                        "Set up Alembic and a model smoke test.",
+                        "Set up Alembic, a Customer api_key field, and a model smoke test.",
                         List.of("app/database.py", "alembic/env.py", "tests/test_models.py")),
                     task(
                         "T2",
                         "Reservation service",
-                        "Implement create_reservation(customer_id, product_id, quantity) with"
-                            + " atomic stock decrement and get_reservation/cancel_reservation.",
+                        "Implement API key lookup and create_reservation(customer_id, product_id,"
+                            + " quantity) with atomic stock decrement and"
+                            + " get_reservation/cancel_reservation.",
                         List.of(
                             "app/services/reservation_service.py",
                             "tests/test_reservation_service.py")),
@@ -56,18 +61,24 @@ class CoherencePlannerDeterministicSafetyContractTest {
 
     PlanSafetyContractEnricher.Result result = PlanSafetyContractEnricher.enrich(plan);
 
-    assertThat(result.contractsApplied()).isEqualTo(13);
+    assertThat(result.contractsApplied()).isGreaterThanOrEqualTo(17);
+    assertThat(result.summaries()).hasSize(result.contractsApplied());
     assertThat(constraints(result, "T2"))
         .anyMatch(value -> value.contains("verified credential"))
         .anyMatch(value -> value.contains("quantity <= 0"))
+        .anyMatch(value -> value.contains("SELECT FOR UPDATE"))
+        .anyMatch(value -> value.contains("one-way verifier"))
         .anyMatch(value -> value.contains("cross-principal owned-resource"))
         .anyMatch(value -> value.contains("Test fixtures must apply the configured migration"));
     assertThat(constraints(result, "T3"))
         .anyMatch(value -> value.contains("verified credential"))
         .anyMatch(value -> value.contains("quantity <= 0"))
+        .anyMatch(value -> value.contains("SELECT FOR UPDATE"))
+        .anyMatch(value -> value.contains("second cancellation"))
         .anyMatch(value -> value.contains("default startup path"))
         .anyMatch(value -> value.contains("Test fixtures must apply the configured migration"));
     assertThat(constraints(result, "T1"))
+        .anyMatch(value -> value.contains("one-way verifier"))
         .anyMatch(value -> value.contains("default startup path"))
         .anyMatch(value -> value.contains("Test fixtures must apply the configured migration"));
     assertThat(constraints(result, "T4"))

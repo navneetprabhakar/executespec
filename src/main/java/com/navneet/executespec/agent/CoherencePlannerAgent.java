@@ -56,61 +56,6 @@ public class CoherencePlannerAgent {
   private static final int COHERENCE_MAX_TOKENS = 1_500;
   private static final int DESCRIPTION_SUMMARY_CHARS = 320;
   private static final int CONTRACT_EVIDENCE_CHARS = 3_000;
-  private static final List<String> HIGH_SIGNAL_CONTRACT_MARKERS =
-      List.of(
-          "base64",
-          "bcrypt",
-          "column",
-          "dead_letter",
-          "enum",
-          "header format",
-          "hex",
-          "hmac",
-          "sha-256",
-          "signature",
-          "status",
-          "table");
-  private static final List<String> CONTRACT_MARKERS =
-      List.of(
-          "api key",
-          "authentication",
-          "base64",
-          "bcrypt",
-          "column",
-          "config",
-          "constraint",
-          "contract",
-          "dead letter",
-          "dead_letter",
-          "dto",
-          "encoding",
-          "endpoint",
-          "entity",
-          "enum",
-          "field",
-          "format",
-          "hash",
-          "header",
-          "hex",
-          "hmac",
-          "idempot",
-          "identifier",
-          "interface",
-          "method",
-          "outbox",
-          "property",
-          "repository",
-          "request",
-          "response",
-          "replay",
-          "schema",
-          "secret",
-          "sha-256",
-          "status",
-          "table",
-          "tenant",
-          "timestamp",
-          "uuid");
 
   public record PatchResult(
       Plan patchedPlan,
@@ -507,8 +452,8 @@ public class CoherencePlannerAgent {
     List<String> lines =
         description.lines().map(String::trim).filter(line -> !line.isBlank()).toList();
     java.util.LinkedHashSet<String> selected = new java.util.LinkedHashSet<>();
-    selectContractLines(lines, HIGH_SIGNAL_CONTRACT_MARKERS, selected);
-    selectContractLines(lines, CONTRACT_MARKERS, selected);
+    selectContractLines(lines, CoherenceContractMarkers.HIGH_SIGNAL, selected);
+    selectContractLines(lines, CoherenceContractMarkers.ALL, selected);
     StringBuilder evidence = new StringBuilder();
     for (String line : selected) {
       if (evidence.length() > 0) evidence.append(" | ");
