@@ -185,9 +185,17 @@ describe('runResultUtils', () => {
         policy,
       },
     };
+    const sameRouteTask: Pick<api.TaskSummary, 'continuationDecision' | 'goalDoneness'> = {
+      goalDoneness: {recommendedDecision: 'CONTINUE_SAME_MODEL_PROVIDER'},
+      continuationDecision: {
+        decision: 'CONTINUE_SAME_MODEL_PROVIDER',
+        policy,
+      },
+    };
 
     expect(shouldShowModelRanking(doneTask)).toBe(false);
     expect(shouldShowModelRanking(providerChangeTask)).toBe(true);
+    expect(shouldShowModelRanking(sameRouteTask)).toBe(false);
   });
 
   it('renders goal proof decisions as proof state, not raw executor enums', () => {
