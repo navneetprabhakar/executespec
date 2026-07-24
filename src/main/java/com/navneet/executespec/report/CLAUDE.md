@@ -94,7 +94,10 @@ invalid reports are excluded and counted separately.
 - Final assessment is tighten-only: `CLEAN_*` pre-report status cannot erase a newly measured
   `NEEDS_ATTENTION` result; successfully auto-fixed visibility issues are not open blockers; and an
   accuracy report with admitted missing/partial/unknown requirements caps the headline/rubric score
-  at its spec-adherence score. `AccuracyReportTruthPolicy` moves UNKNOWN entries that themselves state
+  at its spec-adherence score. Unknown requirements additionally cap verified/rubric projections at
+  84 (below the 85 passing band), so an internally inconsistent 100/100 assessment cannot coexist
+  with an unproven release badge; legacy report DTOs and evidence-ledger score summaries apply the
+  cap on read, while new reports persist it during score generation. `AccuracyReportTruthPolicy` moves UNKNOWN entries that themselves state
   negative implementation evidence to PARTIAL before scoring. Any admitted partial requirement
   caps accuracy at 79/C, an admitted missing requirement caps it at 69/D, and genuinely unverified
   requirements cap it at 89/B. UNKNOWN is not treated as a defect, but its ledger row is WARN and
