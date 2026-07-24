@@ -22,6 +22,7 @@ import com.navneet.executespec.report.ValidationReportRepository;
 import com.navneet.executespec.report.entity.ValidationReport;
 import com.navneet.executespec.state.entity.AgentTask;
 import com.navneet.executespec.state.entity.PipelineRun;
+import com.navneet.executespec.state.repository.AgentTaskRepository;
 import com.navneet.executespec.state.repository.IntegrationRunRepository;
 import com.navneet.executespec.testgen.repository.TestPlanRepository;
 
@@ -43,6 +44,7 @@ public class RunMapper {
   private final ValidationReportRepository validationReportRepository;
   private final ManagedAiUsageEventRepository managedAiUsageEventRepository;
   private final RunEffectiveRouteService runEffectiveRouteService;
+  private final AgentTaskRepository agentTaskRepository;
   private final ObjectMapper objectMapper;
 
   public RunSummary toSummary(PipelineRun r) {
@@ -67,7 +69,19 @@ public class RunMapper {
         scores.put(String.valueOf(row[0]), ((Number) row[1]).intValue());
       }
     }
-    return runs.stream().map(r -> toSummary(r, scores.get(r.getRunId()), null, null)).toList();
+    Map<String, List<AgentTask>> tasksByRun =
+        agentTaskRepository.findByRunIdIn(ids).stream()
+            .collect(java.util.stream.Collectors.groupingBy(AgentTask::getRunId));
+    return runs.stream()
+        .map(
+            r ->
+                toSummary(
+                    r,
+                    scores.get(r.getRunId()),
+                    null,
+                    null,
+                    tasksByRun.getOrDefault(r.getRunId(), List.of())))
+        .toList();
   }
 
   private RunSummary toSummary(
@@ -75,9 +89,19 @@ public class RunMapper {
       Integer verifiedScore,
       Boolean localExecutionRequested,
       Boolean localExecutionAccepted) {
+    return toSummary(r, verifiedScore, localExecutionRequested, localExecutionAccepted, List.of());
+  }
+
+  private RunSummary toSummary(
+      PipelineRun r,
+      Integer verifiedScore,
+      Boolean localExecutionRequested,
+      Boolean localExecutionAccepted,
+      List<AgentTask> tasks) {
+    String displayStatus = displayRunStatus(r.getStatus(), tasks);
     return new RunSummary(
         r.getRunId(),
-        r.getStatus(),
+        displayStatus,
         r.getUserRequest(),
         r.getCurrentGate(),
         r.getQueuePosition(),
@@ -105,7 +129,7 @@ public class RunMapper {
         r.getSourceRunId(),
         r.getHarnessVersion(),
         r.getActualCostUsd(),
-        r.getStatusReason(),
+        displayRunStatusReason(r.getStatusReason(), r.getStatus(), displayStatus),
         // PR-B (2026-05-13) — hydrate PR URLs in the listing endpoint so the project launches
         // surface can render PR pills without a per-row drill-down. Prefer scm-agnostic
         // scmPrUrl; the legacy githubPrUrl ships alongside for pre-SCM-split back-compat.
@@ -224,10 +248,11 @@ public class RunMapper {
     // C1 (G4) — DERIVED effective route. Read from the physical-attempt ledger rather than stored,
     // so it can never drift from the usage facts it summarises.
     EffectiveRouteProjection effectiveRoute = runEffectiveRouteService.forRun(r.getRunId());
+    String displayStatus = displayRunStatus(r.getStatus(), tasks);
 
     return RunDetail.builder()
         .runId(r.getRunId())
-        .status(r.getStatus())
+        .status(displayStatus)
         .userRequest(r.getUserRequest())
         .currentGate(r.getCurrentGate())
         .queuePosition(r.getQueuePosition())
@@ -240,8 +265,8 @@ public class RunMapper {
         .completedAt(r.getCompletedAt())
         .repoUrl(r.getRepoUrl())
         .repoMode(r.getRepoMode())
-        .failureReason(r.getFailureReason())
-        .statusReason(r.getStatusReason())
+        .failureReason(displayRunFailureReason(r.getFailureReason(), r.getStatus(), displayStatus))
+        .statusReason(displayRunStatusReason(r.getStatusReason(), r.getStatus(), displayStatus))
         .planJson(r.getPlanJson())
         .reviewJson(r.getReviewJson())
         .runGoalDoneness(parseJson(r.getRunGoalDonenessJson(), "runGoalDoneness", r.getRunId()))
@@ -413,6 +438,46 @@ public class RunMapper {
     }
     String goalState = goalDoneness.path("state").asText("");
     return goalState.isBlank() || "DONE".equals(goalState) ? persistedStatus : "PARTIAL";
+  }
+
+  String displayRunStatus(String persistedStatus, List<AgentTask> tasks) {
+    if (!"COMPLETE".equals(persistedStatus) || tasks == null || tasks.isEmpty()) {
+      return persistedStatus;
+    }
+    boolean allTasksProvenComplete = tasks.stream().allMatch(this::isTaskProvenCompleteForDisplay);
+    return allTasksProvenComplete ? persistedStatus : "PARTIAL";
+  }
+
+  private boolean isTaskProvenCompleteForDisplay(AgentTask task) {
+    if (!"COMPLETE".equals(task.getStatus())) return false;
+    String json = task.getGoalDonenessJson();
+    if (json == null || json.isBlank()) return true;
+    try {
+      JsonNode proof = objectMapper.readTree(json);
+      String state = proof.path("state").asText("");
+      return state.isBlank() || "DONE".equals(state);
+    } catch (Exception error) {
+      log.warn(
+          "Malformed goal proof cannot certify run completion: taskId={} ({})",
+          task.getTaskId(),
+          error.getMessage());
+      return false;
+    }
+  }
+
+  private static String displayRunStatusReason(
+      String persistedReason, String persistedStatus, String displayStatus) {
+    return "COMPLETE".equals(persistedStatus) && "PARTIAL".equals(displayStatus)
+        ? "TASK_PROOF_INCOMPLETE"
+        : persistedReason;
+  }
+
+  private static String displayRunFailureReason(
+      String persistedFailure, String persistedStatus, String displayStatus) {
+    if (persistedFailure != null && !persistedFailure.isBlank()) return persistedFailure;
+    return "COMPLETE".equals(persistedStatus) && "PARTIAL".equals(displayStatus)
+        ? "one or more tasks lack durable completion proof"
+        : persistedFailure;
   }
 
   /** Parses the objective field from the planner's TaskDefinition JSON stored in the task. */
