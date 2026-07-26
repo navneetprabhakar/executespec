@@ -74,6 +74,25 @@ class PlanBackendContractGateTest {
   }
 
   @Test
+  void bareIdsOnDifferentAggregatesAreNotOneSharedFieldContract() {
+    PlannedTask warehouses =
+        task(
+            "T1",
+            "Define warehouse model",
+            "Warehouse fields: id (UUID), name (string).",
+            List.of("backend/app/models/warehouse.py"));
+    PlannedTask products =
+        task(
+            "T2",
+            "Define product model",
+            "Product fields: id (int), sku (string).",
+            List.of("backend/app/models/product.py"));
+
+    assertThat(PlanContractQualityGate.violations(plan(warehouses, products)))
+        .noneMatch(value -> value.contains("shared field id"));
+  }
+
+  @Test
   void rejectsR13AsyncFixtureWithoutPluginOrReadinessProbe() {
     PlannedTask scaffold =
         task(
@@ -99,7 +118,7 @@ class PlanBackendContractGateTest {
         .contains(
             "plan: async pytest fixtures are required but dependency-owning tasks do not declare"
                 + " pytest-asyncio",
-            "T8: real-server functional fixture launches uvicorn without a bounded readiness"
+            "T8: real-server functional fixture launches the backend without a bounded readiness"
                 + " probe");
   }
 
@@ -126,6 +145,47 @@ class PlanBackendContractGateTest {
             List.of("backend/app/routers/health.py"));
 
     assertThat(PlanContractQualityGate.violations(plan(scaffold, health, integration))).isEmpty();
+  }
+
+  @Test
+  void rejectsSynchronousSeedSessionAgainstPlanWideAsyncDatabaseStack() {
+    PlannedTask scaffold =
+        task(
+            "T1",
+            "Configure async database runtime",
+            "Create create_async_engine with sqlite+aiosqlite:///./app.db and expose AsyncSession.",
+            List.of("backend/app/database.py"));
+    PlannedTask seed =
+        task(
+            "T3",
+            "Seed sample catalog data",
+            "Import Session from sqlalchemy.orm and seed rows with Session(engine), then commit.",
+            List.of("backend/app/seed.py"));
+
+    assertThat(PlanContractQualityGate.violations(plan(scaffold, seed)))
+        .contains(
+            "T3: seed/setup contract uses a synchronous SQLAlchemy Session while the plan's"
+                + " runtime database stack is async; use AsyncSession/async_sessionmaker and await"
+                + " database operations");
+  }
+
+  @Test
+  void acceptsAsyncSeedSessionAgainstPlanWideAsyncDatabaseStack() {
+    PlannedTask scaffold =
+        task(
+            "T1",
+            "Configure async database runtime",
+            "Create create_async_engine with sqlite+aiosqlite:///./app.db and expose AsyncSession.",
+            List.of("backend/app/database.py"));
+    PlannedTask seed =
+        task(
+            "T3",
+            "Seed sample catalog data",
+            "Use async_sessionmaker with AsyncSession and await commit while seeding rows.",
+            List.of("backend/app/seed.py"));
+
+    assertThat(PlanContractQualityGate.violations(plan(scaffold, seed)))
+        .noneMatch(value -> value.contains("synchronous SQLAlchemy Session"));
   }
 
   @Test

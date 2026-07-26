@@ -38,8 +38,11 @@ final class PlanMigrationOwnershipReconciler {
             || requirements.matches("(?s).*\\bmust\\s+migrate\\b.*");
     if (!requiresMigration) return plan;
 
+    PlannedTask consolidatedOwner = PlanSafetyMigrationSupport.consolidatedMigrationOwner(plan);
+    boolean explicitlyConsolidated =
+        PlanSafetyMigrationSupport.hasExplicitConsolidatedOwnership(consolidatedOwner);
     if (PlanSafetyMigrationSupport.requiresConsolidatedMigration(plan)
-        && !hasCrossTaskModelReassignment(plan)) {
+        && (explicitlyConsolidated || !hasCrossTaskModelReassignment(plan))) {
       return reconcileConsolidatedMigration(plan);
     }
 
@@ -123,7 +126,10 @@ final class PlanMigrationOwnershipReconciler {
       }
       boolean migrationOwner = java.util.Objects.equals(owner.id(), task.id());
       LinkedHashSet<String> files = new LinkedHashSet<>(safeFiles(task));
-      files.removeIf(PlanSafetyMigrationSupport::isVersionMigrationPath);
+      files.removeIf(
+          path ->
+              PlanSafetyMigrationSupport.isVersionMigrationPath(path)
+                  || PlanSafetyMigrationSupport.isMigrationDirectoryPlaceholder(path));
       if (migrationOwner) files.add(migrationPath);
 
       boolean mentionsMigration =

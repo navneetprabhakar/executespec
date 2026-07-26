@@ -1,7 +1,5 @@
 package com.navneet.executespec.agent;
 
-import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -25,7 +23,6 @@ import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.definition.DefaultToolDefinition;
 import org.springframework.ai.tool.definition.ToolDefinition;
-import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
@@ -44,6 +41,7 @@ public class CoherencePlannerAgent {
   private final LlmRouter router;
   private final ObjectMapper objectMapper;
   private final ModelResolver modelResolver;
+  private final PromptAssembler promptAssembler;
 
   private static final String PROMPT_PATH = "prompts/coherence-planner.md";
   private static final int COHERENCE_MAX_TOKENS = 4_096;
@@ -172,6 +170,12 @@ public class CoherencePlannerAgent {
               this::applyPatches);
     }
     if (!modelResult.validated()) return modelResult;
+    // A no-op model response cannot have reintroduced unsafe text. Re-enriching the already
+    // canonical plan only duplicates deterministic accounting (and, for a non-idempotent defect,
+    // risks changing the plan without any provider patch to justify it).
+    if (modelResult.patchesApplied() == 0) {
+      return finishNoOpModelPass(deterministic, modelResult);
+    }
     // The model patch can itself append text that contradicts deterministic safety contracts.
     // Canonicalize once more before persistence so coherence cannot reintroduce the exact unsafe
     // instruction the pre-pass removed.
@@ -190,6 +194,14 @@ public class CoherencePlannerAgent {
             + modelResult.patchesApplied()
             + postModel.contractsApplied(),
         List.copyOf(summaries));
+  }
+
+  static PatchResult finishNoOpModelPass(
+      PlanSafetyContractEnricher.Result deterministic, PatchResult modelResult) {
+    return deterministic.contractsApplied() == 0
+        ? modelResult
+        : new PatchResult(
+            deterministic.plan(), deterministic.contractsApplied(), deterministic.summaries());
   }
 
   static boolean isProtocolRepairable(PatchResult result) {
@@ -484,10 +496,10 @@ public class CoherencePlannerAgent {
     };
   }
 
-  private String loadPrompt() {
+  String loadPrompt() {
     try {
-      return new ClassPathResource(PROMPT_PATH).getContentAsString(StandardCharsets.UTF_8);
-    } catch (IOException e) {
+      return promptAssembler.assemble(PROMPT_PATH.substring("prompts/".length()));
+    } catch (Exception e) {
       throw new IllegalStateException("CoherencePlanner prompt missing at " + PROMPT_PATH, e);
     }
   }

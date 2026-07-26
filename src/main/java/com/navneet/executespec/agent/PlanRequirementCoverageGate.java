@@ -54,8 +54,9 @@ final class PlanRequirementCoverageGate {
 
       Set<String> markers = requirementMarkers(safe(requirement.text()));
       if (markers.isEmpty()) continue;
+      List<PlannedTask> evidenceOwners = evidenceOwners(requirement, owners);
       String evidence =
-          owners.stream()
+          evidenceOwners.stream()
               .map(PlanRequirementCoverageGate::taskEvidence)
               .collect(java.util.stream.Collectors.joining("\n"))
               .toLowerCase(Locale.ROOT);
@@ -65,7 +66,7 @@ final class PlanRequirementCoverageGate {
         violations.add(
             requirement.id()
                 + ": tasks "
-                + owners.stream().map(PlannedTask::id).toList()
+                + evidenceOwners.stream().map(PlannedTask::id).toList()
                 + " cite the requirement but omit high-signal contract terms "
                 + missing);
       }
@@ -92,8 +93,9 @@ final class PlanRequirementCoverageGate {
       if (owners.isEmpty()) continue;
       Set<String> markers = requirementMarkers(safe(requirement.text()));
       if (markers.isEmpty()) continue;
+      List<PlannedTask> evidenceOwners = evidenceOwners(requirement, owners);
       String evidence =
-          owners.stream()
+          evidenceOwners.stream()
               .map(PlanRequirementCoverageGate::taskEvidence)
               .collect(java.util.stream.Collectors.joining("\n"))
               .toLowerCase(Locale.ROOT);
@@ -106,7 +108,7 @@ final class PlanRequirementCoverageGate {
               + missing.stream()
                   .map(PlanRequirementCoverageGate::markerSignal)
                   .collect(java.util.stream.Collectors.joining(", "));
-      for (PlannedTask owner : owners) {
+      for (PlannedTask owner : evidenceOwners) {
         signalsByTask
             .computeIfAbsent(owner.id(), ignored -> new java.util.ArrayList<>())
             .add(signal);
@@ -127,6 +129,26 @@ final class PlanRequirementCoverageGate {
       tasks.add(copyTask(task, description));
     }
     return copyPlan(plan, tasks);
+  }
+
+  /**
+   * Acceptance requirements must remain executable in their verification task. Allowing an
+   * implementation owner to satisfy the union by merely mentioning "rollback" can otherwise erase
+   * the assertion from the black-box suite while the plan still appears covered.
+   */
+  private static List<PlannedTask> evidenceOwners(
+      RequirementSpec requirement, List<PlannedTask> owners) {
+    String text = safe(requirement.text()).toLowerCase(Locale.ROOT);
+    boolean verificationRequirement =
+        text.matches(
+            "(?s).*\\b(?:acceptance|black[- ]box|integration test|end[- ]to[- ]end|e2e|"
+                + "verify|assert|proof)\\b.*");
+    if (!verificationRequirement) return owners;
+    List<PlannedTask> verificationOwners =
+        owners.stream()
+            .filter(owner -> !TaskExpansionPlanContract.isImplementationTask(owner))
+            .toList();
+    return verificationOwners.isEmpty() ? owners : verificationOwners;
   }
 
   static Set<String> requirementMarkers(String requirement) {

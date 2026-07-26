@@ -49,8 +49,8 @@
     {
       "id": "coherence-planner",
       "path": "src/main/resources/prompts/coherence-planner.md",
-      "sha256": "4a05e94a3a6864ab65ba41748a646c6ebadd9a224a2b998552b05d383501d2b3",
-      "bytes": 4211,
+      "sha256": "02f06009079c7f1a40e2d625f3761fef7574320cb90b0807e40be4d15c48ffc1",
+      "bytes": 10165,
       "active": true,
       "fragments": [],
       "variables": [
@@ -330,8 +330,8 @@
     {
       "id": "fragments/backend-robustness",
       "path": "src/main/resources/prompts/fragments/backend-robustness.md",
-      "sha256": "9048df39f679311104b6c98b3195d0965f16e3ee096d19a10bcd1c83caf6f045",
-      "bytes": 497,
+      "sha256": "3ddaf02fc34cff040540c7a0892cf87aef0ebf3ffdc17c2257afddf75c6dd4ea",
+      "bytes": 4023,
       "active": true,
       "fragments": [],
       "variables": []
@@ -366,8 +366,8 @@
     {
       "id": "fragments/provider/anthropic/build",
       "path": "src/main/resources/prompts/fragments/provider/anthropic/build.md",
-      "sha256": "1c11ac7be3a7f95f53efd969ae892a923fa7b16ed4d7478faa06e205d04f8fbb",
-      "bytes": 543,
+      "sha256": "5c8ebf832998ec8c8898a70543d856438756b9b3aadda0d736bd660bd2ebb62e",
+      "bytes": 706,
       "active": true,
       "fragments": [],
       "variables": []
@@ -393,8 +393,8 @@
     {
       "id": "fragments/provider/deepseek/build",
       "path": "src/main/resources/prompts/fragments/provider/deepseek/build.md",
-      "sha256": "79f750e760ff2df4b3bce1327963c1168d3003e9031c19c956e495bf18ea3c0d",
-      "bytes": 783,
+      "sha256": "68d8160854a68220d9e953dc5cd82d76f0106147822107bf97e74ada679cd142",
+      "bytes": 946,
       "active": true,
       "fragments": [],
       "variables": []
@@ -420,8 +420,8 @@
     {
       "id": "fragments/provider/fireworks/build",
       "path": "src/main/resources/prompts/fragments/provider/fireworks/build.md",
-      "sha256": "8f95d13a30e6a1304402dbfd645528ade7edab78e7012e5cc15098ee811b22d0",
-      "bytes": 666,
+      "sha256": "488caf98bcb05817e76312a27bf2321d6717f93cc1f74263e83d4b505e90b599",
+      "bytes": 829,
       "active": true,
       "fragments": [],
       "variables": []
@@ -438,8 +438,8 @@
     {
       "id": "fragments/provider/gemini/build",
       "path": "src/main/resources/prompts/fragments/provider/gemini/build.md",
-      "sha256": "5ed8a93d1e7a6fc19934f5b1a9dae1ffa18fa65a0d001d2f625e646b2b826ba3",
-      "bytes": 765,
+      "sha256": "9ef827532d79ca7ed3844a2f7adab88196d5611effcfc06a122acedf6cdcacfb",
+      "bytes": 928,
       "active": true,
       "fragments": [],
       "variables": []
@@ -456,8 +456,8 @@
     {
       "id": "fragments/provider/openai/build",
       "path": "src/main/resources/prompts/fragments/provider/openai/build.md",
-      "sha256": "487c541eaedaeb0b6145297d85d5ca6fe2e16af21b00ba73d01209a8018b61cc",
-      "bytes": 625,
+      "sha256": "1a33dc7bf3b12244afd446ccbcc59e847edc616a30683181fdb948dc510a0802",
+      "bytes": 788,
       "active": true,
       "fragments": [],
       "variables": []
@@ -474,8 +474,8 @@
     {
       "id": "fragments/provider/openrouter/build",
       "path": "src/main/resources/prompts/fragments/provider/openrouter/build.md",
-      "sha256": "68e3425e4af5d28557c97f6a159f663769c1a26ec80ce4649a170508e01b0405",
-      "bytes": 554,
+      "sha256": "8e8d104148ed727c51d3ad2e783d21ad0d58a1d9a3cc13b71b7ffec8946442b7",
+      "bytes": 717,
       "active": true,
       "fragments": [],
       "variables": []
@@ -510,8 +510,8 @@
     {
       "id": "fragments/security-rules-planner",
       "path": "src/main/resources/prompts/fragments/security-rules-planner.md",
-      "sha256": "0e21f7d4141f64ba0f6fd75e68b1083e969401f78a70c8d6cecf1e61c9083806",
-      "bytes": 674,
+      "sha256": "5ce9a1b924c6574b3829c1432eebe4a0e0efecfedc9d0ca289ccd6d05464e5c5",
+      "bytes": 2326,
       "active": true,
       "fragments": [],
       "variables": []
@@ -603,8 +603,8 @@
     {
       "id": "outline-planner-skeleton",
       "path": "src/main/resources/prompts/outline-planner-skeleton.md",
-      "sha256": "ada814ec6358b32f9da2e00d1742c0b9ee1a97928ee0efe191c0611e487e9057",
-      "bytes": 6783,
+      "sha256": "5a2b013237e065ab956c79a19c3789e40b93a98fc41dada7bed99565ea87edb0",
+      "bytes": 11609,
       "active": true,
       "fragments": [
         "security-rules:planner"
@@ -612,6 +612,7 @@
       "variables": [
         "CLASSIFICATION",
         "CONTRACTS",
+        "ENGINEERING_STANDARDS",
         "MAX_TASKS",
         "PROJECT_ADRS",
         "PROJECT_BRIEF",
@@ -626,8 +627,8 @@
     {
       "id": "outline-planner",
       "path": "src/main/resources/prompts/outline-planner.md",
-      "sha256": "2e571df566251a4283869c12ea79d5a6c1801aeedd2fc3af0f99d26f44385f00",
-      "bytes": 15118,
+      "sha256": "e573fb3e6219b95e785368340f101fbb311ddda581cf424120ecf09b2c879526",
+      "bytes": 24865,
       "active": true,
       "fragments": [
         "security-rules:planner"
@@ -635,6 +636,7 @@
       "variables": [
         "CLASSIFICATION",
         "CONTRACTS",
+        "ENGINEERING_STANDARDS",
         "MAX_TASKS",
         "MOBILE_PREFERENCE_BLOCK",
         "PROJECT_ADRS",
@@ -659,10 +661,24 @@
       "variables": []
     },
     {
+      "id": "preview-render",
+      "path": "src/main/resources/prompts/preview-render.md",
+      "sha256": "9853822bffe0a7120c5f76f15ae61c5794bfcd886500a92a8c14979a1efdb2bf",
+      "bytes": 3296,
+      "active": true,
+      "fragments": [],
+      "variables": [
+        "TARGET",
+        "TARGET_GUIDANCE",
+        "VIEWPORT_HEIGHT",
+        "VIEWPORT_WIDTH"
+      ]
+    },
+    {
       "id": "reviewer-general",
       "path": "src/main/resources/prompts/reviewer-general.md",
-      "sha256": "218f96d30f484181425e3db5e296335d422b99a36d51df9515227167e097e5de",
-      "bytes": 4619,
+      "sha256": "29b56971e09458fcbb7c4161159608747a528e6b20eb608c60ef6c1fa1a1fe7d",
+      "bytes": 11165,
       "active": true,
       "fragments": [],
       "variables": []
@@ -670,8 +686,8 @@
     {
       "id": "reviewer-wiring",
       "path": "src/main/resources/prompts/reviewer-wiring.md",
-      "sha256": "930d2efab0706551d8957627990a3806c012e0febe71c533ca1e867b69f9231a",
-      "bytes": 4662,
+      "sha256": "d2ac6019324dedc11ab9e33fc532a49f364d24752714ca550f950fc5e6890416",
+      "bytes": 5410,
       "active": true,
       "fragments": [],
       "variables": []
@@ -694,8 +710,8 @@
     {
       "id": "scaffolds/all",
       "path": "src/main/resources/prompts/scaffolds/all.md",
-      "sha256": "b31add225c600131f23b5a03dabbfb284f968335b9f324e6e5b56635f591f3a5",
-      "bytes": 2416,
+      "sha256": "c438846304e981ce24a1a8da7a17be179480170778604d344d91d944f2aa6097",
+      "bytes": 2661,
       "active": true,
       "fragments": [],
       "variables": []
@@ -703,8 +719,8 @@
     {
       "id": "scaffolds/fullstack",
       "path": "src/main/resources/prompts/scaffolds/fullstack.md",
-      "sha256": "476d02b7eba24896147c649575a6f96f35f1680ac28730772b56884c8ca1666d",
-      "bytes": 3478,
+      "sha256": "31cb56d4426fbc3d72fee5d6007316ed7043270b5a61e046e8cef39627ed4c73",
+      "bytes": 3549,
       "active": true,
       "fragments": [],
       "variables": [
@@ -758,8 +774,8 @@
     {
       "id": "scaffolds/python",
       "path": "src/main/resources/prompts/scaffolds/python.md",
-      "sha256": "20d4b33f273784c958adfce79921af498527553ee06b02c961cabc5379c5667c",
-      "bytes": 2124,
+      "sha256": "50549ab72af8f6e7b32b41142f17b88e552f618628eaca08fc16afb96711205c",
+      "bytes": 2281,
       "active": true,
       "fragments": [],
       "variables": [
@@ -791,8 +807,8 @@
     {
       "id": "scaffolds/spring-boot",
       "path": "src/main/resources/prompts/scaffolds/spring-boot.md",
-      "sha256": "66e1adbc3a749ab6c9c86bb2ff517789aadbf91bfc20fa8e0c9bb8561c1a5734",
-      "bytes": 1281,
+      "sha256": "7b52f9aad530727a1768145bc523506f86e556983eda254a632fd9714bcfde58",
+      "bytes": 1348,
       "active": true,
       "fragments": [],
       "variables": [
@@ -813,25 +829,11 @@
     {
       "id": "task-expander",
       "path": "src/main/resources/prompts/task-expander.md",
-      "sha256": "3f973c11db67f4d698a3c5ac89feb5b7b4c1d664f5a407a12c67bffc8aa2f5eb",
-      "bytes": 5496,
+      "sha256": "470f6c85eb3d4bd858d1d70322870abd6aa88449112f4918a942232af899b635",
+      "bytes": 16138,
       "active": true,
       "fragments": [],
-      "variables": [
-        "ALL_TASK_SKELETONS",
-        "BUILD_COMMAND",
-        "PLAN_SUMMARY",
-        "PROJECT_TYPE",
-        "REQUIREMENTS",
-        "RUNTIME_SURFACE",
-        "TASK_COMPLEXITY",
-        "TASK_DEPENDS_ON",
-        "TASK_ID",
-        "TASK_TITLE",
-        "TASK_TOUCHES_FILES",
-        "TASK_TYPE",
-        "WORKSPACE_SUMMARY"
-      ]
+      "variables": []
     },
     {
       "id": "test-fix-suggestions",
@@ -845,8 +847,8 @@
     {
       "id": "test-planner",
       "path": "src/main/resources/prompts/test-planner.txt",
-      "sha256": "065fae4d2cd80012d783790e5b9c66d9badf6885c628c2ee376365e8c072826f",
-      "bytes": 6255,
+      "sha256": "23779e26f64e557de33a984162452811dc96685c39603c3e05cc97942aea77d2",
+      "bytes": 8026,
       "active": true,
       "fragments": [],
       "variables": []
@@ -854,8 +856,8 @@
     {
       "id": "test-worker",
       "path": "src/main/resources/prompts/test-worker.txt",
-      "sha256": "3beec6222e3444dc976c11bc28ab00d921a26923ed54ae168154f0950b825f9f",
-      "bytes": 5241,
+      "sha256": "db7bc23f8fef135461903d188f13066ac94edc3edd83472fcefa6a6ef5feeeb5",
+      "bytes": 6442,
       "active": true,
       "fragments": [],
       "variables": []

@@ -32,6 +32,7 @@ import {
   modelRankingLabel,
   num,
   runArtifactActionAvailability,
+  terminalFailureEvidence,
   runPhaseDiagnosis,
   shouldUseRunEvidenceChat,
   shouldShowModelRanking,
@@ -133,6 +134,43 @@ describe('runArtifactActionAvailability', () => {
         {path: 'src/unchanged.ts', status: 'UNCHANGED'},
       ]),
     ).toBe(1);
+  });
+});
+
+describe('terminalFailureEvidence', () => {
+  it('surfaces durable planner rejection evidence on reload', () => {
+    expect(
+      terminalFailureEvidence({
+        status: 'FAILED',
+        statusReason: 'PLAN_VALIDATION_REJECTED',
+        failureReason: ' Plan validation rejected: T8 misses producer GET /api/products. ',
+      }),
+    ).toEqual({
+      title: 'Planning rejection evidence',
+      detail: 'Plan validation rejected: T8 misses producer GET /api/products.',
+    });
+  });
+
+  it('does not label an unavailable planning path as deterministic rejection', () => {
+    expect(
+      terminalFailureEvidence({
+        status: 'FAILED',
+        statusReason: 'PLANNER_UNAVAILABLE',
+        failureReason: 'planning could not produce a safe executable plan',
+      }),
+    ).toEqual({
+      title: 'Planning failure evidence',
+      detail: 'planning could not produce a safe executable plan',
+    });
+  });
+
+  it('does not invent evidence for an in-flight or reasonless run', () => {
+    expect(
+      terminalFailureEvidence({status: 'RUNNING', statusReason: null, failureReason: 'waiting'}),
+    ).toBeNull();
+    expect(
+      terminalFailureEvidence({status: 'FAILED', statusReason: 'PLANNER_UNAVAILABLE'}),
+    ).toBeNull();
   });
 });
 
@@ -469,6 +507,11 @@ describe('runResultUtils', () => {
 
   it('routes run evidence questions away from fresh-run proposals', () => {
     expect(shouldUseRunEvidenceChat('Why did this run fail?')).toBe(true);
+    expect(
+      shouldUseRunEvidenceChat(
+        'Did worker code generation start? Explain the exact planning failure and whether the provider was unavailable.',
+      ),
+    ).toBe(true);
     expect(shouldUseRunEvidenceChat('Show evidence for the reported files')).toBe(true);
     expect(shouldUseRunEvidenceChat('What did it create?')).toBe(true);
     expect(shouldUseRunEvidenceChat('Implement the missing endpoint')).toBe(false);

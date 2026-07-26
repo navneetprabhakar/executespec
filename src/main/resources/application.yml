@@ -1309,6 +1309,10 @@ auth:
     app-return-url: ${APP_SURFACE_RETURN_URL:${app.cors.app-return-url:http://localhost:5173/auth/callback}}
 
 executespec:
+  client-compatibility:
+    # Server-owned protocol floor advertised on every /api response. The split CLI/VS Code core
+    # turns an older identified client into an actionable, non-retryable 426 upgrade error.
+    minimum-cli-version: ${EXECUTESPEC_MIN_CLI_VERSION:1.0.0}
   # Production/runtime calls remain enabled. Maven test forks override this to false unless the
   # explicit live-llm-test profile is selected after a provider-budget reservation is acquired.
   live-llm:

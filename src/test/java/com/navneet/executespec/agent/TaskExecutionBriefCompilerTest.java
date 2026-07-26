@@ -202,6 +202,47 @@ class TaskExecutionBriefCompilerTest {
   }
 
   @Test
+  void acceptanceOwnerRetainsRollbackEvenWhenAnImplementationOwnerAlreadyMentionsIt() {
+    RequirementSpec requirement =
+        new RequirementSpec(
+            "R23",
+            "Black-box acceptance must assert transaction rollback.",
+            RequirementSpec.RequirementKind.NON_FUNCTIONAL);
+    PlannedTask implementation =
+        PlannedTask.builder()
+            .id("T8")
+            .title("Implement transactional mutation")
+            .description("Rollback the transaction when the second database write fails.")
+            .touchesFiles(List.of("backend/app/service.py"))
+            .meetsRequirements(List.of("R23"))
+            .build();
+    PlannedTask acceptance =
+        PlannedTask.builder()
+            .id("T16")
+            .title("Write black-box acceptance tests")
+            .description("Verbose browser journey. ".repeat(500))
+            .touchesFiles(List.of("tests/acceptance/test_failure.py"))
+            .meetsRequirements(List.of("R23"))
+            .build();
+    Plan normalized =
+        TaskExpanderAgent.normalizeFinalPlan(
+            Plan.builder()
+                .requirements(List.of(requirement))
+                .tasks(List.of(implementation, acceptance))
+                .build());
+
+    PlannedTask normalizedAcceptance = normalized.tasks().get(1);
+    assertThat(normalizedAcceptance.description())
+        .contains(
+            "REQUIREMENT SIGNALS (binding; preserve these exact contract terms)",
+            "R23 requires rollback");
+    assertThat(PlanContractQualityGate.violations(normalized)).isEmpty();
+
+    PlannedTask compiledAcceptance = TaskExecutionBriefCompiler.compile(normalized).tasks().get(1);
+    assertThat(compiledAcceptance.description()).contains("R23 requires rollback");
+  }
+
+  @Test
   void failsClosedWhenExplicitlyBindingDescriptionContractsCannotFitBriefBudget() {
     String oversizedContract =
         "ATOMICITY CONTRACT (binding): " + "preserve-this-executable-clause ".repeat(30);

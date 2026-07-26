@@ -145,6 +145,17 @@ class PromptConformanceTest {
   }
 
   @Test
+  void taskExpanderRequiresCompleteProducerSchemaBeforeConsumerExpansion() throws IOException {
+    String prompt = prompt("prompts/task-expander.md");
+
+    assertThat(prompt)
+        .contains("every model it owns")
+        .contains("complete field, relationship, constraint, and lifecycle contract")
+        .contains("Do not abbreviate a schema inventory")
+        .contains("downstream consumers can copy it verbatim");
+  }
+
+  @Test
   void plannerAndExpanderKeepFocusedTestsWithProductionWork() throws IOException {
     String full = prompt("prompts/outline-planner.md");
     String skeleton = prompt("prompts/outline-planner-skeleton.md");
@@ -370,7 +381,14 @@ class PromptConformanceTest {
         .contains("commits a claim")
         .contains("share the business transaction")
         .contains("SQLITE PORTABILITY")
-        .contains("ERROR ENVELOPE");
+        .contains("ERROR ENVELOPE")
+        .contains("framework-native HTTP errors/exceptions")
+        .contains("framework request-validation errors")
+        .contains("catch-all handler is not sufficient");
+    assertThat(prompt("prompts/reviewer-general.md"))
+        .contains("framework's native HTTP-error/exception handler")
+        .contains("request-validation handler")
+        .contains("catch-all is not sufficient");
   }
 
   private static String prompt(String classpath) throws IOException {

@@ -29,9 +29,14 @@ final class PlanExecutableContractReconciler {
               + "(?:or|versus|vs\\.?)\\s+(?:httpx\\.)?AsyncClient)"
               + "(?:[^.\\n]{0,100}\\b(?:pick|choose|select)\\s+one\\b)?");
   private static final String READINESS_CONTRACT =
-      "EXECUTABLE READINESS CONTRACT (binding): after launching uvicorn as a subprocess, poll a"
-          + " health/readiness endpoint with a bounded 15-second startup timeout before issuing"
-          + " test requests; fail with captured process logs if readiness is not reached.";
+      "EXECUTABLE READINESS CONTRACT (binding): after launching the documented backend command as"
+          + " a subprocess, poll a health/readiness endpoint with a bounded 15-second startup"
+          + " timeout before issuing test requests; fail with captured process logs if readiness"
+          + " is not reached.";
+  private static final String GLOBAL_ERROR_COVERAGE_CONTRACT =
+      "GLOBAL ERROR COVERAGE CONTRACT (binding): route framework HTTP errors/exceptions and"
+          + " framework request-validation errors through the canonical sanitized JSON envelope;"
+          + " a catch-all exception handler alone is insufficient.";
   private static final String NODE_E2E_CONTRACT =
       "EXECUTABLE PLAYWRIGHT CONTRACT (binding): use the @playwright/test dependency and a"
           + " package.json test:e2e script that runs `playwright test`. The Playwright webServer"
@@ -62,6 +67,7 @@ final class PlanExecutableContractReconciler {
     applied += closeExactActionPathBindings(tasks, summaries);
     applied += removeStaleForeignFileAssignments(tasks, summaries);
     applied += closeRuntimeDriverDependencies(tasks, summaries);
+    applied += closeGlobalErrorEnvelopeContracts(tasks, summaries);
     applied += closeExecutableTestContracts(tasks, summaries);
     applied += closeFrontendPlaceholderBindings(tasks, summaries);
     if (applied == 0) return new Result(plan, 0, List.of());
@@ -231,12 +237,8 @@ final class PlanExecutableContractReconciler {
       PlannedTask task = tasks.get(index);
       if (task == null) continue;
       String evidence = evidence(task).toLowerCase(Locale.ROOT);
-      boolean launchesUvicorn =
-          evidence.contains("subprocess")
-              && evidence.matches("(?s).*\\b(?:start|launch)\\w*\\b.{0,80}\\buvicorn\\b.*");
-      if (launchesUvicorn
-          && !evidence.matches(
-              "(?s).*\\b(?:readiness|ready|poll|wait until|startup timeout|health check)\\b.*")) {
+      boolean launchesServer = PlanSafetyE2eSupport.launchesRealServerSubprocess(evidence);
+      if (launchesServer && !PlanSafetyE2eSupport.hasBoundedReadinessProbe(evidence)) {
         task = appendDescription(task, READINESS_CONTRACT);
         tasks.set(index, task);
         evidence = evidence(task).toLowerCase(Locale.ROOT);
@@ -251,8 +253,24 @@ final class PlanExecutableContractReconciler {
           isPythonRunner(task, evidence)
               ? pythonE2eContract(task, fastApiVite)
               : (fastApiVite ? NODE_E2E_CONTRACT : GENERIC_NODE_E2E_CONTRACT);
-      tasks.set(index, appendDescription(task, contract));
+      tasks.set(index, replaceExecutablePlaywrightContract(task, contract));
       summaries.add(task.id() + " closes Playwright execution contract " + missing);
+      applied++;
+    }
+    return applied;
+  }
+
+  private static int closeGlobalErrorEnvelopeContracts(
+      List<PlannedTask> tasks, List<String> summaries) {
+    int applied = 0;
+    for (int index = 0; index < tasks.size(); index++) {
+      PlannedTask task = tasks.get(index);
+      if (task == null || !PlanGlobalErrorEnvelopeGate.ownsGlobalNestedEnvelope(task)) continue;
+      String evidence = evidence(task).toLowerCase(Locale.ROOT);
+      if (PlanGlobalErrorEnvelopeGate.coversFrameworkHttpErrors(evidence)
+          && PlanGlobalErrorEnvelopeGate.coversFrameworkValidationErrors(evidence)) continue;
+      tasks.set(index, appendDescription(task, GLOBAL_ERROR_COVERAGE_CONTRACT));
+      summaries.add(task.id() + " closes framework HTTP and request-validation error coverage");
       applied++;
     }
     return applied;
@@ -460,6 +478,16 @@ final class PlanExecutableContractReconciler {
         appendParagraph(task.description(), contract),
         task.hardConstraints(),
         task.touchesFiles());
+  }
+
+  private static PlannedTask replaceExecutablePlaywrightContract(
+      PlannedTask task, String contract) {
+    String description =
+        safe(task.description())
+            .replaceFirst("(?is)\\s*EXECUTABLE PLAYWRIGHT CONTRACT \\(binding\\):.*$", "")
+            .trim();
+    return PlanSafetyStructureSupport.withDescriptionConstraintsAndFiles(
+        task, appendParagraph(description, contract), task.hardConstraints(), task.touchesFiles());
   }
 
   private static String appendParagraph(String description, String paragraph) {

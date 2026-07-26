@@ -7,8 +7,6 @@ import static com.navneet.executespec.agent.TaskExpansionValueMerger.MAX_REQUIRE
 import static com.navneet.executespec.agent.TaskExpansionValueMerger.MAX_TOUCHES_FILES;
 import static com.navneet.executespec.agent.TaskExpansionValueMerger.MAX_TOUCH_FILE_CHARS;
 
-import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -30,7 +28,6 @@ import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.definition.DefaultToolDefinition;
 import org.springframework.ai.tool.definition.ToolDefinition;
-import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
@@ -65,6 +62,7 @@ public class TaskExpanderAgent {
   private final LlmRouter router;
   private final ObjectMapper objectMapper;
   private final ModelResolver modelResolver;
+  private final PromptAssembler promptAssembler;
 
   private static final String PROMPT_PATH = "prompts/task-expander.md";
 
@@ -338,15 +336,7 @@ public class TaskExpanderAgent {
     }
 
     String rawDescription = normalizeTechnicalSpacing(root.path("description").asText("").trim());
-    String description =
-        TaskExpansionTextNormalizer.boundTextPreservingExecutableContracts(
-            rawDescription, MAX_DESCRIPTION_CHARS);
-    if (!description.equals(rawDescription)) {
-      log.warn(
-          "TaskExpander {} compacted oversized description while preserving executable contract"
-              + " lines",
-          skeleton.id());
-    }
+    String description = requireDescriptionWithinEnvelope(skeleton.id(), rawDescription);
     List<String> rawAdditionalTouchesFiles =
         stringList(additionalArray(root, "additionalTouchesFiles", "touchesFiles", skeleton.id()));
     List<String> rawAdditionalHardConstraints =
@@ -429,6 +419,29 @@ public class TaskExpanderAgent {
     }
   }
 
+  /**
+   * Reject provider output that cannot fit the executable task schema without losing detail.
+   *
+   * <p>The old path silently truncated an oversized description and appended a compaction marker.
+   * That made an incomplete schema or acceptance procedure look executable and allowed workers to
+   * receive phrases such as "verbose implementation detail omitted". Oversize is a repairable tool
+   * schema violation: the existing bounded schema-repair turn asks the provider for a complete,
+   * concise payload, and a second oversize response fails closed before plan assembly.
+   */
+  static String requireDescriptionWithinEnvelope(String taskId, String description) {
+    String value = description == null ? "" : description;
+    if (value.length() > MAX_DESCRIPTION_CHARS) {
+      throw new IllegalStateException(
+          "submitTaskDetail args exceed schema limits for "
+              + taskId
+              + ": description is "
+              + value.length()
+              + " characters; maximum is "
+              + MAX_DESCRIPTION_CHARS);
+    }
+    return value;
+  }
+
   private static JsonNode additionalArray(
       JsonNode root, String field, String legacyField, String taskId) {
     if (root.has(field)) return root.path(field);
@@ -489,10 +502,10 @@ public class TaskExpanderAgent {
     };
   }
 
-  private String loadPrompt() {
+  String loadPrompt() {
     try {
-      return new ClassPathResource(PROMPT_PATH).getContentAsString(StandardCharsets.UTF_8);
-    } catch (IOException e) {
+      return promptAssembler.assemble(PROMPT_PATH.substring("prompts/".length()));
+    } catch (Exception e) {
       throw new IllegalStateException("TaskExpander prompt missing at " + PROMPT_PATH, e);
     }
   }

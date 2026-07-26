@@ -37,6 +37,105 @@ import org.springframework.ai.chat.model.Generation;
 class ChatServiceRouteTest {
 
   @Test
+  void answersDeterministicPlannerRejectionWithoutProviderDispatchOrFalseOutage() {
+    PipelineRunRepository runs = mock(PipelineRunRepository.class);
+    LlmRouter router = mock(LlmRouter.class);
+    ModelResolver resolver = mock(ModelResolver.class);
+    AgentProperties props = new AgentProperties();
+    props.setWorkspace(System.getProperty("java.io.tmpdir"));
+    ValidationReportRepository reports = mock(ValidationReportRepository.class);
+    RunChatTools tools = mock(RunChatTools.class);
+    PipelineRun run =
+        PipelineRun.builder()
+            .runId("run-plan-rejected")
+            .status("FAILED")
+            .statusReason("PLANNER_UNAVAILABLE")
+            .runMode("BUILD")
+            .aiProvider("DEEPSEEK")
+            .requestedProvider("DEEPSEEK")
+            .plannerProvider("DEEPSEEK")
+            .plannerActualModel("deepseek-v4-flash-native")
+            .expansionOutputTokens(1200L)
+            .planOutlineJson("{\"tasks\":[]}")
+            .failureReason(
+                "Plan validation rejected: T4: POST /api/leases/{id}/release has no producer")
+            .build();
+    when(runs.findById("run-plan-rejected")).thenReturn(Optional.of(run));
+
+    ChatService.SendResult result =
+        new ChatService(runs, router, resolver, props, reports, tools)
+            .send(
+                "run-plan-rejected",
+                "Did worker code generation start, and was the provider unavailable?");
+
+    assertThat(result.reply())
+        .contains("Worker code generation did not start")
+        .contains("POST /api/leases/{id}/release has no producer")
+        .contains("Provider availability was not the recorded cause")
+        .contains("does not mean a provider outage")
+        .doesNotContain("unreachable", "returned no response");
+    assertThat(run.getChatHistoryJson()).contains("POST /api/leases/{id}/release has no producer");
+    verify(resolver, never()).resolve(anyString(), any(), any());
+    verify(router, never()).call(any());
+    verify(runs).save(run);
+  }
+
+  @Test
+  void projectedPlanValidationReasonAlsoAnswersWithoutProviderDispatch() {
+    PipelineRunRepository runs = mock(PipelineRunRepository.class);
+    LlmRouter router = mock(LlmRouter.class);
+    ModelResolver resolver = mock(ModelResolver.class);
+    AgentProperties props = new AgentProperties();
+    props.setWorkspace(System.getProperty("java.io.tmpdir"));
+    PipelineRun run =
+        PipelineRun.builder()
+            .runId("run-plan-validation-rejected")
+            .status("FAILED")
+            .statusReason("PLANNER_UNAVAILABLE")
+            .runMode("BUILD")
+            .failureReason(
+                "Plan validation rejected: T4: POST /api/orders/{id}/reserve has no producer")
+            .planOutlineJson("{\"tasks\":[{\"id\":\"T4\"}]}")
+            .build();
+    when(runs.findById(run.getRunId())).thenReturn(Optional.of(run));
+
+    ChatService.SendResult result =
+        new ChatService(
+                runs,
+                router,
+                resolver,
+                props,
+                mock(ValidationReportRepository.class),
+                mock(RunChatTools.class))
+            .send(run.getRunId(), "Why did planning fail?");
+
+    assertThat(result.reply())
+        .contains("Worker code generation did not start")
+        .contains("PLAN_VALIDATION_REJECTED")
+        .contains("does not mean a provider outage")
+        .doesNotContain("PLANNER_UNAVAILABLE");
+    verify(resolver, never()).resolve(anyString(), any(), any());
+    verify(router, never()).call(any());
+  }
+
+  @Test
+  void wrappedCoherenceProviderFailureDoesNotUseDeterministicNoProviderAnswer() {
+    PipelineRun run =
+        PipelineRun.builder()
+            .runId("run-provider-failed")
+            .status("FAILED")
+            .statusReason("PLANNER_UNAVAILABLE")
+            .runMode("BUILD")
+            .failureReason("planning could not produce a safe executable plan")
+            .build();
+
+    assertThat(
+            RunChatDeterministicAnswer.answer(
+                run, "Did planning fail because the provider was unavailable?"))
+        .isEmpty();
+  }
+
+  @Test
   void dispatchesResolvedFallbackProviderWithItsModel() {
     PipelineRunRepository runs = mock(PipelineRunRepository.class);
     LlmRouter router = mock(LlmRouter.class);

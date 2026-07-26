@@ -83,6 +83,7 @@ import {
   testRerunState,
   taskBudgetFacts,
   taskGoalLine,
+  terminalFailureEvidence,
   testEvidenceSummary,
   testResultSummary,
   type Tab,
@@ -989,6 +990,7 @@ export default function IdeRunResult() {
       : issues.length > 0
         ? `${issues.length} validation issue${issues.length === 1 ? '' : 's'} found.`
         : 'Open the logs and evidence to identify the failing stage.');
+  const durableFailureEvidence = terminalFailureEvidence(run);
   // C2 — tab title carries the run name once loaded.
   useDocumentTitle(run?.runTitle || (run ? `R-${runId.slice(0, 6)}` : null));
 
@@ -1951,7 +1953,19 @@ export default function IdeRunResult() {
               </div>
             )}
             {!run?.tasks?.length ? (
-              <div className='ide-empty'>No steps.</div>
+              durableFailureEvidence ? (
+                <div className='ide-card' role='alert'>
+                  <div style={{fontWeight: 600}}>{durableFailureEvidence.title}</div>
+                  <div style={{fontSize: 12, color: 'var(--ide-red)', marginTop: 6}}>
+                    {durableFailureEvidence.detail}
+                  </div>
+                  <div style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 8}}>
+                    Execution did not start, so no worker steps were created.
+                  </div>
+                </div>
+              ) : (
+                <div className='ide-empty'>No steps.</div>
+              )
             ) : (
               <div className='ide-card' style={{padding: 0}}>
                 {run.tasks.map((t, i) => {
@@ -2465,7 +2479,19 @@ export default function IdeRunResult() {
             {reportFailure ? (
               <LoadError failure={reportFailure} what='evidence report' onRetry={reloadReport} />
             ) : !report ? (
-              <div className='ide-empty'>No evidence report.</div>
+              durableFailureEvidence ? (
+                <div className='ide-card' role='alert'>
+                  <div style={{fontWeight: 600}}>{durableFailureEvidence.title}</div>
+                  <div style={{fontSize: 12, color: 'var(--ide-red)', marginTop: 6}}>
+                    {durableFailureEvidence.detail}
+                  </div>
+                  <div style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 8}}>
+                    Validation did not run because execution never reached the worker phase.
+                  </div>
+                </div>
+              ) : (
+                <div className='ide-empty'>No evidence report.</div>
+              )
             ) : (
               <>
                 <div className='ide-card'>
@@ -2671,6 +2697,7 @@ export default function IdeRunResult() {
               {isSuperAdmin && (
                 <>
                   <Kv k='Actual cost' v={usd(costEvidence?.costUsd ?? run?.actualCostUsd)} />
+                  <Kv k='Requested voluntary cap' v={usd(run?.userCostCapUsd)} />
                   <Kv k='Hard cap' v={usd(run?.hardCapUsd)} />
                   <Kv
                     k='Estimate range'
@@ -2912,7 +2939,11 @@ export default function IdeRunResult() {
         {tab === 'Screens' && (
           <div className='ide-pane' style={{position: 'absolute', inset: 0, overflowY: 'auto'}}>
             <h1 className='ide-h1'>Screens</h1>
-            <IdeRunScreens runId={runId} />
+            <IdeRunScreens
+              runId={runId}
+              hasProducedWorkspace={artifactActions.preview}
+              unavailableReason={artifactActions.workspaceReason}
+            />
           </div>
         )}
 

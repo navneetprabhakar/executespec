@@ -12,6 +12,8 @@ import com.navneet.executespec.config.featureflag.FeatureFlagService;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 /**
  * Pins for {@link SequentialExecutor#composeSystemPrompt}'s provider-specific tuning fragment
@@ -126,6 +128,22 @@ class ProviderPromptTuningTest {
     String prompt =
         newExecutor(ffs).composeSystemPrompt(task(), null, null, null, null, "openrouter");
     assertThat(prompt).contains("PROVIDER-SPECIFIC BUILD NOTES (OpenRouter");
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"anthropic", "openai", "gemini", "deepseek", "openrouter", "fireworks"})
+  @DisplayName("all providers receive the shared backend error-envelope contract")
+  void allProvidersReceiveSharedBackendRobustnessContract(String provider) {
+    FeatureFlagService ffs = mock(FeatureFlagService.class);
+    when(ffs.isEnabled(SequentialExecutor.FLAG_PROVIDER_TUNING)).thenReturn(true);
+
+    String prompt =
+        newExecutor(ffs).composeSystemPrompt(task(), null, null, "python", null, provider);
+
+    assertThat(prompt)
+        .contains("framework-native HTTP errors/exceptions")
+        .contains("framework request-validation errors")
+        .contains("catch-all handler is not sufficient");
   }
 
   @Test

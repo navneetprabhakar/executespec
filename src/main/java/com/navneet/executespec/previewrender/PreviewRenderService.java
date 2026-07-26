@@ -120,6 +120,10 @@ public class PreviewRenderService {
         stateStore
             .findRun(runId)
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "run not found"));
+    if (!hasProductFilesToRender(runId)) {
+      throw new ResponseStatusException(
+          HttpStatus.CONFLICT, "this run produced no product files to render");
+    }
 
     PreviewRenderJob job;
     try {
@@ -192,6 +196,23 @@ public class PreviewRenderService {
   /** Latest job for a run, if any. */
   public Optional<PreviewRenderJob> latestJob(String runId) {
     return jobRepository.findFirstByRunIdOrderByRequestedAtDesc(runId);
+  }
+
+  /**
+   * Whether the admitted run-start baseline proves at least one product-file change.
+   *
+   * <p>This is deliberately the same gate used by {@link #requestRender(String, String)}. The web
+   * client cannot infer it from current {@code git status}: the pipeline normally commits its
+   * output, making a valid brownfield delivery look clean even though its run-baseline diff is
+   * non-empty. Evidence failures fail closed here and at the paid POST boundary.
+   */
+  public boolean hasProductFilesToRender(String runId) {
+    try {
+      return changeEvidenceService.meaningfulProductDiffCount(runId) > 0;
+    } catch (RuntimeException e) {
+      log.warn("preview-render product change evidence unavailable run={}", runId, e);
+      return false;
+    }
   }
 
   /** Surfaces belonging to a job, in display order. */

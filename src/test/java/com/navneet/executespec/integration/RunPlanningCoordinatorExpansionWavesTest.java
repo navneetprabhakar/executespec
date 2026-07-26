@@ -94,6 +94,18 @@ class RunPlanningCoordinatorExpansionWavesTest {
   }
 
   @Test
+  void expansionPhaseFailurePreservesTypedContractRejection() {
+    TaskExpanderAgent.ExpansionContractException rejection =
+        new TaskExpanderAgent.ExpansionContractException(
+            "T9", List.of("required header became optional"));
+
+    assertThat(
+            RunPlanningCoordinator.expansionPhaseFailure(
+                new ExecutionException(new java.util.concurrent.CompletionException(rejection))))
+        .isSameAs(rejection);
+  }
+
+  @Test
   void anyExpansionFailureFailsClosedInsteadOfFabricatingAWorkerTask() {
     var expanded = new java.util.concurrent.ConcurrentHashMap<String, List<PlannedTask>>();
     var failures = new java.util.concurrent.ConcurrentHashMap<String, Throwable>();
@@ -124,7 +136,20 @@ class RunPlanningCoordinatorExpansionWavesTest {
     ObjectMapper mapper = new ObjectMapper();
     RunPlanningCoordinator coordinator =
         new RunPlanningCoordinator(
-            repository, mapper, null, null, null, null, null, null, null, null, null, null, null);
+            repository,
+            mapper,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null);
     Plan candidate =
         Plan.builder()
             .planTitle("Rejected normalized candidate")

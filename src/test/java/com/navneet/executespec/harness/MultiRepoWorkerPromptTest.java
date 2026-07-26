@@ -127,6 +127,56 @@ class MultiRepoWorkerPromptTest {
     }
   }
 
+  @Test
+  void multiTaskWorkersReceiveExactScopedSourceClausesWithoutRepeatingUnrelatedSpec() {
+    String original =
+        """
+        - GET /api/products returns product identifiers and names.
+        - A failed multi-line transfer rolls back stock and audit writes atomically.
+        - The dashboard uses a responsive two-column layout.
+        """;
+    PlannedTask backend =
+        PlannedTask.builder()
+            .id("T1")
+            .title("Implement product and transfer APIs")
+            .description("Implement backend contracts")
+            .meetsRequirements(List.of("R1", "R2"))
+            .build();
+    PlannedTask frontend =
+        PlannedTask.builder()
+            .id("T2")
+            .title("Implement dashboard")
+            .description("Implement frontend")
+            .meetsRequirements(List.of("R3"))
+            .build();
+    Plan plan =
+        Plan.builder()
+            .requirements(
+                List.of(
+                    new RequirementSpec(
+                        "R1",
+                        "GET /api/products returns product identifiers and names.",
+                        RequirementKind.FUNCTIONAL),
+                    new RequirementSpec(
+                        "R2",
+                        "A failed multi-line transfer rolls back stock and audit writes"
+                            + " atomically.",
+                        RequirementKind.FUNCTIONAL),
+                    new RequirementSpec(
+                        "R3", "Responsive two-column dashboard.", RequirementKind.FUNCTIONAL)))
+            .tasks(List.of(backend, frontend))
+            .build();
+
+    String evidence =
+        PromptComposer.composeWorkerEvidence(backend, null, null, null, null, null, plan, original);
+
+    assertTrue(evidence.contains("<<<UNTRUSTED_TASK_SOURCE_REQUIREMENTS"));
+    assertTrue(evidence.contains("GET /api/products returns product identifiers and names."));
+    assertTrue(evidence.contains("failed multi-line transfer rolls back stock and audit writes"));
+    assertFalse(evidence.contains("responsive two-column layout"));
+    assertFalse(evidence.contains("<<<UNTRUSTED_ORIGINAL_SPEC"));
+  }
+
   /**
    * Build a bare-minimum executor instance with all collaborators mocked. {@code
    * composeSystemPrompt} doesn't touch any of them — it only reads from its arguments and {@code

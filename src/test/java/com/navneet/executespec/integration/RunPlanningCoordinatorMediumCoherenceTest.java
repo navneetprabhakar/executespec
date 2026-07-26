@@ -93,6 +93,7 @@ class RunPlanningCoordinatorMediumCoherenceTest {
             null,
             null,
             flags,
+            null,
             null);
     return new Fixture(coordinator, outline, coherence);
   }

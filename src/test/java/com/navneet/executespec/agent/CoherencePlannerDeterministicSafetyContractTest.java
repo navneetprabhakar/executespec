@@ -1610,6 +1610,46 @@ class CoherencePlannerDeterministicSafetyContractTest {
   }
 
   @Test
+  void stockMutationTaskDoesNotStealAuditGetFromConcreteAuditRouterOwner() {
+    Plan plan =
+        Plan.builder()
+            .requirements(
+                List.of(
+                    requirement("R1", "Create positive or negative stock adjustments."),
+                    requirement(
+                        "R2", "Show immutable stock adjustment and transfer audit history.")))
+            .tasks(
+                List.of(
+                    task(
+                        "T4",
+                        "Implement stock adjustment and transfer APIs",
+                        "Expose POST /api/adjustments and POST /api/transfers with atomic audit"
+                            + " writes.",
+                        List.of(
+                            "backend/app/routers/adjustments.py",
+                            "backend/app/routers/transfers.py")),
+                    task(
+                        "T6",
+                        "Implement audit-history API endpoint",
+                        "Expose GET /api/audit with filtering and pagination.",
+                        List.of("backend/app/routers/audit.py"))))
+            .build();
+
+    Plan enriched = PlanSafetyContractEnricher.enrich(plan).plan();
+    PlannedTask mutations = enriched.tasks().getFirst();
+    PlannedTask audit = enriched.tasks().get(1);
+
+    assertThat(mutations.hardConstraints())
+        .noneMatch(value -> value.contains("Expose unified read-only audit history"));
+    assertThat(audit.description()).contains("GET /api/audit");
+    assertThat(TaskExpanderAgent.finalPlanContractViolations(enriched))
+        .noneMatch(
+            value ->
+                value.contains("GET /api/audit")
+                    && value.contains("concrete route artifact ownership belongs"));
+  }
+
+  @Test
   void replacesRealHttpAppFactoryAndDoubleCancelSuccessContradictions() {
     Plan plan =
         Plan.builder()
@@ -1923,7 +1963,7 @@ class CoherencePlannerDeterministicSafetyContractTest {
   }
 
   @Test
-  void packageMarkerAloneDoesNotRewriteMonolithicModelsPath() {
+  void markerOnlyPackageYieldsToCanonicalMonolithicModule() {
     Plan plan =
         Plan.builder()
             .requirements(List.of(requirement("R13", "Persist inventory and transfer audits.")))
@@ -1938,13 +1978,99 @@ class CoherencePlannerDeterministicSafetyContractTest {
                         "T3",
                         "Implement stock audit and Transfer models",
                         "Extend backend/app/models.py with StockAudit and Transfer.",
+                        List.of("backend/app/models.py")),
+                    task(
+                        "T7",
+                        "Implement reservation persistence",
+                        "Extend backend/app/models.py with Reservation and ReservationLine.",
                         List.of("backend/app/models.py"))))
             .build();
 
-    PlannedTask task = PlanSafetyContractEnricher.enrich(plan).plan().tasks().get(1);
+    Plan normalized =
+        TaskExpansionPlanNormalizer.normalize(PlanSafetyContractEnricher.enrich(plan).plan());
+    Plan repeated = TaskExpansionPlanNormalizer.normalize(normalized);
+    PlannedTask markerOwner = normalized.tasks().getFirst();
+    PlannedTask modelOwner = normalized.tasks().get(1);
 
-    assertThat(task.touchesFiles()).containsExactly("backend/app/models.py");
-    assertThat(task.description()).contains("backend/app/models.py");
+    assertThat(markerOwner.touchesFiles())
+        .containsExactly("backend/app/__init__.py")
+        .noneMatch(path -> path.startsWith("backend/app/models/"));
+    assertThat(modelOwner.touchesFiles()).containsExactly("backend/app/models.py");
+    assertThat(normalized.tasks().get(2).touchesFiles()).containsExactly("backend/app/models.py");
+    assertThat(
+            normalized.tasks().stream()
+                .flatMap(task -> task.hardConstraints().stream())
+                .filter(value -> value.contains("PYTHON NAMESPACE CONTRACT")))
+        .allMatch(value -> value.contains("backend/app/models.py"))
+        .allMatch(value -> value.contains("do not create the shadow package"));
+    assertThat(TaskExpanderAgent.finalPlanContractViolations(normalized))
+        .noneMatch(value -> value.contains("models.py") && value.contains("collides with package"));
+    assertThat(repeated).isEqualTo(normalized);
+  }
+
+  @Test
+  void explicitlyMarkerOnlyBaseYieldsToCanonicalMonolithicModule() {
+    Plan plan =
+        Plan.builder()
+            .requirements(List.of(requirement("R13", "Persist inventory audits.")))
+            .tasks(
+                List.of(
+                    task(
+                        "T1",
+                        "Create compatibility package markers",
+                        "Create backend/app/models/__init__.py and backend/app/models/base.py as"
+                            + " package markers; base.py contains no classes or runtime"
+                            + " definitions.",
+                        List.of("backend/app/models/__init__.py", "backend/app/models/base.py")),
+                    task(
+                        "T2",
+                        "Implement audit models",
+                        "Define StockAudit in backend/app/models.py.",
+                        List.of("backend/app/models.py"))))
+            .build();
+
+    Plan normalized = PlanPythonNamespaceLayoutReconciler.reconcile(plan);
+
+    assertThat(normalized.tasks().getFirst().touchesFiles())
+        .containsExactly("backend/app/__init__.py")
+        .doesNotContain("backend/app/models/base.py");
+    assertThat(normalized.tasks().getFirst().description())
+        .contains("backend/app/__init__.py")
+        .doesNotContain("backend/app/models/base.py");
+    assertThat(TaskExpanderAgent.finalPlanContractViolations(normalized))
+        .noneMatch(value -> value.contains("models.py") && value.contains("collides with package"));
+  }
+
+  @Test
+  void substantiveDeclarativeBaseFailsClosedInsteadOfBeingRemovedByFilename() {
+    Plan plan =
+        Plan.builder()
+            .requirements(List.of(requirement("R13", "Persist inventory audits.")))
+            .tasks(
+                List.of(
+                    task(
+                        "T1",
+                        "Create SQLAlchemy model foundation",
+                        "Create backend/app/models/__init__.py as a package marker and"
+                            + " backend/app/models/base.py with SQLAlchemy DeclarativeBase, a"
+                            + " shared MetaData naming convention, and reusable model behavior.",
+                        List.of("backend/app/models/__init__.py", "backend/app/models/base.py")),
+                    task(
+                        "T2",
+                        "Implement audit models",
+                        "Define StockAudit in backend/app/models.py.",
+                        List.of("backend/app/models.py"))))
+            .build();
+
+    Plan reconciled = PlanPythonNamespaceLayoutReconciler.reconcile(plan);
+
+    assertThat(reconciled).isEqualTo(plan);
+    assertThat(reconciled.tasks().getFirst().touchesFiles())
+        .contains("backend/app/models/__init__.py", "backend/app/models/base.py");
+    assertThat(reconciled.tasks().stream().flatMap(task -> task.hardConstraints().stream()))
+        .noneMatch(value -> value.contains("PYTHON NAMESPACE CONTRACT"));
+    assertThat(TaskExpanderAgent.finalPlanContractViolations(reconciled))
+        .anyMatch(value -> value.contains("models.py") && value.contains("collides with package"));
   }
 
   @Test

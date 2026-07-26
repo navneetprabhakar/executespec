@@ -11,6 +11,8 @@ final class RunChatEvidence {
 
   static String render(PipelineRun run) {
     boolean outlinePersisted = hasText(run.getPlanOutlineJson());
+    boolean finalPlanPersisted = hasText(run.getPlanJson());
+    String workerCodeGenerationState = workerCodeGenerationState(run, finalPlanPersisted);
     boolean providerResponseObserved =
         positive(run.getPlannerOutputTokens())
             || positive(run.getTotalOutputTokens())
@@ -31,6 +33,7 @@ final class RunChatEvidence {
     evidence.append("- runId: ").append(run.getRunId()).append('\n');
     evidence.append("- status: ").append(value(run.getStatus())).append('\n');
     evidence.append("- statusReason: ").append(value(run.getStatusReason())).append('\n');
+    evidence.append("- runMode: ").append(value(run.getRunMode())).append('\n');
     evidence
         .append("- failureReason: ")
         .append(bounded(run.getFailureReason(), MAX_FAILURE_REASON_CHARS))
@@ -78,14 +81,29 @@ final class RunChatEvidence {
         .append("- planArtifacts: outlinePersisted=")
         .append(outlinePersisted)
         .append(", finalPlanPersisted=")
-        .append(hasText(run.getPlanJson()))
+        .append(finalPlanPersisted)
         .append(", requirementsPersisted=")
         .append(hasText(run.getPlanRequirementsJson()))
         .append('\n');
+    evidence.append("- workerCodeGenerationState: ").append(workerCodeGenerationState).append('\n');
+    evidence.append("- phaseDefinition: expansion is planning, not worker code generation\n");
     if (run.getActualCostUsd() != null) {
       evidence.append("- recordedRunCostUsd: ").append(run.getActualCostUsd()).append('\n');
     }
     return evidence.toString();
+  }
+
+  private static String workerCodeGenerationState(PipelineRun run, boolean finalPlanPersisted) {
+    // BUILD workers are downstream of an accepted, persisted final plan. A terminal planner
+    // rejection before that boundary therefore proves that the worker could not have started.
+    // Other lifecycle shapes need task/attempt evidence that this bounded run block does not own.
+    if ("BUILD".equalsIgnoreCase(run.getRunMode())
+        && com.navneet.executespec.integration.PlannerFailureDiagnostic
+            .isPlanValidationStatusReason(run.getStatusReason())
+        && !finalPlanPersisted) {
+      return "NOT_STARTED";
+    }
+    return "UNKNOWN";
   }
 
   private static String pair(Number input, Number output) {

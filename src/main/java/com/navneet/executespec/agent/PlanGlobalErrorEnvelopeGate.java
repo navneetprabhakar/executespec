@@ -109,7 +109,7 @@ final class PlanGlobalErrorEnvelopeGate {
     }
   }
 
-  private static boolean ownsGlobalNestedEnvelope(PlannedTask task) {
+  static boolean ownsGlobalNestedEnvelope(PlannedTask task) {
     String evidence = evidence(task);
     String lower = evidence.toLowerCase(Locale.ROOT);
     boolean ownsHandler =
@@ -127,14 +127,15 @@ final class PlanGlobalErrorEnvelopeGate {
     return ownsHandler && globalClaim && NESTED_ERROR_ENVELOPE.matcher(evidence).find();
   }
 
-  private static boolean coversFrameworkHttpErrors(String evidence) {
+  static boolean coversFrameworkHttpErrors(String evidence) {
     return evidence.contains("httpexception")
         || evidence.matches("(?s).*\\bframework http (?:error|exception)s?\\b.*")
         || evidence.matches("(?s).*\\bfastapi\\b.{0,80}\\b(?:http error|http exception)s?\\b.*");
   }
 
-  private static boolean coversFrameworkValidationErrors(String evidence) {
+  static boolean coversFrameworkValidationErrors(String evidence) {
     return evidence.contains("requestvalidationerror")
+        || evidence.contains("framework request-validation errors")
         || evidence.matches("(?s).*\\bframework (?:request )?validation errors?\\b.*")
         || evidence.matches(
             "(?s).*\\b(?:fastapi|pydantic)\\b.{0,100}\\b(?:request )?validation errors?\\b.*");

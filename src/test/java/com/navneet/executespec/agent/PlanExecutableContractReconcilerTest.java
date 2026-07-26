@@ -2,6 +2,7 @@ package com.navneet.executespec.agent;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.util.ArrayList;
 import java.util.List;
 
 import org.junit.jupiter.api.Test;
@@ -191,6 +192,201 @@ class PlanExecutableContractReconcilerTest {
 
     assertThat(normalized.description()).contains("uvicorn", "Vite", "DATABASE_URL");
     assertThat(PlanContractQualityGate.violations(normalizedPlan)).isEmpty();
+  }
+
+  @Test
+  void finalNormalizationClosesStackNeutralRealServerReadinessContracts() {
+    PlannedTask fastApiTest =
+        task(
+            "T13",
+            "Backend HTTP integration tests",
+            "Use a subprocess fixture to launch uvicorn and issue real HTTP requests.",
+            List.of("backend/tests/test_http_integration.py"));
+    PlannedTask springTest =
+        task(
+            "T14",
+            "Spring HTTP integration tests",
+            "Use ProcessBuilder to launch the Spring Boot backend and issue real HTTP requests.",
+            List.of("server/src/test/java/example/HttpIntegrationTest.java"));
+
+    Plan normalized = TaskExpansionPlanNormalizer.normalize(plan(fastApiTest, springTest));
+
+    assertThat(task(normalized, "T13").description())
+        .contains("documented backend command", "bounded 15-second startup timeout");
+    assertThat(task(normalized, "T14").description())
+        .contains("documented backend command", "bounded 15-second startup timeout")
+        .doesNotContain("uvicorn");
+    List<String> violations = new ArrayList<>();
+    PlanBackendContractGate.addViolations(normalized, violations);
+    assertThat(violations).noneMatch(value -> value.contains("bounded readiness probe"));
+  }
+
+  @Test
+  void globalEnvelopeOwnersReceiveFrameworkCoverageWithoutStackSpecificInvention() {
+    for (String stack : List.of("FastAPI", "Spring Boot", "Express")) {
+      PlannedTask owner =
+          task(
+              "T12",
+              "Configure " + stack + " global error handling",
+              "Every non-2xx response uses {\"error\":{\"code\":\"STABLE\","
+                  + "\"message\":\"safe\"}}. Register an application exception handler, a"
+                  + " catch-all Exception handler, and a request validation handler.",
+              List.of(
+                  "backend/errors."
+                      + (stack.equals("Spring Boot")
+                          ? "java"
+                          : stack.equals("FastAPI") ? "py" : "ts")));
+      PlannedTask frontend =
+          task(
+              "T13",
+              "Render errors",
+              "Render the normalized error message.",
+              List.of("frontend/src/ErrorView.tsx"));
+      Plan source = plan(owner, frontend);
+      List<String> before = new ArrayList<>();
+      PlanGlobalErrorEnvelopeGate.addViolations(source, before);
+
+      Plan normalized = PlanExecutableContractReconciler.reconcile(source).plan();
+      List<String> after = new ArrayList<>();
+      PlanGlobalErrorEnvelopeGate.addViolations(normalized, after);
+
+      assertThat(before).anyMatch(value -> value.contains("framework HTTP errors"));
+      assertThat(after).isEmpty();
+      assertThat(task(normalized, "T12").description())
+          .contains(
+              "framework HTTP errors/exceptions",
+              "framework request-validation errors",
+              "catch-all exception handler alone is insufficient");
+      assertThat(task(normalized, "T13").description())
+          .doesNotContain("GLOBAL ERROR COVERAGE CONTRACT");
+    }
+  }
+
+  @Test
+  void finalNormalizationReplacesTruncatedPythonPlaywrightBindingAtomically() {
+    PlannedTask backend =
+        task(
+            "T1",
+            "Build FastAPI backend",
+            "Use FastAPI, uvicorn, SQLite DATABASE_URL, and Alembic migrations.",
+            List.of("backend/requirements.txt", "backend/app/main.py"));
+    PlannedTask frontend =
+        task(
+            "T2",
+            "Build Vite frontend",
+            "Run Vite from the frontend package.",
+            List.of("frontend/package.json", "frontend/vite.config.ts"));
+    String partialBinding =
+        "EXECUTABLE PLAYWRIGHT CONTRACT (binding): use the @playwright/test dependency and a"
+            + " package.json test:e2e script that runs `playwright test`.";
+    PlannedTask e2e =
+        task(
+            "T15",
+            "Independent black-box acceptance suite",
+            "Exercise the complete browser journey. " + "x".repeat(3_650) + " " + partialBinding,
+            List.of(
+                "backend/tests/acceptance/test_browser.py",
+                "backend/tests/acceptance/conftest.py",
+                "backend/requirements.txt"));
+
+    Plan normalized = TaskExpansionPlanNormalizer.normalize(plan(backend, frontend, e2e));
+    Plan compiled = TaskExecutionBriefCompiler.compile(normalized);
+    String description = task(compiled, "T15").description();
+
+    assertThat(description)
+        .contains(
+            "pytest-playwright",
+            "python -m pytest",
+            "both uvicorn and Vite",
+            "bounded timeout",
+            "fresh isolated DATABASE_URL",
+            "teardown terminates both processes")
+        .doesNotContain("@playwright/test", "package.json test:e2e");
+    List<String> violations = new ArrayList<>();
+    PlanE2eToolchainGate.addViolations(compiled, violations);
+    assertThat(violations).isEmpty();
+    Plan second = TaskExpansionPlanNormalizer.normalize(compiled);
+    assertThat(task(second, "T15").description())
+        .containsOnlyOnce("EXECUTABLE PLAYWRIGHT CONTRACT (binding)");
+  }
+
+  @Test
+  void flattenedBindingsCannotDisplaceTheCompleteBrowserExecutionContractFromWorkerBrief() {
+    PlannedTask backend =
+        task(
+            "T1",
+            "Build FastAPI backend",
+            "Use FastAPI, uvicorn, SQLite DATABASE_URL, and Alembic migrations.",
+            List.of("backend/requirements.txt", "backend/app/main.py"));
+    PlannedTask frontend =
+        task(
+            "T2",
+            "Build Vite frontend",
+            "Run Vite from the frontend package.",
+            List.of("frontend/package.json", "frontend/vite.config.ts"));
+    String flattenedTail =
+        "BROWSER JOURNEY CONTRACT (binding): drive workflows through rendered Playwright UI."
+            + "PERSISTENCE PROOF (binding): verify records through public HTTP after restart."
+            + "REQUIREMENT SIGNALS (binding; preserve exact terms): rollback and oversell."
+            + "EXECUTABLE PLAYWRIGHT CONTRACT (binding): use the @playwright/test dependency and"
+            + " a package.json test:e2e script that runs `playwright test`.";
+    PlannedTask e2e =
+        PlannedTask.builder()
+            .id("T16")
+            .title("Implement Playwright E2E tests and black-box acceptance suite")
+            .description(
+                "Exercise every required browser journey. " + "detail ".repeat(510) + flattenedTail)
+            .complexity(PlannedTask.Complexity.HIGH)
+            .touchesFiles(
+                List.of(
+                    "e2e/package.json", "e2e/playwright.config.ts", "e2e/tests/full-flow.spec.ts"))
+            .dependsOn(List.of("T1", "T2"))
+            .hardConstraints(
+                List.of(
+                    "Preserve stable sanitized errors.",
+                    "Exercise only public surfaces.",
+                    "Verify rollback.",
+                    "Verify concurrency.",
+                    "Verify audit history.",
+                    "Verify responsive behavior.",
+                    "Use deterministic seed data.",
+                    "Apply migrations.",
+                    "Do not inspect storage directly.",
+                    "Keep browser business setup UI-driven."))
+            .meetsRequirements(List.of())
+            .taskType(PlannedTask.TaskType.LEAF)
+            .build();
+
+    Plan normalized = TaskExpansionPlanNormalizer.normalize(plan(backend, frontend, e2e));
+    Plan compiled = TaskExecutionBriefCompiler.compile(normalized);
+    String description = task(compiled, "T16").description();
+
+    assertThat(description)
+        .contains(
+            "@playwright/test",
+            "package.json test:e2e",
+            "playwright test",
+            "both uvicorn and Vite",
+            "health/readiness",
+            "fresh isolated DATABASE_URL",
+            "teardown stops both processes");
+    List<String> violations = new ArrayList<>();
+    PlanE2eToolchainGate.addViolations(compiled, violations);
+    assertThat(violations).isEmpty();
+  }
+
+  @Test
+  void blackBoxCanonicalizationPreservesExplicitBindingParagraphBoundaries() {
+    String binding =
+        "EXECUTABLE PLAYWRIGHT CONTRACT (binding): lifecycle, readiness, isolation, and teardown"
+            + " are mandatory.";
+    String source = "Use TestClient against the app factory for the black-box suite.\n\n" + binding;
+
+    PlanSafetyInstructionCanonicalizer.RewriteResult result =
+        PlanSafetyInstructionCanonicalizer.rewriteContradictoryExecutableInstructions(
+            source, List.of(), false, false, false, true);
+
+    assertThat(result.description()).contains("\n\n" + binding);
   }
 
   private static PlannedTask task(Plan plan, String id) {

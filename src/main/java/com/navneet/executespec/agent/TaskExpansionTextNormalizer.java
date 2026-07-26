@@ -13,10 +13,18 @@ final class TaskExpansionTextNormalizer {
   static String boundText(String value, int maxLength) {
     String safeValue = safe(value).trim();
     if (safeValue.length() <= maxLength) return safeValue;
-    int boundary = safeValue.lastIndexOf('\n', maxLength);
-    if (boundary < maxLength / 2) boundary = safeValue.lastIndexOf('.', maxLength);
+    if (maxLength <= 0) return "";
+    // lastIndexOf includes its from-index. Searching from maxLength allowed a newline or period at
+    // exactly that index to be included by substring(boundary + 1), returning maxLength + 1
+    // characters. Coherence commonly appends binding paragraphs after verbose prose, so this
+    // one-character leak could make an otherwise mechanically compactable plan fail the final
+    // 4,000-character contract gate. Search only inside the permitted prefix and retain the hard
+    // min below as a second line of defence.
+    int lastPermittedIndex = maxLength - 1;
+    int boundary = safeValue.lastIndexOf('\n', lastPermittedIndex);
+    if (boundary < maxLength / 2) boundary = safeValue.lastIndexOf('.', lastPermittedIndex);
     if (boundary < maxLength / 2) boundary = maxLength - 1;
-    return safeValue.substring(0, boundary + 1).trim();
+    return safeValue.substring(0, Math.min(maxLength, boundary + 1)).trim();
   }
 
   static String boundTextPreservingFinalContract(String value, int maxLength) {
@@ -61,7 +69,12 @@ final class TaskExpansionTextNormalizer {
   }
 
   private static List<String> paragraphs(String value) {
-    return java.util.Arrays.stream(value.split("\\n\\n+"))
+    String restoredBindingBoundaries =
+        value.replaceAll(
+            "(?<![A-Z0-9 _/+*+-])(?=(?:\\*\\*)?[A-Z][A-Z0-9 _/+-]{1,100}\\s*\\(binding\\b[^)]*\\)"
+                + "\\s*:)",
+            "\n\n");
+    return java.util.Arrays.stream(restoredBindingBoundaries.split("\\n\\n+"))
         .map(String::trim)
         .filter(paragraph -> !paragraph.isBlank())
         .toList();
@@ -325,19 +338,17 @@ final class TaskExpansionTextNormalizer {
   }
 
   static String rewriteFrontendOrderPayload(String description) {
-    String rewritten =
+    String normalized =
         safe(description)
             .replace("product_sku", "product_id")
             .replace("warehouse_code", "warehouse_id")
-            .replaceAll("(?i),?\\s*customer_name:\\s*string", "")
-            .replaceAll("(?im)^\\s*- Customer name text input \\(required\\)\\.\\s*$", "")
-            .replaceAll("(?i)customer name required,?\\s*", "")
             .replaceAll("(?i)`?400`? (?:on )?insufficient stock", "422 on insufficient stock");
     String canonical =
         "The frontend order payload is {items: [{product_id, warehouse_id, quantity}]}; send the"
-            + " required Idempotency-Key header. Do not add alternate customer or string identity"
-            + " fields that the backend does not define.";
-    return rewritten.contains(canonical) ? rewritten : rewritten + "\n\n" + canonical;
+            + " required Idempotency-Key header, and surface the backend 422 insufficient-stock"
+            + " response. Do not add alternate customer or string identity fields that the"
+            + " backend does not define.";
+    return replaceContradictoryClauses(normalized, canonical, "customer_name", "customer name");
   }
 
   static String rewriteRootVerificationCommands(String description) {

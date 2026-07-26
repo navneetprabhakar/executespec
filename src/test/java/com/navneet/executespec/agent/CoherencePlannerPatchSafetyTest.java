@@ -20,7 +20,7 @@ class CoherencePlannerPatchSafetyTest {
 
   private final ObjectMapper mapper = new ObjectMapper();
   private final CoherencePlannerAgent agent =
-      new CoherencePlannerAgent(mock(LlmRouter.class), mapper, mock(ModelResolver.class));
+      new CoherencePlannerAgent(mock(LlmRouter.class), mapper, mock(ModelResolver.class), null);
 
   private Plan planWith(String... files) {
     PlannedTask task =
@@ -50,6 +50,22 @@ class CoherencePlannerPatchSafetyTest {
                 new CoherencePlannerAgent.PatchResult(
                     plan, 0, List.of(), false, "fatal contract conflicts: schema mismatch")))
         .isFalse();
+  }
+
+  @Test
+  void noOpModelPassDoesNotRepeatDeterministicAccounting() {
+    Plan original = planWith("src/A.java");
+    Plan deterministicPlan = planWith("src/A.java", "src/B.java");
+    PlanSafetyContractEnricher.Result deterministic =
+        new PlanSafetyContractEnricher.Result(deterministicPlan, 3, List.of("one", "two", "three"));
+
+    CoherencePlannerAgent.PatchResult result =
+        CoherencePlannerAgent.finishNoOpModelPass(
+            deterministic, new CoherencePlannerAgent.PatchResult(deterministicPlan, 0, List.of()));
+
+    assertThat(result.patchedPlan()).isSameAs(deterministicPlan).isNotSameAs(original);
+    assertThat(result.patchesApplied()).isEqualTo(3);
+    assertThat(result.patchSummaries()).containsExactly("one", "two", "three");
   }
 
   @Test

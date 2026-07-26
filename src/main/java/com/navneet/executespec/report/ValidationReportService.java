@@ -1007,15 +1007,10 @@ public class ValidationReportService {
   private ValidationReportDTO toDTO(ValidationReport entity) {
     List<ReportIssueDTO> issues = parseIssues(entity.getIssuesJson());
     List<VerificationEvidenceDTO> verificationLedger = buildVerificationLedger(entity, issues);
-    AccuracyReport accuracy = parseAccuracyReport(entity);
     Integer effectiveVerifiedScore =
-        entity.getVerifiedScore() == null
-            ? null
-            : capScoreAtAdmittedSpecGaps(entity.getVerifiedScore(), accuracy);
+        ValidationReportScoreProjection.effectiveVerifiedScore(entity, objectMapper);
     Integer effectiveRubricScore =
-        entity.getRubricScore() == null
-            ? null
-            : capScoreAtAdmittedSpecGaps(entity.getRubricScore(), accuracy);
+        ValidationReportScoreProjection.effectiveRubricScore(entity, objectMapper);
     List<String> languages =
         entity.getLanguages() != null && !entity.getLanguages().isBlank()
             ? Arrays.asList(entity.getLanguages().split(","))
@@ -1115,15 +1110,10 @@ public class ValidationReportService {
   private ValidationReportShareDTO toShareDTO(ValidationReport entity) {
     List<ReportIssueDTO> issues = parseIssues(entity.getIssuesJson());
     List<VerificationEvidenceDTO> verificationLedger = buildVerificationLedger(entity, issues);
-    AccuracyReport accuracy = parseAccuracyReport(entity);
     Integer effectiveVerifiedScore =
-        entity.getVerifiedScore() == null
-            ? null
-            : capScoreAtAdmittedSpecGaps(entity.getVerifiedScore(), accuracy);
+        ValidationReportScoreProjection.effectiveVerifiedScore(entity, objectMapper);
     Integer effectiveRubricScore =
-        entity.getRubricScore() == null
-            ? null
-            : capScoreAtAdmittedSpecGaps(entity.getRubricScore(), accuracy);
+        ValidationReportScoreProjection.effectiveRubricScore(entity, objectMapper);
     List<String> languages =
         entity.getLanguages() != null && !entity.getLanguages().isBlank()
             ? Arrays.asList(entity.getLanguages().split(","))

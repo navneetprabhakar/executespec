@@ -278,13 +278,14 @@ public class OutlinePlannerAgent {
         log.warn("OutlinePlanner emitted malformed tool JSON — retrying once with schema feedback");
         plan = planOnce(req, OutlinePlannerSchemaRepairPolicy.FEEDBACK, mode);
       }
-
+      plan =
+          PlannerTaskCapPolicy.enforce(
+              plan, req.plannerMaxTasks(), feedback -> planOnce(req, feedback, mode));
       if (mode == Mode.SKELETON_ONLY) {
         plan =
             SkeletonRequirementAllocationPolicy.enforce(
                 plan, feedback -> planOnce(req, feedback, mode));
       }
-
       // Scope integrity stays active even when the broader validation-v3 graph gate is disabled.
       if (mode == Mode.FULL_PLAN) {
         plan = PlannerScopeIntegrityPolicy.enforce(plan, feedback -> planOnce(req, feedback, mode));

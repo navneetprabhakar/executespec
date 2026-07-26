@@ -11,14 +11,27 @@ final class PlanSafetyE2eSupport {
 
   static boolean isPythonPlaywrightRunner(PlannedTask task, String evidence) {
     if (evidence.contains("pytest-playwright")) return true;
-    if (!(evidence.contains("pytest") || evidence.contains("conftest.py"))) return false;
-    return task.touchesFiles() != null
-        && task.touchesFiles().stream()
+    if (task.touchesFiles() == null) return false;
+    List<String> files =
+        task.touchesFiles().stream()
             .map(
                 value ->
                     PlanSafetyEvidenceSupport.safe(value)
                         .replace('\\', '/')
                         .toLowerCase(Locale.ROOT))
+            .toList();
+    boolean ownsPythonTest =
+        files.stream()
+            .anyMatch(
+                path ->
+                    path.endsWith(".py")
+                        && (path.startsWith("tests/")
+                            || path.contains("/tests/")
+                            || path.startsWith("e2e/")
+                            || path.contains("/e2e/")));
+    if (!ownsPythonTest) return false;
+    boolean ownsDedicatedPythonBrowserTest =
+        files.stream()
             .anyMatch(
                 path ->
                     path.endsWith(".py")
@@ -26,6 +39,42 @@ final class PlanSafetyE2eSupport {
                             || path.contains("/e2e/")
                             || path.contains("playwright")
                             || path.contains("browser")));
+    boolean ownsNodeRunner =
+        files.stream()
+            .anyMatch(
+                path ->
+                    path.endsWith("package.json")
+                        || path.contains("playwright.config.")
+                        || path.endsWith(".spec.ts")
+                        || path.endsWith(".spec.js"));
+    if (!ownsNodeRunner) return true;
+    return ownsDedicatedPythonBrowserTest
+        && (evidence.contains("pytest") || evidence.contains("conftest.py"));
+  }
+
+  static boolean launchesRealServerSubprocess(String evidence) {
+    String lower = PlanSafetyEvidenceSupport.safe(evidence).toLowerCase(Locale.ROOT);
+    boolean subprocess =
+        lower.contains("subprocess")
+            || lower.contains("popen")
+            || lower.contains("processbuilder")
+            || lower.contains("child_process.spawn");
+    return subprocess
+        && lower.matches(
+            "(?s).*\\b(?:start|launch|run)\\w*\\b.{0,140}"
+                + "\\b(?:server|backend|application|service|uvicorn|gunicorn|spring-boot|"
+                + "express|node)\\b.*");
+  }
+
+  static boolean hasBoundedReadinessProbe(String evidence) {
+    String lower = PlanSafetyEvidenceSupport.safe(evidence).toLowerCase(Locale.ROOT);
+    boolean readiness =
+        lower.matches(
+            "(?s).*\\b(?:readiness|ready|poll|wait until|health check|health/readiness)\\b.*");
+    boolean bounded =
+        lower.matches(
+            "(?s).*\\b(?:bounded|timeout|time limit|deadline|\\d+\\s*(?:second|minute)s?)\\b.*");
+    return readiness && bounded;
   }
 
   static String normalizeBrowserHarness(String value) {

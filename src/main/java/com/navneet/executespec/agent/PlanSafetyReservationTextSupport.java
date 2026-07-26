@@ -106,6 +106,37 @@ final class PlanSafetyReservationTextSupport {
             "Before the single transaction commits, update IdempotencyRecord");
   }
 
+  static boolean hasPendingIdempotencyReplay(String value) {
+    return safe(value)
+        .matches(
+            "(?is).*\\bpending\\s+(?:row|record)\\s+exists\\b[^.\\n]{0,180}"
+                + "\\b(?:replay|return)\\b.*");
+  }
+
+  /**
+   * Removes a stale replay branch when COMPLETED replay is already explicit, else fixes its state.
+   */
+  static String normalizeIdempotencyReplayState(String value) {
+    String source = safe(value);
+    boolean hasCompletedReplay =
+        source.matches(
+            "(?is).*\\bcompleted\\s+(?:row|record)\\s+exists\\b[^.\\n]{0,180}"
+                + "\\b(?:replay|return)\\b.*");
+    java.util.regex.Pattern pendingReplay =
+        java.util.regex.Pattern.compile(
+            "(?i)(?:^|(?<=[.!?]))\\s*[^.!?\\n]*\\bpending\\s+(?:row|record)\\s+exists\\b"
+                + "[^.!?\\n]{0,180}\\b(?:replay|return)\\b[^.!?\\n]*(?:[.!?]|$)");
+    java.util.regex.Matcher matcher = pendingReplay.matcher(source);
+    StringBuffer normalized = new StringBuffer(source.length());
+    while (matcher.find()) {
+      String replacement =
+          hasCompletedReplay ? "" : matcher.group().replaceFirst("(?i)\\bPENDING\\b", "COMPLETED");
+      matcher.appendReplacement(normalized, java.util.regex.Matcher.quoteReplacement(replacement));
+    }
+    matcher.appendTail(normalized);
+    return normalized.toString().trim();
+  }
+
   static String normalizeSqliteIdempotencyAlgorithm(String value) {
     String canonical =
         "SQLITE IDEMPOTENCY ALGORITHM (binding): the endpoint/service—not middleware—starts"
@@ -117,7 +148,7 @@ final class PlanSafetyReservationTextSupport {
             + " IMMEDIATE and then re-reads the committed row; never poll for another"
             + " transaction's uncommitted PROCESSING record and never commit a claim separately.";
     String source =
-        safe(value)
+        normalizeIdempotencyReplayState(value)
             .replaceAll("(?im)^SQLITE IDEMPOTENCY ALGORITHM \\(binding\\):[^\\n]*(?:\\R|$)", "")
             .replaceAll(
                 "(?i)\\b(insert|create)(\\s+(?:an?|the))?\\s+DRAFT\\s+record\\b",

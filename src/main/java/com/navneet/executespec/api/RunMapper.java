@@ -1,7 +1,6 @@
 package com.navneet.executespec.api;
 
 import java.util.Comparator;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -18,7 +17,9 @@ import com.navneet.executespec.codeintel.entity.RunCodeMap;
 import com.navneet.executespec.codeintel.repository.RunCodeMapRepository;
 import com.navneet.executespec.cost.EffectiveRouteProjection;
 import com.navneet.executespec.cost.RunEffectiveRouteService;
+import com.navneet.executespec.integration.PlannerFailureDiagnostic;
 import com.navneet.executespec.report.ValidationReportRepository;
+import com.navneet.executespec.report.ValidationReportScoreProjection;
 import com.navneet.executespec.report.entity.ValidationReport;
 import com.navneet.executespec.state.entity.AgentTask;
 import com.navneet.executespec.state.entity.PipelineRun;
@@ -65,12 +66,9 @@ public class RunMapper {
   public List<RunSummary> toSummaries(List<PipelineRun> runs) {
     if (runs.isEmpty()) return List.of();
     List<String> ids = runs.stream().map(PipelineRun::getRunId).toList();
-    Map<String, Integer> scores = new HashMap<>();
-    for (Object[] row : validationReportRepository.findScoresByRunIds(ids)) {
-      if (row[0] != null && row[1] != null) {
-        scores.put(String.valueOf(row[0]), ((Number) row[1]).intValue());
-      }
-    }
+    Map<String, Integer> scores =
+        ValidationReportScoreProjection.effectiveScores(
+            validationReportRepository.findScoresByRunIds(ids), objectMapper);
     Map<String, List<AgentTask>> tasksByRun =
         agentTaskRepository.findByRunIdIn(ids).stream()
             .collect(java.util.stream.Collectors.groupingBy(AgentTask::getRunId));
@@ -131,7 +129,8 @@ public class RunMapper {
         r.getSourceRunId(),
         r.getHarnessVersion(),
         r.getActualCostUsd(),
-        displayRunStatusReason(r.getStatusReason(), r.getStatus(), displayStatus),
+        displayRunStatusReason(
+            r.getStatusReason(), r.getFailureReason(), r.getStatus(), displayStatus),
         // PR-B (2026-05-13) — hydrate PR URLs in the listing endpoint so the project launches
         // surface can render PR pills without a per-row drill-down. Prefer scm-agnostic
         // scmPrUrl; the legacy githubPrUrl ships alongside for pre-SCM-split back-compat.
@@ -268,7 +267,9 @@ public class RunMapper {
         .repoUrl(r.getRepoUrl())
         .repoMode(r.getRepoMode())
         .failureReason(displayRunFailureReason(r.getFailureReason(), r.getStatus(), displayStatus))
-        .statusReason(displayRunStatusReason(r.getStatusReason(), r.getStatus(), displayStatus))
+        .statusReason(
+            displayRunStatusReason(
+                r.getStatusReason(), r.getFailureReason(), r.getStatus(), displayStatus))
         .planJson(r.getPlanJson())
         .reviewJson(r.getReviewJson())
         .runGoalDoneness(parseJson(r.getRunGoalDonenessJson(), "runGoalDoneness", r.getRunId()))
@@ -291,6 +292,7 @@ public class RunMapper {
         .costEstimateHigh(r.getCostEstimateHigh())
         .creditsCharged(r.getCreditsCharged())
         .aiCreditsCharged(managedAiUsageEventRepository.sumAiCreditsChargedByRunId(r.getRunId()))
+        .userCostCapUsd(r.getUserCostCap())
         .hardCapUsd(r.getHardCapUsd())
         // v2.6.2-track — hierarchical-planner phase breakdown.
         .planStrategy(r.getPlanStrategy())
@@ -358,7 +360,9 @@ public class RunMapper {
         .validationStatus(null)
         .validationPhase(null)
         .verifiedScore(
-            displayVerifiedScore(report != null ? report.getVerifiedScore() : null, displayStatus))
+            displayVerifiedScore(
+                ValidationReportScoreProjection.effectiveVerifiedScore(report, objectMapper),
+                displayStatus))
         .accuracyScore(report != null ? report.getAccuracyScore() : null)
         .reviewerVerdict(report != null ? report.getReviewerVerdict() : null)
         .finalBuildPassed(report != null ? report.getFinalBuildPassed() : null)
@@ -486,11 +490,14 @@ public class RunMapper {
     return false;
   }
 
-  private static String displayRunStatusReason(
-      String persistedReason, String persistedStatus, String displayStatus) {
+  static String displayRunStatusReason(
+      String persistedReason,
+      String persistedFailure,
+      String persistedStatus,
+      String displayStatus) {
     return "COMPLETE".equals(persistedStatus) && "PARTIAL".equals(displayStatus)
         ? "TASK_PROOF_INCOMPLETE"
-        : persistedReason;
+        : PlannerFailureDiagnostic.projectStatusReason(persistedReason, persistedFailure);
   }
 
   private static String displayRunFailureReason(

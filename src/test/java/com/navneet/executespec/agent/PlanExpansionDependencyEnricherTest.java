@@ -40,8 +40,9 @@ class PlanExpansionDependencyEnricherTest {
     assertThat(result.plan().tasks().get(2).dependsOn()).isEmpty();
     assertThat(result.plan().tasks().get(3).dependsOn()).contains("T2", "T3");
     assertThat(result.plan().tasks().get(3).dependsOn()).doesNotContain("T1");
-    assertThat(result.plan().tasks().get(4).dependsOn()).contains("T1", "T2", "T3", "T4");
-    assertThat(result.dependenciesAdded()).isEqualTo(4);
+    assertThat(result.plan().tasks().get(4).dependsOn()).containsExactly("T4");
+    assertThat(result.summaries())
+        .anyMatch(value -> value.contains("transitively redundant dependency"));
   }
 
   @Test
@@ -123,7 +124,7 @@ class PlanExpansionDependencyEnricherTest {
 
     Plan enriched = PlanExpansionDependencyEnricher.enrich(plan).plan();
 
-    assertThat(enriched.tasks().get(2).dependsOn()).contains("T1", "T2");
+    assertThat(enriched.tasks().get(2).dependsOn()).containsExactly("T2");
     assertThat(enriched.tasks().get(2).dependsOn()).doesNotContain("T4", "T5");
     assertThat(enriched.tasks().get(3).dependsOn()).containsExactly("T3");
     assertThat(enriched.tasks().get(4).dependsOn()).containsExactly("T4");
@@ -204,6 +205,29 @@ class PlanExpansionDependencyEnricherTest {
     assertThat(result.plan().tasks().get(1).dependsOn()).containsExactly("T1");
     assertThat(result.plan().tasks().get(2).dependsOn()).containsExactly("T2");
     assertThat(result.summaries()).anyMatch(value -> value.contains("cyclic forward dependency"));
+  }
+
+  @Test
+  void keepsOnlyNearestDependencyFrontierForExpansionEvidence() {
+    Plan plan =
+        Plan.builder()
+            .tasks(
+                List.of(
+                    task("T1", "Create schema", List.of("server/models/item.py"), List.of()),
+                    task("T2", "Create service", List.of("server/services/item.py"), List.of("T1")),
+                    task(
+                        "T3", "Create API", List.of("server/routes/items.py"), List.of("T1", "T2")),
+                    task(
+                        "T4",
+                        "HTTP integration tests",
+                        List.of("tests/items.integration.py"),
+                        List.of("T1", "T2", "T3"))))
+            .build();
+
+    PlanExpansionDependencyEnricher.Result result = PlanExpansionDependencyEnricher.enrich(plan);
+
+    assertThat(result.plan().tasks().get(2).dependsOn()).containsExactly("T2");
+    assertThat(result.plan().tasks().get(3).dependsOn()).containsExactly("T3");
   }
 
   private static PlannedTask task(

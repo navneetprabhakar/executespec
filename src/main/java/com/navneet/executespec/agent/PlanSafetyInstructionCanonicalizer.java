@@ -186,6 +186,14 @@ final class PlanSafetyInstructionCanonicalizer {
   }
 
   private static String rewriteBlackBoxInstructions(String value) {
+    return java.util.Arrays.stream(safe(value).split("\\n\\n+"))
+        .map(String::trim)
+        .filter(paragraph -> !paragraph.isBlank())
+        .map(PlanSafetyInstructionCanonicalizer::rewriteBlackBoxParagraph)
+        .collect(java.util.stream.Collectors.joining("\n\n"));
+  }
+
+  private static String rewriteBlackBoxParagraph(String value) {
     String canonical =
         "Launch the documented uvicorn server as a subprocess, apply migrations to a temporary"
             + " file-backed SQLite database visible to that process, and use httpx against its"

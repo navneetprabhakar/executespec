@@ -170,6 +170,22 @@ public class ChatService {
               + " chat messages per run exceeded. Submit a new run to continue.");
     }
 
+    // A deterministic plan-contract rejection is already fully answered by server-owned run
+    // evidence. Do not spend another provider call merely to paraphrase it: besides wasting
+    // tokens, a model can reinterpret the umbrella PLANNER_UNAVAILABLE status as an outage even
+    // when the exact persisted reason proves that provider calls succeeded and the contract gate
+    // rejected their plan. Keep ordinary code questions on the grounded tool loop below.
+    var deterministicAnswer = RunChatDeterministicAnswer.answer(run, safeUserMessage);
+    if (deterministicAnswer.isPresent()) {
+      String reply = contextSanitizer.sanitizeOutput(deterministicAnswer.get());
+      history.add(new ChatMessage("user", safeUserMessage));
+      history.add(new ChatMessage("assistant", reply));
+      run.setChatHistoryJson(serialize(history));
+      run.setChatMessageCount(history.size());
+      runRepo.save(run);
+      return new SendResult(reply, (int) userCount + 1, MAX_USER_MESSAGES);
+    }
+
     // Resolve provider + model (LIGHTWEIGHT tier — chat is Q&A, not planning).
     LlmProvider provider;
     if (run.getAiProvider() == null || run.getAiProvider().isBlank()) {

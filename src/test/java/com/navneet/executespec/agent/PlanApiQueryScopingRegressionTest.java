@@ -84,7 +84,8 @@ class PlanApiQueryScopingRegressionTest {
                     && value.contains("query parameters []"))
         .anyMatch(
             value ->
-                value.contains("GET /api/orders/{id}") && value.contains("query parameters []"));
+                value.contains("GET /api/orders/{order_id}")
+                    && value.contains("query parameters []"));
   }
 
   @Test

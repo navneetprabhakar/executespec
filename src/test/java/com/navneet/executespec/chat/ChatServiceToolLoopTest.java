@@ -68,6 +68,9 @@ class ChatServiceToolLoopTest {
         .contains("Never infer framework behavior from one stack trace")
         .contains("PLANNER_UNAVAILABLE")
         .contains("Never translate it to \"provider unavailable\"")
+        .contains("task expansion, and coherence are all planning phases")
+        .contains("it is not worker code", "generation ran")
+        .contains("workerCodeGenerationState")
         .contains("empty workspace does not prove that no planning output was drafted");
   }
 

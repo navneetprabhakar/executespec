@@ -34,11 +34,13 @@ public final class PreviewRenderDtos {
        * "Render" button that produced "temporarily unavailable" — which is false when the feature
        * is simply off. Same failure shape as the unconditional OAuth buttons on the login page.
        */
-      boolean available) {
+      boolean available,
+      /** Whether a POST would be admitted (or reuse the active job) without failing the gate. */
+      boolean renderAllowed) {
 
-    public static RenderManifest absent(String runId, boolean available) {
+    public static RenderManifest absent(String runId, boolean available, boolean renderAllowed) {
       return new RenderManifest(
-          null, runId, "NONE", null, 0, 0, null, null, null, List.of(), available);
+          null, runId, "NONE", null, 0, 0, null, null, null, List.of(), available, renderAllowed);
     }
   }
 

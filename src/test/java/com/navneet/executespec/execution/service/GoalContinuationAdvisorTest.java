@@ -9,6 +9,8 @@ import static org.mockito.Mockito.when;
 import java.util.List;
 import java.util.Map;
 
+import com.navneet.executespec.cost.EffectiveRouteProjection;
+import com.navneet.executespec.cost.RunEffectiveRouteService;
 import com.navneet.executespec.execution.model.GoalContinuationAdvisorRequest;
 import com.navneet.executespec.execution.model.GoalDonenessDecision;
 import com.navneet.executespec.execution.model.GoalDonenessState;
@@ -93,6 +95,45 @@ class GoalContinuationAdvisorTest {
 
     assertThat(decision.decision()).isEqualTo(RunContinuationDecision.CHANGE_PROVIDER);
     assertThat(decision.selectedCandidate()).contains(score("openai", "gpt-5.4", 88, 70, 7.0));
+  }
+
+  @Test
+  void continuationUsesTerminalPhysicalRouteAndKeepsRequestedRouteAsEvidence() {
+    RunEffectiveRouteService effectiveRoutes = mock(RunEffectiveRouteService.class);
+    GoalContinuationAdvisor physicalRouteAdvisor =
+        new GoalContinuationAdvisor(candidateService, effectiveRoutes);
+    when(effectiveRoutes.latestSuccessfulForTask("run-1", "T1"))
+        .thenReturn(
+            new EffectiveRouteProjection(
+                "openrouter", "glm-5.2", EffectiveRouteProjection.Attribution.LEDGER));
+    when(candidateService.buildCandidates(any()))
+        .thenReturn(
+            List.of(
+                score("deepseek", "deepseek-v4", 80, 70, 3.0),
+                score("openrouter", "glm-5.2", 80, 70, 3.0),
+                score("openai", "gpt-5.4", 88, 70, 7.0)));
+
+    var decision =
+        physicalRouteAdvisor.advise(
+            GoalContinuationAdvisorRequest.builder()
+                .goalDecision(progressing())
+                .runId("run-1")
+                .taskId("T1")
+                .currentProvider("deepseek")
+                .currentModel("deepseek-v4")
+                .taskCategory("BUG_FIX")
+                .providerBehaviorPoor(true)
+                .maxProviderSwitches(1)
+                .build());
+
+    assertThat(decision.decision()).isEqualTo(RunContinuationDecision.CHANGE_PROVIDER);
+    assertThat(decision.selectedCandidate()).contains(score("openai", "gpt-5.4", 88, 70, 7.0));
+    assertThat(decision.policy())
+        .containsEntry("currentRouteAttribution", "LEDGER")
+        .containsEntry("requestedCurrentProvider", "deepseek")
+        .containsEntry("requestedCurrentModel", "deepseek-v4")
+        .containsEntry("currentProvider", "openrouter")
+        .containsEntry("currentModel", "glm-5.2");
   }
 
   @Test

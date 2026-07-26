@@ -331,8 +331,7 @@ to boot — skip it for those.""";
   private final ModelResolver modelResolver;
   private final com.navneet.executespec.router.ModelMatrixProperties matrixProps;
   private final com.navneet.executespec.project.rag.RetrievalService retrievalService;
-  // Transfer #1 (PATCH→BUILD, RL-2026-05-034): in-loop test-execution gate. After a clean compile,
-  // RUN the worker's tests so "tests are mandatory" means "tests pass," not just "tests compile."
+  // RL-2026-05-034: in-loop test execution turns mandatory tests into passing tests.
   private final com.navneet.executespec.smoketest.WorkspaceTestRunner inLoopTestRunner;
   private final com.navneet.executespec.config.featureflag.FeatureFlagService featureFlagService;
 
@@ -368,7 +367,6 @@ to boot — skip it for those.""";
   /** task 11 — deterministic repo-orientation warm start (nullable in tests ⇒ inert). */
   private final com.navneet.executespec.engine.RepoOrientationService repoOrientationService;
 
-  /** Optional only for source-compatible unit construction; Spring always supplies it. */
   private com.navneet.executespec.router.TaskOutcomeMetricService taskOutcomeMetricService;
 
   /** Canonical admitted-baseline product-diff evidence; nullable only in legacy unit tests. */
@@ -2966,6 +2964,8 @@ to boot — skip it for those.""";
           goalContinuationAdvisor.advise(
               GoalContinuationAdvisorRequest.builder()
                   .goalDecision(decision)
+                  .runId(runId)
+                  .taskId(task.id())
                   .currentProvider(provider)
                   .currentModel(model)
                   .taskCategory(taskCategory)
