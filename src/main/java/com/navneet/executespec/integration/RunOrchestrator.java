@@ -165,7 +165,6 @@ public class RunOrchestrator implements RunControlPort {
   private final ContextSanitizer contextSanitizer;
   private final AgentProperties agentProps;
   private final RunCostTracker costTracker;
-  // k-NN historical cost fallback after at least ten comparable terminal runs.
   private final CostHistoryService costHistoryService;
 
   /** Prices a planned run and persists its estimate, credits and hard spend ceiling. */
@@ -176,6 +175,7 @@ public class RunOrchestrator implements RunControlPort {
   private final WorkspaceInitService workspaceInit;
   private final SseBroadcaster broadcaster;
   private final RunPersistenceWriter persistenceWriter;
+  private final RunPlanRequirementShadowCoordinator requirementShadowCoordinator;
   private final RunContextComposer contextComposer;
   private final RunPlanningCoordinator planningCoordinator;
   private final RunStandardsEnforcer standardsEnforcer;
@@ -1978,7 +1978,7 @@ public class RunOrchestrator implements RunControlPort {
               contractRejection ? executablePlanInternalEx : null);
           return;
         }
-        persistenceWriter.persistCompiledPlan(runId, plan);
+        requirementShadowCoordinator.persist(runId, runRow.getUserRequest(), plan);
         contextComposer.writeAgentContext(workspace, plan);
         persistEstimate(runId, provider, model, plan);
         designBlock = contextComposer.buildDesignBlock(userRequest, plan);

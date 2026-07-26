@@ -21,7 +21,7 @@ Callers may provide `Idempotency-Key`; the route requires write access to the so
 | Project           | `2.0.0`             | [`VERSION`](VERSION), [`Version`](Version), [`pom.xml`](pom.xml) `<version>` |
 | Spring Boot       | `3.5.14`            | [`pom.xml`](pom.xml) `<parent>` (bumped from `3.3.0` by Dependabot #132, 2026-05-16) |
 | Spring AI         | `1.1.6`             | [`pom.xml`](pom.xml) `<spring-ai.version>` (BOM import)                |
-| Flyway head       | `V344`              | `src/main/resources/db/migration/V344__validation_report_test_evidence_scope.sql` |
+| Flyway head       | `V345`              | `src/main/resources/db/migration/V345__run_requirement_contract.sql` (RequirementIR shadow persistence; seeded OFF) |
 | Frontend          | `2.0.0`             | [`frontend/package.json`](frontend/package.json) `"version"`           |
 
 `VERSION` and `Version` are kept identical by hand; the project's own conventions reference `Version` as the source of truth. The frontend ships under the same release stamp as the backend.

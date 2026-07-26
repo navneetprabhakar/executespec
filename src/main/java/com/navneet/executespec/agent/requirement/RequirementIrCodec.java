@@ -9,8 +9,6 @@ import com.fasterxml.jackson.databind.SerializationFeature;
 
 /** Strict schema-versioned JSON codec and canonical digest for requirement artifacts. */
 public final class RequirementIrCodec {
-  private static final String BINDING_DOMAIN = "executespec.requirement-ir.binding.v1";
-
   private final ObjectMapper mapper;
 
   public RequirementIrCodec(ObjectMapper objectMapper) {
@@ -59,7 +57,18 @@ public final class RequirementIrCodec {
   }
 
   public String digest(RequirementIrDocument document) {
-    return RequirementIrValidator.sha256(writeCanonical(document));
+    return RequirementContractDigests.artifactDigest(writeCanonical(document));
+  }
+
+  /**
+   * SHA-256 of the exact persisted legacy plan JSON bytes; whitespace and property order matter.
+   */
+  public String exactPlanFingerprint(String exactPlanJson) {
+    String fingerprint = ExactPlanFingerprint.sha256(exactPlanJson);
+    if (fingerprint == null) {
+      throw new RequirementIrCodecException("exact plan JSON is required");
+    }
+    return fingerprint;
   }
 
   public String boundDigest(
@@ -79,16 +88,10 @@ public final class RequirementIrCodec {
       throw new RequirementIrCodecException(
           "requirement IR cannot be bound to source: " + violations);
     }
-    String envelope =
-        BINDING_DOMAIN
-            + "\nplanSha256="
-            + RequirementIrValidator.sha256(exactPlanJson)
-            + "\nsourceSha256="
-            + RequirementIrValidator.sha256(exactSource)
-            + "\nartifactSha256="
-            + digest(document)
-            + "\n";
-    return RequirementIrValidator.sha256(envelope);
+    return RequirementContractDigests.boundDigest(
+        RequirementIrValidator.sha256(exactPlanJson),
+        RequirementIrValidator.sha256(exactSource),
+        digest(document));
   }
 
   private static void requireSupported(int schemaVersion) {

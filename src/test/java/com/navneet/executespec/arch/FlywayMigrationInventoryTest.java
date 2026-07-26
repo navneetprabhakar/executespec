@@ -38,10 +38,11 @@ class FlywayMigrationInventoryTest {
     // 322. The migration-safe additive-column P1 lane then added V337 (LLM-attempt role provenance,
     // RR-430), V338 (agent_task plan_index, RR-1446), V339 (code_review_scan coverage, RR-1696),
     // V340 (graduate the lean worker toolset), V341 (backfill the durable run-usage floor), V342
-    // (durable sandbox cleanup retry), V343 (sandbox release-readiness gates), and V344
-    // (validation test-evidence scope) for 330 — contiguous above the V336 head.
-    assertThat(migrations).hasSize(330);
-    assertThat(migrations.getLast().version()).isEqualTo("344");
+    // (durable sandbox cleanup retry), V343 (sandbox release-readiness gates), V344
+    // (validation test-evidence scope), and V345 (immutable RequirementIR artifact) for 331 —
+    // contiguous above the V336 head.
+    assertThat(migrations).hasSize(331);
+    assertThat(migrations.getLast().version()).isEqualTo("345");
 
     assertThat(migrations.stream().map(MigrationFile::version)).doesNotHaveDuplicates();
     assertThat(migrations.stream().map(MigrationFile::fileName))
