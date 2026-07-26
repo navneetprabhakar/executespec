@@ -8,6 +8,12 @@ reject disposable root-level smoke scripts as test substitutes and stop repeated
 loops that do not obtain a passing test/build. Downloadable source archives omit interpreter and
 test-runner caches such as `__pycache__`, `.pytest_cache`, and compiled Python bytecode.
 
+Terminal server-owned runs can be continued through
+`POST /api/runs/{sourceRunId}/iterate` with `{ "userRequest": "..." }`. The endpoint creates and
+starts a new BUILD run, records `sourceRunId`, inherits the source route/project/repository and
+execution/publication policies, and initializes from a fail-closed Git-tracked workspace snapshot.
+Callers may provide `Idempotency-Key`; the route requires write access to the source run.
+
 ## Versions
 
 | Component         | Version             | Source                                                                 |
@@ -15,10 +21,25 @@ test-runner caches such as `__pycache__`, `.pytest_cache`, and compiled Python b
 | Project           | `2.0.0`             | [`VERSION`](VERSION), [`Version`](Version), [`pom.xml`](pom.xml) `<version>` |
 | Spring Boot       | `3.5.14`            | [`pom.xml`](pom.xml) `<parent>` (bumped from `3.3.0` by Dependabot #132, 2026-05-16) |
 | Spring AI         | `1.1.6`             | [`pom.xml`](pom.xml) `<spring-ai.version>` (BOM import)                |
-| Flyway head       | `V304`              | `src/main/resources/db/migration/V304__benchmark_task_result_route_attribution.sql` |
+| Flyway head       | `V344`              | `src/main/resources/db/migration/V344__validation_report_test_evidence_scope.sql` |
 | Frontend          | `2.0.0`             | [`frontend/package.json`](frontend/package.json) `"version"`           |
 
 `VERSION` and `Version` are kept identical by hand; the project's own conventions reference `Version` as the source of truth. The frontend ships under the same release stamp as the backend.
+
+### Strict sandbox toolchain (dark)
+
+`docker/sandbox-toolchain/Dockerfile` builds the representative Java/Maven, Node/Prettier,
+Python/Black, Go, and Rust toolchain from a digest-pinned Debian base. Run
+`docker/sandbox-toolchain/validate.sh` for the local no-network, non-root, read-only-root build
+matrix. A deployment must push the validated image and configure the resulting immutable
+`repository@sha256:...` reference. This does not enable sandbox execution:
+`sandbox.lifecycle.enabled`, `sandbox.runtime.dispatch.enabled`,
+`sandbox.runtime.container-strict-v1.enabled`, and
+`sandbox.runtime.toolchain-readiness.enabled` remain independently default-off.
+The bind-mounted run workspace must also be owned and writable by the configured non-root
+`executespec.sandbox.runtime-uid:runtime-gid` (defaults `65532:65532`). Provisioning verifies the
+existing tree and refuses it without changing permissions; the deployed service/workspace
+ownership must be aligned explicitly before rollout.
 
 ## Stack at a glance
 
@@ -137,6 +158,12 @@ npm run dev                                # http://localhost:5173
 ```
 
 The Vite dev server proxies `/api` to `http://localhost:8080` (overridable via `VITE_BACKEND_URL` to run multiple worktrees side-by-side, per the inline note in [`frontend/vite.config.ts`](frontend/vite.config.ts)).
+
+The `local` and `dev` profiles converge release-validation gates at startup: goal-decision
+enforcement, verify-before-complete, auto-verification, Ask, and screen rendering are enabled.
+Remote-sandbox lifecycle, dispatch, strict runtime, toolchain readiness, and live-preview network
+access remain disabled and fail closed. The initializer updates only flags already created by
+migrations; a missing required row is logged without inventing configuration or failing startup.
 
 Run submit advanced options include continuation controls: "Confirm model upgrades" maps to `requireConfirmationBeforeExpensiveContinuation`, while "Require benchmark evidence" maps to `requireBenchmarkPriorForAutomaticContinuation`. Benchmark evidence is not required by default, so the quality-ranked selected candidate can run automatically within the normal continuation ceilings; checking the benchmark guard sends an explicit per-run `true` override that approval-gates unbenchmarked model/provider upgrades.
 

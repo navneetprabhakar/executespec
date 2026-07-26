@@ -2,6 +2,7 @@ package com.navneet.executespec.integration;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
 
 import org.junit.jupiter.api.Test;
@@ -39,5 +40,34 @@ class WorkspaceGitCommitServiceTest {
         service.runBoundedGit(dir, 10, "sh", "-c", "exit 3");
     assertThat(bad.completed()).isTrue();
     assertThat(bad.exitCode()).isEqualTo(3);
+  }
+
+  @Test
+  void finalCommitNeverExecutesRepositoryHooks(@TempDir Path dir) throws Exception {
+    assertThat(service.runBoundedGit(dir, 10, "git", "init", "-q").exitCode()).isZero();
+    assertThat(
+            service
+                .runBoundedGit(dir, 10, "git", "config", "user.email", "test@executespec.ai")
+                .exitCode())
+        .isZero();
+    assertThat(
+            service
+                .runBoundedGit(dir, 10, "git", "config", "user.name", "ExecuteSpec Test")
+                .exitCode())
+        .isZero();
+
+    Path marker = dir.resolve("hook-ran");
+    Path hook = dir.resolve(".git/hooks/pre-commit");
+    Files.writeString(hook, "#!/bin/sh\nprintf ran > '" + marker + "'\nexit 42\n");
+    assertThat(hook.toFile().setExecutable(true)).isTrue();
+    Files.writeString(dir.resolve("generated.txt"), "generated output\n");
+
+    service.commitWorkspaceOutputs("run-hook-test", dir);
+
+    assertThat(marker).doesNotExist();
+    WorkspaceGitCommitService.GitProcessResult log =
+        service.runBoundedGit(dir, 10, "git", "rev-list", "--count", "HEAD");
+    assertThat(log.completed()).isTrue();
+    assertThat(log.exitCode()).isZero();
   }
 }

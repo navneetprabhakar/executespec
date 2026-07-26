@@ -3,6 +3,75 @@ import type {DiffLine} from '@/ide/IdeKit';
 
 export type Verdict = {label: string; kind: 'ok' | 'warn' | 'bad'};
 
+export interface RunArtifactActionAvailability {
+  push: boolean;
+  revertWorkspace: boolean;
+  preview: boolean;
+  deploy: boolean;
+  reportPdf: boolean;
+  codeZip: boolean;
+  shareReport: boolean;
+  workspaceReason: string;
+  reportReason: string;
+}
+
+/**
+ * Artifact actions require produced evidence, not merely a workspace cloned for the run. A clean
+ * checkout can contain hundreds of files even when planning failed before the executor started.
+ */
+export function runArtifactActionAvailability(input: {
+  status?: string | null;
+  changedWorkspaceFiles: number;
+  hasExecutionEvidence: boolean;
+  hasValidationReport: boolean;
+}): RunArtifactActionAvailability {
+  const status = (input.status || '').toUpperCase();
+  const terminal = ['COMPLETE', 'COMPLETED', 'PARTIAL', 'FAILED'].includes(status);
+  const hasProducedWorkspace =
+    terminal && input.hasExecutionEvidence && input.changedWorkspaceFiles > 0;
+  const hasReport = terminal && input.hasValidationReport;
+  const workspaceReason = !terminal
+    ? 'This action becomes available after the run finishes.'
+    : !input.hasExecutionEvidence
+      ? 'This run stopped before execution and produced no code changes.'
+      : input.changedWorkspaceFiles <= 0
+        ? 'This run produced no code changes.'
+        : '';
+  const reportReason = !terminal
+    ? 'This action becomes available after the run finishes.'
+    : !input.hasValidationReport
+      ? 'No validation report was produced for this run.'
+      : '';
+  return {
+    push: hasProducedWorkspace,
+    revertWorkspace: hasProducedWorkspace,
+    preview: hasProducedWorkspace,
+    deploy: hasProducedWorkspace,
+    reportPdf: hasReport,
+    codeZip: hasProducedWorkspace,
+    shareReport: hasReport,
+    workspaceReason,
+    reportReason,
+  };
+}
+
+/** Bootstrap repository metadata exists before worker execution and is not generated product code. */
+export function isBootstrapWorkspaceMetadata(path: string): boolean {
+  const normalized = path.replace(/\\/g, '/').replace(/^\.\/+/, '');
+  const basename = normalized.slice(normalized.lastIndexOf('/') + 1);
+  return basename === '.gitignore' || basename === '.gitattributes';
+}
+
+export function countProducedWorkspaceFiles(
+  entries: Array<Pick<api.FileWithStatus, 'path' | 'status'>>,
+): number {
+  return entries.filter(
+    (entry) =>
+      (entry.status === 'ADDED' || entry.status === 'MODIFIED') &&
+      !isBootstrapWorkspaceMetadata(entry.path),
+  ).length;
+}
+
 export function verdictFor(score: number | null | undefined, status?: string | null): Verdict {
   const s = (status || '').toUpperCase();
   if (s === 'FAILED' || s === 'ERROR' || s === 'CANCELLED') return {label: 'Failed', kind: 'bad'};
@@ -14,6 +83,19 @@ export function verdictFor(score: number | null | undefined, status?: string | n
   if (score >= 85) return {label: 'Shippable', kind: 'ok'};
   if (score >= 70) return {label: 'Needs review', kind: 'warn'};
   return {label: 'Failed', kind: 'bad'};
+}
+
+export function missingScoreExplanation(
+  run: Pick<api.RunSummary, 'runMode' | 'status' | 'triggeredByFinding'>,
+): string {
+  const status = (run.status || '').toUpperCase();
+  if (run.runMode === 'PATCH' || run.triggeredByFinding) {
+    return "No verified score for this run — patch and benchmark runs aren't scored by the validation pipeline.";
+  }
+  if (['FAILED', 'ERROR', 'CANCELLED', 'TIMED_OUT', 'STOPPED', 'PARTIAL'].includes(status)) {
+    return 'No verified score was produced because this run stopped before validation completed.';
+  }
+  return 'A verified score will appear after validation completes.';
 }
 
 export const SEV: Record<string, {l: string; k: 'ok' | 'warn' | 'bad'}> = {
@@ -129,6 +211,28 @@ export function testResultSummary(
     headline: `${tests.passed}/${tests.totalTests}`,
     label: 'passed',
     explanation: null,
+  };
+}
+
+export function testEvidenceSummary(
+  passed: number | null | undefined,
+  total: number | null | undefined,
+  evidence?: Pick<api.VerificationEvidence, 'source' | 'status'> | null,
+) {
+  const measured = total != null && total > 0;
+  const source = (evidence?.source || '').toUpperCase();
+  const status = (evidence?.status || '').toUpperCase();
+  const functional = source === 'DETERMINISTIC_FUNCTIONAL' && status !== 'UNKNOWN';
+  const workspaceOnly = source === 'DETERMINISTIC_WORKSPACE_SUITE';
+  return {
+    measured,
+    functional,
+    workspaceOnly,
+    label: measured
+      ? `${passed ?? 0}/${total}${
+          functional ? ' functional' : workspaceOnly ? ' workspace-only' : ' unverified'
+        }`
+      : 'not measured',
   };
 }
 
@@ -378,10 +482,10 @@ export function fileCountSummary({
       : String(workspaceFiles);
   return {
     label,
-    title: `${workspaceFiles} file(s) currently visible in the Code tab`,
+    title: `${workspaceFiles} generated or modified product file(s)`,
     mismatch,
     explanation: mismatch
-      ? 'File counts differ because validation reports generated-file evidence, while the Code tab lists the current workspace files. Failed scaffold runs can expose seed files even when no product code was delivered.'
+      ? 'File counts differ because validation reports persisted generation evidence, while this count uses current git-derived product changes and excludes bootstrap metadata.'
       : null,
   };
 }

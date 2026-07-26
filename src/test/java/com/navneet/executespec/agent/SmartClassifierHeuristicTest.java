@@ -138,9 +138,22 @@ Constraints:
   }
 
   @Test
-  void over2000CharSpecGoesLargeEvenWithEndpoints() throws Exception {
-    // Endpoint override is capped at ≤2000 chars by design — bigger
-    // specs really do tend to be LARGE (lots of supporting context).
+  void richSingleRepoAcceptanceSpecUnder4000CharsStaysMedium() throws Exception {
+    String spec =
+        ("Build one full-stack repository with POST /orders, GET /orders, POST /stock, GET /stock."
+             + " Include persistent storage, concurrency checks, responsive UI, validation, audit"
+             + " history, and black-box tests. ")
+            .repeat(14);
+
+    assertThat(spec.length()).isBetween(2_001, 4_000);
+    Object verdict = runHeuristic(newAgent(), spec, 1);
+
+    assertThat(strategyFor(verdict)).isEqualTo("MEDIUM");
+  }
+
+  @Test
+  void over4000CharSpecGoesLargeEvenWithEndpoints() throws Exception {
+    // At this size even one repository usually contains enough independent scope for expansion.
     StringBuilder bigSpec = new StringBuilder();
     bigSpec.append("Build a multi-resource API.\n\nEndpoints:\n");
     bigSpec.append("- POST /users\n- GET /users/:id\n- DELETE /sessions/:token\n- GET /audit\n\n");
@@ -191,6 +204,47 @@ Constraints:
     Object verdict = runHeuristic(newAgent(), spec, 3);
 
     assertThat(strategyFor(verdict)).isEqualTo("LARGE");
+  }
+
+  @Test
+  void llmEstimateCannotInventRepositoriesOrExceedLargePlannerCap() {
+    ClassificationResult untrustedEstimate =
+        new ClassificationResult(
+            PlanStrategy.LARGE,
+            30,
+            2,
+            true,
+            "model estimate",
+            ClassificationResult.Source.LLM_VERIFIED,
+            100,
+            20,
+            0.01);
+
+    ClassificationResult normalized =
+        SmartClassifierAgent.normalizeSubmittedScope(untrustedEstimate, 1);
+
+    assertThat(normalized.estimatedRepoTouchCount()).isEqualTo(1);
+    assertThat(normalized.estimatedTaskCount()).isEqualTo(16);
+  }
+
+  @Test
+  void normalizationMayEstimateFewerButNeverMoreThanSubmittedRepositories() {
+    ClassificationResult estimate =
+        new ClassificationResult(
+            PlanStrategy.MEDIUM,
+            8,
+            1,
+            false,
+            "one of two repositories",
+            ClassificationResult.Source.LLM_VERIFIED,
+            100,
+            20,
+            0.01);
+
+    ClassificationResult normalized = SmartClassifierAgent.normalizeSubmittedScope(estimate, 2);
+
+    assertThat(normalized.estimatedRepoTouchCount()).isEqualTo(1);
+    assertThat(normalized.estimatedTaskCount()).isEqualTo(8);
   }
 
   @Test

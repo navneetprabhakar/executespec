@@ -43,24 +43,14 @@ import {
 import {hasUnlimitedAiCredits} from '@/ide/planUtils';
 import {useAuthStore, selectIsSuperAdmin} from '@/stores/useAuthStore';
 import {Paperclip, ArrowUp, StopIcon, FolderIcon} from '@/ide/agentIcons';
-
-const SUGGESTIONS = [
-  'Create a remote sandbox to add audit logging',
-  'Fix a failing test in a remote sandbox',
-  'Review waiting sandbox approvals',
-  'Explain this project before I start work',
-];
-
-const SANDBOX_PHASES = [
-  {key: 'queued', label: 'Queued'},
-  {key: 'planning', label: 'Plan'},
-  {key: 'approval', label: 'Approval'},
-  {key: 'coding', label: 'Code'},
-  {key: 'building', label: 'Build'},
-  {key: 'reviewing', label: 'Review'},
-  {key: 'evidence', label: 'Evidence'},
-  {key: 'done', label: 'Done'},
-] as const;
+import {
+  EmptyRuntimeState,
+  OperatorIntro,
+  RuntimeContractPanel,
+  SANDBOX_PHASES,
+  TrustBoundaryPanel,
+} from '@/ide/agentRuntimeContract';
+import {phaseState, sandboxPhaseKey} from '@/ide/agentSandboxPhase';
 
 function tokenCount(value: number): string {
   if (!Number.isFinite(value) || value <= 0) return '0';
@@ -120,6 +110,7 @@ export function AgentTopBar({
   selectedModel,
   onProviderChange,
   onModelChange,
+  remoteSandboxEnabled = false,
 }: {
   selected: api.AgentSessionResponse | null;
   barStatus: {label: string; tone: BarTone};
@@ -144,6 +135,7 @@ export function AgentTopBar({
   selectedModel?: string;
   onProviderChange?: (provider: string) => void;
   onModelChange?: (model: string) => void;
+  remoteSandboxEnabled?: boolean;
 }) {
   return (
     <div className='agent-bar'>
@@ -158,7 +150,11 @@ export function AgentTopBar({
         </span>
       )}
       <div className='agent-bar-title'>
-        {selected ? sessionTitle(selected) : 'Remote sandbox operator'}
+        {selected
+          ? sessionTitle(selected)
+          : remoteSandboxEnabled
+            ? 'Remote sandbox operator'
+            : 'Remote workspace operator'}
       </div>
       <span className='agent-bar-spacer' />
       <span
@@ -182,10 +178,10 @@ export function AgentTopBar({
         className='agent-bar-btn'
         onClick={onNewChat}
         disabled={busy}
-        aria-label='Start a new sandbox'
+        aria-label={remoteSandboxEnabled ? 'Start a new sandbox' : 'Start a new workspace'}
       >
         <PlusIcon size={14} />
-        <span>New sandbox</span>
+        <span>{remoteSandboxEnabled ? 'New sandbox' : 'New workspace'}</span>
       </button>
       <div className='agent-bar-settings'>
         <button
@@ -212,6 +208,7 @@ export function AgentTopBar({
             onProviderChange={onProviderChange ?? (() => {})}
             onModelChange={onModelChange ?? (() => {})}
             onClose={onToggleSettings}
+            remoteSandboxEnabled={remoteSandboxEnabled}
           />
         )}
       </div>
@@ -234,6 +231,7 @@ function SettingsPopover({
   selectedModel,
   onProviderChange,
   onModelChange,
+  remoteSandboxEnabled,
 }: {
   selected: api.AgentSessionResponse | null;
   managedAi: api.ManagedAiBalance | null;
@@ -249,6 +247,7 @@ function SettingsPopover({
   selectedModel: string;
   onProviderChange: (provider: string) => void;
   onModelChange: (model: string) => void;
+  remoteSandboxEnabled: boolean;
 }) {
   const provider = availableModels.find(
     (entry) => entry.id.toUpperCase() === selectedProvider.toUpperCase(),
@@ -273,14 +272,18 @@ function SettingsPopover({
         tabIndex={-1}
       >
         <div className='agent-pop-title' id='agent-settings-title'>
-          Sandbox policy
+          {remoteSandboxEnabled ? 'Sandbox policy' : 'Execution policy'}
         </div>
         <button className='agent-pop-close' onClick={onClose} aria-label='Close agent settings'>
           ×
         </button>
         <div className='agent-pop-row'>
           <span>Execution target</span>
-          <code>remote only</code>
+          <code>{remoteSandboxEnabled ? 'strict remote container' : 'server workspace'}</code>
+        </div>
+        <div className='agent-pop-row'>
+          <span>Isolation</span>
+          <code>{remoteSandboxEnabled ? 'container enforced' : 'sandbox disabled'}</code>
         </div>
         <div className='agent-pop-row'>
           <span>Plan gate</span>
@@ -432,6 +435,7 @@ export function AgentChatsDrawer({
   onRejectGate,
   onOpenGate,
   onClose,
+  remoteSandboxEnabled = false,
 }: {
   open: boolean;
   sessions: api.AgentSessionResponse[];
@@ -444,6 +448,7 @@ export function AgentChatsDrawer({
   onRejectGate: (gate: api.AgentGateDecisionCard) => void;
   onOpenGate: (runId: string) => void;
   onClose: () => void;
+  remoteSandboxEnabled?: boolean;
 }) {
   if (!open) return null;
   return (
@@ -462,13 +467,15 @@ export function AgentChatsDrawer({
         tabIndex={-1}
       >
         <div className='agent-drawer-head'>
-          <strong id='agent-chats-title'>Remote sandboxes</strong>
+          <strong id='agent-chats-title'>
+            Remote {remoteSandboxEnabled ? 'sandboxes' : 'workspaces'}
+          </strong>
           <button className='agent-drawer-close' onClick={onClose} aria-label='Close chats'>
             ×
           </button>
           <button className='ide-btn ghost' onClick={onNewChat}>
             <PlusIcon size={13} />
-            New sandbox
+            New {remoteSandboxEnabled ? 'sandbox' : 'workspace'}
           </button>
         </div>
         <div className='agent-drawer-summary'>
@@ -484,7 +491,9 @@ export function AgentChatsDrawer({
                   <span className='agent-drawer-title'>
                     {gate.title || gate.summary || gate.runId}
                   </span>
-                  <span className='agent-drawer-meta'>{gateQueueMeta(gate)}</span>
+                  <span className='agent-drawer-meta'>
+                    {gateQueueMeta(gate, remoteSandboxEnabled)}
+                  </span>
                   <span className='agent-drawer-riskline'>
                     <b>{(gate.risk || 'LOW').toLowerCase()} risk</b>
                     <span>{gate.tasks.length || 'n/a'} tasks</span>
@@ -515,7 +524,9 @@ export function AgentChatsDrawer({
         {status === 'loadingSession' ? (
           <div className='agent-muted'>Loading…</div>
         ) : sessions.length === 0 ? (
-          <div className='agent-muted'>No sandbox conversations yet.</div>
+          <div className='agent-muted'>
+            No {remoteSandboxEnabled ? 'sandbox' : 'workspace'} conversations yet.
+          </div>
         ) : (
           <div className='agent-drawer-section'>
             <div className='agent-drawer-label'>Conversations</div>
@@ -528,7 +539,7 @@ export function AgentChatsDrawer({
                 >
                   <span className='agent-drawer-title'>{sessionTitle(s)}</span>
                   <span className='agent-drawer-meta'>
-                    {sessionDrawerMeta(s)}
+                    {sessionDrawerMeta(s, remoteSandboxEnabled)}
                     {' · '}
                     {relTime(s.updatedAt)}
                   </span>
@@ -548,19 +559,19 @@ function scopeBadge(s: api.AgentSessionResponse): string {
   return '';
 }
 
-function sessionMode(s: api.AgentSessionResponse): string {
+function sessionMode(s: api.AgentSessionResponse, remoteSandboxEnabled: boolean): string {
   if (s.runId) return 'run-scoped';
   if (s.projectId) return 'project-scoped';
-  return 'sandbox operator';
+  return remoteSandboxEnabled ? 'sandbox operator' : 'workspace operator';
 }
 
-function sessionDrawerMeta(s: api.AgentSessionResponse): string {
+function sessionDrawerMeta(s: api.AgentSessionResponse, remoteSandboxEnabled: boolean): string {
   if (s.latestLinkedRunId) {
     const title = s.latestLinkedRunTitle || `Run ${s.latestLinkedRunId.slice(0, 8)}`;
     const status = s.latestLinkedRunStatus ? ` · ${runPhaseLabel(s.latestLinkedRunStatus)}` : '';
-    return `Latest sandbox: ${title}${status}`;
+    return `Latest ${remoteSandboxEnabled ? 'sandbox' : 'workspace'}: ${title}${status}`;
   }
-  return `${scopeBadge(s)}${sessionMode(s)}`;
+  return `${scopeBadge(s)}${sessionMode(s, remoteSandboxEnabled)}`;
 }
 
 function gateAge(gate: api.AgentGateDecisionCard): string {
@@ -577,8 +588,9 @@ export function gateCostLabel(gate: api.AgentGateDecisionCard): string {
   return parts.length ? parts.join(' / ') : 'cost pending';
 }
 
-function gateQueueMeta(gate: api.AgentGateDecisionCard): string {
-  const project = gate.projectName || 'Standalone sandbox';
+function gateQueueMeta(gate: api.AgentGateDecisionCard, remoteSandboxEnabled: boolean): string {
+  const project =
+    gate.projectName || `Standalone ${remoteSandboxEnabled ? 'sandbox' : 'workspace'}`;
   const route = gate.provider || gate.model || 'default route';
   const age = gateAge(gate);
   return `${project} · ${route}${age ? ` · ${age}` : ''}`;
@@ -716,6 +728,7 @@ function SandboxRunCard({
   busy,
   onOpen,
   onStop,
+  remoteSandboxEnabled = false,
 }: {
   run: api.RunDetail;
   liveCostUsd: number | null;
@@ -724,6 +737,7 @@ function SandboxRunCard({
   busy: boolean;
   onOpen: (path: string) => void;
   onStop: () => void;
+  remoteSandboxEnabled?: boolean;
 }) {
   const prog = runProgress(run.tasks);
   const isSuperAdmin = useAuthStore(selectIsSuperAdmin);
@@ -768,7 +782,9 @@ function SandboxRunCard({
     >
       <div className='agent-runcard-head'>
         <RunsIcon size={16} />
-        <span className='agent-runcard-title'>{run.runTitle || 'Remote sandbox run'}</span>
+        <span className='agent-runcard-title'>
+          {run.runTitle || (remoteSandboxEnabled ? 'Remote sandbox run' : 'Remote workspace run')}
+        </span>
         <span className={`agent-runcard-pill ${pillKind}`}>
           {!terminal && <span className='agent-runcard-dot' aria-hidden='true' />}
           {runPhaseLabel(run.status)}
@@ -786,7 +802,10 @@ function SandboxRunCard({
           )}
         </span>
       </div>
-      <div className='agent-runcard-mode'>Remote sandbox · plan-gated · PR-oriented</div>
+      <div className='agent-runcard-mode'>
+        {remoteSandboxEnabled ? 'Remote sandbox' : 'Remote server workspace'} · plan-gated ·
+        PR-oriented
+      </div>
       {streamLabel && (
         <div
           className={`agent-runcard-stream ${streamStatus === 'CONNECTED' ? 'ok' : ''}`}
@@ -1080,11 +1099,13 @@ function ActionCard({
   onConfirm,
   onDismiss,
   busy,
+  remoteSandboxEnabled,
 }: {
   pending: PendingAction;
   onConfirm: (pending: PendingAction) => void;
   onDismiss: () => void;
   busy: boolean;
+  remoteSandboxEnabled: boolean;
 }) {
   const isLocal =
     pending.action.type === 'local_tool_action' || pending.action.type === 'local_code_task';
@@ -1098,6 +1119,7 @@ function ActionCard({
         busy={busy}
         onConfirm={onConfirm}
         onDismiss={onDismiss}
+        remoteSandboxEnabled={remoteSandboxEnabled}
       />
     );
   }
@@ -1142,11 +1164,13 @@ function SandboxProposalCard({
   onConfirm,
   onDismiss,
   busy,
+  remoteSandboxEnabled,
 }: {
   pending: PendingAction;
   onConfirm: (pending: PendingAction) => void;
   onDismiss: () => void;
   busy: boolean;
+  remoteSandboxEnabled: boolean;
 }) {
   const args = pending.action.arguments || {};
   const spec = asText(args.spec || args.request || pending.action.confirmationPrompt || '');
@@ -1156,7 +1180,7 @@ function SandboxProposalCard({
     <div className='agent-card agent-sandbox-proposal waiting'>
       <div className='agent-card-head'>
         <RunsIcon size={16} />
-        <strong>Create remote sandbox run</strong>
+        <strong>Create remote {remoteSandboxEnabled ? 'sandbox' : 'workspace'} run</strong>
         <span className='agent-card-meta'>plan gate before spend</span>
       </div>
       <div className='agent-card-sub'>
@@ -1177,14 +1201,14 @@ function SandboxProposalCard({
         </div>
         <div className='agent-kv-row'>
           <span>Execution target</span>
-          <code>Remote sandbox</code>
+          <code>{remoteSandboxEnabled ? 'Remote sandbox' : 'Remote server workspace'}</code>
         </div>
         <div className='agent-kv-row'>
           <span>Provider route</span>
           <code>{provider}</code>
         </div>
       </div>
-      <SandboxContractPanel />
+      <RuntimeContractPanel sandboxEnabled={remoteSandboxEnabled} />
       <TrustBoundaryPanel compact />
       <div className='agent-card-consequence-row'>
         <span>plan first</span>
@@ -1198,7 +1222,7 @@ function SandboxProposalCard({
           onClick={() => onConfirm(pending)}
           disabled={busy}
         >
-          Create sandbox plan
+          Create {remoteSandboxEnabled ? 'sandbox' : 'workspace'} plan
         </button>
         <button className='ide-btn ghost' onClick={onDismiss} disabled={busy}>
           Edit request
@@ -1217,8 +1241,8 @@ function LocalHandoffCard({pending, onDismiss}: {pending: PendingAction; onDismi
         <span className='agent-card-meta'>{pending.action.type.replace(/_/g, ' ')}</span>
       </div>
       <div className='agent-card-sub'>
-        This request needs local file or shell authority. The web agent stays remote-sandbox only;
-        use the CLI or VS Code client when your machine must execute commands.
+        This request needs local file or shell authority. The web agent stays server-side only; use
+        the CLI or VS Code client when your machine must execute commands.
       </div>
       <div className='agent-card-actions'>
         <button className='ide-btn' onClick={() => (window.location.href = '/cli-login')}>
@@ -1238,25 +1262,29 @@ function GateCard({
   onReject,
   onOpen,
   busy,
+  remoteSandboxEnabled,
 }: {
   gate: api.AgentGateDecisionCard;
   onApprove: (gate: api.AgentGateDecisionCard) => void;
   onReject: (gate: api.AgentGateDecisionCard) => void;
   onOpen: (runId: string) => void;
   busy: boolean;
+  remoteSandboxEnabled: boolean;
 }) {
   return (
     <div className='agent-card agent-gate-card waiting'>
       <div className='agent-card-head'>
         <RunsIcon size={16} />
-        <strong>Sandbox plan awaiting approval</strong>
+        <strong>
+          {remoteSandboxEnabled ? 'Sandbox' : 'Remote workspace'} plan awaiting approval
+        </strong>
         {gate.risk && <span className='agent-card-meta'>risk {gate.risk.toLowerCase()}</span>}
       </div>
       <button className='agent-card-title' onClick={() => onOpen(gate.runId)}>
         {gate.title || gate.summary || gate.runId}
       </button>
       <div className='agent-card-consequence-row'>
-        <span>{gate.projectName || 'standalone sandbox'}</span>
+        <span>{gate.projectName || 'standalone run'}</span>
         {gate.tasks.length > 0 && <span>{gate.tasks.length} tasks</span>}
         {/* RR-1489 — render the USD estimate and the hard cap that bound the spend. */}
         {gate.estimatedCostUsd != null && <span>~${gate.estimatedCostUsd.toFixed(2)}</span>}
@@ -1296,123 +1324,6 @@ function GateCard({
         <button className='ide-btn ghost' onClick={() => onOpen(gate.runId)} disabled={busy}>
           Open full plan
         </button>
-      </div>
-    </div>
-  );
-}
-
-function SandboxContractPanel() {
-  return (
-    <div className='agent-contract-panel' aria-label='Sandbox contract'>
-      <div className='agent-contract-title'>What will happen before spend</div>
-      <div className='agent-contract-grid'>
-        <span>
-          <b>Workspace</b>
-          remote clone
-        </span>
-        <span>
-          <b>Branch</b>
-          shown in plan
-        </span>
-        <span>
-          <b>Tests</b>
-          detected command
-        </span>
-        <span>
-          <b>PR</b>
-          target confirmed
-        </span>
-        <span>
-          <b>Cost</b>
-          cap before run
-        </span>
-        <span>
-          <b>Local files</b>
-          never touched
-        </span>
-      </div>
-    </div>
-  );
-}
-
-function TrustBoundaryPanel({compact = false}: {compact?: boolean}) {
-  // RR-839 — state only properties the runtime actually enforces. The prior
-  // "repo token scoped to selected project" and "secrets are not displayed in
-  // chat" lines asserted a credential/isolation boundary the current
-  // policy-guarded server workspace does not prove (RR-118..RR-120, RR-142), so
-  // they are removed rather than shown as a security guarantee.
-  return (
-    <div className={compact ? 'agent-trust-panel compact' : 'agent-trust-panel'}>
-      <span>Runs on a policy-guarded server workspace</span>
-      <span>Your local files are never touched</span>
-      <span>Approval required before any code runs</span>
-      <span>Every run event is recorded in the audit trail</span>
-      <span>Cost is capped before the run starts</span>
-    </div>
-  );
-}
-
-function OperatorIntro({
-  hasHistory,
-  onPick,
-}: {
-  hasHistory: boolean;
-  onPick: (text: string) => void;
-}) {
-  return (
-    <div className='agent-operator-intro'>
-      <div className='agent-operator-kicker'>Remote sandbox operator</div>
-      <div className='agent-operator-grid'>
-        <div>
-          <h1>Run work in a remote sandbox.</h1>
-          <p>
-            Plan, code, test, review, and open a PR without touching your local machine. You approve
-            the plan and cost before the sandbox starts coding.
-          </p>
-        </div>
-        <div className='agent-operator-steps' aria-label='Remote sandbox workflow'>
-          <span>Request</span>
-          <span>Plan gate</span>
-          <span>Sandbox work</span>
-          <span>Evidence</span>
-          <span>PR / deploy</span>
-        </div>
-      </div>
-      <SandboxContractPanel />
-      <TrustBoundaryPanel />
-      <div className='agent-empty-chips'>
-        {SUGGESTIONS.map((s) => (
-          <button key={s} onClick={() => onPick(s)}>
-            {s}
-          </button>
-        ))}
-      </div>
-      {hasHistory && (
-        <div className='agent-history-note'>
-          Recent transcript is below. Start a new sandbox from here or open Chats for older work.
-        </div>
-      )}
-    </div>
-  );
-}
-
-function EmptyState({onPick}: {onPick: (text: string) => void}) {
-  return (
-    <div className='agent-empty'>
-      <div className='agent-empty-icon'>
-        <CommandIcon size={26} />
-      </div>
-      <strong>Remote sandbox ready</strong>
-      <p>
-        Describe the change, review the generated plan, then let ExecuteSpec work in a remote
-        sandbox. Browser sessions never get local shell authority.
-      </p>
-      <div className='agent-empty-chips'>
-        {SUGGESTIONS.map((s) => (
-          <button key={s} onClick={() => onPick(s)}>
-            {s}
-          </button>
-        ))}
       </div>
     </div>
   );
@@ -1550,6 +1461,7 @@ export function AgentConversation({
   runStreamStatus,
   runUnavailable,
   routingState,
+  remoteSandboxEnabled = false,
   hasNewActivity = false,
   input,
   attachments,
@@ -1580,6 +1492,7 @@ export function AgentConversation({
   runStreamStatus?: 'IDLE' | 'CONNECTING' | 'CONNECTED' | 'RECONNECTING' | 'CLOSED';
   runUnavailable?: 'RUN_NOT_FOUND' | 'AUTH_REQUIRED' | null;
   routingState?: RoutingState;
+  remoteSandboxEnabled?: boolean;
   hasNewActivity?: boolean;
   input: string;
   attachments: AgentAttachmentLite[];
@@ -1610,7 +1523,7 @@ export function AgentConversation({
       <div className='agent-chat-scroll' data-agent-region='transcript' onScroll={onScroll}>
         <div className='ide-sr-only' role='status' aria-live='polite' aria-atomic='true'>
           {runCard
-            ? `Remote sandbox ${runPhaseLabel(runCard.status)}${
+            ? `${remoteSandboxEnabled ? 'Remote sandbox' : 'Remote workspace'} ${runPhaseLabel(runCard.status)}${
                 runUnavailable === 'RUN_NOT_FOUND'
                   ? '. Run no longer available.'
                   : runUnavailable === 'AUTH_REQUIRED'
@@ -1631,12 +1544,17 @@ export function AgentConversation({
           {showOperatorInScroll && (
             <OperatorIntro
               hasHistory={messages.length > 0}
+              remoteSandboxEnabled={remoteSandboxEnabled}
               onPick={(s) => dispatch({type: 'input:set', input: s})}
             />
           )}
           {gates.length > 0 && (
             <div className='agent-gates-inline' data-agent-region='approval-gates'>
-              <div className='agent-gates-label'>Remote sandboxes waiting for your approval</div>
+              <div className='agent-gates-label'>
+                {remoteSandboxEnabled
+                  ? 'Remote sandboxes waiting for your approval'
+                  : 'Remote workspaces waiting for your approval'}
+              </div>
               {gates.map((g) => (
                 <GateCard
                   key={g.runId}
@@ -1645,6 +1563,7 @@ export function AgentConversation({
                   onApprove={onApproveGate}
                   onReject={onRejectGate}
                   onOpen={onOpenGate}
+                  remoteSandboxEnabled={remoteSandboxEnabled}
                 />
               ))}
             </div>
@@ -1652,7 +1571,10 @@ export function AgentConversation({
           <RouteDecision routingState={routingState ?? null} />
           {empty
             ? !showOperatorInScroll && (
-                <EmptyState onPick={(s) => dispatch({type: 'input:set', input: s})} />
+                <EmptyRuntimeState
+                  remoteSandboxEnabled={remoteSandboxEnabled}
+                  onPick={(s) => dispatch({type: 'input:set', input: s})}
+                />
               )
             : messages.map((message) => (
                 <MessageBubble key={message.id} message={message} dispatch={dispatch} />
@@ -1668,6 +1590,7 @@ export function AgentConversation({
               busy={isBusy}
               onOpen={onOpenRun}
               onStop={onStopRun}
+              remoteSandboxEnabled={remoteSandboxEnabled}
             />
           )}
           {visibleAction && (
@@ -1676,6 +1599,7 @@ export function AgentConversation({
               busy={isBusy}
               onConfirm={onConfirmAction}
               onDismiss={() => dispatch({type: 'action:clear'})}
+              remoteSandboxEnabled={remoteSandboxEnabled}
             />
           )}
           <div ref={endRef} />
@@ -1698,7 +1622,9 @@ export function AgentConversation({
         <div className='agent-chat-col'>
           {showComposerContract && (
             <div className='agent-composer-contract'>
-              <span>Remote sandbox only</span>
+              <span>
+                {remoteSandboxEnabled ? 'Remote sandbox only' : 'Remote server workspace'}
+              </span>
               <span>Plan and cost first</span>
               <span>Branch, tests, PR, and cap shown before run</span>
               <span>No local files touched</span>
@@ -1719,43 +1645,4 @@ export function AgentConversation({
       </div>
     </section>
   );
-}
-
-function sandboxPhaseKey(status?: string | null): (typeof SANDBOX_PHASES)[number]['key'] {
-  const s = (status || '').toUpperCase();
-  if (['QUEUED', 'PENDING', 'SUBMITTED', 'QUEUED_BATCH'].includes(s)) return 'queued';
-  if (['CLASSIFYING', 'PLANNING'].includes(s)) return 'planning';
-  if (s === 'AWAITING_APPROVAL') return 'approval';
-  if (['WORKING', 'IN_PROGRESS', 'IN_PROGRESS_BATCH', 'CODING', 'RUNNING'].includes(s))
-    return 'coding';
-  if (['COMPILING', 'BUILDING', 'TESTING'].includes(s)) return 'building';
-  if (s === 'REVIEWING') return 'reviewing';
-  if (['COMPLETE', 'COMPLETED', 'FAILED', 'CANCELLED', 'ERROR', 'PARTIAL'].includes(s))
-    return 'done';
-  return 'queued';
-}
-
-function phaseState(
-  phase: (typeof SANDBOX_PHASES)[number]['key'],
-  active: (typeof SANDBOX_PHASES)[number]['key'],
-  terminal: boolean,
-  failed: boolean,
-  cancelled: boolean,
-): string {
-  const order = SANDBOX_PHASES.map((p) => p.key);
-  const phaseIndex = order.indexOf(phase);
-  const activeIndex = order.indexOf(active);
-  const state =
-    terminal && phase === 'done'
-      ? failed
-        ? 'bad'
-        : cancelled
-          ? 'muted'
-          : 'done'
-      : phaseIndex < activeIndex
-        ? 'done'
-        : phaseIndex === activeIndex
-          ? 'active'
-          : 'pending';
-  return `agent-runcard-phase ${state}`;
 }

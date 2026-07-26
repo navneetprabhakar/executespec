@@ -31,7 +31,10 @@ public enum SandboxState {
   /** Cancellation was requested against a sandbox a runtime is still responsible for. */
   CANCEL_REQUESTED,
 
-  /** Teardown in progress: the runtime is destroying the sandbox and settling artifacts. */
+  /**
+   * Teardown in progress. V342 persists the intended terminal target before destruction; a failed
+   * destroy remains RELEASING and reclaimable until runtime absence is verified.
+   */
   RELEASING,
 
   /** Terminal: the sandbox completed and was released cleanly. */

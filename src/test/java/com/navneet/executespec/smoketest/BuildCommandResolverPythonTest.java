@@ -7,6 +7,14 @@ import org.junit.jupiter.api.Test;
 class BuildCommandResolverPythonTest {
 
   @Test
+  void rejectsChainedTestSuitesAsPlannerBuildSmokes() {
+    assertThat(
+            BuildCommandResolver.isRepeatableBuildSmoke(
+                "cd backend && python3 -m pytest && cd ../frontend && npx playwright test"))
+        .isFalse();
+  }
+
+  @Test
   void normalizesBarePipInPlannerDeclaredBuildCommand() {
     assertThat(
             BuildCommandResolver.normalizePython(

@@ -10,6 +10,15 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 @AllArgsConstructor
 public class TestExecutionSummary {
+  public enum EvidenceScope {
+    /** Generated black-box tests executed against this run's live preview. */
+    LIVE_PREVIEW_FUNCTIONAL,
+    /** Freshly executed tests that do not cross the deployed product boundary. */
+    WORKSPACE_TEST_SUITE,
+    /** No admissible execution evidence was produced. */
+    UNAVAILABLE
+  }
+
   private int totalTests;
   private int passed;
   private int failed;
@@ -40,6 +49,13 @@ public class TestExecutionSummary {
   /** Why {@link #executionVerified} is FALSE. Null when verified or when no signal was recorded. */
   private String unverifiedReason;
 
+  /**
+   * What boundary the executed tests exercised. Freshness alone is insufficient product-quality
+   * proof: a headless unit suite can be freshly executed without proving the generated application
+   * works end to end.
+   */
+  private EvidenceScope evidenceScope;
+
   /** Empty summary for pipeline failures where no tests were executed. */
   public static TestExecutionSummary empty() {
     return TestExecutionSummary.builder().build();
@@ -54,11 +70,27 @@ public class TestExecutionSummary {
         .executionVerified(Boolean.FALSE)
         .executionId(executionId)
         .unverifiedReason(reason)
+        .evidenceScope(EvidenceScope.UNAVAILABLE)
         .build();
   }
 
   /** True only when the producer positively proved this attempt's provenance. */
   public boolean isExecutionProven() {
     return Boolean.TRUE.equals(executionVerified);
+  }
+
+  /** True only for fresh black-box execution against this run's live product surface. */
+  public boolean isIndependentFunctionalProof() {
+    return isExecutionProven()
+        && evidenceScope == EvidenceScope.LIVE_PREVIEW_FUNCTIONAL
+        && totalTests > 0;
+  }
+
+  /** True when counts are fresh execution evidence, regardless of the exercised boundary. */
+  public boolean hasProvenTestExecution() {
+    return isExecutionProven()
+        && evidenceScope != null
+        && evidenceScope != EvidenceScope.UNAVAILABLE
+        && totalTests > 0;
   }
 }

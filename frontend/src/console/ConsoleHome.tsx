@@ -31,7 +31,7 @@ function RunRow({r, to, action}: {r: api.RunSummary; to: string; action?: string
       <span className='con-runrow-main'>
         <span className='con-runrow-title'>{runTitleFor(r)}</span>
         <span className='con-runrow-meta'>
-          {(r.projectName || 'Sandbox') + ' · ' + relTime(r.startedAt)}
+          {(r.projectName || 'Standalone') + ' · ' + relTime(r.startedAt)}
           {isSuperAdmin && r.actualCostUsd != null && r.actualCostUsd > 0
             ? ` · ${fmtCost(r.actualCostUsd)}`
             : ''}

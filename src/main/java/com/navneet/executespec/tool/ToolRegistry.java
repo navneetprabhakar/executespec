@@ -323,6 +323,16 @@ public class ToolRegistry {
    * different tool-schema behaviour.
    */
   public List<ToolCallback> bindForWorker(ExecutionContext ctx, String provider, String model) {
+    return bindForWorker(ctx, provider, model, null);
+  }
+
+  /**
+   * Provider/model-aware worker bind with a caller-supplied tighten-only allow-list. The allow-list
+   * is applied after every registry, flag, remote/local and provider capability restriction, so it
+   * cannot re-enable a forbidden tool.
+   */
+  public List<ToolCallback> bindForWorker(
+      ExecutionContext ctx, String provider, String model, java.util.Set<String> allowedNames) {
     final boolean remote = isRemoteRun(ctx);
     // T1 lean toolset: server-side workers get the canonical set only when enabled. Remote workers
     // are always canonical because transmitting duplicate aliases on every LLM turn is pure schema
@@ -343,6 +353,7 @@ public class ToolRegistry {
         .filter(t -> isToolBound(t) || profileTools.contains(t.name()))
         .filter(t -> !remote || remoteTools.contains(t.name()))
         .filter(t -> !lean || LEAN_WORKER_TOOLS.contains(t.name()))
+        .filter(t -> allowedNames == null || allowedNames.contains(t.name()))
         .map(
             t ->
                 (ToolCallback)

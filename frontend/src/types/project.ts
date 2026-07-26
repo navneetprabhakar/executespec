@@ -112,6 +112,21 @@ export interface ProjectCodeIndexStatus {
   readiness: ProjectCodeIndexReadiness;
 }
 
+/**
+ * Result of an explicit source-index refresh request.
+ *
+ * The server may reject semantic work for the selected project route while still returning 202:
+ * callers must inspect `status` and `reason` instead of treating every accepted HTTP response as
+ * proof that provider-backed indexing was queued.
+ */
+export interface ProjectCodeIndexRefreshAccepted {
+  repoId: string;
+  status: 'QUEUED' | 'UNAVAILABLE' | 'PARTIAL' | 'READY';
+  fallback: 'RIPGREP';
+  relationshipGraphAvailable: false;
+  reason: string | null;
+}
+
 export interface PrSummary {
   repoFullName: string;
   prNumber: number;

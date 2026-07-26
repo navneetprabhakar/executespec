@@ -103,6 +103,7 @@ export default function ConsoleShell() {
   const [runs, setRuns] = useState<api.RunSummary[]>([]);
   const [projects, setProjects] = useState<api.ProjectDto[]>([]);
   const [agentSessions, setAgentSessions] = useState<api.AgentSessionResponse[]>([]);
+  const [remoteSandboxEnabled, setRemoteSandboxEnabled] = useState(false);
   const [unread, setUnread] = useState(0);
   const latestSandbox = latestSandboxSession(agentSessions);
 
@@ -152,6 +153,10 @@ export default function ConsoleShell() {
     refreshUnread();
     refreshProjects();
     refreshAgentSessions();
+    api
+      .getRuntimeClientCapabilities()
+      .then((capabilities) => setRemoteSandboxEnabled(capabilities.remoteSandbox?.enabled === true))
+      .catch(() => setRemoteSandboxEnabled(false));
   }, [refreshRuns, refreshUnread, refreshProjects, refreshAgentSessions]);
   useEffect(() => {
     const id = window.setInterval(() => {
@@ -261,7 +266,11 @@ export default function ConsoleShell() {
     if (!location.pathname.startsWith('/agent')) navigate('/agent');
   }, [location.pathname, navigate]);
   const primaryCta = path.startsWith('/agent')
-    ? {label: 'Sandbox', title: 'Start a remote sandbox', run: startSandbox}
+    ? {
+        label: remoteSandboxEnabled ? 'Sandbox' : 'Workspace',
+        title: remoteSandboxEnabled ? 'Start a remote sandbox' : 'Start a remote workspace',
+        run: startSandbox,
+      }
     : {label: 'Start', title: 'Start work', run: () => navigate('/compose')};
   const shellClasses = [
     'ide-root',
@@ -312,8 +321,8 @@ export default function ConsoleShell() {
     {id: 'agent', label: 'Open agent', hint: 'chat', run: () => navigate('/agent')},
     {
       id: 'agent-new-sandbox',
-      label: 'Agent: New remote sandbox',
-      hint: 'sandbox',
+      label: `Agent: New remote ${remoteSandboxEnabled ? 'sandbox' : 'workspace'}`,
+      hint: remoteSandboxEnabled ? 'sandbox' : 'workspace',
       run: startSandbox,
     },
     {
@@ -324,7 +333,7 @@ export default function ConsoleShell() {
     },
     {
       id: 'agent-latest-sandbox',
-      label: 'Agent: Open latest sandbox',
+      label: `Agent: Open latest ${remoteSandboxEnabled ? 'sandbox' : 'workspace'}`,
       // Server-owned truth. `runs[0]` is the newest run of ANY origin, so this
       // command used to open a run the sandbox never touched. `latestLinkedRun*`
       // on the agent-session read model is the run actually linked to a sandbox.

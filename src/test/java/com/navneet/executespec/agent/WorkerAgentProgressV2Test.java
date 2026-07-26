@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -66,6 +67,10 @@ class WorkerAgentProgressV2Test {
   }
 
   private WorkerAgent newWorker(List<ChatResponse> seq, List<Tool> tools) {
+    return newWorker(seq, tools, null);
+  }
+
+  private WorkerAgent newWorker(List<ChatResponse> seq, List<Tool> tools, String runStatus) {
     LlmRouter router = mock(LlmRouter.class);
     ToolRegistry registry = mock(ToolRegistry.class);
     ContextStore contextStore = mock(ContextStore.class);
@@ -75,7 +80,13 @@ class WorkerAgentProgressV2Test {
 
     PipelineRun runRow = new PipelineRun();
     runRow.setHardCapUsd(null);
+    runRow.setStatus(runStatus);
     lenient().when(runRepo.findById(anyString())).thenReturn(Optional.of(runRow));
+    lenient()
+        .when(
+            runRepo.existsByRunIdAndStatus(
+                anyString(), org.mockito.ArgumentMatchers.eq("CANCELLED")))
+        .thenAnswer(ignored -> "CANCELLED".equals(runRow.getStatus()));
     lenient().when(registry.isRemoteRun(any())).thenReturn(false);
     for (Tool tool : tools) {
       lenient().when(registry.find(tool.name())).thenReturn(tool);
@@ -111,6 +122,16 @@ class WorkerAgentProgressV2Test {
     return tool;
   }
 
+  private static Tool forbiddenTool(String name) {
+    Tool tool = mock(Tool.class);
+    lenient().when(tool.name()).thenReturn(name);
+    lenient().when(tool.inputSchema()).thenReturn("{\"type\":\"object\"}");
+    lenient()
+        .when(tool.execute(any(), any()))
+        .thenReturn(ToolResult.err(ToolResult.ErrorKind.FORBIDDEN, "blocked by sandbox"));
+    return tool;
+  }
+
   private static WorkerTaskRequest req(boolean progressV2, Integer warnAfter, Integer forceAfter) {
     int maxIter = 30;
     return WorkerTaskRequest.builder()
@@ -129,6 +150,100 @@ class WorkerAgentProgressV2Test {
   }
 
   // ---------------------------------------------------------------- text-only stops
+
+  @Test
+  void durableCancellationStopsBeforeAnotherProviderCall() {
+    WorkerAgent worker =
+        newWorker(
+            List.of(responseWithCalls(toolCall("completeTask", "{\"summary\":\"too late\"}"))),
+            List.of(),
+            "CANCELLED");
+
+    WorkerResult result = worker.run(req(true, null, null));
+
+    assertEquals(WorkerResult.Outcome.STOPPED_WITHOUT_COMPLETE, result.outcome());
+    assertEquals(1, result.iterations());
+  }
+
+  @Test
+  void cancellationDuringProviderCallReassertsInterruptForTheExecutor() {
+    LlmRouter router = mock(LlmRouter.class);
+    ToolRegistry registry = mock(ToolRegistry.class);
+    PipelineRunRepository runRepo = mock(PipelineRunRepository.class);
+    PipelineRun runRow = new PipelineRun();
+    when(runRepo.findById(anyString())).thenReturn(Optional.of(runRow));
+    when(runRepo.existsByRunIdAndStatus(anyString(), org.mockito.ArgumentMatchers.eq("CANCELLED")))
+        .thenAnswer(ignored -> "CANCELLED".equals(runRow.getStatus()));
+    lenient().when(registry.isRemoteRun(any())).thenReturn(false);
+    when(router.call(any()))
+        .thenAnswer(
+            ignored -> {
+              runRow.setStatus("CANCELLED");
+              throw new org.springframework.web.client.ResourceAccessException("interrupted");
+            });
+    WorkerAgent worker =
+        new WorkerAgent(
+            router,
+            registry,
+            new ObjectMapper(),
+            mock(ContextStore.class),
+            mock(Metrics.class),
+            mock(RunCostTracker.class),
+            runRepo,
+            mock(com.navneet.executespec.sse.SseBroadcaster.class),
+            null,
+            null,
+            null);
+
+    try {
+      WorkerResult result = worker.run(req(true, null, null));
+      assertEquals(WorkerResult.Outcome.STOPPED_WITHOUT_COMPLETE, result.outcome());
+      assertThat(Thread.currentThread().isInterrupted()).isTrue();
+    } finally {
+      Thread.interrupted();
+    }
+  }
+
+  @Test
+  void cancellationCommittedWithSuccessfulProviderResponseDiscardsCompleteTask() {
+    LlmRouter router = mock(LlmRouter.class);
+    ToolRegistry registry = mock(ToolRegistry.class);
+    PipelineRunRepository runRepo = mock(PipelineRunRepository.class);
+    java.util.concurrent.atomic.AtomicBoolean cancelled =
+        new java.util.concurrent.atomic.AtomicBoolean();
+    lenient().when(runRepo.findById(anyString())).thenReturn(Optional.of(new PipelineRun()));
+    when(runRepo.existsByRunIdAndStatus(anyString(), org.mockito.ArgumentMatchers.eq("CANCELLED")))
+        .thenAnswer(ignored -> cancelled.get());
+    lenient().when(registry.isRemoteRun(any())).thenReturn(false);
+    when(router.call(any()))
+        .thenAnswer(
+            ignored -> {
+              cancelled.set(true);
+              return responseWithCalls(toolCall("completeTask", "{\"summary\":\"too late\"}"));
+            });
+    WorkerAgent worker =
+        new WorkerAgent(
+            router,
+            registry,
+            new ObjectMapper(),
+            mock(ContextStore.class),
+            mock(Metrics.class),
+            mock(RunCostTracker.class),
+            runRepo,
+            mock(com.navneet.executespec.sse.SseBroadcaster.class),
+            null,
+            null,
+            null);
+
+    try {
+      WorkerResult result = worker.run(req(true, null, null));
+      assertEquals(WorkerResult.Outcome.STOPPED_WITHOUT_COMPLETE, result.outcome());
+      assertThat(Thread.currentThread().isInterrupted()).isTrue();
+      assertEquals(0, result.toolCallsDispatched(), "late completeTask must be discarded");
+    } finally {
+      Thread.interrupted();
+    }
+  }
 
   @Test
   void v1_kills_after_two_text_only_stops() {
@@ -206,6 +321,30 @@ class WorkerAgentProgressV2Test {
   }
 
   @Test
+  void v2_doesNotLetNovelShellDiagnosticsRunForeverAfterAnEdit() {
+    Tool write =
+        successfulTool(
+            "writeFile",
+            "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"},\"content\":{\"type\":\"string\"}}}",
+            "wrote file");
+    Tool shell =
+        successfulTool(
+            "shell",
+            "{\"type\":\"object\",\"properties\":{\"command\":{\"type\":\"string\"}}}",
+            "exit=0\ndiagnostic");
+    List<ChatResponse> seq = new ArrayList<>();
+    seq.add(responseWithCalls(toolCall("writeFile", "{\"path\":\"app.py\",\"content\":\"x\"}")));
+    for (int i = 0; i < 6; i++) {
+      seq.add(responseWithCalls(toolCall("shell", "{\"command\":\"python3." + i + " -V\"}")));
+    }
+
+    WorkerResult result = newWorker(seq, List.of(write, shell)).run(req(true, 2, 6));
+
+    assertEquals(WorkerResult.Outcome.COMPLETED_BY_STAGNATION, result.outcome());
+    assertEquals(7, result.iterations());
+  }
+
+  @Test
   void v2_doesNotTreatNovelFailingCommandsAsProgress() {
     List<ChatResponse> seq = new ArrayList<>();
     for (int i = 0; i < 6; i++) {
@@ -235,6 +374,21 @@ class WorkerAgentProgressV2Test {
         WorkerResult.Outcome.COMPLETED_BY_STAGNATION,
         r.outcome(),
         "identical failing signature x" + WorkerAgent.PROGRESS_V2_REPEAT_FAILURE_FORCE_AT);
+  }
+
+  @Test
+  void v2_groupsVaryingSandboxDenialsAsOneFailureFamily() {
+    List<ChatResponse> seq = new ArrayList<>();
+    for (int i = 0; i < WorkerAgent.PROGRESS_V2_REPEAT_FAILURE_FORCE_AT; i++) {
+      seq.add(responseWithCalls(toolCall("shell", "{\"command\":\"python3." + i + " -V\"}")));
+    }
+    seq.add(textOnly("salvage declines"));
+
+    WorkerResult result =
+        newWorker(seq, List.of(forbiddenTool("shell"))).run(req(true, null, null));
+
+    assertEquals(WorkerResult.Outcome.COMPLETED_BY_STAGNATION, result.outcome());
+    assertEquals(WorkerAgent.PROGRESS_V2_REPEAT_FAILURE_FORCE_AT, result.iterations());
   }
 
   @Test

@@ -84,6 +84,18 @@ class PromptConformanceTest {
   }
 
   @Test
+  void skeletonAllocatesRequirementOwnershipBeforeParallelExpansion() throws IOException {
+    String skeleton = prompt("prompts/outline-planner-skeleton.md");
+
+    assertThat(skeleton)
+        .contains("\"meetsRequirements\": [\"R1\", \"R4\"]")
+        .contains("Every requirement ID must be cited by at least one task")
+        .contains("rejected before any task-expansion calls");
+    assertThat(OutlinePlannerAgent.SUBMIT_OUTLINE_SCHEMA)
+        .contains("REQUIRED in both modes so requirement ownership survives hierarchical fan-out");
+  }
+
+  @Test
   void reviewerGeneralTreatsMissingChangedCodeTestsAsInScope() throws IOException {
     String reviewer = prompt("prompts/reviewer-general.md");
 
@@ -186,6 +198,10 @@ class PromptConformanceTest {
 
     assertThat(SequentialExecutor.workerSystemPromptBase())
         .contains("one atomic critical section/transaction")
+        .contains("atomic database claim for the scoped idempotency key")
+        .contains("Never mutate")
+        .contains("rely on a later unique-key insert")
+        .contains("SELECT FOR UPDATE is ignored")
         .contains("first-decision")
         .contains("Raw delimiter concatenation")
         .contains("eviction of every live bucket/index/map")
@@ -197,6 +213,8 @@ class PromptConformanceTest {
         .contains("assert every response plus final persisted state");
     assertThat(reviewer)
         .contains("force concurrent callers to observe the initial miss")
+        .contains("atomic scoped-key database claim")
+        .contains("hopeful unique insert is a critical race")
         .contains("reject the same key with a different payload")
         .contains("transaction races that surface intermittent 500s")
         .contains("Wildcard CORS combined with credentials")
@@ -206,10 +224,12 @@ class PromptConformanceTest {
         .contains("Cancellation must reach blocking core work");
     assertThat(testPlanner)
         .contains("exact replay of status, body, and contract-relevant headers")
+        .contains("repeat the race enough to expose intermittent failures")
         .contains("truly parallel live-server clients/connections")
         .contains("predictable sample/default credential is not accepted");
     assertThat(testWorker)
         .contains("genuinely parallel requests to the live server")
+        .contains("repeat the race to expose intermittent unique/lock/busy failures")
         .contains("compare the first and replayed status, body, and contract-relevant headers")
         .contains("intermittent 5xx responses fail the contract");
   }
@@ -245,8 +265,8 @@ class PromptConformanceTest {
     assertThat(coherence)
         .contains("weakens an authenticated")
         .contains("principal into a caller-selected identity")
-        .contains("zero/negative business quantities")
-        .contains("instead of exercising the migration runner");
+        .contains("bypasses a required migration/runtime path")
+        .contains("real integration proof with mocks");
   }
 
   @Test
@@ -294,16 +314,63 @@ class PromptConformanceTest {
   }
 
   @Test
-  void coherenceConstraintConflictPromptMatchesAppendSemantics() throws IOException {
+  void coherenceConstraintConflictPromptUsesReplacementOrFailClosedSemantics() throws IOException {
     String prompt = prompt("prompts/coherence-planner.md");
 
     assertThat(prompt)
-        .contains("appends the corrected constraint")
-        .contains("later conflicting constraints as higher precedence")
+        .contains("oldConstraint")
+        .contains("fatalConflicts")
+        .contains("the patch replaces it")
         .contains("Cross-task contract registry")
-        .contains("lowercase-hex HMAC in production versus Base64 in a test")
-        .contains("append the exact canonical contract to every affected task");
-    assertThat(prompt).doesNotContain("replaces the incompatible constraint");
+        .contains("Derive the contract from the current")
+        .contains("REPLACE_DESCRIPTION_TEXT")
+        .contains("Never import a route, schema, state")
+        .contains("field vocabulary from an example or a previous application");
+    assertThat(prompt).doesNotContain("later conflicting constraints as higher precedence");
+  }
+
+  @Test
+  void planningReviewAndTestsPreserveExplicitCollectionCardinality() throws IOException {
+    for (String path :
+        List.of(
+            "prompts/outline-planner.md",
+            "prompts/task-expander.md",
+            "prompts/coherence-planner.md",
+            "prompts/reviewer-general.md",
+            "prompts/test-planner.txt",
+            "prompts/test-worker.txt")) {
+      String prompt = prompt(path).toLowerCase();
+      if (path.endsWith("coherence-planner.md")) {
+        assertThat(prompt).as(path).contains("preserve requested cardinality");
+      } else {
+        assertThat(prompt).as(path).contains("multiple sku");
+        assertThat(prompt).as(path).containsAnyOf("single", "one product");
+      }
+    }
+  }
+
+  @Test
+  void generationPromptsRejectSplitIdempotencyAndSQLiteUuidDrift() throws IOException {
+    for (String path :
+        List.of(
+            "prompts/outline-planner.md",
+            "prompts/task-expander.md",
+            "prompts/reviewer-general.md")) {
+      String prompt = prompt(path);
+      assertThat(prompt).as(path).contains("PROCESSING/COMPLETED");
+      assertThat(prompt).as(path).containsAnyOf("func.uuid4()", "uuid_generate_v4()");
+      assertThat(prompt).as(path).contains("\"code\"").contains("\"message\"");
+    }
+    assertThat(prompt("prompts/coherence-planner.md"))
+        .contains("lifecycle, atomicity, and error semantics")
+        .contains("serialization/encoding")
+        .contains("Never import a route, schema, state")
+        .contains("field vocabulary from an example or a previous application");
+    assertThat(prompt("prompts/fragments/backend-robustness.md"))
+        .contains("commits a claim")
+        .contains("share the business transaction")
+        .contains("SQLITE PORTABILITY")
+        .contains("ERROR ENVELOPE");
   }
 
   private static String prompt(String classpath) throws IOException {

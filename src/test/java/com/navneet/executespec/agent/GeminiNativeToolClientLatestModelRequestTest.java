@@ -65,6 +65,26 @@ class GeminiNativeToolClientLatestModelRequestTest {
         .isFalse();
   }
 
+  @Test
+  void providerNeutralToolChoiceOverridesLegacyForceHint() {
+    assertThat(GeminiNativeToolClient.toolMode(toolRequest("required", false))).isEqualTo("ANY");
+    assertThat(GeminiNativeToolClient.toolMode(toolRequest("none", true))).isEqualTo("NONE");
+    assertThat(GeminiNativeToolClient.toolMode(toolRequest("auto", true))).isEqualTo("AUTO");
+    assertThat(GeminiNativeToolClient.toolMode(toolRequest(null, true))).isEqualTo("ANY");
+    assertThat(GeminiNativeToolClient.toolMode(toolRequest(null, false))).isEqualTo("AUTO");
+  }
+
+  private GeminiNativeToolClient.GeminiToolCallRequest toolRequest(
+      String toolChoice, boolean legacyForce) {
+    return GeminiNativeToolClient.GeminiToolCallRequest.builder()
+        .model("gemini-3.6-flash")
+        .messages(List.of(new UserMessage("inspect")))
+        .tools(List.of())
+        .forceToolCall(legacyForce)
+        .toolChoice(toolChoice)
+        .build();
+  }
+
   private JsonNode body(String model) {
     AssistantMessage.ToolCall call =
         new AssistantMessage.ToolCall("call-1", "function", "readFile", "{\"path\":\"a.txt\"}");

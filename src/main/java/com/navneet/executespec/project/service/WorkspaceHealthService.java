@@ -75,6 +75,22 @@ public class WorkspaceHealthService {
 
   public record Report(List<RepoHealth> repos, Instant lastRefreshedAt) {}
 
+  /**
+   * Drop the exact cached origin HEAD for a repository after an authoritative source mutation or
+   * provider event. This is repo-scoped because the cache is shared by every project that links the
+   * same repository.
+   */
+  public void invalidateOriginSha(java.util.UUID repoId) {
+    if (repoId == null) return;
+    try {
+      redis.delete(ORIGIN_SHA_PREFIX + repoId);
+    } catch (Exception e) {
+      // Cache availability must not turn a committed repo mutation or signed webhook into a
+      // customer-visible failure. The TTL remains the bounded fallback.
+      log.warn("Redis origin-sha invalidation failed for {}: {}", repoId, e.getMessage());
+    }
+  }
+
   public Report report(String projectId, String callerUserId) {
     List<ProjectRepoLink> links = linkRepo.findByProjectId(projectId);
 

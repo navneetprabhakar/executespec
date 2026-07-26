@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -732,7 +733,7 @@ to boot — skip it for those.""";
         // Re-asserting the interrupt flag with {@code Thread.currentThread()
         // .interrupt()} so any caller waiting on this thread (RunOrchestrator's
         // {@code activeRuns} future) still sees it as cancelled.
-        if (Thread.currentThread().isInterrupted()) {
+        if (cancellationRequested(runId)) {
           log.info(
               "SequentialExecutor cancel detected at task index {}/{}, breaking loop",
               i,
@@ -756,33 +757,58 @@ to boot — skip it for those.""";
         //   - resume it (snapshot present) → executeOne with snapshot
         //   - run fresh
         TaskOutcome outcome;
-        if (resume != null) {
-          ResumeAction action =
-              resolveResumeAction(runId, task.id(), resume, req.runContext().workspaceRoot());
-          switch (action.kind()) {
-            case SKIP_TERMINAL -> {
-              log.info(
-                  "Executor RESUME skip task={} status={} (already terminal pre-resume)",
-                  task.id(),
-                  action.persistedStatus());
-              outcome = synthesizeSkippedOutcome(task, action.persistedStatus());
+        try {
+          if (resume != null) {
+            ResumeAction action =
+                resolveResumeAction(runId, task.id(), resume, req.runContext().workspaceRoot());
+            switch (action.kind()) {
+              case SKIP_TERMINAL -> {
+                log.info(
+                    "Executor RESUME skip task={} status={} (already terminal pre-resume)",
+                    task.id(),
+                    action.persistedStatus());
+                outcome = synthesizeSkippedOutcome(task, action.persistedStatus());
+              }
+              case RESUME_FROM_SNAPSHOT -> {
+                log.info(
+                    "Executor RESUME task={} from snapshot iter={}",
+                    task.id(),
+                    action.snapshot() == null ? "n/a" : action.snapshot().iteration());
+                outcome = executeOne(task, plan, req, isFinalTask, action.snapshot(), runJournal);
+              }
+              case RUN_FRESH ->
+                  outcome = executeOne(task, plan, req, isFinalTask, null, runJournal);
+              default -> outcome = executeOne(task, plan, req, isFinalTask, null, runJournal);
             }
-            case RESUME_FROM_SNAPSHOT -> {
-              log.info(
-                  "Executor RESUME task={} from snapshot iter={}",
-                  task.id(),
-                  action.snapshot() == null ? "n/a" : action.snapshot().iteration());
-              outcome = executeOne(task, plan, req, isFinalTask, action.snapshot(), runJournal);
-            }
-            case RUN_FRESH -> outcome = executeOne(task, plan, req, isFinalTask, null, runJournal);
-            default -> outcome = executeOne(task, plan, req, isFinalTask, null, runJournal);
+          } else {
+            outcome = executeOne(task, plan, req, isFinalTask, null, runJournal);
           }
-        } else {
-          outcome = executeOne(task, plan, req, isFinalTask, null, runJournal);
-        }
 
-        if (resume == null) {
-          outcome = maybeActOnContinuation(task, plan, req, isFinalTask, outcome);
+          // A continuation action is another provider dispatch. Re-check the durable fence after
+          // the primary task and before the continuation policy can spend again.
+          throwIfCancellationRequested(runId, task.id());
+          if (resume == null) {
+            outcome = maybeActOnContinuation(task, plan, req, isFinalTask, outcome);
+          }
+        } catch (CancellationException cancelledTask) {
+          // A raw thread interrupt/provider unwind is not proof that the durable run was
+          // cancelled. Leave the task non-terminal so startup recovery can resume it. Only the
+          // explicit durable cancellation fence may terminalize/skip work here.
+          if (!(cancelledTask instanceof DurableRunCancellationException)) {
+            throw cancelledTask;
+          }
+          log.info(
+              "SequentialExecutor cancellation fenced task={} index={}/{}: {}",
+              task.id(),
+              i,
+              taskCount,
+              cancelledTask.getMessage());
+          persistTaskStatus(runId, task.id(), "PARTIAL", "Run cancelled before task completion");
+          broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "PARTIAL"));
+          cancelled = true;
+          appendSkippedGoalStopOutcomes(outcomes, plan, i);
+          Thread.currentThread().interrupt();
+          break;
         }
 
         recordTaskOutcomeMetric(req, task, outcome);
@@ -830,7 +856,7 @@ to boot — skip it for those.""";
       }
 
       ExecutionResult result =
-          summarize(
+          ExecutionResultSummarizer.summarize(
               outcomes, System.currentTimeMillis() - runStart, abortedByGoalDecision, cancelled);
       log.info(
           "SequentialExecutor DONE run={} overall={} success={}/{} warnings={} failed={}"
@@ -863,6 +889,35 @@ to boot — skip it for those.""";
       lowComplexityWorkerStartTierEffectiveByRun.remove(runId);
       continuationConfirmationScopeByRun.remove(runId);
     }
+  }
+
+  /**
+   * Hard run-cancellation fence shared by task and worker-dispatch boundaries.
+   *
+   * <p>The worker's durable check uses a scalar database query, so this does not trust a possibly
+   * stale managed run entity. Once cancellation is observed, the interrupt is re-asserted and no
+   * later task/provider dispatch is authorised.
+   */
+  private boolean cancellationRequested(String runId) {
+    return RunCancellationFence.requested(worker, runId);
+  }
+
+  private void throwIfCancellationRequested(String runId, String taskId) {
+    RunCancellationFence.throwIfRequested(worker, runId, taskId);
+  }
+
+  private WorkerResult runWorkerWithCancellationFence(
+      String runId, String taskId, java.util.function.Supplier<WorkerResult> dispatch) {
+    throwIfCancellationRequested(runId, taskId);
+    WorkerResult result = dispatch.get();
+    // Never interpret an interrupted/cancelled response as soft completion, even when it contains
+    // successful file writes or the provider returned a nominal COMPLETED outcome.
+    WorkerInterruptionPolicy.throwIfInterruptedError(result, taskId);
+    if (Thread.currentThread().isInterrupted()) {
+      throw new DurableRunCancellationException("run interrupted during worker task: " + taskId);
+    }
+    throwIfCancellationRequested(runId, taskId);
+    return result;
   }
 
   private void recordTaskOutcomeMetric(
@@ -1910,8 +1965,9 @@ to boot — skip it for those.""";
             req.originalGoal());
     String userPrompt = composeUserPrompt(task, null, workerEvidence);
 
-    log.info("Executor task={} ('{}') START", task.id(), task.title());
     String runId = req.runContext().runId();
+    throwIfCancellationRequested(runId, task.id());
+    log.info("Executor task={} ('{}') START", task.id(), task.title());
     persistTaskStatus(runId, task.id(), "WORKING");
     broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "WORKING"));
     broadcaster.emit(runId, RunEvent.log(runId, task.id(), "Starting task: " + task.title()));
@@ -1998,7 +2054,8 @@ to boot — skip it for those.""";
     // Resume-aware dispatch — when resumeFrom is non-null, the worker rebuilds history from the
     // saved snapshot and resumes the iteration loop from snapshot.iteration() + 1. Snapshots
     // ride a 24h Redis TTL and are written every 5 worker iters.
-    WorkerResult primary = worker.run(workerReq, resumeFrom);
+    WorkerResult primary =
+        runWorkerWithCancellationFence(runId, task.id(), () -> worker.run(workerReq, resumeFrom));
 
     // 2026-05-04 — emit a worker-summary log line right after the worker returns so the user
     // sees outcome + iters without waiting for the smoke test to finish or scrolling back to
@@ -2013,7 +2070,7 @@ to boot — skip it for those.""";
           case BUDGET_EXCEEDED -> "💸";
           case ERROR -> "❌";
         };
-    int writes = countFileWrites(primary.toolCallLog());
+    int writes = WorkerToolLogEvidence.countFileWrites(primary.toolCallLog());
     broadcaster.emit(
         runId,
         RunEvent.log(
@@ -2042,7 +2099,7 @@ to boot — skip it for those.""";
         primary.outcome(),
         primary.iterations(),
         primary.toolCallsDispatched(),
-        countFileWrites(primary.toolCallLog()));
+        WorkerToolLogEvidence.countFileWrites(primary.toolCallLog()));
 
     WorkerInterruptionPolicy.throwIfInterruptedError(primary, task.id());
     // Worker didn't reach COMPLETED. Check whether it still wrote files — if so
@@ -2066,7 +2123,7 @@ to boot — skip it for those.""";
     final boolean softCompletion;
     final String softWarnReason;
     if (primary.outcome() != WorkerResult.Outcome.COMPLETED) {
-      int fileWrites = countFileWrites(primary.toolCallLog());
+      int fileWrites = WorkerToolLogEvidence.countFileWrites(primary.toolCallLog());
       if (fileWrites == 0) {
         log.warn(
             "Executor task={} WORKER_FAILED outcome={} iters={} (no file writes)",
@@ -2371,13 +2428,15 @@ to boot — skip it for those.""";
             "Executor task={} retry CONTEXT-RETAINED from snapshot (iter={})",
             task.id(),
             snapshot.get().iteration());
-        retry = worker.run(retryReq, snapshot.get());
+        retry =
+            runWorkerWithCancellationFence(
+                runId, task.id(), () -> worker.run(retryReq, snapshot.get()));
       } else {
         log.debug("Executor task={} retry context-retention flag ON but no snapshot", task.id());
-        retry = worker.run(retryReq);
+        retry = runWorkerWithCancellationFence(runId, task.id(), () -> worker.run(retryReq));
       }
     } else {
-      retry = worker.run(retryReq);
+      retry = runWorkerWithCancellationFence(runId, task.id(), () -> worker.run(retryReq));
     }
 
     int totalToolCalls = primary.toolCallsDispatched() + retry.toolCallsDispatched();
@@ -2469,7 +2528,8 @@ to boot — skip it for those.""";
     // verify-only task contract, so the failure cannot be attributed. It terminalises as PARTIAL:
     // the run keeps its evidence and continues, but nothing is vouched for.
     int totalFileWrites =
-        countFileWrites(primary.toolCallLog()) + countFileWrites(retry.toolCallLog());
+        WorkerToolLogEvidence.countFileWrites(primary.toolCallLog())
+            + WorkerToolLogEvidence.countFileWrites(retry.toolCallLog());
     if (totalFileWrites == 0) {
       String zeroWriteReason =
           "Build smoke failed after retry (exit "
@@ -2521,36 +2581,37 @@ to boot — skip it for those.""";
           "Executor task={} HIGH-complexity, smoke still fails after retry-1; attempting retry-2",
           task.id());
       String retry2Prompt = composeUserPrompt(task, retrySmoke.output(), workerEvidence);
+      WorkerTaskRequest retry2Request =
+          WorkerTaskRequest.builder()
+              .provider(cfg.provider)
+              .model(cfg.model)
+              .systemPrompt(systemPrompt)
+              .userPrompt(retry2Prompt)
+              .context(taskCtx)
+              .maxIterations(
+                  req.maxIterationsPerTask() != null ? req.maxIterationsPerTask() : cfg.maxIter)
+              .temperature(0.0)
+              .maxTokensPerCall(cfg.maxTokens)
+              .stagnationWarnAfter(cfg.stagnationWarnAfter)
+              .stagnationForceAfter(cfg.stagnationForceAfter)
+              .wallClockSeconds(cfg.wallClockSeconds)
+              .requireBuildVerification(true)
+              .forceToolChoiceOnSalvage(cfg.forceToolChoiceOnSalvage)
+              .criticPass(
+                  featureFlagService != null
+                      && featureFlagService.isEnabled("worker.critic-pass.enabled"))
+              .verifyBeforeComplete(
+                  featureFlagService != null
+                      && featureFlagService.isEnabled("worker.verify-before-complete.enabled"))
+              .progressV2(
+                  featureFlagService != null
+                      && featureFlagService.isEnabled("worker.progress-v2.enabled"))
+              .autoVerify(
+                  featureFlagService != null
+                      && featureFlagService.isEnabled("worker.auto-verify.enabled"))
+              .build();
       WorkerResult retry2 =
-          worker.run(
-              WorkerTaskRequest.builder()
-                  .provider(cfg.provider)
-                  .model(cfg.model)
-                  .systemPrompt(systemPrompt)
-                  .userPrompt(retry2Prompt)
-                  .context(taskCtx)
-                  .maxIterations(
-                      req.maxIterationsPerTask() != null ? req.maxIterationsPerTask() : cfg.maxIter)
-                  .temperature(0.0)
-                  .maxTokensPerCall(cfg.maxTokens)
-                  .stagnationWarnAfter(cfg.stagnationWarnAfter)
-                  .stagnationForceAfter(cfg.stagnationForceAfter)
-                  .wallClockSeconds(cfg.wallClockSeconds)
-                  .requireBuildVerification(true)
-                  .forceToolChoiceOnSalvage(cfg.forceToolChoiceOnSalvage)
-                  .criticPass(
-                      featureFlagService != null
-                          && featureFlagService.isEnabled("worker.critic-pass.enabled"))
-                  .verifyBeforeComplete(
-                      featureFlagService != null
-                          && featureFlagService.isEnabled("worker.verify-before-complete.enabled"))
-                  .progressV2(
-                      featureFlagService != null
-                          && featureFlagService.isEnabled("worker.progress-v2.enabled"))
-                  .autoVerify(
-                      featureFlagService != null
-                          && featureFlagService.isEnabled("worker.auto-verify.enabled"))
-                  .build());
+          runWorkerWithCancellationFence(runId, task.id(), () -> worker.run(retry2Request));
       int totalToolCalls2 = totalToolCalls + retry2.toolCallsDispatched();
       if (retry2.outcome() == WorkerResult.Outcome.COMPLETED) {
         SmokeTestResult retry2Smoke = runSmokeTest(taskCtx, plan.buildCommand());
@@ -3596,7 +3657,10 @@ to boot — skip it for those.""";
       Boolean smokePassed,
       String failureReason,
       boolean downstreamValidationDeferred) {
-    int fileWrites = workerResult == null ? 0 : countFileWrites(workerResult.toolCallLog());
+    int fileWrites =
+        workerResult == null
+            ? 0
+            : WorkerToolLogEvidence.countFileWrites(workerResult.toolCallLog());
     int meaningfulProductDiffs = meaningfulProductDiffCount(runId, workerResult, fileWrites);
     RunCostTracker.Snapshot cost = taskCostSnapshot(runId, task.id());
     int totalTokens = totalTrackedTokens(cost);
@@ -4723,69 +4787,5 @@ to boot — skip it for those.""";
     metrics.recordSmokeTest("fail");
     String msg = result instanceof ToolResult.Err err ? err.message() : "(unknown tool err)";
     return new SmokeTestResult(false, -1, "tool error: " + msg, elapsed);
-  }
-
-  private record SmokeTestResult(boolean passed, int exitCode, String output, long latencyMs) {}
-
-  private ExecutionResult summarize(
-      List<TaskOutcome> outcomes,
-      long totalLatency,
-      boolean abortedByGoalDecision,
-      boolean cancelled) {
-    int succ = 0, warn = 0, fail = 0, skip = 0;
-    for (var o : outcomes) {
-      switch (o.status()) {
-        case SUCCESS, SUCCESS_AFTER_RETRY -> succ++;
-        case COMPLETED_WITH_WARNING -> warn++;
-        case WORKER_FAILED -> fail++;
-        case SKIPPED -> skip++;
-      }
-    }
-    ExecutionResult.Overall overall;
-    // RR-271 — cancellation is a terminal ABORTED, never ALL_SUCCESS, even when every executed task
-    // was clean. Reviewer/publication must not proceed on a cancelled run's "success".
-    if (cancelled || abortedByGoalDecision) overall = ExecutionResult.Overall.ABORTED;
-    else if (fail > 0) overall = ExecutionResult.Overall.FAILED;
-    else if (warn > 0) overall = ExecutionResult.Overall.PARTIAL_WITH_WARNINGS;
-    else overall = ExecutionResult.Overall.ALL_SUCCESS;
-
-    // v2.5.10 — separate "final task status" from "any intermediate warning"
-    // so RunOrchestrator can distinguish CLEAN_COMPLETION from
-    // CLEAN_WITH_INTERMEDIATE_WARNINGS when the final task is clean but
-    // an earlier task flickered.
-    TaskOutcome lastNonSkipped = null;
-    for (int i = outcomes.size() - 1; i >= 0; i--) {
-      if (outcomes.get(i).status() != TaskOutcome.Status.SKIPPED) {
-        lastNonSkipped = outcomes.get(i);
-        break;
-      }
-    }
-    boolean anyIntermediateWarning = false;
-    if (lastNonSkipped != null) {
-      for (TaskOutcome o : outcomes) {
-        if (o == lastNonSkipped) continue;
-        if (o.status() == TaskOutcome.Status.COMPLETED_WITH_WARNING) {
-          anyIntermediateWarning = true;
-          break;
-        }
-      }
-    }
-
-    return ExecutionResult.builder()
-        .overall(overall)
-        .tasksExecuted(outcomes.size() - skip)
-        .tasksSuccessful(succ)
-        .tasksWithWarning(warn)
-        .tasksFailed(fail)
-        .tasksSkipped(skip)
-        .perTask(outcomes)
-        .totalLatencyMs(totalLatency)
-        .finalTaskStatus(lastNonSkipped != null ? lastNonSkipped.status() : null)
-        .anyIntermediateWarning(anyIntermediateWarning)
-        .build();
-  }
-
-  private static int countFileWrites(java.util.List<String> toolLog) {
-    return WorkerToolLogEvidence.countFileWrites(toolLog);
   }
 }

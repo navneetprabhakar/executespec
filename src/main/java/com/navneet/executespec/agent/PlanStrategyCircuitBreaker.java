@@ -43,6 +43,7 @@ public class PlanStrategyCircuitBreaker {
 
   private static final String OPEN_PREFIX = "planner:strategy:open:";
   private static final String FAIL_PREFIX = "planner:strategy:fail:";
+  private static final String KEY_VERSION = "v2";
 
   /**
    * RR-1152 — atomic failure transition. Previously {@code recordFailure} issued INCR, then a
@@ -148,6 +149,47 @@ public class PlanStrategyCircuitBreaker {
     }
   }
 
+  /**
+   * Record only failures that indicate the planning strategy is unavailable or mechanically broken.
+   * A deterministic quality rejection proves the strategy ran; degrading a LARGE request to MEDIUM
+   * after several correctly rejected unsafe plans would remove safeguards and make the next result
+   * less trustworthy.
+   */
+  public void recordFailure(PlanStrategy strategy, Throwable failure) {
+    if (!countsTowardAvailabilityBreaker(failure)) {
+      log.info(
+          "PlanStrategyCircuitBreaker: {} quality/cancellation failure does not affect"
+              + " availability",
+          strategy);
+      return;
+    }
+    recordFailure(strategy);
+  }
+
+  static boolean countsTowardAvailabilityBreaker(Throwable failure) {
+    if (failure == null) return true;
+    Throwable current = failure;
+    for (int depth = 0; current != null && depth < 12; depth++, current = current.getCause()) {
+      if (current instanceof TaskExpanderAgent.ExpansionContractException
+          || current instanceof InterruptedException
+          || current instanceof java.util.concurrent.CancellationException) {
+        return false;
+      }
+      String message = current.getMessage();
+      if (message == null) continue;
+      String normalized = message.toLowerCase(java.util.Locale.ROOT);
+      if (normalized.contains("fatal requirement conflict")
+          || normalized.contains("semantic contract violation")
+          || normalized.contains("producer/consumer contracts")
+          || normalized.contains("violates executable contracts")
+          || normalized.contains("coherence validation failed")
+          || normalized.contains("was cancelled")) {
+        return false;
+      }
+    }
+    return true;
+  }
+
   private boolean isOpen(PlanStrategy strategy) {
     try {
       Boolean exists = redis.hasKey(openKey(strategy));
@@ -175,10 +217,10 @@ public class PlanStrategyCircuitBreaker {
   }
 
   String openKey(PlanStrategy s) {
-    return OPEN_PREFIX + namespace + ':' + s.name();
+    return OPEN_PREFIX + KEY_VERSION + ':' + namespace + ':' + s.name();
   }
 
   String failKey(PlanStrategy s) {
-    return FAIL_PREFIX + namespace + ':' + s.name();
+    return FAIL_PREFIX + KEY_VERSION + ':' + namespace + ':' + s.name();
   }
 }

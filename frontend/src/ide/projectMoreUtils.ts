@@ -48,6 +48,35 @@ export type ContractDetectorSummary = {
   driftCandidateIds: string[];
 };
 
+export type ArchitectureFreshnessBadge = {
+  kind: 'ok' | 'warn';
+  label: string;
+};
+
+/**
+ * Green means every linked repository was actually measured and matched the captured source SHA.
+ * `stale=false` alone is insufficient: UNKNOWN and NOT_MEASURABLE rows are explicitly unverified.
+ */
+export function architectureFreshnessBadge(
+  report: api.StalenessReport | null | undefined,
+): ArchitectureFreshnessBadge {
+  if (!report) return {kind: 'warn', label: 'Freshness unknown'};
+  if (report.stale) return {kind: 'warn', label: 'Stale'};
+  if (report.verified) return {kind: 'ok', label: 'Up to date'};
+
+  const reasons: string[] = [];
+  if (report.unknownCount > 0) {
+    reasons.push(`${report.unknownCount} unknown`);
+  }
+  if (report.notMeasurableCount > 0) {
+    reasons.push(`${report.notMeasurableCount} not measurable`);
+  }
+  return {
+    kind: 'warn',
+    label: reasons.length > 0 ? `Unverified · ${reasons.join(', ')}` : 'Unverified',
+  };
+}
+
 export function uiBound<T>(promise: Promise<T>, timeoutMs = 10_000): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const timer = globalThis.setTimeout(() => reject(new Error('Request timed out.')), timeoutMs);

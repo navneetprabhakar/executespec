@@ -3,6 +3,7 @@ package com.navneet.executespec.harness;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -19,6 +20,7 @@ import com.navneet.executespec.context.ContextStore;
 import com.navneet.executespec.engine.WorkerAgent;
 import com.navneet.executespec.engine.WorkerResult;
 import com.navneet.executespec.engine.WorkerTaskRequest;
+import com.navneet.executespec.state.entity.AgentTask;
 import com.navneet.executespec.state.repository.AgentTaskRepository;
 import com.navneet.executespec.tool.BuildProjectTool;
 import com.navneet.executespec.tool.ExecutionContext;
@@ -47,7 +49,7 @@ import org.mockito.ArgumentMatchers;
  * worker that pre-interrupts the thread on its first call, then count how many tasks the loop
  * dispatched before stopping. Pre-fix the count is 1+remainder (every task gets a worker call);
  * post-fix it's exactly 1 (the one that triggered the interrupt) or 0 (if interrupt was set before
- * the loop even started).
+ * the loop even started). The interrupted task is persisted PARTIAL, never COMPLETE.
  */
 class SequentialExecutorCancelCascadeTest {
 
@@ -219,9 +221,77 @@ class SequentialExecutorCancelCascadeTest {
     assertTrue(
         Thread.currentThread().isInterrupted(),
         "the interrupt must survive so the waiting caller still sees cancellation");
-    // T3..T5 never ran; they are appended as SKIPPED so downstream sees the full plan.
-    assertEquals(3, result.tasksSkipped(), "remaining tasks must be recorded as SKIPPED");
+    // T2 was interrupted before completion and T3..T5 never ran; all four are represented as
+    // SKIPPED outcomes so downstream sees the full plan without a false task success.
+    assertEquals(4, result.tasksSkipped(), "interrupted + remaining tasks must be SKIPPED");
     assertEquals(5, result.perTask().size());
+  }
+
+  @Test
+  void t1_interruption_never_persists_complete_or_dispatches_t2() {
+    AgentTaskRepository taskRepo = mock(AgentTaskRepository.class);
+    java.util.Map<String, AgentTask> rows = new java.util.HashMap<>();
+    java.util.List<String> persistedStatuses = new java.util.ArrayList<>();
+    when(taskRepo.findById(ArgumentMatchers.anyString()))
+        .thenAnswer(
+            inv -> {
+              String key = inv.getArgument(0);
+              return Optional.of(
+                  rows.computeIfAbsent(
+                      key, id -> AgentTask.builder().taskId(id).status("PENDING").build()));
+            });
+    when(taskRepo.findByIdForUpdate(ArgumentMatchers.anyString()))
+        .thenAnswer(
+            inv -> {
+              String key = inv.getArgument(0);
+              return Optional.of(
+                  rows.computeIfAbsent(
+                      key, id -> AgentTask.builder().taskId(id).status("PENDING").build()));
+            });
+    doAnswer(
+            inv -> {
+              AgentTask row = inv.getArgument(0);
+              persistedStatuses.add(row.getStatus());
+              return row;
+            })
+        .when(taskRepo)
+        .saveAndFlush(ArgumentMatchers.any(AgentTask.class));
+
+    AtomicInteger workerCalls = new AtomicInteger();
+    WorkerAgent worker = mock(WorkerAgent.class);
+    when(worker.run(ArgumentMatchers.any(WorkerTaskRequest.class), ArgumentMatchers.any()))
+        .thenAnswer(
+            inv -> {
+              workerCalls.incrementAndGet();
+              Thread.currentThread().interrupt();
+              return WorkerResult.builder()
+                  .outcome(WorkerResult.Outcome.COMPLETED)
+                  .iterations(1)
+                  .toolCallsDispatched(1)
+                  .totalLatencyMs(1)
+                  .toolCallLog(List.of("writeFile(x) -> OK"))
+                  .build();
+            });
+
+    SequentialExecutor exec = newExecutor(worker, taskRepo, mock(ContextStore.class));
+    var req =
+        ExecutionRequest.builder()
+            .plan(fivePlan())
+            .provider("deepseek")
+            .model("deepseek-v4-pro-native")
+            .runContext(ctx)
+            .enableSmokeTests(false)
+            .build();
+
+    ExecutionResult result = exec.execute(req, null);
+
+    assertEquals(1, workerCalls.get(), "T2 must never be dispatched after T1 is interrupted");
+    assertEquals(ExecutionResult.Overall.ABORTED, result.overall());
+    assertTrue(persistedStatuses.contains("WORKING"));
+    assertTrue(persistedStatuses.contains("PARTIAL"));
+    assertFalse(
+        persistedStatuses.contains("COMPLETE"),
+        "an interrupted provider response must never become task COMPLETE");
   }
 
   @Test

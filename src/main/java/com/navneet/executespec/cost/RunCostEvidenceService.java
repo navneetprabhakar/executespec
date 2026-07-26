@@ -115,6 +115,9 @@ public class RunCostEvidenceService {
     body.put("stepCallsPage", pageRequest.getPageNumber());
     body.put("stepCallsSize", pageRequest.getPageSize());
     body.put("stepCallsTotal", total);
+    body.put("physicalAttempts", total);
+    body.put("successfulCalls", successfulCalls);
+    body.put("failedAttempts", Math.max(0L, total - successfulCalls));
     body.put(
         "stepCallsHasMore",
         (long) pageRequest.getPageNumber() * pageRequest.getPageSize() + pageRequest.getPageSize()
@@ -134,13 +137,49 @@ public class RunCostEvidenceService {
     // that the known rows agree.
     body.put("reconciled", unknownCostAttempts == 0 && Math.abs(difference) <= tolerance);
     body.put("reconciliationToleranceUsd", tolerance);
+    Map<String, Double> ledgerPlanningPhases = planningPhaseCosts(run.getRunId());
     body.put(
         "phases",
         Map.of(
-            "classifier", nullToZero(run.getClassifierCostUsd()),
-            "outline", nullToZero(run.getOutlineCostUsd()),
-            "expansion", nullToZero(run.getExpansionCostUsd()),
-            "coherence", nullToZero(run.getCoherenceCostUsd())));
+            "classifier",
+                Math.max(
+                    nullToZero(run.getClassifierCostUsd()),
+                    ledgerPlanningPhases.getOrDefault("classifier", 0d)),
+            "outline",
+                Math.max(
+                    nullToZero(run.getOutlineCostUsd()),
+                    ledgerPlanningPhases.getOrDefault("outline", 0d)),
+            "expansion",
+                Math.max(
+                    nullToZero(run.getExpansionCostUsd()),
+                    ledgerPlanningPhases.getOrDefault("expansion", 0d)),
+            "coherence",
+                Math.max(
+                    nullToZero(run.getCoherenceCostUsd()),
+                    ledgerPlanningPhases.getOrDefault("coherence", 0d))));
+  }
+
+  private Map<String, Double> planningPhaseCosts(String runId) {
+    Map<String, Double> phases = new LinkedHashMap<>();
+    List<Object[]> grouped = repository.sumKnownCostByRunIdGroupedByStepId(runId);
+    if (grouped == null) return phases;
+    for (Object[] row : grouped) {
+      if (row == null || row.length < 2 || row[0] == null || !(row[1] instanceof Number cost)) {
+        continue;
+      }
+      String phase = planningPhase(String.valueOf(row[0]));
+      if (phase != null) phases.merge(phase, cost.doubleValue(), Double::sum);
+    }
+    return phases;
+  }
+
+  private static String planningPhase(String stepId) {
+    if (stepId == null) return null;
+    if (stepId.startsWith("planner.classify")) return "classifier";
+    if (stepId.startsWith("planner.outline")) return "outline";
+    if (stepId.startsWith("planner.expand")) return "expansion";
+    if (stepId.startsWith("planner.coherence")) return "coherence";
+    return null;
   }
 
   private static Number numberOrZero(Object value) {
@@ -216,12 +255,14 @@ public class RunCostEvidenceService {
 
   /**
    * Mirrors {@code RunStepUsageRepository.countUnknownCostAttemptsByRunId}. A non-SUCCESS attempt
-   * is always unknown; a SUCCESS attempt that consumed tokens but priced to exactly zero is the
-   * signature of a model missing from the pricing matrix ({@code RunCostTracker.priceCall} returns
-   * 0.0 and logs at DEBUG). A genuine zero-token, zero-cost SUCCESS stays KNOWN.
+   * is always unknown. A negative cost is the router's explicit unknown-cost sentinel. A SUCCESS
+   * attempt that consumed tokens but priced to exactly zero is the signature of a model missing
+   * from the pricing matrix ({@code RunCostTracker.priceCall} returns 0.0 and logs at DEBUG). A
+   * genuine zero-token, zero-cost SUCCESS stays KNOWN.
    */
   private static boolean isUnknownCost(RunStepUsage row) {
     if (!SUCCESS.equalsIgnoreCase(row.getAttemptStatus())) return true;
+    if (row.getCostUsd() < 0d) return true;
     return row.getCostUsd() == 0d && (row.getInputTokens() > 0 || row.getOutputTokens() > 0);
   }
 

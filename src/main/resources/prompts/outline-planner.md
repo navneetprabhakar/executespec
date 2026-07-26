@@ -60,6 +60,10 @@ another closed-world constraint unless the user explicitly imposed it.
 
    **One-liner specs** (e.g. "write fibonacci to fib.py"): omit the README task.
 
+   If the user explicitly requires exact setup, migration, start, build, or test commands, the
+   README owner is mandatory even at the task cap. Those commands must be valid from their stated
+   working directory and cover every declared backend, frontend, browser, and black-box suite.
+
 5. **No subtask decomposition.** Do not emit meta-tasks or planning-about-planning. Each task must be concrete and actionable.
 
 5a. **No invented deliverables.** Every task must implement at least one specific requirement from
@@ -114,6 +118,26 @@ internal wiring belongs inside the task that owns the requested behavior.
    that boundary. Keep tightly coupled clauses in the same task so one worker can implement and
    adversarially verify them end-to-end.
 
+   Concurrent first use of an idempotency key must have explicit race ownership. The implementing
+   task must require an atomic scoped-key claim before business mutation, or an equivalent datastore
+   serialization boundary before lookup; a later unique insert after mutation is not safe. Require
+   the loser to roll back and re-read/replay the committed winner for an identical payload, and map
+   expected unique/lock/busy races without 5xx leakage. For SQLite, do not plan SELECT FOR UPDATE.
+   A middleware claim committed separately from the handler's business transaction is not atomic;
+   use an application coordinator sharing one transaction. Its scoped claim schema must represent
+   PROCESSING/COMPLETED states and allow response fields to remain empty until completion.
+
+   For SQLite, do not invent unavailable server-side UUID functions such as `func.uuid4()` or
+   `uuid_generate_v4()`. Use a portable application-side UUID default and prove it through the real
+   migration/startup path. When sanitized JSON errors are required, make producers, OpenAPI,
+   frontend consumers, and tests use one exact envelope:
+   `{"error":{"code":"STABLE_CODE","message":"sanitized message","details":{}}}`.
+
+   Preserve explicit data cardinality. “Lines”, “items”, “multiple SKUs”, or an atomic multi-line
+   operation requires a collection-capable schema and one atomic operation across the full
+   collection. The producer/schema task must name that parent/child or equivalent contract; a
+   single product/quantity field on the parent is not an acceptable simplification.
+
    **For every runnable HTTP/API deliverable, acceptance tests are black-box functional tests.**
    At least one task description must launch the documented production server as a separate
    process, apply the real ordered migrations to a fresh database, and exercise the public API over
@@ -140,6 +164,13 @@ internal wiring belongs inside the task that owns the requested behavior.
    repeat the exact schema/entity/DTO fields, enum/status values, identifier types, auth/tenant
    source, signature/hash encoding, endpoint/header names, interface methods, and configuration
    keys on all affected tasks. A dependency edge without an agreed exact contract is incomplete.
+   Every frontend or public-surface test task must depend on the backend API task whose endpoints it
+   consumes. Put API production before UI consumption; never create independent backend/frontend
+   endpoint vocabularies.
+   Resolve stack and strategy choices in the plan itself; never delegate "pick one" or "choose
+   either" decisions to a worker. A shared model, migration, DTO, or config artifact has one owner,
+   one lifecycle, and one field vocabulary across all tasks unless an explicit mapped translation
+   is required and tested.
 
 10. **Honor the LANGUAGE PARITY block (when present).** If the workspace summary contains a "LANGUAGE PARITY (do not violate)" section, every task description and every entry in `touchesFiles` MUST use the conventions of the repo's detected language — even when the user's spec uses different conventions. Concretely:
     - User spec says `scan.service.ts`, repo is Python → write `scan_service.py` in the description, `repos/<name>/scan_service.py` in `touchesFiles`.

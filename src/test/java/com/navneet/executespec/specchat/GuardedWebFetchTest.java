@@ -21,6 +21,10 @@ class GuardedWebFetchTest {
     };
   }
 
+  private static GuardedWebFetch.Resolver publicAddress() {
+    return host -> java.util.List.of(InetAddress.getByName("8.8.8.8"));
+  }
+
   // ------------------------------------------------------------------ internal targets refused
 
   @Test
@@ -104,7 +108,8 @@ class GuardedWebFetchTest {
               sniHost.set(host);
               cap.set(maxBytes);
               return GuardedWebFetch.Outcome.ok("public docs");
-            });
+            },
+            publicAddress());
     assertThat(out.ok()).isTrue();
     assertThat(out.body()).isEqualTo("public docs");
     assertThat(sniHost.get()).isEqualTo("example.com");
@@ -122,7 +127,8 @@ class GuardedWebFetchTest {
         (uri, host, address, maxBytes) -> {
           cap.set(maxBytes);
           return GuardedWebFetch.Outcome.ok("ok");
-        });
+        },
+        publicAddress());
     assertThat(cap.get()).isEqualTo(GuardedWebFetch.MAX_FETCH_BYTES);
   }
 

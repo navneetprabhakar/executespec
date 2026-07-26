@@ -6,6 +6,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
+import com.navneet.executespec.config.featureflag.FeatureFlagService;
 import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
 import com.navneet.executespec.testgen.model.*;
@@ -33,6 +34,12 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 public class TestExecutionService {
 
+  /**
+   * Temporary fail-closed gate for the legacy live-preview runner. Its Docker command uses {@code
+   * --network=host}; leave this off until controlled outbound routing replaces host networking.
+   */
+  public static final String FLAG_LIVE_PREVIEW_NETWORK = "testgen.live-preview-network.enabled";
+
   private static final Duration EXECUTION_TIMEOUT = Duration.ofSeconds(120);
 
   /**
@@ -47,6 +54,8 @@ public class TestExecutionService {
   private final SurefireReportParser surefireReportParser;
   private final SseBroadcaster broadcaster;
   private final TestGenerationAdmissionService admissionService;
+  private final FeatureFlagService featureFlagService;
+  private final TestWorkspaceResolver workspaceResolver;
 
   /** Run all compiled tests against the preview URL. */
   public TestExecutionSummary executeTests(String runId, Long testPlanId, String previewBaseUrl) {
@@ -57,10 +66,18 @@ public class TestExecutionService {
         previewBaseUrl,
         executionId);
 
-    Path testProjectDir = Path.of("workspace-test", runId);
+    Path testProjectDir = workspaceResolver.projectRoot(runId);
 
     // Update plan status
     TestPlan plan = testPlanRepository.findById(testPlanId).orElseThrow();
+    if (!featureFlagService.isEnabled(FLAG_LIVE_PREVIEW_NETWORK)) {
+      return unavailable(
+          runId,
+          plan,
+          executionId,
+          "live-preview test execution is disabled until controlled sandbox egress replaces"
+              + " Docker host networking");
+    }
     plan.setStatus(TestPlanStatus.EXECUTING);
     testPlanRepository.save(plan);
 
@@ -219,6 +236,7 @@ public class TestExecutionService {
               .allConnectionRefused(allConnectionRefused)
               .executionVerified(Boolean.TRUE)
               .executionId(executionId)
+              .evidenceScope(TestExecutionSummary.EvidenceScope.LIVE_PREVIEW_FUNCTIONAL)
               .build();
 
       // Update plan status

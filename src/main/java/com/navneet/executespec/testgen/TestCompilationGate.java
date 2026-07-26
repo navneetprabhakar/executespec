@@ -5,31 +5,28 @@ import java.time.Duration;
 import java.util.List;
 import java.util.regex.Pattern;
 
+import com.navneet.executespec.sandbox.SandboxExecResult;
+import com.navneet.executespec.sandboxroute.SandboxCommandRoutingService;
 import com.navneet.executespec.testgen.model.TestTask;
 import com.navneet.executespec.testgen.model.TestTaskStatus;
 import com.navneet.executespec.testgen.repository.TestTaskRepository;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * Compiles the generated test project to verify tests are valid Java. Uses mvn compile on the
- * workspace-test/{runId}/ project.
+ * Compiles the generated test project to verify tests are valid Java. The project lives inside the
+ * run-owned {@code .executespec/generated-tests/} sandbox mount.
  *
- * <p><strong>Audit 2026-05-12 review item J #59:</strong> the compile step runs {@code mvn
- * test-compile} via host-side ProcessBuilder against LLM-generated test code. The test EXECUTION
- * step is Docker-sandboxed (--read-only --cap-drop ALL --memory=4g) but this compile step isn't.
- * Hardened here to: minimize the inherited environment (strip everything except PATH, HOME, USER,
- * JAVA_HOME, MAVEN_HOME); strict 120s timeout already enforced; destroyForcibly on timeout; treat
- * compile output as untrusted (don't echo back to chat without sanitization). Moving compile into
- * the same Docker sandbox as execution is the proper long-term fix and tracked as a deferred
- * follow-up.
+ * <p><strong>Audit 2026-05-12 review item J #59:</strong> strict routing compiles inside the run
+ * sandbox against the generated project under {@code /workspace/.executespec/generated-tests}.
+ * Runtime unavailability fails closed. The legacy default-off path retains the bounded,
+ * environment-minimized host invocation for rollback compatibility.
  */
 @Component
 @Slf4j
-@RequiredArgsConstructor
 public class TestCompilationGate {
 
   private static final Duration COMPILE_TIMEOUT = Duration.ofSeconds(120);
@@ -37,21 +34,60 @@ public class TestCompilationGate {
       Pattern.compile("\\[ERROR\\].*?/([A-Z][A-Za-z]+Test)\\.java");
 
   private final TestTaskRepository testTaskRepository;
+  private final SandboxCommandRoutingService sandboxRouting;
+  private final TestWorkspaceResolver workspaceResolver;
+
+  TestCompilationGate(TestTaskRepository testTaskRepository) {
+    this(testTaskRepository, null, null);
+  }
+
+  @Autowired
+  public TestCompilationGate(
+      TestTaskRepository testTaskRepository,
+      SandboxCommandRoutingService sandboxRouting,
+      TestWorkspaceResolver workspaceResolver) {
+    this.testTaskRepository = testTaskRepository;
+    this.sandboxRouting = sandboxRouting;
+    this.workspaceResolver = workspaceResolver;
+  }
 
   /**
-   * Compile all test files in workspace-test/{runId}/.
+   * Compile all test files in the run-owned generated-test project.
    *
    * @return true if compilation succeeds, false otherwise
    */
   public CompilationResult compileTests(String runId) {
-    Path testProjectDir = Path.of("workspace-test", runId);
+    Path testProjectDir =
+        workspaceResolver == null
+            ? Path.of("workspace-test", runId)
+            : workspaceResolver.projectRoot(runId);
     Path pomFile = testProjectDir.resolve("pom.xml");
 
+    if (sandboxRouting != null && sandboxRouting.routingEnabled()) {
+      SandboxExecResult result =
+          sandboxRouting.execute(
+              runId,
+              testProjectDir,
+              List.of(
+                  "mvn",
+                  "test-compile",
+                  "-f",
+                  TestWorkspaceResolver.CONTAINER_PROJECT_ROOT + "/pom.xml",
+                  "-q",
+                  "-T",
+                  "1C"),
+              COMPILE_TIMEOUT);
+      if (!result.completed()) {
+        return new CompilationResult(
+            false, "generated-test compilation unavailable: " + result.detail(), List.of());
+      }
+      return compilationResult(
+          runId, result.exitCode(), SandboxCommandRoutingService.combinedOutput(result));
+    }
     if (!pomFile.toFile().exists()) {
       log.error("[TestCompile] pom.xml not found at {}", pomFile);
       return new CompilationResult(false, "pom.xml not found", List.of());
     }
-
     try {
       String javaHome = System.getenv("JAVA_HOME");
       if (javaHome == null || javaHome.isBlank()) {
@@ -81,29 +117,27 @@ public class TestCompilationGate {
             false, "Compilation timed out after " + COMPILE_TIMEOUT.toSeconds() + "s", List.of());
       }
 
-      String output = outcome.output();
-      int exitCode = outcome.exitCode();
-      if (exitCode == 0) {
-        log.info("[TestCompile] Tests compiled successfully for run {}", runId);
-        return new CompilationResult(true, null, List.of());
-      }
-
-      // Parse compilation errors and map to test classes
-      List<String> failedClasses =
-          ERROR_FILE_PATTERN.matcher(output).results().map(m -> m.group(1)).distinct().toList();
-
-      log.warn(
-          "[TestCompile] Compilation failed for run {} — {} classes with errors: {}",
-          runId,
-          failedClasses.size(),
-          failedClasses);
-
-      return new CompilationResult(false, output, failedClasses);
+      return compilationResult(runId, outcome.exitCode(), outcome.output());
 
     } catch (Exception e) {
       log.error("[TestCompile] Failed to run compilation for run {}: {}", runId, e.getMessage(), e);
       return new CompilationResult(false, e.getMessage(), List.of());
     }
+  }
+
+  private CompilationResult compilationResult(String runId, int exitCode, String output) {
+    if (exitCode == 0) {
+      log.info("[TestCompile] Tests compiled successfully for run {}", runId);
+      return new CompilationResult(true, null, List.of());
+    }
+    List<String> failedClasses =
+        ERROR_FILE_PATTERN.matcher(output).results().map(m -> m.group(1)).distinct().toList();
+    log.warn(
+        "[TestCompile] Compilation failed for run {} — {} classes with errors: {}",
+        runId,
+        failedClasses.size(),
+        failedClasses);
+    return new CompilationResult(false, output, failedClasses);
   }
 
   /**

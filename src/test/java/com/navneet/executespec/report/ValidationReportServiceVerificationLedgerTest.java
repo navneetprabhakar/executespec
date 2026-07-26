@@ -90,7 +90,7 @@ class ValidationReportServiceVerificationLedgerTest {
     // RR-1646: the persisted test counts come from runner report files read off disk with no
     // exit-code check, so they cannot claim DETERMINISTIC/HIGH — the one label that asserts
     // independence from an LLM. Status is unchanged; only the provenance claim is weakened.
-    assertEntry(ledger, "tests", "WARN", "UNVERIFIED_COUNT", "MEDIUM");
+    assertEntry(ledger, "tests", "UNKNOWN", "UNVERIFIED_COUNT", "MEDIUM");
     assertEntry(ledger, "reviewer", "PASS", "LLM_REVIEWER", "MEDIUM");
     assertEntry(ledger, "spec-adherence", "PASS", "LLM_ASSESSMENT", "LOW");
     assertEntry(ledger, "endpoint-coverage", "WARN", "LLM_ASSISTED_COUNT", "MEDIUM");
@@ -425,6 +425,8 @@ class ValidationReportServiceVerificationLedgerTest {
             .finalBuildPassed(true)
             .testsPassed(2)
             .testsTotal(2)
+            .testExecutionVerified(true)
+            .testEvidenceScope("LIVE_PREVIEW_FUNCTIONAL")
             .reviewerVerdict("CLEAN")
             .verifiedScore(96)
             .accuracyJson("{\"specAdherenceScore\": 91}")
@@ -530,7 +532,7 @@ class ValidationReportServiceVerificationLedgerTest {
     assertEntry(
         svc.buildVerificationLedger(testDriven, List.of()),
         "executable-verification",
-        "PASS",
+        "UNKNOWN",
         "UNVERIFIED_COUNT",
         "MEDIUM");
 

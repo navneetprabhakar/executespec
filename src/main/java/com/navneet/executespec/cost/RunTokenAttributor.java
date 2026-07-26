@@ -57,6 +57,21 @@ public class RunTokenAttributor {
   }
 
   /**
+   * Reconcile a physical attempt that materialized after lifecycle termination. Cancellation can
+   * race a provider response; the immutable usage row remains authoritative even after the
+   * in-memory accumulator has been finalized. Live runs avoid the aggregate queries.
+   */
+  public void reconcileRunTotalsIfTerminal(String runId) {
+    if (runId == null || runId.isBlank()) return;
+    runRepo
+        .findById(runId)
+        .filter(
+            run ->
+                com.navneet.executespec.integration.RunPipelineSupport.isTerminal(run.getStatus()))
+        .ifPresent(run -> reconcileRunTotalsFromLedger(runId));
+  }
+
+  /**
    * Attribute tokens consumed in a single pipeline phase (PLANNER / REVIEWER). Persists per-phase
    * columns on the run AND increments the run totals so the "Run Stats" panel reflects cumulative
    * usage even if the in-memory tracker is later evicted (deploy restart, accumulator eviction).

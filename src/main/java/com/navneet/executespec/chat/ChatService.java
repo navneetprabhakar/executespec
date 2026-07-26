@@ -8,13 +8,12 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.stream.Stream;
 
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.agent.LlmRequest;
 import com.navneet.executespec.agent.LlmRouter;
 import com.navneet.executespec.agent.PromptTrustBoundary;
 import com.navneet.executespec.agent.ToolProtocolLeakGuard;
 import com.navneet.executespec.config.AgentProperties;
+import com.navneet.executespec.executioncontext.LlmDispatchPolicyException;
 import com.navneet.executespec.executioncontext.LlmExecutionPolicyFactory;
 import com.navneet.executespec.report.ValidationReportRepository;
 import com.navneet.executespec.report.entity.ValidationReport;
@@ -69,6 +68,19 @@ public class ChatService {
   /** Hard cap on tool-execution rounds per chat turn — mirrors ProjectChatService. */
   private static final int MAX_TOOL_ROUNDS = 4;
 
+  /**
+   * Visible-answer allowance for each bounded Ask call. Reasoning-capable providers count hidden
+   * reasoning against maxTokens, so the old 1,200 ceiling could consume the full allowance and
+   * return an empty answer even though the provider completed successfully.
+   */
+  static final int MAX_TOKENS_PER_CALL = 3000;
+
+  /** Persist the full transcript, but never resend an unbounded transcript to a provider. */
+  static final int MAX_HISTORY_MESSAGES_IN_PROMPT = 16;
+
+  /** Character ceiling for prior persisted messages; current evidence/question are separate. */
+  static final int MAX_HISTORY_CHARS_IN_PROMPT = 32_000;
+
   private final PipelineRunRepository runRepo;
   private final LlmRouter router;
   private final ModelResolver modelResolver;
@@ -77,7 +89,7 @@ public class ChatService {
   private final RunChatTools runChatTools;
   private final LlmExecutionPolicyFactory executionPolicyFactory;
   private final ContextSanitizer contextSanitizer;
-  private final ObjectMapper mapper = new ObjectMapper();
+  private static final ChatHistoryCodec HISTORY_CODEC = new ChatHistoryCodec();
 
   @Autowired
   public ChatService(
@@ -193,7 +205,7 @@ public class ChatService {
     List<Message> messages = new ArrayList<>();
     messages.add(new SystemMessage(systemPrompt));
     messages.add(new UserMessage(runEvidence));
-    for (ChatMessage m : history) {
+    for (ChatMessage m : boundedHistoryForPrompt(history)) {
       messages.add(
           "user".equals(m.role())
               ? new UserMessage(m.content())
@@ -219,6 +231,16 @@ public class ChatService {
         reply = "(The model returned an empty response. Try rephrasing the question.)";
       reply = contextSanitizer.sanitizeOutput(reply);
       reply = ChatEvidenceTruthPolicy.enforce(reply, findValidationReport(runId));
+    } catch (LlmDispatchPolicyException e) {
+      log.warn("ChatService policy rejected run={} reason={}", runId, e.reason());
+      throw new IllegalStateException(
+          e.reason() == LlmDispatchPolicyException.Reason.BUDGET_EXHAUSTED
+              ? "This Ask turn could not start because its provider budget is unavailable."
+              : "This Ask turn could not start because the run's provider route is unavailable.");
+    } catch (org.springframework.web.server.ResponseStatusException e) {
+      // Managed-AI admission uses an intentional HTTP status (normally 402). Preserve it for the
+      // controller instead of turning a credit/policy refusal into a misleading generic 500.
+      throw e;
     } catch (Exception e) {
       String safeFailure = contextSanitizer.sanitizeException(e);
       log.error(
@@ -237,6 +259,19 @@ public class ChatService {
     runRepo.save(run);
 
     return new SendResult(reply, (int) userCount + 1, MAX_USER_MESSAGES);
+  }
+
+  /**
+   * Selects the newest prior messages within deterministic message and character ceilings.
+   *
+   * <p>The database remains the complete audit transcript. Only the provider request is windowed,
+   * so a long-lived 50-turn chat cannot overflow a lightweight model's context merely because old
+   * turns are still retained. If the oldest selected message crosses the remaining character
+   * budget, only its head is retained with an explicit marker.
+   */
+  static List<ChatMessage> boundedHistoryForPrompt(List<ChatMessage> history) {
+    return HISTORY_CODEC.boundedForPrompt(
+        history, MAX_HISTORY_MESSAGES_IN_PROMPT, MAX_HISTORY_CHARS_IN_PROMPT);
   }
 
   /**
@@ -266,7 +301,7 @@ public class ChatService {
               .agentRole("RunChatAgent")
               .stepId("run-chat.round-" + (round + 1))
               .temperature(0.2) // tiny bit of variety for a chat voice
-              .maxTokens(1200) // ~900-1000 word answer cap
+              .maxTokens(MAX_TOKENS_PER_CALL)
               .toolsOverride(tools) // read-only: list_run_files / read_run_file only
               .build();
 
@@ -364,7 +399,7 @@ public class ChatService {
             // Reasoning models count hidden reasoning against this cap. At 1,200 tokens DeepSeek
             // exhausted the entire allowance in reasoning and returned an empty visible answer.
             // Keep this bounded, but leave enough room for both reasoning and a concise synthesis.
-            .maxTokens(3000)
+            .maxTokens(MAX_TOKENS_PER_CALL)
             .toolsOverride(List.of())
             .toolChoice("none")
             .build();
@@ -407,15 +442,7 @@ public class ChatService {
   }
 
   private String buildRunEvidence(PipelineRun run, Path workspace) {
-    StringBuilder evidence = new StringBuilder();
-    evidence.append("## Run metadata\n");
-    evidence.append("- runId: ").append(run.getRunId()).append('\n');
-    evidence.append("- status: ").append(run.getStatus());
-    if (run.getStatusReason() != null)
-      evidence.append(" (").append(run.getStatusReason()).append(')');
-    evidence.append('\n');
-    if (run.getAiProvider() != null)
-      evidence.append("- provider: ").append(run.getAiProvider()).append('\n');
+    StringBuilder evidence = new StringBuilder(RunChatEvidence.render(run));
 
     String spec = run.getUserRequest();
     String boundedSpec =
@@ -537,21 +564,10 @@ public class ChatService {
   }
 
   private List<ChatMessage> deserialize(String json) {
-    if (json == null || json.isBlank()) return new ArrayList<>();
-    try {
-      return mapper.readValue(json, new TypeReference<>() {});
-    } catch (Exception e) {
-      log.warn("ChatService failed to parse chat history — starting fresh: {}", e.getMessage());
-      return new ArrayList<>();
-    }
+    return HISTORY_CODEC.deserialize(json);
   }
 
   private String serialize(List<ChatMessage> history) {
-    try {
-      return mapper.writeValueAsString(history);
-    } catch (Exception e) {
-      log.warn("ChatService failed to serialize chat history: {}", e.getMessage());
-      return "[]";
-    }
+    return HISTORY_CODEC.serialize(history);
   }
 }

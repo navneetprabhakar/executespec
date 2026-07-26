@@ -43,6 +43,11 @@ public class RunChatTools {
   /** Per-file read cap — mirrors the worker {@code readFile} 8k-char budget. */
   private static final int MAX_FILE_CHARS = 8_000;
 
+  /** A repository manifest is evidence too; never inject an unbounded monorepo listing. */
+  static final int MAX_FILE_LIST_ENTRIES = 1_000;
+
+  static final int MAX_FILE_LIST_CHARS = 40_000;
+
   private final WorkspaceFileService workspaceFileService;
   private final SearchFilesTool searchFilesTool;
   private final ObjectMapper json;
@@ -80,10 +85,20 @@ public class RunChatTools {
         args -> {
           List<String> files = workspaceFileService.listFiles(ctx.runId());
           ArrayNode arr = json.createArrayNode();
-          files.forEach(arr::add);
+          int chars = 0;
+          for (String file : files) {
+            if (arr.size() >= MAX_FILE_LIST_ENTRIES) break;
+            if (file == null) continue;
+            int next = file.length();
+            if (chars + next > MAX_FILE_LIST_CHARS) break;
+            arr.add(file);
+            chars += next;
+          }
           ObjectNode out = json.createObjectNode();
           out.put("ok", true);
-          out.put("count", arr.size());
+          out.put("count", files.size());
+          out.put("returnedCount", arr.size());
+          out.put("truncated", arr.size() < files.size());
           out.set("files", arr);
           return out;
         });

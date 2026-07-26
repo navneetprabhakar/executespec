@@ -1016,6 +1016,32 @@ class LlmRouterTest {
   }
 
   @Test
+  void everyOpenAiWireRouteHonorsThePerCallReadTimeout() {
+    build();
+    configureWireProviderUrls();
+    ReflectionTestUtils.setField(router, "deepSeekApiKey", "deepseek-key");
+    ReflectionTestUtils.setField(router, "openRouterApiKey", "openrouter-key");
+    ReflectionTestUtils.setField(router, "fireworksApiKey", "fireworks-key");
+    when(openai.call(any())).thenReturn(ok());
+
+    for (String[] route :
+        List.of(
+            new String[] {"openai", "gpt-x"},
+            new String[] {"deepseek", "deepseek-v4-pro-native"},
+            new String[] {"openrouter", "glm-5.2"},
+            new String[] {"fireworks", "glm-5.2-fw"})) {
+      router.call(
+          req(route[0], route[1]).toBuilder().readTimeoutSeconds(77).strictProvider(true).build());
+    }
+
+    ArgumentCaptor<OpenAiNativeToolClient.OpenAiToolCallRequest> calls =
+        ArgumentCaptor.forClass(OpenAiNativeToolClient.OpenAiToolCallRequest.class);
+    verify(openai, times(4)).call(calls.capture());
+    assertThat(calls.getAllValues())
+        .allSatisfy(request -> assertThat(request.readTimeoutSeconds()).isEqualTo(77));
+  }
+
+  @Test
   void byok_run_does_not_fail_over_to_an_unkeyed_provider() {
     build();
     when(flags.isEnabled(LlmRouter.FAILOVER_FLAG)).thenReturn(true);

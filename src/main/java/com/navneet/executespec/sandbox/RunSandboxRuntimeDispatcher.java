@@ -101,8 +101,20 @@ public class RunSandboxRuntimeDispatcher {
             sandbox.id());
         throw failure;
       }
-      safeDestroy(runtime, sandbox);
-      store.fail(lease, classify(failure), failure.getMessage());
+      RunSandbox releasing =
+          store.beginRelease(lease, SandboxState.FAILED, classify(failure), failure.getMessage());
+      try {
+        runtime.destroy(releasing);
+      } catch (RuntimeException cleanupFailure) {
+        log.error(
+            "sandbox {} cleanup after provisioning failure did not complete",
+            sandbox.id(),
+            cleanupFailure);
+        store.recordCleanupFailure(lease, cleanupFailure.getMessage());
+        failure.addSuppressed(cleanupFailure);
+        throw failure;
+      }
+      store.completeRelease(lease);
       throw failure;
     }
   }
@@ -162,17 +174,49 @@ public class RunSandboxRuntimeDispatcher {
    * this must work when dispatch is disabled.
    */
   public RunSandbox release(RunSandbox sandbox, RunSandbox.Lease lease, SandboxState terminal) {
-    RunSandbox releasing = store.beginRelease(lease);
-    RunSandboxRuntime runtime = requireRuntime(sandbox.isolationProfile());
+    RunSandbox releasing =
+        sandbox.state() == SandboxState.RELEASING
+            ? sandbox
+            : store.beginRelease(lease, terminal, null, null);
+    if (releasing.state() == terminal) {
+      return releasing;
+    }
     try {
-      runtime.destroy(releasing);
+      requireRuntime(sandbox.isolationProfile()).destroy(releasing);
     } catch (RuntimeException failure) {
       log.error("sandbox {} teardown failed", sandbox.id(), failure);
-      // Teardown failure is a real failure, not a clean stop: a container may still be live.
-      store.fail(lease, "TEARDOWN_FAILED", failure.getMessage());
+      // Keep RELEASING and expire the lease immediately. A terminal row would falsely assert that
+      // the runtime is gone and would disappear from every cleanup candidate query.
+      store.recordCleanupFailure(lease, failure.getMessage());
       throw failure;
     }
-    return store.finishRelease(lease, terminal);
+    return store.completeRelease(lease);
+  }
+
+  /**
+   * Destroys a sandbox after an execution failure and records the classified failure.
+   *
+   * <p>A timed-out {@code docker exec} client does not prove its in-container process died. The
+   * sandbox must therefore be destroyed before the row becomes terminal; merely marking FAILED
+   * would leave the process alive until the container's outer sleep exits.
+   */
+  public RunSandbox failAndRelease(
+      RunSandbox sandbox, RunSandbox.Lease lease, String failureClass, String detail) {
+    RunSandbox releasing =
+        sandbox.state() == SandboxState.RELEASING
+            ? sandbox
+            : store.beginRelease(lease, SandboxState.FAILED, failureClass, detail);
+    if (releasing.state() == SandboxState.FAILED) {
+      return releasing;
+    }
+    try {
+      requireRuntime(sandbox.isolationProfile()).destroy(releasing);
+    } catch (RuntimeException failure) {
+      log.error("sandbox {} failure teardown failed", sandbox.id(), failure);
+      store.recordCleanupFailure(lease, failure.getMessage());
+      throw failure;
+    }
+    return store.completeRelease(lease);
   }
 
   /**
@@ -189,32 +233,52 @@ public class RunSandboxRuntimeDispatcher {
     }
     RunSandbox.Lease lease = claimed.get();
     RunSandbox current = store.get(orphan.id()).orElseThrow();
-    RunSandboxRuntime runtime = requireRuntime(current.isolationProfile());
+    RunSandbox releasing =
+        current.state() == SandboxState.RELEASING
+            ? current
+            : store.beginRelease(
+                lease,
+                current.state() == SandboxState.CANCEL_REQUESTED
+                    ? SandboxState.CANCELLED
+                    : SandboxState.FAILED,
+                current.state() == SandboxState.CANCEL_REQUESTED ? null : "ORPHANED_RUNTIME",
+                current.state() == SandboxState.CANCEL_REQUESTED
+                    ? null
+                    : "owning runtime disappeared");
     try {
-      runtime.destroy(current);
+      requireRuntime(current.isolationProfile()).destroy(releasing);
     } catch (RuntimeException failure) {
       log.error("orphan sandbox {} teardown failed", orphan.id(), failure);
-      return Optional.of(store.fail(lease, "ORPHAN_TEARDOWN_FAILED", failure.getMessage()));
+      return Optional.of(store.recordCleanupFailure(lease, failure.getMessage()));
     }
-    SandboxState terminal =
-        current.state() == SandboxState.CANCEL_REQUESTED
-            ? SandboxState.CANCELLED
-            : SandboxState.FAILED;
-    if (current.state() != SandboxState.RELEASING) {
-      store.beginRelease(lease);
-    }
-    return Optional.of(
-        terminal == SandboxState.CANCELLED
-            ? store.finishRelease(lease, SandboxState.CANCELLED)
-            : store.fail(lease, "ORPHANED_RUNTIME", "owning runtime disappeared"));
+    return Optional.of(store.completeRelease(lease));
   }
 
-  private void safeDestroy(RunSandboxRuntime runtime, RunSandbox sandbox) {
+  /**
+   * Claims and destroys an expired sandbox before recording EXPIRED.
+   *
+   * <p>Expiry must not call {@code forceTerminal} for a sandbox that ever had a runtime handle:
+   * doing so makes the row terminal before destroying the container, after which orphan
+   * reconciliation can no longer discover the leaked runtime.
+   */
+  public Optional<RunSandbox> reconcileExpired(
+      RunSandbox expired, String owner, Duration leaseDuration) {
+    Optional<RunSandbox.Lease> claimed = store.tryAcquire(expired.id(), owner, leaseDuration);
+    if (claimed.isEmpty()) {
+      return Optional.empty();
+    }
+    RunSandbox.Lease lease = claimed.get();
+    RunSandbox current = store.get(expired.id()).orElseThrow();
+    RunSandbox releasing =
+        current.state() == SandboxState.RELEASING
+            ? current
+            : store.beginRelease(lease, SandboxState.EXPIRED, null, null);
     try {
-      runtime.destroy(sandbox);
-    } catch (RuntimeException cleanupFailure) {
-      // Reported, never swallowed silently; the caller's original failure must still surface.
-      log.error("sandbox {} cleanup after failure did not complete", sandbox.id(), cleanupFailure);
+      requireRuntime(current.isolationProfile()).destroy(releasing);
+      return Optional.of(store.completeRelease(lease));
+    } catch (RuntimeException failure) {
+      log.error("expired sandbox {} teardown failed", expired.id(), failure);
+      return Optional.of(store.recordCleanupFailure(lease, failure.getMessage()));
     }
   }
 

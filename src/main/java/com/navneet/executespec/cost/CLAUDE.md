@@ -45,6 +45,11 @@
   This covers post-terminal consumers such as Screens and Ask, whose calls occur after the pipeline
   snapshot was frozen. Null legacy cache/reasoning fields mean “not projected”, not numeric zero;
   aggregation must tolerate them and return the ledger totals rather than failing or under-reporting.
+- Planning phase costs in that read model are also raise-only against known successful
+  `planner.classify*`, `planner.outline*`, `planner.expand*`, and `planner.coherence*` step rows.
+  A fail-closed hierarchical plan can terminate before its legacy phase snapshot is saved; the
+  durable attempt ledger must still show where the planning spend occurred instead of reporting
+  expansion/coherence as zero.
 - `PlannerPhaseSplit` / `PlannerPhaseAttribution` own how pre-executor spend is booked (RR-1561).
   `RunOrchestrator` used to hand `attributePhase(PLANNER, …)` the WHOLE-RUN snapshot, so the smart
   classifier — which runs on every run, before the planner — was always booked to
@@ -121,6 +126,15 @@ Failed attempts without numeric provider-reported/upstream/accounted cost metada
 `knownCostUsd=null`, `costStatus=UNKNOWN_PROVIDER_NOT_REPORTED`, and increment
 `unknownCostAttempts`. Aggregate spend is named `knownCostUsdLowerBound`; never reinterpret a
 provider-unreported failure as a proven zero-cost call.
+
+The same rule applies to a successful response whose post-success price projection fails.
+`LlmRouter` persists `costUsd=-1` as an explicit unknown sentinel; repository aggregates exclude
+negative cost from `knownCostUsdLowerBound`, the cost API exposes `knownCostUsd=null`, and a durable
+execution context with a dollar ceiling fails closed before authorizing another provider call.
+Only unknown-cost SUCCESS rows close that dollar gate: failed transport attempts remain eligible
+for the router's bounded retry. The run cost API exposes `physicalAttempts`, `successfulCalls`, and
+`failedAttempts` separately because the backward-compatible `calls` field counts successful
+responses, not all billable physical dispatch attempts.
 
 Reconciliation uses `max($0.000001, 0.5% of canonical known cost)` and exact tokens when both sides
 carry token facts. `pipeline_run.actual_cost_usd` is cost-only, so that comparison does not claim

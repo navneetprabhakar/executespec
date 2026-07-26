@@ -126,6 +126,15 @@ class ChatServiceRouteTest {
     verify(factory, times(2)).forRunChatTurn(eq("run-1"), turnIds.capture());
     assertThat(turnIds.getAllValues()).doesNotHaveDuplicates();
     verify(factory, never()).forRun(any());
+    ArgumentCaptor<LlmRequest> requests = ArgumentCaptor.forClass(LlmRequest.class);
+    verify(router, times(2)).call(requests.capture());
+    assertThat(requests.getAllValues())
+        .allSatisfy(
+            request -> {
+              assertThat(request.llmExecutionContextId()).isEqualTo("ctx");
+              assertThat(request.llmExecutionScope())
+                  .isEqualTo(LlmExecutionScope.customer("org-1"));
+            });
   }
 
   @Test

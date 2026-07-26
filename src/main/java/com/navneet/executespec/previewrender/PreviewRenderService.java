@@ -281,7 +281,11 @@ public class PreviewRenderService {
       var snapshot = ContextSnapshotFactory.builder().build().captureAll();
       List<Future<PreviewRenderAgent.RenderedSurface>> futures = new ArrayList<>();
       for (PreviewSurface surface : surfaces) {
-        futures.add(pool.submit(snapshot.wrap(() -> renderAgent.render(surface, provider, runId))));
+        String renderAttemptId = jobId + ":" + surface.id();
+        futures.add(
+            pool.submit(
+                snapshot.wrap(
+                    () -> renderAgent.render(surface, provider, runId, renderAttemptId))));
       }
 
       int rendered = 0;

@@ -506,7 +506,7 @@ public class ShellSandboxPolicy {
       log.warn("SHELL BLOCKED (executable origin): {} in: {}", tokens[0], cmdFp);
       return ValidationResult.block(origin.rejection());
     }
-    String firstToken = origin.commandName();
+    String firstToken = ShellExecutableFamily.allowlistName(origin.commandName());
 
     if (!ALLOWED_PREFIXES.contains(firstToken)) {
       log.warn("SHELL BLOCKED (chained command not in allowlist): '{}' in: {}", firstToken, cmdFp);

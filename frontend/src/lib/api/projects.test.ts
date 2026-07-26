@@ -98,14 +98,26 @@ describe('project API', () => {
     expect(JSON.stringify(fetchMock.mock.calls)).not.toContain('appPassword');
   });
 
-  it('reads honest semantic coverage and queues a fenced refresh through project-scoped paths', async () => {
+  it('preserves an unavailable semantic-refresh result through project-scoped paths', async () => {
     const fetchMock = vi
       .fn<typeof fetch>()
-      .mockImplementation(async () => new Response(JSON.stringify([]), {status: 200}));
+      .mockResolvedValueOnce(new Response(JSON.stringify([]), {status: 200}))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            repoId: 'repo-1',
+            status: 'UNAVAILABLE',
+            fallback: 'RIPGREP',
+            relationshipGraphAvailable: false,
+            reason: 'EMBEDDING_PROVIDER_NOT_AVAILABLE_FOR_PROJECT_ROUTE',
+          }),
+          {status: 202},
+        ),
+      );
     vi.stubGlobal('fetch', fetchMock);
 
     await getProjectCodeIndex('project-1');
-    await refreshProjectCodeIndex('project-1', 'repo-1');
+    const refresh = await refreshProjectCodeIndex('project-1', 'repo-1');
 
     expect(fetchMock).toHaveBeenNthCalledWith(
       1,
@@ -118,6 +130,12 @@ describe('project API', () => {
       2,
       '/api/projects/project-1/code-index/repo-1/refresh',
       expect.objectContaining({method: 'POST'}),
+    );
+    expect(refresh).toEqual(
+      expect.objectContaining({
+        status: 'UNAVAILABLE',
+        reason: 'EMBEDDING_PROVIDER_NOT_AVAILABLE_FOR_PROJECT_ROUTE',
+      }),
     );
   });
 

@@ -48,15 +48,18 @@ final class ShellCommandConfinement {
           "/opt/homebrew/bin",
           "/opt/homebrew/sbin");
 
-  /**
-   * The only workspace-relative executables that may be invoked by path. Both are build wrappers
-   * whose risk model is identical to the already-allowlisted {@code gradle} / {@code mvn} (a build
-   * script executes arbitrary code either way), and {@code ./gradlew} is what {@code
-   * BuildCommandResolver} itself emits for wrapper projects. Every other relative path — including
-   * {@code ./compile.sh} and {@code ./executable} — stays rejected.
-   */
+  /** Workspace-relative build wrappers whose execution is explicitly supported. */
   private static final Set<String> GOVERNED_WORKSPACE_EXECUTABLES =
       Set.of("./gradlew", "./mvnw", "./gradlew.bat", "./mvnw.cmd");
+
+  /**
+   * Python virtual-environment launchers are equivalent to the already allowed {@code python} and
+   * {@code pip} commands, but keep dependency installation inside the workspace. Only the
+   * conventional venv directory at the current working directory is accepted; arbitrary nested
+   * paths and other worker-written executable names remain blocked.
+   */
+  private static final String GOVERNED_PYTHON_VENV_EXECUTABLE =
+      "^(?:\\./)?\\.?venv/bin/(?:python(?:3(?:\\.\\d+)?)?|pip(?:3(?:\\.\\d+)?)?)$";
 
   /**
    * Absolute prefixes an argument may reference. Workspace-relative work needs none of these; they
@@ -123,6 +126,9 @@ final class ShellCommandConfinement {
       return CommandOrigin.of(token);
     }
     if (GOVERNED_WORKSPACE_EXECUTABLES.contains(token)) {
+      return CommandOrigin.of(basename(token));
+    }
+    if (token.matches(GOVERNED_PYTHON_VENV_EXECUTABLE)) {
       return CommandOrigin.of(basename(token));
     }
     if (!token.startsWith("/")) {

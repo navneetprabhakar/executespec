@@ -26,6 +26,7 @@ public class LlmUsageTerminalOutbox {
 
   private final LlmUsageTerminalOutboxStore store;
   private final Metrics metrics;
+  private final RunTokenAttributor tokenAttributor;
   private final String owner;
   private final int batchSize;
   private final Duration leaseDuration;
@@ -35,11 +36,13 @@ public class LlmUsageTerminalOutbox {
   public LlmUsageTerminalOutbox(
       LlmUsageTerminalOutboxStore store,
       Metrics metrics,
+      RunTokenAttributor tokenAttributor,
       @Value("${executespec.usage-terminal-outbox.batch-size:20}") int batchSize,
       @Value("${executespec.usage-terminal-outbox.lease-seconds:120}") long leaseSeconds,
       @Value("${executespec.usage-terminal-outbox.max-attempts:8}") int maxAttempts) {
     this.store = store;
     this.metrics = metrics;
+    this.tokenAttributor = tokenAttributor;
     this.batchSize = Math.max(1, Math.min(batchSize, 100));
     this.leaseDuration = Duration.ofSeconds(Math.max(30, Math.min(leaseSeconds, 3600)));
     this.maxAttempts = Math.max(1, Math.min(maxAttempts, 100));
@@ -49,7 +52,27 @@ public class LlmUsageTerminalOutbox {
   /** Test/backward-compatible constructor retaining the production default retry ceiling. */
   LlmUsageTerminalOutbox(
       LlmUsageTerminalOutboxStore store, Metrics metrics, int batchSize, long leaseSeconds) {
-    this(store, metrics, batchSize, leaseSeconds, 8);
+    this(store, metrics, null, batchSize, leaseSeconds, 8);
+  }
+
+  /** Test constructor that exposes terminal reconciliation without Spring wiring. */
+  LlmUsageTerminalOutbox(
+      LlmUsageTerminalOutboxStore store,
+      Metrics metrics,
+      RunTokenAttributor tokenAttributor,
+      int batchSize,
+      long leaseSeconds) {
+    this(store, metrics, tokenAttributor, batchSize, leaseSeconds, 8);
+  }
+
+  /** Test/backward-compatible constructor with an explicit retry ceiling. */
+  LlmUsageTerminalOutbox(
+      LlmUsageTerminalOutboxStore store,
+      Metrics metrics,
+      int batchSize,
+      long leaseSeconds,
+      int maxAttempts) {
+    this(store, metrics, null, batchSize, leaseSeconds, maxAttempts);
   }
 
   /** Stage before materialization; returning QUEUED still means the exact payload is DB durable. */
@@ -92,6 +115,9 @@ public class LlmUsageTerminalOutbox {
     try {
       if (!store.materialize(lease, row)) {
         throw new IllegalStateException("terminal usage recovery lease was lost");
+      }
+      if (tokenAttributor != null) {
+        tokenAttributor.reconcileRunTotalsIfTerminal(row.getRunId());
       }
       metrics.recordLlmUsagePersistence(row.getAttemptStatus(), "outbox_materialized");
       return PersistResult.MATERIALIZED;

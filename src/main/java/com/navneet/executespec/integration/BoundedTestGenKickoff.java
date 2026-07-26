@@ -1,6 +1,9 @@
 package com.navneet.executespec.integration;
 
 import java.time.Duration;
+import java.time.Instant;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -36,6 +39,7 @@ public class BoundedTestGenKickoff {
   private final Duration timeout;
   private final ExecutorService workerExecutor;
   private final ScheduledExecutorService timeoutExecutor;
+  private final Map<String, Instant> activeRuns = new ConcurrentHashMap<>();
 
   @Autowired
   public BoundedTestGenKickoff(
@@ -67,39 +71,56 @@ public class BoundedTestGenKickoff {
 
   /** Starts test generation and owns run-scoped cleanup after completion or interruption. */
   public void kickoff(String runId, Runnable pipeline, Runnable cleanup) {
+    if (runId == null || runId.isBlank()) {
+      throw new IllegalArgumentException("test generation requires a run id");
+    }
+    Instant retentionDeadline = Instant.now().plus(timeout);
+    if (activeRuns.putIfAbsent(runId, retentionDeadline) != null) {
+      throw new IllegalStateException("test generation is already active for run " + runId);
+    }
     var snapshot = ContextSnapshotFactory.builder().build().captureAll();
     var routeContext = com.navneet.executespec.router.RunModelOverrides.capture();
     AtomicReference<ScheduledFuture<?>> timeoutTaskRef = new AtomicReference<>();
-    Future<?> future =
-        workerExecutor.submit(
-            snapshot.wrap(
-                () ->
-                    com.navneet.executespec.router.RunModelOverrides.runWith(
-                        routeContext,
-                        () -> {
-                          try {
-                            pipeline.run();
-                          } catch (Throwable t) {
-                            log.error(
-                                "[TestGen] bounded kickoff failed for run {}: {}",
-                                runId,
-                                t.getMessage(),
-                                t);
-                          } finally {
+    Future<?> future;
+    try {
+      future =
+          workerExecutor.submit(
+              snapshot.wrap(
+                  () ->
+                      com.navneet.executespec.router.RunModelOverrides.runWith(
+                          routeContext,
+                          () -> {
                             try {
-                              cleanup.run();
-                            } catch (Throwable cleanupFailure) {
-                              log.warn(
-                                  "[TestGen] cleanup failed for run {}: {}",
+                              pipeline.run();
+                            } catch (Throwable t) {
+                              log.error(
+                                  "[TestGen] bounded kickoff failed for run {}: {}",
                                   runId,
-                                  cleanupFailure.getMessage());
+                                  t.getMessage(),
+                                  t);
+                            } finally {
+                              try {
+                                cleanup.run();
+                              } catch (Throwable cleanupFailure) {
+                                log.warn(
+                                    "[TestGen] cleanup failed for run {}: {}",
+                                    runId,
+                                    cleanupFailure.getMessage());
+                              } finally {
+                                // The terminal sandbox listener may release only after this
+                                // optional pipeline can no longer dispatch another command.
+                                activeRuns.remove(runId);
+                              }
+                              ScheduledFuture<?> timeoutTask = timeoutTaskRef.get();
+                              if (timeoutTask != null) {
+                                timeoutTask.cancel(false);
+                              }
                             }
-                            ScheduledFuture<?> timeoutTask = timeoutTaskRef.get();
-                            if (timeoutTask != null) {
-                              timeoutTask.cancel(false);
-                            }
-                          }
-                        })));
+                          })));
+    } catch (RuntimeException rejected) {
+      activeRuns.remove(runId);
+      throw rejected;
+    }
 
     ScheduledFuture<?> timeoutTask =
         timeoutExecutor.schedule(
@@ -123,6 +144,28 @@ public class BoundedTestGenKickoff {
     if (future.isDone()) {
       timeoutTask.cancel(false);
     }
+  }
+
+  /**
+   * Whether bounded post-run validation may still issue a sandbox command for this run.
+   *
+   * <p>This is a retention fence, not an unbounded lifetime extension: the marker expires at the
+   * same deadline even if an upstream client ignores interruption, and normal completion removes it
+   * earlier in {@code finally}.
+   */
+  public boolean isActive(String runId) {
+    if (runId == null) {
+      return false;
+    }
+    Instant deadline = activeRuns.get(runId);
+    if (deadline == null) {
+      return false;
+    }
+    if (!Instant.now().isBefore(deadline)) {
+      activeRuns.remove(runId, deadline);
+      return false;
+    }
+    return true;
   }
 
   private static long timeoutSeconds(Duration timeout) {

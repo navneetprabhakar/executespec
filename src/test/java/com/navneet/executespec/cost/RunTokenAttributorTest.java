@@ -2,6 +2,7 @@ package com.navneet.executespec.cost;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -40,6 +41,35 @@ class RunTokenAttributorTest {
     attributor.reconcileRunTotalsFromLedger(RUN_ID);
 
     verify(runRepo).raiseUsageTotalsToAtLeast(RUN_ID, 612_345, 23_456, 0.08125d);
+  }
+
+  @Test
+  void lateMaterializationReconcilesOnlyAfterRunIsTerminal() {
+    when(runRepo.findById(RUN_ID))
+        .thenReturn(Optional.of(PipelineRun.builder().runId(RUN_ID).status("CANCELLED").build()));
+    when(usageRepo.sumSuccessfulInputTokensByRunId(RUN_ID)).thenReturn(12L);
+    when(usageRepo.sumSuccessfulOutputTokensByRunId(RUN_ID)).thenReturn(3L);
+    when(usageRepo.sumKnownCostByRunId(RUN_ID)).thenReturn(0.004d);
+
+    attributor.reconcileRunTotalsIfTerminal(RUN_ID);
+
+    verify(runRepo).raiseUsageTotalsToAtLeast(RUN_ID, 12, 3, 0.004d);
+  }
+
+  @Test
+  void liveMaterializationDoesNotRunLedgerAggregates() {
+    when(runRepo.findById(RUN_ID))
+        .thenReturn(Optional.of(PipelineRun.builder().runId(RUN_ID).status("WORKING").build()));
+
+    attributor.reconcileRunTotalsIfTerminal(RUN_ID);
+
+    verify(usageRepo, never()).sumSuccessfulInputTokensByRunId(RUN_ID);
+    verify(runRepo, never())
+        .raiseUsageTotalsToAtLeast(
+            org.mockito.ArgumentMatchers.anyString(),
+            org.mockito.ArgumentMatchers.anyInt(),
+            org.mockito.ArgumentMatchers.anyInt(),
+            org.mockito.ArgumentMatchers.anyDouble());
   }
 
   private static RunStepUsage successRow(String taskId, String provider, String model) {

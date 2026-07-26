@@ -38,6 +38,21 @@ class CoherencePlannerPatchSafetyTest {
   }
 
   @Test
+  void onlyProtocolShapeFailuresAreRepairable() {
+    Plan plan = planWith("src/A.java");
+    assertThat(
+            CoherencePlannerAgent.isProtocolRepairable(
+                new CoherencePlannerAgent.PatchResult(
+                    plan, 0, List.of(), false, "patchPlan arguments were invalid JSON")))
+        .isTrue();
+    assertThat(
+            CoherencePlannerAgent.isProtocolRepairable(
+                new CoherencePlannerAgent.PatchResult(
+                    plan, 0, List.of(), false, "fatal contract conflicts: schema mismatch")))
+        .isFalse();
+  }
+
+  @Test
   void absentSourceMoveInjectsNothing() {
     // RR-1192 — `to` must not be added when `from` was never present on the task.
     Plan plan = planWith("src/Real.java");
@@ -117,5 +132,100 @@ class CoherencePlannerPatchSafetyTest {
     assertThat(malformed.validationFailure()).contains("invalid JSON");
     assertThat(inapplicable.validated()).isFalse();
     assertThat(inapplicable.validationFailure()).contains("no applicable patches");
+  }
+
+  @Test
+  void fatalRequirementContractConflictRejectsPlanBeforeWorkerSpend() {
+    CoherencePlannerAgent.PatchResult result =
+        apply(
+            planWith("src/A.java"),
+            "{\"fatalConflicts\":[\"Producer collapses required multi-line order into one"
+                + " product\"],\"patches\":[]}");
+
+    assertThat(result.validated()).isFalse();
+    assertThat(result.validationFailure()).contains("fatal contract conflicts");
+  }
+
+  @Test
+  void hardConstraintFixReplacesExactOldBulletInsteadOfStackingContradictions() {
+    PlannedTask task =
+        PlannedTask.builder()
+            .id("T1")
+            .title("t")
+            .description("d")
+            .hardConstraints(List.of("Use ammo.js", "Keep port 8080"))
+            .build();
+    Plan plan = Plan.builder().tasks(List.of(task)).build();
+
+    CoherencePlannerAgent.PatchResult result =
+        apply(
+            plan,
+            "{\"fatalConflicts\":[],\"patches\":[{\"kind\":\"FIX_HARD_CONSTRAINT_CONFLICT\","
+                + "\"taskId\":\"T1\",\"oldConstraint\":\"Use ammo.js\","
+                + "\"newConstraint\":\"Use cannon-es\",\"reason\":\"shared contract\"}]}");
+
+    assertThat(result.validated()).isTrue();
+    assertThat(result.patchedPlan().tasks().get(0).hardConstraints())
+        .containsExactly("Keep port 8080", "Use cannon-es")
+        .doesNotContain("Use ammo.js");
+  }
+
+  @Test
+  void hardConstraintRemovalDeletesExactBulletWithoutLeavingWorkerMetaProse() {
+    PlannedTask task =
+        PlannedTask.builder()
+            .id("T7")
+            .title("Frontend tests")
+            .description("d")
+            .hardConstraints(List.of("Apply backend migrations", "Use Vitest"))
+            .build();
+    Plan plan = Plan.builder().tasks(List.of(task)).build();
+
+    CoherencePlannerAgent.PatchResult result =
+        apply(
+            plan,
+            "{\"fatalConflicts\":[],\"patches\":[{\"kind\":\"REMOVE_HARD_CONSTRAINT\","
+                + "\"taskId\":\"T7\",\"oldConstraint\":\"Apply backend migrations\","
+                + "\"reason\":\"backend-only\"}]}");
+
+    assertThat(result.validated()).isTrue();
+    assertThat(result.patchedPlan().tasks().getFirst().hardConstraints())
+        .containsExactly("Use Vitest");
+  }
+
+  @Test
+  void descriptionContractRepairReplacesOnlyExactConflictingFragment() {
+    PlannedTask task =
+        PlannedTask.builder()
+            .id("T2")
+            .title("Activity client")
+            .description("Keep loading states. Call GET /activity-history with page and page_size.")
+            .build();
+    Plan plan = Plan.builder().tasks(List.of(task)).build();
+
+    CoherencePlannerAgent.PatchResult result =
+        apply(
+            plan,
+            "{\"fatalConflicts\":[],\"patches\":[{\"kind\":\"REPLACE_DESCRIPTION_TEXT\","
+                + "\"taskId\":\"T2\",\"oldText\":\"GET /activity-history with page and"
+                + " page_size\",\"newText\":\"GET /activity with offset and limit\","
+                + "\"reason\":\"match producer T1\"}]}");
+
+    assertThat(result.validated()).isTrue();
+    assertThat(result.patchedPlan().tasks().getFirst().description())
+        .isEqualTo("Keep loading states. Call GET /activity with offset and limit.");
+  }
+
+  @Test
+  void descriptionContractRepairFailsClosedWhenExactSourceIsAbsent() {
+    CoherencePlannerAgent.PatchResult result =
+        apply(
+            planWith("src/A.java"),
+            "{\"fatalConflicts\":[],\"patches\":[{\"kind\":\"REPLACE_DESCRIPTION_TEXT\","
+                + "\"taskId\":\"T1\",\"oldText\":\"invented text\","
+                + "\"newText\":\"replacement\",\"reason\":\"match producer\"}]}");
+
+    assertThat(result.validated()).isFalse();
+    assertThat(result.patchedPlan().tasks().getFirst().description()).isEqualTo("d");
   }
 }

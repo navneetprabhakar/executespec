@@ -1,7 +1,8 @@
 package com.navneet.executespec.sandbox;
 
-import java.sql.ResultSet;
-import java.sql.SQLException;
+import static com.navneet.executespec.sandbox.RunSandboxPersistenceCodec.bounded;
+import static com.navneet.executespec.sandbox.RunSandboxPersistenceCodec.requireBoundedJson;
+
 import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
@@ -37,7 +38,6 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class RunSandboxStore {
 
-  private static final int MAX_REPOSITORY_SET_CHARS = 200_000;
   private static final String ALL = "SELECT * FROM run_sandbox ";
 
   private final JdbcTemplate jdbc;
@@ -168,7 +168,7 @@ public class RunSandboxStore {
             )
             RETURNING *
             """,
-            RunSandboxStore::map,
+            RunSandboxPersistenceCodec::map,
             owner,
             Timestamp.from(expiresAt),
             id);
@@ -264,22 +264,116 @@ public class RunSandboxStore {
         List.of(runtimeHandle, imageDigest));
   }
 
-  /** Begins teardown. Legal from PROVISIONING, READY or CANCEL_REQUESTED. */
-  public RunSandbox beginRelease(RunSandbox.Lease lease) {
-    return fencedTransition(lease, SandboxState.RELEASING, "released_at=NOW()", List.of());
+  /**
+   * Persists the terminal outcome before teardown starts.
+   *
+   * <p>Idempotent for the same live fence and intent. This matters when completion and the durable
+   * terminal sweep race: both may observe the same READY row, but neither may overwrite the other's
+   * cleanup target or turn an already-terminal row back into live work.
+   */
+  public RunSandbox beginRelease(
+      RunSandbox.Lease lease, SandboxState target, String failureClass, String failureDetail) {
+    requireCleanupIntent(target, failureClass);
+    RunSandbox current =
+        get(lease.sandboxId())
+            .orElseThrow(() -> new SandboxLeaseFencedException(lease.sandboxId()));
+    if (sameCleanupIntent(current, target, failureClass)) {
+      if (current.state() == SandboxState.RELEASING && holdsLiveLease(lease)) {
+        return current;
+      }
+      if (current.state() == target) {
+        return current;
+      }
+    }
+    try {
+      return fencedTransition(
+          lease,
+          SandboxState.RELEASING,
+          "released_at=COALESCE(released_at,NOW()), cleanup_target=?,"
+              + " cleanup_failure_class=?, cleanup_failure_detail=?, cleanup_last_error=NULL",
+          java.util.Arrays.asList(
+              target.name(), bounded(failureClass, 48), bounded(failureDetail, 2000)));
+    } catch (IllegalSandboxTransitionException | SandboxLeaseFencedException raced) {
+      RunSandbox winner =
+          get(lease.sandboxId())
+              .orElseThrow(() -> new SandboxLeaseFencedException(lease.sandboxId()));
+      if (sameCleanupIntent(winner, target, failureClass)
+          && ((winner.state() == SandboxState.RELEASING && holdsLiveLease(lease))
+              || winner.state() == target)) {
+        return winner;
+      }
+      throw raced;
+    }
   }
 
-  /** RELEASING -> a terminal non-failure state. Drops the lease. */
-  public RunSandbox finishRelease(RunSandbox.Lease lease, SandboxState terminal) {
-    if (terminal == SandboxState.FAILED || !terminal.terminal()) {
-      throw new IllegalArgumentException(
-          "finishRelease expects a non-failure terminal state, got " + terminal);
+  /**
+   * Publishes the persisted cleanup target after runtime absence was verified.
+   *
+   * <p>Idempotent when another cleanup racer already published the same target.
+   */
+  public RunSandbox completeRelease(RunSandbox.Lease lease) {
+    RunSandbox current =
+        get(lease.sandboxId())
+            .orElseThrow(() -> new SandboxLeaseFencedException(lease.sandboxId()));
+    SandboxState target = current.cleanupTarget();
+    if (target == null || !target.terminal()) {
+      throw new IllegalStateException("sandbox has no durable cleanup target");
     }
-    return fencedTransition(
-        lease,
-        terminal,
-        "terminal_at=NOW(), runtime_owner=NULL, lease_expires_at=NULL, heartbeat_at=NOW()",
-        List.of());
+    if (current.state() == target) {
+      return current;
+    }
+    if (current.state() != SandboxState.RELEASING) {
+      throw new IllegalSandboxTransitionException(current.state(), target);
+    }
+    try {
+      if (target == SandboxState.FAILED) {
+        return fail(lease, current.cleanupFailureClass(), current.cleanupFailureDetail());
+      }
+      return fencedTransition(
+          lease,
+          target,
+          "terminal_at=NOW(), runtime_owner=NULL, lease_expires_at=NULL, heartbeat_at=NOW()",
+          List.of());
+    } catch (IllegalSandboxTransitionException | SandboxLeaseFencedException raced) {
+      RunSandbox winner =
+          get(lease.sandboxId())
+              .orElseThrow(() -> new SandboxLeaseFencedException(lease.sandboxId()));
+      if (winner.state() == target) {
+        return winner;
+      }
+      throw raced;
+    }
+  }
+
+  /**
+   * Records an unsuccessful destroy without claiming the runtime is gone.
+   *
+   * <p>The lease is expired in the same fenced write so another JVM or the next local sweep can
+   * reclaim the RELEASING row immediately. The runtime owner remains populated to satisfy the V307
+   * live-state invariant and the fencing token still protects against stale writers.
+   */
+  public RunSandbox recordCleanupFailure(RunSandbox.Lease lease, String detail) {
+    List<RunSandbox> updated =
+        jdbc.query(
+            """
+            UPDATE run_sandbox SET
+              cleanup_attempts=cleanup_attempts+1,
+              cleanup_last_error=?,
+              heartbeat_at=NOW(),
+              lease_expires_at=NOW() - INTERVAL '1 microsecond'
+            WHERE id=? AND runtime_owner=? AND lease_token=? AND lease_expires_at>NOW()
+              AND state='RELEASING' AND cleanup_target IS NOT NULL
+            RETURNING *
+            """,
+            RunSandboxPersistenceCodec::map,
+            bounded(detail, 2000),
+            lease.sandboxId(),
+            lease.owner(),
+            lease.fencingToken());
+    if (updated.isEmpty()) {
+      throw new SandboxLeaseFencedException(lease.sandboxId());
+    }
+    return updated.getFirst();
   }
 
   /**
@@ -318,7 +412,7 @@ public class RunSandboxStore {
             WHERE id=? AND state IN ('REQUESTED','PROVISIONING','READY')
             RETURNING *
             """,
-            RunSandboxStore::map,
+            RunSandboxPersistenceCodec::map,
             id);
     return changed.stream().findFirst().or(() -> get(id));
   }
@@ -357,6 +451,27 @@ public class RunSandboxStore {
   }
 
   /**
+   * Live sandboxes whose owning pipeline run is already terminal.
+   *
+   * <p>This is the durable fallback for a missed in-process completion event and for direct user
+   * cancellation, which persists {@code pipeline_run.status=CANCELLED} before interrupting the
+   * worker. Returning sandbox rows rather than run ids preserves the exact lifecycle identity the
+   * caller must fence before teardown.
+   */
+  public List<RunSandbox> terminalRunCandidates(int limit) {
+    return query(
+        """
+        SELECT rs.* FROM run_sandbox rs
+        JOIN pipeline_run pr ON pr.run_id=rs.run_id
+        WHERE rs.state NOT IN ('TERMINATED','CANCELLED','EXPIRED','FAILED')
+          AND UPPER(pr.status) IN ('COMPLETE','PARTIAL','FAILED','CANCELLED')
+        ORDER BY rs.created_at
+        LIMIT ?
+        """,
+        limit);
+  }
+
+  /**
    * Settles an unclaimable sandbox without a lease. Used by reconciliation once teardown has been
    * attempted, and by expiry for a sandbox no runtime ever claimed. Requires the lease to be
    * genuinely dead, so this cannot steal a sandbox from a live owner.
@@ -381,7 +496,7 @@ public class RunSandboxStore {
             RETURNING *
             """
                 .formatted(from),
-            RunSandboxStore::map,
+            RunSandboxPersistenceCodec::map,
             terminal.name(),
             bounded(failureClass, 48),
             failureClass == null ? null : "settled by reconciliation after lease expiry",
@@ -433,7 +548,7 @@ public class RunSandboxStore {
             RETURNING *
             """
                 .formatted(extraSet.isEmpty() ? "" : ", " + extraSet, predecessorList(next)),
-            RunSandboxStore::map,
+            RunSandboxPersistenceCodec::map,
             args);
     if (updated.isEmpty()) {
       throw new SandboxLeaseFencedException(lease.sandboxId());
@@ -451,67 +566,23 @@ public class RunSandboxStore {
     return "'TERMINATED','CANCELLED','EXPIRED','FAILED'";
   }
 
-  private List<RunSandbox> query(String sql, Object... args) {
-    return jdbc.query(sql, RunSandboxStore::map, args);
-  }
-
-  private static RunSandbox map(ResultSet rs, int ignored) throws SQLException {
-    return new RunSandbox(
-        rs.getObject("id", UUID.class),
-        rs.getString("run_id"),
-        rs.getString("project_id"),
-        rs.getObject("session_id", UUID.class),
-        rs.getString("requested_by_user_id"),
-        rs.getString("org_id"),
-        rs.getString("source_revision"),
-        rs.getString("repository_set"),
-        SandboxState.valueOf(rs.getString("state")),
-        SandboxIsolationProfile.valueOf(rs.getString("isolation_profile")),
-        rs.getInt("isolation_profile_version"),
-        rs.getString("runtime_owner"),
-        rs.getLong("lease_token"),
-        instant(rs, "lease_expires_at"),
-        rs.getLong("runtime_epoch"),
-        instant(rs, "heartbeat_at"),
-        rs.getString("runtime_handle"),
-        rs.getString("image_digest"),
-        rs.getString("config_digest"),
-        SandboxNetworkPolicy.valueOf(rs.getString("network_policy")),
-        SandboxSecretPolicy.valueOf(rs.getString("secret_policy")),
-        instant(rs, "expires_at"),
-        rs.getString("failure_class"),
-        rs.getString("failure_detail"),
-        SandboxRetentionState.valueOf(rs.getString("retention_state")),
-        rs.getString("artifact_uri"),
-        rs.getString("idempotency_key"),
-        instant(rs, "created_at"),
-        instant(rs, "started_at"),
-        instant(rs, "ready_at"),
-        instant(rs, "released_at"),
-        instant(rs, "terminal_at"));
-  }
-
-  private static Instant instant(ResultSet rs, String column) throws SQLException {
-    Timestamp value = rs.getTimestamp(column);
-    return value == null ? null : value.toInstant();
-  }
-
-  private static String bounded(String value, int max) {
-    if (value == null) {
-      return null;
+  private static void requireCleanupIntent(SandboxState target, String failureClass) {
+    if (target == null || !target.terminal()) {
+      throw new IllegalArgumentException("cleanup target must be terminal");
     }
-    String clean =
-        value.replaceAll("(?i)(api[-_ ]?key|token|secret|bearer)\\s*[:=]\\s*\\S+", "$1=[REDACTED]");
-    return clean.length() <= max ? clean : clean.substring(0, max);
-  }
-
-  private static void requireBoundedJson(String value) {
-    if (value == null || value.isBlank()) {
-      throw new IllegalArgumentException("sandbox repository set is required");
-    }
-    if (value.length() > MAX_REPOSITORY_SET_CHARS) {
+    if ((target == SandboxState.FAILED) != (failureClass != null && !failureClass.isBlank())) {
       throw new IllegalArgumentException(
-          "sandbox repository set exceeds " + MAX_REPOSITORY_SET_CHARS + " characters");
+          "FAILED cleanup requires a failure class; others forbid it");
     }
+  }
+
+  private static boolean sameCleanupIntent(
+      RunSandbox sandbox, SandboxState target, String failureClass) {
+    return sandbox.cleanupTarget() == target
+        && java.util.Objects.equals(sandbox.cleanupFailureClass(), bounded(failureClass, 48));
+  }
+
+  private List<RunSandbox> query(String sql, Object... args) {
+    return jdbc.query(sql, RunSandboxPersistenceCodec::map, args);
   }
 }

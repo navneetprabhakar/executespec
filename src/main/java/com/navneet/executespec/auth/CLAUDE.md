@@ -89,6 +89,9 @@ Auth, account, org, project, RBAC, PAT, OAuth, and user-level client preferences
   that wants the writer seam must request it explicitly. `full` tokens are unaffected.
 - Device-cap LRU revocation is returned in `CreatedToken.autoRevokedTokenIds` and the controller
   appends one `USER_PAT_AUTO_REVOKED` audit event per displaced token.
+- Resolving a stale PAT updates `last_used_at` through a narrow active-row update. That modifying
+  repository query owns its transaction; do not rely on a caller transaction because
+  `JwtAuthenticationFilter` invokes the resolver directly on the request path.
 
 ## Provider Preference
 

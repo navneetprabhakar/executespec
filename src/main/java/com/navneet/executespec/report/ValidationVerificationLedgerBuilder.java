@@ -42,7 +42,11 @@ final class ValidationVerificationLedgerBuilder {
    */
   private static final String UNPROVEN_TEST_COUNT_SOURCE = "UNVERIFIED_COUNT";
 
-  private static final String PROVEN_TEST_COUNT_SOURCE = "DETERMINISTIC";
+  private static final String FUNCTIONAL_TEST_SOURCE = "DETERMINISTIC_FUNCTIONAL";
+
+  private static final String WORKSPACE_TEST_SOURCE = "DETERMINISTIC_WORKSPACE_SUITE";
+
+  private static final String LEGACY_PROVEN_TEST_SOURCE = "DETERMINISTIC_EXECUTION";
 
   private static final String UNPROVEN_TEST_COUNT_CONFIDENCE = "MEDIUM";
 
@@ -54,11 +58,24 @@ final class ValidationVerificationLedgerBuilder {
   }
 
   private static String testCountSource(ValidationReport entity) {
-    return testCountsProven(entity) ? PROVEN_TEST_COUNT_SOURCE : UNPROVEN_TEST_COUNT_SOURCE;
+    if (!testCountsProven(entity)) return UNPROVEN_TEST_COUNT_SOURCE;
+    return switch (testEvidenceScope(entity)) {
+      case "LIVE_PREVIEW_FUNCTIONAL" -> FUNCTIONAL_TEST_SOURCE;
+      case "WORKSPACE_TEST_SUITE" -> WORKSPACE_TEST_SOURCE;
+      default -> LEGACY_PROVEN_TEST_SOURCE;
+    };
   }
 
   private static String testCountConfidence(ValidationReport entity) {
     return testCountsProven(entity) ? PROVEN_TEST_COUNT_CONFIDENCE : UNPROVEN_TEST_COUNT_CONFIDENCE;
+  }
+
+  private static String testEvidenceScope(ValidationReport entity) {
+    return entity.getTestEvidenceScope() == null ? "" : entity.getTestEvidenceScope();
+  }
+
+  private static boolean functionalTestCountsProven(ValidationReport entity) {
+    return testCountsProven(entity) && "LIVE_PREVIEW_FUNCTIONAL".equals(testEvidenceScope(entity));
   }
 
   private final ObjectMapper objectMapper;
@@ -130,17 +147,20 @@ final class ValidationVerificationLedgerBuilder {
       // RR-1646 — this row is deterministic only while it rests on the build signal. Once the
       // status was decided by the concrete-test counts, it inherits their unproven provenance.
       boolean restsOnTestCounts = Boolean.TRUE.equals(entity.getExecutableTestsRun());
+      boolean testBackedProofIsAdmissible = !restsOnTestCounts || testCountsProven(entity);
       out.add(
           evidence(
               "executable-verification",
               "Executable verification",
               "VERIFICATION",
-              switch (executableStatus) {
-                case "PASSED" -> "PASS";
-                case "BUILD_ONLY" -> "WARN";
-                case "FAILED" -> "FAIL";
-                default -> "UNKNOWN";
-              },
+              !testBackedProofIsAdmissible
+                  ? "UNKNOWN"
+                  : switch (executableStatus) {
+                    case "PASSED" -> "PASS";
+                    case "BUILD_ONLY" -> "WARN";
+                    case "FAILED" -> "FAIL";
+                    default -> "UNKNOWN";
+                  },
               restsOnTestCounts ? testCountSource(entity) : "DETERMINISTIC",
               restsOnTestCounts ? testCountConfidence(entity) : "HIGH",
               restsOnTestCounts && !testCountsProven(entity)
@@ -161,29 +181,40 @@ final class ValidationVerificationLedgerBuilder {
     Integer testsTotal = entity.getTestsTotal();
     int total = testsTotal == null ? 0 : testsTotal;
     int passed = testsPassed == null ? 0 : testsPassed;
+    boolean countsProven = total > 0 && testCountsProven(entity);
     out.add(
         evidence(
             "tests",
             "Tests",
             "TESTS",
-            total <= 0 ? "UNKNOWN" : passed == total ? "PASS" : passed > 0 ? "WARN" : "FAIL",
-            total <= 0 ? UNPROVEN_TEST_COUNT_SOURCE : testCountSource(entity),
-            total <= 0 ? UNPROVEN_TEST_COUNT_CONFIDENCE : testCountConfidence(entity),
+            !countsProven ? "UNKNOWN" : passed == total ? "PASS" : passed > 0 ? "WARN" : "FAIL",
+            countsProven ? testCountSource(entity) : UNPROVEN_TEST_COUNT_SOURCE,
+            countsProven ? PROVEN_TEST_COUNT_CONFIDENCE : UNPROVEN_TEST_COUNT_CONFIDENCE,
             total <= 0
                 ? "No independently admissible functional-test result is attached to this report."
                     + " Worker-authored workspace tests are diagnostic and cannot prove product"
                     + " quality by themselves."
-                : total > 0 && testCountsProven(entity)
-                    ? "Generated or workspace tests passed. The counts are bound to this run's own"
-                        + " execution: report files were reset before launch, the runner's exit"
-                        + " status was checked, and every parsed report postdates the launch."
-                    : "Generated or workspace tests passed. Counts are read from persisted"
-                        + " test-runner output; the report carries no execution-freshness token, so"
-                        + " a stale or absent run cannot be ruled out.",
+                : functionalTestCountsProven(entity)
+                    ? "Generated black-box functional tests ran against this run's live preview."
+                        + " The counts are bound to this execution and exercise the product"
+                        + " boundary."
+                    : countsProven
+                        ? "A fresh workspace test suite executed successfully. This is"
+                            + " deterministic code-level evidence, but it does not prove deployed"
+                            + " product journeys or external integrations end to end."
+                        : "Persisted test counts exist, but the report carries no admissible"
+                            + " independent functional-execution proof. Fresh unit-test output or"
+                            + " stale runner output cannot certify end-to-end product quality.",
             total <= 0
                 ? "Independent end-to-end/functional verification is pending; workspace tests are"
                     + " diagnostic only."
-                : passed + "/" + total + " tests passed.",
+                : passed
+                    + "/"
+                    + total
+                    + " tests passed"
+                    + (functionalTestCountsProven(entity)
+                        ? " (functional)."
+                        : countsProven ? " (workspace suite only)." : " (counts unverified)."),
             "validation_report.tests_passed/tests_total",
             total <= 0 ? null : passed,
             total <= 0 ? null : total));

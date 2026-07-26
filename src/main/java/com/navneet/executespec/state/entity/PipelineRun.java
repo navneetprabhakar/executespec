@@ -148,7 +148,9 @@ public class PipelineRun {
   @Column(name = "cost_estimate_high")
   private Double costEstimateHigh;
 
-  private Double actualCostUsd; // computed post-run with cache-aware pricing (null until complete)
+  // Raised monotonically from cache-aware physical-attempt evidence. Planning spend is persisted
+  // before an approval gate; terminal/cancellation reconciliation may raise it again.
+  private Double actualCostUsd;
 
   /** Run credits charged (proportional to estimated cost). Default 1. */
   @Builder.Default

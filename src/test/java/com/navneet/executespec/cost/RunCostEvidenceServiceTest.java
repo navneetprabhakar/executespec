@@ -109,6 +109,37 @@ class RunCostEvidenceServiceTest {
   }
 
   @Test
+  @SuppressWarnings("unchecked")
+  void failedPlanningRunRecoversPhaseCostsFromDurableStepLedger() {
+    RunStepUsageRepository repository = mock(RunStepUsageRepository.class);
+    RunCostEvidenceService service = new RunCostEvidenceService(repository);
+    PipelineRun run = new PipelineRun();
+    run.setRunId("planner-failed");
+    // The planner rejected the candidate before the legacy phase snapshots were persisted.
+    run.setOutlineCostUsd(0.003d);
+    when(repository.sumKnownCostByRunIdGroupedByStepId("planner-failed"))
+        .thenReturn(
+            List.of(
+                new Object[] {"planner.outline", 0.003d},
+                new Object[] {"planner.expand.T1", 0.012d},
+                new Object[] {"planner.expand.T2.semantic-repair", 0.004d},
+                new Object[] {"planner.coherence", 0.006d},
+                new Object[] {"worker.T1", 9.0d}));
+    stubLedger(repository, "planner-failed", List.of(), 0L, 0.025d);
+    Map<String, Object> body = new LinkedHashMap<>(Map.of("costUsd", 0.025d));
+
+    service.enrich(body, run, true, 0, SIZE);
+
+    Map<String, Double> phases = (Map<String, Double>) body.get("phases");
+    assertThat(phases)
+        .containsEntry("outline", 0.003d)
+        .containsEntry("expansion", 0.016d)
+        .containsEntry("coherence", 0.006d)
+        .containsEntry("classifier", 0d);
+    assertThat(phases.values()).allMatch(cost -> cost < 1d);
+  }
+
+  @Test
   void asyncAttemptLedgerCannotProduceNegativeUnattributedCostOrStaleTokenTotals() {
     RunStepUsageRepository repository = mock(RunStepUsageRepository.class);
     RunCostEvidenceService service = new RunCostEvidenceService(repository);
@@ -298,6 +329,45 @@ class RunCostEvidenceServiceTest {
     assertThat(body).containsEntry("reconciled", false).containsEntry("unknownCostAttempts", 1L);
     List<Map<String, Object>> calls = (List<Map<String, Object>>) body.get("stepCalls");
     assertThat(calls.get(0))
+        .containsEntry("knownCostUsd", null)
+        .containsEntry("costStatus", "UNKNOWN_PROVIDER_NOT_REPORTED");
+  }
+
+  /** A negative router sentinel means unknown cost; it must never lower the aggregate spend. */
+  @Test
+  @SuppressWarnings("unchecked")
+  void aNegativeUnknownCostSentinelIsNotPresentedOrSummedAsKnownSpend() {
+    RunStepUsageRepository repository = mock(RunStepUsageRepository.class);
+    RunCostEvidenceService service = new RunCostEvidenceService(repository);
+    PipelineRun run = new PipelineRun();
+    run.setRunId("r-negative");
+    RunStepUsage unknown =
+        RunStepUsage.builder()
+            .id("u-negative")
+            .runId("r-negative")
+            .attemptStatus("SUCCESS")
+            .provider("gemini")
+            .model("gemini-3-flash-preview")
+            .inputTokens(4_000)
+            .outputTokens(900)
+            .costUsd(-1d)
+            .createdAt(Instant.parse("2026-07-19T00:00:00Z"))
+            .build();
+    stubLedger(repository, "r-negative", List.of(unknown), 1L, 0d);
+    Map<String, Object> body = new LinkedHashMap<>(Map.of("costUsd", 0.4d, "calls", 1L));
+
+    service.enrich(body, run, true, 0, SIZE);
+
+    assertThat(body)
+        .containsEntry("costUsd", 0.4d)
+        .containsEntry("knownCostUsdLowerBound", 0d)
+        .containsEntry("unknownCostAttempts", 1L)
+        .containsEntry("physicalAttempts", 1L)
+        .containsEntry("successfulCalls", 1L)
+        .containsEntry("failedAttempts", 0L);
+    List<Map<String, Object>> calls = (List<Map<String, Object>>) body.get("stepCalls");
+    assertThat(calls.get(0))
+        .containsEntry("costUsd", -1d)
         .containsEntry("knownCostUsd", null)
         .containsEntry("costStatus", "UNKNOWN_PROVIDER_NOT_REPORTED");
   }

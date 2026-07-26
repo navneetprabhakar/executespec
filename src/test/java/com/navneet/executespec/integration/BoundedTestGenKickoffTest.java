@@ -77,7 +77,16 @@ class BoundedTestGenKickoffTest {
       // The pipeline deliberately remains blocked; only the kickoff must return promptly.
       org.junit.jupiter.api.Assertions.assertTrue(elapsedMillis < 500);
       org.junit.jupiter.api.Assertions.assertTrue(started.await(1, TimeUnit.SECONDS));
+      org.junit.jupiter.api.Assertions.assertTrue(kickoff.isActive("run-async"));
       release.countDown();
+      org.junit.jupiter.api.Assertions.assertTimeoutPreemptively(
+          Duration.ofSeconds(1),
+          () -> {
+            while (kickoff.isActive("run-async")) {
+              Thread.onSpinWait();
+            }
+          });
+      org.junit.jupiter.api.Assertions.assertFalse(kickoff.isActive("run-async"));
     } finally {
       worker.shutdownNow();
       timer.shutdownNow();
