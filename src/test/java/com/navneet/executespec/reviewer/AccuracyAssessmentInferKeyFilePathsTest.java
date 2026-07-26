@@ -120,8 +120,7 @@ class AccuracyAssessmentInferKeyFilePathsTest {
 
   @Test
   void manyStructuralFiles_returnsAllStructuralUpToBudget() throws Exception {
-    // A project with 6 structural files + 2 utility files — the structural
-    // list alone fills the 6-slot budget, so utilities don't get pulled in.
+    // Structural files fill the bounded source budget, so utilities don't get pulled in.
     // Note: paths must avoid common structural substrings ('main', 'app',
     // 'api') in directory components or even Helpers/Utils land in the
     // structural bucket. Using top-level paths to keep the test crisp.
@@ -134,12 +133,16 @@ class AccuracyAssessmentInferKeyFilePathsTest {
             "AuthService.java",
             "UserRepository.java",
             "OrderRepository.java",
+            "PaymentRepository.java",
+            "AccountRepository.java",
+            "InventoryRepository.java",
+            "AuditRepository.java",
             "StringHelpers.java", // non-structural
             "DateUtils.java"); // non-structural
 
     List<String> picked = infer(tree);
 
-    assertThat(picked).hasSize(6);
+    assertThat(picked).hasSize(10);
     // Utility classes were not pulled in (would have been if top-up ran)
     assertThat(picked).doesNotContain("StringHelpers.java", "DateUtils.java");
   }
@@ -147,9 +150,7 @@ class AccuracyAssessmentInferKeyFilePathsTest {
   @Test
   void manyStructuralFiles_capAtSingleRepoBudget() throws Exception {
     // A Spring Boot project with 30 controllers — single-repo runs cap at the read budget
-    // (SINGLE_REPO_BUDGET = 6). 2026-05-02: previously inferKeyFilePaths returned 10 and
-    // buildKeyFileSnippets enforced the 6-file read cap; now both layers agree on the budget
-    // value so the API contract reflects what's actually read.
+    // (SINGLE_REPO_BUDGET = 10).
     StringBuilder tree = new StringBuilder();
     for (int i = 0; i < 30; i++) {
       tree.append(String.format("Controller%02d.java%n", i));
@@ -158,7 +159,7 @@ class AccuracyAssessmentInferKeyFilePathsTest {
 
     List<String> picked = infer(tree.toString());
 
-    assertThat(picked).hasSize(6);
+    assertThat(picked).hasSize(10);
     assertThat(picked).allMatch(p -> p.startsWith("Controller"));
     assertThat(picked).doesNotContain("Helper.java");
   }
@@ -221,8 +222,7 @@ class AccuracyAssessmentInferKeyFilePathsTest {
 
   @Test
   void multiRepo_totalCapBoundsTokenCost() throws Exception {
-    // 5 repos × 10 candidates each — total picks must not exceed MULTI_REPO_TOTAL_CAP (18)
-    // even though the per-repo budget × repo count would otherwise be 30.
+    // 5 repos × 10 candidates each — total picks must not exceed MULTI_REPO_TOTAL_CAP.
     StringBuilder tree = new StringBuilder();
     for (int r = 0; r < 5; r++) {
       for (int i = 0; i < 10; i++) {
@@ -232,21 +232,47 @@ class AccuracyAssessmentInferKeyFilePathsTest {
 
     List<String> picked = infer(tree.toString());
 
-    assertThat(picked).hasSizeLessThanOrEqualTo(18);
-    // First 3 repos should each get the full 6 (3 × 6 = 18 = cap), repos 4 + 5 get 0.
-    assertThat(picked.stream().filter(p -> p.startsWith("repos/repo0/")).count()).isEqualTo(6);
+    assertThat(picked).hasSizeLessThanOrEqualTo(24);
+    assertThat(picked.stream().filter(p -> p.startsWith("repos/repo0/")).count()).isEqualTo(8);
   }
 
   @Test
   void singleRepo_keepsFlatBudget() throws Exception {
     // Single repos/ subdir (or no repos/ prefix at all) keeps the V162 single-repo budget
-    // of 6 — no behavior change for the common case.
+    // of 10.
     StringBuilder tree = new StringBuilder();
     for (int i = 0; i < 12; i++) {
       tree.append(String.format("repos/only-one/src/route%d.ts%n", i));
     }
     List<String> picked = infer(tree.toString());
-    assertThat(picked).hasSize(6);
+    assertThat(picked).hasSize(10);
+  }
+
+  @Test
+  void runtimeEvidenceCannotBeCrowdedOutByFastApiStructure() throws Exception {
+    String tree =
+        String.join(
+            "\n",
+            "app/routes/__init__.py",
+            "app/routes/reservations.py",
+            "app/services/__init__.py",
+            "app/services/reservation_service.py",
+            "alembic/versions/001_initial.py",
+            "app/models.py",
+            "app/schemas.py",
+            "app/exceptions.py",
+            "app/main.py",
+            "app/database.py",
+            "app/config.py",
+            "app/dependencies.py");
+
+    assertThat(infer(tree))
+        .contains(
+            "app/routes/reservations.py",
+            "app/services/reservation_service.py",
+            "app/main.py",
+            "app/database.py",
+            "app/config.py");
   }
 
   // Tiered structural detection (2026-05-02 b171fa52 follow-up)

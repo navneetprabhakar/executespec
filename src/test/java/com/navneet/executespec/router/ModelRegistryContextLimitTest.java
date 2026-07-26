@@ -27,8 +27,9 @@ class ModelRegistryContextLimitTest {
 
     models.put("claude-sonnet-4-6", model("anthropic", 200_000));
     models.put("claude-haiku-4-5-20251001", model("anthropic", 200_000));
-    models.put("gemini-3-flash-preview", model("gemini", 1_048_576));
-    models.put("gemini-3-pro-preview", model("gemini", 1_048_576));
+    models.put("gemini-3.5-flash-lite", model("gemini", 1_048_576));
+    models.put("gemini-3.6-flash", model("gemini", 1_048_576));
+    models.put("gemini-3.1-pro-preview", model("gemini", 1_048_576));
     // The audit's headline drift: YAML says gpt-5.4 = 200K, the deleted map said 256K.
     // YAML wins after this refactor.
     models.put("gpt-5.4", model("openai", 200_000));
@@ -44,8 +45,7 @@ class ModelRegistryContextLimitTest {
     assertThat(registry.contextLimitForOrPrefixFallback("gpt-5.4")).isEqualTo(200_000);
     assertThat(registry.contextLimitForOrPrefixFallback("gpt-5.4-mini")).isEqualTo(200_000);
     assertThat(registry.contextLimitForOrPrefixFallback("claude-sonnet-4-6")).isEqualTo(200_000);
-    assertThat(registry.contextLimitForOrPrefixFallback("gemini-3-flash-preview"))
-        .isEqualTo(1_048_576);
+    assertThat(registry.contextLimitForOrPrefixFallback("gemini-3.6-flash")).isEqualTo(1_048_576);
   }
 
   @Test

@@ -57,6 +57,21 @@ public class RunTokenAttributor {
   }
 
   /**
+   * Reconcile a physical attempt that materialized after lifecycle termination. Cancellation can
+   * race a provider response; the immutable usage row remains authoritative even after the
+   * in-memory accumulator has been finalized. Live runs avoid the aggregate queries.
+   */
+  public void reconcileRunTotalsIfTerminal(String runId) {
+    if (runId == null || runId.isBlank()) return;
+    runRepo
+        .findById(runId)
+        .filter(
+            run ->
+                com.navneet.executespec.integration.RunPipelineSupport.isTerminal(run.getStatus()))
+        .ifPresent(run -> reconcileRunTotalsFromLedger(runId));
+  }
+
+  /**
    * Attribute tokens consumed in a single pipeline phase (PLANNER / REVIEWER). Persists per-phase
    * columns on the run AND increments the run totals so the "Run Stats" panel reflects cumulative
    * usage even if the in-memory tracker is later evicted (deploy restart, accumulator eviction).
@@ -65,6 +80,10 @@ public class RunTokenAttributor {
       String runId, Phase phase, long inTok, long outTok, String providerUpper, String model) {
     int persistedIn = RunCostTracker.saturatedInt(inTok);
     int persistedOut = RunCostTracker.saturatedInt(outTok);
+    EffectiveRouteProjection physicalRoute =
+        phase == Phase.PLANNER
+            ? effectiveRoutes.forPlanner(runId)
+            : effectiveRoutes.forReviewer(runId);
     runRepo
         .findById(runId)
         .ifPresent(
@@ -73,14 +92,14 @@ public class RunTokenAttributor {
                 case PLANNER -> {
                   r.setPlannerInputTokens(persistedIn);
                   r.setPlannerOutputTokens(persistedOut);
-                  r.setPlannerProvider(providerUpper);
-                  r.setPlannerActualModel(model);
+                  r.setPlannerProvider(actualProviderOrFallback(physicalRoute, providerUpper));
+                  r.setPlannerActualModel(actualModelOrFallback(physicalRoute, model));
                 }
                 case REVIEWER -> {
                   r.setReviewerInputTokens(persistedIn);
                   r.setReviewerOutputTokens(persistedOut);
-                  r.setReviewerProvider(providerUpper);
-                  r.setReviewerActualModel(model);
+                  r.setReviewerProvider(actualProviderOrFallback(physicalRoute, providerUpper));
+                  r.setReviewerActualModel(actualModelOrFallback(physicalRoute, model));
                 }
               }
               runRepo.save(r);
@@ -103,6 +122,10 @@ public class RunTokenAttributor {
       String runId, Phase phase, long inTok, long outTok, String providerUpper, String model) {
     int persistedIn = RunCostTracker.saturatedInt(inTok);
     int persistedOut = RunCostTracker.saturatedInt(outTok);
+    EffectiveRouteProjection physicalRoute =
+        phase == Phase.PLANNER
+            ? effectiveRoutes.forPlanner(runId)
+            : effectiveRoutes.forReviewer(runId);
     runRepo
         .findById(runId)
         .ifPresent(
@@ -113,16 +136,16 @@ public class RunTokenAttributor {
                       saturatingAdd(safe(r.getPlannerInputTokens()), persistedIn));
                   r.setPlannerOutputTokens(
                       saturatingAdd(safe(r.getPlannerOutputTokens()), persistedOut));
-                  r.setPlannerProvider(providerUpper);
-                  r.setPlannerActualModel(model);
+                  r.setPlannerProvider(actualProviderOrFallback(physicalRoute, providerUpper));
+                  r.setPlannerActualModel(actualModelOrFallback(physicalRoute, model));
                 }
                 case REVIEWER -> {
                   r.setReviewerInputTokens(
                       saturatingAdd(safe(r.getReviewerInputTokens()), persistedIn));
                   r.setReviewerOutputTokens(
                       saturatingAdd(safe(r.getReviewerOutputTokens()), persistedOut));
-                  r.setReviewerProvider(providerUpper);
-                  r.setReviewerActualModel(model);
+                  r.setReviewerProvider(actualProviderOrFallback(physicalRoute, providerUpper));
+                  r.setReviewerActualModel(actualModelOrFallback(physicalRoute, model));
                 }
               }
               runRepo.save(r);
@@ -301,6 +324,22 @@ public class RunTokenAttributor {
 
   private static int safe(Integer value) {
     return value == null ? 0 : Math.max(0, value);
+  }
+
+  private static String actualProviderOrFallback(
+      EffectiveRouteProjection route, String requestedProvider) {
+    if (route.attribution() == EffectiveRouteProjection.Attribution.LEDGER) {
+      return route.provider().toUpperCase(java.util.Locale.ROOT);
+    }
+    if (route.attribution() == EffectiveRouteProjection.Attribution.MIXED) return null;
+    return requestedProvider;
+  }
+
+  private static String actualModelOrFallback(
+      EffectiveRouteProjection route, String requestedModel) {
+    if (route.attribution() == EffectiveRouteProjection.Attribution.LEDGER) return route.model();
+    if (route.attribution() == EffectiveRouteProjection.Attribution.MIXED) return null;
+    return requestedModel;
   }
 
   private static long safeLong(Long value) {

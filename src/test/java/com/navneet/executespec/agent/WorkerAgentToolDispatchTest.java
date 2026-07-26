@@ -136,6 +136,9 @@ class WorkerAgentToolDispatchTest {
     lenient()
         .when(registry.bindForWorker(any(ExecutionContext.class), anyString(), anyString()))
         .thenReturn(boundTools);
+    lenient()
+        .when(registry.bindForWorker(any(ExecutionContext.class), anyString(), anyString(), any()))
+        .thenReturn(boundTools);
 
     ChatResponse first = seq.get(0);
     ChatResponse[] rest = seq.subList(1, seq.size()).toArray(new ChatResponse[0]);

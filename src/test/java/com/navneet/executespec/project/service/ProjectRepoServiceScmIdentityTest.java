@@ -71,6 +71,7 @@ class ProjectRepoServiceScmIdentityTest {
             mock(AppUserRepository.class),
             mock(TierEnforcementService.class),
             mock(GovernanceGuard.class),
+            mock(ProjectSourceFreshnessInvalidator.class),
             mock(ObjectProvider.class));
   }
 

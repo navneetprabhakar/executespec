@@ -32,4 +32,23 @@ class TestCommandResolverTest {
 
     assertThat(command.framework()).isEqualTo(TestCommandResolver.Framework.VITEST);
   }
+
+  @Test
+  void resolvesPythonAndFrontendSuitesInAFullStackWorkspace(@TempDir Path workspace)
+      throws Exception {
+    Files.createDirectories(workspace.resolve("backend/tests"));
+    Files.writeString(workspace.resolve("backend/requirements.txt"), "pytest\n");
+    Files.writeString(workspace.resolve("backend/tests/test_api.py"), "def test_ok(): pass\n");
+    Files.createDirectories(workspace.resolve("frontend"));
+    Files.writeString(
+        workspace.resolve("frontend/package.json"),
+        "{\"scripts\":{\"test\":\"vitest run\"},\"devDependencies\":{\"vitest\":\"latest\"}}");
+
+    var command = new TestCommandResolver().resolve(workspace).orElseThrow();
+
+    assertThat(command.framework()).isEqualTo(TestCommandResolver.Framework.MULTI);
+    assertThat(command.command())
+        .contains("cd backend && python3 -m pytest -q")
+        .contains("cd frontend && npm test --silent");
+  }
 }

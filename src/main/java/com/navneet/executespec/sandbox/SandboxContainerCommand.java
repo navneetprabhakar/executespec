@@ -127,9 +127,30 @@ public final class SandboxContainerCommand {
       long runtimeEpoch,
       Path agentWorkspaceRoot,
       String runId) {
+    return create(
+        containerName,
+        spec,
+        globalWorkspaceRoot,
+        sandboxId,
+        runtimeEpoch,
+        agentWorkspaceRoot,
+        runId,
+        NON_ROOT_USER);
+  }
+
+  static List<String> create(
+      String containerName,
+      SandboxRuntimeSpec spec,
+      Path globalWorkspaceRoot,
+      String sandboxId,
+      long runtimeEpoch,
+      Path agentWorkspaceRoot,
+      String runId,
+      String runtimeUser) {
     if (containerName == null || !containerName.matches("[A-Za-z0-9][A-Za-z0-9_.-]{0,62}")) {
       throw new IllegalArgumentException("unsafe container name: " + containerName);
     }
+    requireRuntimeUser(runtimeUser);
     Path sandboxRoot = ownedWorkspaceRoot(globalWorkspaceRoot, sandboxId);
     Path runWorkspaceRoot =
         (agentWorkspaceRoot != null && runId != null)
@@ -147,7 +168,7 @@ public final class SandboxContainerCommand {
 
     // Isolation.
     argv.addAll(List.of("--network", "none"));
-    argv.addAll(List.of("--user", NON_ROOT_USER));
+    argv.addAll(List.of("--user", runtimeUser));
     argv.addAll(List.of("--security-opt", "no-new-privileges"));
     argv.addAll(List.of("--cap-drop", "ALL"));
     argv.add("--read-only");
@@ -201,11 +222,16 @@ public final class SandboxContainerCommand {
    * expresses one.
    */
   public static List<String> exec(String containerName, SandboxExecRequest request) {
+    return exec(containerName, request, NON_ROOT_USER);
+  }
+
+  static List<String> exec(String containerName, SandboxExecRequest request, String runtimeUser) {
     if (containerName == null || !containerName.matches("[A-Za-z0-9][A-Za-z0-9_.-]{0,62}")) {
       throw new IllegalArgumentException("unsafe container name: " + containerName);
     }
+    requireRuntimeUser(runtimeUser);
     List<String> argv = new ArrayList<>(List.of("docker", "exec"));
-    argv.addAll(List.of("--user", NON_ROOT_USER));
+    argv.addAll(List.of("--user", runtimeUser));
     if (request.workdir() != null) {
       requireAbsolute(request.workdir(), "exec workdir");
       argv.addAll(List.of("--workdir", request.workdir()));
@@ -214,6 +240,12 @@ public final class SandboxContainerCommand {
     argv.add(containerName);
     argv.addAll(request.argv());
     return List.copyOf(argv);
+  }
+
+  private static void requireRuntimeUser(String runtimeUser) {
+    if (runtimeUser == null || !runtimeUser.matches("[1-9][0-9]{0,9}:[1-9][0-9]{0,9}")) {
+      throw new IllegalArgumentException("sandbox runtime user must be a numeric non-root uid:gid");
+    }
   }
 
   /**

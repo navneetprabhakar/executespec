@@ -735,6 +735,20 @@ public class RunController {
               });
     }
 
+    // Planning is the first point where a useful whole-run estimate exists. Submission reserves
+    // only one minimum managed-AI credit, so re-check the conservative high estimate here before
+    // an approval can knowingly launch a run whose later tasks/reviewer will be denied mid-flight.
+    if (req.approved()) {
+      double estimateHighUsd =
+          approveRun.getCostEstimateHigh() != null
+              ? approveRun.getCostEstimateHigh()
+              : (approveRun.getHardCapUsd() != null ? approveRun.getHardCapUsd() : 0.0);
+      managedAiUsageService.assertCanApproveEstimatedSpend(
+          userDetails,
+          apiKeyResolver.isOwnKeysMode(userDetails.getUser().getId()),
+          estimateHighUsd);
+    }
+
     // RR-819 — the breaking-change gate. PlanBreakingChangeReport's own contract says approval must
     // be disabled until the approver types BREAKING when a touched contract has declared consumers.
     // That was never enforced anywhere: the classifier ran AFTER the worker wrote the change and

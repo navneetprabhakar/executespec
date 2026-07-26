@@ -6,6 +6,8 @@ import com.navneet.executespec.agentsession.SubagentBudgetExceededException;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
+import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.context.request.async.AsyncRequestTimeoutException;
 import org.springframework.web.server.ResponseStatusException;
 
 class GlobalExceptionAdviceTest {
@@ -38,5 +40,17 @@ class GlobalExceptionAdviceTest {
         .containsEntry("errorCode", "SUBAGENT_TREE_COST_BUDGET_EXHAUSTED")
         .containsEntry("error", "subagent-budget-exhausted")
         .containsEntry("status", 422);
+  }
+
+  @Test
+  void asyncSseTimeoutDoesNotFallThroughToJsonThrowableHandler() throws Exception {
+    var method =
+        GlobalExceptionAdvice.class.getMethod(
+            "onAsyncRequestTimeout", AsyncRequestTimeoutException.class);
+
+    assertThat(method.getReturnType()).isEqualTo(Void.TYPE);
+    assertThat(method.getAnnotation(ExceptionHandler.class).value())
+        .containsExactly(AsyncRequestTimeoutException.class);
+    new GlobalExceptionAdvice().onAsyncRequestTimeout(new AsyncRequestTimeoutException());
   }
 }

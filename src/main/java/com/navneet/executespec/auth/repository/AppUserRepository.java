@@ -14,6 +14,15 @@ import org.springframework.data.repository.query.Param;
 
 public interface AppUserRepository extends JpaRepository<AppUser, String> {
 
+  interface NameProjection {
+    String getFirstName();
+
+    String getLastName();
+  }
+
+  @Query("SELECT u.firstName AS firstName, u.lastName AS lastName FROM AppUser u WHERE u.id = :id")
+  Optional<NameProjection> findNameById(@Param("id") String id);
+
   /** Pessimistic lock for atomic quota enforcement (prevents TOCTOU race on run count). */
   @Lock(LockModeType.PESSIMISTIC_WRITE)
   @Query("SELECT u FROM AppUser u WHERE u.id = :id")

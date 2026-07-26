@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -154,17 +155,9 @@ mutate git state (`git add`, `git commit`, `git reset`, `git stash`,
 
 BUILD ONLY WHAT THE TASK ASKS — match complexity to the requirement (applies to
 ALL tasks, new features as well as fixes):
-  - Write the minimum implementation that satisfies the task. Do not add options,
-    config, abstraction, or "future-proofing" the task did not request.
-  - No defensive code for cases that cannot occur given how the code is called.
-  - Validate inputs only at real trust boundaries (external/untrusted input); trust
-    your own internal callers rather than re-checking between private functions.
-  - Do NOT add comments or docstrings to code you did not change. Any new comment
-    states the non-obvious WHY, never a restatement of what the code does.
-  - If code becomes unused, delete it outright — do not comment it out or rename it
-    to `_unused`. Dead code left behind is not cleanup.
-  - Prefer a few similar concrete lines over a premature abstraction; add a helper
-    only when duplication is real and repeated, not merely anticipated.
+"""
+          + WorkerScopeQualityPrompt.TEXT
+          + """
 This does NOT waive the test requirement below — tests that exercise what you build
 are part of the task, not gold-plating.
 
@@ -213,9 +206,9 @@ Report honestly + recover deliberately:
 TESTS ARE PART OF THE TASK — NOT OPTIONAL.
 If your task adds or changes a function, endpoint, route, or module, you MUST
 also create or extend a test that exercises it before calling completeTask:
-  - At least one happy-path test per public function / endpoint you touched.
-  - At least one error / edge-case test (invalid input, not-found, failure path)
-    where the spec or the code has an obvious failure mode.
+"""
+          + WorkerScopeQualityPrompt.TEST_TEXT
+          + """
   - Put tests in the project's conventional location + framework (pytest
     `test_*.py`, Jest `*.test.ts` / `__tests__/`, Go `*_test.go`, JUnit
     `src/test/java/...`). If no test scaffold exists, create the minimal one.
@@ -225,12 +218,9 @@ also create or extend a test that exercises it before calling completeTask:
   - Never disable, replace, monkeypatch, or no-op authentication, authorization, CSRF, validation,
     middleware, persistence, or another requirement under test merely to make the suite green.
     Mock only a true external dependency while keeping the required production boundary active.
-  - Derive adversarial tests from EVERY semantic clause in TASK_REQUIREMENTS. A symbol with the
-    right name is not proof: exercise the documented/default startup path, cross-operation reuse of
-    shared idempotency keys, immutable replay responses after later state changes, version mismatch
-    through the public request boundary, rollback after a mid-transaction failure, and sanitized
-    handling of expected persistence failures whenever those contracts are assigned to this task.
-  - Tests are maintained product artifacts in the conventional test tree; root-level scratch smoke files are forbidden, and one-off reproduction files belong under `/tmp` outside the deliverable.
+"""
+          + WorkerVerificationContractPrompt.TEXT
+          + """
 Untested code is an INCOMPLETE task. Do not call completeTask on a code change
 with zero tests unless the task is genuinely untestable (pure static asset, a
 one-line config) — and if so, say why in your completeTask summary.
@@ -341,8 +331,7 @@ to boot — skip it for those.""";
   private final ModelResolver modelResolver;
   private final com.navneet.executespec.router.ModelMatrixProperties matrixProps;
   private final com.navneet.executespec.project.rag.RetrievalService retrievalService;
-  // Transfer #1 (PATCH→BUILD, RL-2026-05-034): in-loop test-execution gate. After a clean compile,
-  // RUN the worker's tests so "tests are mandatory" means "tests pass," not just "tests compile."
+  // RL-2026-05-034: in-loop test execution turns mandatory tests into passing tests.
   private final com.navneet.executespec.smoketest.WorkspaceTestRunner inLoopTestRunner;
   private final com.navneet.executespec.config.featureflag.FeatureFlagService featureFlagService;
 
@@ -378,7 +367,6 @@ to boot — skip it for those.""";
   /** task 11 — deterministic repo-orientation warm start (nullable in tests ⇒ inert). */
   private final com.navneet.executespec.engine.RepoOrientationService repoOrientationService;
 
-  /** Optional only for source-compatible unit construction; Spring always supplies it. */
   private com.navneet.executespec.router.TaskOutcomeMetricService taskOutcomeMetricService;
 
   /** Canonical admitted-baseline product-diff evidence; nullable only in legacy unit tests. */
@@ -743,7 +731,7 @@ to boot — skip it for those.""";
         // Re-asserting the interrupt flag with {@code Thread.currentThread()
         // .interrupt()} so any caller waiting on this thread (RunOrchestrator's
         // {@code activeRuns} future) still sees it as cancelled.
-        if (Thread.currentThread().isInterrupted()) {
+        if (cancellationRequested(runId)) {
           log.info(
               "SequentialExecutor cancel detected at task index {}/{}, breaking loop",
               i,
@@ -767,33 +755,58 @@ to boot — skip it for those.""";
         //   - resume it (snapshot present) → executeOne with snapshot
         //   - run fresh
         TaskOutcome outcome;
-        if (resume != null) {
-          ResumeAction action =
-              resolveResumeAction(runId, task.id(), resume, req.runContext().workspaceRoot());
-          switch (action.kind()) {
-            case SKIP_TERMINAL -> {
-              log.info(
-                  "Executor RESUME skip task={} status={} (already terminal pre-resume)",
-                  task.id(),
-                  action.persistedStatus());
-              outcome = synthesizeSkippedOutcome(task, action.persistedStatus());
+        try {
+          if (resume != null) {
+            ResumeAction action =
+                resolveResumeAction(runId, task.id(), resume, req.runContext().workspaceRoot());
+            switch (action.kind()) {
+              case SKIP_TERMINAL -> {
+                log.info(
+                    "Executor RESUME skip task={} status={} (already terminal pre-resume)",
+                    task.id(),
+                    action.persistedStatus());
+                outcome = synthesizeSkippedOutcome(task, action.persistedStatus());
+              }
+              case RESUME_FROM_SNAPSHOT -> {
+                log.info(
+                    "Executor RESUME task={} from snapshot iter={}",
+                    task.id(),
+                    action.snapshot() == null ? "n/a" : action.snapshot().iteration());
+                outcome = executeOne(task, plan, req, isFinalTask, action.snapshot(), runJournal);
+              }
+              case RUN_FRESH ->
+                  outcome = executeOne(task, plan, req, isFinalTask, null, runJournal);
+              default -> outcome = executeOne(task, plan, req, isFinalTask, null, runJournal);
             }
-            case RESUME_FROM_SNAPSHOT -> {
-              log.info(
-                  "Executor RESUME task={} from snapshot iter={}",
-                  task.id(),
-                  action.snapshot() == null ? "n/a" : action.snapshot().iteration());
-              outcome = executeOne(task, plan, req, isFinalTask, action.snapshot(), runJournal);
-            }
-            case RUN_FRESH -> outcome = executeOne(task, plan, req, isFinalTask, null, runJournal);
-            default -> outcome = executeOne(task, plan, req, isFinalTask, null, runJournal);
+          } else {
+            outcome = executeOne(task, plan, req, isFinalTask, null, runJournal);
           }
-        } else {
-          outcome = executeOne(task, plan, req, isFinalTask, null, runJournal);
-        }
 
-        if (resume == null) {
-          outcome = maybeActOnContinuation(task, plan, req, isFinalTask, outcome);
+          // A continuation action is another provider dispatch. Re-check the durable fence after
+          // the primary task and before the continuation policy can spend again.
+          throwIfCancellationRequested(runId, task.id());
+          if (resume == null) {
+            outcome = maybeActOnContinuation(task, plan, req, isFinalTask, outcome);
+          }
+        } catch (CancellationException cancelledTask) {
+          // A raw thread interrupt/provider unwind is not proof that the durable run was
+          // cancelled. Leave the task non-terminal so startup recovery can resume it. Only the
+          // explicit durable cancellation fence may terminalize/skip work here.
+          if (!(cancelledTask instanceof DurableRunCancellationException)) {
+            throw cancelledTask;
+          }
+          log.info(
+              "SequentialExecutor cancellation fenced task={} index={}/{}: {}",
+              task.id(),
+              i,
+              taskCount,
+              cancelledTask.getMessage());
+          persistTaskStatus(runId, task.id(), "PARTIAL", "Run cancelled before task completion");
+          broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "PARTIAL"));
+          cancelled = true;
+          appendSkippedGoalStopOutcomes(outcomes, plan, i);
+          Thread.currentThread().interrupt();
+          break;
         }
 
         recordTaskOutcomeMetric(req, task, outcome);
@@ -841,7 +854,7 @@ to boot — skip it for those.""";
       }
 
       ExecutionResult result =
-          summarize(
+          ExecutionResultSummarizer.summarize(
               outcomes, System.currentTimeMillis() - runStart, abortedByGoalDecision, cancelled);
       log.info(
           "SequentialExecutor DONE run={} overall={} success={}/{} warnings={} failed={}"
@@ -876,6 +889,35 @@ to boot — skip it for those.""";
     }
   }
 
+  /**
+   * Hard run-cancellation fence shared by task and worker-dispatch boundaries.
+   *
+   * <p>The worker's durable check uses a scalar database query, so this does not trust a possibly
+   * stale managed run entity. Once cancellation is observed, the interrupt is re-asserted and no
+   * later task/provider dispatch is authorised.
+   */
+  private boolean cancellationRequested(String runId) {
+    return RunCancellationFence.requested(worker, runId);
+  }
+
+  private void throwIfCancellationRequested(String runId, String taskId) {
+    RunCancellationFence.throwIfRequested(worker, runId, taskId);
+  }
+
+  private WorkerResult runWorkerWithCancellationFence(
+      String runId, String taskId, java.util.function.Supplier<WorkerResult> dispatch) {
+    throwIfCancellationRequested(runId, taskId);
+    WorkerResult result = dispatch.get();
+    // Never interpret an interrupted/cancelled response as soft completion, even when it contains
+    // successful file writes or the provider returned a nominal COMPLETED outcome.
+    WorkerInterruptionPolicy.throwIfInterruptedError(result, taskId);
+    if (Thread.currentThread().isInterrupted()) {
+      throw new DurableRunCancellationException("run interrupted during worker task: " + taskId);
+    }
+    throwIfCancellationRequested(runId, taskId);
+    return result;
+  }
+
   private void recordTaskOutcomeMetric(
       ExecutionRequest req, PlannedTask task, TaskOutcome outcome) {
     if (taskOutcomeMetricService == null || req == null || task == null || outcome == null) return;
@@ -888,7 +930,7 @@ to boot — skip it for those.""";
         (primary == null ? 0 : primary.iterations()) + (retry == null ? 0 : retry.iterations());
     taskOutcomeMetricService.record(
         runId,
-        taskCategory(task),
+        TaskCategoryClassifier.classify(task),
         task.complexity().name(),
         taskLanguage(task),
         outcome.retryAttempted() ? 2 : 1,
@@ -1593,16 +1635,8 @@ to boot — skip it for those.""";
             new AtomicInteger(req.initialModelStepDownsUsed()));
       }
     }
-    // RR-1563 (P1 spend guard) — the escalation counters live only in process memory and are seeded
-    // exclusively from ExecutionRequest.initial*Used, which the approval retry path supplies but
-    // the
-    // crash-recovery resume path does NOT. A run that already spent its one provider switch / model
-    // step-up, then crashed and was resumed, therefore got a fresh full escalation budget once per
-    // crash-resume cycle. Derive the ALREADY-CONSUMED counters from durable task state
-    // (agent_task.continuation_actions_json, V252) on every resume so a process restart cannot
-    // reset
-    // a spend ceiling. putIfAbsent keeps an explicit approval-path seed (already put above)
-    // winning.
+    // RR-1563 — crash recovery reconstructs consumed escalation counters from durable task action
+    // history. putIfAbsent preserves the explicit approval-path seed above.
     if (resume != null) {
       seedConsumedContinuationCountersFromDurableState(runId);
     }
@@ -1751,7 +1785,7 @@ to boot — skip it for those.""";
           List.of(),
           List.of("route pinned; initial routing kept the explicit provider/model"));
     }
-    String category = taskCategory(task);
+    String category = TaskCategoryClassifier.classify(task);
     try {
       return initialRoutingService.decide(
           currentProvider,
@@ -1929,8 +1963,9 @@ to boot — skip it for those.""";
             req.originalGoal());
     String userPrompt = composeUserPrompt(task, null, workerEvidence);
 
-    log.info("Executor task={} ('{}') START", task.id(), task.title());
     String runId = req.runContext().runId();
+    throwIfCancellationRequested(runId, task.id());
+    log.info("Executor task={} ('{}') START", task.id(), task.title());
     persistTaskStatus(runId, task.id(), "WORKING");
     broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "WORKING"));
     broadcaster.emit(runId, RunEvent.log(runId, task.id(), "Starting task: " + task.title()));
@@ -2017,7 +2052,8 @@ to boot — skip it for those.""";
     // Resume-aware dispatch — when resumeFrom is non-null, the worker rebuilds history from the
     // saved snapshot and resumes the iteration loop from snapshot.iteration() + 1. Snapshots
     // ride a 24h Redis TTL and are written every 5 worker iters.
-    WorkerResult primary = worker.run(workerReq, resumeFrom);
+    WorkerResult primary =
+        runWorkerWithCancellationFence(runId, task.id(), () -> worker.run(workerReq, resumeFrom));
 
     // 2026-05-04 — emit a worker-summary log line right after the worker returns so the user
     // sees outcome + iters without waiting for the smoke test to finish or scrolling back to
@@ -2032,7 +2068,7 @@ to boot — skip it for those.""";
           case BUDGET_EXCEEDED -> "💸";
           case ERROR -> "❌";
         };
-    int writes = countFileWrites(primary.toolCallLog());
+    int writes = WorkerToolLogEvidence.countFileWrites(primary.toolCallLog());
     broadcaster.emit(
         runId,
         RunEvent.log(
@@ -2061,7 +2097,7 @@ to boot — skip it for those.""";
         primary.outcome(),
         primary.iterations(),
         primary.toolCallsDispatched(),
-        countFileWrites(primary.toolCallLog()));
+        WorkerToolLogEvidence.countFileWrites(primary.toolCallLog()));
 
     WorkerInterruptionPolicy.throwIfInterruptedError(primary, task.id());
     // Worker didn't reach COMPLETED. Check whether it still wrote files — if so
@@ -2085,7 +2121,7 @@ to boot — skip it for those.""";
     final boolean softCompletion;
     final String softWarnReason;
     if (primary.outcome() != WorkerResult.Outcome.COMPLETED) {
-      int fileWrites = countFileWrites(primary.toolCallLog());
+      int fileWrites = WorkerToolLogEvidence.countFileWrites(primary.toolCallLog());
       if (fileWrites == 0) {
         log.warn(
             "Executor task={} WORKER_FAILED outcome={} iters={} (no file writes)",
@@ -2204,7 +2240,7 @@ to boot — skip it for those.""";
       broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "COMPLETE"));
       GoalTaskDecision goalDecision =
           emitGoalDecision(
-              runId, task, primary, status, null, softWarnReason, cfg.provider, cfg.model);
+              runId, task, primary, status, null, softWarnReason, cfg.provider, cfg.model, true);
       return TaskOutcome.builder()
           .taskId(task.id())
           .taskTitle(task.title())
@@ -2390,24 +2426,21 @@ to boot — skip it for those.""";
             "Executor task={} retry CONTEXT-RETAINED from snapshot (iter={})",
             task.id(),
             snapshot.get().iteration());
-        retry = worker.run(retryReq, snapshot.get());
+        retry =
+            runWorkerWithCancellationFence(
+                runId, task.id(), () -> worker.run(retryReq, snapshot.get()));
       } else {
         log.debug("Executor task={} retry context-retention flag ON but no snapshot", task.id());
-        retry = worker.run(retryReq);
+        retry = runWorkerWithCancellationFence(runId, task.id(), () -> worker.run(retryReq));
       }
     } else {
-      retry = worker.run(retryReq);
+      retry = runWorkerWithCancellationFence(runId, task.id(), () -> worker.run(retryReq));
     }
 
     int totalToolCalls = primary.toolCallsDispatched() + retry.toolCallsDispatched();
     if (retry.outcome() != WorkerResult.Outcome.COMPLETED) {
-      // RR-269 (P1 routing-policy bypass) — the legacy same-provider-retry-then-next-YAML-provider
-      // fallback lane was DELETED here (2026-07-22). It dispatched the next failover provider
-      // directly, consulting neither route pins, org key policy, provider availability, strict mode
-      // nor benchmark/confirmation policy, and its per-run ceiling was racy — so it could spend
-      // against an unavailable/disallowed provider or override an Enterprise pin. Every provider or
-      // model change now flows through the single continuation-policy / admission path
-      // (maybeActOnContinuation) with exact authority and atomic durable reservations.
+      // RR-269 — every route change must flow through maybeActOnContinuation; the deleted YAML
+      // fallback bypassed route pins, org policy, availability, confirmation, and spend fences.
       log.warn(
           "Executor task={} retry WORKER_FAILED outcome={}; marking COMPLETED_WITH_WARNING",
           task.id(),
@@ -2493,7 +2526,8 @@ to boot — skip it for those.""";
     // verify-only task contract, so the failure cannot be attributed. It terminalises as PARTIAL:
     // the run keeps its evidence and continues, but nothing is vouched for.
     int totalFileWrites =
-        countFileWrites(primary.toolCallLog()) + countFileWrites(retry.toolCallLog());
+        WorkerToolLogEvidence.countFileWrites(primary.toolCallLog())
+            + WorkerToolLogEvidence.countFileWrites(retry.toolCallLog());
     if (totalFileWrites == 0) {
       String zeroWriteReason =
           "Build smoke failed after retry (exit "
@@ -2545,36 +2579,37 @@ to boot — skip it for those.""";
           "Executor task={} HIGH-complexity, smoke still fails after retry-1; attempting retry-2",
           task.id());
       String retry2Prompt = composeUserPrompt(task, retrySmoke.output(), workerEvidence);
+      WorkerTaskRequest retry2Request =
+          WorkerTaskRequest.builder()
+              .provider(cfg.provider)
+              .model(cfg.model)
+              .systemPrompt(systemPrompt)
+              .userPrompt(retry2Prompt)
+              .context(taskCtx)
+              .maxIterations(
+                  req.maxIterationsPerTask() != null ? req.maxIterationsPerTask() : cfg.maxIter)
+              .temperature(0.0)
+              .maxTokensPerCall(cfg.maxTokens)
+              .stagnationWarnAfter(cfg.stagnationWarnAfter)
+              .stagnationForceAfter(cfg.stagnationForceAfter)
+              .wallClockSeconds(cfg.wallClockSeconds)
+              .requireBuildVerification(true)
+              .forceToolChoiceOnSalvage(cfg.forceToolChoiceOnSalvage)
+              .criticPass(
+                  featureFlagService != null
+                      && featureFlagService.isEnabled("worker.critic-pass.enabled"))
+              .verifyBeforeComplete(
+                  featureFlagService != null
+                      && featureFlagService.isEnabled("worker.verify-before-complete.enabled"))
+              .progressV2(
+                  featureFlagService != null
+                      && featureFlagService.isEnabled("worker.progress-v2.enabled"))
+              .autoVerify(
+                  featureFlagService != null
+                      && featureFlagService.isEnabled("worker.auto-verify.enabled"))
+              .build();
       WorkerResult retry2 =
-          worker.run(
-              WorkerTaskRequest.builder()
-                  .provider(cfg.provider)
-                  .model(cfg.model)
-                  .systemPrompt(systemPrompt)
-                  .userPrompt(retry2Prompt)
-                  .context(taskCtx)
-                  .maxIterations(
-                      req.maxIterationsPerTask() != null ? req.maxIterationsPerTask() : cfg.maxIter)
-                  .temperature(0.0)
-                  .maxTokensPerCall(cfg.maxTokens)
-                  .stagnationWarnAfter(cfg.stagnationWarnAfter)
-                  .stagnationForceAfter(cfg.stagnationForceAfter)
-                  .wallClockSeconds(cfg.wallClockSeconds)
-                  .requireBuildVerification(true)
-                  .forceToolChoiceOnSalvage(cfg.forceToolChoiceOnSalvage)
-                  .criticPass(
-                      featureFlagService != null
-                          && featureFlagService.isEnabled("worker.critic-pass.enabled"))
-                  .verifyBeforeComplete(
-                      featureFlagService != null
-                          && featureFlagService.isEnabled("worker.verify-before-complete.enabled"))
-                  .progressV2(
-                      featureFlagService != null
-                          && featureFlagService.isEnabled("worker.progress-v2.enabled"))
-                  .autoVerify(
-                      featureFlagService != null
-                          && featureFlagService.isEnabled("worker.auto-verify.enabled"))
-                  .build());
+          runWorkerWithCancellationFence(runId, task.id(), () -> worker.run(retry2Request));
       int totalToolCalls2 = totalToolCalls + retry2.toolCallsDispatched();
       if (retry2.outcome() == WorkerResult.Outcome.COMPLETED) {
         SmokeTestResult retry2Smoke = runSmokeTest(taskCtx, plan.buildCommand());
@@ -2679,9 +2714,38 @@ to boot — skip it for those.""";
       String failureReason,
       String dispatchedProvider,
       String dispatchedModel) {
+    return emitGoalDecision(
+        runId,
+        task,
+        workerResult,
+        finalStatus,
+        smokePassed,
+        failureReason,
+        dispatchedProvider,
+        dispatchedModel,
+        false);
+  }
+
+  private GoalTaskDecision emitGoalDecision(
+      String runId,
+      PlannedTask task,
+      WorkerResult workerResult,
+      TaskOutcome.Status finalStatus,
+      Boolean smokePassed,
+      String failureReason,
+      String dispatchedProvider,
+      String dispatchedModel,
+      boolean downstreamValidationDeferred) {
     GoalDonenessDecision decision =
         goalDonenessEvaluator.evaluate(
-            buildGoalEvidence(runId, task, workerResult, finalStatus, smokePassed, failureReason));
+            buildGoalEvidence(
+                runId,
+                task,
+                workerResult,
+                finalStatus,
+                smokePassed,
+                failureReason,
+                downstreamValidationDeferred));
     GoalContinuationPolicyDecision continuationDecision =
         decideContinuation(
             runId,
@@ -2871,7 +2935,7 @@ to boot — skip it for those.""";
       String provider,
       String model,
       boolean providerBehaviorPoor) {
-    String taskCategory = taskCategory(task);
+    String taskCategory = TaskCategoryClassifier.classify(task);
     double requiredQualityThreshold = requiredGoalQualityThreshold(taskCategory);
     boolean confirmationRequired = requireConfirmationBeforeExpensiveContinuation(runId);
     boolean benchmarkPriorRequired = requireBenchmarkPriorForAutomaticContinuation(runId);
@@ -2900,6 +2964,8 @@ to boot — skip it for those.""";
           goalContinuationAdvisor.advise(
               GoalContinuationAdvisorRequest.builder()
                   .goalDecision(decision)
+                  .runId(runId)
+                  .taskId(task.id())
                   .currentProvider(provider)
                   .currentModel(model)
                   .taskCategory(taskCategory)
@@ -3097,108 +3163,8 @@ to boot — skip it for those.""";
     }
   }
 
-  private static String taskCategory(PlannedTask task) {
-    if (task == null || task.complexity() == null) {
-      return "TASK_MEDIUM";
-    }
-    String text = normalizedTaskText(task);
-    if (containsAny(text, "swe-bench", "terminal-bench", "programbench", "benchmark")) {
-      return "BENCHMARK_PATCH";
-    }
-    if (touchesTestFiles(task)
-        || containsAny(
-            text,
-            "failing test",
-            "test failure",
-            "fix test",
-            "unit test",
-            "integration test",
-            "pytest",
-            "junit",
-            "jest")) {
-      return "TEST_FIX";
-    }
-    if (containsAny(
-        text,
-        "bug",
-        "fix",
-        "error",
-        "exception",
-        "failure",
-        "regression",
-        "broken",
-        "failing",
-        "crash")) {
-      return "BUG_FIX";
-    }
-    if (containsAny(
-        text, "refactor", "cleanup", "clean up", "rename", "extract", "restructure", "decompose")) {
-      return "REFACTOR";
-    }
-    if (containsAny(text, "terminal", "cli", "command-line", "command line", "shell", "script")) {
-      return "TERMINAL_TASK";
-    }
-    if (containsAny(
-        text, "read-only", "read only", "investigate", "analyze", "analyse", "explain")) {
-      return "READ_ONLY_HELP";
-    }
-    if (containsAny(text, "create", "implement", "build", "add", "new", "scaffold", "generate")) {
-      return "GREENFIELD_BUILD";
-    }
-    if (!taskValues(task.touchesFiles()).isEmpty()) {
-      return "PROJECT_PATCH";
-    }
-    return "TASK_" + task.complexity().name();
-  }
-
-  private static String normalizedTaskText(PlannedTask task) {
-    StringBuilder text = new StringBuilder();
-    appendTaskText(text, task.title());
-    appendTaskText(text, task.description());
-    taskValues(task.hardConstraints()).forEach(value -> appendTaskText(text, value));
-    taskValues(task.touchesFiles()).forEach(value -> appendTaskText(text, value));
-    return text.toString().toLowerCase(Locale.ROOT);
-  }
-
   private static List<String> taskValues(List<String> values) {
     return values == null ? List.of() : values;
-  }
-
-  private static void appendTaskText(StringBuilder text, String value) {
-    if (value != null && !value.isBlank()) {
-      text.append(' ').append(value);
-    }
-  }
-
-  private static boolean containsAny(String text, String... needles) {
-    if (text == null || text.isBlank()) {
-      return false;
-    }
-    for (String needle : needles) {
-      if (needle != null && !needle.isBlank() && text.contains(needle)) {
-        return true;
-      }
-    }
-    return false;
-  }
-
-  private static boolean touchesTestFiles(PlannedTask task) {
-    return taskValues(task.touchesFiles()).stream()
-        .map(value -> value == null ? "" : value.toLowerCase(Locale.ROOT))
-        .anyMatch(
-            path ->
-                path.contains("/test/")
-                    || path.contains("/tests/")
-                    || path.contains("__tests__")
-                    || path.endsWith("test.java")
-                    || path.endsWith("tests.java")
-                    || path.endsWith(".test.ts")
-                    || path.endsWith(".test.tsx")
-                    || path.endsWith(".spec.ts")
-                    || path.endsWith(".spec.tsx")
-                    || path.endsWith("_test.go")
-                    || path.startsWith("test_")
-                    || path.endsWith("_test.py"));
   }
 
   private static Map<String, Object> goalDecisionData(GoalDonenessDecision decision) {
@@ -3679,10 +3645,27 @@ to boot — skip it for those.""";
       TaskOutcome.Status finalStatus,
       Boolean smokePassed,
       String failureReason) {
-    int fileWrites = workerResult == null ? 0 : countFileWrites(workerResult.toolCallLog());
+    return buildGoalEvidence(
+        runId, task, workerResult, finalStatus, smokePassed, failureReason, false);
+  }
+
+  private GoalEvidence buildGoalEvidence(
+      String runId,
+      PlannedTask task,
+      WorkerResult workerResult,
+      TaskOutcome.Status finalStatus,
+      Boolean smokePassed,
+      String failureReason,
+      boolean downstreamValidationDeferred) {
+    int fileWrites =
+        workerResult == null
+            ? 0
+            : WorkerToolLogEvidence.countFileWrites(workerResult.toolCallLog());
     int meaningfulProductDiffs = meaningfulProductDiffCount(runId, workerResult, fileWrites);
-    RunCostTracker.Snapshot cost = costSnapshot(runId);
+    RunCostTracker.Snapshot cost = taskCostSnapshot(runId, task.id());
     int totalTokens = totalTrackedTokens(cost);
+    RunCostTracker.Snapshot runCost = costSnapshot(runId);
+    int runTotalTokens = totalTrackedTokens(runCost);
     long wallClockMs = workerResult == null ? 0L : workerResult.totalLatencyMs();
     boolean completeTaskClaimed =
         workerResult != null && workerResult.outcome() == WorkerResult.Outcome.COMPLETED;
@@ -3691,8 +3674,8 @@ to boot — skip it for those.""";
     boolean statusClean =
         finalStatus == TaskOutcome.Status.SUCCESS
             || finalStatus == TaskOutcome.Status.SUCCESS_AFTER_RETRY;
-    String category = taskCategory(task);
-    boolean meaningfulDiffRequired = requiresMeaningfulDiff(category);
+    String category = TaskCategoryClassifier.classify(task);
+    boolean meaningfulDiffRequired = TaskCategoryClassifier.requiresMeaningfulDiff(category, task);
     boolean requiredOutputsPresent =
         validationPassed && statusClean && (!meaningfulDiffRequired || meaningfulProductDiffs > 0);
     List<String> completed = new ArrayList<>();
@@ -3742,8 +3725,12 @@ to boot — skip it for those.""";
     if (smokePassed != null) {
       evidence.add("smokePassed=" + smokePassed);
     }
+    if (downstreamValidationDeferred) {
+      evidence.add("downstreamValidationDeferred=true");
+    }
 
-    String budgetCeilingReason = budgetCeilingReason(workerResult, cost, totalTokens, wallClockMs);
+    String budgetCeilingReason =
+        budgetCeilingReason(workerResult, runCost, runTotalTokens, wallClockMs);
     boolean budgetCeilingReached = budgetCeilingReason != null && !validationPassed;
     boolean blockedByEnvironment = blockedByEnvironment(workerResult, failureReason);
     boolean unsafeContinuation = unsafeContinuation(workerResult, failureReason);
@@ -3810,11 +3797,6 @@ to boot — skip it for those.""";
         .evidence(evidence)
         .risks(risksFor(workerResult, failureReason, budgetCeilingReason, completionConfidenceLow))
         .build();
-  }
-
-  static boolean requiresMeaningfulDiff(String category) {
-    if (category == null) return true;
-    return !"READ_ONLY_HELP".equals(category);
   }
 
   private int meaningfulProductDiffCount(
@@ -3999,6 +3981,23 @@ to boot — skip it for those.""";
     }
   }
 
+  private RunCostTracker.Snapshot taskCostSnapshot(String runId, String taskId) {
+    if (costTracker == null) {
+      return new RunCostTracker.Snapshot(0, 0, 0, 0, 0.0, 0);
+    }
+    try {
+      RunCostTracker.Snapshot snapshot = costTracker.snapshotTask(runId, taskId);
+      return snapshot == null ? new RunCostTracker.Snapshot(0, 0, 0, 0, 0.0, 0) : snapshot;
+    } catch (Exception ex) {
+      log.debug(
+          "goalEvidence: task cost snapshot failed for run={} task={}: {}",
+          runId,
+          taskId,
+          ex.getMessage());
+      return new RunCostTracker.Snapshot(0, 0, 0, 0, 0.0, 0);
+    }
+  }
+
   private String budgetCeilingReason(
       WorkerResult workerResult, RunCostTracker.Snapshot cost, int totalTokens, long wallClockMs) {
     if (workerStoppedOnCeiling(workerResult)) {
@@ -4028,28 +4027,7 @@ to boot — skip it for those.""";
     return null;
   }
 
-  /**
-   * RR-268 (P1 waste-guard accounting) — a canonical, provider-safe, NON-overlapping physical-token
-   * count for the {@code max-total-tokens} waste guard.
-   *
-   * <p>The previous sum added {@code reasoningTokens} and {@code cacheReadTokens} on top of
-   * input+output, but both are diagnostic SUBSETS for the providers that report them:
-   *
-   * <ul>
-   *   <li><b>reasoningTokens</b> — Gemini {@code thinking_tokens} is already folded into {@code
-   *       outputTokens} by {@code RunCostTracker}; OpenAI/DeepSeek {@code reasoning_tokens} is a
-   *       subset of completion. Adding it double-counts output.
-   *   <li><b>cacheReadTokens</b> — OpenAI/Gemini include cached tokens INSIDE prompt/input tokens
-   *       (a subset); adding it double-counts input. Anthropic reports it disjointly, so excluding
-   *       it slightly UNDER-counts a cache-heavy Anthropic run — the safe direction for a guard
-   *       that must not stop before the real ceiling.
-   * </ul>
-   *
-   * <p>{@code cacheWriteTokens} is Anthropic-only and genuinely disjoint from input/output (the
-   * first-time prompt tokens processed to populate the cache), and is zero for every other
-   * provider, so it is summed. Never sum a subset dimension into a physical total without set
-   * normalisation.
-   */
+  /** RR-268 — physical total excludes cache-read/reasoning subsets; cache-write is disjoint. */
   private static int totalTrackedTokens(RunCostTracker.Snapshot cost) {
     if (cost == null) {
       return 0;
@@ -4770,10 +4748,11 @@ to boot — skip it for those.""";
       // tests in-loop. BUILD's tests-are-mandatory directive WRITES tests; this verifies they PASS.
       // Language-neutral (TestCommandResolver → pytest / jest|vitest / go test / mvn|gradle /
       // cargo).
-      // Flag-gated + fail-safe: no runner / empty summary → skip (today's compile-only behavior). A
-      // real test failure flips this gate to FAILED, transparently reusing the existing build-fail
-      // retry path (which re-invokes the worker with this failure text injected).
-      if (passed && featureFlagService.isEnabled("build.test-exec-gate.enabled")) {
+      // No runner / empty summary remains fail-safe. A concrete red suite is authoritative.
+      if (passed
+          && WorkerTestGatePolicy.shouldRunTests(
+              featureFlagService.isEnabled("build.test-exec-gate.enabled"),
+              featureFlagService.isEnabled("worker.auto-verify.enabled"))) {
         try {
           java.util.Optional<com.navneet.executespec.testgen.model.TestExecutionSummary> ts =
               inLoopTestRunner.runTests(ctx.runId(), ctx.workspaceRoot());
@@ -4808,69 +4787,5 @@ to boot — skip it for those.""";
     metrics.recordSmokeTest("fail");
     String msg = result instanceof ToolResult.Err err ? err.message() : "(unknown tool err)";
     return new SmokeTestResult(false, -1, "tool error: " + msg, elapsed);
-  }
-
-  private record SmokeTestResult(boolean passed, int exitCode, String output, long latencyMs) {}
-
-  private ExecutionResult summarize(
-      List<TaskOutcome> outcomes,
-      long totalLatency,
-      boolean abortedByGoalDecision,
-      boolean cancelled) {
-    int succ = 0, warn = 0, fail = 0, skip = 0;
-    for (var o : outcomes) {
-      switch (o.status()) {
-        case SUCCESS, SUCCESS_AFTER_RETRY -> succ++;
-        case COMPLETED_WITH_WARNING -> warn++;
-        case WORKER_FAILED -> fail++;
-        case SKIPPED -> skip++;
-      }
-    }
-    ExecutionResult.Overall overall;
-    // RR-271 — cancellation is a terminal ABORTED, never ALL_SUCCESS, even when every executed task
-    // was clean. Reviewer/publication must not proceed on a cancelled run's "success".
-    if (cancelled || abortedByGoalDecision) overall = ExecutionResult.Overall.ABORTED;
-    else if (fail > 0) overall = ExecutionResult.Overall.FAILED;
-    else if (warn > 0) overall = ExecutionResult.Overall.PARTIAL_WITH_WARNINGS;
-    else overall = ExecutionResult.Overall.ALL_SUCCESS;
-
-    // v2.5.10 — separate "final task status" from "any intermediate warning"
-    // so RunOrchestrator can distinguish CLEAN_COMPLETION from
-    // CLEAN_WITH_INTERMEDIATE_WARNINGS when the final task is clean but
-    // an earlier task flickered.
-    TaskOutcome lastNonSkipped = null;
-    for (int i = outcomes.size() - 1; i >= 0; i--) {
-      if (outcomes.get(i).status() != TaskOutcome.Status.SKIPPED) {
-        lastNonSkipped = outcomes.get(i);
-        break;
-      }
-    }
-    boolean anyIntermediateWarning = false;
-    if (lastNonSkipped != null) {
-      for (TaskOutcome o : outcomes) {
-        if (o == lastNonSkipped) continue;
-        if (o.status() == TaskOutcome.Status.COMPLETED_WITH_WARNING) {
-          anyIntermediateWarning = true;
-          break;
-        }
-      }
-    }
-
-    return ExecutionResult.builder()
-        .overall(overall)
-        .tasksExecuted(outcomes.size() - skip)
-        .tasksSuccessful(succ)
-        .tasksWithWarning(warn)
-        .tasksFailed(fail)
-        .tasksSkipped(skip)
-        .perTask(outcomes)
-        .totalLatencyMs(totalLatency)
-        .finalTaskStatus(lastNonSkipped != null ? lastNonSkipped.status() : null)
-        .anyIntermediateWarning(anyIntermediateWarning)
-        .build();
-  }
-
-  private static int countFileWrites(java.util.List<String> toolLog) {
-    return WorkerToolLogEvidence.countFileWrites(toolLog);
   }
 }

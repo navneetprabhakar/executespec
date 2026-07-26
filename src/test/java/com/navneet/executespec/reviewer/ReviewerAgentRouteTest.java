@@ -23,7 +23,7 @@ class ReviewerAgentRouteTest {
     WorkerAgent worker = mock(WorkerAgent.class);
     when(worker.run(any()))
         .thenReturn(WorkerResult.builder().outcome(WorkerResult.Outcome.COMPLETED).build());
-    ReviewerAgent agent = new ReviewerAgent(worker, null, null, null, null, null, null);
+    ReviewerAgent agent = new ReviewerAgent(worker, null, null, null, null, null, null, null);
     ReviewerRequest request =
         ReviewerRequest.builder()
             .provider("openrouter")

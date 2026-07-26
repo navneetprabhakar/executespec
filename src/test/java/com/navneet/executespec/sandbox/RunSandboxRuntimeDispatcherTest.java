@@ -77,10 +77,9 @@ class RunSandboxRuntimeDispatcherTest {
     // This is the rollback contract: disabling execution must not strand a live sandbox.
     RunSandbox sandbox = sandbox(SandboxState.READY);
     RunSandbox.Lease lease = lease(sandbox);
-    RunSandbox releasing = sandbox(SandboxState.RELEASING);
-    when(store.beginRelease(lease)).thenReturn(releasing);
-    when(store.finishRelease(lease, SandboxState.CANCELLED))
-        .thenReturn(sandbox(SandboxState.CANCELLED));
+    RunSandbox releasing = sandbox(SandboxState.RELEASING, SandboxState.CANCELLED, null);
+    when(store.beginRelease(lease, SandboxState.CANCELLED, null, null)).thenReturn(releasing);
+    when(store.completeRelease(lease)).thenReturn(sandbox(SandboxState.CANCELLED));
 
     assertThat(dispatcher.dispatchEnabled()).isFalse();
     assertThat(dispatcher.release(sandbox, lease, SandboxState.CANCELLED).state())
@@ -89,16 +88,35 @@ class RunSandboxRuntimeDispatcherTest {
   }
 
   @Test
-  void aTeardownFailureIsRecordedAsFailedBecauseTheContainerMayStillBeLive() {
+  void aTeardownFailureStaysReleasingAndIsImmediatelyRetryable() {
     RunSandbox sandbox = sandbox(SandboxState.READY);
     RunSandbox.Lease lease = lease(sandbox);
-    when(store.beginRelease(lease)).thenReturn(sandbox(SandboxState.RELEASING));
+    when(store.beginRelease(lease, SandboxState.TERMINATED, null, null))
+        .thenReturn(sandbox(SandboxState.RELEASING, SandboxState.TERMINATED, null));
     strict.destroyFailure = new IllegalStateException("container still running");
 
     assertThatThrownBy(() -> dispatcher.release(sandbox, lease, SandboxState.TERMINATED))
         .isInstanceOf(IllegalStateException.class);
-    verify(store).fail(eq(lease), eq("TEARDOWN_FAILED"), anyString());
-    verify(store, never()).finishRelease(any(), any());
+    verify(store).recordCleanupFailure(lease, "container still running");
+    verify(store, never()).completeRelease(any());
+  }
+
+  @Test
+  void commandTimeoutDestroysRuntimeBeforeRecordingTheFailure() {
+    RunSandbox sandbox = sandbox(SandboxState.READY);
+    RunSandbox.Lease lease = lease(sandbox);
+    RunSandbox releasing = sandbox(SandboxState.RELEASING, SandboxState.FAILED, "COMMAND_TIMEOUT");
+    when(store.beginRelease(
+            lease, SandboxState.FAILED, "COMMAND_TIMEOUT", "sandbox command exceeded PT1M"))
+        .thenReturn(releasing);
+    when(store.completeRelease(lease)).thenReturn(sandbox(SandboxState.FAILED));
+
+    assertThat(
+            dispatcher.failAndRelease(
+                sandbox, lease, "COMMAND_TIMEOUT", "sandbox command exceeded PT1M"))
+        .extracting(RunSandbox::state)
+        .isEqualTo(SandboxState.FAILED);
+    assertThat(strict.destroyed).containsExactly(releasing.id());
   }
 
   @Test
@@ -158,11 +176,31 @@ class RunSandboxRuntimeDispatcherTest {
     RunSandbox.Lease lease = lease(sandbox);
     strict.provisionFailure = new IllegalStateException("container did not start");
     when(store.holdsLiveLease(lease)).thenReturn(true);
+    when(store.beginRelease(lease, SandboxState.FAILED, "RUNTIME_ERROR", "container did not start"))
+        .thenReturn(sandbox(SandboxState.RELEASING, SandboxState.FAILED, "RUNTIME_ERROR"));
 
     assertThatThrownBy(() -> dispatcher.provision(sandbox, lease, spec()))
         .isInstanceOf(IllegalStateException.class);
     assertThat(strict.destroyed).containsExactly(sandbox.id());
-    verify(store).fail(eq(lease), eq("RUNTIME_ERROR"), anyString());
+    verify(store).completeRelease(lease);
+  }
+
+  @Test
+  void aProvisionCleanupFailurePersistsRetryableIntentInsteadOfTerminalFailure() {
+    when(flags.isEnabled(RunSandboxRuntimeDispatcher.FLAG_DISPATCH)).thenReturn(true);
+    RunSandbox sandbox = sandbox(SandboxState.PROVISIONING);
+    RunSandbox.Lease lease = lease(sandbox);
+    strict.provisionFailure = new IllegalStateException("container did not start");
+    strict.destroyFailure = new IllegalStateException("daemon unavailable");
+    when(store.holdsLiveLease(lease)).thenReturn(true);
+    when(store.beginRelease(lease, SandboxState.FAILED, "RUNTIME_ERROR", "container did not start"))
+        .thenReturn(sandbox(SandboxState.RELEASING, SandboxState.FAILED, "RUNTIME_ERROR"));
+
+    assertThatThrownBy(() -> dispatcher.provision(sandbox, lease, spec()))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessage("container did not start");
+    verify(store).recordCleanupFailure(lease, "daemon unavailable");
+    verify(store, never()).completeRelease(any());
   }
 
   @Test
@@ -180,15 +218,64 @@ class RunSandboxRuntimeDispatcherTest {
     RunSandbox.Lease lease = lease(orphan);
     when(store.tryAcquire(eq(orphan.id()), anyString(), any())).thenReturn(Optional.of(lease));
     when(store.get(orphan.id())).thenReturn(Optional.of(orphan));
-    when(store.beginRelease(lease)).thenReturn(sandbox(SandboxState.RELEASING));
-    when(store.finishRelease(lease, SandboxState.CANCELLED))
-        .thenReturn(sandbox(SandboxState.CANCELLED));
+    when(store.beginRelease(lease, SandboxState.CANCELLED, null, null))
+        .thenReturn(sandbox(SandboxState.RELEASING, SandboxState.CANCELLED, null));
+    when(store.completeRelease(lease)).thenReturn(sandbox(SandboxState.CANCELLED));
 
     assertThat(dispatcher.reconcileOrphan(orphan, "jvm-b", Duration.ofMinutes(1)))
         .get()
         .extracting(RunSandbox::state)
         .isEqualTo(SandboxState.CANCELLED);
     assertThat(strict.destroyed).containsExactly(orphan.id());
+  }
+
+  @Test
+  void expiryClaimsAndDestroysTheRuntimeBeforeRecordingExpired() {
+    RunSandbox expired = sandbox(SandboxState.READY);
+    RunSandbox.Lease lease = lease(expired);
+    when(store.tryAcquire(eq(expired.id()), anyString(), any())).thenReturn(Optional.of(lease));
+    when(store.get(expired.id())).thenReturn(Optional.of(expired));
+    when(store.beginRelease(lease, SandboxState.EXPIRED, null, null))
+        .thenReturn(sandbox(SandboxState.RELEASING, SandboxState.EXPIRED, null));
+    when(store.completeRelease(lease)).thenReturn(sandbox(SandboxState.EXPIRED));
+
+    assertThat(dispatcher.reconcileExpired(expired, "expiry-owner", Duration.ofMinutes(1)))
+        .get()
+        .extracting(RunSandbox::state)
+        .isEqualTo(SandboxState.EXPIRED);
+    assertThat(strict.destroyed).containsExactly(expired.id());
+  }
+
+  @Test
+  void retryOfAReleasingSandboxPreservesItsOriginalTerminalIntent() {
+    RunSandbox retry = sandbox(SandboxState.RELEASING, SandboxState.TERMINATED, null);
+    RunSandbox.Lease lease = lease(retry);
+    when(store.tryAcquire(eq(retry.id()), anyString(), any())).thenReturn(Optional.of(lease));
+    when(store.get(retry.id())).thenReturn(Optional.of(retry));
+    when(store.completeRelease(lease)).thenReturn(sandbox(SandboxState.TERMINATED));
+
+    assertThat(dispatcher.reconcileOrphan(retry, "retry-owner", Duration.ofMinutes(1)))
+        .get()
+        .extracting(RunSandbox::state)
+        .isEqualTo(SandboxState.TERMINATED);
+    verify(store, never()).beginRelease(any(), any(), any(), any());
+    verify(store).completeRelease(lease);
+  }
+
+  @Test
+  void failedRetryRemainsReleasingForTheNextFencedOwner() {
+    RunSandbox retry = sandbox(SandboxState.RELEASING, SandboxState.TERMINATED, null);
+    RunSandbox.Lease lease = lease(retry);
+    strict.destroyFailure = new IllegalStateException("daemon unavailable");
+    when(store.tryAcquire(eq(retry.id()), anyString(), any())).thenReturn(Optional.of(lease));
+    when(store.get(retry.id())).thenReturn(Optional.of(retry));
+    when(store.recordCleanupFailure(lease, "daemon unavailable")).thenReturn(retry);
+
+    assertThat(dispatcher.reconcileOrphan(retry, "retry-owner", Duration.ofMinutes(1)))
+        .get()
+        .extracting(RunSandbox::state)
+        .isEqualTo(SandboxState.RELEASING);
+    verify(store, never()).completeRelease(any());
   }
 
   private static final UUID ID = UUID.randomUUID();
@@ -202,6 +289,23 @@ class RunSandboxRuntimeDispatcherTest {
   }
 
   private static RunSandbox sandbox(SandboxState state, String configDigest) {
+    return sandbox(
+        state,
+        configDigest,
+        state == SandboxState.RELEASING ? SandboxState.TERMINATED : null,
+        null);
+  }
+
+  private static RunSandbox sandbox(
+      SandboxState state, SandboxState cleanupTarget, String cleanupFailureClass) {
+    return sandbox(state, spec().configDigest(), cleanupTarget, cleanupFailureClass);
+  }
+
+  private static RunSandbox sandbox(
+      SandboxState state,
+      String configDigest,
+      SandboxState cleanupTarget,
+      String cleanupFailureClass) {
     return new RunSandbox(
         ID,
         "run-1",
@@ -226,6 +330,11 @@ class RunSandboxRuntimeDispatcherTest {
         SandboxSecretPolicy.NO_HOST_SECRETS,
         Instant.now().plusSeconds(3600),
         null,
+        null,
+        cleanupTarget,
+        cleanupFailureClass,
+        null,
+        0,
         null,
         SandboxRetentionState.RETAINED,
         null,

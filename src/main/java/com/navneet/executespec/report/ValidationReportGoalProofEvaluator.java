@@ -71,7 +71,8 @@ public class ValidationReportGoalProofEvaluator {
     for (VerificationEvidenceDTO row : safeLedger) {
       if (row == null) continue;
       evidence.add(evidenceLine(row));
-      if ("PASS".equalsIgnoreCase(row.status())) {
+      if ("PASS".equalsIgnoreCase(row.status())
+          && (!"tests".equals(row.id()) || trustedTestProof(row))) {
         completed.add(label(row) + " passed");
       }
     }
@@ -94,8 +95,12 @@ public class ValidationReportGoalProofEvaluator {
     for (String id : REQUIRED_HARD_PASS_IDS) {
       VerificationEvidenceDTO row = byId.get(id);
       String status = status(row);
-      if ("PASS".equals(status)) {
+      boolean trustedTestProof = !"tests".equals(id) || trustedTestProof(row);
+      if ("PASS".equals(status) && trustedTestProof) {
         continue;
+      }
+      if ("tests".equals(id) && "PASS".equals(status) && !trustedTestProof) {
+        status = "UNKNOWN";
       }
       if ("FAIL".equals(status)) {
         hasFailure = true;
@@ -202,9 +207,49 @@ public class ValidationReportGoalProofEvaluator {
         false);
   }
 
+  /**
+   * Lifecycle-aware projection for persisted run/report APIs. A report generated before or during a
+   * terminal cancellation/failure can retain useful evidence, but it cannot certify the run DONE.
+   */
+  public GoalDonenessDecision evaluateForRun(
+      String runId,
+      String goalSummary,
+      String runStatus,
+      PipelineResult pipelineResult,
+      List<VerificationEvidenceDTO> ledger) {
+    String normalized = runStatus == null ? "" : runStatus.toUpperCase();
+    if ("CANCELLED".equals(normalized)
+        || "FAILED".equals(normalized)
+        || "PARTIAL".equals(normalized)) {
+      return decision(
+          GoalDonenessState.FAILED,
+          RunContinuationDecision.STOP_FAILED,
+          "run lifecycle is " + normalized + "; validation evidence cannot certify completion",
+          goal(runId, goalSummary),
+          List.of(),
+          List.of("run lifecycle is " + normalized.toLowerCase()),
+          ledger == null
+              ? List.of()
+              : ledger.stream()
+                  .filter(java.util.Objects::nonNull)
+                  .map(ValidationReportGoalProofEvaluator::evidenceLine)
+                  .toList(),
+          List.of("terminal run lifecycle contradicts completed-goal proof"),
+          false,
+          false);
+    }
+    return evaluate(runId, goalSummary, pipelineResult, ledger);
+  }
+
   private static boolean reviewerQualityFailed(VerificationEvidenceDTO reviewer) {
     String status = status(reviewer);
     return "WARN".equals(status) || "FAIL".equals(status);
+  }
+
+  private static boolean trustedTestProof(VerificationEvidenceDTO tests) {
+    return tests != null
+        && "DETERMINISTIC_FUNCTIONAL".equalsIgnoreCase(tests.source())
+        && "HIGH".equalsIgnoreCase(tests.confidence());
   }
 
   private static List<String> incompleteWith(List<String> incomplete, String item) {

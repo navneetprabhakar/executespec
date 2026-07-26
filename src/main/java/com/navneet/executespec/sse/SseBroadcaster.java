@@ -11,6 +11,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import jakarta.annotation.PostConstruct;
+import jakarta.annotation.PreDestroy;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -19,6 +20,8 @@ import com.navneet.executespec.benchmark.BenchmarkTrajectoryStore;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.context.event.ContextClosedEvent;
+import org.springframework.context.event.EventListener;
 import org.springframework.data.redis.connection.Message;
 import org.springframework.data.redis.connection.MessageListener;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -143,6 +146,29 @@ public class SseBroadcaster {
     listenerContainer.addMessageListener(
         new SseRedisListener(), new PatternTopic(CHANNEL_PREFIX + "*"));
     log.info("[SseBroadcaster] Subscribed to Redis pattern sse:* (instanceId={})", INSTANCE_ID);
+  }
+
+  /**
+   * Complete every open async response before Tomcat begins graceful shutdown.
+   *
+   * <p>Run-detail pages intentionally keep their SSE connection open while a run is waiting at the
+   * plan gate. Without an explicit lifecycle close, one such idle browser tab keeps Tomcat's active
+   * request count non-zero for the full graceful-shutdown timeout.
+   */
+  @PreDestroy
+  @EventListener(ContextClosedEvent.class)
+  void shutdown() {
+    List<SseEmitter> open = emitters.values().stream().flatMap(List::stream).distinct().toList();
+    emitters.clear();
+    totalEmitterCount.set(0);
+    open.forEach(SseBroadcaster::completeQuietly);
+    if (!open.isEmpty()) {
+      log.info("[SseBroadcaster] Completed {} emitter(s) for shutdown", open.size());
+    }
+  }
+
+  int activeEmitterCount() {
+    return totalEmitterCount.get();
   }
 
   /**

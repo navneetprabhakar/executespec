@@ -88,8 +88,35 @@ public final class BoundedProcess {
   }
 
   private static void destroyTree(Process process) {
-    process.descendants().forEach(ProcessHandle::destroyForcibly);
+    // Kill the process we own before attempting process-tree discovery. On restricted macOS hosts
+    // ProcessHandle.descendants() can block in sysmon/sysctl rather than promptly throwing; when
+    // enumeration ran first, a timed-out pytest child stayed alive indefinitely and pinned the
+    // worker beyond its advertised 300-second shell cap.
     process.destroyForcibly();
+
+    Thread descendantCleanup =
+        Thread.ofVirtual()
+            .name("bounded-process-descendant-cleanup")
+            .start(
+                () -> {
+                  try {
+                    process.descendants().forEach(ProcessHandle::destroyForcibly);
+                  } catch (RuntimeException e) {
+                    log.debug(
+                        "[BoundedProcess] Could not enumerate child process tree: {}",
+                        e.getMessage());
+                  }
+                });
+    try {
+      descendantCleanup.join(Duration.ofSeconds(2));
+      if (descendantCleanup.isAlive()) {
+        descendantCleanup.interrupt();
+        log.debug("[BoundedProcess] Descendant cleanup exceeded its 2s best-effort bound");
+      }
+    } catch (InterruptedException ie) {
+      Thread.currentThread().interrupt();
+      descendantCleanup.interrupt();
+    }
   }
 
   /**

@@ -66,7 +66,11 @@ class SandboxRunWorkspaceProvisionTest {
     runWorkspace =
         Files.createDirectories(agentWorkspaceRoot.toAbsolutePath().normalize().resolve(RUN_ID));
 
-    runtime = new ScriptedContainerRuntime(new SandboxProperties(), flags, agentWorkspaceRoot);
+    SandboxProperties properties = new SandboxProperties();
+    Map<String, Object> ownership = Files.readAttributes(runWorkspace, "unix:uid,gid");
+    properties.setRuntimeUid(((Number) ownership.get("uid")).intValue());
+    properties.setRuntimeGid(((Number) ownership.get("gid")).intValue());
+    runtime = new ScriptedContainerRuntime(properties, flags, agentWorkspaceRoot);
     dispatcher =
         new RunSandboxRuntimeDispatcher(
             store, flags, List.of(new NotEnabledSandboxRuntime(), runtime));
@@ -160,6 +164,11 @@ class SandboxRunWorkspaceProvisionTest {
         SandboxSecretPolicy.NO_HOST_SECRETS,
         Instant.now().plusSeconds(3600),
         null,
+        null,
+        null,
+        null,
+        null,
+        0,
         null,
         SandboxRetentionState.RETAINED,
         null,

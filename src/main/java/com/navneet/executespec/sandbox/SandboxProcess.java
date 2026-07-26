@@ -111,7 +111,14 @@ final class SandboxProcess {
    * children away, after which {@code descendants()} no longer finds them and they survive.
    */
   private static void destroyTree(Process process) {
-    process.descendants().toList().forEach(ProcessHandle::destroyForcibly);
+    try {
+      process.descendants().toList().forEach(ProcessHandle::destroyForcibly);
+    } catch (RuntimeException denied) {
+      // Some hardened macOS/container profiles deny the sysctl/procfs read used by
+      // ProcessHandle.descendants(). Cleanup must still terminate the process we own and must
+      // never let that platform restriction mask the original timeout result.
+      log.debug("sandbox descendant discovery unavailable: {}", denied.toString());
+    }
     process.destroyForcibly();
   }
 

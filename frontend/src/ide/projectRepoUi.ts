@@ -1,3 +1,5 @@
+import type {ProjectCodeIndexRefreshAccepted} from '@/types/project';
+
 export type RepoBadge = {kind: 'ok' | 'warn' | 'bad'; label: string};
 const BITBUCKET_READ_CAPABILITIES = new Set([
   'CATALOG',
@@ -69,4 +71,25 @@ export function sourceReadinessBadge(
     return {kind: 'bad', label: `source blocked · ${reason || 'check access'}`};
   }
   return {kind: 'warn', label: 'source not verified'};
+}
+
+/**
+ * Translate the refresh admission result without confusing HTTP 202 with provider work actually
+ * being queued. Exact backend reason codes remain visible because they are the actionable routing
+ * evidence (for example, an embedding provider is unavailable for the selected project route).
+ */
+export function codeIndexRefreshNotice(result: ProjectCodeIndexRefreshAccepted): string {
+  const reason = result.reason ? ` · ${result.reason}` : '';
+  switch (result.status) {
+    case 'READY':
+      return 'Semantic index is already ready.';
+    case 'PARTIAL':
+      return `Semantic index remains partial${reason}. Ripgrep search remains available.`;
+    case 'UNAVAILABLE':
+      return `Semantic indexing unavailable${reason}. Ripgrep search remains available.`;
+    case 'QUEUED':
+      return `Semantic indexing queued${reason}. Ripgrep search remains available.`;
+    default:
+      return `Semantic indexing status unavailable${reason}. Ripgrep search remains available.`;
+  }
 }

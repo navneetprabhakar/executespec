@@ -533,6 +533,51 @@ class ManagedAiUsageServiceTest {
   }
 
   @Test
+  void approvalRefusesPlanWhoseHighEstimateExceedsRemainingCredits() {
+    ManagedAiUsagePeriod period = period();
+    period.setAiCreditsUsed(1950);
+    period.setReservedAiCredits(1951);
+    stubCurrentPeriod(period);
+
+    org.assertj.core.api.Assertions.assertThatThrownBy(
+            () -> service.assertCanApproveEstimatedSpend(userDetails(), false, 1.0))
+        .isInstanceOf(ResponseStatusException.class)
+        .hasMessageContaining("estimated to require up to 100 AI credits")
+        .hasMessageContaining("only 49 remain");
+  }
+
+  @Test
+  void approvalAllowsEstimateThatFitsRemainingCreditsAndRawBudget() {
+    ManagedAiUsagePeriod period = period();
+    period.setAiCreditsUsed(1000);
+    period.setReservedAiCredits(1001);
+    period.setRawCogsUsedUsd(2.0);
+    stubCurrentPeriod(period);
+
+    service.assertCanApproveEstimatedSpend(userDetails(), false, 1.0);
+  }
+
+  @Test
+  void approvalRefusesPlanWhoseEstimateExceedsRemainingRawBudget() {
+    ManagedAiUsagePeriod period = period();
+    period.setAiCreditsUsed(100);
+    period.setReservedAiCredits(101);
+    period.setRawCogsUsedUsd(15.5);
+    stubCurrentPeriod(period);
+
+    org.assertj.core.api.Assertions.assertThatThrownBy(
+            () -> service.assertCanApproveEstimatedSpend(userDetails(), false, 1.0))
+        .isInstanceOf(ResponseStatusException.class)
+        .hasMessageContaining("remaining managed-AI provider budget");
+  }
+
+  @Test
+  void approvalEstimateGateBypassesOwnKeys() {
+    service.assertCanApproveEstimatedSpend(userDetails(), true, 100.0);
+    verify(periodRepo, never()).findCurrentForUpdate(anyString(), any());
+  }
+
+  @Test
   void creditSummaryReportsManagedBalanceForManagedTier() {
     ManagedAiUsagePeriod period = period();
     period.setAiCreditsUsed(500);

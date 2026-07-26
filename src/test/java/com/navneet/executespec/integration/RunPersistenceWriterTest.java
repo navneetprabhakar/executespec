@@ -13,6 +13,7 @@ import java.util.Optional;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.billing.cost.RunCostLogRepository;
+import com.navneet.executespec.cost.RunCostTracker;
 import com.navneet.executespec.harness.ExecutionResult;
 import com.navneet.executespec.harness.TaskOutcome;
 import com.navneet.executespec.sse.RunEvent;
@@ -68,6 +69,17 @@ class RunPersistenceWriterTest {
     assertThat(run.getStatus()).isEqualTo("REVIEWING");
     verify(runRepo).save(run);
     verify(broadcaster).emit(eq("run-3"), any(RunEvent.class));
+  }
+
+  @Test
+  void usageFloorUsesAtomicNarrowUpdate() {
+    RunCostTracker.Snapshot cost =
+        new RunCostTracker.Snapshot(409_127, 14_706, 0, 372_736, 0.010256, 27);
+
+    writer.raiseUsageFloor("run-cost", cost);
+
+    verify(runRepo).raiseUsageTotalsToAtLeast("run-cost", 409_127, 14_706, 0.010256);
+    verify(runRepo, never()).save(any());
   }
 
   @Test

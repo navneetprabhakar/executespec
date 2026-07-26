@@ -19,6 +19,7 @@ export type SpecHandoffSource =
   | 'onboarding-sample'
   | 'signup-picker'
   | 'project-chat-compile'
+  | 'plan-revision'
   | 'legacy';
 
 export type SpecHandoff = {
@@ -141,6 +142,7 @@ const SPEC_HANDOFF_SOURCES: readonly SpecHandoffSource[] = [
   'onboarding-sample',
   'signup-picker',
   'project-chat-compile',
+  'plan-revision',
   'legacy',
 ];
 

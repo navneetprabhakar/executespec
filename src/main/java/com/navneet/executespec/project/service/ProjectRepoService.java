@@ -66,6 +66,8 @@ public class ProjectRepoService {
   /** M-039 (Wave 3) — repo allowlist enforcement. */
   private final com.navneet.executespec.governance.GovernanceGuard governanceGuard;
 
+  private final ProjectSourceFreshnessInvalidator sourceFreshnessInvalidator;
+
   /**
    * E1.5 — fires bootstrap PR async after a successful link. Lazy to keep service start-up cheap
    * when the bootstrap pipeline isn't on the critical path (e.g. tests, admin tooling, migrations).
@@ -285,6 +287,7 @@ public class ProjectRepoService {
     // repoRepo.save is itself transactional (Spring Data wraps each call) — a short write tx, not
     // one held across the network probes above. Architecture regen is now an explicit action.
     ProjectRepo saved = repoRepo.save(repo);
+    sourceFreshnessInvalidator.invalidateRepo(repoId);
     return ProjectRepoDto.from(saved);
   }
 
@@ -415,6 +418,7 @@ public class ProjectRepoService {
             .linkedBy(callerUserId)
             .build();
     linkRepo.save(link);
+    dispatchAfterCommit(() -> sourceFreshnessInvalidator.invalidateLink(projectId, repoId));
 
     log.info("Linked repo {} ({}) to project {}", repoId, repo.getGithubRepoFullName(), projectId);
 
@@ -485,6 +489,7 @@ public class ProjectRepoService {
         .findByProjectIdAndRepoId(projectId, repoId)
         .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Link not found"));
     linkRepo.deleteByProjectIdAndRepoId(projectId, repoId);
+    dispatchAfterCommit(() -> sourceFreshnessInvalidator.invalidateLink(projectId, repoId));
     log.info("Unlinked repo {} from project {}", repoId, projectId);
   }
 
@@ -776,6 +781,7 @@ public class ProjectRepoService {
             .repoId(entity.getId())
             .linkedBy(callerUserId)
             .build());
+    dispatchAfterCommit(() -> sourceFreshnessInvalidator.invalidateLink(projectId, entity.getId()));
     log.info(
         "Created+linked new repo {} ({}) for project {} [webhook={}]",
         entity.getId(),

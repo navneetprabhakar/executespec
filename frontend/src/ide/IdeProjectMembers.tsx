@@ -47,7 +47,6 @@ export function IdeProjectMembers() {
   const orgState = useAsyncData(() => api.getMyOrg(), [projectId], !!projectId);
 
   const members = membersState.data;
-  const setMembers = membersState.setData;
   const invites = invitesState.data;
   const setInvites = invitesState.setData;
   const shareLinks = shareLinksState.data;

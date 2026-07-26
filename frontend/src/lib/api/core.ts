@@ -309,6 +309,8 @@ export interface RunDetail extends RunSummary {
   creditsCharged?: number | null;
   /** Managed AI credits debited by successful platform-key model calls for this run. */
   aiCreditsCharged?: number | null;
+  /** Customer-selected voluntary cap, persisted before classification/planning starts. */
+  userCostCapUsd?: number | null;
   /** Hard cap in USD (safety net ceiling). */
   hardCapUsd?: number | null;
   /** v2.6.2-track — hierarchical-planner strategy chosen by SmartClassifierAgent. */
@@ -583,6 +585,8 @@ export interface PreviewRenderManifest {
   surfaces: PreviewRenderSurface[];
   /** False when preview.render-agent.enabled is off — the feature is disabled, not merely busy. */
   available?: boolean;
+  /** Server-authoritative admitted-baseline gate. Optional for compatibility with older servers. */
+  renderAllowed?: boolean;
 }
 
 export interface PreviewRenderSurface {
@@ -1549,11 +1553,16 @@ export interface RepoStaleness {
   generatedFromSha: string | null;
   currentSha: string | null;
   stale: boolean;
+  state: 'FRESH' | 'STALE' | 'UNKNOWN' | 'NOT_MEASURABLE';
+  reason: string | null;
 }
 export interface StalenessReport {
   stale: boolean;
   staleCount: number;
   totalCount: number;
+  unknownCount: number;
+  notMeasurableCount: number;
+  verified: boolean;
   repos: RepoStaleness[];
 }
 

@@ -874,10 +874,7 @@ public class LlmRouter {
 
     String primaryProvider = request.provider().toLowerCase(Locale.ROOT);
     boolean primaryUsedCustomerKey = source != RunKeyContext.Source.PLATFORM;
-    List<String[]> chain =
-        "deepseek".equalsIgnoreCase(primaryProvider)
-            ? modelRegistry.fallbackChainFor(request.model(), primaryProvider)
-            : modelRegistry.fallbackChainFor(request.model());
+    List<String[]> chain = modelRegistry.fallbackChainFor(request.model(), primaryProvider);
     if (chain == null || chain.isEmpty()) return null;
 
     for (String[] entry : chain) {
@@ -997,7 +994,16 @@ public class LlmRouter {
    * rate-limit (429). Permanent client errors (400/401/403/404) are NOT retried. Walks the cause
    * chain + falls back to message sniffing since the three provider clients throw different types.
    */
-  private static boolean isTransientError(Throwable e) {
+  static boolean isTransientError(Throwable e) {
+    // User cancellation is terminal for this dispatch. HTTP clients commonly wrap an interrupt in
+    // ResourceAccessException, which is otherwise retryable; classifying it as transient caused a
+    // cancelled provider call to enter the 2s/4s/8s retry loop and risk more spend.
+    if (Thread.currentThread().isInterrupted()) return false;
+    for (Throwable t = e; t != null; t = t.getCause()) {
+      if (t instanceof InterruptedException
+          || t instanceof java.io.InterruptedIOException
+          || t instanceof java.nio.channels.ClosedByInterruptException) return false;
+    }
     for (Throwable t = e; t != null; t = t.getCause()) {
       if (t instanceof org.springframework.web.client.HttpServerErrorException) return true;
       // 429 by TYPE (robust) — a TooManyRequests is always retryable; the message-sniff below is
@@ -1349,6 +1355,7 @@ public class LlmRouter {
     ANTHROPIC_DEPRECATED_TEMP_MODELS.add("claude-opus-4-7");
     ANTHROPIC_DEPRECATED_TEMP_MODELS.add("claude-opus-4-8");
     ANTHROPIC_DEPRECATED_TEMP_MODELS.add("claude-sonnet-5");
+    ANTHROPIC_DEPRECATED_TEMP_MODELS.add("claude-fable-5");
   }
 
   private ChatResponse callGemini(LlmRequest r, List<ToolCallback> tools, String apiKey) {
@@ -1381,6 +1388,7 @@ public class LlmRouter {
         .temperature(r.temperature())
         .maxOutputTokens(r.maxTokens())
         .forceToolCall(forceToolCall)
+        .toolChoice(r.toolChoice())
         .apiKey(apiKey)
         .readTimeoutSeconds(r.readTimeoutSeconds())
         .build();
@@ -1399,6 +1407,7 @@ public class LlmRouter {
             .maxCompletionTokens(r.maxTokens())
             .toolChoice(r.toolChoice())
             .apiKey(apiKey)
+            .readTimeoutSeconds(r.readTimeoutSeconds())
             .build());
   }
 
@@ -1423,6 +1432,7 @@ public class LlmRouter {
             .maxCompletionTokens(r.maxTokens())
             .toolChoice(r.toolChoice())
             .apiKey(key)
+            .readTimeoutSeconds(r.readTimeoutSeconds())
             .baseUrl(openRouterBaseUrl)
             .extraBody(
                 Map.of(
@@ -1463,9 +1473,40 @@ public class LlmRouter {
             .maxCompletionTokens(r.maxTokens())
             .toolChoice(r.toolChoice())
             .apiKey(key)
-            .readTimeoutSeconds(deepSeekReadTimeoutSeconds)
+            .readTimeoutSeconds(
+                r.readTimeoutSeconds() != null
+                    ? r.readTimeoutSeconds()
+                    : deepSeekReadTimeoutSeconds)
             .baseUrl(deepSeekBaseUrl)
+            .extraBody(deepSeekExtraBody(r))
             .build());
+  }
+
+  static Map<String, Object> deepSeekExtraBody(LlmRequest request) {
+    // Outline, classifier, and task expansion are bounded structured transforms, not open-ended
+    // reasoning jobs. DeepSeek thinking can consume their entire output allowance before emitting
+    // JSON/tool arguments, turning metadata planning into fallback or expensive expansion stalls.
+    // Coherence is likewise a small bounded schema-patch decision. DeepSeek thinking consumed the
+    // entire
+    // enforced 1,500-token ceiling before emitting patchPlan. Reviewer passes have the same
+    // failure mode at larger scale: run dc6df05f spent three separate 8K completions entirely on
+    // hidden reasoning, emitted no tool call, and failed the review protocol after nine minutes.
+    // Review is already an iterative inspect/edit/verify loop; disable single-call thinking for
+    // that bounded tool loop so the model must expose an action instead of silently consuming the
+    // complete output budget. Normal generation workers retain provider-default thinking.
+    String taskId =
+        request.context() == null || request.context().taskId() == null
+            ? ""
+            : request.context().taskId();
+    if ("SmartClassifierAgent".equals(request.agentRole())
+        || "OutlinePlannerAgent".equals(request.agentRole())
+        || "TaskExpanderAgent".equals(request.agentRole())
+        || "CoherencePlannerAgent".equals(request.agentRole())
+        || "required".equals(request.toolChoice())
+        || taskId.contains("-reviewer-")) {
+      return Map.of("thinking", Map.of("type", "disabled"));
+    }
+    return Map.of();
   }
 
   /**
@@ -1490,6 +1531,7 @@ public class LlmRouter {
             .maxCompletionTokens(r.maxTokens())
             .toolChoice(r.toolChoice())
             .apiKey(key)
+            .readTimeoutSeconds(r.readTimeoutSeconds())
             .baseUrl(fireworksBaseUrl)
             .build());
   }

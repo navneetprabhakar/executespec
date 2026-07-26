@@ -91,7 +91,13 @@ public class RunChangeEvidenceService {
         if (baseline.isBlank())
           return ChangeEvidence.invalid("workspace Git baseline is unavailable");
         String commitCount = git(workspace, "rev-list", "--count", "HEAD").trim();
-        if (!"1".equals(commitCount)) {
+        boolean managedFinalCommit =
+            "2".equals(commitCount)
+                && "init agent workspace"
+                    .equals(git(workspace, "log", "-1", "--format=%s", baseline).trim())
+                && ("V2 run output for " + runId)
+                    .equals(git(workspace, "log", "-1", "--format=%s", "HEAD").trim());
+        if (!"1".equals(commitCount) && !managedFinalCommit) {
           return ChangeEvidence.invalid(
               "no admitted run-start snapshot for this workspace; the repository root commit is"
                   + " not a valid run baseline");

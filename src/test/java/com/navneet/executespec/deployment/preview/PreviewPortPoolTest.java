@@ -7,6 +7,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 
 /** Tests for PreviewPortPool — allocates host ports for Docker Compose previews. */
 @DisplayName("PreviewPortPool")
@@ -20,7 +21,19 @@ class PreviewPortPoolTest {
     props.setPortRangeStart(10000);
     props.setPortRangeEnd(10002); // small range for testing
     props.setUseEphemeralPorts(false); // deterministic range-based allocation for tests
-    pool = new PreviewPortPool(props);
+    pool = new PreviewPortPool(props, () -> -1, port -> true);
+  }
+
+  @Test
+  @DisplayName("Spring selects the production constructor when the test seam also exists")
+  void springWiresProductionConstructor() {
+    try (var context = new AnnotationConfigApplicationContext()) {
+      context.registerBean(PreviewProperties.class);
+      context.registerBean(PreviewPortPool.class);
+      context.refresh();
+
+      assertThat(context.getBean(PreviewPortPool.class)).isNotNull();
+    }
   }
 
   @Nested

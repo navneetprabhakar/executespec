@@ -14,6 +14,7 @@ vi.mock('@/lib/api', () => ({
   // server-owned agent-session read model instead of the global run list.
   listAgentSessions: vi.fn().mockResolvedValue([]),
   createAgentSession: vi.fn().mockResolvedValue({id: 's1'}),
+  getRuntimeClientCapabilities: vi.fn().mockResolvedValue({remoteSandbox: {enabled: false}}),
 }));
 
 vi.mock('@/stores/useUiStore', () => ({
@@ -48,6 +49,7 @@ let host: HTMLDivElement;
 let root: Root;
 
 beforeEach(() => {
+  vi.clearAllMocks();
   host = document.createElement('div');
   document.body.appendChild(host);
   root = createRoot(host);
@@ -94,6 +96,32 @@ describe('ConsoleShell focus affordances', () => {
     const shell = host.querySelector<HTMLElement>('.con-root');
     expect(shell?.classList.contains('agent-active')).toBe(true);
     expect(shell?.dataset.surface).toBe('transcript');
+    expect(host.querySelector<HTMLButtonElement>('.con-newrun')?.textContent).toContain(
+      'Workspace',
+    );
+  });
+
+  it('advertises Sandbox only after the server explicitly enables it', async () => {
+    vi.mocked(api.getRuntimeClientCapabilities).mockResolvedValueOnce({
+      remoteSandbox: {enabled: true},
+    } as Awaited<ReturnType<typeof api.getRuntimeClientCapabilities>>);
+
+    await renderShell('/agent');
+
+    expect(host.querySelector<HTMLButtonElement>('.con-newrun')?.textContent).toContain('Sandbox');
+  });
+
+  it('fails closed to Workspace when capability discovery fails', async () => {
+    vi.mocked(api.getRuntimeClientCapabilities).mockRejectedValueOnce(new Error('offline'));
+
+    await renderShell('/agent');
+
+    expect(host.querySelector<HTMLButtonElement>('.con-newrun')?.textContent).toContain(
+      'Workspace',
+    );
+    expect(host.querySelector<HTMLButtonElement>('.con-newrun')?.textContent).not.toContain(
+      'Sandbox',
+    );
   });
 
   it('closes the mobile drawer with Escape and returns focus to its trigger', async () => {

@@ -15,9 +15,12 @@ import type {AgentArtifact} from '@/ide/agentArtifacts';
 export function ArtifactRail({
   artifacts,
   dispatch,
+  remoteSandboxEnabled,
 }: {
   artifacts: AgentArtifact[];
   dispatch: Dispatch<AgentAction>;
+  /** Server-owned runtime capability. Fail closed until the capability endpoint proves it. */
+  remoteSandboxEnabled: boolean;
 }) {
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [copyErrorId, setCopyErrorId] = useState<string | null>(null);
@@ -138,9 +141,14 @@ export function ArtifactRail({
               <button
                 className='ide-btn ghost'
                 onClick={() => draftSandboxRequest(artifact)}
-                title='Draft a sandbox request in the composer. Nothing runs until you send it.'
+                disabled={!remoteSandboxEnabled}
+                title={
+                  remoteSandboxEnabled
+                    ? 'Draft a sandbox request in the composer. Nothing runs until you send it.'
+                    : 'Remote sandbox is unavailable in this environment.'
+                }
               >
-                Draft sandbox request
+                {remoteSandboxEnabled ? 'Draft sandbox request' : 'Sandbox unavailable'}
               </button>
             </div>
             {copyErrorId === artifact.id && (
@@ -157,7 +165,11 @@ export function ArtifactRail({
         ))}
       </div>
       <div className='agent-artifact-handoff'>
-        <span>Remote sandbox keeps local files untouched.</span>
+        <span>
+          {remoteSandboxEnabled
+            ? 'Remote sandbox keeps local files untouched.'
+            : 'Remote sandbox is unavailable in this environment.'}
+        </span>
         <a href='/cli-login'>Open local handoff</a>
       </div>
     </div>

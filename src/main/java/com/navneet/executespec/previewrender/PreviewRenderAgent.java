@@ -6,6 +6,8 @@ import java.util.Map;
 import com.navneet.executespec.agent.LlmRouter;
 import com.navneet.executespec.agent.PromptAssembler;
 import com.navneet.executespec.agent.PromptTrustBoundary;
+import com.navneet.executespec.executioncontext.LlmDispatchPolicyException;
+import com.navneet.executespec.executioncontext.LlmExecutionPolicyFactory;
 import com.navneet.executespec.router.AgentTier;
 import com.navneet.executespec.router.LlmProvider;
 import com.navneet.executespec.router.ModelResolver;
@@ -15,7 +17,9 @@ import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatResponse;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.web.server.ResponseStatusException;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -40,6 +44,7 @@ public class PreviewRenderAgent {
   private final ModelResolver modelResolver;
   private final PromptAssembler promptAssembler;
   private final PreviewRenderGuard guard;
+  private final LlmExecutionPolicyFactory executionPolicyFactory;
 
   /**
    * The result of rendering one surface.
@@ -59,7 +64,8 @@ public class PreviewRenderAgent {
   }
 
   /** Renders a single surface. Never throws — a failed render degrades to a reason code. */
-  public RenderedSurface render(PreviewSurface surface, LlmProvider provider, String runId) {
+  public RenderedSurface render(
+      PreviewSurface surface, LlmProvider provider, String runId, String renderAttemptId) {
     try {
       ResolvedModel resolved =
           modelResolver.resolve(
@@ -87,7 +93,9 @@ public class PreviewRenderAgent {
               runId,
               "PreviewRenderAgent",
               "render:" + surface.id(),
-              MAX_OUTPUT_TOKENS);
+              MAX_OUTPUT_TOKENS,
+              com.navneet.executespec.agent.LlmRequest.PromptCacheStrategy.DEFAULT,
+              executionPolicyFactory.forRunPreviewSurface(runId, renderAttemptId));
 
       String raw = response.getResult().getOutput().getText();
       String html = stripFences(raw);
@@ -105,9 +113,37 @@ public class PreviewRenderAgent {
       return new RenderedSurface(surface.id(), html, null);
 
     } catch (RuntimeException e) {
-      log.warn("preview-render failed surface={} run={}", surface.id(), runId, e);
-      return RenderedSurface.failed(surface.id(), "RENDER_ERROR");
+      String reason = failureReason(e);
+      log.warn(
+          "preview-render failed surface={} run={} reason={} type={}",
+          surface.id(),
+          runId,
+          reason,
+          e.getClass().getSimpleName());
+      return RenderedSurface.failed(surface.id(), reason);
     }
+  }
+
+  /**
+   * Maps admission/policy failures to stable, non-secret categories the UI can explain honestly.
+   */
+  static String failureReason(Throwable failure) {
+    Throwable current = failure;
+    for (int depth = 0; current != null && depth < 8; depth++, current = current.getCause()) {
+      if (current instanceof LlmDispatchPolicyException policy) {
+        return switch (policy.reason()) {
+          case BUDGET_EXHAUSTED -> "BUDGET_EXHAUSTED";
+          case CREDENTIAL_UNAVAILABLE, CREDENTIAL_SOURCE_CHANGED ->
+              "PROVIDER_CREDENTIAL_UNAVAILABLE";
+          default -> "PROVIDER_ROUTE_UNAVAILABLE";
+        };
+      }
+      if (current instanceof ResponseStatusException status
+          && status.getStatusCode().value() == HttpStatus.PAYMENT_REQUIRED.value()) {
+        return "AI_CREDITS_REQUIRED";
+      }
+    }
+    return "RENDER_ERROR";
   }
 
   // ---------------------------------------------------------------- prompt construction

@@ -40,6 +40,10 @@ export default function IdeAgent() {
   const [availableModels, setAvailableModels] = useState<api.ProviderEntry[]>([]);
   const [selectedProvider, setSelectedProvider] = useState('');
   const [selectedModel, setSelectedModel] = useState('');
+  // Isolation is a server capability, never a client-side assumption. Until the
+  // capability request explicitly proves it is enabled, describe this surface
+  // as the policy-guarded remote workspace it actually is.
+  const [remoteSandboxEnabled, setRemoteSandboxEnabled] = useState(false);
   const providerReadiness = useProviderReadiness();
   const eventCursorRef = useRef(0);
   const overlayFocusRef = useRef<HTMLElement | null>(null);
@@ -47,6 +51,14 @@ export default function IdeAgent() {
   const liveRun = useAgentRunStream(state.activeRun);
   const runDetail = liveRun.detail;
   const runCost = liveRun.costUsd;
+
+  useEffect(() => {
+    if (typeof api.getRuntimeClientCapabilities !== 'function') return;
+    void api
+      .getRuntimeClientCapabilities()
+      .then((capabilities) => setRemoteSandboxEnabled(capabilities.remoteSandbox?.enabled === true))
+      .catch(() => setRemoteSandboxEnabled(false));
+  }, []);
 
   useEffect(() => {
     if (!chatsOpen && !settingsOpen) return;
@@ -738,6 +750,7 @@ export default function IdeAgent() {
         routingState={state.routingState}
         capabilities={state.capabilities}
         pendingGateCount={inlineGates.length}
+        remoteSandboxEnabled={remoteSandboxEnabled}
         onNewChat={() => {
           setChatsOpen(false);
           void startNewSession();
@@ -815,6 +828,7 @@ export default function IdeAgent() {
           navigate(`/plan/${id}`);
         }}
         onClose={() => setChatsOpen(false)}
+        remoteSandboxEnabled={remoteSandboxEnabled}
       />
 
       <AgentConversation
@@ -829,6 +843,7 @@ export default function IdeAgent() {
         runStreamStatus={liveRun.status}
         runUnavailable={liveRun.unavailable}
         routingState={state.routingState}
+        remoteSandboxEnabled={remoteSandboxEnabled}
         hasNewActivity={hasNewActivity}
         input={state.input}
         attachments={state.attachments}

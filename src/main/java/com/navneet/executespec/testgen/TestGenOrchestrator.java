@@ -74,7 +74,8 @@ public class TestGenOrchestrator {
         log.warn("[TestGen] Run {} not applicable: {}", runId, admission.reason());
         emitTestEvent(runId, "TEST_GEN_NOT_APPLICABLE", admission.reason());
         eventPublisher.publishEvent(
-            new TestExecutionCompletedEvent(runId, 0L, TestExecutionSummary.empty()));
+            new TestExecutionCompletedEvent(
+                runId, 0L, TestExecutionSummary.unavailable("not-applicable", admission.reason())));
         return;
       }
 
@@ -116,7 +117,11 @@ public class TestGenOrchestrator {
         emitTestEvent(
             runId, "TEST_GEN_NOT_APPLICABLE", "No planned test target exists in admitted source");
         eventPublisher.publishEvent(
-            new TestExecutionCompletedEvent(runId, testPlan.getId(), TestExecutionSummary.empty()));
+            new TestExecutionCompletedEvent(
+                runId,
+                testPlan.getId(),
+                TestExecutionSummary.unavailable(
+                    "no-valid-test-target", "No planned test target exists in admitted source")));
         return;
       }
       emitTestEvent(
@@ -228,7 +233,11 @@ public class TestGenOrchestrator {
           runId, "TEST_PIPELINE_FAILED", "Test generation pipeline failed: " + e.getMessage());
       // Notify that test pipeline ended (no results) so validation report isn't blocked
       eventPublisher.publishEvent(
-          new TestExecutionCompletedEvent(runId, 0L, TestExecutionSummary.empty()));
+          new TestExecutionCompletedEvent(
+              runId,
+              0L,
+              TestExecutionSummary.unavailable(
+                  "test-generation-failed", "Test generation pipeline failed")));
     }
   }
 
@@ -308,7 +317,11 @@ public class TestGenOrchestrator {
     testPlanRepository.save(testPlan);
     // Notify that test pipeline ended (no results)
     eventPublisher.publishEvent(
-        new TestExecutionCompletedEvent(runId, testPlan.getId(), TestExecutionSummary.empty()));
+        new TestExecutionCompletedEvent(
+            runId,
+            testPlan.getId(),
+            TestExecutionSummary.unavailable(
+                "test-compilation-failed", "Generated functional tests did not compile")));
     return false;
   }
 

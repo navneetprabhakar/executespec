@@ -257,6 +257,61 @@ class RunLifecycleServiceCrashClaimTest {
   }
 
   @Test
+  void malformedRecoveryPlanPersistsStructuredInternalErrorReason() throws Exception {
+    Path workspaceRoot = Files.createTempDirectory("executespec-malformed-plan-");
+    Files.createDirectories(workspaceRoot.resolve("malformed-plan"));
+    PipelineRun run =
+        PipelineRun.builder()
+            .runId("malformed-plan")
+            .status("WORKING")
+            .harnessVersion("v2")
+            .resumeAttempts(0)
+            .planJson("{")
+            .build();
+    PipelineRunRepository runRepo = mock(PipelineRunRepository.class);
+    RunControlPort controlPort = mock(RunControlPort.class);
+    com.navneet.executespec.config.AgentProperties agentProperties =
+        mock(com.navneet.executespec.config.AgentProperties.class);
+    when(agentProperties.getWorkspace()).thenReturn(workspaceRoot.toString());
+    when(runRepo.findById(run.getRunId())).thenReturn(Optional.of(run));
+    when(runRepo.claimCrashResume(anyString(), anyInt(), anyInt(), any(), any(), anyString()))
+        .thenReturn(1);
+
+    RunLifecycleService service =
+        new RunLifecycleService(
+            runRepo,
+            null,
+            null,
+            null,
+            null,
+            controlPort,
+            agentProperties,
+            new com.fasterxml.jackson.databind.ObjectMapper(),
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null);
+
+    assertThat(service.resumeAfterCrash(run.getRunId()))
+        .isEqualTo(RunOrchestrator.CrashResumeOutcome.PLAN_MISSING);
+    verify(controlPort)
+        .terminate(
+            run.getRunId(),
+            "FAILED",
+            RunOrchestrator.INTERNAL_ERROR_REASON,
+            RunOrchestrator.INTERNAL_ERROR_REASON,
+            null);
+  }
+
+  @Test
   void taskLeaseLossAfterRunClaimRefusesDuplicateResume() {
     PipelineRun run =
         PipelineRun.builder()

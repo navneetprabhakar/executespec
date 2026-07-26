@@ -132,7 +132,19 @@ terminal, cross-tenant, out-of-policy and exhausted contexts fail before provide
   mints a dedicated per-turn context via `forRunChatTurn(runId, turnId)` — identical
   run-owner/org/project/provider/model/pin policy, but a unique per-turn source id so it never
   collides with the run's own (already-terminal) pipeline context. Reusing `forRun(runId)` here
-  threw an idempotency-collision 500 on every chat turn (Phase-6 F1, fixed 2026-07-18).
+  threw an idempotency-collision 500 on every chat turn (Phase-6 F1, fixed 2026-07-18). Each Ask
+  turn is bounded to 20 physical provider attempts (four same-provider attempts across four tool
+  rounds plus forced synthesis), 400k input tokens, 15k output tokens, 415k total tokens, and $2 raw
+  provider cost. Provider-call count and projected output are reserved before dispatch; input and
+  raw cost use the budget gate's recorded-usage check before the next dispatch, so one in-flight
+  call can cross those reconciled dimensions. Managed-credit admission remains an independent
+  stricter gate for platform keys.
+- Static Screens rendering likewise mints one dedicated context per durable job/surface through
+  `forRunPreviewSurface(runId, renderAttemptId)`. It inherits the run's tenant, credential source,
+  provider preference and exact model pin, but not the terminal pipeline context's consumed cost
+  ceiling. Each surface is explicitly bounded to four physical provider attempts, 100k input
+  tokens, 8,192 output tokens, 110k total tokens, and $1 raw provider cost. The job/surface key
+  makes context creation idempotent without merging separate re-renders into one spend boundary.
 - Agent intent, Spec Chat and agent-session streams carry an agent-turn context.
 - Project chat/compaction/compiler, architecture, generated docs, project brief/memory, PR Review
   and Code Review create explicit project contexts and resolve the project provider without a

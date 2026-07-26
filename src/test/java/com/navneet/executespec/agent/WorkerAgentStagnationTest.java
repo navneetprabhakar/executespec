@@ -183,6 +183,22 @@ class WorkerAgentStagnationTest {
         "Should terminate exactly at the force threshold, not later.");
   }
 
+  @Test
+  void failingBuildProjectCannotResetTheStagnationWatchdog() {
+    List<ChatResponse> seq = new ArrayList<>();
+    for (int i = 0; i < 20; i++) {
+      // fakeTool returns a transport-level Ok("ok") without exit-zero build evidence. This is the
+      // production shape that previously reset progress on every red reviewer build.
+      seq.add(responseWithCalls(toolCall("buildProject", "{}")));
+    }
+    Fixture f = newWorker(seq);
+
+    WorkerResult result = f.worker.run(req(40));
+
+    assertEquals(WorkerResult.Outcome.COMPLETED_BY_STAGNATION, result.outcome());
+    assertEquals(WorkerAgent.STAGNATION_FORCE_AFTER_N, result.iterations());
+  }
+
   // 2026-06-01 (RL-2026-05-062) — RE-ENABLED. The "off-by-one" was NOT a c72fa557 loop bug: it is
   // the one-shot verify-before-done nudge (RL-2026-05-051, predates c72fa557). When the worker has
   // written files but run no verify (shell/buildProject/runTests) since its last edit, the FIRST

@@ -96,6 +96,13 @@ for existing rows, and adds scoped unique/indexed local identities and lease loo
   metadata and installing a GitHub webhook require ORG_ADMIN for ORG-scoped repos and the owner for
   USER-scoped repos. The service repeats this check before any SCM credential lookup, provider call,
   or persistence even when a controller has already admitted the request.
+- Repository topology and HEAD evidence have an explicit cache-invalidation boundary.
+  `ProjectSourceFreshnessInvalidator` deletes the exact repo-scoped Workspace Health origin-SHA key
+  and the exact linked project staleness keys after sync, after-commit link/unlink/create+link, and
+  signed GitHub push/merged-PR observations. It resolves only persisted repo/link rows and never
+  scans Redis keyspaces. Redis invalidation is fail-soft so a committed mutation or acknowledged
+  signed webhook is not converted into a customer failure; the existing bounded TTL remains the
+  outage fallback.
 - Provider credentials are resolved server-side as short-lived `ScmCredential` values. DTOs and
   `project_repo` store only credential-free metadata and an HTTPS clone URL with no userinfo,
   query, or fragment.
@@ -148,11 +155,31 @@ bypassed with a raw user id.
   graph. The response and Repos UI explicitly report `relationshipGraphAvailable=false`; the
   ripgrep-backed `search_repo_files` path stays available for exact/regex lookup whenever semantic
   readiness is absent or partial. FastContext is not referenced by this production path.
+- The explicit refresh endpoint may return HTTP 202 with `status=UNAVAILABLE` when the governed
+  embedding route cannot run. Web reads the response status (`QUEUED | UNAVAILABLE | PARTIAL |
+  READY`) and fixed reason instead of translating every accepted response into “queued”; current
+  readiness status/reason and the RIPGREP fallback remain visible. Refresh is idempotent for
+  `READY` and already-`INDEXING` states: it returns the current admission status without scheduling
+  redundant provider work.
+- The Repos surface keeps code-index loading, loaded-empty and failed states distinct. A failed
+  readiness request renders a retryable unknown-state notice and preserves the last known
+  projection; it never hides the subsystem or treats an outage as evidence that no semantic index
+  exists.
 - V290 makes provider policy part of readiness. The current 1536-dimensional schema supports only
   governed OpenAI `text-embedding-3-small`; a project selected to DeepSeek, Gemini, Anthropic,
   OpenRouter or Fireworks (or an OpenAI OWN_KEYS project with no current allowed key) is reported as
   lexical-only. It cannot dispatch through a hidden platform OpenAI key, and an old READY state is
   dynamically exposed as STALE until the exact compatible route is available again.
+
+## System Map UI evidence states
+
+- Current map, history, rules/violations, decisions and repository-contract coverage retain
+  separate loading/failure/loaded-empty states. A secondary request failure cannot become “No
+  previous versions”, “No rules”, an all-PASS rules list, an empty decision cache or “Link repos”.
+- Navigating between projects clears every secondary System Map projection before the next
+  project's requests settle. The generation fence still drops late responses, while the eager
+  clear prevents the prior project's history/rules/contracts from appearing under the new project
+  route.
 
 ## Hostile project-document admission (V288)
 

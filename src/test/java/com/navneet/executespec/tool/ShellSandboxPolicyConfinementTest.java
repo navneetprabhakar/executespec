@@ -50,12 +50,19 @@ class ShellSandboxPolicyConfinementTest {
     }
 
     @Test
-    @DisplayName("the governed build wrappers keep working, other scripts do not")
-    void governedWorkspaceWrappers() {
+    @DisplayName("governed build wrappers and local Python venv tools keep working")
+    void governedWorkspaceExecutables() {
       assertThat(policy.validate("./gradlew -q assemble -x test", "/ws").permitted()).isTrue();
       assertThat(policy.validate("./mvnw -q compile", "/ws").permitted()).isTrue();
+      assertThat(policy.validate(".venv/bin/python -m pytest", "/ws").permitted()).isTrue();
+      assertThat(policy.validate("./.venv/bin/pip3.12 --version", "/ws").permitted()).isTrue();
+      assertThat(policy.validate("venv/bin/python3.12 -m compileall .", "/ws").permitted())
+          .isTrue();
       assertThat(policy.validate("./compile.sh", "/ws").permitted()).isFalse();
       assertThat(policy.validate("./executable --help", "/ws").permitted()).isFalse();
+      assertThat(policy.validate(".venv/bin/git status", "/ws").permitted()).isFalse();
+      assertThat(policy.validate("backend/.venv/bin/pip install fastapi", "/ws").permitted())
+          .isFalse();
     }
 
     @Test

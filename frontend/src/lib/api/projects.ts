@@ -1,6 +1,7 @@
 import type {
   ProjectDashboardDTO,
   ProjectCodeIndexStatus,
+  ProjectCodeIndexRefreshAccepted,
   ProjectRepo,
   ProjectRepoLink,
   ArchitectureDoc,
@@ -396,10 +397,9 @@ export const getProjectCodeIndex = (projectId: string) =>
   req<ProjectCodeIndexStatus[]>(`/projects/${projectId}/code-index`);
 
 export const refreshProjectCodeIndex = (projectId: string, repoId: string) =>
-  req<{repoId: string; status: 'QUEUED'; fallback: 'RIPGREP'; relationshipGraphAvailable: false}>(
-    `/projects/${projectId}/code-index/${repoId}/refresh`,
-    {method: 'POST'},
-  );
+  req<ProjectCodeIndexRefreshAccepted>(`/projects/${projectId}/code-index/${repoId}/refresh`, {
+    method: 'POST',
+  });
 
 export const linkProjectRepo = (projectId: string, repoId: string) =>
   req<ProjectRepoLink>(`/projects/${projectId}/repos/${repoId}`, {method: 'POST'});

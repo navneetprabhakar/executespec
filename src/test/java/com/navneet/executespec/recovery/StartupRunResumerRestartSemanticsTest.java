@@ -20,6 +20,7 @@ import com.navneet.executespec.state.repository.PipelineRunRepository;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.test.util.ReflectionTestUtils;
 
 /**
  * Characterization tests for what a JVM restart does and does not recover.
@@ -32,6 +33,24 @@ import org.springframework.beans.factory.ObjectProvider;
 class StartupRunResumerRestartSemanticsTest {
 
   private static final String RUN_ID = "restart-run";
+
+  @Test
+  void disabledAutomaticRecoveryDoesNotScanAtStartupOrOnSchedule() {
+    PipelineRunRepository runRepo = mock(PipelineRunRepository.class);
+    AgentTaskRepository taskRepo = mock(AgentTaskRepository.class);
+    SseBroadcaster broadcaster = mock(SseBroadcaster.class);
+    @SuppressWarnings("unchecked")
+    ObjectProvider<RunLifecycleService> lifecycleProvider = mock(ObjectProvider.class);
+    StartupRunResumer resumer =
+        new StartupRunResumer(runRepo, taskRepo, broadcaster, lifecycleProvider);
+    ReflectionTestUtils.setField(resumer, "automaticRecoveryEnabled", false);
+
+    resumer.onApplicationReady();
+    resumer.scheduledRecoverySweep();
+
+    verify(runRepo, never()).findByStatusIn(any());
+    verify(lifecycleProvider, never()).getObject();
+  }
 
   @Test
   void awaitingApproval_isLeftUntouchedWhenItsPendingGateIsReconciled() {

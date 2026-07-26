@@ -65,13 +65,19 @@ public class PreviewRenderController {
 
     accessGuard.requireRunAccess(runId, userDetails);
 
-    return renderService
-        .latestJob(runId)
-        .map(job -> ResponseEntity.ok(toManifest(job, renderService.bundles(job.getId()))))
-        .orElseGet(
-            () ->
-                ResponseEntity.ok(
-                    PreviewRenderDtos.RenderManifest.absent(runId, renderService.enabled())));
+    boolean available = renderService.enabled();
+    PreviewRenderJob job = renderService.latestJob(runId).orElse(null);
+    // Feature-off wins and avoids a needless workspace/Git inspection. An active job remains
+    // reloadable even if its workspace evidence disappears after it was admitted.
+    boolean renderAllowed =
+        available
+            && ((job != null && !job.isTerminal()) || renderService.hasProductFilesToRender(runId));
+    if (job == null) {
+      return ResponseEntity.ok(
+          PreviewRenderDtos.RenderManifest.absent(runId, available, renderAllowed));
+    }
+    return ResponseEntity.ok(
+        toManifest(job, renderService.bundles(job.getId()), available, renderAllowed));
   }
 
   /**
@@ -162,7 +168,10 @@ public class PreviewRenderController {
   // ---------------------------------------------------------------- mapping
 
   private PreviewRenderDtos.RenderManifest toManifest(
-      PreviewRenderJob job, List<PreviewRenderBundle> bundles) {
+      PreviewRenderJob job,
+      List<PreviewRenderBundle> bundles,
+      boolean available,
+      boolean renderAllowed) {
 
     List<PreviewRenderDtos.RenderSurfaceDto> surfaces =
         bundles.stream()
@@ -191,7 +200,8 @@ public class PreviewRenderController {
         job.getRequestedAt(),
         job.getCompletedAt(),
         surfaces,
-        renderService.enabled());
+        available,
+        renderAllowed);
   }
 
   /** One honest sentence about what the operator is looking at, driven by the weakest surface. */

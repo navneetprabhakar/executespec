@@ -1,7 +1,5 @@
 package com.navneet.executespec.reviewer;
 
-import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -15,6 +13,7 @@ import jakarta.annotation.PreDestroy;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.navneet.executespec.agent.PromptAssembler;
 import com.navneet.executespec.agent.PromptTrustBoundary;
 import com.navneet.executespec.config.featureflag.FeatureFlagService;
 import com.navneet.executespec.engine.WorkerAgent;
@@ -135,6 +134,7 @@ public class ReviewerAgent {
   private final ObjectMapper objectMapper;
   private final Metrics metrics;
   private final FeatureFlagService featureFlagService;
+  private final PromptAssembler promptAssembler;
   // 2026-05-13 — post-edit formatter pass. Audit run 6024f510 RC-1: reviewer's
   // surgical async→def edits introduced black-incompatible formatting drift
   // that broke the customer's `black --check app/` CI step. Runs after both
@@ -625,7 +625,20 @@ public class ReviewerAgent {
             // the future.cancel(true) interrupt. Belt-and-braces with the worker's interrupt check.
             .wallClockSeconds((int) wallClockSeconds)
             .temperature(0.0)
-            .maxTokensPerCall(8192)
+            // Review turns should produce one bounded tool decision, not another long-form code
+            // generation. This also caps non-DeepSeek providers; native DeepSeek additionally
+            // disables hidden thinking for reviewer task ids in LlmRouter.
+            .maxTokensPerCall(4096)
+            // Reviewer prompts promise a smaller sandbox than the generic worker. Enforce that
+            // contract in the actual model-visible schemas: no shell/runTests/move/delete tools,
+            // and the wiring pass cannot create unrelated files.
+            .allowedToolNames(reviewerToolNames(taskIdSuffix))
+            // A clean wiring pass is a bounded evidence sweep, not another open-ended worker run.
+            // Nudge after three read-only turns so the model builds and returns its verdict instead
+            // of repeatedly rediscovering the same tree. Keep four recovery turns after the nudge
+            // for a real wiring edit plus verification.
+            .stagnationWarnAfter("reviewer-wiring".equals(taskIdSuffix) ? 3 : null)
+            .stagnationForceAfter("reviewer-wiring".equals(taskIdSuffix) ? 7 : null)
             // 2026-05-08 — when build is failing pre-review, force completeTask gate to require
             // a successful buildProject call before terminating. Mirrors the patch-mode test gate
             // shape (V182 layer-3). Without this, reviewer can call completeTask after a few edits
@@ -640,6 +653,23 @@ public class ReviewerAgent {
             Boolean.TRUE.equals(req.allowBuildManifestCreation()));
     return com.navneet.executespec.tool.ReviewerMutationScope.withPolicy(
         mutationPolicy, lease, () -> worker.run(workerRequest));
+  }
+
+  static java.util.Set<String> reviewerToolNames(String taskIdSuffix) {
+    java.util.LinkedHashSet<String> tools =
+        new java.util.LinkedHashSet<>(
+            java.util.List.of(
+                "readFile",
+                "editFile",
+                "listFiles",
+                "searchFiles",
+                "gitStatus",
+                "gitDiff",
+                "buildProject",
+                "completeTask",
+                "glob"));
+    if (!"reviewer-wiring".equals(taskIdSuffix)) tools.add("writeFile");
+    return java.util.Set.copyOf(tools);
   }
 
   /**
@@ -1162,9 +1192,11 @@ exit=0 — the harness will reject premature completions.
    * {@code REVIEW_FAILED} but the JSON error only surfaced "Failed to load
    * prompts/reviewer-general.md" — operators couldn't tell whether the file was missing,
    * unreadable, or had an encoding issue. Now logs the root cause class + message + classpath
-   * resource state before re-throwing so the next failure points operators at the right fix.
+   * resource state before re-throwing so the next failure points operators at the right fix. Prompt
+   * content now flows through {@link PromptAssembler}, so shared includes follow the same assembly
+   * contract as planner prompts.
    */
-  private String loadPrompt(String path) {
+  String loadPrompt(String path) {
     ClassPathResource resource = new ClassPathResource(path);
     try {
       if (!resource.exists()) {
@@ -1179,10 +1211,11 @@ exit=0 — the harness will reject premature completions.
         throw new IllegalStateException(
             "Classpath resource not found: " + path + " (deploy artefact issue)");
       }
-      return resource.getContentAsString(StandardCharsets.UTF_8);
-    } catch (IOException e) {
+      String relative = path.startsWith("prompts/") ? path.substring("prompts/".length()) : path;
+      return promptAssembler.assemble(relative);
+    } catch (Exception e) {
       log.error(
-          "[ReviewerAgent] IOException loading '{}': {}: {} (resource.exists()={})",
+          "[ReviewerAgent] prompt assembly failed for '{}': {}: {} (resource.exists()={})",
           path,
           e.getClass().getSimpleName(),
           e.getMessage(),

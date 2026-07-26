@@ -111,8 +111,11 @@ class MultiRepoWorkerPromptTest {
               .composeSystemPrompt(task, null, null, "python", null, provider, null, false);
       String user = PromptComposer.composeUserPrompt(task, null, evidence);
       assertTrue(system.contains("EVERY semantic clause in TASK_REQUIREMENTS"), provider);
+      assertTrue(system.contains("missing local runtime"), provider);
+      assertTrue(system.contains("Never\n    downgrade a version"), provider);
       assertTrue(system.contains("cross-operation reuse of"), provider);
       assertTrue(system.contains("shared idempotency keys"), provider);
+      assertTrue(system.contains("one baseline DDL file proves initialization"), provider);
       assertTrue(system.contains("RUNTIME COMPATIBILITY"), provider);
       assertTrue(user.contains("<<<UNTRUSTED_ORIGINAL_SPEC"), provider);
       assertTrue(user.contains("<<<UNTRUSTED_TASK_REQUIREMENTS"), provider);
@@ -122,6 +125,56 @@ class MultiRepoWorkerPromptTest {
       assertTrue(user.contains("mismatches return HTTP 409"), provider);
       assertFalse(user.contains("R99"), provider);
     }
+  }
+
+  @Test
+  void multiTaskWorkersReceiveExactScopedSourceClausesWithoutRepeatingUnrelatedSpec() {
+    String original =
+        """
+        - GET /api/products returns product identifiers and names.
+        - A failed multi-line transfer rolls back stock and audit writes atomically.
+        - The dashboard uses a responsive two-column layout.
+        """;
+    PlannedTask backend =
+        PlannedTask.builder()
+            .id("T1")
+            .title("Implement product and transfer APIs")
+            .description("Implement backend contracts")
+            .meetsRequirements(List.of("R1", "R2"))
+            .build();
+    PlannedTask frontend =
+        PlannedTask.builder()
+            .id("T2")
+            .title("Implement dashboard")
+            .description("Implement frontend")
+            .meetsRequirements(List.of("R3"))
+            .build();
+    Plan plan =
+        Plan.builder()
+            .requirements(
+                List.of(
+                    new RequirementSpec(
+                        "R1",
+                        "GET /api/products returns product identifiers and names.",
+                        RequirementKind.FUNCTIONAL),
+                    new RequirementSpec(
+                        "R2",
+                        "A failed multi-line transfer rolls back stock and audit writes"
+                            + " atomically.",
+                        RequirementKind.FUNCTIONAL),
+                    new RequirementSpec(
+                        "R3", "Responsive two-column dashboard.", RequirementKind.FUNCTIONAL)))
+            .tasks(List.of(backend, frontend))
+            .build();
+
+    String evidence =
+        PromptComposer.composeWorkerEvidence(backend, null, null, null, null, null, plan, original);
+
+    assertTrue(evidence.contains("<<<UNTRUSTED_TASK_SOURCE_REQUIREMENTS"));
+    assertTrue(evidence.contains("GET /api/products returns product identifiers and names."));
+    assertTrue(evidence.contains("failed multi-line transfer rolls back stock and audit writes"));
+    assertFalse(evidence.contains("responsive two-column layout"));
+    assertFalse(evidence.contains("<<<UNTRUSTED_ORIGINAL_SPEC"));
   }
 
   /**
@@ -195,6 +248,62 @@ class MultiRepoWorkerPromptTest {
     assertTrue(
         prompt.contains("repos/web-app/"),
         "Worker prompt must include every per-repo subdir, not just the first.");
+  }
+
+  @Test
+  void multiTaskWorkerOmitsGlobalSpecAndNamesLaterReservedScope() {
+    PlannedTask scaffold =
+        PlannedTask.builder()
+            .id("T1")
+            .title("Create models and migrations")
+            .description("Create the database schema only.")
+            .complexity(Complexity.MEDIUM)
+            .touchesFiles(List.of("app/models.py", "migrations/001.py"))
+            .meetsRequirements(List.of("R1"))
+            .build();
+    PlannedTask routes =
+        PlannedTask.builder()
+            .id("T2")
+            .title("Implement reservation endpoints")
+            .description("Create POST and cancel routes.")
+            .complexity(Complexity.HIGH)
+            .touchesFiles(List.of("app/routes.py", "tests/test_http.py"))
+            .dependsOn(List.of("T1"))
+            .meetsRequirements(List.of("R1"))
+            .build();
+    Plan plan =
+        Plan.builder()
+            .tasks(List.of(scaffold, routes))
+            .requirements(
+                List.of(
+                    new RequirementSpec(
+                        "R1", "Build the complete reservation API.", RequirementKind.FUNCTIONAL)))
+            .build();
+
+    String evidence =
+        PromptComposer.composeWorkerEvidence(
+            scaffold,
+            null,
+            null,
+            null,
+            null,
+            null,
+            plan,
+            "Build the entire application, including every endpoint and test.");
+    String system =
+        newExecutor()
+            .composeSystemPrompt(scaffold, null, null, "python", null, "gemini", null, false);
+
+    assertFalse(evidence.contains("<<<UNTRUSTED_ORIGINAL_SPEC"));
+    assertTrue(evidence.contains("<<<UNTRUSTED_RESERVED_FUTURE_SCOPE"));
+    assertTrue(evidence.contains("T2: Implement reservation endpoints"));
+    assertTrue(evidence.contains("app/routes.py"));
+    assertTrue(system.contains("WORKER_TASK is the sole deliverable"));
+    assertTrue(system.contains("untrusted intermediate output"));
+    assertTrue(system.contains("hardcoded signing secret"));
+    assertTrue(system.contains("insecure path remains reachable"));
+    assertTrue(system.contains("does not prove immutable replay"));
+    assertTrue(system.contains("do NOT implement it now"));
   }
 
   @Test

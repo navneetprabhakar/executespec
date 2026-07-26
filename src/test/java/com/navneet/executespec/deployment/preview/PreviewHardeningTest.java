@@ -107,7 +107,7 @@ class PreviewHardeningTest {
     private PreviewPortPool pool() {
       PreviewProperties props = new PreviewProperties();
       props.setUseEphemeralPorts(false);
-      return new PreviewPortPool(props);
+      return new PreviewPortPool(props, () -> -1, port -> true);
     }
 
     @Test

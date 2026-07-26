@@ -16,6 +16,18 @@ export interface AgentClientCapabilities {
   canRenderTui: boolean;
 }
 
+export interface RuntimeClientCapabilities {
+  remoteSandbox: {
+    supported: boolean;
+    enabled: boolean;
+    lifecycleEnabled: boolean;
+    dispatchEnabled: boolean;
+    strictContainerEnabled: boolean;
+    isolationProfile: string;
+    note: string;
+  };
+}
+
 export interface CreateAgentSessionRequest {
   id?: string | null;
   projectId?: string | null;
@@ -247,6 +259,9 @@ export const listAgentActions = () => req<AgentActionDescriptor[]>('/agent/actio
 
 export const listAgentCapabilities = (surface: 'WEB' | 'CLI' | 'VSCODE' | string = 'WEB') =>
   req<AgentCapabilityTool[]>(`/agent/v2/capabilities?surface=${encodeURIComponent(surface)}`);
+
+export const getRuntimeClientCapabilities = () =>
+  req<RuntimeClientCapabilities>('/v3/client-capabilities');
 
 export const createAgentSession = (body: CreateAgentSessionRequest) =>
   req<AgentSessionResponse>('/agent/sessions', {method: 'POST', body: JSON.stringify(body)});

@@ -59,6 +59,14 @@ public record PlannerRequest(
      */
     String prReviewComments) {
 
+  /**
+   * A 25-task LARGE outline creates 25 independent expansion calls before any code is written.
+   * Sixteen cohesive leaves leave enough room for independent backend operations, frontend
+   * consumers, and black-box verification without forcing unrelated HIGH work into descriptions
+   * that exceed the bounded expansion envelope. LEGACY retains its migration-scale cap.
+   */
+  static final int LARGE_PLANNER_TASK_CAP = 16;
+
   public PlannerRequest {
     if (spec == null || spec.isBlank()) throw new IllegalArgumentException("spec required");
     if (classification == null) classification = Classification.MEDIUM;
@@ -76,6 +84,9 @@ public record PlannerRequest(
   }
 
   public int plannerMaxTasks() {
+    if (planStrategy == PlanStrategy.LARGE) {
+      return Math.min(planStrategy.maxTasks(), LARGE_PLANNER_TASK_CAP);
+    }
     return planStrategy == null ? classification.maxTasks() : planStrategy.maxTasks();
   }
 }

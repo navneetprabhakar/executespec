@@ -71,6 +71,14 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class SandboxCommandRoutingService {
 
+  /**
+   * Operator acknowledgement that the configured digest-pinned image contains the build/test
+   * toolchains needed by generated projects. This is deliberately separate from lifecycle and
+   * dispatch: the generic Debian default image is containment-capable but not execution-ready.
+   */
+  public static final String FLAG_TOOLCHAIN_READINESS =
+      "sandbox.runtime.toolchain-readiness.enabled";
+
   /** Fallback wall-clock when a caller supplies no usable timeout. */
   static final Duration DEFAULT_TIMEOUT = Duration.ofMinutes(10);
 
@@ -82,6 +90,10 @@ public class SandboxCommandRoutingService {
 
   /** Above this many cached leases, lapsed entries are swept. */
   private static final int MAX_CACHED_LEASES = 256;
+
+  /** Per-process owner identity; PID alone can be reused after a restart. */
+  private static final String OWNER =
+      "jvm:" + ProcessHandle.current().pid() + ":" + UUID.randomUUID();
 
   private final RunSandboxLifecycleService lifecycle;
   private final RunSandboxRuntimeDispatcher dispatcher;
@@ -100,9 +112,72 @@ public class SandboxCommandRoutingService {
    * host path unchanged.
    */
   public boolean routingEnabled() {
-    return featureFlags.isEnabled(RunSandboxLifecycleService.FLAG_LIFECYCLE)
-        && dispatcher.dispatchEnabled();
+    return readiness().enabled();
   }
+
+  /**
+   * The complete fail-closed admission decision used by command callers and capability reporting.
+   *
+   * <p>A strict-runtime flag is not proof that a usable runtime exists. We also require an
+   * explicitly verified toolchain image, a digest pin, and a currently available strict runtime.
+   * This prevents an accidental three-flag flip from advertising isolation while commands either
+   * fail immediately or drift to an unreviewed mutable image.
+   */
+  public Readiness readiness() {
+    boolean lifecycleEnabled = featureFlags.isEnabled(RunSandboxLifecycleService.FLAG_LIFECYCLE);
+    boolean dispatchEnabled = dispatcher.dispatchEnabled();
+    boolean strictContainerEnabled =
+        featureFlags.isEnabled(RunSandboxRuntimeDispatcher.FLAG_CONTAINER_STRICT_V1);
+    boolean toolchainReady = featureFlags.isEnabled(FLAG_TOOLCHAIN_READINESS);
+    String image = properties.getImage();
+    boolean imageDigestPinned = image != null && image.matches("(?i)^.+@sha256:[0-9a-f]{64}$");
+    boolean runtimeAvailable =
+        lifecycleEnabled
+            && dispatchEnabled
+            && strictContainerEnabled
+            && toolchainReady
+            && imageDigestPinned
+            && dispatcher.selectedProfile()
+                == com.navneet.executespec.sandbox.SandboxIsolationProfile.CONTAINER_STRICT_V1;
+    boolean enabled =
+        lifecycleEnabled
+            && dispatchEnabled
+            && strictContainerEnabled
+            && toolchainReady
+            && imageDigestPinned
+            && runtimeAvailable;
+    String reason;
+    if (enabled) {
+      reason = "strict sandbox runtime and digest-pinned toolchain image are ready";
+    } else if (!toolchainReady) {
+      reason = FLAG_TOOLCHAIN_READINESS + " is off";
+    } else if (!imageDigestPinned) {
+      reason = "sandbox image is not pinned by sha256 digest";
+    } else if (!runtimeAvailable) {
+      reason = "strict sandbox runtime is unavailable";
+    } else {
+      reason = "one or more sandbox execution gates are off";
+    }
+    return new Readiness(
+        enabled,
+        lifecycleEnabled,
+        dispatchEnabled,
+        strictContainerEnabled,
+        toolchainReady,
+        imageDigestPinned,
+        runtimeAvailable,
+        reason);
+  }
+
+  public record Readiness(
+      boolean enabled,
+      boolean lifecycleEnabled,
+      boolean dispatchEnabled,
+      boolean strictContainerEnabled,
+      boolean toolchainReady,
+      boolean imageDigestPinned,
+      boolean runtimeAvailable,
+      String reason) {}
 
   /**
    * Runs one argument vector inside the sandbox belonging to {@code runId}.
@@ -150,8 +225,33 @@ public class SandboxCommandRoutingService {
           || current.state() == SandboxState.PROVISIONING) {
         current = dispatcher.provision(current, lease, spec);
       }
-      return dispatcher.exec(
-          current, lease, new SandboxExecRequest(argv, CONTAINER_WORKDIR, bounded));
+      SandboxExecResult result =
+          dispatcher.exec(current, lease, new SandboxExecRequest(argv, CONTAINER_WORKDIR, bounded));
+      if (result.status() == SandboxExecResult.Status.TIMED_OUT) {
+        try {
+          dispatcher.failAndRelease(
+              current, lease, "COMMAND_TIMEOUT", "sandbox command exceeded " + bounded);
+        } catch (RuntimeException cleanupFailure) {
+          log.error(
+              "timed-out sandbox {} could not be torn down immediately",
+              current.id(),
+              cleanupFailure);
+        } finally {
+          heldLeases.remove(current.id());
+        }
+      } else if (store.cancellationRequested(lease)) {
+        try {
+          dispatcher.release(current, lease, SandboxState.CANCELLED);
+        } catch (RuntimeException cleanupFailure) {
+          log.error(
+              "cancelled sandbox {} could not be torn down immediately",
+              current.id(),
+              cleanupFailure);
+        } finally {
+          heldLeases.remove(current.id());
+        }
+      }
+      return result;
     } catch (RuntimeException failure) {
       // Logged, not swallowed: the caller still receives an explicit "did not execute" status and
       // must fail closed on it. Converting this to a host run is the defect being closed.
@@ -180,6 +280,68 @@ public class SandboxCommandRoutingService {
     return out.isEmpty() ? err : out + "\n" + err;
   }
 
+  /**
+   * Tears down the active sandbox for a terminal pipeline run.
+   *
+   * <p>Event listeners call this on the fast path; a scheduled durable sweep calls it when an event
+   * was missed or the run was cancelled directly. Teardown is deliberately independent of all three
+   * admission/dispatch flags.
+   */
+  public Optional<RunSandbox> releaseForTerminalRun(String runId) {
+    Optional<PipelineRun> run = pipelineRuns.findById(runId);
+    Optional<RunSandbox> active = store.findActiveForRun(runId);
+    if (run.isEmpty() || active.isEmpty() || !terminal(run.get().getStatus())) {
+      return Optional.empty();
+    }
+    SandboxState terminal =
+        "CANCELLED".equalsIgnoreCase(run.get().getStatus())
+            ? SandboxState.CANCELLED
+            : SandboxState.TERMINATED;
+    return release(active.get(), terminal);
+  }
+
+  /** Durable fallback sweep for terminal runs whose event-driven teardown was missed. */
+  public int releaseTerminalRuns(int limit) {
+    return releaseTerminalRuns(limit, ignored -> false);
+  }
+
+  /**
+   * Durable fallback sweep with a bounded retention predicate for post-run work that may still
+   * issue commands.
+   */
+  public int releaseTerminalRuns(int limit, java.util.function.Predicate<String> retainRun) {
+    int released = 0;
+    for (RunSandbox sandbox : store.terminalRunCandidates(Math.max(1, limit))) {
+      if (retainRun != null && retainRun.test(sandbox.runId())) {
+        continue;
+      }
+      if (releaseForTerminalRun(sandbox.runId()).isPresent()) {
+        released++;
+      }
+    }
+    return released;
+  }
+
+  private Optional<RunSandbox> release(RunSandbox sandbox, SandboxState terminal) {
+    RunSandbox.Lease lease = heldLeases.get(sandbox.id());
+    if (lease == null || !store.heartbeat(lease, properties.getLeaseDuration())) {
+      heldLeases.remove(sandbox.id());
+      lease = store.tryAcquire(sandbox.id(), OWNER, properties.getLeaseDuration()).orElse(null);
+    }
+    if (lease == null) {
+      if (terminal == SandboxState.CANCELLED) {
+        lifecycle.cancel(sandbox.id());
+      }
+      return Optional.empty();
+    }
+    try {
+      RunSandbox current = store.get(sandbox.id()).orElse(sandbox);
+      return Optional.of(dispatcher.release(current, lease, terminal));
+    } finally {
+      heldLeases.remove(sandbox.id());
+    }
+  }
+
   private RunSandbox resolveSandbox(String runId, SandboxRuntimeSpec spec) {
     Optional<RunSandbox> active = store.findActiveForRun(runId);
     if (active.isPresent()) {
@@ -192,6 +354,10 @@ public class SandboxCommandRoutingService {
                 () ->
                     new IllegalStateException(
                         "run " + runId + " has no persisted row; cannot admit a sandbox for it"));
+    if (terminal(run.getStatus())) {
+      throw new IllegalStateException(
+          "run " + runId + " is already terminal; refusing to create a late sandbox");
+    }
     if (run.getCreatedByUserId() == null || run.getOrgId() == null) {
       // A sandbox without an accountable owner is not admissible; the column is NOT NULL for
       // exactly that reason and guessing a value here would forge the accountability.
@@ -260,7 +426,17 @@ public class SandboxCommandRoutingService {
   }
 
   private static String owner() {
-    return "jvm:" + ProcessHandle.current().pid();
+    return OWNER;
+  }
+
+  private static boolean terminal(String status) {
+    if (status == null) {
+      return false;
+    }
+    return switch (status.toUpperCase(java.util.Locale.ROOT)) {
+      case "COMPLETE", "PARTIAL", "FAILED", "CANCELLED" -> true;
+      default -> false;
+    };
   }
 
   static Duration clamp(Duration timeout) {

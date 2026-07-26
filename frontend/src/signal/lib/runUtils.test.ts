@@ -7,6 +7,11 @@ describe('humanStatusReason', () => {
       'Changes ready locally — not server-verified',
     );
   });
+
+  it('distinguishes deterministic plan rejection from planning unavailability', () => {
+    expect(humanStatusReason('PLAN_VALIDATION_REJECTED')).toBe('Plan validation rejected');
+    expect(humanStatusReason('PLANNER_UNAVAILABLE')).toBe('Planning could not complete');
+  });
 });
 
 describe('repoDisplayName', () => {

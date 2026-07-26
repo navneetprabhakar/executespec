@@ -48,9 +48,9 @@ class StateStoreUserRunsSummaryTest {
         mock(ModelRegistry.class));
   }
 
-  private static PipelineRunRepository.UserRunAggregate agg(
+  private static com.navneet.executespec.state.repository.UserRunAggregate agg(
       String uid, long runCount, long completed, long failed, long in, long out) {
-    return new PipelineRunRepository.UserRunAggregate() {
+    return new com.navneet.executespec.state.repository.UserRunAggregate() {
       @Override
       public String getUid() {
         return uid;

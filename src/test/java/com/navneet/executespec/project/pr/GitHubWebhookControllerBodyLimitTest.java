@@ -2,6 +2,8 @@ package com.navneet.executespec.project.pr;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.nio.charset.StandardCharsets;
@@ -10,6 +12,7 @@ import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.navneet.executespec.project.service.ProjectSourceFreshnessInvalidator;
 import com.navneet.executespec.prreview.inbox.PrCommentInboxService;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -25,11 +28,14 @@ class GitHubWebhookControllerBodyLimitTest {
   private final PullRequestRecordService prService = mock(PullRequestRecordService.class);
   private final CiFailureAutoFixService ciAutoFix = mock(CiFailureAutoFixService.class);
   private final PrCommentInboxService inbox = mock(PrCommentInboxService.class);
+  private final ProjectSourceFreshnessInvalidator freshnessInvalidator =
+      mock(ProjectSourceFreshnessInvalidator.class);
   private GitHubWebhookController controller;
 
   @BeforeEach
   void setUp() {
-    controller = new GitHubWebhookController(prService, ciAutoFix, new ObjectMapper());
+    controller =
+        new GitHubWebhookController(prService, ciAutoFix, new ObjectMapper(), freshnessInvalidator);
     ReflectionTestUtils.setField(controller, "webhookSecret", SECRET);
     ReflectionTestUtils.setField(controller, "maxBodyBytes", 1024);
     ReflectionTestUtils.setField(controller, "prCommentInboxService", inbox);
@@ -88,5 +94,34 @@ class GitHubWebhookControllerBodyLimitTest {
     ResponseEntity<Void> response = controller.receive(sign(body), "pull_request", req);
 
     assertThat(response.getStatusCode().value()).isEqualTo(204);
+  }
+
+  @Test
+  void signedPushWithChangedHeadInvalidatesProjectFreshnessCaches() {
+    String json =
+        "{\"before\":\"old-sha\",\"after\":\"new-sha\","
+            + "\"repository\":{\"full_name\":\"acme/widget\"}}";
+    byte[] body = json.getBytes(StandardCharsets.UTF_8);
+    MockHttpServletRequest req = new MockHttpServletRequest();
+    req.setContent(body);
+
+    ResponseEntity<Void> response = controller.receive(sign(body), "push", req);
+
+    assertThat(response.getStatusCode().value()).isEqualTo(204);
+    verify(freshnessInvalidator).invalidateGitHubRepo("acme/widget");
+  }
+
+  @Test
+  void duplicatePushHeadDoesNotEvictCaches() {
+    String json =
+        "{\"before\":\"same-sha\",\"after\":\"same-sha\","
+            + "\"repository\":{\"full_name\":\"acme/widget\"}}";
+    byte[] body = json.getBytes(StandardCharsets.UTF_8);
+    MockHttpServletRequest req = new MockHttpServletRequest();
+    req.setContent(body);
+
+    controller.receive(sign(body), "push", req);
+
+    verify(freshnessInvalidator, never()).invalidateGitHubRepo("acme/widget");
   }
 }

@@ -58,6 +58,13 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class SmartClassifierAgent {
 
+  /**
+   * Long acceptance criteria are not the same thing as a hierarchical multi-repository change. Keep
+   * a single-repository spec in the bounded full-plan lane until its size is materially larger;
+   * structural signals above still promote migrations/refactors and true multi-repo work.
+   */
+  private static final int HEURISTIC_MEDIUM_CHAR_CAP = 4_000;
+
   private final LlmRouter router;
   private final ModelResolver modelResolver;
   private final StringRedisTemplate redis;
@@ -74,8 +81,14 @@ public class SmartClassifierAgent {
   /** Redis cache TTL for the {spec,repos,projectId} → ClassificationResult mapping. */
   private static final Duration CACHE_TTL = Duration.ofHours(1);
 
-  /** Redis key prefix. */
-  private static final String CACHE_PREFIX = "planner:classify:";
+  /**
+   * Redis cache namespace for the current classifier policy/prompt contract.
+   *
+   * <p>Classifier verdicts are derived data, not durable facts. Bump this namespace whenever the
+   * heuristic thresholds or {@code smart-classifier.md} contract changes; otherwise a deployment
+   * can continue routing from an obsolete pre-deploy verdict for the full cache TTL.
+   */
+  private static final String CACHE_PREFIX = "planner:classify:v3:";
 
   /**
    * Words that, when present in the spec, force the heuristic to defer to the LLM verifier even
@@ -189,6 +202,7 @@ public class SmartClassifierAgent {
       String projectMemorySnippet,
       com.navneet.executespec.executioncontext.LlmExecutionReference executionReference,
       String usageRunId) {
+    int repoCount = repoFullNames == null ? 1 : Math.max(1, repoFullNames.size());
     String cacheKey =
         cacheKey(spec, repoFullNames, projectId, projectType, aiProvider, projectMemorySnippet);
     if (cacheKey != null) {
@@ -197,6 +211,7 @@ public class SmartClassifierAgent {
         if (cached != null && !cached.isBlank()) {
           ClassificationResult fromCache = parseCached(cached);
           if (fromCache != null) {
+            fromCache = normalizeSubmittedScope(fromCache, repoCount);
             log.info(
                 "SmartClassifier cache hit project={} key={} → {}",
                 projectId,
@@ -210,8 +225,6 @@ public class SmartClassifierAgent {
         log.debug("SmartClassifier redis lookup failed: {}", e.getMessage());
       }
     }
-
-    int repoCount = repoFullNames == null ? 1 : Math.max(1, repoFullNames.size());
 
     HeuristicVerdict heuristic = runHeuristic(spec, repoCount);
 
@@ -235,16 +248,18 @@ public class SmartClassifierAgent {
     }
 
     ClassificationResult verified =
-        invokeLlmVerifier(
-            spec,
-            repoFullNames,
-            projectType,
-            projectMemorySnippet,
-            heuristic,
-            aiProvider,
-            projectId,
-            executionReference,
-            usageRunId);
+        normalizeSubmittedScope(
+            invokeLlmVerifier(
+                spec,
+                repoFullNames,
+                projectType,
+                projectMemorySnippet,
+                heuristic,
+                aiProvider,
+                projectId,
+                executionReference,
+                usageRunId),
+            repoCount);
     // RR-1201 — never cache a TRANSIENT fallback. Model-resolve, prompt-assembly, empty-body,
     // JSON-parse and transport failures all return a LLM_FALLBACK_TO_HEURISTIC verdict; caching it
     // for the full TTL would suppress verifier recovery for every identical key for an hour after
@@ -254,6 +269,37 @@ public class SmartClassifierAgent {
       cachePut(cacheKey, verified);
     }
     return verified;
+  }
+
+  /**
+   * The classifier estimates shape; it cannot expand the submitted repository scope or promise more
+   * tasks than the selected planner lane can emit. Apply this boundary to every result source
+   * (cache, LLM, and fallback) so transient fallbacks and stale model output cannot leak impossible
+   * counts into routing logs or the UI.
+   */
+  static ClassificationResult normalizeSubmittedScope(
+      ClassificationResult result, int submittedRepoCount) {
+    int repoUpperBound = Math.max(1, submittedRepoCount);
+    int repoTouchCount = Math.max(1, Math.min(result.estimatedRepoTouchCount(), repoUpperBound));
+    int taskUpperBound =
+        result.strategy() == PlanStrategy.LARGE
+            ? Math.min(result.strategy().maxTasks(), PlannerRequest.LARGE_PLANNER_TASK_CAP)
+            : result.strategy().maxTasks();
+    int taskCount = Math.max(1, Math.min(result.estimatedTaskCount(), taskUpperBound));
+    if (repoTouchCount == result.estimatedRepoTouchCount()
+        && taskCount == result.estimatedTaskCount()) {
+      return result;
+    }
+    return new ClassificationResult(
+        result.strategy(),
+        taskCount,
+        repoTouchCount,
+        result.requiresEpics(),
+        result.reasoning(),
+        result.source(),
+        result.inputTokens(),
+        result.outputTokens(),
+        result.costUsd());
   }
 
   // Heuristic
@@ -296,10 +342,10 @@ public class SmartClassifierAgent {
     // endpoint typically expands to ≥1 task. Checked BEFORE the
     // SINGLE_SHOT fast-path so a tight 4-endpoint API spec doesn't
     // get misclassified as a one-shot just because it's short.
-    // Capped at ≤2000 chars so >2000-char specs (where length carries
-    // a lot of supporting context) still flow through the LARGE bucket.
+    // Capped at the single-repo MEDIUM ceiling. Rich acceptance criteria often exceed 2K without
+    // requiring 25 independently expanded tasks; structural upgrade signals above still win.
     int endpoints = countEndpoints(trimmed);
-    if (endpoints >= 4 && len <= 2000) {
+    if (endpoints >= 4 && len <= HEURISTIC_MEDIUM_CHAR_CAP) {
       return new HeuristicVerdict(
           PlanStrategy.MEDIUM, false, endpoints + " HTTP endpoints → MEDIUM (multi-feature scope)");
     }
@@ -317,11 +363,14 @@ public class SmartClassifierAgent {
           false,
           "≤800 chars, single feature scope (LLM may downgrade or upgrade)");
     }
-    if (len <= 2000) {
-      return new HeuristicVerdict(PlanStrategy.MEDIUM, false, "≤2000 chars, single repo");
+    if (len <= HEURISTIC_MEDIUM_CHAR_CAP) {
+      return new HeuristicVerdict(
+          PlanStrategy.MEDIUM, false, "≤" + HEURISTIC_MEDIUM_CHAR_CAP + " chars, single repo");
     }
     return new HeuristicVerdict(
-        PlanStrategy.LARGE, false, ">2000 chars → at least LARGE (LLM may upgrade to LEGACY)");
+        PlanStrategy.LARGE,
+        false,
+        ">" + HEURISTIC_MEDIUM_CHAR_CAP + " chars → at least LARGE (LLM may upgrade to LEGACY)");
   }
 
   // LLM verifier

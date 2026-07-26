@@ -8,15 +8,15 @@ class SequentialExecutorGoalOutputPolicyTest {
 
   @Test
   void codeChangingCategoriesRequireMeaningfulDiff() {
-    assertThat(SequentialExecutor.requiresMeaningfulDiff("PROJECT_PATCH")).isTrue();
-    assertThat(SequentialExecutor.requiresMeaningfulDiff("BUG_FIX")).isTrue();
-    assertThat(SequentialExecutor.requiresMeaningfulDiff("TEST_FIX")).isTrue();
-    assertThat(SequentialExecutor.requiresMeaningfulDiff("REFACTOR")).isTrue();
-    assertThat(SequentialExecutor.requiresMeaningfulDiff("GREENFIELD_BUILD")).isTrue();
+    assertThat(TaskCategoryClassifier.requiresMeaningfulDiff("PROJECT_PATCH")).isTrue();
+    assertThat(TaskCategoryClassifier.requiresMeaningfulDiff("BUG_FIX")).isTrue();
+    assertThat(TaskCategoryClassifier.requiresMeaningfulDiff("TEST_FIX")).isTrue();
+    assertThat(TaskCategoryClassifier.requiresMeaningfulDiff("REFACTOR")).isTrue();
+    assertThat(TaskCategoryClassifier.requiresMeaningfulDiff("GREENFIELD_BUILD")).isTrue();
   }
 
   @Test
   void readOnlyHelpCanCompleteWithoutAProductDiff() {
-    assertThat(SequentialExecutor.requiresMeaningfulDiff("READ_ONLY_HELP")).isFalse();
+    assertThat(TaskCategoryClassifier.requiresMeaningfulDiff("READ_ONLY_HELP")).isFalse();
   }
 }

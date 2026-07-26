@@ -16,6 +16,7 @@ const api = vi.hoisted(() => ({
   listAgentSessions: vi.fn(),
   listAgentGates: vi.fn(),
   listAgentCapabilities: vi.fn(),
+  getRuntimeClientCapabilities: vi.fn(),
   getManagedAiBalance: vi.fn(),
   listAgentTurns: vi.fn(),
   listAgentEvents: vi.fn(),
@@ -90,6 +91,17 @@ const managedAi = {
 };
 
 function setHappyPathMocks() {
+  api.getRuntimeClientCapabilities.mockResolvedValue({
+    remoteSandbox: {
+      supported: true,
+      enabled: true,
+      lifecycleEnabled: true,
+      dispatchEnabled: true,
+      strictContainerEnabled: true,
+      isolationProfile: 'CONTAINER_STRICT_V1',
+      note: 'enabled',
+    },
+  });
   api.listAgentSessions.mockResolvedValue([session]);
   api.listAgentGates.mockResolvedValue([
     {
@@ -275,6 +287,38 @@ describe('IdeAgent', () => {
     expect(host.textContent).not.toContain('0 of 0 credits left');
     expect(host.textContent).toContain('Run credits');
     expect(host.textContent).toContain('Operator diagnostics');
+  });
+
+  it('does not advertise an isolated sandbox when the runtime gates are off', async () => {
+    api.getRuntimeClientCapabilities.mockResolvedValue({
+      remoteSandbox: {
+        supported: true,
+        enabled: false,
+        lifecycleEnabled: false,
+        dispatchEnabled: false,
+        strictContainerEnabled: false,
+        isolationProfile: 'NOT_ENABLED',
+        note: 'disabled',
+      },
+    });
+
+    ({host, root} = await renderAgent('/agent'));
+
+    expect(host.textContent).toContain('New workspace');
+    expect(host.textContent).toContain('Remote workspaces waiting for your approval');
+    expect(host.textContent).not.toContain('New sandbox');
+    expect(host.textContent).not.toContain('Remote sandboxes waiting for your approval');
+  });
+
+  it('fails closed to remote-workspace language when capability discovery fails', async () => {
+    api.getRuntimeClientCapabilities.mockRejectedValueOnce(new Error('capability unavailable'));
+
+    ({host, root} = await renderAgent('/agent'));
+
+    expect(host.textContent).toContain('New workspace');
+    expect(host.textContent).toContain('Remote workspaces waiting for your approval');
+    expect(host.textContent).not.toContain('New sandbox');
+    expect(host.textContent).not.toContain('Remote sandboxes waiting for your approval');
   });
 
   it('exposes agent status as an accessible live region for screen-reader operators', async () => {
@@ -855,6 +899,7 @@ describe('IdeAgent', () => {
           gates={[]}
           runCard={null}
           runCost={null}
+          remoteSandboxEnabled
           input=''
           attachments={[]}
           uploading={false}
@@ -961,6 +1006,65 @@ describe('IdeAgent', () => {
     }
   });
 
+  it('keeps artifact sandbox actions disabled until the server enables the runtime', async () => {
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    const localRoot = createRoot(host);
+    root = localRoot;
+    const dispatch = vi.fn();
+
+    await act(async () => {
+      localRoot.render(
+        <AgentConversation
+          messages={[
+            {
+              id: 'turn:assistant',
+              role: 'assistant',
+              content: 'Generated output:\n\n```html\n<main>Release candidate</main>\n```',
+            },
+          ]}
+          streamEvents={[]}
+          streamText=''
+          isBusy={false}
+          visibleAction={null}
+          gates={[]}
+          runCard={null}
+          runCost={null}
+          remoteSandboxEnabled={false}
+          input=''
+          attachments={[]}
+          uploading={false}
+          endRef={{current: null}}
+          dispatch={dispatch}
+          onScroll={vi.fn()}
+          onSend={vi.fn()}
+          onStop={vi.fn()}
+          onAddFiles={vi.fn()}
+          onRemoveAttachment={vi.fn()}
+          onConfirmAction={vi.fn()}
+          onApproveGate={vi.fn()}
+          onRejectGate={vi.fn()}
+          onOpenGate={vi.fn()}
+          onOpenRun={vi.fn()}
+          onStopRun={vi.fn()}
+        />,
+      );
+    });
+
+    const sandboxAction = [...host.querySelectorAll<HTMLButtonElement>('button')].find(
+      (button) => button.textContent === 'Sandbox unavailable',
+    );
+    expect(sandboxAction?.disabled).toBe(true);
+    expect(sandboxAction?.title).toBe('Remote sandbox is unavailable in this environment.');
+    expect(host.textContent).toContain('Remote sandbox is unavailable in this environment.');
+    expect(host.textContent).not.toContain('Draft sandbox request');
+
+    await act(async () => {
+      sandboxAction?.dispatchEvent(new MouseEvent('click', {bubbles: true}));
+    });
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
   it('renders multi-file generated output as separate artifact actions', async () => {
     host = document.createElement('div');
     document.body.appendChild(host);
@@ -986,6 +1090,7 @@ describe('IdeAgent', () => {
           gates={[]}
           runCard={null}
           runCost={null}
+          remoteSandboxEnabled
           input=''
           attachments={[]}
           uploading={false}
@@ -1172,7 +1277,7 @@ describe('IdeAgent', () => {
     });
     await flush();
 
-    expect(host.textContent).toContain('Sandbox run not ready');
+    expect(host.textContent).toContain('Remote run not ready');
     expect(host.textContent).toContain('Select a project or repository first.');
     expect(host.textContent).not.toContain('Create sandbox plan');
     expect(api.confirmAgentRunProposal).not.toHaveBeenCalled();

@@ -29,7 +29,16 @@ Check for these patterns based on the project type (inferred from the file tree)
 
 # Available tools
 
-`readFile`/`read_file`, `writeFile`/`write_file`, `editFile`/`edit_file`, `multiEdit`/`multi_edit`/`apply_patch`, `listFiles`, `glob`, `searchFiles`/`grep`, `diagnostics`, `gitStatus`, `gitDiff`, `buildProject`, `completeTask`. Shell is unavailable in brownfield review passes; use `buildProject` for executable verification.
+`readFile`, `editFile`, `listFiles`, `glob`, `searchFiles`, `gitStatus`, `gitDiff`, `buildProject`, `completeTask`. This pass cannot create files or invoke a shell; use `buildProject` for executable verification.
+
+# Efficiency contract
+
+Batch independent read-only calls in the same response. One clean-pass evidence sweep should
+normally take no more than three model turns: (1) tree + diff/status, (2) relevant files + symbol
+searches, (3) one `buildProject`, followed immediately by `completeTask`. Do not re-read or
+re-search evidence already returned. The numbered workflow below describes required evidence, not
+a requirement to spend one model turn per numbered step. Once the diff and relevant call-sites
+show no wiring gap, stop investigating, build once, and complete.
 
 Do not create or wholesale-replace build manifests to make an empty or unrelated workspace appear runnable. Do not write outside admitted repository roots or create files absent from the approved plan; report those conditions as `VERDICT: UNRESOLVED`.
 
@@ -39,10 +48,10 @@ Do not create or wholesale-replace build manifests to make an empty or unrelated
 2. Identify project type from files present (Cargo.toml → Rust; package.json → TS/JS; pom.xml → Java; go.mod → Go; requirements.txt / pyproject.toml → Python).
 3. Scan source files for the patterns relevant to that project type (use `searchFiles` for annotations/decorators).
 4. `gitDiff` to see what this run changed; for every changed shared mechanism (signature / exported type / schema / interface / config key), `searchFiles` the symbol and confirm EVERY call-site was updated — the most common multi-file under-scoping gap.
-5. Fix any wiring gaps with `editFile` or `writeFile`.
-6. If a tool returns `STALE_READ`, re-read and retry against the current file. If `write_file` returns `ALREADY_EXISTS`, use an edit tool. If `bash` returns `COMMAND_FAILED`, inspect its structured stdout/stderr before retrying.
-6. Call `buildProject` once at the end.
-7. Call `completeTask` with the structured verdict header described below.
+5. Fix any wiring gaps with `editFile`.
+6. If a tool returns `STALE_READ`, re-read and retry against the current file.
+7. Call `buildProject` once at the end.
+8. Call `completeTask` with the structured verdict header described below.
 
 # `completeTask` summary format — REQUIRED
 

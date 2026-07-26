@@ -116,8 +116,15 @@ public class RunSandboxLifecycleService {
     List<RunSandbox> candidates = store.expiryCandidates(properties.getReconcileBatchSize());
     int expired = 0;
     for (RunSandbox candidate : candidates) {
-      if (store.forceTerminal(candidate.id(), SandboxState.EXPIRED, null).isPresent()) {
-        expired++;
+      try {
+        if (dispatcher
+            .reconcileExpired(
+                candidate, "expiry:" + ProcessHandle.current().pid(), properties.getLeaseDuration())
+            .isPresent()) {
+          expired++;
+        }
+      } catch (RuntimeException failure) {
+        log.error("expired sandbox {} could not be torn down", candidate.id(), failure);
       }
     }
     return expired;

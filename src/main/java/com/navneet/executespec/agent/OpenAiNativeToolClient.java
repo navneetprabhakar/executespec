@@ -19,9 +19,6 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
-import org.springframework.ai.chat.messages.SystemMessage;
-import org.springframework.ai.chat.messages.ToolResponseMessage;
-import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.metadata.ChatGenerationMetadata;
 import org.springframework.ai.chat.metadata.ChatResponseMetadata;
 import org.springframework.ai.chat.metadata.DefaultUsage;
@@ -268,6 +265,7 @@ public class OpenAiNativeToolClient {
   private ObjectNode buildRequestBody(OpenAiToolCallRequest request) {
     ObjectNode body = objectMapper.createObjectNode();
     body.put("model", request.model());
+    boolean isDeepSeek = request.baseUrl() != null && request.baseUrl().contains("deepseek");
 
     ArrayNode messages = body.putArray("messages");
     // Two input modes:
@@ -277,7 +275,7 @@ public class OpenAiNativeToolClient {
     //      fields are ignored.
     if (request.messages() != null && !request.messages().isEmpty()) {
       for (Message m : request.messages()) {
-        appendMessage(messages, m);
+        OpenAiMessageSerializer.append(messages, m);
       }
     } else {
       if (request.systemPrompt() != null && !request.systemPrompt().isBlank()) {
@@ -307,22 +305,25 @@ public class OpenAiNativeToolClient {
               "Invalid JSON schema for tool '" + tc.getToolDefinition().name() + "'", e);
         }
       }
-      // RL-2026-06-004 — DeepSeek's thinking-mode models 400 on ANY tool_choice
-      // ("Thinking mode does not support this tool_choice"), so NEVER send it on the native
-      // DeepSeek
-      // base-url. OpenAI/OpenRouter, by contrast, NEED the "auto" default sent when tools are
-      // present
-      // (omitting it makes gpt-5.x return text instead of calling tools) — so keep the default
-      // there.
-      boolean isDeepSeek = request.baseUrl() != null && request.baseUrl().contains("deepseek");
-      if (!isDeepSeek) {
+      // DeepSeek rejects tool_choice in thinking mode but supports it when thinking is explicitly
+      // disabled. OpenAI/aggregators always retain their normal auto/required behavior.
+      if (supportsToolChoice(request)) {
         body.put("tool_choice", request.toolChoice() == null ? "auto" : request.toolChoice());
       }
     }
 
-    if (request.temperature() != null) body.put("temperature", request.temperature());
-    if (request.maxCompletionTokens() != null)
-      body.put("max_completion_tokens", request.maxCompletionTokens());
+    // GPT-5.6 exposes reasoning effort rather than sampling temperature. The direct OpenAI and
+    // OpenRouter catalogues omit temperature from this family's supported parameters, so do not
+    // turn an otherwise valid selectable model into a deterministic 400.
+    if (request.temperature() != null && !rejectsSamplingTemperature(request.model())) {
+      body.put("temperature", request.temperature());
+    }
+    if (request.maxCompletionTokens() != null) {
+      // Native DeepSeek's Chat Completions contract uses `max_tokens`; it silently ignored our
+      // OpenAI-specific `max_completion_tokens`, allowing a 1,500-token coherence request to emit
+      // 12,840 billed completion tokens. Aggregators/OpenAI retain the OpenAI field.
+      body.put(isDeepSeek ? "max_tokens" : "max_completion_tokens", request.maxCompletionTokens());
+    }
     if (request.extraBody() != null && !request.extraBody().isEmpty()) {
       for (var entry : request.extraBody().entrySet()) {
         if (entry.getKey() != null && entry.getValue() != null) {
@@ -334,94 +335,16 @@ public class OpenAiNativeToolClient {
     return body;
   }
 
-  /**
-   * Serializes a Spring AI {@link Message} to OpenAI's chat-completions wire format and appends it
-   * to the messages array. Supports the four message types V2 needs: SystemMessage, UserMessage,
-   * AssistantMessage (with optional tool_calls), and ToolResponseMessage (one or more tool results,
-   * each becoming a separate {@code role:"tool"} entry — OpenAI requires one tool message per
-   * tool_call_id).
-   */
-  private void appendMessage(ArrayNode messages, Message m) {
-    if (m instanceof SystemMessage sm) {
-      ObjectNode n = messages.addObject();
-      n.put("role", "system");
-      n.put("content", sm.getText());
-    } else if (m instanceof UserMessage um) {
-      ObjectNode n = messages.addObject();
-      n.put("role", "user");
-      if (um.getMedia() == null || um.getMedia().isEmpty()) {
-        n.put("content", um.getText());
-      } else {
-        ArrayNode parts = n.putArray("content");
-        if (um.getText() != null && !um.getText().isBlank()) {
-          parts.addObject().put("type", "text").put("text", um.getText());
-        }
-        for (var media : um.getMedia()) {
-          ObjectNode image = parts.addObject();
-          image.put("type", "image_url");
-          String mime = media.getMimeType().toString();
-          image
-              .putObject("image_url")
-              .put(
-                  "url",
-                  "data:"
-                      + mime
-                      + ";base64,"
-                      + java.util.Base64.getEncoder().encodeToString(media.getDataAsByteArray()));
-        }
-      }
-    } else if (m instanceof AssistantMessage am) {
-      ObjectNode n = messages.addObject();
-      n.put("role", "assistant");
-      String text = am.getText();
-      if (text != null && !text.isEmpty()) {
-        n.put("content", text);
-      } else {
-        n.putNull("content");
-      }
-      // 2026-05-28 (RL-2026-05-052) — DeepSeek thinking-mode round-trip. V4-{Pro,Flash} both return
-      // `message.reasoning_content` alongside the tool calls; the API then requires that same value
-      // echoed back in the assistant turn of every follow-up call. parseResponse() captures it into
-      // the AssistantMessage's `properties` map under key REASONING_CONTENT_META_KEY; we re-emit
-      // here. OpenAI's own endpoint ignores extra fields, so this is safe for non-DeepSeek calls.
-      if (am.getMetadata() != null) {
-        Object rc = am.getMetadata().get(REASONING_CONTENT_META_KEY);
-        if (rc instanceof String rcStr && !rcStr.isEmpty()) {
-          n.put("reasoning_content", rcStr);
-        }
-      }
-      if (am.getToolCalls() != null && !am.getToolCalls().isEmpty()) {
-        ArrayNode tcs = n.putArray("tool_calls");
-        for (var tc : am.getToolCalls()) {
-          ObjectNode tcn = tcs.addObject();
-          // OpenAI requires non-empty IDs to round-trip in the tool response.
-          // Stable, collision-free synthetic ID when the upstream tool call lacks one.
-          // `System.identityHashCode` is NOT unique across JVMs and can collide within one JVM
-          // (rare but real → OpenAI returns 400 "tool_call_id mismatch"). UUIDs are safe.
-          // Audit: 2026-05-12 line-by-line review item M #67.
-          tcn.put(
-              "id",
-              (tc.id() == null || tc.id().isBlank())
-                  ? "call_" + java.util.UUID.randomUUID().toString().replace("-", "")
-                  : tc.id());
-          tcn.put("type", "function");
-          ObjectNode fn = tcn.putObject("function");
-          fn.put("name", tc.name());
-          fn.put("arguments", tc.arguments() == null ? "{}" : tc.arguments());
-        }
-      }
-    } else if (m instanceof ToolResponseMessage trm) {
-      // OpenAI: one role:"tool" message per ToolResponse, each with its own tool_call_id.
-      for (var resp : trm.getResponses()) {
-        ObjectNode n = messages.addObject();
-        n.put("role", "tool");
-        n.put("tool_call_id", resp.id());
-        n.put("content", resp.responseData() == null ? "" : resp.responseData());
-      }
-    } else {
-      throw new IllegalArgumentException(
-          "Unsupported message type for OpenAI wrapper: " + m.getClass().getName());
-    }
+  private static boolean rejectsSamplingTemperature(String model) {
+    return model != null && model.startsWith("gpt-5.6-");
+  }
+
+  static boolean supportsToolChoice(OpenAiToolCallRequest request) {
+    boolean isDeepSeek = request.baseUrl() != null && request.baseUrl().contains("deepseek");
+    if (!isDeepSeek) return true;
+    Object thinking = request.extraBody() == null ? null : request.extraBody().get("thinking");
+    if (!(thinking instanceof Map<?, ?> thinkingMap)) return false;
+    return "disabled".equals(thinkingMap.get("type"));
   }
 
   private ChatResponse parseResponse(JsonNode response, String requestedModel) {
@@ -474,6 +397,21 @@ public class OpenAiNativeToolClient {
       }
 
       String finishReason = choice.path("finish_reason").asText(null);
+      // Match the Gemini and forced-Anthropic safety boundary: a provider/gateway termination
+      // caused by length, filtering, or another abnormal reason cannot authorize a mutation even
+      // when the partial body happens to contain a syntactically valid tool call.
+      if (!toolCalls.isEmpty() && isAbnormalToolTermination(finishReason)) {
+        log.warn(
+            "OpenAI-wire wrapper: dropping {} tool call(s) after abnormal finish_reason={}",
+            toolCalls.size(),
+            finishReason);
+        toolCalls.clear();
+        content =
+            (content.isBlank() ? "" : content + "\n")
+                + "[Provider terminated with finish_reason="
+                + finishReason
+                + "; tool call(s) suppressed by provider-safety gate]";
+      }
 
       // 2026-05-28 (RL-2026-05-052) — capture DeepSeek's reasoning_content into the
       // AssistantMessage metadata so appendMessage() can echo it back on follow-up calls (the
@@ -519,8 +457,18 @@ public class OpenAiNativeToolClient {
       // (real signal that the prefix isn't matching) distinguishable from "OpenAI returned no
       // metadata" (older API path / parser bug). OpenAI auto-caches prefixes ≥1024 tokens, so 0
       // hits on a multi-iteration task is a flag that the prefix is mutating.
-      int cachedTokens = usage.path("prompt_tokens_details").path("cached_tokens").asInt(0);
+      int cachedTokens =
+          Math.max(
+              usage.path("prompt_tokens_details").path("cached_tokens").asInt(0),
+              usage.path("prompt_cache_hit_tokens").asInt(0));
       metaBuilder.keyValue("cache_read_input_tokens", cachedTokens);
+      // DeepSeek documents top-level hit/miss counters rather than OpenAI's nested detail shape.
+      // Keep miss tokens as diagnostic evidence; never add hit + miss to prompt_tokens because
+      // both providers report cache counters as subsets of the prompt total.
+      int cacheMissTokens = usage.path("prompt_cache_miss_tokens").asInt(0);
+      if (cacheMissTokens > 0) {
+        metaBuilder.keyValue("cache_miss_input_tokens", cacheMissTokens);
+      }
 
       // OpenAI-compatible providers expose reasoning as a subset of completion tokens under
       // completion_tokens_details. Preserve it as a separate audit dimension without adding it to
@@ -543,6 +491,14 @@ public class OpenAiNativeToolClient {
       }
     }
     return new ChatResponse(generations, metaBuilder.build());
+  }
+
+  private static boolean isAbnormalToolTermination(String finishReason) {
+    if (finishReason == null || finishReason.isBlank()) return false;
+    return !switch (finishReason.toLowerCase(java.util.Locale.ROOT)) {
+      case "tool_calls", "function_call", "stop" -> true;
+      default -> false;
+    };
   }
 
   private static Double numberOrNull(JsonNode node) {

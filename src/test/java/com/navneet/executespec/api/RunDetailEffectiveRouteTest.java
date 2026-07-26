@@ -53,6 +53,7 @@ class RunDetailEffectiveRouteTest {
         validationReportRepository,
         managedAiUsageEventRepository,
         new RunEffectiveRouteService(usageRepository),
+        null,
         new ObjectMapper());
   }
 
@@ -134,5 +135,47 @@ class RunDetailEffectiveRouteTest {
     assertThat(detail.getEffectiveRouteAttribution()).isEqualTo("UNATTRIBUTED");
     assertThat(detail.getEffectiveProvider()).isNull();
     assertThat(detail.getRouteDiverged()).isFalse();
+  }
+
+  @Test
+  void preservesRequestedCapSeparatelyWhenPlanningFailedBeforeHardCapDerivation() {
+    when(usageRepository.findByRunIdOrderByCreatedAtAsc(RUN_ID)).thenReturn(List.of());
+    PipelineRun failedDuringPlanning = run("deepseek", null);
+    failedDuringPlanning.setUserCostCap(1.50);
+    failedDuringPlanning.setHardCapUsd(null);
+
+    RunDetail detail = mapper().toDetail(failedDuringPlanning, List.of());
+
+    assertThat(detail.getUserCostCapUsd()).isEqualTo(1.50);
+    assertThat(detail.getHardCapUsd())
+        .as("the read model must not claim a pre-fix cap was enforced when it was not")
+        .isNull();
+  }
+
+  @Test
+  void projectsDeterministicPlannerRejectionWithoutCallingItUnavailable() {
+    when(usageRepository.findByRunIdOrderByCreatedAtAsc(RUN_ID)).thenReturn(List.of());
+    PipelineRun rejected = run("deepseek", null);
+    rejected.setStatus("FAILED");
+    rejected.setStatusReason("PLANNER_UNAVAILABLE");
+    rejected.setFailureReason(
+        "Plan validation rejected: final plan contract validation failed: T9 has no producer");
+
+    RunDetail detail = mapper().toDetail(rejected, List.of());
+
+    assertThat(detail.getStatusReason()).isEqualTo("PLAN_VALIDATION_REJECTED");
+  }
+
+  @Test
+  void preservesUnavailableReasonForWrappedProviderFailure() {
+    when(usageRepository.findByRunIdOrderByCreatedAtAsc(RUN_ID)).thenReturn(List.of());
+    PipelineRun unavailable = run("deepseek", null);
+    unavailable.setStatus("FAILED");
+    unavailable.setStatusReason("PLANNER_UNAVAILABLE");
+    unavailable.setFailureReason("planning could not produce a safe executable plan");
+
+    RunDetail detail = mapper().toDetail(unavailable, List.of());
+
+    assertThat(detail.getStatusReason()).isEqualTo("PLANNER_UNAVAILABLE");
   }
 }

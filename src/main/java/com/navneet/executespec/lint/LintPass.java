@@ -10,6 +10,10 @@ import java.util.List;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
+import com.navneet.executespec.sandbox.SandboxExecResult;
+import com.navneet.executespec.sandboxroute.SandboxCommandRoutingService;
+
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import lombok.extern.slf4j.Slf4j;
@@ -47,10 +51,31 @@ public class LintPass {
   private static final Duration PER_TOOL_TIMEOUT = Duration.ofMinutes(5);
   private static final Duration TOTAL_BUDGET = Duration.ofMinutes(10);
 
+  private final SandboxCommandRoutingService sandboxRouting;
+
+  public LintPass() {
+    this(null);
+  }
+
+  @Autowired
+  public LintPass(SandboxCommandRoutingService sandboxRouting) {
+    this.sandboxRouting = sandboxRouting;
+  }
+
   /** Run every detected fixer against the workspace. */
   public LintReport run(Path workspace) {
+    return run(null, workspace);
+  }
+
+  /** Run every detected fixer with the run scope required by strict sandbox routing. */
+  public LintReport run(String runId, Path workspace) {
     if (workspace == null || !Files.isDirectory(workspace)) {
       return LintReport.skipped("workspace missing");
+    }
+    if (sandboxRouting != null
+        && sandboxRouting.routingEnabled()
+        && (runId == null || runId.isBlank())) {
+      return LintReport.skipped("sandbox routing requires a run id");
     }
 
     Set<Tool> tools = detect(workspace);
@@ -69,13 +94,13 @@ public class LintPass {
             new ToolResult(tool, false, "skipped (total budget exceeded)", Duration.ZERO, 0));
         continue;
       }
-      results.add(applyOne(workspace, tool));
+      results.add(applyOne(runId, workspace, tool));
     }
     int filesChanged = results.stream().mapToInt(ToolResult::filesChanged).sum();
     return new LintReport(results, filesChanged, false, null);
   }
 
-  private Set<Tool> detect(Path workspace) {
+  Set<Tool> detect(Path workspace) {
     Set<Tool> tools = EnumSet.noneOf(Tool.class);
     if (hasPrettierConfig(workspace) || Files.exists(workspace.resolve("package.json"))) {
       // package.json alone is enough to attempt prettier — `npx prettier` will install on demand
@@ -107,7 +132,7 @@ public class LintPass {
         || Files.exists(workspace.resolve("prettier.config.js"));
   }
 
-  private ToolResult applyOne(Path workspace, Tool tool) {
+  private ToolResult applyOne(String runId, Path workspace, Tool tool) {
     long beforeMtime = walkLatestMtime(workspace);
     long started = System.nanoTime();
     try {
@@ -121,6 +146,29 @@ public class LintPass {
             case GOFMT -> List.of("gofmt", "-w", ".");
             case RUSTFMT -> List.of("cargo", "fmt");
           };
+      if (sandboxRouting != null && sandboxRouting.routingEnabled()) {
+        SandboxExecResult result =
+            sandboxRouting.execute(
+                runId, workspace.toAbsolutePath().normalize(), cmd, PER_TOOL_TIMEOUT);
+        Duration elapsed = Duration.ofNanos(System.nanoTime() - started);
+        String output = SandboxCommandRoutingService.combinedOutput(result).trim();
+        if (!result.completed()) {
+          String reason = result.detail() == null ? result.status().name() : result.detail();
+          log.warn("LintPass {} sandbox execution unavailable: {}", tool, reason);
+          return new ToolResult(tool, false, reason, elapsed, 0);
+        }
+        long afterMtime = walkLatestMtime(workspace);
+        int filesChanged = afterMtime > beforeMtime ? countTouchedFiles(workspace, beforeMtime) : 0;
+        if (result.exitCode() != 0) {
+          log.warn(
+              "LintPass {} sandbox exit {} (output={})",
+              tool,
+              result.exitCode(),
+              truncate(output, 400));
+          return new ToolResult(tool, false, "exit " + result.exitCode(), elapsed, filesChanged);
+        }
+        return new ToolResult(tool, true, null, elapsed, filesChanged);
+      }
       ProcessBuilder pb =
           new ProcessBuilder(cmd).directory(workspace.toFile()).redirectErrorStream(true);
       // Strip secret-bearing env vars — formatters never need them.

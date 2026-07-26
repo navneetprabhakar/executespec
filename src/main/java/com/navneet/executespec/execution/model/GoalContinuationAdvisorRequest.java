@@ -11,6 +11,8 @@ import lombok.Builder;
 @Builder
 public record GoalContinuationAdvisorRequest(
     GoalDonenessDecision goalDecision,
+    String runId,
+    String taskId,
     String currentProvider,
     String currentModel,
     String taskCategory,

@@ -12,21 +12,14 @@ class FireworksModelMapperTest {
   void maps_fireworks_models_to_current_slugs() {
     assertThat(FireworksModelMapper.toSlug("deepseek-v4-pro-fw"))
         .isEqualTo("accounts/fireworks/models/deepseek-v4-pro");
-    assertThat(FireworksModelMapper.toSlug("deepseek-v4-flash-fw"))
-        .isEqualTo("accounts/fireworks/models/deepseek-v4-flash");
     assertThat(FireworksModelMapper.toSlug("kimi-k2p6-fw"))
         .isEqualTo("accounts/fireworks/models/kimi-k2p6");
     assertThat(FireworksModelMapper.toSlug("glm-5.1-fw"))
         .isEqualTo("accounts/fireworks/models/glm-5p1");
-    // 2026-06-18 — Fireworks-available subset of the OpenRouter coding models (live-probed).
+    // 2026-07-24 — exact account-visible Fireworks serverless coding subset.
     assertThat(FireworksModelMapper.toSlug("glm-5.2-fw"))
         .isEqualTo("accounts/fireworks/models/glm-5p2");
-    assertThat(FireworksModelMapper.toSlug("minimax-m3-fw"))
-        .isEqualTo("accounts/fireworks/models/minimax-m3");
-    assertThat(FireworksModelMapper.toSlug("minimax-m2.7-fw"))
-        .isEqualTo("accounts/fireworks/models/minimax-m2p7");
-    assertThat(FireworksModelMapper.toSlug("kimi-k2.7-code-fw"))
-        .isEqualTo("accounts/fireworks/models/kimi-k2p7-code");
+    assertThat(FireworksModelMapper.allowList()).hasSize(4);
   }
 
   @Test
@@ -41,5 +34,9 @@ class FireworksModelMapperTest {
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("No verified Fireworks slug");
     assertThat(FireworksModelMapper.isSupported(null)).isFalse();
+    assertThatThrownBy(() -> FireworksModelMapper.toSlug("deepseek-v4-flash-fw"))
+        .isInstanceOf(IllegalArgumentException.class);
+    assertThatThrownBy(() -> FireworksModelMapper.toSlug("minimax-m3-fw"))
+        .isInstanceOf(IllegalArgumentException.class);
   }
 }

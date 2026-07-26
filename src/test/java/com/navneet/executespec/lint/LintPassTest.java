@@ -24,9 +24,9 @@ import org.junit.jupiter.api.io.TempDir;
  *   <li>Tool-failure containment — a missing binary fails the tool, not the run.
  * </ol>
  *
- * <p>Tests deliberately avoid asserting that the actual formatter ran successfully — CI hosts may
- * or may not have prettier / mvn / black / gofmt / cargo on PATH. The contract under test is that
- * LintPass detects the tool, dispatches it, captures the outcome, and never throws.
+ * <p>Marker tests exercise detection without launching host formatters. Running npx/Maven/Cargo
+ * from a unit test makes the suite depend on network, tool installation, and multi-minute process
+ * timeouts; process execution belongs in the sandboxed functional-test layer.
  */
 @DisplayName("LintPass")
 class LintPassTest {
@@ -65,49 +65,35 @@ class LintPassTest {
   @DisplayName("workspace with package.json → prettier detected (run attempt recorded)")
   void packageJsonDetectsPrettier(@TempDir Path tmp) throws Exception {
     Files.writeString(tmp.resolve("package.json"), "{\"name\":\"x\",\"version\":\"1.0.0\"}");
-    LintPass.LintReport report = lintPass.run(tmp);
-    // Detection happened (not skipped), prettier is in the result list — outcome
-    // depends on whether `npx` is on the test host's PATH.
-    assertFalse(report.skipped());
-    assertTrue(
-        report.results().stream().anyMatch(r -> r.tool() == LintPass.Tool.PRETTIER),
-        "expected PRETTIER in results, got: " + toolNames(report.results()));
+    assertTrue(lintPass.detect(tmp).contains(LintPass.Tool.PRETTIER));
   }
 
   @Test
   @DisplayName("workspace with pom.xml → spotless-maven detected")
   void pomDetectsSpotlessMaven(@TempDir Path tmp) throws Exception {
     Files.writeString(tmp.resolve("pom.xml"), "<project/>");
-    LintPass.LintReport report = lintPass.run(tmp);
-    assertFalse(report.skipped());
-    assertTrue(report.results().stream().anyMatch(r -> r.tool() == LintPass.Tool.SPOTLESS_MAVEN));
+    assertTrue(lintPass.detect(tmp).contains(LintPass.Tool.SPOTLESS_MAVEN));
   }
 
   @Test
   @DisplayName("workspace with go.mod → gofmt detected")
   void goModDetectsGofmt(@TempDir Path tmp) throws Exception {
     Files.writeString(tmp.resolve("go.mod"), "module example.com/x\n");
-    LintPass.LintReport report = lintPass.run(tmp);
-    assertFalse(report.skipped());
-    assertTrue(report.results().stream().anyMatch(r -> r.tool() == LintPass.Tool.GOFMT));
+    assertTrue(lintPass.detect(tmp).contains(LintPass.Tool.GOFMT));
   }
 
   @Test
   @DisplayName("workspace with Cargo.toml → rustfmt detected")
   void cargoTomlDetectsRustfmt(@TempDir Path tmp) throws Exception {
     Files.writeString(tmp.resolve("Cargo.toml"), "[package]\nname = \"x\"\n");
-    LintPass.LintReport report = lintPass.run(tmp);
-    assertFalse(report.skipped());
-    assertTrue(report.results().stream().anyMatch(r -> r.tool() == LintPass.Tool.RUSTFMT));
+    assertTrue(lintPass.detect(tmp).contains(LintPass.Tool.RUSTFMT));
   }
 
   @Test
   @DisplayName("workspace with pyproject.toml → black detected")
   void pyprojectDetectsBlack(@TempDir Path tmp) throws Exception {
     Files.writeString(tmp.resolve("pyproject.toml"), "[tool.poetry]\nname = \"x\"\n");
-    LintPass.LintReport report = lintPass.run(tmp);
-    assertFalse(report.skipped());
-    assertTrue(report.results().stream().anyMatch(r -> r.tool() == LintPass.Tool.BLACK));
+    assertTrue(lintPass.detect(tmp).contains(LintPass.Tool.BLACK));
   }
 
   @Test
@@ -116,9 +102,7 @@ class LintPassTest {
     Files.writeString(tmp.resolve("package.json"), "{\"name\":\"x\"}");
     Files.writeString(tmp.resolve("pom.xml"), "<project/>");
     Files.writeString(tmp.resolve("go.mod"), "module x\n");
-    LintPass.LintReport report = lintPass.run(tmp);
-    assertFalse(report.skipped());
-    long detected = report.results().stream().map(LintPass.ToolResult::tool).distinct().count();
+    long detected = lintPass.detect(tmp).size();
     assertTrue(detected >= 3, "expected ≥3 tools, got " + detected);
   }
 
@@ -172,14 +156,5 @@ class LintPassTest {
     assertTrue(changed.changedAnything());
     assertFalse(unchanged.changedAnything());
     assertFalse(skipped.changedAnything());
-  }
-
-  private static String toolNames(List<LintPass.ToolResult> results) {
-    StringBuilder sb = new StringBuilder("[");
-    for (LintPass.ToolResult r : results) {
-      if (sb.length() > 1) sb.append(", ");
-      sb.append(r.tool());
-    }
-    return sb.append(']').toString();
   }
 }

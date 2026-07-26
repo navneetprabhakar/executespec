@@ -130,23 +130,27 @@ class RunCostEstimatePersister {
               //   BYOK    + userCostCap null   → null          (no cap; fully BYOK)
               //   non-BYOK + (any)             → clamp(platform, userCostCap) (existing behaviour)
               boolean byok = apiKeyResolver.isOwnKeysMode(r.getCreatedByUserId());
+              Double effectiveHardCap;
               if (byok) {
                 Double userCap = r.getUserCostCap();
-                r.setHardCapUsd(userCap != null && userCap > 0 ? userCap : null);
+                effectiveHardCap = userCap != null && userCap > 0 ? userCap : null;
               } else {
-                r.setHardCapUsd(RunOrchestrator.clampHardCap(est.hardCapUsd(), r.getUserCostCap()));
+                effectiveHardCap =
+                    RunOrchestrator.clampHardCap(est.hardCapUsd(), r.getUserCostCap());
               }
+              r.setHardCapUsd(effectiveHardCap);
               runRepo.save(r);
+              log.info(
+                  "RunOrchestrator run={} estimate strategy={} low=${} high=${} credits={}"
+                      + " platformCap=${} effectiveCap={} tasks={}",
+                  runId,
+                  strategy,
+                  String.format("%.4f", est.lowUsd()),
+                  String.format("%.4f", est.highUsd()),
+                  est.credits(),
+                  String.format("%.2f", est.hardCapUsd()),
+                  effectiveHardCap == null ? "none" : "$" + String.format("%.2f", effectiveHardCap),
+                  est.taskCount());
             });
-    log.info(
-        "RunOrchestrator run={} estimate strategy={} low=${} high=${} credits={} cap=${}"
-            + " tasks={}",
-        runId,
-        strategy,
-        String.format("%.4f", est.lowUsd()),
-        String.format("%.4f", est.highUsd()),
-        est.credits(),
-        String.format("%.2f", est.hardCapUsd()),
-        est.taskCount());
   }
 }

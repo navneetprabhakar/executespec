@@ -315,6 +315,12 @@ public class WorkspaceInitService {
         trackedFiles.size());
   }
 
+  /** Fail-closed, Git-tracked-only initialization for iteration workspaces. */
+  public void copyFromRunRequired(String sourceRunId, String targetRunId) throws Exception {
+    new RequiredIterationWorkspaceCopier(props, restoreService, snapshotRepo)
+        .copy(sourceRunId, targetRunId);
+  }
+
   /**
    * Pilot v3.0 — clones a set of project-linked repos into per-repo subdirectories under the run
    * workspace. Each repo lands at {@code <workspace>/<runId>/repos/<repoName>/} where {@code

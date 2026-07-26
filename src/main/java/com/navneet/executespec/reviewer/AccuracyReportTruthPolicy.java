@@ -6,6 +6,8 @@ import java.util.Locale;
 import java.util.regex.Pattern;
 
 import com.navneet.executespec.reviewer.model.AccuracyReport;
+import com.navneet.executespec.reviewer.model.IssueSeverity;
+import com.navneet.executespec.reviewer.model.ReviewIssue;
 
 /** Deterministic consistency rules for the LLM-produced accuracy report. */
 final class AccuracyReportTruthPolicy {
@@ -32,8 +34,9 @@ final class AccuracyReportTruthPolicy {
 
   /**
    * Reclassifies UNKNOWN entries that actually admit a defect and prevents incomplete requirement
-   * assessments from receiving an impossible A grade. UNKNOWN remains valid when the text merely
-   * describes an evidence-access limitation.
+   * assessments from receiving an impossible A grade. Genuine UNKNOWN remains distinct from a
+   * defect, but it still caps the claim below A: unavailable evidence cannot prove complete spec
+   * adherence.
    */
   static void enforceConsistency(AccuracyReport report) {
     if (report == null) return;
@@ -42,13 +45,57 @@ final class AccuracyReportTruthPolicy {
         report.getMissingRequirements() == null ? 0 : report.getMissingRequirements().size();
     int partial =
         report.getPartialRequirements() == null ? 0 : report.getPartialRequirements().size();
+    int unknown =
+        report.getUnknownRequirements() == null ? 0 : report.getUnknownRequirements().size();
     if (missing > 0) {
       report.setSpecAdherenceScore(Math.min(69, report.getSpecAdherenceScore()));
       report.setOverallAccuracyGrade(gradeFromScore(report.getSpecAdherenceScore()));
     } else if (partial > 0) {
       report.setSpecAdherenceScore(Math.min(79, report.getSpecAdherenceScore()));
       report.setOverallAccuracyGrade(gradeFromScore(report.getSpecAdherenceScore()));
+    } else if (unknown > 0) {
+      report.setSpecAdherenceScore(Math.min(89, report.getSpecAdherenceScore()));
+      report.setOverallAccuracyGrade(gradeFromScore(report.getSpecAdherenceScore()));
     }
+  }
+
+  /**
+   * A model cannot award full adherence while deterministic validation has an unresolved critical
+   * failure. Passing tests remain only supporting evidence, but a failed build or an actually
+   * executed failing test is positive evidence that the produced output is internally inconsistent.
+   * Preserve the LLM's requirement ledger for diagnosis while preventing an objectively false A/100
+   * claim.
+   */
+  static void enforceDeterministicFailures(
+      AccuracyReport report, List<ReviewIssue> deterministicIssues) {
+    if (report == null || deterministicIssues == null) return;
+    List<String> failures =
+        deterministicIssues.stream()
+            .filter(issue -> issue != null && issue.getSeverity() == IssueSeverity.CRITICAL)
+            .filter(issue -> !issue.isFixSucceeded())
+            .map(ReviewIssue::getDescription)
+            .filter(description -> description != null && !description.isBlank())
+            .distinct()
+            .limit(3)
+            .toList();
+    if (failures.isEmpty()) return;
+
+    List<String> partial =
+        report.getPartialRequirements() == null
+            ? new ArrayList<>()
+            : new ArrayList<>(report.getPartialRequirements());
+    failures.stream()
+        .map(failure -> "Deterministic validation failure: " + failure)
+        .filter(failure -> !partial.contains(failure))
+        .forEach(partial::add);
+    report.setPartialRequirements(List.copyOf(partial));
+    report.setSpecAdherenceScore(Math.min(69, report.getSpecAdherenceScore()));
+    report.setOverallAccuracyGrade(gradeFromScore(report.getSpecAdherenceScore()));
+    String prefix = "Deterministic validation contradicts a complete-adherence claim.";
+    report.setGradingNotes(
+        report.getGradingNotes() == null || report.getGradingNotes().isBlank()
+            ? prefix
+            : prefix + " " + report.getGradingNotes());
   }
 
   private static void reclassifyContradictoryUnknowns(AccuracyReport report) {

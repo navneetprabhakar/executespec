@@ -56,13 +56,43 @@ public class RunCostEvidenceService {
     var pageRequest = PageBounds.request(page, size, MAX_STEP_CALLS_PAGE_SIZE);
 
     long total = orZero(repository.countByRunId(run.getRunId()));
+    long successfulCalls = orZero(repository.countByRunIdAndAttemptStatus(run.getRunId(), SUCCESS));
     // A FAILED attempt is persisted with a hard costUsd=0, and a route with no pricing row is
     // priced at 0 too. Neither is a PROVEN zero-cost call, so both are counted as unknown rather
     // than folded into the aggregate as fact (RR-1556).
     long unknownCostAttempts = orZero(repository.countUnknownCostAttemptsByRunId(run.getRunId()));
     double knownCostLowerBound = orZero(repository.sumKnownCostByRunId(run.getRunId()));
+    long ledgerInputTokens = orZero(repository.sumSuccessfulInputTokensByRunId(run.getRunId()));
+    long ledgerOutputTokens = orZero(repository.sumSuccessfulOutputTokensByRunId(run.getRunId()));
+    long ledgerCacheRead = orZero(repository.sumSuccessfulCacheReadTokensByRunId(run.getRunId()));
+    long ledgerCacheWrite = orZero(repository.sumSuccessfulCacheWriteTokensByRunId(run.getRunId()));
+    long ledgerReasoning = orZero(repository.sumSuccessfulReasoningTokensByRunId(run.getRunId()));
 
-    double runTotal = ((Number) body.getOrDefault("costUsd", 0d)).doubleValue();
+    double trackerTotal = ((Number) body.getOrDefault("costUsd", 0d)).doubleValue();
+    // Async post-run calls can land in run_step_usage after the terminal RunCostTracker snapshot
+    // was persisted. The attempt ledger is then a higher known lower bound than costUsd, which
+    // previously produced a nonsensical negative unattributedCostUsd. Never under-report evidence
+    // we already possess: use the greater total and retain the tracker value for diagnosis.
+    double runTotal = Math.max(trackerTotal, knownCostLowerBound);
+    long trackerInput = numberOrZero(body.get("inputTokens")).longValue();
+    long trackerOutput = numberOrZero(body.get("outputTokens")).longValue();
+    body.put("costUsd", runTotal);
+    body.put("pipelineRecordedCostUsd", trackerTotal);
+    body.put("calls", Math.max(numberOrZero(body.get("calls")).longValue(), successfulCalls));
+    if (knownCostLowerBound > trackerTotal + ABSOLUTE_TOLERANCE_USD) {
+      body.put("source", "stored_total+attempt_ledger");
+    }
+    body.put("inputTokens", Math.max(trackerInput, ledgerInputTokens));
+    body.put("outputTokens", Math.max(trackerOutput, ledgerOutputTokens));
+    body.put(
+        "cacheReadTokens",
+        Math.max(numberOrZero(body.get("cacheReadTokens")).longValue(), ledgerCacheRead));
+    body.put(
+        "cacheWriteTokens",
+        Math.max(numberOrZero(body.get("cacheWriteTokens")).longValue(), ledgerCacheWrite));
+    body.put(
+        "reasoningTokens",
+        Math.max(numberOrZero(body.get("reasoningTokens")).longValue(), ledgerReasoning));
     double difference = runTotal - knownCostLowerBound;
     double tolerance = Math.max(ABSOLUTE_TOLERANCE_USD, RELATIVE_TOLERANCE * knownCostLowerBound);
 
@@ -85,6 +115,9 @@ public class RunCostEvidenceService {
     body.put("stepCallsPage", pageRequest.getPageNumber());
     body.put("stepCallsSize", pageRequest.getPageSize());
     body.put("stepCallsTotal", total);
+    body.put("physicalAttempts", total);
+    body.put("successfulCalls", successfulCalls);
+    body.put("failedAttempts", Math.max(0L, total - successfulCalls));
     body.put(
         "stepCallsHasMore",
         (long) pageRequest.getPageNumber() * pageRequest.getPageSize() + pageRequest.getPageSize()
@@ -104,13 +137,53 @@ public class RunCostEvidenceService {
     // that the known rows agree.
     body.put("reconciled", unknownCostAttempts == 0 && Math.abs(difference) <= tolerance);
     body.put("reconciliationToleranceUsd", tolerance);
+    Map<String, Double> ledgerPlanningPhases = planningPhaseCosts(run.getRunId());
     body.put(
         "phases",
         Map.of(
-            "classifier", nullToZero(run.getClassifierCostUsd()),
-            "outline", nullToZero(run.getOutlineCostUsd()),
-            "expansion", nullToZero(run.getExpansionCostUsd()),
-            "coherence", nullToZero(run.getCoherenceCostUsd())));
+            "classifier",
+                Math.max(
+                    nullToZero(run.getClassifierCostUsd()),
+                    ledgerPlanningPhases.getOrDefault("classifier", 0d)),
+            "outline",
+                Math.max(
+                    nullToZero(run.getOutlineCostUsd()),
+                    ledgerPlanningPhases.getOrDefault("outline", 0d)),
+            "expansion",
+                Math.max(
+                    nullToZero(run.getExpansionCostUsd()),
+                    ledgerPlanningPhases.getOrDefault("expansion", 0d)),
+            "coherence",
+                Math.max(
+                    nullToZero(run.getCoherenceCostUsd()),
+                    ledgerPlanningPhases.getOrDefault("coherence", 0d))));
+  }
+
+  private Map<String, Double> planningPhaseCosts(String runId) {
+    Map<String, Double> phases = new LinkedHashMap<>();
+    List<Object[]> grouped = repository.sumKnownCostByRunIdGroupedByStepId(runId);
+    if (grouped == null) return phases;
+    for (Object[] row : grouped) {
+      if (row == null || row.length < 2 || row[0] == null || !(row[1] instanceof Number cost)) {
+        continue;
+      }
+      String phase = planningPhase(String.valueOf(row[0]));
+      if (phase != null) phases.merge(phase, cost.doubleValue(), Double::sum);
+    }
+    return phases;
+  }
+
+  private static String planningPhase(String stepId) {
+    if (stepId == null) return null;
+    if (stepId.startsWith("planner.classify")) return "classifier";
+    if (stepId.startsWith("planner.outline")) return "outline";
+    if (stepId.startsWith("planner.expand")) return "expansion";
+    if (stepId.startsWith("planner.coherence")) return "coherence";
+    return null;
+  }
+
+  private static Number numberOrZero(Object value) {
+    return value instanceof Number number ? number : 0L;
   }
 
   /**
@@ -182,12 +255,14 @@ public class RunCostEvidenceService {
 
   /**
    * Mirrors {@code RunStepUsageRepository.countUnknownCostAttemptsByRunId}. A non-SUCCESS attempt
-   * is always unknown; a SUCCESS attempt that consumed tokens but priced to exactly zero is the
-   * signature of a model missing from the pricing matrix ({@code RunCostTracker.priceCall} returns
-   * 0.0 and logs at DEBUG). A genuine zero-token, zero-cost SUCCESS stays KNOWN.
+   * is always unknown. A negative cost is the router's explicit unknown-cost sentinel. A SUCCESS
+   * attempt that consumed tokens but priced to exactly zero is the signature of a model missing
+   * from the pricing matrix ({@code RunCostTracker.priceCall} returns 0.0 and logs at DEBUG). A
+   * genuine zero-token, zero-cost SUCCESS stays KNOWN.
    */
   private static boolean isUnknownCost(RunStepUsage row) {
     if (!SUCCESS.equalsIgnoreCase(row.getAttemptStatus())) return true;
+    if (row.getCostUsd() < 0d) return true;
     return row.getCostUsd() == 0d && (row.getInputTokens() > 0 || row.getOutputTokens() > 0);
   }
 

@@ -252,7 +252,11 @@ public class GoalDonenessEvaluator {
       items.add("goal criteria not proven satisfied");
     }
     if (!Boolean.TRUE.equals(evidence.validationPassed())) {
-      items.add(evidence.validationUnavailable() ? "validation not proven" : "validation failed");
+      items.add(
+          evidence.validationUnavailable()
+              ? "no task-level validation result was recorded; completion requires downstream"
+                  + " build, test, or reviewer proof"
+              : "validation failed");
     }
     if (!evidence.requiredOutputsPresent()) {
       items.add("required outputs not proven present");

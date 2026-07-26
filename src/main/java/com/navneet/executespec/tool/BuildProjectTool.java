@@ -4,7 +4,6 @@ import java.io.IOException;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.TimeUnit;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.navneet.executespec.programbench.ProgramBenchContainerStore;
@@ -12,6 +11,7 @@ import com.navneet.executespec.sandbox.SandboxExecResult;
 import com.navneet.executespec.sandboxroute.SandboxCommandRoutingService;
 import com.navneet.executespec.smoketest.BuildCommand;
 import com.navneet.executespec.smoketest.BuildCommandResolver;
+import com.navneet.executespec.testgen.BoundedProcess;
 
 import org.springframework.stereotype.Component;
 
@@ -158,6 +158,27 @@ public class BuildProjectTool implements Tool {
     if (containerId == null && sandboxPolicy != null) {
       ShellSandboxPolicy.ValidationResult validation =
           sandboxPolicy.validate(bc.command(), ctx.workspaceRoot().toString());
+      // A planner command is advisory model output, not an executable contract. If it is unsafe
+      // or malformed, retain the sandbox denial but recover with the deterministic framework
+      // resolver. Otherwise one bad planning token poisons every task smoke and every reviewer
+      // pass even when the repository compiles and its tests pass. Never apply this fallback to an
+      // inferred command: a resolver/policy disagreement there is a platform defect that must stay
+      // visible, and never apply it inside benchmark cleanrooms whose container is the boundary.
+      if (!validation.permitted() && "planner-declared".equals(bc.sourceDescription())) {
+        BuildCommand inferred = resolver.resolve(ctx.workspaceRoot(), null);
+        ShellSandboxPolicy.ValidationResult inferredValidation =
+            sandboxPolicy.validate(inferred.command(), ctx.workspaceRoot().toString());
+        if (inferredValidation.permitted()) {
+          log.warn(
+              "buildProject rejected planner command={} reason={}; using safe {} command={}",
+              bc.command(),
+              validation.reason(),
+              inferred.sourceDescription(),
+              inferred.command());
+          bc = inferred;
+          validation = inferredValidation;
+        }
+      }
       if (!validation.permitted()) {
         log.warn(
             "buildProject blocked by sandbox command={} source={} reason={}",
@@ -239,24 +260,23 @@ public class BuildProjectTool implements Tool {
       if (javaHome != null) env.put("JAVA_HOME", javaHome);
       pb.redirectErrorStream(true);
 
-      Process proc = pb.start();
-      boolean finished = proc.waitFor(bc.timeoutSeconds(), TimeUnit.SECONDS);
-      if (!finished) {
-        proc.destroyForcibly();
+      BoundedProcess.Outcome outcome =
+          BoundedProcess.run(pb, java.time.Duration.ofSeconds(bc.timeoutSeconds()));
+      if (!outcome.finished()) {
         return ToolResult.err(
             ToolResult.ErrorKind.TIMEOUT,
             "build exceeded " + bc.timeoutSeconds() + "s timeout: " + bc.command());
       }
-      String output = new String(proc.getInputStream().readAllBytes());
-      int exit = proc.exitValue();
+      String output = outcome.output();
+      int exit = outcome.exitCode();
       // Return Ok regardless of exit code — the LLM/harness reads exit and decides.
       return ToolResult.ok(buildSummary(ctx, bc, exit, output));
     } catch (IOException ioe) {
       log.warn("buildProject IO error command={}", bc.command(), ioe);
       return ToolResult.err(ToolResult.ErrorKind.IO_ERROR, ioe.getMessage());
-    } catch (InterruptedException ie) {
-      Thread.currentThread().interrupt();
-      return ToolResult.err(ToolResult.ErrorKind.INTERNAL, "interrupted");
+    } catch (Exception e) {
+      log.warn("buildProject process error command={}", bc.command(), e);
+      return ToolResult.err(ToolResult.ErrorKind.INTERNAL, e.getMessage());
     }
   }
 

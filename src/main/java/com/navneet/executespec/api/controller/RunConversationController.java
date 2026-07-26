@@ -1,7 +1,6 @@
 package com.navneet.executespec.api.controller;
 
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -16,6 +15,7 @@ import com.navneet.executespec.auth.security.RunAccessGuard;
 import com.navneet.executespec.chat.ApplyResultStore;
 import com.navneet.executespec.chat.ApplyService;
 import com.navneet.executespec.chat.ChatService;
+import com.navneet.executespec.run.RunIterationService;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -28,9 +28,8 @@ import lombok.extern.slf4j.Slf4j;
 
 /**
  * Post-run conversation endpoints. V2-native: {@code POST/GET /runs/{id}/chat} are wired to {@link
- * ChatService}. {@code /apply} and {@code /iterate} are still 410 Gone pending a V2
- * re-implementation (they need to spin up a new run from the current workspace, which is more
- * plumbing than chat itself).
+ * ChatService}. Apply runs a bounded worker pass in-place; iterate creates a lineage-linked BUILD
+ * run through the normal asynchronous pipeline.
  */
 @RestController
 @RequestMapping("/api/runs")
@@ -48,6 +47,7 @@ public class RunConversationController {
   private final ChatService chatService;
   private final ApplyService applyService;
   private final ApplyResultStore applyResultStore;
+  private final RunIterationService runIterationService;
 
   /**
    * Apply-suggestion runs a 25-iteration WorkerAgent loop with Sonnet-grade calls (~10–20 s each
@@ -108,6 +108,11 @@ public class RunConversationController {
   public record ApplyResponseBody(
       int taskCount, List<ApplyTaskBody> tasks, String workerOutcome, String summary) {}
 
+  public record IterateBody(String userRequest) {}
+
+  public record IterateResponseBody(
+      String runId, String sourceRunId, String status, String aiProvider) {}
+
   @GetMapping("/{runId}/chat")
   public ResponseEntity<List<ChatHistoryItem>> getHistory(
       @PathVariable String runId, @AuthenticationPrincipal AppUserDetails userDetails) {
@@ -142,6 +147,10 @@ public class RunConversationController {
       throw new ResponseStatusException(HttpStatus.NOT_FOUND, e.getMessage());
     } catch (IllegalStateException e) {
       throw new ResponseStatusException(HttpStatus.CONFLICT, e.getMessage());
+    } catch (ResponseStatusException e) {
+      // Managed-AI/provider admission carries an intentional status such as 402. Do not collapse
+      // that truthful refusal into the generic 500 below.
+      throw e;
     } catch (RuntimeException e) {
       log.error("Chat send failed for run={}: {}", runId, e.getMessage(), e);
       throw new ResponseStatusException(
@@ -214,12 +223,29 @@ public class RunConversationController {
   }
 
   @PostMapping("/{runId}/iterate")
-  public ResponseEntity<Map<String, String>> iterateRun(
+  public ResponseEntity<IterateResponseBody> iterateRun(
       @PathVariable String runId,
-      @RequestBody Map<String, String> body,
+      @RequestBody IterateBody body,
+      @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
       @AuthenticationPrincipal AppUserDetails userDetails) {
     guard.requireRunWriteAccess(runId, userDetails);
-    throw new ResponseStatusException(
-        HttpStatus.GONE, "Iterate-from-run not yet supported in V2 — submit a fresh run instead.");
+    if (body == null || body.userRequest() == null || body.userRequest().isBlank()) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "userRequest is required");
+    }
+    if (body.userRequest().length() > MAX_CHAT_MESSAGE_CHARS) {
+      throw new ResponseStatusException(
+          HttpStatus.PAYLOAD_TOO_LARGE,
+          "userRequest exceeds the " + MAX_CHAT_MESSAGE_CHARS + "-character limit.");
+    }
+    RunIterationService.IterationResult result =
+        runIterationService.iterate(runId, body.userRequest(), idempotencyKey, userDetails);
+    var child = result.run();
+    return ResponseEntity.status(HttpStatus.ACCEPTED)
+        .body(
+            new IterateResponseBody(
+                child.getRunId(),
+                child.getSourceRunId(),
+                child.getStatus(),
+                child.getAiProvider()));
   }
 }

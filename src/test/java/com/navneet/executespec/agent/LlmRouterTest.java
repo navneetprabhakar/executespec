@@ -797,7 +797,7 @@ class LlmRouterTest {
   void controlledWorkerDurablePolicyBlocksCrossProviderFailover() {
     build();
     when(flags.isEnabled(LlmRouter.FAILOVER_FLAG)).thenReturn(true);
-    when(registry.fallbackChainFor(anyString()))
+    when(registry.fallbackChainFor(anyString(), anyString()))
         .thenReturn(List.of(new String[] {"openai", "gpt-x"}, new String[] {"gemini", "gem-x"}));
     when(openai.call(any())).thenThrow(new RuntimeException("503 service unavailable"));
     LlmExecutionContext benchmarkContext = mock(LlmExecutionContext.class);
@@ -832,10 +832,10 @@ class LlmRouterTest {
   }
 
   @Test
-  void failover_enabled_crosses_to_next_provider_in_chain() {
+  void failover_enabled_crosses_in_the_primaryProvidersConfiguredOrder() {
     build();
     when(flags.isEnabled(LlmRouter.FAILOVER_FLAG)).thenReturn(true);
-    when(registry.fallbackChainFor(anyString()))
+    when(registry.fallbackChainFor(anyString(), anyString()))
         .thenReturn(List.of(new String[] {"openai", "gpt-x"}, new String[] {"gemini", "gem-x"}));
     when(openai.call(any())).thenThrow(new RuntimeException("503 service unavailable"));
     RunCostTracker.CallUsage geminiUsage =
@@ -851,6 +851,7 @@ class LlmRouterTest {
             .stepId("planner.outline")
             .build();
     assertThat(router.call(req)).isNotNull();
+    verify(registry).fallbackChainFor("gpt-x", "openai");
     verify(gemini, times(1)).callAudited(any(), any());
     verify(stepUsageRecorder, times(4))
         .recordFailure(
@@ -874,10 +875,26 @@ class LlmRouterTest {
   }
 
   @Test
+  void providerWithoutConfiguredFailoverDoesNotInheritAnUnrelatedTierChain() {
+    build();
+    when(flags.isEnabled(LlmRouter.FAILOVER_FLAG)).thenReturn(true);
+    when(registry.fallbackChainFor("gpt-x", "openai")).thenReturn(List.of());
+    when(openai.call(any())).thenThrow(new RuntimeException("503 service unavailable"));
+
+    assertThatThrownBy(() -> router.call(req("openai", "gpt-x")))
+        .isInstanceOf(RuntimeException.class)
+        .hasMessageContaining("503 service unavailable");
+
+    verify(registry).fallbackChainFor("gpt-x", "openai");
+    verify(gemini, never()).call(any());
+    verify(gemini, never()).callAudited(any(), any());
+  }
+
+  @Test
   void managedAiAuthorizationCanStepDownFailoverTargetBeforeDebit() {
     build();
     when(flags.isEnabled(LlmRouter.FAILOVER_FLAG)).thenReturn(true);
-    when(registry.fallbackChainFor(anyString()))
+    when(registry.fallbackChainFor(anyString(), anyString()))
         .thenReturn(List.of(new String[] {"openai", "gpt-x"}, new String[] {"gemini", "gem-pro"}));
     when(openai.call(any())).thenThrow(new RuntimeException("503 service unavailable"));
     RunCostTracker.CallUsage geminiUsage =
@@ -1016,6 +1033,32 @@ class LlmRouterTest {
   }
 
   @Test
+  void everyOpenAiWireRouteHonorsThePerCallReadTimeout() {
+    build();
+    configureWireProviderUrls();
+    ReflectionTestUtils.setField(router, "deepSeekApiKey", "deepseek-key");
+    ReflectionTestUtils.setField(router, "openRouterApiKey", "openrouter-key");
+    ReflectionTestUtils.setField(router, "fireworksApiKey", "fireworks-key");
+    when(openai.call(any())).thenReturn(ok());
+
+    for (String[] route :
+        List.of(
+            new String[] {"openai", "gpt-x"},
+            new String[] {"deepseek", "deepseek-v4-pro-native"},
+            new String[] {"openrouter", "glm-5.2"},
+            new String[] {"fireworks", "glm-5.2-fw"})) {
+      router.call(
+          req(route[0], route[1]).toBuilder().readTimeoutSeconds(77).strictProvider(true).build());
+    }
+
+    ArgumentCaptor<OpenAiNativeToolClient.OpenAiToolCallRequest> calls =
+        ArgumentCaptor.forClass(OpenAiNativeToolClient.OpenAiToolCallRequest.class);
+    verify(openai, times(4)).call(calls.capture());
+    assertThat(calls.getAllValues())
+        .allSatisfy(request -> assertThat(request.readTimeoutSeconds()).isEqualTo(77));
+  }
+
+  @Test
   void byok_run_does_not_fail_over_to_an_unkeyed_provider() {
     build();
     when(flags.isEnabled(LlmRouter.FAILOVER_FLAG)).thenReturn(true);
@@ -1033,7 +1076,7 @@ class LlmRouterTest {
             "u1",
             "o1");
     when(keyStore.get(anyString())).thenReturn(keys);
-    when(registry.fallbackChainFor(anyString()))
+    when(registry.fallbackChainFor(anyString(), anyString()))
         .thenReturn(List.of(new String[] {"openai", "gpt-x"}, new String[] {"gemini", "gem-x"}));
     when(openai.call(any())).thenThrow(new RuntimeException("503 service unavailable"));
 
@@ -1106,8 +1149,6 @@ class LlmRouterTest {
         .thenReturn(
             List.of(
                 new String[] {"openrouter", "glm-5.2"}, new String[] {"fireworks", "glm-5.2-fw"}));
-    when(registry.fallbackChainFor(anyString()))
-        .thenReturn(List.<String[]>of(new String[] {"openrouter", "glm-5.2"}));
     when(openai.call(any())).thenThrow(new RuntimeException("503 service unavailable"));
 
     LlmRequest byokRequest = req("deepseek", "deepseek-v4-pro-native");

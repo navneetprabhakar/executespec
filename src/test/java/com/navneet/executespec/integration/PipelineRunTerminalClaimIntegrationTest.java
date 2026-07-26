@@ -38,19 +38,36 @@ class PipelineRunTerminalClaimIntegrationTest extends PostgresIntegrationBase {
     String runId = "terminal-cancel-" + UUID.randomUUID();
     runRepository.save(PipelineRun.builder().runId(runId).status("REVIEWING").build());
 
-    PipelineRun cancelled = runRepository.findById(runId).orElseThrow();
-    cancelled.setStatus("CANCELLED");
-    cancelled.setFailureReason("Cancelled by user from status REVIEWING");
-    cancelled.setCompletedAt(Instant.now());
-    runRepository.save(cancelled);
+    int cancellation =
+        runRepository.claimTerminalTransitionWithReasons(
+            runId, "CANCELLED", null, "Cancelled by user from status REVIEWING", Instant.now());
 
     int lateClaim =
         runRepository.claimTerminalTransitionWithReasons(
             runId, "COMPLETE", "CLEAN_COMPLETION", null, Instant.now());
 
+    assertThat(cancellation).isEqualTo(1);
     assertThat(lateClaim).isZero();
     PipelineRun persisted = runRepository.findById(runId).orElseThrow();
     assertThat(persisted.getStatus()).isEqualTo("CANCELLED");
     assertThat(persisted.getFailureReason()).contains("Cancelled by user");
+  }
+
+  @Test
+  void lateUsageFloorCanBeRaisedWithoutChangingCancelledStatus() {
+    String runId = "terminal-cancel-usage-" + UUID.randomUUID();
+    runRepository.save(PipelineRun.builder().runId(runId).status("WORKING").build());
+    assertThat(
+            runRepository.claimTerminalTransitionWithReasons(
+                runId, "CANCELLED", null, "Cancelled by user from status WORKING", Instant.now()))
+        .isEqualTo(1);
+
+    runRepository.raiseUsageTotalsToAtLeast(runId, 409_127, 14_706, 0.010256);
+
+    PipelineRun persisted = runRepository.findById(runId).orElseThrow();
+    assertThat(persisted.getStatus()).isEqualTo("CANCELLED");
+    assertThat(persisted.getTotalInputTokens()).isEqualTo(409_127);
+    assertThat(persisted.getTotalOutputTokens()).isEqualTo(14_706);
+    assertThat(persisted.getActualCostUsd()).isEqualTo(0.010256);
   }
 }

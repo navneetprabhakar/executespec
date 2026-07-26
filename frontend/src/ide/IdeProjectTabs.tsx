@@ -1,7 +1,12 @@
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {Link, useLocation, useNavigate, useParams} from 'react-router-dom';
 import * as api from '@/lib/api';
-import type {ProjectCodeIndexStatus, ProjectRepo, ProjectRepoLink} from '@/types/project';
+import type {
+  ProjectCodeIndexRefreshAccepted,
+  ProjectCodeIndexStatus,
+  ProjectRepo,
+  ProjectRepoLink,
+} from '@/types/project';
 import Crumbs from '@/ide/Crumbs';
 import {useDocumentTitle} from '@/hooks/useDocumentTitle';
 import {IdeBadge, IdeLoader, statusKind} from '@/ide/IdeKit';
@@ -13,6 +18,7 @@ import {ConfirmModal} from '@/signal/components/Modal';
 import {runTitleFor, repoDisplayName, repoIdFor} from '@/signal/lib/runUtils';
 import {useAuthStore, selectIsSuperAdmin} from '@/stores/useAuthStore';
 import {
+  codeIndexRefreshNotice,
   normalizeScmRepoQuery,
   repoSupports,
   sourceReadinessBadge,
@@ -1321,6 +1327,7 @@ export function IdeProjectRepos() {
   const [reposFailure, setReposFailure] = useState<LoadFailure | null>(null);
   const [health, setHealth] = useState<Record<string, Record<string, unknown>>>({});
   const [codeIndex, setCodeIndex] = useState<Record<string, ProjectCodeIndexStatus>>({});
+  const [codeIndexFailure, setCodeIndexFailure] = useState<LoadFailure | null>(null);
   const [provider, setProvider] = useState<'GITHUB' | 'BITBUCKET'>('GITHUB');
   const [available, setAvailable] = useState<api.ScmRemoteRepository[] | null>(null);
   const [registered, setRegistered] = useState<ProjectRepo[]>([]);
@@ -1389,8 +1396,13 @@ export function IdeProjectRepos() {
       .catch(() => {});
     api
       .getProjectCodeIndex(projectId)
-      .then((rows) => setCodeIndex(codeIndexByRepo(rows)))
-      .catch(() => setCodeIndex({}));
+      .then((rows) => {
+        setCodeIndex(codeIndexByRepo(rows));
+        setCodeIndexFailure(null);
+      })
+      // An unavailable readiness endpoint is not evidence that semantic indexing is absent.
+      // Preserve the previous projection and make the unknown state retryable.
+      .catch((e: unknown) => setCodeIndexFailure(toLoadFailure(e)));
   }
   useEffect(() => {
     if (projectId) load();
@@ -1431,7 +1443,11 @@ export function IdeProjectRepos() {
     }
   }
 
-  async function act(key: string, fn: () => Promise<unknown>, done = 'Done.') {
+  async function act(
+    key: string,
+    fn: () => Promise<unknown>,
+    done: string | ((result: unknown) => string) = 'Done.',
+  ) {
     // RR-755 — refuse a duplicate of the same op, and (for per-repo keys) a
     // conflicting op on the same repository while one is already running.
     if (isBusy(key)) return;
@@ -1441,8 +1457,8 @@ export function IdeProjectRepos() {
     setMsg('');
     setErr('');
     try {
-      await fn();
-      setMsg(done);
+      const result = await fn();
+      setMsg(typeof done === 'function' ? done(result) : done);
       load();
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : 'Failed.');
@@ -1536,6 +1552,9 @@ export function IdeProjectRepos() {
 
       {msg && <Notice msg={msg} kind='info' />}
       {err && <Notice msg={err} kind='bad' />}
+      {codeIndexFailure && (
+        <LoadError failure={codeIndexFailure} what='semantic index status' onRetry={load} />
+      )}
 
       {showLink && (
         <div className='ide-card' style={{margin: '12px 0'}}>
@@ -1840,6 +1859,13 @@ export function IdeProjectRepos() {
                       </span>
                     </div>
                     <div className='ide-kv'>
+                      <span>Semantic status</span>
+                      <span>
+                        {semanticIndex.status.toLowerCase()}
+                        {semanticIndex.reason ? ` · ${semanticIndex.reason}` : ''}
+                      </span>
+                    </div>
+                    <div className='ide-kv'>
                       <span>Search fallback</span>
                       <span>ripgrep available · relationship graph not available</span>
                     </div>
@@ -1893,7 +1919,8 @@ export function IdeProjectRepos() {
                         act(
                           `index${id}`,
                           () => api.refreshProjectCodeIndex(projectId, id),
-                          'Semantic indexing queued. Ripgrep search remains available.',
+                          (result) =>
+                            codeIndexRefreshNotice(result as ProjectCodeIndexRefreshAccepted),
                         )
                       }
                     >

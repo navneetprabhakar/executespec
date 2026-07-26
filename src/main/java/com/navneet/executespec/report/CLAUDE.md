@@ -36,22 +36,17 @@ invalid reports are excluded and counted separately.
   deterministic JSON. New reports and concrete-test rescoring populate those columns, and the
   reloadable ledger exposes the same evidence. `FAILED` and `UNAVAILABLE` rows are excluded from
   project health; historical nullable rows remain readable for backward compatibility.
-- Ledger entries label provenance (`DETERMINISTIC`, `UNVERIFIED_COUNT`, `LLM_REVIEWER`,
-  `LLM_ASSESSMENT`, `LLM_ASSISTED_COUNT`, `HYBRID`, or `INTERNAL_FORMULA`). A score is a summary,
-  not independent proof.
-- `DETERMINISTIC` is the only label that claims independence from an LLM. RR-1646 removed it from
-  the persisted concrete-test counts because report files read off disk carried no proof they
-  described THIS run. **V317 (RR-1660) supplies that proof and restores the label where — and only
-  where — it was earned.** `validation_report.test_execution_verified` is a THREE-VALUED token set
-  TRUE only when the producing runner reset the report directory before launch, checked the exit
-  status, and admitted only reports postdating the launch. The `tests` row, and the
-  `executable-verification` row whenever `executable_tests_run` is true, read
-  `DETERMINISTIC`/HIGH on TRUE and `UNVERIFIED_COUNT`/MEDIUM otherwise.
-  **`null` is unproven, never proven-false** — every pre-V317 row and every producer that
-  establishes no freshness lands there and keeps the conservative label. `merged` populations are
-  only as proven as their weakest contributor. Row *status* is unchanged, and
-  `ValidationReportGoalProofEvaluator` keys on status rather than source/confidence, so restoring
-  the strong label does not by itself change run-level goal proof.
+- Ledger entries label provenance (`DETERMINISTIC_FUNCTIONAL`,
+  `DETERMINISTIC_WORKSPACE_SUITE`, `DETERMINISTIC_EXECUTION` for legacy fresh-but-unscoped rows,
+  `UNVERIFIED_COUNT`, `LLM_REVIEWER`, `LLM_ASSESSMENT`, `LLM_ASSISTED_COUNT`, `HYBRID`, or
+  `INTERNAL_FORMULA`). A score is a summary, not independent proof.
+- V317's `validation_report.test_execution_verified` proves count freshness. V344 adds
+  `test_evidence_scope` so freshness is not confused with the boundary exercised:
+  `LIVE_PREVIEW_FUNCTIONAL` is independent product-level proof, while `WORKSPACE_TEST_SUITE` is
+  deterministic code-level evidence only. Both can render their observed pass/fail status, but
+  only a `DETERMINISTIC_FUNCTIONAL`/HIGH tests row can satisfy
+  `ValidationReportGoalProofEvaluator` and reach `STOP_DONE`. Null/false freshness renders the row
+  `UNKNOWN` with `UNVERIFIED_COUNT`; positive stale or unbound counts never render as pass.
 - `RunChangeEvidenceService` requires an admitted run-start baseline. When no `run_repo_snapshot`
   row exists, a Git workspace is accepted only if its history is a single commit — the case where
   the workspace was initialised for this run and `gitCommit` is filtered out of worker authority.
@@ -72,13 +67,13 @@ invalid reports are excluded and counted separately.
   keeps the proof uncertain, and missing spec-adherence evidence remains explicitly unproven.
 - No approved product diff, deterministic zero spec adherence with named missing requirements, or
   zero required-endpoint coverage forces both headline scores to zero and `pipelineResult=FAILED`.
-- Concrete test evidence is monotonic. The run-end workspace suite may establish positive counts;
-  a later HTTP/preview test-generation `NOT_APPLICABLE` event carries 0/0 and must not erase those
-  counts or lower the score. A later positive concrete summary is **combined** with the workspace
-  suite, never substituted for it: the two are different populations, so a 2/3 generated smoke may
-  not discard a passing 10/10 worker suite. The merge is anchored on a `baselineTestsTotal` /
-  `baselineTestsPassed` pair persisted inside `executable_evidence_json`, so a re-delivered
-  execution event recomputes the same counts instead of stacking increments.
+- Fresh workspace suites remain customer-visible deterministic test evidence, explicitly labelled
+  `workspace suite only`; they cannot certify deployed journeys and cap both verified/rubric
+  headlines at 75. The independently generated black-box suite exercises the live preview/runtime
+  and replaces the earlier population. Events are idempotent overwrite, not arithmetic merge:
+  unit tests cannot dilute a failing functional result. Missing, failed, stale, zero-test, or
+  provenance-unverified execution persists 0/0/unverified evidence; only a non-empty,
+  provenance-verified `LIVE_PREVIEW_FUNCTIONAL` suite can earn full test credit and final-goal proof.
 - Anti-gaming guards (`scoring.gaming-guards`) are tighten-only and must not be defeated by absent
   evidence. With the guards on, a null endpoint-coverage reading gives CODE_DELIVERED the midpoint
   of the guarded range (75), not the full slot, and a missing or unrecognised test-coverage
@@ -93,10 +88,18 @@ invalid reports are excluded and counted separately.
   source snippet.
 - Final assessment is tighten-only: `CLEAN_*` pre-report status cannot erase a newly measured
   `NEEDS_ATTENTION` result; successfully auto-fixed visibility issues are not open blockers; and an
-  accuracy report with admitted missing/partial requirements caps the headline/rubric score at its
-  spec-adherence score. `AccuracyReportTruthPolicy` moves UNKNOWN entries that themselves state
+  accuracy report with admitted missing/partial/unknown requirements caps the headline/rubric score
+  at its spec-adherence score. Unknown requirements additionally cap verified/rubric projections at
+  84 (below the 85 passing band), so an internally inconsistent 100/100 assessment cannot coexist
+  with an unproven release badge; legacy report DTOs and evidence-ledger score summaries apply the
+  cap on read, while new reports persist it during score generation. The shared
+  `ValidationReportScoreProjection` is authoritative for report, shared-report, run-list, and
+  run-detail reads; those surfaces must never expose the uncapped persisted snapshot after newer
+  accuracy evidence admits a gap. `AccuracyReportTruthPolicy` moves UNKNOWN entries that themselves state
   negative implementation evidence to PARTIAL before scoring. Any admitted partial requirement
-  caps accuracy at 79/C, while an admitted missing requirement caps it at 69/D. The assessor prompt
+  caps accuracy at 79/C, an admitted missing requirement caps it at 69/D, and genuinely unverified
+  requirements cap it at 89/B. UNKNOWN is not treated as a defect, but its ledger row is WARN and
+  cannot prove the run goal DONE. The assessor prompt
   requires readable route/runtime/error/idempotency/migration evidence; test names, mocked fixtures,
   OpenAPI entries, and raw exception strings cannot prove those contracts. Lexical grep hits no
   longer demote semantic MISSING findings to UNKNOWN: the release-blocker audit showed that words
@@ -107,7 +110,7 @@ invalid reports are excluded and counted separately.
 - SUPER_ADMIN verified-score backfill replays the same admitted-gap cap from persisted
   `accuracy_json`. Historical partial requirements cap both recomputed headline scores at 79 (or
   the lower stored adherence score), missing requirements cap them at 69, and UNKNOWN-only evidence
-  remains uncapped. A maintenance rescore must never erase known requirement gaps or inflate a row
+  caps them at 89. A maintenance rescore must never erase known requirement gaps or inflate a row
   above the live report policy.
 
 ## Migration

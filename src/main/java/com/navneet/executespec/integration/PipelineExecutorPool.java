@@ -6,9 +6,11 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import jakarta.annotation.PreDestroy;
 
+import org.springframework.context.SmartLifecycle;
 import org.springframework.stereotype.Component;
 
 import lombok.extern.slf4j.Slf4j;
@@ -20,16 +22,18 @@ import lombok.extern.slf4j.Slf4j;
  * rate limits; each run may also fan out parallel task expansion (LARGE planner skeleton-expand × N
  * + EPIC sub-expansions) on it.
  *
- * <p>Behaviour is byte-identical to the {@code private final ExecutorService pool} field it
- * replaced — same sizing, the same daemon {@code v2-orchestrator-N} threads, and the same 30s
- * {@code @PreDestroy} graceful shutdown (SIGTERM must not abandon in-flight runs after credits were
- * charged at plan approval). Making it a bean (rather than a field) lets the planning / lifecycle
- * methods that fan out on it move out of the god-class into their own collaborators without
- * threading the {@link ExecutorService} through every constructor.
+ * <p>It retains the original sizing and daemon {@code v2-orchestrator-N} threads. As a
+ * maximum-phase {@link SmartLifecycle}, it interrupts active work before Redis/JPA destruction so a
+ * deployment stops provider spend and leaves durable WORKING checkpoints for crash recovery. Making
+ * it a bean (rather than a field) also lets planning/lifecycle collaborators share the executors
+ * without threading the {@link ExecutorService} through every constructor.
  */
 @Component
 @Slf4j
-public class PipelineExecutorPool {
+public class PipelineExecutorPool implements SmartLifecycle {
+
+  /** Keep Spring infrastructure alive within systemd's 90-second TimeoutStopSec. */
+  private static final long TOTAL_STOP_WAIT_SECONDS = 60;
 
   private static ExecutorService fixedDaemonPool(String namePrefix, int size) {
     return Executors.newFixedThreadPool(
@@ -78,6 +82,9 @@ public class PipelineExecutorPool {
       fixedDaemonPool(
           "v2-plan-expand-nested-", com.navneet.executespec.util.PoolSizing.coreMultiple(1, 4, 16));
 
+  private final AtomicBoolean shuttingDown = new AtomicBoolean(false);
+  private volatile boolean running = true;
+
   /** Submit a fire-and-forget pipeline task; the returned {@link Future} is the cancel handle. */
   public Future<?> submit(Runnable task) {
     return pool.submit(task);
@@ -112,31 +119,79 @@ public class PipelineExecutorPool {
     return nestedExpansionPool;
   }
 
-  /**
-   * v2.5.12 — graceful shutdown. Without this, SIGTERM on the JVM abandons in-flight runs
-   * mid-planning/execution after credits were already charged at plan approval. 30 s grace window
-   * matches Kubernetes default {@code terminationGracePeriodSeconds}.
-   */
-  @PreDestroy
-  public void shutdownPool() {
-    log.info("PipelineExecutorPool shutting down");
-    // Shut the expansion tiers down first: an orchestration thread may still be waiting on them.
-    shutdownGracefully(nestedExpansionPool, "nested-expansion");
-    shutdownGracefully(expansionPool, "expansion");
-    shutdownGracefully(pool, "orchestration");
+  /** True once lifecycle shutdown begins; run owners use this to preserve resumable state. */
+  public boolean isShuttingDown() {
+    return shuttingDown.get();
   }
 
-  private static void shutdownGracefully(ExecutorService executor, String label) {
-    executor.shutdown();
+  @Override
+  public void start() {
+    running = true;
+  }
+
+  @Override
+  public boolean isRunning() {
+    return running && !shuttingDown.get();
+  }
+
+  @Override
+  public boolean isAutoStartup() {
+    return true;
+  }
+
+  /**
+   * Stop before persistence/Redis infrastructure. A maximum lifecycle phase is stopped first by
+   * Spring, while those dependencies are still alive. Active pipeline threads are interrupted
+   * immediately so they stop provider spend, unwind without terminalizing the run, and leave their
+   * durable WORKING checkpoint for {@code StartupRunResumer} in the replacement process.
+   */
+  @Override
+  public int getPhase() {
+    return Integer.MAX_VALUE;
+  }
+
+  @Override
+  public void stop(Runnable callback) {
     try {
-      if (!executor.awaitTermination(30, TimeUnit.SECONDS)) {
+      stop();
+    } finally {
+      callback.run();
+    }
+  }
+
+  @Override
+  public void stop() {
+    if (!shuttingDown.compareAndSet(false, true)) return;
+    running = false;
+    log.info("PipelineExecutorPool stopping before infrastructure shutdown");
+    // Signal every tier before awaiting any one of them. Waiting first allowed workers in another
+    // tier to keep making provider calls while the application was already closing.
+    nestedExpansionPool.shutdownNow();
+    expansionPool.shutdownNow();
+    pool.shutdownNow();
+    long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(TOTAL_STOP_WAIT_SECONDS);
+    awaitStopped(nestedExpansionPool, "nested-expansion", deadline);
+    awaitStopped(expansionPool, "expansion", deadline);
+    awaitStopped(pool, "orchestration", deadline);
+  }
+
+  /** PreDestroy is an idempotent fallback for contexts that bypass lifecycle stop callbacks. */
+  @PreDestroy
+  public void shutdownPool() {
+    stop();
+  }
+
+  private static void awaitStopped(ExecutorService executor, String label, long deadlineNanos) {
+    try {
+      long remaining = deadlineNanos - System.nanoTime();
+      if (remaining <= 0 || !executor.awaitTermination(remaining, TimeUnit.NANOSECONDS)) {
         log.warn(
-            "PipelineExecutorPool {} pool did not terminate in 30s; forcing shutdownNow", label);
-        executor.shutdownNow();
+            "PipelineExecutorPool {} pool did not terminate within the {}s total stop window",
+            label,
+            TOTAL_STOP_WAIT_SECONDS);
       }
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
-      executor.shutdownNow();
     }
   }
 }

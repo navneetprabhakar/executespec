@@ -17,7 +17,6 @@ const api = vi.hoisted(() => ({
   approveRun: vi.fn(),
   getPlanContractGate: vi.fn(),
   cancelRun: vi.fn(),
-  editRunPlan: vi.fn(),
 }));
 
 vi.mock('@/lib/api', () => api);
@@ -76,6 +75,7 @@ function button(label: string): HTMLButtonElement | undefined {
 }
 
 beforeEach(() => {
+  sessionStorage.clear();
   host = document.createElement('div');
   document.body.appendChild(host);
   root = createRoot(host);
@@ -99,6 +99,7 @@ async function render() {
           <Route path='/plan/:runId' element={<Harness />} />
           <Route path='/live/:runId' element={<div>Live</div>} />
           <Route path='/runs' element={<div>Runs</div>} />
+          <Route path='/compose' element={<div>Compose revised run</div>} />
         </Routes>
       </MemoryRouter>,
     );
@@ -106,6 +107,69 @@ async function render() {
 }
 
 describe('IdePlan approval gate identity (RR-1459)', () => {
+  it('shows task descriptions, dependencies, requirements, constraints, and file scope', async () => {
+    const planJson = JSON.stringify({
+      projectType: 'python',
+      runtimeSurface: 'HTTP',
+      buildCommand: 'python3 -m compileall -q backend',
+      smokeTestStrategy: 'BUILD',
+      requirements: [{id: 'R1', text: 'Reservations are atomic.', kind: 'FUNCTIONAL'}],
+      tasks: [
+        {
+          id: 'T2',
+          title: 'Reserve inventory',
+          description: 'Reserve every order line in one transaction.',
+          complexity: 'HIGH',
+          dependsOn: ['T1'],
+          meetsRequirements: ['R1'],
+          hardConstraints: ['Never partially reserve an order.'],
+          touchesFiles: ['backend/app/orders.py'],
+        },
+      ],
+    });
+    api.getRun.mockResolvedValue({
+      ...runDetail('run-a', planJson, 3),
+      tasks: [{taskId: 'run-a_T2', title: 'Reserve inventory', status: 'PENDING'}],
+    });
+
+    await render();
+
+    expect(text()).toContain('Step contracts');
+    expect(text()).toContain('Reserve inventory · HIGH');
+    const details = host.querySelector('details') as HTMLDetailsElement;
+    details.open = true;
+    expect(text()).toContain('Reserve every order line in one transaction.');
+    expect(text()).toContain('T1');
+    expect(text()).toContain('R1: Reservations are atomic.');
+    expect(text()).toContain('Never partially reserve an order.');
+    expect(text()).toContain('backend/app/orders.py');
+  });
+
+  it('recovers when SSE misses the transition from planning to the durable approval gate', async () => {
+    vi.useFakeTimers();
+    api.getRun
+      .mockResolvedValueOnce({
+        ...runDetail('run-a', '{"tasks":["a"]}', 3),
+        status: 'PLANNING',
+      })
+      .mockResolvedValue(runDetail('run-a', '{"tasks":["a"]}', 3));
+
+    try {
+      await render();
+      expect(text()).toContain('Planning — classifying + outlining your request');
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(3_000);
+      });
+
+      expect(text()).toContain('3 credit(s)');
+      expect(button('Approve and start work')).toBeTruthy();
+      expect(api.getRun).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('does not carry run A gate state across a runId change to run B', async () => {
     let resolveB: ((value: unknown) => void) | undefined;
     api.getRun.mockImplementation((id: string) => {
@@ -120,7 +184,7 @@ describe('IdePlan approval gate identity (RR-1459)', () => {
 
     // Open the revision editor and type feedback so we can prove the draft does not leak either.
     await act(async () => {
-      button('Request changes')?.click();
+      button('Revise as new run')?.click();
     });
     const textarea = host.querySelector('textarea') as HTMLTextAreaElement;
     expect(textarea).toBeTruthy();
@@ -161,6 +225,34 @@ describe('IdePlan approval gate identity (RR-1459)', () => {
       await sha256Hex('{"tasks":["a"]}'),
       undefined,
     );
+  });
+
+  it('starts a new-run handoff instead of calling the unsupported edit-plan endpoint', async () => {
+    api.getRun.mockResolvedValue({
+      ...runDetail('run-a', '{"tasks":["a"]}', 3),
+      userRequest: 'Build an inventory API without authentication.',
+    });
+    await render();
+
+    await act(async () => {
+      button('Revise as new run')?.click();
+    });
+    const textarea = host.querySelector('textarea') as HTMLTextAreaElement;
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')
+        ?.set as (value: string) => void;
+      setter.call(textarea, 'Remove invented authentication tests.');
+      textarea.dispatchEvent(new Event('input', {bubbles: true}));
+    });
+    await act(async () => {
+      button('Start revised run')?.click();
+    });
+
+    const handoff = JSON.parse(sessionStorage.getItem('signal:pending-spec') || '{}');
+    expect(handoff.source).toBe('plan-revision');
+    expect(handoff.spec).toContain('Build an inventory API without authentication.');
+    expect(handoff.spec).toContain('Remove invented authentication tests.');
+    expect(text()).toContain('Compose revised run');
   });
 
   it('ignores a run detail that belongs to a different run than the route', async () => {
@@ -341,12 +433,17 @@ describe('IdePlan breaking-change acknowledgement gate (RR-819)', () => {
       button('Approve and start work')?.click();
     });
 
-    expect(text()).toContain('reload');
-    // The stale acknowledgement is dropped and the report is re-read, so the user re-acknowledges
-    // the change they will actually ship.
-    expect(ackInput()?.value).toBe('');
-    expect(button('Approve and start work')?.disabled).toBe(true);
-    expect(api.getPlanContractGate.mock.calls.length).toBeGreaterThan(1);
+    // The click starts with an async SHA-256 plan fingerprint. Under the full parallel Vitest run,
+    // that digest can resolve after React's initial act turn, so wait for the actual rejection
+    // recovery instead of asserting while the button still says "Approving…".
+    await vi.waitFor(() => {
+      expect(text()).toContain('reload');
+      // The stale acknowledgement is dropped and the report is re-read, so the user
+      // re-acknowledges the change they will actually ship.
+      expect(ackInput()?.value).toBe('');
+      expect(button('Approve and start work')?.disabled).toBe(true);
+      expect(api.getPlanContractGate.mock.calls.length).toBeGreaterThan(1);
+    });
   });
 
   it('does not add any friction to a run with no contract gate (the 204 case)', async () => {

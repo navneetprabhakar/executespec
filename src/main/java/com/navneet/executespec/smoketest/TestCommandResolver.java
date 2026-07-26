@@ -2,6 +2,8 @@ package com.navneet.executespec.smoketest;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 
 import org.springframework.stereotype.Component;
@@ -30,6 +32,7 @@ public class TestCommandResolver {
     SUREFIRE, // mvn / gradle JUnit
     GO,
     CARGO,
+    MULTI,
     UNKNOWN
   }
 
@@ -39,6 +42,49 @@ public class TestCommandResolver {
    */
   public Optional<TestCommand> resolve(Path workspaceRoot) {
     if (workspaceRoot == null) return Optional.empty();
+
+    Optional<TestCommand> root =
+        hasProjectManifest(workspaceRoot) ? resolveSingle(workspaceRoot) : Optional.empty();
+    if (root.isPresent()) return root;
+
+    List<String> commands = new ArrayList<>();
+    int timeout = 0;
+    try (var children = Files.list(workspaceRoot)) {
+      for (Path child : children.filter(Files::isDirectory).sorted().toList()) {
+        String name = child.getFileName().toString();
+        if (!name.matches("[A-Za-z0-9._-]+")) continue;
+        Optional<TestCommand> resolved = resolveSingle(child);
+        if (resolved.isEmpty()) continue;
+        commands.add("(cd " + name + " && " + resolved.get().command() + ")");
+        timeout += resolved.get().timeoutSeconds();
+      }
+    } catch (Exception ignored) {
+      return Optional.empty();
+    }
+    if (commands.isEmpty()) return resolveSingle(workspaceRoot);
+    if (commands.size() == 1) {
+      String command = commands.getFirst();
+      Optional<TestCommand> child = directChildCommand(workspaceRoot, command);
+      return child;
+    }
+    return Optional.of(
+        new TestCommand(
+            String.join(" && ", commands), Math.min(timeout, 1200), Framework.MULTI, "multi-root"));
+  }
+
+  private Optional<TestCommand> directChildCommand(Path workspaceRoot, String wrappedCommand) {
+    String childName = wrappedCommand.substring(4, wrappedCommand.indexOf(" && "));
+    return resolveSingle(workspaceRoot.resolve(childName))
+        .map(
+            command ->
+                new TestCommand(
+                    wrappedCommand,
+                    command.timeoutSeconds(),
+                    command.framework(),
+                    command.source() + "@" + childName));
+  }
+
+  private Optional<TestCommand> resolveSingle(Path workspaceRoot) {
 
     if (exists(workspaceRoot, "pom.xml")) {
       // -q keeps output small; surefire still prints the "Tests run:" summary we parse.
@@ -79,6 +125,18 @@ public class TestCommandResolver {
           new TestCommand(python + " -m pytest -q", 600, Framework.PYTEST, "pytest"));
     }
     return Optional.empty();
+  }
+
+  private static boolean hasProjectManifest(Path root) {
+    return exists(root, "pom.xml")
+        || exists(root, "build.gradle")
+        || exists(root, "build.gradle.kts")
+        || exists(root, "Cargo.toml")
+        || exists(root, "go.mod")
+        || exists(root, "package.json")
+        || exists(root, "pyproject.toml")
+        || exists(root, "setup.py")
+        || exists(root, "requirements.txt");
   }
 
   private static boolean exists(Path dir, String name) {

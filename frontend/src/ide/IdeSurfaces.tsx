@@ -756,7 +756,7 @@ export function IdeCompose() {
 
   const selectedProjectName = projectId
     ? projects.find((p) => p.id === projectId)?.name || 'Selected project'
-    : 'Sandbox';
+    : 'Standalone';
   const mobileCanAdvanceFromSpec = spec.trim().length > 0;
   const mobileNextBlocked = mobileStep === 1 && !mobileCanAdvanceFromSpec;
 
@@ -821,7 +821,7 @@ export function IdeCompose() {
                   className={projectId == null ? 'ide-btn' : 'ide-btn ghost'}
                   onClick={() => pickProject(null)}
                 >
-                  {projectId == null ? '✓ ' : ''}Sandbox
+                  {projectId == null ? '✓ ' : ''}Standalone
                 </button>
                 {chipProjects.map((p) => (
                   <button
@@ -901,7 +901,7 @@ export function IdeCompose() {
               <div className='ide-sub' style={{marginTop: 0, marginBottom: 0}}>
                 {projectId
                   ? `${projects.find((p) => p.id === projectId)?.name}. ${selectedRepoIds.length} ${selectedRepoIds.length === 1 ? 'repo' : 'repos'} selected.`
-                  : 'Sandbox starts a run without linking a repository.'}
+                  : 'Standalone starts a run without linking a repository.'}
               </div>
             </div>
 

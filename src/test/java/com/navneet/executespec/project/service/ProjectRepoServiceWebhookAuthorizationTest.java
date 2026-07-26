@@ -57,6 +57,7 @@ class ProjectRepoServiceWebhookAuthorizationTest {
             mock(AppUserRepository.class),
             mock(TierEnforcementService.class),
             mock(GovernanceGuard.class),
+            mock(ProjectSourceFreshnessInvalidator.class),
             mock(ObjectProvider.class));
 
     assertThatThrownBy(() -> service.installWebhook(repoId, "pat", "user-1", "org-1", false))
