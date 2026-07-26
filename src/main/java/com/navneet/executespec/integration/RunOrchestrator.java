@@ -54,7 +54,6 @@ import com.navneet.executespec.execution.service.GoalContinuationAdvisor;
 import com.navneet.executespec.executioncontext.LlmExecutionPolicyFactory;
 import com.navneet.executespec.harness.ExecutionRequest;
 import com.navneet.executespec.harness.ExecutionResult;
-import com.navneet.executespec.harness.GateStore;
 import com.navneet.executespec.harness.SequentialExecutor;
 import com.navneet.executespec.harness.TaskOutcome;
 import com.navneet.executespec.harness.WorkspaceInitService;
@@ -175,7 +174,7 @@ public class RunOrchestrator implements RunControlPort {
   private final WorkspaceInitService workspaceInit;
   private final SseBroadcaster broadcaster;
   private final RunPersistenceWriter persistenceWriter;
-  private final RunPlanRequirementShadowCoordinator requirementShadowCoordinator;
+  private final RunPlanGateCoordinator planGateCoordinator;
   private final RunContextComposer contextComposer;
   private final RunPlanningCoordinator planningCoordinator;
   private final RunStandardsEnforcer standardsEnforcer;
@@ -185,7 +184,6 @@ public class RunOrchestrator implements RunControlPort {
   private final TestGenOrchestrator testGenOrchestrator;
   private final BoundedTestGenKickoff boundedTestGenKickoff;
   private final PerkyMessenger perky;
-  private final GateStore gateStore;
   private final ModelResolver modelResolver;
   private final AvailableProviderResolver availableProviderResolver;
   private final LlmExecutionPolicyFactory llmExecutionPolicyFactory;
@@ -1978,7 +1976,9 @@ public class RunOrchestrator implements RunControlPort {
               contractRejection ? executablePlanInternalEx : null);
           return;
         }
-        requirementShadowCoordinator.persist(runId, runRow.getUserRequest(), plan);
+        boolean needsApproval = !skipApproval && "PRODUCTION".equalsIgnoreCase(executionMode);
+        var gatePreparation =
+            planGateCoordinator.prepare(needsApproval, runId, runRow.getUserRequest(), plan);
         contextComposer.writeAgentContext(workspace, plan);
         persistEstimate(runId, provider, model, plan);
         designBlock = contextComposer.buildDesignBlock(userRequest, plan);
@@ -1991,19 +1991,19 @@ public class RunOrchestrator implements RunControlPort {
         // PROTOTYPE runs + integration-triggered runs (skipApproval=true) bypass the gate. A
         // PRODUCTION run persists everything required for continuation and returns immediately, so
         // AWAITING_APPROVAL consumes no PipelineExecutorPool worker.
-        boolean needsApproval = !skipApproval && "PRODUCTION".equalsIgnoreCase(executionMode);
         if (needsApproval) {
           perky.stop(runId);
           // RR-819 — compose the contract gate BEFORE the run parks at the gate, so the approver is
           // shown (and the server durably records) which registered contracts this plan intends to
           // modify and which repositories declare themselves consumers. The post-run classifier
           // below cannot do this job: it runs after the files are already written.
-          try {
-            planContractGate.composeAndPersist(runId, projectId, plan, selectedRepoIds);
-          } catch (Exception gateEx) {
-            log.warn("run={} plan contract gate not composed: {}", runId, gateEx.toString());
-          }
-          persistenceWriter.updateStatus(runId, "AWAITING_APPROVAL");
+          String contractGateReportDigest =
+              planContractGate
+                  .composeAndPersist(runId, projectId, plan, selectedRepoIds)
+                  .map(
+                      com.navneet.executespec.contracts.gate.PlanContractGateService.GateReport
+                          ::digest)
+                  .orElse(null);
           PlanGateContinuation continuation =
               new PlanGateContinuation(
                   1,
@@ -2012,22 +2012,13 @@ public class RunOrchestrator implements RunControlPort {
                   requireContinuationBenchmarkPrior,
                   pinnedModel,
                   lowComplexityWorkerStartTierOverride);
-          gateStore.openPlanGate(runId, objectMapper.writeValueAsString(continuation));
-          int credits =
-              runRepo
-                  .findById(runId)
-                  .map(r -> r.getCreditsCharged() == null ? 1 : r.getCreditsCharged())
-                  .orElse(1);
-          double estimatedCost =
-              runRepo
-                  .findById(runId)
-                  .map(r -> r.getCostEstimateHigh() == null ? 0.0 : r.getCostEstimateHigh())
-                  .orElse(0.0);
-          broadcaster.emit(
+          String continuationJson = objectMapper.writeValueAsString(continuation);
+          planGateCoordinator.open(
               runId,
-              RunEvent.gateOpenedWithCredits(runId, "PLAN_APPROVAL", credits, estimatedCost));
-          eventPublisher.publishEvent(
-              new PipelineEvent.GateOpened(runId, "PLAN_APPROVAL", credits));
+              gatePreparation,
+              continuationJson,
+              continuation.schemaVersion(),
+              contractGateReportDigest);
           log.info("RunOrchestrator run={} suspended at durable plan gate", runId);
           return;
         }

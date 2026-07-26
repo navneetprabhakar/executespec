@@ -14,6 +14,10 @@ public interface GateRepository extends JpaRepository<GateRecord, String> {
 
   java.util.Optional<GateRecord> findFirstByRunIdAndGateType(String runId, String gateType);
 
+  @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+  @Query("SELECT g FROM GateRecord g WHERE g.gateKey = :gateKey")
+  java.util.Optional<GateRecord> findByIdForPlanGateOpen(@Param("gateKey") String gateKey);
+
   /**
    * Atomic "claim" for the plan-approval gate. Only resolves the row if it is still PENDING — if
    * another caller already won the race, the UPDATE affects 0 rows and the caller should return 409

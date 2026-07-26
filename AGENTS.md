@@ -189,13 +189,13 @@ Standing rule from 2026-04-25: every commit must keep the project's documentatio
 2. **Per-package `CLAUDE.md`** (e.g. `agent/CLAUDE.md`, `state/CLAUDE.md`) when entities, repository methods, agents, or migrations change in that package.
 3. **`executespec-docs/backend/architecture/CODEMAP.md`** when new top-level packages, entities, agents, or DB migrations are added.
 4. **`executespec-docs/backend/reference/document_map.md`** when a doc is added, removed, or moved in the docs repo.
-5. **`executespec-docs/backend/reason-log/2026-06.md`** when an in-flight item changes status or a new decision is recorded.
+5. **`executespec-docs/backend/reason-log/2026-07.md`** when an in-flight item changes status or a new decision is recorded.
 6. **`README.md`** if a user-visible feature, environment variable, or build step changed. **`executespec-docs/backend/design/*`** when tokens / theming / a11y commitments change.
 7. **Migration trail** — every new `Vxxx__*.sql` must be cross-linked from the touching package's `CLAUDE.md` + the entity row.
 
 ### Current-state corrections (2026-07-11)
 
-- The current migration head is V304; the next allocatable number is V305. Older migration references in this file are historical unless they explicitly describe their migration contracts.
+- The current migration head is V347; the next allocatable number is V348. Older migration references in this file are historical unless they explicitly describe their migration contracts.
 - `execution.continuation.require-benchmark-prior-for-automatic-continuation` is false in the active YAML; benchmark-required continuation is an explicit opt-in.
 - Current source-size facts are RunOrchestrator 4,084 lines, `frontend/src/lib/api/core.ts` 1,927 lines, and `frontend/src/signal/pages/ExtraPages.tsx` 377 lines. Recheck before copying older debt counts.
 

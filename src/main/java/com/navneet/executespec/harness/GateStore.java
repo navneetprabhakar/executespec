@@ -117,10 +117,9 @@ public class GateStore {
    * {@code POST /api/runs/{id}/approve} calls both returned 200 with the gate state written twice.
    * Now the loser cleanly returns 409.
    *
-   * <p>Relies on the pipeline thread having called {@link #openPlanGate} when entering
-   * AWAITING_APPROVAL. If the row is missing (e.g. old runs that pre-date this change, or manual DB
-   * cleanup), falls back to {@link #setPlanGate} idempotency — still safe, just without the
-   * loser-409 surface.
+   * <p>Relies on the pipeline thread having durably opened the gate before entering {@code
+   * AWAITING_APPROVAL}. A missing row is corruption, not permission to fabricate a continuation at
+   * approval time, and therefore fails closed.
    */
   public boolean tryClaimPlanGate(String runId, boolean approved) {
     return claimPlanGate(runId, approved) == PlanGateClaim.CLAIMED;
@@ -145,22 +144,9 @@ public class GateStore {
     if (updated == 0) {
       boolean missing = gateRepository.findById(key).isEmpty();
       if (missing) {
-        // No pending row — either opening-gate was skipped (legacy run) or race
-        // with an INSERT. Insert-then-claim, matching the pre-existing idempotent
-        // behaviour rather than blocking the caller.
-        openPlanGate(runId);
-        try {
-          updated =
-              gateRepository.tryResolveIfPending(
-                  key, approved ? "APPROVED" : "REJECTED", Instant.now());
-        } catch (Exception ex) {
-          throw new IllegalStateException(
-              "Unable to atomically resolve newly opened plan gate for run " + runId, ex);
-        }
-        if (updated == 0) return resolvedClaim(key);
-      } else {
-        return resolvedClaim(key);
+        throw new IllegalStateException("Plan gate was never durably opened for run " + runId);
       }
+      return resolvedClaim(key);
     }
     // We won the race — publish a short-lived signal for compatibility observers.
     try {
