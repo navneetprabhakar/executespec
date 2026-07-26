@@ -985,9 +985,10 @@ persisted "REALTIME", failed the exact-`PRODUCTION` gate test, and executed unap
 preserve the source run's exact repository selection and its (now durable, V315) `tdd_mode`.
 `POST /api/runs/{id}/approve` accepts an optional `planFingerprint` (SHA-256 of the persisted plan
 JSON) and rejects a mismatch with 409, because `creditsConfirmed` is a price check, not a plan
-identity. Launch-side: `approvePlanAndExecute` fails the launch instead of executing when approval
-cannot be durably recorded or the V2 gate cannot be resolved, and refuses to start on an
-already-REJECTED gate; `executeApprovedPlan` (and therefore `POST /api/executions/{id}/resume`)
+identity. Launch-side: `projectApprovedPlan` runs only after synchronous canonical admission and
+gate resolution, writes the V3 approval projection after that authority exists, and fences the V2
+run when a concurrent abort prevents the projection; `executeApprovedPlan` (and therefore
+`POST /api/executions/{id}/resume`)
 requires a durable `planApprovedAt` and a non-terminal launch; terminal status is derived from the
 per-solution outcomes rather than unconditionally COMPLETE, and FAILED/CANCELLED joined the
 protected terminal set; abort atomically claims cancellation from a non-terminal state and performs
@@ -999,14 +1000,27 @@ selections fail closed on both sides — an unparseable or non-UUID value is an 
 non-terminal task rows to success. `PipelineExecutorPool` now exposes three distinct executors so a
 LARGE plan's expansion fan-out never blocks on the pool the waiter runs on.
 
-**Plan-gate transition authority (2026-07-27):** every positive durable gate mutation now flows
-through `RunLifecycleService.resolvePlanGate`; the execution-view projection and the dormant chat
-action no longer call `GateStore` directly. An already-approved gate is restart-safe: a replay while
-the run is still `AWAITING_APPROVAL` re-queues the missing continuation, while a duplicate after the
-run progressed is an idempotent no-op. This centralizes the transition/recovery seam, not yet the
-entire approval admission contract: `/api/runs/{id}/approve` still owns plan-fingerprint, managed-AI
-spend, breaking-change, governance-cap, and credit-confirmation checks. The execution-view approval
-route must share those policies before RequirementIR approval enforcement can be enabled.
+**Plan-gate transition and admission authority (2026-07-27):** every customer-facing plan decision
+flows through synchronous `PlanApprovalService` admission before
+`RunLifecycleService.resolvePlanGate`. The run API, retained Execution View route and dormant chat
+action share one admission sequence: optional compatibility checks for an exact-plan fingerprint
+and confirmed estimate when the caller supplies them, followed by managed-AI, org-governance,
+project-cap and breaking-change checks; an architecture test prevents direct route/tool resolution.
+Execution View also requires canonical run-write authority in addition to its project-write guard,
+and policy failures are returned before its async V3 projection starts. Managed-AI approval is
+checked against `pipeline_run.created_by_user_id` and payer org—the principal later debited by LLM
+calls—not whichever admin clicked Approve. The OWN_KEYS exemption additionally requires an enabled
+customer key for this run's selected provider; org-wide BYOK mode alone cannot exempt a Gemini run
+backed only by an Anthropic key. Durable approval replay remains restart-safe, but until
+a versioned admission receipt exists it re-runs policy rather than assuming historical APPROVED
+gates passed C03B admission. Execution View binds the exact approved pipeline ID through its async
+projection, fences it if the link/state changed, and returns 410 for pipeline-less legacy approvals;
+that legacy customer execution path is retired rather than exempted from canonical admission.
+Breaking acknowledgement now runs after spend/governance validation so a denied approval does not
+consume the ack first. Acknowledgement persistence and the subsequent plan-gate claim are still
+separate writes, so a later lifecycle conflict/failure can leave acknowledgement evidence without a
+successful gate transition. This does not yet add RequirementIR gate binding, make optional plan
+fingerprints mandatory, or repair Execution View's separate run-submission-admission bypass.
 
 **Breaking-change approval gate + continuation locality + publication fencing (2026-07-21, V329).**
 Four orchestrator-side corrections. (1) **RR-819** — `PlanBreakingChangeReport.requiresTypedAck`

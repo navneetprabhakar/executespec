@@ -10,7 +10,10 @@ class RunControllerExecutionModePolicyTest {
 
   @Test
   void rejectsNewBatchApprovalWithExplicitRetirementStatus() {
-    assertThatThrownBy(() -> RunController.rejectRetiredBatchApproval(true, "batch"))
+    assertThatThrownBy(
+            () ->
+                com.navneet.executespec.integration.PlanApprovalService.rejectRetiredBatchApproval(
+                    true, "batch"))
         .isInstanceOfSatisfying(
             ResponseStatusException.class,
             error -> {
@@ -23,8 +26,10 @@ class RunControllerExecutionModePolicyTest {
 
   @Test
   void allowsRealtimeAndRejectedApprovalsToPreserveCompatibility() {
-    RunController.rejectRetiredBatchApproval(true, "REALTIME");
-    RunController.rejectRetiredBatchApproval(false, "BATCH");
-    RunController.rejectRetiredBatchApproval(false, null);
+    com.navneet.executespec.integration.PlanApprovalService.rejectRetiredBatchApproval(
+        true, "REALTIME");
+    com.navneet.executespec.integration.PlanApprovalService.rejectRetiredBatchApproval(
+        false, "BATCH");
+    com.navneet.executespec.integration.PlanApprovalService.rejectRetiredBatchApproval(false, null);
   }
 }

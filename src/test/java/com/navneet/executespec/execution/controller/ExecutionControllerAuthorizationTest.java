@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.util.List;
@@ -17,6 +18,7 @@ import com.navneet.executespec.auth.repository.OrgRepository;
 import com.navneet.executespec.auth.repository.TierConfigRepository;
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.auth.security.JwtUtil;
+import com.navneet.executespec.auth.security.RunAccessGuard;
 import com.navneet.executespec.config.featureflag.FeatureFlagService;
 import com.navneet.executespec.execution.entity.ExecutionRun;
 import com.navneet.executespec.execution.repository.ExecutionRunRepository;
@@ -25,6 +27,7 @@ import com.navneet.executespec.execution.repository.ExecutionSolutionRunReposito
 import com.navneet.executespec.execution.service.ExecutionOrchestrator;
 import com.navneet.executespec.execution.service.ExecutionPlannerService;
 import com.navneet.executespec.execution.service.SolutionExecutionService;
+import com.navneet.executespec.integration.PlanApprovalService;
 import com.navneet.executespec.project.entity.ProjectRepo;
 import com.navneet.executespec.project.security.ProjectAccessGuard;
 import com.navneet.executespec.project.service.ProjectRepoService;
@@ -52,6 +55,8 @@ class ExecutionControllerAuthorizationTest {
   @Mock OrgRepository orgRepo;
   @Mock TierConfigRepository tierConfigRepo;
   @Mock ExecutionOrchestrator orchestrator;
+  @Mock PlanApprovalService planApprovalService;
+  @Mock RunAccessGuard runAccessGuard;
   @Mock ExecutionPlannerService plannerService;
   @Mock SolutionExecutionService solutionExecService;
   @Mock SseBroadcaster broadcaster;
@@ -109,6 +114,94 @@ class ExecutionControllerAuthorizationTest {
 
     verify(projectAccessGuard).assertCanRead("project-1", principal);
     verify(projectAccessGuard, never()).assertCanWrite("project-1", principal);
+  }
+
+  @Test
+  void unifiedPlanApprovalCompletesCanonicalAdmissionBeforeAsyncProjection() {
+    ExecutionRun approvalRun =
+        ExecutionRun.builder()
+            .id("execution-1")
+            .projectId("project-1")
+            .orgId("org-1")
+            .createdBy("owner-1")
+            .status("PLANNING")
+            .executionPlan("{\"tasks\":[]}")
+            .pipelineRunId("run-1")
+            .build();
+    when(execRunRepo.findById("execution-1")).thenReturn(Optional.of(approvalRun));
+    var request =
+        new com.navneet.executespec.api.dto.ApprovalRequest(
+            true, null, 3, "REALTIME", "fingerprint", "BREAKING", "digest");
+
+    controller.approvePlan("execution-1", request, principal);
+
+    verify(runAccessGuard).requireRunWriteAccess("run-1", principal);
+    verify(planApprovalService)
+        .decide(
+            org.mockito.Mockito.eq("run-1"),
+            org.mockito.Mockito.argThat(
+                command ->
+                    command.approved()
+                        && Integer.valueOf(3).equals(command.creditsConfirmed())
+                        && "fingerprint".equals(command.planFingerprint())
+                        && "digest".equals(command.breakingChangeReportDigest())),
+            org.mockito.Mockito.eq(principal));
+    verify(orchestrator).projectApprovedPlan("execution-1", "run-1");
+  }
+
+  @Test
+  void canonicalAdmissionFailureIsReturnedBeforeProjectionStarts() {
+    ExecutionRun approvalRun =
+        ExecutionRun.builder()
+            .id("execution-1")
+            .projectId("project-1")
+            .status("PLANNING")
+            .executionPlan("{\"tasks\":[]}")
+            .pipelineRunId("run-1")
+            .build();
+    when(execRunRepo.findById("execution-1")).thenReturn(Optional.of(approvalRun));
+    org.mockito.Mockito.doThrow(
+            new ResponseStatusException(HttpStatus.PAYMENT_REQUIRED, "managed credits"))
+        .when(planApprovalService)
+        .decide(
+            org.mockito.Mockito.eq("run-1"),
+            org.mockito.ArgumentMatchers.any(PlanApprovalService.Command.class),
+            org.mockito.Mockito.eq(principal));
+
+    assertThatThrownBy(() -> controller.approvePlan("execution-1", null, principal))
+        .isInstanceOfSatisfying(
+            ResponseStatusException.class,
+            error ->
+                org.assertj.core.api.Assertions.assertThat(error.getStatusCode())
+                    .isEqualTo(HttpStatus.PAYMENT_REQUIRED));
+
+    verify(orchestrator, never())
+        .projectApprovedPlan(
+            org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyString());
+  }
+
+  @Test
+  void pipelineLessLegacyApprovalIsRetiredBeforeAdmission() {
+    ExecutionRun approvalRun =
+        ExecutionRun.builder()
+            .id("execution-1")
+            .projectId("project-1")
+            .status("PLANNING")
+            .executionPlan("{\"tasks\":[]}")
+            .build();
+    when(execRunRepo.findById("execution-1")).thenReturn(Optional.of(approvalRun));
+
+    assertThatThrownBy(() -> controller.approvePlan("execution-1", null, principal))
+        .isInstanceOfSatisfying(
+            ResponseStatusException.class,
+            error ->
+                org.assertj.core.api.Assertions.assertThat(error.getStatusCode())
+                    .isEqualTo(HttpStatus.GONE));
+
+    verifyNoInteractions(planApprovalService);
+    verify(orchestrator, never())
+        .projectApprovedPlan(
+            org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyString());
   }
 
   @Test

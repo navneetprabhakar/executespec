@@ -9,6 +9,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.auth.security.RunAccessGuard;
+import com.navneet.executespec.integration.PlanApprovalService;
 import com.navneet.executespec.integration.RunLifecycleService;
 import com.navneet.executespec.integration.RunOrchestrator;
 import com.navneet.executespec.project.security.ProjectAccessGuard;
@@ -25,6 +26,7 @@ class ProjectChatActionToolsTest {
 
   private final RunOrchestrator runOrchestrator = mock(RunOrchestrator.class);
   private final RunLifecycleService runLifecycleService = mock(RunLifecycleService.class);
+  private final PlanApprovalService planApprovalService = mock(PlanApprovalService.class);
   private final PipelineRunRepository pipelineRunRepo = mock(PipelineRunRepository.class);
   private final ValidationReportService validationReportService =
       mock(ValidationReportService.class);
@@ -36,6 +38,7 @@ class ProjectChatActionToolsTest {
       new ProjectChatActionTools(
           runOrchestrator,
           runLifecycleService,
+          planApprovalService,
           pipelineRunRepo,
           validationReportService,
           runAccessGuard,

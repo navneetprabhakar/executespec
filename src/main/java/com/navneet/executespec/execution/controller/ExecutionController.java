@@ -4,6 +4,7 @@ import java.time.Instant;
 import java.util.Map;
 
 import com.navneet.executespec.api.PageBounds;
+import com.navneet.executespec.api.dto.ApprovalRequest;
 import com.navneet.executespec.auth.entity.AppUser;
 import com.navneet.executespec.auth.entity.Org;
 import com.navneet.executespec.auth.entity.Project;
@@ -12,6 +13,7 @@ import com.navneet.executespec.auth.repository.OrgRepository;
 import com.navneet.executespec.auth.repository.TierConfigRepository;
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.auth.security.JwtUtil;
+import com.navneet.executespec.auth.security.RunAccessGuard;
 import com.navneet.executespec.config.featureflag.FeatureFlagService;
 import com.navneet.executespec.execution.dto.CreateExecutionRequest;
 import com.navneet.executespec.execution.dto.DecisionRequest;
@@ -70,6 +72,8 @@ public class ExecutionController {
   private final OrgRepository orgRepo;
   private final TierConfigRepository tierConfigRepo;
   private final ExecutionOrchestrator orchestrator;
+  private final com.navneet.executespec.integration.PlanApprovalService planApprovalService;
+  private final RunAccessGuard runAccessGuard;
   private final ExecutionPlannerService plannerService;
   private final SolutionExecutionService solutionExecService;
   private final SseBroadcaster broadcaster;
@@ -159,7 +163,9 @@ public class ExecutionController {
 
   @PutMapping("/api/executions/{id}/plan/approve")
   public ResponseEntity<Void> approvePlan(
-      @PathVariable String id, @AuthenticationPrincipal AppUserDetails principal) {
+      @PathVariable String id,
+      @RequestBody(required = false) ApprovalRequest request,
+      @AuthenticationPrincipal AppUserDetails principal) {
     AppUser user = requireFeatureEnabled(principal);
     ExecutionRun run = requireRunWriteAccess(id, principal);
     // v2.5.12 — reject plan-approve before the plan is generated. Observed
@@ -175,7 +181,38 @@ public class ExecutionController {
               + id
               + " until executionPlan is present).");
     }
-    orchestrator.approvePlanAndExecute(id);
+    if (run.getPipelineRunId() == null) {
+      throw new ResponseStatusException(
+          HttpStatus.GONE,
+          "Legacy Execution View plan approval is retired because it has no canonical run gate."
+              + " Create a new run before approving.");
+    }
+    String approvedPipelineRunId = run.getPipelineRunId();
+    // The project guard above protects the Execution View projection. Canonical run authority is
+    // checked separately so this compatibility route cannot grant broader approval rights than
+    // POST /api/runs/{id}/approve.
+    runAccessGuard.requireRunWriteAccess(approvedPipelineRunId, principal);
+    ApprovalRequest req =
+        request == null
+            ? new ApprovalRequest(true, null, null, "REALTIME", null, null, null)
+            : request;
+    if (!req.approved()) {
+      throw new ResponseStatusException(
+          HttpStatus.BAD_REQUEST,
+          "The execution approval route accepts positive decisions only; reject through the run"
+              + " plan gate.");
+    }
+    planApprovalService.decide(
+        approvedPipelineRunId,
+        new com.navneet.executespec.integration.PlanApprovalService.Command(
+            true,
+            req.creditsConfirmed(),
+            req.executionMode(),
+            req.planFingerprint(),
+            req.breakingChangeAck(),
+            req.breakingChangeReportDigest()),
+        principal);
+    orchestrator.projectApprovedPlan(id, approvedPipelineRunId);
     return ResponseEntity.accepted().build();
   }
 

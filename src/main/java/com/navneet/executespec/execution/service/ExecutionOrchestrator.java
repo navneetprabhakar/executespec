@@ -582,8 +582,8 @@ public class ExecutionOrchestrator {
    *   <li>PLANNING → V2 PLANNING (classifier + outline planner) → V2 AWAITING_APPROVAL (V3 stays
    *       PLANNING; frontend reads {@code executionPlan} mirror of {@code pipeline_run.planJson},
    *       shows Approve button).
-   *   <li>(user clicks Approve at V3) → {@link #approvePlanAndExecute} asks the lifecycle service
-   *       to resolve V2's plan gate → V2 WORKING → V3 EXECUTING.
+   *   <li>(user clicks Approve at V3) → the shared approval service resolves V2's plan gate, then
+   *       {@link #projectApprovedPlan} projects V2 WORKING → V3 EXECUTING.
    *   <li>V2 terminal (COMPLETE / PARTIAL / FAILED / ABORTED) → V3 mirrors via {@link
    *       #mirrorV2Terminal}.
    * </ul>
@@ -685,7 +685,7 @@ public class ExecutionOrchestrator {
       if ("AWAITING_APPROVAL".equals(v2Status)) {
         // Planner done; V3 stays in PLANNING (frontend shows approve button). Return from this
         // async task; the next phase fires when the user clicks /plan/approve, which routes to
-        // approvePlanAndExecute → claims the V2 plan gate.
+        // the shared approval service claims the V2 plan gate before projectApprovedPlan runs.
         emit(executionRunId, ExecutionEventTypes.EXEC_PLAN_READY, pipelineRunId);
         return;
       }
@@ -737,7 +737,7 @@ public class ExecutionOrchestrator {
 
   /**
    * V188 (2026-05-13) — polls the V2 pipeline_run until terminal, mirroring its terminal state onto
-   * the ExecutionRun. Called from {@link #approvePlanAndExecute} once the V2 plan gate has been
+   * the ExecutionRun. Called from {@link #projectApprovedPlan} once the V2 plan gate has been
    * durably resolved and its continuation has been queued.
    */
   @Async
@@ -886,15 +886,13 @@ public class ExecutionOrchestrator {
    * EXECUTING while V2 sat forever in AWAITING_APPROVAL; and a gate the user had already
    * <em>rejected</em> was briefly reported as started.
    *
-   * <p>Now: the approval timestamp must be durably recorded before anything else happens, and the
-   * canonical lifecycle authority returns a typed result. Only {@code RESUME_QUEUED} (this call
-   * durably approved and queued the run) or {@code ALREADY_RESOLVED} (idempotent repeat of the same
-   * positive decision) may proceed to EXECUTING. A conflicting or rejected decision takes the
-   * canonical terminal path instead of starting work, and a gate that cannot be resolved at all
-   * fails the launch rather than executing without proof.
+   * <p>Now: the controller synchronously completes canonical admission and gate resolution before
+   * calling this projection. This method records the V3 approval only after that authority exists,
+   * refuses to overwrite an abort/terminal state, and fences the linked V2 run when projection lost
+   * a concurrent abort race.
    */
   @Async
-  public void approvePlanAndExecute(String executionRunId) {
+  public void projectApprovedPlan(String executionRunId, String approvedPipelineRunId) {
     // 2026-04-26 hotfix — covered by ExecutionRunCasUpdater. The find-then-
     // save window here is tight, but @Async runs on a fresh thread with
     // OSIV off; concurrent writers from the SSE update path or from a
@@ -902,76 +900,71 @@ public class ExecutionOrchestrator {
     // findById and save, which OOMs the request because no
     // @RestControllerAdvice catches async exceptions.
     Instant approvedAt = Instant.now();
-    boolean ok = runCas.casUpdate(executionRunId, r -> r.setPlanApprovedAt(approvedAt));
+    java.util.concurrent.atomic.AtomicBoolean transitioned =
+        new java.util.concurrent.atomic.AtomicBoolean(false);
+    java.util.concurrent.atomic.AtomicBoolean alreadyProjected =
+        new java.util.concurrent.atomic.AtomicBoolean(false);
+    java.util.concurrent.atomic.AtomicBoolean linkMatches =
+        new java.util.concurrent.atomic.AtomicBoolean(false);
+    boolean ok =
+        runCas.casUpdate(
+            executionRunId,
+            r -> {
+              // The mutator may run again after an optimistic-lock retry. Its decision must reflect
+              // the latest refetched row, not the status observed by an earlier failed attempt.
+              transitioned.set(false);
+              alreadyProjected.set(false);
+              linkMatches.set(
+                  java.util.Objects.equals(approvedPipelineRunId, r.getPipelineRunId()));
+              if (!linkMatches.get()) return;
+              if ("EXECUTING".equals(r.getStatus()) && r.getPlanApprovedAt() != null) {
+                alreadyProjected.set(true);
+                return;
+              }
+              if (!"PLANNING".equals(r.getStatus())
+                  && !"AWAITING_PLAN_APPROVAL".equals(r.getStatus())) return;
+              r.setPlanApprovedAt(approvedAt);
+              r.setStatus("EXECUTING");
+              transitioned.set(true);
+            });
     if (!ok) {
-      // RR-346 — no durable approval record means no authority to spend. Fail the launch instead
-      // of executing on an unrecorded approval.
+      // Canonical approval already exists, but the V3 projection could not be recorded. Fence the
+      // linked run first; then mark FAILED only if the projection is still in an approval state.
+      // Never overwrite a concurrent ABORTED/terminal decision with a generic failure update.
       log.error(
-          "approvePlanAndExecute: could not durably record plan approval for exec {}; refusing to"
+          "projectApprovedPlan: could not durably record plan approval for exec {}; refusing to"
               + " execute",
           executionRunId);
-      failLaunch(executionRunId, "Plan approval could not be durably recorded; execution refused.");
+      runLifecycleService.cancel(approvedPipelineRunId);
+      java.util.concurrent.atomic.AtomicBoolean markedFailed =
+          new java.util.concurrent.atomic.AtomicBoolean(false);
+      runCas.casUpdate(
+          executionRunId,
+          r -> {
+            markedFailed.set(false);
+            if ("PLANNING".equals(r.getStatus())
+                || "AWAITING_PLAN_APPROVAL".equals(r.getStatus())) {
+              r.setStatus("FAILED");
+              r.setFailureReason(
+                  "Plan approval could not be durably projected; execution was fenced.");
+              markedFailed.set(true);
+            }
+          });
+      if (markedFailed.get()) emit(executionRunId, ExecutionEventTypes.EXEC_FAILED, null);
       return;
     }
-    // V188 (2026-05-13) — when the unified-dispatch path is in use, the V3
-    // plan-approve click maps to V2's plan gate. Resolve it through the canonical lifecycle; V2
-    // resumes
-    // execution; we transition V3 to EXECUTING and poll V2 until terminal.
-    ExecutionRun run = runRepo.findById(executionRunId).orElse(null);
-    if (run != null && run.getPipelineRunId() != null) {
-      String pipelineRunId = run.getPipelineRunId();
-      com.navneet.executespec.integration.RunLifecycleService.PlanApprovalOutcome approvalOutcome;
-      try {
-        approvalOutcome = runLifecycleService.resolvePlanGate(pipelineRunId, true);
-      } catch (RuntimeException e) {
-        log.error(
-            "approvePlanAndExecute: V2 plan gate for exec {} (V2 run {}) could not be resolved: {}",
-            executionRunId,
-            pipelineRunId,
-            e.getMessage());
-        failLaunch(
-            executionRunId,
-            "Plan gate could not be resolved; execution refused: " + safeMessage(e));
-        return;
-      }
-      if (approvalOutcome
-              == com.navneet.executespec.integration.RunLifecycleService.PlanApprovalOutcome
-                  .CONFLICTING_DECISION
-          || approvalOutcome
-              == com.navneet.executespec.integration.RunLifecycleService.PlanApprovalOutcome
-                  .REJECTED) {
-        log.warn(
-            "approvePlanAndExecute: V2 plan gate for exec {} (V2 run {}) was already REJECTED;"
-                + " not starting execution",
-            executionRunId,
-            pipelineRunId);
-        runCas.casUpdate(executionRunId, r -> r.setStatus("ABORTED"));
-        emit(executionRunId, ExecutionEventTypes.EXEC_ABORTED, pipelineRunId);
-        return;
-      }
-      if (approvalOutcome
-              != com.navneet.executespec.integration.RunLifecycleService.PlanApprovalOutcome
-                  .RESUME_QUEUED
-          && approvalOutcome
-              != com.navneet.executespec.integration.RunLifecycleService.PlanApprovalOutcome
-                  .ALREADY_RESOLVED) {
-        failLaunch(
-            executionRunId,
-            "Plan approval could not resume from the current run state: " + approvalOutcome);
-        return;
-      }
-      // Canonical lifecycle authority either queued the resume or proved an idempotent prior
-      // approval. Only then may the V3 projection mirror EXECUTING.
-      runCas.casUpdate(executionRunId, r -> r.setStatus("EXECUTING"));
-      emit(executionRunId, ExecutionEventTypes.EXEC_STARTED, pipelineRunId);
-      self.getObject().pollAndMirrorV2(executionRunId, pipelineRunId);
+    if (alreadyProjected.get()) return;
+    if (!linkMatches.get() || !transitioned.get()) {
+      runLifecycleService.cancel(approvedPipelineRunId);
+      log.warn(
+          "projectApprovedPlan: exec {} no longer permits the exact approved pipeline {}"
+              + " projection; fenced it",
+          executionRunId,
+          approvedPipelineRunId);
       return;
     }
-    // Legacy path — per-Solution dispatch, retained for in-flight executions
-    // that were created before V188 and emergency rollback when the unified
-    // flag is off. The approval timestamp written above is the proof
-    // executeApprovedPlan re-checks (RR-351).
-    self.getObject().executeApprovedPlan(executionRunId);
+    emit(executionRunId, ExecutionEventTypes.EXEC_STARTED, approvedPipelineRunId);
+    self.getObject().pollAndMirrorV2(executionRunId, approvedPipelineRunId);
   }
 
   /** RR-346 — terminal failure for a launch that must not proceed without proven authority. */
@@ -996,8 +989,8 @@ public class ExecutionOrchestrator {
    * architecture and plan approval and enter solution execution (and therefore provider spend and
    * PR publication).
    *
-   * <p>The durable {@code planApprovedAt} stamp written by {@link #approvePlanAndExecute} is now
-   * the required authority, and the launch must be in a state from which execution is legal. Boot
+   * <p>The durable {@code planApprovedAt} stamp written by {@link #projectApprovedPlan} is now the
+   * required authority, and the launch must be in a state from which execution is legal. Boot
    * recovery re-enters through the same door, so recovery cannot launder an unapproved plan either.
    */
   @Async

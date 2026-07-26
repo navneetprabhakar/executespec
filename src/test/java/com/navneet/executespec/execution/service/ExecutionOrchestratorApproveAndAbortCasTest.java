@@ -24,7 +24,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 
 /**
- * 2026-04-26 hotfix coverage — approvePlanAndExecute + abortExecution + executeApprovedPlan
+ * 2026-04-26 hotfix coverage — projectApprovedPlan + abortExecution + executeApprovedPlan
  * (EXECUTING + cyclic-deps ABORTED saves) now route through {@link ExecutionRunCasUpdater}.
  *
  * <p>Each test is intentionally narrow: only the @Version race shape that the patch addresses, not
@@ -93,104 +93,145 @@ class ExecutionOrchestratorApproveAndAbortCasTest {
   }
 
   @Test
-  void approvePlanAndExecute_recordsApprovalViaCas_thenInvokesExecute() {
-    // approvePlanAndExecute: 1 findById for the CAS planApprovedAt save.
-    // executeApprovedPlan that follows: 1 findById for the snapshot, 1 for
-    // the CAS EXECUTING save, 1 for the no-layer "latest" recheck (we pass
-    // an empty layer set so the for-loop is a no-op), and finally
-    // applyTerminalStatus(COMPLETE) does its own findById + save.
-    // RR-351 — executeApprovedPlan now requires the durable planApprovedAt stamp this method
-    // writes. Return ONE shared row so the later reads observe that stamp, which is what a real
-    // database does; a fresh instance per call would model a row that never persisted the approval.
+  void projectApprovedPlan_recordsApprovalForExactCanonicalLink_thenPollsIt() {
     ExecutionRun row = withStatus("AWAITING_PLAN_APPROVAL");
+    row.setPipelineRunId("run-1");
     when(runRepo.findById("exec-1")).thenAnswer(inv -> Optional.of(row));
     when(runRepo.save(any(ExecutionRun.class))).thenAnswer(inv -> inv.getArgument(0));
-    when(solutionRepo.findWithDependenciesByExecutionRun_IdOrderBySequenceNumberAsc("exec-1"))
-        .thenReturn(List.of());
-    when(depResolver.resolveExecutionOrder(any())).thenReturn(List.of());
-    when(solutionRepo.findWithRepoMappingsByExecutionRun_IdOrderBySequenceNumberAsc("exec-1"))
-        .thenReturn(List.of());
-    when(appUserRepo.findById(any())).thenReturn(Optional.empty());
+    when(pipelineRunRepo.findById("run-1"))
+        .thenReturn(Optional.of(PipelineRun.builder().runId("run-1").status("COMPLETE").build()));
 
-    orchestrator.approvePlanAndExecute("exec-1");
+    orchestrator.projectApprovedPlan("exec-1", "run-1");
 
-    // Verify the CAS plan-approval save fired (planApprovedAt set on the
-    // refetched row + saved). The exact total save count depends on the
-    // executeApprovedPlan tail — what we care about is that the approval
-    // path didn't OOM and reached the executeApprovedPlan fork.
-    verify(runRepo, atLeast(2)).save(any());
-    verify(runRepo, atLeast(2)).findById("exec-1");
-    // RR-351 — and the approval is now durably stamped, which is what authorises execution.
+    verify(runRepo, atLeast(2)).save(row);
+    verify(pipelineRunRepo).findById("run-1");
+    verify(runLifecycleService, never()).cancel(anyString());
     assertThat(row.getPlanApprovedAt()).isNotNull();
+    assertThat(row.getStatus()).isEqualTo("COMPLETE");
   }
 
   @Test
-  void approvePlanAndExecute_runDeleted_skipsApprovalButStillExecutes() {
-    // CAS findById returns empty → returns false (logged), then control
-    // falls through to executeApprovedPlan which itself bails on missing
-    // row. No save calls anywhere.
+  void projectApprovedPlan_deletedExecutionFencesPassedApprovedPipeline() {
     when(runRepo.findById("exec-1")).thenReturn(Optional.empty());
 
-    orchestrator.approvePlanAndExecute("exec-1");
+    orchestrator.projectApprovedPlan("exec-1", "run-approved");
 
     verify(runRepo, never()).save(any());
+    verify(runLifecycleService).cancel("run-approved");
+    verifyNoInteractions(pipelineRunRepo);
   }
 
   @Test
-  void unifiedApprovalRoutesThroughCanonicalLifecycleBeforeMirroringExecution() {
+  void unifiedApprovalProjectsOnlyAfterCanonicalApprovalWasResolvedByController() {
     ExecutionRun row = withStatus("AWAITING_PLAN_APPROVAL");
     row.setPipelineRunId("run-1");
     when(runRepo.findById("exec-1")).thenReturn(Optional.of(row));
     when(runRepo.save(any(ExecutionRun.class))).thenAnswer(inv -> inv.getArgument(0));
-    when(runLifecycleService.resolvePlanGate("run-1", true))
-        .thenReturn(
-            com.navneet.executespec.integration.RunLifecycleService.PlanApprovalOutcome
-                .RESUME_QUEUED);
     when(pipelineRunRepo.findById("run-1"))
         .thenReturn(Optional.of(PipelineRun.builder().runId("run-1").status("COMPLETE").build()));
 
-    orchestrator.approvePlanAndExecute("exec-1");
+    orchestrator.projectApprovedPlan("exec-1", "run-1");
 
-    verify(runLifecycleService).resolvePlanGate("run-1", true);
+    verify(runLifecycleService, never()).resolvePlanGate("run-1", true);
     verify(pipelineRunRepo).findById("run-1");
     assertThat(row.getPlanApprovedAt()).isNotNull();
   }
 
   @Test
   void duplicateUnifiedApprovalAfterCanonicalProgressDoesNotFailTheLaunch() {
-    ExecutionRun row = withStatus("AWAITING_PLAN_APPROVAL");
+    ExecutionRun row = withStatus("EXECUTING");
     row.setPipelineRunId("run-1");
+    row.setPlanApprovedAt(java.time.Instant.now());
     when(runRepo.findById("exec-1")).thenReturn(Optional.of(row));
     when(runRepo.save(any(ExecutionRun.class))).thenAnswer(inv -> inv.getArgument(0));
-    when(runLifecycleService.resolvePlanGate("run-1", true))
-        .thenReturn(
-            com.navneet.executespec.integration.RunLifecycleService.PlanApprovalOutcome
-                .ALREADY_RESOLVED);
-    when(pipelineRunRepo.findById("run-1"))
-        .thenReturn(Optional.of(PipelineRun.builder().runId("run-1").status("COMPLETE").build()));
+    orchestrator.projectApprovedPlan("exec-1", "run-1");
 
-    orchestrator.approvePlanAndExecute("exec-1");
-
-    assertThat(row.getStatus()).isEqualTo("COMPLETE");
+    assertThat(row.getStatus()).isEqualTo("EXECUTING");
     assertThat(row.getFailureReason()).isNull();
+    verifyNoInteractions(pipelineRunRepo);
   }
 
   @Test
-  void unifiedApprovalDoesNotMirrorOrPollWhenLifecycleRejectsTheRunState() {
-    ExecutionRun row = withStatus("AWAITING_PLAN_APPROVAL");
+  void unifiedApprovalLostToAbortFencesCanonicalRunWithoutPolling() {
+    ExecutionRun row = withStatus("ABORTED");
     row.setPipelineRunId("run-1");
     when(runRepo.findById("exec-1")).thenReturn(Optional.of(row));
     when(runRepo.save(any(ExecutionRun.class))).thenAnswer(inv -> inv.getArgument(0));
-    when(runLifecycleService.resolvePlanGate("run-1", true))
-        .thenReturn(
-            com.navneet.executespec.integration.RunLifecycleService.PlanApprovalOutcome
-                .INVALID_STATE);
+    orchestrator.projectApprovedPlan("exec-1", "run-1");
 
-    orchestrator.approvePlanAndExecute("exec-1");
-
-    verify(runLifecycleService).resolvePlanGate("run-1", true);
+    verify(runLifecycleService).cancel("run-1");
     verifyNoInteractions(pipelineRunRepo);
-    assertThat(row.getStatus()).isEqualTo("FAILED");
+    assertThat(row.getStatus()).isEqualTo("ABORTED");
+    assertThat(row.getPlanApprovedAt()).isNull();
+  }
+
+  @Test
+  void optimisticRetryRefetchingAbortDoesNotReuseStaleProjectionDecision() {
+    ExecutionRun planning = withStatus("PLANNING");
+    planning.setPipelineRunId("run-1");
+    ExecutionRun aborted = withStatus("ABORTED");
+    aborted.setPipelineRunId("run-1");
+    when(runRepo.findById("exec-1"))
+        .thenReturn(Optional.of(planning), Optional.of(aborted), Optional.of(aborted));
+    when(runRepo.save(any(ExecutionRun.class)))
+        .thenThrow(new ObjectOptimisticLockingFailureException(ExecutionRun.class, "exec-1"))
+        .thenAnswer(inv -> inv.getArgument(0));
+
+    orchestrator.projectApprovedPlan("exec-1", "run-1");
+
+    verify(runLifecycleService).cancel("run-1");
+    verifyNoInteractions(pipelineRunRepo);
+    assertThat(aborted.getStatus()).isEqualTo("ABORTED");
+    assertThat(aborted.getPlanApprovedAt()).isNull();
+  }
+
+  @Test
+  void exactLinkMismatchFencesPassedApprovedPipelineWithoutTouchingDifferentLink() {
+    ExecutionRun row = withStatus("PLANNING");
+    row.setPipelineRunId("run-different");
+    when(runRepo.findById("exec-1")).thenReturn(Optional.of(row));
+    when(runRepo.save(any(ExecutionRun.class))).thenAnswer(inv -> inv.getArgument(0));
+
+    orchestrator.projectApprovedPlan("exec-1", "run-approved");
+
+    verify(runLifecycleService).cancel("run-approved");
+    verify(runLifecycleService, never()).cancel("run-different");
+    verifyNoInteractions(pipelineRunRepo);
+    assertThat(row.getStatus()).isEqualTo("PLANNING");
+    assertThat(row.getPlanApprovedAt()).isNull();
+  }
+
+  @Test
+  void projectionCasExhaustionPreservesConcurrentAbortAndFencesPassedApprovedPipeline() {
+    ExecutionRun attemptOne = withStatus("PLANNING");
+    attemptOne.setPipelineRunId("run-approved");
+    ExecutionRun attemptTwo = withStatus("PLANNING");
+    attemptTwo.setPipelineRunId("run-approved");
+    ExecutionRun attemptThree = withStatus("PLANNING");
+    attemptThree.setPipelineRunId("run-approved");
+    ExecutionRun aborted = withStatus("ABORTED");
+    aborted.setPipelineRunId("run-approved");
+    when(runRepo.findById("exec-1"))
+        .thenReturn(
+            Optional.of(attemptOne),
+            Optional.of(attemptTwo),
+            Optional.of(attemptThree),
+            Optional.of(aborted));
+    when(runRepo.save(any(ExecutionRun.class)))
+        .thenThrow(new ObjectOptimisticLockingFailureException(ExecutionRun.class, "exec-1"))
+        .thenThrow(new ObjectOptimisticLockingFailureException(ExecutionRun.class, "exec-1"))
+        .thenThrow(new ObjectOptimisticLockingFailureException(ExecutionRun.class, "exec-1"))
+        .thenAnswer(inv -> inv.getArgument(0));
+
+    orchestrator.projectApprovedPlan("exec-1", "run-approved");
+
+    verify(runLifecycleService).cancel("run-approved");
+    verify(runRepo, times(4)).findById("exec-1");
+    verify(runRepo, times(4)).save(any(ExecutionRun.class));
+    verifyNoInteractions(pipelineRunRepo);
+    assertThat(aborted.getStatus()).isEqualTo("ABORTED");
+    assertThat(aborted.getFailureReason()).isNull();
+    assertThat(aborted.getPlanApprovedAt()).isNull();
   }
 
   @Test

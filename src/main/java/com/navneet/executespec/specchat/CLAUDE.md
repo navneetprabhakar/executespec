@@ -94,3 +94,13 @@ append-only `agent_action_event`; legacy/project-chat admission and tool allow/d
 is additionally written through `ChatSecurityAuditService` to the hash-chained `activity_audit`.
 Audit metadata contains only tool/capability/outcome identifiers, never prompts, arguments,
 results, exception bodies, or secrets.
+
+The retained model-filtered `approve_plan` callback is not a gate shortcut. It first reauthorizes
+run write access and then uses `PlanApprovalService`, so managed-AI, governance, breaking-contract
+and canonical lifecycle policy match the web/run routes. The legacy tool schema carries no plan
+fingerprint or credit confirmation, and those inputs remain optional compatibility checks; it
+therefore does not prove exact reviewed-plan/cost identity. A required breaking-report
+acknowledgement does fail closed and must move to the explicit plan UI. Historical durable approvals
+without a versioned admission receipt re-run admission on replay; they are not grandfathered around
+current policy. The acknowledgement write and plan-gate claim are not yet atomic, so admission can
+record a valid acknowledgement before a later lifecycle race refuses the gate transition.
