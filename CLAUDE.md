@@ -1357,6 +1357,15 @@ evidence, and horizontally scaled JVMs require a shared persistent trajectory ro
   and ambiguity. `RepositoryIntelligenceEvaluationManifestTest` validates containment, required
   case coverage and byte-exact asset hashes; it is deterministic baseline evidence, not an explorer
   quality or generated-code claim.
+- **RequirementIR schema-first slice (IR-P1-C01, integration not yet enabled)** —
+  `agent/requirement/` owns a separate schema-v1 requirement/acceptance document, deterministic
+  exact-source compiler, structural/completeness validator, canonical JSON codec and plan/source/
+  contract-bound digest. It preserves exact UTF-16 source spans and USER_STATED/INFERRED
+  provenance, retains
+  legacy requirement/task IDs through an explicit adapter boundary, and blocks omission,
+  ambiguity, conflict, missing task ownership and missing executable acceptance without modifying
+  legacy `Plan`/`PlannedTask` JSON. No provider, prompt, feature flag, persistence, API or UI behavior
+  changes in this first commit; those require a separate integration gate.
 - **Benchmark usage reconciliation (RL-2026-07-18-017)** — `POST /api/v2/test/benchmark/{id}/reconcile-usage` is benchmark-profile + SUPER_ADMIN only. It repairs historical tracker projections exclusively from the canonical `run_step_usage` rows linked by each task's `esRunId`; clients cannot supply replacement usage. Score, outcome and task identity remain immutable, and a changed repair appends `USAGE_RECONCILED` while exact replay is a no-op.
 - **Deterministic protected-Web QA fixture** — `test/WebQaFixtureController` is local/dev-only and SUPER_ADMIN-gated at `/api/v2/test/web-fixture`. It creates provider-free terminal success/failure/approval runs, tasks, validation/test evidence, a workspace, Redis SSE replay, and an agent-session action card for current-SHA browser capture; `DELETE` removes only its `web-qa-*` fixtures. `AgentStreamTurnRunner` recognizes only those minted fixture session IDs and emits a bounded scripted token/tool/result stream, so Web streaming evidence does not spend a provider. The former provider-free `RECOVERY` transition was removed on 2026-07-19 because it manufactured terminal success without the fenced reviewer/validation lifecycle; restart evidence must now use the real `RunLifecycleService.resumeAfterCrash` path. It is not a customer or production endpoint and must never be enabled outside local/dev QA.
 - **God classes** — `RunOrchestrator.java` is currently 4,140 LOC after the extraction work; residual backend decomposition is tracked in `pending.md` §E1/I1. Frontend debt remains concentrated in the shared DTO registry `frontend/src/lib/api/core.ts` (now ~1,650 LOC after billing and deployment DTO extraction) and the isolated transport `frontend/src/lib/api/transport.ts` (~191 LOC); `signal/pages/ExtraPages.tsx` is now 377 LOC after the prior split. These remain high-coupling and under-tested areas.
