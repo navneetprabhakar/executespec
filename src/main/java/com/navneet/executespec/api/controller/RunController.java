@@ -969,16 +969,7 @@ public class RunController {
    * which case no client-supplied fingerprint can match and the approval is rejected.
    */
   static String planFingerprintOf(String planJson) {
-    if (planJson == null || planJson.isBlank()) return null;
-    try {
-      java.security.MessageDigest md = java.security.MessageDigest.getInstance("SHA-256");
-      byte[] hash = md.digest(planJson.getBytes(java.nio.charset.StandardCharsets.UTF_8));
-      StringBuilder sb = new StringBuilder(hash.length * 2);
-      for (byte b : hash) sb.append(String.format("%02x", b));
-      return sb.toString();
-    } catch (java.security.NoSuchAlgorithmException e) {
-      throw new IllegalStateException("SHA-256 unavailable", e);
-    }
+    return com.navneet.executespec.agent.requirement.ExactPlanFingerprint.sha256(planJson);
   }
 
   /**
