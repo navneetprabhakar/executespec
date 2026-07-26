@@ -3,6 +3,8 @@ package com.navneet.executespec.integration;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.atLeastOnce;
@@ -138,6 +140,37 @@ class RunLifecycleServiceContinuationApprovalTest {
 
     verify(pool, times(1)).submit(any(Runnable.class));
     verify(controlPort, times(1)).putActiveRun(eq(RUN_ID), any());
+  }
+
+  @Test
+  void approvedGateReplayAfterCrashQueuesTheMissingContinuation() throws Exception {
+    Files.createDirectories(tempDir.resolve(RUN_ID));
+    PipelineRun run = approvedPlanRun("AWAITING_APPROVAL");
+    when(runRepo.findById(RUN_ID)).thenReturn(Optional.of(run));
+    when(gateStore.claimPlanGate(RUN_ID, true))
+        .thenReturn(GateStore.PlanGateClaim.ALREADY_APPROVED);
+    when(gateStore.findPlanGate(RUN_ID)).thenReturn(Optional.of(approvedGate()));
+    when(runRepo.claimApprovalResume(eq(RUN_ID), any())).thenReturn(1);
+    when(pool.submit(any(Runnable.class))).thenReturn(CompletableFuture.completedFuture(null));
+
+    assertThat(service.resolvePlanGate(RUN_ID, true))
+        .isEqualTo(RunLifecycleService.PlanApprovalOutcome.RESUME_QUEUED);
+
+    verify(pool).submit(any(Runnable.class));
+    verify(controlPort).putActiveRun(eq(RUN_ID), any());
+  }
+
+  @Test
+  void duplicateApprovalAfterRunProgressedIsAnIdempotentNoOp() throws Exception {
+    PipelineRun run = approvedPlanRun("WORKING");
+    when(runRepo.findById(RUN_ID)).thenReturn(Optional.of(run));
+    when(gateStore.findPlanGate(RUN_ID)).thenReturn(Optional.of(approvedGate()));
+
+    assertThat(service.resolvePlanGate(RUN_ID, true))
+        .isEqualTo(RunLifecycleService.PlanApprovalOutcome.ALREADY_RESOLVED);
+
+    verify(gateStore, never()).claimPlanGate(anyString(), anyBoolean());
+    verify(pool, never()).submit(any(Runnable.class));
   }
 
   @Test

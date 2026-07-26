@@ -53,7 +53,6 @@ class ExecutionOrchestratorTriggerAnalysisRetryTest {
   @Mock com.navneet.executespec.project.pr.PullRequestRecordRepository prRecordRepo;
   @Mock ObjectProvider<com.navneet.executespec.folder.BootstrapService> bootstrapServiceProvider;
   @Mock com.navneet.executespec.state.repository.PipelineRunRepository pipelineRunRepo;
-  @Mock com.navneet.executespec.harness.GateStore gateStore;
   @Mock ExecutionPlannerService plannerService;
   @Mock ExecutionCostAggregator costAggregator;
   // Use a real ExecutionRunCasUpdater wired to the runRepo mock so CAS
@@ -85,7 +84,6 @@ class ExecutionOrchestratorTriggerAnalysisRetryTest {
             prRecordRepo,
             runCas,
             pipelineRunRepo,
-            gateStore,
             plannerService,
             costAggregator,
             // RR-343 — the production bean routes self-calls through the Spring @Async proxy; in a

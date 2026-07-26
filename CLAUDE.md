@@ -999,6 +999,15 @@ selections fail closed on both sides — an unparseable or non-UUID value is an 
 non-terminal task rows to success. `PipelineExecutorPool` now exposes three distinct executors so a
 LARGE plan's expansion fan-out never blocks on the pool the waiter runs on.
 
+**Plan-gate transition authority (2026-07-27):** every positive durable gate mutation now flows
+through `RunLifecycleService.resolvePlanGate`; the execution-view projection and the dormant chat
+action no longer call `GateStore` directly. An already-approved gate is restart-safe: a replay while
+the run is still `AWAITING_APPROVAL` re-queues the missing continuation, while a duplicate after the
+run progressed is an idempotent no-op. This centralizes the transition/recovery seam, not yet the
+entire approval admission contract: `/api/runs/{id}/approve` still owns plan-fingerprint, managed-AI
+spend, breaking-change, governance-cap, and credit-confirmation checks. The execution-view approval
+route must share those policies before RequirementIR approval enforcement can be enabled.
+
 **Breaking-change approval gate + continuation locality + publication fencing (2026-07-21, V329).**
 Four orchestrator-side corrections. (1) **RR-819** — `PlanBreakingChangeReport.requiresTypedAck`
 demanded a typed `BREAKING` and a disabled approve button, but nothing in the API, frontend or CLI

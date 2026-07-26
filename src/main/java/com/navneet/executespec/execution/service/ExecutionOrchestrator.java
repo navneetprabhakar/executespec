@@ -68,7 +68,6 @@ public class ExecutionOrchestrator {
   private final com.navneet.executespec.project.pr.PullRequestRecordRepository prRecordRepo;
   private final ExecutionRunCasUpdater runCas;
   private final com.navneet.executespec.state.repository.PipelineRunRepository pipelineRunRepo;
-  private final com.navneet.executespec.harness.GateStore gateStore;
   private final ExecutionPlannerService plannerService;
   private final ExecutionCostAggregator costAggregator;
 
@@ -574,8 +573,8 @@ public class ExecutionOrchestrator {
    * V188 (2026-05-13) — dispatch a single V2 pipeline_run for this execution, then mirror its
    * status back onto the ExecutionRun row. V2 handles classification + hierarchical planning +
    * multi-repo workspace setup; we re-use the V2 plan-approval gate by passing {@code
-   * skipApproval=false} so the user's V3 plan-approve click flows through {@code
-   * gateStore.tryClaimPlanGate} to resume V2.
+   * skipApproval=false} so the user's V3 plan-approve click flows through the restart-safe run
+   * lifecycle authority to resume V2.
    *
    * <p>Phases (V3 status → V2 status):
    *
@@ -583,8 +582,8 @@ public class ExecutionOrchestrator {
    *   <li>PLANNING → V2 PLANNING (classifier + outline planner) → V2 AWAITING_APPROVAL (V3 stays
    *       PLANNING; frontend reads {@code executionPlan} mirror of {@code pipeline_run.planJson},
    *       shows Approve button).
-   *   <li>(user clicks Approve at V3) → {@link #approvePlanAndExecute} claims V2's plan gate → V2
-   *       WORKING → V3 EXECUTING.
+   *   <li>(user clicks Approve at V3) → {@link #approvePlanAndExecute} asks the lifecycle service
+   *       to resolve V2's plan gate → V2 WORKING → V3 EXECUTING.
    *   <li>V2 terminal (COMPLETE / PARTIAL / FAILED / ABORTED) → V3 mirrors via {@link
    *       #mirrorV2Terminal}.
    * </ul>
@@ -739,7 +738,7 @@ public class ExecutionOrchestrator {
   /**
    * V188 (2026-05-13) — polls the V2 pipeline_run until terminal, mirroring its terminal state onto
    * the ExecutionRun. Called from {@link #approvePlanAndExecute} once the V2 plan gate has been
-   * claimed.
+   * durably resolved and its continuation has been queued.
    */
   @Async
   public void pollAndMirrorV2(String executionRunId, String pipelineRunId) {
@@ -888,11 +887,11 @@ public class ExecutionOrchestrator {
    * <em>rejected</em> was briefly reported as started.
    *
    * <p>Now: the approval timestamp must be durably recorded before anything else happens, and the
-   * gate claim is consumed as a typed result. Only {@code CLAIMED} (this call won the one-shot
-   * approval) or {@code ALREADY_APPROVED} (idempotent repeat of the same positive decision) may
-   * proceed to EXECUTING. {@code ALREADY_REJECTED} takes the canonical terminal path instead of
-   * starting work, and a gate that cannot be resolved at all fails the launch rather than executing
-   * without proof.
+   * canonical lifecycle authority returns a typed result. Only {@code RESUME_QUEUED} (this call
+   * durably approved and queued the run) or {@code ALREADY_RESOLVED} (idempotent repeat of the same
+   * positive decision) may proceed to EXECUTING. A conflicting or rejected decision takes the
+   * canonical terminal path instead of starting work, and a gate that cannot be resolved at all
+   * fails the launch rather than executing without proof.
    */
   @Async
   public void approvePlanAndExecute(String executionRunId) {
@@ -915,14 +914,15 @@ public class ExecutionOrchestrator {
       return;
     }
     // V188 (2026-05-13) — when the unified-dispatch path is in use, the V3
-    // plan-approve click maps to V2's plan gate. Claim the gate; V2 resumes
+    // plan-approve click maps to V2's plan gate. Resolve it through the canonical lifecycle; V2
+    // resumes
     // execution; we transition V3 to EXECUTING and poll V2 until terminal.
     ExecutionRun run = runRepo.findById(executionRunId).orElse(null);
     if (run != null && run.getPipelineRunId() != null) {
       String pipelineRunId = run.getPipelineRunId();
-      com.navneet.executespec.harness.GateStore.PlanGateClaim claim;
+      com.navneet.executespec.integration.RunLifecycleService.PlanApprovalOutcome approvalOutcome;
       try {
-        claim = gateStore.claimPlanGate(pipelineRunId, true);
+        approvalOutcome = runLifecycleService.resolvePlanGate(pipelineRunId, true);
       } catch (RuntimeException e) {
         log.error(
             "approvePlanAndExecute: V2 plan gate for exec {} (V2 run {}) could not be resolved: {}",
@@ -934,7 +934,12 @@ public class ExecutionOrchestrator {
             "Plan gate could not be resolved; execution refused: " + safeMessage(e));
         return;
       }
-      if (claim == com.navneet.executespec.harness.GateStore.PlanGateClaim.ALREADY_REJECTED) {
+      if (approvalOutcome
+              == com.navneet.executespec.integration.RunLifecycleService.PlanApprovalOutcome
+                  .CONFLICTING_DECISION
+          || approvalOutcome
+              == com.navneet.executespec.integration.RunLifecycleService.PlanApprovalOutcome
+                  .REJECTED) {
         log.warn(
             "approvePlanAndExecute: V2 plan gate for exec {} (V2 run {}) was already REJECTED;"
                 + " not starting execution",
@@ -944,8 +949,19 @@ public class ExecutionOrchestrator {
         emit(executionRunId, ExecutionEventTypes.EXEC_ABORTED, pipelineRunId);
         return;
       }
-      // CLAIMED (we won the one-shot) or ALREADY_APPROVED (idempotent repeat) — both are a durable
-      // positive decision, so mirroring EXECUTING is truthful.
+      if (approvalOutcome
+              != com.navneet.executespec.integration.RunLifecycleService.PlanApprovalOutcome
+                  .RESUME_QUEUED
+          && approvalOutcome
+              != com.navneet.executespec.integration.RunLifecycleService.PlanApprovalOutcome
+                  .ALREADY_RESOLVED) {
+        failLaunch(
+            executionRunId,
+            "Plan approval could not resume from the current run state: " + approvalOutcome);
+        return;
+      }
+      // Canonical lifecycle authority either queued the resume or proved an idempotent prior
+      // approval. Only then may the V3 projection mirror EXECUTING.
       runCas.casUpdate(executionRunId, r -> r.setStatus("EXECUTING"));
       emit(executionRunId, ExecutionEventTypes.EXEC_STARTED, pipelineRunId);
       self.getObject().pollAndMirrorV2(executionRunId, pipelineRunId);

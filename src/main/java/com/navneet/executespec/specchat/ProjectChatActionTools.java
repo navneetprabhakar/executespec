@@ -10,7 +10,6 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.auth.security.RunAccessGuard;
-import com.navneet.executespec.harness.GateStore;
 import com.navneet.executespec.integration.RunOrchestrator;
 import com.navneet.executespec.project.security.ProjectAccessGuard;
 import com.navneet.executespec.report.ValidationReportService;
@@ -52,7 +51,6 @@ public class ProjectChatActionTools {
   private final com.navneet.executespec.integration.RunLifecycleService runLifecycleService;
   private final PipelineRunRepository pipelineRunRepo;
   private final ValidationReportService validationReportService;
-  private final GateStore gateStore;
   private final RunAccessGuard runAccessGuard;
   private final ProjectAccessGuard projectAccessGuard;
   private final ContextSanitizer contextSanitizer;
@@ -235,11 +233,22 @@ public class ProjectChatActionTools {
           // Write/governance action — must use the WRITE guard, not the read guard (design §10
           // defect #1): a cross-org read-only member must not be able to approve another's gate.
           PipelineRun run = runAccessGuard.requireRunWriteAccess(runId, ctx.userDetails());
-          gateStore.setPlanGate(runId, true);
+          var outcome = runLifecycleService.resolvePlanGate(runId, true);
+          boolean resumed =
+              outcome
+                      == com.navneet.executespec.integration.RunLifecycleService.PlanApprovalOutcome
+                          .RESUME_QUEUED
+                  || outcome
+                      == com.navneet.executespec.integration.RunLifecycleService.PlanApprovalOutcome
+                          .ALREADY_RESOLVED;
           ObjectNode out = json.createObjectNode();
-          out.put("ok", true);
+          out.put("ok", resumed);
           out.put("runId", run.getRunId());
-          out.put("summary", "Plan approved. Worker is resuming.");
+          out.put(
+              "summary",
+              resumed
+                  ? "Plan approved. Worker is resuming."
+                  : "Plan approval could not resume from the run's current state: " + outcome);
           return out;
         });
   }

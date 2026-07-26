@@ -200,17 +200,35 @@ public class RunLifecycleService {
     if (run == null) return PlanApprovalOutcome.NOT_FOUND;
     if (!"AWAITING_APPROVAL".equals(run.getStatus())
         && !"APPROVAL_RESUMING".equals(run.getStatus())) {
+      var resolvedGate = gateStore.findPlanGate(runId).orElse(null);
+      if (resolvedGate != null) {
+        if ((approved && "APPROVED".equals(resolvedGate.getStatus()))
+            || (!approved && "REJECTED".equals(resolvedGate.getStatus()))) {
+          return PlanApprovalOutcome.ALREADY_RESOLVED;
+        }
+        if ((approved && "REJECTED".equals(resolvedGate.getStatus()))
+            || (!approved && "APPROVED".equals(resolvedGate.getStatus()))) {
+          return PlanApprovalOutcome.CONFLICTING_DECISION;
+        }
+      }
       return PlanApprovalOutcome.INVALID_STATE;
     }
 
     GateStore.PlanGateClaim claim = gateStore.claimPlanGate(runId, approved);
-    if (claim != GateStore.PlanGateClaim.CLAIMED) {
-      boolean sameDecision =
-          (approved && claim == GateStore.PlanGateClaim.ALREADY_APPROVED)
-              || (!approved && claim == GateStore.PlanGateClaim.ALREADY_REJECTED);
-      return sameDecision
-          ? PlanApprovalOutcome.ALREADY_RESOLVED
-          : PlanApprovalOutcome.CONFLICTING_DECISION;
+    if (claim == GateStore.PlanGateClaim.ALREADY_APPROVED) {
+      if (!approved) return PlanApprovalOutcome.CONFLICTING_DECISION;
+      if ("APPROVAL_RESUMING".equals(run.getStatus())) {
+        return PlanApprovalOutcome.ALREADY_RESOLVED;
+      }
+      // The durable approval may have committed immediately before a process crash. Re-run the
+      // idempotent status claim + continuation submission instead of assuming a worker exists.
+      return queueApprovedPlan(run, continuationFor(runId));
+    }
+    if (claim == GateStore.PlanGateClaim.ALREADY_REJECTED) {
+      if (approved) return PlanApprovalOutcome.CONFLICTING_DECISION;
+      // Likewise, finish a rejection whose gate write survived but terminal transition did not.
+      controlPort.terminate(runId, "CANCELLED", "plan rejected at approval gate", Instant.now());
+      return PlanApprovalOutcome.REJECTED;
     }
 
     if (!approved) {
@@ -281,7 +299,10 @@ public class RunLifecycleService {
       // database so an approved run can never resurrect a concurrently-cancelled run.
       if (runRepo.claimApprovalResume(runId, resumedAt) != 1) {
         log.info("plan approval resume lost lifecycle race for run={}", runId);
-        return PlanApprovalOutcome.INVALID_STATE;
+        PipelineRun current = runRepo.findById(runId).orElse(null);
+        return current != null && !"AWAITING_APPROVAL".equals(current.getStatus())
+            ? PlanApprovalOutcome.ALREADY_RESOLVED
+            : PlanApprovalOutcome.INVALID_STATE;
       }
       run.setStatus("APPROVAL_RESUMING");
       run.setResumedAt(resumedAt);

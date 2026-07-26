@@ -14,6 +14,7 @@ import com.navneet.executespec.execution.repository.ExecutionRunRepository;
 import com.navneet.executespec.integration.RunOrchestrator;
 import com.navneet.executespec.repo.GitHubRepoService;
 import com.navneet.executespec.sse.SseBroadcaster;
+import com.navneet.executespec.state.entity.PipelineRun;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -48,7 +49,6 @@ class ExecutionOrchestratorApproveAndAbortCasTest {
   @Mock com.navneet.executespec.integration.RunLifecycleService runLifecycleService;
   @Mock com.navneet.executespec.project.pr.PullRequestRecordRepository prRecordRepo;
   @Mock com.navneet.executespec.state.repository.PipelineRunRepository pipelineRunRepo;
-  @Mock com.navneet.executespec.harness.GateStore gateStore;
   @Mock ExecutionPlannerService plannerService;
   @Mock ExecutionCostAggregator costAggregator;
 
@@ -77,7 +77,6 @@ class ExecutionOrchestratorApproveAndAbortCasTest {
             prRecordRepo,
             runCas,
             pipelineRunRepo,
-            gateStore,
             plannerService,
             costAggregator,
             // RR-343 — the production bean routes self-calls through the Spring @Async proxy; in a
@@ -135,6 +134,63 @@ class ExecutionOrchestratorApproveAndAbortCasTest {
     orchestrator.approvePlanAndExecute("exec-1");
 
     verify(runRepo, never()).save(any());
+  }
+
+  @Test
+  void unifiedApprovalRoutesThroughCanonicalLifecycleBeforeMirroringExecution() {
+    ExecutionRun row = withStatus("AWAITING_PLAN_APPROVAL");
+    row.setPipelineRunId("run-1");
+    when(runRepo.findById("exec-1")).thenReturn(Optional.of(row));
+    when(runRepo.save(any(ExecutionRun.class))).thenAnswer(inv -> inv.getArgument(0));
+    when(runLifecycleService.resolvePlanGate("run-1", true))
+        .thenReturn(
+            com.navneet.executespec.integration.RunLifecycleService.PlanApprovalOutcome
+                .RESUME_QUEUED);
+    when(pipelineRunRepo.findById("run-1"))
+        .thenReturn(Optional.of(PipelineRun.builder().runId("run-1").status("COMPLETE").build()));
+
+    orchestrator.approvePlanAndExecute("exec-1");
+
+    verify(runLifecycleService).resolvePlanGate("run-1", true);
+    verify(pipelineRunRepo).findById("run-1");
+    assertThat(row.getPlanApprovedAt()).isNotNull();
+  }
+
+  @Test
+  void duplicateUnifiedApprovalAfterCanonicalProgressDoesNotFailTheLaunch() {
+    ExecutionRun row = withStatus("AWAITING_PLAN_APPROVAL");
+    row.setPipelineRunId("run-1");
+    when(runRepo.findById("exec-1")).thenReturn(Optional.of(row));
+    when(runRepo.save(any(ExecutionRun.class))).thenAnswer(inv -> inv.getArgument(0));
+    when(runLifecycleService.resolvePlanGate("run-1", true))
+        .thenReturn(
+            com.navneet.executespec.integration.RunLifecycleService.PlanApprovalOutcome
+                .ALREADY_RESOLVED);
+    when(pipelineRunRepo.findById("run-1"))
+        .thenReturn(Optional.of(PipelineRun.builder().runId("run-1").status("COMPLETE").build()));
+
+    orchestrator.approvePlanAndExecute("exec-1");
+
+    assertThat(row.getStatus()).isEqualTo("COMPLETE");
+    assertThat(row.getFailureReason()).isNull();
+  }
+
+  @Test
+  void unifiedApprovalDoesNotMirrorOrPollWhenLifecycleRejectsTheRunState() {
+    ExecutionRun row = withStatus("AWAITING_PLAN_APPROVAL");
+    row.setPipelineRunId("run-1");
+    when(runRepo.findById("exec-1")).thenReturn(Optional.of(row));
+    when(runRepo.save(any(ExecutionRun.class))).thenAnswer(inv -> inv.getArgument(0));
+    when(runLifecycleService.resolvePlanGate("run-1", true))
+        .thenReturn(
+            com.navneet.executespec.integration.RunLifecycleService.PlanApprovalOutcome
+                .INVALID_STATE);
+
+    orchestrator.approvePlanAndExecute("exec-1");
+
+    verify(runLifecycleService).resolvePlanGate("run-1", true);
+    verifyNoInteractions(pipelineRunRepo);
+    assertThat(row.getStatus()).isEqualTo("FAILED");
   }
 
   @Test
