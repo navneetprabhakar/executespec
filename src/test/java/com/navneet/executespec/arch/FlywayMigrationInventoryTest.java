@@ -39,10 +39,10 @@ class FlywayMigrationInventoryTest {
     // RR-430), V338 (agent_task plan_index, RR-1446), V339 (code_review_scan coverage, RR-1696),
     // V340 (graduate the lean worker toolset), V341 (backfill the durable run-usage floor), V342
     // (durable sandbox cleanup retry), V343 (sandbox release-readiness gates), V344
-    // (validation test-evidence scope), and V345 (immutable RequirementIR artifact) for 331 —
-    // contiguous above the V336 head.
-    assertThat(migrations).hasSize(331);
-    assertThat(migrations.getLast().version()).isEqualTo("345");
+    // (validation test-evidence scope), V345 (immutable RequirementIR artifact), and V346 (durable
+    // plan-gate admission binding + continuation outbox) for 332 — contiguous above V336.
+    assertThat(migrations).hasSize(332);
+    assertThat(migrations.getLast().version()).isEqualTo("346");
 
     assertThat(migrations.stream().map(MigrationFile::version)).doesNotHaveDuplicates();
     assertThat(migrations.stream().map(MigrationFile::fileName))
