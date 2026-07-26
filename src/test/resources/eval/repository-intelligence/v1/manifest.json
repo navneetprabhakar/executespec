@@ -1,0 +1,125 @@
+{
+  "schemaVersion": 1,
+  "datasetId": "repository-intelligence-planir-zero-spend-v1",
+  "checkpoint": "RI-P0-C01",
+  "createdAt": "2026-07-27T00:00:00+05:30",
+  "sourceTuple": {
+    "backendBaseSha": "31a0ddda453e0609f19042ef7ad1f77ad0d91b13",
+    "clientBaseSha": "6333cc11027677597441d585d05fded4b0f80d8e",
+    "docsPlanSha": "495a65487ec092da4cc02b98d52f4249bb27e8a2",
+    "backendBranch": "codex/repository-intelligence-planir-clients",
+    "clientBranch": "codex/repository-intelligence-planir-clients",
+    "docsBranch": "codex/repository-intelligence-planir-clients"
+  },
+  "executionPolicy": {
+    "liveProviderCallsAllowed": false,
+    "graphifyInstallationAllowed": false,
+    "deploymentAllowed": false,
+    "providerBudgetUsd": {
+      "anthropic": 0,
+      "openai": 0,
+      "gemini": 0,
+      "deepseek": 0,
+      "openrouter": 0,
+      "fireworks": 0
+    }
+  },
+  "plannedFlags": {
+    "requirementIrShadow": "NOT_CREATED",
+    "requirementCompletenessEnforcement": "NOT_CREATED",
+    "unifiedRepositoryIntelligence": "NOT_CREATED",
+    "repositoryExplorer": "NOT_CREATED",
+    "graphifyAdapter": "NOT_CREATED",
+    "generatedClientProtocol": "NOT_CREATED"
+  },
+  "sourceFingerprints": [
+    {
+      "path": "src/main/resources/prompts/outline-planner.md",
+      "sha256": "e573fb3e6219b95e785368340f101fbb311ddda581cf424120ecf09b2c879526"
+    },
+    {
+      "path": "src/main/resources/prompts/task-expander.md",
+      "sha256": "470f6c85eb3d4bd858d1d70322870abd6aa88449112f4918a942232af899b635"
+    },
+    {
+      "path": "src/main/resources/prompts/coherence-planner.md",
+      "sha256": "02f06009079c7f1a40e2d625f3761fef7574320cb90b0807e40be4d15c48ffc1"
+    },
+    {
+      "path": "src/main/resources/prompts/reviewer-general.md",
+      "sha256": "29b56971e09458fcbb7c4161159608747a528e6b20eb608c60ef6c1fa1a1fe7d"
+    },
+    {
+      "path": "src/main/resources/prompts/reviewer-wiring.md",
+      "sha256": "d2ac6019324dedc11ab9e33fc532a49f364d24752714ca550f950fc5e6890416"
+    },
+    {
+      "path": "src/main/java/com/navneet/executespec/tool/RepositorySearchService.java",
+      "sha256": "58535da3de174d5440c8e977c9e0b04429e68255dd7cd64fbd5c4a3ac571494e"
+    },
+    {
+      "path": "src/main/java/com/navneet/executespec/tool/SearchFilesTool.java",
+      "sha256": "48a1138d3e37922b34cdebb6e137450ae2eca78ea5a849ee7515d53f7f121519"
+    }
+  ],
+  "cases": [
+    {
+      "id": "explicit-cross-repo",
+      "requirementKind": "EXPLICIT",
+      "requirementPath": "requirements/explicit-cross-repo.md",
+      "repositoryRoots": ["repositories/java-service", "repositories/typescript-client"],
+      "expectedSignals": ["GET /api/orders/{orderId}", "orderId", "status", "two test contracts"]
+    },
+    {
+      "id": "missing-acceptance-contract",
+      "requirementKind": "OMISSION",
+      "requirementPath": "requirements/omission.md",
+      "repositoryRoots": ["repositories/typescript-client"],
+      "expectedSignals": ["missing route", "missing fields", "missing error behavior", "missing tests"]
+    },
+    {
+      "id": "contradictory-routes",
+      "requirementKind": "CONFLICT",
+      "requirementPath": "requirements/conflict.md",
+      "repositoryRoots": ["repositories/java-service", "repositories/typescript-client"],
+      "expectedSignals": ["GET versus POST", "path conflict", "human resolution required"]
+    },
+    {
+      "id": "undefined-fallback-and-retry",
+      "requirementKind": "AMBIGUITY",
+      "requirementPath": "requirements/ambiguity.md",
+      "repositoryRoots": ["repositories/java-service", "repositories/typescript-client", "repositories/python-worker"],
+      "expectedSignals": ["undefined unavailable", "undefined fallback", "undefined retry policy"]
+    }
+  ],
+  "assets": [
+    {
+      "path": "repositories/java-service/src/main/java/example/OrderService.java",
+      "sha256": "483a53bf6ceedcb58c51a08a49233d16157dd0082e1dbe30e758927694c2e24b"
+    },
+    {
+      "path": "repositories/python-worker/order_worker.py",
+      "sha256": "dfeb7eb9ad3dcb697beeaac72fdd39e86bc6878e87e8866f5617f524bc73d44a"
+    },
+    {
+      "path": "repositories/typescript-client/src/orderClient.ts",
+      "sha256": "88317d32947da084c6f545e32b8af198f175d6e01f9fe77b3fe2fbe31782c29c"
+    },
+    {
+      "path": "requirements/ambiguity.md",
+      "sha256": "be3cd84c2dabcde7e1672aa00555a7fec4a19fb36a13bb0d3b54593cd3c8efce"
+    },
+    {
+      "path": "requirements/conflict.md",
+      "sha256": "cdeb3bc6d5242faae2f8eb40fc18d78365f02c06236ffd380c7163aa1f5f60c4"
+    },
+    {
+      "path": "requirements/explicit-cross-repo.md",
+      "sha256": "383213c5350057284f6b0eab2f0158d0a0173dd825fbfc6c030df103f4cdf22b"
+    },
+    {
+      "path": "requirements/omission.md",
+      "sha256": "91a1ab044f02c35f71df4a559cd1f54e6ba7e48f121c9d9b4dd5c7f685693ec2"
+    }
+  ]
+}
