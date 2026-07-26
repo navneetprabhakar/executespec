@@ -30,6 +30,9 @@ class PlanGateAdmissionPersistenceIntegrationTest extends PostgresIntegrationBas
     String gateKey = "gate:plan:" + runId;
     UUID requirementContractId = UUID.randomUUID();
     Instant now = Instant.now();
+    String payload = "{\"runId\":\"" + runId + "\"}";
+    String payloadDigest = PlanGateOpenService.sha256(payload);
+    String approvalEvidence = "{\"admitted\":true}";
     insertRun(runId, "AWAITING_APPROVAL");
     insertRequirementContract(runId, requirementContractId);
 
@@ -47,10 +50,11 @@ class PlanGateAdmissionPersistenceIntegrationTest extends PostgresIntegrationBas
     gate.setBindingArtifactDigest("d".repeat(64));
     gate.setBindingBoundDigest("e".repeat(64));
     gate.setBindingBoundAt(now);
+    gate.setComment(payload);
     gate.setContinuationSchemaVersion(1);
-    gate.setContinuationSha256("f".repeat(64));
-    gate.setApprovalEvidenceJson("{\"admitted\":true}");
-    gate.setApprovalEvidenceDigest("1".repeat(64));
+    gate.setContinuationSha256(payloadDigest);
+    gate.setApprovalEvidenceJson(approvalEvidence);
+    gate.setApprovalEvidenceDigest(PlanGateOpenService.sha256(approvalEvidence));
     gate.setResolvedByUserId("user-1");
     gate.setResolvedByRole("DEVELOPER");
     gate.setResolutionSource("RUN_API");
@@ -63,8 +67,8 @@ class PlanGateAdmissionPersistenceIntegrationTest extends PostgresIntegrationBas
         PlanGateResumeOutbox.builder()
             .runId(runId)
             .gateKey(gateKey)
-            .payload("{\"runId\":\"" + runId + "\"}")
-            .payloadSha256("2".repeat(64))
+            .payload(payload)
+            .payloadSha256(payloadDigest)
             .handlerContractVersion(1)
             .status("READY")
             .attemptCount(0)
@@ -92,11 +96,15 @@ class PlanGateAdmissionPersistenceIntegrationTest extends PostgresIntegrationBas
     String gateKey = "gate:plan:" + runId;
     insertRun(runId, "AWAITING_APPROVAL");
     jdbc.update(
-        "INSERT INTO gate_record (gate_key,run_id,gate_type,status) VALUES (?,?,?,?)",
+        "INSERT INTO gate_record"
+            + " (gate_key,run_id,gate_type,status,comment,continuation_schema_version,continuation_sha256)"
+            + " VALUES (?,?,?,?,?,1,?)",
         gateKey,
         runId,
         "PLAN",
-        "PENDING");
+        "PENDING",
+        "{}",
+        PlanGateOpenService.sha256("{}"));
 
     assertThatThrownBy(
             () ->
@@ -126,7 +134,7 @@ class PlanGateAdmissionPersistenceIntegrationTest extends PostgresIntegrationBas
                     runId,
                     gateKey,
                     "{}",
-                    "3".repeat(64),
+                    PlanGateOpenService.sha256("{}"),
                     1))
         .isInstanceOf(DataAccessException.class)
         .hasMessageContaining("ck_plan_gate_resume_lease");

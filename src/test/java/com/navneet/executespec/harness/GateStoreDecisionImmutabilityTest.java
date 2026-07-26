@@ -1,5 +1,6 @@
 package com.navneet.executespec.harness;
 
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -62,6 +63,18 @@ class GateStoreDecisionImmutabilityTest {
 
     verify(repository, never()).save(any());
     verify(values).set(GATE_KEY, "0", Duration.ofHours(4));
+  }
+
+  @Test
+  void approvalCannotFabricateAMissingGateOrContinuation() {
+    when(repository.tryResolveIfPending(eq(GATE_KEY), eq("APPROVED"), any())).thenReturn(0);
+    when(repository.findById(GATE_KEY)).thenReturn(Optional.empty());
+
+    assertThatThrownBy(() -> store.claimPlanGate(RUN_ID, true))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("never durably opened");
+
+    verify(repository, never()).save(any());
   }
 
   private static GateRecord resolved(String status) {

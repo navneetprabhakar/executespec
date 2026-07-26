@@ -22,9 +22,14 @@ class RunPlanRequirementShadowCoordinator {
 
   RunPersistenceWriter.PersistedCompiledPlan persist(
       String runId, String exactSource, Plan compiledPlan) {
+    return persist(runId, exactSource, compiledPlan, false);
+  }
+
+  RunPersistenceWriter.PersistedCompiledPlan persist(
+      String runId, String exactSource, Plan compiledPlan, boolean forceRequirementContract) {
     RunPersistenceWriter.PersistedCompiledPlan persisted =
         persistenceWriter.persistCompiledPlan(runId, compiledPlan);
-    if (persisted.exactPlanJson() == null || !shadowEnabled(runId)) {
+    if (persisted.exactPlanJson() == null || (!forceRequirementContract && !shadowEnabled(runId))) {
       return persisted;
     }
     try {

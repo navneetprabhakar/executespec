@@ -39,6 +39,9 @@ Persistence layer for pipeline runs, tasks, and all mutable state.
 - `InboxService.java` — User inbox/notification service.
 
 ## DB Migrations
+
+- **V347 atomic plan-gate open:** `PipelineRunRepository.findByIdForPlanGateOpen()` takes the pessimistic run-row lock that serializes the gate row, WAITING continuation outbox, and `PLANNING -> AWAITING_APPROVAL` transition in one transaction.
+
 - V1–V44: Core schema through report improvements
 - V45: Widened `plan_version` columns (VARCHAR(255) for IDs, VARCHAR(64) for source)
 - V46: Stripe and payment gateway support
