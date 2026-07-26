@@ -114,4 +114,16 @@ class SseBroadcasterReplayContractTest {
     org.mockito.Mockito.verify(emitter)
         .send(org.mockito.ArgumentMatchers.<SseEmitter.SseEventBuilder>any());
   }
+
+  @Test
+  void shutdownCompletesAndForgetsIdlePlanGateSubscriptions() {
+    SseBroadcaster service = broadcaster();
+    service.subscribe("waiting-at-plan-gate");
+
+    assertThat(service.activeEmitterCount()).isEqualTo(1);
+
+    service.shutdown();
+
+    assertThat(service.activeEmitterCount()).isZero();
+  }
 }

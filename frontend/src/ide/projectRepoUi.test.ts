@@ -1,5 +1,6 @@
 import {describe, expect, it} from 'vitest';
 import {
+  codeIndexRefreshNotice,
   explicitLinkedRepoSelection,
   normalizeGitHubRepoQuery,
   normalizeScmRepoQuery,
@@ -55,5 +56,36 @@ describe('brownfield repository UI contracts', () => {
       label: 'source blocked · GITHUB_TREE_HTTP_ERROR',
     });
     expect(sourceReadinessBadge('READY', null, 42).label).toBe('source ready · 42 files');
+  });
+
+  it('does not claim semantic work was queued when the backend says it is unavailable', () => {
+    const notice = codeIndexRefreshNotice({
+      repoId: 'repo-1',
+      status: 'UNAVAILABLE',
+      fallback: 'RIPGREP',
+      relationshipGraphAvailable: false,
+      reason: 'EMBEDDING_PROVIDER_NOT_AVAILABLE_FOR_PROJECT_ROUTE',
+    });
+
+    expect(notice).toContain('Semantic indexing unavailable');
+    expect(notice).toContain('EMBEDDING_PROVIDER_NOT_AVAILABLE_FOR_PROJECT_ROUTE');
+    expect(notice.toLowerCase()).not.toContain('queued');
+    expect(notice).toContain('Ripgrep search remains available');
+  });
+
+  it.each([
+    ['QUEUED', 'Semantic indexing queued'],
+    ['PARTIAL', 'Semantic index remains partial'],
+    ['READY', 'Semantic index is already ready'],
+  ] as const)('reports the %s refresh admission status honestly', (status, expected) => {
+    expect(
+      codeIndexRefreshNotice({
+        repoId: 'repo-1',
+        status,
+        fallback: 'RIPGREP',
+        relationshipGraphAvailable: false,
+        reason: null,
+      }),
+    ).toContain(expected);
   });
 });

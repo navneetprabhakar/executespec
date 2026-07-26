@@ -76,6 +76,17 @@ public class CodeIndexController {
     projectAccessGuard.assertCanWrite(projectId, userDetails);
     ProjectRepo repo = requireLinked(projectId, repoId);
     CodeIndexingService.Readiness readiness = indexingService.readiness(projectId, repo);
+    if (readiness.status() == CodeIndexStateStore.Status.READY
+        && readiness.semanticSearchAvailable()) {
+      return ResponseEntity.accepted()
+          .body(new RefreshAccepted(repoId.toString(), "READY", "RIPGREP", false, null));
+    }
+    if (readiness.status() == CodeIndexStateStore.Status.INDEXING) {
+      return ResponseEntity.accepted()
+          .body(
+              new RefreshAccepted(
+                  repoId.toString(), "QUEUED", "RIPGREP", false, readiness.reason()));
+    }
     if (readiness.reason() != null && readiness.reason().startsWith("EMBEDDING_")) {
       return ResponseEntity.accepted()
           .body(

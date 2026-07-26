@@ -11,6 +11,7 @@ import java.util.Set;
 import com.navneet.executespec.agent.LlmRequest;
 import com.navneet.executespec.agent.LlmRouter;
 import com.navneet.executespec.agent.PromptTrustBoundary;
+import com.navneet.executespec.agent.ToolProtocolLeakGuard;
 import com.navneet.executespec.auth.entity.Project;
 import com.navneet.executespec.auth.repository.ProjectRepository;
 import com.navneet.executespec.auth.security.AppUserDetails;
@@ -508,6 +509,19 @@ public class ProjectChatService {
           }
         }
 
+        if (calls.isEmpty() && ToolProtocolLeakGuard.containsProtocolMarkup(turnText.toString())) {
+          log.warn("Project chat suppressed textual tool protocol for project {}", projectId);
+          conversation.add(new AssistantMessage(turnText.toString()));
+          conversation.add(
+              new UserMessage(
+                  "The previous provider response exposed internal tool-call markup instead of "
+                      + "an answer. Do not call or describe tools. Answer the original request "
+                      + "from evidence already present; state exactly what evidence is missing."));
+          forceFinalAnswer = true;
+          terminationReason = "textual-tool-protocol-suppressed";
+          continue;
+        }
+
         // Accumulate any narration the model emits BEFORE / BETWEEN tool calls.
         if (turnText.length() > 0) {
           if (finalText.length() > 0) finalText.append("\n\n");
@@ -631,9 +645,14 @@ public class ProjectChatService {
       terminationReason = "error:" + e.getClass().getSimpleName();
     }
 
-    String assistantText =
-        contextSanitizer.sanitizeOutput(
-            finalText.length() == 0 ? "(no response)" : finalText.toString());
+    String rawAssistantText = finalText.length() == 0 ? "(no response)" : finalText.toString();
+    if (ToolProtocolLeakGuard.containsProtocolMarkup(rawAssistantText)) {
+      rawAssistantText =
+          "I could not produce a safe grounded answer. Internal provider tool output was "
+              + "suppressed.";
+      terminationReason = "textual-tool-protocol-suppressed";
+    }
+    String assistantText = contextSanitizer.sanitizeOutput(rawAssistantText);
     log.info(
         "Project chat project={} terminationReason={} tokens(in/out)={}/{} finalLen={}chars",
         projectId,

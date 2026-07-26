@@ -8,6 +8,7 @@ import jakarta.servlet.http.HttpServletRequest;
 
 import com.navneet.executespec.auth.security.JwtAuthenticationFilter;
 import com.navneet.executespec.config.featureflag.FeatureFlagService;
+import com.navneet.executespec.sandboxroute.SandboxCommandRoutingService;
 
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -25,10 +26,12 @@ public class ClientCapabilitiesController {
       List.of("RUN_STATUS", "LOG", "TOOL_CALL", "FILE_WRITTEN", "TOKEN_USAGE", "RUN_DETAIL");
 
   private final FeatureFlagService featureFlagService;
+  private final SandboxCommandRoutingService sandboxRouting;
 
   @GetMapping("/client-capabilities")
   public ClientCapabilities capabilities(HttpServletRequest request) {
     boolean localHandsEnabled = featureFlagService.isEnabled("worker.local-hands.enabled");
+    SandboxCommandRoutingService.Readiness sandbox = sandboxRouting.readiness();
     // RR-646 — resolve the ACTUAL request auth source instead of hard-coding "authenticated" with
     // currentAuthSourceAllowed=true. Local-hands run submission is PAT-only (RunController rejects
     // localExecution=true for browser/JWT). A JWT/browser caller previously received machine-
@@ -53,6 +56,21 @@ public class ClientCapabilitiesController {
             List.of(
                 "Local-hands execution is accepted only for PAT-authenticated clients.",
                 "The browser/JWT surface cannot submit local execution.")),
+        new RemoteSandbox(
+            true,
+            sandbox.enabled(),
+            sandbox.lifecycleEnabled(),
+            sandbox.dispatchEnabled(),
+            sandbox.strictContainerEnabled(),
+            sandbox.toolchainReady(),
+            sandbox.imageDigestPinned(),
+            sandbox.runtimeAvailable(),
+            sandbox.enabled() ? "CONTAINER_STRICT_V1" : "NOT_ENABLED",
+            sandbox.enabled()
+                ? "Commands are routed to the strict run container."
+                : "Strict sandbox execution is disabled; runs use a policy-guarded server"
+                    + " workspace and must not be advertised as isolated sandboxes. "
+                    + sandbox.reason()),
         Map.of(
             "agentSessions",
                 new Endpoint("GET", "/api/agent/sessions", true, "Durable agent sessions"),
@@ -101,6 +119,7 @@ public class ClientCapabilitiesController {
       Instant generatedAt,
       String authSource,
       LocalHands localHands,
+      RemoteSandbox remoteSandbox,
       Map<String, Endpoint> endpoints,
       EventContracts eventContracts,
       ToolResultContract toolResultContract,
@@ -118,6 +137,18 @@ public class ClientCapabilitiesController {
       String submitPath,
       String toolResultsPath,
       List<String> notes) {}
+
+  public record RemoteSandbox(
+      boolean supported,
+      boolean enabled,
+      boolean lifecycleEnabled,
+      boolean dispatchEnabled,
+      boolean strictContainerEnabled,
+      boolean toolchainReady,
+      boolean imageDigestPinned,
+      boolean runtimeAvailable,
+      String isolationProfile,
+      String note) {}
 
   public record Endpoint(String method, String path, boolean authenticated, String note) {}
 

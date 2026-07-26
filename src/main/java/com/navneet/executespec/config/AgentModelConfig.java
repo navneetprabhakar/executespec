@@ -75,16 +75,12 @@ public class AgentModelConfig {
   private ChatModel resolveModel(String provider) {
     return switch (provider.toLowerCase()) {
       case "anthropic" -> {
-        // 2026-05-16 (Spring Boot 3.5 upgrade) — Spring 6.2 narrows bean types by reflecting the
-        // returned instance, so plannerModel + workerModel + reviewerModel all register as
-        // AnthropicChatModel at runtime (whatever the declared `ChatModel` return type says).
-        // Use a typed provider lookup so a missing optional bean (Spring's NullBean) does not
-        // abort startup.
-        yield optionalModel(
-            "anthropic", ctx.getBeanProvider(AnthropicChatModel.class), "ANTHROPIC_API_KEY");
+        yield optionalNamedModel(
+            "anthropic", "anthropicChatModel", AnthropicChatModel.class, "ANTHROPIC_API_KEY");
       }
       case "openai" -> {
-        yield optionalModel("openai", ctx.getBeanProvider(OpenAiChatModel.class), "OPENAI_API_KEY");
+        yield optionalNamedModel(
+            "openai", "openAiChatModel", OpenAiChatModel.class, "OPENAI_API_KEY");
       }
       default -> throw new IllegalArgumentException("Unknown provider: " + provider);
     };
@@ -96,12 +92,10 @@ public class AgentModelConfig {
    * provider key is configured, but the V2 router can run a different provider (for example native
    * DeepSeek) without requiring the default Anthropic/OpenAI bean to exist at boot.
    */
-  static <T extends ChatModel> T optionalModel(
-      String provider,
-      org.springframework.beans.factory.ObjectProvider<T> modelProvider,
-      String keyName) {
+  private <T extends ChatModel> T optionalNamedModel(
+      String provider, String beanName, Class<T> modelType, String keyName) {
     try {
-      T model = modelProvider.getIfAvailable();
+      T model = ctx.getBean(beanName, modelType);
       if (model == null) {
         log.warn(
             "[AgentModelConfig] {} provider unavailable ({} not configured); role bean will remain"
@@ -111,9 +105,7 @@ public class AgentModelConfig {
       }
       return model;
     } catch (BeansException ex) {
-      // A @Bean method returning null is represented by Spring as a NullBean. Some Spring
-      // versions surface that placeholder through a typed ObjectProvider; treat it exactly like
-      // an absent provider rather than failing the whole application context.
+      // A missing optional provider may surface as Spring's NullBean; keep startup fail-soft.
       log.warn(
           "[AgentModelConfig] {} provider bean unavailable ({}); role bean will remain inactive",
           provider,

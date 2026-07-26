@@ -1,5 +1,7 @@
 package com.navneet.executespec.engine;
 
+import static com.navneet.executespec.engine.WorkerCompletionPolicy.maxIterations;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -61,15 +63,6 @@ import lombok.extern.slf4j.Slf4j;
  *       compaction yet — Phase 8 owns context persistence + crash recovery)
  *   <li>Native completeTask signal (no JSON-prefix heuristic)
  *   <li>40-iteration default cap (overridable via WorkerTaskRequest.maxIterations)
- * </ul>
- *
- * <p>Deferred to later phases (per execution plan):
- *
- * <ul>
- *   <li>Hybrid context (upfront file fill from planner-declared dependencyFiles) — Phase 4
- *   <li>Sliding-window compaction at 75% context limit — Phase 8
- *   <li>Redis context persistence + crash recovery — Phase 8
- *   <li>Stall detection / model escalation — Phase 2.x
  * </ul>
  */
 @Service
@@ -393,7 +386,7 @@ public class WorkerAgent {
     // evidence-gathering progress; repeating an old one is not.
     final java.util.Set<String> seenCallSignatures = new java.util.HashSet<>();
     // v2: consecutive failures per signature (a success on the same signature clears its streak).
-    final java.util.Map<String, Integer> failedSignatureStreaks = new java.util.HashMap<>();
+    final WorkerFailureStreaks failureStreaks = new WorkerFailureStreaks();
     final WorkerMutationChurnGuard mutationChurn = new WorkerMutationChurnGuard();
     int textOnlyForcedRetries = 0;
     boolean forceToolChoiceNextCall = false;
@@ -411,6 +404,7 @@ public class WorkerAgent {
     int editsSinceAutoVerify = 0;
     boolean lastIterHadWrite = false;
     int autoVerifyRuns = 0;
+    WorkerCompletionPolicy completionPolicy = WorkerCompletionPolicy.create();
     // One-shot: at most one corrective nudge per task, whether triggered by the progress counter
     // crossing progressWarnAfter mid-loop or by a premature text-only stop. After it fires once,
     // the next failure terminates (force threshold, or another text-only stop).
@@ -513,7 +507,7 @@ public class WorkerAgent {
       // loop kept generating to completion (still billed). Bail at the iter boundary, before the
       // next (billable) LLM call — same "stop on the next boundary" contract as the wall-clock cap
       // below. No salvage call: a cancellation means stop now, don't spend another LLM call.
-      if (Thread.currentThread().isInterrupted()) {
+      if (WorkerAgentSupport.cancellationRequested(pipelineRunRepository, runId)) {
         log.warn(
             "WorkerAgent INTERRUPTED run={} task={} iter={} elapsedMs={} totalWrites={}",
             runId,
@@ -522,15 +516,8 @@ public class WorkerAgent {
             System.currentTimeMillis() - start,
             totalWriteCalls);
         recordTerminal(WorkerResult.Outcome.STOPPED_WITHOUT_COMPLETE, req, iter);
-        return WorkerResult.builder()
-            .outcome(WorkerResult.Outcome.STOPPED_WITHOUT_COMPLETE)
-            .iterations(iter)
-            .toolCallsDispatched(toolsDispatched)
-            .finalAssistantText(lastText)
-            .repeatedAssistantTextCount(maxRepeatedAssistantTextCount)
-            .toolCallLog(toolLog)
-            .totalLatencyMs(System.currentTimeMillis() - start)
-            .build();
+        return WorkerAgentSupport.stoppedResult(
+            iter, toolsDispatched, lastText, maxRepeatedAssistantTextCount, toolLog, start);
       }
       if (absoluteDeadline) {
         long usableMillis =
@@ -640,10 +627,7 @@ public class WorkerAgent {
         }
       }
 
-      // Bind once so context planning measures the exact schema set that the request will send.
-      // Reusing the same list also prevents headroom accounting from drifting from dispatch.
-      List<org.springframework.ai.tool.ToolCallback> workerTools =
-          toolRegistry.bindForWorker(req.context(), req.provider(), req.model());
+      List<org.springframework.ai.tool.ToolCallback> workerTools = boundWorkerTools(req);
 
       // ExecuteSpec 2.0 context headroom: before request assembly, reserve output + safety against
       // the provider model's window and proactively compact only when the remaining headroom is
@@ -692,16 +676,27 @@ public class WorkerAgent {
                     // ToolRegistry#WORKER_DENY_TOOLS for the rationale.
                     .toolsOverride(workerTools)
                     // 2026-05-08 — Gemini's static GeminiNativeToolClient.READ_TIMEOUT is 60s,
-                    // calibrated to fail fast on stalled worker calls. But gemini-3-pro-preview
-                    // (thinking model) regularly takes 60-90s on dense tool-call iterations,
+                    // calibrated to fail fast on stalled worker calls. But Gemini thinking models
+                    // regularly take 60-90s on dense tool-call iterations,
                     // tripping the timeout mid-task. Cmatrix run 84252898 task T3 FAILED with
                     // ResourceAccessException I/O error after the worker burned 17m of work.
                     // 120s gives 2× headroom while still detecting genuinely stuck calls within
-                    // 2 minutes. Anthropic + OpenAI clients ignore the field (Spring AI manages
-                    // their HTTP timeouts).
+                    // 2 minutes. Gemini and OpenAI-wire clients honor this per-call deadline;
+                    // Anthropic retains its configured Spring AI transport timeout.
                     .readTimeoutSeconds(iterationTimeout.getAsInt())
                     .build());
       } catch (Exception e) {
+        if (WorkerAgentSupport.cancellationRequested(pipelineRunRepository, runId)) {
+          Thread.currentThread().interrupt();
+          log.warn(
+              "WorkerAgent cancellation observed after provider unwind run={} task={} iter={}",
+              runId,
+              req.context().taskId(),
+              iter);
+          recordTerminal(WorkerResult.Outcome.STOPPED_WITHOUT_COMPLETE, req, iter);
+          return WorkerAgentSupport.stoppedResult(
+              iter, toolsDispatched, lastText, maxRepeatedAssistantTextCount, toolLog, start);
+        }
         if (forcedThisCall) {
           log.warn(
               "WorkerAgent forced tool_choice rejected at iter={} ({}); retrying auto",
@@ -750,6 +745,22 @@ public class WorkerAgent {
             toolLog,
             start,
             "router error: " + e.getClass().getSimpleName() + ": " + e.getMessage());
+      }
+
+      // A cancellation can commit while the provider is returning a successful response without
+      // interrupting this thread (cross-JVM cancel, or an HTTP client that consumed the interrupt).
+      // Discard that response before any tool call or completeTask is processed. This is the
+      // provider-dispatch counterpart to the executor's task-boundary fence.
+      if (WorkerAgentSupport.cancellationRequested(pipelineRunRepository, runId)) {
+        Thread.currentThread().interrupt();
+        log.warn(
+            "WorkerAgent cancellation observed after provider response run={} task={} iter={}",
+            runId,
+            req.context().taskId(),
+            iter);
+        recordTerminal(WorkerResult.Outcome.STOPPED_WITHOUT_COMPLETE, req, iter);
+        return WorkerAgentSupport.stoppedResult(
+            iter, toolsDispatched, lastText, maxRepeatedAssistantTextCount, toolLog, start);
       }
 
       // RL-2026-05-052 follow-up — remember this call's INPUT size so the next iteration's
@@ -825,7 +836,7 @@ public class WorkerAgent {
         // the tool). Fire the SAME one-shot progress nudge used mid-loop: if we haven't nudged
         // yet, give the model one more iteration to either call completeTask or make the next
         // concrete edit. If we've already spent the nudge, stop with STOPPED_WITHOUT_COMPLETE.
-        history.add(new AssistantMessage(assistantText));
+        WorkerCompletionPolicy.appendTextTurn(history, assistantText);
         if (terminalVerifiedPass) {
           String summary =
               "terminal verifier-shaped check passed; preserving verified candidate"
@@ -900,16 +911,25 @@ public class WorkerAgent {
           if (finalized != null) return finalized;
         }
         recordTerminal(WorkerResult.Outcome.STOPPED_WITHOUT_COMPLETE, req, iter);
-        return WorkerResult.builder()
-            .outcome(WorkerResult.Outcome.STOPPED_WITHOUT_COMPLETE)
-            .iterations(iter)
-            .toolCallsDispatched(toolsDispatched)
-            .finalAssistantText(lastText)
-            .repeatedAssistantTextCount(maxRepeatedAssistantTextCount)
-            .toolCallLog(toolLog)
-            .totalLatencyMs(System.currentTimeMillis() - start)
-            .build();
+        return WorkerAgentSupport.stoppedResult(
+            iter, toolsDispatched, lastText, maxRepeatedAssistantTextCount, toolLog, start);
       }
+
+      if (completionPolicy.shouldComplete(totalWriteCalls, calls)) {
+        contextStore.delete(req.context());
+        recordTerminal(WorkerResult.Outcome.COMPLETED, req, iter);
+        return WorkerCompletionPolicy.greenAutoComplete(
+            runId,
+            req.context().taskId(),
+            iter,
+            toolsDispatched,
+            maxRepeatedAssistantTextCount,
+            assistantText,
+            calls,
+            toolLog,
+            start);
+      }
+      completionPolicy.beforeSubstantiveTurn();
 
       // Append the assistant turn (text + tool_calls + optional metadata) to history.
       AssistantMessage.Builder assistantBuilder =
@@ -927,8 +947,10 @@ public class WorkerAgent {
       // test run.  The broader progress watchdog still records the attempted tool call below so
       // a model cannot hide a stuck loop behind repeated failed writes.
       int successfulEditsThisIter = 0;
+      boolean fullSuitePassedThisIter = false;
       boolean successfulProgressThisIter =
           false; // RR-259 — set on a SUCCESSFUL progress-class call
+      boolean successfulNoveltyThisIter = false;
       // RL-2026-05-052 Phase 5+6 — the LAST tool call in this batch is the "immediately prior"
       // call for the next LLM turn; its output is the most likely to be re-referenced by the
       // worker's next decision, so ToolOutputCompactor preserves it verbatim (skip compaction).
@@ -1299,12 +1321,20 @@ public class WorkerAgent {
                 : dispatchOne(tc, req, isImmediatelyPriorToolCall);
         if (isWriteTool(tc.name()) && isOkEnvelope(envelope)) {
           successfulEditsThisIter++;
-          mutationChurn.recordMutation(mutationTarget(tc.name(), tc.arguments()));
+          String mutationPath = mutationTarget(tc.name(), tc.arguments());
+          mutationChurn.recordMutation(mutationPath);
+          completionPolicy.recordWrite(mutationPath);
         }
         // RR-259 — a progress-class call counts only when it succeeded.
+        // A build tool reports a transport-success Ok envelope even when the child exits non-zero.
+        // Treating that as progress lets a reviewer reset the watchdog forever by repeating the
+        // same red build. Only an exit-zero build is progress; writes/moves/deletes keep their
+        // normal successful-envelope semantics. Terminal shell progress remains separately scoped
+        // by WorkerToolPolicy.
         if (isProgressTool(tc.name(), terminalTaskMode)
             && isOkEnvelope(envelope)
-            && !isFailureEnvelope(envelope)) {
+            && !isFailureEnvelope(envelope)
+            && (!isBuildTool(tc.name()) || isSuccessfulBuildEnvelope(envelope))) {
           successfulProgressThisIter = true;
         }
         if (terminalVerifierCommand(tc.name(), commandFromArgs(tc.arguments()))
@@ -1327,6 +1357,9 @@ public class WorkerAgent {
             && envelope.contains("\\\"errored\\\":[]")
             && envelope.contains("\\\"exit_code\\\":0")) {
           lastTestRunIter = iter;
+          fullSuitePassedThisIter =
+              fullSuitePassedThisIter
+                  || WorkerCompletionPolicy.isFullSuiteRunTestsCall(objectMapper, tc.arguments());
         }
         // 2026-05-08 — track successful buildProject (exit=0) for the build-verification gate.
         // BuildProjectTool's content includes a "\nexit=<n>\n" line; in the JSON-encoded ok
@@ -1365,12 +1398,14 @@ public class WorkerAgent {
         // (success clears the streak). Re-running an identical failing command without changing
         // anything is the true stagnation-loop shape.
         if (progressV2) {
-          String sig = callSignature(tc);
-          if (isFailureEnvelope(envelope)) {
-            failedSignatureStreaks.merge(sig, 1, Integer::sum);
-          } else {
-            failedSignatureStreaks.remove(sig);
+          String callSig = callSignature(tc);
+          boolean novel = seenCallSignatures.add(callSig);
+          if (novel
+              && !isFailureEnvelope(envelope)
+              && (totalWriteCalls == 0 || !isShellTool(tc.name()))) {
+            successfulNoveltyThisIter = true;
           }
+          failureStreaks.record(tc, envelope);
         }
         // 2026-05-04 — emit a per-mutation log line so the LiveLog shows real activity, not
         // just the token counter. Filtered to mutating + heavy tools (writes, edits, shell,
@@ -1379,6 +1414,9 @@ public class WorkerAgent {
         emitToolCallLog(req, tc);
       }
       history.add(ToolResponseMessage.builder().responses(toolResponses).build());
+
+      completionPolicy.afterToolBatch(
+          successfulEditsThisIter, fullSuitePassedThisIter, totalWriteCalls);
 
       WorkerMutationChurnGuard.Decision churnDecision =
           mutationChurn.evaluate(
@@ -1413,12 +1451,10 @@ public class WorkerAgent {
         wroteThisIter = successfulEditsThisIter > 0;
       }
       if (progressV2) {
-        // v2 — novelty IS progress: a new (tool, normalized-args) signature resets the counter.
-        boolean novelThisIter = false;
-        for (AssistantMessage.ToolCall tc : calls) {
-          if (seenCallSignatures.add(callSignature(tc))) novelThisIter = true;
-        }
-        wroteThisIter = wroteThisIter || novelThisIter;
+        // v2 — successful novelty is progress. Once edits exist, shell diagnostics no longer
+        // reset the guard: varying version/install probes after implementation is a verification
+        // loop, while dedicated file reads can still gather new evidence.
+        wroteThisIter = wroteThisIter || successfulNoveltyThisIter;
       }
       if (wroteThisIter) {
         itersSinceProgress = 0;
@@ -1442,6 +1478,7 @@ public class WorkerAgent {
           String observation = autoVerifyObservation(req.context(), editsSinceAutoVerify);
           if (observation != null) {
             editsSinceAutoVerify = 0;
+            completionPolicy.observeAutoVerify(observation);
             history.add(new UserMessage(observation));
             toolLog.add("AUTO_VERIFY → " + observation.lines().findFirst().orElse(""));
             log.info(
@@ -1459,10 +1496,7 @@ public class WorkerAgent {
         lastIterHadWrite = successfulEditsThisIter > 0;
       }
       // v2 — worst current same-signature failure streak (0 when off/empty).
-      final int worstFailureStreak =
-          progressV2 && !failedSignatureStreaks.isEmpty()
-              ? java.util.Collections.max(failedSignatureStreaks.values())
-              : 0;
+      final int worstFailureStreak = progressV2 ? failureStreaks.worst() : 0;
       if (patchNoEditNudgeOn
           && !progressV2
           && !progressNudged
@@ -1799,10 +1833,13 @@ public class WorkerAgent {
       if (CompleteTaskTool.NAME.equals(tc.name())) {
         salvageSummary = "salvage path: " + extractSummary(tc.arguments());
         log.info("WorkerAgent SALVAGE got completeTask: {}", salvageSummary);
-        recordTerminal(WorkerResult.Outcome.ITERATION_LIMIT_EXCEEDED, req, maxIterOf(req));
+        recordTerminal(
+            WorkerResult.Outcome.ITERATION_LIMIT_EXCEEDED,
+            req,
+            maxIterations(req, DEFAULT_MAX_ITER));
         return WorkerResult.builder()
             .outcome(WorkerResult.Outcome.ITERATION_LIMIT_EXCEEDED)
-            .iterations(maxIterOf(req))
+            .iterations(maxIterations(req, DEFAULT_MAX_ITER))
             .toolCallsDispatched(toolsDispatched)
             .completionSummary(salvageSummary)
             .toolCallLog(toolLog)
@@ -1824,10 +1861,10 @@ public class WorkerAgent {
 
     if (wroteAnything) {
       log.info("WorkerAgent SALVAGE produced an edit — returning COMPLETED (unverified)");
-      recordTerminal(WorkerResult.Outcome.COMPLETED, req, maxIterOf(req));
+      recordTerminal(WorkerResult.Outcome.COMPLETED, req, maxIterations(req, DEFAULT_MAX_ITER));
       return WorkerResult.builder()
           .outcome(WorkerResult.Outcome.COMPLETED)
-          .iterations(maxIterOf(req))
+          .iterations(maxIterations(req, DEFAULT_MAX_ITER))
           .toolCallsDispatched(toolsDispatched + calls.size())
           .completionSummary("salvage: best-guess edit produced after iter-limit")
           .toolCallLog(toolLog)
@@ -2080,7 +2117,7 @@ public class WorkerAgent {
   }
 
   private List<ToolCallback> terminalFinalizerTools(WorkerTaskRequest req, boolean restrict) {
-    List<ToolCallback> all = toolRegistry.bindForWorker(req.context(), req.provider(), req.model());
+    List<ToolCallback> all = boundWorkerTools(req);
     if (!restrict) return all;
     java.util.Set<String> allow =
         java.util.Set.of("writeFile", "editFile", "shell", CompleteTaskTool.NAME);
@@ -2098,7 +2135,7 @@ public class WorkerAgent {
    * change).
    */
   private List<ToolCallback> salvageTools(WorkerTaskRequest req, boolean restrict) {
-    List<ToolCallback> all = toolRegistry.bindForWorker(req.context(), req.provider(), req.model());
+    List<ToolCallback> all = boundWorkerTools(req);
     if (!restrict) return all;
     java.util.Set<String> allow = java.util.Set.of("writeFile", "editFile", CompleteTaskTool.NAME);
     List<ToolCallback> filtered =
@@ -2106,10 +2143,9 @@ public class WorkerAgent {
     return filtered.isEmpty() ? all : filtered;
   }
 
-  private static int maxIterOf(WorkerTaskRequest req) {
-    return req.maxIterations() != null && req.maxIterations() > 0
-        ? req.maxIterations()
-        : DEFAULT_MAX_ITER;
+  private List<ToolCallback> boundWorkerTools(WorkerTaskRequest req) {
+    return toolRegistry.bindForWorker(
+        req.context(), req.provider(), req.model(), req.allowedToolNames());
   }
 
   /** Emit worker outcome + iterations metrics at every terminal path. */
@@ -2964,15 +3000,8 @@ public class WorkerAgent {
       TestExecutionSummary s = opt.get().summary();
       if (s.getTotalTests() == 0) return null;
       if (s.getFailed() == 0 && s.getErrors() == 0) {
-        return "AUTO-VERIFY — the platform ran `"
-            + opt.get().command()
-            + "` after your last "
-            + editsInBurst
-            + " edit(s): "
-            + s.getPassed()
-            + "/"
-            + s.getTotalTests()
-            + " passed (exit 0). Tests are green — continue.";
+        return WorkerCompletionPolicy.passingAutoVerifyObservation(
+            opt.get().command(), editsInBurst, s.getPassed(), s.getTotalTests());
       }
       return "AUTO-VERIFY — the platform ran `"
           + opt.get().command()
@@ -3329,31 +3358,9 @@ own line and nothing else. Otherwise list ONLY the real gaps, most important fir
             .limit(8)
             .toList();
     if (safe.isEmpty()) return;
-    String snapshotDir = "/tmp/es-passing-candidate-" + safeShellToken(ctx.runId());
-    StringBuilder cmd = new StringBuilder();
-    cmd.append("rm -rf '")
-        .append(snapshotDir)
-        .append("'; mkdir -p '")
-        .append(snapshotDir)
-        .append("'; ");
-    for (String p : safe) {
-      cmd.append("if [ -e '")
-          .append(p)
-          .append("' ]; then mkdir -p '")
-          .append(snapshotDir)
-          .append("'\"$(dirname '")
-          .append(p)
-          .append("')\"; cp -a '")
-          .append(p)
-          .append("' '")
-          .append(snapshotDir)
-          .append(p)
-          .append("'; fi; ");
-    }
-    cmd.append("printf 'ES_SNAPSHOT_OK\\n'");
     try {
       ObjectNode args = objectMapper.createObjectNode();
-      args.put("command", cmd.toString());
+      args.put("command", TerminalCandidateSnapshotCommand.build(ctx.runId(), safe));
       String envelope = dispatchToolDirect(req, "shell", objectMapper.writeValueAsString(args));
       if (envelope == null || !isOkEnvelope(envelope)) {
         log.debug("terminal verified-pass snapshot did not complete for run={}", ctx.runId());
@@ -3364,11 +3371,6 @@ own line and nothing else. Otherwise list ONLY the real gaps, most important fir
           ctx.runId(),
           e.getMessage());
     }
-  }
-
-  private static String safeShellToken(String s) {
-    if (s == null || s.isBlank()) return "run";
-    return s.replaceAll("[^A-Za-z0-9._-]", "-");
   }
 
   // RR-1599 — classification lives in WorkerToolPolicy so every registered alias of a capability
@@ -3392,5 +3394,14 @@ own line and nothing else. Otherwise list ONLY the real gaps, most important fir
 
   static boolean isRunTestsTool(String toolName) {
     return WorkerToolPolicy.isRunTestsTool(toolName);
+  }
+
+  /**
+   * Durable run-cancellation fence exposed to the sequential executor at task boundaries.
+   *
+   * <p>The underlying query is scalar and bypasses any stale managed {@code PipelineRun} entity.
+   */
+  public boolean cancellationRequested(String runId) {
+    return WorkerAgentSupport.cancellationRequested(pipelineRunRepository, runId);
   }
 }

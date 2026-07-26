@@ -1,7 +1,13 @@
 import {describe, expect, it} from 'vitest';
 
 import type {RunCostEvidence, RunDetail} from '@/lib/api';
-import {costReconciliation, phaseCostRows, stepCallsView} from './runCostLedger';
+import {
+  attemptSummary,
+  costReconciliation,
+  knownCallCost,
+  phaseCostRows,
+  stepCallsView,
+} from './runCostLedger';
 
 const evidence = {
   runId: 'r1',
@@ -21,9 +27,57 @@ const evidence = {
   reconciled: false,
 } satisfies RunCostEvidence;
 
+const stepCall = (
+  overrides: Partial<RunCostEvidence['stepCalls'][number]>,
+): RunCostEvidence['stepCalls'][number] => ({
+  id: 'call-1',
+  taskId: 'task-1',
+  agentRole: 'worker',
+  stepId: 'step-1',
+  retryOf: null,
+  provider: 'deepseek',
+  model: 'deepseek-v4-pro-native',
+  inputTokens: 10,
+  outputTokens: 5,
+  cacheReadTokens: 0,
+  cacheWriteTokens: 0,
+  reasoningTokens: 0,
+  costUsd: 0,
+  callIndex: 1,
+  createdAt: '2026-07-26T00:00:00Z',
+  ...overrides,
+});
+
 describe('run cost evidence', () => {
   it('includes coherence in the phase ledger', () => {
     expect(phaseCostRows(null, evidence)).toContainEqual(['Coherence', 0.04]);
+  });
+
+  it('does not present an unknown negative sentinel as free provider spend', () => {
+    const call = stepCall({
+      costUsd: -1,
+      knownCostUsd: null,
+      costStatus: 'UNKNOWN_PROVIDER_NOT_REPORTED',
+    });
+    expect(knownCallCost(call)).toBeNull();
+  });
+
+  it('keeps a genuine known zero-cost call visible as zero', () => {
+    const call = stepCall({
+      costUsd: 0,
+      knownCostUsd: 0,
+      costStatus: 'KNOWN',
+    });
+    expect(knownCallCost(call)).toBe(0);
+  });
+
+  it('labels physical retry causality and attempt ordinal', () => {
+    const call = stepCall({
+      attemptKind: 'SAME_PROVIDER_RETRY',
+      attemptNumber: 3,
+      costUsd: 0,
+    });
+    expect(attemptSummary(call)).toBe('SAME_PROVIDER_RETRY #3');
   });
 
   it('shows an explicit remainder instead of claiming partial calls reconcile', () => {
@@ -74,9 +128,7 @@ describe('per-call ledger visibility', () => {
   });
 
   it('surfaces paging so a truncated page does not read as the whole run', () => {
-    const call: RunCostEvidence['stepCalls'][number] = {
-      id: 'c1',
-    } as unknown as RunCostEvidence['stepCalls'][number];
+    const call = stepCall({id: 'c1'});
     expect(
       stepCallsView({
         ...evidence,

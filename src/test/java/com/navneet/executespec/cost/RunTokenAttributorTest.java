@@ -2,6 +2,7 @@ package com.navneet.executespec.cost;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -40,6 +41,35 @@ class RunTokenAttributorTest {
     attributor.reconcileRunTotalsFromLedger(RUN_ID);
 
     verify(runRepo).raiseUsageTotalsToAtLeast(RUN_ID, 612_345, 23_456, 0.08125d);
+  }
+
+  @Test
+  void lateMaterializationReconcilesOnlyAfterRunIsTerminal() {
+    when(runRepo.findById(RUN_ID))
+        .thenReturn(Optional.of(PipelineRun.builder().runId(RUN_ID).status("CANCELLED").build()));
+    when(usageRepo.sumSuccessfulInputTokensByRunId(RUN_ID)).thenReturn(12L);
+    when(usageRepo.sumSuccessfulOutputTokensByRunId(RUN_ID)).thenReturn(3L);
+    when(usageRepo.sumKnownCostByRunId(RUN_ID)).thenReturn(0.004d);
+
+    attributor.reconcileRunTotalsIfTerminal(RUN_ID);
+
+    verify(runRepo).raiseUsageTotalsToAtLeast(RUN_ID, 12, 3, 0.004d);
+  }
+
+  @Test
+  void liveMaterializationDoesNotRunLedgerAggregates() {
+    when(runRepo.findById(RUN_ID))
+        .thenReturn(Optional.of(PipelineRun.builder().runId(RUN_ID).status("WORKING").build()));
+
+    attributor.reconcileRunTotalsIfTerminal(RUN_ID);
+
+    verify(usageRepo, never()).sumSuccessfulInputTokensByRunId(RUN_ID);
+    verify(runRepo, never())
+        .raiseUsageTotalsToAtLeast(
+            org.mockito.ArgumentMatchers.anyString(),
+            org.mockito.ArgumentMatchers.anyInt(),
+            org.mockito.ArgumentMatchers.anyInt(),
+            org.mockito.ArgumentMatchers.anyDouble());
   }
 
   private static RunStepUsage successRow(String taskId, String provider, String model) {
@@ -207,6 +237,65 @@ class RunTokenAttributorTest {
     assertThat(saved.getValue().getReviewerOutputTokens()).isEqualTo(27);
     assertThat(saved.getValue().getReviewerProvider()).isEqualTo("ANTHROPIC");
     assertThat(saved.getValue().getReviewerActualModel()).isEqualTo("claude-sonnet-4-6");
+  }
+
+  @Test
+  void attributePlannerPersistsPhysicalFailoverRouteInsteadOfRequestedRoute() {
+    PipelineRun run = PipelineRun.builder().runId(RUN_ID).build();
+    when(runRepo.findById(RUN_ID)).thenReturn(Optional.of(run));
+    when(usageRepo.findByRunIdOrderByCreatedAtAsc(RUN_ID))
+        .thenReturn(
+            List.of(
+                RunStepUsage.builder()
+                    .id("planner")
+                    .runId(RUN_ID)
+                    .taskId("planner")
+                    .agentRole("OutlinePlannerAgent")
+                    .provider("openai")
+                    .model("gpt-5.4")
+                    .attemptStatus("SUCCESS")
+                    .build()));
+
+    attributor.attributePhase(
+        RUN_ID, RunTokenAttributor.Phase.PLANNER, 30, 7, "ANTHROPIC", "claude-sonnet-4-6");
+
+    ArgumentCaptor<PipelineRun> saved = ArgumentCaptor.forClass(PipelineRun.class);
+    verify(runRepo).save(saved.capture());
+    assertThat(saved.getValue().getPlannerProvider()).isEqualTo("OPENAI");
+    assertThat(saved.getValue().getPlannerActualModel()).isEqualTo("gpt-5.4");
+  }
+
+  @Test
+  void attributeReviewerKeepsMixedPhysicalRoutesVisibleInsteadOfInventingOne() {
+    PipelineRun run = PipelineRun.builder().runId(RUN_ID).build();
+    when(runRepo.findById(RUN_ID)).thenReturn(Optional.of(run));
+    when(usageRepo.findByRunIdOrderByCreatedAtAsc(RUN_ID))
+        .thenReturn(
+            List.of(
+                RunStepUsage.builder()
+                    .id("reviewer-1")
+                    .runId(RUN_ID)
+                    .taskId("run-reviewer-general")
+                    .provider("anthropic")
+                    .model("sonnet")
+                    .attemptStatus("SUCCESS")
+                    .build(),
+                RunStepUsage.builder()
+                    .id("reviewer-2")
+                    .runId(RUN_ID)
+                    .taskId("run-reviewer-wiring")
+                    .provider("openai")
+                    .model("gpt-5.4")
+                    .attemptStatus("SUCCESS")
+                    .build()));
+
+    attributor.attributePhase(
+        RUN_ID, RunTokenAttributor.Phase.REVIEWER, 30, 7, "ANTHROPIC", "sonnet");
+
+    ArgumentCaptor<PipelineRun> saved = ArgumentCaptor.forClass(PipelineRun.class);
+    verify(runRepo).save(saved.capture());
+    assertThat(saved.getValue().getReviewerProvider()).isNull();
+    assertThat(saved.getValue().getReviewerActualModel()).isNull();
   }
 
   @Test

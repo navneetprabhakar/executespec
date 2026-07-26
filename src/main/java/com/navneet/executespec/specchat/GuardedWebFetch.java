@@ -96,6 +96,12 @@ public final class GuardedWebFetch {
     Outcome fetch(URI uri, String host, InetAddress address, int maxBytes);
   }
 
+  /** DNS seam used to keep policy tests hermetic while production resolves every host address. */
+  @FunctionalInterface
+  interface Resolver {
+    List<InetAddress> resolve(String host) throws UnknownHostException;
+  }
+
   /** The production transport: pinned socket, bounded headers, bounded body. */
   public static final Transport PINNED = GuardedWebFetch::pinnedFetch;
 
@@ -106,13 +112,18 @@ public final class GuardedWebFetch {
 
   /** Validate {@code rawUrl} and fetch through {@code transport}, capping the body at maxBytes. */
   public static Outcome fetch(String rawUrl, int maxBytes, Transport transport) {
+    return fetch(
+        rawUrl, maxBytes, transport, host -> Arrays.asList(InetAddress.getAllByName(host)));
+  }
+
+  static Outcome fetch(String rawUrl, int maxBytes, Transport transport, Resolver resolver) {
     Outcome policy = validateTarget(rawUrl);
     if (!policy.ok()) return policy;
     URI uri = URI.create(rawUrl.trim());
     String host = uri.getHost();
     List<InetAddress> addresses;
     try {
-      addresses = Arrays.asList(InetAddress.getAllByName(host));
+      addresses = resolver.resolve(host);
     } catch (UnknownHostException e) {
       return Outcome.err("host could not be resolved");
     }

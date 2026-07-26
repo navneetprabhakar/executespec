@@ -17,9 +17,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 public interface PipelineRunRepository
     extends JpaRepository<PipelineRun, String>, JpaSpecificationExecutor<PipelineRun> {
-
   // Atomic token counter updates (avoids read-modify-write race)
-
   @Modifying
   @Transactional
   @Query(
@@ -27,7 +25,6 @@ public interface PipelineRunRepository
           + " = r.totalOutputTokens + :out WHERE r.runId = :runId")
   void addTokens(@Param("runId") String runId, @Param("inp") int inp, @Param("out") int out);
 
-  /** Raise persisted usage to the canonical attempt-ledger floor without ever shrinking totals. */
   @Modifying
   @Transactional
   @Query(
@@ -176,6 +173,15 @@ public interface PipelineRunRepository
       @Param("heartbeat") Instant heartbeat);
 
   List<PipelineRun> findByStatusIn(List<String> statuses);
+
+  /**
+   * Durable cancellation fence used by worker/executor dispatch loops.
+   *
+   * <p>A scalar existence query always consults the database and cannot return a stale managed
+   * {@link PipelineRun} instance from the current persistence context. Cancellation must therefore
+   * use this method instead of {@link #findById(Object)} before spending another provider call.
+   */
+  boolean existsByRunIdAndStatus(String runId, String status);
 
   Optional<PipelineRun> findTopByStatusInOrderByStartedAtDesc(List<String> statuses);
 
@@ -567,20 +573,6 @@ public interface PipelineRunRepository
    * summary's {@code findAll()}/{@code findByStartedAtAfter()} + in-Java grouping, which loaded
    * every pipeline_run into heap. Bounded to one row per distinct run owner.
    */
-  interface UserRunAggregate {
-    String getUid();
-
-    long getRunCount();
-
-    long getCompleted();
-
-    long getFailed();
-
-    long getTotalIn();
-
-    long getTotalOut();
-  }
-
   @Query(
       "SELECT r.createdByUserId AS uid, COUNT(r) AS runCount,"
           + " SUM(CASE WHEN r.status = 'COMPLETE' THEN 1L ELSE 0L END) AS completed,"

@@ -180,6 +180,132 @@ class LlmExecutionPolicyFactoryAggregatorTest {
   }
 
   @Test
+  void previewSurfaceGetsDedicatedBoundedContextWithRunCredentialPolicy() {
+    LlmExecutionContextService contexts = mock(LlmExecutionContextService.class);
+    PipelineRunRepository runs = mock(PipelineRunRepository.class);
+    OrgRepository orgs = mock(OrgRepository.class);
+    ApiKeyResolver keys = mock(ApiKeyResolver.class);
+    ModelRegistry registry = mock(ModelRegistry.class);
+    PipelineRun run = new PipelineRun();
+    run.setRunId("run-1");
+    run.setCreatedByUserId("user-1");
+    run.setOrgId("org-1");
+    run.setAiProvider("DEEPSEEK");
+    when(runs.findById("run-1")).thenReturn(java.util.Optional.of(run));
+    when(orgs.findById("org-1"))
+        .thenReturn(
+            java.util.Optional.of(
+                Org.builder().id("org-1").tier("BYOK").keySourceMode("OWN_KEYS").build()));
+    when(keys.resolveWithProvenance("user-1"))
+        .thenReturn(
+            new ApiKeyResolver.CredentialResolution(
+                new ResolvedKeys(
+                    null,
+                    null,
+                    null,
+                    null,
+                    "deepseek-secret",
+                    null,
+                    "OWN_KEYS",
+                    Set.of("deepseek")),
+                "org-1",
+                Map.of("deepseek", ApiKeyResolver.CredentialOrigin.ORG)));
+    when(registry.allModels()).thenReturn(Map.of());
+    LlmExecutionContext saved = mock(LlmExecutionContext.class);
+    when(saved.getId()).thenReturn("preview-context");
+    when(contexts.create(any())).thenReturn(saved);
+    LlmExecutionPolicyFactory factory =
+        new LlmExecutionPolicyFactory(
+            contexts,
+            runs,
+            mock(AgentSessionRepository.class),
+            mock(ProjectRepository.class),
+            orgs,
+            keys,
+            registry);
+
+    factory.forRunPreviewSurface("run-1", "job-1:home");
+
+    ArgumentCaptor<LlmExecutionContextCreateRequest> request =
+        ArgumentCaptor.forClass(LlmExecutionContextCreateRequest.class);
+    verify(contexts).create(request.capture());
+    LlmExecutionContextCreateRequest created = request.getValue();
+    assertThat(created.feature()).isEqualTo("preview-render");
+    assertThat(created.sourceType()).isEqualTo("PREVIEW_RENDER");
+    assertThat(created.sourceId()).isEqualTo("preview-render:run-1:job-1:home");
+    assertThat(created.budget()).isEqualTo(LlmExecutionPolicyFactory.PREVIEW_SURFACE_BUDGET);
+    assertThat(created.budget().maxProviderCalls()).isEqualTo(4);
+    assertThat(created.budget().maxOutputTokens()).isEqualTo(8_192L);
+    assertThat(created.policy().keySourceMode())
+        .isEqualTo(LlmPolicySnapshot.KeySourceMode.OWN_KEYS);
+    assertThat(created.policy().allowedProviders()).containsExactly("deepseek");
+  }
+
+  @Test
+  void runChatTurnGetsDedicatedBoundedContextWithRunCredentialPolicy() {
+    LlmExecutionContextService contexts = mock(LlmExecutionContextService.class);
+    PipelineRunRepository runs = mock(PipelineRunRepository.class);
+    OrgRepository orgs = mock(OrgRepository.class);
+    ApiKeyResolver keys = mock(ApiKeyResolver.class);
+    ModelRegistry registry = mock(ModelRegistry.class);
+    PipelineRun run = new PipelineRun();
+    run.setRunId("run-1");
+    run.setCreatedByUserId("user-1");
+    run.setOrgId("org-1");
+    run.setAiProvider("DEEPSEEK");
+    when(runs.findById("run-1")).thenReturn(java.util.Optional.of(run));
+    when(orgs.findById("org-1"))
+        .thenReturn(
+            java.util.Optional.of(
+                Org.builder().id("org-1").tier("BYOK").keySourceMode("OWN_KEYS").build()));
+    when(keys.resolveWithProvenance("user-1"))
+        .thenReturn(
+            new ApiKeyResolver.CredentialResolution(
+                new ResolvedKeys(
+                    null,
+                    null,
+                    null,
+                    null,
+                    "deepseek-secret",
+                    null,
+                    "OWN_KEYS",
+                    Set.of("deepseek")),
+                "org-1",
+                Map.of("deepseek", ApiKeyResolver.CredentialOrigin.ORG)));
+    when(registry.allModels()).thenReturn(Map.of());
+    LlmExecutionContext saved = mock(LlmExecutionContext.class);
+    when(saved.getId()).thenReturn("chat-context");
+    when(contexts.create(any())).thenReturn(saved);
+    LlmExecutionPolicyFactory factory =
+        new LlmExecutionPolicyFactory(
+            contexts,
+            runs,
+            mock(AgentSessionRepository.class),
+            mock(ProjectRepository.class),
+            orgs,
+            keys,
+            registry);
+
+    factory.forRunChatTurn("run-1", "turn-1");
+
+    ArgumentCaptor<LlmExecutionContextCreateRequest> request =
+        ArgumentCaptor.forClass(LlmExecutionContextCreateRequest.class);
+    verify(contexts).create(request.capture());
+    LlmExecutionContextCreateRequest created = request.getValue();
+    assertThat(created.feature()).isEqualTo("run-chat");
+    assertThat(created.sourceType()).isEqualTo("RUN_CHAT");
+    assertThat(created.sourceId()).isEqualTo("run-chat:run-1:turn-1");
+    assertThat(created.budget()).isEqualTo(LlmExecutionPolicyFactory.RUN_CHAT_TURN_BUDGET);
+    assertThat(created.budget().maxProviderCalls()).isEqualTo(20);
+    assertThat(created.budget().maxOutputTokens()).isEqualTo(15_000L);
+    assertThat(created.budget().maxTotalTokens()).isEqualTo(415_000L);
+    assertThat(created.budget().maxCostUsd()).isEqualByComparingTo("2.00");
+    assertThat(created.policy().keySourceMode())
+        .isEqualTo(LlmPolicySnapshot.KeySourceMode.OWN_KEYS);
+    assertThat(created.policy().allowedProviders()).containsExactly("deepseek");
+  }
+
+  @Test
   void enterpriseOwnKeysProjectLocksPolicyToSelectedProvider() {
     CapturedProjectPolicy captured = captureProjectPolicy("ENTERPRISE");
 

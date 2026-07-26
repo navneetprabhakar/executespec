@@ -10,16 +10,25 @@ import static org.mockito.Mockito.when;
 
 import java.nio.file.Path;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 
 import com.navneet.executespec.config.featureflag.FeatureFlagService;
+import com.navneet.executespec.sandbox.RunSandbox;
 import com.navneet.executespec.sandbox.RunSandboxLifecycleService;
 import com.navneet.executespec.sandbox.RunSandboxRuntimeDispatcher;
 import com.navneet.executespec.sandbox.RunSandboxStore;
 import com.navneet.executespec.sandbox.SandboxExecRequest;
 import com.navneet.executespec.sandbox.SandboxExecResult;
+import com.navneet.executespec.sandbox.SandboxIsolationProfile;
+import com.navneet.executespec.sandbox.SandboxNetworkPolicy;
 import com.navneet.executespec.sandbox.SandboxProperties;
+import com.navneet.executespec.sandbox.SandboxRetentionState;
+import com.navneet.executespec.sandbox.SandboxSecretPolicy;
+import com.navneet.executespec.sandbox.SandboxState;
+import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -41,6 +50,7 @@ class SandboxCommandRoutingServiceTest {
   private FeatureFlagService flags;
   private PipelineRunRepository runs;
   private SandboxCommandRoutingService routing;
+  private SandboxProperties properties;
 
   @BeforeEach
   void setUp() {
@@ -49,13 +59,16 @@ class SandboxCommandRoutingServiceTest {
     store = mock(RunSandboxStore.class);
     flags = mock(FeatureFlagService.class);
     runs = mock(PipelineRunRepository.class);
+    properties = new SandboxProperties();
+    properties.setImage(
+        "registry.example/executespec-toolchain@sha256:"
+            + "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
     routing =
-        new SandboxCommandRoutingService(
-            lifecycle, dispatcher, store, new SandboxProperties(), flags, runs);
+        new SandboxCommandRoutingService(lifecycle, dispatcher, store, properties, flags, runs);
   }
 
   @Test
-  void routingIsOffUntilBothTheLifecycleAndDispatchFlagsAreOn() {
+  void routingIsOffUntilEveryGatePinnedImageAndRuntimeReadinessArePresent() {
     assertThat(routing.routingEnabled()).isFalse();
 
     when(flags.isEnabled(RunSandboxLifecycleService.FLAG_LIFECYCLE)).thenReturn(true);
@@ -66,7 +79,30 @@ class SandboxCommandRoutingServiceTest {
     assertThat(routing.routingEnabled()).as("dispatch alone must not route").isFalse();
 
     when(flags.isEnabled(RunSandboxLifecycleService.FLAG_LIFECYCLE)).thenReturn(true);
+    assertThat(routing.routingEnabled()).as("strict runtime must also be selected").isFalse();
+
+    when(flags.isEnabled(RunSandboxRuntimeDispatcher.FLAG_CONTAINER_STRICT_V1)).thenReturn(true);
+    assertThat(routing.routingEnabled()).as("toolchain readiness is an independent gate").isFalse();
+
+    when(flags.isEnabled(SandboxCommandRoutingService.FLAG_TOOLCHAIN_READINESS)).thenReturn(true);
+    assertThat(routing.routingEnabled()).as("runtime must be actually available").isFalse();
+
+    when(dispatcher.selectedProfile()).thenReturn(SandboxIsolationProfile.CONTAINER_STRICT_V1);
     assertThat(routing.routingEnabled()).isTrue();
+  }
+
+  @Test
+  void mutableImageTagCannotBecomeExecutionReady() {
+    properties.setImage("registry.example/executespec-toolchain:latest");
+    when(flags.isEnabled(RunSandboxLifecycleService.FLAG_LIFECYCLE)).thenReturn(true);
+    when(flags.isEnabled(RunSandboxRuntimeDispatcher.FLAG_CONTAINER_STRICT_V1)).thenReturn(true);
+    when(flags.isEnabled(SandboxCommandRoutingService.FLAG_TOOLCHAIN_READINESS)).thenReturn(true);
+    when(dispatcher.dispatchEnabled()).thenReturn(true);
+    when(dispatcher.selectedProfile()).thenReturn(SandboxIsolationProfile.CONTAINER_STRICT_V1);
+
+    assertThat(routing.readiness().enabled()).isFalse();
+    assertThat(routing.readiness().imageDigestPinned()).isFalse();
+    assertThat(routing.readiness().reason()).contains("not pinned");
   }
 
   @Test
@@ -116,6 +152,24 @@ class SandboxCommandRoutingServiceTest {
   }
 
   @Test
+  void terminalRunCannotResurrectASandboxAfterCleanup() {
+    routingOn();
+    PipelineRun run = mock(PipelineRun.class);
+    when(run.getStatus()).thenReturn("COMPLETE");
+    when(run.getCreatedByUserId()).thenReturn("user-1");
+    when(run.getOrgId()).thenReturn("org-1");
+    when(store.findActiveForRun("run-1")).thenReturn(Optional.empty());
+    when(runs.findById("run-1")).thenReturn(Optional.of(run));
+
+    SandboxExecResult result =
+        routing.execute("run-1", Path.of("/ws/run-1"), List.of("mvn", "test"), null);
+
+    assertThat(result.unexecuted()).isTrue();
+    assertThat(result.detail()).contains("already terminal");
+    verify(lifecycle, never()).create(any(), any());
+  }
+
+  @Test
   void aTimeoutBeyondTheHardCeilingIsClampedRatherThanRejected() {
     assertThat(SandboxCommandRoutingService.clamp(Duration.ofHours(9)))
         .isEqualTo(SandboxExecRequest.MAX_TIMEOUT);
@@ -143,8 +197,108 @@ class SandboxCommandRoutingServiceTest {
         .isEqualTo("err");
   }
 
+  @Test
+  void timedOutCommandDestroysAndFailsTheSandboxBeforeReturning() {
+    routingOn();
+    RunSandbox sandbox = sandbox(SandboxState.READY);
+    RunSandbox.Lease lease =
+        new RunSandbox.Lease(sandbox.id(), "owner", 1L, Instant.now().plusSeconds(60));
+    when(store.findActiveForRun("run-1")).thenReturn(Optional.of(sandbox));
+    when(store.tryAcquire(any(), anyString(), any())).thenReturn(Optional.of(lease));
+    when(store.get(sandbox.id())).thenReturn(Optional.of(sandbox));
+    when(dispatcher.exec(any(), any(), any()))
+        .thenReturn(SandboxExecResult.timedOut("", "", false, Duration.ofMinutes(1)));
+
+    SandboxExecResult result =
+        routing.execute(
+            "run-1", Path.of("/ws/run-1"), List.of("mvn", "test"), Duration.ofMinutes(1));
+
+    assertThat(result.status()).isEqualTo(SandboxExecResult.Status.TIMED_OUT);
+    verify(dispatcher)
+        .failAndRelease(sandbox, lease, "COMMAND_TIMEOUT", "sandbox command exceeded PT1M");
+  }
+
+  @Test
+  void terminalRunReleasesItsOwnedSandboxEvenWhenDispatchIsOff() {
+    PipelineRun run = mock(PipelineRun.class);
+    when(run.getStatus()).thenReturn("COMPLETE");
+    RunSandbox sandbox = sandbox(SandboxState.READY);
+    RunSandbox.Lease lease =
+        new RunSandbox.Lease(sandbox.id(), "owner", 1L, Instant.now().plusSeconds(60));
+    when(runs.findById("run-1")).thenReturn(Optional.of(run));
+    when(store.findActiveForRun("run-1")).thenReturn(Optional.of(sandbox));
+    when(store.tryAcquire(any(), anyString(), any())).thenReturn(Optional.of(lease));
+    when(store.get(sandbox.id())).thenReturn(Optional.of(sandbox));
+    when(dispatcher.release(sandbox, lease, SandboxState.TERMINATED))
+        .thenReturn(sandbox(SandboxState.TERMINATED));
+
+    assertThat(routing.releaseForTerminalRun("run-1"))
+        .get()
+        .extracting(RunSandbox::state)
+        .isEqualTo(SandboxState.TERMINATED);
+  }
+
+  @Test
+  void cancelledRunRequestsCancellationWhenAnotherOwnerStillHoldsTheLease() {
+    PipelineRun run = mock(PipelineRun.class);
+    when(run.getStatus()).thenReturn("CANCELLED");
+    RunSandbox sandbox = sandbox(SandboxState.READY);
+    when(runs.findById("run-1")).thenReturn(Optional.of(run));
+    when(store.findActiveForRun("run-1")).thenReturn(Optional.of(sandbox));
+    when(store.tryAcquire(any(), anyString(), any())).thenReturn(Optional.empty());
+
+    assertThat(routing.releaseForTerminalRun("run-1")).isEmpty();
+
+    verify(lifecycle).cancel(sandbox.id());
+    verify(dispatcher, never()).release(any(), any(), any());
+  }
+
   private void routingOn() {
     when(flags.isEnabled(RunSandboxLifecycleService.FLAG_LIFECYCLE)).thenReturn(true);
+    when(flags.isEnabled(RunSandboxRuntimeDispatcher.FLAG_CONTAINER_STRICT_V1)).thenReturn(true);
+    when(flags.isEnabled(SandboxCommandRoutingService.FLAG_TOOLCHAIN_READINESS)).thenReturn(true);
     when(dispatcher.dispatchEnabled()).thenReturn(true);
+    when(dispatcher.selectedProfile()).thenReturn(SandboxIsolationProfile.CONTAINER_STRICT_V1);
+  }
+
+  private static RunSandbox sandbox(SandboxState state) {
+    return new RunSandbox(
+        UUID.randomUUID(),
+        "run-1",
+        "project-1",
+        null,
+        "user-1",
+        "org-1",
+        "revision",
+        "[]",
+        state,
+        SandboxIsolationProfile.CONTAINER_STRICT_V1,
+        1,
+        null,
+        0L,
+        null,
+        1L,
+        null,
+        "es-sbx-1",
+        "sha256:image",
+        "sha256:config",
+        SandboxNetworkPolicy.DENY_ALL,
+        SandboxSecretPolicy.NO_HOST_SECRETS,
+        Instant.now().plusSeconds(600),
+        null,
+        null,
+        state == SandboxState.RELEASING ? SandboxState.TERMINATED : null,
+        null,
+        null,
+        0,
+        null,
+        SandboxRetentionState.RETAINED,
+        null,
+        "idem-" + UUID.randomUUID(),
+        Instant.now(),
+        null,
+        null,
+        null,
+        null);
   }
 }

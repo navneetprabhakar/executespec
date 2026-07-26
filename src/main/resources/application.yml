@@ -119,7 +119,7 @@ spring:
         api-key: ${GOOGLE_API_KEY:}
         chat:
           options:
-            model: gemini-3-flash-preview
+            model: gemini-3.5-flash-lite
     openrouter:
       base-url: https://openrouter.ai/api
       api-key: ${OPENROUTER_API_KEY:}
@@ -298,7 +298,7 @@ model-matrix:
     gemini:
       planning: gemini-3.5-flash
       workhorse: gemini-3.5-flash
-      lightweight: gemini-3-flash-preview
+      lightweight: gemini-3.5-flash-lite
     openai:
       planning: gpt-5.4
       workhorse: gpt-5.4
@@ -319,7 +319,7 @@ model-matrix:
     fireworks:
       planning: deepseek-v4-pro-fw
       workhorse: deepseek-v4-pro-fw
-      lightweight: deepseek-v4-flash-fw
+      lightweight: kimi-k2p6-fw
   models:
     claude-opus-4-6:
       provider: anthropic
@@ -366,6 +366,21 @@ model-matrix:
         cached-input-per-1m: 0.20
         output-per-1m: 10.00
       notes: "Anthropic default PLANNING + WORKHORSE model from 2026-07-02 through 2026-08-31 while introductory Sonnet 5 pricing applies. Revisit before 2026-09-01."
+    claude-fable-5:
+      provider: anthropic
+      chain-tier: ARCHITECT
+      cost-class: FRONTIER
+      quality-class: PREMIUM
+      managed-ai-enabled: true
+      step-down-priority: 110
+      context-limit: 1000000
+      max-output-tokens: 128000
+      display-label: "Claude Fable 5"
+      pricing:
+        input-per-1m: 10.00
+        cached-input-per-1m: 1.00
+        output-per-1m: 50.00
+      notes: "Anthropic's current top generally available model; account-visible through /v1/models on 2026-07-24. Selectable but not tier-routed until ExecuteSpec quality/cost evaluation; 1M input / 128K output from live model metadata."
     claude-haiku-4-5-20251001:
       provider: anthropic
       chain-tier: UTILITY
@@ -391,23 +406,38 @@ model-matrix:
         input-per-1m: 0.30
         cached-input-per-1m: 0.03
         output-per-1m: 2.50
-      notes: "Gemini 2.5 Flash — legacy, replaced by gemini-3-flash-preview for all tiers."
-    "[gemini-3-flash-preview]":
+      notes: "Gemini 2.5 Flash — legacy; Google recommends gemini-3.5-flash-lite for cost-sensitive migration or gemini-3.6-flash for code/agentic work."
+    "[gemini-3.5-flash-lite]":
       provider: gemini
-      chain-tier: CAPABLE
+      chain-tier: UTILITY
       cost-class: CHEAP
-      quality-class: HIGH
+      quality-class: BASIC
       managed-ai-enabled: true
       step-down-priority: 10
       context-limit: 1048576
       max-output-tokens: 65536
-      display-label: "Gemini 3 Flash Preview"
+      display-label: "Gemini 3.5 Flash-Lite"
       pricing:
-        input-per-1m: 0.50
-        cached-input-per-1m: 0.05
-        output-per-1m: 3.00
-      notes: "Gemini 3 Flash Preview — WORKHORSE + LIGHTWEIGHT tier for Google. Cached at 10% of input (Google's 90% context-cache discount)."
-    "[gemini-3-pro-preview]":
+        input-per-1m: 0.30
+        cached-input-per-1m: 0.03
+        output-per-1m: 2.50
+      notes: "Gemini 3.5 Flash-Lite GA (2026-07-21) — Google LIGHTWEIGHT tier. Optimized for high-throughput subagent and structured-data work; 1M input / 64K output."
+    "[gemini-3.1-flash-lite]":
+      provider: gemini
+      chain-tier: UTILITY
+      cost-class: CHEAP
+      quality-class: BASIC
+      managed-ai-enabled: true
+      step-down-priority: 8
+      context-limit: 1048576
+      max-output-tokens: 65536
+      display-label: "Gemini 3.1 Flash-Lite"
+      pricing:
+        input-per-1m: 0.25
+        cached-input-per-1m: 0.025
+        output-per-1m: 1.50
+      notes: "Gemini 3.1 Flash-Lite GA — selectable low-cost route; 1M input / 64K output and standard pricing verified from Google model/pricing docs on 2026-07-24."
+    "[gemini-3.1-pro-preview]":
       provider: gemini
       chain-tier: ARCHITECT
       cost-class: FRONTIER
@@ -416,12 +446,12 @@ model-matrix:
       step-down-priority: 90
       context-limit: 1048576
       max-output-tokens: 65536
-      display-label: "Gemini 3 Pro Preview"
+      display-label: "Gemini 3.1 Pro Preview"
       pricing:
-        input-per-1m: 3.50
-        cached-input-per-1m: 0.35
-        output-per-1m: 21.00
-      notes: "Gemini 3 Pro Preview — registry entry retained as the GeminiNativeToolClient default-model constant; not tier-routed (PLANNING moved to gemini-3.5-flash, WORKHORSE/LIGHTWEIGHT to gemini-3-flash-preview). Cached at 10% of input (Google's 90% context-cache discount)."
+        input-per-1m: 4.00
+        cached-input-per-1m: 0.40
+        output-per-1m: 18.00
+      notes: "Gemini 3.1 Pro Preview — selectable ARCHITECT route and replacement for the shut-down gemini-3-pro-preview. Conservative >200K rates prevent managed-AI undercharging until ModelRegistry can express Google's rate step."
     "[gemini-3.5-flash]":
       provider: gemini
       chain-tier: CAPABLE
@@ -437,6 +467,21 @@ model-matrix:
         cached-input-per-1m: 0.15
         output-per-1m: 9.00
       notes: "Gemini 3.5 Flash — Google PLANNING tier. Eval: completes the HIGH band at verifiedScore 94 (best Gemini, ties Sonnet) in ~49min — slower than Anthropic/OpenAI but higher quality + cheaper than Pro. Cached at 10% of input (Google's 90% context-cache discount; input/output from ai.google.dev pricing)."
+    "[gemini-3.6-flash]":
+      provider: gemini
+      chain-tier: CAPABLE
+      cost-class: BALANCED
+      quality-class: HIGH
+      managed-ai-enabled: true
+      step-down-priority: 25
+      context-limit: 1048576
+      max-output-tokens: 65536
+      display-label: "Gemini 3.6 Flash"
+      pricing:
+        input-per-1m: 1.50
+        cached-input-per-1m: 0.15
+        output-per-1m: 7.50
+      notes: "Gemini 3.6 Flash GA (2026-07-21) — selectable CAPABLE code/agentic route. Google reports fewer turns, fewer unwanted edits, and lower output cost than 3.5 Flash; defaults remain on the benchmarked 3.5 route until ExecuteSpec eval evidence exists."
     "[gpt-5.4]":
       provider: openai
       chain-tier: CAPABLE
@@ -512,21 +557,51 @@ model-matrix:
         cached-input-per-1m: 0.50
         output-per-1m: 30.00
       notes: "GPT-5.5 — ENTERPRISE-only pin (Beta). Pricing verified 2026-05-26 (OpenRouter pass-through ≈ direct): $5 in / $0.50 cached / $30 out per 1M."
-    "[gpt-5.5-mini]":
+    "[gpt-5.6-sol]":
+      provider: openai
+      chain-tier: ARCHITECT
+      cost-class: FRONTIER
+      quality-class: PREMIUM
+      managed-ai-enabled: true
+      step-down-priority: 110
+      context-limit: 1050000
+      max-output-tokens: 128000
+      display-label: "GPT-5.6 Sol"
+      pricing:
+        input-per-1m: 10.00
+        cached-input-per-1m: 1.00
+        output-per-1m: 45.00
+      notes: "GPT-5.6 Sol GA — selectable frontier route. Conservative >272K rates prevent managed-AI undercharging until ModelRegistry can express stepped pricing; standard rates are $5/$0.50/$30. Account-visible and function-calling capable on 2026-07-24."
+    "[gpt-5.6-terra]":
+      provider: openai
+      chain-tier: CAPABLE
+      cost-class: BALANCED
+      quality-class: HIGH
+      managed-ai-enabled: true
+      step-down-priority: 40
+      context-limit: 1050000
+      max-output-tokens: 128000
+      display-label: "GPT-5.6 Terra"
+      pricing:
+        input-per-1m: 5.00
+        cached-input-per-1m: 0.50
+        output-per-1m: 22.50
+      notes: "GPT-5.6 Terra GA — selectable balanced route. Conservative >272K rates prevent managed-AI undercharging until ModelRegistry can express stepped pricing; standard rates are $2.50/$0.25/$15. Account-visible and function-calling capable on 2026-07-24."
+    "[gpt-5.6-luna]":
       provider: openai
       chain-tier: UTILITY
       cost-class: CHEAP
-      quality-class: BASIC
+      quality-class: STANDARD
       managed-ai-enabled: true
-      step-down-priority: 10
-      context-limit: 200000
-      max-output-tokens: 16384
-      display-label: "GPT-5.5 Mini"
+      step-down-priority: 12
+      context-limit: 1050000
+      max-output-tokens: 128000
+      display-label: "GPT-5.6 Luna"
       pricing:
-        input-per-1m: 0.75
-        cached-input-per-1m: 0.075
-        output-per-1m: 4.50
-      notes: "GPT-5.5 Mini — ENTERPRISE-only pin (Beta). Not yet on the public catalogue (2026-05-26); uses GPT-5.4 Mini's verified rates as proxy: $0.75 in / $0.075 cached / $4.50 out per 1M. Update when listed."
+        input-per-1m: 2.00
+        cached-input-per-1m: 0.20
+        output-per-1m: 9.00
+      notes: "GPT-5.6 Luna GA — selectable cost-sensitive route. Conservative >272K rates prevent managed-AI undercharging until ModelRegistry can express stepped pricing; standard rates are $1/$0.10/$6. Account-visible and function-calling capable on 2026-07-24."
     deepseek-v4-pro:
       provider: openrouter
       chain-tier: CAPABLE
@@ -550,7 +625,7 @@ model-matrix:
       managed-ai-enabled: true
       step-down-priority: 20
       context-limit: 1048576
-      max-output-tokens: 32000
+      max-output-tokens: 131072
       display-label: "DeepSeek V4 Pro (Native)"
       pricing:
         input-per-1m: 0.435
@@ -558,7 +633,7 @@ model-matrix:
         output-per-1m: 0.87
       notes: |
         DeepSeek native api.deepseek.com — ENTERPRISE BYOK. Native pricing refreshed 2026-07-02 from DeepSeek docs: $0.435 cache-miss input / $0.003625 cache-hit input / $0.87 output per 1M.
-        TIER-ACTIVE (RL-2026-06-053): the deepseek provider's planning + workhorse tiers. Verified live 2026-06-18 — Pro works multi-turn with tools on auto tool_choice and api.deepseek.com does NOT require the reasoning_content echo (the earlier blocker is resolved; OpenAiNativeToolClient captures + replays it regardless). Caveat: thinking mode rejects tool_choice="required" — the worker salvage already falls back to auto and the planner doesn't force it on the OpenAI-wire path, so it's non-blocking.
+        TIER-ACTIVE (RL-2026-06-053): the deepseek provider's planning + workhorse tiers. Official maximum output is 384K; ExecuteSpec conservatively exposes 128K. Verified live 2026-06-18 — Pro works multi-turn with tools on auto tool_choice and api.deepseek.com does NOT require the reasoning_content echo (the earlier blocker is resolved; OpenAiNativeToolClient captures + replays it regardless). Caveat: thinking mode rejects tool_choice="required" — the worker salvage already falls back to auto and the planner doesn't force it on the OpenAI-wire path, so it's non-blocking.
     deepseek-v4-flash-native:
       provider: deepseek
       chain-tier: UTILITY
@@ -567,13 +642,13 @@ model-matrix:
       managed-ai-enabled: true
       step-down-priority: 5
       context-limit: 1048576
-      max-output-tokens: 16384
+      max-output-tokens: 131072
       display-label: "DeepSeek V4 Flash (Native)"
       pricing:
         input-per-1m: 0.14
         cached-input-per-1m: 0.0028
         output-per-1m: 0.28
-      notes: "DeepSeek native api.deepseek.com (Flash, non-thinking) — ENTERPRISE BYOK. Pricing refreshed 2026-07-02 from DeepSeek docs: $0.14 cache-miss input / $0.0028 cache-hit input / $0.28 output per 1M. Replaces the OpenRouter detour for the cheap chat-style tier. RL-2026-05-052."
+      notes: "DeepSeek native api.deepseek.com (Flash) — ENTERPRISE BYOK. Pricing refreshed 2026-07-02 from DeepSeek docs: $0.14 cache-miss input / $0.0028 cache-hit input / $0.28 output per 1M. Official maximum output is 384K; ExecuteSpec conservatively exposes 128K. Replaces the OpenRouter detour for the cheap chat-style tier. RL-2026-05-052."
     deepseek-v4-flash:
       provider: openrouter
       chain-tier: UTILITY
@@ -604,21 +679,6 @@ model-matrix:
         cached-input-per-1m: 0.14
         output-per-1m: 3.48
       notes: "Fireworks accounts/fireworks/models/deepseek-v4-pro — ENTERPRISE BYOK. Pricing/slugs from Fireworks model page 2026-06-10. Live API smoke 2026-06-18: callable + tool_choice=required verified (RL-2026-06-052)."
-    deepseek-v4-flash-fw:
-      provider: fireworks
-      chain-tier: UTILITY
-      cost-class: CHEAP
-      quality-class: BASIC
-      managed-ai-enabled: true
-      step-down-priority: 5
-      context-limit: 1048576
-      max-output-tokens: 131072
-      display-label: "DeepSeek V4 Flash (Fireworks)"
-      pricing:
-        input-per-1m: 0.14
-        cached-input-per-1m: 0.03
-        output-per-1m: 0.28
-      notes: "Fireworks accounts/fireworks/models/deepseek-v4-flash — ENTERPRISE BYOK. Pricing/slugs from Fireworks model page 2026-06-10. Live API smoke 2026-06-18: callable + tool_choice=required verified (RL-2026-06-052)."
     kimi-k2p6-fw:
       provider: fireworks
       chain-tier: CAPABLE
@@ -643,12 +703,10 @@ model-matrix:
         cached-input-per-1m: 0.26
         output-per-1m: 4.40
       notes: "Fireworks accounts/fireworks/models/glm-5p1 Standard path — ENTERPRISE BYOK. Pricing/slugs from Fireworks model page 2026-06-10. Live API smoke 2026-06-18: callable + tool_choice=required verified (RL-2026-06-052)."
-    # 2026-06-18 — mirror the Fireworks-available subset of the OpenRouter coding-model
-    # expansion (RL-2026-06-049 follow-up). Each slug was live-probed on api.fireworks.ai:
-    # callable AND tool_choice=required emits a valid tool call (the worker bar). devstral-2 /
-    # codestral-2508 / qwen3-coder* / grok-4.20 / gpt-5.3-codex are NOT on Fireworks (404) so
-    # they are deliberately omitted — an unverified slug would 404 → silent fallback. ENTERPRISE
-    # BYOK (needs the org's own Fireworks key); ctx conservative vs the OpenRouter sibling.
+    # Fireworks' account-visible serverless catalogue was rechecked on 2026-07-24. Only
+    # deepseek-v4-pro, kimi-k2p6, glm-5p1, and glm-5p2 remain among ExecuteSpec's coding cohort.
+    # Removed serverless ids stay as legacy aliases below so persisted selections resolve to a
+    # callable Fireworks replacement instead of reaching transport with a dead slug.
     "[glm-5.2-fw]": # bracket-wrapped: dotted key (5.2) would otherwise bind as a nested path
       provider: fireworks
       chain-tier: CAPABLE
@@ -661,42 +719,6 @@ model-matrix:
         cached-input-per-1m: 0.26
         output-per-1m: 4.40
       notes: "Fireworks accounts/fireworks/models/glm-5p2 Standard path — ENTERPRISE BYOK. Pricing from Fireworks docs 2026-06-18 (GLM-5 band). Live API smoke 2026-06-18: callable + tool_choice=required verified."
-    minimax-m3-fw:
-      provider: fireworks
-      chain-tier: CAPABLE
-      quality-class: HIGH
-      context-limit: 196608
-      max-output-tokens: 32000
-      display-label: "MiniMax M3 (Fireworks)"
-      pricing:
-        input-per-1m: 0.30
-        cached-input-per-1m: 0.06
-        output-per-1m: 1.20
-      notes: "Fireworks accounts/fireworks/models/minimax-m3 Standard path — ENTERPRISE BYOK. Pricing from Fireworks docs 2026-06-18. Live API smoke 2026-06-18: callable + tool_choice=required verified."
-    "[minimax-m2.7-fw]": # bracket-wrapped: dotted key (2.7) would otherwise bind as a nested path
-      provider: fireworks
-      chain-tier: CAPABLE
-      quality-class: HIGH
-      context-limit: 196608
-      max-output-tokens: 32000
-      display-label: "MiniMax M2.7 (Fireworks)"
-      pricing:
-        input-per-1m: 0.30
-        cached-input-per-1m: 0.06
-        output-per-1m: 1.20
-      notes: "Fireworks accounts/fireworks/models/minimax-m2p7 Standard path — ENTERPRISE BYOK. Pricing from Fireworks docs 2026-06-18. Live API smoke 2026-06-18: callable + tool_choice=required verified."
-    "[kimi-k2.7-code-fw]": # bracket-wrapped: dotted key (2.7) would otherwise bind as a nested path
-      provider: fireworks
-      chain-tier: CAPABLE
-      quality-class: HIGH
-      context-limit: 262144
-      max-output-tokens: 16384
-      display-label: "Kimi K2.7 Code (Fireworks)"
-      pricing:
-        input-per-1m: 0.95
-        cached-input-per-1m: 0.19
-        output-per-1m: 4.00
-      notes: "Fireworks accounts/fireworks/models/kimi-k2p7-code Standard path — ENTERPRISE BYOK. Pricing from Fireworks docs 2026-06-18. Live API smoke 2026-06-18: callable + tool_choice=required verified."
     devstral-2:
       provider: openrouter
       chain-tier: CAPABLE
@@ -841,15 +863,86 @@ model-matrix:
         cached-input-per-1m: 0.004
         output-per-1m: 0.87
       notes: "OpenRouter xiaomi/mimo-v2.5-pro — tools-capable, 1M ctx. Pricing verified vs OpenRouter catalogue 2026-06-09: $0.435 in / $0.004 cached / $0.87 out per 1M. Added for the TB 2.0 benchmark (RL-2026-06)."
+    kimi-k3:
+      provider: openrouter
+      chain-tier: ARCHITECT
+      cost-class: FRONTIER
+      quality-class: PREMIUM
+      managed-ai-enabled: true
+      step-down-priority: 90
+      context-limit: 1048576
+      max-output-tokens: 32000
+      display-label: "Kimi K3 (OpenRouter)"
+      pricing:
+        input-per-1m: 3.00
+        cached-input-per-1m: 0.30
+        output-per-1m: 15.00
+      notes: "OpenRouter moonshotai/kimi-k3 — latest Kimi frontier route; 1M context and tools/tool_choice verified from the live OpenRouter catalogue on 2026-07-24. ENTERPRISE BYOK; not tier-routed."
+    "[qwen3.7-plus]":
+      provider: openrouter
+      chain-tier: CAPABLE
+      cost-class: BALANCED
+      quality-class: HIGH
+      managed-ai-enabled: true
+      step-down-priority: 18
+      context-limit: 1000000
+      max-output-tokens: 32000
+      display-label: "Qwen 3.7 Plus (OpenRouter)"
+      pricing:
+        input-per-1m: 0.96
+        cached-input-per-1m: 0.192
+        output-per-1m: 3.84
+      notes: "OpenRouter qwen/qwen3.7-plus — tools/tool_choice verified 2026-07-24. Conservative >256K rates are stored because ModelRegistry cannot express stepped pricing; standard rates are $0.32/$0.064/$1.28. ENTERPRISE BYOK."
+    "[qwen3.7-max]":
+      provider: openrouter
+      chain-tier: ARCHITECT
+      cost-class: FRONTIER
+      quality-class: PREMIUM
+      managed-ai-enabled: true
+      step-down-priority: 75
+      context-limit: 1000000
+      max-output-tokens: 32000
+      display-label: "Qwen 3.7 Max (OpenRouter)"
+      pricing:
+        input-per-1m: 1.475
+        cached-input-per-1m: 0.295
+        output-per-1m: 4.425
+      notes: "OpenRouter qwen/qwen3.7-max — 1M context and tools/tool_choice verified from the live catalogue on 2026-07-24. ENTERPRISE BYOK; not tier-routed."
+    "[grok-4.5]":
+      provider: openrouter
+      chain-tier: ARCHITECT
+      cost-class: FRONTIER
+      quality-class: PREMIUM
+      managed-ai-enabled: true
+      step-down-priority: 85
+      context-limit: 500000
+      max-output-tokens: 32000
+      display-label: "Grok 4.5 (OpenRouter)"
+      pricing:
+        input-per-1m: 4.00
+        cached-input-per-1m: 0.60
+        output-per-1m: 12.00
+      notes: "OpenRouter x-ai/grok-4.5 — tools/tool_choice verified 2026-07-24. Conservative >200K rates are stored because ModelRegistry cannot express stepped pricing; standard rates are $2/$0.30/$6. ENTERPRISE BYOK."
 
   legacy-aliases:
     claude-opus-4-5: claude-opus-4-6
     claude-sonnet-4-5: claude-sonnet-4-6
     claude-sonnet-5-latest: claude-sonnet-5
+    claude-fable-latest: claude-fable-5
     claude-haiku-4-5: claude-haiku-4-5-20251001
     gpt-4o: gpt-5.4
     gpt-4o-mini: gpt-5.4-mini
-    gemini-3-flash: gemini-3-flash-preview
+    gpt-5.6: gpt-5.6-sol
+    gpt-5.5-mini: gpt-5.6-luna
+    gemini-3-flash: gemini-3.6-flash
+    gemini-3-flash-preview: gemini-3.6-flash
+    gemini-flash-latest: gemini-3.6-flash
+    gemini-3-pro-preview: gemini-3.1-pro-preview
+    gemini-pro-latest: gemini-3.1-pro-preview
+    deepseek-v4-flash-fw: kimi-k2p6-fw
+    minimax-m3-fw: glm-5.2-fw
+    minimax-m2.7-fw: glm-5.1-fw
+    kimi-k2.7-code-fw: kimi-k2p6-fw
 
   fallback-chains:
     ARCHITECT:
@@ -862,7 +955,7 @@ model-matrix:
       - { provider: gemini, model: gemini-3.5-flash }
     UTILITY:
       - { provider: anthropic, model: claude-haiku-4-5-20251001 }
-      - { provider: gemini, model: gemini-3-flash-preview }
+      - { provider: gemini, model: gemini-3.5-flash-lite }
       - { provider: openai, model: gpt-5.4 }
 
   free-tier:
@@ -889,6 +982,7 @@ model-matrix:
     ProjectChatCompiler: PLANNING
     ProjectChatCompactor: LIGHTWEIGHT
     ProjectBriefService: LIGHTWEIGHT
+    ChatService: LIGHTWEIGHT
     SpecChatService: WORKHORSE # RL-2026-06-052: user-facing spec-build chat stays on the flagship after LIGHTWEIGHT dropped to a cheap model
     RepoArchitectureGenerator: PLANNING
     ArchitectureDocGenerator: PLANNING
@@ -1215,12 +1309,21 @@ auth:
     app-return-url: ${APP_SURFACE_RETURN_URL:${app.cors.app-return-url:http://localhost:5173/auth/callback}}
 
 executespec:
+  client-compatibility:
+    # Server-owned protocol floor advertised on every /api response. The split CLI/VS Code core
+    # turns an older identified client into an actionable, non-retryable 426 upgrade error.
+    minimum-cli-version: ${EXECUTESPEC_MIN_CLI_VERSION:1.0.0}
   # Production/runtime calls remain enabled. Maven test forks override this to false unless the
   # explicit live-llm-test profile is selected after a provider-budget reservation is acquired.
   live-llm:
     enabled: true
     test-mode: false
     reservation-id: ""
+  sandbox:
+    # Must match the deployed non-root service/workspace owner before strict routing is enabled.
+    # Provisioning verifies ownership and never chmods/chowns customer data.
+    runtime-uid: ${SANDBOX_RUNTIME_UID:65532}
+    runtime-gid: ${SANDBOX_RUNTIME_GID:65532}
   designs:
     root-path: /opt/executespec/designs/design-md
     cache-ttl: 30m

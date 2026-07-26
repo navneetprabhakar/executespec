@@ -5,7 +5,6 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -69,7 +68,14 @@ class ValidationReportServiceConcreteRescoreTest {
 
     Optional<ValidationReport> result =
         service.rescoreAfterConcreteTests(
-            "run-1", TestExecutionSummary.builder().totalTests(10).passed(8).failed(2).build());
+            "run-1",
+            TestExecutionSummary.builder()
+                .totalTests(10)
+                .passed(8)
+                .failed(2)
+                .executionVerified(Boolean.TRUE)
+                .evidenceScope(TestExecutionSummary.EvidenceScope.LIVE_PREVIEW_FUNCTIONAL)
+                .build());
 
     assertTrue(result.isPresent());
     assertEquals(10, report.getTestsTotal());
@@ -94,7 +100,7 @@ class ValidationReportServiceConcreteRescoreTest {
             .filter(e -> "tests".equals(e.id()))
             .findFirst()
             .orElseThrow();
-    assertEquals("8/10 tests passed.", tests.summary());
+    assertEquals("8/10 tests passed (functional).", tests.summary());
     VerificationEvidenceDTO executable =
         event.verificationLedger().stream()
             .filter(e -> "executable-verification".equals(e.id()))
@@ -123,7 +129,7 @@ class ValidationReportServiceConcreteRescoreTest {
   }
 
   @Test
-  void emptyDownstreamSummaryCannotEraseConcreteWorkspaceTests() {
+  void unavailableFunctionalSuiteOverridesWorkspaceCountsAndCapsQuality() {
     ValidationReportRepository repository = mock(ValidationReportRepository.class);
     FeatureFlagService flags = mock(FeatureFlagService.class);
     var events = mock(org.springframework.context.ApplicationEventPublisher.class);
@@ -133,10 +139,18 @@ class ValidationReportServiceConcreteRescoreTest {
             .runId("run-worker-tests")
             .testsPassed(2)
             .testsTotal(2)
+            .filesGenerated(4)
+            .pipelineResult(PipelineResult.PASSED)
+            .finalBuildPassed(true)
+            .reviewerVerdict("CLEAN")
+            .issuesJson("[]")
+            .accuracyJson("{\"testCoverageLevel\":\"GOOD\"}")
             .verifiedScore(94)
             .rubricScore(100)
             .build();
     when(repository.findByRunId("run-worker-tests")).thenReturn(Optional.of(report));
+    when(repository.save(any(ValidationReport.class)))
+        .thenAnswer(invocation -> invocation.getArgument(0));
     ValidationReportService service =
         new ValidationReportService(
             repository,
@@ -149,23 +163,88 @@ class ValidationReportServiceConcreteRescoreTest {
             events);
 
     Optional<ValidationReport> result =
-        service.rescoreAfterConcreteTests("run-worker-tests", TestExecutionSummary.empty());
+        service.rescoreAfterConcreteTests(
+            "run-worker-tests",
+            TestExecutionSummary.unavailable(
+                "preview-failed", "Independent functional suite could not run"));
 
     assertTrue(result.isPresent());
-    assertEquals(2, result.orElseThrow().getTestsTotal());
-    assertEquals(2, result.orElseThrow().getTestsPassed());
-    assertEquals(94, result.orElseThrow().getVerifiedScore());
-    verify(repository, never()).save(any());
-    verify(events, never()).publishEvent(any());
+    assertEquals(0, result.orElseThrow().getTestsTotal());
+    assertEquals(0, result.orElseThrow().getTestsPassed());
+    assertEquals(Boolean.FALSE, result.orElseThrow().getTestExecutionVerified());
+    assertTrue(result.orElseThrow().getVerifiedScore() <= 75);
+    assertTrue(result.orElseThrow().getRubricScore() <= 75);
+    verify(repository).save(report);
+    verify(events).publishEvent(org.mockito.ArgumentMatchers.any(Object.class));
+  }
+
+  @Test
+  void freshWorkspaceSuiteIsPreservedButCannotEarnFunctionalProof() {
+    ValidationReportRepository repository = mock(ValidationReportRepository.class);
+    FeatureFlagService flags = mock(FeatureFlagService.class);
+    var events = mock(org.springframework.context.ApplicationEventPublisher.class);
+    ValidationReport report =
+        ValidationReport.builder()
+            .id("vr-workspace-suite")
+            .runId("run-workspace-suite")
+            .filesGenerated(4)
+            .pipelineResult(PipelineResult.PASSED)
+            .finalBuildPassed(true)
+            .reviewerVerdict("CLEAN")
+            .issuesJson("[]")
+            .accuracyJson("{\"testCoverageLevel\":\"GOOD\"}")
+            .build();
+    when(repository.findByRunId("run-workspace-suite")).thenReturn(Optional.of(report));
+    when(repository.save(any(ValidationReport.class)))
+        .thenAnswer(invocation -> invocation.getArgument(0));
+    ValidationReportService service =
+        new ValidationReportService(
+            repository,
+            null,
+            new ObjectMapper(),
+            new SimpleMeterRegistry(),
+            null,
+            null,
+            flags,
+            events);
+
+    ValidationReport rescored =
+        service
+            .rescoreAfterConcreteTests(
+                "run-workspace-suite",
+                TestExecutionSummary.builder()
+                    .totalTests(7)
+                    .passed(7)
+                    .executionVerified(Boolean.TRUE)
+                    .evidenceScope(TestExecutionSummary.EvidenceScope.WORKSPACE_TEST_SUITE)
+                    .build())
+            .orElseThrow();
+
+    assertEquals(7, rescored.getTestsTotal());
+    assertEquals(7, rescored.getTestsPassed());
+    assertEquals(Boolean.TRUE, rescored.getTestExecutionVerified());
+    assertEquals("WORKSPACE_TEST_SUITE", rescored.getTestEvidenceScope());
+    assertTrue(rescored.getVerifiedScore() <= 75);
+    var eventCaptor = org.mockito.ArgumentCaptor.forClass(ValidationReportEvidenceEvent.class);
+    verify(events).publishEvent(eventCaptor.capture());
+    VerificationEvidenceDTO tests =
+        eventCaptor.getValue().verificationLedger().stream()
+            .filter(row -> "tests".equals(row.id()))
+            .findFirst()
+            .orElseThrow();
+    assertEquals("PASS", tests.status());
+    assertEquals("DETERMINISTIC_WORKSPACE_SUITE", tests.source());
+    assertEquals(
+        com.navneet.executespec.execution.model.RunContinuationDecision
+            .CONTINUE_SAME_MODEL_PROVIDER,
+        eventCaptor.getValue().runGoalDecision().recommendedDecision());
   }
 
   /**
-   * RR-1647 — the generated HTTP/preview suite is a DIFFERENT population from the worker's own
-   * workspace suite captured at report generation. Replacing one with the other discarded a passing
-   * 10/10 worker suite the moment a 2/3 generated smoke landed. Both suites must stay counted.
+   * Worker tests are diagnostic; only the independent HTTP/preview population certifies quality.
    */
   @Test
-  void downstreamSuiteIsCombinedWithTheWorkerSuiteInsteadOfReplacingIt() {
+  void independentFunctionalSuiteReplacesWorkerSuiteAndIsIdempotent() {
     ValidationReportRepository repository = mock(ValidationReportRepository.class);
     FeatureFlagService flags = mock(FeatureFlagService.class);
     when(flags.isEnabled(any())).thenReturn(true);
@@ -193,20 +272,32 @@ class ValidationReportServiceConcreteRescoreTest {
         service
             .rescoreAfterConcreteTests(
                 "run-merge",
-                TestExecutionSummary.builder().totalTests(3).passed(2).failed(1).build())
+                TestExecutionSummary.builder()
+                    .totalTests(3)
+                    .passed(2)
+                    .failed(1)
+                    .executionVerified(Boolean.TRUE)
+                    .evidenceScope(TestExecutionSummary.EvidenceScope.LIVE_PREVIEW_FUNCTIONAL)
+                    .build())
             .orElseThrow();
 
-    assertEquals(13, merged.getTestsTotal(), "the worker suite must not be discarded");
-    assertEquals(12, merged.getTestsPassed());
+    assertEquals(3, merged.getTestsTotal(), "only the independent suite certifies output quality");
+    assertEquals(2, merged.getTestsPassed());
 
     // Re-delivering the same execution event must reproduce the same result, not stack again.
     ValidationReport again =
         service
             .rescoreAfterConcreteTests(
                 "run-merge",
-                TestExecutionSummary.builder().totalTests(3).passed(2).failed(1).build())
+                TestExecutionSummary.builder()
+                    .totalTests(3)
+                    .passed(2)
+                    .failed(1)
+                    .executionVerified(Boolean.TRUE)
+                    .evidenceScope(TestExecutionSummary.EvidenceScope.LIVE_PREVIEW_FUNCTIONAL)
+                    .build())
             .orElseThrow();
-    assertEquals(13, again.getTestsTotal(), "the merge must be anchored on a stable baseline");
-    assertEquals(12, again.getTestsPassed());
+    assertEquals(3, again.getTestsTotal());
+    assertEquals(2, again.getTestsPassed());
   }
 }

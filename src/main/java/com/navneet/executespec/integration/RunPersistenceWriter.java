@@ -48,6 +48,12 @@ class RunPersistenceWriter {
   private final SseBroadcaster broadcaster;
   private final ObjectMapper objectMapper;
 
+  void persistCompiledPlan(String runId, Plan plan) {
+    persistPlan(runId, plan);
+    persistTasks(runId, plan);
+    persistRunTitle(runId, plan);
+  }
+
   void persistPlan(String runId, Plan plan) {
     runRepo
         .findById(runId)
@@ -322,6 +328,15 @@ class RunPersistenceWriter {
     if (changed[0]) {
       broadcaster.emit(runId, RunEvent.runStatus(runId, newStatus));
     }
+  }
+
+  /** Monotonically persists the live tracker floor without touching lifecycle/evidence fields. */
+  void raiseUsageFloor(String runId, RunCostTracker.Snapshot cost) {
+    runRepo.raiseUsageTotalsToAtLeast(
+        runId,
+        RunCostTracker.saturatedInt(cost.inputTokens()),
+        RunCostTracker.saturatedInt(cost.outputTokens()),
+        cost.costUsd());
   }
 
   void writeRunCostLog(PipelineRun r, RunCostTracker.Snapshot cost) {

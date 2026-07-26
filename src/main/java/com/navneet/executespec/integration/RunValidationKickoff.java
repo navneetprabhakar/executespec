@@ -184,13 +184,39 @@ class RunValidationKickoff {
                           ? ""
                           : reviewResult.finalBuildOutput()));
 
+      // Run worker-authored tests before the LLM accuracy assessment. A passing generated suite
+      // is not independent product-quality proof, so it still cannot populate the verified TESTS
+      // slot. A failing executed suite is nevertheless deterministic negative evidence: the
+      // produced code and its own acceptance contract disagree. Previously this ran after the
+      // assessor, allowing dc6df05f to receive A/100 immediately before pytest reported 9/10.
+      java.util.List<com.navneet.executespec.reviewer.model.ReviewIssue> workspaceDiagnosticIssues =
+          new java.util.ArrayList<>();
+      if (featureFlagService.isEnabled("scoring.real-test-exec")) {
+        try {
+          Path testWorkspace =
+              Path.of(agentProps.getWorkspace(), runId).toAbsolutePath().normalize();
+          workspaceTestRunner
+              .runTestsDetailed(runId, testWorkspace)
+              .filter(
+                  result -> result.summary().getFailed() > 0 || result.summary().getErrors() > 0)
+              .ifPresent(
+                  result -> workspaceDiagnosticIssues.add(workspaceTestFailureIssue(result)));
+        } catch (Exception e) {
+          log.warn(
+              "RunOrchestrator run={} supplemental workspace test execution failed: {}",
+              runId,
+              e.getMessage());
+        }
+      }
+
       // RR-291 — deterministic review evidence (final-build failure + reviewer verdict) that does
       // NOT depend on the accuracy report. Passing this to assess() replaces the old empty
       // List.of(), so the assessor no longer inserts "No issues found — code passed review" when
       // the
       // reviewer actually failed or flagged unresolved issues.
       java.util.List<com.navneet.executespec.reviewer.model.ReviewIssue> deterministicReviewIssues =
-          synthesiseReviewIssues(reviewResult, compile, null);
+          new java.util.ArrayList<>(synthesiseReviewIssues(reviewResult, compile, null));
+      deterministicReviewIssues.addAll(workspaceDiagnosticIssues);
 
       // Run accuracy assessment — V1 does this inside ReviewerAgentV2 phase 3,
       // but V2's ReviewerAgent skips it, so the ValidationReport was coming
@@ -229,29 +255,20 @@ class RunValidationKickoff {
       java.util.List<com.navneet.executespec.reviewer.model.ReviewIssue> synthIssues =
           new java.util.ArrayList<>(
               synthesiseReviewIssues(reviewResult, compile, review.getAccuracyReport()));
+      synthIssues.addAll(workspaceDiagnosticIssues);
       if (extraIssues != null && !extraIssues.isEmpty()) {
         synthIssues.addAll(extraIssues);
       }
       review.setIssues(synthIssues);
 
-      // RL-2026-05-001 — run the worker-written tests in the workspace and feed the REAL
-      // passed/total into the verifiedScore TESTS slot, instead of an LLM coverage guess. The
-      // command is resolver-derived (not worker text), validated by ShellSandboxPolicy, and run in
-      // the cleanroom container where one exists. Empty → the scorer falls back to LLM coverage, so
-      // this can only ever make the TESTS slot more honest, never break report generation.
-      com.navneet.executespec.testgen.model.TestExecutionSummary testSummary = null;
-      if (featureFlagService.isEnabled("scoring.real-test-exec")) {
-        try {
-          Path testWorkspace =
-              Path.of(agentProps.getWorkspace(), runId).toAbsolutePath().normalize();
-          testSummary = workspaceTestRunner.runTests(runId, testWorkspace).orElse(null);
-        } catch (Exception e) {
-          log.warn(
-              "RunOrchestrator run={} workspace test execution failed (fallback to coverage): {}",
-              runId,
-              e.getMessage());
-        }
-      }
+      // Worker-authored workspace tests are a repair aid, not independent product-quality proof.
+      // Run them for diagnostics, but never feed their counts into the verified score. The
+      // separately generated black-box suite will rescore this report when it exercises the real
+      // runtime over HTTP. Until then, persist an explicitly unavailable functional-test signal.
+      com.navneet.executespec.testgen.model.TestExecutionSummary testSummary =
+          com.navneet.executespec.testgen.model.TestExecutionSummary.unavailable(
+              "functional-tests-pending",
+              "Independent end-to-end/functional tests have not completed");
       // RL-2026-05-066 (verifyBoot) — feed a deterministic boot verdict into the BUILD slot. Reads
       // the run-recipe + boots in the hardened sandbox; fail-open (empty → null → compile-only
       // BUILD
@@ -321,6 +338,32 @@ class RunValidationKickoff {
       claims.add(claim);
     }
     return claims;
+  }
+
+  private static com.navneet.executespec.reviewer.model.ReviewIssue workspaceTestFailureIssue(
+      com.navneet.executespec.smoketest.WorkspaceTestRunner.DetailedResult result) {
+    var summary = result.summary();
+    String tail = result.outputTail() == null ? "" : result.outputTail().strip();
+    if (tail.length() > 1_200) tail = tail.substring(tail.length() - 1_200);
+    String description =
+        "Workspace test suite executed with "
+            + summary.getFailed()
+            + " failed and "
+            + summary.getErrors()
+            + " errored of "
+            + summary.getTotalTests()
+            + " tests (command: "
+            + result.command()
+            + ")";
+    if (!tail.isBlank()) description += ". Failure output: " + tail;
+    return com.navneet.executespec.reviewer.model.ReviewIssue.builder()
+        .id("SYNTH-TEST-DIAGNOSTIC")
+        .severity(com.navneet.executespec.reviewer.model.IssueSeverity.CRITICAL)
+        .category(com.navneet.executespec.reviewer.model.IssueCategory.LOGIC_ERROR)
+        .description(description)
+        .autoFixed(false)
+        .fixSucceeded(false)
+        .build();
   }
 
   /**

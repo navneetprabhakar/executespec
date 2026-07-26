@@ -289,16 +289,34 @@ public class DatabaseDetector {
             || pkg.contains("sql.js")
             || pkg.contains("sqlite3")
             || pkg.contains("@sqlite.org"))) return true;
-    // Check Python for SQLite (sqlite:/// in config or pysqlite in deps)
+    // Check Python for SQLite (sqlite:/// in config/source or pysqlite in deps). Generated FastAPI
+    // projects commonly keep the URL in app/database.py; looking only at root config.py let the
+    // later generic SQLAlchemy fallback misclassify them as PostgreSQL.
     for (String pyFile : new String[] {"requirements.txt", "pyproject.toml"}) {
       String content = readSafe(dir.resolve(pyFile));
       if (content != null && (content.contains("aiosqlite") || content.contains("pysqlite")))
         return true;
     }
-    // Check for sqlite:/// in any common config file
-    for (String cfg : new String[] {".env", ".env.example", "config.py", "settings.py"}) {
+    // Check for embedded-database URLs/imports in common Python config and persistence modules.
+    for (String cfg :
+        new String[] {
+          ".env",
+          ".env.example",
+          "config.py",
+          "settings.py",
+          "database.py",
+          "app/config.py",
+          "app/settings.py",
+          "app/database.py",
+          "src/config.py",
+          "src/settings.py",
+          "src/database.py"
+        }) {
       String content = readSafe(dir.resolve(cfg));
-      if (content != null && content.contains("sqlite:///")) return true;
+      if (content != null) {
+        String normalized = content.toLowerCase();
+        if (normalized.contains("sqlite:") || EMBEDDED_DB.matcher(normalized).find()) return true;
+      }
     }
     return false;
   }

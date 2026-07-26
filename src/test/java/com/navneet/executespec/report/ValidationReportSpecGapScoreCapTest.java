@@ -22,13 +22,24 @@ class ValidationReportSpecGapScoreCapTest {
   }
 
   @Test
-  void unknown_only_evidence_does_not_cap_the_headline_score() {
+  void unknown_only_evidence_caps_the_headline_at_the_assessors_confidence() {
     AccuracyReport accuracy =
         AccuracyReport.builder()
             .specAdherenceScore(70)
             .unknownRequirements(List.of("Middleware was not included in the evidence"))
             .build();
 
-    assertEquals(97, ValidationReportService.capScoreAtAdmittedSpecGaps(97, accuracy));
+    assertEquals(70, ValidationReportService.capScoreAtAdmittedSpecGaps(97, accuracy));
+  }
+
+  @Test
+  void unknown_requirements_cannot_keep_a_perfect_passing_score() {
+    AccuracyReport accuracy =
+        AccuracyReport.builder()
+            .specAdherenceScore(100)
+            .unknownRequirements(List.of("Authentication boundary was not verified"))
+            .build();
+
+    assertEquals(84, ValidationReportService.capScoreAtAdmittedSpecGaps(97, accuracy));
   }
 }

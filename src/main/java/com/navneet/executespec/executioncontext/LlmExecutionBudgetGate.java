@@ -127,6 +127,12 @@ class LlmExecutionBudgetGate {
       throw budget();
     }
     if (context.getMaxCostUsd() != null) {
+      // A successful call with unprojectable provider cost is not free. Fail closed before
+      // authorizing more spend under a dollar ceiling; failed transport attempts stay eligible
+      // for the router's bounded retry because they have no provider-reported usage.
+      if (value(usageRepository.countUnknownSuccessfulCostAttemptsByContextId(id)) > 0) {
+        throw budget();
+      }
       double spent = value(usageRepository.sumSuccessfulCostByContextId(id));
       if (BigDecimal.valueOf(spent).compareTo(context.getMaxCostUsd()) >= 0) throw budget();
     }

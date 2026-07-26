@@ -24,6 +24,8 @@ import {
   toGateView,
 } from '@/ide/planContractGate';
 import {PlanContractGateCard} from '@/ide/PlanContractGateCard';
+import {PlanReviewDetails} from '@/ide/PlanReviewDetails';
+import {writeSpecHandoff} from '@/lib/specHandoff';
 import {useAuthStore, selectIsSuperAdmin} from '@/stores/useAuthStore';
 import {useRunStore} from '@/stores/useRunStore';
 import {useSse} from '@/hooks/useSse';
@@ -100,6 +102,32 @@ export default function IdePlan() {
       cancelled = true;
     };
   }, [runId, navigate]);
+
+  // SSE is the fast path, but plan approval must not depend on an uninterrupted event stream.
+  // A run can finish planning between the initial detail read and SSE subscription (or while a
+  // laptop briefly loses the stream). In that case the old page stayed on PLANNING forever even
+  // though the durable run was already AWAITING_APPROVAL. Poll quickly while planning and retain a
+  // low-frequency fallback at the gate so changes made from another client also become visible.
+  const durablePlanStatus = (run?.status || '').toUpperCase();
+  useEffect(() => {
+    if (!runId || !durablePlanStatus) return;
+    const status = durablePlanStatus;
+    if (isPlanExecutingStatus(status) || isPlanTerminalStatus(status)) return;
+    const intervalMs = status === 'AWAITING_APPROVAL' ? 15_000 : 3_000;
+    let cancelled = false;
+    const timer = window.setInterval(() => {
+      void api
+        .getRun(runId)
+        .then((fresh) => {
+          if (!cancelled && fresh?.runId === runId) setLoadedRun(fresh);
+        })
+        .catch(() => {});
+    }, intervalMs);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [runId, durablePlanStatus]);
 
   // RR-819 — fetch the gate report the server composed for this run. A 204 (no contract touched,
   // the overwhelming majority of runs) resolves to `undefined`, which stores a null report and
@@ -194,22 +222,23 @@ export default function IdePlan() {
       setBusy('');
     }
   }
-  // Revise the plan before approving — re-plans with the feedback; the poll
-  // loop above picks up the new AWAITING_APPROVAL version.
-  async function revise() {
+  function revise() {
     if (!feedback.trim()) return;
     if (gateMutationBlocked()) return;
-    setBusy('e');
+    const revising = run;
+    if (!revising) return;
     setErr('');
-    try {
-      await api.editRunPlan(runId, feedback.trim());
-      setFeedback('');
-      setEditing(false);
-    } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : 'Revision failed.');
-    } finally {
-      setBusy('');
+    const original = revising.userRequest?.trim();
+    if (!original) {
+      setErr('The original request is unavailable; copy your changes into a new run manually.');
+      return;
     }
+    writeSpecHandoff({
+      source: 'plan-revision',
+      projectId: revising.projectId,
+      spec: `${original}\n\nPlan revision requirements:\n${feedback.trim()}`,
+    });
+    navigate(revising.projectId ? `/projects/${revising.projectId}?compose=1` : '/compose');
   }
 
   const status = (run?.status || '').toUpperCase();
@@ -334,6 +363,9 @@ export default function IdePlan() {
             <RunTimeline tasks={tasks} />
           </div>
 
+          <div className='ide-h2'>Step contracts</div>
+          <PlanReviewDetails planJson={run.planJson} />
+
           <div className='ide-h2'>Not quite right?</div>
           {editing ? (
             <div className='ide-card'>
@@ -361,7 +393,7 @@ export default function IdePlan() {
                   disabled={busy !== '' || !feedback.trim()}
                   onClick={revise}
                 >
-                  {busy === 'e' ? 'Revising…' : 'Submit requested changes'}
+                  Start revised run
                 </button>
                 <button className='ide-btn ghost' onClick={() => setEditing(false)}>
                   Cancel
@@ -374,7 +406,7 @@ export default function IdePlan() {
               style={{borderColor: 'var(--ide-accent)', color: 'var(--ide-accent)'}}
               onClick={() => setEditing(true)}
             >
-              ✎ Request changes
+              ✎ Revise as new run
             </button>
           )}
 

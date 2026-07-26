@@ -1,4 +1,4 @@
-import type {RunCostEvidence, RunDetail} from '@/lib/api';
+import type {RunCostEvidence, RunDetail, RunStepCostCall} from '@/lib/api';
 
 export function phaseCostRows(run: RunDetail | null, evidence: RunCostEvidence | null) {
   const phases = evidence?.phases;
@@ -18,6 +18,20 @@ export function costReconciliation(evidence: RunCostEvidence | null) {
     remainder: evidence.unattributedCostUsd,
     reconciled: evidence.reconciled,
   };
+}
+
+/** Never turn an unpriced or failed physical attempt into a fabricated $0.0000. */
+export function knownCallCost(call: RunStepCostCall): number | null {
+  if (call.knownCostUsd === null || call.costStatus?.startsWith('UNKNOWN')) return null;
+  const value = call.knownCostUsd ?? call.costUsd;
+  return Number.isFinite(value) && value >= 0 ? value : null;
+}
+
+/** Compact physical-attempt causality for the operator ledger. */
+export function attemptSummary(call: RunStepCostCall): string {
+  const kind = call.attemptKind || (call.retryOf ? 'RETRY' : 'PRIMARY');
+  const ordinal = call.attemptNumber && call.attemptNumber > 0 ? ` #${call.attemptNumber}` : '';
+  return `${kind}${ordinal}`;
 }
 
 /**

@@ -20,11 +20,14 @@ public interface ValidationReportRepository extends JpaRepository<ValidationRepo
   Optional<ValidationReport> findByShareTokenHash(String shareTokenHash);
 
   /**
-   * RL-2026-06-019 — batch (run_id, verified_score) pairs for the run-list endpoint so RunSummary
-   * can carry the headline score without an N+1 report lookup per row.
+   * RL-2026-06-019 — batch (run_id, verified_score, accuracy_json) rows for the run-list endpoint
+   * so RunSummary can carry the evidence-capped headline score without an N+1 report lookup per
+   * row. Accuracy evidence is part of the score projection and must travel with the snapshot.
    */
   @Query(
-      value = "SELECT run_id, verified_score FROM validation_report WHERE run_id IN (:runIds)",
+      value =
+          "SELECT run_id, verified_score, accuracy_json FROM validation_report WHERE run_id IN"
+              + " (:runIds)",
       nativeQuery = true)
   List<Object[]> findScoresByRunIds(@Param("runIds") List<String> runIds);
 

@@ -16,6 +16,8 @@ public interface AgentTaskRepository extends JpaRepository<AgentTask, String> {
 
   List<AgentTask> findByRunId(String runId);
 
+  List<AgentTask> findByRunIdIn(List<String> runIds);
+
   List<AgentTask> findByRunIdAndStatusIn(String runId, List<String> statuses);
 
   List<AgentTask> findByRunIdOrderByStartedAtAsc(String runId);

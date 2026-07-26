@@ -1,7 +1,6 @@
 package com.navneet.executespec.api;
 
 import java.util.Comparator;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -18,10 +17,13 @@ import com.navneet.executespec.codeintel.entity.RunCodeMap;
 import com.navneet.executespec.codeintel.repository.RunCodeMapRepository;
 import com.navneet.executespec.cost.EffectiveRouteProjection;
 import com.navneet.executespec.cost.RunEffectiveRouteService;
+import com.navneet.executespec.integration.PlannerFailureDiagnostic;
 import com.navneet.executespec.report.ValidationReportRepository;
+import com.navneet.executespec.report.ValidationReportScoreProjection;
 import com.navneet.executespec.report.entity.ValidationReport;
 import com.navneet.executespec.state.entity.AgentTask;
 import com.navneet.executespec.state.entity.PipelineRun;
+import com.navneet.executespec.state.repository.AgentTaskRepository;
 import com.navneet.executespec.state.repository.IntegrationRunRepository;
 import com.navneet.executespec.testgen.repository.TestPlanRepository;
 
@@ -35,6 +37,8 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class RunMapper {
 
+  private static final int UNPROVEN_COMPLETION_SCORE_CAP = 84;
+
   private final IntegrationRunRepository integrationRunRepository;
   private final ProjectRepository projectRepository;
   private final AppUserRepository appUserRepository;
@@ -43,6 +47,7 @@ public class RunMapper {
   private final ValidationReportRepository validationReportRepository;
   private final ManagedAiUsageEventRepository managedAiUsageEventRepository;
   private final RunEffectiveRouteService runEffectiveRouteService;
+  private final AgentTaskRepository agentTaskRepository;
   private final ObjectMapper objectMapper;
 
   public RunSummary toSummary(PipelineRun r) {
@@ -61,13 +66,22 @@ public class RunMapper {
   public List<RunSummary> toSummaries(List<PipelineRun> runs) {
     if (runs.isEmpty()) return List.of();
     List<String> ids = runs.stream().map(PipelineRun::getRunId).toList();
-    Map<String, Integer> scores = new HashMap<>();
-    for (Object[] row : validationReportRepository.findScoresByRunIds(ids)) {
-      if (row[0] != null && row[1] != null) {
-        scores.put(String.valueOf(row[0]), ((Number) row[1]).intValue());
-      }
-    }
-    return runs.stream().map(r -> toSummary(r, scores.get(r.getRunId()), null, null)).toList();
+    Map<String, Integer> scores =
+        ValidationReportScoreProjection.effectiveScores(
+            validationReportRepository.findScoresByRunIds(ids), objectMapper);
+    Map<String, List<AgentTask>> tasksByRun =
+        agentTaskRepository.findByRunIdIn(ids).stream()
+            .collect(java.util.stream.Collectors.groupingBy(AgentTask::getRunId));
+    return runs.stream()
+        .map(
+            r ->
+                toSummary(
+                    r,
+                    scores.get(r.getRunId()),
+                    null,
+                    null,
+                    tasksByRun.getOrDefault(r.getRunId(), List.of())))
+        .toList();
   }
 
   private RunSummary toSummary(
@@ -75,9 +89,19 @@ public class RunMapper {
       Integer verifiedScore,
       Boolean localExecutionRequested,
       Boolean localExecutionAccepted) {
+    return toSummary(r, verifiedScore, localExecutionRequested, localExecutionAccepted, List.of());
+  }
+
+  private RunSummary toSummary(
+      PipelineRun r,
+      Integer verifiedScore,
+      Boolean localExecutionRequested,
+      Boolean localExecutionAccepted,
+      List<AgentTask> tasks) {
+    String displayStatus = displayRunStatus(r.getStatus(), tasks);
     return new RunSummary(
         r.getRunId(),
-        r.getStatus(),
+        displayStatus,
         r.getUserRequest(),
         r.getCurrentGate(),
         r.getQueuePosition(),
@@ -105,13 +129,14 @@ public class RunMapper {
         r.getSourceRunId(),
         r.getHarnessVersion(),
         r.getActualCostUsd(),
-        r.getStatusReason(),
+        displayRunStatusReason(
+            r.getStatusReason(), r.getFailureReason(), r.getStatus(), displayStatus),
         // PR-B (2026-05-13) — hydrate PR URLs in the listing endpoint so the project launches
         // surface can render PR pills without a per-row drill-down. Prefer scm-agnostic
         // scmPrUrl; the legacy githubPrUrl ships alongside for pre-SCM-split back-compat.
         r.getScmPrUrl(),
         r.getGithubPrUrl(),
-        verifiedScore,
+        displayVerifiedScore(verifiedScore, displayStatus),
         localExecutionRequested,
         localExecutionAccepted);
   }
@@ -126,7 +151,7 @@ public class RunMapper {
   private String resolveCreatorName(String userId) {
     if (userId == null || userId.isBlank()) return null;
     return appUserRepository
-        .findById(userId)
+        .findNameById(userId)
         .map(
             u ->
                 ((u.getFirstName() != null ? u.getFirstName() : "")
@@ -224,10 +249,11 @@ public class RunMapper {
     // C1 (G4) — DERIVED effective route. Read from the physical-attempt ledger rather than stored,
     // so it can never drift from the usage facts it summarises.
     EffectiveRouteProjection effectiveRoute = runEffectiveRouteService.forRun(r.getRunId());
+    String displayStatus = displayRunStatus(r.getStatus(), tasks);
 
     return RunDetail.builder()
         .runId(r.getRunId())
-        .status(r.getStatus())
+        .status(displayStatus)
         .userRequest(r.getUserRequest())
         .currentGate(r.getCurrentGate())
         .queuePosition(r.getQueuePosition())
@@ -240,8 +266,10 @@ public class RunMapper {
         .completedAt(r.getCompletedAt())
         .repoUrl(r.getRepoUrl())
         .repoMode(r.getRepoMode())
-        .failureReason(r.getFailureReason())
-        .statusReason(r.getStatusReason())
+        .failureReason(displayRunFailureReason(r.getFailureReason(), r.getStatus(), displayStatus))
+        .statusReason(
+            displayRunStatusReason(
+                r.getStatusReason(), r.getFailureReason(), r.getStatus(), displayStatus))
         .planJson(r.getPlanJson())
         .reviewJson(r.getReviewJson())
         .runGoalDoneness(parseJson(r.getRunGoalDonenessJson(), "runGoalDoneness", r.getRunId()))
@@ -264,6 +292,7 @@ public class RunMapper {
         .costEstimateHigh(r.getCostEstimateHigh())
         .creditsCharged(r.getCreditsCharged())
         .aiCreditsCharged(managedAiUsageEventRepository.sumAiCreditsChargedByRunId(r.getRunId()))
+        .userCostCapUsd(r.getUserCostCap())
         .hardCapUsd(r.getHardCapUsd())
         // v2.6.2-track — hierarchical-planner phase breakdown.
         .planStrategy(r.getPlanStrategy())
@@ -330,7 +359,10 @@ public class RunMapper {
         // V2 runs expose validation state through the validation report itself.
         .validationStatus(null)
         .validationPhase(null)
-        .verifiedScore(report != null ? report.getVerifiedScore() : null)
+        .verifiedScore(
+            displayVerifiedScore(
+                ValidationReportScoreProjection.effectiveVerifiedScore(report, objectMapper),
+                displayStatus))
         .accuracyScore(report != null ? report.getAccuracyScore() : null)
         .reviewerVerdict(report != null ? report.getReviewerVerdict() : null)
         .finalBuildPassed(report != null ? report.getFinalBuildPassed() : null)
@@ -369,11 +401,17 @@ public class RunMapper {
   }
 
   public TaskSummary toTaskSummary(AgentTask t) {
+    JsonNode goalDoneness = parseJson(t.getGoalDonenessJson(), "goalDoneness", t.getTaskId());
+    String displayStatus = displayTaskStatus(t.getStatus(), goalDoneness);
+    String failureReason = extractFailureReason(t);
+    if (failureReason == null && "PARTIAL".equals(displayStatus) && goalDoneness != null) {
+      failureReason = goalDoneness.path("reason").asText(null);
+    }
     return new TaskSummary(
         t.getTaskId(),
         t.getTitle(),
         t.getComplexity(),
-        t.getStatus(),
+        displayStatus,
         t.getAssignedModel(),
         t.getProvider(),
         t.getModel(),
@@ -384,8 +422,8 @@ public class RunMapper {
         t.getDurationMs(),
         t.getStartedAt(),
         t.getCompletedAt(),
-        extractFailureReason(t),
-        parseJson(t.getGoalDonenessJson(), "goalDoneness", t.getTaskId()),
+        failureReason,
+        goalDoneness,
         parseJson(t.getContinuationDecisionJson(), "continuationDecision", t.getTaskId()),
         parseJson(t.getContinuationActionsJson(), "continuationActions", t.getTaskId()),
         extractObjective(t.getTaskJson()),
@@ -393,6 +431,81 @@ public class RunMapper {
         t.getParentTaskId(),
         t.getSubtaskIndex(),
         t.getSubtaskTotal());
+  }
+
+  /**
+   * A persisted COMPLETE row means the worker stopped at this task boundary; it does not override
+   * the task's later evidence-backed goal decision. Keep the persistence status unchanged for
+   * crash-resume bookkeeping, but fail closed in the customer-facing DTO whenever goal proof is
+   * present and not DONE. Legacy COMPLETE rows without goal proof remain backward compatible.
+   */
+  static String displayTaskStatus(String persistedStatus, JsonNode goalDoneness) {
+    if (!"COMPLETE".equals(persistedStatus) || goalDoneness == null) {
+      return persistedStatus;
+    }
+    String goalState = goalDoneness.path("state").asText("");
+    return goalState.isBlank()
+            || "DONE".equals(goalState)
+            || downstreamValidationDeferred(goalDoneness)
+        ? persistedStatus
+        : "PARTIAL";
+  }
+
+  String displayRunStatus(String persistedStatus, List<AgentTask> tasks) {
+    if (!"COMPLETE".equals(persistedStatus) || tasks == null || tasks.isEmpty()) {
+      return persistedStatus;
+    }
+    boolean allTasksProvenComplete = tasks.stream().allMatch(this::isTaskProvenCompleteForDisplay);
+    return allTasksProvenComplete ? persistedStatus : "PARTIAL";
+  }
+
+  static Integer displayVerifiedScore(Integer persistedScore, String displayStatus) {
+    if (persistedScore == null || "COMPLETE".equals(displayStatus)) return persistedScore;
+    return Math.min(persistedScore, UNPROVEN_COMPLETION_SCORE_CAP);
+  }
+
+  private boolean isTaskProvenCompleteForDisplay(AgentTask task) {
+    if (!"COMPLETE".equals(task.getStatus())) return false;
+    String json = task.getGoalDonenessJson();
+    if (json == null || json.isBlank()) return true;
+    try {
+      JsonNode proof = objectMapper.readTree(json);
+      String state = proof.path("state").asText("");
+      return state.isBlank() || "DONE".equals(state) || downstreamValidationDeferred(proof);
+    } catch (Exception error) {
+      log.warn(
+          "Malformed goal proof cannot certify run completion: taskId={} ({})",
+          task.getTaskId(),
+          error.getMessage());
+      return false;
+    }
+  }
+
+  private static boolean downstreamValidationDeferred(JsonNode goalDoneness) {
+    JsonNode evidence = goalDoneness == null ? null : goalDoneness.path("evidence");
+    if (evidence == null || !evidence.isArray()) return false;
+    for (JsonNode item : evidence) {
+      if ("downstreamValidationDeferred=true".equals(item.asText())) return true;
+    }
+    return false;
+  }
+
+  static String displayRunStatusReason(
+      String persistedReason,
+      String persistedFailure,
+      String persistedStatus,
+      String displayStatus) {
+    return "COMPLETE".equals(persistedStatus) && "PARTIAL".equals(displayStatus)
+        ? "TASK_PROOF_INCOMPLETE"
+        : PlannerFailureDiagnostic.projectStatusReason(persistedReason, persistedFailure);
+  }
+
+  private static String displayRunFailureReason(
+      String persistedFailure, String persistedStatus, String displayStatus) {
+    if (persistedFailure != null && !persistedFailure.isBlank()) return persistedFailure;
+    return "COMPLETE".equals(persistedStatus) && "PARTIAL".equals(displayStatus)
+        ? "one or more tasks lack durable completion proof"
+        : persistedFailure;
   }
 
   /** Parses the objective field from the planner's TaskDefinition JSON stored in the task. */

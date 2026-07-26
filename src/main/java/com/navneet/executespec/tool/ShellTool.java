@@ -1,13 +1,19 @@
 package com.navneet.executespec.tool;
 
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.TimeUnit;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.navneet.executespec.programbench.ProgramBenchContainerStore;
+import com.navneet.executespec.sandbox.SandboxExecResult;
+import com.navneet.executespec.sandboxroute.SandboxCommandRoutingService;
 import com.navneet.executespec.security.ContextSanitizer;
+import com.navneet.executespec.security.SafeWorkspacePath;
+import com.navneet.executespec.testgen.BoundedProcess;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
@@ -46,17 +52,20 @@ public class ShellTool implements Tool {
   // SWE-bench Pro uses /app.
   private final com.navneet.executespec.swebench.SwebenchContainerStore swebenchContainers;
   private final ContextSanitizer contextSanitizer;
+  private final SandboxCommandRoutingService sandboxRouting;
 
   @Autowired
   public ShellTool(
       ShellSandboxPolicy sandboxPolicy,
       ProgramBenchContainerStore programBenchContainers,
       com.navneet.executespec.swebench.SwebenchContainerStore swebenchContainers,
-      ContextSanitizer contextSanitizer) {
+      ContextSanitizer contextSanitizer,
+      SandboxCommandRoutingService sandboxRouting) {
     this.sandboxPolicy = sandboxPolicy;
     this.programBenchContainers = programBenchContainers;
     this.swebenchContainers = swebenchContainers;
     this.contextSanitizer = contextSanitizer;
+    this.sandboxRouting = sandboxRouting;
   }
 
   /** Compatibility constructor for focused tool tests. */
@@ -64,7 +73,7 @@ public class ShellTool implements Tool {
       ShellSandboxPolicy sandboxPolicy,
       ProgramBenchContainerStore programBenchContainers,
       com.navneet.executespec.swebench.SwebenchContainerStore swebenchContainers) {
-    this(sandboxPolicy, programBenchContainers, swebenchContainers, new ContextSanitizer());
+    this(sandboxPolicy, programBenchContainers, swebenchContainers, new ContextSanitizer(), null);
   }
 
   @Override
@@ -74,9 +83,11 @@ public class ShellTool implements Tool {
 
   @Override
   public String description() {
-    return "Executes a sandboxed shell command in the run's workspace. Use for build commands, test"
-        + " runs, package installs, and running your reproduction script. Subshells ($(...))"
-        + " and backticks are blocked. Large output is saved to a file — you'll get a"
+    return "Executes one sandboxed shell command with the run workspace already set as the working"
+        + " directory. Do not prefix with cd, an absolute workspace path, timeout, env, or a shell"
+        + " wrapper. Do not chain commands with &&, ||, ;, or pipes; make separate tool calls. Use"
+        + " buildProject/runTests when they fit. Subshells ($(...)) and backticks are blocked."
+        + " Large output is saved to a file — you'll get a"
         + " preview plus a path you can readFile for the complete output (e.g. a full"
         + " failure trace).";
   }
@@ -84,24 +95,24 @@ public class ShellTool implements Tool {
   @Override
   public String inputSchema() {
     return """
-           {
-             "type": "object",
-             "properties": {
-               "command": {
-                 "type": "string",
-                 "description": "Shell command to execute"
-               },
-               "timeoutSeconds": {
-                 "type": "integer",
-                 "description": "Optional timeout (default 60, max 300)",
-                 "minimum": 1,
-                 "maximum": 300
-               }
-             },
-             "required": ["command"],
-             "additionalProperties": false
-           }
-           """;
+{
+  "type": "object",
+  "properties": {
+    "command": {
+      "type": "string",
+      "description": "One command, relative to the existing workspace. No cd prefix, absolute workspace path, timeout/env/shell wrapper, chaining, pipe, subshell, or backticks."
+    },
+    "timeoutSeconds": {
+      "type": "integer",
+      "description": "Optional timeout (default 60, max 300)",
+      "minimum": 1,
+      "maximum": 300
+    }
+  },
+  "required": ["command"],
+  "additionalProperties": false
+}
+""";
   }
 
   @Override
@@ -145,6 +156,35 @@ public class ShellTool implements Tool {
       }
     }
 
+    if (containerId == null && sandboxRouting != null && sandboxRouting.routingEnabled()) {
+      SandboxExecResult sandboxed =
+          sandboxRouting.executeShell(
+              ctx.runId(), ctx.workspaceRoot(), command, Duration.ofSeconds(timeout));
+      return switch (sandboxed.status()) {
+        case COMPLETED ->
+            ToolResult.ok(
+                "exit="
+                    + sandboxed.exitCode()
+                    + "\n"
+                    + ToolOutput.budget(
+                        ctx,
+                        "shell",
+                        contextSanitizer.sanitizeOutput(
+                            SandboxCommandRoutingService.combinedOutput(sandboxed)),
+                        ToolOutput.DEFAULT_INLINE_CAP));
+        case TIMED_OUT ->
+            ToolResult.err(
+                ToolResult.ErrorKind.TIMEOUT,
+                "command exceeded " + timeout + "s timeout inside the sandbox: " + command);
+        case UNAVAILABLE, REFUSED ->
+            ToolResult.err(
+                ToolResult.ErrorKind.UNAVAILABLE,
+                "shell unavailable — the sandbox could not run it ("
+                    + sandboxed.detail()
+                    + "). It was NOT executed on the application host.");
+      };
+    }
+
     // The host-oriented ShellSandboxPolicy (blocks `cd <abs>`, heredocs, env-prefixes, chained
     // verbs not in its allowlist) is correct for HOST execution (product runs), but is both
     // unnecessary and actively harmful for IN-CONTAINER dispatch: it blocks the worker's own
@@ -158,7 +198,11 @@ public class ShellTool implements Tool {
           sandboxPolicy.validate(command, workspacePath);
       if (!validation.permitted()) {
         return ToolResult.err(
-            ToolResult.ErrorKind.FORBIDDEN, "command blocked by sandbox: " + validation.reason());
+            ToolResult.ErrorKind.FORBIDDEN,
+            "command blocked by sandbox: "
+                + validation.reason()
+                + ". Retry only the underlying command from the existing workspace; do not use cd,"
+                + " absolute workspace paths, timeout/env/shell wrappers, or command chaining.");
       }
     }
 
@@ -178,24 +222,21 @@ public class ShellTool implements Tool {
       // Sanitize env — whitelist only safe vars (matches V1 behavior).
       Map<String, String> env = pb.environment();
       String path = env.get("PATH");
-      String home = env.get("HOME");
-      String dockerHost = env.get("DOCKER_HOST");
       env.clear();
       if (path != null) env.put("PATH", path);
-      if (home != null) env.put("HOME", home);
-      if (dockerHost != null) env.put("DOCKER_HOST", dockerHost);
+      if (containerId == null) {
+        prepareHostEnvironment(env, ctx.workspaceRoot());
+      }
       pb.redirectErrorStream(true);
 
-      Process proc = pb.start();
-      boolean finished = proc.waitFor(timeout, TimeUnit.SECONDS);
-      if (!finished) {
-        proc.destroyForcibly();
+      BoundedProcess.Outcome outcome =
+          BoundedProcess.run(pb, java.time.Duration.ofSeconds(timeout));
+      if (!outcome.finished()) {
         return ToolResult.err(
             ToolResult.ErrorKind.TIMEOUT, "command exceeded " + timeout + "s timeout: " + command);
       }
-      String output =
-          contextSanitizer.sanitizeOutput(new String(proc.getInputStream().readAllBytes()));
-      int exit = proc.exitValue();
+      String output = contextSanitizer.sanitizeOutput(outcome.output());
+      int exit = outcome.exitCode();
       // Output budget (#6): large output is persisted to .agent-context/tool-output and the worker
       // gets a preview + a readFile path, so it can see a FULL failure trace instead of a 4 KB
       // fragment (the inline preview alone could not show why a test failed).
@@ -209,9 +250,23 @@ public class ShellTool implements Tool {
     } catch (IOException ioe) {
       log.warn("shell IO error command={}", command, ioe);
       return ToolResult.err(ToolResult.ErrorKind.IO_ERROR, ioe.getMessage());
-    } catch (InterruptedException ie) {
-      Thread.currentThread().interrupt();
-      return ToolResult.err(ToolResult.ErrorKind.INTERNAL, "interrupted");
+    } catch (Exception e) {
+      log.warn("shell process error command={}", command, e);
+      return ToolResult.err(ToolResult.ErrorKind.INTERNAL, e.getMessage());
     }
+  }
+
+  static void prepareHostEnvironment(Map<String, String> env, Path workspaceRoot)
+      throws IOException {
+    Path shellHome = SafeWorkspacePath.resolveWithin(workspaceRoot, ".agent-context/shell-home");
+    Path temp = SafeWorkspacePath.resolveWithin(workspaceRoot, ".agent-context/shell-tmp");
+    Path npmCache = SafeWorkspacePath.resolveWithin(workspaceRoot, ".agent-context/npm-cache");
+    Files.createDirectories(shellHome);
+    Files.createDirectories(temp);
+    Files.createDirectories(npmCache);
+    env.put("HOME", shellHome.toString());
+    env.put("TMPDIR", temp.toString());
+    env.put("NPM_CONFIG_CACHE", npmCache.toString());
+    env.put("PIP_REQUIRE_VIRTUALENV", "true");
   }
 }

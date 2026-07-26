@@ -12,7 +12,22 @@ import com.navneet.executespec.reviewer.model.ReviewVerdict;
  */
 final class ValidationReportScorePolicy {
 
+  /** A score at or above 85 is rendered as passing; unverified requirements cannot cross it. */
+  static final int UNVERIFIED_REQUIREMENTS_SCORE_CAP = 84;
+
   private ValidationReportScorePolicy() {}
+
+  static int capForAdmittedSpecGaps(
+      int score, int specAdherenceScore, int incompleteRequirements, int unknownRequirements) {
+    int capped = Math.max(0, Math.min(100, score));
+    if (incompleteRequirements > 0 || unknownRequirements > 0) {
+      capped = Math.min(capped, Math.max(0, Math.min(100, specAdherenceScore)));
+    }
+    if (unknownRequirements > 0) {
+      capped = Math.min(capped, UNVERIFIED_REQUIREMENTS_SCORE_CAP);
+    }
+    return capped;
+  }
 
   static double testFactorFromCoverageLevel(String testCoverageLevel) {
     if (testCoverageLevel == null) return 0.5;

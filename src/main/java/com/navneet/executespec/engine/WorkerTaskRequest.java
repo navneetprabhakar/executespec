@@ -1,6 +1,7 @@
 package com.navneet.executespec.engine;
 
 import java.util.List;
+import java.util.Set;
 
 import com.navneet.executespec.tool.ExecutionContext;
 
@@ -22,6 +23,11 @@ import lombok.Builder;
  * @param maxIterations max LLM calls; 0/null defaults to {@link WorkerAgent#DEFAULT_MAX_ITER}
  * @param temperature sampling temperature; null defaults to 0.0
  * @param maxTokensPerCall max output tokens per LLM call; null defaults per-provider
+ * @param allowedToolNames optional exact model-visible tool allow-list for a specialized worker
+ *     pass. Null preserves the normal provider/model worker tool set; a non-null set is
+ *     tighten-only and cannot introduce a tool the registry would not otherwise bind. This keeps
+ *     reviewer and other bounded passes from paying schema/context cost for unavailable or
+ *     irrelevant tools.
  * @param stagnationWarnAfter optional override for the stagnation-warn threshold (consecutive
  *     non-write iters before injecting a one-shot PROGRESS CHECK). When null, falls through to
  *     {@link WorkerAgent#STAGNATION_WARN_AFTER_N}. Use to give complex (HIGH-complexity)
@@ -169,6 +175,7 @@ public record WorkerTaskRequest(
     Integer maxIterations,
     Double temperature,
     Integer maxTokensPerCall,
+    Set<String> allowedToolNames,
     Integer stagnationWarnAfter,
     Integer stagnationForceAfter,
     Boolean requireTestVerification,

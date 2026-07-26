@@ -50,6 +50,7 @@ class LlmExecutionBudgetGateTest {
     when(usage.sumSuccessfulInputTokensByContextId("ctx-1")).thenReturn(0L);
     when(usage.sumSuccessfulOutputTokensByContextId("ctx-1")).thenReturn(0L);
     when(usage.sumSuccessfulCostByContextId("ctx-1")).thenReturn(0.0);
+    when(usage.countUnknownSuccessfulCostAttemptsByContextId("ctx-1")).thenReturn(0L);
     when(context.getMaxProviderCalls()).thenReturn(null);
     when(context.getMaxInputTokens()).thenReturn(null);
     when(context.getMaxOutputTokens()).thenReturn(null);
@@ -77,6 +78,33 @@ class LlmExecutionBudgetGateTest {
 
     verify(context).recordProviderCallReservation(1L);
     verify(repository).save(context);
+  }
+
+  @Test
+  void runChatBudgetAdmitsFourFullReasoningRoundsAndForcedSynthesis() {
+    LlmExecutionBudget chatBudget = LlmExecutionPolicyFactory.RUN_CHAT_TURN_BUDGET;
+    when(context.getMaxOutputTokens()).thenReturn(chatBudget.maxOutputTokens());
+    when(context.getMaxTotalTokens()).thenReturn(chatBudget.maxTotalTokens());
+    when(context.getMaxProviderCalls()).thenReturn(chatBudget.maxProviderCalls());
+    when(models.maxOutputForModel("m")).thenReturn(131_072);
+
+    for (long completedCalls = 0; completedCalls < 5; completedCalls++) {
+      when(context.getReservedProviderCalls()).thenReturn(completedCalls);
+      when(usage.countByLlmExecutionContextId("ctx-1")).thenReturn(completedCalls);
+      when(usage.sumSuccessfulOutputTokensByContextId("ctx-1")).thenReturn(completedCalls * 3_000L);
+
+      gate.reserveProviderCall(context, 3_000);
+
+      verify(context).recordProviderCallReservation(completedCalls + 1);
+    }
+
+    when(context.getReservedProviderCalls()).thenReturn(5L);
+    when(usage.countByLlmExecutionContextId("ctx-1")).thenReturn(5L);
+    when(usage.sumSuccessfulOutputTokensByContextId("ctx-1")).thenReturn(15_000L);
+    assertThatThrownBy(() -> gate.reserveProviderCall(context, 3_000))
+        .isInstanceOf(LlmDispatchPolicyException.class)
+        .extracting(e -> ((LlmDispatchPolicyException) e).reason())
+        .isEqualTo(LlmDispatchPolicyException.Reason.BUDGET_EXHAUSTED);
   }
 
   @Test
@@ -139,6 +167,18 @@ class LlmExecutionBudgetGateTest {
         .isInstanceOf(LlmDispatchPolicyException.class)
         .extracting(e -> ((LlmDispatchPolicyException) e).reason())
         .isEqualTo(LlmDispatchPolicyException.Reason.BUDGET_EXHAUSTED);
+  }
+
+  @Test
+  void successfulCallWithUnknownCostClosesDollarBudgetBeforeMoreSpend() {
+    when(context.getMaxCostUsd()).thenReturn(new BigDecimal("10.00"));
+    when(usage.countUnknownSuccessfulCostAttemptsByContextId("ctx-1")).thenReturn(1L);
+
+    assertThatThrownBy(() -> gate.reserveProviderCall(context))
+        .isInstanceOf(LlmDispatchPolicyException.class)
+        .extracting(e -> ((LlmDispatchPolicyException) e).reason())
+        .isEqualTo(LlmDispatchPolicyException.Reason.BUDGET_EXHAUSTED);
+    verify(context, never()).recordProviderCallReservation(org.mockito.ArgumentMatchers.anyLong());
   }
 
   @Test

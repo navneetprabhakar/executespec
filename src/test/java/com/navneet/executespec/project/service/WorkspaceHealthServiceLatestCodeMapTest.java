@@ -78,4 +78,23 @@ class WorkspaceHealthServiceLatestCodeMapTest {
     verify(codeMapRepo, never()).findByProjectId(any());
     verify(codeMapRepo, never()).findByProjectId(eq("proj-1"));
   }
+
+  @Test
+  void invalidatesTheExactRepoScopedOriginShaKey() {
+    StringRedisTemplate redis = mock(StringRedisTemplate.class);
+    WorkspaceHealthService cacheOwner =
+        new WorkspaceHealthService(
+            linkRepo,
+            repoRepo,
+            codeMapRepo,
+            prRepo,
+            mock(ScmRepositoryClientRegistry.class),
+            mock(ScmCredentialResolver.class),
+            redis);
+    UUID repoId = UUID.randomUUID();
+
+    cacheOwner.invalidateOriginSha(repoId);
+
+    verify(redis).delete(WorkspaceHealthService.ORIGIN_SHA_PREFIX + repoId);
+  }
 }

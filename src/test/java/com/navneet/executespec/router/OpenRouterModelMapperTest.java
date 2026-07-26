@@ -7,7 +7,7 @@ import org.junit.jupiter.api.Test;
 
 /**
  * Pins the verified matrix-id → OpenRouter-slug allow-list (checked against the live OpenRouter
- * catalogue 2026-05-21). If a matrix model id changes, this test fails until the slug is
+ * catalogue 2026-07-24). If a matrix model id changes, this test fails until the slug is
  * re-verified.
  */
 class OpenRouterModelMapperTest {
@@ -24,8 +24,13 @@ class OpenRouterModelMapperTest {
     assertThat(OpenRouterModelMapper.toSlug("gpt-5.4-mini")).isEqualTo("openai/gpt-5.4-mini");
     assertThat(OpenRouterModelMapper.toSlug("gemini-3.5-flash"))
         .isEqualTo("google/gemini-3.5-flash");
-    assertThat(OpenRouterModelMapper.toSlug("gemini-3-flash-preview"))
-        .isEqualTo("google/gemini-3-flash-preview");
+    assertThat(OpenRouterModelMapper.toSlug("claude-fable-5"))
+        .isEqualTo("anthropic/claude-fable-5");
+    assertThat(OpenRouterModelMapper.toSlug("gpt-5.6-sol")).isEqualTo("openai/gpt-5.6-sol");
+    assertThat(OpenRouterModelMapper.toSlug("gpt-5.6-terra")).isEqualTo("openai/gpt-5.6-terra");
+    assertThat(OpenRouterModelMapper.toSlug("gpt-5.6-luna")).isEqualTo("openai/gpt-5.6-luna");
+    assertThat(OpenRouterModelMapper.toSlug("gemini-3.6-flash"))
+        .isEqualTo("google/gemini-3.6-flash");
   }
 
   @Test
@@ -41,8 +46,16 @@ class OpenRouterModelMapperTest {
   }
 
   @Test
+  void maps_latest_openrouter_only_agentic_models() {
+    assertThat(OpenRouterModelMapper.toSlug("kimi-k3")).isEqualTo("moonshotai/kimi-k3");
+    assertThat(OpenRouterModelMapper.toSlug("qwen3.7-plus")).isEqualTo("qwen/qwen3.7-plus");
+    assertThat(OpenRouterModelMapper.toSlug("qwen3.7-max")).isEqualTo("qwen/qwen3.7-max");
+    assertThat(OpenRouterModelMapper.toSlug("grok-4.5")).isEqualTo("x-ai/grok-4.5");
+  }
+
+  @Test
   void unmapped_model_throws_so_we_never_send_an_unverified_slug() {
-    // gemini-3-pro-preview has no exact OpenRouter slug + is not tier-routed → must fail loudly.
+    // The retired raw id is canonicalized before dispatch and must not be sent directly.
     assertThatThrownBy(() -> OpenRouterModelMapper.toSlug("gemini-3-pro-preview"))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("No verified OpenRouter slug");
@@ -53,6 +66,7 @@ class OpenRouterModelMapperTest {
   @Test
   void isSupported_is_consistent_with_toSlug() {
     assertThat(OpenRouterModelMapper.isSupported("gpt-5.4")).isTrue();
+    assertThat(OpenRouterModelMapper.isSupported("gemini-3-flash-preview")).isFalse();
     assertThat(OpenRouterModelMapper.isSupported("gemini-3-pro-preview")).isFalse();
     assertThat(OpenRouterModelMapper.isSupported(null)).isFalse();
   }

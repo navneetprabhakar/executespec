@@ -3,6 +3,7 @@ package com.navneet.executespec.project.service;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.util.List;
@@ -35,6 +36,8 @@ class ProjectRepoServiceProjectMemberTest {
   private final ProjectRepository projectRepo = mock(ProjectRepository.class);
   private final ProjectMemberRepository projectMemberRepo = mock(ProjectMemberRepository.class);
   private final AppUserRepository userRepo = mock(AppUserRepository.class);
+  private final ProjectSourceFreshnessInvalidator freshnessInvalidator =
+      mock(ProjectSourceFreshnessInvalidator.class);
   private final ProjectRepoService service =
       new ProjectRepoService(
           repoRepo,
@@ -49,6 +52,7 @@ class ProjectRepoServiceProjectMemberTest {
           userRepo,
           mock(TierEnforcementService.class),
           mock(GovernanceGuard.class),
+          freshnessInvalidator,
           mock(ObjectProvider.class));
 
   @Test
@@ -92,5 +96,43 @@ class ProjectRepoServiceProjectMemberTest {
     assertThrows(
         ResponseStatusException.class,
         () -> service.listProjectRepos("project-1", "outsider", "other-org"));
+  }
+
+  @Test
+  void linkInvalidatesTheExactRepoAndProjectFreshnessKeys() {
+    UUID repoId = UUID.randomUUID();
+    Project project = Project.builder().id("project-1").orgId("org-1").name("P").build();
+    ProjectRepo repo =
+        ProjectRepo.builder()
+            .id(repoId)
+            .scope(ProjectRepo.Scope.USER)
+            .ownerUserId("user-1")
+            .sourceType(ProjectRepo.SourceType.SCM.name())
+            .scmProvider("GITHUB")
+            .githubRepoFullName("acme/widget")
+            .sourceCapabilities(List.of("ATTACH"))
+            .build();
+    when(projectRepo.findById("project-1")).thenReturn(Optional.of(project));
+    when(repoRepo.findById(repoId)).thenReturn(Optional.of(repo));
+    when(linkRepo.findByProjectIdAndRepoId("project-1", repoId)).thenReturn(Optional.empty());
+
+    service.linkToProject("project-1", repoId, "user-1", "org-1");
+
+    verify(freshnessInvalidator).invalidateLink("project-1", repoId);
+  }
+
+  @Test
+  void unlinkInvalidatesTheExactRepoAndProjectFreshnessKeys() {
+    UUID repoId = UUID.randomUUID();
+    Project project = Project.builder().id("project-1").orgId("org-1").name("P").build();
+    when(projectRepo.findById("project-1")).thenReturn(Optional.of(project));
+    when(linkRepo.findByProjectIdAndRepoId("project-1", repoId))
+        .thenReturn(
+            Optional.of(ProjectRepoLink.builder().projectId("project-1").repoId(repoId).build()));
+
+    service.unlinkFromProject("project-1", repoId, "user-1", "org-1");
+
+    verify(linkRepo).deleteByProjectIdAndRepoId("project-1", repoId);
+    verify(freshnessInvalidator).invalidateLink("project-1", repoId);
   }
 }

@@ -60,8 +60,8 @@ public class ToolRegistry {
   private final RemoteToolDispatcher remoteToolDispatcher;
 
   /**
-   * Gates the T1 lean-toolset worker binding ({@code worker.lean-toolset.enabled}). Nullable in
-   * unit tests (null ⇒ flag treated as OFF ⇒ legacy full binding).
+   * Gates the T1 lean-toolset worker binding ({@code worker.lean-toolset.enabled}, graduated ON by
+   * V340). Nullable in unit tests (null ⇒ flag treated as OFF ⇒ legacy full binding).
    */
   private final com.navneet.executespec.config.featureflag.FeatureFlagService featureFlagService;
 
@@ -138,8 +138,8 @@ public class ToolRegistry {
           "backgroundProcess");
 
   /**
-   * Harness-resolution T1 (flag {@code worker.lean-toolset.enabled}, V255, default OFF) — the
-   * canonical toolset for SERVER-SIDE workers. The registry also carries ~25 CLI-parity
+   * Harness-resolution T1 (flag {@code worker.lean-toolset.enabled}, V255, graduated ON by V340) —
+   * the canonical toolset for SERVER-SIDE workers. The registry also carries ~25 CLI-parity
    * alias/fallback tools ({@code read_file} / {@code bash} / {@code grep} / {@code multiEdit} /
    * {@code executeCommand} / {@code lsp} / stubs — see {@link CommandToolConfiguration}); binding
    * those to server workers duplicates the schema 2-3× (schema-token bloat, the RL-2026-05-061
@@ -323,6 +323,16 @@ public class ToolRegistry {
    * different tool-schema behaviour.
    */
   public List<ToolCallback> bindForWorker(ExecutionContext ctx, String provider, String model) {
+    return bindForWorker(ctx, provider, model, null);
+  }
+
+  /**
+   * Provider/model-aware worker bind with a caller-supplied tighten-only allow-list. The allow-list
+   * is applied after every registry, flag, remote/local and provider capability restriction, so it
+   * cannot re-enable a forbidden tool.
+   */
+  public List<ToolCallback> bindForWorker(
+      ExecutionContext ctx, String provider, String model, java.util.Set<String> allowedNames) {
     final boolean remote = isRemoteRun(ctx);
     // T1 lean toolset: server-side workers get the canonical set only when enabled. Remote workers
     // are always canonical because transmitting duplicate aliases on every LLM turn is pure schema
@@ -343,6 +353,7 @@ public class ToolRegistry {
         .filter(t -> isToolBound(t) || profileTools.contains(t.name()))
         .filter(t -> !remote || remoteTools.contains(t.name()))
         .filter(t -> !lean || LEAN_WORKER_TOOLS.contains(t.name()))
+        .filter(t -> allowedNames == null || allowedNames.contains(t.name()))
         .map(
             t ->
                 (ToolCallback)

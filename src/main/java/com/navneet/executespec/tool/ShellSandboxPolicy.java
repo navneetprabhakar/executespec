@@ -457,7 +457,6 @@ public class ShellSandboxPolicy {
         continue;
       }
 
-      // Split on && and ||
       if (i + 1 < chars.length) {
         if ((c == '&' && chars[i + 1] == '&') || (c == '|' && chars[i + 1] == '|')) {
           segments.add(current.toString());
@@ -467,11 +466,13 @@ public class ShellSandboxPolicy {
         }
       }
 
-      // Split on ;, single |, a lone & (background operator), subshell/command-group delimiters,
-      // and raw newlines. /bin/sh treats all of these as command separators, so each resulting
-      // segment must get the same per-segment allowlist validation as a semicolon-delimited one.
-      // The && / || cases above already consumed their second char via i++, so reaching here with
-      // c == '&' means a lone &. (RR-1540)
+      if (ShellCommandSeparatorPolicy.isFileDescriptorDuplication(chars, i, current)) {
+        current.append(c);
+        continue;
+      }
+
+      // /bin/sh treats these as separators; &&/|| above already consumed their second character,
+      // so a remaining ampersand is the lone background operator. (RR-1540)
       if (c == ';' || c == '|' || c == '&' || c == '(' || c == ')' || c == '{' || c == '}'
           || c == '\n' || c == '\r' || c == '\f') {
         segments.add(current.toString());
@@ -505,7 +506,7 @@ public class ShellSandboxPolicy {
       log.warn("SHELL BLOCKED (executable origin): {} in: {}", tokens[0], cmdFp);
       return ValidationResult.block(origin.rejection());
     }
-    String firstToken = origin.commandName();
+    String firstToken = ShellExecutableFamily.allowlistName(origin.commandName());
 
     if (!ALLOWED_PREFIXES.contains(firstToken)) {
       log.warn("SHELL BLOCKED (chained command not in allowlist): '{}' in: {}", firstToken, cmdFp);

@@ -79,4 +79,28 @@ class PersonalAccessTokenConcurrencyIntegrationTest extends PostgresIntegrationB
                 "SELECT COUNT(*) FROM personal_access_token WHERE user_id=?", Long.class, userId))
         .isEqualTo(10L);
   }
+
+  @Test
+  void resolvingActiveTokenPersistsLastUsedTimestamp() {
+    jdbc.update(
+        "INSERT INTO app_user"
+            + " (id,email,first_name,password_hash,tier,status) VALUES (?,?,?,?,?,?)",
+        userId,
+        userId + "@example.com",
+        "PAT",
+        "hash",
+        "FREE",
+        "ACTIVE");
+
+    PersonalAccessTokenService.CreatedToken created =
+        tokens.create(userId, new CreatePatRequest("last-used", null));
+
+    assertThat(tokens.resolveUserId(created.plaintext())).isEqualTo(userId);
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT last_used_at IS NOT NULL FROM personal_access_token WHERE id=?",
+                Boolean.class,
+                created.token().getId()))
+        .isTrue();
+  }
 }

@@ -2,6 +2,7 @@ import {describe, expect, it} from 'vitest';
 
 import {
   actorLabel,
+  architectureFreshnessBadge,
   availableOrgMembers,
   canManageMembership,
   canManageProjectSharing,
@@ -41,6 +42,50 @@ describe('RR-1469 — activity actor label', () => {
 });
 
 describe('projectMoreUtils', () => {
+  it('only calls architecture current when staleness is verified', () => {
+    expect(
+      architectureFreshnessBadge({
+        stale: false,
+        staleCount: 0,
+        totalCount: 2,
+        unknownCount: 1,
+        notMeasurableCount: 1,
+        verified: false,
+        repos: [],
+      }),
+    ).toEqual({kind: 'warn', label: 'Unverified · 1 unknown, 1 not measurable'});
+
+    expect(
+      architectureFreshnessBadge({
+        stale: false,
+        staleCount: 0,
+        totalCount: 1,
+        unknownCount: 0,
+        notMeasurableCount: 0,
+        verified: true,
+        repos: [],
+      }),
+    ).toEqual({kind: 'ok', label: 'Up to date'});
+  });
+
+  it('keeps stale and missing architecture measurements out of the green state', () => {
+    expect(architectureFreshnessBadge(null)).toEqual({
+      kind: 'warn',
+      label: 'Freshness unknown',
+    });
+    expect(
+      architectureFreshnessBadge({
+        stale: true,
+        staleCount: 1,
+        totalCount: 1,
+        unknownCount: 0,
+        notMeasurableCount: 0,
+        verified: true,
+        repos: [],
+      }),
+    ).toEqual({kind: 'warn', label: 'Stale'});
+  });
+
   it('detects assistant artifacts without classifying short normal answers', () => {
     expect(looksLikeArtifact('Short answer.')).toBe(false);
     expect(looksLikeArtifact('```ts\nconst x = 1;\n```')).toBe(true);

@@ -11,6 +11,7 @@ import java.util.Set;
 import com.navneet.executespec.agent.LlmRequest;
 import com.navneet.executespec.agent.LlmRouter;
 import com.navneet.executespec.agent.RunKeyContextStore;
+import com.navneet.executespec.agent.ToolProtocolLeakGuard;
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.config.AgentProperties;
 import com.navneet.executespec.cost.RunCostTracker;
@@ -657,12 +658,24 @@ claim in a tool result — never invent a runId, score, or status.""";
           calls.addAll(gen.getOutput().getToolCalls());
         }
       }
-      if (turnText.length() > 0) {
-        sink.token(contextSanitizer.sanitizeOutput(turnText.toString()));
+      if (calls.isEmpty()) {
+        if (ToolProtocolLeakGuard.containsProtocolMarkup(turnText.toString())) {
+          log.warn("spec-chat suppressed textual tool protocol (session {})", sessionId);
+          conversation.add(new AssistantMessage(turnText.toString()));
+          finalSynthesisInstruction =
+              "The previous provider response exposed internal tool-call markup instead of an "
+                  + "answer. Do not call or describe tools. Answer the original request using "
+                  + "only evidence already present; state exactly what evidence is missing.";
+          break;
+        }
+        if (turnText.length() > 0) {
+          sink.token(contextSanitizer.sanitizeOutput(turnText.toString()));
+        }
+        return round + 1; // final answer reached
       }
 
-      if (calls.isEmpty()) {
-        return round + 1; // final answer reached
+      if (turnText.length() > 0) {
+        sink.token(contextSanitizer.sanitizeOutput(turnText.toString()));
       }
 
       conversation.add(
@@ -739,12 +752,12 @@ claim in a tool result — never invent a runId, score, or status.""";
               .map(generation -> generation.getOutput().getText())
               .filter(text -> text != null && !text.isBlank())
               .collect(java.util.stream.Collectors.joining("\n"));
-      if (!finalText.isBlank()) {
+      if (!finalText.isBlank() && !ToolProtocolLeakGuard.containsProtocolMarkup(finalText)) {
         sink.token(contextSanitizer.sanitizeOutput(finalText));
       } else {
         sink.token(
-            "_(I gathered evidence but could not produce a final synthesis. No additional tools "
-                + "were executed.)_");
+            "_(I could not produce a safe grounded answer. Internal provider tool output was "
+                + "suppressed.)_");
       }
       return completedRounds + 1;
     } catch (Exception synthesisFailure) {

@@ -19,6 +19,8 @@ public interface RunStepUsageRepository extends JpaRepository<RunStepUsage, Stri
 
   long countByRunId(String runId);
 
+  long countByRunIdAndAttemptStatus(String runId, String attemptStatus);
+
   /**
    * Sum of the attempts whose cost is PROVEN. Deliberately excludes non-SUCCESS attempts (persisted
    * with a hard zero cost) and SUCCESS attempts that consumed tokens yet priced to exactly zero —
@@ -28,13 +30,27 @@ public interface RunStepUsageRepository extends JpaRepository<RunStepUsage, Stri
   @Query(
       "select coalesce(sum(u.costUsd), 0.0) from RunStepUsage u "
           + "where u.runId = :runId and upper(coalesce(u.attemptStatus, '')) = 'SUCCESS' "
+          + "and u.costUsd >= 0.0 "
           + "and not (u.costUsd = 0.0 and (u.inputTokens > 0 or u.outputTokens > 0))")
   Double sumKnownCostByRunId(@Param("runId") String runId);
+
+  /**
+   * Known successful cost grouped by durable producer step. This survives a later fail-closed plan
+   * rejection even when the legacy phase snapshot was never persisted.
+   */
+  @Query(
+      "select u.stepId, coalesce(sum(u.costUsd), 0.0) from RunStepUsage u "
+          + "where u.runId = :runId and upper(coalesce(u.attemptStatus, '')) = 'SUCCESS' "
+          + "and u.costUsd >= 0.0 "
+          + "and not (u.costUsd = 0.0 and (u.inputTokens > 0 or u.outputTokens > 0)) "
+          + "group by u.stepId")
+  List<Object[]> sumKnownCostByRunIdGroupedByStepId(@Param("runId") String runId);
 
   /** Count of attempts whose cost the ledger cannot prove; the complement of the sum above. */
   @Query(
       "select count(u) from RunStepUsage u "
           + "where u.runId = :runId and (upper(coalesce(u.attemptStatus, '')) <> 'SUCCESS' "
+          + "or u.costUsd < 0.0 "
           + "or (u.costUsd = 0.0 and (u.inputTokens > 0 or u.outputTokens > 0)))")
   Long countUnknownCostAttemptsByRunId(@Param("runId") String runId);
 
@@ -68,7 +84,35 @@ public interface RunStepUsageRepository extends JpaRepository<RunStepUsage, Stri
   Long sumSuccessfulOutputTokensByRunId(@Param("runId") String runId);
 
   @Query(
+      "select coalesce(sum(u.cacheReadTokens), 0) from RunStepUsage u "
+          + "where u.runId = :runId and u.attemptStatus = 'SUCCESS'")
+  Long sumSuccessfulCacheReadTokensByRunId(@Param("runId") String runId);
+
+  @Query(
+      "select coalesce(sum(u.cacheWriteTokens), 0) from RunStepUsage u "
+          + "where u.runId = :runId and u.attemptStatus = 'SUCCESS'")
+  Long sumSuccessfulCacheWriteTokensByRunId(@Param("runId") String runId);
+
+  @Query(
+      "select coalesce(sum(u.reasoningTokens), 0) from RunStepUsage u "
+          + "where u.runId = :runId and u.attemptStatus = 'SUCCESS'")
+  Long sumSuccessfulReasoningTokensByRunId(@Param("runId") String runId);
+
+  @Query(
       "select coalesce(sum(u.costUsd), 0.0) from RunStepUsage u "
-          + "where u.llmExecutionContextId = :contextId and u.attemptStatus = 'SUCCESS'")
+          + "where u.llmExecutionContextId = :contextId and u.attemptStatus = 'SUCCESS' "
+          + "and u.costUsd >= 0.0 "
+          + "and not (u.costUsd = 0.0 and (u.inputTokens > 0 or u.outputTokens > 0))")
   Double sumSuccessfulCostByContextId(@Param("contextId") String contextId);
+
+  /**
+   * Successful calls whose provider spend could not be projected. These cannot safely be treated as
+   * free when a durable execution context has a dollar ceiling.
+   */
+  @Query(
+      "select count(u) from RunStepUsage u "
+          + "where u.llmExecutionContextId = :contextId and u.attemptStatus = 'SUCCESS' "
+          + "and (u.costUsd < 0.0 "
+          + "or (u.costUsd = 0.0 and (u.inputTokens > 0 or u.outputTokens > 0)))")
+  Long countUnknownSuccessfulCostAttemptsByContextId(@Param("contextId") String contextId);
 }

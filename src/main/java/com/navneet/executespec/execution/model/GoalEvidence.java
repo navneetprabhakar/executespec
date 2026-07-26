@@ -59,7 +59,9 @@ public record GoalEvidence(
     maxStaleExplanations = maxStaleExplanations <= 0 ? Integer.MAX_VALUE : maxStaleExplanations;
     budgetCeilingReason =
         budgetCeilingReason == null || budgetCeilingReason.isBlank()
-            ? "budget, token, iteration, or wall-clock ceiling reached"
+            ? (budgetCeilingReached
+                ? "budget, token, iteration, or wall-clock ceiling reached"
+                : "")
             : budgetCeilingReason;
     inputTokens = Math.max(0, inputTokens);
     outputTokens = Math.max(0, outputTokens);

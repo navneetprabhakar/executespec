@@ -81,8 +81,22 @@ REAL OVER MOCK — preference order for test dependencies:
 1. Real implementation (highest confidence) — these tests hit a real server, use it
 2. Real test data (unique per test, cleaned up after)
 3. Never mock the server — the whole point is integration testing
+4. For concurrency, issue genuinely parallel requests to the live server and verify final state via
+   a later public API read; sequential calls or a shared application session are not concurrency proof
 If a test requires a precondition (e.g., user must exist to test GET /users/{id}),
 CREATE the precondition via API call in the test setup, don't assume it exists.
+
+For idempotency, compare the first and replayed status, body, and contract-relevant headers exactly;
+also send the same key with a different payload and race simultaneous first requests. A status-only
+replay assertion is insufficient.
+For concurrent mutation or cancellation, assert every parallel response as well as final state;
+intermittent 5xx responses fail the contract even when one request eventually commits the right state.
+For concurrent first use of one idempotency key, synchronize independent clients before sending,
+repeat the race to expose intermittent unique/lock/busy failures, assert every response is the
+documented first result or exact replay with no 5xx, and verify the mutation committed exactly once.
+When the requirement names lines/items/multiple SKUs or an atomic multi-item operation, exercise at
+least two distinct items through the public boundary and verify all-or-nothing rollback. A
+single-product parent record or repeated one-item test is not valid coverage.
 
 TEST ISOLATION — MANDATORY:
 - Every test method must use unique data that cannot conflict with other tests.

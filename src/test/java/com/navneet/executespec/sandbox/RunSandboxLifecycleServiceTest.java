@@ -92,6 +92,19 @@ class RunSandboxLifecycleServiceTest {
   }
 
   @Test
+  void expiryDelegatesToRuntimeTeardownBeforeSettlingTheRow() {
+    RunSandbox expired = orphan();
+    when(store.expiryCandidates(anyInt())).thenReturn(List.of(expired));
+    when(dispatcher.reconcileExpired(any(), any(), any(Duration.class)))
+        .thenReturn(Optional.of(expired));
+
+    assertThat(lifecycle.expire()).isEqualTo(1);
+
+    verify(dispatcher).reconcileExpired(any(), any(), any(Duration.class));
+    verify(store, never()).forceTerminal(any(), any(), any());
+  }
+
+  @Test
   void retentionIsSeparateFromLifecycleSoTeardownNeverDestroysEvidence() {
     UUID id = UUID.randomUUID();
     when(store.markRetention(id, SandboxRetentionState.RETAINED, "gs://evidence")).thenReturn(true);
@@ -123,6 +136,11 @@ class RunSandboxLifecycleServiceTest {
         SandboxSecretPolicy.NO_HOST_SECRETS,
         Instant.now().plusSeconds(600),
         null,
+        null,
+        null,
+        null,
+        null,
+        0,
         null,
         SandboxRetentionState.RETAINED,
         null,

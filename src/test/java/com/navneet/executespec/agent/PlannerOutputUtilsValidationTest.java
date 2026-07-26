@@ -43,6 +43,41 @@ class PlannerOutputUtilsValidationTest {
   }
 
   @Test
+  void skeletonRequirementCoverageIsValidatedWithoutExpandedBodies() {
+    Plan skeleton =
+        buildPlan(
+            List.of(
+                new RequirementSpec("R1", "Create warehouses", RequirementKind.FUNCTIONAL),
+                new RequirementSpec("R2", "Deactivate warehouses", RequirementKind.FUNCTIONAL)),
+            List.of(
+                skeletonTask("T1", "Persist warehouses", List.of("R1")),
+                skeletonTask("T2", "Expose warehouse lifecycle", List.of("R2"))),
+            Plan.RuntimeSurface.HTTP,
+            Classification.MULTI_TASK);
+
+    assertThat(PlannerOutputUtils.validateRequirementCoverage(skeleton)).isEmpty();
+  }
+
+  @Test
+  void skeletonRequirementCoverageRejectsFanOutWithoutOwnership() {
+    Plan skeleton =
+        buildPlan(
+            List.of(
+                new RequirementSpec("R1", "Create warehouses", RequirementKind.FUNCTIONAL),
+                new RequirementSpec("R2", "Deactivate warehouses", RequirementKind.FUNCTIONAL)),
+            List.of(
+                skeletonTask("T1", "Persist warehouses", List.of()),
+                skeletonTask("T2", "Expose warehouse lifecycle", List.of("R99"))),
+            Plan.RuntimeSurface.HTTP,
+            Classification.MULTI_TASK);
+
+    assertThat(PlannerOutputUtils.validateRequirementCoverage(skeleton))
+        .anyMatch(violation -> violation.contains("T1"))
+        .anyMatch(violation -> violation.contains("R99"))
+        .anyMatch(violation -> violation.contains("R1") && violation.contains("R2"));
+  }
+
+  @Test
   void emptyRequirementsListIsViolation() {
     Plan plan =
         buildPlan(
@@ -99,6 +134,128 @@ class PlannerOutputUtilsValidationTest {
 
     assertThat(PlannerOutputUtils.validatePlan(plan))
         .anyMatch(v -> v.contains("unknown ids") && v.contains("R99"));
+  }
+
+  @Test
+  void taskWithoutRequirementOwnershipIsRejectedAsLikelyInventedDeliverable() {
+    Plan plan =
+        buildPlan(
+            List.of(new RequirementSpec("R1", "Implement POST /jobs", RequirementKind.FUNCTIONAL)),
+            List.of(
+                task("T1", "Implement POST /jobs and tests", List.of("R1")),
+                task("T2", "Create unrequested OpenAPI specification", List.of())),
+            Plan.RuntimeSurface.HTTP,
+            Classification.MEDIUM);
+
+    assertThat(PlannerOutputUtils.validatePlan(plan))
+        .anyMatch(
+            violation ->
+                violation.contains("likely invented deliverables")
+                    && violation.contains("T2")
+                    && violation.contains("OpenAPI"));
+  }
+
+  @Test
+  void unrequestedStandaloneOpenApiFileIsRejectedEvenWhenBundledIntoARealTask() {
+    PlannedTask apiTask =
+        PlannedTask.builder()
+            .id("T1")
+            .title("Implement routes, tests, and OpenAPI")
+            .description("Implement POST /jobs and export openapi.yaml")
+            .complexity(PlannedTask.Complexity.MEDIUM)
+            .touchesFiles(List.of("src/routes.py", "tests/test_routes.py", "openapi.yaml"))
+            .meetsRequirements(List.of("R1"))
+            .build();
+    Plan plan =
+        buildPlan(
+            List.of(new RequirementSpec("R1", "Implement POST /jobs", RequirementKind.FUNCTIONAL)),
+            List.of(apiTask),
+            Plan.RuntimeSurface.HTTP,
+            Classification.MEDIUM);
+
+    assertThat(PlannerOutputUtils.validatePlan(plan))
+        .anyMatch(
+            violation ->
+                violation.contains("Unrequested OpenAPI/Swagger") && violation.contains("T1"));
+  }
+
+  @Test
+  void explicitlyRequestedOpenApiFileIsAllowed() {
+    PlannedTask apiTask =
+        PlannedTask.builder()
+            .id("T1")
+            .title("Implement routes, tests, and OpenAPI")
+            .description("Implement POST /jobs and export openapi.yaml")
+            .complexity(PlannedTask.Complexity.MEDIUM)
+            .touchesFiles(List.of("src/routes.py", "tests/test_routes.py", "openapi.yaml"))
+            .meetsRequirements(List.of("R1", "R2"))
+            .build();
+    Plan plan =
+        buildPlan(
+            List.of(
+                new RequirementSpec("R1", "Implement POST /jobs", RequirementKind.FUNCTIONAL),
+                new RequirementSpec("R2", "Deliver openapi.yaml", RequirementKind.CONSTRAINT)),
+            List.of(apiTask),
+            Plan.RuntimeSurface.HTTP,
+            Classification.MEDIUM);
+
+    assertThat(PlannerOutputUtils.validatePlan(plan))
+        .noneMatch(violation -> violation.contains("Unrequested OpenAPI/Swagger"));
+  }
+
+  @Test
+  void backendContractDerivedFrontendClientAuthorizesStandaloneOpenApiFile() {
+    PlannedTask apiTask =
+        PlannedTask.builder()
+            .id("T1")
+            .title("Implement routes and typed frontend client")
+            .description("Export openapi.yaml and generate the typed client from it")
+            .complexity(PlannedTask.Complexity.MEDIUM)
+            .touchesFiles(List.of("src/routes.py", "openapi.yaml", "frontend/src/api/types.ts"))
+            .meetsRequirements(List.of("R1"))
+            .build();
+    Plan plan =
+        buildPlan(
+            List.of(
+                new RequirementSpec(
+                    "R1",
+                    "Provide a typed frontend API client derived from the backend contract",
+                    RequirementKind.CONSTRAINT)),
+            List.of(apiTask),
+            Plan.RuntimeSurface.HTTP,
+            Classification.MEDIUM);
+
+    assertThat(PlannerOutputUtils.validateScopeIntegrity(plan))
+        .noneMatch(violation -> violation.contains("Unrequested OpenAPI/Swagger"));
+  }
+
+  @Test
+  void runtimeOpenApiEndpointMentionDoesNotAuthorizeStandaloneSpecificationFile() {
+    PlannedTask apiTask =
+        PlannedTask.builder()
+            .id("T1")
+            .title("Implement routes and tests")
+            .description("Implement POST /jobs and export openapi.yaml")
+            .complexity(PlannedTask.Complexity.MEDIUM)
+            .touchesFiles(List.of("src/routes.py", "tests/test_routes.py", "openapi.yaml"))
+            .meetsRequirements(List.of("R1", "R2"))
+            .build();
+    Plan plan =
+        buildPlan(
+            List.of(
+                new RequirementSpec("R1", "Implement POST /jobs", RequirementKind.FUNCTIONAL),
+                new RequirementSpec(
+                    "R2",
+                    "Poll /openapi.json only to detect when the runtime server is ready",
+                    RequirementKind.TEST)),
+            List.of(apiTask),
+            Plan.RuntimeSurface.HTTP,
+            Classification.MEDIUM);
+
+    assertThat(PlannerOutputUtils.validatePlan(plan))
+        .anyMatch(violation -> violation.contains("Unrequested OpenAPI/Swagger"));
+    assertThat(PlannerOutputUtils.validateScopeIntegrity(plan))
+        .anyMatch(violation -> violation.contains("Unrequested OpenAPI/Swagger"));
   }
 
   @Test
@@ -227,6 +384,17 @@ class PlannerOutputUtilsValidationTest {
         .description(title)
         .complexity(PlannedTask.Complexity.MEDIUM)
         .meetsRequirements(meetsRequirements)
+        .build();
+  }
+
+  private static PlannedTask skeletonTask(String id, String title, List<String> meetsRequirements) {
+    return PlannedTask.builder()
+        .id(id)
+        .title(title)
+        .description("")
+        .complexity(PlannedTask.Complexity.MEDIUM)
+        .meetsRequirements(meetsRequirements)
+        .taskType(PlannedTask.TaskType.LEAF)
         .build();
   }
 

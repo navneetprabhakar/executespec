@@ -90,7 +90,7 @@ class ValidationReportServiceVerificationLedgerTest {
     // RR-1646: the persisted test counts come from runner report files read off disk with no
     // exit-code check, so they cannot claim DETERMINISTIC/HIGH — the one label that asserts
     // independence from an LLM. Status is unchanged; only the provenance claim is weakened.
-    assertEntry(ledger, "tests", "WARN", "UNVERIFIED_COUNT", "MEDIUM");
+    assertEntry(ledger, "tests", "UNKNOWN", "UNVERIFIED_COUNT", "MEDIUM");
     assertEntry(ledger, "reviewer", "PASS", "LLM_REVIEWER", "MEDIUM");
     assertEntry(ledger, "spec-adherence", "PASS", "LLM_ASSESSMENT", "LOW");
     assertEntry(ledger, "endpoint-coverage", "WARN", "LLM_ASSISTED_COUNT", "MEDIUM");
@@ -99,6 +99,60 @@ class ValidationReportServiceVerificationLedgerTest {
     VerificationEvidenceDTO score = find(ledger, "score-summary");
     assertEquals("INTERNAL_FORMULA", score.source());
     assertTrue(score.summary().contains("Treat this as a summary, not independent proof."));
+  }
+
+  @Test
+  void unknownRequirementsKeepSpecProofAndRunGoalUncertain() {
+    ValidationReportRepository repository = mock(ValidationReportRepository.class);
+    StateStore stateStore = mock(StateStore.class);
+    ValidationReportService service =
+        new ValidationReportService(
+            repository, null, new ObjectMapper(), null, stateStore, null, flags);
+    ValidationReport report =
+        ValidationReport.builder()
+            .id("vr-unknown")
+            .runId("run-unknown")
+            .filesGenerated(3)
+            .pipelineResult(PipelineResult.PASSED)
+            .issuesJson("[]")
+            .finalBuildPassed(true)
+            .testsPassed(12)
+            .testsTotal(12)
+            .reviewerVerdict("CLEAN")
+            .verifiedScore(89)
+            .accuracyJson(
+                """
+                {
+                  "specAdherenceScore": 89,
+                  "overallAccuracyGrade": "B",
+                  "unknownRequirements": [
+                    "Could not verify that caller identity comes from an authenticated principal"
+                  ]
+                }
+                """)
+            .build();
+    when(repository.findByRunId("run-unknown")).thenReturn(Optional.of(report));
+    when(stateStore.findRun("run-unknown"))
+        .thenReturn(
+            Optional.of(
+                PipelineRun.builder()
+                    .runId("run-unknown")
+                    .userRequest("Build an authenticated inventory reservation API")
+                    .build()));
+
+    var dto = service.getByRunId("run-unknown").orElseThrow();
+
+    assertEntry(dto.verificationLedger(), "spec-adherence", "WARN", "LLM_ASSESSMENT", "LOW");
+    assertTrue(
+        find(dto.verificationLedger(), "spec-adherence")
+            .summary()
+            .contains("1 requirement(s) unverified"));
+    assertNotNull(dto.runGoalDecision());
+    assertEquals("UNCERTAIN", dto.runGoalDecision().state().name());
+    assertEquals(
+        "CONTINUE_SAME_MODEL_PROVIDER", dto.runGoalDecision().recommendedDecision().name());
+    assertEquals(84, dto.verifiedScore());
+    assertEquals("WARN", find(dto.verificationLedger(), "score-summary").status());
   }
 
   @Test
@@ -124,6 +178,35 @@ class ValidationReportServiceVerificationLedgerTest {
         new ValidationVerificationLedgerBuilder(new ObjectMapper());
 
     assertEquals(svc.buildVerificationLedger(report, issues), builder.build(report, issues));
+  }
+
+  @Test
+  void missingIndependentTestsExplainWhyWorkspaceTestsAreNotProof() {
+    ValidationReport report =
+        ValidationReport.builder()
+            .id("vr-tests-pending")
+            .runId("run-tests-pending")
+            .filesGenerated(2)
+            .pipelineResult(PipelineResult.NEEDS_ATTENTION)
+            .finalBuildPassed(true)
+            .testsPassed(0)
+            .testsTotal(0)
+            .testExecutionVerified(false)
+            .reviewerVerdict("CLEAN")
+            .verifiedScore(70)
+            .build();
+
+    var tests =
+        new ValidationVerificationLedgerBuilder(new ObjectMapper())
+            .build(report, List.of()).stream()
+                .filter(entry -> entry.id().equals("tests"))
+                .findFirst()
+                .orElseThrow();
+
+    assertEquals("UNKNOWN", tests.status());
+    assertTrue(tests.claim().contains("Worker-authored workspace tests are diagnostic"));
+    assertTrue(
+        tests.summary().contains("Independent end-to-end/functional verification is pending"));
   }
 
   @Test
@@ -342,6 +425,8 @@ class ValidationReportServiceVerificationLedgerTest {
             .finalBuildPassed(true)
             .testsPassed(2)
             .testsTotal(2)
+            .testExecutionVerified(true)
+            .testEvidenceScope("LIVE_PREVIEW_FUNCTIONAL")
             .reviewerVerdict("CLEAN")
             .verifiedScore(96)
             .accuracyJson("{\"specAdherenceScore\": 91}")
@@ -447,7 +532,7 @@ class ValidationReportServiceVerificationLedgerTest {
     assertEntry(
         svc.buildVerificationLedger(testDriven, List.of()),
         "executable-verification",
-        "PASS",
+        "UNKNOWN",
         "UNVERIFIED_COUNT",
         "MEDIUM");
 

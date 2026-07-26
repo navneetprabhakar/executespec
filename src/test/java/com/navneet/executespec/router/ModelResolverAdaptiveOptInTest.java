@@ -146,7 +146,7 @@ class ModelResolverAdaptiveOptInTest {
     ModelMatrixProperties.ProviderModels fireworks = new ModelMatrixProperties.ProviderModels();
     fireworks.setPlanning("deepseek-v4-pro-fw");
     fireworks.setWorkhorse("deepseek-v4-pro-fw");
-    fireworks.setLightweight("deepseek-v4-flash-fw");
+    fireworks.setLightweight("kimi-k2p6-fw");
     matrixProps.setAgentTierMap(Map.of("Worker", AgentTier.WORKHORSE));
     matrixProps.setProviders(Map.of("deepseek", nativeDeepSeek, "fireworks", fireworks));
     matrixProps.setFailoverOrder(Map.of("deepseek", java.util.List.of("openrouter", "fireworks")));

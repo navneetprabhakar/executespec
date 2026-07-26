@@ -18,8 +18,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 /**
- * RR-1660 — the evidence ledger may claim {@code DETERMINISTIC} for concrete test counts again, but
- * ONLY where V317 recorded a positive execution-provenance proof.
+ * Test evidence records both freshness and exercised boundary. Fresh workspace suites remain
+ * deterministic evidence, while only live-preview functional execution can prove product journeys.
  *
  * <p>The three-valued contract is the whole point: {@code null} (no signal recorded — every
  * pre-V317 row, and every producer that establishes no freshness) must read as UNPROVEN, never as
@@ -58,13 +58,46 @@ class ValidationReportExecutionProvenanceLedgerTest {
   }
 
   @Test
-  void provenExecutionRendersDeterministicHigh() {
+  void functionalExecutionRendersFunctionalDeterministicHigh() {
     VerificationEvidenceDTO tests =
-        row(greenReport().testExecutionVerified(Boolean.TRUE).build(), "tests");
+        row(
+            greenReport()
+                .testExecutionVerified(Boolean.TRUE)
+                .testEvidenceScope("LIVE_PREVIEW_FUNCTIONAL")
+                .build(),
+            "tests");
 
     assertEquals("PASS", tests.status());
-    assertEquals("DETERMINISTIC", tests.source());
+    assertEquals("DETERMINISTIC_FUNCTIONAL", tests.source());
     assertEquals("HIGH", tests.confidence());
+  }
+
+  @Test
+  void workspaceSuiteIsDeterministicButExplicitlyNotFunctional() {
+    VerificationEvidenceDTO tests =
+        row(
+            greenReport()
+                .testExecutionVerified(Boolean.TRUE)
+                .testEvidenceScope("WORKSPACE_TEST_SUITE")
+                .build(),
+            "tests");
+
+    assertEquals("PASS", tests.status());
+    assertEquals("DETERMINISTIC_WORKSPACE_SUITE", tests.source());
+    assertEquals("HIGH", tests.confidence());
+    assertEquals(
+        RunContinuationDecision.CONTINUE_SAME_MODEL_PROVIDER,
+        new ValidationReportGoalProofEvaluator()
+            .evaluate(
+                "run-prov",
+                PipelineResult.PASSED,
+                svc.buildVerificationLedger(
+                    greenReport()
+                        .testExecutionVerified(Boolean.TRUE)
+                        .testEvidenceScope("WORKSPACE_TEST_SUITE")
+                        .build(),
+                    List.of()))
+            .recommendedDecision());
   }
 
   @Test
@@ -72,7 +105,7 @@ class ValidationReportExecutionProvenanceLedgerTest {
     // Pre-V317 rows and WorkspaceTestRunner paths that record no signal land here.
     VerificationEvidenceDTO tests = row(greenReport().build(), "tests");
 
-    assertEquals("PASS", tests.status());
+    assertEquals("UNKNOWN", tests.status());
     assertEquals("UNVERIFIED_COUNT", tests.source());
     assertEquals("MEDIUM", tests.confidence());
   }
@@ -82,6 +115,7 @@ class ValidationReportExecutionProvenanceLedgerTest {
     VerificationEvidenceDTO tests =
         row(greenReport().testExecutionVerified(Boolean.FALSE).build(), "tests");
 
+    assertEquals("UNKNOWN", tests.status());
     assertEquals("UNVERIFIED_COUNT", tests.source());
     assertEquals("MEDIUM", tests.confidence());
   }
@@ -112,16 +146,16 @@ class ValidationReportExecutionProvenanceLedgerTest {
             .executableTestsRun(Boolean.TRUE)
             .executableVerificationStatus("PASSED")
             .testExecutionVerified(Boolean.TRUE)
+            .testEvidenceScope("LIVE_PREVIEW_FUNCTIONAL")
             .build();
-    assertEquals("DETERMINISTIC", row(proven, "executable-verification").source());
+    assertEquals("DETERMINISTIC_FUNCTIONAL", row(proven, "executable-verification").source());
     assertEquals("HIGH", row(proven, "executable-verification").confidence());
   }
 
   @Test
   void nullProvenanceDoesNotReachStopDoneOnTheTestsRowAlone() {
     // RR-1660 explicitly requires verifying the goal-proof consequence rather than assuming it.
-    // The evaluator keys on row STATUS, not source/confidence, so an unproven-but-passing tests row
-    // must not be the thing that carries a run to STOP_DONE by itself.
+    // Neither missing counts nor a forged PASS with weak provenance may carry STOP_DONE.
     ValidationReport report = greenReport().testsPassed(0).testsTotal(0).build();
     List<VerificationEvidenceDTO> ledger = svc.buildVerificationLedger(report, List.of());
 

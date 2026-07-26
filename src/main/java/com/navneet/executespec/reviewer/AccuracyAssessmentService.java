@@ -107,9 +107,9 @@ C = 70-79: Core requirements met, some features missing
 D = 60-69: Basic skeleton present, significant features absent
 F = 0-59: Major portions of the spec are not implemented
 
-UNKNOWN is NOT counted as a gap. Score and grade reflect implemented + missing + partial only —
-absence of evidence is NOT evidence of absence. A spec with 8 IMPLEMENTED + 0 MISSING + 0 PARTIAL +
-4 UNKNOWN should grade A, not D, because we have no evidence anything is wrong.
+UNKNOWN is not a defect and is excluded from the implementation denominator, but unavailable
+evidence cannot prove complete adherence. Any UNKNOWN requirement caps specAdherenceScore at 89/B.
+Absence of evidence is not evidence of absence; it is also not evidence of completion.
 
 RULES — REQUIREMENT CLASSIFICATION (strict, four-way):
 
@@ -187,11 +187,44 @@ ADVERSARIAL CONTRACT EVIDENCE:
   reserved quantities is PARTIAL or MISSING even when the route itself exists.
 - Migration support is not proven by one arbitrary DDL call. If version advancement always writes
   the same next version, classify repeated migration support as PARTIAL.
+- "Authenticated customer" is not proven by accepting a caller-controlled customer-id header,
+  query parameter, or request field. Require readable credential/session/token verification that
+  derives a trusted principal, binds the idempotency scope to that principal, and enforces the same
+  owner boundary on read/cancel/update routes. A raw `X-Customer-Id` used as identity is negative
+  evidence, even when its variable name says authenticated.
+- Validate numeric business inputs at the public request boundary. If zero or negative quantities
+  can reach arithmetic such as `stock = stock - quantity`, non-negative stock is not enough: a
+  negative request can increase stock and create an invalid reservation. Classify that contract as
+  MISSING or PARTIAL and downgrade test coverage when the suite omits the adversarial case.
+- A migration file in the tree does not prove migration-backed startup when the documented/default
+  application path calls ORM `create_all`/schema auto-creation instead of the migration runner.
+- Concurrent idempotency is not proven by a race test that happens to schedule the first store
+  before other lookups. Require one atomic lookup + business mutation + first-decision persistence
+  boundary, exact replay responses, and quota/state consumption exactly once. Raw delimiter-
+  concatenated tenant/subject/idempotency keys are collision evidence unless components are escaped
+  or length-prefixed.
+- "Bounded memory" requires readable eviction of all live request-serving buckets/maps and a test
+  that advances the injected clock then observes their size fall. Starting eviction on a detached
+  store while the limiter constructs another store is MISSING. Cancellation checked only before a
+  blocking core call is PARTIAL/MISSING when the core interface cannot receive cancellation.
+- A configurable tenant header copied directly into context is caller-selected identity, not
+  authenticated middleware. Require credential verification that derives the tenant and a negative
+  test proving the raw tenant header alone is rejected.
+- Cross-feature reachability is part of implementation. If an empty/loading/error branch hides the
+  only create/retry control, classify the affected primary action as MISSING even when isolated CRUD
+  tests pass after pre-seeding state. Optional demo data must not be the only way to start.
+- Persisted/recovered state must enforce the complete invariant: every required collection member
+  exists exactly once, stable identities are unique, and values rejected interactively (for example
+  blank titles) are also rejected during restore. Field type checks alone are not safe recovery.
+- Do not infer responsive layout, visible focus, or WCAG contrast from component presence or DOM
+  order. Require readable CSS/computed/browser evidence. A README claim is not proof, and a viewport
+  test that asserts the same DOM structure at every width is not coverage of responsive rendering.
 
 SCORE COMPUTATION GUIDANCE:
 - Base score primarily on the IMPLEMENTED count vs the IMPLEMENTED+MISSING+PARTIAL count.
   Formula heuristic: score ≈ 100 × (implemented + 0.5×partial) / max(1, implemented + missing + partial).
-  UNKNOWN does not enter the denominator — it's neither credit nor penalty.
+  UNKNOWN does not enter the denominator, but one or more UNKNOWN rows cap the score at 89 because
+  the evidence cannot support an A-grade completeness claim.
 - README and documentation gaps count at most 5 points total toward specAdherenceScore.
 - The specAdherenceScore must primarily reflect FUNCTIONAL compliance (endpoints, features,
   business logic).
@@ -362,6 +395,7 @@ SCORE COMPUTATION GUIDANCE:
       // defect in unknownRequirements (for example, "release accepts no idempotency key"). Repair
       // that contradiction deterministically so an admitted hard gap cannot retain an A grade.
       AccuracyReportTruthPolicy.enforceConsistency(report);
+      AccuracyReportTruthPolicy.enforceDeterministicFailures(report, issues);
 
       log.info(
           "[AccuracyAssessment] Complete for run {}: {} ({}/100) — {} missing, {} partial,"
@@ -598,8 +632,8 @@ Return your assessment as a JSON object. No markdown fences. No explanation outs
   /**
    * Reads key source files (routes, controllers, models, entry points) and returns their content as
    * annotated snippets for the accuracy scorer. Cap is whatever {@link #inferKeyFilePaths} hands
-   * back — single-repo runs stay at 6, multi-repo runs scale up to {@code MULTI_REPO_TOTAL_CAP} (18
-   * by default = 6 per repo × 3 repos).
+   * back — single-repo runs stay bounded at 10, multi-repo runs scale up to {@code
+   * MULTI_REPO_TOTAL_CAP}.
    *
    * <p>P1.1 (2026-05-06, GA-readiness audit follow-up): the previous per-file cap was 2,500 chars,
    * which truncated FastAPI / Express routers with 5+ endpoints to imports + the first 2 handlers —
@@ -746,16 +780,16 @@ Return your assessment as a JSON object. No markdown fences. No explanation outs
    * or more distinct names get a per-repo budget of this size, capped at {@link
    * #MULTI_REPO_TOTAL_CAP} total files.
    */
-  static final int PER_REPO_BUDGET = 6;
+  static final int PER_REPO_BUDGET = 8;
 
   /** Read budget for single-repo / no-repos-prefix workspaces. */
-  static final int SINGLE_REPO_BUDGET = 6;
+  static final int SINGLE_REPO_BUDGET = 10;
 
   /**
    * Hard cap on total files read for the accuracy assessment regardless of how many repos a run
    * touches. Keeps per-call token cost bounded (18 × 2,500 chars ≈ 45K chars ≈ 11K extra tokens).
    */
-  static final int MULTI_REPO_TOTAL_CAP = 18;
+  static final int MULTI_REPO_TOTAL_CAP = 24;
 
   /**
    * Heuristically identifies key structural files from the file tree listing. Targets route
@@ -893,6 +927,12 @@ Return your assessment as a JSON object. No markdown fences. No explanation outs
   private static final java.util.regex.Pattern BOILERPLATE_FILENAME =
       java.util.regex.Pattern.compile("(?i)(^|/)(index|main|app|server)\\.[a-z0-9]+$");
 
+  private static final java.util.regex.Pattern RUNTIME_EVIDENCE_FILENAME =
+      java.util.regex.Pattern.compile(
+          "(?i)(^|/)(index|main|app|server|database|db|config|settings|security|auth|middleware)\\.[a-z0-9]+$");
+
+  private static final int RUNTIME_EVIDENCE_SLOTS = 3;
+
   /**
    * TIER A — files inside a structural directory ({@code routers/}, {@code services/}, …). These
    * are nearly always the deliverable: the worker added a route to {@code app/routers/ai.py}, not
@@ -914,9 +954,12 @@ Return your assessment as a JSON object. No markdown fences. No explanation outs
   }
 
   /**
-   * Pick {@code budget} files from {@code source}, preferring structural directories over
-   * structural filenames over non-structural fallbacks. Within a tier, shortest path wins as a
-   * tiebreaker (smallest-first ordering preserved from caller via {@code source} sort).
+   * Pick {@code budget} files from {@code source}, preferring structural directories and filenames
+   * while reserving bounded slots for the default runtime path. Without that reservation, route,
+   * service, model, and migration files can consume the entire sample while the application
+   * entrypoint, database initialization, or authentication middleware is omitted. That exact shape
+   * allowed a FastAPI run whose tests manually called {@code create_all} to receive 97/100 even
+   * though production startup bypassed its required Alembic migration.
    *
    * <p>2026-05-02 cap-at-10 from R-343 retained per tier to keep the read budget honest when a
    * Spring Boot project has 30 files in {@code controllers/}.
@@ -929,6 +972,21 @@ Return your assessment as a JSON object. No markdown fences. No explanation outs
     java.util.List<String> tierB =
         source.stream().filter(p -> structuralTier(p, structural) == 1).limit(10).toList();
     java.util.LinkedHashSet<String> picked = new java.util.LinkedHashSet<>();
+    int structuralBudget = Math.max(0, budget - RUNTIME_EVIDENCE_SLOTS);
+    for (String p : tierA) {
+      if (picked.size() >= structuralBudget) break;
+      picked.add(p);
+    }
+    for (String p : tierB) {
+      if (picked.size() >= structuralBudget) break;
+      picked.add(p);
+    }
+    source.stream()
+        .filter(p -> RUNTIME_EVIDENCE_FILENAME.matcher(p).find())
+        .filter(p -> !picked.contains(p))
+        .limit(RUNTIME_EVIDENCE_SLOTS)
+        .forEach(picked::add);
+    // If fewer runtime files exist, restore unused reserved slots to structural evidence.
     for (String p : tierA) {
       if (picked.size() >= budget) break;
       picked.add(p);

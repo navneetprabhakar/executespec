@@ -17,6 +17,12 @@ public class SandboxProperties {
   /** Default image for a strict sandbox. Pin by digest in any deployed configuration. */
   private String image = "docker.io/library/debian:stable-slim";
 
+  /** Numeric non-root identity used for both container startup and every docker exec. */
+  private int runtimeUid = 65532;
+
+  /** Numeric non-root group used for both container startup and every docker exec. */
+  private int runtimeGid = 65532;
+
   /** How long a runtime lease is valid before another JVM may take it over. */
   private Duration leaseDuration = Duration.ofMinutes(2);
 

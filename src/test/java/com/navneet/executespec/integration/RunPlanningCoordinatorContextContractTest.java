@@ -66,6 +66,8 @@ class RunPlanningCoordinatorContextContractTest {
                 + "- src/WidgetLoader.java");
     assertThat(prepared.spec()).isEqualTo(request.spec());
     assertThat(prepared.referenceDocs()).isEqualTo(request.referenceDocs());
+    assertThat(prepared.engineeringStandards()).isEqualTo(request.engineeringStandards());
+    assertThat(prepared.prReviewComments()).isEqualTo(request.prReviewComments());
   }
 
   @Test
@@ -94,6 +96,24 @@ class RunPlanningCoordinatorContextContractTest {
     assertThat(coordinator.preparePlannerRequest(request)).isSameAs(request);
   }
 
+  @Test
+  void recursiveEpicRequestPreservesEveryParentEvidenceChannel() {
+    PlannerRequest parent = request("base summary");
+
+    PlannerRequest child = RunPlanningCoordinator.epicPlannerRequest("child spec", parent);
+
+    assertThat(child.spec()).isEqualTo("child spec");
+    assertThat(child.workspaceSummary()).isEqualTo(parent.workspaceSummary());
+    assertThat(child.projectMemory()).isEqualTo(parent.projectMemory());
+    assertThat(child.projectBrief()).isEqualTo(parent.projectBrief());
+    assertThat(child.referenceDocs()).isEqualTo(parent.referenceDocs());
+    assertThat(child.contracts()).isEqualTo(parent.contracts());
+    assertThat(child.projectAdrs()).isEqualTo(parent.projectAdrs());
+    assertThat(child.engineeringStandards()).isEqualTo(parent.engineeringStandards());
+    assertThat(child.prReviewComments()).isEqualTo(parent.prReviewComments());
+    assertThat(child.tddMode()).isEqualTo(parent.tddMode());
+  }
+
   private static PlannerRequest request(String summary) {
     return PlannerRequest.builder()
         .spec("Fix WidgetLoader")
@@ -107,6 +127,7 @@ class RunPlanningCoordinatorContextContractTest {
         .referenceDocs("docs")
         .contracts("contracts")
         .projectAdrs("adrs")
+        .engineeringStandards("standards")
         .tddMode(true)
         .prReviewComments("review")
         .build();
@@ -127,6 +148,7 @@ class RunPlanningCoordinatorContextContractTest {
         null,
         orientation,
         flags,
+        null,
         null);
   }
 }

@@ -63,7 +63,13 @@ final class CloudRunProcess {
 
     boolean finished = process.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS);
     if (!finished) {
-      process.descendants().forEach(ProcessHandle::destroyForcibly);
+      try {
+        process.descendants().forEach(ProcessHandle::destroyForcibly);
+      } catch (RuntimeException denied) {
+        // Hardened hosts can deny ProcessHandle's process-table lookup. Preserve the deadline and
+        // still terminate the direct gcloud process instead of leaking the cleanup exception.
+        log.debug("gcloud descendant discovery unavailable: {}", denied.toString());
+      }
       process.destroyForcibly();
       process.waitFor(5, TimeUnit.SECONDS);
     }

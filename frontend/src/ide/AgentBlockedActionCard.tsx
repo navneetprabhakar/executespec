@@ -23,7 +23,7 @@ export function AgentBlockedActionCard({
     <div className='agent-card'>
       <div className='agent-card-head'>
         <RunsIcon size={16} />
-        <strong>Sandbox run not ready</strong>
+        <strong>Remote run not ready</strong>
       </div>
       <div className='agent-card-sub'>{cloudRunBlockingCopy(action)}</div>
       <div className='agent-card-actions'>

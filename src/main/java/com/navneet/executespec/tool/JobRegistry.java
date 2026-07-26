@@ -10,6 +10,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 
 import org.springframework.stereotype.Component;
 
@@ -129,11 +130,22 @@ public class JobRegistry {
   }
 
   private static void killTree(Process proc) {
+    List<ProcessHandle> descendants = List.of();
     try {
-      proc.descendants().forEach(ProcessHandle::destroyForcibly);
-      proc.destroyForcibly();
-    } catch (Exception e) {
-      log.debug("killTree failed (best-effort): {}", e.toString());
+      descendants = proc.descendants().toList();
+    } catch (RuntimeException e) {
+      log.debug("descendant discovery failed; terminating root process: {}", e.toString());
+    }
+    descendants.forEach(ProcessHandle::destroyForcibly);
+    proc.destroyForcibly();
+    try {
+      if (!proc.waitFor(2, TimeUnit.SECONDS)) {
+        proc.destroyForcibly();
+      }
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+    } finally {
+      descendants.stream().filter(ProcessHandle::isAlive).forEach(ProcessHandle::destroyForcibly);
     }
   }
 

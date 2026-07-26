@@ -19,6 +19,7 @@ class AnthropicModelOptionsTest {
     assertThat(AnthropicModelOptions.shouldOmitTemperature("claude-sonnet-5")).isTrue();
     assertThat(AnthropicModelOptions.shouldOmitTemperature("claude-sonnet-5-20260702")).isTrue();
     assertThat(AnthropicModelOptions.shouldOmitTemperature("claude-opus-4-8")).isTrue();
+    assertThat(AnthropicModelOptions.shouldOmitTemperature("claude-fable-5")).isTrue();
     assertThat(AnthropicModelOptions.shouldOmitTemperature("claude-sonnet-4-6")).isFalse();
   }
 

@@ -42,6 +42,11 @@ class RunCostEvidenceServiceTest {
     when(repo.findByRunIdOrderByCreatedAtDesc(eq(runId), any(Pageable.class)))
         .thenReturn((Page<RunStepUsage>) new PageImpl<>(newestFirst));
     when(repo.countByRunId(runId)).thenReturn((long) chronological.size());
+    when(repo.countByRunIdAndAttemptStatus(runId, "SUCCESS"))
+        .thenReturn(
+            chronological.stream()
+                .filter(call -> "SUCCESS".equals(call.getAttemptStatus()))
+                .count());
     when(repo.countUnknownCostAttemptsByRunId(runId)).thenReturn(unknownCostAttempts);
     when(repo.sumKnownCostByRunId(runId)).thenReturn(knownCost);
   }
@@ -101,6 +106,102 @@ class RunCostEvidenceServiceTest {
         .contains("deepseek-chat");
     assertThat(body).containsEntry("attributedCostUsd", 0.40).containsEntry("reconciled", false);
     assertThat((double) body.get("unattributedCostUsd")).isCloseTo(0.10, within(0.000001));
+  }
+
+  @Test
+  @SuppressWarnings("unchecked")
+  void failedPlanningRunRecoversPhaseCostsFromDurableStepLedger() {
+    RunStepUsageRepository repository = mock(RunStepUsageRepository.class);
+    RunCostEvidenceService service = new RunCostEvidenceService(repository);
+    PipelineRun run = new PipelineRun();
+    run.setRunId("planner-failed");
+    // The planner rejected the candidate before the legacy phase snapshots were persisted.
+    run.setOutlineCostUsd(0.003d);
+    when(repository.sumKnownCostByRunIdGroupedByStepId("planner-failed"))
+        .thenReturn(
+            List.of(
+                new Object[] {"planner.outline", 0.003d},
+                new Object[] {"planner.expand.T1", 0.012d},
+                new Object[] {"planner.expand.T2.semantic-repair", 0.004d},
+                new Object[] {"planner.coherence", 0.006d},
+                new Object[] {"worker.T1", 9.0d}));
+    stubLedger(repository, "planner-failed", List.of(), 0L, 0.025d);
+    Map<String, Object> body = new LinkedHashMap<>(Map.of("costUsd", 0.025d));
+
+    service.enrich(body, run, true, 0, SIZE);
+
+    Map<String, Double> phases = (Map<String, Double>) body.get("phases");
+    assertThat(phases)
+        .containsEntry("outline", 0.003d)
+        .containsEntry("expansion", 0.016d)
+        .containsEntry("coherence", 0.006d)
+        .containsEntry("classifier", 0d);
+    assertThat(phases.values()).allMatch(cost -> cost < 1d);
+  }
+
+  @Test
+  void asyncAttemptLedgerCannotProduceNegativeUnattributedCostOrStaleTokenTotals() {
+    RunStepUsageRepository repository = mock(RunStepUsageRepository.class);
+    RunCostEvidenceService service = new RunCostEvidenceService(repository);
+    PipelineRun run = new PipelineRun();
+    run.setRunId("async");
+    stubLedger(repository, "async", List.of(), 0L, 0.133d);
+    when(repository.sumSuccessfulInputTokensByRunId("async")).thenReturn(1_700_000L);
+    when(repository.sumSuccessfulOutputTokensByRunId("async")).thenReturn(98_000L);
+    when(repository.sumSuccessfulCacheReadTokensByRunId("async")).thenReturn(1_590_000L);
+    when(repository.sumSuccessfulCacheWriteTokensByRunId("async")).thenReturn(12L);
+    when(repository.sumSuccessfulReasoningTokensByRunId("async")).thenReturn(55_000L);
+    Map<String, Object> body =
+        new LinkedHashMap<>(
+            Map.of(
+                "costUsd", 0.129d,
+                "inputTokens", 1_689_000L,
+                "outputTokens", 94_000L));
+
+    service.enrich(body, run, true, 0, SIZE);
+
+    assertThat(body)
+        .containsEntry("costUsd", 0.133d)
+        .containsEntry("pipelineRecordedCostUsd", 0.129d)
+        .containsEntry("inputTokens", 1_700_000L)
+        .containsEntry("outputTokens", 98_000L)
+        .containsEntry("cacheReadTokens", 1_590_000L)
+        .containsEntry("cacheWriteTokens", 12L)
+        .containsEntry("reasoningTokens", 55_000L)
+        .containsEntry("unattributedCostUsd", 0.0d)
+        .containsEntry("reconciled", true);
+  }
+
+  @Test
+  void terminalNullCacheFieldsAreReplacedByLedgerTotalsInsteadOfCrashing() {
+    RunStepUsageRepository repository = mock(RunStepUsageRepository.class);
+    RunCostEvidenceService service = new RunCostEvidenceService(repository);
+    PipelineRun run = new PipelineRun();
+    run.setRunId("terminal");
+    stubLedger(repository, "terminal", List.of(), 0L, 0.16d);
+    when(repository.sumSuccessfulInputTokensByRunId("terminal")).thenReturn(1_000L);
+    when(repository.sumSuccessfulOutputTokensByRunId("terminal")).thenReturn(100L);
+    when(repository.sumSuccessfulCacheReadTokensByRunId("terminal")).thenReturn(800L);
+    when(repository.sumSuccessfulCacheWriteTokensByRunId("terminal")).thenReturn(20L);
+    when(repository.sumSuccessfulReasoningTokensByRunId("terminal")).thenReturn(40L);
+    Map<String, Object> body = new LinkedHashMap<>();
+    body.put("costUsd", 0.12d);
+    body.put("inputTokens", 900L);
+    body.put("outputTokens", 90L);
+    body.put("cacheReadTokens", null);
+    body.put("cacheWriteTokens", null);
+    body.put("reasoningTokens", null);
+    body.put("source", "stored_total");
+
+    service.enrich(body, run, true, 0, SIZE);
+
+    assertThat(body)
+        .containsEntry("costUsd", 0.16d)
+        .containsEntry("cacheReadTokens", 800L)
+        .containsEntry("cacheWriteTokens", 20L)
+        .containsEntry("reasoningTokens", 40L)
+        .containsEntry("calls", 0L)
+        .containsEntry("source", "stored_total+attempt_ledger");
   }
 
   /**
@@ -228,6 +329,45 @@ class RunCostEvidenceServiceTest {
     assertThat(body).containsEntry("reconciled", false).containsEntry("unknownCostAttempts", 1L);
     List<Map<String, Object>> calls = (List<Map<String, Object>>) body.get("stepCalls");
     assertThat(calls.get(0))
+        .containsEntry("knownCostUsd", null)
+        .containsEntry("costStatus", "UNKNOWN_PROVIDER_NOT_REPORTED");
+  }
+
+  /** A negative router sentinel means unknown cost; it must never lower the aggregate spend. */
+  @Test
+  @SuppressWarnings("unchecked")
+  void aNegativeUnknownCostSentinelIsNotPresentedOrSummedAsKnownSpend() {
+    RunStepUsageRepository repository = mock(RunStepUsageRepository.class);
+    RunCostEvidenceService service = new RunCostEvidenceService(repository);
+    PipelineRun run = new PipelineRun();
+    run.setRunId("r-negative");
+    RunStepUsage unknown =
+        RunStepUsage.builder()
+            .id("u-negative")
+            .runId("r-negative")
+            .attemptStatus("SUCCESS")
+            .provider("gemini")
+            .model("gemini-3-flash-preview")
+            .inputTokens(4_000)
+            .outputTokens(900)
+            .costUsd(-1d)
+            .createdAt(Instant.parse("2026-07-19T00:00:00Z"))
+            .build();
+    stubLedger(repository, "r-negative", List.of(unknown), 1L, 0d);
+    Map<String, Object> body = new LinkedHashMap<>(Map.of("costUsd", 0.4d, "calls", 1L));
+
+    service.enrich(body, run, true, 0, SIZE);
+
+    assertThat(body)
+        .containsEntry("costUsd", 0.4d)
+        .containsEntry("knownCostUsdLowerBound", 0d)
+        .containsEntry("unknownCostAttempts", 1L)
+        .containsEntry("physicalAttempts", 1L)
+        .containsEntry("successfulCalls", 1L)
+        .containsEntry("failedAttempts", 0L);
+    List<Map<String, Object>> calls = (List<Map<String, Object>>) body.get("stepCalls");
+    assertThat(calls.get(0))
+        .containsEntry("costUsd", -1d)
         .containsEntry("knownCostUsd", null)
         .containsEntry("costStatus", "UNKNOWN_PROVIDER_NOT_REPORTED");
   }

@@ -1336,7 +1336,7 @@ public class StateStore {
     // into heap, then group in Java. Now the per-user counts/token sums are aggregated in SQL
     // (one row per distinct run owner) and only the owning users' display names are batch-fetched,
     // so heap and query count no longer scale with the total run/user count.
-    List<PipelineRunRepository.UserRunAggregate> aggregates =
+    List<com.navneet.executespec.state.repository.UserRunAggregate> aggregates =
         since == null ? runRepo.aggregateUserRunStats() : runRepo.aggregateUserRunStatsSince(since);
     return buildUserStatsFromAggregates(aggregates);
   }
@@ -1347,10 +1347,10 @@ public class StateStore {
    * owner falls back to a truncated id, exactly as before), and the run-count-descending ordering.
    */
   private UserRunsSummaryData buildUserStatsFromAggregates(
-      List<PipelineRunRepository.UserRunAggregate> aggregates) {
+      List<com.navneet.executespec.state.repository.UserRunAggregate> aggregates) {
     List<String> userIds =
         aggregates.stream()
-            .map(PipelineRunRepository.UserRunAggregate::getUid)
+            .map(com.navneet.executespec.state.repository.UserRunAggregate::getUid)
             .filter(Objects::nonNull)
             .distinct()
             .collect(Collectors.toList());
@@ -1876,40 +1876,6 @@ public class StateStore {
         .findById(runId)
         .map(run -> parseChatHistory(run.getChatHistoryJson()))
         .orElse(List.of());
-  }
-
-  /**
-   * Creates a new pipeline run that is an iteration of an existing completed run. Sets {@code
-   * sourceRunId} so the harness will copy the workspace instead of initialising a fresh one.
-   *
-   * @param sourceRun the completed run to iterate from
-   * @param newRequest the user's new / refined request
-   * @return the new {@link PipelineRun} entity (status=PLANNING, not yet saved to DB)
-   */
-  public PipelineRun createIterationRun(PipelineRun sourceRun, String newRequest) {
-    PipelineRun newRun =
-        PipelineRun.builder()
-            .runId(UUID.randomUUID().toString())
-            .userRequest(newRequest)
-            .status("PLANNING")
-            .plannerModel(sourceRun.getPlannerModel())
-            .workerModel(sourceRun.getWorkerModel())
-            .reviewerModel(sourceRun.getReviewerModel())
-            .sourceType("MANUAL")
-            .repoUrl(null) // new run gets its own repo if user has a PAT
-            .repoMode(null)
-            .queuePosition(0)
-            .startedAt(Instant.now())
-            .totalInputTokens(0)
-            .totalOutputTokens(0)
-            .githubPat(sourceRun.getGithubPat())
-            .githubOwner(sourceRun.getGithubOwner())
-            .createdByUserId(sourceRun.getCreatedByUserId())
-            .orgId(sourceRun.getOrgId())
-            .projectId(sourceRun.getProjectId())
-            .sourceRunId(sourceRun.getRunId()) // ← links back to the source
-            .build();
-    return runRepo.save(newRun);
   }
 
   @SuppressWarnings("unchecked")

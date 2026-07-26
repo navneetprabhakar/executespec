@@ -8,6 +8,12 @@ reject disposable root-level smoke scripts as test substitutes and stop repeated
 loops that do not obtain a passing test/build. Downloadable source archives omit interpreter and
 test-runner caches such as `__pycache__`, `.pytest_cache`, and compiled Python bytecode.
 
+Terminal server-owned runs can be continued through
+`POST /api/runs/{sourceRunId}/iterate` with `{ "userRequest": "..." }`. The endpoint creates and
+starts a new BUILD run, records `sourceRunId`, inherits the source route/project/repository and
+execution/publication policies, and initializes from a fail-closed Git-tracked workspace snapshot.
+Callers may provide `Idempotency-Key`; the route requires write access to the source run.
+
 ## Versions
 
 | Component         | Version             | Source                                                                 |
@@ -15,10 +21,25 @@ test-runner caches such as `__pycache__`, `.pytest_cache`, and compiled Python b
 | Project           | `2.0.0`             | [`VERSION`](VERSION), [`Version`](Version), [`pom.xml`](pom.xml) `<version>` |
 | Spring Boot       | `3.5.14`            | [`pom.xml`](pom.xml) `<parent>` (bumped from `3.3.0` by Dependabot #132, 2026-05-16) |
 | Spring AI         | `1.1.6`             | [`pom.xml`](pom.xml) `<spring-ai.version>` (BOM import)                |
-| Flyway head       | `V304`              | `src/main/resources/db/migration/V304__benchmark_task_result_route_attribution.sql` |
+| Flyway head       | `V344`              | `src/main/resources/db/migration/V344__validation_report_test_evidence_scope.sql` |
 | Frontend          | `2.0.0`             | [`frontend/package.json`](frontend/package.json) `"version"`           |
 
 `VERSION` and `Version` are kept identical by hand; the project's own conventions reference `Version` as the source of truth. The frontend ships under the same release stamp as the backend.
+
+### Strict sandbox toolchain (dark)
+
+`docker/sandbox-toolchain/Dockerfile` builds the representative Java/Maven, Node/Prettier,
+Python/Black, Go, and Rust toolchain from a digest-pinned Debian base. Run
+`docker/sandbox-toolchain/validate.sh` for the local no-network, non-root, read-only-root build
+matrix. A deployment must push the validated image and configure the resulting immutable
+`repository@sha256:...` reference. This does not enable sandbox execution:
+`sandbox.lifecycle.enabled`, `sandbox.runtime.dispatch.enabled`,
+`sandbox.runtime.container-strict-v1.enabled`, and
+`sandbox.runtime.toolchain-readiness.enabled` remain independently default-off.
+The bind-mounted run workspace must also be owned and writable by the configured non-root
+`executespec.sandbox.runtime-uid:runtime-gid` (defaults `65532:65532`). Provisioning verifies the
+existing tree and refuses it without changing permissions; the deployed service/workspace
+ownership must be aligned explicitly before rollout.
 
 ## Stack at a glance
 
@@ -28,7 +49,7 @@ test-runner caches such as `__pycache__`, `.pytest_cache`, and compiled Python b
 | Framework           | Spring Boot 3.5.14 (Web, Data JPA, Security, OAuth2 client, Mail, Thymeleaf, Actuator, AOP, Validation, Retry, Data Redis) | [`pom.xml`](pom.xml) deps 1, 5, 14–20, 30, 36–39, 60 |
 | LLM SDK             | Spring AI 1.1.6 starters for Anthropic, OpenAI, Google GenAI                        | [`pom.xml`](pom.xml) deps 2–4                                                    |
 | LLM auto-config     | Provider auto-configurations disabled in favor of manual `AgentModelConfig` beans   | [`src/main/java/com/navneet/executespec/ExecutespecApplication.java`](src/main/java/com/navneet/executespec/ExecutespecApplication.java) |
-| Database            | PostgreSQL (Cloud SQL in prod), Flyway migrations head V304                         | [`pom.xml`](pom.xml) deps 6–8, `src/main/resources/db/migration/`                 |
+| Database            | PostgreSQL (Cloud SQL in prod), Flyway migrations head V340                         | [`pom.xml`](pom.xml) deps 6–8, `src/main/resources/db/migration/`                 |
 | Cache / lock        | Redis (Lettuce), ShedLock 7.7.0                                                     | [`pom.xml`](pom.xml) deps 30–32                                                  |
 | Auth                | JJWT 0.13.0 + Spring Security OAuth2 client (Google, GitHub)                        | [`pom.xml`](pom.xml) deps 14–18                                                  |
 | Billing             | Stripe 32.1.0, Razorpay (HMAC), invoice PDFs via OpenPDF 2.0.3 + flying-saucer 9.4.0 | [`pom.xml`](pom.xml) deps 21–22, 56; HMAC via commons-codec 1.22.0 (dep 35)     |
@@ -45,6 +66,20 @@ test-runner caches such as `__pycache__`, `.pytest_cache`, and compiled Python b
 
 Python previews resolve bounded nested application packages: a FastAPI app declared in
 `app/main.py` is launched as `app.main:app` for both VM/Docker and Cloud Run preview commands.
+
+### Current model catalog
+
+The 2026-07-24 provider-catalog refresh adds account-visible Claude Fable 5, GPT-5.6
+Sol/Terra/Luna, Gemini 3.6 Flash, Gemini 3.5 Flash-Lite, Gemini 3.1 Flash-Lite, and the latest
+curated OpenRouter agentic routes (Kimi K3, Qwen 3.7 Plus/Max, Grok 4.5). Native DeepSeek V4
+Pro/Flash remains current. The Fireworks allow-list now contains only the four serverless coding
+models its live account catalog actually returns: DeepSeek V4 Pro, Kimi K2.6, GLM 5.1, and GLM
+5.2; persisted removed IDs resolve to a live replacement.
+
+New frontier routes are selectable but not tier defaults until they pass ExecuteSpec's
+output-quality evaluation. Models with stepped long-context pricing use the conservative upper
+rate so managed-AI usage cannot be undercharged. Existing tier defaults remain benchmark-based: Sonnet 5, GPT-5.4,
+Gemini 3.5 Flash/3.5 Flash-Lite, native DeepSeek V4, and the surviving Fireworks routes.
 
 ## Repository layout
 
@@ -69,7 +104,7 @@ Python previews resolve bounded nested application packages: a FastAPI app decla
 │   └── ... (76 package roots total under com.navneet.executespec)
 ├── src/main/resources/
 │   ├── application.yml           Single source of truth for model matrix, provider routes, pricing, failover
-│   ├── db/migration/             Flyway V*.sql (head V304, immutable post-apply)
+│   ├── db/migration/             Flyway V*.sql (head V340, immutable post-apply)
 │   ├── prompts/                  External LLM prompts (assembled by PromptAssembler)
 │   └── static/                   Vite build output served by Spring Boot
 ├── src/test/java/                Unit + ArchUnit guard tests (e.g. AccessGuardCoverageTest)
@@ -123,6 +158,12 @@ npm run dev                                # http://localhost:5173
 ```
 
 The Vite dev server proxies `/api` to `http://localhost:8080` (overridable via `VITE_BACKEND_URL` to run multiple worktrees side-by-side, per the inline note in [`frontend/vite.config.ts`](frontend/vite.config.ts)).
+
+The `local` and `dev` profiles converge release-validation gates at startup: goal-decision
+enforcement, verify-before-complete, auto-verification, Ask, and screen rendering are enabled.
+Remote-sandbox lifecycle, dispatch, strict runtime, toolchain readiness, and live-preview network
+access remain disabled and fail closed. The initializer updates only flags already created by
+migrations; a missing required row is logged without inventing configuration or failing startup.
 
 Run submit advanced options include continuation controls: "Confirm model upgrades" maps to `requireConfirmationBeforeExpensiveContinuation`, while "Require benchmark evidence" maps to `requireBenchmarkPriorForAutomaticContinuation`. Benchmark evidence is not required by default, so the quality-ranked selected candidate can run automatically within the normal continuation ceilings; checking the benchmark guard sends an explicit per-run `true` override that approval-gates unbenchmarked model/provider upgrades.
 
@@ -221,6 +262,9 @@ Validation evidence is fail-closed: code-changing tasks require an admitted base
 diff attributable to that task, and persisted executable verification distinguishes `PASSED`,
 `BUILD_ONLY`, `FAILED`, and `UNAVAILABLE`. The Web evidence ledger exposes those deterministic facts;
 the headline score is a summary and must not be treated as independent proof.
+Post-run Ask follows the same rule: configured build success is not test success, missing concrete
+test counts remain an explicit verification gap, and provider tool-protocol markup is suppressed
+rather than displayed to customers.
 
 **Frontend**
 
@@ -282,6 +326,7 @@ OpenAI, OpenRouter, and Fireworks retain the shared 120-second OpenAI-wire defau
 | `GITHUB_OAUTH_CLIENT_ID` / `GITHUB_OAUTH_CLIENT_SECRET`                                    | Enables GitHub OAuth2 login                                           |
 | `SLACK_CLIENT_ID` / `SLACK_CLIENT_SECRET` / `SLACK_SIGNING_SECRET`                         | Enables Slack integration                                             |
 | `DEPLOYMENT_RECOVERY_SAFE_ENABLED`                                                         | Explicit prod attestation required to expose deployment creation; defaults to `false` |
+| `EXECUTESPEC_MIN_CLI_VERSION`                                                              | Oldest supported CLI/VS Code protocol version advertised on API responses; defaults to `1.0.0` |
 
 Release safety: production and benchmark profiles do not deliver outbound integration lifecycle
 updates because the current adapters are non-idempotent, best-effort append operations. Deployment

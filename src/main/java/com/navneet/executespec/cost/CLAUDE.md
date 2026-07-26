@@ -21,9 +21,12 @@
   to a single provider reintroduces exactly the untruth this projection exists to remove. Consumed
   by `BenchmarkTrackingService` (V304 attempt attribution) and `BenchmarkGenerationService`
   (`GenerateResult.effectiveProvider`/`effectiveModel`/`routeAttribution`/`routeDiverged`).
-- `RunEffectiveRouteService` is the single read seam over that projection: `forRun(runId)` and
-  `forTask(runId, taskId)`. Consumed by `RunTokenAttributor` (per-task V305 columns) and
-  `api/RunMapper` (derived `RunDetail` fields). Do not re-derive an effective route anywhere else.
+- `RunEffectiveRouteService` is the single read seam over that projection: `forRun(runId)`,
+  `forTask(runId, taskId)`, planner-phase `forPlanner(runId)` (outline + expansion + coherence;
+  classifier excluded), reviewer-pass-only
+  `forReviewer(runId)`, and `latestSuccessfulForTask(runId, taskId)` for the physical route that
+  produced a continuation decision's terminal observation. Consumed by `RunTokenAttributor`,
+  continuation policy, and `api/RunMapper`. Do not re-derive an effective route anywhere else.
 - **Which layer carries which route (C1, 2026-07-19).** REQUESTED / tier-resolved:
   `TaskOutcome.dispatchedProvider`/`dispatchedModel`, `agent_task.provider`/`model`,
   `pipeline_run.requested_provider`/`requested_model`/`worker_model`, `RunDetail.requestedProvider`/
@@ -36,11 +39,24 @@
 - `RunTokenAttributor` writes the V305 effective columns from the ledger and falls back to the
   requested route ONLY when the task has no successful attempt, in which case the attribution stays
   `UNATTRIBUTED` so an unproven fallback is never mistaken for ledger proof.
+- Planner and reviewer phase attribution also uses the canonical ledger projection. A single
+  physical route is persisted as the actual phase provider/model; a multi-route phase leaves those
+  singular fields null rather than reporting the originally requested route as though it served
+  every call. Legacy/no-ledger runs retain the requested-route fallback.
 - Terminal run publication reconciles `pipeline_run.total_input_tokens`, `total_output_tokens`, and
   `actual_cost` upward from successful canonical `run_step_usage` rows. This is a raise-only floor:
   it repairs physical attempts persisted before an interrupted executor reached its normal
   in-memory attribution boundary, without replacing larger phase/task totals or double-counting
   replayed reconciliation.
+- The run cost read model also raises terminal totals to the successful `run_step_usage` ledger.
+  This covers post-terminal consumers such as Screens and Ask, whose calls occur after the pipeline
+  snapshot was frozen. Null legacy cache/reasoning fields mean “not projected”, not numeric zero;
+  aggregation must tolerate them and return the ledger totals rather than failing or under-reporting.
+- Planning phase costs in that read model are also raise-only against known successful
+  `planner.classify*`, `planner.outline*`, `planner.expand*`, and `planner.coherence*` step rows.
+  A fail-closed hierarchical plan can terminate before its legacy phase snapshot is saved; the
+  durable attempt ledger must still show where the planning spend occurred instead of reporting
+  expansion/coherence as zero.
 - `PlannerPhaseSplit` / `PlannerPhaseAttribution` own how pre-executor spend is booked (RR-1561).
   `RunOrchestrator` used to hand `attributePhase(PLANNER, …)` the WHOLE-RUN snapshot, so the smart
   classifier — which runs on every run, before the planner — was always booked to
@@ -118,6 +134,15 @@ Failed attempts without numeric provider-reported/upstream/accounted cost metada
 `unknownCostAttempts`. Aggregate spend is named `knownCostUsdLowerBound`; never reinterpret a
 provider-unreported failure as a proven zero-cost call.
 
+The same rule applies to a successful response whose post-success price projection fails.
+`LlmRouter` persists `costUsd=-1` as an explicit unknown sentinel; repository aggregates exclude
+negative cost from `knownCostUsdLowerBound`, the cost API exposes `knownCostUsd=null`, and a durable
+execution context with a dollar ceiling fails closed before authorizing another provider call.
+Only unknown-cost SUCCESS rows close that dollar gate: failed transport attempts remain eligible
+for the router's bounded retry. The run cost API exposes `physicalAttempts`, `successfulCalls`, and
+`failedAttempts` separately because the backward-compatible `calls` field counts successful
+responses, not all billable physical dispatch attempts.
+
 Reconciliation uses `max($0.000001, 0.5% of canonical known cost)` and exact tokens when both sides
 carry token facts. `pipeline_run.actual_cost_usd` is cost-only, so that comparison does not claim
 token reconciliation. The managed-AI cohort is anchored to canonical physical attempts in the
@@ -137,9 +162,13 @@ total PostgreSQL outage, and ledger retention/partitioning remain release work.
 
 ## Historical cost estimation is tenant-scoped (RR-1551)
 
-`CostHistoryService.estimateFromHistory` sets `pipeline_run.credits_charged` and
-`pipeline_run.hard_cap_usd` through `integration/RunCostEstimatePersister`, so it is derived
-exclusively from the submitting run's OWN org history. Both `RunCostHistoryRepository` queries
+`CostHistoryService.estimateFromHistory` sets `pipeline_run.credits_charged` and tightens
+`pipeline_run.hard_cap_usd` through `integration/RunCostEstimatePersister`, so the estimate is
+derived exclusively from the submitting run's OWN org history. A validated voluntary
+`user_cost_cap_usd` is already copied into `hard_cap_usd` on the initial run row before any
+classifier or planner call; the estimate may only preserve or tighten that ceiling. This keeps the
+customer cap enforceable and visible through `RunDetail.userCostCapUsd` even when planning fails
+before an estimate exists. Both `RunCostHistoryRepository` queries
 (`findSimilarCosts`, `findSimilarCostsLoose`) take a required `orgId` predicate; the loose fallback
 relaxes shape only, never the tenant boundary. A run with no `orgId` skips history entirely and
 takes the model-aware Stage-1 formula — a global pool is never a fallback. Before this fix the

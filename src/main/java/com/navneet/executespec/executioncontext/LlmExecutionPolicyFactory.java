@@ -41,6 +41,27 @@ public class LlmExecutionPolicyFactory {
    */
   static final String CONTROLLED_WORKER_ROUTE_POLICY_KEY = "route-v3-controlled-worker";
 
+  /**
+   * One screen is one bounded logical render. Four physical calls allow the router's existing
+   * same-provider transient retry envelope, while the token/cost ceilings prevent a decorative
+   * surface from becoming an ungoverned post-run spend lane.
+   */
+  static final LlmExecutionBudget PREVIEW_SURFACE_BUDGET =
+      new LlmExecutionBudget(100_000L, 8_192L, 110_000L, new BigDecimal("1.00"), 4);
+
+  /**
+   * One Ask turn can make four 3,000-token tool-loop calls plus one 3,000-token forced synthesis.
+   * The 15,000-token output ceiling therefore admits every logical call even when a reasoning model
+   * consumes each call's full allowance; keeping the former 8,000 ceiling caused the durable budget
+   * gate to reject the third call or final synthesis. Twenty physical attempts cover four bounded
+   * same-provider attempts for each of those five logical calls. The input ceiling accounts for the
+   * bounded transcript/evidence plus accumulated read-only tool results; the cost ceiling prevents
+   * BYOK turns from becoming an unbounded lane while managed-credit admission remains independently
+   * enforced by the router.
+   */
+  static final LlmExecutionBudget RUN_CHAT_TURN_BUDGET =
+      new LlmExecutionBudget(400_000L, 15_000L, 415_000L, new BigDecimal("2.00"), 20);
+
   private static final List<String> PROVIDERS =
       List.of("anthropic", "openai", "gemini", "openrouter", "deepseek", "fireworks");
 
@@ -182,8 +203,46 @@ public class LlmExecutionPolicyFactory {
         requestedProvider,
         requestedModel,
         pinned,
-        LlmExecutionBudget.UNBOUNDED,
+        RUN_CHAT_TURN_BUDGET,
         "run-chat-v1",
+        null);
+  }
+
+  /**
+   * Dedicated context for one static screen-render surface.
+   *
+   * <p>A preview is requested after the pipeline is terminal and must not inherit the pipeline
+   * context's already-consumed cost ceiling. It still inherits the run owner, host org/project,
+   * provider preference, exact model pin and BYOK credential policy. The caller supplies the
+   * durable job/surface attempt id, making duplicate execution-context creation idempotent without
+   * combining spend from separate re-renders.
+   */
+  public LlmExecutionReference forRunPreviewSurface(String runId, String renderAttemptId) {
+    var run =
+        runRepository
+            .findById(require(runId, "runId"))
+            .orElseThrow(() -> new IllegalArgumentException("pipeline run not found"));
+    String userId = require(run.getCreatedByUserId(), "run owner");
+    String orgId = require(run.getOrgId(), "run org");
+    String requestedProvider = firstNonBlank(run.getRequestedProvider(), run.getAiProvider());
+    boolean pinned = run.isRoutePinned();
+    String requestedModel = pinned ? require(run.getRequestedModel(), "pinned model") : null;
+    String source = "preview-render:" + runId + ":" + require(renderAttemptId, "renderAttemptId");
+    return createCustomer(
+        LlmExecutionContext.ContextType.AGENT_TURN,
+        "preview-render",
+        "PREVIEW_RENDER",
+        source,
+        source,
+        userId,
+        userId,
+        orgId,
+        run.getProjectId(),
+        requestedProvider,
+        requestedModel,
+        pinned,
+        PREVIEW_SURFACE_BUDGET,
+        "preview-render-v1",
         null);
   }
 
