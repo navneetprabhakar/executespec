@@ -41,4 +41,32 @@ class PlanApprovalAuthorityTest {
         .as("positive plan-gate decisions must route through RunLifecycleService")
         .isEmpty();
   }
+
+  @Test
+  void noRouteOrToolBypassesSharedApprovalAdmission() throws Exception {
+    List<String> violations;
+    try (var files = Files.walk(SOURCE_ROOT)) {
+      violations =
+          files
+              .filter(path -> path.toString().endsWith(".java"))
+              .filter(path -> !path.endsWith("integration/RunLifecycleService.java"))
+              .filter(path -> !path.endsWith("integration/PlanApprovalService.java"))
+              .filter(
+                  path -> {
+                    try {
+                      return Files.readString(path).matches("(?s).*\\.resolvePlanGate\\s*\\(.*");
+                    } catch (Exception e) {
+                      throw new IllegalStateException(e);
+                    }
+                  })
+              .map(SOURCE_ROOT::relativize)
+              .map(Path::toString)
+              .sorted()
+              .toList();
+    }
+
+    assertThat(violations)
+        .as("plan decisions must pass PlanApprovalService admission before lifecycle resolution")
+        .isEmpty();
+  }
 }

@@ -120,7 +120,7 @@ class AsyncAllowlistTest {
               // execution orchestration — originally triggered 3a17e9aa bug;
               // fixed via findWithRepoMappingsBy* eager-load queries + compensation logic
               "ExecutionOrchestrator#triggerAnalysis",
-              "ExecutionOrchestrator#approvePlanAndExecute",
+              "ExecutionOrchestrator#projectApprovedPlan",
               "ExecutionOrchestrator#executeApprovedPlan",
               "ExecutionPlannerService#generatePlan",
               // V188 (2026-05-13) unified-dispatch path: both methods read the V2 PipelineRun via

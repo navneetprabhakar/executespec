@@ -60,6 +60,7 @@ public class RunController {
 
   private final com.navneet.executespec.integration.RunOrchestrator v2Orchestrator;
   private final com.navneet.executespec.integration.RunLifecycleService runLifecycleService;
+  private final com.navneet.executespec.integration.PlanApprovalService planApprovalService;
   private final ScmPushService scmPushService;
   private final StateStore stateStore;
   private final RunMapper mapper;
@@ -79,9 +80,6 @@ public class RunController {
   private final com.navneet.executespec.project.service.ProjectRepoService projectRepoService;
   private final com.navneet.executespec.agent.ApiKeyResolver apiKeyResolver;
   private final com.navneet.executespec.billing.service.ManagedAiUsageService managedAiUsageService;
-
-  /** M-032 + M-033 (Wave 3) — plan-approval governance guards. */
-  private final com.navneet.executespec.governance.GovernanceGuard governanceGuard;
 
   private final com.navneet.executespec.contracts.gate.PlanContractGateService planContractGate;
 
@@ -692,138 +690,18 @@ public class RunController {
         req.executionMode(),
         approveRun.getHarnessVersion());
 
-    // Historical BATCH rows remain readable, but batch execution was never wired into the V2
-    // executor. Reject new approvals explicitly instead of persisting BATCH and silently running
-    // realtime workers with batch-only preview/notification behavior.
-    rejectRetiredBatchApproval(req.approved(), req.executionMode());
-
-    // RR-1459 — bind the approval to the exact plan the approver reviewed. The credits check below
-    // is a price check, not an identity check: a client that is still displaying run A's plan while
-    // the route has already moved to run B passes it whenever the two estimates happen to match.
-    if (req.approved() && req.planFingerprint() != null && !req.planFingerprint().isBlank()) {
-      String actual = planFingerprintOf(approveRun.getPlanJson());
-      if (!req.planFingerprint().trim().equalsIgnoreCase(actual)) {
-        throw new ResponseStatusException(
-            HttpStatus.CONFLICT,
-            "The plan you reviewed is not the plan currently on this run. Reload the plan and"
-                + " review it again before approving.");
-      }
-    }
-
-    // Validate creditsConfirmed matches the current estimate (prevents stale approvals)
-    if (req.approved() && req.creditsConfirmed() != null) {
-      stateStore
-          .findRun(runId)
-          .ifPresent(
-              run -> {
-                int expected;
-                if ("BATCH".equalsIgnoreCase(req.executionMode())
-                    && run.getBatchCredits() != null) {
-                  expected = run.getBatchCredits();
-                } else {
-                  expected = run.getCreditsCharged() != null ? run.getCreditsCharged() : 1;
-                }
-                if (!req.creditsConfirmed().equals(expected)) {
-                  throw new ResponseStatusException(
-                      HttpStatus.CONFLICT,
-                      "Credits mismatch: expected "
-                          + expected
-                          + " but confirmed "
-                          + req.creditsConfirmed()
-                          + ". Cost estimate may have changed — please review.");
-                }
-              });
-    }
-
-    // Planning is the first point where a useful whole-run estimate exists. Submission reserves
-    // only one minimum managed-AI credit, so re-check the conservative high estimate here before
-    // an approval can knowingly launch a run whose later tasks/reviewer will be denied mid-flight.
-    if (req.approved()) {
-      double estimateHighUsd =
-          approveRun.getCostEstimateHigh() != null
-              ? approveRun.getCostEstimateHigh()
-              : (approveRun.getHardCapUsd() != null ? approveRun.getHardCapUsd() : 0.0);
-      managedAiUsageService.assertCanApproveEstimatedSpend(
-          userDetails,
-          apiKeyResolver.isOwnKeysMode(userDetails.getUser().getId()),
-          estimateHighUsd);
-    }
-
-    // RR-819 — the breaking-change gate. PlanBreakingChangeReport's own contract says approval must
-    // be disabled until the approver types BREAKING when a touched contract has declared consumers.
-    // That was never enforced anywhere: the classifier ran AFTER the worker wrote the change and
-    // its verdict became a MINOR issue with a "[REQUIRES ACK]" suffix, so consumer-breaking API and
-    // schema changes could be approved and auto-published with no friction and no record. The gate
-    // report is composed while the run parks at AWAITING_APPROVAL; here it is enforced.
-    if (req.approved()) {
-      var ack =
-          planContractGate.acknowledge(
-              runId,
-              req.breakingChangeAck(),
-              req.breakingChangeReportDigest(),
-              userDetails == null ? null : userDetails.getUser().getId());
-      switch (ack) {
-        case MISSING ->
-            throw new ResponseStatusException(
-                HttpStatus.CONFLICT,
-                "This plan changes a contract that other repositories consume. Review the"
-                    + " breaking-change report and type BREAKING to acknowledge it before"
-                    + " approving.");
-        case STALE_REPORT ->
-            throw new ResponseStatusException(
-                HttpStatus.CONFLICT,
-                "The breaking-change report you acknowledged is not the one currently on this run."
-                    + " Reload the plan and review the change again before approving.");
-        default -> {
-          /* NOT_REQUIRED or ACKNOWLEDGED — proceed. */
-        }
-      }
-    }
-
-    // M-032 + M-033 (Wave 3) — governance gates run before we ever
-    // signal the plan gate. Skip on rejection (req.approved == false).
-    if (req.approved()) {
-      double estUsd =
-          approveRun.getCostEstimateHigh() != null
-              ? approveRun.getCostEstimateHigh()
-              : (approveRun.getHardCapUsd() != null ? approveRun.getHardCapUsd() : 0.0);
-      governanceGuard.assertCanApproveCost(approveRun.getOrgId(), estUsd, userDetails);
-      governanceGuard.assertProjectSpendCap(approveRun.getProjectId(), estUsd);
-    }
-
-    // Validate and persist execution mode choice
-    if (req.approved() && "BATCH".equalsIgnoreCase(req.executionMode())) {
-      stateStore
-          .findRun(runId)
-          .ifPresent(
-              run -> {
-                if (!Boolean.TRUE.equals(run.getBatchAvailable())) {
-                  throw new ResponseStatusException(
-                      HttpStatus.BAD_REQUEST, "Batch execution is not available for this run.");
-                }
-              });
-      stateStore.setApprovedExecutionMode(runId, "BATCH");
-    }
-
-    var outcome = runLifecycleService.resolvePlanGate(runId, req.approved());
-    if (outcome
-        == com.navneet.executespec.integration.RunLifecycleService.PlanApprovalOutcome
-            .CONFLICTING_DECISION) {
-      throw new ResponseStatusException(
-          HttpStatus.CONFLICT, "Plan gate was already resolved with the opposite decision.");
-    }
-    if (outcome
-            == com.navneet.executespec.integration.RunLifecycleService.PlanApprovalOutcome
-                .INVALID_STATE
-        || outcome
-            == com.navneet.executespec.integration.RunLifecycleService.PlanApprovalOutcome
-                .PLAN_MISSING
-        || outcome
-            == com.navneet.executespec.integration.RunLifecycleService.PlanApprovalOutcome
-                .WORKSPACE_GONE) {
-      throw new ResponseStatusException(
-          HttpStatus.CONFLICT, "Plan approval cannot resume from the run's current state.");
-    }
+    var decision =
+        planApprovalService.decide(
+            runId,
+            new com.navneet.executespec.integration.PlanApprovalService.Command(
+                req.approved(),
+                req.creditsConfirmed(),
+                req.executionMode(),
+                req.planFingerprint(),
+                req.breakingChangeAck(),
+                req.breakingChangeReportDigest()),
+            userDetails);
+    var outcome = decision.outcome();
 
     // Wave 2.1 — activation funnel step 4 (fires once per user, only on
     // positive approval — rejections don't count as "crossed the credit bar").
@@ -836,8 +714,10 @@ public class RunController {
           approveRun.getCreatedByUserId(),
           com.navneet.executespec.analytics.EventName.PLAN_APPROVED,
           java.util.Map.of(
-              "executionMode", req.executionMode() == null ? "REALTIME" : req.executionMode(),
-              "creditsConfirmed", req.creditsConfirmed() == null ? 0 : req.creditsConfirmed()));
+              "executionMode",
+              decision.executionMode(),
+              "creditsConfirmed",
+              req.creditsConfirmed() == null ? 0 : req.creditsConfirmed()));
     }
     return ResponseEntity.ok().build();
   }
@@ -1944,15 +1824,6 @@ public class RunController {
       String parentTaskId,
       Integer subtaskIndex,
       Integer subtaskTotal) {}
-
-  static void rejectRetiredBatchApproval(boolean approved, String executionMode) {
-    if (approved && "BATCH".equalsIgnoreCase(executionMode)) {
-      throw new ResponseStatusException(
-          HttpStatus.GONE,
-          "BATCH_EXECUTION_RETIRED: batch execution is not available in ExecuteSpec 2.0; use"
-              + " REALTIME");
-    }
-  }
 
   static void validateLocalRepositoryInventory(String inventory) {
     if (inventory == null || inventory.isBlank()) return;

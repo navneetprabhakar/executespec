@@ -558,6 +558,22 @@ class ManagedAiUsageServiceTest {
   }
 
   @Test
+  void approvalRunOwnerOverloadUsesRunOwnerAndOrgAsBillingPrincipal() {
+    when(tierResolver.resolveUserTier("run-owner")).thenReturn("PRO");
+    when(periodRepo.saveAndFlush(any())).thenAnswer(inv -> inv.getArgument(0));
+
+    service.assertCanApproveEstimatedSpend("run-owner", "run-org", false, 1.0);
+
+    ArgumentCaptor<ManagedAiUsagePeriod> createdPeriod =
+        ArgumentCaptor.forClass(ManagedAiUsagePeriod.class);
+    verify(periodRepo).saveAndFlush(createdPeriod.capture());
+    assertThat(createdPeriod.getValue().getUserId()).isEqualTo("run-owner");
+    assertThat(createdPeriod.getValue().getOrgId()).isEqualTo("run-org");
+    assertThat(createdPeriod.getValue().getTier()).isEqualTo("PRO");
+    verify(tierResolver).resolveUserTier("run-owner");
+  }
+
+  @Test
   void approvalRefusesPlanWhoseEstimateExceedsRemainingRawBudget() {
     ManagedAiUsagePeriod period = period();
     period.setAiCreditsUsed(100);

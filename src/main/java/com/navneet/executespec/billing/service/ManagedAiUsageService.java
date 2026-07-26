@@ -285,11 +285,24 @@ public class ManagedAiUsageService {
   @Transactional
   public void assertCanApproveEstimatedSpend(
       AppUserDetails userDetails, boolean ownKeysMode, double estimateHighUsd) {
+    assertCanApproveEstimatedSpend(
+        userDetails.getUser().getId(),
+        userDetails.getUser().getOrgId(),
+        ownKeysMode,
+        estimateHighUsd);
+  }
+
+  /**
+   * Run-owner form of the plan-approval check. The actor clicking Approve is not necessarily the
+   * principal whose managed credits and provider-key hierarchy will fund subsequent calls.
+   */
+  @Transactional
+  public void assertCanApproveEstimatedSpend(
+      String billingUserId, String billingOrgId, boolean ownKeysMode, double estimateHighUsd) {
     if (!properties.isEnabled() || ownKeysMode || estimateHighUsd <= 0.0) return;
-    String userId = userDetails.getUser().getId();
     ManagedAiUserContext user =
         new ManagedAiUserContext(
-            userId, userDetails.getUser().getOrgId(), tierResolver.resolveUserTier(userId));
+            billingUserId, billingOrgId, tierResolver.resolveUserTier(billingUserId));
     ManagedAiProperties.TierPolicy policy = properties.policyFor(user.tier());
     if (!isManaged(policy)) return;
 

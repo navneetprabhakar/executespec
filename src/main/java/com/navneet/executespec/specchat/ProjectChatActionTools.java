@@ -49,6 +49,7 @@ public class ProjectChatActionTools {
 
   private final RunOrchestrator runOrchestrator;
   private final com.navneet.executespec.integration.RunLifecycleService runLifecycleService;
+  private final com.navneet.executespec.integration.PlanApprovalService planApprovalService;
   private final PipelineRunRepository pipelineRunRepo;
   private final ValidationReportService validationReportService;
   private final RunAccessGuard runAccessGuard;
@@ -233,22 +234,21 @@ public class ProjectChatActionTools {
           // Write/governance action — must use the WRITE guard, not the read guard (design §10
           // defect #1): a cross-org read-only member must not be able to approve another's gate.
           PipelineRun run = runAccessGuard.requireRunWriteAccess(runId, ctx.userDetails());
-          var outcome = runLifecycleService.resolvePlanGate(runId, true);
-          boolean resumed =
-              outcome
-                      == com.navneet.executespec.integration.RunLifecycleService.PlanApprovalOutcome
-                          .RESUME_QUEUED
-                  || outcome
-                      == com.navneet.executespec.integration.RunLifecycleService.PlanApprovalOutcome
-                          .ALREADY_RESOLVED;
+          var decision =
+              planApprovalService.decide(
+                  runId,
+                  com.navneet.executespec.integration.PlanApprovalService.Command.approveLegacy(),
+                  ctx.userDetails());
           ObjectNode out = json.createObjectNode();
-          out.put("ok", resumed);
+          out.put("ok", true);
           out.put("runId", run.getRunId());
           out.put(
               "summary",
-              resumed
+              decision.outcome()
+                      == com.navneet.executespec.integration.RunLifecycleService.PlanApprovalOutcome
+                          .RESUME_QUEUED
                   ? "Plan approved. Worker is resuming."
-                  : "Plan approval could not resume from the run's current state: " + outcome);
+                  : "Plan was already approved.");
           return out;
         });
   }
