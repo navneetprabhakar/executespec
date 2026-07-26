@@ -6,6 +6,10 @@ tool must be explicitly classified in `ChatToolPolicy` as `PROJECT_READ`, `PROJE
 `PROJECT_READ` only. Run submission, plan decisions, cancellation, project generation, code-review
 scans, and child-agent spend use their explicit structured endpoints/proposals instead.
 
+The legacy write callbacks retained in `ProjectChatActionTools` remain filtered out of model-bound
+tool sets. Their plan-approval implementation still routes through `RunLifecycleService` so a future
+explicit binding cannot bypass durable gate validation by calling `GateStore` directly.
+
 `policy/ProjectChatPolicyResolver` resolves one immutable, secret-free `ProjectChatPolicy` before
 every legacy Spec Chat, persistent agent-session chat, and direct project-chat model turn. It binds
 the authenticated actor, actor org, host project org, effective project role, exact capabilities,

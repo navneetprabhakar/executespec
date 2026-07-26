@@ -9,7 +9,6 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.auth.security.RunAccessGuard;
-import com.navneet.executespec.harness.GateStore;
 import com.navneet.executespec.integration.RunLifecycleService;
 import com.navneet.executespec.integration.RunOrchestrator;
 import com.navneet.executespec.project.security.ProjectAccessGuard;
@@ -29,7 +28,6 @@ class ProjectChatActionToolsTest {
   private final PipelineRunRepository pipelineRunRepo = mock(PipelineRunRepository.class);
   private final ValidationReportService validationReportService =
       mock(ValidationReportService.class);
-  private final GateStore gateStore = mock(GateStore.class);
   private final RunAccessGuard runAccessGuard = mock(RunAccessGuard.class);
   private final ProjectAccessGuard projectAccessGuard = mock(ProjectAccessGuard.class);
   private final AppUserDetails userDetails = mock(AppUserDetails.class);
@@ -40,7 +38,6 @@ class ProjectChatActionToolsTest {
           runLifecycleService,
           pipelineRunRepo,
           validationReportService,
-          gateStore,
           runAccessGuard,
           projectAccessGuard,
           new ContextSanitizer(),
@@ -55,7 +52,7 @@ class ProjectChatActionToolsTest {
 
     assertThat(names).containsExactly("list_recent_runs", "get_run_report");
     assertThat(names).doesNotContain("submit_run", "approve_plan", "reject_plan", "cancel_run");
-    verifyNoInteractions(runOrchestrator, runLifecycleService, gateStore);
+    verifyNoInteractions(runOrchestrator, runLifecycleService);
   }
 
   @Test

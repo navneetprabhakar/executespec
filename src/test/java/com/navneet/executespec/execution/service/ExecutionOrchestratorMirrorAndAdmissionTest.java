@@ -59,7 +59,6 @@ class ExecutionOrchestratorMirrorAndAdmissionTest {
   @Mock com.navneet.executespec.integration.RunLifecycleService runLifecycleService;
   @Mock com.navneet.executespec.project.pr.PullRequestRecordRepository prRecordRepo;
   @Mock com.navneet.executespec.state.repository.PipelineRunRepository pipelineRunRepo;
-  @Mock com.navneet.executespec.harness.GateStore gateStore;
   @Mock ExecutionPlannerService plannerService;
   @Mock ExecutionCostAggregator costAggregator;
   @Mock EntityManager em;
@@ -89,7 +88,6 @@ class ExecutionOrchestratorMirrorAndAdmissionTest {
             prRecordRepo,
             runCas,
             pipelineRunRepo,
-            gateStore,
             plannerService,
             costAggregator,
             new org.springframework.beans.factory.ObjectProvider<ExecutionOrchestrator>() {
