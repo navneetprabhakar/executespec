@@ -12,6 +12,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 public interface GateRepository extends JpaRepository<GateRecord, String> {
 
+  java.util.Optional<GateRecord> findFirstByRunIdAndGateType(String runId, String gateType);
+
   /**
    * Atomic "claim" for the plan-approval gate. Only resolves the row if it is still PENDING — if
    * another caller already won the race, the UPDATE affects 0 rows and the caller should return 409

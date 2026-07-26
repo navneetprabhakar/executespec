@@ -193,7 +193,31 @@ public class GateStore {
    * same-instance) and writes to Redis (cross-instance fallback for MIG).
    */
   public void setPlanGate(String runId, boolean approved) {
-    // Redis (cross-instance signal)
+    // Resolve through the same conditional database claim as customer approval. This method is
+    // retained for broad lifecycle cleanup (notably cancellation), so it must never rewrite a
+    // decision that was already durably APPROVED or REJECTED. The previous read-modify-save path
+    // could turn an approved gate into REJECTED after a later run cancellation, destroying the
+    // human-approval audit record.
+    try {
+      PlanGateClaim claim = claimPlanGate(runId, approved);
+      if (claim == PlanGateClaim.ALREADY_APPROVED || claim == PlanGateClaim.ALREADY_REJECTED) {
+        boolean durableDecision = claim == PlanGateClaim.ALREADY_APPROVED;
+        if (durableDecision != approved) {
+          log.info(
+              "[GateStore] preserving existing {} plan decision for run={} despite requested {}",
+              durableDecision ? "APPROVED" : "REJECTED",
+              runId,
+              approved ? "APPROVED" : "REJECTED");
+        }
+        // Keep compatibility observers aligned with the durable winner, never the losing request.
+        publishPlanSignal(runId, durableDecision);
+      }
+    } catch (Exception ex) {
+      log.warn("[GateStore] plan gate resolution failed for run={}: {}", runId, ex.getMessage());
+    }
+  }
+
+  private void publishPlanSignal(String runId, boolean approved) {
     try {
       redis.opsForValue().set(planKey(runId), approved ? "1" : "0", GATE_TTL);
     } catch (Exception ex) {
@@ -202,16 +226,6 @@ public class GateStore {
           runId,
           ex.getMessage());
       redisFailureCounter.increment();
-    }
-    // DB (durable fallback — upsert resolution)
-    try {
-      String key = planKey(runId);
-      GateRecord rec = gateRepository.findById(key).orElse(GateRecord.pending(key, runId, "PLAN"));
-      rec.setStatus(approved ? "APPROVED" : "REJECTED");
-      rec.setResolvedAt(Instant.now());
-      gateRepository.save(rec);
-    } catch (Exception ex) {
-      log.warn("[GateStore] DB write failed for plan gate run={}: {}", runId, ex.getMessage());
     }
   }
 

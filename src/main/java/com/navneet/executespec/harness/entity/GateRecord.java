@@ -1,6 +1,7 @@
 package com.navneet.executespec.harness.entity;
 
 import java.time.Instant;
+import java.util.UUID;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -61,6 +62,82 @@ public class GateRecord {
 
   @Column(name = "resolved_at")
   private Instant resolvedAt;
+
+  /** Positive values identify a versioned admission receipt; {@code null} means legacy/unbound. */
+  @Column(name = "admission_contract_version")
+  private Integer admissionContractVersion;
+
+  /** LEGACY | SHADOW | ENFORCED. */
+  @Column(name = "binding_mode", length = 16)
+  private String bindingMode;
+
+  /** UNBOUND | BOUND | BLOCKED | MISSING | INVALID | UNAVAILABLE. */
+  @Column(name = "binding_status", length = 16)
+  private String bindingStatus;
+
+  @Column(name = "requirement_contract_id", columnDefinition = "uuid")
+  private UUID requirementContractId;
+
+  @Column(name = "binding_schema_version")
+  private Integer bindingSchemaVersion;
+
+  @Column(name = "binding_compiler_fingerprint", length = 64)
+  private String bindingCompilerFingerprint;
+
+  @Column(name = "binding_source_sha256", length = 64)
+  private String bindingSourceSha256;
+
+  @Column(name = "binding_exact_plan_fingerprint", length = 64)
+  private String bindingExactPlanFingerprint;
+
+  @Column(name = "binding_artifact_digest", length = 64)
+  private String bindingArtifactDigest;
+
+  @Column(name = "binding_bound_digest", length = 64)
+  private String bindingBoundDigest;
+
+  @Column(name = "binding_bound_at")
+  private Instant bindingBoundAt;
+
+  @Column(name = "binding_reason", length = 512)
+  private String bindingReason;
+
+  @Column(name = "contract_gate_report_digest", length = 64)
+  private String contractGateReportDigest;
+
+  @Column(name = "continuation_schema_version")
+  private Integer continuationSchemaVersion;
+
+  @Column(name = "continuation_sha256", length = 64)
+  private String continuationSha256;
+
+  /** Canonical exact bytes; deliberately TEXT rather than JSONB so the digest remains stable. */
+  @Column(name = "approval_evidence_json", columnDefinition = "TEXT")
+  private String approvalEvidenceJson;
+
+  @Column(name = "approval_evidence_digest", length = 64)
+  private String approvalEvidenceDigest;
+
+  @Column(name = "resolved_by_user_id", length = 64)
+  private String resolvedByUserId;
+
+  @Column(name = "resolved_by_role", length = 64)
+  private String resolvedByRole;
+
+  @Column(name = "resolution_source", length = 64)
+  private String resolutionSource;
+
+  @Column(name = "resolution_reason", length = 512)
+  private String resolutionReason;
+
+  @Column(name = "billing_owner_user_id", length = 64)
+  private String billingOwnerUserId;
+
+  @Column(name = "billing_org_id", length = 64)
+  private String billingOrgId;
+
+  @Column(name = "admitted_at")
+  private Instant admittedAt;
 
   public static GateRecord pending(String gateKey, String runId, String gateType) {
     GateRecord r = new GateRecord();
