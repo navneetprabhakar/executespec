@@ -326,6 +326,7 @@ OpenAI, OpenRouter, and Fireworks retain the shared 120-second OpenAI-wire defau
 | `GITHUB_OAUTH_CLIENT_ID` / `GITHUB_OAUTH_CLIENT_SECRET`                                    | Enables GitHub OAuth2 login                                           |
 | `SLACK_CLIENT_ID` / `SLACK_CLIENT_SECRET` / `SLACK_SIGNING_SECRET`                         | Enables Slack integration                                             |
 | `DEPLOYMENT_RECOVERY_SAFE_ENABLED`                                                         | Explicit prod attestation required to expose deployment creation; defaults to `false` |
+| `EXECUTESPEC_MIN_CLI_VERSION`                                                              | Oldest supported CLI/VS Code protocol version advertised on API responses; defaults to `1.0.0` |
 
 Release safety: production and benchmark profiles do not deliver outbound integration lifecycle
 updates because the current adapters are non-idempotent, best-effort append operations. Deployment

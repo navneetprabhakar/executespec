@@ -32,6 +32,16 @@ final class PlanApiContractEvidence {
   private static final Pattern MARKDOWN_SECTION_BOUNDARY =
       Pattern.compile("(?m)^\\s*(?:#{1,6}\\s+\\S.*|\\*\\*[^*\\n]{1,120}\\*\\*\\s*:?)\\s*$");
   private static final Pattern QUERY_PARAM = Pattern.compile("[?&]([a-zA-Z_][a-zA-Z0-9_]*)");
+  private static final Pattern NAMED_QUERY_PARAM_LIST =
+      Pattern.compile(
+          "(?i)\\bquery\\s+parameters?\\s*(?:are|include|includes|:)?\\s*"
+              + "([a-zA-Z_][a-zA-Z0-9_]*(?:(?:\\s*,\\s*(?:and\\s+)?|\\s*/\\s*|\\s+and\\s+)"
+              + "[a-zA-Z_][a-zA-Z0-9_]*){1,12})");
+  private static final Pattern SUPPORTED_QUERY_PARAM_LIST =
+      Pattern.compile(
+          "(?i)\\bsupports?\\s+"
+              + "([a-zA-Z_][a-zA-Z0-9_]*(?:(?:\\s*,\\s*(?:and\\s+)?|\\s*/\\s*|\\s+and\\s+)"
+              + "[a-zA-Z_][a-zA-Z0-9_]*){1,12})\\s+query\\s+parameters?\\b");
   static final Pattern PARAM_BLOCK = Pattern.compile("(?i)params?\\??\\s*:\\s*\\{([^}]+)}");
   private static final Pattern IDENTIFIER = Pattern.compile("\\b([a-zA-Z_][a-zA-Z0-9_]*)\\??");
   private static final Set<String> DOMAIN_STOP_WORDS =
@@ -179,7 +189,7 @@ final class PlanApiContractEvidence {
    */
   static boolean isImplementationProducerTask(PlannedTask task) {
     if (task == null) return false;
-    if (derivedRouterPrefix(task) != null) return true;
+    if (derivedRouterPrefix(task) != null || ownsResourceRouteArtifact(task)) return true;
     String identity =
         (safe(task.title())
                 + "\n"
@@ -190,6 +200,41 @@ final class PlanApiContractEvidence {
             "(?s).*(?:\\bcors\\b|global\\s+error|error\\s+handling|openapi\\s+metadata|"
                 + "api\\s+metadata|api\\s+documentation).*");
     return !crossCuttingMetadata;
+  }
+
+  /**
+   * Detects concrete resource route/controller artifacts even when one task owns several of them.
+   *
+   * <p>{@link #derivedRouterPrefix(PlannedTask)} deliberately returns a prefix only for a single
+   * resource file. That ambiguity is useful for composing relative paths, but it must not make a
+   * multi-router implementation task look like metadata merely because the same task also owns CORS
+   * or sanitized-error wiring.
+   */
+  private static boolean ownsResourceRouteArtifact(PlannedTask task) {
+    if (task.touchesFiles() == null) return false;
+    return task.touchesFiles().stream()
+        .map(path -> safe(path).replace('\\', '/').toLowerCase(Locale.ROOT))
+        .anyMatch(
+            path -> {
+              boolean routeModule =
+                  path.matches(".*[/](?:routers|routes|controllers)/[a-z0-9_-]+\\.[a-z0-9]+$")
+                      || path.matches(
+                          "(?:^|.*/)(?:backend|server)/.*[/]api/[a-z0-9_-]+\\.[a-z0-9]+$");
+              if (!routeModule) return false;
+              String fileName = path.substring(path.lastIndexOf('/') + 1);
+              String resource = fileName.substring(0, fileName.lastIndexOf('.'));
+              return !Set.of(
+                      "index",
+                      "main",
+                      "health",
+                      "common",
+                      "config",
+                      "errors",
+                      "error_handler",
+                      "error_handlers",
+                      "__init__")
+                  .contains(resource);
+            });
   }
 
   static String normalizedPath(String raw) {
@@ -259,7 +304,8 @@ final class PlanApiContractEvidence {
     String context = consumer.context();
     final String desiredMethod;
     String explicitAction =
-        List.of("reserve", "commit", "cancel", "deactivate", "adjust", "transfer").stream()
+        List.of("reserve", "commit", "cancel", "release", "deactivate", "adjust", "transfer")
+            .stream()
             .filter(action -> isActionInvocation(consumer, context, action))
             .findFirst()
             .orElse(null);
@@ -298,6 +344,13 @@ final class PlanApiContractEvidence {
                             || context.contains("crud")))
             .toList();
     return candidates.size() == 1 ? candidates.getFirst() : null;
+  }
+
+  static boolean hasExplicitActionInvocation(ApiEvidence consumer) {
+    String context = consumer.context();
+    return List.of("reserve", "commit", "cancel", "release", "deactivate", "adjust", "transfer")
+        .stream()
+        .anyMatch(action -> isActionInvocation(consumer, context, action));
   }
 
   private static boolean isActionInvocation(ApiEvidence consumer, String context, String action) {
@@ -415,6 +468,8 @@ final class PlanApiContractEvidence {
     LinkedHashSet<String> params = new LinkedHashSet<>();
     Matcher queryMatcher = QUERY_PARAM.matcher(evidence);
     while (queryMatcher.find()) params.add(queryMatcher.group(1));
+    addNamedQueryParams(params, NAMED_QUERY_PARAM_LIST.matcher(evidence));
+    addNamedQueryParams(params, SUPPORTED_QUERY_PARAM_LIST.matcher(evidence));
     Matcher blockMatcher = PARAM_BLOCK.matcher(evidence);
     while (blockMatcher.find()) {
       Matcher identifier = IDENTIFIER.matcher(blockMatcher.group(1));
@@ -427,6 +482,27 @@ final class PlanApiContractEvidence {
       }
     }
     return Set.copyOf(params);
+  }
+
+  /**
+   * Reads only explicitly labelled query-parameter lists from endpoint-local context.
+   *
+   * <p>Provider plans do not always prefix every declared parameter with {@code ?}; for example,
+   * "query parameters: q, page, page_size" is still an authoritative producer declaration. The
+   * label and two-or-more-identifier list are required so ordinary prose and response fields never
+   * become transport parameters.
+   */
+  private static void addNamedQueryParams(LinkedHashSet<String> params, Matcher lists) {
+    while (lists.find()) {
+      Matcher identifier = IDENTIFIER.matcher(lists.group(1));
+      while (identifier.find()) {
+        String value = identifier.group(1);
+        if (!Set.of("and", "or", "query", "parameter", "parameters")
+            .contains(value.toLowerCase(Locale.ROOT))) {
+          params.add(value);
+        }
+      }
+    }
   }
 
   private static String operationContext(String evidence, int start, int end) {

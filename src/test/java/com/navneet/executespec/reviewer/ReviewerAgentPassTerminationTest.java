@@ -34,7 +34,7 @@ class ReviewerAgentPassTerminationTest {
   @BeforeEach
   void setUp() {
     worker = mock(WorkerAgent.class);
-    agent = new ReviewerAgent(worker, null, null, null, null, null, null);
+    agent = new ReviewerAgent(worker, null, null, null, null, null, null, null);
     agent.initExecutor();
   }
 

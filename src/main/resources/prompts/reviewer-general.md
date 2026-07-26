@@ -28,6 +28,9 @@ Inspect for these classes of issues only. Do NOT rewrite code for style, naming,
    contracts must use the same exact envelope in handlers, OpenAPI, frontend code, and black-box
    assertions: `{"error":{"code":"STABLE_CODE","message":"sanitized message","details":{}}}`.
    Mixed flat `error`, framework `detail`, and nested `error.code` shapes are defects.
+   Inspect the framework's native HTTP-error/exception handler and request-validation handler, not
+   only the catch-all exception handler. A catch-all is not sufficient when framework-specific
+   handlers can bypass it; every path must emit the same stable sanitized envelope.
 8. **Cross-feature journey regressions and false visual tests**: inspect shared conditional UI/state/storage paths after all tasks have landed. An empty/loading/error state that removes the only create/retry action is an incomplete implementation even when its isolated test passes. Restored state must enforce the full required shape, uniqueness, and public validation rules. A DOM-order/component-count assertion does not prove responsive layout, visible focus, or WCAG contrast; compare actual CSS/computed/browser evidence and fix unsupported README claims.
 
 # Out of scope (do NOT fix these)

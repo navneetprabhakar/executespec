@@ -16,8 +16,6 @@ final class PlanSafetyTaskPatch {
   String spacingNormalized;
   String endpointNormalized;
   String taskEvidence;
-  boolean backendInventoryReadTask;
-  boolean backendOrderApiTask;
   boolean stockMutationServiceTask;
   boolean ownsStockMutationApi;
   boolean ownsIdempotencyModel;

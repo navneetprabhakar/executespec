@@ -195,6 +195,8 @@ const STATUS_REASON_LABELS: Record<string, string> = {
   REVIEWER_UNRESOLVED: 'Reviewer found unresolved issues',
   REVIEWER_FAILED: 'Reviewer pass failed',
   ALL_TASKS_FAILED: 'All tasks failed',
+  PLAN_VALIDATION_REJECTED: 'Plan validation rejected',
+  PLANNER_UNAVAILABLE: 'Planning could not complete',
   LOCAL_EXECUTION: 'Changes ready locally — not server-verified',
   LEGACY_UNKNOWN: '',
 };

@@ -27,6 +27,7 @@ import com.navneet.executespec.executioncontext.LlmExecutionPolicyFactory;
 import com.navneet.executespec.memory.ProjectMemoryProvider;
 import com.navneet.executespec.project.entity.ProjectRepo;
 import com.navneet.executespec.project.service.ProjectRepoService;
+import com.navneet.executespec.security.ContextSanitizer;
 import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
 import com.navneet.executespec.tool.ExecutionContext;
@@ -54,6 +55,10 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 class RunPlanningCoordinator {
 
+  private static final int MAX_REPAIR_TRIGGER_VIOLATIONS = 8;
+  private static final int MAX_REPAIR_TRIGGER_CHARS = 1_600;
+  private static final int MAX_REPAIR_TRIGGER_ITEM_CHARS = 240;
+
   private final PipelineRunRepository runRepo;
   private final ObjectMapper objectMapper;
   private final RunCostTracker costTracker;
@@ -75,6 +80,7 @@ class RunPlanningCoordinator {
 
   private final FeatureFlagService featureFlagService;
   private final LlmExecutionPolicyFactory executionPolicyFactory;
+  private final ContextSanitizer contextSanitizer;
 
   PlanStrategy runClassifierShadow(
       String runId,
@@ -313,6 +319,7 @@ class RunPlanningCoordinator {
         .referenceDocs(req.referenceDocs())
         .contracts(req.contracts())
         .projectAdrs(req.projectAdrs())
+        .engineeringStandards(req.engineeringStandards())
         .tddMode(req.tddMode())
         .prReviewComments(req.prReviewComments())
         .build();
@@ -483,9 +490,7 @@ class RunPlanningCoordinator {
       if (!patchResult.validated()) {
         throw new IllegalStateException(patchResult.validationFailure());
       }
-      Plan normalizedFinalPlan =
-          TaskExecutionBriefCompiler.compile(
-              TaskExpanderAgent.normalizeFinalPlan(patchResult.patchedPlan()));
+      Plan normalizedFinalPlan = normalizeAndCompileFinalPlan(patchResult.patchedPlan());
       rejectedCandidate = normalizedFinalPlan;
       patchResult =
           new CoherencePlannerAgent.PatchResult(
@@ -497,6 +502,26 @@ class RunPlanningCoordinator {
       List<String> finalPlanViolations =
           TaskExpanderAgent.finalPlanContractViolations(normalizedFinalPlan);
       if (!finalPlanViolations.isEmpty()) {
+        DeterministicFinalPlanPass deterministicPass =
+            stabilizeFinalPlanBeforeProviderRepair(normalizedFinalPlan, finalPlanViolations);
+        normalizedFinalPlan = deterministicPass.plan();
+        rejectedCandidate = normalizedFinalPlan;
+        finalPlanViolations = deterministicPass.violations();
+        patchResult =
+            new CoherencePlannerAgent.PatchResult(
+                normalizedFinalPlan,
+                patchResult.patchesApplied(),
+                patchResult.patchSummaries(),
+                patchResult.validated(),
+                patchResult.validationFailure());
+      }
+      if (!finalPlanViolations.isEmpty()) {
+        log.warn(
+            "V2 run={} final contract validation still has {} violation(s) after bounded"
+                + " deterministic stabilization; invoking one provider repair: {}",
+            runId,
+            finalPlanViolations.size(),
+            boundedRepairTriggerSummary(finalPlanViolations, contextSanitizer));
         CoherencePlannerAgent.PatchResult repairResult =
             coherencePlanner.repairContractViolations(
                 normalizedFinalPlan,
@@ -506,9 +531,7 @@ class RunPlanningCoordinator {
         if (!repairResult.validated()) {
           throw new IllegalStateException(repairResult.validationFailure());
         }
-        normalizedFinalPlan =
-            TaskExecutionBriefCompiler.compile(
-                TaskExpanderAgent.normalizeFinalPlan(repairResult.patchedPlan()));
+        normalizedFinalPlan = normalizeAndCompileFinalPlan(repairResult.patchedPlan());
         rejectedCandidate = normalizedFinalPlan;
         finalPlanViolations = TaskExpanderAgent.finalPlanContractViolations(normalizedFinalPlan);
         if (!finalPlanViolations.isEmpty()) {
@@ -540,7 +563,7 @@ class RunPlanningCoordinator {
     double cohCost = Math.max(0.0, afterCoherence.costUsd() - beforeCoherence.costUsd());
 
     log.info(
-        "V2 run={} coherence: {} patches applied, in/out={}/{}, ${}",
+        "V2 run={} coherence: {} deterministic/model plan operations applied, in/out={}/{}, ${}",
         runId,
         patchResult.patchesApplied(),
         cohIn,
@@ -575,6 +598,48 @@ class RunPlanningCoordinator {
     }
 
     return patchResult.patchedPlan();
+  }
+
+  record DeterministicFinalPlanPass(
+      Plan plan, List<String> violations, boolean stabilizationAttempted) {}
+
+  static DeterministicFinalPlanPass stabilizeFinalPlanBeforeProviderRepair(
+      Plan plan, List<String> currentViolations) {
+    if (currentViolations == null || currentViolations.isEmpty()) {
+      return new DeterministicFinalPlanPass(plan, List.of(), false);
+    }
+    Plan stabilized = normalizeAndCompileFinalPlan(plan);
+    return new DeterministicFinalPlanPass(
+        stabilized, TaskExpanderAgent.finalPlanContractViolations(stabilized), true);
+  }
+
+  private static Plan normalizeAndCompileFinalPlan(Plan plan) {
+    return TaskExecutionBriefCompiler.compile(TaskExpanderAgent.normalizeFinalPlan(plan));
+  }
+
+  static String boundedRepairTriggerSummary(List<String> violations, ContextSanitizer sanitizer) {
+    if (violations == null || violations.isEmpty()) return "(none)";
+    String summary =
+        violations.stream()
+            .limit(MAX_REPAIR_TRIGGER_VIOLATIONS)
+            .map(value -> value == null ? "(missing violation)" : value)
+            .map(
+                value ->
+                    value.replaceAll("[\\p{Cntrl}&&[^\\t]]+", " ").replaceAll("\\s+", " ").trim())
+            .map(
+                value ->
+                    value.length() <= MAX_REPAIR_TRIGGER_ITEM_CHARS
+                        ? value
+                        : value.substring(0, MAX_REPAIR_TRIGGER_ITEM_CHARS) + "…")
+            .collect(java.util.stream.Collectors.joining("; "));
+    if (sanitizer != null) summary = sanitizer.sanitizeOutput(summary);
+    int omitted = Math.max(0, violations.size() - MAX_REPAIR_TRIGGER_VIOLATIONS);
+    String omissionSuffix = omitted == 0 ? "" : "; … +" + omitted + " more";
+    int maxSummaryChars = Math.max(1, MAX_REPAIR_TRIGGER_CHARS - omissionSuffix.length());
+    if (summary.length() > maxSummaryChars) {
+      summary = summary.substring(0, Math.max(0, maxSummaryChars - 1)) + "…";
+    }
+    return summary + omissionSuffix;
   }
 
   /**
@@ -729,6 +794,9 @@ class RunPlanningCoordinator {
     if (cause instanceof java.util.concurrent.CompletionException && cause.getCause() != null) {
       cause = cause.getCause();
     }
+    if (cause instanceof TaskExpanderAgent.ExpansionContractException contractFailure) {
+      return contractFailure;
+    }
     String detail =
         cause.getMessage() == null || cause.getMessage().isBlank()
             ? cause.getClass().getSimpleName()
@@ -757,25 +825,7 @@ class RunPlanningCoordinator {
 
     String subSpec = buildEpicSubSpec(epic, parentPlan);
 
-    PlannerRequest subReq =
-        PlannerRequest.builder()
-            .spec(subSpec)
-            // MEDIUM caps sub-tasks at 4 (per Classification.maxTasks); a
-            // sub-outline that overflows is almost always a sign the
-            // planner mistakenly marked something EPIC that should have
-            // been LEAF. Better to truncate than blow the budget.
-            .classification(Classification.MEDIUM)
-            .provider(parentReq.provider())
-            .model(parentReq.model())
-            .context(parentReq.context())
-            .workspaceSummary(parentReq.workspaceSummary())
-            .projectMemory(parentReq.projectMemory())
-            .projectBrief(parentReq.projectBrief())
-            .referenceDocs(parentReq.referenceDocs())
-            .contracts(parentReq.contracts())
-            .projectAdrs(parentReq.projectAdrs())
-            .tddMode(parentReq.tddMode())
-            .build();
+    PlannerRequest subReq = epicPlannerRequest(subSpec, parentReq);
 
     Plan subSkeleton;
     try {
@@ -932,6 +982,28 @@ class RunPlanningCoordinator {
     PlannedTask leaf = coerceToLeafFallback(epic);
     return taskExpander.expand(
         leaf, parentPlan, parentReq, rootCtx.child("_expand_epic_fallback_" + epic.id()));
+  }
+
+  static PlannerRequest epicPlannerRequest(String subSpec, PlannerRequest parentReq) {
+    return PlannerRequest.builder()
+        .spec(subSpec)
+        // MEDIUM caps sub-tasks at 4 (per Classification.maxTasks); a sub-outline that overflows is
+        // almost always a sign the planner mistakenly marked something EPIC that should have been
+        // LEAF. Better to truncate than blow the budget.
+        .classification(Classification.MEDIUM)
+        .provider(parentReq.provider())
+        .model(parentReq.model())
+        .context(parentReq.context())
+        .workspaceSummary(parentReq.workspaceSummary())
+        .projectMemory(parentReq.projectMemory())
+        .projectBrief(parentReq.projectBrief())
+        .referenceDocs(parentReq.referenceDocs())
+        .contracts(parentReq.contracts())
+        .projectAdrs(parentReq.projectAdrs())
+        .engineeringStandards(parentReq.engineeringStandards())
+        .tddMode(parentReq.tddMode())
+        .prReviewComments(parentReq.prReviewComments())
+        .build();
   }
 
   static List<String> validateEpicChildRequirementOwnership(

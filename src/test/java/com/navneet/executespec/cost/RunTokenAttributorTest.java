@@ -240,6 +240,65 @@ class RunTokenAttributorTest {
   }
 
   @Test
+  void attributePlannerPersistsPhysicalFailoverRouteInsteadOfRequestedRoute() {
+    PipelineRun run = PipelineRun.builder().runId(RUN_ID).build();
+    when(runRepo.findById(RUN_ID)).thenReturn(Optional.of(run));
+    when(usageRepo.findByRunIdOrderByCreatedAtAsc(RUN_ID))
+        .thenReturn(
+            List.of(
+                RunStepUsage.builder()
+                    .id("planner")
+                    .runId(RUN_ID)
+                    .taskId("planner")
+                    .agentRole("OutlinePlannerAgent")
+                    .provider("openai")
+                    .model("gpt-5.4")
+                    .attemptStatus("SUCCESS")
+                    .build()));
+
+    attributor.attributePhase(
+        RUN_ID, RunTokenAttributor.Phase.PLANNER, 30, 7, "ANTHROPIC", "claude-sonnet-4-6");
+
+    ArgumentCaptor<PipelineRun> saved = ArgumentCaptor.forClass(PipelineRun.class);
+    verify(runRepo).save(saved.capture());
+    assertThat(saved.getValue().getPlannerProvider()).isEqualTo("OPENAI");
+    assertThat(saved.getValue().getPlannerActualModel()).isEqualTo("gpt-5.4");
+  }
+
+  @Test
+  void attributeReviewerKeepsMixedPhysicalRoutesVisibleInsteadOfInventingOne() {
+    PipelineRun run = PipelineRun.builder().runId(RUN_ID).build();
+    when(runRepo.findById(RUN_ID)).thenReturn(Optional.of(run));
+    when(usageRepo.findByRunIdOrderByCreatedAtAsc(RUN_ID))
+        .thenReturn(
+            List.of(
+                RunStepUsage.builder()
+                    .id("reviewer-1")
+                    .runId(RUN_ID)
+                    .taskId("run-reviewer-general")
+                    .provider("anthropic")
+                    .model("sonnet")
+                    .attemptStatus("SUCCESS")
+                    .build(),
+                RunStepUsage.builder()
+                    .id("reviewer-2")
+                    .runId(RUN_ID)
+                    .taskId("run-reviewer-wiring")
+                    .provider("openai")
+                    .model("gpt-5.4")
+                    .attemptStatus("SUCCESS")
+                    .build()));
+
+    attributor.attributePhase(
+        RUN_ID, RunTokenAttributor.Phase.REVIEWER, 30, 7, "ANTHROPIC", "sonnet");
+
+    ArgumentCaptor<PipelineRun> saved = ArgumentCaptor.forClass(PipelineRun.class);
+    verify(runRepo).save(saved.capture());
+    assertThat(saved.getValue().getReviewerProvider()).isNull();
+    assertThat(saved.getValue().getReviewerActualModel()).isNull();
+  }
+
+  @Test
   void attributeWorkerAdditionalTaskUpdatesOnlyTargetTaskWithTaskSnapshot() {
     AgentTask task = AgentTask.builder().taskId("12345678_T2").runId(UUID_RUN_ID).build();
     when(taskRepo.findById("12345678_T2")).thenReturn(Optional.of(task));

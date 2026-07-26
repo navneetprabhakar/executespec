@@ -80,43 +80,62 @@ final class TaskExpansionPlanContract {
         || (!consumerEvidence.contains("idempotency_key")
             && !consumerEvidence.contains("scope_hash"))) return;
 
-    for (PlannedTask candidate : plan.tasks()) {
-      if (candidate == null || java.util.Objects.equals(candidate.id(), task.id())) continue;
-      String producerEvidence = taskContractEvidence(candidate);
-      boolean schemaProducer =
-          producerEvidence.contains("idempotencyrecord")
-              && isPersistenceSchemaProducer(candidate, producerEvidence);
-      if (!schemaProducer) continue;
+    PlannedTask candidate = canonicalIdempotencySchemaProducer(plan);
+    if (candidate == null || java.util.Objects.equals(candidate.id(), task.id())) return;
+    String producerEvidence = taskContractEvidence(candidate);
 
-      String producerCompact = producerEvidence.replaceAll("[^a-z0-9]", "");
-      boolean producerUsesKeyAndScope =
-          producerCompact.contains("uniqueconstraintkeyscope")
-              || producerCompact.contains("uniqueconstraintonkeyscope");
-      boolean legacyAliasesSuperseded =
-          consumerEvidence.contains("idempotency_key and scope_hash are forbidden")
-              || consumerEvidence.contains("do not use idempotency_key or scope_hash");
-      if (producerUsesKeyAndScope
-          && usesIdempotencyRecordAlias(consumerEvidence, "idempotency_key")
-          && !legacyAliasesSuperseded) {
-        violations.add(
-            "IdempotencyRecord consumer invents idempotency_key but schema task "
-                + candidate.id()
-                + " defines key scoped by scope");
-      }
-      if (producerEvidence.contains("request_body_hash")
-          && usesIdempotencyRecordAlias(consumerEvidence, "scope_hash")
-          && !legacyAliasesSuperseded) {
-        violations.add(
-            "IdempotencyRecord consumer invents scope_hash but schema task "
-                + candidate.id()
-                + " defines request_body_hash");
-      }
-      return;
+    String producerCompact = producerEvidence.replaceAll("[^a-z0-9]", "");
+    boolean producerUsesKeyAndScope =
+        producerCompact.contains("uniqueconstraintkeyscope")
+            || producerCompact.contains("uniqueconstraintonkeyscope");
+    boolean bothLegacyAliasesSuperseded =
+        consumerEvidence.contains("idempotency_key and scope_hash are forbidden")
+            || consumerEvidence.contains("do not use idempotency_key or scope_hash");
+    boolean keyAliasSuperseded =
+        bothLegacyAliasesSuperseded
+            || consumerEvidence.contains("idempotency_key is a forbidden alias")
+            || consumerEvidence.contains("idempotency_key is forbidden");
+    boolean scopeAliasSuperseded =
+        bothLegacyAliasesSuperseded
+            || consumerEvidence.contains("scope_hash is a forbidden alias")
+            || consumerEvidence.contains("scope_hash is forbidden");
+    if (producerUsesKeyAndScope
+        && usesIdempotencyRecordAlias(consumerEvidence, "idempotency_key")
+        && !keyAliasSuperseded) {
+      violations.add(
+          "IdempotencyRecord consumer invents idempotency_key but schema task "
+              + candidate.id()
+              + " defines key scoped by scope");
+    }
+    if (producerEvidence.contains("request_body_hash")
+        && usesIdempotencyRecordAlias(consumerEvidence, "scope_hash")
+        && !scopeAliasSuperseded) {
+      violations.add(
+          "IdempotencyRecord consumer invents scope_hash but schema task "
+              + candidate.id()
+              + " defines request_body_hash");
     }
   }
 
+  /** Returns the plan-owned IdempotencyRecord schema instead of imposing one without evidence. */
+  static PlannedTask canonicalIdempotencySchemaProducer(Plan plan) {
+    if (plan == null || plan.tasks() == null) return null;
+    return plan.tasks().stream()
+        .filter(java.util.Objects::nonNull)
+        .filter(
+            candidate -> {
+              String evidence = taskContractEvidence(candidate);
+              return evidence.contains("idempotencyrecord")
+                  && isPersistenceSchemaProducer(candidate, evidence);
+            })
+        .findFirst()
+        .orElse(null);
+  }
+
   static boolean usesIdempotencyRecordAlias(String evidence, String alias) {
-    for (String sentence : evidence.split("[.!?;\\n]+")) {
+    String normalizedEvidence =
+        evidence.replaceAll("(?i)\\bidempotencyrecord\\s*\\.\\s*", "idempotencyrecord ");
+    for (String sentence : normalizedEvidence.split("[.!?;\\n]+")) {
       if (!sentence.contains("idempotencyrecord") || !sentence.contains(alias)) continue;
       if (sentence.contains("forbidden")
           || sentence.contains("must not")
@@ -164,10 +183,7 @@ final class TaskExpansionPlanContract {
         containsAny(evidence, "post /api/orders", "createorder", "create_order", "ordercreate");
     if (exactIdempotentReplay
         && orderContractConsumer
-        && (evidence.matches("(?s).*idempotency-key[^.\\n]{0,120}optional.*")
-            || evidence.matches("(?s).*optional[^.\\n]{0,120}idempotency-key.*")
-            || evidence.matches(
-                "(?s).*if provided[^.\\n]{0,160}(?:idempotency[_-]key|idempotency-key).*"))) {
+        && PlanSafetyTextSupport.makesIdempotencyHeaderOptional(evidence)) {
       violations.add("Task description makes the required Idempotency-Key header optional");
     }
     boolean reservationAggregateRequired =
@@ -557,41 +573,14 @@ final class TaskExpansionPlanContract {
 
   static String orderSchemaSection(String producerEvidence) {
     int start =
-        firstNonNegative(
+        PlanSafetyEvidenceSupport.firstNonNegative(
             producerEvidence.indexOf("`order`:"),
             producerEvidence.indexOf("order model"),
             producerEvidence.indexOf("**order**"));
     if (start < 0) return "";
     int end =
-        firstPositiveAfter(
+        PlanSafetyEvidenceSupport.firstPositiveAfter(
             producerEvidence, start, "`reservation`", "reservation.py", "reservation model");
     return producerEvidence.substring(start, end < 0 ? producerEvidence.length() : end);
-  }
-
-  static int firstNonNegative(int... values) {
-    int result = -1;
-    for (int value : values) {
-      if (value >= 0 && (result < 0 || value < result)) result = value;
-    }
-    return result;
-  }
-
-  static int firstPositiveAfter(String text, int start, String... needles) {
-    int result = -1;
-    for (String needle : needles) {
-      int value = text.indexOf(needle, start + 1);
-      if (value >= 0 && (result < 0 || value < result)) result = value;
-    }
-    return result;
-  }
-
-  public static final class ExpansionContractException extends IllegalStateException {
-    ExpansionContractException(String taskId, List<String> violations) {
-      super(
-          "TaskExpander semantic contract violation for "
-              + taskId
-              + ": "
-              + String.join("; ", violations));
-    }
   }
 }

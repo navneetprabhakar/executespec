@@ -60,28 +60,8 @@ final class PlanSafetyEvidenceSupport {
       }
     }
     normalized =
-        normalized
-            .replaceAll(
-                "(?i)(/api/reservations/)\\{order_id\\}(/(?:release|cancel))",
-                "$1{reservation_id}$2")
-            .replaceAll(
-                "(?i)and the warehouses endpoint \\(if [^)]+; otherwise derive from stock"
-                    + " data\\)",
-                "and derive warehouse summaries from GET /api/stock; do not call an undocumented"
-                    + " warehouse-list endpoint")
-            .replaceAll(
-                "(?i)populated from `?GET /api/products\\?warehouse_id=`? or a dedicated"
-                    + " warehouses list endpoint",
-                "populated from the distinct warehouse objects returned by `GET /api/stock`")
-            .replaceAll(
-                "(?i)If T\\d+ exposes `?GET (/api/stock/adjustments)`? and `?GET"
-                    + " (/api/stock/transfers)`?, call both",
-                "Call `GET $1` and `GET $2`")
-            .replaceAll(
-                "(?i)If T\\d+ uses a different endpoint shape, adapt to whatever T\\d+'s"
-                    + " contract provides[^.]*\\.",
-                "Use those exact backend paths and response contracts; do not invent alternate"
-                    + " endpoints.");
+        normalized.replaceAll(
+            "(?i)(/api/reservations/)\\{order_id\\}(/(?:release|cancel))", "$1{reservation_id}$2");
     return normalized;
   }
 

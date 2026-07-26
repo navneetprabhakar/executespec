@@ -1,7 +1,5 @@
 package com.navneet.executespec.reviewer;
 
-import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -15,6 +13,7 @@ import jakarta.annotation.PreDestroy;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.navneet.executespec.agent.PromptAssembler;
 import com.navneet.executespec.agent.PromptTrustBoundary;
 import com.navneet.executespec.config.featureflag.FeatureFlagService;
 import com.navneet.executespec.engine.WorkerAgent;
@@ -135,6 +134,7 @@ public class ReviewerAgent {
   private final ObjectMapper objectMapper;
   private final Metrics metrics;
   private final FeatureFlagService featureFlagService;
+  private final PromptAssembler promptAssembler;
   // 2026-05-13 — post-edit formatter pass. Audit run 6024f510 RC-1: reviewer's
   // surgical async→def edits introduced black-incompatible formatting drift
   // that broke the customer's `black --check app/` CI step. Runs after both
@@ -1192,9 +1192,11 @@ exit=0 — the harness will reject premature completions.
    * {@code REVIEW_FAILED} but the JSON error only surfaced "Failed to load
    * prompts/reviewer-general.md" — operators couldn't tell whether the file was missing,
    * unreadable, or had an encoding issue. Now logs the root cause class + message + classpath
-   * resource state before re-throwing so the next failure points operators at the right fix.
+   * resource state before re-throwing so the next failure points operators at the right fix. Prompt
+   * content now flows through {@link PromptAssembler}, so shared includes follow the same assembly
+   * contract as planner prompts.
    */
-  private String loadPrompt(String path) {
+  String loadPrompt(String path) {
     ClassPathResource resource = new ClassPathResource(path);
     try {
       if (!resource.exists()) {
@@ -1209,10 +1211,11 @@ exit=0 — the harness will reject premature completions.
         throw new IllegalStateException(
             "Classpath resource not found: " + path + " (deploy artefact issue)");
       }
-      return resource.getContentAsString(StandardCharsets.UTF_8);
-    } catch (IOException e) {
+      String relative = path.startsWith("prompts/") ? path.substring("prompts/".length()) : path;
+      return promptAssembler.assemble(relative);
+    } catch (Exception e) {
       log.error(
-          "[ReviewerAgent] IOException loading '{}': {}: {} (resource.exists()={})",
+          "[ReviewerAgent] prompt assembly failed for '{}': {}: {} (resource.exists()={})",
           path,
           e.getClass().getSimpleName(),
           e.getMessage(),

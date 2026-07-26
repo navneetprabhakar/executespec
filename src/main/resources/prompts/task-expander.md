@@ -56,6 +56,12 @@ The description becomes the worker's user prompt. Be concrete:
 
 1. **What to build, end-to-end.** Name the concrete classes/functions/files/routes/columns you expect to land. Vague is useless — "add error handling" tells the worker nothing; "wrap calls to the LLM provider in a retry-with-backoff helper at `src/llm/retry.ts` that surfaces the error class so callers can match on it" gives the worker something to execute.
 
+   A task that owns a persistence model or shared DTO must enumerate every model it owns with a
+   complete field, relationship, constraint, and lifecycle contract. Do not abbreviate a schema inventory,
+   splice an “e.g.” example into the middle of a field list, or jump from a partially
+   described model to migration/seed instructions. Before submitting, verify that every named
+   model declaration is syntactically complete and that downstream consumers can copy it verbatim.
+
 2. **Acceptance signals.** What does success look like at the file/test level? Mention the test file and what it should assert.
 
    Production code and its focused maintained tests belong in this SAME task. Put conventional

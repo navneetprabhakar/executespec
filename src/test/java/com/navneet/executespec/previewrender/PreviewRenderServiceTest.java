@@ -59,6 +59,7 @@ class PreviewRenderServiceTest {
   private PreviewRenderAgent agent;
   private FeatureFlagService flags;
   private WorkspaceRestoreService restore;
+  private RunChangeEvidenceService changes;
   private PreviewRenderService service;
 
   @BeforeEach
@@ -155,13 +156,14 @@ class PreviewRenderServiceTest {
     restore = mock(WorkspaceRestoreService.class);
 
     StateStore stateStore = mock(StateStore.class);
-    RunChangeEvidenceService changes = mock(RunChangeEvidenceService.class);
+    changes = mock(RunChangeEvidenceService.class);
 
     PipelineRun run = new PipelineRun();
     run.setAiProvider(LlmProvider.ANTHROPIC.name());
     when(stateStore.findRun(RUN_ID)).thenReturn(Optional.of(run));
     when(flags.isEnabled(PreviewRenderService.FLAG)).thenReturn(true);
     when(restore.ensureWorkspaceAvailable(RUN_ID)).thenReturn(workspace);
+    when(changes.meaningfulProductDiffCount(RUN_ID)).thenReturn(1);
     // An invalid diff must degrade the ranking signal, not fail the render.
     when(changes.inspect(anyString(), any())).thenReturn(null);
 
@@ -191,6 +193,19 @@ class PreviewRenderServiceTest {
         .hasMessageContaining("not enabled");
 
     assertThat(jobStore).isEmpty();
+    verify(changes, never()).meaningfulProductDiffCount(anyString());
+  }
+
+  @Test
+  void rejectsRenderWhenRunProducedNoProductFiles() {
+    when(changes.meaningfulProductDiffCount(RUN_ID)).thenReturn(0);
+
+    assertThatThrownBy(() -> service.requestRender(RUN_ID, "user"))
+        .isInstanceOf(ResponseStatusException.class)
+        .hasMessageContaining("produced no product files");
+
+    assertThat(jobStore).isEmpty();
+    verify(agent, never()).render(any(), any(), anyString(), anyString());
   }
 
   @Test
@@ -294,6 +309,23 @@ class PreviewRenderServiceTest {
     assertThat(second.getId()).isEqualTo(first.getId());
     assertThat(jobStore).hasSize(1);
     awaitTerminal(first);
+  }
+
+  @Test
+  void returnsAnExistingActiveJobBeforeApplyingTheProductFileGate() {
+    PreviewRenderJob active =
+        PreviewRenderJob.builder()
+            .runId(RUN_ID)
+            .status(PreviewRenderJob.Status.RENDERING.name())
+            .requestedAt(Instant.now())
+            .leaseOwner("healthy-instance")
+            .leaseExpiresAt(Instant.now().plus(Duration.ofMinutes(5)))
+            .build();
+    jobStore.put(active.getId(), active);
+    when(changes.meaningfulProductDiffCount(RUN_ID)).thenReturn(0);
+
+    assertThat(service.requestRender(RUN_ID, "user").getId()).isEqualTo(active.getId());
+    verify(changes, never()).meaningfulProductDiffCount(anyString());
   }
 
   /**

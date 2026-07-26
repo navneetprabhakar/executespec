@@ -21,6 +21,16 @@ final class PlanSafetyMigrationSupport {
     if (plan == null || plan.tasks() == null || !usesAlembic(plan)) return false;
     PlannedTask owner = consolidatedMigrationOwner(plan);
     if (owner == null) return false;
+    // A provider can put the explicit full-schema owner first and then accidentally assign
+    // numbered revisions to later domain tasks. The ownership contract, not task ordering, is
+    // authoritative in that shape.
+    if (hasExplicitConsolidatedOwnership(owner)
+        && plan.tasks().stream()
+            .filter(Objects::nonNull)
+            .filter(task -> !Objects.equals(task.id(), owner.id()))
+            .anyMatch(PlanSafetyMigrationSupport::hasVersionMigration)) {
+      return true;
+    }
     int ownerIndex = plan.tasks().indexOf(owner);
     for (int index = 0; index < ownerIndex; index++) {
       PlannedTask task = plan.tasks().get(index);
@@ -33,6 +43,14 @@ final class PlanSafetyMigrationSupport {
                   .contains("migration ownership correction (binding)"))) return true;
     }
     return false;
+  }
+
+  static boolean hasExplicitConsolidatedOwnership(PlannedTask task) {
+    if (task == null) return false;
+    String evidence = taskContractEvidence(task).toLowerCase(Locale.ROOT);
+    return evidence.contains("migration ownership (binding")
+        || evidence.contains("single consolidated migration")
+        || evidence.contains("sole migration owner");
   }
 
   private static boolean usesAlembic(Plan plan) {
@@ -66,12 +84,10 @@ final class PlanSafetyMigrationSupport {
   }
 
   static String consolidatedMigrationPath(Plan plan) {
-    if (plan != null && plan.tasks() != null) {
-      for (PlannedTask task : plan.tasks()) {
-        if (task == null || task.touchesFiles() == null) continue;
-        for (String path : task.touchesFiles()) {
-          if (isVersionMigrationPath(path)) return path;
-        }
+    PlannedTask owner = consolidatedMigrationOwner(plan);
+    if (owner != null && owner.touchesFiles() != null) {
+      for (String path : owner.touchesFiles()) {
+        if (isVersionMigrationPath(path)) return path;
       }
     }
     return "backend/alembic/versions/001_initial_schema.py";
@@ -86,8 +102,14 @@ final class PlanSafetyMigrationSupport {
 
   static boolean isVersionMigrationPath(String path) {
     String normalized = safe(path).replace('\\', '/').toLowerCase(Locale.ROOT);
-    return normalized.contains("/alembic/versions/")
+    return normalized.matches("(?s).*/alembic/versions/(?!__init__\\.py$)[^/.][^/]*\\.py$")
         || normalized.matches("(?s).*/db/migration/v[^/]+\\.(?:sql|java|kt)$");
+  }
+
+  static boolean isMigrationDirectoryPlaceholder(String path) {
+    String normalized = safe(path).replace('\\', '/').toLowerCase(Locale.ROOT);
+    return normalized.matches(
+        "(?s).*/alembic/versions/(?:\\.gitkeep|\\.keep|__init__\\.py|readme(?:\\.[a-z0-9]+)?)$");
   }
 
   static String normalizeOwnershipDescription(
@@ -180,9 +202,9 @@ final class PlanSafetyMigrationSupport {
   }
 
   private static boolean isExplicitFullSchemaMigrationOwner(PlannedTask task) {
-    if (!hasVersionMigration(task)) return false;
     String evidence = taskContractEvidence(task).toLowerCase(Locale.ROOT);
-    if (evidence.contains("migration ownership (binding")) return true;
+    if (hasExplicitConsolidatedOwnership(task) && isDomainSchemaTask(task)) return true;
+    if (!hasVersionMigration(task)) return false;
     if (!isDomainSchemaTask(task)) return false;
     boolean initialMigration =
         evidence.contains("initial migration")

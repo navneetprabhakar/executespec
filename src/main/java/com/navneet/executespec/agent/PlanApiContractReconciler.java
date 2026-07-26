@@ -6,6 +6,7 @@ import static com.navneet.executespec.agent.PlanApiContractEvidence.derivedRoute
 import static com.navneet.executespec.agent.PlanApiContractEvidence.displayPath;
 import static com.navneet.executespec.agent.PlanApiContractEvidence.domainTokens;
 import static com.navneet.executespec.agent.PlanApiContractEvidence.extract;
+import static com.navneet.executespec.agent.PlanApiContractEvidence.hasExplicitActionInvocation;
 import static com.navneet.executespec.agent.PlanApiContractEvidence.isImplementationProducerTask;
 import static com.navneet.executespec.agent.PlanApiContractEvidence.mergeEvidence;
 import static com.navneet.executespec.agent.PlanApiContractEvidence.normalizedPath;
@@ -30,12 +31,16 @@ import com.navneet.executespec.agent.PlanApiContractEvidence.ApiEvidence;
 final class PlanApiContractReconciler {
   private static final Pattern GET_MUTATION_ACTION =
       Pattern.compile(
-          "(?i)\\bGET\\s*(?=/)(/[^\\s`\"']*/(?:reserve|commit|cancel|deactivate|adjust|transfer))"
+          "(?i)\\bGET\\s*(?=/)(/[^\\s`\"']*/(?:reserve|commit|cancel|release|deactivate|adjust|transfer))"
               + "(?=\\b|[?`])");
   private static final Pattern GET_WITH_CREATED_RESPONSE =
       Pattern.compile(
           "(?i)\\bGET\\s*(?=/)(/[^\\s`\"']+)(?=[^.\\n]{0,180}(?:\\b201\\b|"
               + "\\brequest\\s+body\\b))");
+  private static final Pattern MALFORMED_ANGLE_QUERY_ROUTE =
+      Pattern.compile(
+          "(?i)\\b(GET|POST|PUT|PATCH|DELETE)\\s+(`?)(/[^\\s`\"'<>?&]+)"
+              + "<[^>]+>((?:&[a-zA-Z_][a-zA-Z0-9_]*=<[^>]+>)+)");
 
   private PlanApiContractReconciler() {}
 
@@ -54,6 +59,66 @@ final class PlanApiContractReconciler {
       tasks.add(copyTask(task, description, constraints));
     }
     return copyPlan(plan, tasks);
+  }
+
+  /**
+   * Repairs the legacy {@code /route<int>&page=<int>} spelling only when one backend producer owns
+   * the same HTTP method and route identity.
+   *
+   * <p>The first anonymous angle token cannot express a named path or query parameter, so it is
+   * discarded. Named {@code &key=<type>} suffixes become an ordinary query string. Ambiguous or
+   * missing producers are deliberately left untouched for {@link PlanApiSyntaxGate} to reject.
+   */
+  static Plan normalizeMalformedConsumerRoutes(Plan plan) {
+    if (plan == null || plan.tasks() == null || plan.tasks().isEmpty()) return plan;
+    List<ApiEvidence> producers =
+        mergeEvidence(
+            plan.tasks().stream()
+                .filter(java.util.Objects::nonNull)
+                .filter(task -> !isFrontendOnlyTask(task) && !isTestOnlyTask(task))
+                .filter(PlanApiContractEvidence::isImplementationProducerTask)
+                .flatMap(task -> extract(task).stream())
+                .toList());
+    List<PlannedTask> tasks = new ArrayList<>(plan.tasks().size());
+    for (PlannedTask task : plan.tasks()) {
+      if (task == null || (!isFrontendOnlyTask(task) && !isTestOnlyTask(task))) {
+        tasks.add(task);
+        continue;
+      }
+      String description = normalizeMalformedConsumerRoutes(task.description(), producers);
+      List<String> constraints =
+          (task.hardConstraints() == null ? List.<String>of() : task.hardConstraints())
+              .stream().map(value -> normalizeMalformedConsumerRoutes(value, producers)).toList();
+      tasks.add(copyTask(task, description, constraints));
+    }
+    return copyPlan(plan, tasks);
+  }
+
+  private static String normalizeMalformedConsumerRoutes(
+      String evidence, List<ApiEvidence> producers) {
+    String source = safe(evidence);
+    Matcher matcher = MALFORMED_ANGLE_QUERY_ROUTE.matcher(source);
+    StringBuffer normalized = new StringBuffer(source.length());
+    while (matcher.find()) {
+      String method = matcher.group(1).toUpperCase(Locale.ROOT);
+      String route = matcher.group(3);
+      String identity = normalizedPath(route);
+      List<ApiEvidence> candidates =
+          producers.stream()
+              .filter(producer -> producer.method().equals(method))
+              .filter(producer -> producer.path().equals(identity))
+              .toList();
+      if (candidates.size() != 1) {
+        matcher.appendReplacement(normalized, Matcher.quoteReplacement(matcher.group()));
+        continue;
+      }
+      String query = "?" + matcher.group(4).substring(1);
+      String replacement =
+          method + " " + matcher.group(2) + authoritativeDisplayPath(candidates.getFirst()) + query;
+      matcher.appendReplacement(normalized, Matcher.quoteReplacement(replacement));
+    }
+    matcher.appendTail(normalized);
+    return normalized.toString();
   }
 
   private static String normalizeImpossibleGet(String evidence) {
@@ -225,7 +290,7 @@ final class PlanApiContractReconciler {
           producer = PlanApiReadIntentResolver.resolve(producers, task);
           readIntentSelected = producer != null;
         }
-        if (producer == null) {
+        if (producer == null && !hasExplicitActionInvocation(consumer)) {
           producer =
               producers.stream()
                   .filter(candidate -> candidate.method().equals(consumer.method()))
@@ -306,7 +371,7 @@ final class PlanApiContractReconciler {
                   + " is authoritative for "
                   + producer.method()
                   + " "
-                  + displayPath(producer.path())
+                  + authoritativeDisplayPath(producer)
                   + "; use query parameters "
                   + producer.declaredQueryParams()
                   + (producer.responseFields().isEmpty()
@@ -456,6 +521,13 @@ final class PlanApiContractReconciler {
                     consumer.path().equals(producerPath)
                         || consumer.path().startsWith(producerPath + "/"));
     return hasApiProducerPrefix ? displayPath(consumer.path()) : null;
+  }
+
+  private static String authoritativeDisplayPath(ApiEvidence producer) {
+    String raw = safe(producer.rawPath());
+    int query = raw.indexOf('?');
+    if (query >= 0) raw = raw.substring(0, query);
+    return raw.startsWith("/api") ? raw : displayPath(producer.path());
   }
 
   private static boolean containsAny(String value, String... needles) {

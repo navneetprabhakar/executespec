@@ -92,7 +92,10 @@ invalid reports are excluded and counted separately.
   at its spec-adherence score. Unknown requirements additionally cap verified/rubric projections at
   84 (below the 85 passing band), so an internally inconsistent 100/100 assessment cannot coexist
   with an unproven release badge; legacy report DTOs and evidence-ledger score summaries apply the
-  cap on read, while new reports persist it during score generation. `AccuracyReportTruthPolicy` moves UNKNOWN entries that themselves state
+  cap on read, while new reports persist it during score generation. The shared
+  `ValidationReportScoreProjection` is authoritative for report, shared-report, run-list, and
+  run-detail reads; those surfaces must never expose the uncapped persisted snapshot after newer
+  accuracy evidence admits a gap. `AccuracyReportTruthPolicy` moves UNKNOWN entries that themselves state
   negative implementation evidence to PARTIAL before scoring. Any admitted partial requirement
   caps accuracy at 79/C, an admitted missing requirement caps it at 69/D, and genuinely unverified
   requirements cap it at 89/B. UNKNOWN is not treated as a defect, but its ledger row is WARN and

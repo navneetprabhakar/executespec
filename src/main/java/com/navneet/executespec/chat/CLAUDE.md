@@ -25,6 +25,22 @@ it as provider downtime when deterministic plan-contract or coherence validation
 after successful calls. An empty code workspace also says nothing about whether an outline existed,
 because file generation starts only after planning is accepted.
 
+Classifier, outline, task expansion, and coherence are planning phases; task expansion elaborates
+implementation instructions and is not worker code generation. The evidence block therefore emits
+`workerCodeGenerationState=NOT_STARTED` only for a BUILD run terminally rejected as
+`PLANNER_UNAVAILABLE` before any final plan was persisted. All other shapes remain `UNKNOWN` unless
+stronger worker/artifact evidence is available, preventing Ask from turning planning-token activity
+into a false claim that generated-code execution ran.
+
+`RunChatDeterministicAnswer` answers planning-failure lifecycle questions without provider spend
+only when `failureReason` carries the server-owned, sanitized `Plan validation rejected:` marker
+and no final plan exists. It accepts both the persisted umbrella `PLANNER_UNAVAILABLE` reason and
+its customer-facing `PLAN_VALIDATION_REJECTED` projection, keeping Web and CLI Ask on the same
+zero-provider path after run-detail projection.
+The generic hierarchical-coherence wrapper is insufficient because it also wraps provider, model,
+prompt, transport, and protocol failures; those cases continue through the grounded provider path
+and Ask must not claim provider availability was irrelevant.
+
 Each bounded Ask provider call allows 3,000 output tokens. Reasoning-capable providers count hidden
 reasoning against this ceiling; the former 1,200-token limit could consume the entire allowance
 without producing visible text. The per-turn durable ceiling is 15,000 output tokens / 415,000

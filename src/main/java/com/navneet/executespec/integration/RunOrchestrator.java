@@ -38,6 +38,7 @@ import com.navneet.executespec.billing.config.ManagedAiProperties;
 import com.navneet.executespec.billing.cost.RunCostLogRepository;
 import com.navneet.executespec.codeintel.RunCodeMapService;
 import com.navneet.executespec.config.AgentProperties;
+import com.navneet.executespec.cost.CostCapValues;
 import com.navneet.executespec.cost.CostHistoryService;
 import com.navneet.executespec.cost.PlannerPhaseAttribution;
 import com.navneet.executespec.cost.RunCostTracker;
@@ -76,6 +77,7 @@ import com.navneet.executespec.router.ProviderAvailabilityMap;
 import com.navneet.executespec.router.RunModelOverrides;
 import com.navneet.executespec.run.RunContinuationBenchmarkPriorFlag;
 import com.navneet.executespec.run.RunContinuationConfirmationFlag;
+import com.navneet.executespec.security.ContextSanitizer;
 import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
 import com.navneet.executespec.state.entity.PipelineRun;
@@ -160,10 +162,10 @@ public class RunOrchestrator implements RunControlPort {
 
   private final Metrics metrics;
   private final ObjectMapper objectMapper;
+  private final ContextSanitizer contextSanitizer;
   private final AgentProperties agentProps;
   private final RunCostTracker costTracker;
-  // 2026-05-13 audit Stage 2 — k-NN over historical run costs. Records on terminal; the
-  // estimator falls back to it before the Stage-1 formula once ≥10 similar runs exist.
+  // k-NN historical cost fallback after at least ten comparable terminal runs.
   private final CostHistoryService costHistoryService;
 
   /** Prices a planned run and persists its estimate, credits and hard spend ceiling. */
@@ -1087,6 +1089,11 @@ public class RunOrchestrator implements RunControlPort {
             // RR-233 — expose the hard ceiling before the planner can persist its estimate; a
             // post-submit write races a fast planner and clamps against the wrong cap.
             .userCostCap(policy.userCostCap())
+            // A customer ceiling applies to the whole run, including classification and planning.
+            // The plan-derived cap is unavailable here, so seed hard_cap_usd with the voluntary
+            // ceiling; persistEstimate may only tighten it. Otherwise an early planning failure
+            // leaves dispatch and the Cost tab uncapped despite a durable user_cost_cap_usd.
+            .hardCapUsd(CostCapValues.requireValidOptional(policy.userCostCap()))
             // RR-234 — publication consent is durable; losing it on crash turns "do not publish"
             // into "publish".
             .skipAutoPush(policy.skipAutoPush())
@@ -1920,7 +1927,7 @@ public class RunOrchestrator implements RunControlPort {
                   runId,
                   effective,
                   outlineEx);
-              failPlannerUnavailable(runId, startedAt, "produce a safe executable plan");
+              failPlannerUnavailable(runId, startedAt, "produce a safe executable plan", outlineEx);
               return;
             }
           } else if (effective == PlanStrategy.LARGE) {
@@ -1934,7 +1941,7 @@ public class RunOrchestrator implements RunControlPort {
                   "V2 run={} LARGE planner pipeline failed — refusing scope collapse",
                   runId,
                   largeEx);
-              failPlannerUnavailable(runId, startedAt, "produce a safe executable plan");
+              failPlannerUnavailable(runId, startedAt, "produce a safe executable plan", largeEx);
               return;
             }
           } else if (effective == PlanStrategy.SINGLE_SHOT) {
@@ -1945,7 +1952,7 @@ public class RunOrchestrator implements RunControlPort {
           } else {
             log.error(
                 "V2 run={} no usable planning strategy — refusing synthetic execution", runId);
-            failPlannerUnavailable(runId, startedAt, "select a safe executable strategy");
+            failPlannerUnavailable(runId, startedAt, "select a safe executable strategy", null);
             return;
           }
         } catch (Exception e) {
@@ -1955,12 +1962,20 @@ public class RunOrchestrator implements RunControlPort {
         }
         try {
           plan = TaskExecutionBriefCompiler.compileExecutable(plan);
-        } catch (Exception executablePlanEx) {
+        } catch (RuntimeException executablePlanInternalEx) {
+          boolean contractRejection =
+              PlannerFailureDiagnostic.isExecutableContractRejection(executablePlanInternalEx);
+          if (contractRejection) planningCoordinator.persistRejectedPlanDiagnostic(runId, plan);
           log.error(
-              "V2 run={} executable plan compilation failed — refusing worker execution",
+              "V2 run={} executable plan compiler {}",
               runId,
-              executablePlanEx);
-          failPlannerUnavailable(runId, startedAt, "compile a safe executable task contract");
+              contractRejection ? "rejected its contract" : "failed internally",
+              executablePlanInternalEx);
+          failPlannerUnavailable(
+              runId,
+              startedAt,
+              "compile a safe executable task contract",
+              contractRejection ? executablePlanInternalEx : null);
           return;
         }
         persistenceWriter.persistCompiledPlan(runId, plan);
@@ -3132,8 +3147,17 @@ public class RunOrchestrator implements RunControlPort {
         .orElse(false);
   }
 
-  private void failPlannerUnavailable(String runId, Instant startedAt, String failure) {
-    terminate(runId, "FAILED", "PLANNER_UNAVAILABLE", "planning could not " + failure, startedAt);
+  private void failPlannerUnavailable(
+      String runId, Instant startedAt, String failure, Throwable cause) {
+    String genericReason = "planning could not " + failure;
+    terminate(
+        runId,
+        "FAILED",
+        "PLANNER_UNAVAILABLE",
+        cause == null
+            ? genericReason
+            : PlannerFailureDiagnostic.describe(cause, genericReason, contextSanitizer),
+        startedAt);
   }
 
   @Override
@@ -3400,6 +3424,8 @@ public class RunOrchestrator implements RunControlPort {
         goalContinuationAdvisor.advise(
             GoalContinuationAdvisorRequest.builder()
                 .goalDecision(goalDecision)
+                .runId(runId)
+                .taskId(task.taskId())
                 .currentProvider(task.dispatchedProvider())
                 .currentModel(task.dispatchedModel())
                 .taskCategory("PROJECT_PATCH")
@@ -3519,6 +3545,8 @@ public class RunOrchestrator implements RunControlPort {
         goalContinuationAdvisor.advise(
             GoalContinuationAdvisorRequest.builder()
                 .goalDecision(goalDecision)
+                .runId(runId)
+                .taskId(task.taskId())
                 .currentProvider(task.dispatchedProvider())
                 .currentModel(task.dispatchedModel())
                 .taskCategory("PROJECT_PATCH")

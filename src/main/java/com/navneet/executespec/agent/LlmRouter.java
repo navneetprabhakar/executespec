@@ -874,10 +874,7 @@ public class LlmRouter {
 
     String primaryProvider = request.provider().toLowerCase(Locale.ROOT);
     boolean primaryUsedCustomerKey = source != RunKeyContext.Source.PLATFORM;
-    List<String[]> chain =
-        "deepseek".equalsIgnoreCase(primaryProvider)
-            ? modelRegistry.fallbackChainFor(request.model(), primaryProvider)
-            : modelRegistry.fallbackChainFor(request.model());
+    List<String[]> chain = modelRegistry.fallbackChainFor(request.model(), primaryProvider);
     if (chain == null || chain.isEmpty()) return null;
 
     for (String[] entry : chain) {

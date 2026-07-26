@@ -194,51 +194,6 @@ final class PlanSafetyTaskPhase1 {
       patch.summaries.add(patch.task.id() + " reuses canonical backend API endpoint paths");
     }
     patch.taskEvidence = taskEvidence(patch.task);
-    patch.backendInventoryReadTask =
-        !isFrontendOnlyTask(patch.task)
-            && !isTestOnlyTask(patch.task)
-            && containsAny(
-                patch.taskEvidence, "product/stock listing", "list products", "get /api/stock");
-    if (policy.requirements().contains("inventory overview") && patch.backendInventoryReadTask) {
-      String readContract =
-          "Expose GET /api/warehouses for the warehouse selector and overview counts, alongside"
-              + " the canonical product and stock read endpoints; frontend and black-box tests"
-              + " use this exact path.";
-      if (!patch.description.contains(readContract)) {
-        patch.description = patch.description + "\n\nCONTRACT CORRECTION: " + readContract;
-        patch.applied++;
-        patch.summaries.add(patch.task.id() + " description += warehouse read API");
-      }
-      patch.applied +=
-          addConstraint(
-              patch.constraints,
-              readContract,
-              patch.task.id(),
-              "warehouse read API ownership",
-              patch.summaries);
-    }
-    patch.backendOrderApiTask =
-        !isFrontendOnlyTask(patch.task)
-            && !isTestOnlyTask(patch.task)
-            && containsAny(patch.taskEvidence, "order creation api", "post /api/orders");
-    if (policy.requirements().contains("order creation") && patch.backendOrderApiTask) {
-      String orderReadContract =
-          "Expose GET /api/orders and GET /api/orders/{order_id} using the same Order/OrderLine"
-              + " response contract as creation; frontend and persistence tests use these exact"
-              + " paths.";
-      if (!patch.description.contains(orderReadContract)) {
-        patch.description = patch.description + "\n\nCONTRACT CORRECTION: " + orderReadContract;
-        patch.applied++;
-        patch.summaries.add(patch.task.id() + " description += order read APIs");
-      }
-      patch.applied +=
-          addConstraint(
-              patch.constraints,
-              orderReadContract,
-              patch.task.id(),
-              "order read API ownership",
-              patch.summaries);
-    }
     patch.stockMutationServiceTask =
         !isFrontendOnlyTask(patch.task)
             && !isTestOnlyTask(patch.task)
@@ -278,7 +233,13 @@ final class PlanSafetyTaskPhase1 {
       String auditPath = policy.canonicalApiEndpoints().get(ApiOperation.AUDIT_HISTORY);
       String adjustmentsPath = policy.canonicalApiEndpoints().get(ApiOperation.ADJUST_STOCK);
       String transfersPath = policy.canonicalApiEndpoints().get(ApiOperation.TRANSFER_STOCK);
-      if (auditPath != null) {
+      String auditRouteOwner =
+          auditPath == null
+              ? null
+              : PlanApiProducerContractReconciler.uniqueRouteArtifactOwnerIds(policy.plan().tasks())
+                  .get(PlanApiProducerContractReconciler.routeResource(auditPath));
+      if (auditPath != null
+          && (auditRouteOwner == null || auditRouteOwner.equals(patch.task.id()))) {
         patch.constraints.removeIf(
             constraint -> {
               String normalized = safe(constraint).toLowerCase(Locale.ROOT);
@@ -296,6 +257,21 @@ final class PlanSafetyTaskPhase1 {
                 patch.task.id(),
                 "unified backend audit-history API ownership",
                 patch.summaries);
+      } else if (auditPath != null) {
+        boolean removed =
+            patch.constraints.removeIf(
+                constraint -> {
+                  String normalized = safe(constraint).toLowerCase(Locale.ROOT);
+                  return normalized.contains("audit history")
+                      && normalized.contains("get " + auditPath.toLowerCase(Locale.ROOT));
+                });
+        if (removed) {
+          patch.applied++;
+          patch.summaries.add(
+              patch.task.id()
+                  + " removed audit-history producer ownership assigned to route owner "
+                  + auditRouteOwner);
+        }
       } else if (adjustmentsPath != null && transfersPath != null) {
         patch.applied +=
             addConstraint(

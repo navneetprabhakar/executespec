@@ -15,6 +15,7 @@ class RunChatEvidenceTest {
             .runId("run-coherence-rejected")
             .status("FAILED")
             .statusReason("PLANNER_UNAVAILABLE")
+            .runMode("BUILD")
             .failureReason("planning could not pass deterministic coherence validation")
             .aiProvider("DEEPSEEK")
             .requestedProvider("GEMINI")
@@ -37,6 +38,7 @@ class RunChatEvidenceTest {
 
     assertThat(evidence)
         .contains("- statusReason: PLANNER_UNAVAILABLE")
+        .contains("- runMode: BUILD")
         .contains("- failureReason: planning could not pass deterministic coherence validation")
         .contains("- requestedProvider: GEMINI")
         .contains("- plannerEffectiveProvider: DEEPSEEK")
@@ -48,7 +50,9 @@ class RunChatEvidenceTest {
         .contains("coherence=input=116604/output=18271")
         .contains(
             "planArtifacts: outlinePersisted=true, finalPlanPersisted=false,"
-                + " requirementsPersisted=false");
+                + " requirementsPersisted=false")
+        .contains("- workerCodeGenerationState: NOT_STARTED")
+        .contains("- phaseDefinition: expansion is planning, not worker code generation");
   }
 
   @Test
@@ -93,5 +97,44 @@ class RunChatEvidenceTest {
         .contains("- plannerTokenAttributionIncomplete: true")
         .contains("outline=input=5457/output=3699")
         .contains("outlinePersisted=true");
+  }
+
+  @Test
+  void finalPlanOrNonPlannerFailureDoesNotInventWorkerExecutionState() {
+    PipelineRun acceptedPlan =
+        PipelineRun.builder()
+            .runId("run-worker-unknown")
+            .runMode("BUILD")
+            .status("FAILED")
+            .statusReason("FINAL_BUILD_FAILED")
+            .planJson("{\"tasks\":[{\"id\":\"T1\"}]}")
+            .build();
+    PipelineRun patch =
+        PipelineRun.builder()
+            .runId("run-patch")
+            .runMode("PATCH")
+            .status("FAILED")
+            .statusReason("PLANNER_UNAVAILABLE")
+            .build();
+
+    assertThat(RunChatEvidence.render(acceptedPlan))
+        .contains("- workerCodeGenerationState: UNKNOWN");
+    assertThat(RunChatEvidence.render(patch)).contains("- workerCodeGenerationState: UNKNOWN");
+  }
+
+  @Test
+  void projectedPlanValidationReasonProvesWorkerDidNotStart() {
+    PipelineRun rejected =
+        PipelineRun.builder()
+            .runMode("BUILD")
+            .status("FAILED")
+            .statusReason("PLAN_VALIDATION_REJECTED")
+            .failureReason("Plan validation rejected: missing producer")
+            .planOutlineJson("{\"tasks\":[]}")
+            .planJson(null)
+            .build();
+
+    assertThat(RunChatEvidence.render(rejected))
+        .contains("- workerCodeGenerationState: NOT_STARTED");
   }
 }

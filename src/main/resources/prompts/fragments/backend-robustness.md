@@ -3,6 +3,9 @@ BACKEND ROBUSTNESS — MANDATORY:
 - Python (FastAPI/Flask): Global exception handlers AND 404 handler returning JSON
 - Java (Spring Boot): @RestControllerAdvice for centralized JSON error handling AND 404 handler
 - Go / Rust: Global JSON error handlers AND 404 handlers
+- FRAMEWORK ERROR COVERAGE: when one canonical error envelope is required, explicitly route both
+  framework-native HTTP errors/exceptions and framework request-validation errors through it. A
+  catch-all handler is not sufficient because more-specific framework handlers run first.
 - NETWORK BINDING: ALL servers MUST bind to 0.0.0.0 (not localhost)
 - All API responses must be structured JSON, never raw HTML or text
 - CONCURRENCY CONTRACTS: when the requirement says atomic, idempotent, overlap-safe, unique, or

@@ -880,6 +880,24 @@ class PlanContractQualityGateTest {
   }
 
   @Test
+  void rejectsMalformedPartialSchemaOwnerInsteadOfIgnoringItsClippedExample() {
+    Plan plan =
+        plan(
+            backend(
+                "T2",
+                "Define warehouse model",
+                "`Warehouse`: id (UUID), code (unique string, e.g. Use application UUID defaults."
+                    + " Configure migrations and seed data."),
+            frontend(
+                "T11",
+                "Consume warehouse response",
+                "The Warehouse fields: id, code, name, created_at."));
+
+    assertThat(PlanContractQualityGate.violations(plan))
+        .anyMatch(value -> value.contains("shared warehouse field contract differs"));
+  }
+
+  @Test
   void rejectsTrueStrictSubsetOfBracedSharedModelContract() {
     Plan plan =
         plan(
@@ -1002,6 +1020,88 @@ class PlanContractQualityGateTest {
   }
 
   @Test
+  void acceptsDifferentTaskLocalPropsContractsForDistinctUiComponents() {
+    Plan plan =
+        plan(
+            frontend(
+                "T9",
+                "Build searchable inventory table",
+                "Create `InventoryTable.tsx`. Props: onSearchChange, onWarehouseChange,"
+                    + " searchTerm, products, stock, loading."),
+            frontend(
+                "T10",
+                "Build stock transfer dialog",
+                "Create `TransferDialog.tsx`. Props: open, onClose, inventoryId, warehouseName,"
+                    + " productSku, currentOnHand, onSuccess."));
+
+    assertThat(PlanContractQualityGate.violations(plan))
+        .noneMatch(value -> value.contains("shared props field contract differs"));
+  }
+
+  @Test
+  void rejectsInventoryFieldVocabularyDriftAcrossSchemaAndServiceTasks() {
+    PlannedTask schema =
+        task(
+            "T2",
+            "Define inventory schema",
+            "Inventory fields: id, product_id, warehouse_id, quantity, updated_at.",
+            List.of("backend/app/models/inventory.py"));
+    PlannedTask service =
+        task(
+            "T5",
+            "Implement inventory service",
+            "Inventory fields: id, product_id, warehouse_id, on_hand, reserved, updated_at.",
+            List.of("backend/app/services/inventory.py"));
+
+    assertThat(PlanContractQualityGate.violations(plan(schema, service)))
+        .contains(
+            "T5: shared inventory field contract differs from T2; first-only=[quantity],"
+                + " second-only=[on_hand, reserved]");
+  }
+
+  @Test
+  void rejectsDifferentExplicitlySharedPropsContracts() {
+    Plan plan =
+        plan(
+            frontend(
+                "T9",
+                "Define shared selection props",
+                "Export the shared Props contract.\nProps: selectedId, onSelect, loading."),
+            frontend(
+                "T10",
+                "Reuse shared selection props",
+                "Reuse the shared Props contract.\nProps: selectedId, onChange, disabled."));
+
+    assertThat(PlanContractQualityGate.violations(plan))
+        .anyMatch(
+            value ->
+                value.contains("T10: shared props field contract differs from T9")
+                    && value.contains("onselect")
+                    && value.contains("onchange"));
+  }
+
+  @Test
+  void stillRejectsDifferentComponentQualifiedPropsContracts() {
+    Plan plan =
+        plan(
+            frontend(
+                "T9",
+                "Define inventory table props",
+                "InventoryTableProps: products, stock, loading, onSearchChange."),
+            frontend(
+                "T10",
+                "Consume inventory table props",
+                "InventoryTableProps: products, stock, pending, onSearchChange."));
+
+    assertThat(PlanContractQualityGate.violations(plan))
+        .anyMatch(
+            value ->
+                value.contains("shared inventorytableprops field contract differs")
+                    && value.contains("loading")
+                    && value.contains("pending"));
+  }
+
+  @Test
   void rejectsInstallCommandForManifestThatNoTaskOwns() {
     PlannedTask scaffold =
         PlannedTask.builder()
@@ -1094,6 +1194,26 @@ class PlanContractQualityGateTest {
         .containsExactly(
             "T1: async SQLAlchemy engine is paired with a synchronous sqlite:/// URL; use an"
                 + " async driver URL consistently or select the synchronous SQLAlchemy stack");
+  }
+
+  @Test
+  void normalizerAlignsAsyncEngineWithAsyncSqliteDriverUrl() {
+    Plan raw =
+        plan(
+            task(
+                "T1",
+                "Scaffold persistence",
+                "Create backend/pyproject.toml and use create_async_engine with DATABASE_URL"
+                    + " default sqlite:///./app.db.",
+                List.of("backend/pyproject.toml", "backend/app/database.py")));
+
+    Plan normalized = TaskExpanderAgent.normalizeFinalPlan(raw);
+
+    assertThat(normalized.tasks().getFirst().description())
+        .contains("sqlite+aiosqlite:///./app.db")
+        .contains("dependency manifest must declare aiosqlite")
+        .doesNotContain("default sqlite:///./app.db");
+    assertThat(PlanContractQualityGate.violations(normalized)).isEmpty();
   }
 
   @Test
@@ -1229,7 +1349,7 @@ class PlanContractQualityGateTest {
     assertThat(normalized.tasks().get(1).hardConstraints())
         .anyMatch(
             value ->
-                value.contains("POST /api/orders/{id}/reserve")
+                value.contains("POST /api/orders/{order_id}/reserve")
                     && value.contains("query parameters []"));
   }
 
@@ -1904,6 +2024,458 @@ class PlanContractQualityGateTest {
                 + " DELETE /api/products/{id}.");
 
     assertThat(PlanContractQualityGate.violations(plan(producer, consumer))).isEmpty();
+  }
+
+  @Test
+  void consumerOnlyAggregateReadDoesNotInventASecondBackendRouteShape() {
+    PlannedTask producer =
+        task(
+            "T5",
+            "Implement REST endpoints for inventory, orders, and audit with sanitized error"
+                + " handling",
+            "**Inventory router** (`backend/app/routers/inventory.py`): "
+                + "`GET /api/products`, `GET /api/products/{product_id}`, "
+                + "`GET /api/warehouses`, `GET /api/warehouses/{warehouse_id}/stock`, "
+                + "`POST /api/adjustments`, and `POST /api/transfers`. "
+                + "Register sanitized global error handlers without exposing internals.",
+            List.of(
+                "backend/app/routers/inventory.py",
+                "backend/app/routers/orders.py",
+                "backend/app/routers/audit.py",
+                "backend/app/errors.py",
+                "backend/app/main.py"));
+    PlannedTask consumer =
+        frontend(
+            "T10",
+            "Build inventory dashboard",
+            "Load GET /api/warehouses/{id}, GET /api/products, GET /api/products/{id}, GET"
+                + " /api/warehouses/{id}/stock, and aggregate GET /api/stock.");
+
+    Plan normalized = TaskExpanderAgent.normalizeFinalPlan(plan(producer, consumer));
+
+    assertThat(normalized.tasks().getFirst().description())
+        .contains("GET /api/warehouses/{warehouse_id}/stock")
+        .doesNotContain("GET /api/stock");
+    assertThat(normalized.tasks().getFirst().description())
+        .doesNotContain(
+            "API PRODUCER CONTRACTS (binding; implement every operation): GET /api/stock");
+    assertThat(normalized.tasks().get(1).description())
+        .contains("GET /api/warehouses/{warehouse_id}/stock")
+        .doesNotContain("GET /api/stock");
+    assertThat(PlanContractQualityGate.violations(normalized)).isEmpty();
+  }
+
+  @Test
+  void rejectsModelDefinitionOutsideTheUniqueModelFileOwner() {
+    PlannedTask schema =
+        task(
+            "T2",
+            "Implement persistence schema",
+            "Define these models: 1. **Warehouse** — id, name, location. Apply the migration.",
+            List.of("backend/alembic/versions/001_initial.py"));
+    PlannedTask owner =
+        task(
+            "T3",
+            "Implement warehouse model and routes",
+            "Create the Warehouse model and GET /api/warehouses.",
+            List.of("backend/app/models/warehouse.py", "backend/app/routers/warehouses.py"));
+
+    assertThat(PlanContractQualityGate.violations(plan(schema, owner)))
+        .contains(
+            "T2: description defines model Warehouse even though T3 uniquely owns"
+                + " models/warehouse.py");
+  }
+
+  @Test
+  void rejectsPlainModelDefinitionOutsideTheUniqueModelFileOwner() {
+    PlannedTask consolidatedSchema =
+        task(
+            "T2",
+            "Implement persistence schema",
+            "Define the Product model with id, sku, name, and price in the consolidated schema.",
+            List.of("backend/app/models.py", "backend/alembic/versions/001_initial.py"));
+    PlannedTask owner =
+        task(
+            "T4",
+            "Implement product domain",
+            "Create Product persistence and routes.",
+            List.of("backend/app/models/product.py", "backend/app/routers/products.py"));
+
+    assertThat(PlanContractQualityGate.violations(plan(consolidatedSchema, owner)))
+        .contains(
+            "T2: description defines model Product even though T4 uniquely owns"
+                + " models/product.py");
+  }
+
+  @Test
+  void normalizerConvertsForeignModelDefinitionIntoExplicitConsumerContract() {
+    PlannedTask migrationConsumer =
+        task(
+            "T2",
+            "Create persistence migration",
+            "Define these models for the migration: 1. **Depot** — id, name, region. Preserve the"
+                + " composite uniqueness constraint.",
+            List.of("server/migrations/001_initial.sql"));
+    PlannedTask modelOwner =
+        task(
+            "T3",
+            "Implement depot domain",
+            "Create the Depot model and repository.",
+            List.of("server/models/depot.py", "server/repositories/depot.py"));
+
+    Plan normalized = TaskExpansionPlanNormalizer.normalize(plan(migrationConsumer, modelOwner));
+
+    assertThat(normalized.tasks().getFirst().description())
+        .contains("canonical Depot schema (owned by T3 in `server/models/depot.py`)")
+        .contains("id, name, region")
+        .contains("composite uniqueness constraint");
+    assertThat(normalized.tasks().getFirst().hardConstraints())
+        .contains(
+            "MODEL OWNER CONTRACT (binding): T3 exclusively defines and implements Depot in"
+                + " `server/models/depot.py`; this task consumes that canonical schema and must"
+                + " not create or redefine its model artifact.");
+    assertThat(PlanContractQualityGate.violations(normalized)).isEmpty();
+  }
+
+  @Test
+  void modelOwnershipReconciliationIsStackNeutral() {
+    PlannedTask contractConsumer =
+        task(
+            "T4",
+            "Document persistence contract",
+            "Implement the schema contract: **Shipment**: id and tracking code.",
+            List.of("docs/persistence.md"));
+    PlannedTask modelOwner =
+        task(
+            "T5",
+            "Implement shipment entity",
+            "Create the Shipment entity.",
+            List.of("src/main/java/example/entities/Shipment.java"));
+
+    Plan normalized = TaskExpansionPlanNormalizer.normalize(plan(contractConsumer, modelOwner));
+
+    assertThat(normalized.tasks().getFirst().description())
+        .contains(
+            "canonical Shipment schema (owned by T5 in"
+                + " `src/main/java/example/entities/Shipment.java`)");
+    assertThat(PlanContractQualityGate.violations(normalized)).isEmpty();
+  }
+
+  @Test
+  void ownershipReconciliationDoesNotDemoteModelsOwnedByTheSameMixedSchemaTask() {
+    PlannedTask mixedSchemaTask =
+        task(
+            "T2",
+            "Implement persistence schema",
+            "Define these models: **Account** — id and name; **Invoice** — id and total.",
+            List.of("server/models/account.py", "server/migrations/001_initial.sql"));
+    PlannedTask invoiceOwner =
+        task(
+            "T3",
+            "Implement invoice domain",
+            "Create the Invoice model.",
+            List.of("server/models/invoice.py"));
+
+    Plan normalized = TaskExpansionPlanNormalizer.normalize(plan(mixedSchemaTask, invoiceOwner));
+
+    assertThat(normalized.tasks().getFirst().description())
+        .startsWith("Define these models:")
+        .contains("**Account** — id and name")
+        .contains("canonical Invoice schema (owned by T3 in `server/models/invoice.py`)");
+    assertThat(PlanContractQualityGate.violations(normalized)).isEmpty();
+  }
+
+  @Test
+  void rejectsTaskLocalAndUnqualifiedLifecycleValuesOutsideCanonicalVocabularies() {
+    PlannedTask producer =
+        task(
+            "T1",
+            "Implement jobs",
+            "Job.status lifecycle values are exactly QUEUED, RUNNING, DONE. Job status defaults to"
+                + " QUEUED. Return JobResponse with status=PROCESSING after create.",
+            List.of("server/models/job.py"));
+    PlannedTask verification =
+        task(
+            "T2",
+            "Test job lifecycle",
+            "Test PARTIALLY_DONE status when only some work succeeds.",
+            List.of("tests/test_jobs.py"));
+
+    assertThat(PlanContractQualityGate.violations(plan(producer, verification)))
+        .anyMatch(
+            violation ->
+                violation.contains("T1: job uses lifecycle value PROCESSING")
+                    && violation.contains("QUEUED"))
+        .anyMatch(
+            violation -> violation.contains("T2: uses undeclared lifecycle value PARTIALLY_DONE"));
+  }
+
+  @Test
+  void acceptsEntityScopedLifecycleValuesWhenOneSentenceCoversTwoAggregates() {
+    PlannedTask producer =
+        task(
+            "T1",
+            "Implement lifecycle contracts",
+            "Job.status lifecycle values are exactly QUEUED and RUNNING. Lease.status lifecycle"
+                + " is exactly ACTIVE and RELEASED.",
+            List.of("server/domain/models.py"));
+    PlannedTask verification =
+        task(
+            "T2",
+            "Verify release behavior",
+            "Release the lease and assert Lease status=RELEASED while the associated Job"
+                + " status=QUEUED remains unchanged.",
+            List.of("tests/release_flow.test.ts"));
+
+    assertThat(PlanContractQualityGate.violations(plan(producer, verification))).isEmpty();
+  }
+
+  @Test
+  void rejectsExplicitLifecycleMismatchEvenWhenClauseMentionsAnotherEntityThatAllowsTheValue() {
+    PlannedTask producer =
+        task(
+            "T1",
+            "Implement lifecycle contracts",
+            "Job.status lifecycle values are exactly QUEUED and RUNNING. Lease.status lifecycle"
+                + " is exactly ACTIVE and RELEASED.",
+            List.of("server/domain/models.py"));
+    PlannedTask verification =
+        task(
+            "T2",
+            "Verify release behavior",
+            "Release the lease and assert Job status=RELEASED while Lease status=ACTIVE remains"
+                + " persisted.",
+            List.of("tests/release_flow.test.ts"));
+
+    assertThat(PlanContractQualityGate.violations(plan(producer, verification)))
+        .anyMatch(
+            violation ->
+                violation.startsWith("T2: job uses lifecycle value RELEASED")
+                    && violation.contains("QUEUED")
+                    && violation.contains("RUNNING"));
+  }
+
+  @Test
+  void parsesConjunctionSeparatedCanonicalLifecycleValuesCompletely() {
+    PlannedTask producer =
+        task(
+            "T1",
+            "Implement workflow",
+            "Ticket.state lifecycle values are exactly NEW, ASSIGNED and CLOSED.",
+            List.of("service/ticket.rb"));
+    PlannedTask valid =
+        task(
+            "T2",
+            "Test assignment",
+            "Assert Ticket state=ASSIGNED after claiming it.",
+            List.of("spec/ticket_spec.rb"));
+
+    assertThat(PlanContractQualityGate.violations(plan(producer, valid))).isEmpty();
+  }
+
+  @Test
+  void doesNotAttributeRequestProcessingStatusToAnEntityMentionedElsewhereInTestProse() {
+    PlannedTask producer =
+        task(
+            "T1",
+            "Implement order lifecycle",
+            "Order.status lifecycle values are exactly PENDING and RESERVED.",
+            List.of("service/order.go"));
+    PlannedTask verification =
+        task(
+            "T2",
+            "Test order processing",
+            "Exercise order processing through the HTTP harness. Assert request status ="
+                + " PROCESSING while the handler is blocked, then release it and verify the"
+                + " response.",
+            List.of("service/order_integration_test.go"));
+
+    assertThat(PlanContractQualityGate.violations(plan(producer, verification))).isEmpty();
+  }
+
+  @Test
+  void doesNotTreatAnOperationNameAsAnEntityLifecycleAssertion() {
+    PlannedTask producer =
+        task(
+            "T1",
+            "Implement shipment lifecycle",
+            "Shipment.state lifecycle values are exactly CREATED and DISPATCHED.",
+            List.of("src/shipment.kt"));
+    PlannedTask verification =
+        task(
+            "T2",
+            "Test shipment processing status endpoint",
+            "Cover shipment PROCESSING status endpoint failures and assert the sanitized error"
+                + " response.",
+            List.of("src/shipment_test.kt"));
+
+    assertThat(PlanContractQualityGate.violations(plan(producer, verification))).isEmpty();
+  }
+
+  @Test
+  void stillRejectsExplicitInvalidOrderProcessingState() {
+    PlannedTask producer =
+        task(
+            "T1",
+            "Implement order lifecycle",
+            "Order.status lifecycle values are exactly PENDING and RESERVED.",
+            List.of("lib/order.rb"));
+    PlannedTask verification =
+        task(
+            "T2",
+            "Test order lifecycle",
+            "Create an order and assert Order.status = PROCESSING after the request completes.",
+            List.of("spec/order_spec.rb"));
+
+    assertThat(PlanContractQualityGate.violations(plan(producer, verification)))
+        .anyMatch(
+            violation ->
+                violation.startsWith("T2: order uses lifecycle value PROCESSING")
+                    && violation.contains("PENDING")
+                    && violation.contains("RESERVED"));
+  }
+
+  @Test
+  void acceptsUnqualifiedNaturalLanguageTransitionToADeclaredLifecycleValue() {
+    PlannedTask producer =
+        task(
+            "T1",
+            "Implement lease lifecycle",
+            "Lease.status lifecycle values are exactly ACTIVE and RELEASED.",
+            List.of("domain/lease.ex"));
+    PlannedTask verification =
+        task(
+            "T2",
+            "Verify release flow",
+            "Release the lease and verify status becomes RELEASED.",
+            List.of("test/lease_flow_test.exs"));
+
+    assertThat(PlanContractQualityGate.violations(plan(producer, verification))).isEmpty();
+  }
+
+  @Test
+  void acceptsNaturalLanguageTransitionOwnedByAnExplicitNonDomainSubject() {
+    PlannedTask producer =
+        task(
+            "T1",
+            "Implement shipment lifecycle",
+            "Shipment.state lifecycle values are exactly CREATED and DISPATCHED.",
+            List.of("pkg/shipment.go"));
+    PlannedTask verification =
+        task(
+            "T2",
+            "Verify asynchronous request handling",
+            "Start shipment creation and verify request status becomes PROCESSING before the"
+                + " response arrives.",
+            List.of("pkg/shipment_integration_test.go"));
+
+    assertThat(PlanContractQualityGate.violations(plan(producer, verification))).isEmpty();
+  }
+
+  @Test
+  void rejectsUnqualifiedNaturalLanguageTransitionOutsideEveryDeclaredLifecycle() {
+    PlannedTask order =
+        task(
+            "T1",
+            "Implement order lifecycle",
+            "Order.status lifecycle values are exactly PENDING and RESERVED.",
+            List.of("src/order.cs"));
+    PlannedTask reservation =
+        task(
+            "T2",
+            "Implement reservation lifecycle",
+            "Reservation.status lifecycle is exactly ACTIVE and RELEASED.",
+            List.of("src/reservation.cs"));
+    PlannedTask verification =
+        task(
+            "T3",
+            "Verify release and cancellation",
+            "Release or cancel the reservation, then assert status becomes CANCELLED.",
+            List.of("tests/release_flow.cs"));
+
+    assertThat(PlanContractQualityGate.violations(plan(order, reservation, verification)))
+        .contains(
+            "T3: uses undeclared lifecycle value CANCELLED while the assembled plan defines"
+                + " explicit lifecycle vocabularies");
+  }
+
+  @Test
+  void rejectsReadOrientedHookThatUsesMutationMethodForCollectionFetch() {
+    PlannedTask producer =
+        task(
+            "T1",
+            "Implement ticket routes",
+            "Expose GET /api/tickets and POST /api/tickets.",
+            List.of("server/routes/tickets.py"));
+    PlannedTask consumer =
+        frontend(
+            "T2",
+            "Build ticket list and create flow",
+            "useTickets() fetches POST/tickets and returns {tickets, loading, error}. "
+                + "createTicket(data) posts POST /tickets.");
+
+    assertThat(PlanContractQualityGate.violations(plan(producer, consumer)))
+        .contains(
+            "T2: read-oriented client or hook uses POST for a collection read; bind it to the"
+                + " declared GET producer");
+  }
+
+  @Test
+  void finalNormalizationKeepsDistinctLifecycleActionVisibleAndDropsUnsupportedConsumerQuery() {
+    PlannedTask producer =
+        task(
+            "T6",
+            "Implement lease and order routes",
+            "Expose POST /api/leases/{id}/cancel and GET /api/orders?warehouse_id={id}.",
+            List.of("backend/app/routers/leases.py", "backend/app/routers/orders.py"));
+    PlannedTask consumer =
+        frontend(
+            "T14",
+            "Build lease UI",
+            "Release with POST /api/leases/{id}/release. Load GET"
+                + " /api/orders?order_id={id}; filter the returned list client-side.");
+
+    Plan normalized = TaskExpanderAgent.normalizeFinalPlan(plan(producer, consumer));
+    String consumerDescription = normalized.tasks().get(1).description();
+
+    assertThat(consumerDescription)
+        .contains("POST /api/leases/{id}/release")
+        .doesNotContain("?order_id=");
+    assertThat(PlanContractQualityGate.violations(normalized))
+        .anyMatch(
+            value ->
+                value.contains("POST /api/leases/{id}/release")
+                    && value.contains("no backend task declares that operation"));
+  }
+
+  @Test
+  void terminalReadOwnershipDoesNotTreatMetadataAsProducerOrInventAggregateAlias() {
+    PlannedTask producer =
+        task(
+            "T5",
+            "Implement event resource routes with sanitized error handling",
+            "Expose GET /api/accounts/{account_id}/events.",
+            List.of("backend/app/routers/events.py", "backend/app/errors.py"));
+    PlannedTask metadata =
+        task(
+            "T6",
+            "Configure CORS, global error handling, and OpenAPI metadata",
+            "Document GET /api/events and POST /api/events.",
+            List.of(
+                "backend/app/config/ApiConfig.java", "backend/app/error/GlobalErrorHandler.java"));
+    PlannedTask consumer = frontend("T10", "Build event history", "Load GET /api/events.");
+
+    Plan normalized =
+        PlanApiProducerContractReconciler.reconcileMissingOperations(
+            plan(producer, metadata, consumer));
+
+    assertThat(normalized.tasks().getFirst().description())
+        .contains("GET /api/accounts/{account_id}/events")
+        .doesNotContain("API PRODUCER CONTRACTS", "GET /api/events");
+    assertThat(normalized.tasks().get(1).description()).doesNotContain("API PRODUCER CONTRACTS");
+    assertThat(PlanApiContractEvidence.extract(normalized.tasks().getFirst()))
+        .extracting(PlanApiContractEvidence.ApiEvidence::method)
+        .containsOnly("GET");
   }
 
   @Test

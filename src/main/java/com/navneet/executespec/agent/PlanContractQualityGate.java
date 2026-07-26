@@ -31,6 +31,15 @@ final class PlanContractQualityGate {
           "(?i)(?:^|[/`'\"\\s])([a-z0-9][a-z0-9_.-]{2,}\\.(?:py|sql|xml|yaml|yml|json))");
   private static final Pattern NAMED_MODEL =
       Pattern.compile("(?i)(?:\\*\\*|`)?([a-z][a-z0-9_]*)\\s+(?:model|table)(?:\\*\\*|`)?");
+  private static final Pattern BOLD_MODEL_DEFINITION =
+      Pattern.compile("\\*\\*([A-Z][A-Za-z0-9_]*)\\*\\*\\s*(?:—|-|:)");
+  private static final Pattern PLAIN_MODEL_DEFINITION =
+      Pattern.compile(
+          "(?i)\\b(?:define|create|implement)\\s+(?:the\\s+)?([A-Z][A-Za-z0-9_]*)"
+              + "\\s+(?:model|entity)\\b");
+  private static final Pattern MODEL_ARTIFACT =
+      Pattern.compile(
+          "(?i)(?:^|/)((?:models?|entities)/([a-z0-9_-]+)\\.(?:py|java|kt|ts|tsx|js|jsx|cs|go|rb|php))$");
 
   private PlanContractQualityGate() {}
 
@@ -42,8 +51,15 @@ final class PlanContractQualityGate {
       addTaskInstructionViolations(task, violations);
       TaskExpansionContradictionValidator.addViolations(task, plan, violations);
     }
+    PlanWorkerBriefIntegrityGate.addViolations(plan, violations);
     addSharedArtifactViolations(plan.tasks(), violations);
+    addModelOwnershipViolations(plan.tasks(), violations);
+    PlanModelDefinitionOwnershipGate.addViolations(plan, violations);
+    PlanCrossTaskSymbolReferenceGate.addViolations(plan, violations);
+    PlanLifecycleValueContractGate.addViolations(plan.tasks(), violations);
     PlanSharedFieldContractGate.addViolations(plan.tasks(), violations);
+    PlanPersistenceFieldUsageGate.addViolations(plan, violations);
+    PlanDatabaseInitializationContractGate.addViolations(plan, violations);
     addPythonPackagingViolations(plan.tasks(), violations);
     PlanBackendContractGate.addViolations(plan, violations);
     PlanCrossStackIdentifierTypeGate.addViolations(plan, violations);
@@ -52,12 +68,96 @@ final class PlanContractQualityGate {
     PlanE2eToolchainGate.addViolations(plan, violations);
     PlanRequirementCoverageGate.addViolations(plan, violations);
     PlanApiRequestContractGate.addViolations(plan, violations);
+    PlanApiArtifactOwnershipGate.addViolations(plan, violations);
     PlanScopeOwnershipReconciler.addViolations(plan, violations);
     PlanFrontendRouteBindingGate.addViolations(plan, violations);
     PlanLifecycleJourneyGate.addViolations(plan, violations);
     PlanJourneyCardinalityGate.addViolations(plan, violations);
+    PlanApiSyntaxGate.addViolations(plan, violations);
+    PlanApiBindingContradictionGate.addViolations(plan, violations);
+    PlanApiRouteIdentityContract.addViolations(plan, violations);
     PlanApiContractReconciler.addViolations(plan, violations);
+    PlanDocumentedCommandContractGate.addViolations(plan, violations);
     return List.copyOf(new LinkedHashSet<>(violations));
+  }
+
+  private static void addModelOwnershipViolations(
+      List<PlannedTask> tasks, List<String> violations) {
+    java.util.Map<String, String> uniqueOwnerByModelFile = new java.util.LinkedHashMap<>();
+    java.util.Map<String, String> displayPathByModelFile = new java.util.LinkedHashMap<>();
+    java.util.Map<String, Integer> ownerCountByModelFile = new java.util.LinkedHashMap<>();
+    for (PlannedTask task : tasks) {
+      if (task == null) continue;
+      for (String raw : task.touchesFiles() == null ? List.<String>of() : task.touchesFiles()) {
+        String path = safe(raw).replace('\\', '/').toLowerCase(Locale.ROOT);
+        Matcher modelFile = MODEL_ARTIFACT.matcher(path);
+        if (!modelFile.find()
+            || PlanArtifactOwnershipSupport.isPackageOrRegistryMetadata(path)
+            || Set.of("base", "model", "models", "entity", "entities").contains(modelFile.group(2)))
+          continue;
+        String model = toSnakeCase(modelFile.group(2));
+        ownerCountByModelFile.merge(model, 1, Integer::sum);
+        uniqueOwnerByModelFile.put(model, task.id());
+        displayPathByModelFile.put(model, modelFile.group(1));
+      }
+    }
+    for (PlannedTask task : tasks) {
+      if (task == null) continue;
+      String description = safe(task.description());
+      Matcher definition = BOLD_MODEL_DEFINITION.matcher(description);
+      while (definition.find()) {
+        String lead =
+            description
+                .substring(Math.max(0, definition.start() - 240), definition.start())
+                .toLowerCase(Locale.ROOT);
+        if (!lead.matches("(?s).*\\b(?:define|create|implement|model)s?\\b.*")) continue;
+        addForeignModelDefinitionViolation(
+            task,
+            definition.group(1),
+            ownerCountByModelFile,
+            uniqueOwnerByModelFile,
+            displayPathByModelFile,
+            violations);
+      }
+      Matcher plainDefinition = PLAIN_MODEL_DEFINITION.matcher(description);
+      while (plainDefinition.find()) {
+        addForeignModelDefinitionViolation(
+            task,
+            plainDefinition.group(1),
+            ownerCountByModelFile,
+            uniqueOwnerByModelFile,
+            displayPathByModelFile,
+            violations);
+      }
+    }
+  }
+
+  private static void addForeignModelDefinitionViolation(
+      PlannedTask task,
+      String displayModel,
+      java.util.Map<String, Integer> ownerCountByModelFile,
+      java.util.Map<String, String> uniqueOwnerByModelFile,
+      java.util.Map<String, String> displayPathByModelFile,
+      List<String> violations) {
+    String model = toSnakeCase(displayModel);
+    if (ownerCountByModelFile.getOrDefault(model, 0) != 1) return;
+    String owner = uniqueOwnerByModelFile.get(model);
+    if (java.util.Objects.equals(owner, task.id())) return;
+    violations.add(
+        task.id()
+            + ": description defines model "
+            + displayModel
+            + " even though "
+            + owner
+            + " uniquely owns "
+            + displayPathByModelFile.get(model));
+  }
+
+  private static String toSnakeCase(String value) {
+    return value
+        .replaceAll("([a-z0-9])([A-Z])", "$1_$2")
+        .replace('-', '_')
+        .toLowerCase(Locale.ROOT);
   }
 
   private static void addTaskInstructionViolations(PlannedTask task, List<String> violations) {
@@ -184,13 +284,36 @@ final class PlanContractQualityGate {
 
   private static String localClause(String evidence, int start, int end) {
     int clauseStart =
-        Math.max(0, Math.max(evidence.lastIndexOf('\n', start), evidence.lastIndexOf('.', start)));
+        Math.max(
+            0, Math.max(evidence.lastIndexOf('\n', start), previousSentenceEnd(evidence, start)));
     int newlineEnd = evidence.indexOf('\n', end);
-    int sentenceEnd = evidence.indexOf('.', end);
+    int sentenceEnd = nextSentenceEnd(evidence, end);
     int clauseEnd = evidence.length();
     if (newlineEnd >= 0) clauseEnd = Math.min(clauseEnd, newlineEnd);
     if (sentenceEnd >= 0) clauseEnd = Math.min(clauseEnd, sentenceEnd + 1);
     return evidence.substring(clauseStart, clauseEnd);
+  }
+
+  private static int previousSentenceEnd(String evidence, int before) {
+    int candidate = evidence.lastIndexOf('.', Math.max(0, before - 1));
+    while (candidate >= 0) {
+      if (isSentenceEnd(evidence, candidate)) return candidate;
+      candidate = evidence.lastIndexOf('.', candidate - 1);
+    }
+    return -1;
+  }
+
+  private static int nextSentenceEnd(String evidence, int from) {
+    int candidate = evidence.indexOf('.', from);
+    while (candidate >= 0) {
+      if (isSentenceEnd(evidence, candidate)) return candidate;
+      candidate = evidence.indexOf('.', candidate + 1);
+    }
+    return -1;
+  }
+
+  private static boolean isSentenceEnd(String evidence, int period) {
+    return period + 1 >= evidence.length() || Character.isWhitespace(evidence.charAt(period + 1));
   }
 
   private static void addPythonPackagingViolations(

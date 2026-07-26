@@ -84,11 +84,7 @@ final class TaskExpansionContradictionValidator {
           "Root build execution changes working directory before root-relative commands");
     }
     boolean requiredHeader = constraints.contains("idempotency-key is a required http header");
-    if (requiredHeader
-        && (description.matches("(?s).*idempotency-key[^.\\n]{0,100}optional.*")
-            || description.matches("(?s).*optional[^.\\n]{0,100}idempotency-key.*")
-            || description.matches(
-                "(?s).*if provided[^.\\n]{0,160}(?:idempotency[_-]key|idempotency-key).*"))) {
+    if (requiredHeader && PlanSafetyTextSupport.makesIdempotencyHeaderOptional(description)) {
       violations.add("Task description makes the required Idempotency-Key header optional");
     }
     IdempotencyResponseSemanticValidator.addViolations(description, constraints, violations);
@@ -148,7 +144,8 @@ final class TaskExpansionContradictionValidator {
       violations.add("Task description defines an incomplete canonical IdempotencyRecord schema");
     }
     if (canonicalIdempotencyRecord
-        && description.matches("(?s).*\\bstate\\s*={1,2}\\s*`?pending`?\\b.*")) {
+        && (description.matches("(?s).*\\bstate\\s*={1,2}\\s*`?pending`?\\b.*")
+            || PlanSafetyReservationTextSupport.hasPendingIdempotencyReplay(description))) {
       violations.add("IdempotencyRecord state machine uses PENDING outside PROCESSING/COMPLETED");
     }
     if (canonicalIdempotencyRecord
@@ -197,6 +194,14 @@ final class TaskExpansionContradictionValidator {
     }
     if (description.matches("(?s).*(?:^|[:\\n])\\s*\\d+\\.\\s*(?=\\d+\\.).*")) {
       violations.add("Task description contains empty numbered implementation steps");
+    }
+    if (description.matches(
+        "(?is).*\\b(?:use|list|search|load|fetch|get)[a-z0-9_]*\\s*\\([^)]*\\)"
+            + "[^.\\n]{0,180}\\b(?:fetches|calls|loads?|reads?)\\s+post\\s*/.*")) {
+      violations.add(
+          task.id()
+              + ": read-oriented client or hook uses POST for a collection read; bind it to the"
+              + " declared GET producer");
     }
     addQuantityInvariantViolations(task, plan, taskIdentity, description, constraints, violations);
     for (String path : TaskExpansionRouteContract.ambiguousDuplicateReadRoutes(description)) {

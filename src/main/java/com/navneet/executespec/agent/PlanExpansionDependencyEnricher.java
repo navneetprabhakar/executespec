@@ -74,9 +74,12 @@ public final class PlanExpansionDependencyEnricher {
       enriched.add(enrichedTask);
       byId.put(enrichedTask.id(), enrichedTask);
     }
+    DependencyRepair transitiveReduction = removeTransitivelyRedundantEdges(enriched);
+    added += transitiveReduction.edgesRemoved();
+    summaries.addAll(transitiveReduction.summaries());
     return added == 0
         ? new Result(plan, 0, List.of())
-        : new Result(copyPlan(plan, enriched), added, List.copyOf(summaries));
+        : new Result(copyPlan(plan, transitiveReduction.tasks()), added, List.copyOf(summaries));
   }
 
   private record DependencyRepair(
@@ -119,6 +122,51 @@ public final class PlanExpansionDependencyEnricher {
           dependencies.equals(task.dependsOn()) ? task : withDependencies(task, dependencies));
     }
     return new DependencyRepair(List.copyOf(repaired), removed, List.copyOf(summaries));
+  }
+
+  /**
+   * Keeps only dependency-frontier contracts in each expansion prompt.
+   *
+   * <p>If T9 depends on T7 and T7 already depends on T6→T3→T2, repeating every ancestor as a direct
+   * T9 dependency does not add execution ordering. It does make the expander serialize the same
+   * prerequisite contracts again until the shared 8k evidence cap truncates the useful API/UI
+   * boundary. Preserve the nearest dependencies and remove only edges already reachable through a
+   * sibling dependency.
+   */
+  private static DependencyRepair removeTransitivelyRedundantEdges(List<PlannedTask> tasks) {
+    Map<String, PlannedTask> byId =
+        tasks.stream()
+            .filter(java.util.Objects::nonNull)
+            .collect(Collectors.toMap(PlannedTask::id, task -> task, (left, right) -> left));
+    List<PlannedTask> reduced = new ArrayList<>(tasks.size());
+    List<String> summaries = new ArrayList<>();
+    int removed = 0;
+    for (PlannedTask task : tasks) {
+      if (task == null || task.dependsOn() == null || task.dependsOn().size() < 2) {
+        reduced.add(task);
+        continue;
+      }
+      List<String> dependencies = new ArrayList<>();
+      for (String candidate : task.dependsOn()) {
+        boolean redundant =
+            task.dependsOn().stream()
+                .filter(other -> !other.equals(candidate))
+                .anyMatch(other -> reaches(other, candidate, byId, new LinkedHashSet<>()));
+        if (redundant) {
+          removed++;
+          summaries.add(
+              task.id()
+                  + " removed transitively redundant dependency on "
+                  + candidate
+                  + "; nearest producer contract remains direct");
+        } else {
+          dependencies.add(candidate);
+        }
+      }
+      reduced.add(
+          dependencies.equals(task.dependsOn()) ? task : withDependencies(task, dependencies));
+    }
+    return new DependencyRepair(List.copyOf(reduced), removed, List.copyOf(summaries));
   }
 
   private static List<PlannedTask> precedingImplementationTasks(

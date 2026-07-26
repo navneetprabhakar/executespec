@@ -73,6 +73,9 @@ public class RunDetail {
   /** Managed AI credits actually debited by successful platform-key model calls for this run. */
   Long aiCreditsCharged;
 
+  /** Customer-selected voluntary ceiling, even when planning failed before deriving a hard cap. */
+  Double userCostCapUsd;
+
   /** Hard cap in USD (safety ceiling). */
   Double hardCapUsd;
 

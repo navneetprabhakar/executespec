@@ -15,6 +15,33 @@ export interface RunArtifactActionAvailability {
   reportReason: string;
 }
 
+export interface TerminalFailureEvidence {
+  title: string;
+  detail: string;
+}
+
+/**
+ * Reloadable terminal evidence comes only from the durable run row. In particular, a planner
+ * rejection has no task rows or validation report, so those surfaces must render this evidence
+ * instead of incorrectly claiming that there is nothing to show.
+ */
+export function terminalFailureEvidence(
+  run?: Pick<api.RunDetail, 'status' | 'statusReason' | 'failureReason'> | null,
+): TerminalFailureEvidence | null {
+  const status = (run?.status || '').toUpperCase();
+  const detail = run?.failureReason?.trim();
+  if (!detail || !['FAILED', 'ERROR', 'PARTIAL'].includes(status)) return null;
+  return {
+    title:
+      run?.statusReason === 'PLAN_VALIDATION_REJECTED'
+        ? 'Planning rejection evidence'
+        : run?.statusReason === 'PLANNER_UNAVAILABLE'
+          ? 'Planning failure evidence'
+          : 'Terminal failure evidence',
+    detail,
+  };
+}
+
 /**
  * Artifact actions require produced evidence, not merely a workspace cloned for the run. A clean
  * checkout can contain hundreds of files even when planning failed before the executor started.
@@ -392,9 +419,10 @@ export function shouldUseRunEvidenceChat(message: string): boolean {
     /\b(change|modify|edit|fix|implement|add|remove|refactor|rewrite|create|start|rerun|re-run|iterate|apply|push|deploy|open\s+(a\s+)?pr)\b/.test(
       text,
     );
-  const questionPrefix = /^(why|what|where|which|how|explain|show|summarize|tell|list)\b/.test(
-    text,
-  );
+  const questionPrefix =
+    /^(why|what|where|which|how|explain|show|summarize|tell|list|did|was|were|has|have)\b/.test(
+      text,
+    );
   const evidenceKeyword =
     /\b(evidence|score|cost|token|credit|test|build|review|file|diff|log|failure|failed|partial|status|result|report|artifact|pr)\b/.test(
       text,

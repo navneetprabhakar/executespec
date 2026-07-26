@@ -169,6 +169,12 @@ final class TaskExpansionSemanticContract {
       } else if (violation.startsWith(
           "Frontend order consumer contradicts the canonical backend payload")) {
         description = rewriteFrontendOrderPayload(description);
+        constraints.replaceAll(
+            existing ->
+                hasPositiveInstruction(existing, "customer_name", "customer name")
+                    ? rewriteFrontendOrderPayload(existing)
+                    : existing);
+        constraints = new ArrayList<>(constraints.stream().distinct().toList());
       } else if (violation.equals(
           "Order producer persists state instead of the canonical status field")) {
         description = rewriteOrderPersistenceField(description);
@@ -226,11 +232,17 @@ final class TaskExpansionSemanticContract {
         description = replaceRootBuildWorkingDirectory(description);
       } else if (violation.equals(
           "Task description makes the required Idempotency-Key header optional")) {
+        String requiredHeaderContract =
+            "Idempotency-Key is required for every scoped mutating reservation request.";
         description =
-            replaceContradictoryClauses(
-                description,
-                "Idempotency-Key is required for every scoped mutating reservation request.",
-                "idempotency-key");
+            replaceContradictoryClauses(description, requiredHeaderContract, "idempotency-key");
+        constraints.replaceAll(
+            existing ->
+                PlanSafetyTextSupport.makesIdempotencyHeaderOptional(existing)
+                    ? replaceContradictoryClauses(
+                        existing, requiredHeaderContract, "idempotency-key")
+                    : existing);
+        constraints = new ArrayList<>(constraints.stream().distinct().toList());
       } else if (violation.startsWith(
           "SQLite does not provide the proposed server-side UUID function")) {
         description = rewriteSqliteUuidDefaults(description);
@@ -257,7 +269,8 @@ final class TaskExpansionSemanticContract {
       } else if (violation.equals(
           "IdempotencyRecord state machine uses PENDING outside PROCESSING/COMPLETED")) {
         description =
-            description.replaceAll("(?i)state\\s*={1,2}\\s*`?PENDING`?", "state==COMPLETED");
+            PlanSafetyReservationTextSupport.normalizeIdempotencyReplayState(
+                description.replaceAll("(?i)state\\s*={1,2}\\s*`?PENDING`?", "state==COMPLETED"));
       } else if (violation.equals(
           "IdempotencyRecord state machine uses a business state outside"
               + " PROCESSING/COMPLETED")) {
@@ -300,6 +313,8 @@ final class TaskExpansionSemanticContract {
       } else if (violation.equals(
           "Stock transfer source guard ignores reserved inventory availability")) {
         description = rewriteStockTransferAvailabilityGuard(description);
+      } else if (violation.startsWith("one duplicate GET route ")) {
+        description = TaskExpansionRouteContract.reconcileAmbiguousDuplicateReadRoutes(description);
       }
       if (constraint == null) continue;
       if (!constraints.contains(constraint)) constraints.add(constraint);
@@ -486,6 +501,8 @@ final class TaskExpansionSemanticContract {
       }
       String domain = scopedArtifactDomain(lower);
       if (domain == null || titleOwnsDomain(ownTitle, domain)) continue;
+      if (lower.contains("/models/")
+          && PlanScopeOwnershipReconciler.isResolvedModelOwner(plan, task, path)) continue;
       PlannedTask sibling =
           plan.tasks().stream()
               .filter(java.util.Objects::nonNull)

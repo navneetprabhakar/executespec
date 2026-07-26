@@ -10,6 +10,23 @@ import org.junit.jupiter.api.Test;
 class TaskExpanderSchemaRepairTest {
 
   @Test
+  void oversizedProviderDescriptionIsRepairableInsteadOfSilentlyCompacted() {
+    String oversized = "x".repeat(4_001);
+
+    assertThatThrownBy(() -> TaskExpanderAgent.requireDescriptionWithinEnvelope("T7", oversized))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("exceed schema limits")
+        .hasMessageContaining("T7")
+        .hasMessageContaining("4001");
+
+    try {
+      TaskExpanderAgent.requireDescriptionWithinEnvelope("T7", oversized);
+    } catch (IllegalStateException failure) {
+      assertThat(TaskExpanderAgent.isSchemaRepairable(failure)).isTrue();
+    }
+  }
+
+  @Test
   void retriesOnlyAbsentOrMalformedToolPayloads() {
     assertThat(
             TaskExpanderAgent.isSchemaRepairable(
@@ -138,6 +155,44 @@ class TaskExpanderSchemaRepairTest {
   }
 
   @Test
+  void postCoherenceCompactionNeverIncludesBoundaryCharacterPastEnvelope() {
+    // Stack-neutral reproduction of run e2745c42: deterministic coherence/safety text left a
+    // newline exactly at index 4,000. String.lastIndexOf(..., 4_000) is inclusive, so the old
+    // compactor returned 4,001 characters and the final contract gate rejected the whole plan.
+    String boundaryInput = "x".repeat(TaskExpanderAgent.MAX_DESCRIPTION_CHARS) + "\nTAIL";
+    assertThat(
+            TaskExpansionTextNormalizer.boundText(
+                boundaryInput, TaskExpanderAgent.MAX_DESCRIPTION_CHARS))
+        .hasSize(TaskExpanderAgent.MAX_DESCRIPTION_CHARS);
+
+    String coherencePatchedDescription =
+        "Implementation guidance "
+            + "x".repeat(TaskExpanderAgent.MAX_DESCRIPTION_CHARS)
+            + "\n\n"
+            + "EXECUTABLE READINESS CONTRACT (binding): launch the documented server, poll its"
+            + " readiness endpoint, and exercise the public interface.";
+    PlannedTask task =
+        PlannedTask.builder()
+            .id("T9")
+            .title("Exercise the public application contract")
+            .description(coherencePatchedDescription)
+            .touchesFiles(List.of("acceptance/public_contract_test"))
+            .hardConstraints(List.of())
+            .meetsRequirements(List.of())
+            .dependsOn(List.of())
+            .build();
+
+    Plan normalized =
+        TaskExpanderAgent.normalizeFinalPlan(
+            Plan.builder().tasks(List.of(task)).requirements(List.of()).build());
+
+    assertThat(normalized.tasks().getFirst().description())
+        .hasSizeLessThanOrEqualTo(TaskExpanderAgent.MAX_DESCRIPTION_CHARS)
+        .contains("EXECUTABLE READINESS CONTRACT (binding)");
+    assertThat(TaskExpanderAgent.finalPlanContractViolations(normalized)).isEmpty();
+  }
+
+  @Test
   void finalNormalizationKeepsCoherenceContractTailInsideEnvelope() {
     String bindingTail =
         "CONTRACT CORRECTION: The frontend order payload uses product_id and warehouse_id only.";
@@ -157,6 +212,74 @@ class TaskExpanderSchemaRepairTest {
         .hasSizeLessThanOrEqualTo(4_000)
         .endsWith(bindingTail);
     assertThat(TaskExpanderAgent.finalPlanContractViolations(normalized)).isEmpty();
+  }
+
+  @Test
+  void finalBoundaryBoundsDescriptionAddedByExecutableReconciliation() {
+    PlannedTask task =
+        PlannedTask.builder()
+            .id("T13")
+            .title("Run black-box acceptance tests")
+            .description(
+                "Launch the documented backend server as a subprocess. " + "x".repeat(4_700))
+            .touchesFiles(List.of("acceptance/black_box_test.py"))
+            .hardConstraints(List.of())
+            .meetsRequirements(List.of())
+            .dependsOn(List.of())
+            .build();
+
+    Plan normalized =
+        TaskExpanderAgent.normalizeFinalPlan(
+            Plan.builder().tasks(List.of(task)).requirements(List.of()).build());
+
+    assertThat(normalized.tasks().getFirst().description())
+        .hasSizeLessThanOrEqualTo(TaskExpanderAgent.MAX_DESCRIPTION_CHARS)
+        .contains("EXECUTABLE READINESS CONTRACT (binding)")
+        .contains("bounded 15-second startup timeout");
+    assertThat(TaskExpanderAgent.finalPlanContractViolations(normalized)).isEmpty();
+    assertThat(TaskExpanderAgent.normalizeFinalPlan(normalized)).isEqualTo(normalized);
+  }
+
+  @Test
+  void finalBoundaryBoundsConstraintsAndRetainsDerivedProducerContract() {
+    List<String> fullEnvelope =
+        java.util.stream.IntStream.range(0, 12)
+            .mapToObj(index -> "Catalog implementation constraint " + index + ".")
+            .toList();
+    PlannedTask producer =
+        PlannedTask.builder()
+            .id("T4")
+            .title("Implement catalog jobs API")
+            .description("Implement the catalog jobs router at /api/jobs.")
+            .touchesFiles(List.of("backend/app/routers/jobs.py"))
+            .hardConstraints(fullEnvelope)
+            .meetsRequirements(List.of())
+            .dependsOn(List.of())
+            .build();
+    PlannedTask consumer =
+        PlannedTask.builder()
+            .id("T12")
+            .title("Build catalog job controls")
+            .description("Cancel a selected job with POST /api/jobs/{job_id}/cancel.")
+            .touchesFiles(List.of("frontend/src/api/jobs.ts"))
+            .hardConstraints(List.of())
+            .meetsRequirements(List.of())
+            .dependsOn(List.of("T4"))
+            .build();
+
+    Plan normalized =
+        TaskExpanderAgent.normalizeFinalPlan(
+            Plan.builder().tasks(List.of(producer, consumer)).requirements(List.of()).build());
+
+    assertThat(normalized.tasks().getFirst().hardConstraints())
+        .hasSizeLessThanOrEqualTo(12)
+        .anyMatch(
+            value ->
+                value.contains("API PRODUCER CONTRACTS (binding")
+                    && value.contains("POST /api/jobs/{")
+                    && value.contains("}/cancel"));
+    assertThat(TaskExpanderAgent.finalPlanContractViolations(normalized)).isEmpty();
+    assertThat(TaskExpanderAgent.normalizeFinalPlan(normalized)).isEqualTo(normalized);
   }
 
   @Test
@@ -623,6 +746,126 @@ class TaskExpanderSchemaRepairTest {
 
     assertThat(TaskExpanderAgent.semanticViolations(consumer, plan)).isEmpty();
     assertThat(TaskExpanderAgent.crossTaskContractViolations(plan)).isEmpty();
+  }
+
+  @Test
+  void finalNormalizationRepairsConsumerAliasesFromThePlanOwnedSchemaWithoutReplayKeywords() {
+    PlannedTask schema =
+        PlannedTask.builder()
+            .id("T2")
+            .title("Implement IdempotencyRecord model and migration")
+            .description(
+                "IdempotencyRecord has key, scope, request_body_hash and a UniqueConstraint(key,"
+                    + " scope).")
+            .touchesFiles(List.of("backend/app/models.py", "backend/migrations/001.py"))
+            .build();
+    PlannedTask consumer =
+        PlannedTask.builder()
+            .id("T6")
+            .title("Implement mutation service")
+            .description(
+                "Load IdempotencyRecord.idempotency_key, compare scope_hash, then perform the"
+                    + " mutation.")
+            .touchesFiles(List.of("backend/app/service.py"))
+            .build();
+    Plan input = Plan.builder().requirements(List.of()).tasks(List.of(schema, consumer)).build();
+
+    Plan normalized = TaskExpanderAgent.normalizeFinalPlan(input);
+
+    assertThat(normalized.tasks().get(1).description())
+        .contains(
+            "IDEMPOTENCY SCHEMA CONTRACT (binding; supersedes consumer aliases)",
+            "follow schema task T2",
+            "key scoped by scope",
+            "request_body_hash",
+            "idempotency_key and scope_hash are forbidden aliases");
+    assertThat(TaskExpanderAgent.crossTaskContractViolations(normalized)).isEmpty();
+  }
+
+  @Test
+  void finalNormalizationRepairsOnlyTheProducerProvenKeyScopeAlias() {
+    PlannedTask schema =
+        PlannedTask.builder()
+            .id("T2")
+            .title("Implement IdempotencyRecord model and migration")
+            .description("IdempotencyRecord has key and scope with a UniqueConstraint(key, scope).")
+            .touchesFiles(List.of("backend/app/models.py", "backend/migrations/001.py"))
+            .build();
+    PlannedTask consumer =
+        PlannedTask.builder()
+            .id("T6")
+            .title("Implement mutation service")
+            .description(
+                "Load IdempotencyRecord.idempotency_key and compare scope_hash before mutation.")
+            .touchesFiles(List.of("backend/app/service.py"))
+            .build();
+
+    Plan normalized =
+        TaskExpanderAgent.normalizeFinalPlan(
+            Plan.builder().requirements(List.of()).tasks(List.of(schema, consumer)).build());
+    String description = normalized.tasks().get(1).description();
+
+    assertThat(description)
+        .contains("IdempotencyRecord uses key scoped by scope")
+        .contains("idempotency_key is a forbidden alias")
+        .doesNotContain("request_body_hash", "scope_hash is a forbidden alias");
+    assertThat(TaskExpanderAgent.crossTaskContractViolations(normalized)).isEmpty();
+  }
+
+  @Test
+  void finalNormalizationRepairsOnlyTheProducerProvenRequestHashAlias() {
+    PlannedTask schema =
+        PlannedTask.builder()
+            .id("T2")
+            .title("Implement IdempotencyRecord model and migration")
+            .description("IdempotencyRecord has token and request_body_hash.")
+            .touchesFiles(List.of("backend/app/models.py", "backend/migrations/001.py"))
+            .build();
+    PlannedTask consumer =
+        PlannedTask.builder()
+            .id("T6")
+            .title("Implement mutation service")
+            .description(
+                "Load IdempotencyRecord.idempotency_key and compare scope_hash before mutation.")
+            .touchesFiles(List.of("backend/app/service.py"))
+            .build();
+
+    Plan normalized =
+        TaskExpanderAgent.normalizeFinalPlan(
+            Plan.builder().requirements(List.of()).tasks(List.of(schema, consumer)).build());
+    String description = normalized.tasks().get(1).description();
+
+    assertThat(description)
+        .contains("IdempotencyRecord uses request_body_hash")
+        .contains("scope_hash is a forbidden alias")
+        .doesNotContain("key scoped by scope", "idempotency_key is a forbidden alias");
+    assertThat(TaskExpanderAgent.crossTaskContractViolations(normalized)).isEmpty();
+  }
+
+  @Test
+  void finalNormalizationDoesNotImposeCanonicalNamesWithoutAPlanOwnedCanonicalSchema() {
+    PlannedTask schema =
+        PlannedTask.builder()
+            .id("T2")
+            .title("Implement replay model and migration")
+            .description(
+                "ReplayEntry has token and operation fields with unique(token, operation).")
+            .touchesFiles(List.of("backend/app/models.py", "backend/migrations/001.py"))
+            .build();
+    PlannedTask consumer =
+        PlannedTask.builder()
+            .id("T6")
+            .title("Implement mutation service")
+            .description("Load ReplayEntry.token and scope the operation before mutation.")
+            .touchesFiles(List.of("backend/app/service.py"))
+            .build();
+
+    Plan normalized =
+        TaskExpanderAgent.normalizeFinalPlan(
+            Plan.builder().requirements(List.of()).tasks(List.of(schema, consumer)).build());
+
+    assertThat(normalized.tasks().get(1).description())
+        .doesNotContain("IDEMPOTENCY SCHEMA CONTRACT", "IdempotencyRecord");
   }
 
   @Test
@@ -1172,6 +1415,37 @@ class TaskExpanderSchemaRepairTest {
   }
 
   @Test
+  void canonicalIdempotencyStateMachineRemovesStalePendingReplayBranch() {
+    PlannedTask task =
+        PlannedTask.builder()
+            .id("T2")
+            .title("Implement IdempotencyRecord replay")
+            .description(
+                "IdempotencyRecord fields are key, scope, request_body_hash, state"
+                    + " (PROCESSING|COMPLETED), nullable response_status, nullable response_body,"
+                    + " and UniqueConstraint(key, scope). If a PENDING row exists, replay its"
+                    + " exact status/body. If a COMPLETED row exists, replay its exact"
+                    + " status/body.")
+            .hardConstraints(
+                List.of(
+                    "Use one exact IdempotencyRecord contract everywhere: key, scope,"
+                        + " request_body_hash, state, nullable response_status, and nullable"
+                        + " response_body; use PROCESSING/COMPLETED and unique (key, scope)."))
+            .build();
+    Plan plan = Plan.builder().requirements(List.of()).tasks(List.of(task)).build();
+
+    List<String> violations = TaskExpanderAgent.semanticViolations(task, plan);
+    PlannedTask repaired = TaskExpanderAgent.applyDeterministicSemanticFallback(task, violations);
+
+    assertThat(violations)
+        .contains("IdempotencyRecord state machine uses PENDING outside PROCESSING/COMPLETED");
+    assertThat(repaired.description())
+        .contains("If a COMPLETED row exists, replay its exact status/body")
+        .doesNotContain("PENDING row exists");
+    assertThat(TaskExpanderAgent.semanticViolations(repaired, plan)).isEmpty();
+  }
+
+  @Test
   void canonicalIdempotencyStateMachineRejectsAndRepairsBusinessAggregateStates() {
     PlannedTask task =
         PlannedTask.builder()
@@ -1395,6 +1669,40 @@ class TaskExpanderSchemaRepairTest {
 
     assertThat(TaskExpansionRouteContract.ambiguousDuplicateReadRoutes(description))
         .containsExactly("/api/orders/{order_id}");
+  }
+
+  @Test
+  void deterministicFallbackKeepsFirstParameterizedReadAndRemovesOnlyConflictingDuplicate() {
+    String description =
+        "**Endpoints:** - GET /api/accounts/{account_id}/profile — retrieve profile details - POST"
+            + " /api/accounts/{account_id}/profile — update the profile - GET"
+            + " /api/accounts/{account_id}/profile — list all profiles - GET /api/audit — list"
+            + " audit events.";
+    PlannedTask task =
+        PlannedTask.builder()
+            .id("T7")
+            .title("Implement account profile routes")
+            .description(description)
+            .touchesFiles(List.of("server/routes/accounts.ts"))
+            .hardConstraints(List.of())
+            .build();
+    Plan plan = Plan.builder().requirements(List.of()).tasks(List.of(task)).build();
+
+    PlannedTask normalized = TaskExpansionPlanNormalizer.normalize(plan).tasks().getFirst();
+    PlannedTask repeated =
+        TaskExpansionPlanNormalizer.normalize(
+                Plan.builder().requirements(List.of()).tasks(List.of(normalized)).build())
+            .tasks()
+            .getFirst();
+
+    assertThat(normalized.description())
+        .contains("GET /api/accounts/{account_id}/profile — retrieve profile details")
+        .contains("POST /api/accounts/{account_id}/profile — update the profile")
+        .contains("GET /api/audit — list audit events")
+        .doesNotContain("list all profiles");
+    assertThat(TaskExpansionRouteContract.ambiguousDuplicateReadRoutes(normalized.description()))
+        .isEmpty();
+    assertThat(repeated.description()).isEqualTo(normalized.description());
   }
 
   @Test
@@ -1747,6 +2055,57 @@ class TaskExpanderSchemaRepairTest {
   }
 
   @Test
+  void deterministicFallbackRemovesOptionalIdempotencyFromDescriptionAndConstraints() {
+    PlannedTask consumer =
+        PlannedTask.builder()
+            .id("T9")
+            .title("Build frontend API client")
+            .description(
+                "Expose createOrder with an optional Idempotency-Key header. The request returns"
+                    + " typed JSON.")
+            .hardConstraints(
+                List.of(
+                    "The client accepts optional Idempotency-Key input; callers may omit it.",
+                    "Preserve stable error codes."))
+            .meetsRequirements(List.of("R1"))
+            .build();
+    Plan plan =
+        Plan.builder()
+            .requirements(
+                List.of(
+                    new RequirementSpec(
+                        "R1",
+                        "Require Idempotency-Key for mutating reservation requests; same key and"
+                            + " request replays exactly.",
+                        RequirementSpec.RequirementKind.FUNCTIONAL)))
+            .tasks(List.of(consumer))
+            .build();
+
+    List<String> initial = TaskExpanderAgent.semanticViolations(consumer, plan);
+    PlannedTask repaired =
+        TaskExpansionSemanticContract.applyDeterministicSemanticFallback(consumer, initial);
+
+    assertThat(initial)
+        .contains("Task description makes the required Idempotency-Key header optional");
+    assertThat(TaskExpanderAgent.semanticViolations(repaired, plan)).isEmpty();
+    assertThat(repaired.description())
+        .contains("Idempotency-Key is required")
+        .doesNotContainIgnoringCase("optional Idempotency-Key");
+    assertThat(String.join(" ", repaired.hardConstraints()))
+        .contains("Idempotency-Key is required")
+        .doesNotContainIgnoringCase("optional Idempotency-Key");
+  }
+
+  @Test
+  void optionalAndIdempotencyInSeparateClausesDoNotCreateFalseContradiction() {
+    String description =
+        "The response includes optional display metadata; Idempotency-Key is required for every"
+            + " reservation mutation.";
+
+    assertThat(PlanSafetyTextSupport.makesIdempotencyHeaderOptional(description)).isFalse();
+  }
+
+  @Test
   void crossTaskContractRejectsInventedCustomerField() {
     PlannedTask producer =
         PlannedTask.builder()
@@ -1774,6 +2133,51 @@ class TaskExpanderSchemaRepairTest {
         .contains(
             "T7: Frontend order consumer contradicts the canonical backend payload with alternate"
                 + " identity fields");
+  }
+
+  @Test
+  void finalNormalizationRemovesInventedConsumerFieldsFromDescriptionAndConstraints() {
+    PlannedTask producer =
+        PlannedTask.builder()
+            .id("T3")
+            .title("Implement order models")
+            .description(
+                "Order model has id and status. OrderCreate has items with product_id,"
+                    + " warehouse_id, and quantity.")
+            .touchesFiles(List.of("backend/app/models/order.py"))
+            .hardConstraints(List.of())
+            .build();
+    PlannedTask consumer =
+        PlannedTask.builder()
+            .id("T7")
+            .title("Build frontend order creation")
+            .description(
+                "POST /api/orders with {customer_name: string, items: [{product_sku: string,"
+                    + " warehouse_code: string, quantity: int}]}. Return 400 on insufficient"
+                    + " stock.")
+            .touchesFiles(List.of("frontend/src/OrderForm.tsx"))
+            .hardConstraints(
+                List.of(
+                    "Require a customer_name text input before POST /api/orders.",
+                    "Render validation errors returned by the backend."))
+            .build();
+    Plan input = Plan.builder().tasks(List.of(producer, consumer)).build();
+
+    Plan normalized = TaskExpanderAgent.normalizeFinalPlan(input);
+    PlannedTask repaired = normalized.tasks().get(1);
+
+    assertThat(TaskExpanderAgent.crossTaskContractViolations(normalized))
+        .as(
+            "normalized consumer description=%s constraints=%s",
+            repaired.description(), repaired.hardConstraints())
+        .isEmpty();
+    assertThat(repaired.description())
+        .contains("product_id", "warehouse_id", "422 insufficient-stock")
+        .doesNotContain("customer_name", "product_sku", "warehouse_code");
+    assertThat(String.join("\n", repaired.hardConstraints()))
+        .contains("Do not add alternate customer")
+        .doesNotContain("customer_name");
+    assertThat(TaskExpanderAgent.normalizeFinalPlan(normalized)).isEqualTo(normalized);
   }
 
   @Test

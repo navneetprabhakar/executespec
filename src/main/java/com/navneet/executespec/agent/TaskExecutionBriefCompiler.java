@@ -21,11 +21,11 @@ public final class TaskExecutionBriefCompiler {
   /** Normalize, validate, and compile the final worker-visible plan or fail closed. */
   public static Plan compileExecutable(Plan plan) {
     if (plan == null || plan.tasks() == null || plan.tasks().isEmpty()) {
-      throw new IllegalStateException("planner returned an empty executable plan");
+      throw contractFailure("planner returned an empty executable plan");
     }
     Plan compiled = compile(TaskExpanderAgent.normalizeFinalPlan(plan));
     List<String> violations = TaskExpanderAgent.finalPlanContractViolations(compiled);
-    if (!violations.isEmpty()) throw new IllegalStateException(String.join("; ", violations));
+    if (!violations.isEmpty()) throw contractFailure(String.join("; ", violations));
     return compiled;
   }
 
@@ -51,10 +51,10 @@ public final class TaskExecutionBriefCompiler {
 
   private static PlannedTask compileTask(
       PlannedTask task, Map<String, RequirementSpec> requirements) {
-    if (task == null) throw new IllegalStateException("assembled plan contains a null task");
+    if (task == null) throw contractFailure("assembled plan contains a null task");
     int authoritativeChars = authoritativeChars(task, requirements);
     if (authoritativeChars > MAX_BRIEF_CHARS) {
-      throw new IllegalStateException(
+      throw contractFailure(
           task.id()
               + ": authoritative task contract exceeds "
               + MAX_BRIEF_CHARS
@@ -93,9 +93,9 @@ public final class TaskExecutionBriefCompiler {
     return TaskExpansionTextNormalizer.boundTextPreservingFinalContract(source, availableChars);
   }
 
-  private static IllegalStateException bindingDescriptionBudgetExceeded(
+  private static ExecutablePlanContractException bindingDescriptionBudgetExceeded(
       PlannedTask task, int availableChars) {
-    return new IllegalStateException(
+    return contractFailure(
         task.id()
             + ": explicitly binding description contracts exceed the remaining "
             + Math.max(0, availableChars)
@@ -110,7 +110,7 @@ public final class TaskExecutionBriefCompiler {
     for (String id : requirementIds) {
       RequirementSpec requirement = requirements.get(id);
       if (requirement == null) {
-        throw new IllegalStateException(task.id() + ": unknown requirement " + id);
+        throw contractFailure(task.id() + ": unknown requirement " + id);
       }
       chars += id.length() + requirement.text().trim().length();
     }
@@ -142,9 +142,25 @@ public final class TaskExecutionBriefCompiler {
       if (requirement == null || requirement.id() == null || requirement.id().isBlank()) continue;
       RequirementSpec prior = indexed.putIfAbsent(requirement.id(), requirement);
       if (prior != null) {
-        throw new IllegalStateException("duplicate requirement id " + requirement.id());
+        throw contractFailure("duplicate requirement id " + requirement.id());
       }
     }
     return indexed;
+  }
+
+  private static ExecutablePlanContractException contractFailure(String message) {
+    return new ExecutablePlanContractException(message);
+  }
+
+  /**
+   * A deterministic rejection of the assembled worker contract.
+   *
+   * <p>The orchestration boundary uses this type, rather than an exception-message prefix, to
+   * distinguish a provider-produced contract defect from an internal compiler/runtime bug.
+   */
+  public static final class ExecutablePlanContractException extends IllegalStateException {
+    private ExecutablePlanContractException(String message) {
+      super(message);
+    }
   }
 }

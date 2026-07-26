@@ -263,7 +263,12 @@ final class PlanSafetyTextSupport {
   static String normalizeInlineCode(String value) {
     return value
         .replaceAll("(?i)--prefix\\s+\\.\\s+run", "--prefix frontend run")
-        .replaceAll("(?<=[A-Za-z0-9_])\\s*\\.\\s*(?=[A-Za-z0-9_])", ".")
+        // A dot that starts a shell path is an argument boundary, not member access. The former
+        // expression allowed optional whitespace on both sides and therefore corrupted valid
+        // commands such as `python -m venv .venv` and `source .venv/bin/activate` into
+        // `venv.venv` / `source.venv`. Repair spaced member access, but preserve whitespace when
+        // the dot is immediately followed by an identifier (the shell hidden-path shape).
+        .replaceAll("(?<=[A-Za-z0-9_])(?:\\.\\s+|\\s+\\.\\s+)(?=[A-Za-z0-9_])", ".")
         .replaceAll("\\s*/\\s*", "/")
         .replaceAll("(?i)\\b(GET|POST|PUT|PATCH|DELETE)/api/", "$1 /api/");
   }
@@ -370,6 +375,20 @@ final class PlanSafetyTextSupport {
             "required `idempotencyKey: string` parameter")
         .replaceAll("(?i)\\bidempotencyKey\\?\\s*:\\s*string\\b", "idempotencyKey: string")
         .replace("affected-row verificationor", "affected-row verification or");
+  }
+
+  static boolean makesIdempotencyHeaderOptional(String text) {
+    for (String clause : safe(text).toLowerCase(Locale.ROOT).split("[.\\n;]+")) {
+      boolean mentionsHeader =
+          clause.contains("idempotency-key")
+              || clause.contains("idempotency_key")
+              || clause.contains("idempotencykey");
+      if (mentionsHeader
+          && (clause.contains("optional") || clause.matches("(?s).*\\bif provided\\b.*"))) {
+        return true;
+      }
+    }
+    return false;
   }
 
   static String removeBusinessAggregateIdempotencyFields(String value) {

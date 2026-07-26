@@ -342,22 +342,40 @@ public class ModelRegistry {
   /**
    * Resolve the ordered recovery chain for a concrete primary provider.
    *
-   * <p>Most providers continue to use the tier fallback chain. DeepSeek is intentionally different:
-   * its recovery order is native DeepSeek, then OpenRouter, then Fireworks. Keeping this
-   * provider-specific mapping here prevents the generic tier chain from silently routing a native
-   * DeepSeek failure to an unrelated Anthropic/OpenAI model.
+   * <p>{@code model-matrix.failover-order} is authoritative for every provider. Each configured
+   * target receives its equivalent tier model: ARCHITECT -> planning, CAPABLE -> workhorse, and
+   * UTILITY -> lightweight. A provider without an explicit failover-order entry has no recovery
+   * chain. It must never inherit the generic tier chain, because that silently invents providers
+   * the operator did not configure (notably direct OpenRouter/Fireworks routes).
    */
   public List<String[]> fallbackChainFor(String modelName, String primaryProvider) {
-    if ("deepseek".equalsIgnoreCase(primaryProvider)) {
-      boolean flash = modelName != null && modelName.toLowerCase().contains("flash");
-      String tier = flash ? "lightweight" : "workhorse";
-      String openRouterModel = providerModel("openrouter", tier);
-      String fireworksModel = providerModel("fireworks", tier);
-      if (openRouterModel == null || fireworksModel == null) return Collections.emptyList();
-      return List.of(
-          new String[] {"openrouter", openRouterModel}, new String[] {"fireworks", fireworksModel});
+    if (primaryProvider == null || matrixProps.getFailoverOrder() == null) {
+      return Collections.emptyList();
     }
-    return fallbackChainFor(modelName);
+    List<String> providers =
+        matrixProps.getFailoverOrder().get(primaryProvider.toLowerCase(java.util.Locale.ROOT));
+    if (providers == null || providers.isEmpty()) return Collections.emptyList();
+
+    String tier = providerTierForFailover(modelName);
+    List<String[]> resolved = new ArrayList<>(providers.size());
+    for (String provider : providers) {
+      if (provider == null || provider.isBlank()) continue;
+      String normalized = provider.toLowerCase(java.util.Locale.ROOT);
+      String model = providerModel(normalized, tier);
+      if (model != null && !model.isBlank()) resolved.add(new String[] {normalized, model});
+    }
+    return List.copyOf(resolved);
+  }
+
+  private String providerTierForFailover(String modelName) {
+    ModelMatrixProperties.ModelConfig config = lookupConfig(modelName);
+    String chainTier = config == null ? null : config.getChainTier();
+    if (chainTier == null) return "workhorse";
+    return switch (chainTier.toUpperCase(java.util.Locale.ROOT)) {
+      case "ARCHITECT" -> "planning";
+      case "UTILITY" -> "lightweight";
+      default -> "workhorse";
+    };
   }
 
   private String providerModel(String provider, String tier) {

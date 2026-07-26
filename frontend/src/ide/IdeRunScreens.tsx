@@ -63,32 +63,53 @@ function failureText(reason: string | null): string {
   return 'This screen could not be rendered.';
 }
 
-export default function IdeRunScreens({runId}: {runId: string}) {
+export default function IdeRunScreens({
+  runId,
+  hasProducedWorkspace,
+  unavailableReason,
+}: {
+  runId: string;
+  hasProducedWorkspace: boolean;
+  unavailableReason?: string;
+}) {
   const [manifest, setManifest] = useState<PreviewRenderManifest | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [html, setHtml] = useState<string | null>(null);
   const [viewport, setViewport] = useState<ViewportId>('auto');
   const [error, setError] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
+  const [loadingManifest, setLoadingManifest] = useState(true);
   const [loadingSurface, setLoadingSurface] = useState(false);
   const pollRef = useRef<number | null>(null);
+  const activeRunRef = useRef(runId);
 
   const inFlight = manifest?.status === 'QUEUED' || manifest?.status === 'RENDERING';
 
   const load = useCallback(async () => {
     try {
       const next = await getPreviewRender(runId);
+      if (activeRunRef.current !== runId) return null;
       setManifest(next);
+      setError(null);
       return next;
     } catch (e) {
+      if (activeRunRef.current !== runId) return null;
       setError(e instanceof Error ? e.message : 'Could not load the preview.');
       return null;
     }
   }, [runId]);
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    activeRunRef.current = runId;
+    setManifest(null);
+    setSelected(null);
+    setHtml(null);
+    setError(null);
+    setLoadingManifest(true);
+    void load().finally(() => {
+      if (activeRunRef.current === runId) setLoadingManifest(false);
+    });
+  }, [load, runId]);
 
   // Poll only while work is outstanding, then stop.
   useEffect(() => {
@@ -157,17 +178,28 @@ export default function IdeRunScreens({runId}: {runId: string}) {
   const activeSurface = rendered.find((s) => s.surfaceId === selected) ?? null;
   const frame = frameSize(viewport, activeSurface);
   const failed = (manifest?.surfaces ?? []).filter((s) => !s.rendered);
+  // The server uses the admitted run-start baseline. `hasProducedWorkspace` is retained only as a
+  // compatibility fallback for older deployments that do not return renderAllowed yet.
+  const renderAllowed = inFlight || (manifest?.renderAllowed ?? hasProducedWorkspace);
 
   return (
     <div className='ide-screens'>
       <div className='ide-screens-bar'>
         <div className='ide-screens-bar-left'>
-          {manifest?.available === false ? (
+          {loadingManifest ? (
+            <span className='ide-screens-status'>Checking screen availability…</span>
+          ) : manifest?.available === false ? (
             /* The flag is off for this deployment. Previously this rendered an always-enabled
                button whose 503 surfaced as "temporarily unavailable" — false for a feature that
                is simply disabled. Say what is actually true instead. */
             <span className='ide-screens-status'>
               Screen rendering is turned off for this deployment.
+            </span>
+          ) : !renderAllowed ? (
+            <span className='ide-screens-status'>
+              {manifest?.jobId
+                ? 'Re-rendering is unavailable because no product-file change can be verified.'
+                : 'No generated product files are available.'}
             </span>
           ) : (
             <button className='ide-btn' onClick={start} disabled={starting || inFlight}>
@@ -202,15 +234,35 @@ export default function IdeRunScreens({runId}: {runId: string}) {
         <p className='ide-screens-note'>{manifest.fidelityNote}</p>
       )}
 
-      {!manifest?.jobId && !inFlight && (
-        <div className='ide-screens-empty'>
-          <h3>See what you built</h3>
-          <p>
-            Renders this run&apos;s screens as a visual approximation — no container, no deploy, and
-            it works even when the build is failing. Data shown is invented sample content.
-          </p>
-        </div>
-      )}
+      {!loadingManifest &&
+        !error &&
+        manifest?.available !== false &&
+        !manifest?.jobId &&
+        !inFlight &&
+        renderAllowed && (
+          <div className='ide-screens-empty'>
+            <h3>See what you built</h3>
+            <p>
+              Renders this run&apos;s screens as a visual approximation — no container, no deploy,
+              and it works even when the build is failing. Data shown is invented sample content.
+            </p>
+          </div>
+        )}
+
+      {!loadingManifest &&
+        !error &&
+        manifest?.available !== false &&
+        !manifest?.jobId &&
+        !inFlight &&
+        !renderAllowed && (
+          <div className='ide-screens-empty'>
+            <h3>No generated screens</h3>
+            <p>
+              {unavailableReason ||
+                'This run has no verified product-file changes, so there is nothing honest to render.'}
+            </p>
+          </div>
+        )}
 
       {manifest?.status === 'NO_SURFACES' && (
         <div className='ide-screens-empty'>

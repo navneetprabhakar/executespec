@@ -457,8 +457,18 @@ public class OpenAiNativeToolClient {
       // (real signal that the prefix isn't matching) distinguishable from "OpenAI returned no
       // metadata" (older API path / parser bug). OpenAI auto-caches prefixes ≥1024 tokens, so 0
       // hits on a multi-iteration task is a flag that the prefix is mutating.
-      int cachedTokens = usage.path("prompt_tokens_details").path("cached_tokens").asInt(0);
+      int cachedTokens =
+          Math.max(
+              usage.path("prompt_tokens_details").path("cached_tokens").asInt(0),
+              usage.path("prompt_cache_hit_tokens").asInt(0));
       metaBuilder.keyValue("cache_read_input_tokens", cachedTokens);
+      // DeepSeek documents top-level hit/miss counters rather than OpenAI's nested detail shape.
+      // Keep miss tokens as diagnostic evidence; never add hit + miss to prompt_tokens because
+      // both providers report cache counters as subsets of the prompt total.
+      int cacheMissTokens = usage.path("prompt_cache_miss_tokens").asInt(0);
+      if (cacheMissTokens > 0) {
+        metaBuilder.keyValue("cache_miss_input_tokens", cacheMissTokens);
+      }
 
       // OpenAI-compatible providers expose reasoning as a subset of completion tokens under
       // completion_tokens_details. Preserve it as a separate audit dimension without adding it to

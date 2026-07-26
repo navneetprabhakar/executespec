@@ -40,6 +40,7 @@ final class PlanBackendContractGate {
     addSplitFieldViolations(tasks, violations);
     addEnumAliasViolations(tasks, violations);
     addAsyncTestContractViolations(tasks, violations);
+    addAsyncSessionConsistencyViolations(tasks, violations);
     addRuntimeDriverDependencyViolations(tasks, violations);
     addExactActionPathViolations(tasks, violations);
   }
@@ -115,6 +116,9 @@ final class PlanBackendContractGate {
     }
     fields.forEach(
         (field, declarations) -> {
+          // Bare `id` is aggregate-local by default. Comparing Product.id, Warehouse.id, and
+          // Reservation.id as one shared contract creates a false cross-entity type conflict.
+          if (field.equals("id")) return;
           Set<String> types = new LinkedHashSet<>();
           declarations.forEach(value -> types.add(value.type()));
           if (types.size() < 2) return;
@@ -225,16 +229,55 @@ final class PlanBackendContractGate {
     for (PlannedTask task : tasks) {
       if (task == null) continue;
       String taskEvidence = evidence(task).toLowerCase(Locale.ROOT);
-      boolean launchesServer =
-          taskEvidence.contains("subprocess")
-              && taskEvidence.matches("(?s).*\\b(?:start|launch)\\w*\\b.{0,80}\\buvicorn\\b.*");
-      if (launchesServer
-          && !taskEvidence.matches(
-              "(?s).*\\b(?:readiness|ready|poll|wait until|startup timeout|health check)\\b.*")) {
+      boolean launchesServer = PlanSafetyE2eSupport.launchesRealServerSubprocess(taskEvidence);
+      if (launchesServer && !PlanSafetyE2eSupport.hasBoundedReadinessProbe(taskEvidence)) {
         violations.add(
             task.id()
-                + ": real-server functional fixture launches uvicorn without a bounded readiness"
-                + " probe");
+                + ": real-server functional fixture launches the backend without a bounded"
+                + " readiness probe");
+      }
+    }
+  }
+
+  private static void addAsyncSessionConsistencyViolations(
+      List<PlannedTask> tasks, List<String> violations) {
+    String allEvidence =
+        tasks.stream()
+            .filter(java.util.Objects::nonNull)
+            .map(PlanBackendContractGate::evidence)
+            .collect(java.util.stream.Collectors.joining("\n"))
+            .toLowerCase(Locale.ROOT);
+    boolean asyncStack =
+        allEvidence.contains("create_async_engine")
+            || allEvidence.contains("asyncsession")
+            || allEvidence.contains("async_sessionmaker")
+            || allEvidence.contains("sqlite+aiosqlite")
+            || allEvidence.contains("postgresql+asyncpg");
+    if (!asyncStack) return;
+
+    for (PlannedTask task : tasks) {
+      if (task == null) continue;
+      String taskEvidence = evidence(task).toLowerCase(Locale.ROOT);
+      boolean setupOrSeed =
+          taskEvidence.matches(
+              "(?s).*\\b(?:seed|seeding|fixture|bootstrap data|initial data|sample data)\\b.*");
+      if (!setupOrSeed) continue;
+      boolean explicitlyAsync =
+          taskEvidence.contains("asyncsession")
+              || taskEvidence.contains("async_sessionmaker")
+              || taskEvidence.contains("class_=asyncsession");
+      boolean synchronousSession =
+          taskEvidence.contains("from sqlalchemy.orm import session")
+              || taskEvidence.matches("(?s).*\\bwith\\s+session\\s*\\(.*")
+              || taskEvidence.matches("(?s).*\\bsession\\s*\\(\\s*engine\\s*\\).*")
+              || taskEvidence.matches("(?s).*\\bsessionmaker\\s*\\(.*")
+              || taskEvidence.matches("(?s).*\\b(?:sync|synchronous)\\s+session\\b.*");
+      if (synchronousSession && !explicitlyAsync) {
+        violations.add(
+            task.id()
+                + ": seed/setup contract uses a synchronous SQLAlchemy Session while the plan's"
+                + " runtime database stack is async; use AsyncSession/async_sessionmaker and"
+                + " await database operations");
       }
     }
   }

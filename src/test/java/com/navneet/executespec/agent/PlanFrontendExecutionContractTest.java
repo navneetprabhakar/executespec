@@ -55,8 +55,8 @@ class PlanFrontendExecutionContractTest {
             "Python browser tests",
             "Declare pytest-playwright and run `python -m pytest e2e/tests`. Python session"
                 + " fixtures launch uvicorn and Vite with subprocess.Popen, wait for readiness"
-                + " against a fresh isolated DATABASE_URL, and terminate both processes after"
-                + " pytest.",
+                + " with a bounded 15-second timeout against a fresh isolated DATABASE_URL, and"
+                + " terminate both processes after pytest.",
             List.of("e2e/tests/test_full_flow.py", "e2e/conftest.py", "backend/pyproject.toml"));
 
     assertThat(PlanContractQualityGate.violations(plan(e2e))).isEmpty();
@@ -202,6 +202,7 @@ class PlanFrontendExecutionContractTest {
             .build();
 
     Plan normalized = TaskExpanderAgent.normalizeFinalPlan(plan(producer, shell, consumer));
+    Plan normalizedAgain = TaskExpanderAgent.normalizeFinalPlan(normalized);
 
     assertThat(normalized.tasks().get(0).description())
         .contains("GET /api/orders", "POST /api/orders");
@@ -211,6 +212,7 @@ class PlanFrontendExecutionContractTest {
     assertThat(normalized.tasks().get(2).hardConstraints())
         .anyMatch(value -> value.contains("GET /orders"))
         .anyMatch(value -> value.contains("Public producer documentation remains at /api/orders"));
+    assertThat(normalizedAgain).isEqualTo(normalized);
   }
 
   @Test

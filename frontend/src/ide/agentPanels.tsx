@@ -612,9 +612,11 @@ function relTime(iso?: string | null): string {
 function MessageBubble({
   message,
   dispatch,
+  remoteSandboxEnabled,
 }: {
   message: LocalMessage;
   dispatch: Dispatch<AgentAction>;
+  remoteSandboxEnabled: boolean;
 }) {
   const isSuperAdmin = useAuthStore(selectIsSuperAdmin);
   if (message.role === 'user') {
@@ -642,7 +644,11 @@ function MessageBubble({
         )}
       </div>
       {message.role === 'assistant' && (
-        <ArtifactRail artifacts={extractAgentArtifacts(message.content)} dispatch={dispatch} />
+        <ArtifactRail
+          artifacts={extractAgentArtifacts(message.content)}
+          dispatch={dispatch}
+          remoteSandboxEnabled={remoteSandboxEnabled}
+        />
       )}
     </div>
   );
@@ -1577,7 +1583,12 @@ export function AgentConversation({
                 />
               )
             : messages.map((message) => (
-                <MessageBubble key={message.id} message={message} dispatch={dispatch} />
+                <MessageBubble
+                  key={message.id}
+                  message={message}
+                  dispatch={dispatch}
+                  remoteSandboxEnabled={remoteSandboxEnabled}
+                />
               ))}
           <Activity items={streamEvents} />
           {isBusy && !streamText && <Typing />}
