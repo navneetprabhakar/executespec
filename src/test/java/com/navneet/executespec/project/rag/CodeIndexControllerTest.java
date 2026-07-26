@@ -83,7 +83,7 @@ class CodeIndexControllerTest {
         .thenReturn(
             Optional.of(ProjectRepoLink.builder().repoId(repoId).projectId("project-1").build()));
     when(repos.findById(repoId)).thenReturn(Optional.of(repo));
-    when(indexing.readiness("project-1", repo)).thenReturn(readiness(repoId));
+    when(indexing.readiness("project-1", repo)).thenReturn(partialReadiness(repoId));
 
     var response = controller.refresh("project-1", repoId, principal);
 
@@ -92,6 +92,29 @@ class CodeIndexControllerTest {
     assertThat(response.getBody().relationshipGraphAvailable()).isFalse();
     verify(guard).assertCanWrite("project-1", principal);
     verify(indexing).indexRepoAsync("project-1", repo, "bb-user", "bb-app-password", "user-1");
+  }
+
+  @Test
+  void refreshOfReadyIndexIsIdempotentAndDoesNotQueueProviderWork() {
+    UUID repoId = UUID.randomUUID();
+    ProjectRepo repo = repo(repoId, "acme/ready");
+    when(links.findByProjectIdAndRepoId("project-1", repoId))
+        .thenReturn(
+            Optional.of(ProjectRepoLink.builder().repoId(repoId).projectId("project-1").build()));
+    when(repos.findById(repoId)).thenReturn(Optional.of(repo));
+    when(indexing.readiness("project-1", repo)).thenReturn(readiness(repoId));
+
+    var response = controller.refresh("project-1", repoId, principal);
+
+    assertThat(response.getStatusCode().value()).isEqualTo(202);
+    assertThat(response.getBody().status()).isEqualTo("READY");
+    verify(indexing, never())
+        .indexRepoAsync(
+            org.mockito.ArgumentMatchers.anyString(),
+            org.mockito.ArgumentMatchers.any(),
+            org.mockito.ArgumentMatchers.any(),
+            org.mockito.ArgumentMatchers.any(),
+            org.mockito.ArgumentMatchers.any());
   }
 
   private static AppUserDetails principal() {
@@ -144,5 +167,33 @@ class CodeIndexControllerTest {
         "SEMANTIC",
         "openai",
         EmbeddingService.DEFAULT_MODEL);
+  }
+
+  private static CodeIndexingService.Readiness partialReadiness(UUID repoId) {
+    var ready = readiness(repoId);
+    return new CodeIndexingService.Readiness(
+        ready.projectId(),
+        ready.repoId(),
+        ready.currentSourceSha(),
+        ready.indexedSourceSha(),
+        CodeIndexStateStore.Status.PARTIAL,
+        "REFRESH_LIMIT_REACHED_RESUMABLE",
+        2,
+        2,
+        1,
+        1,
+        0,
+        0,
+        0,
+        0,
+        1,
+        50,
+        false,
+        false,
+        true,
+        false,
+        "LEXICAL",
+        null,
+        null);
   }
 }

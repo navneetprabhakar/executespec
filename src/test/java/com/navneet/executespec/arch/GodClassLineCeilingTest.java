@@ -53,7 +53,7 @@ class GodClassLineCeilingTest {
     ceilings.put("src/main/java/com/navneet/executespec/harness/SequentialExecutor.java", 4791);
     ceilings.put("src/main/java/com/navneet/executespec/engine/WorkerAgent.java", 3415);
     ceilings.put("frontend/src/lib/api/core.ts", 1803);
-    ceilings.put("frontend/src/ide/agentPanels.tsx", 1780);
+    ceilings.put("frontend/src/ide/agentPanels.tsx", 1682);
     return Map.copyOf(ceilings);
   }
 

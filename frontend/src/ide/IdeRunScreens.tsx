@@ -48,6 +48,18 @@ function failureText(reason: string | null): string {
   if (reason === 'TIMEOUT') return 'The model did not finish this screen in time.';
   if (reason === 'BUNDLE_TOO_LARGE') return 'The render came back too large to display.';
   if (reason === 'NOT_HTML') return 'The model did not return a usable HTML document.';
+  if (reason === 'AI_CREDITS_REQUIRED') {
+    return 'This screen was not rendered because managed AI credits are unavailable.';
+  }
+  if (reason === 'BUDGET_EXHAUSTED') {
+    return 'This screen was not rendered because its provider budget was exhausted.';
+  }
+  if (reason === 'PROVIDER_CREDENTIAL_UNAVAILABLE') {
+    return 'This screen was not rendered because the selected provider credential is unavailable.';
+  }
+  if (reason === 'PROVIDER_ROUTE_UNAVAILABLE') {
+    return 'This screen was not rendered because the run’s provider route is unavailable.';
+  }
   return 'This screen could not be rendered.';
 }
 

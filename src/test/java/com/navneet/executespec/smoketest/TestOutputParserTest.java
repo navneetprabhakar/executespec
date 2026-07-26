@@ -70,6 +70,19 @@ class TestOutputParserTest {
   }
 
   @Test
+  void multi_root_output_aggregates_pytest_and_vitest() {
+    String output =
+        "==== 7 passed, 1 failed in 0.5s ====\n"
+            + " Test Files  1 passed (1)\n Tests  5 passed (5)\n";
+
+    var s = ok(TestOutputParser.parse(Framework.MULTI, output, 1));
+
+    assertEquals(13, s.getTotalTests());
+    assertEquals(12, s.getPassed());
+    assertEquals(1, s.getFailed());
+  }
+
+  @Test
   void surefire_sums_multiple_classes() {
     String out =
         "Tests run: 4, Failures: 0, Errors: 0, Skipped: 0\n"

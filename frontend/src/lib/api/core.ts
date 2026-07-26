@@ -1549,11 +1549,16 @@ export interface RepoStaleness {
   generatedFromSha: string | null;
   currentSha: string | null;
   stale: boolean;
+  state: 'FRESH' | 'STALE' | 'UNKNOWN' | 'NOT_MEASURABLE';
+  reason: string | null;
 }
 export interface StalenessReport {
   stale: boolean;
   staleCount: number;
   totalCount: number;
+  unknownCount: number;
+  notMeasurableCount: number;
+  verified: boolean;
   repos: RepoStaleness[];
 }
 

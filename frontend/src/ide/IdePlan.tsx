@@ -24,6 +24,8 @@ import {
   toGateView,
 } from '@/ide/planContractGate';
 import {PlanContractGateCard} from '@/ide/PlanContractGateCard';
+import {PlanReviewDetails} from '@/ide/PlanReviewDetails';
+import {writeSpecHandoff} from '@/lib/specHandoff';
 import {useAuthStore, selectIsSuperAdmin} from '@/stores/useAuthStore';
 import {useRunStore} from '@/stores/useRunStore';
 import {useSse} from '@/hooks/useSse';
@@ -220,22 +222,23 @@ export default function IdePlan() {
       setBusy('');
     }
   }
-  // Revise the plan before approving — re-plans with the feedback; the poll
-  // loop above picks up the new AWAITING_APPROVAL version.
-  async function revise() {
+  function revise() {
     if (!feedback.trim()) return;
     if (gateMutationBlocked()) return;
-    setBusy('e');
+    const revising = run;
+    if (!revising) return;
     setErr('');
-    try {
-      await api.editRunPlan(runId, feedback.trim());
-      setFeedback('');
-      setEditing(false);
-    } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : 'Revision failed.');
-    } finally {
-      setBusy('');
+    const original = revising.userRequest?.trim();
+    if (!original) {
+      setErr('The original request is unavailable; copy your changes into a new run manually.');
+      return;
     }
+    writeSpecHandoff({
+      source: 'plan-revision',
+      projectId: revising.projectId,
+      spec: `${original}\n\nPlan revision requirements:\n${feedback.trim()}`,
+    });
+    navigate(revising.projectId ? `/projects/${revising.projectId}?compose=1` : '/compose');
   }
 
   const status = (run?.status || '').toUpperCase();
@@ -360,6 +363,9 @@ export default function IdePlan() {
             <RunTimeline tasks={tasks} />
           </div>
 
+          <div className='ide-h2'>Step contracts</div>
+          <PlanReviewDetails planJson={run.planJson} />
+
           <div className='ide-h2'>Not quite right?</div>
           {editing ? (
             <div className='ide-card'>
@@ -387,7 +393,7 @@ export default function IdePlan() {
                   disabled={busy !== '' || !feedback.trim()}
                   onClick={revise}
                 >
-                  {busy === 'e' ? 'Revising…' : 'Submit requested changes'}
+                  Start revised run
                 </button>
                 <button className='ide-btn ghost' onClick={() => setEditing(false)}>
                   Cancel
@@ -400,7 +406,7 @@ export default function IdePlan() {
               style={{borderColor: 'var(--ide-accent)', color: 'var(--ide-accent)'}}
               onClick={() => setEditing(true)}
             >
-              ✎ Request changes
+              ✎ Revise as new run
             </button>
           )}
 

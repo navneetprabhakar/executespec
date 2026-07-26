@@ -9,8 +9,10 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.nio.file.Path;
 import java.util.Optional;
 
+import com.navneet.executespec.config.featureflag.FeatureFlagService;
 import com.navneet.executespec.sse.SseBroadcaster;
 import com.navneet.executespec.testgen.model.TestExecutionSummary;
 import com.navneet.executespec.testgen.model.TestPlan;
@@ -32,10 +34,16 @@ class TestExecutionBindingTest {
   private final SurefireReportParser parser = mock(SurefireReportParser.class);
   private final TestGenerationAdmissionService admission =
       mock(TestGenerationAdmissionService.class);
+  private final TestWorkspaceResolver workspaceResolver = mock(TestWorkspaceResolver.class);
 
   private TestExecutionService service() {
     when(plans.save(any(TestPlan.class))).thenAnswer(inv -> inv.getArgument(0));
-    return new TestExecutionService(plans, results, parser, mock(SseBroadcaster.class), admission);
+    FeatureFlagService flags = mock(FeatureFlagService.class);
+    when(flags.isEnabled(TestExecutionService.FLAG_LIVE_PREVIEW_NETWORK)).thenReturn(true);
+    when(workspaceResolver.projectRoot("run-bind"))
+        .thenReturn(Path.of("workspace-test", "run-bind"));
+    return new TestExecutionService(
+        plans, results, parser, mock(SseBroadcaster.class), admission, flags, workspaceResolver);
   }
 
   private TestPlan plan(String workspaceFingerprint) {
@@ -100,7 +108,35 @@ class TestExecutionBindingTest {
   void unavailableSummaryIsExplicitlyUnproven() {
     TestExecutionSummary summary = TestExecutionSummary.unavailable("exec-1", "runner exited 137");
     assertEquals(Boolean.FALSE, summary.getExecutionVerified());
+    assertEquals(TestExecutionSummary.EvidenceScope.UNAVAILABLE, summary.getEvidenceScope());
     assertEquals("runner exited 137", summary.getUnverifiedReason());
     assertEquals(0, summary.getTotalTests());
+  }
+
+  @Test
+  void hostNetworkRunnerIsFailClosedWhenItsExplicitGateIsOff() {
+    TestPlan plan = plan("planned-fp");
+    when(plans.save(any(TestPlan.class))).thenAnswer(inv -> inv.getArgument(0));
+    FeatureFlagService flags = mock(FeatureFlagService.class);
+    when(workspaceResolver.projectRoot("run-bind"))
+        .thenReturn(Path.of("workspace-test", "run-bind"));
+    TestExecutionService service =
+        new TestExecutionService(
+            plans,
+            results,
+            parser,
+            mock(SseBroadcaster.class),
+            admission,
+            flags,
+            workspaceResolver);
+
+    TestExecutionSummary summary = service.executeTests("run-bind", 3L, "http://preview/");
+
+    assertFalse(summary.isExecutionProven());
+    assertEquals(TestPlanStatus.FAILED, plan.getStatus());
+    assertNotNull(summary.getUnverifiedReason());
+    verify(admission, never()).currentWorkspaceFingerprint(any());
+    verify(parser, never()).admit(any(), any());
+    verify(results, never()).saveAll(any());
   }
 }

@@ -93,10 +93,12 @@ public class ContainerStrictV1Runtime implements RunSandboxRuntime {
         throw new IllegalStateException(
             "refusing to reattach to container %s: fencing labels %s".formatted(name, fence));
       }
+      requireWorkspaceOwnership(sandbox);
       log.info("sandbox {} reattaching to existing container {}", sandbox.id(), name);
       return new Provisioned(name, imageDigest(spec.image()));
     }
 
+    requireWorkspaceOwnership(sandbox);
     ExecResult started =
         exec(
             // RR-821 — mount admission is scoped to THIS sandbox's own directory, derived from
@@ -112,7 +114,8 @@ public class ContainerStrictV1Runtime implements RunSandboxRuntime {
                 String.valueOf(sandbox.id()),
                 sandbox.runtimeEpoch(),
                 agentWorkspaceRoot,
-                sandbox.runId()),
+                sandbox.runId(),
+                runtimeUser()),
             properties.getCommandTimeoutSeconds());
     if (started.exitCode() != 0) {
       throw new IllegalStateException(
@@ -147,7 +150,8 @@ public class ContainerStrictV1Runtime implements RunSandboxRuntime {
         sandbox.runtimeHandle() == null ? containerName(sandbox) : sandbox.runtimeHandle();
 
     SandboxProcess.Outcome outcome =
-        SandboxProcess.run(SandboxContainerCommand.exec(name, request), request.timeout());
+        SandboxProcess.run(
+            SandboxContainerCommand.exec(name, request, runtimeUser()), request.timeout());
 
     if (!outcome.finished()) {
       log.warn(
@@ -296,6 +300,17 @@ public class ContainerStrictV1Runtime implements RunSandboxRuntime {
 
   static String containerName(RunSandbox sandbox) {
     return NAME_PREFIX + sandbox.id().toString().replace("-", "");
+  }
+
+  private String runtimeUser() {
+    return properties.getRuntimeUid() + ":" + properties.getRuntimeGid();
+  }
+
+  private void requireWorkspaceOwnership(RunSandbox sandbox) {
+    Path runWorkspace =
+        SandboxContainerCommand.requireRunWorkspace(agentWorkspaceRoot, sandbox.runId());
+    SandboxWorkspaceOwnership.requireWritableTree(
+        runWorkspace, properties.getRuntimeUid(), properties.getRuntimeGid());
   }
 
   private boolean running(String name) {

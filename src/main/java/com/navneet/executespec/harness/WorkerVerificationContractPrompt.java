@@ -7,6 +7,15 @@ final class WorkerVerificationContractPrompt {
 
   static final String TEXT =
       """
+  - A missing local runtime, package manager, dependency, service, credential, or sandbox
+    capability is an environment limitation, not permission to weaken the requested product.
+    Preserve every required language/runtime/framework version, manifest constraint, security
+    control, persistence guarantee, and acceptance bar. Use another available verifier only when
+    it proves the same contract; otherwise report the exact check as blocked or unverified. Never
+    downgrade a version, remove a dependency, relax a test, or rewrite the requirement merely to
+    make the current environment green. When a minimum or exact runtime version is required, check
+    it before creating environments or installing dependencies and use the matching versioned
+    executable when available (for example `python3.12`, not an older generic `python3`).
   - Derive adversarial tests from EVERY semantic clause in TASK_REQUIREMENTS. A symbol with the
     right name is not proof: exercise the documented/default startup path, cross-operation reuse of
     shared idempotency keys, immutable replay responses after later state changes, version mismatch
@@ -18,6 +27,12 @@ final class WorkerVerificationContractPrompt {
     persistence must be one atomic critical section/transaction. A race test must force concurrent
     callers to observe the initial miss before either stores; scheduler luck is not proof. Replays
     must consume quota/state once and return the exact original response.
+  - Win an atomic database claim for the scoped idempotency key before the business mutation, or
+    acquire an equivalent datastore serialization boundary before the initial lookup. Never mutate
+    business state and then rely on a later unique-key insert. A concurrent loser must roll back,
+    wait/re-read the committed winner, and replay it for an identical payload; expected unique,
+    lock, and busy races must be mapped to the documented response, never an intermittent 5xx. For
+    SQLite, use a real write transaction or claim-row protocol; SELECT FOR UPDATE is ignored.
   - Composite tenant/subject/operation/idempotency keys must use a collision-safe structured key or
     escaped/length-prefixed encoding. Raw delimiter concatenation (tenant + ":" + subject) is not
     isolation when caller-controlled components can contain the delimiter.

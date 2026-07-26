@@ -13,6 +13,7 @@ import org.springframework.web.ErrorResponseException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.context.request.async.AsyncRequestNotUsableException;
+import org.springframework.web.context.request.async.AsyncRequestTimeoutException;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
@@ -50,6 +51,16 @@ public class GlobalExceptionAdvice {
   @ExceptionHandler(AsyncRequestNotUsableException.class)
   public void onAsyncRequestNotUsable(AsyncRequestNotUsableException ex) {
     log.debug("Async client disconnected before response completion: {}", ex.getMessage());
+  }
+
+  /**
+   * An idle SSE emitter can time out while the response is already committed as an event stream.
+   * Treat that as normal stream completion for the same reason as a disconnected async client:
+   * rendering the JSON fallback here cannot succeed and delays graceful shutdown.
+   */
+  @ExceptionHandler(AsyncRequestTimeoutException.class)
+  public void onAsyncRequestTimeout(AsyncRequestTimeoutException ex) {
+    log.debug("Async event stream timed out after response commitment");
   }
 
   /**

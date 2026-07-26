@@ -31,6 +31,9 @@ import lombok.extern.slf4j.Slf4j;
 public class BuildCommandResolver {
 
   public BuildCommand resolve(Path workspaceRoot, String plannerDeclaredCommand) {
+    Optional<BuildCommand> fullStack = inferDirectChildBuilds(workspaceRoot);
+    if (fullStack.isPresent()) return fullStack.get();
+
     if (plannerDeclaredCommand != null && !plannerDeclaredCommand.isBlank()) {
       String cmd = normalizePython(plannerDeclaredCommand.trim());
       // A build smoke must be a repeatable verification command. Model-authored plans sometimes
@@ -101,6 +104,36 @@ public class BuildCommandResolver {
         .timeoutSeconds(5)
         .sourceDescription("fallback:no-op")
         .build();
+  }
+
+  private Optional<BuildCommand> inferDirectChildBuilds(Path workspaceRoot) {
+    if (workspaceRoot == null || hasAnyMarker(workspaceRoot) || !Files.isDirectory(workspaceRoot)) {
+      return Optional.empty();
+    }
+    java.util.List<String> commands = new java.util.ArrayList<>();
+    int timeout = 0;
+    try (var children = Files.list(workspaceRoot)) {
+      for (Path child : children.filter(Files::isDirectory).sorted().toList()) {
+        String name = child.getFileName().toString();
+        if (!name.matches("[A-Za-z0-9._-]+")) continue;
+        Optional<BuildCommand> command = inferFromFramework(child);
+        if (command.isEmpty()) continue;
+        commands.add("(cd " + name + " && " + command.get().command() + ")");
+        timeout += command.get().timeoutSeconds();
+      }
+    } catch (java.io.IOException e) {
+      log.warn(
+          "BuildCommandResolver: direct-child scan failed in {}: {}",
+          workspaceRoot,
+          e.getMessage());
+      return Optional.empty();
+    }
+    if (commands.isEmpty()) return Optional.empty();
+    return Optional.of(
+        build(
+            String.join(" && ", commands),
+            Math.min(timeout, 600),
+            commands.size() == 1 ? "inferred:child-root" : "inferred:multi-root"));
   }
 
   /**
@@ -230,6 +263,13 @@ public class BuildCommandResolver {
   static boolean isRepeatableBuildSmoke(String command) {
     if (command == null || command.isBlank()) return false;
     String normalized = command.trim().toLowerCase(java.util.Locale.ROOT).replaceAll("\\s+", " ");
+    if (normalized.contains("&&")
+        || normalized.contains(";")
+        || normalized.contains("|")
+        || normalized.startsWith("cd ")
+        || normalized.contains(" pytest")
+        || normalized.contains("vitest")
+        || normalized.contains("playwright")) return false;
     // Python setup (including normalizePython's rewrite of bare pip).
     if (normalized.matches("^(?:python(?:3(?:\\.\\d+)?)? -m )?pip(?:3)? install(?: |$).*")
         || normalized.matches("^uv (?:pip install|sync|venv)(?: |$).*$")) return false;

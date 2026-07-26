@@ -12,7 +12,6 @@ import java.util.concurrent.Callable;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 
-import com.navneet.executespec.sandbox.IllegalSandboxTransitionException;
 import com.navneet.executespec.sandbox.RunSandbox;
 import com.navneet.executespec.sandbox.RunSandboxStore;
 import com.navneet.executespec.sandbox.SandboxIsolationProfile;
@@ -33,8 +32,8 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 /**
- * Real PostgreSQL V306 -> V307 upgrade plus the lifecycle guarantees that only a database can
- * demonstrate: single-winner acquisition across two JVM identities, stale-fence rejection,
+ * Real PostgreSQL V306 -> current-head upgrade plus the lifecycle guarantees that only a database
+ * can demonstrate: single-winner acquisition across two JVM identities, stale-fence rejection,
  * illegal-transition rejection, cancellation and reconciliation without runtime dispatch, and
  * artifact retention surviving teardown.
  */
@@ -63,8 +62,13 @@ class RunSandboxLifecycleMigrationIntegrationTest {
     JdbcTemplate jdbc = new JdbcTemplate(dataSource);
 
     flyway(dataSource, schema, MigrationVersion.fromVersion("306")).migrate();
-    Flyway upgrade = flyway(dataSource, schema, MigrationVersion.fromVersion("307"));
-    assertThat(upgrade.migrate().migrationsExecuted).isEqualTo(1);
+    Flyway upgrade = flyway(dataSource, schema, MigrationVersion.fromVersion("342"));
+    assertThat(upgrade.migrate().migrationsExecuted).isGreaterThan(0);
+    assertThat(
+            jdbc.queryForList(
+                "SELECT version FROM flyway_schema_history WHERE version IN ('307','342')",
+                String.class))
+        .containsExactlyInAnyOrder("307", "342");
 
     // The three Phase 5 flags exist as separate rows and are independently OFF. Matched by exact
     // key: an unrelated pre-existing `sandbox.network-isolation` flag also lives in this table.
@@ -123,9 +127,9 @@ class RunSandboxLifecycleMigrationIntegrationTest {
 
     // ---- an illegal transition is rejected at the store
     RunSandbox.Lease finalLive = live;
-    assertThatThrownBy(() -> alpha.finishRelease(finalLive, SandboxState.TERMINATED))
+    assertThatThrownBy(() -> alpha.completeRelease(finalLive))
         .as("PROVISIONING -> TERMINATED skips teardown and must be refused")
-        .isInstanceOf(IllegalSandboxTransitionException.class);
+        .isInstanceOf(IllegalStateException.class);
     assertThat(alpha.get(id).orElseThrow().state()).isEqualTo(SandboxState.PROVISIONING);
 
     // ---- a stale fence is rejected even when the transition itself is legal
@@ -148,7 +152,7 @@ class RunSandboxLifecycleMigrationIntegrationTest {
     RunSandbox.Lease takeover = beta.tryAcquire(id, "jvm-beta", LEASE).orElseThrow();
     assertThat(takeover.fencingToken()).isEqualTo(live.fencingToken() + 1);
     RunSandbox.Lease evicted = live;
-    assertThatThrownBy(() -> alpha.beginRelease(evicted))
+    assertThatThrownBy(() -> alpha.beginRelease(evicted, SandboxState.CANCELLED, null, null))
         .as("the superseded owner must not be able to act")
         .isInstanceOf(SandboxLeaseFencedException.class);
     // Takeover does not restart the sandbox: the epoch only advances on a fresh provisioning
@@ -163,20 +167,82 @@ class RunSandboxLifecycleMigrationIntegrationTest {
     // ---- teardown then terminal, preserving audit evidence
     assertThat(beta.markRetention(id, SandboxRetentionState.RETAINED, "gs://evidence/sandbox-1"))
         .isTrue();
-    assertThat(beta.beginRelease(takeover).state()).isEqualTo(SandboxState.RELEASING);
-    RunSandbox cancelled = beta.finishRelease(takeover, SandboxState.CANCELLED);
+    var releaseRace = Executors.newFixedThreadPool(2);
+    List<RunSandbox> releasingRows;
+    try {
+      releasingRows =
+          releaseRace
+              .invokeAll(
+                  List.<Callable<RunSandbox>>of(
+                      () -> alpha.beginRelease(takeover, SandboxState.CANCELLED, null, null),
+                      () -> beta.beginRelease(takeover, SandboxState.CANCELLED, null, null)))
+              .stream()
+              .map(RunSandboxLifecycleMigrationIntegrationTest::get)
+              .toList();
+    } finally {
+      releaseRace.shutdownNow();
+    }
+    assertThat(releasingRows)
+        .as("same-fence teardown racers observe one canonical durable intent")
+        .allSatisfy(
+            row -> {
+              assertThat(row.state()).isEqualTo(SandboxState.RELEASING);
+              assertThat(row.cleanupTarget()).isEqualTo(SandboxState.CANCELLED);
+            });
+
+    var completionRace = Executors.newFixedThreadPool(2);
+    List<RunSandbox> completedRows;
+    try {
+      completedRows =
+          completionRace
+              .invokeAll(
+                  List.<Callable<RunSandbox>>of(
+                      () -> alpha.completeRelease(takeover), () -> beta.completeRelease(takeover)))
+              .stream()
+              .map(RunSandboxLifecycleMigrationIntegrationTest::get)
+              .toList();
+    } finally {
+      completionRace.shutdownNow();
+    }
+    assertThat(completedRows).extracting(RunSandbox::state).containsOnly(SandboxState.CANCELLED);
+    RunSandbox cancelled = completedRows.getFirst();
     assertThat(cancelled.state()).isEqualTo(SandboxState.CANCELLED);
     assertThat(cancelled.runtimeOwner()).isNull();
     assertThat(cancelled.leaseExpiresAt()).isNull();
     assertThat(cancelled.terminalAt()).isNotNull();
     assertThat(cancelled.artifactUri()).isEqualTo("gs://evidence/sandbox-1");
     assertThat(cancelled.imageDigest()).isEqualTo("sha256:deadbeef");
+    assertThat(beta.completeRelease(takeover).state())
+        .as("completion is idempotent after a racing teardown already won")
+        .isEqualTo(SandboxState.CANCELLED);
 
     // ---- a terminal sandbox cannot be re-acquired or re-cancelled
     assertThat(beta.tryAcquire(id, "jvm-gamma", LEASE)).isEmpty();
     assertThat(beta.requestCancellation(id).orElseThrow().state())
         .isEqualTo(SandboxState.CANCELLED);
     assertThat(beta.orphanCandidates(10)).isEmpty();
+
+    // ---- failed teardown remains non-terminal and immediately reclaimable until absence is
+    // verified. The original terminal intent survives the owner change.
+    UUID cleanupRetry = UUID.randomUUID();
+    alpha.createOrGet(create(cleanupRetry, "run-cleanup-retry", "sandbox:idem:cleanup-retry"));
+    RunSandbox.Lease cleanupOwner =
+        alpha.tryAcquire(cleanupRetry, "jvm-cleanup-a", LEASE).orElseThrow();
+    alpha.markReady(cleanupOwner, "container-cleanup", "sha256:deadbeef");
+    alpha.beginRelease(cleanupOwner, SandboxState.TERMINATED, null, null);
+    RunSandbox pending = alpha.recordCleanupFailure(cleanupOwner, "docker daemon unavailable");
+    assertThat(pending.state()).isEqualTo(SandboxState.RELEASING);
+    assertThat(pending.cleanupTarget()).isEqualTo(SandboxState.TERMINATED);
+    assertThat(pending.cleanupAttempts()).isEqualTo(1);
+    assertThat(pending.cleanupLastError()).isEqualTo("docker daemon unavailable");
+    assertThat(pending.terminalAt()).isNull();
+    assertThat(alpha.orphanCandidates(10)).extracting(RunSandbox::id).contains(cleanupRetry);
+
+    RunSandbox.Lease cleanupTakeover =
+        beta.tryAcquire(cleanupRetry, "jvm-cleanup-b", LEASE).orElseThrow();
+    RunSandbox retried = beta.beginRelease(cleanupTakeover, SandboxState.TERMINATED, null, null);
+    assertThat(retried.cleanupTarget()).isEqualTo(SandboxState.TERMINATED);
+    assertThat(beta.completeRelease(cleanupTakeover).state()).isEqualTo(SandboxState.TERMINATED);
 
     // ---- orphan reconciliation settles a sandbox whose JVM is gone
     UUID orphan = UUID.randomUUID();
@@ -237,6 +303,17 @@ class RunSandboxLifecycleMigrationIntegrationTest {
       // A losing racer may surface a serialization conflict rather than an empty result; both are
       // "did not win", never "both won".
       return Optional.empty();
+    }
+  }
+
+  private static <T> T get(Future<T> future) {
+    try {
+      return future.get();
+    } catch (InterruptedException interrupted) {
+      Thread.currentThread().interrupt();
+      throw new IllegalStateException(interrupted);
+    } catch (Exception failure) {
+      throw new IllegalStateException(failure);
     }
   }
 

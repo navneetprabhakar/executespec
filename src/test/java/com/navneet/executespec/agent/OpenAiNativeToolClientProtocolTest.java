@@ -63,4 +63,22 @@ class OpenAiNativeToolClientProtocolTest {
         .isInstanceOf(IllegalStateException.class)
         .hasMessageContaining("no function name");
   }
+
+  @Test
+  void truncatedToolCallCandidateIsSuppressedBeforeDispatch() throws Exception {
+    ChatResponse response =
+        parse(
+            """
+            {"choices":[{"message":{"content":null,"tool_calls":[
+              {"id":"call-1","type":"function",
+               "function":{"name":"writeFile","arguments":"{\\"path\\":\\"partial.txt\\"}"}}]},
+              "finish_reason":"length"}],
+             "usage":{"prompt_tokens":10,"completion_tokens":20}}
+            """);
+
+    AssistantMessage output = response.getResult().getOutput();
+    assertThat(output.getToolCalls()).isEmpty();
+    assertThat(output.getText()).contains("tool call(s) suppressed");
+    assertThat(response.getMetadata().getUsage().getCompletionTokens()).isEqualTo(20);
+  }
 }

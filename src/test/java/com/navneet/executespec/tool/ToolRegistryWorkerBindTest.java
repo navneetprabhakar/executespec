@@ -100,6 +100,34 @@ class ToolRegistryWorkerBindTest {
   }
 
   @Test
+  void specialistAllowListCanOnlyTightenTheAlreadyAuthorizedWorkerTools() {
+    ToolRegistry registry =
+        new ToolRegistry(
+            List.of(
+                fakeTool("readFile"),
+                fakeTool("shell"),
+                fakeTool("completeTask"),
+                fakeTool("gitCommit")),
+            new ObjectMapper(),
+            null,
+            null,
+            null);
+
+    List<String> names =
+        registry
+            .bindForWorker(
+                ctx(),
+                "deepseek",
+                "deepseek-v4-pro-native",
+                java.util.Set.of("readFile", "completeTask", "gitCommit", "notBound"))
+            .stream()
+            .map(tool -> tool.getToolDefinition().name())
+            .toList();
+
+    assertEquals(List.of("readFile", "completeTask"), names);
+  }
+
+  @Test
   void bind_keeps_gitCommit_for_non_worker_callers() {
     ToolRegistry registry =
         new ToolRegistry(

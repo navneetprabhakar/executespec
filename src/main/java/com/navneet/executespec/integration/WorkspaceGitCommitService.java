@@ -18,7 +18,9 @@ import lombok.extern.slf4j.Slf4j;
  * undrained. A stuck Git hook/index operation or pipe backpressure could pin the orchestration
  * worker indefinitely and still log a misleading exit. Both invocations here are bounded and killed
  * on timeout, output is discarded so no pipe can back up, and a failed/timed-out {@code git add}
- * skips the commit (gates publication) rather than committing an unknown index.
+ * skips the commit (gates publication) rather than committing an unknown index. Repository hooks,
+ * fsmonitor helpers and commit signing are disabled per invocation because this service operates on
+ * generated/customer-controlled workspaces under the application identity.
  */
 @Component
 @Slf4j
@@ -26,12 +28,23 @@ public class WorkspaceGitCommitService {
 
   private static final long ADD_TIMEOUT_SECONDS = 30;
   private static final long COMMIT_TIMEOUT_SECONDS = 60;
+  private static final String DISABLED_HOOKS_PATH = "/dev/null";
 
   /** Best-effort bounded commit of everything in {@code workspace}. Never throws. */
   public void commitWorkspaceOutputs(String runId, Path workspace) {
     if (workspace == null || !Files.isDirectory(workspace.resolve(".git"))) return;
     try {
-      GitProcessResult add = runBoundedGit(workspace, ADD_TIMEOUT_SECONDS, "git", "add", "-A");
+      GitProcessResult add =
+          runBoundedGit(
+              workspace,
+              ADD_TIMEOUT_SECONDS,
+              "git",
+              "-c",
+              "core.hooksPath=" + DISABLED_HOOKS_PATH,
+              "-c",
+              "core.fsmonitor=false",
+              "add",
+              "-A");
       if (!add.completed()) {
         log.warn(
             "WorkspaceGitCommitService run={} commit skipped — 'git add' exceeded {}s and was"
@@ -52,6 +65,12 @@ public class WorkspaceGitCommitService {
               workspace,
               COMMIT_TIMEOUT_SECONDS,
               "git",
+              "-c",
+              "core.hooksPath=" + DISABLED_HOOKS_PATH,
+              "-c",
+              "core.fsmonitor=false",
+              "-c",
+              "commit.gpgSign=false",
               "commit",
               "--allow-empty",
               "-m",
@@ -78,7 +97,9 @@ public class WorkspaceGitCommitService {
   /**
    * Run a Git command with a hard wall-clock bound. Output is discarded (never piped) so a
    * verbose/blocking child cannot cause pipe backpressure that pins the caller; on timeout the
-   * whole process is force-destroyed and reaped.
+   * whole process is force-destroyed and reaped. Callers must pass Git's fail-closed per-invocation
+   * configuration before the subcommand; repository hooks and fsmonitor helpers are never trusted
+   * execution surfaces for generated workspaces.
    */
   GitProcessResult runBoundedGit(Path workspace, long timeoutSeconds, String... args)
       throws IOException, InterruptedException {

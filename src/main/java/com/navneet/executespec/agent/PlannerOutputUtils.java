@@ -34,8 +34,8 @@ public final class PlannerOutputUtils {
   /**
    * Parse a {@code submitPlan}/{@code submitOutline} tool-call argument JSON string into a {@link
    * Plan}. Robust to malformed Anthropic tool-call payloads (the {@code <parameter name="..."} XML
-   * salvage path) and to skeleton-mode plans where descriptions / hardConstraints /
-   * meetsRequirements are intentionally blank.
+   * salvage path) and to skeleton-mode plans where descriptions / hardConstraints are intentionally
+   * blank.
    */
   public static Plan parsePlanFromArgs(
       String argsJson, Classification classification, ObjectMapper objectMapper) {
@@ -229,55 +229,17 @@ public final class PlannerOutputUtils {
 
   /**
    * Validate the plan's requirement graph. Returns a list of violations — empty when the plan is
-   * clean. Skips rules that don't apply (e.g. skeleton plans where meetsRequirements is
-   * intentionally blank pre- expansion are checked at the post-coherence pass instead, not here).
+   * clean. Hierarchical skeletons use {@link #validateRequirementCoverage(Plan)} before expansion;
+   * this method adds body/file/test-quality rules that require a fully expanded plan.
    */
   public static List<String> validatePlan(Plan plan) {
-    List<String> out = new ArrayList<>();
-    List<RequirementSpec> reqs = plan.requirements();
-    if (reqs == null || reqs.isEmpty()) {
-      out.add("No requirements enumerated (top-level 'requirements' array is empty).");
+    List<String> out = new ArrayList<>(validateRequirementCoverage(plan));
+    if (plan == null || plan.requirements() == null || plan.requirements().isEmpty()) {
       return out;
     }
+    List<RequirementSpec> reqs = plan.requirements();
+    List<PlannedTask> tasks = plan.tasks() == null ? List.of() : plan.tasks();
 
-    Set<String> ids = new HashSet<>();
-    Set<String> duplicates = new LinkedHashSet<>();
-    for (RequirementSpec r : reqs) {
-      if (r.id() == null || r.id().isBlank()) {
-        out.add("Requirement has blank id (text=" + truncate(r.text(), 60) + ").");
-        continue;
-      }
-      if (!ids.add(r.id())) duplicates.add(r.id());
-    }
-    if (!duplicates.isEmpty()) {
-      out.add("Duplicate requirement ids: " + duplicates);
-    }
-
-    Set<String> covered = new HashSet<>();
-    Set<String> unknownRefs = new LinkedHashSet<>();
-    Set<String> unownedTasks = new LinkedHashSet<>();
-    for (PlannedTask t : plan.tasks()) {
-      if (t.meetsRequirements() == null || t.meetsRequirements().isEmpty()) {
-        unownedTasks.add(t.id() + " (" + truncate(t.title(), 60) + ")");
-        continue;
-      }
-      for (String refId : t.meetsRequirements()) {
-        if (!ids.contains(refId)) unknownRefs.add(refId);
-        else covered.add(refId);
-      }
-    }
-    if (!unownedTasks.isEmpty()) {
-      out.add(
-          "Tasks with no requirement ownership (likely invented deliverables): " + unownedTasks);
-    }
-    if (!unknownRefs.isEmpty()) {
-      out.add("Task meetsRequirements references unknown ids: " + unknownRefs);
-    }
-    Set<String> uncovered = new LinkedHashSet<>(ids);
-    uncovered.removeAll(covered);
-    if (!uncovered.isEmpty()) {
-      out.add("Requirements not covered by any task: " + uncovered);
-    }
     String requirementText =
         reqs.stream()
             .map(RequirementSpec::text)
@@ -286,7 +248,7 @@ public final class PlannerOutputUtils {
             .collect(java.util.stream.Collectors.joining("\n"));
     if (!explicitlyRequestsStandaloneApiSpecification(requirementText)) {
       Set<String> inventedOpenApi = new LinkedHashSet<>();
-      for (PlannedTask task : plan.tasks()) {
+      for (PlannedTask task : tasks) {
         boolean ownsOpenApiFile =
             task.touchesFiles() != null
                 && task.touchesFiles().stream()
@@ -310,7 +272,7 @@ public final class PlannerOutputUtils {
                 + " standalone specification file.");
       }
     }
-    out.addAll(PlanTaskOwnershipValidator.validate(plan.tasks()));
+    out.addAll(PlanTaskOwnershipValidator.validate(tasks));
 
     Plan.RuntimeSurface surface = plan.runtimeSurface();
     // RR-1220 — STATIC_WEB was blanket-exempt from the strict test gate even though the planner
@@ -331,13 +293,71 @@ public final class PlannerOutputUtils {
       // substring "test", so "attestation support", "tests out of scope" and "Do not add tests" all
       // satisfied the mandatory test gate. Require a genuine, non-negated test signal instead.
       boolean hasTestTask =
-          plan.tasks().stream().anyMatch(t -> looksLikeGenuineTestTask(t.title(), t.description()));
+          tasks.stream().anyMatch(t -> looksLikeGenuineTestTask(t.title(), t.description()));
       if (!hasTestRequirement && !hasTestTask) {
         out.add(
             "No test task or TEST-kind requirement on a testable surface ("
                 + surface
                 + ") — strict v3 requires at least one.");
       }
+    }
+    return out;
+  }
+
+  /**
+   * Validate only the compact requirement-allocation graph shared by full plans and hierarchical
+   * skeletons. This deliberately avoids description, file-ownership, and test-surface heuristics:
+   * those require expanded task bodies. Running this before expansion prevents N parallel expanders
+   * from each receiving the whole requirement list and independently guessing ownership.
+   */
+  public static List<String> validateRequirementCoverage(Plan plan) {
+    List<String> out = new ArrayList<>();
+    if (plan == null || plan.requirements() == null || plan.requirements().isEmpty()) {
+      out.add("No requirements enumerated (top-level 'requirements' array is empty).");
+      return out;
+    }
+
+    List<RequirementSpec> reqs = plan.requirements();
+    Set<String> ids = new HashSet<>();
+    Set<String> duplicates = new LinkedHashSet<>();
+    for (RequirementSpec requirement : reqs) {
+      if (requirement == null || requirement.id() == null || requirement.id().isBlank()) {
+        out.add(
+            "Requirement has blank id (text="
+                + truncate(requirement == null ? null : requirement.text(), 60)
+                + ").");
+        continue;
+      }
+      if (!ids.add(requirement.id())) duplicates.add(requirement.id());
+    }
+    if (!duplicates.isEmpty()) out.add("Duplicate requirement ids: " + duplicates);
+
+    Set<String> covered = new HashSet<>();
+    Set<String> unknownRefs = new LinkedHashSet<>();
+    Set<String> unownedTasks = new LinkedHashSet<>();
+    List<PlannedTask> tasks = plan.tasks() == null ? List.of() : plan.tasks();
+    for (PlannedTask task : tasks) {
+      if (task == null) continue;
+      if (task.meetsRequirements() == null || task.meetsRequirements().isEmpty()) {
+        unownedTasks.add(task.id() + " (" + truncate(task.title(), 60) + ")");
+        continue;
+      }
+      for (String refId : task.meetsRequirements()) {
+        if (!ids.contains(refId)) unknownRefs.add(refId);
+        else covered.add(refId);
+      }
+    }
+    if (!unownedTasks.isEmpty()) {
+      out.add(
+          "Tasks with no requirement ownership (likely invented deliverables): " + unownedTasks);
+    }
+    if (!unknownRefs.isEmpty()) {
+      out.add("Task meetsRequirements references unknown ids: " + unknownRefs);
+    }
+    Set<String> uncovered = new LinkedHashSet<>(ids);
+    uncovered.removeAll(covered);
+    if (!uncovered.isEmpty()) {
+      out.add("Requirements not covered by any task: " + uncovered);
     }
     return out;
   }
@@ -372,7 +392,10 @@ public final class PlannerOutputUtils {
         "provide swagger",
         "create swagger",
         "generate swagger",
-        "export swagger");
+        "export swagger",
+        "typed frontend api client derived from the backend contract",
+        "typed api client derived from the backend contract",
+        "openapi-driven frontend api types");
   }
 
   /**

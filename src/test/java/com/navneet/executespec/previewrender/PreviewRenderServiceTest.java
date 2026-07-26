@@ -198,7 +198,7 @@ class PreviewRenderServiceTest {
     writeScreen("src/pages/Home.tsx", "Home");
     writeScreen("src/pages/Settings.tsx", "Settings");
 
-    when(agent.render(any(), any(), anyString()))
+    when(agent.render(any(), any(), anyString(), anyString()))
         .thenAnswer(
             inv -> {
               PreviewSurface s = inv.getArgument(0);
@@ -227,7 +227,7 @@ class PreviewRenderServiceTest {
   void persistsRejectedSurfaceAsReasonWithoutStoringItsHtml() throws Exception {
     writeScreen("src/pages/Home.tsx", "Home");
 
-    when(agent.render(any(), any(), anyString()))
+    when(agent.render(any(), any(), anyString(), anyString()))
         .thenAnswer(
             inv ->
                 new PreviewRenderAgent.RenderedSurface(
@@ -259,7 +259,7 @@ class PreviewRenderServiceTest {
     assertThat(jobs.findById(job.getId()).orElseThrow().getStatus())
         .isEqualTo(PreviewRenderJob.Status.NO_SURFACES.name());
     // A run with no UI must never spend a provider call.
-    verify(agent, never()).render(any(), any(), anyString());
+    verify(agent, never()).render(any(), any(), anyString(), anyString());
   }
 
   @Test
@@ -272,13 +272,13 @@ class PreviewRenderServiceTest {
     PreviewRenderJob done = jobs.findById(job.getId()).orElseThrow();
     assertThat(done.getStatus()).isEqualTo(PreviewRenderJob.Status.FAILED.name());
     assertThat(done.getFailureReason()).isEqualTo("WORKSPACE_UNAVAILABLE");
-    verify(agent, never()).render(any(), any(), anyString());
+    verify(agent, never()).render(any(), any(), anyString(), anyString());
   }
 
   @Test
   void returnsTheInFlightJobInsteadOfStartingASecond() throws Exception {
     writeScreen("src/pages/Home.tsx", "Home");
-    when(agent.render(any(), any(), anyString()))
+    when(agent.render(any(), any(), anyString(), anyString()))
         .thenAnswer(
             inv -> {
               Thread.sleep(400);
@@ -418,7 +418,7 @@ class PreviewRenderServiceTest {
   }
 
   private void stubSuccessfulRender() {
-    when(agent.render(any(), any(), anyString()))
+    when(agent.render(any(), any(), anyString(), anyString()))
         .thenAnswer(
             inv ->
                 new PreviewRenderAgent.RenderedSurface(

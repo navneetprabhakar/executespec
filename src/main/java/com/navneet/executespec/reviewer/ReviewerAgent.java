@@ -629,6 +629,16 @@ public class ReviewerAgent {
             // generation. This also caps non-DeepSeek providers; native DeepSeek additionally
             // disables hidden thinking for reviewer task ids in LlmRouter.
             .maxTokensPerCall(4096)
+            // Reviewer prompts promise a smaller sandbox than the generic worker. Enforce that
+            // contract in the actual model-visible schemas: no shell/runTests/move/delete tools,
+            // and the wiring pass cannot create unrelated files.
+            .allowedToolNames(reviewerToolNames(taskIdSuffix))
+            // A clean wiring pass is a bounded evidence sweep, not another open-ended worker run.
+            // Nudge after three read-only turns so the model builds and returns its verdict instead
+            // of repeatedly rediscovering the same tree. Keep four recovery turns after the nudge
+            // for a real wiring edit plus verification.
+            .stagnationWarnAfter("reviewer-wiring".equals(taskIdSuffix) ? 3 : null)
+            .stagnationForceAfter("reviewer-wiring".equals(taskIdSuffix) ? 7 : null)
             // 2026-05-08 — when build is failing pre-review, force completeTask gate to require
             // a successful buildProject call before terminating. Mirrors the patch-mode test gate
             // shape (V182 layer-3). Without this, reviewer can call completeTask after a few edits
@@ -643,6 +653,23 @@ public class ReviewerAgent {
             Boolean.TRUE.equals(req.allowBuildManifestCreation()));
     return com.navneet.executespec.tool.ReviewerMutationScope.withPolicy(
         mutationPolicy, lease, () -> worker.run(workerRequest));
+  }
+
+  static java.util.Set<String> reviewerToolNames(String taskIdSuffix) {
+    java.util.LinkedHashSet<String> tools =
+        new java.util.LinkedHashSet<>(
+            java.util.List.of(
+                "readFile",
+                "editFile",
+                "listFiles",
+                "searchFiles",
+                "gitStatus",
+                "gitDiff",
+                "buildProject",
+                "completeTask",
+                "glob"));
+    if (!"reviewer-wiring".equals(taskIdSuffix)) tools.add("writeFile");
+    return java.util.Set.copyOf(tools);
   }
 
   /**

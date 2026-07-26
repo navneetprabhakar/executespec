@@ -3,8 +3,8 @@ package com.navneet.executespec.agent;
 import java.time.Duration;
 import java.util.List;
 import java.util.UUID;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
@@ -58,9 +58,10 @@ public class OutlinePlannerAgent {
 
   /**
    * v2.6.2 slice 3 — skeleton-mode prompt for LARGE/LEGACY classifications. Emits
-   * id/title/complexity/touchesFiles/dependsOn/type only — the expander fills the bodies in
-   * parallel. Smaller output budget needed because no descriptions / hardConstraints /
-   * meetsRequirements per task.
+   * id/title/complexity/touchesFiles/dependsOn/type plus compact requirement ownership — the
+   * expander fills the prose bodies in parallel. Requirement IDs must be allocated before fan-out;
+   * otherwise every expander sees the full requirement set, independently guesses ownership, and
+   * can silently drop user intent.
    */
   private static final String PROMPT_PATH_SKELETON = "prompts/outline-planner-skeleton.md";
 
@@ -121,7 +122,7 @@ public class OutlinePlannerAgent {
           "hardConstraints": {"type": "array", "items": {"type": "string"}},
           "meetsRequirements": {
             "type": "array",
-            "description": "Requirement IDs (from the top-level requirements array) this task implements. OMIT in SKELETON_ONLY mode.",
+            "description": "Requirement IDs (from the top-level requirements array) this task implements. REQUIRED in both modes so requirement ownership survives hierarchical fan-out.",
             "items": {"type": "string"}
           }
         },
@@ -163,9 +164,9 @@ public class OutlinePlannerAgent {
 
   /**
    * Per-call HTTP read-timeout override propagated through {@code LlmRequest.readTimeoutSeconds}.
-   * Currently honoured only by {@link GeminiNativeToolClient} — Anthropic + OpenAI manage their
-   * HTTP timeouts via Spring AI. 240s (4 minutes) gives Gemini's thinking models enough headroom
-   * for a single multi-task plan call while staying well under the wall timeout (480s).
+   * Honoured by Gemini and every OpenAI-wire route; Anthropic retains its configured Spring AI
+   * client timeout. 240s (4 minutes) gives thinking models enough headroom for a single multi-task
+   * plan call while staying well under the wall timeout (480s).
    */
   private static final int PLANNER_HTTP_READ_TIMEOUT_SECONDS = 240;
 
@@ -257,10 +258,10 @@ public class OutlinePlannerAgent {
    * snapshot before/after to attribute the phase to {@code pipeline_run.outline_*} columns.
    *
    * <p>{@link Mode#FULL_PLAN} emits descriptions + hardConstraints + meetsRequirements per task.
-   * {@link Mode#SKELETON_ONLY} emits id/title/complexity/repos/dependsOn/ type — the expander fills
-   * the bodies. Skeleton mode bypasses validation-v3 coverage checks (those need filled-in
-   * meetsRequirements which haven't been written yet); coverage is re-checked post-expansion in the
-   * coherence pass.
+   * {@link Mode#SKELETON_ONLY} emits id/title/complexity/repos/dependsOn/type plus
+   * meetsRequirements — the expander fills the bodies. Skeleton requirement allocation is validated
+   * before expansion so parallel task calls receive only their owned requirements instead of
+   * repeatedly ingesting and independently reinterpreting the entire spec.
    */
   public Plan plan(PlannerRequest req, Mode mode) {
     long start = System.currentTimeMillis();
@@ -278,15 +279,20 @@ public class OutlinePlannerAgent {
         plan = planOnce(req, OutlinePlannerSchemaRepairPolicy.FEEDBACK, mode);
       }
 
+      if (mode == Mode.SKELETON_ONLY) {
+        plan =
+            SkeletonRequirementAllocationPolicy.enforce(
+                plan, feedback -> planOnce(req, feedback, mode));
+      }
+
       // Scope integrity stays active even when the broader validation-v3 graph gate is disabled.
       if (mode == Mode.FULL_PLAN) {
         plan = PlannerScopeIntegrityPolicy.enforce(plan, feedback -> planOnce(req, feedback, mode));
       }
 
       // v2.5.11 (Validation v3 / Pillar 1) — strict validation + one retry.
-      // Gated by feature flag; off → log-only behaviour. SKELETON_ONLY mode
-      // skips this — meetsRequirements is intentionally blank pre-expansion;
-      // the coherence pass post-expansion runs the same check.
+      // Gated by feature flag; off → log-only behaviour. SKELETON_ONLY mode already enforced the
+      // compact requirement-allocation subset above; body-dependent checks remain post-expansion.
       if (mode == Mode.FULL_PLAN
           && featureFlagService != null
           && featureFlagService.isEnabled(FLAG_V3_STRICT)) {
@@ -381,9 +387,10 @@ public class OutlinePlannerAgent {
         PLANNER_LLM_WALL_TIMEOUT_SECONDS);
 
     // [D-02] (coverage Sprint 3, 2026-05-01) — wall-clock timeout.
-    // CompletableFuture.supplyAsync runs the synchronous router.call
-    // on the common ForkJoinPool; .get(timeout) interrupts and
-    // propagates a TimeoutException if the LLM provider stalls. Was:
+    // A dedicated virtual thread runs the synchronous router.call; FutureTask cancellation really
+    // interrupts that thread. CompletableFuture.cancel(true) does not interrupt common-pool work,
+    // so cancelled runs previously left the provider request consuming tokens in the background.
+    // .get(timeout) propagates a TimeoutException if the LLM provider stalls. Was:
     // a wedged provider socket (network partition, hung TCP keepalive,
     // provider-side queue jam) left the run in PLANNING indefinitely
     // because Spring AI's RestClient retry chain has no overall
@@ -391,44 +398,31 @@ public class OutlinePlannerAgent {
     // 4 = per-call ceiling" rule of thumb already used in
     // RunOrchestrator.runLargePipeline.
     ChatResponse resp;
-    // RR-505: declared outside the try so the TimeoutException path can cancel it. Leaving the
-    // future scoped inside the try meant a stalled provider call kept running on the common pool
-    // and kept spending after the run had already taken its failure/fallback path.
-    CompletableFuture<ChatResponse> fut = null;
+    FutureTask<ChatResponse> fut =
+        new FutureTask<>(
+            () ->
+                router.call(
+                    LlmRequest.builder()
+                        .provider(plannerProviderName)
+                        .model(plannerModel)
+                        .messages(messages)
+                        .context(req.context())
+                        .agentRole("OutlinePlannerAgent")
+                        .stepId(OutlinePlannerSchemaRepairPolicy.stepId(retryFeedback))
+                        .temperature(0.0)
+                        .maxTokens(maxTokens)
+                        .toolChoice("required")
+                        .toolsOverride(List.of(submitOutline))
+                        .readTimeoutSeconds(PLANNER_HTTP_READ_TIMEOUT_SECONDS)
+                        .build()));
+    Thread.ofVirtual().name("outline-planner-" + req.context().runId()).start(fut);
     try {
-      fut =
-          CompletableFuture.supplyAsync(
-              () ->
-                  router.call(
-                      LlmRequest.builder()
-                          .provider(plannerProviderName)
-                          .model(plannerModel)
-                          .messages(messages)
-                          .context(req.context())
-                          .agentRole("OutlinePlannerAgent")
-                          .stepId(OutlinePlannerSchemaRepairPolicy.stepId(retryFeedback))
-                          .temperature(0.0)
-                          .maxTokens(maxTokens)
-                          .toolsOverride(List.of(submitOutline))
-                          // 2026-05-07 — Gemini's HTTP read-timeout default is 60s, but
-                          // Gemini thinking models can take longer on a single multi-task
-                          // plan call can take 90-120s wall on warm-cache, much longer on
-                          // cold-cache. The 60s ceiling tripped on cmatrix run a0b81542
-                          // (gemini, 2026-05-07) — error "Request timed out: null" — and the
-                          // outline-failure fallback at RunOrchestrator emitted a 1-task
-                          // SINGLE_SHOT plan that the LIGHTWEIGHT worker then stagnated on.
-                          // 240s gives 4× headroom while staying well under the wall timeout
-                          // (480s). Anthropic + OpenAI clients ignore the field today; only
-                          // Gemini is wired to read it.
-                          .readTimeoutSeconds(PLANNER_HTTP_READ_TIMEOUT_SECONDS)
-                          .build()));
       resp = fut.get(PLANNER_LLM_WALL_TIMEOUT_SECONDS, TimeUnit.SECONDS);
     } catch (TimeoutException te) {
       // RR-505: free the waiter and interrupt the common-pool worker running router.call. The
-      // per-call HTTP read-timeout (readTimeoutSeconds above) is what actually bounds the transport
-      // — it is wired for Gemini; Anthropic/OpenAI clients ignore it today — so cancel(true) stops
-      // the JVM-side wait but a socket already mid-response may run to completion. That is the
-      // honest limit here: this frees the thread, it does not guarantee the provider stops billing.
+      // per-call HTTP read-timeout (readTimeoutSeconds above) is what actually bounds Gemini and
+      // OpenAI-wire transports. Anthropic retains its configured Spring AI client timeout, so
+      // cancel(true) still cannot guarantee an Anthropic socket already mid-response stops billing.
       fut.cancel(true);
       log.error(
           "OutlinePlanner [{}] WALL_TIMEOUT after {}s — provider {} may be stalled",
@@ -441,6 +435,7 @@ public class OutlinePlannerAgent {
               + "s. Provider may be stalled or rate-limited. Run can be retried.",
           te);
     } catch (InterruptedException ie) {
+      fut.cancel(true);
       Thread.currentThread().interrupt();
       throw new IllegalStateException("OutlinePlanner interrupted", ie);
     } catch (ExecutionException ee) {
@@ -480,7 +475,9 @@ public class OutlinePlannerAgent {
         Plan plan =
             PlannerOutputUtils.parsePlanFromArgs(
                 salvaged, req.classification(), req.planStrategy(), objectMapper);
-        PlannerOutputUtils.warnIfConstraintsUnderpropagated(plan, req.spec());
+        if (mode != Mode.SKELETON_ONLY) {
+          PlannerOutputUtils.warnIfConstraintsUnderpropagated(plan, req.spec());
+        }
         return plan;
       }
       throw new IllegalStateException(
@@ -492,16 +489,18 @@ public class OutlinePlannerAgent {
     Plan plan =
         PlannerOutputUtils.parsePlanFromArgs(
             planCall.arguments(), req.classification(), req.planStrategy(), objectMapper);
-    PlannerOutputUtils.warnIfConstraintsUnderpropagated(plan, req.spec());
+    if (mode != Mode.SKELETON_ONLY) {
+      PlannerOutputUtils.warnIfConstraintsUnderpropagated(plan, req.spec());
+    }
     return plan;
   }
 
   private ToolCallback buildSubmitOutlineCallback(Mode mode) {
     String description =
         (mode == Mode.SKELETON_ONLY)
-            ? ("Submit a SKELETON outline — task ids/titles/complexity/repos/dependsOn/type only. "
-                + "Descriptions, hardConstraints, and meetsRequirements will be filled in by the "
-                + "task expander afterwards. Call exactly once.")
+            ? ("Submit a SKELETON outline — task ids/titles/complexity/repos/dependsOn/type plus "
+                + "meetsRequirements ownership. Descriptions and hardConstraints are filled by "
+                + "the task expander afterwards. Call exactly once.")
             : ("Submit the final outline-mode execution plan. Call exactly once with the complete "
                 + "plan. After this call the planning phase ends.");
     ToolDefinition def =

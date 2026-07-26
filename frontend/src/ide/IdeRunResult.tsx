@@ -21,7 +21,13 @@ import {
 import {agentTurnToRunChatMessages} from '@/ide/agentChatHistory';
 import {selectScopedAgentSession, webAgentSessionRequest} from '@/ide/agentSession';
 import {streamWebAgentChatReply} from '@/ide/agentChatStream';
-import {costReconciliation, phaseCostRows, stepCallsView} from '@/ide/runCostLedger';
+import {
+  attemptSummary,
+  costReconciliation,
+  knownCallCost,
+  phaseCostRows,
+  stepCallsView,
+} from '@/ide/runCostLedger';
 import {providerIsDispatchable} from '@/ide/providerReadiness';
 import {useProviderReadiness} from '@/ide/useProviderReadiness';
 import {useAuthStore, selectIsSuperAdmin} from '@/stores/useAuthStore';
@@ -40,6 +46,7 @@ import {
   confidenceColor,
   continuationApprovalCandidate,
   continuationApprovalReason,
+  countProducedWorkspaceFiles,
   evidenceKind,
   emptyCodeTabMessage,
   fileCountSummary,
@@ -56,12 +63,14 @@ import {
   logLabel,
   logMeta,
   logMessage,
+  missingScoreExplanation,
   modelRankingCandidateLabel,
   modelRankingCandidateMetrics,
   modelRankingDetails,
   modelRankingLabel,
   num,
   latestContinuationAction,
+  runArtifactActionAvailability,
   runPhaseDiagnosis,
   SEV,
   shouldUseRunEvidenceChat,
@@ -74,6 +83,7 @@ import {
   testRerunState,
   taskBudgetFacts,
   taskGoalLine,
+  testEvidenceSummary,
   testResultSummary,
   type Tab,
   toLines,
@@ -121,6 +131,7 @@ export default function IdeRunResult() {
   const [testPlan, setTestPlan] = useState<api.TestPlanData | null>(null);
   const [testRunPending, setTestRunPending] = useState(false);
   const [files, setFiles] = useState<string[]>([]);
+  const [producedWorkspaceFileCount, setProducedWorkspaceFileCount] = useState(0);
   const [openFiles, setOpenFiles] = useState<string[]>([]);
   const [activeFile, setActiveFile] = useState<string | null>(null);
   // RR-767 — a cache entry is either loaded source (`content`/`diff`) or an
@@ -214,6 +225,7 @@ export default function IdeRunResult() {
     setReport(null);
     setReportFailure(null);
     setFiles([]);
+    setProducedWorkspaceFileCount(0);
     setFilesFailure(null);
     setOpenFiles([]);
     setActiveFile(null);
@@ -236,10 +248,12 @@ export default function IdeRunResult() {
       });
     reloadReport();
     api
-      .getFiles(runId)
-      .then((f) => {
+      .getFilesWithStatus(runId)
+      .then((entries) => {
         if (gen !== loadGen.current) return;
+        const f = entries.map((entry) => entry.path);
         setFiles(f);
+        setProducedWorkspaceFileCount(countProducedWorkspaceFiles(entries));
         setFilesFailure(null);
         if (f.length) openFile(f[0]);
       })
@@ -934,15 +948,26 @@ export default function IdeRunResult() {
   const v = verdictFor(score, run?.status);
   const measuredTestsTotal = tests?.totalTests ?? report?.testsTotal ?? null;
   const measuredTestsPassed = tests?.passed ?? report?.testsPassed ?? null;
-  const testsMeasured = measuredTestsTotal != null && measuredTestsTotal > 0;
+  const testsEvidence = report?.verificationLedger?.find((row) => row.id === 'tests');
+  const testProof = testEvidenceSummary(measuredTestsPassed, measuredTestsTotal, testsEvidence);
+  const testsSignal = testProof.measured ? testProof.label : score != null ? 'not measured' : '—';
   const testsSummary = tests ? testResultSummary(tests) : null;
-  const scoredWithoutMeasuredTests = score != null && !testsMeasured;
+  const scoredWithoutFunctionalTests = score != null && !testProof.functional;
   const prUrl = run?.scmPrUrl || run?.githubPrUrl || null;
   const active = activeFile ? cache[activeFile] : null;
   const issues = report?.issues ?? [];
   const reportedFiles = report?.filesGenerated ?? null;
-  const workspaceFiles = files.length;
+  const workspaceFiles = producedWorkspaceFileCount;
   const fileCounts = fileCountSummary({reportedFiles, workspaceFiles});
+  const hasExecutionEvidence =
+    report != null ||
+    Boolean(run?.tasks?.some((task) => task.startedAt != null || task.completedAt != null));
+  const artifactActions = runArtifactActionAvailability({
+    status: run?.status,
+    changedWorkspaceFiles: producedWorkspaceFileCount,
+    hasExecutionEvidence,
+    hasValidationReport: report != null,
+  });
   const hasCostEvidence = hasRunCostEvidence(run);
   const {canRerunTests, emptyMessage: noCodeTestMessage} = testRerunState({
     status: run?.status,
@@ -1010,7 +1035,7 @@ export default function IdeRunResult() {
         >
           <span>
             {TAB_LABEL[tab]}
-            {tab === 'Code' && files.length ? ` · ${files.length}` : ''}
+            {tab === 'Code' && producedWorkspaceFileCount ? ` · ${producedWorkspaceFileCount}` : ''}
             {tab === 'Tasks' && run?.tasks?.length ? ` · ${run.tasks.length}` : ''}
             {tab === 'Validation' && issues.length ? ` · ${issues.length}` : ''}
           </span>
@@ -1021,7 +1046,7 @@ export default function IdeRunResult() {
             {TABS.map((t) => {
               const badge =
                 t === 'Code'
-                  ? files.length
+                  ? producedWorkspaceFileCount
                   : t === 'Tasks'
                     ? run?.tasks?.length
                     : t === 'Validation'
@@ -1050,7 +1075,7 @@ export default function IdeRunResult() {
         {TABS.map((t) => {
           const badge =
             t === 'Code'
-              ? files.length
+              ? producedWorkspaceFileCount
               : t === 'Tasks'
                 ? run?.tasks?.length
                 : t === 'Validation'
@@ -1122,7 +1147,8 @@ export default function IdeRunResult() {
                       {issues.length} evidence issue{issues.length === 1 ? '' : 's'}
                     </span>
                     <span>
-                      {files.length} file{files.length === 1 ? '' : 's'}
+                      {producedWorkspaceFileCount} generated file
+                      {producedWorkspaceFileCount === 1 ? '' : 's'}
                     </span>
                   </div>
                 </div>
@@ -1190,8 +1216,7 @@ export default function IdeRunResult() {
                   className='ide-card'
                   style={{flex: 1, minWidth: 240, color: 'var(--ide-fg-muted)', fontSize: 12}}
                 >
-                  No verified score for this run — patch and benchmark runs aren't scored by the
-                  validation pipeline.
+                  {missingScoreExplanation(run)}
                 </div>
               ) : (
                 <div className='ide-card' style={{flex: 1, minWidth: 240}}>
@@ -1208,16 +1233,7 @@ export default function IdeRunResult() {
                         : '—'
                     }
                   />
-                  <Kv
-                    k='Tests'
-                    v={
-                      testsMeasured
-                        ? `${measuredTestsPassed ?? 0}/${measuredTestsTotal}`
-                        : score != null
-                          ? 'not measured'
-                          : '—'
-                    }
-                  />
+                  <Kv k='Tests' v={testsSignal} />
                   <Kv
                     k='Reviewer'
                     v={
@@ -1256,7 +1272,7 @@ export default function IdeRunResult() {
                       {fileCounts.explanation}
                     </div>
                   )}
-                  {scoredWithoutMeasuredTests && (
+                  {scoredWithoutFunctionalTests && (
                     <div
                       className='ide-card'
                       style={{
@@ -1269,8 +1285,9 @@ export default function IdeRunResult() {
                         lineHeight: 1.45,
                       }}
                     >
-                      Tests were not measured for this score. Treat the headline as build/reviewer
-                      evidence, not a fully test-backed result.
+                      No independently verified functional test run backs this score. Fresh
+                      workspace tests remain useful code-level evidence, but they do not prove
+                      deployed product journeys or external integrations end to end.
                     </div>
                   )}
                 </div>
@@ -1353,7 +1370,7 @@ export default function IdeRunResult() {
                   <a className='ide-btn' href={prUrl} target='_blank' rel='noreferrer'>
                     ↗ Open PR
                   </a>
-                ) : files.length > 0 ? (
+                ) : artifactActions.push ? (
                   <button
                     className='ide-btn'
                     disabled={busy === 'push'}
@@ -1383,7 +1400,7 @@ export default function IdeRunResult() {
                   {busy === 'pause' ? 'Pausing…' : '⏸ Pause'}
                 </button>
               )}
-              {files.length > 0 &&
+              {artifactActions.revertWorkspace &&
                 ['COMPLETE', 'PARTIAL', 'FAILED', 'CANCELLED'].includes(
                   String(run?.status || '').toUpperCase(),
                 ) && (
@@ -1417,7 +1434,8 @@ export default function IdeRunResult() {
                 )}
               <button
                 className='ide-btn ghost'
-                disabled={busy === 'preview'}
+                disabled={busy === 'preview' || !artifactActions.preview}
+                title={!artifactActions.preview ? artifactActions.workspaceReason : undefined}
                 onClick={() =>
                   action(
                     'preview',
@@ -1435,7 +1453,8 @@ export default function IdeRunResult() {
               </button>
               <button
                 className='ide-btn ghost'
-                disabled={busy === 'deploy'}
+                disabled={busy === 'deploy' || !artifactActions.deploy}
+                title={!artifactActions.deploy ? artifactActions.workspaceReason : undefined}
                 onClick={() =>
                   setConfirm({
                     title: 'Deploy to Cloud Run',
@@ -1455,7 +1474,8 @@ export default function IdeRunResult() {
               </button>
               <button
                 className='ide-btn ghost'
-                disabled={busy === 'pdf'}
+                disabled={busy === 'pdf' || !artifactActions.reportPdf}
+                title={!artifactActions.reportPdf ? artifactActions.reportReason : undefined}
                 onClick={() =>
                   action(
                     'pdf',
@@ -1468,10 +1488,10 @@ export default function IdeRunResult() {
               </button>
               <button
                 className='ide-btn ghost'
-                disabled={busy === 'code' || files.length === 0}
+                disabled={busy === 'code' || !artifactActions.codeZip}
                 title={
-                  files.length === 0
-                    ? 'No generated code is available for this run.'
+                  !artifactActions.codeZip
+                    ? artifactActions.workspaceReason
                     : 'Download the generated code as a clean repository zip.'
                 }
                 onClick={() =>
@@ -1486,7 +1506,8 @@ export default function IdeRunResult() {
               </button>
               <button
                 className='ide-btn ghost'
-                disabled={busy === 'share'}
+                disabled={busy === 'share' || !artifactActions.shareReport}
+                title={!artifactActions.shareReport ? artifactActions.reportReason : undefined}
                 onClick={() =>
                   action(
                     'share',
@@ -1784,13 +1805,24 @@ export default function IdeRunResult() {
                   gap: 8,
                 }}
               >
-                <span>Explorer {files.length ? `· ${files.length}` : ''}</span>
+                <span>
+                  Explorer
+                  {producedWorkspaceFileCount
+                    ? ` · ${producedWorkspaceFileCount} generated`
+                    : files.length
+                      ? ` · ${files.length} bootstrap/workspace`
+                      : ''}
+                </span>
                 {files.length > 0 && (
                   <button
                     className='ide-btn ghost'
                     style={{padding: '2px 8px', fontSize: 11}}
-                    disabled={busy === 'code'}
-                    title='Download the generated code as a zip'
+                    disabled={busy === 'code' || !artifactActions.codeZip}
+                    title={
+                      artifactActions.codeZip
+                        ? 'Download the generated code as a zip'
+                        : artifactActions.workspaceReason
+                    }
                     onClick={() =>
                       action(
                         'code',
@@ -2619,7 +2651,23 @@ export default function IdeRunResult() {
               <Kv k='Output tokens' v={num(costEvidence?.outputTokens ?? run?.totalOutputTokens)} />
               <Kv k='Cache-read tokens' v={num(costEvidence?.cacheReadTokens)} />
               <Kv k='Cache-write tokens' v={num(costEvidence?.cacheWriteTokens)} />
-              <Kv k='Reasoning tokens' v={num(costEvidence?.reasoningTokens)} />
+              <Kv
+                k='Reasoning tokens (included in output)'
+                v={num(costEvidence?.reasoningTokens)}
+              />
+              {costEvidence && (
+                <>
+                  <Kv
+                    k='Physical provider attempts'
+                    v={num(costEvidence.physicalAttempts ?? costEvidence.stepCallsTotal)}
+                  />
+                  <Kv
+                    k='Successful provider calls'
+                    v={num(costEvidence.successfulCalls ?? costEvidence.calls)}
+                  />
+                  <Kv k='Failed provider attempts' v={num(costEvidence.failedAttempts)} />
+                </>
+              )}
               {isSuperAdmin && (
                 <>
                   <Kv k='Actual cost' v={usd(costEvidence?.costUsd ?? run?.actualCostUsd)} />
@@ -2710,7 +2758,7 @@ export default function IdeRunResult() {
                           <th>Provider / model</th>
                           <th>Tokens</th>
                           <th>Cache / reasoning</th>
-                          <th>Retry</th>
+                          <th>Attempt</th>
                           <th style={{textAlign: 'right'}}>Cost</th>
                         </tr>
                       </thead>
@@ -2736,8 +2784,44 @@ export default function IdeRunResult() {
                               {call.cacheWriteTokens.toLocaleString()} write
                               <div>{call.reasoningTokens.toLocaleString()} reasoning</div>
                             </td>
-                            <td>{call.retryOf || '—'}</td>
-                            <td style={{textAlign: 'right'}}>{usd(call.costUsd)}</td>
+                            <td
+                              title={[
+                                call.physicalAttemptId && `physical: ${call.physicalAttemptId}`,
+                                call.parentAttemptId && `parent: ${call.parentAttemptId}`,
+                                call.logicalCallId && `logical: ${call.logicalCallId}`,
+                                call.errorCode && `error: ${call.errorCode}`,
+                                call.error,
+                              ]
+                                .filter(Boolean)
+                                .join('\n')}
+                            >
+                              {attemptSummary(call)}
+                              <div
+                                style={{
+                                  color:
+                                    call.attemptStatus === 'SUCCESS'
+                                      ? 'var(--ide-green)'
+                                      : 'var(--ide-yellow)',
+                                }}
+                              >
+                                {call.attemptStatus || 'status unavailable'}
+                              </div>
+                              {call.parentAttemptId && (
+                                <div className='ide-mono' style={{color: 'var(--ide-fg-muted)'}}>
+                                  parent …{call.parentAttemptId.slice(-10)}
+                                </div>
+                              )}
+                            </td>
+                            <td
+                              style={{textAlign: 'right'}}
+                              title={
+                                knownCallCost(call) === null
+                                  ? 'Provider spend was not reported or could not be projected.'
+                                  : undefined
+                              }
+                            >
+                              {knownCallCost(call) === null ? 'Unknown' : usd(knownCallCost(call))}
+                            </td>
                           </tr>
                         ))}
                       </tbody>
@@ -2805,12 +2889,14 @@ export default function IdeRunResult() {
             ) : (
               <div className='ide-card'>
                 <div style={{marginBottom: 10, color: 'var(--ide-fg-muted)'}}>
-                  No pull request yet. Push the generated changes when you are ready to open one.
-                  Pushing requires a connected repository provider under Integrations.
+                  {artifactActions.push
+                    ? 'No pull request yet. Push the generated changes when you are ready to open one. Pushing requires a connected repository provider under Integrations.'
+                    : `No pull request can be opened. ${artifactActions.workspaceReason}`}
                 </div>
                 <button
                   className='ide-btn'
-                  disabled={busy === 'push'}
+                  disabled={busy === 'push' || !artifactActions.push}
+                  title={!artifactActions.push ? artifactActions.workspaceReason : undefined}
                   onClick={() =>
                     action('push', () => api.pushToScm(runId), pushOutcomeMessage, reloadRun)
                   }
@@ -2895,6 +2981,13 @@ export default function IdeRunResult() {
                 {testsSummary?.explanation && (
                   <div className='ide-card' style={{marginTop: 10, color: 'var(--ide-yellow)'}}>
                     {testsSummary.explanation}
+                  </div>
+                )}
+                {testsSummary?.measured && !testProof.functional && (
+                  <div className='ide-card' style={{marginTop: 10, color: 'var(--ide-yellow)'}}>
+                    {testProof.workspaceOnly
+                      ? 'Execution scope: workspace test suite. These fresh results are code-level evidence, not end-to-end proof of the deployed product.'
+                      : 'Execution provenance is unverified. These counts cannot certify product quality or final-goal completion.'}
                   </div>
                 )}
 

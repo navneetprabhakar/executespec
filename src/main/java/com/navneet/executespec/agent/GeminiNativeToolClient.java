@@ -511,14 +511,15 @@ public class GeminiNativeToolClient {
         //   (e.g. planner's submitPlan); prevents gemini-2.5-flash's Python-code degradation.
         ObjectNode toolConfig = body.putObject("toolConfig");
         ObjectNode fcc = toolConfig.putObject("functionCallingConfig");
-        if (Boolean.TRUE.equals(request.forceToolCall())) {
+        String toolMode = toolMode(request);
+        if ("ANY".equals(toolMode)) {
           fcc.put("mode", "ANY");
           ArrayNode allowed = fcc.putArray("allowedFunctionNames");
           for (ToolCallback tc : request.tools()) {
             allowed.add(tc.getToolDefinition().name());
           }
         } else {
-          fcc.put("mode", "AUTO");
+          fcc.put("mode", toolMode);
         }
       }
     }
@@ -541,6 +542,24 @@ public class GeminiNativeToolClient {
 
   private static boolean requiresFunctionCallIds(String model) {
     return rejectsSamplingParameters(model);
+  }
+
+  /**
+   * Translate the provider-neutral tool-choice contract onto Gemini's function-calling modes.
+   * Explicit request intent wins over the legacy {@code forceToolCall} hint.
+   */
+  static String toolMode(GeminiToolCallRequest request) {
+    if (request.toolChoice() != null) {
+      return switch (request.toolChoice().toLowerCase(java.util.Locale.ROOT)) {
+        case "required" -> "ANY";
+        case "none" -> "NONE";
+        case "auto" -> "AUTO";
+        default ->
+            throw new IllegalArgumentException(
+                "Unsupported Gemini toolChoice: " + request.toolChoice());
+      };
+    }
+    return Boolean.TRUE.equals(request.forceToolCall()) ? "ANY" : "AUTO";
   }
 
   /**
@@ -795,7 +814,7 @@ public class GeminiNativeToolClient {
     } catch (Exception e) {
       tools = String.valueOf(request.tools().size());
     }
-    String toolMode = Boolean.TRUE.equals(request.forceToolCall()) ? "ANY" : "AUTO";
+    String toolMode = toolMode(request);
     String credentialFingerprint = sha256(effectiveApiKey == null ? "" : effectiveApiKey);
     return sha256(
         request.model()
@@ -836,14 +855,15 @@ public class GeminiNativeToolClient {
       // allowedFunctionNames references the cached tool names. (RL-2026-05-059 fix.)
       ObjectNode cacheToolConfig = body.putObject("toolConfig");
       ObjectNode cacheFcc = cacheToolConfig.putObject("functionCallingConfig");
-      if (Boolean.TRUE.equals(request.forceToolCall())) {
+      String toolMode = toolMode(request);
+      if ("ANY".equals(toolMode)) {
         cacheFcc.put("mode", "ANY");
         ArrayNode allowed = cacheFcc.putArray("allowedFunctionNames");
         for (ToolCallback tc : request.tools()) {
           allowed.add(tc.getToolDefinition().name());
         }
       } else {
-        cacheFcc.put("mode", "AUTO");
+        cacheFcc.put("mode", toolMode);
       }
       body.put("ttl", EXPLICIT_CACHE_TTL);
       // Intent is written immediately before transport. Local body/schema failures therefore do
@@ -983,6 +1003,12 @@ public class GeminiNativeToolClient {
        * function to be called.
        */
       Boolean forceToolCall,
+      /**
+       * Provider-neutral tool-call policy ({@code auto|required|none}). When present, this exact
+       * policy wins over {@link #forceToolCall}; required maps to Gemini {@code ANY}, none to
+       * {@code NONE}, and auto to {@code AUTO}.
+       */
+      String toolChoice,
       /**
        * Optional per-call HTTP read-timeout override (seconds). Falls through to the static {@link
        * #READ_TIMEOUT} default when null. Used by {@code OutlinePlannerAgent} to give large

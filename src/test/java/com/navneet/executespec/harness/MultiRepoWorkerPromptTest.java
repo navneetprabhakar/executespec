@@ -111,6 +111,8 @@ class MultiRepoWorkerPromptTest {
               .composeSystemPrompt(task, null, null, "python", null, provider, null, false);
       String user = PromptComposer.composeUserPrompt(task, null, evidence);
       assertTrue(system.contains("EVERY semantic clause in TASK_REQUIREMENTS"), provider);
+      assertTrue(system.contains("missing local runtime"), provider);
+      assertTrue(system.contains("Never\n    downgrade a version"), provider);
       assertTrue(system.contains("cross-operation reuse of"), provider);
       assertTrue(system.contains("shared idempotency keys"), provider);
       assertTrue(system.contains("one baseline DDL file proves initialization"), provider);

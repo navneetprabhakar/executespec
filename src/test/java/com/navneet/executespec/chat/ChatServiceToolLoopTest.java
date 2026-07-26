@@ -7,6 +7,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 
 import com.navneet.executespec.agent.LlmRequest;
@@ -29,6 +30,23 @@ import org.springframework.ai.chat.model.Generation;
 class ChatServiceToolLoopTest {
 
   @Test
+  void priorHistoryIsBoundedWithoutDeletingThePersistedTranscript() {
+    List<ChatService.ChatMessage> history = new ArrayList<>();
+    for (int i = 0; i < 30; i++) {
+      history.add(
+          new ChatService.ChatMessage(i % 2 == 0 ? "user" : "assistant", "x".repeat(3_000)));
+    }
+
+    List<ChatService.ChatMessage> bounded = ChatService.boundedHistoryForPrompt(history);
+
+    assertThat(bounded).hasSizeLessThanOrEqualTo(ChatService.MAX_HISTORY_MESSAGES_IN_PROMPT);
+    assertThat(bounded.stream().mapToInt(m -> m.content().length()).sum())
+        .isLessThanOrEqualTo(ChatService.MAX_HISTORY_CHARS_IN_PROMPT);
+    assertThat(history).hasSize(30);
+    assertThat(bounded.get(bounded.size() - 1).role()).isEqualTo("assistant");
+  }
+
+  @Test
   void promptRequiresFinalEvidencePrecedenceAndForbidsSpeculativeRootCause() {
     ChatService service =
         new ChatService(
@@ -47,7 +65,10 @@ class ChatServiceToolLoopTest {
         .contains("any test process ran or exited successfully")
         .contains("it cannot call the behavior correct or satisfied")
         .contains("Separate facts from hypotheses")
-        .contains("Never infer framework behavior from one stack trace");
+        .contains("Never infer framework behavior from one stack trace")
+        .contains("PLANNER_UNAVAILABLE")
+        .contains("Never translate it to \"provider unavailable\"")
+        .contains("empty workspace does not prove that no planning output was drafted");
   }
 
   @Test
@@ -102,6 +123,8 @@ class ChatServiceToolLoopTest {
     verify(router, times(5)).call(org.mockito.ArgumentMatchers.any());
     ArgumentCaptor<LlmRequest> requests = ArgumentCaptor.forClass(LlmRequest.class);
     verify(router, times(5)).call(requests.capture());
+    assertThat(requests.getAllValues().subList(0, 4))
+        .allSatisfy(request -> assertThat(request.maxTokens()).isEqualTo(3000));
     LlmRequest synthesis = requests.getAllValues().get(4);
     assertThat(synthesis.maxTokens()).isEqualTo(3000);
     assertThat(synthesis.toolChoice()).isEqualTo("none");

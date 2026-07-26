@@ -19,12 +19,27 @@ final class PlanSafetyInstructionCanonicalizer {
     String rewrittenDescription =
         description
             .replaceAll(
+                "(?i)(?:No|Do not use|Never use)\\s+`?BEGIN IMMEDIATE or a conditional UPDATE"
+                    + " with affected-row verification`?\\.?",
+                "Use BEGIN IMMEDIATE or a conditional UPDATE with affected-row verification.")
+            .replaceAll(
+                "(?i)SQLite(?:'s)?\\s+serialized isolation",
+                "SQLite-effective BEGIN IMMEDIATE serialization")
+            .replaceAll(
                 "(?i)(?:via\\s+)?row-level\\s+lock\\s*\\(\\s*SELECT\\s*(?:\\.\\.\\.|…)?\\s+FOR\\s+UPDATE\\s*\\)",
                 "using a SQLite-effective atomic mutation (BEGIN IMMEDIATE or a conditional UPDATE"
                     + " with affected-row verification)")
             .replaceAll(
                 "(?i)optimistic/pessimistic locking",
-                "a SQLite-effective conditional atomic UPDATE");
+                "a SQLite-effective conditional atomic UPDATE")
+            .replaceAll(
+                "(?i)(?:an?\s+)?explicit transaction with SERIALIZABLE isolation or"
+                    + " (?:an?\s+)?application-level lock",
+                "a SQLite-effective BEGIN IMMEDIATE transaction or conditional UPDATE with"
+                    + " affected-row verification")
+            .replaceAll(
+                "(?i)(?:SERIALIZABLE isolation|application-level lock)(?:ing)?",
+                "SQLite-effective BEGIN IMMEDIATE serialization");
     if (containsUnsafePositiveSelectForUpdate(rewrittenDescription)) {
       rewrittenDescription =
           rewrittenDescription
@@ -102,7 +117,12 @@ final class PlanSafetyInstructionCanonicalizer {
               .replaceAll(
                   "(?i)second cancel returns the stored response",
                   "second cancel returns the stable invalid-state error while stock remains"
-                      + " restored exactly once");
+                      + " restored exactly once")
+              .replaceAll(
+                  "(?i)(?:the )?second cancel(?:lation)?[^.\\n]{0,100}(?:returns?|expects?)"
+                      + "[^.\\n]{0,60}(?:200|success|same response|idempotent response)",
+                  "the second cancellation returns the stable invalid-state 409 response while"
+                      + " stock remains restored exactly once");
     }
     if (blackBoxHttpRequired) {
       rewrittenDescription = rewriteBlackBoxInstructions(rewrittenDescription);
@@ -166,22 +186,37 @@ final class PlanSafetyInstructionCanonicalizer {
   }
 
   private static String rewriteBlackBoxInstructions(String value) {
-    return value
-        .replaceAll(
-            "(?i)not\\s+(?:just\\s+)?(?:an?\\s+)?(?:FastAPI\\s+)?TestClient",
-            "not an in-process HTTP test client")
-        .replaceAll("(?i)not just (?:FastAPI\\s+)?TestClient", "not an in-process HTTP test client")
-        .replaceAll(
-            "(?i)(?:do not|must not|never) use (?:FastAPI\\s+)?TestClient(?: to simulate"
-                + " HTTP)?",
-            "do not use an in-process HTTP test client as acceptance proof")
-        .replaceAll(
-            "(?i)(?:FastAPI\\s+)?TestClient",
-            "a real HTTP client against the documented server launched as a subprocess")
+    String canonical =
+        "Launch the documented uvicorn server as a subprocess, apply migrations to a temporary"
+            + " file-backed SQLite database visible to that process, and use httpx against its"
+            + " loopback URL as a real HTTP client after polling health/readiness with a bounded"
+            + " 15-second startup timeout, not an in-process HTTP test client; dependency"
+            + " overrides and app-factory calls are not acceptance proof.";
+    List<String> retained = new ArrayList<>();
+    boolean replaced = false;
+    for (String clause : safe(value).split("(?<=[;\\n])|(?<=\\.)(?=\\s+[A-Z])")) {
+      String lower = clause.toLowerCase(Locale.ROOT);
+      boolean conflicting =
+          lower.contains("testclient")
+              || lower.contains("against the app factory")
+              || lower.contains("against app factory")
+              || lower.contains("not a subprocess")
+              || lower.contains("without a subprocess")
+              || lower.contains("in-process server");
+      if (conflicting) {
+        if (!replaced) retained.add(canonical);
+        replaced = true;
+      } else if (!clause.isBlank()) {
+        retained.add(clause.trim());
+      }
+    }
+    String rewritten = String.join(" ", retained).trim();
+    return rewritten
         .replaceAll(
             "(?i)yield httpx\\.AsyncClient against the FastAPI app",
-            "launch the documented uvicorn server as a subprocess and yield"
-                + " httpx.AsyncClient against its loopback HTTP URL")
+            "launch the documented uvicorn server as a subprocess, poll its health/readiness"
+                + " endpoint with a bounded 15-second timeout, and yield httpx.AsyncClient"
+                + " against its loopback HTTP URL")
         .replaceAll(
             "(?i)with dependency overrides providing test API keys",
             "with isolated generated test credentials provisioned before server startup")
@@ -234,17 +269,18 @@ final class PlanSafetyInstructionCanonicalizer {
   }
 
   private static String rewriteBlackBoxConstraint(String value) {
-    return value
-        .replaceAll(
-            "(?i)not\\s+(?:just\\s+)?(?:an?\\s+)?(?:FastAPI\\s+)?TestClient",
-            "not an in-process HTTP test client")
-        .replaceAll("(?i)not just (?:FastAPI\\s+)?TestClient", "not an in-process HTTP test client")
-        .replaceAll(
-            "(?i)(?:do not|must not|never) use (?:FastAPI\\s+)?TestClient(?: to simulate HTTP)?",
-            "do not use an in-process HTTP test client as acceptance proof")
-        .replaceAll(
-            "(?i)(?:FastAPI\\s+)?TestClient",
-            "a real HTTP client against the documented server launched as a subprocess");
+    String lower = safe(value).toLowerCase(Locale.ROOT);
+    if (lower.contains("testclient")
+        || lower.contains("app factory")
+        || lower.contains("not a subprocess")
+        || lower.contains("without a subprocess")) {
+      return "Acceptance must launch the documented server as a subprocess, apply migrations to a"
+          + " temporary file-backed SQLite database visible to that process, and use a real HTTP"
+          + " client against its loopback URL; do not use an in-process HTTP test client as the"
+          + " acceptance path because acceptance is not an in-process HTTP test client;"
+          + " in-process clients and app-factory calls are supplemental only.";
+    }
+    return value;
   }
 
   private static boolean containsUnsafePositiveSelectForUpdate(String value) {

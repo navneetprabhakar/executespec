@@ -16,6 +16,9 @@ IMPLICIT TEST CASES — the spec often implies tests it doesn't state explicitly
 - If spec mentions "idempotency" → test exact replay of status, body, and contract-relevant headers;
   same key + different payload conflict; concurrent first-decision behavior; AND reuse of the same
   raw key across two different operations without replaying another operation's response shape
+- For concurrent first use of one idempotency key, synchronize independent clients before the
+  request, repeat the race enough to expose intermittent failures, assert every response is the
+  documented first result/replay (never 5xx), and verify the business mutation occurred once
 - If spec mentions concurrency/atomicity → use truly parallel live-server clients/connections and
   assert both response outcomes and final persisted state; a shared in-process session is not proof
 - If spec mentions bearer/API credentials → reject missing/forged credentials and verify that a
@@ -99,6 +102,9 @@ REQUIRED TEST METHOD TYPES (include at least one of each where applicable):
 - Validation rejection: POST with missing/invalid required field returns 400
 - Duplicate rejection: POST with duplicate unique field returns 409
 - List shape: GET collection returns array (even if empty, not null)
+- Cardinality: when the requirement names lines/items/multiple SKUs or an atomic multi-item
+  operation, test at least two distinct items through the public boundary and verify all-or-nothing
+  rollback; a repeated single-item test does not prove the collection contract.
 
 TEST ANTI-PATTERNS — do NOT generate tests that:
 - Test only the happy path (must include error/validation paths)

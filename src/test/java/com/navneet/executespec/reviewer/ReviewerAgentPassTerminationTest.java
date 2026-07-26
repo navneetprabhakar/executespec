@@ -3,6 +3,7 @@ package com.navneet.executespec.reviewer;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.nio.file.Path;
@@ -12,11 +13,13 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 import com.navneet.executespec.engine.WorkerAgent;
 import com.navneet.executespec.engine.WorkerResult;
+import com.navneet.executespec.engine.WorkerTaskRequest;
 import com.navneet.executespec.tool.ExecutionContext;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 /**
  * RR-272 regression — a timed-out review pass holds the shared workspace and (in a brownfield run)
@@ -209,5 +212,38 @@ class ReviewerAgentPassTerminationTest {
   void ordinaryReviewResultsRemainQuiescentByDefault() {
     assertThat(ReviewerResult.builder().overall(ReviewerResult.Overall.CLEAN).build())
         .matches(ReviewerResult::isWorkspaceQuiescent);
+  }
+
+  @Test
+  void wiringPassAdvertisesOnlyItsBoundedToolContract() {
+    when(worker.run(any()))
+        .thenReturn(WorkerResult.builder().outcome(WorkerResult.Outcome.COMPLETED).build());
+
+    agent.runPass(
+        request(),
+        3,
+        "reviewer-wiring",
+        "system",
+        60,
+        null,
+        new com.navneet.executespec.tool.ReviewerMutationScope.Lease());
+
+    ArgumentCaptor<WorkerTaskRequest> requestCaptor =
+        ArgumentCaptor.forClass(WorkerTaskRequest.class);
+    verify(worker).run(requestCaptor.capture());
+    assertThat(requestCaptor.getValue().allowedToolNames())
+        .containsExactlyInAnyOrder(
+            "readFile",
+            "editFile",
+            "listFiles",
+            "searchFiles",
+            "gitStatus",
+            "gitDiff",
+            "buildProject",
+            "completeTask",
+            "glob")
+        .doesNotContain("shell", "runTests", "writeFile", "move", "delete");
+    assertThat(requestCaptor.getValue().stagnationWarnAfter()).isEqualTo(3);
+    assertThat(requestCaptor.getValue().stagnationForceAfter()).isEqualTo(7);
   }
 }

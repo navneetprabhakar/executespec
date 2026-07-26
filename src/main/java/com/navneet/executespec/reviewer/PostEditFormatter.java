@@ -8,8 +8,12 @@ import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
 
+import com.navneet.executespec.sandbox.SandboxExecResult;
+import com.navneet.executespec.sandboxroute.SandboxCommandRoutingService;
+import com.navneet.executespec.security.SafeWorkspacePath;
 import com.navneet.executespec.testgen.BoundedProcess;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import lombok.extern.slf4j.Slf4j;
@@ -25,9 +29,10 @@ import lombok.extern.slf4j.Slf4j;
  * com.navneet.executespec.harness.SequentialExecutor#SYSTEM_PROMPT_BASE} 2026-05-13 patch), but the
  * reviewer agent does not run that same prompt — so its edits sneak past.
  *
- * <p>This component invokes the formatters as host-side subprocesses (60s timeout, env-stripped
- * ProcessBuilder, best-effort: missing binary = WARN + skip). It does NOT install formatters; if
- * the customer's machine doesn't have {@code black} on PATH, the customer's CI is the fallback.
+ * <p>With strict sandbox routing enabled, discovery remains read-only on the host and formatter
+ * argument vectors use only paths beneath the admitted {@code /workspace} mount. Runtime
+ * unavailability is reported and never falls back to a host process. The legacy default-off path
+ * retains the bounded, environment-stripped host subprocess behavior.
  *
  * <p>Idempotent: running the formatter on already-formatted code is a no-op. Safe to call
  * unconditionally at reviewer-end.
@@ -60,6 +65,17 @@ public class PostEditFormatter {
           ".vscode",
           ".executespec");
 
+  private final SandboxCommandRoutingService sandboxRouting;
+
+  public PostEditFormatter() {
+    this(null);
+  }
+
+  @Autowired
+  public PostEditFormatter(SandboxCommandRoutingService sandboxRouting) {
+    this.sandboxRouting = sandboxRouting;
+  }
+
   public record Result(int filesReformatted, List<String> formattersRun, List<String> errors) {}
 
   /**
@@ -72,6 +88,9 @@ public class PostEditFormatter {
   public Result run(Path workspace, String runId) {
     if (workspace == null || !Files.isDirectory(workspace)) {
       return new Result(0, List.of(), List.of("workspace missing: " + workspace));
+    }
+    if (sandboxRouting != null && sandboxRouting.routingEnabled()) {
+      return runSandboxed(workspace.toAbsolutePath().normalize(), runId);
     }
     java.util.List<String> formatters = new java.util.ArrayList<>();
     java.util.List<String> errors = new java.util.ArrayList<>();
@@ -146,6 +165,133 @@ public class PostEditFormatter {
   }
 
   /**
+   * Strict-runtime formatter path. Host paths are used only for read-only discovery, then converted
+   * to paths beneath the already-admitted {@code /workspace} mount. A missing formatter or
+   * unavailable sandbox is a recorded error; it never falls back to a host process.
+   */
+  private Result runSandboxed(Path workspace, String runId) {
+    if (runId == null || runId.isBlank()) {
+      return new Result(0, List.of(), List.of("sandbox formatter requires a run id"));
+    }
+    List<String> formatters = new java.util.ArrayList<>();
+    List<String> errors = new java.util.ArrayList<>();
+    int reformatted = 0;
+
+    if (hasFiles(workspace, ".py")) {
+      for (Path root : pythonRoots(workspace)) {
+        try {
+          String containerRoot = containerPath(workspace, root);
+          reformatted +=
+              invokeSandboxFormatter(
+                  runId, workspace, "black", List.of("black", "--quiet", containerRoot));
+          formatters.add("black on " + containerRoot);
+        } catch (Exception failure) {
+          errors.add("black failed: " + shortMsg(failure));
+        }
+      }
+    }
+
+    if (hasFiles(workspace, ".js")
+        || hasFiles(workspace, ".jsx")
+        || hasFiles(workspace, ".ts")
+        || hasFiles(workspace, ".tsx")) {
+      for (Path root : jsRoots(workspace)) {
+        try {
+          String containerRoot = containerPath(workspace, root);
+          String binary = resolveSandboxPrettier(root, workspace);
+          reformatted +=
+              invokeSandboxFormatter(
+                  runId,
+                  workspace,
+                  binary,
+                  List.of(
+                      binary,
+                      "--write",
+                      "--log-level=warn",
+                      containerRoot + "/**/*.{js,jsx,ts,tsx,json,css,md}"));
+          formatters.add("prettier on " + containerRoot);
+        } catch (Exception failure) {
+          errors.add("prettier failed: " + shortMsg(failure));
+        }
+      }
+    }
+
+    List<Path> goFiles = filesWithExtension(workspace, ".go", 500);
+    if (!goFiles.isEmpty()) {
+      try {
+        List<String> command = new java.util.ArrayList<>();
+        command.add("gofmt");
+        command.add("-w");
+        for (Path file : goFiles) {
+          command.add(containerPath(workspace, file));
+        }
+        reformatted += invokeSandboxFormatter(runId, workspace, "gofmt", command);
+        formatters.add("gofmt on " + goFiles.size() + " file(s)");
+      } catch (Exception failure) {
+        errors.add("gofmt failed: " + shortMsg(failure));
+      }
+    }
+
+    log.info(
+        "[PostEditFormatter] run {} sandboxed — reformatted ~{} file(s); formatters={}; errors={}",
+        runId,
+        reformatted,
+        formatters,
+        errors);
+    return new Result(reformatted, List.copyOf(formatters), List.copyOf(errors));
+  }
+
+  private int invokeSandboxFormatter(
+      String runId, Path workspace, String binary, List<String> command) throws IOException {
+    SandboxExecResult result =
+        sandboxRouting.execute(
+            runId, workspace, command, Duration.ofSeconds(FORMATTER_TIMEOUT_SECONDS));
+    if (!result.completed()) {
+      throw new IOException(
+          result.detail() == null ? "sandbox formatter was not executed" : result.detail());
+    }
+    String output = SandboxCommandRoutingService.combinedOutput(result);
+    if (result.exitCode() != 0) {
+      throw new IOException(binary + " exited " + result.exitCode() + ": " + truncate(output, 240));
+    }
+    return parseReformattedCount(binary.endsWith("black") ? "black" : binary, output);
+  }
+
+  private static String resolveSandboxPrettier(Path root, Path workspace) throws IOException {
+    for (Path base : List.of(root, workspace)) {
+      Path local = base.resolve("node_modules").resolve(".bin").resolve("prettier");
+      if (Files.isExecutable(local) && SafeWorkspacePath.isWithin(workspace, local)) {
+        return containerPath(workspace, local);
+      }
+    }
+    // The digest-pinned toolchain image may provide a global prettier. Execution proves whether it
+    // does; no host PATH probe participates in the strict path.
+    return "prettier";
+  }
+
+  private static String containerPath(Path workspace, Path hostPath) throws IOException {
+    SafeWorkspacePath.requireWithin(workspace, hostPath);
+    Path relative = workspace.toRealPath().relativize(hostPath.toRealPath());
+    String suffix = relative.toString().replace(java.io.File.separatorChar, '/');
+    return suffix.isEmpty()
+        ? SandboxCommandRoutingService.CONTAINER_WORKDIR
+        : SandboxCommandRoutingService.CONTAINER_WORKDIR + "/" + suffix;
+  }
+
+  private static List<Path> filesWithExtension(Path workspace, String extension, int limit) {
+    try (Stream<Path> walk = Files.walk(workspace, 8)) {
+      return walk.filter(Files::isRegularFile)
+          .filter(path -> path.toString().endsWith(extension))
+          .filter(path -> !inSkippedDir(path))
+          .filter(path -> SafeWorkspacePath.isWithin(workspace, path))
+          .limit(limit)
+          .toList();
+    } catch (IOException failure) {
+      return List.of();
+    }
+  }
+
+  /**
    * Returns true if at least one file with the given extension exists in {@code workspace} (skips
    * SKIP_DIR_NAMES dirs). Short-circuits on first hit.
    */
@@ -185,7 +331,8 @@ public class PostEditFormatter {
                 // For each matching file, pick its top-most non-skipped ancestor inside workspace.
                 Path rel = workspace.relativize(p);
                 if (rel.getNameCount() > 0) {
-                  roots.add(workspace.resolve(rel.getName(0)));
+                  roots.add(
+                      rel.getNameCount() == 1 ? workspace : workspace.resolve(rel.getName(0)));
                 }
               });
     } catch (IOException e) {
@@ -328,5 +475,12 @@ public class PostEditFormatter {
     String m = t.getMessage();
     if (m == null) return t.getClass().getSimpleName();
     return m.length() > 200 ? m.substring(0, 200) + "…" : m;
+  }
+
+  private static String truncate(String value, int maxChars) {
+    if (value == null || value.length() <= maxChars) {
+      return value == null ? "" : value;
+    }
+    return value.substring(0, maxChars) + "…";
   }
 }

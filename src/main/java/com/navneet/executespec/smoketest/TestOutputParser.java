@@ -78,8 +78,30 @@ public final class TestOutputParser {
       case SUREFIRE -> parseSurefire(output);
       case CARGO -> parseCargo(output);
       case GO -> parseGo(output, exitCode);
+      case MULTI -> parseMulti(output, exitCode);
       case UNKNOWN -> Optional.empty();
     };
+  }
+
+  private static Optional<TestExecutionSummary> parseMulti(String output, int exitCode) {
+    java.util.List<TestExecutionSummary> summaries =
+        java.util.stream.Stream.of(
+                parsePytest(output),
+                parseJest(output),
+                parseVitest(output),
+                parseSurefire(output),
+                parseCargo(output),
+                parseGo(output, exitCode))
+            .flatMap(Optional::stream)
+            .toList();
+    if (summaries.isEmpty()) return Optional.empty();
+    return Optional.of(
+        summary(
+            summaries.stream().mapToInt(TestExecutionSummary::getTotalTests).sum(),
+            summaries.stream().mapToInt(TestExecutionSummary::getPassed).sum(),
+            summaries.stream().mapToInt(TestExecutionSummary::getFailed).sum(),
+            summaries.stream().mapToInt(TestExecutionSummary::getErrors).sum(),
+            summaries.stream().mapToInt(TestExecutionSummary::getSkipped).sum()));
   }
 
   private static Optional<TestExecutionSummary> parsePytest(String out) {

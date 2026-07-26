@@ -16,6 +16,7 @@ const api = vi.hoisted(() => ({
   listAgentSessions: vi.fn(),
   listAgentGates: vi.fn(),
   listAgentCapabilities: vi.fn(),
+  getRuntimeClientCapabilities: vi.fn(),
   getManagedAiBalance: vi.fn(),
   listAgentTurns: vi.fn(),
   listAgentEvents: vi.fn(),
@@ -90,6 +91,17 @@ const managedAi = {
 };
 
 function setHappyPathMocks() {
+  api.getRuntimeClientCapabilities.mockResolvedValue({
+    remoteSandbox: {
+      supported: true,
+      enabled: true,
+      lifecycleEnabled: true,
+      dispatchEnabled: true,
+      strictContainerEnabled: true,
+      isolationProfile: 'CONTAINER_STRICT_V1',
+      note: 'enabled',
+    },
+  });
   api.listAgentSessions.mockResolvedValue([session]);
   api.listAgentGates.mockResolvedValue([
     {
@@ -275,6 +287,38 @@ describe('IdeAgent', () => {
     expect(host.textContent).not.toContain('0 of 0 credits left');
     expect(host.textContent).toContain('Run credits');
     expect(host.textContent).toContain('Operator diagnostics');
+  });
+
+  it('does not advertise an isolated sandbox when the runtime gates are off', async () => {
+    api.getRuntimeClientCapabilities.mockResolvedValue({
+      remoteSandbox: {
+        supported: true,
+        enabled: false,
+        lifecycleEnabled: false,
+        dispatchEnabled: false,
+        strictContainerEnabled: false,
+        isolationProfile: 'NOT_ENABLED',
+        note: 'disabled',
+      },
+    });
+
+    ({host, root} = await renderAgent('/agent'));
+
+    expect(host.textContent).toContain('New workspace');
+    expect(host.textContent).toContain('Remote workspaces waiting for your approval');
+    expect(host.textContent).not.toContain('New sandbox');
+    expect(host.textContent).not.toContain('Remote sandboxes waiting for your approval');
+  });
+
+  it('fails closed to remote-workspace language when capability discovery fails', async () => {
+    api.getRuntimeClientCapabilities.mockRejectedValueOnce(new Error('capability unavailable'));
+
+    ({host, root} = await renderAgent('/agent'));
+
+    expect(host.textContent).toContain('New workspace');
+    expect(host.textContent).toContain('Remote workspaces waiting for your approval');
+    expect(host.textContent).not.toContain('New sandbox');
+    expect(host.textContent).not.toContain('Remote sandboxes waiting for your approval');
   });
 
   it('exposes agent status as an accessible live region for screen-reader operators', async () => {
@@ -1172,7 +1216,7 @@ describe('IdeAgent', () => {
     });
     await flush();
 
-    expect(host.textContent).toContain('Sandbox run not ready');
+    expect(host.textContent).toContain('Remote run not ready');
     expect(host.textContent).toContain('Select a project or repository first.');
     expect(host.textContent).not.toContain('Create sandbox plan');
     expect(api.confirmAgentRunProposal).not.toHaveBeenCalled();

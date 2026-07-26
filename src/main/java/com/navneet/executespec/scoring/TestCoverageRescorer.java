@@ -20,9 +20,10 @@ import lombok.extern.slf4j.Slf4j;
  * has a chance to land. That path always reports {@code NONE}, pegging every run's
  * testCoverageScore at 20.
  *
- * <p>This listener re-derives the score from the actual test execution summary once it arrives and
- * updates the persisted report in place. If no report exists yet (rare race), the update is
- * skipped; the next regeneration will pick up the new data.
+ * <p>This listener re-derives the score from the scoped test execution summary once it arrives and
+ * updates the persisted report in place. Workspace suites remain deterministic code-level evidence;
+ * only live-preview functional suites can earn product-level proof. If no report exists yet (rare
+ * race), the update is skipped; the next regeneration will pick up the new data.
  */
 @Component
 @RequiredArgsConstructor

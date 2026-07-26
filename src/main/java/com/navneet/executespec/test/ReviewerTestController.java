@@ -5,7 +5,10 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.UUID;
 
+import com.navneet.executespec.executioncontext.LlmExecutionPolicyFactory;
+import com.navneet.executespec.executioncontext.LlmExecutionReference;
 import com.navneet.executespec.reviewer.ReviewerAgent;
 import com.navneet.executespec.reviewer.ReviewerRequest;
 import com.navneet.executespec.reviewer.ReviewerResult;
@@ -86,6 +89,7 @@ console.log('smoke ok');"
 """;
 
   private final ReviewerAgent reviewer;
+  private final LlmExecutionPolicyFactory executionPolicyFactory;
 
   @GetMapping("/reviewer")
   public Map<String, Object> testReviewer(
@@ -111,8 +115,11 @@ console.log('smoke ok');"
           "-m",
           "buggy seed");
 
-      ExecutionContext ctx =
-          new ExecutionContext("reviewer-test-run", "reviewer-test-task", workspace.toRealPath());
+      String invocationId = UUID.randomUUID().toString();
+      LlmExecutionReference executionReference =
+          executionPolicyFactory.platformInternal(
+              "reviewer-smoke", "REVIEWER_SMOKE", invocationId, invocationId);
+      ExecutionContext ctx = freshExecutionContext(workspace, invocationId, executionReference);
 
       long start = System.currentTimeMillis();
       ReviewerResult result =
@@ -163,6 +170,19 @@ console.log('smoke ok');"
     } finally {
       deleteTree(workspace);
     }
+  }
+
+  static ExecutionContext freshExecutionContext(
+      Path workspace, String invocationId, LlmExecutionReference executionReference)
+      throws IOException {
+    // Execution-context budgets are durable and intentionally fail closed. Reusing one synthetic
+    // run/task identity across smoke invocations makes an earlier invocation's spend poison every
+    // later one with BUDGET_EXHAUSTED, so each independent smoke must own an independent identity.
+    return new ExecutionContext(
+        "reviewer-test-run-" + invocationId,
+        "reviewer-test-task-" + invocationId,
+        workspace.toRealPath(),
+        executionReference);
   }
 
   private static void runGit(Path workspace, String... args) throws IOException {

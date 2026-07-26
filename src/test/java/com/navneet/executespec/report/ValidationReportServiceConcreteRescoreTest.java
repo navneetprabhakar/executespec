@@ -74,6 +74,7 @@ class ValidationReportServiceConcreteRescoreTest {
                 .passed(8)
                 .failed(2)
                 .executionVerified(Boolean.TRUE)
+                .evidenceScope(TestExecutionSummary.EvidenceScope.LIVE_PREVIEW_FUNCTIONAL)
                 .build());
 
     assertTrue(result.isPresent());
@@ -99,7 +100,7 @@ class ValidationReportServiceConcreteRescoreTest {
             .filter(e -> "tests".equals(e.id()))
             .findFirst()
             .orElseThrow();
-    assertEquals("8/10 tests passed.", tests.summary());
+    assertEquals("8/10 tests passed (functional).", tests.summary());
     VerificationEvidenceDTO executable =
         event.verificationLedger().stream()
             .filter(e -> "executable-verification".equals(e.id()))
@@ -177,6 +178,68 @@ class ValidationReportServiceConcreteRescoreTest {
     verify(events).publishEvent(org.mockito.ArgumentMatchers.any(Object.class));
   }
 
+  @Test
+  void freshWorkspaceSuiteIsPreservedButCannotEarnFunctionalProof() {
+    ValidationReportRepository repository = mock(ValidationReportRepository.class);
+    FeatureFlagService flags = mock(FeatureFlagService.class);
+    var events = mock(org.springframework.context.ApplicationEventPublisher.class);
+    ValidationReport report =
+        ValidationReport.builder()
+            .id("vr-workspace-suite")
+            .runId("run-workspace-suite")
+            .filesGenerated(4)
+            .pipelineResult(PipelineResult.PASSED)
+            .finalBuildPassed(true)
+            .reviewerVerdict("CLEAN")
+            .issuesJson("[]")
+            .accuracyJson("{\"testCoverageLevel\":\"GOOD\"}")
+            .build();
+    when(repository.findByRunId("run-workspace-suite")).thenReturn(Optional.of(report));
+    when(repository.save(any(ValidationReport.class)))
+        .thenAnswer(invocation -> invocation.getArgument(0));
+    ValidationReportService service =
+        new ValidationReportService(
+            repository,
+            null,
+            new ObjectMapper(),
+            new SimpleMeterRegistry(),
+            null,
+            null,
+            flags,
+            events);
+
+    ValidationReport rescored =
+        service
+            .rescoreAfterConcreteTests(
+                "run-workspace-suite",
+                TestExecutionSummary.builder()
+                    .totalTests(7)
+                    .passed(7)
+                    .executionVerified(Boolean.TRUE)
+                    .evidenceScope(TestExecutionSummary.EvidenceScope.WORKSPACE_TEST_SUITE)
+                    .build())
+            .orElseThrow();
+
+    assertEquals(7, rescored.getTestsTotal());
+    assertEquals(7, rescored.getTestsPassed());
+    assertEquals(Boolean.TRUE, rescored.getTestExecutionVerified());
+    assertEquals("WORKSPACE_TEST_SUITE", rescored.getTestEvidenceScope());
+    assertTrue(rescored.getVerifiedScore() <= 75);
+    var eventCaptor = org.mockito.ArgumentCaptor.forClass(ValidationReportEvidenceEvent.class);
+    verify(events).publishEvent(eventCaptor.capture());
+    VerificationEvidenceDTO tests =
+        eventCaptor.getValue().verificationLedger().stream()
+            .filter(row -> "tests".equals(row.id()))
+            .findFirst()
+            .orElseThrow();
+    assertEquals("PASS", tests.status());
+    assertEquals("DETERMINISTIC_WORKSPACE_SUITE", tests.source());
+    assertEquals(
+        com.navneet.executespec.execution.model.RunContinuationDecision
+            .CONTINUE_SAME_MODEL_PROVIDER,
+        eventCaptor.getValue().runGoalDecision().recommendedDecision());
+  }
+
   /**
    * Worker tests are diagnostic; only the independent HTTP/preview population certifies quality.
    */
@@ -214,6 +277,7 @@ class ValidationReportServiceConcreteRescoreTest {
                     .passed(2)
                     .failed(1)
                     .executionVerified(Boolean.TRUE)
+                    .evidenceScope(TestExecutionSummary.EvidenceScope.LIVE_PREVIEW_FUNCTIONAL)
                     .build())
             .orElseThrow();
 
@@ -230,6 +294,7 @@ class ValidationReportServiceConcreteRescoreTest {
                     .passed(2)
                     .failed(1)
                     .executionVerified(Boolean.TRUE)
+                    .evidenceScope(TestExecutionSummary.EvidenceScope.LIVE_PREVIEW_FUNCTIONAL)
                     .build())
             .orElseThrow();
     assertEquals(3, again.getTestsTotal());

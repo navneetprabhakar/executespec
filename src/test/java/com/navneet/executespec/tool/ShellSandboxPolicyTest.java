@@ -58,6 +58,13 @@ class ShellSandboxPolicyTest {
     }
 
     @Test
+    @DisplayName("versioned Python and pip executables use their allowlisted command family")
+    void versionedPythonExecutables() {
+      assertThat(policy.validate("python3.12 -m pytest", "/ws").permitted()).isTrue();
+      assertThat(policy.validate("pip3.12 install -e .", "/ws").permitted()).isTrue();
+    }
+
+    @Test
     @DisplayName("standard stderr-to-stdout redirection is not parsed as command chaining")
     void stderrToStdoutRedirection() {
       assertThat(policy.validate("npm test 2>&1", "/ws").permitted()).isTrue();
@@ -234,6 +241,13 @@ class ShellSandboxPolicyTest {
     void unknownCommand() {
       var result = policy.validate("nc 192.168.1.1 4444", "/ws");
       assertThat(result.permitted()).isFalse();
+    }
+
+    @Test
+    @DisplayName("Python lookalikes do not inherit the Python allowlist")
+    void pythonLookalikes() {
+      assertThat(policy.validate("python3.12evil -m pytest", "/ws").permitted()).isFalse();
+      assertThat(policy.validate("pip3.12-beta install -e .", "/ws").permitted()).isFalse();
     }
 
     @Test

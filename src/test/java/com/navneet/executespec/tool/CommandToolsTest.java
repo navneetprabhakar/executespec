@@ -478,6 +478,20 @@ class CommandToolsTest {
   }
 
   @Test
+  void hostShellUsesWorkspacePrivateHomeAndRequiresAPythonVirtualEnvironment() {
+    Tool tool = new ShellTool(new ShellSandboxPolicy(), null, null);
+
+    ToolResult home = tool.execute(json("{\"command\":\"printenv HOME\"}"), ctx());
+    ToolResult pipPolicy =
+        tool.execute(json("{\"command\":\"printenv PIP_REQUIRE_VIRTUALENV\"}"), ctx());
+
+    assertThat(home).isInstanceOf(ToolResult.Ok.class);
+    assertThat(((ToolResult.Ok) home).content())
+        .contains(root.resolve(".agent-context/shell-home").toString());
+    assertThat(((ToolResult.Ok) pipPolicy).content()).contains("true");
+  }
+
+  @Test
   void shellContractExplainsWorkspaceRelativeSingleCommandPolicy() {
     Tool tool = new ShellTool(new ShellSandboxPolicy(), null, null);
 

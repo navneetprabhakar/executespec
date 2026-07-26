@@ -49,6 +49,7 @@ public class HeadlessTestExecutor {
   private final SurefireReportParser surefireReportParser;
   private final SseBroadcaster broadcaster;
   private final TestGenerationAdmissionService admissionService;
+  private final TestWorkspaceResolver workspaceResolver;
 
   /**
    * Execute unit tests for a batch run without a live preview.
@@ -68,7 +69,7 @@ public class HeadlessTestExecutor {
         RunEvent.log(
             runId, null, "[TestExec] Running unit tests (headless mode — no preview required)"));
 
-    Path testProjectDir = Path.of("workspace-test", runId);
+    Path testProjectDir = workspaceResolver.projectRoot(runId);
     Path absTestDir = testProjectDir.toAbsolutePath();
 
     TestPlan plan = testPlanRepository.findById(testPlanId).orElse(null);
@@ -210,6 +211,7 @@ public class HeadlessTestExecutor {
           .executionDurationMs(durationMs)
           .executionVerified(Boolean.TRUE)
           .executionId(executionId)
+          .evidenceScope(TestExecutionSummary.EvidenceScope.WORKSPACE_TEST_SUITE)
           .build();
 
     } catch (Exception e) {

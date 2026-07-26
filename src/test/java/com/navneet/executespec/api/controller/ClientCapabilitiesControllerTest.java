@@ -8,10 +8,28 @@ import jakarta.servlet.http.HttpServletRequest;
 
 import com.navneet.executespec.auth.security.JwtAuthenticationFilter;
 import com.navneet.executespec.config.featureflag.FeatureFlagService;
+import com.navneet.executespec.sandboxroute.SandboxCommandRoutingService;
 
 import org.junit.jupiter.api.Test;
 
 class ClientCapabilitiesControllerTest {
+
+  private static ClientCapabilitiesController controller(
+      FeatureFlagService flags, boolean sandboxEnabled) {
+    SandboxCommandRoutingService routing = mock(SandboxCommandRoutingService.class);
+    when(routing.readiness())
+        .thenReturn(
+            new SandboxCommandRoutingService.Readiness(
+                sandboxEnabled,
+                sandboxEnabled,
+                sandboxEnabled,
+                sandboxEnabled,
+                sandboxEnabled,
+                sandboxEnabled,
+                sandboxEnabled,
+                sandboxEnabled ? "ready" : "gates are off"));
+    return new ClientCapabilitiesController(flags, routing);
+  }
 
   private static HttpServletRequest requestWithAuthSource(String source) {
     HttpServletRequest request = mock(HttpServletRequest.class);
@@ -23,9 +41,12 @@ class ClientCapabilitiesControllerTest {
   void exposesTheStableCliRuntimeContract() {
     FeatureFlagService flags = mock(FeatureFlagService.class);
     when(flags.isEnabled("worker.local-hands.enabled")).thenReturn(true);
+    when(flags.isEnabled("sandbox.lifecycle.enabled")).thenReturn(true);
+    when(flags.isEnabled("sandbox.runtime.dispatch.enabled")).thenReturn(true);
+    when(flags.isEnabled("sandbox.runtime.container-strict-v1.enabled")).thenReturn(true);
 
     var response =
-        new ClientCapabilitiesController(flags)
+        controller(flags, true)
             .capabilities(requestWithAuthSource(JwtAuthenticationFilter.AUTH_SOURCE_PAT));
 
     assertThat(response.contractVersion()).isEqualTo("agent-protocol-v2");
@@ -36,6 +57,38 @@ class ClientCapabilitiesControllerTest {
     assertThat(response.toolResultContract().strictEnvelope()).isTrue();
     assertThat(response.managedAi().balancePath()).isEqualTo("/api/billing/managed-ai/balance");
     assertThat(response.providerCatalog().path()).isEqualTo("/api/v3/provider-readiness");
+    assertThat(response.remoteSandbox().enabled()).isTrue();
+    assertThat(response.remoteSandbox().isolationProfile()).isEqualTo("CONTAINER_STRICT_V1");
+  }
+
+  @Test
+  void remoteSandboxIsDisabledUnlessEveryExecutionGateIsEnabled() {
+    FeatureFlagService flags = mock(FeatureFlagService.class);
+    when(flags.isEnabled("sandbox.lifecycle.enabled")).thenReturn(true);
+    when(flags.isEnabled("sandbox.runtime.dispatch.enabled")).thenReturn(false);
+    when(flags.isEnabled("sandbox.runtime.container-strict-v1.enabled")).thenReturn(true);
+
+    var response =
+        controller(flags, false)
+            .capabilities(requestWithAuthSource(JwtAuthenticationFilter.AUTH_SOURCE_JWT));
+
+    assertThat(response.remoteSandbox().enabled()).isFalse();
+    assertThat(response.remoteSandbox().note()).contains("must not be advertised");
+  }
+
+  @Test
+  void remoteSandboxDefaultsOffWhenNoExecutionGateIsEnabled() {
+    FeatureFlagService flags = mock(FeatureFlagService.class);
+
+    var response =
+        controller(flags, false)
+            .capabilities(requestWithAuthSource(JwtAuthenticationFilter.AUTH_SOURCE_JWT));
+
+    assertThat(response.remoteSandbox().enabled()).isFalse();
+    assertThat(response.remoteSandbox().lifecycleEnabled()).isFalse();
+    assertThat(response.remoteSandbox().dispatchEnabled()).isFalse();
+    assertThat(response.remoteSandbox().strictContainerEnabled()).isFalse();
+    assertThat(response.remoteSandbox().isolationProfile()).isEqualTo("NOT_ENABLED");
   }
 
   // RR-646 — a PAT caller with local-hands enabled is the only case that may submit local hands.
@@ -45,7 +98,7 @@ class ClientCapabilitiesControllerTest {
     when(flags.isEnabled("worker.local-hands.enabled")).thenReturn(true);
 
     var response =
-        new ClientCapabilitiesController(flags)
+        controller(flags, false)
             .capabilities(requestWithAuthSource(JwtAuthenticationFilter.AUTH_SOURCE_PAT));
 
     assertThat(response.authSource()).isEqualTo("PAT");
@@ -61,7 +114,7 @@ class ClientCapabilitiesControllerTest {
     when(flags.isEnabled("worker.local-hands.enabled")).thenReturn(true);
 
     var response =
-        new ClientCapabilitiesController(flags)
+        controller(flags, false)
             .capabilities(requestWithAuthSource(JwtAuthenticationFilter.AUTH_SOURCE_JWT));
 
     assertThat(response.authSource()).isEqualTo("JWT");
@@ -76,7 +129,7 @@ class ClientCapabilitiesControllerTest {
     when(flags.isEnabled("worker.local-hands.enabled")).thenReturn(false);
 
     var response =
-        new ClientCapabilitiesController(flags)
+        controller(flags, false)
             .capabilities(requestWithAuthSource(JwtAuthenticationFilter.AUTH_SOURCE_PAT));
 
     assertThat(response.localHands().currentAuthSourceAllowed()).isTrue();
@@ -89,8 +142,7 @@ class ClientCapabilitiesControllerTest {
     FeatureFlagService flags = mock(FeatureFlagService.class);
     when(flags.isEnabled("worker.local-hands.enabled")).thenReturn(true);
 
-    var response =
-        new ClientCapabilitiesController(flags).capabilities(requestWithAuthSource(null));
+    var response = controller(flags, false).capabilities(requestWithAuthSource(null));
 
     assertThat(response.authSource()).isEqualTo("anonymous");
     assertThat(response.localHands().currentAuthSourceAllowed()).isFalse();

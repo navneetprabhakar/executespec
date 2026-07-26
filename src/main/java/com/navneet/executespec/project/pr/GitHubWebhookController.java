@@ -13,6 +13,7 @@ import jakarta.servlet.http.HttpServletRequest;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.navneet.executespec.project.service.ProjectSourceFreshnessInvalidator;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
@@ -38,6 +39,7 @@ public class GitHubWebhookController {
   private final PullRequestRecordService prService;
   private final CiFailureAutoFixService ciAutoFixService;
   private final ObjectMapper objectMapper;
+  private final ProjectSourceFreshnessInvalidator sourceFreshnessInvalidator;
 
   /**
    * 2026-05-07 — Phase P1: ingest {@code pull_request_review_comment} webhook events into the inbox
@@ -113,6 +115,7 @@ public class GitHubWebhookController {
     try {
       switch (event) {
         case "pull_request" -> handlePullRequest(root);
+        case "push" -> handlePush(root);
         case "check_run" -> handleCheckRun(root);
         case "pull_request_review_comment" -> handlePullRequestReviewComment(root);
         default -> {
@@ -146,6 +149,18 @@ public class GitHubWebhookController {
                 ? Instant.parse(pr.get("closed_at").asText())
                 : Instant.now());
     prService.applyWebhookUpdate(repoFullName, prNumber, merged, ts);
+    if (merged) {
+      sourceFreshnessInvalidator.invalidateGitHubRepo(repoFullName);
+    }
+  }
+
+  /** Invalidate exact repo/project freshness keys when a signed push observes HEAD movement. */
+  private void handlePush(JsonNode root) {
+    String repoFullName = textOrNull(root.path("repository"), "full_name");
+    String before = textOrNull(root, "before");
+    String after = textOrNull(root, "after");
+    if (repoFullName == null || before == null || after == null || before.equals(after)) return;
+    sourceFreshnessInvalidator.invalidateGitHubRepo(repoFullName);
   }
 
   /**

@@ -5,6 +5,7 @@ import {
   continuationApprovalCandidate,
   continuationApprovalReason,
   continuationSourceLabel,
+  countProducedWorkspaceFiles,
   evidenceKind,
   emptyCodeTabMessage,
   fileCountSummary,
@@ -15,6 +16,7 @@ import {
   goalStateKind,
   hasRunCostEvidence,
   isNoisyLogEvent,
+  isBootstrapWorkspaceMetadata,
   isFailedTerminalStatus,
   isTestExecutionTerminal,
   lineDiff,
@@ -23,11 +25,13 @@ import {
   logLabel,
   logMeta,
   logMessage,
+  missingScoreExplanation,
   modelRankingCandidateLabel,
   modelRankingCandidateMetrics,
   modelRankingDetails,
   modelRankingLabel,
   num,
+  runArtifactActionAvailability,
   runPhaseDiagnosis,
   shouldUseRunEvidenceChat,
   shouldShowModelRanking,
@@ -35,10 +39,102 @@ import {
   testRerunState,
   taskBudgetFacts,
   taskGoalLine,
+  testEvidenceSummary,
   testResultSummary,
   usd,
   verdictFor,
 } from './runResultUtils';
+
+describe('runArtifactActionAvailability', () => {
+  it('blocks every artifact action when planning failed before producing evidence', () => {
+    const changedWorkspaceFiles = countProducedWorkspaceFiles([
+      {path: '.gitattributes', status: 'ADDED'},
+      {path: '.gitignore', status: 'ADDED'},
+    ]);
+    expect(
+      runArtifactActionAvailability({
+        status: 'FAILED',
+        changedWorkspaceFiles,
+        hasExecutionEvidence: false,
+        hasValidationReport: false,
+      }),
+    ).toEqual({
+      push: false,
+      revertWorkspace: false,
+      preview: false,
+      deploy: false,
+      reportPdf: false,
+      codeZip: false,
+      shareReport: false,
+      workspaceReason: 'This run stopped before execution and produced no code changes.',
+      reportReason: 'No validation report was produced for this run.',
+    });
+  });
+
+  it('allows workspace actions after execution while withholding missing report actions', () => {
+    const availability = runArtifactActionAvailability({
+      status: 'FAILED',
+      changedWorkspaceFiles: 3,
+      hasExecutionEvidence: true,
+      hasValidationReport: false,
+    });
+
+    expect(availability).toMatchObject({
+      push: true,
+      revertWorkspace: true,
+      preview: true,
+      deploy: true,
+      codeZip: true,
+      reportPdf: false,
+      shareReport: false,
+    });
+  });
+
+  it('allows all artifact actions only after produced changes and a report exist', () => {
+    const availability = runArtifactActionAvailability({
+      status: 'COMPLETE',
+      changedWorkspaceFiles: 4,
+      hasExecutionEvidence: true,
+      hasValidationReport: true,
+    });
+
+    expect(
+      Object.entries(availability)
+        .filter(([key]) => !key.endsWith('Reason'))
+        .every(([, enabled]) => enabled),
+    ).toBe(true);
+  });
+
+  it('does not expose terminal actions for a paused run with dirty files', () => {
+    const availability = runArtifactActionAvailability({
+      status: 'PAUSED',
+      changedWorkspaceFiles: 2,
+      hasExecutionEvidence: true,
+      hasValidationReport: false,
+    });
+
+    expect(availability.push).toBe(false);
+    expect(availability.preview).toBe(false);
+    expect(availability.workspaceReason).toBe(
+      'This action becomes available after the run finishes.',
+    );
+  });
+
+  it('does not classify bootstrap git metadata as generated product code', () => {
+    expect(isBootstrapWorkspaceMetadata('.gitignore')).toBe(true);
+    expect(isBootstrapWorkspaceMetadata('./.gitattributes')).toBe(true);
+    expect(isBootstrapWorkspaceMetadata('repos/service/.gitignore')).toBe(true);
+    expect(isBootstrapWorkspaceMetadata('src/main.ts')).toBe(false);
+    expect(
+      countProducedWorkspaceFiles([
+        {path: '.gitignore', status: 'ADDED'},
+        {path: '.gitattributes', status: 'ADDED'},
+        {path: 'src/main.ts', status: 'MODIFIED'},
+        {path: 'src/unchanged.ts', status: 'UNCHANGED'},
+      ]),
+    ).toBe(1);
+  });
+});
 
 describe('testResultSummary', () => {
   it('does not present a zero-test report as a passing measurement', () => {
@@ -57,6 +153,34 @@ describe('testResultSummary', () => {
       headline: '3/4',
       label: 'passed',
       explanation: null,
+    });
+  });
+});
+
+describe('testEvidenceSummary', () => {
+  it('distinguishes functional, workspace-only, and unverified counts', () => {
+    expect(
+      testEvidenceSummary(5, 5, {
+        source: 'DETERMINISTIC_FUNCTIONAL',
+        status: 'PASS',
+      }),
+    ).toEqual({measured: true, functional: true, workspaceOnly: false, label: '5/5 functional'});
+    expect(
+      testEvidenceSummary(7, 7, {
+        source: 'DETERMINISTIC_WORKSPACE_SUITE',
+        status: 'PASS',
+      }),
+    ).toEqual({
+      measured: true,
+      functional: false,
+      workspaceOnly: true,
+      label: '7/7 workspace-only',
+    });
+    expect(testEvidenceSummary(3, 3, {source: 'UNVERIFIED_COUNT', status: 'UNKNOWN'})).toEqual({
+      measured: true,
+      functional: false,
+      workspaceOnly: false,
+      label: '3/3 unverified',
     });
   });
 });
@@ -459,10 +583,10 @@ describe('runResultUtils', () => {
   it('explains validation-reported file counts versus Code-tab workspace files', () => {
     expect(fileCountSummary({reportedFiles: 3, workspaceFiles: 1})).toEqual({
       label: '3 reported · 1 visible',
-      title: '1 file(s) currently visible in the Code tab',
+      title: '1 generated or modified product file(s)',
       mismatch: true,
       explanation:
-        'File counts differ because validation reports generated-file evidence, while the Code tab lists the current workspace files. Failed scaffold runs can expose seed files even when no product code was delivered.',
+        'File counts differ because validation reports persisted generation evidence, while this count uses current git-derived product changes and excludes bootstrap metadata.',
     });
     expect(fileCountSummary({reportedFiles: 2, workspaceFiles: 2})).toMatchObject({
       label: '2 reported',
@@ -482,6 +606,30 @@ describe('runResultUtils', () => {
       'No generated files. This failed run did not leave product code to inspect.',
     );
     expect(emptyCodeTabMessage({hasFiles: false, status: 'COMPLETE'})).toBe('No generated files');
+  });
+
+  it('explains missing scores from the actual run lifecycle', () => {
+    expect(
+      missingScoreExplanation({
+        runMode: 'BUILD',
+        status: 'FAILED',
+        triggeredByFinding: null,
+      } as api.RunSummary),
+    ).toBe('No verified score was produced because this run stopped before validation completed.');
+    expect(
+      missingScoreExplanation({
+        runMode: 'PATCH',
+        status: 'COMPLETE',
+        triggeredByFinding: null,
+      } as api.RunSummary),
+    ).toContain("patch and benchmark runs aren't scored");
+    expect(
+      missingScoreExplanation({
+        runMode: 'BUILD',
+        status: 'VALIDATING',
+        triggeredByFinding: null,
+      } as api.RunSummary),
+    ).toBe('A verified score will appear after validation completes.');
   });
 
   it('keeps small formatting helpers stable', () => {

@@ -134,12 +134,20 @@ public class ValidationReport {
    * postdating launch. {@code FALSE} when the producer explicitly could not prove it. {@code null}
    * when no provenance signal was recorded at all — including every row written before V317.
    *
-   * <p><b>null is unproven, never proven-false.</b> The evidence ledger promotes the tests row back
-   * to {@code DETERMINISTIC}/HIGH only on {@code TRUE}; both other states keep the conservative
-   * {@code UNVERIFIED_COUNT}/MEDIUM label.
+   * <p><b>null is unproven, never proven-false.</b> TRUE permits a deterministic execution label,
+   * whose exact scope is then selected from {@link #testEvidenceScope}; both other states keep the
+   * conservative {@code UNVERIFIED_COUNT}/MEDIUM label.
    */
   @Column(name = "test_execution_verified")
   private Boolean testExecutionVerified;
+
+  /**
+   * V344 — boundary exercised by the proven test population. A fresh workspace/unit suite is
+   * deterministic test evidence, but only LIVE_PREVIEW_FUNCTIONAL can prove product-level journeys.
+   * Null is legacy/unknown and must not be upgraded to functional proof.
+   */
+  @Column(name = "test_evidence_scope", length = 40)
+  private String testEvidenceScope;
 
   /** ReviewerResult.Overall enum name: CLEAN | FIXED_ISSUES | UNRESOLVED_ISSUES | REVIEW_FAILED. */
   @Column(name = "reviewer_verdict", length = 32)

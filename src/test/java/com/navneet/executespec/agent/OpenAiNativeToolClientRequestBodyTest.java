@@ -44,14 +44,26 @@ class OpenAiNativeToolClientRequestBodyTest {
   }
 
   @Test
-  void deepSeekCoherenceAndReviewerDisableThinkingWithoutChangingNormalWorkers() {
+  void deepSeekStructuredMetadataCoherenceAndReviewerDisableThinkingWithoutChangingWorkers() {
     LlmRequest coherence = request("CoherencePlannerAgent");
+    LlmRequest classifier = request("SmartClassifierAgent");
+    LlmRequest outline = request("OutlinePlannerAgent");
+    LlmRequest expander = request("TaskExpanderAgent");
     LlmRequest worker = request("WorkerAgent");
+    LlmRequest forcedWorker = request("WorkerAgent").toBuilder().toolChoice("required").build();
     LlmRequest reviewer = request("WorkerAgent", "run-reviewer-general");
 
     assertThat(LlmRouter.deepSeekExtraBody(coherence))
         .containsEntry("thinking", Map.of("type", "disabled"));
+    assertThat(LlmRouter.deepSeekExtraBody(classifier))
+        .containsEntry("thinking", Map.of("type", "disabled"));
+    assertThat(LlmRouter.deepSeekExtraBody(outline))
+        .containsEntry("thinking", Map.of("type", "disabled"));
+    assertThat(LlmRouter.deepSeekExtraBody(expander))
+        .containsEntry("thinking", Map.of("type", "disabled"));
     assertThat(LlmRouter.deepSeekExtraBody(reviewer))
+        .containsEntry("thinking", Map.of("type", "disabled"));
+    assertThat(LlmRouter.deepSeekExtraBody(forcedWorker))
         .containsEntry("thinking", Map.of("type", "disabled"));
     assertThat(LlmRouter.deepSeekExtraBody(worker)).isEmpty();
   }

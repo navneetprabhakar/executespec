@@ -9,7 +9,6 @@ import static com.navneet.executespec.integration.RunPipelineSupport.truncate;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
@@ -32,6 +31,7 @@ import com.navneet.executespec.agent.PlanStrategy;
 import com.navneet.executespec.agent.PlanStrategyCircuitBreaker;
 import com.navneet.executespec.agent.PlannerRequest;
 import com.navneet.executespec.agent.SpecClassifier;
+import com.navneet.executespec.agent.TaskExecutionBriefCompiler;
 import com.navneet.executespec.assessment.FeatureAssessmentService;
 import com.navneet.executespec.auth.repository.AppUserRepository;
 import com.navneet.executespec.billing.config.ManagedAiProperties;
@@ -280,6 +280,12 @@ public class RunOrchestrator implements RunControlPort {
 
   private final ThreadLocal<SubmitPolicy> submitPolicyIntent = new ThreadLocal<>();
 
+  /**
+   * Source-workspace lineage for a follow-up BUILD run. Like the other submit intents above, this
+   * is consumed while the initial row is built, before the async pipeline can observe it.
+   */
+  private final ThreadLocal<String> submitSourceRunIntent = new ThreadLocal<>();
+
   /** Wave 2.1 — activation funnel event tracker (no-op when PostHog is unconfigured). */
   private final com.navneet.executespec.analytics.EventTrackingService eventTracking;
 
@@ -445,6 +451,95 @@ public class RunOrchestrator implements RunControlPort {
         lowComplexityWorkerStartTier,
         localExecutionRequested,
         SubmitPolicy.NONE);
+  }
+
+  /**
+   * Creates a lineage-preserving BUILD iteration and starts the normal asynchronous V2 pipeline.
+   *
+   * <p>The route, project/repository boundary, execution mode, TDD mode, cost ceiling and
+   * publication consent are inherited from the source. The current actor's SCM credentials are
+   * used; credentials are never copied from the source row.
+   */
+  public PipelineRun submitIterationRun(
+      PipelineRun source,
+      String followUpRequest,
+      String actorId,
+      String actorOrgId,
+      String githubPat,
+      String githubOwner) {
+    if (source == null || source.getRunId() == null || source.getRunId().isBlank()) {
+      throw new IllegalArgumentException("source run is required");
+    }
+    IterationPolicy inherited = iterationPolicy(source);
+    submitSourceRunIntent.set(source.getRunId());
+    try {
+      return submitRunWithLocalExecution(
+          followUpRequest,
+          "ITERATION",
+          source.getRepoUrl(),
+          source.getRepoMode(),
+          githubPat,
+          githubOwner,
+          false,
+          false,
+          inherited.pinnedModel(),
+          inherited.provider(),
+          actorId,
+          actorOrgId,
+          inherited.projectId(),
+          inherited.executionMode(),
+          inherited.selectedRepoIds(),
+          source.getFigmaUrl(),
+          inherited.tddMode(),
+          null,
+          null,
+          com.navneet.executespec.state.RunMode.BUILD,
+          null,
+          null,
+          null,
+          false,
+          new SubmitPolicy(
+              inherited.userCostCap(), inherited.skipAutoPush(), inherited.payerOrgId()));
+    } finally {
+      submitSourceRunIntent.remove();
+    }
+  }
+
+  static String iterationPinnedModel(PipelineRun source) {
+    return source != null && source.isRoutePinned() ? source.getRequestedModel() : null;
+  }
+
+  static IterationPolicy iterationPolicy(PipelineRun source) {
+    if (source == null) throw new IllegalArgumentException("source run is required");
+    return new IterationPolicy(
+        firstNonBlank(source.getRequestedProvider(), source.getAiProvider()),
+        iterationPinnedModel(source),
+        source.getProjectId(),
+        RunPipelineSupport.deserializeRepoIds(source.getSelectedRepoIds()),
+        normalizeIterationExecutionMode(source.getExecutionMode()),
+        source.isTddMode(),
+        source.getUserCostCap(),
+        source.isSkipAutoPush(),
+        source.getOrgId());
+  }
+
+  record IterationPolicy(
+      String provider,
+      String pinnedModel,
+      String projectId,
+      List<UUID> selectedRepoIds,
+      String executionMode,
+      boolean tddMode,
+      Double userCostCap,
+      boolean skipAutoPush,
+      String payerOrgId) {}
+
+  static String normalizeIterationExecutionMode(String executionMode) {
+    return "PROTOTYPE".equalsIgnoreCase(executionMode) ? "PROTOTYPE" : "PRODUCTION";
+  }
+
+  private static String firstNonBlank(String primary, String fallback) {
+    return primary != null && !primary.isBlank() ? primary : fallback;
   }
 
   /**
@@ -1004,6 +1099,7 @@ public class RunOrchestrator implements RunControlPort {
             .figmaUrl(figmaUrl)
             .tddMode(tddMode)
             .selectedRepoIds(serializeRepoIds(selectedRepoIds))
+            .sourceRunId(submitSourceRunIntent.get())
             .localExecutionRequested(Boolean.TRUE.equals(submitLocalExecutionIntent.get()))
             .build();
     run = runRepo.save(run);
@@ -1426,8 +1522,18 @@ public class RunOrchestrator implements RunControlPort {
       // Reuse V1's workspace init — creates a fresh git repo with .gitignore/.gitattributes
       // and an initial empty commit. This is required for `/push-github` to work against
       // V2 runs: the endpoint assumes the workspace already has git history.
+      String sourceRunId =
+          runRepo
+              .findById(runId)
+              .map(PipelineRun::getSourceRunId)
+              .filter(s -> !s.isBlank())
+              .orElse(null);
       if (approvedPlanContinuation == null) {
-        workspaceInit.ensureRunWorkspace(runId);
+        if (sourceRunId == null) {
+          workspaceInit.ensureRunWorkspace(runId);
+        } else {
+          workspaceInit.copyFromRunRequired(sourceRunId, runId);
+        }
       }
 
       // P3 local-hands (RL-2026-06-014): choose LOCAL vs remote execution once, here. When on, the
@@ -1481,7 +1587,9 @@ public class RunOrchestrator implements RunControlPort {
                                 r.getId(),
                                 branchOverride != null ? branchOverride : r.getDefaultBranch()))
                     .toList();
-            workspaceInit.cloneMultipleRepos(runId, toClone, githubPat);
+            if (sourceRunId == null) {
+              workspaceInit.cloneMultipleRepos(runId, toClone, githubPat);
+            }
             WorkspaceInitService.WorkspaceAdmission admission =
                 workspaceInit.verifyMultipleRepos(runId, toClone);
             if (!admission.admitted()) {
@@ -1802,7 +1910,7 @@ public class RunOrchestrator implements RunControlPort {
                       runId, plannerReq, OutlinePlannerAgent.Mode.FULL_PLAN);
               planStrategyBreaker.recordSuccess(effective);
             } catch (Exception outlineEx) {
-              planStrategyBreaker.recordFailure(effective);
+              planStrategyBreaker.recordFailure(effective, outlineEx);
               // A multi-task request cannot safely degrade to one LOW synthetic task. That path
               // discards structured requirements and can execute a materially different product
               // after a provider/auth failure. Fail before the plan gate and preserve the raw
@@ -1821,7 +1929,7 @@ public class RunOrchestrator implements RunControlPort {
                   planningCoordinator.runLargePipeline(runId, plannerReq, rootCtx, legacyRecursion);
               planStrategyBreaker.recordSuccess(PlanStrategy.LARGE);
             } catch (Exception largeEx) {
-              planStrategyBreaker.recordFailure(PlanStrategy.LARGE);
+              planStrategyBreaker.recordFailure(PlanStrategy.LARGE, largeEx);
               log.error(
                   "V2 run={} LARGE planner pipeline failed — refusing scope collapse",
                   runId,
@@ -1845,18 +1953,17 @@ public class RunOrchestrator implements RunControlPort {
           terminate(runId, "FAILED", INTERNAL_ERROR_REASON, INTERNAL_ERROR_REASON, startedAt);
           return;
         }
-        if (plan.tasks() == null || plan.tasks().isEmpty()) {
-          log.error("RunOrchestrator run={} planner returned empty plan — failing", runId);
-          terminate(
+        try {
+          plan = TaskExecutionBriefCompiler.compileExecutable(plan);
+        } catch (Exception executablePlanEx) {
+          log.error(
+              "V2 run={} executable plan compilation failed — refusing worker execution",
               runId,
-              "FAILED",
-              "planner: returned empty plan (model likely emitted malformed tool-call payload)",
-              startedAt);
+              executablePlanEx);
+          failPlannerUnavailable(runId, startedAt, "compile a safe executable task contract");
           return;
         }
-        persistenceWriter.persistPlan(runId, plan);
-        persistenceWriter.persistTasks(runId, plan);
-        persistenceWriter.persistRunTitle(runId, plan);
+        persistenceWriter.persistCompiledPlan(runId, plan);
         contextComposer.writeAgentContext(workspace, plan);
         persistEstimate(runId, provider, model, plan);
         designBlock = contextComposer.buildDesignBlock(userRequest, plan);
@@ -1864,7 +1971,7 @@ public class RunOrchestrator implements RunControlPort {
         afterPlan = costTracker.snapshot(runId);
         PlannerPhaseAttribution.apply(
             runRepo, tokenAttributor, runId, afterPlan, afterClassifier, upperProvider, model);
-
+        persistenceWriter.raiseUsageFloor(runId, afterPlan);
         // 1b. Plan approval gate (PRODUCTION only)
         // PROTOTYPE runs + integration-triggered runs (skipApproval=true) bypass the gate. A
         // PRODUCTION run persists everything required for continuation and returns immediately, so
@@ -2037,7 +2144,7 @@ public class RunOrchestrator implements RunControlPort {
       if (featureFlagService.isEnabled("lint.autofix.enabled")) {
         try {
           com.navneet.executespec.lint.LintPass.LintReport lintReport =
-              lintPass.run(rootCtx.workspaceRoot());
+              lintPass.run(runId, rootCtx.workspaceRoot());
           if (lintReport.changedAnything()) {
             log.info("RunOrchestrator run={} lint auto-fix: {}", runId, lintReport.summary());
             broadcaster.emit(runId, RunEvent.lintAutofixApplied(runId, lintReport.summary()));
@@ -2087,7 +2194,7 @@ public class RunOrchestrator implements RunControlPort {
       }
       try {
         ProviderModel reviewerRoute = reviewerRouteFor(provider, model, execResult);
-        if (!sameRoute(provider, model, reviewerRoute)) {
+        if (!ReviewerRoutePolicy.sameRoute(provider, model, reviewerRoute)) {
           log.info(
               "RunOrchestrator run={} reviewer route promoted after continuation action:"
                   + " {}/{} -> {}/{}",
@@ -2348,7 +2455,7 @@ public class RunOrchestrator implements RunControlPort {
         // Baseline CLI smoke: invoke the inferred entry point with no stdin,
         // record exit code + head of stdout. Full stdin/stdout fixture harness
         // (planner-emitted cliTestCases with expected stdout) is follow-up work.
-        var cliResult = cliSmokeRunner.run(workspace);
+        var cliResult = cliSmokeRunner.run(runId, workspace);
         log.info(
             "RunOrchestrator run={} CLI smoke status={} exit={} cmd='{}' dur={}ms",
             runId,
@@ -3310,7 +3417,7 @@ public class RunOrchestrator implements RunControlPort {
                 .modelStepDownsUsed(modelStepDownsUsed(task))
                 .maxModelStepDowns(Math.max(0, postReviewMaxModelStepDowns))
                 .build());
-    decision = withContinuationSource(decision, "POST_REVIEW");
+    decision = PostReviewContinuationDecisionMapper.withSource(decision, "POST_REVIEW");
 
     String summary =
         "Post-review continuation decision: "
@@ -3429,7 +3536,7 @@ public class RunOrchestrator implements RunControlPort {
                 .modelStepDownsUsed(modelStepDownsUsed(task))
                 .maxModelStepDowns(Math.max(0, postReviewMaxModelStepDowns))
                 .build());
-    decision = withContinuationSource(decision, "POST_VALIDATION_REPORT");
+    decision = PostReviewContinuationDecisionMapper.withSource(decision, "POST_VALIDATION_REPORT");
 
     String summary =
         "Post-validation continuation decision: "
@@ -3820,7 +3927,8 @@ public class RunOrchestrator implements RunControlPort {
       return;
     }
     try {
-      com.navneet.executespec.lint.LintPass.LintReport lintReport = lintPass.run(workspaceRoot);
+      com.navneet.executespec.lint.LintPass.LintReport lintReport =
+          lintPass.run(runId, workspaceRoot);
       if (lintReport.changedAnything()) {
         log.info(
             "RunOrchestrator run={} post-review lint auto-fix: {}", runId, lintReport.summary());
@@ -3981,72 +4089,12 @@ public class RunOrchestrator implements RunControlPort {
       boolean benchmarkPriorRequired,
       boolean routePinned,
       String source) {
-    Map<String, Object> data = new LinkedHashMap<>();
-    data.put("decision", decision.decision().name());
-    data.put("reasons", decision.reasons());
-    Map<String, Object> policy = new LinkedHashMap<>();
-    if (decision.policy() != null) {
-      policy.putAll(decision.policy());
-    }
-    policy.put("taskCategory", "PROJECT_PATCH");
-    policy.put("requiredQualityThreshold", postReviewRequiredQualityThreshold);
-    policy.put("providerSwitchesUsed", Math.max(0, providerSwitchesUsedFromPolicy(decision)));
-    policy.put("maxProviderSwitches", Math.max(0, postReviewMaxProviderSwitches));
-    policy.put("maxModelStepUps", Math.max(0, postReviewMaxModelStepUps));
-    policy.put("maxModelStepDowns", Math.max(0, postReviewMaxModelStepDowns));
-    policy.put("requireConfirmationBeforeExpensiveContinuation", confirmationRequired);
-    policy.put("requireBenchmarkPriorForAutomaticContinuation", benchmarkPriorRequired);
-    policy.put("routePinned", routePinned);
-    policy.put("source", continuationSource(source));
-    data.put("policy", policy);
-    decision
-        .selectedCandidate()
-        .ifPresent(candidate -> data.put("selectedCandidate", selectedCandidateData(candidate)));
-    String approvalRequiredReason = postReviewContinuationApprovalRequiredReason(decision, policy);
-    if (approvalRequiredReason != null) {
-      data.put("approvalRequiredReason", approvalRequiredReason);
-    }
-    data.put("source", continuationSource(source));
-    return data;
-  }
-
-  private static String continuationSource(String source) {
-    return source == null || source.isBlank() ? "POST_REVIEW" : source;
-  }
-
-  private static GoalContinuationPolicyDecision withContinuationSource(
-      GoalContinuationPolicyDecision decision, String source) {
-    if (decision == null) {
-      return null;
-    }
-    Map<String, Object> policy = new LinkedHashMap<>();
-    if (decision.policy() != null) {
-      policy.putAll(decision.policy());
-    }
-    policy.put("source", continuationSource(source));
-    return new GoalContinuationPolicyDecision(
-        decision.decision(), decision.selectedCandidate(), decision.reasons(), policy);
-  }
-
-  private static String postReviewContinuationApprovalRequiredReason(
-      GoalContinuationPolicyDecision decision, Map<String, Object> policy) {
-    if (decision == null
-        || decision.decision() != RunContinuationDecision.STOP_BLOCKED
-        || decision.selectedCandidate().isEmpty()) {
-      return null;
-    }
-    ModelProviderScore candidate = decision.selectedCandidate().get();
-    if (Boolean.TRUE.equals(policy.get("routePinned"))) {
-      return "ROUTE_PINNED";
-    }
-    if (Boolean.TRUE.equals(policy.get("requireBenchmarkPriorForAutomaticContinuation"))
-        && !candidate.benchmarkQualityPriorAvailable()) {
-      return "BENCHMARK_PRIOR_REQUIRED";
-    }
-    if (Boolean.TRUE.equals(policy.get("requireConfirmationBeforeExpensiveContinuation"))) {
-      return "EXPENSIVE_CONTINUATION_CONFIRMATION_REQUIRED";
-    }
-    return null;
+    return new PostReviewContinuationDecisionMapper(
+            postReviewRequiredQualityThreshold,
+            postReviewMaxProviderSwitches,
+            postReviewMaxModelStepUps,
+            postReviewMaxModelStepDowns)
+        .data(decision, confirmationRequired, benchmarkPriorRequired, routePinned, source);
   }
 
   private void persistPostReviewContinuationDecision(
@@ -4088,32 +4136,6 @@ public class RunOrchestrator implements RunControlPort {
     }
   }
 
-  private static int providerSwitchesUsedFromPolicy(GoalContinuationPolicyDecision decision) {
-    Object value =
-        decision == null || decision.policy() == null
-            ? null
-            : decision.policy().get("providerSwitchesUsed");
-    if (value instanceof Number number) {
-      return Math.max(0, number.intValue());
-    }
-    return 0;
-  }
-
-  private static Map<String, Object> selectedCandidateData(ModelProviderScore candidate) {
-    Map<String, Object> data = new LinkedHashMap<>();
-    data.put("provider", candidate.provider());
-    data.put("model", candidate.model());
-    data.put("taskCategory", candidate.taskCategory());
-    data.put("qualityScore", candidate.qualityScore());
-    data.put("requiredQualityThreshold", candidate.requiredQualityThreshold());
-    data.put("costPerMillionTokens", candidate.costPerMillionTokens());
-    data.put("latencyP50Ms", candidate.latencyP50Ms());
-    data.put("latencyP95Ms", candidate.latencyP95Ms());
-    data.put("benchmarkQualityPriorAvailable", candidate.benchmarkQualityPriorAvailable());
-    data.put("reasons", candidate.reasons());
-    return data;
-  }
-
   private static String firstReason(GoalContinuationPolicyDecision decision) {
     if (decision == null || decision.reasons().isEmpty()) {
       return "no continuation reason supplied";
@@ -4125,57 +4147,7 @@ public class RunOrchestrator implements RunControlPort {
 
   static ProviderModel reviewerRouteFor(
       String defaultProvider, String defaultModel, ExecutionResult exec) {
-    ProviderModel fallback = new ProviderModel(defaultProvider, defaultModel);
-    if (exec == null || exec.perTask() == null || exec.perTask().isEmpty()) {
-      return fallback;
-    }
-    List<TaskOutcome> perTask = exec.perTask();
-    for (int i = perTask.size() - 1; i >= 0; i--) {
-      TaskOutcome task = perTask.get(i);
-      if (!successfulEnoughForReviewPromotion(task) || !qualityContinuationAction(task)) {
-        continue;
-      }
-      ProviderModel candidate =
-          new ProviderModel(task.continuationActionProvider(), task.continuationActionModel());
-      if (sameRoute(defaultProvider, defaultModel, candidate)) {
-        return fallback;
-      }
-      return candidate;
-    }
-    return fallback;
-  }
-
-  private static boolean successfulEnoughForReviewPromotion(TaskOutcome task) {
-    if (task == null || task.status() == null) {
-      return false;
-    }
-    return switch (task.status()) {
-      case SUCCESS, SUCCESS_AFTER_RETRY, COMPLETED_WITH_WARNING -> true;
-      case WORKER_FAILED, SKIPPED -> false;
-    };
-  }
-
-  private static boolean qualityContinuationAction(TaskOutcome task) {
-    if (!hasText(task.continuationActionProvider()) || !hasText(task.continuationActionModel())) {
-      return false;
-    }
-    RunContinuationDecision action = task.continuationAction();
-    return action == RunContinuationDecision.STEP_UP_MODEL
-        || action == RunContinuationDecision.CHANGE_PROVIDER;
-  }
-
-  private static boolean sameRoute(String provider, String model, ProviderModel route) {
-    if (route == null) {
-      return false;
-    }
-    return equalsIgnoreCase(provider, route.provider()) && equalsIgnoreCase(model, route.model());
-  }
-
-  private static boolean equalsIgnoreCase(String left, String right) {
-    if (left == null || right == null) {
-      return left == right;
-    }
-    return left.equalsIgnoreCase(right);
+    return ReviewerRoutePolicy.select(defaultProvider, defaultModel, exec);
   }
 
   private List<String> reviewerRepoRoots(String projectId, List<UUID> selectedRepoIds) {

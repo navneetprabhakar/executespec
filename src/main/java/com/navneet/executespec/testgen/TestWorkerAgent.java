@@ -106,7 +106,7 @@ public class TestWorkerAgent {
     // Strip markdown fences if present
     code = stripMarkdownFences(code);
 
-    // Write to workspace-test
+    // Write to the run-owned generated-test workspace.
     try {
       writeTestFile(runId, task.getTaskName(), code);
     } catch (IOException e) {

@@ -27,6 +27,7 @@ import {
   type AgentChatBubble,
 } from '@/ide/agentChatHistory';
 import {
+  architectureFreshnessBadge,
   contractDetectorSummary,
   docStamp,
   driftSummaryMessage,
@@ -694,7 +695,7 @@ export function IdeProjectCode() {
     [projectId],
     !!projectId,
   );
-  const repos = reposState.data ?? [];
+  const repos = useMemo(() => reposState.data ?? [], [reposState.data]);
   const debtState = useAsyncData(() => api.getTechDebt(projectId, 30), [projectId], !!projectId);
   const debt = debtState.data;
   const docsState = useAsyncData(
@@ -853,7 +854,7 @@ export function IdeProjectCode() {
         });
     }, 3000);
     return () => window.clearInterval(id);
-  }, [genPending, projectId]);
+  }, [genPending, projectId, setDocs]);
 
   async function dlDoc(t: api.GeneratedDocType) {
     setBusy(`dl-${t}`);
@@ -1374,6 +1375,9 @@ export function IdeProjectArchitecture() {
   // RR-1313 — a real failure of the primary map request is a retryable error, not
   // absence. Only a typed 404/410 (getArchitectureDoc returns null) renders empty.
   const [archFailure, setArchFailure] = useState<LoadFailure | null>(null);
+  const [sectionFailures, setSectionFailures] = useState<
+    Partial<Record<'versions' | 'invariants' | 'adrs' | 'contracts', LoadFailure>>
+  >({});
   const [staleness, setStaleness] = useState<api.StalenessReport | null>(null);
   const [versions, setVersions] = useState<ArchitectureDoc[] | null>(null);
   const [invariants, setInvariants] = useState<api.InvariantSummary[] | null>(null);
@@ -1382,11 +1386,12 @@ export function IdeProjectArchitecture() {
   const [adrCapability, setAdrCapability] = useState<api.AdrCapability | null | undefined>(
     undefined,
   );
-  const [repos, setRepos] = useState<Array<Record<string, unknown>>>([]);
+  const [repos, setRepos] = useState<Array<Record<string, unknown>> | null>(null);
   const [coverage, setCoverage] = useState<Record<
     string,
     api.ContractCoverageResponse | null
   > | null>(null);
+  const [coverageFailures, setCoverageFailures] = useState<Record<string, LoadFailure>>({});
   const [contractBusy, setContractBusy] = useState('');
   // Contract whose drift the user is dismissing (drives the PromptModal).
   const [dismissFor, setDismissFor] = useState<string | null>(null);
@@ -1418,6 +1423,19 @@ export function IdeProjectArchitecture() {
     // barrier around it.
     setArch(undefined);
     setArchFailure(null);
+    // Scope changes must clear every secondary projection immediately. Keeping project A's
+    // history/rules/contracts visible under project B until the new requests settle is a
+    // cross-project data leak, even when the generation guard correctly drops late responses.
+    setSectionFailures({});
+    setVersions(null);
+    setInvariants(null);
+    setViolations([]);
+    setAdrs(null);
+    setAdrCapability(undefined);
+    setStaleness(null);
+    setRepos(null);
+    setCoverage(null);
+    setCoverageFailures({});
     uiBound(api.getArchitectureDoc(projectId))
       .then(
         scoped((doc: ArchitectureDoc | null) => {
@@ -1443,6 +1461,18 @@ export function IdeProjectArchitecture() {
       uiBound(api.getProjectRepos(projectId)),
     ]).then(async ([v, inv, viol, adr, adrCap, st, rp]) => {
       if (gen !== refreshGen.current) return;
+      setSectionFailures({
+        ...(v.status === 'rejected' ? {versions: toLoadFailure(v.reason)} : {}),
+        ...(inv.status === 'rejected' || viol.status === 'rejected'
+          ? {
+              invariants: toLoadFailure(
+                inv.status === 'rejected' ? inv.reason : viol.status === 'rejected' && viol.reason,
+              ),
+            }
+          : {}),
+        ...(adr.status === 'rejected' ? {adrs: toLoadFailure(adr.reason)} : {}),
+        ...(rp.status === 'rejected' ? {contracts: toLoadFailure(rp.reason)} : {}),
+      });
       setVersions(v.status === 'fulfilled' ? (v.value as ArchitectureDoc[]) : []);
       setInvariants(inv.status === 'fulfilled' ? inv.value : []);
       if (viol.status === 'fulfilled') setViolations(viol.value);
@@ -1456,13 +1486,22 @@ export function IdeProjectArchitecture() {
           list.map(async (r) => {
             const rid = repoIdFor(r);
             try {
-              return [rid, await api.getContractCoverage(projectId, rid)] as const;
-            } catch {
-              return [rid, null] as const;
+              return [rid, await api.getContractCoverage(projectId, rid), null] as const;
+            } catch (e: unknown) {
+              return [rid, null, toLoadFailure(e)] as const;
             }
           }),
         );
-        if (gen === refreshGen.current) setCoverage(Object.fromEntries(entries));
+        if (gen === refreshGen.current) {
+          setCoverage(Object.fromEntries(entries.map(([rid, value]) => [rid, value])));
+          setCoverageFailures(
+            Object.fromEntries(
+              entries
+                .filter((entry): entry is readonly [string, null, LoadFailure] => entry[2] !== null)
+                .map(([rid, , failure]) => [rid, failure]),
+            ),
+          );
+        }
       }
     });
   }
@@ -1577,6 +1616,7 @@ export function IdeProjectArchitecture() {
   const violByInv = useMemo(() => invariantViolationCounts(violations), [violations]);
 
   const docMd = arch?.content || '';
+  const freshness = architectureFreshnessBadge(staleness);
 
   return (
     <div className='ide-pane'>
@@ -1635,9 +1675,7 @@ export function IdeProjectArchitecture() {
                     {arch?.version ? `v${arch.version}` : 'Latest'}
                   </div>
                 </div>
-                <IdeBadge kind={!staleness || staleness.stale ? 'warn' : 'ok'}>
-                  {!staleness ? 'Freshness unknown' : staleness.stale ? 'Stale' : 'Up to date'}
-                </IdeBadge>
+                <IdeBadge kind={freshness.kind}>{freshness.label}</IdeBadge>
               </div>
               {docMd ? (
                 // C9 — cap the scroll container so it can't swallow a phone
@@ -1664,7 +1702,13 @@ export function IdeProjectArchitecture() {
 
       {/* ── Versions ── */}
       {sub === 'versions' &&
-        (versions === null ? (
+        (sectionFailures.versions ? (
+          <LoadError
+            failure={sectionFailures.versions}
+            what='system map history'
+            onRetry={refresh}
+          />
+        ) : versions === null ? (
           <IdeLoader label='Loading history…' />
         ) : versions.length === 0 ? (
           <div className='ide-empty'>No previous map versions yet.</div>
@@ -1790,7 +1834,13 @@ export function IdeProjectArchitecture() {
 
       {/* ── Invariants ── */}
       {sub === 'invariants' &&
-        (invariants === null ? (
+        (sectionFailures.invariants ? (
+          <LoadError
+            failure={sectionFailures.invariants}
+            what='architecture rules'
+            onRetry={refresh}
+          />
+        ) : invariants === null ? (
           <IdeLoader label='Loading rules…' />
         ) : invariants.length === 0 ? (
           <div className='ide-empty'>No rules declared yet.</div>
@@ -1824,7 +1874,13 @@ export function IdeProjectArchitecture() {
 
       {/* ── Decisions ── */}
       {sub === 'adrs' &&
-        (adrs === null ? (
+        (sectionFailures.adrs ? (
+          <LoadError
+            failure={sectionFailures.adrs}
+            what='architecture decisions'
+            onRetry={refresh}
+          />
+        ) : adrs === null ? (
           <IdeLoader label='Loading decisions…' />
         ) : (
           <>
@@ -1889,7 +1945,15 @@ export function IdeProjectArchitecture() {
 
       {/* ── Contracts ── */}
       {sub === 'contracts' &&
-        (repos.length === 0 ? (
+        (sectionFailures.contracts ? (
+          <LoadError
+            failure={sectionFailures.contracts}
+            what='repository contracts'
+            onRetry={refresh}
+          />
+        ) : repos === null ? (
+          <IdeLoader label='Loading repositories…' />
+        ) : repos.length === 0 ? (
           <div className='ide-empty'>
             Link repos to detect contract schemas (OpenAPI / GraphQL / gRPC).
           </div>
@@ -1901,100 +1965,123 @@ export function IdeProjectArchitecture() {
               const repoId = repoIdFor(rep);
               const repoName = repoDisplayName(rep);
               const cov = coverage[repoId];
+              const coverageFailure = coverageFailures[repoId];
               const detectors = cov?.scans ?? [];
               const gaps = cov?.knownGaps ?? [];
               const detectorSummary = contractDetectorSummary(detectors);
               const driftIds = detectorSummary.driftCandidateIds.slice(0, 1);
               return (
                 <div key={repoId} className='ide-card' style={{marginBottom: 8}}>
-                  <div style={{display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8}}>
-                    <div style={{flex: 1, minWidth: 0}}>
-                      <div style={{fontWeight: 600, color: 'var(--ide-fg-bright)'}}>{repoName}</div>
-                      <div style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}>
-                        {cov == null
-                          ? 'No coverage data — start a scan'
-                          : `${detectorSummary.scanned} detector${detectorSummary.scanned === 1 ? '' : 's'} scanned${detectorSummary.failed > 0 ? ` · ${detectorSummary.failed} failed` : ''} · ${detectorSummary.totalContracts} contract${detectorSummary.totalContracts === 1 ? '' : 's'}`}
-                      </div>
-                    </div>
-                    <button
-                      className='ide-btn ghost'
-                      style={{padding: '4px 10px'}}
-                      disabled={contractBusy === `scan-${repoId}`}
-                      onClick={() => rescanCoverage(repoId)}
-                    >
-                      {contractBusy === `scan-${repoId}` ? 'Scanning…' : 'Rescan'}
-                    </button>
-                    <button
-                      className='ide-btn ghost'
-                      style={{padding: '4px 10px'}}
-                      disabled={contractBusy === `drift-${repoId}`}
-                      onClick={() => drift(repoId)}
-                    >
-                      {contractBusy === `drift-${repoId}` ? 'Checking…' : 'Check drift'}
-                    </button>
-                  </div>
-                  {detectors.length > 0 && (
-                    <div
-                      style={{
-                        display: 'flex',
-                        gap: 6,
-                        flexWrap: 'wrap',
-                        marginBottom: gaps.length ? 8 : 0,
-                      }}
-                    >
-                      {detectors.map((d, i) => (
-                        <IdeBadge
-                          key={`${repoId}-${d.detector}-${i}`}
-                          kind={
-                            d.status === 'SCANNED' ? 'ok' : d.status === 'FAILED' ? 'bad' : 'warn'
-                          }
-                        >
-                          {d.type}
-                          {d.contractIds?.length ? ` · ${d.contractIds.length}` : ''}
-                        </IdeBadge>
-                      ))}
-                    </div>
-                  )}
-                  {gaps.length > 0 && (
-                    <div
-                      style={{
-                        borderTop: '1px solid var(--ide-border)',
-                        paddingTop: 8,
-                        fontSize: 12,
-                        color: 'var(--ide-fg-muted)',
-                      }}
-                    >
+                  {coverageFailure ? (
+                    <LoadError
+                      failure={coverageFailure}
+                      what={`contract coverage for ${repoName}`}
+                      onRetry={refresh}
+                    />
+                  ) : (
+                    <>
                       <div
-                        style={{fontWeight: 600, color: 'var(--ide-fg-bright)', marginBottom: 4}}
+                        style={{display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8}}
                       >
-                        {gaps.length} known gap{gaps.length === 1 ? '' : 's'}
+                        <div style={{flex: 1, minWidth: 0}}>
+                          <div style={{fontWeight: 600, color: 'var(--ide-fg-bright)'}}>
+                            {repoName}
+                          </div>
+                          <div style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}>
+                            {cov == null
+                              ? 'No coverage data — start a scan'
+                              : `${detectorSummary.scanned} detector${detectorSummary.scanned === 1 ? '' : 's'} scanned${detectorSummary.failed > 0 ? ` · ${detectorSummary.failed} failed` : ''} · ${detectorSummary.totalContracts} contract${detectorSummary.totalContracts === 1 ? '' : 's'}`}
+                          </div>
+                        </div>
+                        <button
+                          className='ide-btn ghost'
+                          style={{padding: '4px 10px'}}
+                          disabled={contractBusy === `scan-${repoId}`}
+                          onClick={() => rescanCoverage(repoId)}
+                        >
+                          {contractBusy === `scan-${repoId}` ? 'Scanning…' : 'Rescan'}
+                        </button>
+                        <button
+                          className='ide-btn ghost'
+                          style={{padding: '4px 10px'}}
+                          disabled={contractBusy === `drift-${repoId}`}
+                          onClick={() => drift(repoId)}
+                        >
+                          {contractBusy === `drift-${repoId}` ? 'Checking…' : 'Check drift'}
+                        </button>
                       </div>
-                      {gaps.slice(0, 3).map((g, i) => (
-                        <div key={i}>· {g.explanation || g.category}</div>
-                      ))}
-                    </div>
-                  )}
-                  {driftIds.length > 0 && (
-                    <div style={{display: 'flex', gap: 6, marginTop: 8}}>
-                      <button
-                        className='ide-btn ghost'
-                        style={{padding: '3px 9px', fontSize: 12}}
-                        disabled={contractBusy === `refresh-${driftIds[0]}`}
-                        onClick={() => refreshContract(driftIds[0])}
-                      >
-                        {contractBusy === `refresh-${driftIds[0]}`
-                          ? 'Refreshing…'
-                          : 'Refresh from source'}
-                      </button>
-                      <button
-                        className='ide-btn ghost'
-                        style={{padding: '3px 9px', fontSize: 12}}
-                        disabled={contractBusy === `dismiss-${driftIds[0]}`}
-                        onClick={() => setDismissFor(driftIds[0])}
-                      >
-                        Dismiss drift
-                      </button>
-                    </div>
+                      {detectors.length > 0 && (
+                        <div
+                          style={{
+                            display: 'flex',
+                            gap: 6,
+                            flexWrap: 'wrap',
+                            marginBottom: gaps.length ? 8 : 0,
+                          }}
+                        >
+                          {detectors.map((d, i) => (
+                            <IdeBadge
+                              key={`${repoId}-${d.detector}-${i}`}
+                              kind={
+                                d.status === 'SCANNED'
+                                  ? 'ok'
+                                  : d.status === 'FAILED'
+                                    ? 'bad'
+                                    : 'warn'
+                              }
+                            >
+                              {d.type}
+                              {d.contractIds?.length ? ` · ${d.contractIds.length}` : ''}
+                            </IdeBadge>
+                          ))}
+                        </div>
+                      )}
+                      {gaps.length > 0 && (
+                        <div
+                          style={{
+                            borderTop: '1px solid var(--ide-border)',
+                            paddingTop: 8,
+                            fontSize: 12,
+                            color: 'var(--ide-fg-muted)',
+                          }}
+                        >
+                          <div
+                            style={{
+                              fontWeight: 600,
+                              color: 'var(--ide-fg-bright)',
+                              marginBottom: 4,
+                            }}
+                          >
+                            {gaps.length} known gap{gaps.length === 1 ? '' : 's'}
+                          </div>
+                          {gaps.slice(0, 3).map((g, i) => (
+                            <div key={i}>· {g.explanation || g.category}</div>
+                          ))}
+                        </div>
+                      )}
+                      {driftIds.length > 0 && (
+                        <div style={{display: 'flex', gap: 6, marginTop: 8}}>
+                          <button
+                            className='ide-btn ghost'
+                            style={{padding: '3px 9px', fontSize: 12}}
+                            disabled={contractBusy === `refresh-${driftIds[0]}`}
+                            onClick={() => refreshContract(driftIds[0])}
+                          >
+                            {contractBusy === `refresh-${driftIds[0]}`
+                              ? 'Refreshing…'
+                              : 'Refresh from source'}
+                          </button>
+                          <button
+                            className='ide-btn ghost'
+                            style={{padding: '3px 9px', fontSize: 12}}
+                            disabled={contractBusy === `dismiss-${driftIds[0]}`}
+                            onClick={() => setDismissFor(driftIds[0])}
+                          >
+                            Dismiss drift
+                          </button>
+                        </div>
+                      )}
+                    </>
                   )}
                 </div>
               );

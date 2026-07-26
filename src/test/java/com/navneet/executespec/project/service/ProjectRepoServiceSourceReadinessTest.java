@@ -33,6 +33,8 @@ class ProjectRepoServiceSourceReadinessTest {
   private final ProjectRepoRepository repoRepo = mock(ProjectRepoRepository.class);
   private final StackDetector stackDetector = mock(StackDetector.class);
   private final GitHubRepoService gitHub = mock(GitHubRepoService.class);
+  private final ProjectSourceFreshnessInvalidator freshnessInvalidator =
+      mock(ProjectSourceFreshnessInvalidator.class);
   private final ProjectRepoService service =
       new ProjectRepoService(
           repoRepo,
@@ -46,6 +48,7 @@ class ProjectRepoServiceSourceReadinessTest {
           mock(AppUserRepository.class),
           mock(TierEnforcementService.class),
           mock(GovernanceGuard.class),
+          freshnessInvalidator,
           mock(ObjectProvider.class));
 
   private final UUID repoId = UUID.randomUUID();
@@ -85,6 +88,7 @@ class ProjectRepoServiceSourceReadinessTest {
     assertThat(result.sourceReadinessReason()).isEqualTo("SOURCE_INVENTORY_CONFIRMED");
     assertThat(result.sourceFileCount()).isEqualTo(2);
     assertThat(result.sourceReadinessCheckedAt()).isNotNull();
+    verify(freshnessInvalidator).invalidateRepo(repoId);
   }
 
   @Test

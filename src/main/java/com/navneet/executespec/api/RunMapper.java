@@ -152,7 +152,7 @@ public class RunMapper {
   private String resolveCreatorName(String userId) {
     if (userId == null || userId.isBlank()) return null;
     return appUserRepository
-        .findById(userId)
+        .findNameById(userId)
         .map(
             u ->
                 ((u.getFirstName() != null ? u.getFirstName() : "")

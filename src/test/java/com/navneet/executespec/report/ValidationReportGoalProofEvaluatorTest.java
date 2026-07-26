@@ -64,6 +64,42 @@ class ValidationReportGoalProofEvaluatorTest {
   }
 
   @Test
+  void deterministicWorkspaceSuiteCannotProveProductLevelCompletion() {
+    List<VerificationEvidenceDTO> ledger =
+        passingLedger().stream()
+            .map(
+                row ->
+                    "tests".equals(row.id())
+                        ? row("tests", "Tests", "PASS", "DETERMINISTIC_WORKSPACE_SUITE")
+                        : row)
+            .toList();
+
+    var decision = evaluator.evaluate("run-workspace-only", PipelineResult.PASSED, ledger);
+
+    assertThat(decision.state()).isEqualTo(GoalDonenessState.UNCERTAIN);
+    assertThat(decision.recommendedDecision())
+        .isEqualTo(RunContinuationDecision.CONTINUE_SAME_MODEL_PROVIDER);
+    assertThat(decision.incompleteItems()).contains("Tests is unknown");
+    assertThat(decision.completedItems()).doesNotContain("Tests passed");
+  }
+
+  @Test
+  void cancelledRunCannotBeReclassifiedDoneByAStalePassingReport() {
+    var decision =
+        evaluator.evaluateForRun(
+            "6785219c-03b9-4f20-af67-c97781422e50",
+            "cancelled run",
+            "CANCELLED",
+            PipelineResult.PASSED,
+            passingLedger());
+
+    assertThat(decision.state()).isEqualTo(GoalDonenessState.FAILED);
+    assertThat(decision.recommendedDecision()).isEqualTo(RunContinuationDecision.STOP_FAILED);
+    assertThat(decision.reason()).contains("CANCELLED", "cannot certify completion");
+    assertThat(decision.incompleteItems()).contains("run lifecycle is cancelled");
+  }
+
+  @Test
   void failsWhenFinalReportContainsFailedCompletionEvidence() {
     var decision =
         evaluator.evaluate(
@@ -93,7 +129,7 @@ class ValidationReportGoalProofEvaluatorTest {
             List.of(
                 row("code-delivered", "Code delivered", "PASS", "DETERMINISTIC"),
                 row("build", "Build", "PASS", "DETERMINISTIC"),
-                row("tests", "Tests", "PASS", "DETERMINISTIC"),
+                row("tests", "Tests", "PASS", "DETERMINISTIC_FUNCTIONAL"),
                 row("reviewer", "Reviewer", "PASS", "LLM_REVIEWER"),
                 row("report-issues", "Report issues", "FAIL", "HYBRID"),
                 row("spec-adherence", "Spec adherence", "FAIL", "LLM_ASSESSMENT"),
@@ -124,7 +160,7 @@ class ValidationReportGoalProofEvaluatorTest {
             List.of(
                 row("code-delivered", "Code delivered", "PASS", "DETERMINISTIC"),
                 row("build", "Build", "PASS", "DETERMINISTIC"),
-                row("tests", "Tests", "PASS", "DETERMINISTIC"),
+                row("tests", "Tests", "PASS", "DETERMINISTIC_FUNCTIONAL"),
                 row("reviewer", "Reviewer", "WARN", "LLM_REVIEWER"),
                 row("report-issues", "Report issues", "PASS", "HYBRID"),
                 row("spec-adherence", "Spec adherence", "PASS", "LLM_ASSESSMENT")));
@@ -148,7 +184,7 @@ class ValidationReportGoalProofEvaluatorTest {
             List.of(
                 row("code-delivered", "Code delivered", "PASS", "DETERMINISTIC"),
                 row("build", "Build", "PASS", "DETERMINISTIC"),
-                row("tests", "Tests", "PASS", "DETERMINISTIC"),
+                row("tests", "Tests", "PASS", "DETERMINISTIC_FUNCTIONAL"),
                 row("reviewer", "Reviewer", "FAIL", "LLM_REVIEWER"),
                 row("report-issues", "Report issues", "PASS", "HYBRID"),
                 row("spec-adherence", "Spec adherence", "PASS", "LLM_ASSESSMENT")));
@@ -179,7 +215,7 @@ class ValidationReportGoalProofEvaluatorTest {
             List.of(
                 row("code-delivered", "Code delivered", "PASS", "DETERMINISTIC"),
                 row("build", "Build", "PASS", "DETERMINISTIC"),
-                row("tests", "Tests", "PASS", "DETERMINISTIC"),
+                row("tests", "Tests", "PASS", "DETERMINISTIC_FUNCTIONAL"),
                 row("reviewer", "Reviewer", "PASS", "LLM_REVIEWER"),
                 row("report-issues", "Report issues", "PASS", "HYBRID"),
                 row("spec-adherence", "Spec adherence", "PASS", "LLM_ASSESSMENT"),
@@ -195,7 +231,7 @@ class ValidationReportGoalProofEvaluatorTest {
     return List.of(
         row("code-delivered", "Code delivered", "PASS", "DETERMINISTIC"),
         row("build", "Build", "PASS", "DETERMINISTIC"),
-        row("tests", "Tests", "PASS", "DETERMINISTIC"),
+        row("tests", "Tests", "PASS", "DETERMINISTIC_FUNCTIONAL"),
         row("reviewer", "Reviewer", "PASS", "LLM_REVIEWER"),
         row("report-issues", "Report issues", "PASS", "HYBRID"),
         row("spec-adherence", "Spec adherence", "PASS", "LLM_ASSESSMENT"),

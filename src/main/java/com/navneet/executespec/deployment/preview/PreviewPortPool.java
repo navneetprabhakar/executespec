@@ -4,9 +4,9 @@ import java.io.IOException;
 import java.net.ServerSocket;
 import java.util.concurrent.ConcurrentHashMap;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 /**
@@ -15,10 +15,27 @@ import lombok.extern.slf4j.Slf4j;
  */
 @Component
 @Slf4j
-@RequiredArgsConstructor
 public class PreviewPortPool {
 
   private final PreviewProperties props;
+  private final java.util.function.IntSupplier ephemeralPortAllocator;
+  private final java.util.function.IntPredicate portAvailability;
+
+  @Autowired
+  public PreviewPortPool(PreviewProperties props) {
+    this.props = props;
+    this.ephemeralPortAllocator = this::allocateEphemeralPort;
+    this.portAvailability = this::isPortAvailable;
+  }
+
+  PreviewPortPool(
+      PreviewProperties props,
+      java.util.function.IntSupplier ephemeralPortAllocator,
+      java.util.function.IntPredicate portAvailability) {
+    this.props = props;
+    this.ephemeralPortAllocator = ephemeralPortAllocator;
+    this.portAvailability = portAvailability;
+  }
 
   /** runId → allocated host port */
   private final ConcurrentHashMap<String, Integer> allocations = new ConcurrentHashMap<>();
@@ -56,7 +73,7 @@ public class PreviewPortPool {
 
     // Strategy 1: Let OS pick a free ephemeral port (most reliable)
     if (props.isUseEphemeralPorts()) {
-      int port = allocateEphemeralPort();
+      int port = ephemeralPortAllocator.getAsInt();
       if (port > 0 && !reservedPorts.contains(port)) {
         reservedPorts.add(port);
         allocations.put(runId, port);
@@ -69,7 +86,7 @@ public class PreviewPortPool {
     int start = props.getPortRangeStart();
     int end = props.getPortRangeEnd();
     for (int p = start; p <= end; p++) {
-      if (!allocations.containsValue(p) && !reservedPorts.contains(p) && isPortAvailable(p)) {
+      if (!allocations.containsValue(p) && !reservedPorts.contains(p) && portAvailability.test(p)) {
         reservedPorts.add(p);
         allocations.put(runId, p);
         log.info("Allocated range port {} for preview run {}", p, runId);

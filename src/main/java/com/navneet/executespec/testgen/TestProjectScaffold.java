@@ -6,10 +6,12 @@ import java.nio.file.Path;
 
 import org.springframework.stereotype.Component;
 
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * Creates a minimal Maven test project in workspace-test/{runId}/. Two POM variants:
+ * Creates a minimal Maven test project in the run-owned {@code .executespec/generated-tests/}
+ * directory. Two POM variants:
  *
  * <ul>
  *   <li><b>REST API:</b> RestAssured + JUnit 5 + AssertJ (default)
@@ -20,7 +22,10 @@ import lombok.extern.slf4j.Slf4j;
  */
 @Component
 @Slf4j
+@RequiredArgsConstructor
 public class TestProjectScaffold {
+
+  private final TestWorkspaceResolver workspaceResolver;
 
   /** POM for REST API testing (RestAssured + JUnit 5 + AssertJ) */
   private static final String POM_REST =
@@ -149,7 +154,7 @@ public class TestProjectScaffold {
    * @return the root path of the test project
    */
   public Path scaffold(String runId, boolean isStaticHtml) throws IOException {
-    Path root = Path.of("workspace-test", runId);
+    Path root = workspaceResolver.projectRoot(runId);
     Path testSrcDir = root.resolve("src/test/java/com/executespec/tests");
     Files.createDirectories(testSrcDir);
 
@@ -165,6 +170,6 @@ public class TestProjectScaffold {
 
   /** Get the test source directory for writing test files. */
   public Path getTestSourceDir(String runId) {
-    return Path.of("workspace-test", runId, "src", "test", "java", "com", "executespec", "tests");
+    return workspaceResolver.testSourceRoot(runId);
   }
 }

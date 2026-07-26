@@ -11,6 +11,23 @@ Inspect for these classes of issues only. Do NOT rewrite code for style, naming,
 5. **Obvious runtime failures**: reference to a non-existent variable/function, import of a file that doesn't exist, use of an undefined symbol.
 6. **Missing or invalid tests for changed production code**: a function, endpoint, module, or public contract was added/changed but no relevant happy-path test and edge/error test exists, the run cannot show meaningful build/test verification, a test reimplements the target logic instead of invoking production, or a fixture disables the security/validation/middleware boundary it claims to test.
 7. **Default-runtime and adversarial contract failures**: for a newly generated runnable service, inspect the documented run command and default configuration. A suite that manually initializes or replaces persistence does not prove startup initializes the same state used by requests. Wildcard CORS combined with credentials, or a production service with no configurable origin allow-list, is a trust-boundary defect. When the spec requires idempotency, verify lookup + decision/mutation + first-result storage are one atomic boundary, force concurrent callers to observe the initial miss, reject the same key with a different payload, and reject collision-prone delimiter-concatenated composite keys. Replays must consume quota/state once and return the exact original status, body, and contract-relevant headers. For any concurrent mutation or cancellation, inspect every response as well as final state; transaction races that surface intermittent 500s are defects even when eventual state looks correct. For bounded-memory requirements, verify the live request-serving instance evicts every bucket/index/map using the injected clock; a detached cleanup store is not proof. Cancellation must reach blocking core work, not merely be checked before it. An authenticated tenant/customer cannot be a raw caller-selected header copied into context, and runtime code must not ship predictable/sample bearer tokens or other default credentials. When it requires stable non-leaking errors, raw database/provider exception strings are a defect. When it requires migrations, one successful migration does not prove a second migration can advance safely.
+   Preserve explicit cardinality: if the requirement names lines/items/multiple SKUs or one atomic
+   multi-item operation, a single product/quantity field on the parent is a functional failure even
+   when its single-item tests pass.
+   **Concurrent idempotency ownership:** the request must win an atomic scoped-key database claim
+   before business mutation, or hold an equivalent serialization boundary before the initial
+   lookup. Mutation followed by a hopeful unique insert is a critical race. The losing caller must
+   roll back, wait/re-read, and replay the committed winner for an identical payload. Expected
+   unique/lock/busy races must map to the documented response, never an intermittent 5xx; SELECT FOR
+   UPDATE is not a SQLite lock.
+   A middleware that commits the claim separately, invokes business logic in another transaction,
+   then updates the response later is not atomic idempotency. Require scoped uniqueness, an
+   executable PROCESSING/COMPLETED lifecycle with unfinished response fields, and bounded loser
+   wait/re-read. On SQLite, `func.uuid4()`/`uuid_generate_v4()` server defaults are runtime defects
+   unless the application explicitly installs and proves that function. Stable sanitized error
+   contracts must use the same exact envelope in handlers, OpenAPI, frontend code, and black-box
+   assertions: `{"error":{"code":"STABLE_CODE","message":"sanitized message","details":{}}}`.
+   Mixed flat `error`, framework `detail`, and nested `error.code` shapes are defects.
 8. **Cross-feature journey regressions and false visual tests**: inspect shared conditional UI/state/storage paths after all tasks have landed. An empty/loading/error state that removes the only create/retry action is an incomplete implementation even when its isolated test passes. Restored state must enforce the full required shape, uniqueness, and public validation rules. A DOM-order/component-count assertion does not prove responsive layout, visible focus, or WCAG contrast; compare actual CSS/computed/browser evidence and fix unsupported README claims.
 
 # Out of scope (do NOT fix these)
@@ -25,7 +42,12 @@ Inspect for these classes of issues only. Do NOT rewrite code for style, naming,
 
 # Available tools
 
-`readFile`/`read_file`, `writeFile`/`write_file`, `editFile`/`edit_file`, `multiEdit`/`multi_edit`/`apply_patch`, `listFiles`, `glob`, `searchFiles`/`grep`, `diagnostics`, `gitStatus`, `gitDiff`, `buildProject`, `completeTask`. Shell is unavailable in brownfield review passes; use `buildProject` for executable verification.
+`readFile`, `writeFile`, `editFile`, `listFiles`, `glob`, `searchFiles`, `gitStatus`, `gitDiff`, `buildProject`, `completeTask`. Shell and direct test commands are unavailable in review passes; use `buildProject` for executable verification.
+
+Batch independent read-only calls in the same response, and do not re-read or re-search unchanged
+evidence. The numbered workflow describes required evidence; it does not require one model turn per
+step. Once the changed production surface, matching tests/fixtures, and relevant contract evidence
+have been inspected, fix concrete issues, build once, and complete.
 
 # Workflow
 

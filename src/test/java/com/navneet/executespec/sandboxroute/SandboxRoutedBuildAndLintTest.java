@@ -13,6 +13,7 @@ import java.util.List;
 
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.navneet.executespec.sandbox.SandboxExecResult;
+import com.navneet.executespec.security.ContextSanitizer;
 import com.navneet.executespec.smoketest.BuildCommand;
 import com.navneet.executespec.smoketest.BuildCommandResolver;
 import com.navneet.executespec.smoketest.TestCommandResolver;
@@ -23,6 +24,7 @@ import com.navneet.executespec.tool.BuildProjectTool;
 import com.navneet.executespec.tool.ExecutionContext;
 import com.navneet.executespec.tool.MavenDependencyValidator;
 import com.navneet.executespec.tool.ShellSandboxPolicy;
+import com.navneet.executespec.tool.ShellTool;
 import com.navneet.executespec.tool.ToolResult;
 
 import org.junit.jupiter.api.Test;
@@ -81,6 +83,41 @@ class SandboxRoutedBuildAndLintTest {
 
     assertThat(result).isInstanceOf(ToolResult.Ok.class);
     assertThat(((ToolResult.Ok) result).content()).contains("exit=0", "hi");
+  }
+
+  @Test
+  void anUnavailableSandboxMakesShellUnavailableInsteadOfRunningItOnTheHost() {
+    SandboxCommandRoutingService routing = mock(SandboxCommandRoutingService.class);
+    when(routing.routingEnabled()).thenReturn(true);
+    when(routing.executeShell(anyString(), any(), anyString(), any())).thenReturn(UNAVAILABLE);
+    ShellTool shell =
+        new ShellTool(new ShellSandboxPolicy(), null, null, new ContextSanitizer(), routing);
+
+    ToolResult result =
+        shell.execute(
+            JsonNodeFactory.instance.objectNode().put("command", "touch host-marker"), ctx());
+
+    assertThat(result).isInstanceOf(ToolResult.Err.class);
+    ToolResult.Err err = (ToolResult.Err) result;
+    assertThat(err.kind()).isEqualTo(ToolResult.ErrorKind.UNAVAILABLE);
+    assertThat(err.message()).contains("NOT executed on the application host");
+    assertThat(workspace.resolve("host-marker")).doesNotExist();
+  }
+
+  @Test
+  void aRoutedShellPreservesTheSandboxExitStatusAndOutput() {
+    SandboxCommandRoutingService routing = mock(SandboxCommandRoutingService.class);
+    when(routing.routingEnabled()).thenReturn(true);
+    when(routing.executeShell(anyString(), any(), anyString(), any()))
+        .thenReturn(SandboxExecResult.completed(3, "inside", "failed", false, Duration.ZERO));
+    ShellTool shell =
+        new ShellTool(new ShellSandboxPolicy(), null, null, new ContextSanitizer(), routing);
+
+    ToolResult result =
+        shell.execute(JsonNodeFactory.instance.objectNode().put("command", "python3 -V"), ctx());
+
+    assertThat(result).isInstanceOf(ToolResult.Ok.class);
+    assertThat(((ToolResult.Ok) result).content()).contains("exit=3", "inside", "failed");
   }
 
   @Test

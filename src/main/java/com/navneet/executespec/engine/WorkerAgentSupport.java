@@ -5,6 +5,7 @@ import java.util.List;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.navneet.executespec.state.repository.PipelineRunRepository;
 import com.navneet.executespec.tool.ToolCapabilities;
 
 /**
@@ -101,5 +102,32 @@ final class WorkerAgentSupport {
     if (left == null) return right;
     if (right == null) return left;
     return Math.min(left, right);
+  }
+
+  static boolean cancellationRequested(PipelineRunRepository runs, String runId) {
+    if (Thread.currentThread().isInterrupted()) return true;
+    try {
+      return runs.existsByRunIdAndStatus(runId, "CANCELLED");
+    } catch (RuntimeException ignored) {
+      return false;
+    }
+  }
+
+  static WorkerResult stoppedResult(
+      int iteration,
+      int toolsDispatched,
+      String lastText,
+      int repeatedAssistantTextCount,
+      List<String> toolLog,
+      long startedAtMillis) {
+    return WorkerResult.builder()
+        .outcome(WorkerResult.Outcome.STOPPED_WITHOUT_COMPLETE)
+        .iterations(iteration)
+        .toolCallsDispatched(toolsDispatched)
+        .finalAssistantText(lastText)
+        .repeatedAssistantTextCount(repeatedAssistantTextCount)
+        .toolCallLog(toolLog)
+        .totalLatencyMs(System.currentTimeMillis() - startedAtMillis)
+        .build();
   }
 }

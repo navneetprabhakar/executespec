@@ -48,6 +48,12 @@ class RunPersistenceWriter {
   private final SseBroadcaster broadcaster;
   private final ObjectMapper objectMapper;
 
+  void persistCompiledPlan(String runId, Plan plan) {
+    persistPlan(runId, plan);
+    persistTasks(runId, plan);
+    persistRunTitle(runId, plan);
+  }
+
   void persistPlan(String runId, Plan plan) {
     runRepo
         .findById(runId)

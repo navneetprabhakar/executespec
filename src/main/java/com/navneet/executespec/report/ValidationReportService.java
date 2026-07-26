@@ -320,6 +320,8 @@ public class ValidationReportService {
               // RR-1660 — carry the producer's execution-provenance token, three-valued. A summary
               // with no signal stays null (unproven), never false.
               .testExecutionVerified(ts == null ? null : ts.getExecutionVerified())
+              .testEvidenceScope(
+                  ts == null || ts.getEvidenceScope() == null ? null : ts.getEvidenceScope().name())
               .reviewerVerdict(reviewerVerdict)
               .verifiedScore(verifiedScore)
               .rubricScore(rubricScore)
@@ -352,13 +354,15 @@ public class ValidationReportService {
       // RR-295 — atomic PK upsert (see the id-reuse note above); no destructive pre-delete.
       var saved = repository.save(report);
       List<VerificationEvidenceDTO> verificationLedger = buildVerificationLedger(saved, issues);
+      PipelineRun reportRun = input.run();
       GoalDonenessDecision runGoalDecision =
-          goalProofEvaluator.evaluate(
+          goalProofEvaluator.evaluateForRun(
               saved.getRunId(),
-              runGoalSummary(input.run()),
+              runGoalSummary(reportRun),
+              reportRun == null ? null : reportRun.getStatus(),
               saved.getPipelineResult(),
               verificationLedger);
-      persistRunGoalDecision(input.run(), runGoalDecision);
+      persistRunGoalDecision(reportRun, runGoalDecision);
       publishEvidenceEvent(saved, verificationLedger, runGoalDecision);
 
       // 5. Metrics
@@ -439,7 +443,7 @@ public class ValidationReportService {
   }
 
   /**
-   * Recompute the persisted score after the independent black-box functional suite completes.
+   * Recompute the persisted score after an explicitly scoped concrete suite completes.
    *
    * <p>Report generation normally happens before generated/preview tests finish. Updating only
    * {@code testCoverageScore} in that later path left the headline {@code verifiedScore}, the
@@ -447,10 +451,11 @@ public class ValidationReportService {
    * rescore as one transactional operation: test counts, both headline scores, and the reloadable
    * evidence ledger are written from the same execution summary.
    *
-   * <p>The persisted report is the source of truth for every signal other than concrete tests. This
-   * deliberately does not rerun an LLM assessment or reviewer, and therefore cannot invent new
-   * quality evidence. A missing report is returned as empty so the caller can retain its existing
-   * report-generation race handling.
+   * <p>A fresh workspace suite remains deterministic code-level evidence, but is capped and cannot
+   * satisfy functional run-goal proof. Only a fresh live-preview suite proves the external product
+   * boundary. The persisted report is the source of truth for every other signal; this deliberately
+   * does not rerun an LLM assessment or reviewer. A missing report is returned as empty so the
+   * caller can retain its existing report-generation race handling.
    */
   @org.springframework.transaction.annotation.Transactional
   public Optional<ValidationReport> rescoreAfterConcreteTests(
@@ -464,12 +469,13 @@ public class ValidationReportService {
     }
 
     ValidationReport report = found.get();
-    int incomingTotal = Math.max(0, summary.getTotalTests());
-    int incomingPassed = Math.max(0, Math.min(summary.getPassed(), incomingTotal));
-    // The incoming population is the independently generated black-box suite. It REPLACES any
-    // prior worker-authored workspace-test population; adding the two lets unit tests dilute a
-    // failing functional result and falsely certify output quality. Re-delivery is naturally
-    // idempotent because the same external counts overwrite the row.
+    boolean provenTestExecution = summary.hasProvenTestExecution();
+    int incomingTotal = provenTestExecution ? Math.max(0, summary.getTotalTests()) : 0;
+    int incomingPassed =
+        provenTestExecution ? Math.max(0, Math.min(summary.getPassed(), incomingTotal)) : 0;
+    // Each event is one explicitly scoped population and REPLACES the prior population. Adding
+    // workspace and functional counts would let unit tests dilute a failing black-box result.
+    // Re-delivery is naturally idempotent because the same scoped counts overwrite the row.
     int total = incomingTotal;
     int passed = incomingPassed;
     List<ReportIssueDTO> issues = parseIssues(report.getIssuesJson());
@@ -483,7 +489,11 @@ public class ValidationReportService {
 
     report.setTestsTotal(total);
     report.setTestsPassed(passed);
-    report.setTestExecutionVerified(summary.getExecutionVerified());
+    report.setTestExecutionVerified(provenTestExecution ? Boolean.TRUE : Boolean.FALSE);
+    report.setTestEvidenceScope(
+        provenTestExecution && summary.getEvidenceScope() != null
+            ? summary.getEvidenceScope().name()
+            : TestExecutionSummary.EvidenceScope.UNAVAILABLE.name());
     ExecutableVerificationEvidence executableVerification =
         executableVerification(
             report.getFinalBuildPassed(), true, passed, total, scoreEvidenceFailure(report));
@@ -525,13 +535,15 @@ public class ValidationReportService {
 
     ValidationReport saved = repository.save(report);
     List<VerificationEvidenceDTO> ledger = buildVerificationLedger(saved, issues);
+    PipelineRun reportRun = findRunForReport(saved.getRunId());
     GoalDonenessDecision runGoalDecision =
-        goalProofEvaluator.evaluate(
+        goalProofEvaluator.evaluateForRun(
             saved.getRunId(),
-            runGoalSummary(findRunForReport(saved.getRunId())),
+            runGoalSummary(reportRun),
+            reportRun == null ? null : reportRun.getStatus(),
             saved.getPipelineResult(),
             ledger);
-    persistRunGoalDecision(findRunForReport(saved.getRunId()), runGoalDecision);
+    persistRunGoalDecision(reportRun, runGoalDecision);
     publishEvidenceEvent(saved, ledger, runGoalDecision);
     return Optional.of(saved);
   }
@@ -548,9 +560,7 @@ public class ValidationReportService {
   /** Full quality credit requires a provenance-verified independent functional execution. */
   private static int capScoreWithoutIndependentFunctionalProof(
       int score, TestExecutionSummary summary) {
-    return summary != null && summary.isExecutionProven() && summary.getTotalTests() > 0
-        ? score
-        : Math.min(score, 75);
+    return summary != null && summary.isIndependentFunctionalProof() ? score : Math.min(score, 75);
   }
 
   private String scoreEvidenceFailure(ValidationReport report) {
@@ -1014,6 +1024,7 @@ public class ValidationReportService {
         entity.getChecksPassed() != null && !entity.getChecksPassed().isBlank()
             ? Arrays.asList(entity.getChecksPassed().split(","))
             : List.of();
+    PipelineRun reportRun = findRunForReport(entity.getRunId());
 
     return new ValidationReportDTO(
         entity.getId(),
@@ -1049,9 +1060,10 @@ public class ValidationReportService {
         entity.getReviewerVerdict(),
         effectiveVerifiedScore,
         verificationLedger,
-        goalProofEvaluator.evaluate(
+        goalProofEvaluator.evaluateForRun(
             entity.getRunId(),
-            runGoalSummary(findRunForReport(entity.getRunId())),
+            runGoalSummary(reportRun),
+            runStatus(reportRun),
             entity.getPipelineResult(),
             verificationLedger),
         effectiveRubricScore,
@@ -1068,6 +1080,10 @@ public class ValidationReportService {
       log.debug("Failed to load run goal summary for report run={}: {}", runId, ex.getMessage());
       return null;
     }
+  }
+
+  private static String runStatus(PipelineRun run) {
+    return run == null ? null : run.getStatus();
   }
 
   private static String runGoalSummary(PipelineRun run) {

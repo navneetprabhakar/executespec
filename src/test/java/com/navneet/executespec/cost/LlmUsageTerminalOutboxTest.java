@@ -45,6 +45,24 @@ class LlmUsageTerminalOutboxTest {
   }
 
   @Test
+  void materializedLateAttemptReconcilesTerminalRunTotals() {
+    RunStepUsage row = usage("attempt-late");
+    var lease = lease(row);
+    RunTokenAttributor attributor = org.mockito.Mockito.mock(RunTokenAttributor.class);
+    LlmUsageTerminalOutbox reconciling =
+        new LlmUsageTerminalOutbox(store, metrics, attributor, 20, 120);
+    when(store.stage(row)).thenReturn(LlmUsageTerminalOutboxStore.StageResult.STAGED);
+    when(store.claimOne(eq("attempt-late"), anyString(), any(Duration.class)))
+        .thenReturn(Optional.of(lease));
+    when(store.materialize(lease, row)).thenReturn(true);
+
+    assertThat(reconciling.persist(row))
+        .isEqualTo(LlmUsageTerminalOutbox.PersistResult.MATERIALIZED);
+
+    verify(attributor).reconcileRunTotalsIfTerminal("run-1");
+  }
+
+  @Test
   void canonicalWriteFailureLeavesExactDatabasePayloadQueued() {
     RunStepUsage row = usage("attempt-2");
     var lease = lease(row);

@@ -36,21 +36,17 @@ invalid reports are excluded and counted separately.
   deterministic JSON. New reports and concrete-test rescoring populate those columns, and the
   reloadable ledger exposes the same evidence. `FAILED` and `UNAVAILABLE` rows are excluded from
   project health; historical nullable rows remain readable for backward compatibility.
-- Ledger entries label provenance (`DETERMINISTIC`, `UNVERIFIED_COUNT`, `LLM_REVIEWER`,
-  `LLM_ASSESSMENT`, `LLM_ASSISTED_COUNT`, `HYBRID`, or `INTERNAL_FORMULA`). A score is a summary,
-  not independent proof.
-- `DETERMINISTIC` is the only label that claims independence from an LLM. RR-1646 removed it from
-  the persisted concrete-test counts because report files read off disk carried no proof they
-  described THIS run. **V317 (RR-1660) supplies that proof and restores the label where — and only
-  where — it was earned.** `validation_report.test_execution_verified` is a THREE-VALUED token set
-  TRUE only when the producing runner reset the report directory before launch, checked the exit
-  status, and admitted only reports postdating the launch. The `tests` row, and the
-  `executable-verification` row whenever `executable_tests_run` is true, read
-  `DETERMINISTIC`/HIGH on TRUE and `UNVERIFIED_COUNT`/MEDIUM otherwise.
-  **`null` is unproven, never proven-false** — every pre-V317 row and every producer that
-  establishes no freshness lands there and keeps the conservative label. Row *status* is unchanged, and
-  `ValidationReportGoalProofEvaluator` keys on status rather than source/confidence, so restoring
-  the strong label does not by itself change run-level goal proof.
+- Ledger entries label provenance (`DETERMINISTIC_FUNCTIONAL`,
+  `DETERMINISTIC_WORKSPACE_SUITE`, `DETERMINISTIC_EXECUTION` for legacy fresh-but-unscoped rows,
+  `UNVERIFIED_COUNT`, `LLM_REVIEWER`, `LLM_ASSESSMENT`, `LLM_ASSISTED_COUNT`, `HYBRID`, or
+  `INTERNAL_FORMULA`). A score is a summary, not independent proof.
+- V317's `validation_report.test_execution_verified` proves count freshness. V344 adds
+  `test_evidence_scope` so freshness is not confused with the boundary exercised:
+  `LIVE_PREVIEW_FUNCTIONAL` is independent product-level proof, while `WORKSPACE_TEST_SUITE` is
+  deterministic code-level evidence only. Both can render their observed pass/fail status, but
+  only a `DETERMINISTIC_FUNCTIONAL`/HIGH tests row can satisfy
+  `ValidationReportGoalProofEvaluator` and reach `STOP_DONE`. Null/false freshness renders the row
+  `UNKNOWN` with `UNVERIFIED_COUNT`; positive stale or unbound counts never render as pass.
 - `RunChangeEvidenceService` requires an admitted run-start baseline. When no `run_repo_snapshot`
   row exists, a Git workspace is accepted only if its history is a single commit — the case where
   the workspace was initialised for this run and `gitCommit` is filtered out of worker authority.
@@ -71,13 +67,13 @@ invalid reports are excluded and counted separately.
   keeps the proof uncertain, and missing spec-adherence evidence remains explicitly unproven.
 - No approved product diff, deterministic zero spec adherence with named missing requirements, or
   zero required-endpoint coverage forces both headline scores to zero and `pipelineResult=FAILED`.
-- Worker-authored workspace tests are supplemental repair diagnostics and never populate the
-  customer-facing quality score. The independently generated black-box suite exercises the real
-  preview/runtime and replaces any earlier test population. Its event is idempotent overwrite, not
-  arithmetic merge: unit tests cannot dilute a failing functional result. Missing, failed, stale,
-  zero-test, or provenance-unverified functional execution persists 0/0/unverified evidence and
-  caps both verified/rubric headlines at 75; only a non-empty provenance-verified external suite can
-  earn full test credit.
+- Fresh workspace suites remain customer-visible deterministic test evidence, explicitly labelled
+  `workspace suite only`; they cannot certify deployed journeys and cap both verified/rubric
+  headlines at 75. The independently generated black-box suite exercises the live preview/runtime
+  and replaces the earlier population. Events are idempotent overwrite, not arithmetic merge:
+  unit tests cannot dilute a failing functional result. Missing, failed, stale, zero-test, or
+  provenance-unverified execution persists 0/0/unverified evidence; only a non-empty,
+  provenance-verified `LIVE_PREVIEW_FUNCTIONAL` suite can earn full test credit and final-goal proof.
 - Anti-gaming guards (`scoring.gaming-guards`) are tighten-only and must not be defeated by absent
   evidence. With the guards on, a null endpoint-coverage reading gives CODE_DELIVERED the midpoint
   of the guarded range (75), not the full slot, and a missing or unrecognised test-coverage
