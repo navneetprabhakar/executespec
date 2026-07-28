@@ -47,9 +47,10 @@ class FlywayMigrationInventoryTest {
     // identity, bringing the exact inventory to 336. V351 adds the dormant per-operation LLM
     // attempt-fencing foundation, bringing the exact inventory to 337. V352 permits exact,
     // structurally valid BLOCKED RequirementIR evidence to open a visible pending gate while
-    // preserving fail-closed approval, bringing the exact inventory to 338.
-    assertThat(migrations).hasSize(338);
-    assertThat(migrations.getLast().version()).isEqualTo("352");
+    // preserving fail-closed approval, bringing the exact inventory to 338. V353 adds durable,
+    // idempotent project-architecture refresh jobs, bringing the exact inventory to 339.
+    assertThat(migrations).hasSize(339);
+    assertThat(migrations.getLast().version()).isEqualTo("353");
 
     assertThat(migrations.stream().map(MigrationFile::version)).doesNotHaveDuplicates();
     assertThat(migrations.stream().map(MigrationFile::fileName))

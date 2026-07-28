@@ -18,14 +18,19 @@ class ProjectArchitectureDurableCallerContractTest {
     String postMerge = source("project/pr/PostMergeCascadeService.java");
     String execution = source("execution/service/ExecutionOrchestrator.java");
     String run = source("integration/RunOrchestrator.java");
+    String prePlannerRefresh = source("integration/PrePlannerArchitectureRefreshService.java");
 
     assertThat(controller).doesNotContain("service.generate(projectId");
     assertThat(confirmed).contains("architectureJobs.requestExact(");
     assertThat(legacyTool).contains("architectureJobs.request(");
     assertThat(postMerge).contains("architectureJobs.request(");
     assertThat(execution).contains("requestAndAwaitArchitectureId(");
-    assertThat(run).contains("requestWithProviderAndAwaitArchitectureId(");
+    assertThat(run).contains("prePlannerArchitectureRefreshService.refreshIfStale(");
+    assertThat(run).doesNotContain("requestWithProviderAndAwaitArchitectureId(");
     assertThat(run).doesNotContain("projectArchitectureService.generate(");
+    assertThat(prePlannerRefresh).contains("requestWithProviderAndAwaitArchitectureId(");
+    assertThat(prePlannerRefresh)
+        .contains("architectureService", ".findById(refreshedArchitectureId)");
   }
 
   private static String source(String relative) throws Exception {
