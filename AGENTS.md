@@ -2,7 +2,7 @@
 
 > This file is read by Claude Code at session start. Keep it accurate.
 
-**Version:** `2.0.0` ([`Version`](Version)). Migration head: **V350** in the current worktree; next allocatable migration **V351**, with **336 migration source files**. The uncommitted V350 source carries an external collaborator's payer/credential org separately from the host run tenant across pipeline runs and LLM execution contexts. Clean Java 21 verification passes 5,738/5,738 with zero failures, errors, or skips; the named PostgreSQL V350/dispatch/lifecycle/plan-gate gates pass independently. `requirement.ir.gate.mode` remains `LEGACY`. Default branch: `main`. Dev environment: `dev.executespec.ai`.
+**Version:** `2.0.0` ([`Version`](Version)). Migration head: **V350** at committed/pushed checkpoint **`13ead3f40`**; next allocatable migration **V351**, with **336 migration source files**. V350 carries an external collaborator's payer/credential org separately from the host run tenant across pipeline runs and LLM execution contexts. Clean Java 21 verification passes 5,738/5,738 with zero failures, errors, or skips; the named PostgreSQL V350/dispatch/lifecycle/plan-gate gates pass independently. `requirement.ir.gate.mode` remains `LEGACY`. Default branch: `main`. Dev environment: `dev.executespec.ai`.
 
 Spec-driven AI coding platform. Customer submits a spec in natural language → V2 pipeline plans, codes across one or more repos, builds + tests, opens a pull request with a deterministic verified score. Human approves at the plan gate; everything after is automatic.
 
@@ -11,7 +11,7 @@ Spec-driven AI coding platform. Customer submits a spec in natural language → 
 - **Backend:** Java 21, Spring Boot 3.5, Spring AI 1.1.6, PostgreSQL (Cloud SQL) + Redis. Single Spring Boot JAR; frontend served from `static/`.
 - **Frontend:** React 18, Vite 5, Tailwind CSS 4, TypeScript 5.3. **Console** (`frontend/src/console/`) is now the only protected web-app shell (RL-2026-06-027): `App.tsx` mounts `ConsoleShell` for every protected route, `/home` renders `ConsoleHome`, `/decisions` renders `ConsoleDecisions`, and the old `localStorage es:console` gate plus `IdeWorkspace` shell are gone. The VS Code-style `frontend/src/ide/` package remains the route-level implementation surface for runs, projects, billing, org settings, benchmark tracking, etc., while the actual in-editor IDE metaphor belongs to the VS Code extension. Protected routes lazy-load the heavy admin/discovery/billing/org/legal chunks so the run loop stays in the entry path. The production **Signal** chrome was retired and its pages were ported IDE-native then **deleted in the 2026-05-23 cleanup** (App.tsx's dead `ide ? Ide : Signal` ternaries collapsed + the `const ide` flag dropped; `Shell.tsx` + 22 orphaned pages removed). `frontend/src/signal/` now holds only the standalone **public** pages (auth/marketing/legal/shared + `AdminPage` for `/admin/*`) plus shared `components/` + `signal.css` reused by protected surfaces. The legacy V2 sidebar + V3 top-bar chromes (`components/`, `pages/`, `v3/`) were **deleted** (commit `5f5e4aaa`) — only `signal/`, `ide/`, `console/`, `hooks/`, `lib/`, `stores/`, `types`, `design-system/` remain under `frontend/src/`.
 - **Infra:** GCP us-east4. Single GCE VM serves prod + dev; Cloud Run serves on-demand previews. Cloudflare in front of `*.executespec.ai`.
-- **Codebase shape:** 77 Java package roots / major package groups under `com.navneet.executespec.*` (flat; the historical `v2.*` / `v3.*` prefixes were retired in 2026-05-07's unification pass). Current worktree inventory includes 107 REST controller classes, `agentsession/` for cross-surface agent sessions, and the uncommitted `repositoryintel/` read-only evidence port. Frontend ~75K LOC.
+- **Codebase shape:** 77 Java package roots / major package groups under `com.navneet.executespec.*` (flat; the historical `v2.*` / `v3.*` prefixes were retired in 2026-05-07's unification pass). Current source includes 107 REST controller classes, `agentsession/` for cross-surface agent sessions, and the committed `repositoryintel/` read-only evidence port. Frontend ~75K LOC.
 
 ### V2 pipeline (the only execution path)
 
@@ -90,7 +90,7 @@ Reviewer (`reviewer/ReviewerAgent.java`): general pass → wiring pass → `Post
 
 ### Four customer-facing autofix surfaces (V183 `triggered_by_finding`)
 
-All routed through one chokepoint `finding/FindingPatchSubmitter`. The current uncommitted V350-era
+All routed through one chokepoint `finding/FindingPatchSubmitter`. The committed V350-era
 implementation resolves the host project's org as the PATCH data tenant and the active finding
 actor's home org as payer/provider-policy authority before dedupe or dispatch. Submitter dedupes per
 finding key, dispatches with `runMode=PATCH` + `source="finding:<TYPE>"`, and `runPatchPipeline`

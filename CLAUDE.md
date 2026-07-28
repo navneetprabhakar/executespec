@@ -2,7 +2,7 @@
 
 > This file is read by Claude Code at session start. Keep it accurate.
 
-**Version:** `2.0.0` ([`Version`](Version)). Migration head: **V350** on the current worktree; the next allocatable migration is **V351** and the migration directory contains **336 source files**. The uncommitted V350 source carries the external-collaborator payer/credential organization separately from the host tenant through pipeline runs and durable LLM contexts. Clean Java 21 verification passes 5,738/5,738 with zero failures, errors, or skips; the named PostgreSQL V350/dispatch/lifecycle/plan-gate gates pass independently. `requirement.ir.gate.mode` remains `LEGACY`, so RequirementIR enforcement is still inactive. Default branch: `main`. Dev environment: `dev.executespec.ai`.
+**Version:** `2.0.0` ([`Version`](Version)). Migration head: **V350** at committed/pushed checkpoint **`13ead3f40`**; the next allocatable migration is **V351** and the migration directory contains **336 source files**. V350 carries the external-collaborator payer/credential organization separately from the host tenant through pipeline runs and durable LLM contexts. Clean Java 21 verification passes 5,738/5,738 with zero failures, errors, or skips; the named PostgreSQL V350/dispatch/lifecycle/plan-gate gates pass independently. `requirement.ir.gate.mode` remains `LEGACY`, so RequirementIR enforcement is still inactive. Default branch: `main`. Dev environment: `dev.executespec.ai`.
 
 Spec-driven AI coding platform. Customer submits a spec in natural language → V2 pipeline plans, codes across one or more repos, builds + tests, opens a pull request with a deterministic verified score. Human approves at the plan gate; everything after is automatic.
 
@@ -11,7 +11,7 @@ Spec-driven AI coding platform. Customer submits a spec in natural language → 
 - **Backend:** Java 21, Spring Boot 3.5, Spring AI 1.1.6, PostgreSQL (Cloud SQL) + Redis. Single Spring Boot JAR; frontend served from `static/`. The fat JAR excludes unused heavyweight transitives from Spring AI Anthropic (`json-path`/Groovy), Tika unsupported parser families, and Google xDS/Conscrypt clients; keep parser coverage pinned with `DocumentExtractorTest` before relaxing or expanding those exclusions.
 - **Frontend:** React 18, Vite 5, Tailwind CSS 4, TypeScript 5.3. **Console** (`frontend/src/console/`) is now the only protected web-app shell (RL-2026-06-027): `App.tsx` mounts `ConsoleShell` for every protected route, `/home` renders `ConsoleHome`, `/decisions` renders `ConsoleDecisions`, and the old `localStorage es:console` gate plus `IdeWorkspace` shell are gone. The VS Code-style `frontend/src/ide/` package remains the route-level implementation surface for runs, projects, billing, org settings, benchmark tracking, etc., while the actual in-editor IDE metaphor belongs to the VS Code extension. Protected routes lazy-load the heavy admin/discovery/billing/org/legal chunks so the run loop stays in the entry path. The production **Signal** chrome was retired and its pages were ported IDE-native then **deleted in the 2026-05-23 cleanup** (App.tsx's dead `ide ? Ide : Signal` ternaries collapsed + the `const ide` flag dropped; `Shell.tsx` + 22 orphaned pages removed). `frontend/src/signal/` now holds only the standalone **public** pages (auth/marketing/legal/shared + `AdminPage` for `/admin/*`) plus shared `components/` + `signal.css` reused by protected surfaces. The legacy V2 sidebar + V3 top-bar chromes (`components/`, `pages/`, `v3/`) were **deleted** (commit `5f5e4aaa`) — only `signal/`, `ide/`, `console/`, `hooks/`, `lib/`, `stores/`, `types`, `design-system/` remain under `frontend/src/`.
 - **Infra:** GCP us-east4. Single GCE VM serves prod + dev; Cloud Run serves on-demand previews. Cloudflare in front of `*.executespec.ai`.
-- **Codebase shape:** 77 Java package roots / major package groups under `com.navneet.executespec.*` (flat; the historical `v2.*` / `v3.*` prefixes were retired in 2026-05-07's unification pass). Current worktree inventory includes 107 REST controller classes, `agentsession/` for cross-surface agent sessions, and the uncommitted `repositoryintel/` read-only evidence port. Frontend ~75K LOC.
+- **Codebase shape:** 77 Java package roots / major package groups under `com.navneet.executespec.*` (flat; the historical `v2.*` / `v3.*` prefixes were retired in 2026-05-07's unification pass). Current source includes 107 REST controller classes, `agentsession/` for cross-surface agent sessions, and the committed `repositoryintel/` read-only evidence port. Frontend ~75K LOC.
 
 ### V2 pipeline (the only execution path)
 
@@ -141,7 +141,7 @@ sandbox is recorded as a formatter error and never falls back to a host process.
 
 ### Four customer-facing autofix surfaces (V183 `triggered_by_finding`)
 
-All routed through one chokepoint `finding/FindingPatchSubmitter`. The current uncommitted V350-era
+All routed through one chokepoint `finding/FindingPatchSubmitter`. The committed V350-era
 implementation resolves the host project's org as the PATCH data tenant and the active finding
 actor's home org as payer/provider-policy authority before dedupe or dispatch. Submitter dedupes per
 finding key, dispatches with `runMode=PATCH` + `source="finding:<TYPE>"`, and `runPatchPipeline`
@@ -978,8 +978,8 @@ rather than the caller's home org, so an external collaborator's run no longer c
 `projectId` with a personal `orgId`; the actor remains `createdByUserId`. V323 backfills existing
 rows and adds a `NOT VALID` project/org check for operators to validate after the backfill is
 confirmed. Follow-up: managed-AI policy should resolve from the run's payer org rather than from the
-submitting user now that the payer org is correct. **Addressed by the current uncommitted V350
-implementation (2026-07-28; backend and named PostgreSQL gates verified locally):**
+submitting user now that the payer org is correct. **Addressed by committed backend checkpoint
+`13ead3f40` (2026-07-28; backend and named PostgreSQL gates verified locally):**
 `pipeline_run.billing_org_id` now preserves the actor's payer org independently from host-tenant
 `org_id`; every durable LLM context separately stores `credential_org_id`. Pipeline, Ask, and
 preview keep the host org as their isolation scope while credential-policy revalidation and
@@ -1470,7 +1470,7 @@ evidence, and horizontally scaled JVMs require a shared persistent trajectory ro
   Premature scaffold-owned “all tables” migrations are deferred to the final domain-schema
   producer so versioned DDL is generated only after prerequisite model contracts exist; order
   lifecycle normalization does not rewrite similarly named columns such as `Inventory.reserved`.
-- **Execution View approved-solution dispatch identity (2026-07-28, uncommitted; deterministic
+- **Execution View approved-solution dispatch identity (2026-07-28, backend `13ead3f40`; deterministic
   verification green)** — the existing V90
   `execution_solution_run(solution_id, attempt_number)` unique row is now the pre-dispatch durable
   claim. Attempt generation is explicitly `retry_count + 1`, the row reserves the child UUID before
@@ -1482,7 +1482,7 @@ evidence, and horizontally scaled JVMs require a shared persistent trajectory ro
   submit-then-record and lost-observer windows without adding a migration or moving provider/SCM
   side effects into a database transaction. The dispatch-reservation race/replay PostgreSQL gate
   passes independently, and clean backend verification passes 5,738/5,738.
-- **Iteration and finding payer identity (2026-07-28, uncommitted; deterministic verification green)** —
+- **Iteration and finding payer identity (2026-07-28, backend `13ead3f40`; deterministic verification green)** —
   BUILD iterations inherit the source run's host tenant and run policy but capture the current
   iteration actor's organization as the new child payer/provider-policy authority. A losing
   idempotency contender is cancelled and must be durably accounted for before the canonical child

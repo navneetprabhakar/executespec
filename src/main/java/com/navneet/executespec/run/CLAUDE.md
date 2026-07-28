@@ -5,7 +5,7 @@ fork/iterate, confirmed Web Agent cloud-run creation, and Execution View. It res
 authority, explicit repository admission, provider/key/spend policy, host-project tenancy, and the
 submitting actor's payer/provider-policy organization before dispatch.
 
-The current uncommitted V350 source stamps host `PipelineRun.orgId` separately from immutable
+Backend checkpoint `13ead3f40` stamps host `PipelineRun.orgId` separately from immutable
 `billingOrgId`. `RunIterationService` preserves the source run's host tenant and inherited route/
 cost policy while capturing the current iteration actor's organization as the child payer. A losing
 idempotency contender is cancelled and must be durably accounted for before the canonical child is
