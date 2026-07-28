@@ -7,7 +7,6 @@ import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
 
-import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.agent.LlmRouter;
 import com.navneet.executespec.agent.PromptAssembler;
@@ -16,14 +15,11 @@ import com.navneet.executespec.agent.ToolProtocolLeakGuard;
 import com.navneet.executespec.auth.entity.Project;
 import com.navneet.executespec.auth.repository.ProjectRepository;
 import com.navneet.executespec.codeintel.entity.ProjectArchitectureDoc;
-import com.navneet.executespec.codeintel.entity.ProjectCodeMap;
 import com.navneet.executespec.codeintel.entity.ProjectGeneratedDoc;
 import com.navneet.executespec.codeintel.entity.ProjectGeneratedDoc.DocType;
 import com.navneet.executespec.codeintel.repository.ProjectGeneratedDocRepository;
 import com.navneet.executespec.executioncontext.LlmExecutionPolicyFactory;
 import com.navneet.executespec.executioncontext.LlmExecutionReference;
-import com.navneet.executespec.project.entity.ProjectRepo;
-import com.navneet.executespec.project.entity.ProjectRepoLink;
 import com.navneet.executespec.project.repository.ProjectRepoLinkRepository;
 import com.navneet.executespec.project.repository.ProjectRepoRepository;
 import com.navneet.executespec.project.workspace.ProjectWorkspaceService;
@@ -41,7 +37,6 @@ import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
-import org.springframework.transaction.support.TransactionTemplate;
 
 import lombok.extern.slf4j.Slf4j;
 
@@ -70,18 +65,15 @@ public class ProjectDocGeneratorService {
   private final ProjectArchitectureService architectureService;
   private final ProjectWorkspaceService workspace;
   private final ProjectGeneratedDocRepository docRepo;
-  private final VersionRetentionService versionRetention;
   private final ProjectRepository projectRepo;
-  private final ProjectRepoLinkRepository linkRepo;
-  private final ProjectRepoRepository repoRepo;
   private final LlmRouter llmRouter;
   private final ModelResolver modelResolver;
   private final ProjectProviderResolver projectProviderResolver;
   private final LlmExecutionPolicyFactory executionPolicyFactory;
   private final PromptAssembler promptAssembler;
   private final GeneratedSecretScanner secretScanner;
-  private final ObjectMapper objectMapper;
-  private final TransactionTemplate transactionTemplate;
+  private final ProjectDocSourceBundleBuilder sourceBundleBuilder;
+  private final ProjectGeneratedDocPublisher publisher;
   private final ConcurrentHashMap<GenerationKey, CompletableFuture<ProjectGeneratedDoc>> inFlight =
       new ConcurrentHashMap<>();
 
@@ -191,10 +183,7 @@ public class ProjectDocGeneratorService {
     this.architectureService = architectureService;
     this.workspace = workspace;
     this.docRepo = docRepo;
-    this.versionRetention = versionRetention;
     this.projectRepo = projectRepo;
-    this.linkRepo = linkRepo;
-    this.repoRepo = repoRepo;
     this.llmRouter = llmRouter;
     this.modelResolver = modelResolver;
     this.costTracker = costTracker;
@@ -202,9 +191,13 @@ public class ProjectDocGeneratorService {
     this.executionPolicyFactory = executionPolicyFactory;
     this.promptAssembler = promptAssembler;
     this.secretScanner = secretScanner == null ? new GeneratedSecretScanner() : secretScanner;
-    this.objectMapper = objectMapper == null ? new ObjectMapper() : objectMapper;
-    this.transactionTemplate =
-        transactionManager == null ? null : new TransactionTemplate(transactionManager);
+    ObjectMapper sourceObjectMapper = objectMapper == null ? new ObjectMapper() : objectMapper;
+    this.sourceBundleBuilder =
+        new ProjectDocSourceBundleBuilder(
+            architectureService, linkRepo, repoRepo, sourceObjectMapper);
+    this.publisher =
+        new ProjectGeneratedDocPublisher(
+            architectureService, docRepo, versionRetention, projectRepo, transactionManager);
   }
 
   /** Compatibility constructor for focused tests that do not boot a transaction manager. */
@@ -413,7 +406,7 @@ public class ProjectDocGeneratorService {
           OUTPUT_LIMIT_REASON);
       throw new IncompleteGenerationException(docType);
     }
-    requireCompleteTermination(response);
+    ProjectDocResponsePolicy.requireComplete(response);
     String content = response.getResult().getOutput().getText();
     if (content == null || content.isBlank()) {
       throw new IllegalStateException("LLM returned empty content for " + docType);
@@ -466,50 +459,7 @@ public class ProjectDocGeneratorService {
   }
 
   private ProjectGeneratedDoc persistGeneratedDoc(ProjectGeneratedDoc candidate) {
-    Supplier<ProjectGeneratedDoc> persistence =
-        () -> {
-          projectRepo
-              .findByIdForQuotaUpdate(candidate.getProjectId())
-              .orElseThrow(
-                  () ->
-                      new IllegalArgumentException(
-                          "project not found: " + candidate.getProjectId()));
-          ProjectArchitectureDoc current =
-              architectureService
-                  .latest(candidate.getProjectId())
-                  .orElseThrow(StaleSourceException::new);
-          if (!java.util.Objects.equals(current.getVersion(), candidate.getSourceArchVersion())
-              || !java.util.Objects.equals(
-                  current.getGeneratedFromShas(), candidate.getSourceShasFingerprint())) {
-            throw new StaleSourceException();
-          }
-          Optional<ProjectGeneratedDoc> alreadyPersisted =
-              candidate.getSourceArchVersion() == null
-                      || candidate.getSourceShasFingerprint() == null
-                  ? Optional.empty()
-                  : docRepo
-                      .findFirstByProjectIdAndDocTypeAndSourceArchVersionAndSourceShasFingerprintOrderByVersionDesc(
-                          candidate.getProjectId(),
-                          candidate.getDocType(),
-                          candidate.getSourceArchVersion(),
-                          candidate.getSourceShasFingerprint())
-                      .filter(doc -> doc.getContent() != null && !doc.getContent().isBlank());
-          if (alreadyPersisted.isPresent()) return alreadyPersisted.get();
-
-          int nextVersion =
-              docRepo
-                  .findFirstByProjectIdAndDocTypeOrderByVersionDesc(
-                      candidate.getProjectId(), candidate.getDocType())
-                  .map(doc -> doc.getVersion() + 1)
-                  .orElse(1);
-          candidate.setVersion(nextVersion);
-          ProjectGeneratedDoc saved = docRepo.save(candidate);
-          versionRetention.pruneGeneratedDoc(candidate.getProjectId(), candidate.getDocType());
-          return saved;
-        };
-    return transactionTemplate == null
-        ? persistence.get()
-        : transactionTemplate.execute(status -> persistence.get());
+    return publisher.publish(candidate);
   }
 
   private ProjectGeneratedDoc singleFlight(
@@ -572,85 +522,11 @@ public class ProjectDocGeneratorService {
    * architecture.md + per-repo codemaps.
    */
   String buildSourceBundle(Project project, ProjectArchitectureDoc arch) {
-    java.util.Map<String, String> sourceShas = parseSourceShas(arch);
-    List<ProjectRepoLink> links = linkRepo.findByProjectId(project.getId());
-    List<ProjectRepo> repos = new java.util.ArrayList<>();
-    for (ProjectRepoLink link : links) {
-      ProjectRepo repo = repoRepo.findById(link.getRepoId()).orElse(null);
-      if (repo != null) repos.add(repo);
-    }
-    repos.sort(
-        java.util.Comparator.comparing(
-                ProjectRepo::getGithubRepoFullName,
-                java.util.Comparator.nullsLast(String::compareTo))
-            .thenComparing(
-                ProjectRepo::getId, java.util.Comparator.nullsLast(java.util.UUID::compareTo)));
-
-    StringBuilder metadata = new StringBuilder();
-    metadata.append("- Name: ").append(nullToDash(project.getName())).append('\n');
-    metadata.append("- Description: ").append(nullToDash(project.getDescription())).append('\n');
-    metadata.append("- GitHub owner: ").append(nullToDash(project.getGithubOwner())).append('\n');
-    metadata.append("\n## Linked repositories\n");
-    for (ProjectRepo repo : repos) {
-      metadata
-          .append("- ")
-          .append(repo.getGithubRepoFullName())
-          .append(" (default branch: ")
-          .append(repo.getDefaultBranch() == null ? "main" : repo.getDefaultBranch())
-          .append(")\n");
-    }
-
-    List<SourceSection> sections = new java.util.ArrayList<>();
-    sections.add(new SourceSection("# Project metadata", metadata.toString()));
-    sections.add(
-        new SourceSection(
-            "# Architecture document (v" + arch.getVersion() + ")",
-            arch.getContent() == null ? "" : arch.getContent()));
-    for (ProjectRepo repo : repos) {
-      String fullName = repo.getGithubRepoFullName();
-      String expectedSha = sourceShas.remove(fullName);
-      if (expectedSha == null || expectedSha.isBlank()) {
-        throw new StaleSourceException();
-      }
-      ProjectCodeMap exactCodeMap =
-          architectureService
-              .codeMapForSourceSha(project.getId(), repo.getId(), expectedSha)
-              .orElseThrow(StaleSourceException::new);
-      String content = exactCodeMap.getContent() == null ? "" : exactCodeMap.getContent();
-      sections.add(new SourceSection("# Repository codemap: " + fullName, content));
-    }
-    if (!sourceShas.isEmpty()) {
-      throw new StaleSourceException();
-    }
-    return fairBudgetSourceSections(sections);
-  }
-
-  private java.util.Map<String, String> parseSourceShas(ProjectArchitectureDoc arch) {
-    if (arch == null
-        || arch.getGeneratedFromShas() == null
-        || arch.getGeneratedFromShas().isBlank()) {
-      throw new StaleSourceException();
-    }
-    try {
-      return parseSourceShas(arch.getGeneratedFromShas());
-    } catch (Exception failure) {
-      throw new StaleSourceException();
-    }
+    return sourceBundleBuilder.build(project, arch);
   }
 
   private java.util.Map<String, String> parseSourceShas(String sourceFingerprint) {
-    if (sourceFingerprint == null || sourceFingerprint.isBlank()) throw new StaleSourceException();
-    try {
-      java.util.Map<String, String> parsed =
-          objectMapper.readValue(
-              sourceFingerprint, new TypeReference<java.util.LinkedHashMap<String, String>>() {});
-      if (parsed == null || parsed.isEmpty()) throw new StaleSourceException();
-      return new java.util.LinkedHashMap<>(parsed);
-    } catch (StaleSourceException stale) {
-      throw stale;
-    } catch (Exception failure) {
-      throw new StaleSourceException();
-    }
+    return sourceBundleBuilder.parseSourceShas(sourceFingerprint);
   }
 
   /**
@@ -678,41 +554,7 @@ public class ProjectDocGeneratorService {
   }
 
   static boolean responseWasTruncated(ChatResponse response) {
-    if (response == null || response.getResults() == null) return false;
-    return response.getResults().stream()
-        .filter(java.util.Objects::nonNull)
-        .map(org.springframework.ai.chat.model.Generation::getMetadata)
-        .filter(java.util.Objects::nonNull)
-        .map(org.springframework.ai.chat.metadata.ChatGenerationMetadata::getFinishReason)
-        .filter(java.util.Objects::nonNull)
-        .map(Object::toString)
-        .map(reason -> reason.trim().toLowerCase(java.util.Locale.ROOT))
-        .anyMatch(reason -> reason.equals("length") || reason.equals("max_tokens"));
-  }
-
-  /**
-   * Every explicit generation finish reason must be a known successful terminal reason. Spring AI
-   * normally returns one generation, but accepting only the first lets a later SAFETY/ERROR result
-   * pass the publication boundary.
-   */
-  private static void requireCompleteTermination(ChatResponse response) {
-    if (response == null || response.getResults() == null || response.getResults().isEmpty()) {
-      throw new ProviderNonCompleteGenerationException();
-    }
-    for (var generation : response.getResults()) {
-      if (generation == null || generation.getMetadata() == null) continue;
-      Object reason = generation.getMetadata().getFinishReason();
-      if (reason == null) continue;
-      String normalized = String.valueOf(reason).trim().toLowerCase(java.util.Locale.ROOT);
-      if (normalized.isBlank()
-          || normalized.equals("stop")
-          || normalized.equals("end_turn")
-          || normalized.equals("complete")
-          || normalized.equals("completed")) {
-        continue;
-      }
-      throw new ProviderNonCompleteGenerationException();
-    }
+    return ProjectDocResponsePolicy.wasTruncated(response);
   }
 
   /**
@@ -741,10 +583,6 @@ public class ProjectDocGeneratorService {
       throw new IllegalStateException("Project provider is required for document generation");
     }
     return project.getAiProvider();
-  }
-
-  private static String nullToDash(String s) {
-    return s == null || s.isBlank() ? "—" : s;
   }
 
   private static int safeInt(Integer i) {

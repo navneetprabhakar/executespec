@@ -1,9 +1,15 @@
 # `chat/` — terminal-run Ask
 
 `ChatService` is the live post-run Ask copilot. It admits terminal runs only, assembles bounded
-workspace and validation evidence, executes at most four read-only tool rounds through
-`RunChatTools`, and persists the sanitized transcript on `pipeline_run.chat_history_json`. It does
-not receive write, shell, push, deploy, or rerun authority.
+workspace and validation evidence, delegates the bounded provider/tool conversation to
+`RunChatTurnExecutor`, and persists the sanitized transcript on
+`pipeline_run.chat_history_json`. It does not receive write, shell, push, deploy, or rerun
+authority.
+
+`RunChatTurnExecutor` owns at most four read-only tool rounds, callback dispatch, provider
+finish-reason inspection, private tool-protocol suppression, and the final tool-free synthesis.
+Keep provider-turn mechanics there; admission, route resolution, evidence, transcript durability,
+and customer-facing policy errors belong to `ChatService`.
 
 `ChatHistoryCodec` owns the transcript storage boundary: JSON serialization/deserialization,
 malformed-history fail-safe behavior, and the deterministic provider-visible history window. The
@@ -51,7 +57,6 @@ append an actionable incomplete notice and return `complete=false` with
 `incompleteReason=PROVIDER_OUTPUT_LIMIT`; they are never persisted or projected as a complete Ask
 answer.
 
-The 2026-07-26 line-ceiling remediation extracted `ChatHistoryCodec` without changing the chat API,
-durable execution-context budgets, model route, or tool authority. `ChatService` moved from 604 to
-574 lines; the helper is 58 lines. Do not raise the god-class ceiling to put this responsibility
-back into the service.
+The line-ceiling remediation extracted `ChatHistoryCodec` and `RunChatTurnExecutor` without
+changing the chat API, durable execution-context budgets, model route, or tool authority. Do not
+put storage or provider-turn responsibility back into the orchestration service.

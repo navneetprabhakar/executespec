@@ -198,10 +198,7 @@ public class RunOrchestrator implements RunControlPort {
   private final com.navneet.executespec.memory.ProjectMemoryProvider projectMemoryProvider;
   private final com.navneet.executespec.codeintel.ProjectBriefService projectBriefService;
   private final com.navneet.executespec.codeintel.StalenessService stalenessService;
-  private final com.navneet.executespec.codeintel.ProjectArchitectureService
-      projectArchitectureService;
-  private final com.navneet.executespec.codeintel.ProjectArchitectureJobService
-      projectArchitectureJobs;
+  private final PrePlannerArchitectureRefreshService prePlannerArchitectureRefreshService;
   private final com.navneet.executespec.project.rag.RetrievalService retrievalService;
   private final com.navneet.executespec.memory.RunLedgerAgent runLedgerAgent;
   private final com.navneet.executespec.integration.scm.ScmPushService scmPushService;
@@ -1765,34 +1762,12 @@ public class RunOrchestrator implements RunControlPort {
                           .findById(runOwnerId)
                           .map(com.navneet.executespec.auth.entity.AppUser::getGithubPat)
                           .orElse(null);
-              var staleness = stalenessService.report(projectId, runUserPat);
-              if (staleness != null && staleness.stale()) {
-                log.info(
-                    "V2 run={} project={} has {} stale codemap(s); regenerating before planner",
-                    runId,
-                    projectId,
-                    staleness.staleCount());
-                // Preserve the run's explicit provider pin during pre-planner architecture refresh.
-                // Without this, a stale project can spend on its project-default provider before
-                // the pinned worker route is reached.
-                java.util.UUID refreshedArchitectureId =
-                    projectArchitectureJobs.requestWithProviderAndAwaitArchitectureId(
-                        projectId,
-                        runOwnerId,
-                        null,
-                        LlmProvider.valueOf(provider.toUpperCase(Locale.ROOT)));
-                projectArchitectureService
-                    .findById(refreshedArchitectureId)
-                    .orElseThrow(
-                        () ->
-                            new IllegalStateException(
-                                "Promoted pre-planner architecture is unavailable"));
-                stalenessService.invalidate(projectId);
-                log.info(
-                    "V2 run={} project={} completed durable pre-planner map refresh",
-                    runId,
-                    projectId);
-              }
+              prePlannerArchitectureRefreshService.refreshIfStale(
+                  runId,
+                  projectId,
+                  runOwnerId,
+                  runUserPat,
+                  LlmProvider.valueOf(provider.toUpperCase(Locale.ROOT)));
             } catch (Exception e) {
               log.warn(
                   "V2 run={} pre-execution staleness refresh failed (continuing): {}",

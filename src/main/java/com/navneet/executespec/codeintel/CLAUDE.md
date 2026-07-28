@@ -105,3 +105,11 @@ cross-node exactly-once spend.
 
 The database row is authoritative. Workspace `docs/<type>.md` is a best-effort read cache written
 only after durable persistence.
+
+`ProjectDocSourceBundleBuilder` owns linked-repository resolution, canonical ordering, exact-SHA
+codemap lookup, architecture-fingerprint parsing, and the final section-aware evidence budget.
+`ProjectGeneratedDocPublisher` owns the short project-row-locked publication transaction:
+source revalidation, same-source deduplication, version assignment, save, and retention. Provider
+dispatch and customer-safety validation stay in `ProjectDocGeneratorService`, while
+`ProjectDocResponsePolicy` owns fail-closed provider finish-reason classification. Do not fold these
+source, publication, or response-policy responsibilities back into that service.
