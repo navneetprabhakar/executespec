@@ -21,6 +21,8 @@ import com.navneet.executespec.agentsession.repository.AgentTurnRepository;
 import com.navneet.executespec.auth.repository.AppUserRepository;
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.config.featureflag.FeatureFlagService;
+import com.navneet.executespec.harness.entity.GateRecord;
+import com.navneet.executespec.harness.repository.GateRepository;
 import com.navneet.executespec.report.ValidationReportRepository;
 import com.navneet.executespec.report.entity.PipelineResult;
 import com.navneet.executespec.report.entity.ValidationReport;
@@ -69,6 +71,7 @@ public class WebQaFixtureController {
   private static final String PROVIDER_READINESS_MARKER = "web-qa-disabled-provider-key";
 
   private final PipelineRunRepository runRepository;
+  private final GateRepository gateRepository;
   private final AgentTaskRepository taskRepository;
   private final ValidationReportRepository reportRepository;
   private final TestPlanRepository testPlanRepository;
@@ -172,6 +175,7 @@ public class WebQaFixtureController {
     gate.setCompletedAt(null);
     gate.setCurrentGate("PLAN_APPROVAL");
     runRepository.save(gate);
+    createLegacyPlanGate(gate.getRunId());
     PipelineRun recovery =
         createRun(
             userId,
@@ -260,6 +264,16 @@ public class WebQaFixtureController {
     }
   }
 
+  // The fixture must obey the same durable plan-gate shape as a real historical run. A synthetic
+  // AWAITING_APPROVAL status without a gate row correctly fails the RequirementIR evidence API
+  // closed, which would make this protected-Web harness test corrupt data instead of product UI.
+  void createLegacyPlanGate(String runId) {
+    GateRecord gate = GateRecord.pending("gate:plan:" + runId, runId, "PLAN");
+    gate.setBindingMode("LEGACY");
+    gate.setBindingStatus("UNBOUND");
+    gateRepository.save(gate);
+  }
+
   @DeleteMapping
   // Keep run/workspace and agent-session graph deletion atomic. Without a transaction, a stale
   // fixture row can fail midway through cleanup and leave ACTIVE web-qa sessions behind.
@@ -280,6 +294,9 @@ public class WebQaFixtureController {
             .filter(r -> r.getRunId().startsWith(PREFIX))
             .toList();
     for (PipelineRun run : runs) {
+      gateRepository
+          .findFirstByRunIdAndGateType(run.getRunId(), "PLAN")
+          .ifPresent(gateRepository::delete);
       taskRepository.deleteAll(taskRepository.findByRunId(run.getRunId()));
       reportRepository.findByRunId(run.getRunId()).ifPresent(reportRepository::delete);
       testPlanRepository

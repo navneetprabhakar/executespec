@@ -881,6 +881,13 @@ export default function IdeAgent() {
     state.status === 'streaming' ||
     state.status === 'toolRunning' ||
     state.status === 'runStreaming';
+  // Tracking a run must keep the current session's composer mutation-gated, but it must not trap
+  // the operator in that session. A run can remain active (or wait at its plan gate) for minutes;
+  // creating an independent workspace during that time is safe and does not mutate the run.
+  const sessionCreationBusy =
+    state.status === 'loadingSession' ||
+    state.status === 'streaming' ||
+    state.status === 'toolRunning';
 
   const runActive =
     !!runDetail &&
@@ -916,7 +923,7 @@ export default function IdeAgent() {
         selected={selected}
         barStatus={barStatus}
         scopeLabel={scopeLabel}
-        busy={isBusy}
+        busy={sessionCreationBusy}
         settingsOpen={settingsOpen}
         managedAi={state.managedAi}
         sessionUsage={sessionUsage}
