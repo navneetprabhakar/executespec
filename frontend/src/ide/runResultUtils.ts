@@ -181,13 +181,59 @@ export function toLines(s: string): string[] {
 
 /**
  * LCS line diff: `base` (old) -> `head` (new). Deletions in a hunk are emitted before additions
- * that replace them, matching standard diff grouping.
+ * that replace them, matching standard diff grouping. The public boundary is deliberately bounded:
+ * the classic traceback matrix is quadratic and must never be allocated for arbitrary provider- or
+ * repository-sized content.
  */
-export function lineDiff(base: string, head: string): DiffLine[] {
+export const LINE_DIFF_LIMITS = Object.freeze({
+  maxInputCharsPerSide: 200_000,
+  maxLinesPerSide: 2_000,
+  maxMatrixCells: 1_000_000,
+});
+
+export interface LineDiffResult {
+  lines: DiffLine[];
+  truncated: boolean;
+  reason: string;
+}
+
+export function boundedLineDiff(
+  base: string,
+  head: string,
+  limits: {
+    maxInputCharsPerSide?: number;
+    maxLinesPerSide?: number;
+    maxMatrixCells?: number;
+  } = {},
+): LineDiffResult {
+  const maxInputCharsPerSide = limits.maxInputCharsPerSide ?? LINE_DIFF_LIMITS.maxInputCharsPerSide;
+  const maxLinesPerSide = limits.maxLinesPerSide ?? LINE_DIFF_LIMITS.maxLinesPerSide;
+  const maxMatrixCells = limits.maxMatrixCells ?? LINE_DIFF_LIMITS.maxMatrixCells;
   const a = toLines(base);
   const b = toLines(head);
   const n = a.length;
   const m = b.length;
+  if (base.length > maxInputCharsPerSide || head.length > maxInputCharsPerSide) {
+    return {
+      lines: [],
+      truncated: true,
+      reason: `Content diff was not computed because one version exceeds the ${maxInputCharsPerSide.toLocaleString()}-character safety limit.`,
+    };
+  }
+  if (n > maxLinesPerSide || m > maxLinesPerSide) {
+    return {
+      lines: [],
+      truncated: true,
+      reason: `Content diff was not computed because one version exceeds the ${maxLinesPerSide.toLocaleString()}-line safety limit.`,
+    };
+  }
+  if (n * m > maxMatrixCells) {
+    return {
+      lines: [],
+      truncated: true,
+      reason: `Content diff was not computed because the ${n.toLocaleString()} × ${m.toLocaleString()} comparison exceeds the ${maxMatrixCells.toLocaleString()}-cell safety limit.`,
+    };
+  }
   const lcs: number[][] = Array.from({length: n + 1}, () => new Array<number>(m + 1).fill(0));
   for (let i = n - 1; i >= 0; i--) {
     for (let j = m - 1; j >= 0; j--) {
@@ -212,7 +258,12 @@ export function lineDiff(base: string, head: string): DiffLine[] {
   }
   while (i < n) out.push({sign: '-', text: a[i++]});
   while (j < m) out.push({sign: '+', text: b[j++]});
-  return out;
+  return {lines: out, truncated: false, reason: ''};
+}
+
+/** Backward-compatible safe line list for existing viewers that do not render truncation metadata. */
+export function lineDiff(base: string, head: string): DiffLine[] {
+  return boundedLineDiff(base, head).lines;
 }
 
 export function fmtDur(ms?: number | null) {
@@ -504,6 +555,22 @@ export function friendlyAiFailureMessage(error: unknown): string {
     return 'Ask cannot reach the selected provider. Check the provider credential and route, then retry.';
   }
   return raw || 'Ask could not complete. Retry, or inspect Evidence and Activity log for this run.';
+}
+
+/**
+ * Preserve the typed Ask completion contract at the rendering boundary. Current servers append the
+ * same notice to the reply, while this fallback keeps mixed-version deployments honest.
+ */
+export function runChatResponseContent(response: api.ChatResponse): string {
+  const content = friendlyAiFailureMessage(response.reply);
+  if (response.complete !== false) return content;
+  if (
+    response.incompleteReason === 'PROVIDER_OUTPUT_LIMIT' &&
+    !content.toLowerCase().includes('provider stopped at its output limit')
+  ) {
+    return `${content}\n\n_(The provider stopped at its output limit, so this answer is incomplete. Ask a narrower question or name a specific file, then retry.)_`;
+  }
+  return content;
 }
 
 export function isFailedTerminalStatus(status?: string | null): boolean {

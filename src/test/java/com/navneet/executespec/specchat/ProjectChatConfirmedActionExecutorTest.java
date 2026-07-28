@@ -15,9 +15,8 @@ import java.util.UUID;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.auth.entity.AppUser;
 import com.navneet.executespec.auth.security.AppUserDetails;
-import com.navneet.executespec.codeintel.ProjectArchitectureService;
+import com.navneet.executespec.codeintel.ProjectArchitectureJobService;
 import com.navneet.executespec.codeintel.ProjectDocGeneratorService;
-import com.navneet.executespec.codeintel.StalenessService;
 import com.navneet.executespec.codeintel.entity.ProjectGeneratedDoc;
 import com.navneet.executespec.codereview.CodeReviewService;
 import com.navneet.executespec.codereview.entity.CodeReviewScan;
@@ -36,17 +35,17 @@ import org.junit.jupiter.api.Test;
 
 class ProjectChatConfirmedActionExecutorTest {
 
-  private final ProjectArchitectureService architecture = mock(ProjectArchitectureService.class);
+  private final ProjectArchitectureJobService architectureJobs =
+      mock(ProjectArchitectureJobService.class);
   private final ProjectDocGeneratorService docs = mock(ProjectDocGeneratorService.class);
   private final CodeReviewService reviews = mock(CodeReviewService.class);
   private final ProjectRepoService repos = mock(ProjectRepoService.class);
-  private final StalenessService staleness = mock(StalenessService.class);
   private final LlmExecutionPolicyFactory policies = mock(LlmExecutionPolicyFactory.class);
   private final LlmExecutionReference reference =
       new LlmExecutionReference("ctx-confirmed", LlmExecutionScope.customer("org-1"));
   private final ProjectChatConfirmedActionExecutor executor =
       new ProjectChatConfirmedActionExecutor(
-          architecture, docs, reviews, repos, staleness, policies, new ObjectMapper());
+          architectureJobs, docs, reviews, repos, policies, new ObjectMapper());
   private AppUserDetails principal;
 
   @BeforeEach

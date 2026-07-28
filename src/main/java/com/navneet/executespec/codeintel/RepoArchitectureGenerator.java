@@ -146,6 +146,7 @@ public class RepoArchitectureGenerator {
             "repo-arch",
             executionReference);
 
+    requireCompleteTermination(response, "repository architecture for " + repoFullName);
     String text = response.getResult().getOutput().getText();
     if (text == null || text.isBlank()) {
       throw new IllegalStateException("LLM returned empty arch content for " + repoFullName);
@@ -160,6 +161,32 @@ public class RepoArchitectureGenerator {
         outTok,
         resolved.getModel());
     return new Result(text.trim(), inTok, outTok, resolved.getModel());
+  }
+
+  static void requireCompleteTermination(ChatResponse response, String operation) {
+    Object reason =
+        response == null
+                || response.getResult() == null
+                || response.getResult().getMetadata() == null
+            ? null
+            : response.getResult().getMetadata().getFinishReason();
+    if (reason == null) return;
+    String normalized = String.valueOf(reason).trim().toLowerCase(java.util.Locale.ROOT);
+    if (normalized.isBlank()
+        || normalized.equals("stop")
+        || normalized.equals("end_turn")
+        || normalized.equals("complete")
+        || normalized.equals("completed")) {
+      return;
+    }
+    throw new ProviderOutputIncompleteException(
+        operation + " terminated before completion (finishReason=" + normalized + ")");
+  }
+
+  static final class ProviderOutputIncompleteException extends RuntimeException {
+    ProviderOutputIncompleteException(String message) {
+      super(message);
+    }
   }
 
   private static String safeSlug(String s) {

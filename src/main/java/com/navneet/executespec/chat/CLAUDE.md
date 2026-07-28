@@ -45,7 +45,11 @@ Each bounded Ask provider call allows 3,000 output tokens. Reasoning-capable pro
 reasoning against this ceiling; the former 1,200-token limit could consume the entire allowance
 without producing visible text. The per-turn durable ceiling is 15,000 output tokens / 415,000
 total tokens so four full tool rounds plus one forced synthesis remain admissible at the declared
-per-call ceiling; the raw-cost ceiling remains $2.
+per-call ceiling; the raw-cost ceiling remains $2. Direct and forced-synthesis responses inspect
+the provider finish reason. `length` / `max_tokens` responses retain their diagnostic prefix but
+append an actionable incomplete notice and return `complete=false` with
+`incompleteReason=PROVIDER_OUTPUT_LIMIT`; they are never persisted or projected as a complete Ask
+answer.
 
 The 2026-07-26 line-ceiling remediation extracted `ChatHistoryCodec` without changing the chat API,
 durable execution-context budgets, model route, or tool authority. `ChatService` moved from 604 to

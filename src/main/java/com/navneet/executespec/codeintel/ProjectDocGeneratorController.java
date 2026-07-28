@@ -6,7 +6,6 @@ import java.util.UUID;
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.codeintel.entity.ProjectGeneratedDoc;
 import com.navneet.executespec.codeintel.entity.ProjectGeneratedDoc.DocType;
-import com.navneet.executespec.security.GeneratedSecretScanner;
 
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -28,7 +27,6 @@ public class ProjectDocGeneratorController {
 
   private final ProjectDocGeneratorService service;
   private final com.navneet.executespec.project.security.ProjectAccessGuard projectAccessGuard;
-  private final GeneratedSecretScanner secretScanner;
 
   public record GeneratedDocDto(
       UUID id,
@@ -64,7 +62,16 @@ public class ProjectDocGeneratorController {
     String userId = userDetails == null ? null : userDetails.getUser().getId();
     try {
       ProjectGeneratedDoc doc = service.generate(projectId, type, userId, null);
-      return ResponseEntity.status(HttpStatus.CREATED).body(GeneratedDocDto.from(doc));
+      return ResponseEntity.status(HttpStatus.CREATED).body(safeDto(doc));
+    } catch (ProjectDocGeneratorService.IncompleteGenerationException e) {
+      throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, e.getMessage());
+    } catch (ProjectDocGeneratorService.ProviderNonCompleteGenerationException e) {
+      throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, e.getMessage());
+    } catch (ProjectDocGeneratorService.StaleSourceException e) {
+      throw new ResponseStatusException(HttpStatus.CONFLICT, e.getMessage());
+    } catch (ProjectDocGeneratorService.UnsafeGeneratedDocumentException
+        | ProjectDocGeneratorService.InvalidGeneratedDocumentException e) {
+      throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY, e.getMessage());
     } catch (IllegalStateException e) {
       // e.g. no architecture doc yet — caller should run /analyse first.
       throw new ResponseStatusException(HttpStatus.CONFLICT, e.getMessage());
@@ -82,7 +89,7 @@ public class ProjectDocGeneratorController {
     DocType type = parseType(docType);
     return service
         .latest(projectId, type)
-        .map(d -> ResponseEntity.ok(GeneratedDocDto.from(d)))
+        .map(d -> ResponseEntity.ok(safeDto(d)))
         .orElseGet(() -> ResponseEntity.noContent().build());
   }
 
@@ -102,7 +109,9 @@ public class ProjectDocGeneratorController {
                         HttpStatus.NOT_FOUND,
                         docType + " doc has not been generated for this project yet"));
     String content = doc.getContent() == null ? "" : doc.getContent();
-    if (secretScanner.scan(content).isPresent()) {
+    try {
+      service.assertSafeForCustomer(content);
+    } catch (ProjectDocGeneratorService.UnsafeGeneratedDocumentException unsafe) {
       throw new ResponseStatusException(
           HttpStatus.UNPROCESSABLE_ENTITY,
           "Generated document contains credential-like material and cannot be downloaded");
@@ -121,5 +130,17 @@ public class ProjectDocGeneratorController {
       throw new ResponseStatusException(
           HttpStatus.BAD_REQUEST, "unknown doc type '" + raw + "' (expected EXPLANATION or SETUP)");
     }
+  }
+
+  private GeneratedDocDto safeDto(ProjectGeneratedDoc doc) {
+    String content = doc == null || doc.getContent() == null ? "" : doc.getContent();
+    try {
+      service.assertSafeForCustomer(content);
+    } catch (ProjectDocGeneratorService.UnsafeGeneratedDocumentException unsafe) {
+      throw new ResponseStatusException(
+          HttpStatus.UNPROCESSABLE_ENTITY,
+          "Generated document failed the publication safety check and cannot be displayed");
+    }
+    return GeneratedDocDto.from(doc);
   }
 }

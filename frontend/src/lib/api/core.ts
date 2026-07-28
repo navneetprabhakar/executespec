@@ -623,15 +623,6 @@ export interface RunChatMessage {
   content: string;
 }
 
-/** Response from POST /api/runs/{id}/chat */
-export interface ChatResponse {
-  reply: string;
-  /** Number of user messages sent so far. */
-  messageCount: number;
-  /** Maximum user messages allowed. */
-  maxMessages: number;
-}
-
 // Apply Suggestion (Chat Copilot / Review)
 
 export interface ApplyResult {
@@ -1252,6 +1243,11 @@ export interface ArchChangedFile {
   additions: number;
   deletions: number;
 }
+export interface ArchRepoDiffIssue {
+  repoFullName: string;
+  status: 'NOT_LINKED' | 'NO_BASELINE' | 'COMPARE_FAILED' | string;
+  detail: string;
+}
 export interface ArchDiffReport {
   fromVersion: number;
   toVersion: number;
@@ -1259,6 +1255,10 @@ export interface ArchDiffReport {
   toContent: string;
   perRepo: {repoFullName: string; files: ArchChangedFile[]}[];
   totalFiles: number;
+  /** Repositories intentionally not fetched/compared (for example, no longer linked). */
+  skipped: ArchRepoDiffIssue[];
+  /** Repositories whose comparison failed, so their source-change state is unknown. */
+  unverified: ArchRepoDiffIssue[];
 }
 
 // v2.5.2 — Tech Debt rollup for Project Overview. All DB-derived, no LLM.

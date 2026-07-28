@@ -1,10 +1,11 @@
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
 import {
-  generateArchitecture,
   generateProjectDoc,
   createRepo,
   createProjectExport,
+  confirmArchitectureRefreshRetry,
+  getLatestArchitectureRefreshJob,
   getProjectCodeIndex,
   listScmRepos,
   regenerateRepoArchitecture,
@@ -32,23 +33,7 @@ describe('project API', () => {
     vi.unstubAllGlobals();
   });
 
-  it.each([
-    {
-      operation: 'project architecture generation',
-      timeoutMs: 300_000,
-      invoke: () => generateArchitecture('project-1'),
-    },
-    {
-      operation: 'repository architecture regeneration',
-      timeoutMs: 180_000,
-      invoke: () => regenerateRepoArchitecture('project-1', 'repo-1'),
-    },
-    {
-      operation: 'project document generation',
-      timeoutMs: 180_000,
-      invoke: () => generateProjectDoc('project-1', 'EXPLANATION'),
-    },
-  ])('keeps $operation alive past the shared 30 second deadline', async ({timeoutMs, invoke}) => {
+  it('keeps project document generation alive past the shared 30 second deadline', async () => {
     vi.useFakeTimers();
     const captured: {signal: AbortSignal | null} = {signal: null};
     const fetchMock = vi.fn<typeof fetch>().mockImplementation((_url, init) => {
@@ -63,16 +48,58 @@ describe('project API', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    const request = invoke().catch((error: unknown) => error);
+    const request = generateProjectDoc('project-1', 'EXPLANATION').catch((error: unknown) => error);
     await vi.advanceTimersByTimeAsync(30_000);
     expect(captured.signal?.aborted).toBe(false);
 
-    await vi.advanceTimersByTimeAsync(timeoutMs - 30_000);
+    await vi.advanceTimersByTimeAsync(150_000);
     await expect(request).resolves.toMatchObject({
       message: 'The request timed out. Please check your connection and try again.',
       status: 0,
     });
     expect(fetchMock.mock.calls[0]?.[1]).not.toHaveProperty('timeoutMs');
+  });
+
+  it('uses durable job endpoints for latest state, per-repo admission, and confirmed retry', async () => {
+    const job = {
+      id: 'job-1',
+      projectId: 'project-1',
+      status: 'QUEUED',
+      phase: 'PREPARING',
+      terminal: false,
+      architectureVersion: null,
+      errorCode: null,
+      errorMessage: null,
+      qualityStatus: null,
+      qualityEvidence: null,
+      createdAt: '2026-07-28T00:00:00Z',
+      startedAt: null,
+      completedAt: null,
+    };
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockImplementation(async () => new Response(JSON.stringify(job), {status: 200}));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(getLatestArchitectureRefreshJob('project-1')).resolves.toEqual(job);
+    await expect(regenerateRepoArchitecture('project-1', 'repo-1')).resolves.toEqual(job);
+    await expect(confirmArchitectureRefreshRetry('project-1', 'job-1')).resolves.toEqual(job);
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      '/api/projects/project-1/architecture/jobs/latest',
+      expect.not.objectContaining({method: 'POST'}),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      '/api/projects/project-1/repos/repo-1/regenerate-architecture',
+      expect.objectContaining({method: 'POST'}),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      '/api/projects/project-1/architecture/jobs/job-1/confirm-retry',
+      expect.objectContaining({method: 'POST'}),
+    );
   });
 
   it('uses the shared transport for the full project-settings patch contract', async () => {

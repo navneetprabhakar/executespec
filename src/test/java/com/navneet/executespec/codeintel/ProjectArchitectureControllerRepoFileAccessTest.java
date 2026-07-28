@@ -49,6 +49,7 @@ class ProjectArchitectureControllerRepoFileAccessTest {
     controller =
         new ProjectArchitectureController(
             mock(ProjectArchitectureService.class),
+            mock(ProjectArchitectureJobService.class),
             mock(StalenessService.class),
             mock(com.navneet.executespec.project.workspace.ProjectWorkspaceService.class),
             mock(ArchitectureDiffService.class),

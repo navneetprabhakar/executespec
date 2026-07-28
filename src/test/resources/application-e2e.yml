@@ -1,11 +1,12 @@
 # ── E2E test profile overrides ────────────────────────────────────────────────
 # Applied when @ActiveProfiles("e2e") is set on the test class.
-# Uses the same PostgreSQL instance as the app; a separate DB is recommended
-# but not required — tests use unique runIds and do not conflict.
+# PipelineE2ETest supplies a disposable Testcontainers PostgreSQL database. Any other e2e-profile
+# caller must provide an explicit isolated database URL; the ordinary local database is never a
+# fallback.
 
 spring:
   datasource:
-    url: jdbc:postgresql://localhost:5432/executespec
+    url: ${EXECUTESPEC_E2E_DATABASE_URL}
     username: ${POSTGRES_USER:postgres}
     password: ${POSTGRES_PASSWORD:postgres}
   jpa:
@@ -13,11 +14,6 @@ spring:
 
 agent:
   workspace: ./workspace-e2e     # isolated from normal ./workspace
-
-  roles:
-    planner: anthropic
-    worker: anthropic
-    reviewer: anthropic
 
   token-budget:
     low: 1024
@@ -38,6 +34,10 @@ agent:
 
   integrations:
     enabled: false               # no integrations needed for pipeline E2E tests
+
+# PipelineE2ETest pins DEEPSEEK/deepseek-v4-flash-native and a $0.10 RunRequest cap in its
+# test-context-only reserved submit endpoint. Do not add placeholder provider keys here: live
+# dispatch requires -Plive-llm-test plus an exact provider/model/run budget-ledger reservation.
 
 logging:
   level:

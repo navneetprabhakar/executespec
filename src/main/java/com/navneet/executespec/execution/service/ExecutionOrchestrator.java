@@ -55,6 +55,14 @@ public class ExecutionOrchestrator {
   private final ExecutionRunRepository runRepo;
   private final ExecutionSolutionRepository solutionRepo;
   private final ProjectArchitectureService archService;
+  private com.navneet.executespec.codeintel.ProjectArchitectureJobService architectureJobs;
+
+  @org.springframework.beans.factory.annotation.Autowired
+  void setArchitectureJobs(
+      com.navneet.executespec.codeintel.ProjectArchitectureJobService architectureJobs) {
+    this.architectureJobs = architectureJobs;
+  }
+
   private final ProjectRepoRepository projectRepoRepo;
   private final ProjectRepoService projectRepoService;
   private final AppUserRepository appUserRepo;
@@ -508,8 +516,15 @@ public class ExecutionOrchestrator {
       // handles per-repo codemap generation + unified doc synthesis.
       // Pass the creator's PAT so private repo trees resolve (system
       // GITHUB_PAT env isn't always scoped on user repos).
-      String pat = appUserRepo.findById(createdBy).map(u -> u.getGithubPat()).orElse(null);
-      ProjectArchitectureDoc doc = archService.generate(projectId, null, pat);
+      java.util.UUID architectureId =
+          architectureJobs.requestAndAwaitArchitectureId(projectId, createdBy);
+      ProjectArchitectureDoc doc =
+          archService
+              .findById(architectureId)
+              .orElseThrow(
+                  () ->
+                      new IllegalStateException(
+                          "Promoted architecture result is unavailable: " + architectureId));
       String docContent = doc == null ? null : doc.getContent();
       boolean markedArchReview =
           runCas.casUpdate(
@@ -519,7 +534,10 @@ public class ExecutionOrchestrator {
                 r.setStatus("ARCH_REVIEW");
               });
       if (markedArchReview) {
-        emit(executionRunId, ExecutionEventTypes.EXEC_ANALYSIS_COMPLETE, null);
+        emit(
+            executionRunId,
+            ExecutionEventTypes.EXEC_ANALYSIS_COMPLETE,
+            "Durable architecture refresh completed");
       } else {
         log.warn(
             "triggerAnalysis: failed to mark exec {} as ARCH_REVIEW (stale row); arch doc not"

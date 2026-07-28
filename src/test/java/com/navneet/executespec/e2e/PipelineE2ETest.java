@@ -2,298 +2,452 @@ package com.navneet.executespec.e2e;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.navneet.executespec.api.RunMapper;
 import com.navneet.executespec.api.dto.ApprovalRequest;
 import com.navneet.executespec.api.dto.RunDetail;
 import com.navneet.executespec.api.dto.RunSummary;
+import com.navneet.executespec.auth.entity.AppUser;
+import com.navneet.executespec.auth.entity.Org;
+import com.navneet.executespec.auth.entity.OrgMember;
+import com.navneet.executespec.auth.repository.AppUserRepository;
+import com.navneet.executespec.auth.repository.OrgMemberRepository;
+import com.navneet.executespec.auth.repository.OrgRepository;
+import com.navneet.executespec.auth.security.AppUserDetails;
+import com.navneet.executespec.auth.security.JwtUtil;
+import com.navneet.executespec.integration.RunOrchestrator;
+import com.navneet.executespec.report.model.ValidationReportDTO;
+import com.navneet.executespec.run.CustomerRunSubmissionService;
+import com.navneet.executespec.run.RunRequestFingerprint;
+import com.navneet.executespec.state.entity.PipelineRun;
 
 import org.junit.jupiter.api.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.test.web.client.TestRestTemplate;
-import org.springframework.core.ParameterizedTypeReference;
-import org.springframework.http.HttpMethod;
-import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseEntity;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Import;
+import org.springframework.http.*;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.TestPropertySource;
+import org.springframework.web.bind.annotation.*;
+import org.testcontainers.containers.PostgreSQLContainer;
+import org.testcontainers.junit.jupiter.Testcontainers;
 
 /**
- * End-to-end pipeline tests. Each test drives a full run through the REST API, approving or
- * rejecting gates as a real user would.
+ * Authenticated V2 lifecycle tests.
  *
- * <p>Prerequisites: - PostgreSQL running at localhost:5432/executespec - ANTHROPIC_API_KEY or
- * spring.ai.anthropic.api-key set
+ * <p>The three provider-backed scenarios are fail-closed: each Maven invocation must select exactly
+ * one scenario, preselect its run UUID, enable the live-LLM test mode, and supply a budget-ledger
+ * reservation matching {@code DEEPSEEK/deepseek-v4-flash-native/<run UUID>}. The test-only reserved
+ * submission endpoint binds that UUID before asynchronous planning can dispatch. Without every
+ * guard, the live scenario is skipped and {@link
+ * com.navneet.executespec.agent.ProviderDispatchAuthorization} still rejects provider transport.
  *
- * <p>Run with: mvn test -Dgroups=e2e -Dspring.profiles.active=e2e
- *
- * <p>Or via IDE: add VM arg -Dspring.profiles.active=e2e and run this class.
+ * <p>Normal {@code mvn verify} excludes this {@code e2e} tag. See README.md for the exact reserved
+ * command.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @ActiveProfiles("e2e")
 @Tag("e2e")
-@TestMethodOrder(MethodOrderer.OrderAnnotation.class)
-@TestPropertySource(
-    properties = {
-      "spring.ai.anthropic.api-key=${ANTHROPIC_API_KEY:test-key-e2e}",
-      "spring.ai.openai.api-key=${OPENAI_API_KEY:test-key-e2e}",
-      "agent.workspace=./test-workspace-e2e"
-    })
+@TestInstance(TestInstance.Lifecycle.PER_CLASS)
+@Import(PipelineE2ETest.ReservedRunSubmissionTestConfiguration.class)
+@TestPropertySource(properties = "agent.workspace=./test-workspace-e2e")
+@Testcontainers
 class PipelineE2ETest {
 
-  @Autowired private TestRestTemplate rest;
+  static final PostgreSQLContainer<?> POSTGRES =
+      new PostgreSQLContainer<>("pgvector/pgvector:pg16")
+          .withDatabaseName("executespec_pipeline_e2e")
+          .withUsername("executespec_e2e")
+          .withPassword("executespec_e2e");
 
-  /** Max time to wait for the planner LLM to produce a plan. */
-  static final Duration PLAN_TIMEOUT = Duration.ofMinutes(4);
+  static {
+    // Spring resolves @DynamicPropertySource while building the test context, before the Jupiter
+    // @Container callback is guaranteed to run. Start this disposable singleton explicitly so
+    // getJdbcUrl() can never observe an unstarted container.
+    POSTGRES.start();
+  }
 
-  /** Max time to wait for all worker agents to finish. */
-  static final Duration WORK_TIMEOUT = Duration.ofMinutes(10);
+  @DynamicPropertySource
+  static void isolatedDatabase(DynamicPropertyRegistry registry) {
+    registry.add("spring.datasource.url", POSTGRES::getJdbcUrl);
+    registry.add("spring.datasource.username", POSTGRES::getUsername);
+    registry.add("spring.datasource.password", POSTGRES::getPassword);
+  }
 
-  /** Max time to wait for a terminal state after a gate decision. */
-  static final Duration SETTLE_TIMEOUT = Duration.ofMinutes(2);
-
-  /**
-   * Smallest possible task — creates a single file. Keeps LLM calls cheap and fast; suitable for
-   * all gate-flow tests.
-   */
-  static final String SIMPLE_TASK =
+  private static final String PROVIDER = "DEEPSEEK";
+  private static final String MODEL = "deepseek-v4-flash-native";
+  private static final double COST_CAP_USD = 0.10;
+  private static final Duration PLAN_TIMEOUT = Duration.ofMinutes(4);
+  private static final Duration WORK_TIMEOUT = Duration.ofMinutes(10);
+  private static final Duration SETTLE_TIMEOUT = Duration.ofMinutes(2);
+  private static final String SIMPLE_TASK =
       "Create a plain text file called hello.txt in the workspace root. "
           + "The file must contain exactly one line: Hello World";
 
-  /**
-   * Slightly richer task that produces verifiable artefacts. Use this when you want to inspect
-   * worker output after the test.
-   */
-  static final String SCRIPT_TASK =
-      "Create a Python script called greet.py that accepts a --name argument "
-          + "and prints 'Hello, <name>!'. Include a short README.md explaining usage.";
+  private static final ApprovalRequest APPROVE =
+      new ApprovalRequest(true, "Reserved E2E approval", null, null, null, null, null);
+  private static final ApprovalRequest REJECT =
+      new ApprovalRequest(false, "Reserved E2E rejection", null, null, null, null, null);
 
-  static final ApprovalRequest APPROVE =
-      new ApprovalRequest(true, "E2E auto-approve", null, null, null, null, null);
-  static final ApprovalRequest REJECT =
-      new ApprovalRequest(false, "E2E test rejection", null, null, null, null, null);
+  @Autowired private TestRestTemplate rest;
+  @Autowired private AppUserRepository userRepository;
+  @Autowired private OrgRepository orgRepository;
+  @Autowired private OrgMemberRepository orgMemberRepository;
+  @Autowired private JwtUtil jwtUtil;
 
-  // Test 1 — Happy path: full pipeline from submit to COMPLETE
+  private String bearerToken;
+  private String actorUserId;
+  private String actorOrgId;
+  private String actorMemberId;
+
+  @BeforeAll
+  void createAuthenticatedEnterpriseActor() {
+    String suffix = UUID.randomUUID().toString();
+    String userId = "e2e-user-" + suffix;
+    String orgId = "e2e-org-" + suffix;
+    actorUserId = userId;
+    actorOrgId = orgId;
+    actorMemberId = "e2e-member-" + suffix;
+
+    Org org =
+        orgRepository.save(
+            Org.builder()
+                .id(orgId)
+                .name("Pipeline E2E " + suffix)
+                .domainPatterns("")
+                .tier("ENTERPRISE")
+                .status("ACTIVE")
+                .keySourceMode("HYBRID")
+                .createdByUserId(userId)
+                .build());
+    AppUser user =
+        userRepository.save(
+            AppUser.builder()
+                .id(userId)
+                .email("pipeline-e2e-" + suffix + "@example.com")
+                .firstName("Pipeline")
+                .lastName("E2E")
+                .globalRole("USER")
+                .tier("ENTERPRISE")
+                .status("ACTIVE")
+                .emailVerified(true)
+                .orgId(org.getId())
+                .build());
+    OrgMember member =
+        orgMemberRepository.save(
+            OrgMember.builder()
+                .id(actorMemberId)
+                .orgId(org.getId())
+                .userId(user.getId())
+                .orgRole("ORG_ADMIN")
+                .build());
+    bearerToken = jwtUtil.generateAccessToken(user, member);
+  }
+
+  @AfterAll
+  void cleanWorkspace() throws IOException {
+    org.springframework.util.FileSystemUtils.deleteRecursively(Path.of("test-workspace-e2e"));
+  }
 
   @Test
-  @Order(1)
-  @DisplayName("Happy path: submit → approve plan → workers run → approve merge → COMPLETE")
-  void happyPath_fullPipeline() {
-    // 1. Submit run
-    String runId = submitRun(SIMPLE_TASK);
-
-    // 2. Wait for plan to be ready
+  @DisplayName("V2 happy path: authenticated submit → plan approval → automatic terminal state")
+  void happyPath_autoMergesWithoutLegacyMergeGate() throws IOException {
+    String runId = requireLiveScenario("happy");
+    submitReservedRun(runId);
     awaitStatus(runId, "AWAITING_APPROVAL", PLAN_TIMEOUT);
 
-    // Inspect the plan before approving (optional — uncomment to print)
-    // RunDetail prePlan = getDetail(runId);
-    // System.out.println("Plan JSON: " + prePlan.planJson());
+    assertThat(post("/api/runs/" + runId + "/approve", APPROVE, Void.class).getStatusCode())
+        .isEqualTo(HttpStatus.OK);
+    assertThat(awaitTerminal(runId, WORK_TIMEOUT)).isEqualTo("COMPLETE");
 
-    // 3. Approve plan gate
-    ResponseEntity<Void> approveResp =
-        rest.postForEntity("/api/runs/" + runId + "/approve", APPROVE, Void.class);
-    assertThat(approveResp.getStatusCode()).isEqualTo(HttpStatus.OK);
-
-    // 4. Wait for workers to finish
-    awaitStatus(runId, "AWAITING_MERGE", WORK_TIMEOUT);
-
-    // 5. Approve merge gate
-    ResponseEntity<Void> mergeResp =
-        rest.postForEntity("/api/runs/" + runId + "/merge", APPROVE, Void.class);
-    assertThat(mergeResp.getStatusCode()).isEqualTo(HttpStatus.OK);
-
-    // 6. Wait for COMPLETE
-    awaitStatus(runId, "COMPLETE", SETTLE_TIMEOUT);
-
-    // 7. Verify final state
     RunDetail detail = getDetail(runId);
-    assertThat(detail.getStatus()).isEqualTo("COMPLETE");
     assertThat(detail.getCompletedAt()).isNotNull();
-    assertThat(detail.getFailureReason()).isNull();
     assertThat(detail.getTasks()).isNotEmpty();
-    assertThat(detail.getIntegrationSource()).isNull(); // manual run — no integration source
+    assertThat(detail.getFailureReason()).isNull();
+
+    Path artifact = Path.of("test-workspace-e2e", runId, "hello.txt");
+    assertThat(artifact).exists().isRegularFile();
+    assertThat(Files.readString(artifact)).isIn("Hello World", "Hello World\n", "Hello World\r\n");
+
+    ValidationReportDTO report = awaitReport(runId);
+    assertThat(report.filesGenerated()).isGreaterThanOrEqualTo(1);
+    assertThat(report.verificationLedger()).isNotEmpty();
+    assertThat(report.verificationLedger())
+        .anyMatch(evidence -> "DETERMINISTIC".equals(evidence.source()));
+    assertThat(report.runGoalDecision()).isNotNull();
+    assertThat(report.runGoalDecision().state().name()).isEqualTo("STOP_DONE");
+
+    // The authenticated compatibility endpoint exists only to return a clear V2 retirement signal.
+    assertThat(post("/api/runs/" + runId + "/merge", APPROVE, Void.class).getStatusCode())
+        .isEqualTo(HttpStatus.GONE);
   }
 
-  // Test 2 — Plan rejection: user rejects the plan → FAILED
-
   @Test
-  @Order(2)
-  @DisplayName("Plan rejection: user rejects plan → run marked FAILED")
-  void planRejection_marksRunFailed() {
-    String runId = submitRun(SIMPLE_TASK);
+  @DisplayName("V2 plan rejection terminalizes as CANCELLED")
+  void planRejection_marksRunCancelled() {
+    String runId = requireLiveScenario("reject");
+    submitReservedRun(runId);
     awaitStatus(runId, "AWAITING_APPROVAL", PLAN_TIMEOUT);
 
-    // Reject the plan
-    rest.postForEntity("/api/runs/" + runId + "/approve", REJECT, Void.class);
-
-    awaitStatus(runId, "FAILED", SETTLE_TIMEOUT);
-
-    RunDetail detail = getDetail(runId);
-    assertThat(detail.getStatus()).isEqualTo("FAILED");
-    assertThat(detail.getFailureReason()).isNotBlank();
+    assertThat(post("/api/runs/" + runId + "/approve", REJECT, Void.class).getStatusCode())
+        .isEqualTo(HttpStatus.OK);
+    awaitStatus(runId, "CANCELLED", SETTLE_TIMEOUT);
+    assertThat(getDetail(runId).getFailureReason()).isNotBlank();
   }
 
-  // Test 3 — Merge rejection: user rejects the merge → FAILED
-
   @Test
-  @Order(3)
-  @DisplayName("Merge rejection: user rejects merge after workers finish → run marked FAILED")
-  void mergeRejection_marksRunFailed() {
-    String runId = submitAndApprovePlan(SIMPLE_TASK);
-    awaitStatus(runId, "AWAITING_MERGE", WORK_TIMEOUT);
-
-    // Reject the merge
-    rest.postForEntity("/api/runs/" + runId + "/merge", REJECT, Void.class);
-
-    awaitStatus(runId, "FAILED", SETTLE_TIMEOUT);
-
-    RunDetail detail = getDetail(runId);
-    assertThat(detail.getStatus()).isEqualTo("FAILED");
-  }
-
-  // Test 4 — Cancellation while awaiting plan approval
-
-  @Test
-  @Order(4)
-  @DisplayName("Cancel run during AWAITING_APPROVAL → run marked FAILED")
-  void cancelDuringPlanGate_marksRunFailed() {
-    String runId = submitRun(SIMPLE_TASK);
+  @DisplayName("V2 cancellation and paginated status listing use current contracts")
+  void cancelDuringPlanGate_marksRunCancelledAndListIsPaginated() {
+    String runId = requireLiveScenario("cancel");
+    submitReservedRun(runId);
     awaitStatus(runId, "AWAITING_APPROVAL", PLAN_TIMEOUT);
 
-    // Cancel the run
-    rest.delete("/api/runs/" + runId);
+    ResponseEntity<JsonNode> list =
+        get("/api/runs?status=AWAITING_APPROVAL&scope=mine", JsonNode.class);
+    assertThat(list.getStatusCode()).isEqualTo(HttpStatus.OK);
+    assertThat(list.getBody()).isNotNull();
+    assertThat(list.getBody().path("content").findValuesAsText("runId")).contains(runId);
 
-    awaitStatus(runId, "FAILED", SETTLE_TIMEOUT);
-
-    RunDetail detail = getDetail(runId);
-    assertThat(detail.getStatus()).isEqualTo("FAILED");
+    assertThat(delete("/api/runs/" + runId).getStatusCode()).isEqualTo(HttpStatus.OK);
+    awaitStatus(runId, "CANCELLED", SETTLE_TIMEOUT);
   }
 
-  // Test 5 — Run listing and status filter
-
   @Test
-  @Order(5)
-  @DisplayName("List runs: status filter returns only matching runs")
-  void listRuns_statusFilter_returnsMatchingRuns() {
-    // Submit a run and hold it at plan gate so we can observe AWAITING_APPROVAL
-    String runId = submitRun(SIMPLE_TASK);
-    awaitStatus(runId, "AWAITING_APPROVAL", PLAN_TIMEOUT);
-
-    // GET /api/runs?status=AWAITING_APPROVAL
-    ResponseEntity<List<RunSummary>> resp =
-        rest.exchange(
-            "/api/runs?status=AWAITING_APPROVAL",
-            HttpMethod.GET,
-            null,
-            new ParameterizedTypeReference<>() {});
-
-    assertThat(resp.getStatusCode()).isEqualTo(HttpStatus.OK);
-    assertThat(resp.getBody()).extracting(RunSummary::runId).contains(runId);
-
-    // Verify the run is not in a different status bucket
-    ResponseEntity<List<RunSummary>> completedResp =
-        rest.exchange(
-            "/api/runs?status=COMPLETE",
-            HttpMethod.GET,
-            null,
-            new ParameterizedTypeReference<>() {});
-    assertThat(completedResp.getBody()).extracting(RunSummary::runId).doesNotContain(runId);
-
-    // Cleanup — reject the plan gate so the run terminates
-    rest.postForEntity("/api/runs/" + runId + "/approve", REJECT, Void.class);
-    awaitStatus(runId, "FAILED", SETTLE_TIMEOUT);
-  }
-
-  // Test 6 — GET /api/runs/{id}: 404 for unknown runId
-
-  @Test
-  @Order(6)
-  @DisplayName("GET /api/runs/unknown-id returns 404")
+  @DisplayName("Unknown authenticated run returns 404")
   void getUnknownRun_returns404() {
-    ResponseEntity<RunDetail> resp =
-        rest.getForEntity("/api/runs/00000000-0000-0000-0000-000000000000", RunDetail.class);
-    assertThat(resp.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+    assertThat(
+            get("/api/runs/00000000-0000-0000-0000-000000000000", RunDetail.class).getStatusCode())
+        .isEqualTo(HttpStatus.NOT_FOUND);
   }
 
-  // Test 7 — Metrics endpoint is reachable
-
   @Test
-  @Order(7)
-  @DisplayName("GET /api/metrics returns 200 with run counts")
+  @DisplayName("Metrics endpoint is authenticated and reachable")
   void metrics_returns200() {
-    ResponseEntity<Map<String, Object>> resp =
-        rest.exchange("/api/metrics", HttpMethod.GET, null, new ParameterizedTypeReference<>() {});
-    assertThat(resp.getStatusCode()).isEqualTo(HttpStatus.OK);
-    assertThat(resp.getBody()).containsKeys("totalRuns", "completedRuns", "failedRuns");
+    ResponseEntity<JsonNode> response = get("/api/metrics", JsonNode.class);
+    assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+    assertThat(response.getBody()).isNotNull();
+    assertThat(response.getBody().has("totalRuns")).isTrue();
   }
-
-  // Test 8 — Submit run with blank request returns 400
 
   @Test
-  @Order(8)
-  @DisplayName("POST /api/runs with blank userRequest returns 400")
+  @DisplayName("Blank run request is rejected before any provider dispatch")
   void submitBlankRequest_returns400() {
-    // RunRequest with empty userRequest
-    Map<String, String> body = Map.of("userRequest", "  ");
-    ResponseEntity<Void> resp = rest.postForEntity("/api/runs", body, Void.class);
-    assertThat(resp.getStatusCode().value()).isGreaterThanOrEqualTo(400);
+    ResponseEntity<Void> response = post("/api/runs", Map.of("userRequest", "  "), Void.class);
+    assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
   }
 
-  // Private helpers
-
-  /** Submits a run and returns its runId. Asserts 202 Accepted. */
-  private String submitRun(String task) {
-    Map<String, String> body = Map.of("userRequest", task, "source", "MANUAL");
-    ResponseEntity<RunSummary> resp = rest.postForEntity("/api/runs", body, RunSummary.class);
-    assertThat(resp.getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
-    assertThat(resp.getBody()).isNotNull();
-    assertThat(resp.getBody().runId()).isNotBlank();
-    return resp.getBody().runId();
+  @Test
+  @DisplayName("Run submission requires authentication")
+  void submitWithoutAuthentication_returns401() {
+    ResponseEntity<Void> response =
+        rest.postForEntity(
+            "/api/e2e/reserved-runs/" + UUID.randomUUID(),
+            new ReservedRunRequest(SIMPLE_TASK),
+            Void.class);
+    assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
   }
 
-  /** Submits a run and approves the plan gate. Returns the runId at WORKING state. */
-  private String submitAndApprovePlan(String task) {
-    String runId = submitRun(task);
-    awaitStatus(runId, "AWAITING_APPROVAL", PLAN_TIMEOUT);
-    rest.postForEntity("/api/runs/" + runId + "/approve", APPROVE, Void.class);
+  private String requireLiveScenario(String expected) {
+    String scenario = System.getenv("E2E_SCENARIO");
+    String runId = System.getenv("E2E_RUN_ID");
+    String reservation = System.getProperty("executespec.live-llm.reservation-id", "");
+    boolean liveEnabled =
+        Boolean.parseBoolean(System.getProperty("executespec.live-llm.enabled", "false"));
+    boolean testMode =
+        Boolean.parseBoolean(System.getProperty("executespec.live-llm.test-mode", "false"));
+
+    assumeTrue(
+        expected.equals(scenario)
+            && liveEnabled
+            && testMode
+            && !reservation.isBlank()
+            && isUuid(runId),
+        () ->
+            "live scenario requires E2E_SCENARIO="
+                + expected
+                + ", E2E_RUN_ID=<uuid>, -Plive-llm-test, and an exact reservation");
     return runId;
   }
 
-  /** Returns the current status of a run, or "NOT_FOUND" if the run does not exist. */
+  private boolean liveFixtureRequested() {
+    return List.of("happy", "reject", "cancel").contains(System.getenv("E2E_SCENARIO"))
+        && isUuid(System.getenv("E2E_RUN_ID"))
+        && Boolean.parseBoolean(System.getProperty("executespec.live-llm.enabled", "false"))
+        && Boolean.parseBoolean(System.getProperty("executespec.live-llm.test-mode", "false"))
+        && !System.getProperty("executespec.live-llm.reservation-id", "").isBlank();
+  }
+
+  private static boolean isUuid(String value) {
+    try {
+      UUID.fromString(value);
+      return true;
+    } catch (RuntimeException invalid) {
+      return false;
+    }
+  }
+
+  private void submitReservedRun(String runId) {
+    ResponseEntity<RunSummary> response =
+        post(
+            "/api/e2e/reserved-runs/" + runId,
+            new ReservedRunRequest(SIMPLE_TASK),
+            RunSummary.class);
+    assertThat(response.getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
+    assertThat(response.getBody()).isNotNull();
+    assertThat(response.getBody().runId()).isEqualTo(runId);
+    assertThat(response.getBody().aiProvider()).isEqualTo(PROVIDER);
+  }
+
   private String getStatus(String runId) {
-    RunDetail detail = rest.getForObject("/api/runs/" + runId, RunDetail.class);
-    return detail != null ? detail.getStatus() : "NOT_FOUND";
+    ResponseEntity<RunDetail> response = get("/api/runs/" + runId, RunDetail.class);
+    return response.getBody() == null ? "NOT_FOUND" : response.getBody().getStatus();
   }
 
   private RunDetail getDetail(String runId) {
-    RunDetail detail = rest.getForObject("/api/runs/" + runId, RunDetail.class);
-    assertThat(detail).as("RunDetail for %s", runId).isNotNull();
-    return detail;
+    ResponseEntity<RunDetail> response = get("/api/runs/" + runId, RunDetail.class);
+    assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+    assertThat(response.getBody()).isNotNull();
+    return response.getBody();
   }
 
-  /**
-   * Polls until the run reaches {@code expected} OR any terminal state (FAILED/CANCELLED). Asserts
-   * the actual status equals {@code expected} after polling completes.
-   *
-   * <p>Failing early on unexpected terminal states prevents tests hanging for their full timeout
-   * when the pipeline encounters an LLM or infrastructure error.
-   */
   private void awaitStatus(String runId, String expected, Duration timeout) {
     await("run " + runId + " → " + expected)
         .atMost(timeout)
         .pollInterval(Duration.ofSeconds(6))
         .until(
             () -> {
-              String s = getStatus(runId);
-              return expected.equals(s) || "FAILED".equals(s) || "CANCELLED".equals(s);
+              String status = getStatus(runId);
+              return expected.equals(status)
+                  || List.of("FAILED", "CANCELLED", "COMPLETE", "PARTIAL").contains(status);
             });
+    assertThat(getStatus(runId)).isEqualTo(expected);
+  }
 
-    assertThat(getStatus(runId))
-        .as("Expected run %s to be %s", runId, expected)
-        .isEqualTo(expected);
+  private String awaitTerminal(String runId, Duration timeout) {
+    await("run " + runId + " → terminal")
+        .atMost(timeout)
+        .pollInterval(Duration.ofSeconds(6))
+        .until(
+            () -> List.of("COMPLETE", "PARTIAL", "FAILED", "CANCELLED").contains(getStatus(runId)));
+    return getStatus(runId);
+  }
+
+  private ValidationReportDTO awaitReport(String runId) {
+    await("validation report for " + runId)
+        .atMost(SETTLE_TIMEOUT)
+        .pollInterval(Duration.ofSeconds(3))
+        .until(
+            () ->
+                get("/api/runs/" + runId + "/report", ValidationReportDTO.class).getStatusCode()
+                    == HttpStatus.OK);
+    ResponseEntity<ValidationReportDTO> response =
+        get("/api/runs/" + runId + "/report", ValidationReportDTO.class);
+    assertThat(response.getBody()).isNotNull();
+    return response.getBody();
+  }
+
+  private HttpHeaders authenticatedHeaders() {
+    HttpHeaders headers = new HttpHeaders();
+    headers.setBearerAuth(bearerToken);
+    headers.setContentType(MediaType.APPLICATION_JSON);
+    return headers;
+  }
+
+  private <T> ResponseEntity<T> get(String path, Class<T> responseType) {
+    return rest.exchange(
+        path, HttpMethod.GET, new HttpEntity<>(authenticatedHeaders()), responseType);
+  }
+
+  private <T> ResponseEntity<T> post(String path, Object body, Class<T> responseType) {
+    return rest.exchange(
+        path, HttpMethod.POST, new HttpEntity<>(body, authenticatedHeaders()), responseType);
+  }
+
+  private ResponseEntity<Void> delete(String path) {
+    return rest.exchange(
+        path, HttpMethod.DELETE, new HttpEntity<>(authenticatedHeaders()), Void.class);
+  }
+
+  record ReservedRunRequest(String userRequest) {}
+
+  /**
+   * Test-context-only submission seam. It exists because provider budget reservations bind an exact
+   * run UUID before the first asynchronous planner call, while the public POST /api/runs
+   * intentionally allocates its own UUID.
+   */
+  @TestConfiguration(proxyBeanMethods = false)
+  static class ReservedRunSubmissionTestConfiguration {
+
+    @Bean
+    ReservedRunSubmissionController reservedRunSubmissionController(
+        CustomerRunSubmissionService submissionService,
+        RunOrchestrator runOrchestrator,
+        RunMapper runMapper) {
+      return new ReservedRunSubmissionController(submissionService, runOrchestrator, runMapper);
+    }
+  }
+
+  @RequestMapping("/api/e2e/reserved-runs")
+  @org.springframework.stereotype.Controller
+  static class ReservedRunSubmissionController {
+
+    private final CustomerRunSubmissionService submissionService;
+    private final RunOrchestrator runOrchestrator;
+    private final RunMapper runMapper;
+
+    ReservedRunSubmissionController(
+        CustomerRunSubmissionService submissionService,
+        RunOrchestrator runOrchestrator,
+        RunMapper runMapper) {
+      this.submissionService = submissionService;
+      this.runOrchestrator = runOrchestrator;
+      this.runMapper = runMapper;
+    }
+
+    @PostMapping("/{runId}")
+    @ResponseBody
+    ResponseEntity<RunSummary> submit(
+        @PathVariable String runId,
+        @RequestBody ReservedRunRequest request,
+        @AuthenticationPrincipal AppUserDetails actor) {
+      CustomerRunSubmissionService.Command command =
+          CustomerRunSubmissionService.Command.builder()
+              .userRequest(request.userRequest())
+              .source("MANUAL")
+              .skipApproval(false)
+              .autoMerge(false)
+              .modelName(MODEL)
+              .aiProvider(PROVIDER)
+              .rememberProviderPreference(false)
+              .executionMode("PRODUCTION")
+              .userCostCap(COST_CAP_USD)
+              .skipAutoPush(true)
+              .requireConfirmationBeforeExpensiveContinuation(true)
+              .requireBenchmarkPriorForAutomaticContinuation(true)
+              .idempotencyKey("pipeline-e2e-" + runId)
+              .requestFingerprint(
+                  RunRequestFingerprint.of(List.of(request.userRequest(), PROVIDER, MODEL, runId)))
+              .build();
+      PipelineRun run =
+          runOrchestrator.withReservedRunId(
+              runId, () -> submissionService.submit(command, actor).run());
+      return ResponseEntity.accepted().body(runMapper.toSummary(run, false, false));
+    }
   }
 }

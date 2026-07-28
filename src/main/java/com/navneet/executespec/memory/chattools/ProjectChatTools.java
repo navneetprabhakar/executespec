@@ -12,6 +12,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.navneet.executespec.auth.entity.AppUser;
 import com.navneet.executespec.auth.repository.AppUserRepository;
 import com.navneet.executespec.auth.security.AppUserDetails;
+import com.navneet.executespec.codeintel.ProjectArchitectureJobService;
 import com.navneet.executespec.codeintel.ProjectArchitectureService;
 import com.navneet.executespec.codeintel.ProjectDocGeneratorService;
 import com.navneet.executespec.codeintel.entity.ProjectArchitectureDoc;
@@ -83,6 +84,7 @@ import lombok.extern.slf4j.Slf4j;
 public class ProjectChatTools {
 
   private final ProjectArchitectureService architectureService;
+  private final ProjectArchitectureJobService architectureJobs;
   private final ProjectDocGeneratorService docGeneratorService;
   private final ProjectRepoRepository repoRepo;
   private final ProjectRepoLinkRepository linkRepo;
@@ -298,17 +300,16 @@ public class ProjectChatTools {
               args.has("branchOverride") && !args.get("branchOverride").isNull()
                   ? args.get("branchOverride").asText(null)
                   : null;
-          ProjectArchitectureDoc doc =
-              architectureService.generate(ctx.projectId(), branchOverride, ctx.callerPat());
+          var job =
+              architectureJobs.request(
+                  ctx.projectId(), ctx.principal().getUser().getId(), branchOverride);
           ObjectNode out = json.createObjectNode();
           out.put("ok", true);
-          out.put("version", doc.getVersion());
+          out.put("jobId", job.id().toString());
+          out.put("status", "QUEUED");
           out.put(
               "summary",
-              "Architecture regenerated as v"
-                  + doc.getVersion()
-                  + ". A PR has been opened on every linked repo with the refreshed codemap. "
-                  + "It also appears in the project dashboard's Pull requests tab.");
+              "Architecture refresh was queued. Poll the project architecture job for completion.");
           return out;
         });
   }
@@ -1220,6 +1221,12 @@ public class ProjectChatTools {
                     + docType.name()
                     + " doc exists yet. Call generate_project_doc to create it.");
             return out;
+          }
+          try {
+            docGeneratorService.assertSafeForCustomer(doc.get().getContent());
+          } catch (ProjectDocGeneratorService.UnsafeGeneratedDocumentException unsafe) {
+            return errorEnvelope(
+                "The generated document failed its publication safety check and cannot be read.");
           }
           out.put("ok", true);
           out.put("docType", doc.get().getDocType().name());

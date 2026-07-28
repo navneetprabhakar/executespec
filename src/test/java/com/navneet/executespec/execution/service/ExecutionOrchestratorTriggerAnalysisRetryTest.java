@@ -1,7 +1,6 @@
 package com.navneet.executespec.execution.service;
 
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 import java.util.Optional;
@@ -39,6 +38,7 @@ class ExecutionOrchestratorTriggerAnalysisRetryTest {
   @Mock ExecutionRunRepository runRepo;
   @Mock com.navneet.executespec.execution.repository.ExecutionSolutionRepository solutionRepo;
   @Mock ProjectArchitectureService archService;
+  @Mock com.navneet.executespec.codeintel.ProjectArchitectureJobService architectureJobs;
   @Mock com.navneet.executespec.project.repository.ProjectRepoRepository projectRepoRepo;
   @Mock com.navneet.executespec.project.service.ProjectRepoService projectRepoService;
   @Mock AppUserRepository appUserRepo;
@@ -96,6 +96,7 @@ class ExecutionOrchestratorTriggerAnalysisRetryTest {
             },
             new com.navneet.executespec.integration.PipelineExecutorPool());
     selfHolder[0] = orchestrator;
+    orchestrator.setArchitectureJobs(architectureJobs);
   }
 
   @Test
@@ -109,10 +110,12 @@ class ExecutionOrchestratorTriggerAnalysisRetryTest {
         .thenReturn(Optional.of(snapshot))
         .thenAnswer(inv -> Optional.of(withStatus("EXECUTING")))
         .thenAnswer(inv -> Optional.of(withStatus("ANALYSING")));
-    when(appUserRepo.findById("user-1")).thenReturn(Optional.of(userWithPat("ghp_test")));
     ProjectArchitectureDoc doc = new ProjectArchitectureDoc();
     doc.setContent("# arch");
-    when(archService.generate(eq("proj-1"), any(), eq("ghp_test"))).thenReturn(doc);
+    java.util.UUID architectureId = java.util.UUID.randomUUID();
+    when(architectureJobs.requestAndAwaitArchitectureId("proj-1", "user-1"))
+        .thenReturn(architectureId);
+    when(archService.findById(architectureId)).thenReturn(Optional.of(doc));
     when(runRepo.save(any(ExecutionRun.class))).thenAnswer(inv -> inv.getArgument(0));
 
     orchestrator.triggerAnalysis("exec-1");
@@ -133,10 +136,12 @@ class ExecutionOrchestratorTriggerAnalysisRetryTest {
         .thenAnswer(inv -> Optional.of(withStatus("ANALYSING"))) // ARCH_REVIEW save attempt 1 fetch
         .thenAnswer(
             inv -> Optional.of(withStatus("ANALYSING"))); // ARCH_REVIEW save attempt 2 fetch
-    when(appUserRepo.findById("user-1")).thenReturn(Optional.empty()); // no PAT
     ProjectArchitectureDoc doc = new ProjectArchitectureDoc();
     doc.setContent("# arch");
-    when(archService.generate(eq("proj-1"), any(), any())).thenReturn(doc);
+    java.util.UUID architectureId = java.util.UUID.randomUUID();
+    when(architectureJobs.requestAndAwaitArchitectureId("proj-1", "user-1"))
+        .thenReturn(architectureId);
+    when(archService.findById(architectureId)).thenReturn(Optional.of(doc));
     // 1st save = ANALYSING ok; 2nd save = ARCH_REVIEW conflict; 3rd save = ARCH_REVIEW ok
     when(runRepo.save(any(ExecutionRun.class)))
         .thenAnswer(inv -> inv.getArgument(0)) // ANALYSING ok
@@ -159,8 +164,7 @@ class ExecutionOrchestratorTriggerAnalysisRetryTest {
         .thenReturn(Optional.of(snapshot)) // snapshot
         .thenAnswer(inv -> Optional.of(withStatus("EXECUTING"))) // ANALYSING save fetch
         .thenAnswer(inv -> Optional.of(withStatus("ANALYSING"))); // ABORTED save fetch
-    when(appUserRepo.findById("user-1")).thenReturn(Optional.empty());
-    when(archService.generate(eq("proj-1"), any(), any()))
+    when(architectureJobs.requestAndAwaitArchitectureId("proj-1", "user-1"))
         .thenThrow(new RuntimeException("clone failed"));
     when(runRepo.save(any(ExecutionRun.class))).thenAnswer(inv -> inv.getArgument(0));
 

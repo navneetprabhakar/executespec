@@ -200,6 +200,8 @@ public class RunOrchestrator implements RunControlPort {
   private final com.navneet.executespec.codeintel.StalenessService stalenessService;
   private final com.navneet.executespec.codeintel.ProjectArchitectureService
       projectArchitectureService;
+  private final com.navneet.executespec.codeintel.ProjectArchitectureJobService
+      projectArchitectureJobs;
   private final com.navneet.executespec.project.rag.RetrievalService retrievalService;
   private final com.navneet.executespec.memory.RunLedgerAgent runLedgerAgent;
   private final com.navneet.executespec.integration.scm.ScmPushService scmPushService;
@@ -1773,12 +1775,23 @@ public class RunOrchestrator implements RunControlPort {
                 // Preserve the run's explicit provider pin during pre-planner architecture refresh.
                 // Without this, a stale project can spend on its project-default provider before
                 // the pinned worker route is reached.
-                projectArchitectureService.generate(
-                    projectId,
-                    null,
-                    runUserPat,
-                    LlmProvider.valueOf(provider.toUpperCase(Locale.ROOT)));
+                java.util.UUID refreshedArchitectureId =
+                    projectArchitectureJobs.requestWithProviderAndAwaitArchitectureId(
+                        projectId,
+                        runOwnerId,
+                        null,
+                        LlmProvider.valueOf(provider.toUpperCase(Locale.ROOT)));
+                projectArchitectureService
+                    .findById(refreshedArchitectureId)
+                    .orElseThrow(
+                        () ->
+                            new IllegalStateException(
+                                "Promoted pre-planner architecture is unavailable"));
                 stalenessService.invalidate(projectId);
+                log.info(
+                    "V2 run={} project={} completed durable pre-planner map refresh",
+                    runId,
+                    projectId);
               }
             } catch (Exception e) {
               log.warn(

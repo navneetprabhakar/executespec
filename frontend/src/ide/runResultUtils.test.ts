@@ -1,6 +1,7 @@
 import {describe, expect, it} from 'vitest';
 
 import {
+  boundedLineDiff,
   confidenceColor,
   continuationApprovalCandidate,
   continuationApprovalReason,
@@ -34,6 +35,7 @@ import {
   modelRankingLabel,
   num,
   runArtifactActionAvailability,
+  runChatResponseContent,
   friendlyAiFailureMessage,
   terminalFailureEvidence,
   runPhaseDiagnosis,
@@ -244,6 +246,22 @@ describe('runResultUtils', () => {
       {sign: '+', text: 'new'},
       {sign: ' ', text: 'same'},
     ]);
+  });
+
+  it('computes at the exact line/matrix threshold and refuses the first comparison above it', () => {
+    const limits = {maxInputCharsPerSide: 100, maxLinesPerSide: 4, maxMatrixCells: 9};
+    const atThreshold = boundedLineDiff('a\nb\nc', 'a\nx\nc', limits);
+    expect(atThreshold.truncated).toBe(false);
+    expect(atThreshold.lines.some((line) => line.sign === '-' && line.text === 'b')).toBe(true);
+    expect(atThreshold.lines.some((line) => line.sign === '+' && line.text === 'x')).toBe(true);
+
+    const overThreshold = boundedLineDiff('a\nb\nc', 'a\nx\nc\nd', limits);
+    expect(overThreshold).toMatchObject({
+      lines: [],
+      truncated: true,
+    });
+    expect(overThreshold.reason).toContain('3 × 4');
+    expect(overThreshold.reason).toContain('9-cell safety limit');
   });
 
   it('rejects missing, epoch and inverted task timestamps instead of showing epoch durations', () => {
@@ -735,5 +753,19 @@ describe('runResultUtils', () => {
     expect(friendlyAiFailureMessage(new Error('chat service unavailable'))).toBe(
       'chat service unavailable',
     );
+  });
+
+  it('does not discard typed Ask incompleteness when a server omits the text notice', () => {
+    const content = runChatResponseContent({
+      reply: 'Partial repository analysis',
+      messageCount: 1,
+      maxMessages: 50,
+      complete: false,
+      incompleteReason: 'PROVIDER_OUTPUT_LIMIT',
+    });
+
+    expect(content).toContain('Partial repository analysis');
+    expect(content).toContain('answer is incomplete');
+    expect(content).toContain('specific file');
   });
 });
