@@ -24,7 +24,10 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
-/** Real PostgreSQL clean-install, V347 upgrade, and impossible decision-state proof for V348. */
+/**
+ * Real PostgreSQL clean-install, V347 upgrade, impossible V348 decision states, and V351-to-V352
+ * admission-trigger preservation.
+ */
 @Tag("integration")
 @Testcontainers
 class PlanGateDecisionIntegrityMigrationIntegrationTest {
@@ -675,6 +678,78 @@ class PlanGateDecisionIntegrityMigrationIntegrationTest {
     }
   }
 
+  @Test
+  void v351UpgradeToV352AllowsExactBlockedEvidenceAndPreservesAdmissionTriggerGuards() {
+    String schema = schema("gate_blocked_upgrade");
+    DriverManagerDataSource dataSource = dataSource(schema);
+    JdbcTemplate jdbc = new JdbcTemplate(dataSource);
+    try {
+      flyway(dataSource, schema, "351").migrate();
+      insertRun(jdbc, "blocked-upgrade", "PLANNING");
+      UUID contractId = insertRequirementContract(jdbc, "blocked-upgrade", "BLOCKED", 1);
+
+      assertThatThrownBy(() -> insertEnforcedGate(jdbc, "blocked-upgrade", contractId, "BLOCKED"))
+          .hasMessageContaining("exact READY zero-blocker RequirementIR");
+
+      assertThat(flyway(dataSource, schema, "352").migrate().migrationsExecuted).isEqualTo(1);
+      assertThat(flyway(dataSource, schema, "352").info().current().getVersion().getVersion())
+          .isEqualTo("352");
+      insertEnforcedGate(jdbc, "blocked-upgrade", contractId, "BLOCKED");
+
+      assertThat(
+              jdbc.queryForMap(
+                  "SELECT status,binding_mode,binding_status FROM gate_record"
+                      + " WHERE run_id='blocked-upgrade'"))
+          .containsEntry("status", "PENDING")
+          .containsEntry("binding_mode", "ENFORCED")
+          .containsEntry("binding_status", "BLOCKED");
+      assertThatThrownBy(
+              () ->
+                  jdbc.update(
+                      "UPDATE gate_record SET binding_reason='changed'"
+                          + " WHERE run_id='blocked-upgrade'"))
+          .hasMessageContaining("plan gate open binding is immutable");
+      assertThatThrownBy(
+              () ->
+                  jdbc.update(
+                      "UPDATE gate_record SET resolved_at=NOW()"
+                          + " WHERE run_id='blocked-upgrade'"))
+          .hasMessageContaining("pending plan gate cannot carry resolution or admission evidence");
+      assertThatThrownBy(
+              () ->
+                  jdbc.update(
+                      "UPDATE gate_record SET status='APPROVED'"
+                          + " WHERE run_id='blocked-upgrade'"))
+          .hasMessageContaining(
+              "ENFORCED plan approval requires a complete BOUND admission binding");
+      assertThat(
+              jdbc.queryForMap(
+                  "SELECT status,binding_status FROM gate_record"
+                      + " WHERE run_id='blocked-upgrade'"))
+          .containsEntry("status", "PENDING")
+          .containsEntry("binding_status", "BLOCKED");
+
+      insertRun(jdbc, "bad-digest-after-upgrade", "PLANNING");
+      assertThatThrownBy(
+              () ->
+                  jdbc.update(
+                      """
+                      INSERT INTO gate_record (
+                        gate_key,run_id,gate_type,status,comment,created_at,binding_mode,
+                        binding_status,binding_reason,continuation_schema_version,
+                        continuation_sha256)
+                      VALUES (?,?,'PLAN','PENDING','exact bytes',NOW(),'LEGACY','UNBOUND',
+                              'LEGACY_MODE',1,?)
+                      """,
+                      "gate:plan:bad-digest-after-upgrade",
+                      "bad-digest-after-upgrade",
+                      "0".repeat(64)))
+          .hasMessageContaining("plan gate continuation digest does not match exact bytes");
+    } finally {
+      jdbc.execute("DROP SCHEMA IF EXISTS " + schema + " CASCADE");
+    }
+  }
+
   private static String approveGate(String runId) {
     return approveGate(runId, approvalEvidence(runId));
   }
@@ -882,6 +957,11 @@ class PlanGateDecisionIntegrityMigrationIntegrationTest {
 
   private static void insertEnforcedGate(
       JdbcTemplate jdbc, String runId, UUID requirementContractId) {
+    insertEnforcedGate(jdbc, runId, requirementContractId, "BOUND");
+  }
+
+  private static void insertEnforcedGate(
+      JdbcTemplate jdbc, String runId, UUID requirementContractId, String bindingStatus) {
     jdbc.update(
         """
         INSERT INTO gate_record (
@@ -889,10 +969,11 @@ class PlanGateDecisionIntegrityMigrationIntegrationTest {
           requirement_contract_id,binding_schema_version,binding_compiler_fingerprint,
           binding_source_sha256,binding_exact_plan_fingerprint,binding_artifact_digest,
           binding_bound_digest,binding_bound_at)
-        VALUES (?,?,'PLAN','PENDING',NOW(),'ENFORCED','BOUND',?,1,?,?,?,?,?,NOW())
+        VALUES (?,?,'PLAN','PENDING',NOW(),'ENFORCED',?,?,1,?,?,?,?,?,NOW())
         """,
         "gate:plan:" + runId,
         runId,
+        bindingStatus,
         requirementContractId,
         "a".repeat(64),
         "b".repeat(64),

@@ -202,7 +202,7 @@ class RequirementGateBindingServiceTest {
   }
 
   @Test
-  void approvalBlockedArtifactIsObservableInShadowAndRejectedInEnforcedMode() throws Exception {
+  void approvalBlockedArtifactIsObservableAndCanOpenAnEnforcedPendingGate() throws Exception {
     String blockedSource = "Do the right thing when appropriate.";
     String blockedPlan = mapper.writeValueAsString(plan(blockedSource));
     RunRequirementContract blocked = validRow(blockedSource, blockedPlan);
@@ -217,11 +217,10 @@ class RequirementGateBindingServiceTest {
     assertThat(shadow.status()).isEqualTo(BindingStatus.BLOCKED);
     assertThat(shadow.reasonCode()).isEqualTo(ReasonCode.APPROVAL_BLOCKED);
 
-    assertThatThrownBy(
-            () -> service.select(RUN_ID, blockedSource, blockedPlan, RequestedMode.ENFORCED))
-        .isInstanceOfSatisfying(
-            RequirementGateBindingException.class,
-            error -> assertThat(error.reasonCode()).isEqualTo(ReasonCode.APPROVAL_BLOCKED));
+    var enforced = service.select(RUN_ID, blockedSource, blockedPlan, RequestedMode.ENFORCED);
+    assertThat(enforced.status()).isEqualTo(BindingStatus.BLOCKED);
+    assertThat(enforced.approvable()).isFalse();
+    assertThat(enforced.contractId()).isEqualTo(blocked.getId());
   }
 
   @Test

@@ -24,6 +24,7 @@ import {
   toGateView,
 } from '@/ide/planContractGate';
 import {PlanContractGateCard} from '@/ide/PlanContractGateCard';
+import {RequirementGateCard} from '@/ide/RequirementGateCard';
 import {PlanReviewDetails} from '@/ide/PlanReviewDetails';
 import {writeSpecHandoff} from '@/lib/specHandoff';
 import {useAuthStore, selectIsSuperAdmin} from '@/stores/useAuthStore';
@@ -57,6 +58,12 @@ export default function IdePlan() {
   const [breakingAck, setBreakingAck] = useState('');
   const [reloadGate, setReloadGate] = useState(0);
   const [gateLoadError, setGateLoadError] = useState('');
+  const [loadedRequirementGate, setLoadedRequirementGate] = useState<{
+    runId: string;
+    evidence: api.RequirementGateEvidence | null;
+  } | null>(null);
+  const [requirementGateLoadError, setRequirementGateLoadError] = useState('');
+  const [reloadRequirementGate, setReloadRequirementGate] = useState(0);
   const [verifiedPlan, setVerifiedPlan] = useState<{
     runId: string;
     planJson: string;
@@ -82,6 +89,8 @@ export default function IdePlan() {
     setLoadedGate(null);
     setGateLoadError('');
     setBreakingAck('');
+    setLoadedRequirementGate(null);
+    setRequirementGateLoadError('');
     setVerifiedPlan(null);
   }
 
@@ -99,8 +108,10 @@ export default function IdePlan() {
   const gate =
     loadedGate && loadedGate.runId === runId ? toGateView(runId, loadedGate.report) : null;
   const gateContextReady = loadedGate?.runId === runId && !gateLoadError;
-  const gateRequiresAck = gateBlocksApproval(gate);
-  const approvalAllowed = gateContextReady && canApprove(gate, breakingAck);
+  const requirementGate =
+    loadedRequirementGate?.runId === runId ? loadedRequirementGate.evidence : null;
+  const requirementContextReady =
+    loadedRequirementGate?.runId === runId && !requirementGateLoadError;
   const exactPlanFingerprint =
     run &&
     verifiedPlan?.runId === runId &&
@@ -108,6 +119,27 @@ export default function IdePlan() {
     verifiedPlan.fingerprint
       ? verifiedPlan.fingerprint
       : undefined;
+  const requirementHasBoundPlan =
+    requirementGate?.bindingMode === 'SHADOW' || requirementGate?.bindingMode === 'ENFORCED';
+  const requirementPlanIdentityReady =
+    !requirementHasBoundPlan ||
+    Boolean(exactPlanFingerprint && requirementGate?.exactPlanFingerprint === exactPlanFingerprint);
+  const requirementPlanIdentityError =
+    requirementHasBoundPlan &&
+    exactPlanFingerprint &&
+    requirementGate?.exactPlanFingerprint !== exactPlanFingerprint
+      ? 'Requirement evidence is bound to a different plan. Retry before approval.'
+      : '';
+  const requirementBlocksApproval = Boolean(
+    requirementGate?.enforced && !requirementGate.approvalReady,
+  );
+  const gateRequiresAck = gateBlocksApproval(gate);
+  const approvalAllowed =
+    gateContextReady &&
+    requirementContextReady &&
+    requirementPlanIdentityReady &&
+    !requirementBlocksApproval &&
+    canApprove(gate, breakingAck);
   const planIdentityError =
     run && verifiedPlan?.runId === runId && verifiedPlan.planJson === run.planJson
       ? verifiedPlan.error
@@ -210,7 +242,7 @@ export default function IdePlan() {
   // read failure cannot be treated as proof that no contract gate exists. Keep approval disabled
   // until the exact report (including a legitimate 204/no-gate response) has loaded.
   useEffect(() => {
-    if (!runId) return;
+    if (!runId || durablePlanStatus !== 'AWAITING_APPROVAL') return;
     let cancelled = false;
     setLoadedGate(null);
     setGateLoadError('');
@@ -234,7 +266,41 @@ export default function IdePlan() {
     return () => {
       cancelled = true;
     };
-  }, [runId, reloadGate]);
+  }, [runId, reloadGate, durablePlanStatus]);
+
+  // RequirementIR is immutable evidence about this exact plan generation. Keep it independently
+  // keyed by runId and fail closed while it is loading: a missing/ambiguous contract must never be
+  // treated as READY merely because the plan itself loaded.
+  useEffect(() => {
+    if (!runId || durablePlanStatus !== 'AWAITING_APPROVAL') return;
+    let cancelled = false;
+    setLoadedRequirementGate(null);
+    setRequirementGateLoadError('');
+    api
+      .getRequirementGate(runId)
+      .then((evidence) => {
+        if (cancelled) return;
+        if (evidence && evidence.runId !== runId) {
+          setRequirementGateLoadError(
+            'Requirement evidence did not match this work item. Retry the request.',
+          );
+          return;
+        }
+        setLoadedRequirementGate({runId, evidence: evidence ?? null});
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) {
+          setRequirementGateLoadError(
+            error instanceof Error && error.message
+              ? error.message
+              : 'Requirement evidence could not be loaded.',
+          );
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [runId, reloadRequirementGate, durablePlanStatus, run?.planJson]);
 
   // RUN_DETAIL replay updates the shared run store. Keep the page-local copy so
   // existing plan rendering and approval actions remain unchanged.
@@ -519,6 +585,39 @@ export default function IdePlan() {
               onTypedChange={setBreakingAck}
               disabled={busy !== ''}
             />
+          )}
+
+          {requirementGate && <RequirementGateCard evidence={requirementGate} />}
+
+          {(!requirementContextReady || !requirementPlanIdentityReady) && (
+            <div
+              className='ide-card'
+              role={requirementGateLoadError || requirementPlanIdentityError ? 'alert' : 'status'}
+            >
+              <div
+                style={{
+                  color:
+                    requirementGateLoadError || requirementPlanIdentityError
+                      ? 'var(--ide-red)'
+                      : 'var(--ide-fg-muted)',
+                }}
+              >
+                {requirementGateLoadError
+                  ? `Requirement evidence could not be loaded. ${requirementGateLoadError}`
+                  : requirementPlanIdentityError
+                    ? requirementPlanIdentityError
+                    : 'Checking requirement coverage…'}
+              </div>
+              {(requirementGateLoadError || requirementPlanIdentityError) && (
+                <button
+                  className='ide-btn ghost'
+                  style={{marginTop: 10}}
+                  onClick={() => setReloadRequirementGate((attempt) => attempt + 1)}
+                >
+                  Retry requirement check
+                </button>
+              )}
+            </div>
           )}
 
           {!gateContextReady && (

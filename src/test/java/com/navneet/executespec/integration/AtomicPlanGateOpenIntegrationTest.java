@@ -9,6 +9,8 @@ import java.util.UUID;
 
 import com.navneet.executespec.agent.requirement.ExactPlanFingerprint;
 import com.navneet.executespec.agent.requirement.RequirementGateBindingService.RequestedMode;
+import com.navneet.executespec.agent.requirement.RunRequirementContractShadowService;
+import com.navneet.executespec.agent.requirement.repository.RunRequirementContractRepository;
 import com.navneet.executespec.harness.repository.GateRepository;
 import com.navneet.executespec.harness.repository.PlanGateResumeOutboxRepository;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
@@ -24,6 +26,8 @@ class AtomicPlanGateOpenIntegrationTest extends PostgresIntegrationBase {
   @Autowired PipelineRunRepository runs;
   @Autowired GateRepository gates;
   @Autowired PlanGateResumeOutboxRepository outbox;
+  @Autowired RunRequirementContractShadowService requirementContracts;
+  @Autowired RunRequirementContractRepository requirementContractRepository;
   @Autowired JdbcTemplate jdbc;
 
   @Test
@@ -57,6 +61,37 @@ class AtomicPlanGateOpenIntegrationTest extends PostgresIntegrationBase {
             jdbc.queryForObject(
                 "SELECT count(*) FROM plan_gate_resume_outbox WHERE run_id=?", Long.class, runId))
         .isEqualTo(1L);
+  }
+
+  @Test
+  void enforcedModeOpensVisiblePendingGateForExactStructurallyValidBlockedArtifact() {
+    String runId = "atomic-blocked-" + UUID.randomUUID();
+    String source = "Original requirement";
+    String planJson = "{\"requirements\":[],\"tasks\":[]}";
+    String continuation = "{\"schemaVersion\":1,\"localRun\":false}";
+    insertPlanningRun(runId, planJson);
+    var persisted = requirementContracts.persist(runId, source, planJson);
+    var contract =
+        requirementContractRepository
+            .findByRunIdAndExactPlanFingerprintAndSchemaVersionAndCompilerFingerprint(
+                runId,
+                persisted.exactPlanFingerprint(),
+                1,
+                com.navneet.executespec.agent.requirement.RequirementIrCompiler
+                    .COMPILER_FINGERPRINT)
+            .orElseThrow();
+    assertThat(contract.getCompleteness().name()).isEqualTo("BLOCKED");
+
+    assertThat(opener.open(command(runId, planJson, continuation, null, RequestedMode.ENFORCED)))
+        .isEqualTo(PlanGateOpenService.OpenResult.OPENED);
+
+    var gate = gates.findById("gate:plan:" + runId).orElseThrow();
+    assertThat(gate.getStatus()).isEqualTo("PENDING");
+    assertThat(gate.getBindingMode()).isEqualTo("ENFORCED");
+    assertThat(gate.getBindingStatus()).isEqualTo("BLOCKED");
+    assertThat(gate.getRequirementContractId()).isEqualTo(contract.getId());
+    assertThat(runs.findById(runId).orElseThrow().getStatus()).isEqualTo("AWAITING_APPROVAL");
+    assertThat(outbox.findById(runId).orElseThrow().getStatus()).isEqualTo("WAITING");
   }
 
   @Test
@@ -181,6 +216,11 @@ class AtomicPlanGateOpenIntegrationTest extends PostgresIntegrationBase {
 
   private PlanGateOpenService.OpenCommand command(
       String runId, String planJson, String continuation, String reportDigest) {
+    return command(runId, planJson, continuation, reportDigest, RequestedMode.LEGACY);
+  }
+
+  private PlanGateOpenService.OpenCommand command(
+      String runId, String planJson, String continuation, String reportDigest, RequestedMode mode) {
     return new PlanGateOpenService.OpenCommand(
         runId,
         planJson,
@@ -188,7 +228,7 @@ class AtomicPlanGateOpenIntegrationTest extends PostgresIntegrationBase {
         continuation,
         1,
         reportDigest,
-        RequestedMode.LEGACY);
+        mode);
   }
 
   private void insertPlanningRun(String runId, String planJson) {
