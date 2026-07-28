@@ -369,6 +369,21 @@ export function goalStateKind(state?: string | null): 'ok' | 'warn' | 'bad' {
   return 'warn';
 }
 
+export function goalProofKind(proofStatus?: string | null): 'ok' | 'warn' | 'bad' {
+  const status = (proofStatus || '').toUpperCase();
+  if (status === 'PROVEN') return 'ok';
+  if (status === 'BLOCKING') return 'bad';
+  return 'warn';
+}
+
+export function goalProofLabel(proofStatus?: string | null): string {
+  const status = (proofStatus || '').toUpperCase();
+  if (status === 'PROVEN') return 'Proven';
+  if (status === 'BLOCKING') return 'Blocking';
+  if (status === 'UNPROVEN') return 'Unproven';
+  return 'Context';
+}
+
 function preciseUsd(n?: number | null): string {
   if (n == null) return '—';
   if (Math.abs(n) < 1) return `$${n.toFixed(4)}`;
@@ -432,6 +447,37 @@ export function shouldUseRunEvidenceChat(message: string): boolean {
   if (explicitMutation && !questionPrefix && !hardEvidenceKeyword) return false;
   if (questionPrefix || evidenceKeyword) return true;
   return !explicitMutation;
+}
+
+/**
+ * Provider/dispatch failures are operator diagnostics, not useful chat answers. Keep the durable
+ * failure visible in server logs while giving the run owner a bounded recovery path instead of
+ * leaking an implementation exception into the Ask surface.
+ */
+export function friendlyAiFailureMessage(error: unknown): string {
+  const raw = error instanceof Error ? error.message : typeof error === 'string' ? error : '';
+  const normalized = raw.toLowerCase();
+  if (
+    normalized.includes('durable llm execution-context budget is exhausted') ||
+    (normalized.includes('llmdispatchpolicyexception') && normalized.includes('budget'))
+  ) {
+    return 'This run has used its available AI context, so it cannot answer another question in the current context. Start follow-up work for a code change, or open Evidence, Code, and Activity log to inspect this run without additional AI spend.';
+  }
+  if (
+    normalized.includes('managed ai credit') ||
+    normalized.includes('ai credits required') ||
+    normalized.includes('provider budget')
+  ) {
+    return 'Ask is unavailable because this account has no usable AI budget. Review the run evidence without additional AI spend, or update the provider or AI-credit settings before retrying.';
+  }
+  if (
+    normalized.includes('provider credential') ||
+    normalized.includes('api-key not configured') ||
+    normalized.includes('api key not configured')
+  ) {
+    return 'Ask cannot reach the selected provider. Check the provider credential and route, then retry.';
+  }
+  return raw || 'Ask could not complete. Retry, or inspect Evidence and Activity log for this run.';
 }
 
 export function isFailedTerminalStatus(status?: string | null): boolean {

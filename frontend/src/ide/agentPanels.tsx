@@ -40,6 +40,7 @@ import {
   type RoutingState,
   type StreamTimelineItem,
 } from '@/ide/agentState';
+
 import {hasUnlimitedAiCredits} from '@/ide/planUtils';
 import {useAuthStore, selectIsSuperAdmin} from '@/stores/useAuthStore';
 import {Paperclip, ArrowUp, StopIcon, FolderIcon} from '@/ide/agentIcons';
@@ -51,6 +52,14 @@ import {
   TrustBoundaryPanel,
 } from '@/ide/agentRuntimeContract';
 import {phaseState, sandboxPhaseKey} from '@/ide/agentSandboxPhase';
+import {friendlyAiFailureMessage} from '@/ide/runResultUtils';
+import {
+  AgentRepositoryScope,
+  repositoryConfirmationDisabled,
+  type CloudRunRepoSelection,
+} from '@/ide/AgentRepositoryScope';
+
+export type {CloudRunRepoChoice, CloudRunRepoSelection} from '@/ide/AgentRepositoryScope';
 
 function tokenCount(value: number): string {
   if (!Number.isFinite(value) || value <= 0) return '0';
@@ -640,7 +649,11 @@ function MessageBubble({
             No response arrived for this turn. You can send the message again.
           </div>
         ) : (
-          <Markdown collapseCodeBlocks={message.role === 'assistant'}>{message.content}</Markdown>
+          <Markdown collapseCodeBlocks={message.role === 'assistant'}>
+            {message.role === 'assistant'
+              ? friendlyAiFailureMessage(message.content)
+              : message.content}
+          </Markdown>
         )}
       </div>
       {message.role === 'assistant' && (
@@ -1106,12 +1119,14 @@ function ActionCard({
   onDismiss,
   busy,
   remoteSandboxEnabled,
+  repoSelection,
 }: {
   pending: PendingAction;
   onConfirm: (pending: PendingAction) => void;
   onDismiss: () => void;
   busy: boolean;
   remoteSandboxEnabled: boolean;
+  repoSelection?: CloudRunRepoSelection;
 }) {
   const isLocal =
     pending.action.type === 'local_tool_action' || pending.action.type === 'local_code_task';
@@ -1126,6 +1141,7 @@ function ActionCard({
         onConfirm={onConfirm}
         onDismiss={onDismiss}
         remoteSandboxEnabled={remoteSandboxEnabled}
+        repoSelection={repoSelection}
       />
     );
   }
@@ -1171,17 +1187,20 @@ function SandboxProposalCard({
   onDismiss,
   busy,
   remoteSandboxEnabled,
+  repoSelection,
 }: {
   pending: PendingAction;
   onConfirm: (pending: PendingAction) => void;
   onDismiss: () => void;
   busy: boolean;
   remoteSandboxEnabled: boolean;
+  repoSelection?: CloudRunRepoSelection;
 }) {
   const args = pending.action.arguments || {};
   const spec = asText(args.spec || args.request || pending.action.confirmationPrompt || '');
   const project = asText(args.projectId || args.project || 'Current project or selected repo');
   const provider = asText(args.aiProvider || args.provider || 'Account default');
+  const confirmationDisabled = repositoryConfirmationDisabled(repoSelection, busy);
   return (
     <div className='agent-card agent-sandbox-proposal waiting'>
       <div className='agent-card-head'>
@@ -1214,6 +1233,7 @@ function SandboxProposalCard({
           <code>{provider}</code>
         </div>
       </div>
+      <AgentRepositoryScope selection={repoSelection} busy={busy} />
       <RuntimeContractPanel sandboxEnabled={remoteSandboxEnabled} />
       <TrustBoundaryPanel compact />
       <div className='agent-card-consequence-row'>
@@ -1226,7 +1246,7 @@ function SandboxProposalCard({
         <button
           className='ide-btn agent-btn-primary'
           onClick={() => onConfirm(pending)}
-          disabled={busy}
+          disabled={confirmationDisabled}
         >
           Create {remoteSandboxEnabled ? 'sandbox' : 'workspace'} plan
         </button>
@@ -1322,7 +1342,7 @@ function GateCard({
           // RR-1489 — cost must be known before spend is authorized.
           disabled={busy || gate.creditsRequired == null}
         >
-          Approve &amp; run
+          Review &amp; approve
         </button>
         <button className='ide-btn ghost' onClick={() => onReject(gate)} disabled={busy}>
           Reject
@@ -1468,6 +1488,7 @@ export function AgentConversation({
   runUnavailable,
   routingState,
   remoteSandboxEnabled = false,
+  repoSelection,
   hasNewActivity = false,
   input,
   attachments,
@@ -1499,6 +1520,7 @@ export function AgentConversation({
   runUnavailable?: 'RUN_NOT_FOUND' | 'AUTH_REQUIRED' | null;
   routingState?: RoutingState;
   remoteSandboxEnabled?: boolean;
+  repoSelection?: CloudRunRepoSelection;
   hasNewActivity?: boolean;
   input: string;
   attachments: AgentAttachmentLite[];
@@ -1611,6 +1633,7 @@ export function AgentConversation({
               onConfirm={onConfirmAction}
               onDismiss={() => dispatch({type: 'action:clear'})}
               remoteSandboxEnabled={remoteSandboxEnabled}
+              repoSelection={repoSelection}
             />
           )}
           <div ref={endRef} />

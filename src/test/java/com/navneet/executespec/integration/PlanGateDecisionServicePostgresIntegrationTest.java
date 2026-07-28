@@ -41,6 +41,7 @@ import com.navneet.executespec.agent.ResolvedKeys;
 import com.navneet.executespec.agent.requirement.ExactPlanFingerprint;
 import com.navneet.executespec.agent.requirement.RequirementContractDigests;
 import com.navneet.executespec.agent.requirement.RequirementGateBindingService.RequestedMode;
+import com.navneet.executespec.agent.requirement.RequirementIrApprovalCompatibilityRegistry;
 import com.navneet.executespec.agent.requirement.RequirementIrCodec;
 import com.navneet.executespec.agent.requirement.RequirementIrCompiler;
 import com.navneet.executespec.agent.requirement.RequirementIrDocument;
@@ -132,6 +133,7 @@ class PlanGateDecisionServicePostgresIntegrationTest extends PostgresIntegration
             gates,
             outbox,
             requirements,
+            new RequirementIrApprovalCompatibilityRegistry(objectMapper),
             entityManager,
             apiKeys,
             managedAi,
@@ -177,6 +179,74 @@ class PlanGateDecisionServicePostgresIntegrationTest extends PostgresIntegration
                 fixture.runId()))
         .isEqualTo(fixture.ownerId());
     verify(events).publishEvent(new PlanGateResumeReadyCommitted(fixture.runId()));
+  }
+
+  @Test
+  void externalCollaboratorApprovalSeparatesPayerOrgFromHostProjectTenant() {
+    Fixture fixture = openFixture(false, RequestedMode.LEGACY, true);
+    String payerOrgId =
+        jdbc.queryForObject(
+            "SELECT org_id FROM app_user WHERE id=?", String.class, fixture.ownerId());
+    when(apiKeys.resolveWithProvenance(fixture.ownerId())).thenReturn(credentials(payerOrgId));
+    when(managedAi.assertCanApproveEstimatedSpend(fixture.ownerId(), payerOrgId, false, 4.5))
+        .thenReturn(
+            new ManagedAiUsageService.ApprovalEvaluation(
+                "ALLOWED", "MANAGED", 2000L, 1900L, 100L, 25.0, 23.0));
+    allowGovernance(fixture);
+
+    PlanGateDecisionService.DecisionResult approved =
+        inTransaction(() -> service.decide(fixture.runId(), fixture.approve(), fixture.actor()));
+
+    assertThat(approved.evidence().billingOrgId()).isEqualTo(payerOrgId);
+    assertThat(approved.evidence().credentialAuthorizationOrgId()).isEqualTo(payerOrgId);
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT org_id FROM pipeline_run WHERE run_id=?", String.class, fixture.runId()))
+        .isEqualTo(fixture.orgId());
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT billing_org_id FROM gate_record WHERE run_id=?",
+                String.class,
+                fixture.runId()))
+        .isEqualTo(payerOrgId);
+    assertCoherentTuple(fixture.runId(), "APPROVE", "APPROVED", "APPROVAL_RESUMING", "READY");
+  }
+
+  @Test
+  void enforcedApprovalWithoutPlanFingerprintFailsClosedAndLeavesGatePending() {
+    Fixture fixture = openEnforcedFixture(false);
+    allowApproval(fixture);
+    PlanApprovalService.Command missingFingerprint =
+        new PlanApprovalService.Command(true, 3, "REALTIME", null, null, null);
+
+    assertThatThrownBy(
+            () ->
+                inTransaction(
+                    () -> service.decide(fixture.runId(), missingFingerprint, fixture.actor())))
+        .isInstanceOfSatisfying(
+            ResponseStatusException.class,
+            error -> {
+              assertThat(error.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+              assertThat(error.getReason()).contains("requires the exact plan fingerprint");
+            });
+
+    assertCoherentTuple(fixture.runId(), null, "PENDING", "AWAITING_APPROVAL", "WAITING");
+    verifyNoInteractions(apiKeys, managedAi, governance, events);
+  }
+
+  @Test
+  void legacyApprovalWithoutPlanFingerprintRemainsCompatible() {
+    Fixture fixture = openFixture(false, RequestedMode.LEGACY);
+    allowApproval(fixture);
+    PlanApprovalService.Command legacy =
+        new PlanApprovalService.Command(true, 3, "REALTIME", null, null, null);
+
+    PlanGateDecisionService.DecisionResult result =
+        inTransaction(() -> service.decide(fixture.runId(), legacy, fixture.actor()));
+
+    assertThat(result.evidence().suppliedPlanFingerprint()).isNull();
+    assertThat(result.evidence().planFingerprintMatched()).isNull();
+    assertCoherentTuple(fixture.runId(), "APPROVE", "APPROVED", "APPROVAL_RESUMING", "READY");
   }
 
   @Test
@@ -888,9 +958,15 @@ class PlanGateDecisionServicePostgresIntegrationTest extends PostgresIntegration
   }
 
   private Fixture openFixture(boolean withBreakingReport, RequestedMode bindingMode) {
+    return openFixture(withBreakingReport, bindingMode, false);
+  }
+
+  private Fixture openFixture(
+      boolean withBreakingReport, RequestedMode bindingMode, boolean externalPayer) {
     String runId = PREFIX + UUID.randomUUID();
     String ownerId = PREFIX + "owner-" + UUID.randomUUID();
     String orgId = PREFIX + "org-" + UUID.randomUUID();
+    String payerOrgId = externalPayer ? PREFIX + "payer-org-" + UUID.randomUUID() : orgId;
     String projectId = PREFIX + "project-" + UUID.randomUUID();
     jdbc.update(
         "INSERT INTO org (id,name,domain_patterns,tier,created_by_user_id) VALUES (?,?,?,?,?)",
@@ -899,6 +975,15 @@ class PlanGateDecisionServicePostgresIntegrationTest extends PostgresIntegration
         "example.test",
         "ENTERPRISE",
         ownerId);
+    if (externalPayer) {
+      jdbc.update(
+          "INSERT INTO org (id,name,domain_patterns,tier,created_by_user_id) VALUES (?,?,?,?,?)",
+          payerOrgId,
+          "C03C Payer Org",
+          "payer.example.test",
+          "PRO",
+          ownerId);
+    }
     jdbc.update(
         "INSERT INTO app_user"
             + " (id,email,first_name,last_name,password_hash,global_role,tier,status,org_id)"
@@ -911,7 +996,7 @@ class PlanGateDecisionServicePostgresIntegrationTest extends PostgresIntegration
         "USER",
         "ENTERPRISE",
         "ACTIVE",
-        orgId);
+        payerOrgId);
     jdbc.update(
         "INSERT INTO project (id,org_id,name,created_by,ai_provider) VALUES (?,?,?,?,?)",
         projectId,
@@ -923,8 +1008,8 @@ class PlanGateDecisionServicePostgresIntegrationTest extends PostgresIntegration
         """
         INSERT INTO pipeline_run
           (run_id,status,started_at,user_request,plan_json,credits_charged,cost_estimate_high,
-           created_by_user_id,org_id,project_id,ai_provider)
-        VALUES (?, 'PLANNING', ?, 'Return 404 when an order is absent.', ?, 3, 4.5, ?, ?, ?,
+           created_by_user_id,org_id,billing_org_id,project_id,ai_provider)
+        VALUES (?, 'PLANNING', ?, 'Return 404 when an order is absent.', ?, 3, 4.5, ?, ?, ?, ?,
                 'anthropic')
         """,
         runId,
@@ -932,6 +1017,7 @@ class PlanGateDecisionServicePostgresIntegrationTest extends PostgresIntegration
         PLAN_JSON,
         ownerId,
         orgId,
+        payerOrgId,
         projectId);
 
     UUID requirementContractId = null;

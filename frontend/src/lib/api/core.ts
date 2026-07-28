@@ -1,6 +1,9 @@
 // Typed API contract definitions. Runtime transport is re-exported here to preserve the stable
 // `@/lib/api/core` import surface for existing API modules.
 export * from './transport';
+export type {GoalProofEvidenceReference} from './validationReportTypes';
+
+import type {GoalProofEvidenceReference} from './validationReportTypes';
 // Billing DTOs moved to the billing domain module, but remain type-re-exported here so existing
 // `@/lib/api/core` consumers keep compiling while the god-file shrinks.
 export type {BillingOverviewData, PaymentAuditEntry, PricingRow, UsageMetrics} from './billing';
@@ -1052,6 +1055,8 @@ export interface ValidationReportData {
   verificationLedger?: VerificationEvidence[];
   /** Conservative run-level proof derived from the final validation ledger. */
   runGoalDecision?: GoalDonenessDecisionData | null;
+  /** Exact durable ledger rows used by the final goal proof. */
+  goalProofReferences?: GoalProofEvidenceReference[];
 }
 
 export interface VerificationEvidence {

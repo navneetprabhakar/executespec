@@ -210,6 +210,7 @@ describe('agent API SSE helpers', () => {
       sessionId: 's1',
       turnId: 't1',
       confirmed: true,
+      selectedRepoIds: ['repo-1'],
     });
 
     expect(response.runId).toBe('run-1');
@@ -218,7 +219,12 @@ describe('agent API SSE helpers', () => {
       expect.objectContaining({
         method: 'POST',
         headers: expect.objectContaining({Authorization: 'Bearer test-token'}),
-        body: JSON.stringify({sessionId: 's1', turnId: 't1', confirmed: true}),
+        body: JSON.stringify({
+          sessionId: 's1',
+          turnId: 't1',
+          confirmed: true,
+          selectedRepoIds: ['repo-1'],
+        }),
       }),
     );
   });

@@ -8,7 +8,15 @@ terminal, cross-tenant, out-of-policy and exhausted contexts fail before provide
 
 ## Invariants
 
-- `CUSTOMER` contexts always carry `orgId`, `userId`, and `isolationKey=org:<orgId>`.
+- `CUSTOMER` contexts always carry host-tenant `orgId`, initiating `userId`, immutable
+  `credentialOrgId`, and `isolationKey=org:<orgId>`. V350 deliberately allows the credential org
+  to differ from the host tenant for external collaborators; only the host org controls data
+  isolation, while credential-policy revalidation and managed-AI debit use `credentialOrgId`.
+  V350 stores and backfills the split, adds a CUSTOMER not-null check, and installs separate
+  PostgreSQL triggers that reject changes to `pipeline_run.billing_org_id` and
+  `llm_execution_context.credential_org_id`. Application creation and dispatch guards enforce the
+  same immutable binding before spend. The named V350 migration/immutability PostgreSQL gate and
+  clean 5,738-test backend verification pass on the current uncommitted source.
 - `PLATFORM_INTERNAL` is explicit and uses `isolationKey=platform:internal`.
 - Provider credentials or encrypted credential envelopes are never persisted here.
 - `LlmPolicySnapshot` records allowed providers/models and only the credential source label

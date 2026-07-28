@@ -40,12 +40,14 @@ class RequirementGateBindingServiceTest {
       new ObjectMapper().disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
   private final RequirementIrCompiler compiler = new RequirementIrCompiler();
   private final RequirementIrCodec codec = new RequirementIrCodec(mapper);
+  private final RequirementIrApprovalCompatibilityRegistry compatibilityRegistry =
+      new RequirementIrApprovalCompatibilityRegistry(mapper);
   private RequirementGateBindingService service;
   private String exactPlanJson;
 
   @BeforeEach
   void setUp() throws Exception {
-    service = new RequirementGateBindingService(repository, mapper);
+    service = new RequirementGateBindingService(repository, mapper, compatibilityRegistry);
     exactPlanJson = mapper.writeValueAsString(plan(SOURCE));
   }
 
@@ -57,6 +59,19 @@ class RequirementGateBindingServiceTest {
     assertThat(binding.approvable()).isTrue();
     assertThat(binding.reasonCode()).isEqualTo(ReasonCode.LEGACY_MODE);
     verifyNoInteractions(repository);
+  }
+
+  @Test
+  void approvalCompatibilityRegistryRetainsV1AndFailsClosedForUnknownPair() {
+    assertThat(compatibilityRegistry.current().schemaVersion())
+        .isEqualTo(RequirementIrDocument.CURRENT_SCHEMA_VERSION);
+    assertThat(compatibilityRegistry.current().compilerFingerprint())
+        .isEqualTo(RequirementIrCompiler.COMPILER_FINGERPRINT);
+
+    assertThatThrownBy(() -> compatibilityRegistry.requireSupported(2, "f".repeat(64)))
+        .isInstanceOf(
+            RequirementIrApprovalCompatibilityRegistry.IncompatibleRequirementIrException.class)
+        .hasMessageContaining("unsupported RequirementIR approval compatibility pair");
   }
 
   @Test

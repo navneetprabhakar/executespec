@@ -6,6 +6,7 @@ import java.util.Objects;
 import jakarta.persistence.EntityManager;
 
 import com.navneet.executespec.agent.ApiKeyResolver;
+import com.navneet.executespec.agent.requirement.RequirementIrApprovalCompatibilityRegistry;
 import com.navneet.executespec.agent.requirement.entity.RunRequirementContract;
 import com.navneet.executespec.agent.requirement.repository.RunRequirementContractRepository;
 import com.navneet.executespec.auth.security.AppUserDetails;
@@ -47,6 +48,7 @@ public class PlanGateDecisionService {
   private final GateRepository gateRepository;
   private final PlanGateResumeOutboxRepository outboxRepository;
   private final RunRequirementContractRepository requirementContractRepository;
+  private final RequirementIrApprovalCompatibilityRegistry requirementIrCompatibilityRegistry;
   private final EntityManager entityManager;
   private final ApiKeyResolver apiKeyResolver;
   private final ManagedAiUsageService managedAiUsageService;
@@ -143,7 +145,7 @@ public class PlanGateDecisionService {
           kind,
           actualPlanFingerprint,
           requestFingerprint,
-          lockBoundEvidence(runId, gate));
+          lockBoundEvidence(runId, gate, run.getUserRequest(), kind));
     }
     if (!"AWAITING_APPROVAL".equals(run.getStatus())) {
       throw new ResponseStatusException(
@@ -151,13 +153,21 @@ public class PlanGateDecisionService {
     }
 
     Instant now = Instant.now().truncatedTo(java.time.temporal.ChronoUnit.MICROS);
-    BoundEvidence boundEvidence = lockBoundEvidence(runId, gate);
+    BoundEvidence boundEvidence = lockBoundEvidence(runId, gate, run.getUserRequest(), kind);
     AppUserDetails lockedActor =
         PlanGateDecisionAdmission.lockPolicyRows(entityManager, run, actor, kind);
     PlanGateDecisionEvidence.ActorEvidence actorEvidence =
         PlanGateDecisionEvidence.actorEvidence(lockedActor, kind, run);
     String suppliedPlanFingerprint =
         PlanGateDecisionEvidence.normalizeSha(command.planFingerprint());
+    if (kind == DecisionKind.APPROVE
+        && "ENFORCED".equals(gate.getBindingMode())
+        && suppliedPlanFingerprint == null) {
+      throw new ResponseStatusException(
+          HttpStatus.CONFLICT,
+          "RequirementIR-enforced approval requires the exact plan fingerprint. Reload the plan"
+              + " before approving.");
+    }
     Boolean fingerprintMatches =
         suppliedPlanFingerprint == null
             ? null
@@ -233,12 +243,30 @@ public class PlanGateDecisionService {
     return new LockedDecisionRows(run, gate, outbox);
   }
 
-  private BoundEvidence lockBoundEvidence(String runId, GateRecord gate) {
+  private BoundEvidence lockBoundEvidence(
+      String runId, GateRecord gate, String exactSource, DecisionKind kind) {
     PlanContractGateReport contractReport =
         PlanGateDecisionAdmission.lockContractReport(entityManager, runId);
     PlanGateDecisionAdmission.verifyContractReportBinding(gate, contractReport);
     RunRequirementContract requirementContract =
         PlanGateDecisionAdmission.lockRequirementContract(requirementContractRepository, gate);
+    try {
+      if (kind == DecisionKind.APPROVE && requirementContract != null) {
+        requirementIrCompatibilityRegistry.requireSupported(
+            requirementContract.getSchemaVersion(), requirementContract.getCompilerFingerprint());
+        if ("ENFORCED".equals(gate.getBindingMode())) {
+          requirementIrCompatibilityRegistry.verifyApprovalCompatible(
+              requirementContract, exactSource);
+        }
+      }
+    } catch (
+        RequirementIrApprovalCompatibilityRegistry.IncompatibleRequirementIrException
+            incompatible) {
+      throw new ResponseStatusException(
+          HttpStatus.CONFLICT,
+          "The bound RequirementIR version is not approval compatible with this deployment.",
+          incompatible);
+    }
     return new BoundEvidence(contractReport, requirementContract);
   }
 
@@ -287,8 +315,8 @@ public class PlanGateDecisionService {
     gate.setResolvedAuthorizationOrgId(actor.authorizationOrgId());
     gate.setResolutionSource(resolutionSource);
     gate.setResolutionReason(resolutionReason);
-    gate.setBillingOwnerUserId(run.getCreatedByUserId());
-    gate.setBillingOrgId(run.getOrgId());
+    gate.setBillingOwnerUserId(evidence.billingOwnerUserId());
+    gate.setBillingOrgId(evidence.billingOrgId());
     gate.setAdmittedAt(now);
 
     clearLease(outbox);

@@ -89,6 +89,7 @@ afterEach(() => {
   act(() => root.unmount());
   host.remove();
   vi.clearAllMocks();
+  vi.unstubAllGlobals();
 });
 
 async function render() {
@@ -107,6 +108,26 @@ async function render() {
 }
 
 describe('IdePlan approval gate identity (RR-1459)', () => {
+  it('surfaces an initial load failure and recovers through an explicit bounded retry', async () => {
+    api.getRun
+      .mockRejectedValueOnce(new Error('run detail unavailable'))
+      .mockResolvedValue(runDetail('run-a', '{"tasks":["a"]}', 3));
+
+    await render();
+
+    await vi.waitFor(() => expect(text()).toContain('run detail unavailable'));
+    expect(text()).not.toContain('Loading plan…');
+    expect(button('Approve and start work')).toBeUndefined();
+
+    await act(async () => {
+      button('Retry loading plan')?.click();
+    });
+
+    await vi.waitFor(() => expect(button('Approve and start work')).toBeTruthy());
+    expect(text()).not.toContain('run detail unavailable');
+    expect(api.getRun).toHaveBeenCalledTimes(2);
+  });
+
   it('shows task descriptions, dependencies, requirements, constraints, and file scope', async () => {
     const planJson = JSON.stringify({
       projectType: 'python',
@@ -213,6 +234,7 @@ describe('IdePlan approval gate identity (RR-1459)', () => {
     api.getRun.mockResolvedValue(runDetail('run-a', '{"tasks":["a"]}', 3));
     await render();
 
+    await vi.waitFor(() => expect(button('Approve and start work')?.disabled).toBe(false));
     await act(async () => {
       button('Approve and start work')?.click();
     });
@@ -225,6 +247,21 @@ describe('IdePlan approval gate identity (RR-1459)', () => {
       await sha256Hex('{"tasks":["a"]}'),
       undefined,
     );
+  });
+
+  it('disables approval with an explicit error when exact plan verification is unavailable', async () => {
+    vi.stubGlobal('crypto', {});
+    api.getRun.mockResolvedValue(runDetail('run-a', '{"tasks":["a"]}', 3));
+    await render();
+
+    await vi.waitFor(() => {
+      expect(text()).toContain('Exact plan verification is unavailable in this browser.');
+    });
+    expect(text()).toContain('Approval is unavailable.');
+    expect(button('Approve and start work')?.disabled).toBe(true);
+
+    await act(async () => button('Approve and start work')?.click());
+    expect(api.approveRun).not.toHaveBeenCalled();
   });
 
   it('starts a new-run handoff instead of calling the unsupported edit-plan endpoint', async () => {
@@ -260,7 +297,8 @@ describe('IdePlan approval gate identity (RR-1459)', () => {
     api.getRun.mockResolvedValue(runDetail('some-other-run', '{"tasks":["x"]}', 7));
     await render();
 
-    expect(text()).toContain('Loading plan');
+    expect(text()).toContain('did not match this work item');
+    expect(button('Retry loading plan')).toBeTruthy();
     expect(text()).not.toContain('7 credit(s)');
     expect(button('Approve and start work')).toBeUndefined();
   });
@@ -304,6 +342,27 @@ async function typeAck(value: string) {
 }
 
 describe('IdePlan breaking-change acknowledgement gate (RR-819)', () => {
+  it('fails closed and retries when contract impact cannot be loaded', async () => {
+    api.getRun.mockResolvedValue(runDetail('run-a', '{"tasks":["a"]}', 3));
+    api.getPlanContractGate
+      .mockRejectedValueOnce(new Error('contract service unavailable'))
+      .mockResolvedValue(undefined);
+
+    await render();
+
+    await vi.waitFor(() => expect(text()).toContain('contract service unavailable'));
+    expect(button('Approve and start work')?.disabled).toBe(true);
+    expect(api.approveRun).not.toHaveBeenCalled();
+
+    await act(async () => {
+      button('Retry contract check')?.click();
+    });
+
+    await vi.waitFor(() => expect(button('Approve and start work')?.disabled).toBe(false));
+    expect(text()).not.toContain('contract service unavailable');
+    expect(api.getPlanContractGate).toHaveBeenCalledTimes(2);
+  });
+
   it('shows what breaks and blocks approval until the exact literal BREAKING is typed', async () => {
     api.getRun.mockResolvedValue(runDetail('run-a', '{"tasks":["a"]}', 3));
     api.getPlanContractGate.mockResolvedValue(gateReport('run-a', 'DIGEST-A'));
@@ -368,6 +427,7 @@ describe('IdePlan breaking-change acknowledgement gate (RR-819)', () => {
     expect(text()).not.toContain('Orders API');
 
     // ...and it must not travel with this run's approval either.
+    await vi.waitFor(() => expect(button('Approve and start work')?.disabled).toBe(false));
     await act(async () => {
       button('Approve and start work')?.click();
     });
@@ -404,6 +464,7 @@ describe('IdePlan breaking-change acknowledgement gate (RR-819)', () => {
     });
 
     // Run B has no gate, so it approves with no friction — but never carrying run A's ack.
+    await vi.waitFor(() => expect(button('Approve and start work')?.disabled).toBe(false));
     await act(async () => {
       button('Approve and start work')?.click();
     });
@@ -452,7 +513,7 @@ describe('IdePlan breaking-change acknowledgement gate (RR-819)', () => {
     await render();
 
     expect(host.querySelector('[data-testid="plan-contract-gate"]')).toBeNull();
-    expect(button('Approve and start work')?.disabled).toBe(false);
+    await vi.waitFor(() => expect(button('Approve and start work')?.disabled).toBe(false));
 
     await act(async () => {
       button('Approve and start work')?.click();
@@ -473,6 +534,6 @@ describe('IdePlan breaking-change acknowledgement gate (RR-819)', () => {
     await render();
 
     expect(host.querySelector('[data-testid="plan-contract-gate"]')).toBeNull();
-    expect(button('Approve and start work')?.disabled).toBe(false);
+    await vi.waitFor(() => expect(button('Approve and start work')?.disabled).toBe(false));
   });
 });

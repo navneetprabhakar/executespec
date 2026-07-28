@@ -40,6 +40,7 @@ import com.navneet.executespec.agent.ApiKeyResolver;
 import com.navneet.executespec.agent.ResolvedKeys;
 import com.navneet.executespec.agent.requirement.ExactPlanFingerprint;
 import com.navneet.executespec.agent.requirement.RequirementGateBindingService.RequestedMode;
+import com.navneet.executespec.agent.requirement.RequirementIrApprovalCompatibilityRegistry;
 import com.navneet.executespec.agent.requirement.repository.RunRequirementContractRepository;
 import com.navneet.executespec.auth.entity.AppUser;
 import com.navneet.executespec.auth.security.AppUserDetails;
@@ -92,6 +93,7 @@ class PlanGateResumeStorePostgresIntegrationTest extends PostgresIntegrationBase
   @Autowired PlatformTransactionManager transactionManager;
   @Autowired JdbcTemplate jdbc;
   @Autowired DataSource dataSource;
+  @Autowired ObjectMapper objectMapper;
   @TempDir Path workspaceRoot;
 
   private ApiKeyResolver apiKeys;
@@ -115,6 +117,7 @@ class PlanGateResumeStorePostgresIntegrationTest extends PostgresIntegrationBase
             gates,
             outboxes,
             requirements,
+            new RequirementIrApprovalCompatibilityRegistry(objectMapper),
             entityManager,
             apiKeys,
             managedAi,
@@ -748,13 +751,14 @@ class PlanGateResumeStorePostgresIntegrationTest extends PostgresIntegrationBase
         """
         INSERT INTO pipeline_run
           (run_id,status,started_at,user_request,plan_json,credits_charged,cost_estimate_high,
-           created_by_user_id,org_id,project_id,ai_provider)
-        VALUES (?, 'PLANNING', ?, 'Original requirement', ?, 3, 4.5, ?, ?, ?, 'anthropic')
+           created_by_user_id,org_id,billing_org_id,project_id,ai_provider)
+        VALUES (?, 'PLANNING', ?, 'Original requirement', ?, 3, 4.5, ?, ?, ?, ?, 'anthropic')
         """,
         runId,
         Timestamp.from(Instant.now()),
         PLAN_JSON,
         ownerId,
+        orgId,
         orgId,
         projectId);
     opener.open(

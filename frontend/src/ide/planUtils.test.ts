@@ -1,4 +1,4 @@
-import {describe, expect, it} from 'vitest';
+import {afterEach, describe, expect, it, vi} from 'vitest';
 import {
   formatManagedAiPlanMessage,
   formatPlanUsd,
@@ -78,6 +78,8 @@ describe('planUtils', () => {
 // RR-1459 — the approval fingerprint must be the SAME function of the plan bytes that
 // RunController.planFingerprintOf computes server-side, or a legitimate approval 409s.
 describe('planFingerprint', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
   it('is lowercase hex SHA-256 over the plan JSON bytes', async () => {
     expect(await planFingerprint('abc')).toBe(
       'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad',
@@ -94,5 +96,12 @@ describe('planFingerprint', () => {
     expect(await planFingerprint(null)).toBeUndefined();
     expect(await planFingerprint('')).toBeUndefined();
     expect(await planFingerprint('   ')).toBeUndefined();
+  });
+
+  it('fails closed when WebCrypto cannot verify a non-empty plan', async () => {
+    vi.stubGlobal('crypto', {});
+    await expect(planFingerprint('{"tasks":["a"]}')).rejects.toThrow(
+      'Exact plan verification is unavailable in this browser.',
+    );
   });
 });

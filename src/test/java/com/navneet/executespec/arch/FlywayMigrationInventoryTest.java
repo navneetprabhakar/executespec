@@ -42,9 +42,11 @@ class FlywayMigrationInventoryTest {
     // (validation test-evidence scope), V345 (immutable RequirementIR artifact), V346 (durable
     // plan-gate admission binding + continuation outbox), and V347 (atomic gate-open identity
     // contract) for 333 — contiguous above V336. V348 then adds atomic plan-gate decision
-    // integrity, bringing the exact inventory to 334.
-    assertThat(migrations).hasSize(334);
-    assertThat(migrations.getLast().version()).isEqualTo("348");
+    // integrity, and V349 separates the immutable payer org from the host-project tenant org for
+    // external collaborators. V350 carries that split into pipeline and durable LLM context
+    // identity, bringing the exact inventory to 336.
+    assertThat(migrations).hasSize(336);
+    assertThat(migrations.getLast().version()).isEqualTo("350");
 
     assertThat(migrations.stream().map(MigrationFile::version)).doesNotHaveDuplicates();
     assertThat(migrations.stream().map(MigrationFile::fileName))

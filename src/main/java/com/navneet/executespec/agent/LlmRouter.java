@@ -426,9 +426,10 @@ public class LlmRouter {
    * Bounded same-provider retry on transient provider errors. RCA 2026-05-24: the SWE-bench Lite
    * matrix lost 3 runs to single 502/503 blips (incl. Gemini discarding 51 iterations of work on
    * one 502). Retrying the SAME provider keeps per-provider benchmark numbers honest (no silent
-   * failover) and makes customer runs survive transient upstream errors.
+   * failover) and makes customer runs survive transient upstream errors. This is public because
+   * durable logical-call budgets must reserve the exact same physical-attempt envelope.
    */
-  private static final int TRANSIENT_RETRY_MAX_ATTEMPTS = 4;
+  public static final int TRANSIENT_RETRY_MAX_ATTEMPTS = 4;
 
   private static final long TRANSIENT_RETRY_BASE_MS = 2000L;
 
@@ -572,7 +573,7 @@ public class LlmRouter {
         source,
         source,
         context.getUserId(),
-        context.getOrgId());
+        context.getCredentialOrgId());
   }
 
   LlmRequest enforceDurableRoutePolicy(

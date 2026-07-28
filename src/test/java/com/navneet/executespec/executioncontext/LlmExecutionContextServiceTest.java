@@ -183,6 +183,7 @@ class LlmExecutionContextServiceTest {
                 "corr-1",
                 ORG_A,
                 "initiating-project-member",
+                "org-a",
                 "project-1",
                 null,
                 hostCredentialPolicy,
@@ -192,6 +193,7 @@ class LlmExecutionContextServiceTest {
                 null));
 
     assertThat(context.getUserId()).isEqualTo("initiating-project-member");
+    assertThat(context.getCredentialOrgId()).isEqualTo("org-a");
     assertThat(context.getKeySubjectUserId()).isEqualTo("host-org-key-user");
   }
 
@@ -231,6 +233,7 @@ class LlmExecutionContextServiceTest {
         "corr-1",
         ORG_A,
         "user-1",
+        "org-a",
         "project-1",
         null,
         policy("user-1"),

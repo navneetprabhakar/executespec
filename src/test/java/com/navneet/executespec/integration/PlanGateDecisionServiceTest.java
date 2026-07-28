@@ -15,13 +15,17 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.Map;
 import java.util.Optional;
+import java.util.UUID;
 
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.LockModeType;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.agent.ApiKeyResolver;
 import com.navneet.executespec.agent.ResolvedKeys;
 import com.navneet.executespec.agent.requirement.ExactPlanFingerprint;
+import com.navneet.executespec.agent.requirement.RequirementIrApprovalCompatibilityRegistry;
+import com.navneet.executespec.agent.requirement.entity.RunRequirementContract;
 import com.navneet.executespec.agent.requirement.repository.RunRequirementContractRepository;
 import com.navneet.executespec.auth.entity.AppUser;
 import com.navneet.executespec.auth.entity.Org;
@@ -63,6 +67,8 @@ class PlanGateDecisionServiceTest {
   private GateRecord gate;
   private PlanGateResumeOutbox outbox;
   private AppUserDetails actor;
+  private final RequirementIrApprovalCompatibilityRegistry requirementIrCompatibilityRegistry =
+      new RequirementIrApprovalCompatibilityRegistry(new ObjectMapper());
 
   @BeforeEach
   void setUp() {
@@ -72,6 +78,7 @@ class PlanGateDecisionServiceTest {
             gateRepository,
             outboxRepository,
             requirementRepository,
+            requirementIrCompatibilityRegistry,
             entityManager,
             apiKeyResolver,
             managedAiUsageService,
@@ -167,6 +174,84 @@ class PlanGateDecisionServiceTest {
     verify(governanceGuard, times(1))
         .evaluateApprovalCost(eq("org-1"), eq(4.5), any(AppUserDetails.class));
     verify(events, times(1)).publishEvent(new PlanGateResumeReadyCommitted("run-1"));
+  }
+
+  @Test
+  void enforcedApprovalRequiresSuppliedExactPlanFingerprint() {
+    gate.setBindingMode("ENFORCED");
+
+    assertThatThrownBy(
+            () ->
+                service.decide(
+                    "run-1",
+                    new PlanApprovalService.Command(true, 3, "REALTIME", null, null, null),
+                    actor))
+        .isInstanceOfSatisfying(
+            ResponseStatusException.class,
+            error -> {
+              assertThat(error.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+              assertThat(error.getReason()).contains("requires the exact plan fingerprint");
+            });
+
+    verifyNoInteractions(apiKeyResolver, managedAiUsageService, governanceGuard, events);
+    assertThat(gate.getStatus()).isEqualTo("PENDING");
+  }
+
+  @Test
+  void rejectionRemainsCompatibleWithoutFingerprintInEnforcedMode() {
+    gate.setBindingMode("ENFORCED");
+
+    var result = service.decide("run-1", PlanApprovalService.Command.rejectLegacy(), actor);
+
+    assertThat(result.decision()).isEqualTo(PlanGateDecisionService.DecisionKind.REJECT);
+    assertThat(result.evidence().suppliedPlanFingerprint()).isNull();
+    assertThat(gate.getStatus()).isEqualTo("REJECTED");
+  }
+
+  @Test
+  void decisionFailsClosedWhenBoundRequirementIrPairHasNoRetainedAdapter() {
+    UUID contractId = UUID.randomUUID();
+    RunRequirementContract contract =
+        RunRequirementContract.builder()
+            .id(contractId)
+            .runId("run-1")
+            .schemaVersion(2)
+            .compilerFingerprint("f".repeat(64))
+            .sourceSha256("s".repeat(64))
+            .exactPlanFingerprint(ExactPlanFingerprint.sha256(run.getPlanJson()))
+            .artifactDigest("a".repeat(64))
+            .boundDigest("b".repeat(64))
+            .build();
+    gate.setBindingMode("ENFORCED");
+    gate.setRequirementContractId(contractId);
+    gate.setBindingSchemaVersion(2);
+    gate.setBindingCompilerFingerprint(contract.getCompilerFingerprint());
+    gate.setBindingSourceSha256(contract.getSourceSha256());
+    gate.setBindingExactPlanFingerprint(contract.getExactPlanFingerprint());
+    gate.setBindingArtifactDigest(contract.getArtifactDigest());
+    gate.setBindingBoundDigest(contract.getBoundDigest());
+    when(requirementRepository.findByIdForUpdate(contractId)).thenReturn(Optional.of(contract));
+    assertThatThrownBy(
+            () ->
+                service.decide(
+                    "run-1",
+                    new PlanApprovalService.Command(
+                        true,
+                        3,
+                        "REALTIME",
+                        ExactPlanFingerprint.sha256(run.getPlanJson()),
+                        null,
+                        null),
+                    actor))
+        .isInstanceOfSatisfying(
+            ResponseStatusException.class,
+            error -> {
+              assertThat(error.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+              assertThat(error.getReason()).contains("not approval compatible");
+            });
+
+    verifyNoInteractions(apiKeyResolver, managedAiUsageService, governanceGuard, events);
+    assertThat(gate.getStatus()).isEqualTo("PENDING");
   }
 
   @Test
@@ -428,7 +513,10 @@ class PlanGateDecisionServiceTest {
   }
 
   @Test
-  void credentialAuthorizationOrgMustMatchRunOrg() {
+  void externalCollaboratorApprovalKeepsPayerOrgDistinctFromHostTenantOrg() {
+    actor.getUser().setOrgId("payer-org");
+    when(entityManager.find(Org.class, "payer-org", LockModeType.PESSIMISTIC_WRITE))
+        .thenReturn(Org.builder().id("payer-org").build());
     when(entityManager.find(
             com.navneet.executespec.contracts.gate.PlanContractGateReport.class,
             "run-1",
@@ -437,15 +525,26 @@ class PlanGateDecisionServiceTest {
     when(apiKeyResolver.resolveWithProvenance("owner-1"))
         .thenReturn(
             new ApiKeyResolver.CredentialResolution(
-                ResolvedKeys.SYSTEM_ONLY, "different-org", Map.of()));
+                ResolvedKeys.SYSTEM_ONLY, "payer-org", Map.of()));
+    when(managedAiUsageService.assertCanApproveEstimatedSpend("owner-1", "payer-org", false, 4.5))
+        .thenReturn(
+            new ManagedAiUsageService.ApprovalEvaluation(
+                "ALLOWED", "MANAGED", 2000L, 1900L, 100L, 25.0, 23.5));
+    when(governanceGuard.evaluateApprovalCost(eq("org-1"), eq(4.5), any(AppUserDetails.class)))
+        .thenReturn(new GovernanceGuard.OrgCostEvaluation("ALLOWED", null, 4.5, "NO_THRESHOLD"));
+    when(governanceGuard.evaluateProjectSpendCap("project-1", 4.5))
+        .thenReturn(
+            new GovernanceGuard.ProjectSpendEvaluation(
+                "ALLOWED", null, BigDecimal.ZERO, BigDecimal.valueOf(4.5), "NO_CAP"));
 
-    assertThatThrownBy(
-            () -> service.decide("run-1", PlanApprovalService.Command.approveLegacy(), actor))
-        .isInstanceOfSatisfying(
-            ResponseStatusException.class,
-            error -> assertThat(error.getStatusCode()).isEqualTo(HttpStatus.CONFLICT));
+    var result = service.decide("run-1", PlanApprovalService.Command.approveLegacy(), actor);
 
-    verifyNoInteractions(managedAiUsageService, governanceGuard);
+    assertThat(run.getOrgId()).isEqualTo("org-1");
+    assertThat(result.evidence().billingOrgId()).isEqualTo("payer-org");
+    assertThat(result.evidence().credentialAuthorizationOrgId()).isEqualTo("payer-org");
+    assertThat(gate.getBillingOrgId()).isEqualTo("payer-org");
+    verify(managedAiUsageService)
+        .assertCanApproveEstimatedSpend("owner-1", "payer-org", false, 4.5);
   }
 
   @Test

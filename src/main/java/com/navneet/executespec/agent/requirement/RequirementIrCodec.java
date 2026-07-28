@@ -10,9 +10,18 @@ import com.fasterxml.jackson.databind.SerializationFeature;
 /** Strict schema-versioned JSON codec and canonical digest for requirement artifacts. */
 public final class RequirementIrCodec {
   private final ObjectMapper mapper;
+  private final int supportedSchemaVersion;
 
   public RequirementIrCodec(ObjectMapper objectMapper) {
+    this(objectMapper, RequirementIrDocument.CURRENT_SCHEMA_VERSION);
+  }
+
+  RequirementIrCodec(ObjectMapper objectMapper, int supportedSchemaVersion) {
     if (objectMapper == null) throw new IllegalArgumentException("objectMapper is required");
+    if (supportedSchemaVersion <= 0) {
+      throw new IllegalArgumentException("supportedSchemaVersion must be positive");
+    }
+    this.supportedSchemaVersion = supportedSchemaVersion;
     this.mapper =
         objectMapper
             .copy()
@@ -94,8 +103,8 @@ public final class RequirementIrCodec {
         digest(document));
   }
 
-  private static void requireSupported(int schemaVersion) {
-    if (schemaVersion != RequirementIrDocument.CURRENT_SCHEMA_VERSION) {
+  private void requireSupported(int schemaVersion) {
+    if (schemaVersion != supportedSchemaVersion) {
       throw new RequirementIrCodecException("unsupported requirement IR schema " + schemaVersion);
     }
   }

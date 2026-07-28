@@ -1,5 +1,6 @@
 package com.navneet.executespec.executioncontext;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
@@ -15,6 +16,7 @@ import java.util.Set;
 
 import com.navneet.executespec.cost.RunStepUsageRepository;
 import com.navneet.executespec.router.ModelRegistry;
+import com.navneet.executespec.specchat.ChatToolPolicy;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -104,6 +106,32 @@ class LlmExecutionBudgetGateTest {
     assertThatThrownBy(() -> gate.reserveProviderCall(context, 3_000))
         .isInstanceOf(LlmDispatchPolicyException.class)
         .extracting(e -> ((LlmDispatchPolicyException) e).reason())
+        .isEqualTo(LlmDispatchPolicyException.Reason.BUDGET_EXHAUSTED);
+  }
+
+  @Test
+  void webAgentBudgetAdmitsRetryEnvelopeForEveryBoundedLogicalRound() {
+    int physicalAttemptsPerRound = ChatToolPolicy.MAX_PROVIDER_ATTEMPTS_PER_MODEL_ROUND;
+    int logicalRounds = ChatToolPolicy.MAX_MODEL_ROUNDS + 1;
+    int physicalCallLimit = ChatToolPolicy.MAX_PROVIDER_CALLS_PER_TURN;
+    assertThat(physicalCallLimit).isEqualTo(logicalRounds * physicalAttemptsPerRound);
+    when(context.getMaxProviderCalls()).thenReturn(physicalCallLimit);
+
+    for (int logicalRound = 0; logicalRound < logicalRounds; logicalRound++) {
+      long completedPhysicalAttempts = (long) logicalRound * physicalAttemptsPerRound;
+      when(context.getReservedProviderCalls()).thenReturn(completedPhysicalAttempts);
+      when(usage.countByLlmExecutionContextId("ctx-1")).thenReturn(completedPhysicalAttempts);
+
+      gate.reserveProviderCall(context, 1_200);
+
+      verify(context).recordProviderCallReservation(completedPhysicalAttempts + 1);
+    }
+
+    when(context.getReservedProviderCalls()).thenReturn((long) physicalCallLimit);
+    when(usage.countByLlmExecutionContextId("ctx-1")).thenReturn((long) physicalCallLimit);
+    assertThatThrownBy(() -> gate.reserveProviderCall(context, 1_200))
+        .isInstanceOf(LlmDispatchPolicyException.class)
+        .extracting(error -> ((LlmDispatchPolicyException) error).reason())
         .isEqualTo(LlmDispatchPolicyException.Reason.BUDGET_EXHAUSTED);
   }
 

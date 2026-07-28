@@ -53,6 +53,8 @@ import {
   fmtDur,
   goalDecisionHelp,
   goalDecisionLabel,
+  goalProofKind,
+  goalProofLabel,
   goalStateLabel,
   goalStateKind,
   hasRunCostEvidence,
@@ -71,6 +73,7 @@ import {
   num,
   latestContinuationAction,
   runArtifactActionAvailability,
+  friendlyAiFailureMessage,
   runPhaseDiagnosis,
   SEV,
   shouldUseRunEvidenceChat,
@@ -114,6 +117,7 @@ export default function IdeRunResult() {
   // stronger final proof. Prefer it so Steps does not keep saying "Keep working" while Evidence
   // already says the completed run is proven.
   const effectiveRunGoal = report?.runGoalDecision ?? run?.runGoalDoneness;
+  const goalProofReferences = report?.goalProofReferences ?? [];
   // D4 — the run-detail surfaces below all render affirmative absence claims
   // ("No evidence report.", "No files", "No timeline data yet.", and the
   // fabricated "patch and benchmark runs aren't scored" explanation). Track the
@@ -805,7 +809,7 @@ export default function IdeRunResult() {
           ...(prev || []),
           {
             role: 'assistant',
-            content: reply.reply,
+            content: friendlyAiFailureMessage(reply.reply),
           },
         ]);
         return;
@@ -819,11 +823,11 @@ export default function IdeRunResult() {
         ...(prev || []),
         {
           role: 'assistant',
-          content: reply,
+          content: friendlyAiFailureMessage(reply),
         },
       ]);
     } catch (e: unknown) {
-      setMsg(e instanceof Error ? e.message : 'Chat failed.');
+      setMsg(friendlyAiFailureMessage(e));
     } finally {
       setChatBusy(false);
     }
@@ -2082,7 +2086,7 @@ export default function IdeRunResult() {
                         </div>
                       )}
                       {showModelRanking && policy && (
-                        <div
+                        <details
                           style={{
                             border: '1px solid var(--ide-border)',
                             borderRadius: 6,
@@ -2092,45 +2096,40 @@ export default function IdeRunResult() {
                             color: 'var(--ide-fg-muted)',
                           }}
                         >
-                          <div
+                          <summary
                             style={{
-                              display: 'flex',
-                              gap: 8,
-                              alignItems: 'center',
-                              flexWrap: 'wrap',
-                              marginBottom: 5,
+                              cursor: 'pointer',
+                              color: 'var(--ide-fg-bright)',
                             }}
                           >
-                            <span style={{color: 'var(--ide-fg-bright)'}}>Model route choice</span>
-                            <span className='ide-mono'>
-                              {modelRankingLabel(policy.rankingPolicy)}
-                            </span>
-                            {rankingDetails.map((detail) => (
-                              <span key={detail}>{detail}</span>
-                            ))}
+                            Routing diagnostics
+                          </summary>
+                          <div style={{display: 'grid', gap: 6, marginTop: 7}}>
+                            <div>{modelRankingLabel(policy.rankingPolicy)}</div>
+                            {rankingDetails.length > 0 && <div>{rankingDetails.join(' · ')}</div>}
                             {rejectedRankingCount > 0 && (
-                              <span>{rejectedRankingCount} below quality bar</span>
+                              <div>{rejectedRankingCount} below quality bar</div>
                             )}
+                            <div style={{display: 'grid', gap: 4}}>
+                              {rankingCandidates.map((candidate, idx) => (
+                                <div
+                                  key={`${candidate.provider || 'provider'}:${candidate.model || idx}`}
+                                  style={{
+                                    display: 'grid',
+                                    gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
+                                    gap: 8,
+                                    alignItems: 'center',
+                                  }}
+                                >
+                                  <span className='ide-mono' style={{overflowWrap: 'anywhere'}}>
+                                    {idx + 1}. {modelRankingCandidateLabel(candidate)}
+                                  </span>
+                                  <span>{modelRankingCandidateMetrics(candidate)}</span>
+                                </div>
+                              ))}
+                            </div>
                           </div>
-                          <div style={{display: 'grid', gap: 4}}>
-                            {rankingCandidates.map((candidate, idx) => (
-                              <div
-                                key={`${candidate.provider || 'provider'}:${candidate.model || idx}`}
-                                style={{
-                                  display: 'grid',
-                                  gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
-                                  gap: 8,
-                                  alignItems: 'center',
-                                }}
-                              >
-                                <span className='ide-mono' style={{overflowWrap: 'anywhere'}}>
-                                  {idx + 1}. {modelRankingCandidateLabel(candidate)}
-                                </span>
-                                <span>{modelRankingCandidateMetrics(candidate)}</span>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
+                        </details>
                       )}
                       {budgetFacts.length > 0 && (
                         <div
@@ -2520,17 +2519,82 @@ export default function IdeRunResult() {
                           {goalDecisionHelp(report.runGoalDecision.recommendedDecision)}
                         </div>
                       )}
-                      {report.runGoalDecision.reason && (
-                        <div style={{fontSize: 13, marginTop: 8}}>
-                          {report.runGoalDecision.reason}
+                      {report.runGoalDecision.goalSummary && (
+                        <div style={{fontSize: 12, marginTop: 8}}>
+                          Goal: {report.runGoalDecision.goalSummary}
                         </div>
                       )}
-                      {report.runGoalDecision.recommendedNextStep && (
-                        <div style={{fontSize: 12, marginTop: 8, color: 'var(--ide-fg-muted)'}}>
-                          Next: {report.runGoalDecision.recommendedNextStep}
+                      {goalProofReferences.length > 0 ? (
+                        <div style={{marginTop: 10}}>
+                          <div
+                            className='ide-mono'
+                            style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}
+                          >
+                            Decision evidence
+                          </div>
+                          {goalProofReferences.map((reference) => (
+                            <div
+                              key={reference.evidenceId}
+                              style={{
+                                marginTop: 7,
+                                paddingTop: 7,
+                                borderTop: '1px solid var(--ide-border)',
+                              }}
+                            >
+                              <div style={{display: 'flex', alignItems: 'center', gap: 8}}>
+                                <IdeBadge kind={goalProofKind(reference.proofStatus)}>
+                                  {goalProofLabel(reference.proofStatus)}
+                                </IdeBadge>
+                                <span style={{fontSize: 12, fontWeight: 600}}>
+                                  {reference.label}
+                                </span>
+                                <span
+                                  className='ide-mono'
+                                  style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}
+                                >
+                                  {reference.observedStatus}
+                                </span>
+                              </div>
+                              {(reference.source || reference.confidence) && (
+                                <div
+                                  className='ide-mono'
+                                  style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 4}}
+                                >
+                                  {[reference.source, reference.confidence]
+                                    .filter(Boolean)
+                                    .join(' · ')}
+                                </div>
+                              )}
+                              {reference.artifact && (
+                                <div
+                                  className='ide-mono'
+                                  style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 3}}
+                                >
+                                  {reference.artifact}
+                                  {reference.total != null && reference.observed != null
+                                    ? ` · ${reference.observed}/${reference.total}`
+                                    : ''}
+                                </div>
+                              )}
+                            </div>
+                          ))}
                         </div>
+                      ) : (
+                        <>
+                          {report.runGoalDecision.reason && (
+                            <div style={{fontSize: 13, marginTop: 8}}>
+                              {report.runGoalDecision.reason}
+                            </div>
+                          )}
+                          {report.runGoalDecision.recommendedNextStep && (
+                            <div style={{fontSize: 12, marginTop: 8, color: 'var(--ide-fg-muted)'}}>
+                              Next: {report.runGoalDecision.recommendedNextStep}
+                            </div>
+                          )}
+                        </>
                       )}
-                      {report.runGoalDecision.incompleteItems &&
+                      {goalProofReferences.length === 0 &&
+                        report.runGoalDecision.incompleteItems &&
                         report.runGoalDecision.incompleteItems.length > 0 && (
                           <div style={{marginTop: 10}}>
                             <div
@@ -2546,21 +2610,23 @@ export default function IdeRunResult() {
                             </ul>
                           </div>
                         )}
-                      {report.runGoalDecision.risks && report.runGoalDecision.risks.length > 0 && (
-                        <div style={{marginTop: 10}}>
-                          <div
-                            className='ide-mono'
-                            style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}
-                          >
-                            Risks
+                      {goalProofReferences.length === 0 &&
+                        report.runGoalDecision.risks &&
+                        report.runGoalDecision.risks.length > 0 && (
+                          <div style={{marginTop: 10}}>
+                            <div
+                              className='ide-mono'
+                              style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}
+                            >
+                              Risks
+                            </div>
+                            <ul style={{margin: '6px 0 0 18px', padding: 0, fontSize: 12}}>
+                              {report.runGoalDecision.risks.slice(0, 4).map((risk, i) => (
+                                <li key={i}>{risk}</li>
+                              ))}
+                            </ul>
                           </div>
-                          <ul style={{margin: '6px 0 0 18px', padding: 0, fontSize: 12}}>
-                            {report.runGoalDecision.risks.slice(0, 4).map((risk, i) => (
-                              <li key={i}>{risk}</li>
-                            ))}
-                          </ul>
-                        </div>
-                      )}
+                        )}
                     </div>
                   </>
                 )}

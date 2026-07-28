@@ -111,10 +111,10 @@ public class LlmExecutionDispatchGuard {
     }
     ApiKeyResolver.CredentialResolution current =
         apiKeyResolver.resolveWithProvenance(context.getKeySubjectUserId());
-    if (!context.getOrgId().equals(current.orgId())) {
+    if (!context.getCredentialOrgId().equals(current.orgId())) {
       throw reject(
-          LlmDispatchPolicyException.Reason.TENANT_MISMATCH,
-          "Credential subject no longer belongs to the execution-context org");
+          LlmDispatchPolicyException.Reason.POLICY_STALE,
+          "Credential subject no longer belongs to the execution-context payer org");
     }
     LlmPolicySnapshot.KeySourceMode currentMode = keySourceMode(current.keys().keySourceMode());
     if (currentMode != policy.keySourceMode()) {
@@ -199,10 +199,10 @@ public class LlmExecutionDispatchGuard {
     }
     ApiKeyResolver.CredentialResolution current =
         apiKeyResolver.resolveWithProvenance(context.getKeySubjectUserId());
-    if (!context.getOrgId().equals(current.orgId())) {
+    if (!context.getCredentialOrgId().equals(current.orgId())) {
       throw reject(
-          LlmDispatchPolicyException.Reason.TENANT_MISMATCH,
-          "Credential subject no longer belongs to the execution-context org");
+          LlmDispatchPolicyException.Reason.POLICY_STALE,
+          "Credential subject no longer belongs to the execution-context payer org");
     }
     LlmPolicySnapshot.KeySourceMode currentMode = keySourceMode(current.keys().keySourceMode());
     if (currentMode != policy.keySourceMode()) {

@@ -9,10 +9,11 @@ import jakarta.persistence.*;
 import lombok.*;
 
 /**
- * One V2 {@code PipelineRun} dispatched under an {@link ExecutionSolution}. A solution owns 1..N of
- * these — the initial attempt, any automatic retries, and any user-triggered retries. The
- * solution's {@code pipelineRunId} is a convenience pointer to the latest row; full history lives
- * here.
+ * Durable identity for one V2 {@code PipelineRun} attempt under an {@link ExecutionSolution}. The
+ * row and its child run id are reserved before dispatch; after dispatch it also stores terminal
+ * usage/history. A solution owns 1..N of these — the initial attempt, any automatic retries, and
+ * any user-triggered retries. The solution's {@code pipelineRunId} is a convenience pointer to the
+ * latest row; full history lives here.
  */
 @Entity
 @Table(name = "execution_solution_run")

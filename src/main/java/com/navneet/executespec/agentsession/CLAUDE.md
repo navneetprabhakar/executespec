@@ -214,7 +214,7 @@ turns separately from runs.
 | ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `OrchestratorController.java`              | Primary structured `/api/orchestrator/turn` endpoint for route/policy decisions plus explicit `/turn/confirm` for confirmed cloud-run submissions.                                                                  |
 | `OrchestratorService.java`                 | Stable controller-to-service facade for structured turn decisions and explicit confirmed run submission; delegates persistence to `AgentSessionService` and keeps run creation behind `AgentRunSubmissionGate`.     |
-| `AgentRunSubmissionGate.java`              | The only agent-session path allowed to create a new cloud run from a stored `CODE_RUN_REQUIRED` decision. It requires canonical project write authority. Local execution fails closed here because the confirmation DTO cannot bind `selectedRepoIds` + `localInstallationId`; clients must use normal local-run admission. Confirmed cloud submissions can carry `lowComplexityWorkerStartTier` so LOW tasks can start cheap without using a route-pinning model override. |
+| `AgentRunSubmissionGate.java`              | The only agent-session path allowed to create a new cloud run from a stored `CODE_RUN_REQUIRED` decision. It delegates BUILD admission to `CustomerRunSubmissionService`, including canonical project write authority, exact `selectedRepoIds`, idempotency, spend/key gates, and host-project org ownership. Local execution still fails closed because confirmation cannot bind a `localInstallationId`; clients must use normal local-run admission. Confirmed cloud submissions can carry `lowComplexityWorkerStartTier` so LOW tasks can start cheap without using a route-pinning model override. |
 | `AgentActionArguments.java`                | Package-local typed-action argument helper shared by confirmed run submission and confirmation write guards.                                                                                                        |
 | `AgentSessionController.java`              | REST surface under `/api/agent`: sessions, streaming + recorded turns, action catalog, context resolution, gate decision cards.                                                                                     |
 | `AgentSessionHistoryService.java`          | Ownership-checked, transactional transcript reset used by the cross-surface `/sessions/{id}/history` DELETE contract; preserves session identity and usage audit rows.                                         |
@@ -308,9 +308,11 @@ turns separately from runs.
   require imperative command wording plus run ids and confirmation actions, list-runs/list-gates
   stays read-only, and approval-boundary wording inside code-run requests (for example "do not
   code until I approve") is not claimed by lifecycle routing.
-- `AgentRunSubmissionGateTest` pins confirmed cloud-run submission idempotency, canonical project
-  write denial, fail-closed local confirmation without connector/repo binding, and propagation of
-  `lowComplexityWorkerStartTier=LIGHTWEIGHT|WORKHORSE` as a normalized non-pinning run hint.
+- `AgentRunSubmissionGateTest` pins confirmed cloud-run delegation through the shared customer
+  BUILD admission boundary, exact repository selection propagation, duplicate semantics,
+  fail-closed local confirmation without connector binding, and propagation of
+  `lowComplexityWorkerStartTier=LIGHTWEIGHT|WORKHORSE` as a normalized non-pinning run hint. A
+  structural assertion forbids this gate from regaining a direct `RunOrchestrator` dependency.
 - `AgentCodeChangeIntentsTest` pins the only code-run-producing branch directly: local tools yield
   `local_code_task` without run API access, project-scoped cloud runs require confirmation, and
   missing/blank project context cannot call the run API. It also pins the typed blocking contract:
@@ -346,7 +348,8 @@ turns separately from runs.
   It also pins confirmed run submission idempotency, turn-to-run linking, and trace fields such as
   `promptVersion`, `calledRunApi`, `createdRunId`, and `policyDecisions`.
 - `AgentRunSubmissionGateTest` pins that only stored, confirmed `CODE_RUN_REQUIRED` decisions reach
-  `RunOrchestrator.submitRun`; non-run routes and missing confirmation fail before a run is created.
+  `CustomerRunSubmissionService`; non-run routes and missing confirmation fail before shared BUILD
+  admission.
 - `AgentActionCatalogTest` pins surface/tier filtering and descriptor/capability metadata alignment
   so local-only tools stay out of WEB and action billing/confirmation fields do not drift, and pins
   `web_search`/`web_fetch` exposure on every surface.

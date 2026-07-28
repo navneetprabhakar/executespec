@@ -76,11 +76,9 @@ final class PlanGateDecisionAdmission {
           "Run credential policy is unavailable; plan approval cannot safely authorize provider"
               + " spend.");
     }
-    if (!Objects.equals(
-        PlanGateDecisionEvidence.trimToNull(resolution.orgId()),
-        PlanGateDecisionEvidence.trimToNull(run.getOrgId()))) {
-      throw conflict(
-          "The billing owner's credential authorization org does not match the run org.");
+    String billingOrgId = PlanGateDecisionEvidence.trimToNull(resolution.orgId());
+    if (billingOrgId == null) {
+      throw conflict("The billing owner's credential authorization organization is unavailable.");
     }
     String keySourceMode =
         PlanGateDecisionEvidence.normalized(resolution.keys().keySourceMode(), "HYBRID")
@@ -97,7 +95,7 @@ final class PlanGateDecisionAdmission {
 
     ManagedAiUsageService.ApprovalEvaluation managedAi =
         managedAiUsageService.assertCanApproveEstimatedSpend(
-            billingUserId, run.getOrgId(), ownKeyExempt, estimateHighUsd);
+            billingUserId, billingOrgId, ownKeyExempt, estimateHighUsd);
     GovernanceGuard.OrgCostEvaluation orgGovernance =
         governanceGuard.evaluateApprovalCost(run.getOrgId(), estimateHighUsd, actor);
     GovernanceGuard.ProjectSpendEvaluation projectGovernance =
@@ -192,9 +190,22 @@ final class PlanGateDecisionAdmission {
       lockedUsers.put(userId, locked);
     }
 
-    if (kind == PlanGateDecisionService.DecisionKind.APPROVE && run.getOrgId() != null) {
-      if (entityManager.find(Org.class, run.getOrgId(), LockModeType.PESSIMISTIC_WRITE) == null) {
-        throw conflict("The run's billing organization is missing.");
+    if (kind == PlanGateDecisionService.DecisionKind.APPROVE) {
+      java.util.List<String> policyOrgIds =
+          java.util.stream.Stream.of(
+                  PlanGateDecisionEvidence.trimToNull(run.getOrgId()),
+                  billingOwnerId == null
+                      ? null
+                      : PlanGateDecisionEvidence.trimToNull(
+                          lockedUsers.get(billingOwnerId).getOrgId()))
+              .filter(Objects::nonNull)
+              .distinct()
+              .sorted()
+              .toList();
+      for (String orgId : policyOrgIds) {
+        if (entityManager.find(Org.class, orgId, LockModeType.PESSIMISTIC_WRITE) == null) {
+          throw conflict("A plan-decision policy organization is missing.");
+        }
       }
     }
     if (kind == PlanGateDecisionService.DecisionKind.APPROVE && run.getProjectId() != null) {
@@ -205,7 +216,8 @@ final class PlanGateDecisionAdmission {
     }
 
     OrgMember lockedMembership = null;
-    if (!"SUPER_ADMIN".equals(lockedUsers.get(actorId).getGlobalRole())
+    if (!Objects.equals(actorId, billingOwnerId)
+        && !"SUPER_ADMIN".equals(lockedUsers.get(actorId).getGlobalRole())
         && suppliedActor.getOrgMember() != null
         && PlanGateDecisionEvidence.trimToNull(suppliedActor.getOrgMember().getId()) != null) {
       lockedMembership =

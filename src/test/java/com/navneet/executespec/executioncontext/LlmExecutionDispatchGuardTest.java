@@ -301,6 +301,7 @@ class LlmExecutionDispatchGuardTest {
     when(context.getIsolationKey()).thenReturn(scope.isolationKey());
     when(context.getScopeMode()).thenReturn(scope.mode());
     when(context.getOrgId()).thenReturn("org-a");
+    when(context.getCredentialOrgId()).thenReturn("org-a");
     when(context.getUserId()).thenReturn("user-a");
     when(context.getKeySubjectUserId()).thenReturn("user-a");
     when(context.getId()).thenReturn("ctx-1");

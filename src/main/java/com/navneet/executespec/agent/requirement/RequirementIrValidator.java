@@ -36,12 +36,24 @@ public final class RequirementIrValidator {
 
   public static ValidationResult validateStructure(
       RequirementIrDocument document, String exactSource) {
+    return validateStructure(
+        document,
+        exactSource,
+        RequirementIrDocument.CURRENT_SCHEMA_VERSION,
+        RequirementIrCompiler.COMPILER_FINGERPRINT);
+  }
+
+  static ValidationResult validateStructure(
+      RequirementIrDocument document,
+      String exactSource,
+      int expectedSchemaVersion,
+      String expectedCompilerFingerprint) {
     List<Violation> violations = new ArrayList<>();
     if (document == null) {
       return new ValidationResult(
           false, List.of(new Violation(ViolationCode.MISSING_DOCUMENT, "document is required")));
     }
-    if (document.schemaVersion() != RequirementIrDocument.CURRENT_SCHEMA_VERSION) {
+    if (document.schemaVersion() != expectedSchemaVersion) {
       violations.add(
           new Violation(
               ViolationCode.UNSUPPORTED_SCHEMA,
@@ -49,7 +61,7 @@ public final class RequirementIrValidator {
     }
     if (!hasText(document.compilerFingerprint())
         || !document.compilerFingerprint().matches(SHA_256)
-        || !document.compilerFingerprint().equals(RequirementIrCompiler.COMPILER_FINGERPRINT)) {
+        || !document.compilerFingerprint().equals(expectedCompilerFingerprint)) {
       violations.add(
           new Violation(
               ViolationCode.INVALID_COMPILER_FINGERPRINT, "invalid compiler fingerprint"));
@@ -107,7 +119,21 @@ public final class RequirementIrValidator {
   /** The only approval-boundary validator: structure and completeness are inseparable. */
   public static CompletenessDecision validateForApproval(
       RequirementIrDocument document, String exactSource) {
-    ValidationResult structure = validateStructure(document, exactSource);
+    return validateForApproval(
+        document,
+        exactSource,
+        RequirementIrDocument.CURRENT_SCHEMA_VERSION,
+        RequirementIrCompiler.COMPILER_FINGERPRINT);
+  }
+
+  static CompletenessDecision validateForApproval(
+      RequirementIrDocument document,
+      String exactSource,
+      int expectedSchemaVersion,
+      String expectedCompilerFingerprint) {
+    ValidationResult structure =
+        validateStructure(
+            document, exactSource, expectedSchemaVersion, expectedCompilerFingerprint);
     if (document == null) {
       return new CompletenessDecision(
           false, Set.of(IssueCode.SOURCE_PROVENANCE_MISSING), structure.violations());

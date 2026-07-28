@@ -22,6 +22,7 @@ import com.navneet.executespec.auth.entity.Project;
 import com.navneet.executespec.auth.entity.ProjectMember;
 import com.navneet.executespec.auth.repository.ProjectMemberRepository;
 import com.navneet.executespec.auth.security.AppUserDetails;
+import com.navneet.executespec.executioncontext.LlmExecutionBudget;
 import com.navneet.executespec.executioncontext.LlmExecutionContext;
 import com.navneet.executespec.executioncontext.LlmExecutionContextService;
 import com.navneet.executespec.executioncontext.LlmExecutionPolicyFactory;
@@ -33,6 +34,7 @@ import com.navneet.executespec.specchat.ChatToolPolicy;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.definition.DefaultToolDefinition;
 import org.springframework.ai.tool.definition.ToolDefinition;
@@ -111,6 +113,8 @@ class ProjectChatPolicyResolverTest {
         .containsEntry("deepseek", LlmPolicySnapshot.CredentialSource.ORG);
     assertThat(policy.budgets().maxToolCalls()).isEqualTo(ChatToolPolicy.MAX_TOOL_CALLS);
     assertThat(policy.budgets().maxModelRounds()).isEqualTo(ChatToolPolicy.MAX_MODEL_ROUNDS + 1);
+    assertThat(policy.budgets().maxProviderCalls())
+        .isEqualTo(ChatToolPolicy.MAX_PROVIDER_CALLS_PER_TURN);
     assertThat(policy.confirmation().state()).isEqualTo(ProjectChatPolicy.ConfirmationState.NONE);
     assertThat(policy.sourceTrustLabels())
         .containsEntry(
@@ -120,6 +124,14 @@ class ProjectChatPolicyResolverTest {
             ProjectChatPolicy.SourceKind.TOOL_RESULT, ProjectChatPolicy.TrustLabel.UNTRUSTED_DATA);
     assertThat(policy.auditIdentity().correlationId()).isEqualTo("correlation-1");
     assertThat(policy.executionReference().contextId()).isEqualTo("llmctx-chat-1");
+
+    ArgumentCaptor<LlmExecutionBudget> durableBudget =
+        ArgumentCaptor.forClass(LlmExecutionBudget.class);
+    verify(policies)
+        .forChatTurn(
+            any(), any(), any(), any(), any(), any(), any(), any(), any(), durableBudget.capture());
+    assertThat(durableBudget.getValue().maxProviderCalls())
+        .isEqualTo(ChatToolPolicy.MAX_PROVIDER_CALLS_PER_TURN);
   }
 
   @Test

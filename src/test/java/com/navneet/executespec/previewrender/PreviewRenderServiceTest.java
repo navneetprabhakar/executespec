@@ -197,6 +197,14 @@ class PreviewRenderServiceTest {
   }
 
   @Test
+  void availabilityFailsClosedWhenTheFlagStoreCannotBeRead() {
+    when(flags.isEnabled(PreviewRenderService.FLAG))
+        .thenThrow(new IllegalStateException("flag store unavailable"));
+
+    assertThat(service.enabled()).isFalse();
+  }
+
+  @Test
   void rejectsRenderWhenRunProducedNoProductFiles() {
     when(changes.meaningfulProductDiffCount(RUN_ID)).thenReturn(0);
 

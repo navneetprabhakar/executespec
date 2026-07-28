@@ -43,6 +43,7 @@ class RunOrchestratorIterationPolicyTest {
             .userCostCap(4.5)
             .skipAutoPush(true)
             .orgId("host-org")
+            .billingOrgId("payer-org")
             .build();
 
     RunOrchestrator.IterationPolicy policy = RunOrchestrator.iterationPolicy(source);
@@ -55,6 +56,12 @@ class RunOrchestratorIterationPolicyTest {
     assertThat(policy.tddMode()).isTrue();
     assertThat(policy.userCostCap()).isEqualTo(4.5);
     assertThat(policy.skipAutoPush()).isTrue();
-    assertThat(policy.payerOrgId()).isEqualTo("host-org");
+    assertThat(policy.tenantOrgId()).isEqualTo("host-org");
+
+    RunOrchestrator.SubmitPolicy submitPolicy =
+        IterationSubmitPolicyFactory.from(policy, "current-writer-org");
+    assertThat(submitPolicy.tenantOrgId()).isEqualTo("host-org");
+    assertThat(submitPolicy.billingOrgId()).isEqualTo("current-writer-org");
+    assertThat(submitPolicy.billingOrgId()).isNotEqualTo(source.getBillingOrgId());
   }
 }

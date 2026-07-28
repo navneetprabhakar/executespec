@@ -30,6 +30,60 @@ public interface ExecutionSolutionRepository extends JpaRepository<ExecutionSolu
    */
   Optional<ExecutionSolution> findFirstByPipelineRunId(String pipelineRunId);
 
+  /** Canonical in-flight solutions that need their child observer restored after a restart. */
+  @Query(
+      "SELECT s FROM ExecutionSolution s WHERE s.executionRun.id = :executionRunId "
+          + "AND s.status IN ('RUNNING', 'RECONCILING') ORDER BY s.sequenceNumber ASC")
+  List<ExecutionSolution> findObserverRecoveryCandidates(
+      @Param("executionRunId") String executionRunId);
+
+  /**
+   * Atomically bind the pre-reserved child identity when the process died after child insertion but
+   * before the convenience pointer was saved on the solution.
+   */
+  @Modifying(clearAutomatically = true, flushAutomatically = true)
+  @org.springframework.transaction.annotation.Transactional
+  @Query(
+      "UPDATE ExecutionSolution s SET s.pipelineRunId = :pipelineRunId, s.updatedAt = :updatedAt "
+          + "WHERE s.id = :solutionId AND s.executionRun.id = :executionRunId "
+          + "AND s.status = 'RUNNING' AND s.pipelineRunId IS NULL")
+  int bindCanonicalPipelineRunIfMissing(
+      @Param("solutionId") String solutionId,
+      @Param("executionRunId") String executionRunId,
+      @Param("pipelineRunId") String pipelineRunId,
+      @Param("updatedAt") Instant updatedAt);
+
+  /** One durable winner is allowed to project a terminal child onto its RUNNING solution. */
+  @Modifying(clearAutomatically = true, flushAutomatically = true)
+  @org.springframework.transaction.annotation.Transactional
+  @Query(
+      "UPDATE ExecutionSolution s SET s.status = 'RECONCILING', s.updatedAt = :claimedAt "
+          + "WHERE s.id = :solutionId AND s.executionRun.id = :executionRunId "
+          + "AND s.status = 'RUNNING' AND s.pipelineRunId = :pipelineRunId")
+  int claimTerminalReconciliation(
+      @Param("solutionId") String solutionId,
+      @Param("executionRunId") String executionRunId,
+      @Param("pipelineRunId") String pipelineRunId,
+      @Param("claimedAt") Instant claimedAt);
+
+  /**
+   * Take over a reconciliation whose owner died after the durable claim. The timestamp predicate is
+   * the lease fence: concurrent replicas cannot both refresh the same stale row.
+   */
+  @Modifying(clearAutomatically = true, flushAutomatically = true)
+  @org.springframework.transaction.annotation.Transactional
+  @Query(
+      "UPDATE ExecutionSolution s SET s.updatedAt = :claimedAt "
+          + "WHERE s.id = :solutionId AND s.executionRun.id = :executionRunId "
+          + "AND s.status = 'RECONCILING' AND s.pipelineRunId = :pipelineRunId "
+          + "AND s.updatedAt < :staleBefore")
+  int claimStaleTerminalReconciliation(
+      @Param("solutionId") String solutionId,
+      @Param("executionRunId") String executionRunId,
+      @Param("pipelineRunId") String pipelineRunId,
+      @Param("claimedAt") Instant claimedAt,
+      @Param("staleBefore") Instant staleBefore);
+
   /**
    * Eager-fetches the {@code dependencies} set so callers outside a transaction (e.g. {@link
    * com.navneet.executespec.execution.service.SolutionDependencyResolver}) can iterate without a

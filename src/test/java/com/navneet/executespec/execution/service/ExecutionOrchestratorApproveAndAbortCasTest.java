@@ -11,7 +11,6 @@ import com.navneet.executespec.auth.repository.AppUserRepository;
 import com.navneet.executespec.codeintel.ProjectArchitectureService;
 import com.navneet.executespec.execution.entity.ExecutionRun;
 import com.navneet.executespec.execution.repository.ExecutionRunRepository;
-import com.navneet.executespec.integration.RunOrchestrator;
 import com.navneet.executespec.repo.GitHubRepoService;
 import com.navneet.executespec.sse.SseBroadcaster;
 import com.navneet.executespec.state.entity.PipelineRun;
@@ -45,7 +44,7 @@ class ExecutionOrchestratorApproveAndAbortCasTest {
   @Mock ExecutionBranchService branchService;
   @Mock SseBroadcaster broadcaster;
   @Mock GitHubRepoService gitHub;
-  @Mock RunOrchestrator v2Orchestrator;
+  @Mock ExecutionPipelineSubmissionService v2Orchestrator;
   @Mock com.navneet.executespec.integration.RunLifecycleService runLifecycleService;
   @Mock com.navneet.executespec.project.pr.PullRequestRecordRepository prRecordRepo;
   @Mock com.navneet.executespec.state.repository.PipelineRunRepository pipelineRunRepo;

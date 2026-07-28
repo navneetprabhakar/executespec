@@ -23,9 +23,14 @@ export function isCloudRunAction(action: api.AgentTypedAction | null | undefined
   return !!action && action.type === CREATE_CLOUD_RUN;
 }
 
-function hasProjectScope(action: api.AgentTypedAction): boolean {
+export function cloudRunProjectId(action: api.AgentTypedAction | null | undefined): string | null {
+  if (!isCloudRunAction(action) || !action) return null;
   const projectId = action.arguments?.projectId;
-  return typeof projectId === 'string' && projectId.trim().length > 0;
+  return typeof projectId === 'string' && projectId.trim().length > 0 ? projectId.trim() : null;
+}
+
+function hasProjectScope(action: api.AgentTypedAction): boolean {
+  return cloudRunProjectId(action) != null;
 }
 
 export function isConfirmableCloudRun(action: api.AgentTypedAction | null | undefined): boolean {

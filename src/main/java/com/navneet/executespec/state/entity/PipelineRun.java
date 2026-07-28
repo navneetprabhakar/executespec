@@ -435,6 +435,12 @@ public class PipelineRun {
   @Column(name = "org_id")
   private String orgId;
 
+  /**
+   * Immutable payer/provider-policy org; differs from {@link #orgId} for external collaborators.
+   */
+  @Column(name = "billing_org_id")
+  private String billingOrgId;
+
   /** Project this run belongs to within the org (null for free-tier personal runs). */
   @Column(name = "project_id")
   private String projectId;
