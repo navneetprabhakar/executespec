@@ -1434,6 +1434,15 @@ evidence, and horizontally scaled JVMs require a shared persistent trajectory ro
   and ambiguity. `RepositoryIntelligenceEvaluationManifestTest` validates containment, required
   case coverage and byte-exact asset hashes; it is deterministic baseline evidence, not an explorer
   quality or generated-code claim.
+- **Repository-intelligence persisted evidence checkpoint (uncommitted, 2026-07-28)** — the
+  registered native adapter now reads already-persisted CODEMAP and per-repository ARCHITECTURE
+  artifacts through the same authorized-handle, current-snapshot, deadline and result-budget
+  boundary as native search. CODEMAP evidence is deterministic, confidence 1.0 and unambiguous,
+  pinned to the exact handle/source SHA, with model-generated `Purpose` lines excluded and partial
+  inventories preserved as partial. ARCHITECTURE evidence remains explicitly model-derived
+  (confidence 0.65, ambiguity UNKNOWN) and is accepted only when its source SHA and exact source
+  codemap ID are current. Project documents, ADRs, AST relationships, semantic retrieval and all
+  planner/worker/reviewer integration remain open; this is not a quality claim.
 - **RequirementIR schema-first and atomic-open slices (IR-P1-C01 through C03C-OPEN; enforcement disabled)** —
   `agent/requirement/` owns a separate schema-v1 requirement/acceptance document, deterministic
   exact-source compiler, structural/completeness validator, canonical JSON codec and plan/source/

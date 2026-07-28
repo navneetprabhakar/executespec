@@ -6,6 +6,8 @@ import static org.mockito.Mockito.mock;
 import com.navneet.executespec.auth.repository.AppUserRepository;
 import com.navneet.executespec.auth.repository.OrgMemberRepository;
 import com.navneet.executespec.auth.repository.OrgRepository;
+import com.navneet.executespec.codeintel.repository.ProjectCodeMapRepository;
+import com.navneet.executespec.codeintel.repository.RepoArchitectureDocRepository;
 import com.navneet.executespec.config.AgentProperties;
 import com.navneet.executespec.harness.WorkspaceInitService;
 import com.navneet.executespec.project.rag.CodeIndexStateStore;
@@ -33,8 +35,13 @@ class RepositoryIntelligenceRegistrationTest {
       context.registerBean(AgentProperties.class, AgentProperties::new);
       context.registerBean(RepositorySearchService.class, RepositorySearchService::new);
       context.registerBean(CodeIndexStateStore.class, () -> mock(CodeIndexStateStore.class));
+      context.registerBean(
+          ProjectCodeMapRepository.class, () -> mock(ProjectCodeMapRepository.class));
+      context.registerBean(
+          RepoArchitectureDocRepository.class, () -> mock(RepoArchitectureDocRepository.class));
       context.register(AccessCheckedRepositoryRootResolver.class);
       context.register(AccessCheckedRepositorySnapshotService.class);
+      context.register(PersistedProjectEvidenceSource.class);
       context.register(NativeRepositoryIntelligenceAdapter.class);
       context.refresh();
 
