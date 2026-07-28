@@ -447,6 +447,67 @@ describe('IdeAgent', () => {
     expect(api.listAgentTurns).toHaveBeenCalledWith('s2', {limit: 50});
   });
 
+  it('allows a new workspace while a hydrated run waits for approval without unlocking its composer', async () => {
+    const waitingSession = {
+      ...session,
+      latestLinkedRunId: 'run-awaiting',
+      latestLinkedRunStatus: 'AWAITING_APPROVAL',
+    };
+    const freshSession = {...session, id: 's2', title: 'Independent workspace'};
+    api.listAgentSessions.mockResolvedValue([waitingSession]);
+    api.listAgentTurns.mockResolvedValue([
+      {
+        turnId: 't-awaiting',
+        sessionId: 's1',
+        sequence: 1,
+        userMessage: 'Implement the approved plan',
+        assistantSummary: 'The plan is waiting for approval.',
+        intentType: 'CODE_RUN_REQUIRED',
+        intentConfidence: 0.99,
+        route: 'CODE_RUN_REQUIRED',
+        reasonCode: 'code_run_required',
+        actionType: 'create_cloud_run',
+        proposedActionJson: null,
+        linkedRunId: 'run-awaiting',
+        inputTokens: 100,
+        outputTokens: 40,
+        reasoningTokens: 0,
+        costUsd: 0.001,
+        status: 'COMPLETED',
+        createdAt: '2026-06-20T00:00:00Z',
+      },
+    ]);
+    api.getRun.mockResolvedValue({
+      runId: 'run-awaiting',
+      runTitle: 'Plan awaiting approval',
+      status: 'AWAITING_APPROVAL',
+      aiProvider: 'deepseek',
+      workerModel: 'deepseek-v4-pro-native',
+      costEstimateHigh: 0.5,
+      verifiedScore: null,
+      scmPrUrl: null,
+      githubPrUrl: null,
+      tasks: [{title: 'Implement plan', status: 'PENDING'}],
+    });
+    api.createAgentSession.mockResolvedValueOnce(freshSession);
+
+    ({host, root} = await renderAgent('/agent'));
+    await flush();
+
+    const newWorkspace = host.querySelector<HTMLButtonElement>(
+      'button.agent-bar-btn[aria-label="Start a new sandbox"]',
+    );
+    const composer = host.querySelector<HTMLTextAreaElement>('[aria-label="Message the agent"]');
+    expect(newWorkspace?.disabled).toBe(false);
+    expect(composer?.disabled).toBe(true);
+
+    await act(async () => newWorkspace?.click());
+    await flush();
+
+    expect(api.createAgentSession).toHaveBeenCalledTimes(1);
+    expect(host.textContent).toContain('Independent workspace');
+  });
+
   it('reconciles the transcript and approval inbox when a suspended mobile tab resumes', async () => {
     ({host, root} = await renderAgent('/agent'));
     const baseline = api.listAgentSessions.mock.calls.length;

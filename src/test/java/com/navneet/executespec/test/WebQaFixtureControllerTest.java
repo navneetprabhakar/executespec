@@ -16,6 +16,8 @@ import com.navneet.executespec.auth.entity.AppUser;
 import com.navneet.executespec.auth.repository.AppUserRepository;
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.config.featureflag.FeatureFlagService;
+import com.navneet.executespec.harness.entity.GateRecord;
+import com.navneet.executespec.harness.repository.GateRepository;
 import com.navneet.executespec.report.ValidationReportRepository;
 import com.navneet.executespec.report.entity.ValidationReport;
 import com.navneet.executespec.sse.SseBroadcaster;
@@ -61,6 +63,7 @@ class WebQaFixtureControllerTest {
             .status("AWAITING_APPROVAL")
             .build();
     AgentTaskRepository tasks = mock(AgentTaskRepository.class);
+    GateRepository gates = mock(GateRepository.class);
     when(tasks.findByRunId("web-qa-run")).thenReturn(List.of());
     ValidationReportRepository reports = mock(ValidationReportRepository.class);
     TestPlanRepository plans = mock(TestPlanRepository.class);
@@ -86,6 +89,7 @@ class WebQaFixtureControllerTest {
     WebQaFixtureController controller =
         new WebQaFixtureController(
             runs,
+            gates,
             tasks,
             reports,
             plans,
@@ -103,6 +107,7 @@ class WebQaFixtureControllerTest {
 
     assertThat(result).containsEntry("deletedAgentSessions", 1);
     assertThat(result).containsEntry("deletedRuns", 1);
+    verify(gates).findFirstByRunIdAndGateType("web-qa-run", "PLAN");
     verify(runs).delete(run);
     verify(events).deleteBySessionId("web-qa-session");
     verify(turns).deleteBySessionId("web-qa-session");
@@ -230,6 +235,7 @@ class WebQaFixtureControllerTest {
     WebQaFixtureController controller =
         new WebQaFixtureController(
             runs,
+            mock(GateRepository.class),
             tasks,
             reports,
             plans,
@@ -258,6 +264,42 @@ class WebQaFixtureControllerTest {
   }
 
   @Test
+  void seededApprovalFixturePersistsCoherentLegacyPlanGate() {
+    GateRepository gates = mock(GateRepository.class);
+    WebQaFixtureController controller =
+        new WebQaFixtureController(
+            mock(PipelineRunRepository.class),
+            gates,
+            mock(AgentTaskRepository.class),
+            mock(ValidationReportRepository.class),
+            mock(TestPlanRepository.class),
+            mock(TestTaskRepository.class),
+            mock(TestResultRepository.class),
+            mock(AgentSessionRepository.class),
+            mock(AgentTurnRepository.class),
+            mock(AgentActionEventRepository.class),
+            mock(AppUserRepository.class),
+            mock(SseBroadcaster.class),
+            featureFlags(),
+            webQaEnvironment());
+
+    controller.createLegacyPlanGate("web-qa-gate");
+
+    ArgumentCaptor<GateRecord> gate = ArgumentCaptor.forClass(GateRecord.class);
+    verify(gates).save(gate.capture());
+    assertThat(gate.getValue())
+        .extracting(
+            GateRecord::getGateKey,
+            GateRecord::getRunId,
+            GateRecord::getGateType,
+            GateRecord::getStatus,
+            GateRecord::getBindingMode,
+            GateRecord::getBindingStatus)
+        .containsExactly(
+            "gate:plan:web-qa-gate", "web-qa-gate", "PLAN", "PENDING", "LEGACY", "UNBOUND");
+  }
+
+  @Test
   void safetyEvidenceRequiresOnlyTheProviderFreeWebQaProfile() {
     assertThat(WebQaFixtureController.class.getAnnotation(Profile.class).value())
         .containsExactly("web-qa");
@@ -278,6 +320,7 @@ class WebQaFixtureControllerTest {
     WebQaFixtureController sharedProfileController =
         new WebQaFixtureController(
             mock(PipelineRunRepository.class),
+            mock(GateRepository.class),
             mock(AgentTaskRepository.class),
             mock(ValidationReportRepository.class),
             mock(TestPlanRepository.class),
@@ -302,6 +345,7 @@ class WebQaFixtureControllerTest {
     WebQaFixtureController controller =
         new WebQaFixtureController(
             runs,
+            mock(GateRepository.class),
             mock(AgentTaskRepository.class),
             mock(ValidationReportRepository.class),
             mock(TestPlanRepository.class),
@@ -343,6 +387,7 @@ class WebQaFixtureControllerTest {
       PipelineRunRepository runs, AgentSessionRepository sessions, AgentTaskRepository tasks) {
     return new WebQaFixtureController(
         runs,
+        mock(GateRepository.class),
         tasks,
         mock(ValidationReportRepository.class),
         mock(TestPlanRepository.class),
