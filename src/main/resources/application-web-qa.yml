@@ -17,6 +17,9 @@ agent:
   integrations:
     enabled: false
   deployment:
+    # Provider-free browser QA exercises presentation and durable local contracts only. Disable
+    # the deployment tier itself so startup never probes workstation Docker/GCP credentials.
+    enabled: false
     recovery-safe-enabled: false
 
 preview:
