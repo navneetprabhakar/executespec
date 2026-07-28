@@ -2,7 +2,7 @@
 
 > This file is read by Claude Code at session start. Keep it accurate.
 
-**Version:** `2.0.0` ([`Version`](Version)). Migration head: **V347** on the current worktree (V347 wires atomic plan-gate opening across the gate row, exact continuation outbox, and `PLANNING -> AWAITING_APPROVAL` transition; it seeds `requirement.ir.gate.mode=LEGACY`, so RequirementIR enforcement remains inactive. V346 adds immutable binding/admission evidence and the fenced continuation outbox; V345 adds exact-plan-bound RequirementIR artifacts). Default branch: `main`. Dev environment: `dev.executespec.ai`.
+**Version:** `2.0.0` ([`Version`](Version)). Migration head: **V348** on the current worktree; the next allocatable migration is **V349** and the migration directory contains **334 source files**. V348 makes APPROVE, REJECT, and pre-approval CANCEL distinct atomic plan-gate decisions with canonical admission receipts/request fingerprints and a leased continuation outbox. `requirement.ir.gate.mode` remains `LEGACY`, so RequirementIR enforcement is still inactive. Default branch: `main`. Dev environment: `dev.executespec.ai`.
 
 Spec-driven AI coding platform. Customer submits a spec in natural language → V2 pipeline plans, codes across one or more repos, builds + tests, opens a pull request with a deterministic verified score. Human approves at the plan gate; everything after is automatic.
 
@@ -524,7 +524,7 @@ When a terminal waste/failed goal decision still says another model/provider mig
 - **LLM prompts:** external files in `src/main/resources/prompts/*.md` plus active `.txt` prompts for legacy/non-tool agents. Assembled via `PromptAssembler.assemble(path, vars)` where applicable — resolves `{{include:fragment}}` markers from `prompts/fragments/` and `{{VAR}}` substitutions. Dead rollback archives were removed in the 2026-07-02 prompt-audit cleanup; rollback uses `PromptAuditEntry.previousContent` and dynamically-created backups for live prompt files.
 - **Tool calling:** provider-native end-to-end. Strict JSON schemas on every entry in `tool/`. No XML `<tool_call>` parsing in V2.
 - **Naming:** `*Agent.java` for agents, `*Service.java` for services, `*Controller.java` for REST, `*Spec.java` for security specifications.
-- **DB migrations:** Flyway `V{n}__description.sql` in `src/main/resources/db/migration/` (source head **V347** in the current worktree). Applied migrations are immutable: never rewrite an applied V-file. V273-V299 retain the executable-verification, route, source-readiness, governed-data, scoped-authority, usage-causality, sharing, benchmark, recovery, and durable-review contracts described in the architecture codemap; V300-V347 are forward migrations and must not be rewritten. Any future consolidation must use a clean-install baseline migration plus forward migrations. Full chronology is in [`executespec-docs/backend/architecture/CODEMAP.md`](../executespec-docs/backend/architecture/CODEMAP.md).
+- **DB migrations:** Flyway `V{n}__description.sql` in `src/main/resources/db/migration/` (source head **V348**, next **V349**, **334 source files** in the current worktree). Applied migrations are immutable: never rewrite an applied V-file. V273-V299 retain the executable-verification, route, source-readiness, governed-data, scoped-authority, usage-causality, sharing, benchmark, recovery, and durable-review contracts described in the architecture codemap; V300-V348 are forward migrations and must not be rewritten. Any future consolidation must use a clean-install baseline migration plus forward migrations. Full chronology is in [`executespec-docs/backend/architecture/CODEMAP.md`](../executespec-docs/backend/architecture/CODEMAP.md).
 
 Production Flyway is strict: `application-prod.yml` disables automatic baselining and out-of-order application. Recovery of an unmanaged database is an explicit operator procedure; do not enable those settings globally.
 
@@ -654,7 +654,7 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318/v1/traces
 | POST   | `/api/runs`                           | Submit run (202). Body includes `aiProvider`, `executionMode`, `runMode`, `tddMode`, optional `userCostCap`, optional `figmaUrl`, optional `selectedRepoIds[]`, optional `requireConfirmationBeforeExpensiveContinuation`, optional `requireBenchmarkPriorForAutomaticContinuation`, optional `lowComplexityWorkerStartTier` (`WORKHORSE\|LIGHTWEIGHT`, non-pinning LOW-task start tier), optional `modelName` (ENTERPRISE per-run model pin, Beta — overrides org matrix + YAML via `RunModelOverrides.withRunPin`), optional `localInstallationId` (V278 — required when `localExecution=true` selects LOCAL project sources; admission verifies installation match + ONLINE lease before quota/spend). |
 | GET    | `/api/runs`                           | List runs (paginated, filtered by visibility + tier).                                                                                                                                                                                                                                       |
 | GET    | `/api/runs/{id}`                      | Run detail (incl. `githubPrUrl`, `verifiedScore`, `statusReason`, `planStrategy`, per-phase costs, and durable `requestedProvider` / `requestedModel` / `routingMode` / `routePinned` intent).                                                                                           |
-| POST   | `/api/runs/{id}/approve`              | Plan gate approval; body `{approved, creditsConfirmed?, planFingerprint?, breakingChangeAck?, breakingChangeReportDigest?}`. Charges credits. `planFingerprint` (RR-1459) is the SHA-256 of the exact plan JSON the approver reviewed and 409s on mismatch; the web plan gate sends it, because `creditsConfirmed` is a price check that passes whenever two runs happen to cost the same. **RR-819:** when the run has a pending contract gate with `requiresTypedAck`, approval is refused with 409 unless `breakingChangeAck` is the literal `BREAKING` and `breakingChangeReportDigest` matches the persisted report. |
+| POST   | `/api/runs/{id}/approve`              | Plan gate approval; body `{approved, creditsConfirmed?, planFingerprint?, breakingChangeAck?, breakingChangeReportDigest?}`. Charges credits. `planFingerprint` (RR-1459) is the SHA-256 of the exact plan JSON the approver reviewed; mismatch returns 409, omission is recorded as absent/null rather than matched, and ENFORCED RequirementIR requires it. The web plan gate sends it because `creditsConfirmed` proves price, not plan identity. **RR-819:** when a pending contract gate has `requiresTypedAck`, approval is refused with 409 unless `breakingChangeAck` semantically equals `BREAKING` after trimming/case-folding and `breakingChangeReportDigest` matches. New C03C writes persist uppercase `BREAKING`; V348 snapshots and cross-binds acknowledgement timestamp/actor/exact stored text, preserving legacy bytes on replay. |
 | GET    | `/api/runs/{id}/plan-contract-gate`   | **RR-819** — the durable plan-approval contract gate report the approver must be shown (`reportJson` rows, `reportDigest`, `requiresTypedAck`). 204 when the plan touches no registered contract. Run-read guarded. |
 | POST   | `/api/runs/{id}/pause`                | PAUSED (V168, flag `v2.pause.enabled`, default OFF).                                                                                                                                                                                                                                        |
 | POST   | `/api/runs/{id}/resume`               | Same-JVM only; workspace must exist.                                                                                                                                                                                                                                                        |
@@ -823,6 +823,8 @@ requires the consumer repository to be linked to that project before persistence
 | Purpose                         | Path                                                                                                                                                                                                                                                                              |
 | ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Run orchestrator                | [`integration/RunOrchestrator.java`](src/main/java/com/navneet/executespec/integration/RunOrchestrator.java)                                                                                                                                                                      |
+| Plan-gate decision              | [`integration/PlanGateDecisionService.java`](src/main/java/com/navneet/executespec/integration/PlanGateDecisionService.java) + [`integration/PlanGateDecisionEvidence.java`](src/main/java/com/navneet/executespec/integration/PlanGateDecisionEvidence.java) + [`integration/PlanGateDecisionAdmission.java`](src/main/java/com/navneet/executespec/integration/PlanGateDecisionAdmission.java) + [`integration/DecisionEvidenceV1.java`](src/main/java/com/navneet/executespec/integration/DecisionEvidenceV1.java) + [`integration/DecisionRequestBytesV1.java`](src/main/java/com/navneet/executespec/integration/DecisionRequestBytesV1.java) |
+| Plan-gate continuation          | [`integration/PlanGateResumeDispatcher.java`](src/main/java/com/navneet/executespec/integration/PlanGateResumeDispatcher.java) + [`integration/PlanGateResumeStore.java`](src/main/java/com/navneet/executespec/integration/PlanGateResumeStore.java)                                                                                              |
 | Sequential executor             | [`harness/SequentialExecutor.java`](src/main/java/com/navneet/executespec/harness/SequentialExecutor.java)                                                                                                                                                                        |
 | Worker agent                    | [`engine/WorkerAgent.java`](src/main/java/com/navneet/executespec/engine/WorkerAgent.java) (moved from `agent/` — Phase 4)                                                                                                                                                        |
 | Outline planner                 | [`agent/OutlinePlannerAgent.java`](src/main/java/com/navneet/executespec/agent/OutlinePlannerAgent.java)                                                                                                                                                                          |
@@ -864,7 +866,7 @@ requires the consumer repository to be linked to that project before persistence
 | Agent web tools + chat uploads  | [`specchat/WebSearchChatTools.java`](src/main/java/com/navneet/executespec/specchat/WebSearchChatTools.java) (SSRF-hardened `web_search`/`web_fetch` for the chat surface) + [`agentsession/AgentAttachmentService.java`](src/main/java/com/navneet/executespec/agentsession/AgentAttachmentService.java) + `AgentAttachmentStore.java` (validate/extract/sanitize uploads → Redis → server-side untrusted injection) |
 | LLM prompts                     | `src/main/resources/prompts/*.md`                                                                                                                                                                                                                                                 |
 | App config                      | `src/main/resources/application.yml`                                                                                                                                                                                                                                              |
-| DB migrations                   | `src/main/resources/db/migration/V*.sql` (head V347; applied V-files immutable). V347 atomically opens plan gates with exact continuation/report identity and seeds the durable RequirementIR gate mode to LEGACY; V346 persists versioned binding/admission evidence plus the fenced continuation outbox; V345 persists exact-plan-bound immutable RequirementIR artifacts separately from legacy plan JSON. |
+| DB migrations                   | `src/main/resources/db/migration/V*.sql` (head V348; next V349; 334 source files; applied V-files immutable). V348 enforces atomic decision receipts and coherent run/gate/outbox states; V347 atomically opens plan gates; V346 persists the binding/admission and continuation-outbox foundation; V345 persists exact-plan-bound immutable RequirementIR artifacts. The durable RequirementIR mode remains LEGACY. |
 | Frontend entry                  | `frontend/src/main.tsx`                                                                                                                                                                                                                                                           |
 | Frontend API client             | `frontend/src/lib/api/` (`transport.ts` + domain DTO contracts, with `core.ts` retaining compatibility re-exports)                                                                                                                                                              |
 | Observability stack             | `observability/docker-compose.yml`                                                                                                                                                                                                                                                |
@@ -936,7 +938,7 @@ all. **RL-2026-06-035:** when the session carries a `projectId`, `SpecChatServic
 
 ### Known tech debt
 
-**Historical source facts (2026-07-18, V299 checkpoint):** V298 durably staged exact terminal LLM-usage facts for fenced any-JVM materialization; V299 made Code Review and PR Review jobs leased, restart-recoverable and atomically fenced through terminal result/cancellation/failure publication. The current source head is V347. At that checkpoint, benchmark event ingestion serialized per-run sequence allocation and task-attempt idempotency across JVMs, with a database uniqueness backstop. Concurrent active benchmark attempts, timestamps, ETA, terminal failure classification, trajectory location/hash and submission readiness were DB-authoritative and reloadable after backend restart; SSE carried the same progress projection for live consumers. The benchmark bridge distinguished setup failures from ordinary failed rewards and refused to mark incomplete trial sets DONE; benchmark-prior continuation and initial routing remained evidence-gated. Brownfield runs failed admission when a requested linked repository was missing, unlinked, unclonable, or had no source inventory. LOCAL project sources used opaque UUIDv4 identities and expiring connector leases without transmitting a filesystem path; cloud execution rejected them, while `localExecution=true` required the submitting CLI installation to match an ONLINE lease. Validation and generated-test claims used the baseline-to-final product diff. Exact Enterprise provider/model routes were durable and failed closed at dispatch; provider-only routes retained tier-aware models inside the chosen provider. Project-document uploads were admitted from bytes and became DB-authoritative for restart recovery. Project exports were durable jobs; project RAG exposed semantic versus lexical readiness and did not hide a global OpenAI dispatch behind non-OpenAI `OWN_KEYS` policy. Project Chat resolved immutable actor/org/project/role/route/budget/trust policy per turn, bound pure-read tools, and required V292 scoped one-shot authority before supported paid or mutating actions. Cursor-aware event replay, symlink-component rejection, project-write authority, manual-readiness solution binding, linked-repository PR-review access, and governed validation-report sharing were already enforced. These statements describe the V299 checkpoint, not the current migration tuple.
+**Historical source facts (2026-07-18, V299 checkpoint):** V298 durably staged exact terminal LLM-usage facts for fenced any-JVM materialization; V299 made Code Review and PR Review jobs leased, restart-recoverable and atomically fenced through terminal result/cancellation/failure publication. The current source head is V348. At that checkpoint, benchmark event ingestion serialized per-run sequence allocation and task-attempt idempotency across JVMs, with a database uniqueness backstop. Concurrent active benchmark attempts, timestamps, ETA, terminal failure classification, trajectory location/hash and submission readiness were DB-authoritative and reloadable after backend restart; SSE carried the same progress projection for live consumers. The benchmark bridge distinguished setup failures from ordinary failed rewards and refused to mark incomplete trial sets DONE; benchmark-prior continuation and initial routing remained evidence-gated. Brownfield runs failed admission when a requested linked repository was missing, unlinked, unclonable, or had no source inventory. LOCAL project sources used opaque UUIDv4 identities and expiring connector leases without transmitting a filesystem path; cloud execution rejected them, while `localExecution=true` required the submitting CLI installation to match an ONLINE lease. Validation and generated-test claims used the baseline-to-final product diff. Exact Enterprise provider/model routes were durable and failed closed at dispatch; provider-only routes retained tier-aware models inside the chosen provider. Project-document uploads were admitted from bytes and became DB-authoritative for restart recovery. Project exports were durable jobs; project RAG exposed semantic versus lexical readiness and did not hide a global OpenAI dispatch behind non-OpenAI `OWN_KEYS` policy. Project Chat resolved immutable actor/org/project/role/route/budget/trust policy per turn, bound pure-read tools, and required V292 scoped one-shot authority before supported paid or mutating actions. Cursor-aware event replay, symlink-component rejection, project-write authority, manual-readiness solution binding, linked-repository PR-review access, and governed validation-report sharing were already enforced. These statements describe the V299 checkpoint, not the current migration tuple.
 
 **Route truth (Adaptive C1 Steps 1-3, 2026-07-19):** cross-provider failover is ENABLED in production
 (V266) and was NOT suppressed for controlled workers, so an unpinned SWE-bench task could be served
@@ -985,7 +987,8 @@ persisted "REALTIME", failed the exact-`PRODUCTION` gate test, and executed unap
 preserve the source run's exact repository selection and its (now durable, V315) `tdd_mode`.
 `POST /api/runs/{id}/approve` accepts an optional `planFingerprint` (SHA-256 of the persisted plan
 JSON) and rejects a mismatch with 409, because `creditsConfirmed` is a price check, not a plan
-identity. Launch-side: `projectApprovedPlan` runs only after synchronous canonical admission and
+identity. V348 records omission as absent/null rather than a successful match; supplied values must
+match, and ENFORCED RequirementIR approval requires one. Launch-side: `projectApprovedPlan` runs only after synchronous canonical admission and
 gate resolution, writes the V3 approval projection after that authority exists, and fences the V2
 run when a concurrent abort prevents the projection; `executeApprovedPlan` (and therefore
 `POST /api/executions/{id}/resume`)
@@ -1000,31 +1003,65 @@ selections fail closed on both sides — an unparseable or non-UUID value is an 
 non-terminal task rows to success. `PipelineExecutorPool` now exposes three distinct executors so a
 LARGE plan's expansion fan-out never blocks on the pool the waiter runs on.
 
-**Plan-gate transition and admission authority (2026-07-27):** every customer-facing plan decision
-flows through synchronous `PlanApprovalService` admission before
-`RunLifecycleService.resolvePlanGate`. The run API, retained Execution View route and dormant chat
-action share one admission sequence: optional compatibility checks for an exact-plan fingerprint
-and confirmed estimate when the caller supplies them, followed by managed-AI, org-governance,
-project-cap and breaking-change checks; an architecture test prevents direct route/tool resolution.
-Execution View also requires canonical run-write authority in addition to its project-write guard,
-and policy failures are returned before its async V3 projection starts. Managed-AI approval is
-checked against `pipeline_run.created_by_user_id` and payer org—the principal later debited by LLM
-calls—not whichever admin clicked Approve. The OWN_KEYS exemption additionally requires an enabled
-customer key for this run's selected provider; org-wide BYOK mode alone cannot exempt a Gemini run
-backed only by an Anthropic key. Durable approval replay remains restart-safe, but until
-a versioned admission receipt exists it re-runs policy rather than assuming historical APPROVED
-gates passed C03B admission. Execution View binds the exact approved pipeline ID through its async
-projection, fences it if the link/state changed, and returns 410 for pipeline-less legacy approvals;
-that legacy customer execution path is retired rather than exempted from canonical admission.
-Breaking acknowledgement now runs after spend/governance validation so a denied approval does not
-consume the ack first. Acknowledgement persistence and the subsequent plan-gate claim are still
-separate writes, so a later lifecycle conflict/failure can leave acknowledgement evidence without a
-successful gate transition. V347 now snapshots the durable RequirementIR mode at open, binds the
-exact persisted source and plan through the current schema/compiler selector, and atomically writes
-the gate, WAITING continuation and `AWAITING_APPROVAL` transition before publishing events after
-commit. The mode is seeded LEGACY, so enforcement remains inactive. The later admission receipt,
-actor/payer transaction and leased dispatcher remain open, as do mandatory plan fingerprints and
-Execution View's separate run-submission-admission bypass.
+**Atomic plan-gate decision and continuation authority (2026-07-28, V348):** every
+customer-facing APPROVE or REJECT and every pre-approval CANCEL now crosses
+`PlanGateDecisionService`. It locks run → gate → continuation outbox → optional contract report →
+RequirementIR/policy rows, evaluates admission, and writes one immutable canonical
+`DecisionEvidenceV1` receipt plus a SHA-256 `DecisionRequestBytesV1` request fingerprint in the
+same transaction. The receipt binds the exact plan, continuation, RequirementIR snapshot,
+resolution source, actor/effective authority, payer, provider/key provenance, managed-AI,
+governance, the run's provider/execution mode, distinct fixed-six-decimal `estimateHighUsd` and
+nullable `hardCapUsd`, expected and confirmed credits, and breaking-change outcomes without
+credential material. When a contract report requires typed acknowledgement, the canonical receipt
+snapshots and cross-binds the report's exact digest, `requiresTypedAck`, acknowledgement timestamp,
+acknowledging actor, and exact stored text. New acknowledgements persist uppercase `BREAKING`;
+complete pre-V348 acknowledgement tuples remain byte-exact while validity is checked by trimmed,
+case-insensitive `BREAKING`. REJECT/CANCEL preserve such tuples with outcome `NOT_EVALUATED`. Exact same-decision
+replay returns the stored receipt without re-running mutable policy; an opposite decision conflicts.
+A legacy client that omits `planFingerprint` is recorded honestly with no supplied fingerprint and
+`planFingerprintMatched=null`, never as a match; supplied fingerprints must match, and ENFORCED
+RequirementIR approval requires one.
+APPROVE atomically moves gate `PENDING → APPROVED`, run `AWAITING_APPROVAL → APPROVAL_RESUMING`,
+and outbox `WAITING → READY`. REJECT and pre-approval CANCEL are distinct decisions and atomically
+cancel the run/outbox; cancellation after approval preserves the immutable APPROVE receipt.
+
+The 400-line transaction coordinator delegates the exact 73-field receipt plus replay verification
+to package-private `PlanGateDecisionEvidence` (478 lines), and locked policy/credential/governance/
+acknowledgement evaluation to `PlanGateDecisionAdmission` (266 lines). This keeps each production
+class below the 600-line ceiling without moving transaction ownership or lock ordering. Its focused
+compile, receipt, request, service and architecture cohort passes 35/35. C03C is now `VERIFIED`:
+all six independent PostgreSQL classes pass 73/73 (12+32+18+5+5+1), the
+active-registry/continuation/dispatcher cohort passes 31/31, architecture ceilings pass, and clean
+Java 21 `mvn clean verify -q` passes 5,630/5,630 with zero failures, errors, or skips.
+
+`PlanGateResumeDispatcher` consumes only durable READY/expired PROCESSING rows under a fenced lease,
+validates schema/digests and cross-row identity, runs a leased transactional preflight before any
+workspace restore, keeps the lease alive through bounded restore, then repeats the identity fence
+while atomically handing off run `APPROVAL_RESUMING → WORKING` and outbox
+`PROCESSING → COMPLETED`. Here COMPLETED means durable handoff to normal WORKING recovery, not run
+completion. Before its Future starts, the run carries a process-unique `:plan-gate-queued:` owner;
+only the dispatcher can reclaim that queued lane, and it restores/checks the workspace while
+renewing the same durable fence. The Future's first instruction transfers ownership atomically to
+the normal runtime host, after which any crash is handled only by ordinary WORKING checkpoint
+recovery. Executor dispatch occurs only after that commit. An AFTER_COMMIT event is a latency hint;
+scheduled/startup sweeps are authoritative, and `StartupRunResumer` no longer submits
+APPROVAL_RESUMING or queued COMPLETED handoffs directly. Corrupt, unsupported, stale, cancelled, and exhausted work is
+fenced or dead-lettered. Direct deletion cannot erase a versioned gate/outbox receipt or a
+referenced/acknowledged contract report while its parent run remains, while deletion of the parent
+run still drives the existing retention/GDPR cascade. The report→run FK is deliberately `NOT VALID`
+so historical orphan rows do not fail deployment; PostgreSQL enforces it for all new writes.
+Paused/crash recovery and continuation dispatch pre-register a `FutureTask` in the active-run map
+before giving it to the executor, so an inline/fast execution cannot finish, remove itself, and then
+be replaced by a stale handle; submission rejection removes the registration. `requirement.ir.gate.mode` remains `LEGACY`; this checkpoint does not
+activate RequirementIR enforcement, change prompts, or call providers.
+`PlanGateResumeStore` is 564 lines after extracting the 220-line
+`PlanGateResumeIntegrityValidator`; `PlanGateResumeDispatcher` is 475 lines and
+`ActiveRunRegistry` is 152 lines. Registry admission fails closed unless its durable ownership
+claim updates exactly one row, rolls back the exact new registration on a zero-row claim or
+repository exception, restores a replaced prior registration when replacement fails, and fences
+stale cleanup from removing a newer Future. This verifies the plan-gate-to-WORKING handoff only;
+ordinary post-transfer WORKING tool/provider calls and terminal output generation still lack
+independent per-attempt fences.
 
 **Breaking-change approval gate + continuation locality + publication fencing (2026-07-21, V329).**
 Four orchestrator-side corrections. (1) **RR-819** — `PlanBreakingChangeReport.requiresTypedAck`
@@ -1177,7 +1214,7 @@ preview-render single-flight; V307 adds run sandbox lifecycle; **V308** retypes
 `contract_version.inline_content` from jsonb to text (RR-1629 — inline contract bodies are not always
 valid JSON, so the jsonb column rejected legitimate content); **V309** gives `file_lock` a run-scoped
 composite `(run_id, file_path)` identity (RR-1544 — the prior key let one run's lock collide with
-another's). The current source head is V347; the older V299-V309 statements above describe prior source tuples.
+another's). The current source head is V348; the older V299-V309 statements above describe prior source tuples.
 
 **V310–V317 are RESERVED** by the in-flight audit-remediation fix wave (one per lane: billing, auth,
 tool, path-containment, preview/deploy, execution-gate, spend-quota, scoring). Do not allocate from
@@ -1392,9 +1429,10 @@ evidence, and horizontally scaled JVMs require a shared persistent trajectory ro
   legacy requirement/task IDs through an explicit adapter boundary, and blocks omission,
   ambiguity, conflict, missing task ownership and missing executable acceptance without modifying
   legacy `Plan`/`PlannedTask` JSON. V345 persists immutable exact-plan artifacts, V346 adds the
-  binding/admission and continuation-outbox foundation, and V347 wires atomic gate opening under
-  `requirement.ir.gate.mode`, seeded LEGACY. The shadow flag remains OFF; no provider, prompt, UI,
-  or enforcement behavior is activated.
+  binding/admission and continuation-outbox foundation, V347 wires atomic gate opening, and V348
+  adds atomic canonical decisions plus leased durable handoff. `requirement.ir.gate.mode` remains
+  `LEGACY`; the shadow flag remains OFF and no provider, prompt, UI, or enforcement behavior is
+  activated.
 - **Benchmark usage reconciliation (RL-2026-07-18-017)** — `POST /api/v2/test/benchmark/{id}/reconcile-usage` is benchmark-profile + SUPER_ADMIN only. It repairs historical tracker projections exclusively from the canonical `run_step_usage` rows linked by each task's `esRunId`; clients cannot supply replacement usage. Score, outcome and task identity remain immutable, and a changed repair appends `USAGE_RECONCILED` while exact replay is a no-op.
 - **Deterministic protected-Web QA fixture** — `test/WebQaFixtureController` is local/dev-only and SUPER_ADMIN-gated at `/api/v2/test/web-fixture`. It creates provider-free terminal success/failure/approval runs, tasks, validation/test evidence, a workspace, Redis SSE replay, and an agent-session action card for current-SHA browser capture; `DELETE` removes only its `web-qa-*` fixtures. `AgentStreamTurnRunner` recognizes only those minted fixture session IDs and emits a bounded scripted token/tool/result stream, so Web streaming evidence does not spend a provider. The former provider-free `RECOVERY` transition was removed on 2026-07-19 because it manufactured terminal success without the fenced reviewer/validation lifecycle; restart evidence must now use the real `RunLifecycleService.resumeAfterCrash` path. It is not a customer or production endpoint and must never be enabled outside local/dev QA.
 - **God classes** — `RunOrchestrator.java` is currently 4,140 LOC after the extraction work; residual backend decomposition is tracked in `pending.md` §E1/I1. Frontend debt remains concentrated in the shared DTO registry `frontend/src/lib/api/core.ts` (now ~1,650 LOC after billing and deployment DTO extraction) and the isolated transport `frontend/src/lib/api/transport.ts` (~191 LOC); `signal/pages/ExtraPages.tsx` is now 377 LOC after the prior split. These remain high-coupling and under-tested areas.

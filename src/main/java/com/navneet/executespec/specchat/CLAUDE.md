@@ -7,8 +7,10 @@ tool must be explicitly classified in `ChatToolPolicy` as `PROJECT_READ`, `PROJE
 scans, and child-agent spend use their explicit structured endpoints/proposals instead.
 
 The legacy write callbacks retained in `ProjectChatActionTools` remain filtered out of model-bound
-tool sets. Their plan-approval implementation still routes through `RunLifecycleService` so a future
-explicit binding cannot bypass durable gate validation by calling `GateStore` directly.
+tool sets. Their plan APPROVE/REJECT implementation routes through `PlanApprovalService` and the
+V348 `PlanGateDecisionService` with typed `PROJECT_CHAT_ACTION` resolution evidence, so a future
+explicit binding cannot bypass atomic admission or use the legacy `GateStore` compatibility methods
+as a decision authority.
 
 `policy/ProjectChatPolicyResolver` resolves one immutable, secret-free `ProjectChatPolicy` before
 every legacy Spec Chat, persistent agent-session chat, and direct project-chat model turn. It binds
@@ -96,11 +98,19 @@ Audit metadata contains only tool/capability/outcome identifiers, never prompts,
 results, exception bodies, or secrets.
 
 The retained model-filtered `approve_plan` callback is not a gate shortcut. It first reauthorizes
-run write access and then uses `PlanApprovalService`, so managed-AI, governance, breaking-contract
-and canonical lifecycle policy match the web/run routes. The legacy tool schema carries no plan
-fingerprint or credit confirmation, and those inputs remain optional compatibility checks; it
-therefore does not prove exact reviewed-plan/cost identity. A required breaking-report
-acknowledgement does fail closed and must move to the explicit plan UI. Historical durable approvals
-without a versioned admission receipt re-run admission on replay; they are not grandfathered around
-current policy. The acknowledgement write and plan-gate claim are not yet atomic, so admission can
-record a valid acknowledgement before a later lifecycle race refuses the gate transition.
+run write access and then uses `PlanApprovalService`, so managed-AI, governance, breaking-contract,
+and V348 canonical decision policy match the web/run and retained Execution View routes. The legacy
+tool schema carries no plan fingerprint or credit confirmation, so it cannot prove that the chat
+caller reviewed an exact plan/cost; a required breaking-report acknowledgement still fails closed
+and must move to the explicit plan UI. If admitted, the callback records a typed
+`PROJECT_CHAT_ACTION` resolution source. The breaking acknowledgement, immutable canonical receipt,
+gate status, run lifecycle, and outbox decision now commit atomically. Exact same-decision replay
+returns the stored receipt without re-evaluating mutable policy; an opposite decision conflicts.
+Because the legacy callback supplies no fingerprint, its receipt records the supplied fingerprint
+and match result as null rather than claiming a match; ENFORCED RequirementIR therefore fails
+closed. Explicit UI approval stores the report's ack timestamp, actor, and exact stored text in the
+receipt and cross-binds them to the report row. New acknowledgements persist uppercase `BREAKING`;
+an already-acknowledged pre-V348 report retains its exact historical spelling, is semantically
+validated by trimmed case-insensitive `BREAKING`, and remains exact-cross-bound.
+APPROVE produces `APPROVAL_RESUMING` + READY for the leased dispatcher, while REJECT remains distinct
+from pre-approval CANCEL. `requirement.ir.gate.mode` remains `LEGACY`.

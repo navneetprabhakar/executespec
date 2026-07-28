@@ -156,6 +156,10 @@ class AsyncAllowlistTest {
               // v2 post-merge orchestrator + recovery
               "PostMergeOrchestrator#onMergeCompleted",
               "StartupRunResumer#onApplicationReady",
+              // Durable plan-gate continuation events and startup recovery carry primitive run
+              // ids only; each async path reloads and locks all JPA state in its own transaction.
+              "PlanGateResumeDispatcher#onResumeReady",
+              "PlanGateResumeDispatcher#onApplicationReady",
 
               // programbench — async background that polls run row + tars submission.
               // Reads the PipelineRun via id (no lazy navigation), shells out to docker.

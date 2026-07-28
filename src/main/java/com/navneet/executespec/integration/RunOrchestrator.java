@@ -16,9 +16,9 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.Future;
+import java.util.concurrent.FutureTask;
+import java.util.concurrent.atomic.AtomicReference;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -86,7 +86,6 @@ import com.navneet.executespec.testgen.TestGenOrchestrator;
 import com.navneet.executespec.tool.ExecutionContext;
 
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
@@ -319,11 +318,8 @@ public class RunOrchestrator implements RunControlPort {
    */
   private final org.springframework.context.ApplicationEventPublisher eventPublisher;
 
-  /** runId → in-flight pipeline future; the cancel/pause/halt interrupt handle (invariant #4). */
-  private final ConcurrentMap<String, Future<?>> activeRuns = new ConcurrentHashMap<>();
-
-  /** Stable process label used by the database-backed execution lease. */
-  private static final String EXECUTION_INSTANCE_ID = ExecutionHostIdentity.current();
+  /** Owns the in-flight pipeline futures and their durable execution-owner heartbeat fence. */
+  private final ActiveRunRegistry activeRunRegistry;
 
   @Value("${execution.continuation.post-review.enabled:true}")
   private boolean postReviewContinuationEnabled = true;
@@ -344,34 +340,31 @@ public class RunOrchestrator implements RunControlPort {
   private boolean postReviewRequireBenchmarkPriorForAutomaticContinuation = false;
 
   // --- RunControlPort: the narrow seam RunLifecycleService reaches the orchestrator through.
-  // activeRuns ownership stays here (the submit + runPipeline path register/unregister through the
-  // same map); the lifecycle service register/removes via these accessors.
+  // The lifecycle service and submit path share one registry so replacement/removal stays fenced.
 
   @Override
   public void putActiveRun(String runId, Future<?> future) {
-    activeRuns.put(runId, future);
-    // Register the lease before the pipeline can outlive this JVM. A startup scanner on another
-    // replica must see a live owner rather than interpreting a null heartbeat as a crash.
-    runRepo.claimExecutionOwner(runId, EXECUTION_INSTANCE_ID, Instant.now());
+    activeRunRegistry.put(runId, future);
+  }
+
+  @Override
+  public void putExternallyHeartbeatedActiveRun(String runId, Future<?> future) {
+    activeRunRegistry.putExternallyHeartbeated(runId, future);
+  }
+
+  @Override
+  public boolean adoptRuntimeHeartbeat(String runId, Future<?> expectedFuture) {
+    return activeRunRegistry.adoptRuntimeHeartbeat(runId, expectedFuture);
   }
 
   @Override
   public Future<?> removeActiveRun(String runId) {
-    return activeRuns.remove(runId);
+    return activeRunRegistry.remove(runId);
   }
 
-  /** Refreshes leases for locally owned futures so rolling restarts cannot duplicate live work. */
-  @Scheduled(fixedRate = 30_000, initialDelay = 30_000)
-  void refreshExecutionHeartbeats() {
-    Instant heartbeat = Instant.now();
-    activeRuns.forEach(
-        (runId, future) -> {
-          if (future == null || future.isDone() || future.isCancelled()) {
-            activeRuns.remove(runId, future);
-            return;
-          }
-          runRepo.refreshExecutionHeartbeat(runId, EXECUTION_INSTANCE_ID, heartbeat);
-        });
+  @Override
+  public boolean removeActiveRun(String runId, Future<?> expectedFuture) {
+    return activeRunRegistry.remove(runId, expectedFuture);
   }
 
   /**
@@ -1097,7 +1090,7 @@ public class RunOrchestrator implements RunControlPort {
             .skipAutoPush(policy.skipAutoPush())
             .queuePosition(0)
             .startedAt(Instant.now())
-            .executingInstance(EXECUTION_INSTANCE_ID)
+            .executingInstance(activeRunRegistry.executionOwner())
             .executionHeartbeat(Instant.now())
             .totalInputTokens(0)
             .totalOutputTokens(0)
@@ -1167,8 +1160,9 @@ public class RunOrchestrator implements RunControlPort {
     // the RunModelOverrides bind site in runPipeline so the overlay is the authoritative routing
     // mechanism for every role. Null/blank = no pin (org/YAML resolution untouched).
     final String pinnedModelFinal = canonicalPin;
-    Future<?> future =
-        pool.submit(
+    AtomicReference<Future<?>> registeredFuture = new AtomicReference<>();
+    FutureTask<Void> future =
+        new FutureTask<>(
             () -> {
               try {
                 runPipeline(
@@ -1187,10 +1181,18 @@ public class RunOrchestrator implements RunControlPort {
                     pinnedModelFinal,
                     lowComplexityWorkerStartTierFinal);
               } finally {
-                activeRuns.remove(runIdFinal);
+                removeActiveRun(runIdFinal, registeredFuture.get());
               }
+              return null;
             });
+    registeredFuture.set(future);
     putActiveRun(runIdFinal, future);
+    try {
+      pool.executor().execute(future);
+    } catch (RuntimeException dispatchFailure) {
+      removeActiveRun(runIdFinal, future);
+      throw dispatchFailure;
+    }
     return run;
   }
 
@@ -2006,7 +2008,7 @@ public class RunOrchestrator implements RunControlPort {
                   .orElse(null);
           PlanGateContinuation continuation =
               new PlanGateContinuation(
-                  1,
+                  PlanGateContinuation.SCHEMA_VERSION,
                   localRun,
                   requireContinuationConfirmation,
                   requireContinuationBenchmarkPrior,
@@ -3018,14 +3020,6 @@ public class RunOrchestrator implements RunControlPort {
    * need to re-thread it.
    */
   /** Versioned state that crosses the durable plan-approval suspension point. */
-  public record PlanGateContinuation(
-      int schemaVersion,
-      boolean localRun,
-      boolean requireContinuationConfirmation,
-      boolean requireContinuationBenchmarkPrior,
-      String pinnedModel,
-      String lowComplexityWorkerStartTierOverride) {}
-
   public record RunPipelineRequest(
       String runId,
       String userRequest,
@@ -3070,6 +3064,11 @@ public class RunOrchestrator implements RunControlPort {
 
     public static RunPipelineRequest fromPausedRow(
         com.navneet.executespec.state.entity.PipelineRun run) {
+      return fromPausedRow(run, null);
+    }
+
+    public static RunPipelineRequest fromPausedRow(
+        com.navneet.executespec.state.entity.PipelineRun run, PlanGateContinuation continuation) {
       // Worker model is the closest analogue to a single "run model" — it's what the bulk of the
       // run's LLM calls used. Resume re-resolves per-tier per-call so this is mostly a label;
       // null falls through to ModelResolver defaults.
@@ -3085,7 +3084,7 @@ public class RunOrchestrator implements RunControlPort {
           /* githubPat */ null, // resume reuses workspace state — no fresh PAT needed for clones
           /* tddMode */ false,
           /* branchOverride */ null,
-          null);
+          continuation);
     }
 
     public static RunPipelineRequest fromApprovedPlanRow(

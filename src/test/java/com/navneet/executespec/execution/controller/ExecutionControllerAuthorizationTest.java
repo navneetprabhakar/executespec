@@ -145,7 +145,10 @@ class ExecutionControllerAuthorizationTest {
                         && Integer.valueOf(3).equals(command.creditsConfirmed())
                         && "fingerprint".equals(command.planFingerprint())
                         && "digest".equals(command.breakingChangeReportDigest())),
-            org.mockito.Mockito.eq(principal));
+            org.mockito.Mockito.eq(principal),
+            org.mockito.Mockito.eq(
+                com.navneet.executespec.integration.PlanGateDecisionService.ResolutionSource
+                    .EXECUTION_VIEW_API));
     verify(orchestrator).projectApprovedPlan("execution-1", "run-1");
   }
 
@@ -166,7 +169,10 @@ class ExecutionControllerAuthorizationTest {
         .decide(
             org.mockito.Mockito.eq("run-1"),
             org.mockito.ArgumentMatchers.any(PlanApprovalService.Command.class),
-            org.mockito.Mockito.eq(principal));
+            org.mockito.Mockito.eq(principal),
+            org.mockito.Mockito.eq(
+                com.navneet.executespec.integration.PlanGateDecisionService.ResolutionSource
+                    .EXECUTION_VIEW_API));
 
     assertThatThrownBy(() -> controller.approvePlan("execution-1", null, principal))
         .isInstanceOfSatisfying(

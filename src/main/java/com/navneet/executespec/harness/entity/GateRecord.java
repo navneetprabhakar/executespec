@@ -46,7 +46,7 @@ public class GateRecord {
    *
    * <ul>
    *   <li>PENDING — gate is open, awaiting decision
-   *   <li>APPROVED / REJECTED — plan gate outcome (maps to boolean true/false)
+   *   <li>APPROVED / REJECTED / CANCELLED — distinct plan gate decisions
    *   <li>{@link com.navneet.executespec.harness.MergeDecision} name — merge gate outcome
    *   <li>Clarification text — for CLARIFICATION gates
    * </ul>
@@ -118,11 +118,31 @@ public class GateRecord {
   @Column(name = "approval_evidence_digest", length = 64)
   private String approvalEvidenceDigest;
 
+  /** APPROVE | REJECT | CANCEL. Null only for pending or historical/unbound decisions. */
+  @Column(name = "decision_kind", length = 16)
+  private String decisionKind;
+
+  /** HUMAN | SYSTEM. */
+  @Column(name = "resolved_actor_type", length = 16)
+  private String resolvedActorType;
+
+  /** SHA-256 of the canonical decision request bytes used for exact replay detection. */
+  @Column(name = "decision_request_fingerprint", length = 64)
+  private String decisionRequestFingerprint;
+
   @Column(name = "resolved_by_user_id", length = 64)
   private String resolvedByUserId;
 
   @Column(name = "resolved_by_role", length = 64)
   private String resolvedByRole;
+
+  /** RUN_OWNER | ORG_ADMIN | GLOBAL_SUPER_ADMIN | SYSTEM_INTERNAL. */
+  @Column(name = "resolved_authorization_source", length = 64)
+  private String resolvedAuthorizationSource;
+
+  /** Tenant whose authority was exercised; null for global or ownership-only authority. */
+  @Column(name = "resolved_authorization_org_id", length = 64)
+  private String resolvedAuthorizationOrgId;
 
   @Column(name = "resolution_source", length = 64)
   private String resolutionSource;
