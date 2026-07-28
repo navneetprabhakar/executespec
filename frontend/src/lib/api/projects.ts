@@ -419,14 +419,20 @@ export const updateRepoRelationships = (
 
 // Architecture docs (R3)
 export const generateArchitecture = (projectId: string) =>
-  req<ArchitectureDoc>(`/projects/${projectId}/architecture/generate`, {method: 'POST'});
+  req<ArchitectureDoc>(`/projects/${projectId}/architecture/generate`, {
+    method: 'POST',
+    // The synchronous three-repo path observed on dev took ~67s. Keep a finite operation-specific
+    // deadline instead of aborting at the shared 30s transport ceiling while the server continues
+    // to spend and users retry the same generation.
+    timeoutMs: 5 * 60_000,
+  });
 
 // Per-repo architecture regen (Task #82) — explicit, heavy (codemap + per-repo arch LLM calls).
 // Split out of syncRepo, which is now a fast metadata-only refresh.
 export const regenerateRepoArchitecture = (projectId: string, repoId: string) =>
   req<{id: string; version: number; content: string; generatedAt: string}>(
     `/projects/${projectId}/repos/${repoId}/regenerate-architecture`,
-    {method: 'POST'},
+    {method: 'POST', timeoutMs: 3 * 60_000},
   );
 
 // Project workspace analyse (regenerates codemaps + architecture.md + summary.md on disk)
@@ -537,7 +543,10 @@ export const getProjectSummary = (projectId: string) =>
   req<{content: string}>(`/projects/${projectId}/summary`);
 
 export const generateProjectDoc = (projectId: string, docType: GeneratedDocType) =>
-  req<GeneratedDocRow>(`/projects/${projectId}/docs/${docType}/generate`, {method: 'POST'});
+  req<GeneratedDocRow>(`/projects/${projectId}/docs/${docType}/generate`, {
+    method: 'POST',
+    timeoutMs: 3 * 60_000,
+  });
 
 /**
  * Returns null (204) when the doc hasn't been generated yet. Callers should

@@ -221,6 +221,32 @@ export function fmtDur(ms?: number | null) {
   return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
 }
 
+export interface TimelineTaskTiming {
+  startedAt?: string | null;
+  completedAt?: string | null;
+}
+
+/**
+ * Convert persisted task timestamps into safe chart coordinates.
+ *
+ * Historical and interrupted tasks can legitimately have no start timestamp. JavaScript treats
+ * `new Date(null)` as the Unix epoch, which previously rendered those rows as multi-million-minute
+ * tasks. Only finite, positive starts are chartable; a malformed or pre-start completion is also
+ * rejected instead of fabricating a duration.
+ */
+export function timelineTiming(
+  task: TimelineTaskTiming,
+  nowMs = Date.now(),
+): {startMs: number; endMs: number; durationMs: number} | null {
+  if (!task.startedAt) return null;
+  const startMs = Date.parse(task.startedAt);
+  if (!Number.isFinite(startMs) || startMs <= 0) return null;
+
+  const parsedEnd = task.completedAt ? Date.parse(task.completedAt) : nowMs;
+  if (!Number.isFinite(parsedEnd) || parsedEnd < startMs) return null;
+  return {startMs, endMs: parsedEnd, durationMs: parsedEnd - startMs};
+}
+
 export function testResultSummary(
   tests: Pick<api.TestReportData, 'totalTests' | 'passed' | 'failed' | 'errors'>,
 ) {

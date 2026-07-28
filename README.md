@@ -301,13 +301,42 @@ mvn -Pintegration verify        # opt-in integration tests (e2e, integration, ch
 
 `mvn verify` runs Spotless in `check` mode (the same gate CI enforces in `lint.yml`) and binds JaCoCo so a coverage report lands under `target/site/jacoco/`. Surefire excludes the `e2e`, `integration`, and `chaos` JUnit groups by default; pass `-Pintegration` (or the equivalent profile your CI uses) to run them.
 
+For provider-free protected-Web functional coverage, run
+`scripts/run-web-provider-free-functional.sh`. It launches disposable PostgreSQL and Redis
+containers, starts the backend with the isolated `web-qa` profile, creates a one-run QA identity,
+and drives the real React UI through login, workspace creation, run tabs, failure recovery, plan
+gate rendering, and fixture-only lifecycle transitions. The profile disables live LLM dispatch and
+does not activate the local/dev feature-flag initializer; the harness also compares a digest of all
+feature-flag values and audit metadata before and after the browser run. Browser session creation
+uses the real provider-free backend contract and its exact session is included in fixture cleanup.
+The fixture assigns the disposable user an unusable DeepSeek readiness marker solely so real project
+create/delete policy can be exercised. Live dispatch remains disabled. Browser-only cleanup removes
+the marker; a combined browser/CLI pass retains it between those phases, then destroys the database.
+Frontend, browser, backend, and optional CLI child processes receive purpose-specific allowlisted
+environments; the harness never reads a credential file and destroys its disposable services on
+exit. This proves deterministic browser contracts, not provider-backed Ask answers, screen
+generation, sandbox isolation, or generated-code quality.
+
+Set `WEB_QA_CLIENT_ROOT` to an absolute standalone client-checkout path to run the CLI behavioral
+suite against that same disposable backend and identity after the browser checks. The client harness
+mints and revokes its own PAT in guaranteed cleanup, removes its temporary config/workspaces, and
+removes the disposable email/password plus unrelated credentials from all child processes. Live-web
+and update checks are disabled for that optional pass. The variable is optional; no client checkout
+path is hardcoded.
+
 Validation evidence is fail-closed: code-changing tasks require an admitted baseline-to-final product
 diff attributable to that task, and persisted executable verification distinguishes `PASSED`,
 `BUILD_ONLY`, `FAILED`, and `UNAVAILABLE`. The Web evidence ledger exposes those deterministic facts;
 the headline score is a summary and must not be treated as independent proof.
 Post-run Ask follows the same rule: configured build success is not test success, missing concrete
 test counts remain an explicit verification gap, and provider tool-protocol markup is suppressed
-rather than displayed to customers.
+rather than displayed to customers. Web/CLI agent answers have bounded 8,192-token direct and
+4,096-token final-synthesis ceilings and visibly warn when a provider stops for output length.
+Long-running architecture and generated-document actions use finite operation-specific client
+timeouts rather than inheriting the ordinary 30-second API deadline. Compare History renders the
+actual authorized document-content diff, Timeline omits invalid timestamps instead of fabricating
+epoch durations, and the provider-key screen exposes OpenRouter's organization-scoped status and
+route to org settings.
 
 **Frontend**
 

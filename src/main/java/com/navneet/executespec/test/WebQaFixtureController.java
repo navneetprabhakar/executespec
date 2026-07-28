@@ -4,7 +4,10 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.MessageDigest;
 import java.time.Instant;
+import java.util.Arrays;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -15,7 +18,9 @@ import com.navneet.executespec.agentsession.entity.AgentTurn;
 import com.navneet.executespec.agentsession.repository.AgentActionEventRepository;
 import com.navneet.executespec.agentsession.repository.AgentSessionRepository;
 import com.navneet.executespec.agentsession.repository.AgentTurnRepository;
+import com.navneet.executespec.auth.repository.AppUserRepository;
 import com.navneet.executespec.auth.security.AppUserDetails;
+import com.navneet.executespec.config.featureflag.FeatureFlagService;
 import com.navneet.executespec.report.ValidationReportRepository;
 import com.navneet.executespec.report.entity.PipelineResult;
 import com.navneet.executespec.report.entity.ValidationReport;
@@ -37,6 +42,7 @@ import com.navneet.executespec.testgen.repository.TestResultRepository;
 import com.navneet.executespec.testgen.repository.TestTaskRepository;
 
 import org.springframework.context.annotation.Profile;
+import org.springframework.core.env.Environment;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.transaction.annotation.Transactional;
@@ -45,13 +51,14 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
 import lombok.RequiredArgsConstructor;
 
 /** Deterministic, provider-free fixtures for authenticated Web release captures. */
-@Profile({"local", "dev"})
+@Profile("web-qa")
 @RestController
 @RequestMapping("/api/v2/test/web-fixture")
 @RequiredArgsConstructor
@@ -59,6 +66,7 @@ import lombok.RequiredArgsConstructor;
 public class WebQaFixtureController {
 
   private static final String PREFIX = "web-qa-";
+  private static final String PROVIDER_READINESS_MARKER = "web-qa-disabled-provider-key";
 
   private final PipelineRunRepository runRepository;
   private final AgentTaskRepository taskRepository;
@@ -69,7 +77,13 @@ public class WebQaFixtureController {
   private final AgentSessionRepository sessionRepository;
   private final AgentTurnRepository turnRepository;
   private final AgentActionEventRepository eventRepository;
+  private final AppUserRepository userRepository;
   private final SseBroadcaster sseBroadcaster;
+  private final FeatureFlagService featureFlagService;
+  private final Environment environment;
+
+  @org.springframework.beans.factory.annotation.Value("${executespec.live-llm.enabled:true}")
+  private boolean liveLlmEnabled;
 
   /**
    * Matches StartupRunResumer's configured root so restart fixtures work with isolated workspaces.
@@ -78,12 +92,28 @@ public class WebQaFixtureController {
   private String workspaceRoot;
 
   @PostMapping
+  @Transactional(rollbackFor = Exception.class)
   public FixtureResponse seed(
       @org.springframework.security.core.annotation.AuthenticationPrincipal
           AppUserDetails principal)
       throws IOException {
+    SafetyEvidence safety = safetyEvidence();
+    if (!safety.safe()) {
+      throw new ResponseStatusException(
+          HttpStatus.SERVICE_UNAVAILABLE,
+          "Web QA fixture seeding requires the isolated web-qa profile with live LLM calls"
+              + " disabled");
+    }
     String userId = principal.getUser().getId();
     String orgId = principal.getUser().getOrgId();
+    userRepository
+        .findById(userId)
+        .filter(user -> user.getDeepSeekApiKey() == null || user.getDeepSeekApiKey().isBlank())
+        .ifPresent(
+            user -> {
+              user.setDeepSeekApiKey(PROVIDER_READINESS_MARKER);
+              userRepository.save(user);
+            });
     String sessionId = PREFIX + UUID.randomUUID();
     AgentSession session =
         sessionRepository.save(
@@ -153,7 +183,12 @@ public class WebQaFixtureController {
     turn.setLinkedRunId(gate.getRunId());
     turnRepository.save(turn);
     return new FixtureResponse(
-        success.getRunId(), failed.getRunId(), gate.getRunId(), recovery.getRunId(), sessionId);
+        success.getRunId(),
+        failed.getRunId(),
+        gate.getRunId(),
+        recovery.getRunId(),
+        sessionId,
+        safety);
   }
 
   /**
@@ -228,10 +263,12 @@ public class WebQaFixtureController {
   @DeleteMapping
   // Keep run/workspace and agent-session graph deletion atomic. Without a transaction, a stale
   // fixture row can fail midway through cleanup and leave ACTIVE web-qa sessions behind.
-  @Transactional
+  @Transactional(rollbackFor = Exception.class)
   public Map<String, Object> cleanup(
       @org.springframework.security.core.annotation.AuthenticationPrincipal
-          AppUserDetails principal)
+          AppUserDetails principal,
+      @RequestParam(required = false) String sessionId,
+      @RequestParam(defaultValue = "false") boolean preserveProviderReadiness)
       throws IOException {
     String userId = principal.getUser().getId();
     List<PipelineRun> runs =
@@ -256,13 +293,81 @@ public class WebQaFixtureController {
       deleteWorkspace(run.getWorkspacePath());
       runRepository.delete(run);
     }
-    List<AgentSession> sessions = sessionRepository.findByUserIdAndIdStartingWith(userId, PREFIX);
+    List<AgentSession> sessions =
+        new java.util.ArrayList<>(sessionRepository.findByUserIdAndIdStartingWith(userId, PREFIX));
+    if (sessionId != null && !sessionId.isBlank()) {
+      sessionRepository
+          .findById(sessionId)
+          .filter(session -> userId.equals(session.getUserId()))
+          .filter(
+              session ->
+                  sessions.stream().noneMatch(existing -> existing.getId().equals(session.getId())))
+          .ifPresent(sessions::add);
+    }
     for (AgentSession session : sessions) {
       eventRepository.deleteBySessionId(session.getId());
       turnRepository.deleteBySessionId(session.getId());
       sessionRepository.delete(session);
     }
-    return Map.of("deletedRuns", runs.size(), "deletedAgentSessions", sessions.size());
+    if (!preserveProviderReadiness) {
+      userRepository
+          .findById(userId)
+          .filter(user -> PROVIDER_READINESS_MARKER.equals(user.getDeepSeekApiKey()))
+          .ifPresent(
+              user -> {
+                user.setDeepSeekApiKey(null);
+                userRepository.save(user);
+              });
+    }
+    return Map.of(
+        "deletedRuns", runs.size(),
+        "deletedAgentSessions", sessions.size(),
+        "safety", safetyEvidence());
+  }
+
+  Map<String, Object> cleanup(AppUserDetails principal) throws IOException {
+    return cleanup(principal, null, false);
+  }
+
+  /**
+   * Provider-free browser evidence must be self-describing. The digest includes values and audit
+   * metadata, so the browser harness can prove that it did not rewrite feature flags while it ran
+   * instead of merely assuming that no mutation occurred.
+   */
+  SafetyEvidence safetyEvidence() {
+    List<String> profiles = Arrays.stream(environment.getActiveProfiles()).sorted().toList();
+    boolean isolatedProfile = profiles.contains("web-qa");
+    boolean sharedProfileActive =
+        profiles.stream()
+            .anyMatch(
+                profile -> List.of("local", "dev", "prod", "benchmark", "gcp").contains(profile));
+    String canonicalFlags =
+        featureFlagService.listAll().stream()
+            .sorted(java.util.Comparator.comparing(flag -> flag.getFlagKey()))
+            .map(
+                flag ->
+                    String.join(
+                        "\u001f",
+                        flag.getFlagKey(),
+                        flag.getFlagValue(),
+                        flag.getUpdatedBy() == null ? "" : flag.getUpdatedBy(),
+                        flag.getUpdatedAt() == null ? "" : flag.getUpdatedAt().toString()))
+            .collect(java.util.stream.Collectors.joining("\n"));
+    return new SafetyEvidence(
+        isolatedProfile && !sharedProfileActive && !liveLlmEnabled,
+        profiles,
+        liveLlmEnabled,
+        sha256(canonicalFlags));
+  }
+
+  private static String sha256(String value) {
+    try {
+      return HexFormat.of()
+          .formatHex(
+              MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8)));
+    } catch (java.security.NoSuchAlgorithmException impossible) {
+      throw new IllegalStateException("SHA-256 is unavailable", impossible);
+    }
   }
 
   // Package-visible for the regression test that ensures visual fixtures remain score-neutral.
@@ -374,6 +479,27 @@ public class WebQaFixtureController {
             .failureMessage(success ? null : "fixture build failed")
             .durationMs(12)
             .build());
+    TestTask edgeTest =
+        testTaskRepository.save(
+            TestTask.builder()
+                .testPlanId(plan.getId())
+                .taskName("fixture edge case")
+                .taskDescription("Deterministic release fixture edge-case test")
+                .testCategory(TestCategory.VALIDATION)
+                .status(success ? TestTaskStatus.COMPILED : TestTaskStatus.FAILED)
+                .generatedCode("fixture")
+                .build());
+    testResultRepository.save(
+        TestResult.builder()
+            .testPlanId(plan.getId())
+            .testTaskId(edgeTest.getId())
+            .testMethod("fixture edge case")
+            .status(success ? TestResultStatus.PASSED : TestResultStatus.FAILED)
+            .expectedValue("reject invalid input")
+            .actualValue(success ? "reject invalid input" : "build error")
+            .failureMessage(success ? null : "fixture build failed")
+            .durationMs(8)
+            .build());
     sseBroadcaster.emit(runId, RunEvent.runStatus(runId, status));
     sseBroadcaster.emit(
         runId,
@@ -421,7 +547,14 @@ public class WebQaFixtureController {
       String failedRunId,
       String gateRunId,
       String recoveryRunId,
-      String agentSessionId) {}
+      String agentSessionId,
+      SafetyEvidence safety) {}
+
+  public record SafetyEvidence(
+      boolean safe,
+      List<String> activeProfiles,
+      boolean liveLlmEnabled,
+      String featureFlagSnapshotSha256) {}
 
   public record AdvanceRequest(String status) {}
 

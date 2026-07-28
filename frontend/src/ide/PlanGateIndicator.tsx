@@ -1,5 +1,5 @@
 import {useEffect, useRef, useState} from 'react';
-import {useNavigate} from 'react-router-dom';
+import {useLocation, useNavigate} from 'react-router-dom';
 import * as api from '@/lib/api';
 import {relTime} from '@/signal/lib/runUtils';
 
@@ -13,6 +13,7 @@ import {relTime} from '@/signal/lib/runUtils';
  */
 export function PlanGateIndicator({dir = 'up'}: {dir?: 'up' | 'down'}) {
   const navigate = useNavigate();
+  const location = useLocation();
   const [runs, setRuns] = useState<api.RunSummary[]>([]);
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement | null>(null);
@@ -34,7 +35,7 @@ export function PlanGateIndicator({dir = 'up'}: {dir?: 'up' | 'down'}) {
       cancelled = true;
       window.clearInterval(id);
     };
-  }, []);
+  }, [location.pathname]);
 
   useEffect(() => {
     if (!open) return;

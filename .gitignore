@@ -47,6 +47,7 @@ scripts/orchestrator-routing-eval-results/
 scripts/tier-eval-v2-results/
 scripts/v2-eval-results/
 scripts/web-agent-browser-smoke-results/
+scripts/web-provider-free-results/
 
 # Frontend build outputs (rebuilt by npm run build)
 frontend/dist/

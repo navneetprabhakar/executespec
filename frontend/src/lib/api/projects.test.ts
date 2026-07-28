@@ -1,10 +1,13 @@
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
 import {
+  generateArchitecture,
+  generateProjectDoc,
   createRepo,
   createProjectExport,
   getProjectCodeIndex,
   listScmRepos,
+  regenerateRepoArchitecture,
   refreshProjectCodeIndex,
   issueProjectChatConfirmation,
   consumeProjectChatConfirmation,
@@ -24,7 +27,53 @@ describe('project API', () => {
     localStorage.setItem('access_token', 'test-token');
   });
 
-  afterEach(() => vi.unstubAllGlobals());
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it.each([
+    {
+      operation: 'project architecture generation',
+      timeoutMs: 300_000,
+      invoke: () => generateArchitecture('project-1'),
+    },
+    {
+      operation: 'repository architecture regeneration',
+      timeoutMs: 180_000,
+      invoke: () => regenerateRepoArchitecture('project-1', 'repo-1'),
+    },
+    {
+      operation: 'project document generation',
+      timeoutMs: 180_000,
+      invoke: () => generateProjectDoc('project-1', 'EXPLANATION'),
+    },
+  ])('keeps $operation alive past the shared 30 second deadline', async ({timeoutMs, invoke}) => {
+    vi.useFakeTimers();
+    const captured: {signal: AbortSignal | null} = {signal: null};
+    const fetchMock = vi.fn<typeof fetch>().mockImplementation((_url, init) => {
+      captured.signal = init?.signal ?? null;
+      return new Promise<Response>((_resolve, reject) => {
+        captured.signal?.addEventListener(
+          'abort',
+          () => reject(new DOMException('The operation was aborted.', 'AbortError')),
+          {once: true},
+        );
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const request = invoke().catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(captured.signal?.aborted).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(timeoutMs - 30_000);
+    await expect(request).resolves.toMatchObject({
+      message: 'The request timed out. Please check your connection and try again.',
+      status: 0,
+    });
+    expect(fetchMock.mock.calls[0]?.[1]).not.toHaveProperty('timeoutMs');
+  });
 
   it('uses the shared transport for the full project-settings patch contract', async () => {
     const fetchMock = vi

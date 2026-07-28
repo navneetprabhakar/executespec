@@ -30,4 +30,11 @@ interface LlmExecutionContextRepository extends JpaRepository<LlmExecutionContex
           + "WHERE c.id = :id AND c.isolationKey = :isolationKey")
   Optional<LlmExecutionContext> findForUpdate(
       @Param("id") String id, @Param("isolationKey") String isolationKey);
+
+  /**
+   * Internal recovery sweep lookup; callers already obtained the durable context id from a row FK.
+   */
+  @Lock(LockModeType.PESSIMISTIC_WRITE)
+  @Query("SELECT c FROM LlmExecutionContext c WHERE c.id = :id")
+  Optional<LlmExecutionContext> findForUpdateById(@Param("id") String id);
 }

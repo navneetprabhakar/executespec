@@ -35,6 +35,7 @@ import org.mockito.ArgumentCaptor;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
+import org.springframework.ai.chat.metadata.ChatGenerationMetadata;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.tool.ToolCallback;
@@ -87,6 +88,14 @@ class SpecChatServiceTest {
   private static ChatResponse textResponse(String text) {
     return new ChatResponse(
         List.of(new Generation(AssistantMessage.builder().content(text).build())));
+  }
+
+  private static ChatResponse textResponse(String text, String finishReason) {
+    Generation generation =
+        new Generation(
+            AssistantMessage.builder().content(text).build(),
+            ChatGenerationMetadata.builder().finishReason(finishReason).build());
+    return new ChatResponse(List.of(generation));
   }
 
   private static ChatResponse toolResponse(AssistantMessage.ToolCall... calls) {
@@ -234,6 +243,8 @@ class SpecChatServiceTest {
     assertThat(request.getValue().context().llmExecutionContextId()).isEqualTo("llmctx-test");
     assertThat(request.getValue().context().llmExecutionScope())
         .isEqualTo(LlmExecutionScope.customer("org-1"));
+    assertThat(request.getValue().maxTokens())
+        .isEqualTo(SpecChatService.DIRECT_RESPONSE_MAX_TOKENS);
   }
 
   @Test
@@ -256,6 +267,27 @@ class SpecChatServiceTest {
     assertThat(sink.toolCalls).isEmpty();
     assertThat(sink.toolResults).isEmpty();
     assertThat(sink.doneTurnCount).isEqualTo(1);
+  }
+
+  @Test
+  void outputLimitIsSurfacedInsteadOfPresentingPartialCodeAsComplete() {
+    LlmRouter router = mock(LlmRouter.class);
+    when(router.call(any())).thenReturn(textResponse("```html\n<div>", "length"));
+    SpecChatService svc = newService(router, List.of());
+
+    RecordingSink sink = new RecordingSink();
+    svc.runTurn(
+        sink,
+        mock(AppUserDetails.class),
+        "sess-truncated",
+        null,
+        "org-1",
+        List.of(Map.of("role", "user", "content", "build a small todo app")),
+        "openai");
+
+    assertThat(sink.tokens)
+        .contains("```html\n<div>")
+        .anySatisfy(message -> assertThat(message).contains("response is incomplete"));
   }
 
   @Test
@@ -638,6 +670,39 @@ class SpecChatServiceTest {
         .contains("The evidence shows the scheduler is the highest-risk seam.")
         .noneMatch(token -> token.contains("ask me to continue"));
     assertThat(sink.doneTurnCount).isEqualTo(2);
+  }
+
+  @Test
+  void finalSynthesisUsesItsDedicatedCapAndSurfacesOutputLimit() {
+    LlmRouter router = mock(LlmRouter.class);
+    when(router.call(any()))
+        .thenReturn(
+            toolResponse(toolCall("list_recent_runs", "{\"limit\":5}")),
+            textResponse("The partial final answer", "max_tokens"));
+    SpecChatService svc =
+        newService(router, List.of(fakeTool("list_recent_runs", "{\"ok\":true}")));
+
+    RecordingSink sink = new RecordingSink();
+    svc.runTurnBounded(
+        sink,
+        mock(AppUserDetails.class),
+        "sess-truncated-synthesis",
+        null,
+        null,
+        "org-1",
+        List.of(Map.of("role", "user", "content", "summarize the evidence")),
+        "anthropic",
+        Set.of("list_recent_runs"),
+        1,
+        () -> {});
+
+    ArgumentCaptor<LlmRequest> requests = ArgumentCaptor.forClass(LlmRequest.class);
+    org.mockito.Mockito.verify(router, org.mockito.Mockito.times(2)).call(requests.capture());
+    assertThat(requests.getAllValues().get(1).maxTokens())
+        .isEqualTo(SpecChatService.FINAL_SYNTHESIS_MAX_TOKENS);
+    assertThat(sink.tokens)
+        .contains("The partial final answer")
+        .anySatisfy(message -> assertThat(message).contains("synthesis is incomplete"));
   }
 
   @Test

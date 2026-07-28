@@ -306,7 +306,7 @@ public class ProjectDocGeneratorService {
     if (executionPolicyFactory == null) {
       throw new IllegalStateException("Execution policy factory is required for project docs");
     }
-    String contextId = runId + "-" + java.util.UUID.randomUUID();
+    String contextId = projectDocContextId(java.util.UUID.randomUUID());
     var executionReference =
         confirmedActionReference != null
             ? confirmedActionReference
@@ -452,6 +452,18 @@ public class ProjectDocGeneratorService {
         + "[truncated at "
         + boundaryNote
         + "; additional repository evidence omitted]\n";
+  }
+
+  /**
+   * Builds the durable source/correlation/idempotency identity for one document-generation call.
+   *
+   * <p>The former value prefixed the full project-doc run id to a UUID. For EXPLANATION documents
+   * that produced 97 characters and failed the database's {@code correlation_id VARCHAR(96)}
+   * constraint before any provider call. Project and feature already have dedicated context
+   * columns, so keep this identity compact and collision-resistant instead of duplicating them.
+   */
+  static String projectDocContextId(java.util.UUID nonce) {
+    return "project-doc:" + java.util.Objects.requireNonNull(nonce, "nonce");
   }
 
   private LlmProvider resolveProvider(Project project) {

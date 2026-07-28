@@ -41,7 +41,7 @@ class NativeRepositoryIntelligenceAdapterTest {
     indexStateStore = mock(CodeIndexStateStore.class);
     adapter =
         new NativeRepositoryIntelligenceAdapter(
-            searchService, indexStateStore, ignored -> repository);
+            searchService, indexStateStore, query -> handle(query, repository));
   }
 
   @Test
@@ -87,6 +87,42 @@ class NativeRepositoryIntelligenceAdapterTest {
         .allMatch(outcome -> outcome.state() == RepositoryCapabilityState.STALE_REJECTED)
         .allMatch(outcome -> "INVENTORY_FINGERPRINT_CHANGED".equals(outcome.reason()));
     verifyNoInteractions(indexStateStore);
+  }
+
+  @Test
+  void rejectsAllEvidenceWhenRepositoryMutatesBetweenProbeAndCapability() {
+    RepositorySearchService changingSearch = mock(RepositorySearchService.class);
+    RepositorySearchService.SearchResult stableProbe =
+        new RepositorySearchService.SearchResult(
+            "abc123", "inventory-before", "query", java.util.List.of(), 0, false, 0, "native");
+    RepositorySearchService.SearchResult capabilityRead =
+        new RepositorySearchService.SearchResult(
+            "abc123", "inventory-after", "query", java.util.List.of(), 0, false, 0, "native");
+    when(changingSearch.search(
+            org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
+        .thenReturn(stableProbe, capabilityRead);
+    RepositorySnapshotId expected =
+        new RepositorySnapshotId(
+            "project-1",
+            UUID.randomUUID().toString(),
+            "abc123",
+            null,
+            "inventory-before",
+            "native",
+            1,
+            Instant.EPOCH,
+            RepositoryFreshness.CURRENT);
+    NativeRepositoryIntelligenceAdapter isolated =
+        new NativeRepositoryIntelligenceAdapter(
+            changingSearch, indexStateStore, query -> handle(query, repository));
+
+    RepositoryEvidenceBatch result =
+        isolated.query(query(expected, Set.of(RepositoryCapability.SYMBOL), false));
+
+    assertThat(result.evidence()).isEmpty();
+    assertThat(result.outcomes().get(RepositoryCapability.SYMBOL))
+        .extracting(CapabilityOutcome::state, CapabilityOutcome::reason)
+        .containsExactly(RepositoryCapabilityState.STALE_REJECTED, "INVENTORY_FINGERPRINT_CHANGED");
   }
 
   @Test
@@ -191,8 +227,7 @@ class NativeRepositoryIntelligenceAdapterTest {
 
     assertThat(result.outcomes().get(RepositoryCapability.EXACT_TEXT))
         .extracting(CapabilityOutcome::state, CapabilityOutcome::reason)
-        .containsExactly(
-            RepositoryCapabilityState.UNAVAILABLE, "DIRTY_FINGERPRINT_NOT_VALIDATABLE");
+        .containsExactly(RepositoryCapabilityState.UNAVAILABLE, "DIRTY_WORKTREE_NOT_CERTIFIABLE");
     verifyNoInteractions(resolver, indexStateStore);
   }
 
@@ -236,6 +271,42 @@ class NativeRepositoryIntelligenceAdapterTest {
         .extracting(CapabilityOutcome::state, CapabilityOutcome::reason)
         .containsExactly(RepositoryCapabilityState.UNAVAILABLE, "SNAPSHOT_SCHEMA_UNSUPPORTED");
     verifyNoInteractions(resolver, indexStateStore);
+  }
+
+  @Test
+  void rejectsResolverHandleWhoseActorTenantProjectRepositoryOrSnapshotDoesNotMatch() {
+    RepositorySnapshotId snapshot =
+        new RepositorySnapshotId(
+            "project-1",
+            UUID.randomUUID().toString(),
+            "abc123",
+            null,
+            "inventory",
+            "native",
+            1,
+            Instant.EPOCH,
+            RepositoryFreshness.CURRENT);
+    RepositoryQuery query = query(snapshot, Set.of(RepositoryCapability.EXACT_TEXT), false);
+    RepositoryRootResolver forgedResolver =
+        ignored ->
+            new AuthorizedRepositoryHandle(
+                "another-actor",
+                query.accessContext().tenantOrgId(),
+                query.projectId(),
+                query.repositoryId(),
+                query.expectedSnapshot().stableId(),
+                query.expectedSnapshot().commitSha(),
+                repository.toAbsolutePath());
+    NativeRepositoryIntelligenceAdapter isolated =
+        new NativeRepositoryIntelligenceAdapter(searchService, indexStateStore, forgedResolver);
+
+    RepositoryEvidenceBatch result = isolated.query(query);
+
+    assertThat(result.evidence()).isEmpty();
+    assertThat(result.outcomes().get(RepositoryCapability.EXACT_TEXT))
+        .extracting(CapabilityOutcome::state, CapabilityOutcome::reason)
+        .containsExactly(RepositoryCapabilityState.FAILED, "REPOSITORY_ROOT_UNAVAILABLE");
+    verifyNoInteractions(indexStateStore);
   }
 
   @Test
@@ -313,7 +384,7 @@ class NativeRepositoryIntelligenceAdapterTest {
             interrupted.countDown();
             Thread.currentThread().interrupt();
           }
-          return repository;
+          return handle(ignored, repository);
         };
     NativeRepositoryIntelligenceAdapter isolated =
         new NativeRepositoryIntelligenceAdapter(searchService, indexStateStore, blockingResolver);
@@ -328,7 +399,8 @@ class NativeRepositoryIntelligenceAdapterTest {
             "*.java",
             snapshot,
             bounded,
-            false);
+            false,
+            access());
 
     long started = System.nanoTime();
     RepositoryEvidenceBatch result = isolated.query(query);
@@ -384,10 +456,11 @@ class NativeRepositoryIntelligenceAdapterTest {
             "*.java",
             snapshot,
             new QueryBudget(2, 10, 10, 1_000, 250, 100),
-            false);
+            false,
+            access());
     NativeRepositoryIntelligenceAdapter isolated =
         new NativeRepositoryIntelligenceAdapter(
-            blockingSearch, indexStateStore, ignored -> repository);
+            blockingSearch, indexStateStore, request -> handle(request, repository));
 
     RepositoryEvidenceBatch result = isolated.query(query);
 
@@ -414,7 +487,7 @@ class NativeRepositoryIntelligenceAdapterTest {
             childInterrupted.countDown();
             Thread.currentThread().interrupt();
           }
-          return repository;
+          return handle(ignored, repository);
         };
     NativeRepositoryIntelligenceAdapter isolated =
         new NativeRepositoryIntelligenceAdapter(searchService, indexStateStore, blockingResolver);
@@ -464,7 +537,7 @@ class NativeRepositoryIntelligenceAdapterTest {
         "project-1",
         UUID.randomUUID().toString(),
         result.repositorySha(),
-        result.inventoryFingerprint(),
+        null,
         result.inventoryFingerprint(),
         "native",
         1,
@@ -485,7 +558,29 @@ class NativeRepositoryIntelligenceAdapterTest {
         "*.java",
         snapshot,
         QueryBudget.DEFAULT,
-        providerAllowed);
+        providerAllowed,
+        access());
+  }
+
+  private static RepositoryAccessContext access() {
+    return new RepositoryAccessContext("actor-1", "org-1");
+  }
+
+  private static AuthorizedRepositoryHandle handle(RepositoryQuery query, Path root) {
+    try {
+      return new AuthorizedRepositoryHandle(
+          query.accessContext().actorUserId(),
+          query.accessContext().tenantOrgId(),
+          query.projectId(),
+          query.repositoryId(),
+          query.expectedSnapshot().stableId(),
+          query.expectedSnapshot().commitSha() == null
+              ? "UNPINNED"
+              : query.expectedSnapshot().commitSha(),
+          root.toRealPath());
+    } catch (java.io.IOException unavailable) {
+      throw new IllegalStateException("test repository is unavailable", unavailable);
+    }
   }
 
   private static CodeIndexStateStore.State readyState(UUID repoId, String sourceSha) {

@@ -8,8 +8,6 @@ import java.util.stream.Collectors;
 import com.navneet.executespec.agent.ApiKeyResolver;
 import com.navneet.executespec.auth.repository.OrgRepository;
 import com.navneet.executespec.auth.repository.ProjectRepository;
-import com.navneet.executespec.router.LlmProvider;
-import com.navneet.executespec.router.ProjectProviderResolver;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -36,7 +34,6 @@ public class EmbeddingPolicyResolver {
 
   private final ProjectRepository projectRepository;
   private final OrgRepository orgRepository;
-  private final ProjectProviderResolver projectProviderResolver;
   private final ApiKeyResolver apiKeyResolver;
 
   @Value("${spring.ai.openai.api-key:}")
@@ -49,16 +46,13 @@ public class EmbeddingPolicyResolver {
     var project = projectRepository.findById(projectId).orElse(null);
     if (project == null) return lexical("PROJECT_NOT_FOUND", null);
 
-    LlmProvider selected;
-    try {
-      selected = projectProviderResolver.resolve(project);
-    } catch (RuntimeException invalidPolicy) {
-      return lexical("PROJECT_PROVIDER_POLICY_INVALID", null);
-    }
-    String provider = selected.name().toLowerCase(Locale.ROOT);
-    if (!"openai".equals(provider)) {
-      return lexical("SELECTED_PROVIDER_HAS_NO_COMPATIBLE_EMBEDDING_MODEL", provider);
-    }
+    // Embeddings are a dedicated governed capability, not the project's code-generation route.
+    // The persisted pgvector contract is pinned to OpenAI/text-embedding-3-small, so coupling this
+    // check to project.aiProvider made semantic indexing unavailable for every Anthropic, Gemini,
+    // DeepSeek, OpenRouter and Fireworks project even when an authorized OpenAI embedding key was
+    // present. Resolve the capability's own provider and still enforce the org key-source and
+    // provider-allowlist policy below.
+    String provider = EmbeddingService.PROVIDER;
 
     var org = orgRepository.findById(project.getOrgId()).orElse(null);
     if (org == null) return lexical("PROJECT_ORG_NOT_FOUND", provider);

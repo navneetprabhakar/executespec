@@ -38,6 +38,7 @@ import {
   techDebtCategories,
   uiBound,
 } from '@/ide/projectMoreUtils';
+import {lineDiff} from '@/ide/runResultUtils';
 import {
   formatProjectList,
   formatProjectRunList,
@@ -1759,54 +1760,72 @@ export function IdeProjectArchitecture() {
               {diffReport && (
                 <div style={{marginTop: 12, fontSize: 13}}>
                   <div style={{fontWeight: 600, marginBottom: 6, color: 'var(--ide-fg-bright)'}}>
-                    v{diffReport.fromVersion} → v{diffReport.toVersion} · {diffReport.totalFiles}{' '}
-                    file{diffReport.totalFiles === 1 ? '' : 's'} changed
+                    System map content · v{diffReport.fromVersion} → v{diffReport.toVersion}
                   </div>
-                  {diffReport.totalFiles === 0 ? (
-                    <span style={{color: 'var(--ide-fg-muted)'}}>No source-file changes.</span>
+                  {lineDiff(diffReport.fromContent || '', diffReport.toContent || '').some(
+                    (line) => line.sign !== ' ',
+                  ) ? (
+                    <IdeCodeViewer
+                      filename='architecture.md'
+                      content={diffReport.toContent || ''}
+                      diff={lineDiff(diffReport.fromContent || '', diffReport.toContent || '')}
+                    />
                   ) : (
-                    <div style={{maxHeight: 260, overflowY: 'auto'}}>
-                      {diffReport.perRepo.map((pr) => (
-                        <div key={pr.repoFullName} style={{marginBottom: 8}}>
-                          <div
-                            className='ide-mono'
-                            style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginBottom: 4}}
-                          >
-                            {pr.repoFullName}
-                          </div>
-                          <ul style={{listStyle: 'none', padding: 0, margin: 0}}>
-                            {pr.files.map((f, i) => {
-                              const status = (f.status || 'modified').toUpperCase();
-                              const color =
-                                status === 'ADDED'
-                                  ? 'var(--ide-green)'
-                                  : status === 'REMOVED'
-                                    ? 'var(--ide-red)'
-                                    : 'var(--ide-yellow)';
-                              return (
-                                <li
-                                  key={i}
-                                  className='ide-mono'
-                                  style={{
-                                    fontSize: 12,
-                                    padding: '3px 0',
-                                    whiteSpace: 'nowrap',
-                                    overflow: 'hidden',
-                                    textOverflow: 'ellipsis',
-                                  }}
-                                >
-                                  <span style={{color, fontWeight: 700, marginRight: 8}}>
-                                    {status[0]}
-                                  </span>
-                                  {f.filename}
-                                </li>
-                              );
-                            })}
-                          </ul>
-                        </div>
-                      ))}
-                    </div>
+                    <div style={{color: 'var(--ide-fg-muted)'}}>No system-map content changes.</div>
                   )}
+                  <details style={{marginTop: 12}}>
+                    <summary style={{cursor: 'pointer', color: 'var(--ide-fg-muted)'}}>
+                      Source revisions · {diffReport.totalFiles} file
+                      {diffReport.totalFiles === 1 ? '' : 's'} changed
+                    </summary>
+                    {diffReport.totalFiles === 0 ? (
+                      <div style={{color: 'var(--ide-fg-muted)', marginTop: 8}}>
+                        No source-file changes.
+                      </div>
+                    ) : (
+                      <div style={{maxHeight: 260, overflowY: 'auto', marginTop: 8}}>
+                        {diffReport.perRepo.map((pr) => (
+                          <div key={pr.repoFullName} style={{marginBottom: 8}}>
+                            <div
+                              className='ide-mono'
+                              style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginBottom: 4}}
+                            >
+                              {pr.repoFullName}
+                            </div>
+                            <ul style={{listStyle: 'none', padding: 0, margin: 0}}>
+                              {pr.files.map((f, i) => {
+                                const status = (f.status || 'modified').toUpperCase();
+                                const color =
+                                  status === 'ADDED'
+                                    ? 'var(--ide-green)'
+                                    : status === 'REMOVED'
+                                      ? 'var(--ide-red)'
+                                      : 'var(--ide-yellow)';
+                                return (
+                                  <li
+                                    key={i}
+                                    className='ide-mono'
+                                    style={{
+                                      fontSize: 12,
+                                      padding: '3px 0',
+                                      whiteSpace: 'nowrap',
+                                      overflow: 'hidden',
+                                      textOverflow: 'ellipsis',
+                                    }}
+                                  >
+                                    <span style={{color, fontWeight: 700, marginRight: 8}}>
+                                      {status[0]}
+                                    </span>
+                                    {f.filename}
+                                  </li>
+                                );
+                              })}
+                            </ul>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </details>
                 </div>
               )}
             </div>

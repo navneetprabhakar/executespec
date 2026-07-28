@@ -134,6 +134,10 @@ bypassed with a raw user id.
 ## Durable semantic code-index readiness (V286)
 
 - `project/rag/CodeIndexingService` no longer treats the presence of any V223 chunk as readiness.
+  `CodeIndexWorkspaceIdentity` now owns the canonical
+  `projchat-<repoId>-<sha256(projectId,repoId,fullRevision)>` clone identity;
+  repository-intelligence authority resolution reuses this exact server-derived identity rather
+  than accepting or reconstructing an arbitrary filesystem path.
   `project_code_index_state` is authoritative per `(project_id, repo_id)` and binds every result to
   the repository's current source SHA/revision.
 - Lifecycle is explicit: `UNINDEXED`, `INDEXING`, `READY`, `PARTIAL`, `STALE`, `FAILED`. READY
@@ -154,7 +158,9 @@ bypassed with a raw user id.
 - `search_code` remains an embedding-backed chunk similarity aid, not a language-aware relationship
   graph. The response and Repos UI explicitly report `relationshipGraphAvailable=false`; the
   ripgrep-backed `search_repo_files` path stays available for exact/regex lookup whenever semantic
-  readiness is absent or partial. FastContext is not referenced by this production path.
+  readiness is absent or partial. FastContext is not referenced by this production path. Code-index
+  materializations are isolated by project + repository + the full source revision digest; the
+  project-scoped lease can no longer race another project's lease against a shared checkout.
 - The explicit refresh endpoint may return HTTP 202 with `status=UNAVAILABLE` when the governed
   embedding route cannot run. Web reads the response status (`QUEUED | UNAVAILABLE | PARTIAL |
   READY`) and fixed reason instead of translating every accepted response into “queued”; current
@@ -166,10 +172,12 @@ bypassed with a raw user id.
   projection; it never hides the subsystem or treats an outage as evidence that no semantic index
   exists.
 - V290 makes provider policy part of readiness. The current 1536-dimensional schema supports only
-  governed OpenAI `text-embedding-3-small`; a project selected to DeepSeek, Gemini, Anthropic,
-  OpenRouter or Fireworks (or an OpenAI OWN_KEYS project with no current allowed key) is reported as
-  lexical-only. It cannot dispatch through a hidden platform OpenAI key, and an old READY state is
-  dynamically exposed as STALE until the exact compatible route is available again.
+  governed OpenAI `text-embedding-3-small`, but embedding is a dedicated capability independent of
+  the project's code-generation provider. Anthropic, Gemini, DeepSeek, OpenRouter and Fireworks
+  projects can therefore use semantic retrieval when their current key-source and org provider
+  allow-list authorize an OpenAI embedding key. OWN_KEYS still cannot fall through to a platform
+  key; when no authorized OpenAI capability exists, readiness is honestly lexical-only and an old
+  READY state is dynamically exposed as STALE.
 
 ## System Map UI evidence states
 
@@ -210,9 +218,10 @@ bypassed with a raw user id.
 
 ## Governed document/code retrieval (V290)
 
-- `EmbeddingService` no longer owns or reads a global key directly. It first resolves the
-  project's selected provider and current org key-source/allow-list, creates an `EMBEDDING_JOB`
-  V282 context, and asks `LlmExecutionDispatchGuard` for the exact current USER/ORG/PLATFORM source.
+- `EmbeddingService` no longer owns or reads a global key directly. It resolves the dedicated
+  OpenAI embedding capability under the current org key-source/allow-list, creates an
+  `EMBEDDING_JOB` V282 context, and asks `LlmExecutionDispatchGuard` for the exact current
+  USER/ORG/PLATFORM source.
   PLATFORM is possible only when SYSTEM/HYBRID policy explicitly authorized it; OWN_KEYS cannot
   fall through. Every physical embedding attempt writes a V283 provider/model/key-source/tenant/
   user/project/token/cost/latency success-or-failure row.

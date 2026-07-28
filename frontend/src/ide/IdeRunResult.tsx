@@ -88,6 +88,7 @@ import {
   taskGoalLine,
   terminalFailureEvidence,
   testEvidenceSummary,
+  timelineTiming,
   testResultSummary,
   type Tab,
   toLines,
@@ -225,16 +226,38 @@ export default function IdeRunResult() {
     if (!runId) return;
     const gen = ++loadGen.current;
     // Reset run-scoped state synchronously so the previous run's data is never shown under the new
-    // URL while requests are in flight (RR-757).
+    // URL while requests are in flight (RR-757). This includes lazy tab data and the selected tab:
+    // React keeps this component mounted when /result/:runId changes, so retaining either would
+    // render evidence from run A under run B until the user manually changed tabs.
+    setTab('Overview');
+    setTabMenuOpen(false);
     setRun(null);
+    setCostEvidence(null);
+    setCostEvidenceFailure(null);
     setReport(null);
     setReportFailure(null);
+    setTests(null);
+    setTestsFailure(null);
+    setTestPlan(null);
     setFiles([]);
     setProducedWorkspaceFileCount(0);
     setFilesFailure(null);
     setOpenFiles([]);
     setActiveFile(null);
     setCache({});
+    setTimeline(null);
+    setTimelineFailure(null);
+    setChat(null);
+    setChatFailure(null);
+    setRunAgentSessionId(null);
+    setChatInput('');
+    setEventLog(null);
+    setEventReplay(null);
+    setPreview(null);
+    setPreviewLogs(null);
+    setPreviewStarted(false);
+    setMsg('');
+    setBusy('');
     setLoadError(null);
     setLoading(true);
     api
@@ -2375,16 +2398,27 @@ export default function IdeRunResult() {
               <div className='ide-card'>
                 {(() => {
                   const allTasks = timeline.tasks || [];
-                  const starts = allTasks.map((t) => new Date(t.startedAt).getTime());
-                  const ends = allTasks.map((t) =>
-                    t.completedAt ? new Date(t.completedAt).getTime() : Date.now(),
-                  );
+                  const nowMs = Date.now();
+                  const chartTasks = allTasks.flatMap((task) => {
+                    const timing = timelineTiming(task, nowMs);
+                    return timing ? [{task, timing}] : [];
+                  });
+                  if (chartTasks.length === 0) {
+                    return (
+                      <div className='ide-empty'>
+                        Timing data is unavailable for these tasks. Their status is still shown
+                        above.
+                      </div>
+                    );
+                  }
+                  const starts = chartTasks.map(({timing}) => timing.startMs);
+                  const ends = chartTasks.map(({timing}) => timing.endMs);
                   const minT = Math.min(...starts);
                   const maxT = Math.max(...ends);
                   const span = Math.max(1, maxT - minT);
-                  return allTasks.map((t, i) => {
-                    const start = new Date(t.startedAt).getTime();
-                    const end = t.completedAt ? new Date(t.completedAt).getTime() : Date.now();
+                  return chartTasks.map(({task: t, timing}, i) => {
+                    const start = timing.startMs;
+                    const end = timing.endMs;
                     const leftPct = ((start - minT) / span) * 100;
                     const widthPct = Math.max(2, ((end - start) / span) * 100);
                     const st = (t.status || '').toUpperCase();
@@ -2417,7 +2451,7 @@ export default function IdeRunResult() {
                             className='ide-mono'
                             style={{fontSize: 11, color: 'var(--ide-fg-muted)', flexShrink: 0}}
                           >
-                            {fmtDur(end - start)}
+                            {fmtDur(timing.durationMs)}
                           </span>
                         </div>
                         <div

@@ -33,9 +33,9 @@ import lombok.extern.slf4j.Slf4j;
  *
  * <p>For each repo that appears in both versions' {@code generated_from_shas} JSON maps, calls
  * GitHub's compare API and aggregates per-repo changed files (added / modified / removed /
- * renamed). The text diff of {@code architecture.md} stays client-side (LCS renderer already in
- * {@code ArchitectureViewer}); this endpoint only returns the file-correlation payload so the UI
- * can render a "Source changes" section below the existing text diff.
+ * renamed). It also returns the two authorized architecture document bodies so the client can
+ * render the actual {@code architecture.md} line diff. Source-file correlation is secondary
+ * context; it is not itself the history diff.
  *
  * <p>No new persistence: relies on SHAs already captured at generate-time.
  */
@@ -69,6 +69,8 @@ public class ArchitectureDiffService {
   public record DiffReport(
       int fromVersion,
       int toVersion,
+      String fromContent,
+      String toContent,
       List<RepoChanges> perRepo,
       int totalFiles,
       List<RepoDiffIssue> skipped,
@@ -154,7 +156,15 @@ public class ArchitectureDiffService {
       perRepo.add(new RepoChanges(repo, files));
       totalFiles += files.size();
     }
-    return new DiffReport(fromVersion, toVersion, perRepo, totalFiles, skipped, unverified);
+    return new DiffReport(
+        fromVersion,
+        toVersion,
+        from.getContent(),
+        to.getContent(),
+        perRepo,
+        totalFiles,
+        skipped,
+        unverified);
   }
 
   /** RR-1589 — lowercase GitHub full names of the repos currently linked to {@code projectId}. */

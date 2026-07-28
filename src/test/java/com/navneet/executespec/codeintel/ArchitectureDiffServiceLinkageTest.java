@@ -54,8 +54,10 @@ class ArchitectureDiffServiceLinkageTest {
   private void docs(String fromShasJson, String toShasJson) {
     ProjectArchitectureDoc from = new ProjectArchitectureDoc();
     from.setGeneratedFromShas(fromShasJson);
+    from.setContent("# System map\n\nOld runtime");
     ProjectArchitectureDoc to = new ProjectArchitectureDoc();
     to.setGeneratedFromShas(toShasJson);
+    to.setContent("# System map\n\nNew runtime");
     when(docRepo.findByProjectIdAndVersion("p1", 1)).thenReturn(Optional.of(from));
     when(docRepo.findByProjectIdAndVersion("p1", 2)).thenReturn(Optional.of(to));
   }
@@ -98,6 +100,8 @@ class ArchitectureDiffServiceLinkageTest {
     assertThat(report.skipped()).hasSize(1);
     assertThat(report.skipped().get(0).repoFullName()).isEqualTo("acme/gone");
     assertThat(report.skipped().get(0).status()).isEqualTo("NOT_LINKED");
+    assertThat(report.fromContent()).contains("Old runtime");
+    assertThat(report.toContent()).contains("New runtime");
   }
 
   /**

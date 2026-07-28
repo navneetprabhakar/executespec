@@ -9,12 +9,148 @@ import java.nio.file.attribute.FileTime;
 import java.util.List;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 class RepositorySearchServiceTest {
   @TempDir Path root;
+
+  @Test
+  void capturesRepositoryWideSnapshotWithoutFabricatedSearchTerm() throws Exception {
+    Files.createDirectories(root.resolve("src"));
+    Path source = root.resolve("src/Widget.java");
+    Files.writeString(source, "class Widget {}\n");
+    var service = new RepositorySearchService();
+
+    var before = service.snapshot(root);
+    var search =
+        service.search(
+            root,
+            new RepositorySearchService.SearchRequest(
+                "Widget", RepositorySearchService.SearchMode.EXACT, true, null, null, 50, 0));
+
+    assertThat(before.engine()).isEqualTo("java-deterministic");
+    assertThat(before.discoveredFiles()).isEqualTo(1);
+    assertThat(before.repositorySha()).isEqualTo(search.repositorySha());
+    assertThat(before.inventoryFingerprint()).isEqualTo(search.inventoryFingerprint());
+    assertThat(before.inventoryFingerprint()).hasSize(64);
+
+    Files.writeString(source, "class Widget { int changed; }\n");
+    assertThat(service.snapshot(root).inventoryFingerprint())
+        .isNotEqualTo(before.inventoryFingerprint());
+  }
+
+  @Test
+  void inventoryFingerprintIsIndependentOfMaterializationPath() throws Exception {
+    Path first = root.resolve("first");
+    Path second = root.resolve("second");
+    Files.createDirectories(first.resolve("src"));
+    Files.createDirectories(second.resolve("src"));
+    Files.writeString(first.resolve("src/Widget.java"), "class Widget {}\n");
+    Files.writeString(second.resolve("src/Widget.java"), "class Widget {}\n");
+    var service = new RepositorySearchService();
+
+    assertThat(service.snapshot(first).inventoryFingerprint())
+        .isEqualTo(service.snapshot(second).inventoryFingerprint());
+  }
+
+  @Test
+  void rejectsMutationBetweenContentHashAndEvidenceRead() throws Exception {
+    Path source = root.resolve("Widget.java");
+    Files.writeString(source, "class Widget {}\n");
+    AtomicBoolean mutateOnce = new AtomicBoolean(true);
+    var service =
+        new RepositorySearchService() {
+          @Override
+          List<String> readIndexedLines(Path workspace, Path file, String contentHash) {
+            if (mutateOnce.compareAndSet(true, false)) {
+              try {
+                Files.writeString(file, "class Widget { int changed; }\n");
+              } catch (java.io.IOException failure) {
+                throw new IllegalStateException(failure);
+              }
+            }
+            return super.readIndexedLines(workspace, file, contentHash);
+          }
+        };
+
+    assertThatThrownBy(
+            () ->
+                service.search(
+                    root,
+                    new RepositorySearchService.SearchRequest(
+                        "Widget",
+                        RepositorySearchService.SearchMode.EXACT,
+                        true,
+                        null,
+                        null,
+                        50,
+                        0)))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("changed while reading");
+  }
+
+  @Test
+  void snapshotMarksTrackedAndUntrackedWorktreeStateAsDirty() throws Exception {
+    runGit(root, "init");
+    runGit(root, "config", "user.email", "repository-search@example.test");
+    runGit(root, "config", "user.name", "Repository Search Test");
+    Files.writeString(root.resolve("tracked.txt"), "clean\n");
+    runGit(root, "add", "tracked.txt");
+    runGit(root, "commit", "-m", "fixture");
+    var service = new RepositorySearchService();
+
+    assertThat(service.snapshot(root).dirtyFingerprint()).isNull();
+    Files.writeString(root.resolve("untracked.txt"), "not committed\n");
+    assertThat(service.snapshot(root).dirtyFingerprint()).isNotBlank();
+    Files.writeString(root.resolve("tracked.txt"), "modified\n");
+    assertThat(service.snapshot(root).dirtyFingerprint()).isNotBlank();
+  }
+
+  @Test
+  void snapshotRejectsMissingOrNonDirectoryWorkspace() throws Exception {
+    var service = new RepositorySearchService();
+    Path file = root.resolve("file.txt");
+    Files.writeString(file, "content");
+
+    assertThatThrownBy(() -> service.snapshot(null))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("workspace");
+    assertThatThrownBy(() -> service.snapshot(file))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("directory");
+  }
+
+  private static void runGit(Path directory, String... args) throws Exception {
+    java.util.ArrayList<String> command = new java.util.ArrayList<>();
+    command.add("git");
+    command.add("-C");
+    command.add(directory.toString());
+    command.addAll(java.util.List.of(args));
+    Process process = new ProcessBuilder(command).redirectErrorStream(true).start();
+    String output = new String(process.getInputStream().readAllBytes());
+    assertThat(process.waitFor()).as(output).isZero();
+  }
+
+  @Test
+  void snapshotRejectsRevisionChangeDuringInventoryCapture() throws Exception {
+    Files.writeString(root.resolve("source.txt"), "content\n");
+    var service =
+        new RepositorySearchService() {
+          private int revisionRead;
+
+          @Override
+          String readRepositorySha(Path ignored) {
+            return revisionRead++ == 0 ? "before" : "after";
+          }
+        };
+
+    assertThatThrownBy(() -> service.snapshot(root))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("revision changed");
+  }
 
   @Test
   void returnsStableTypedCitationsAndPaging() throws Exception {
@@ -92,6 +228,34 @@ class RepositorySearchServiceTest {
                     "needle", RepositorySearchService.SearchMode.EXACT, true, null, null, 50, 0));
 
     assertThat(result.hits()).isEmpty();
+  }
+
+  @Test
+  void rejectsSymlinkedWorkspaceRootInsteadOfRebasingTrustToItsTarget() throws Exception {
+    Path outside = Files.createTempDirectory("repository-search-root-outside");
+    Files.writeString(outside.resolve("secret.txt"), "needle\n");
+    Path link = root.resolve("swapped-root");
+    try {
+      Files.createSymbolicLink(link, outside);
+    } catch (UnsupportedOperationException | java.nio.file.FileSystemException unsupported) {
+      return;
+    }
+
+    assertThatThrownBy(
+            () ->
+                new RepositorySearchService()
+                    .search(
+                        link,
+                        new RepositorySearchService.SearchRequest(
+                            "needle",
+                            RepositorySearchService.SearchMode.EXACT,
+                            true,
+                            null,
+                            null,
+                            50,
+                            0)))
+        .isInstanceOf(SecurityException.class)
+        .hasMessageContaining("symbolic link");
   }
 
   @Test
