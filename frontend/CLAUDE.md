@@ -101,7 +101,7 @@ JetBrainsMono variable font is the single typeface for the entire app (PR #108, 
 
 `frontend/src/lib/api/` is the primary API client. `transport.ts` owns `BASE`, auth headers, `ApiError`, error parsing, token refresh, and the shared `req<T>` / `reqText` helpers; `core.ts` preserves the stable import surface while owning shared cross-domain DTO/type contracts. Domain modules (`runs.ts`, `projects.ts`, `auth.ts`, `org.ts`, `billing.ts`, etc.) export endpoint helpers through `index.ts`; billing plans and managed-AI/payment APIs are co-located in `billing.ts` (the removed standalone `billing-api.ts` must not be reintroduced), and notification DTOs/preferences live in `notifications.ts`. Project settings updates, including target-branch and branch-naming fields, must use `projects.ts:updateProjectSettings` rather than a component-level `fetch`; GDPR archive downloads use `misc.ts:downloadUserDataExport`. `agent.ts` owns agent-session REST helpers and re-exports `agentStream.ts`, which owns the POST-SSE stream parser/dispatcher. ArchUnit test `arch/ApiContractTest` asserts frontend API URLs resolve to registered backend `@*Mapping`s.
 
-For the full audit of which endpoint is consumed by which frontend file, see [`executespec-docs/backend/architecture/frontend-api-usage.md`](../../executespec-docs/backend/architecture/frontend-api-usage.md). The agent POST-SSE client treats `done`/`error` as explicit terminal events and rejects a transport EOF after a partial stream, so a dropped connection cannot be rendered as a completed answer; callers can then refresh durable turns and retry.
+For the full audit of which endpoint is consumed by which frontend file, see [`executespec-docs/backend/architecture/frontend-api-usage.md`](../../executespec-docs/backend/architecture/frontend-api-usage.md). The agent POST-SSE client treats `done`/`error` as explicit terminal events and rejects a transport EOF after a partial stream, so a dropped connection cannot be rendered as a completed answer; callers can then refresh durable turns and retry. JSON transport keeps a 30-second default but accepts an explicit `timeoutMs`; synchronous architecture generation uses 5 minutes, per-repository architecture regeneration and project-document generation use 3 minutes. Add long-operation deadlines at the endpoint wrapper, never by weakening the shared default globally.
 
 ## Build + lint gates
 
@@ -156,6 +156,9 @@ Documented deviations from Google TypeScript style in [`executespec-docs/backend
 ### Run detail (`ide/IdeRunResult.tsx`)
 
 - The flagship run-detail surface — tabbed (Overview / Files / Logs / Timeline / PR / Chat), with live cost polling (5s while non-terminal), file auto-refresh, and a verdict-led header. A non-terminal run redirects to its correct surface: `AWAITING_APPROVAL` → `/plan/:id`, actively running → `/live/:id`; `/result` is terminal-only.
+- Timeline chart coordinates come from `runResultUtils.timelineTiming`. Missing, malformed,
+  non-positive, or completion-before-start timestamps are unchartable and must be omitted; never let
+  `new Date(null)` fabricate an epoch-started multi-million-minute task.
 - `runResultUtils.ts` owns pure verdict, severity, evidence, line-diff, duration/currency, tab-label, event-log formatting helpers, and run-Ask routing classification (`shouldUseRunEvidenceChat`). Keep new run-result formatting behavior there with `runResultUtils.test.ts` instead of growing `IdeRunResult.tsx`.
 - Run-scoped Ask defaults to the read-only run copilot (`POST /api/runs/{id}/chat`) for evidence/status/cost/test/file questions; only explicit mutation/new-work prompts use the broader web agent session so evidence questions do not become fresh `create_cloud_run` proposals.
 - Failed terminal runs explain weak evidence states in-place: Overview distinguishes validation-reported generated files from the Code tab's visible workspace files, Tests disables re-run when there is no test plan/report, and Cost explains zero-token/zero-credit failures as pre-provider/tool setup stops.
@@ -206,15 +209,27 @@ Documented deviations from Google TypeScript style in [`executespec-docs/backend
 - `CodeReviewPanel` (shared) — Code Review scan results; severity chips → autofix Phase 4 dispatch.
 - `PrReviewPanel` (shared) — PR Review verdict popover with "Autofix N comments" → autofix Phase 1, opened from a project PR row.
 - Workspace health — per-repo SHA drift + webhook + open-PR count; `IdeProjectRepos` splits fast **Sync** (metadata-only) from explicit **Regenerate** (codemap + per-repo arch rebuild).
-- Architecture viewer — per-version arch diff (LCS + GitHub `compareCommits`) on click.
+- Architecture viewer — Compare History consumes both authorized version bodies from the diff API
+  and renders their primary line-level LCS content diff; GitHub `compareCommits` source-file changes
+  are secondary correlation, not a substitute for document differences.
 - Generated docs — Generate / Regenerate / View / Download for EXPLANATION + SETUP docs.
 
 ### Org settings (`ide/IdeOrg.tsx` + `ide/orgUtils.ts`)
 
 - `IdeOrg.tsx` owns the protected org surfaces: provider keys, org members/invites, org profile/seats/SSO, external-sharing toggle, member suspend/reinstate, audit preview, compliance links, managed-AI policy display, and the F3 model matrix.
+- OpenRouter is org-scoped, not a personal-key form. `/provider-keys` fetches `getMyOrg()` to show its
+  connected/not-set status and links administrators to the anchored org provider-key section;
+  non-admins receive the same discoverable status with a read-only navigation label.
 - `orgUtils.ts` owns pure formatting/projection helpers for those routes: BYOK key placeholders, USD display, org-domain parsing, member labels/initials/ids, seat labels, personal Team/Enterprise workspace setup-state labels, provider-key row projection, SAML config-only detection, and model-matrix row/model-label projection. Keep new org-route display logic there with `orgUtils.test.ts`.
 - Buyer-demo guardrail: user/provider key forms must honor `permissions.canManageAiKeys`; FREE/PRO/PRO+ org settings should render BYOK/SSO as read-only status, not enabled enterprise-looking controls. Personal BYOK/TEAM/ENTERPRISE orgs should say setup is pending instead of presenting a one-seat personal workspace as a finished team org.
 - Accessibility guardrail: org profile, seat, SSO, external-sharing, personal provider-key, and org provider-key controls must keep explicit accessible names even when rendered read-only or disabled for lower tiers.
+
+### Web agent workspaces (`ide/IdeAgent.tsx`)
+
+- The session-list loader must not close over the currently selected session. Creation selects the
+  returned session id directly; a subsequent list refresh may fall back only when that id is absent.
+  Adding `state.selectedId` to the loader callback dependencies creates a selection/reload cycle that
+  can overwrite a newly created workspace with the previously selected one.
 
 ### Billing (`ide/IdeBilling.tsx` + `ide/billingUtils.ts`)
 

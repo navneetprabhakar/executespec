@@ -77,6 +77,11 @@ tool/provider work and produces a bounded terminal explanation. Provider text, t
 fields, and exception descriptions pass through `ContextSanitizer`; raw credentials and raw
 provider exception messages must never reach a client/model.
 
+Direct answer rounds request at most 8,192 output tokens and the forced tool-free synthesis requests
+at most 4,096. These ceilings replace the former 1,200/1,600 limits that cut otherwise valid code
+answers mid-file. A provider finish reason of `length` or `max_tokens` appends an explicit incomplete
+response warning; truncated generated files must not be presented as complete.
+
 The compatibility `POST /api/spec/chat` turn does not run on the servlet thread. `SpecChatController`
 hands the loop to `SpecChatTurnDispatcher`, which admits it onto a context-propagating virtual thread
 under a global (`spec.chat.max-concurrent-turns`, default 8) and per-user

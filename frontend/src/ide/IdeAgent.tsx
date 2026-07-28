@@ -423,10 +423,8 @@ export default function IdeAgent() {
           userModelsPromise,
         ]);
       setAvailableModels(eligibleAgentProviderCatalog(modelCatalog.providers ?? [], userModels));
-      const current = sessionRows.find((session) => session.id === state.selectedId) ?? null;
       const scoped = selectScopedAgentSession(sessionRows, scope);
-      const selectedId =
-        current && agentSessionMatchesScope(current, scope) ? current.id : (scoped?.id ?? null);
+      const selectedId = scoped?.id ?? null;
       dispatch({
         type: 'load:success',
         sessions: sessionRows,
@@ -442,7 +440,7 @@ export default function IdeAgent() {
         error: e instanceof Error ? e.message : 'Failed to load agent state.',
       });
     }
-  }, [loadTurns, scope, state.selectedId]);
+  }, [loadTurns, scope]);
 
   useEffect(() => {
     void load();

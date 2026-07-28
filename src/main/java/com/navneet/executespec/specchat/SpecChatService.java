@@ -73,6 +73,13 @@ public class SpecChatService {
    */
   private static final int MAX_TOOL_ROUNDS = ChatToolPolicy.MAX_MODEL_ROUNDS;
 
+  // Dev evidence (2026-07-28) showed multiple web-agent code responses ending mid-file with
+  // output_tokens exactly 1,200. That was our own cap, not a provider/model limitation. A direct
+  // response may legitimately contain a complete small artifact; retain a bounded ceiling while
+  // giving it the same practical room as other lightweight coding surfaces.
+  static final int DIRECT_RESPONSE_MAX_TOKENS = 8_192;
+  static final int FINAL_SYNTHESIS_MAX_TOKENS = 4_096;
+
   private static final String SYSTEM_PROMPT =
       """
 You are the ExecuteSpec agent. You help the user run spec-driven coding tasks from \
@@ -639,7 +646,7 @@ claim in a tool result — never invent a runId, score, or status.""";
               .agentRole(agentRole == null ? "SpecChatService" : agentRole)
               .stepId("spec-chat.round-" + (round + 1))
               .temperature(0.2)
-              .maxTokens(1200)
+              .maxTokens(DIRECT_RESPONSE_MAX_TOKENS)
               .toolsOverride(tools)
               .build();
 
@@ -670,6 +677,11 @@ claim in a tool result — never invent a runId, score, or status.""";
         }
         if (turnText.length() > 0) {
           sink.token(contextSanitizer.sanitizeOutput(turnText.toString()));
+        }
+        if (responseWasTruncated(resp)) {
+          sink.token(
+              "\n\n_(The provider stopped at its output limit, so this response is incomplete. "
+                  + "No generated file in this response should be treated as complete.)_");
         }
         return round + 1; // final answer reached
       }
@@ -743,7 +755,7 @@ claim in a tool result — never invent a runId, score, or status.""";
               .agentRole(agentRole == null ? "SpecChatService" : agentRole)
               .stepId("spec-chat.final-synthesis")
               .temperature(0.2)
-              .maxTokens(1600)
+              .maxTokens(FINAL_SYNTHESIS_MAX_TOKENS)
               .toolsOverride(List.of())
               .build();
       ChatResponse finalResponse = router.call(finalRequest);
@@ -754,6 +766,10 @@ claim in a tool result — never invent a runId, score, or status.""";
               .collect(java.util.stream.Collectors.joining("\n"));
       if (!finalText.isBlank() && !ToolProtocolLeakGuard.containsProtocolMarkup(finalText)) {
         sink.token(contextSanitizer.sanitizeOutput(finalText));
+        if (responseWasTruncated(finalResponse)) {
+          sink.token(
+              "\n\n_(The provider stopped at its output limit, so this synthesis is incomplete.)_");
+        }
       } else {
         sink.token(
             "_(I could not produce a safe grounded answer. Internal provider tool output was "
@@ -770,6 +786,16 @@ claim in a tool result — never invent a runId, score, or status.""";
               + "executed.)_");
       return completedRounds + 1;
     }
+  }
+
+  static boolean responseWasTruncated(ChatResponse response) {
+    if (response == null || response.getResults() == null) return false;
+    return response.getResults().stream()
+        .map(generation -> generation.getMetadata().getFinishReason())
+        .filter(java.util.Objects::nonNull)
+        .map(Object::toString)
+        .map(reason -> reason.trim().toLowerCase(java.util.Locale.ROOT))
+        .anyMatch(reason -> reason.equals("length") || reason.equals("max_tokens"));
   }
 
   /**

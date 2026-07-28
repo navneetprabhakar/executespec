@@ -389,8 +389,8 @@ export interface TimelineData {
   tasks: Array<{
     taskId: string;
     title: string;
-    startedAt: string;
-    completedAt: string;
+    startedAt: string | null;
+    completedAt: string | null;
     status: string;
   }>;
 }
@@ -1243,11 +1243,9 @@ export interface SpecTemplate {
   createdAt: string;
 }
 
-// v2.5.5 (UX-4.2) — architecture diff source-file correlation.
-// The text diff of architecture.md stays client-side (LCS); this call
-// returns per-repo added/modified/removed/renamed files between the two
-// versions by hitting GitHub's compare API against the SHAs captured at
-// generate-time on each ProjectArchitectureDoc row.
+// v2.5.5 (UX-4.2) — architecture content diff + source-file correlation.
+// The two document bodies support the primary client-side LCS diff. Per-repo
+// source changes explain which commits accompanied the document change.
 export interface ArchChangedFile {
   filename: string;
   status: string; // added | modified | removed | renamed
@@ -1257,6 +1255,8 @@ export interface ArchChangedFile {
 export interface ArchDiffReport {
   fromVersion: number;
   toVersion: number;
+  fromContent: string;
+  toContent: string;
   perRepo: {repoFullName: string; files: ArchChangedFile[]}[];
   totalFiles: number;
 }

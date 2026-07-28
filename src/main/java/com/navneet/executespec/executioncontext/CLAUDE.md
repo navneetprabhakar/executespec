@@ -57,11 +57,18 @@ terminal, cross-tenant, out-of-policy and exhausted contexts fail before provide
 - Credentials are not stored in V282 or `ExecutionContext`; only the context reference propagates
   through planner/worker/reviewer/compactor children and survives a JVM restart.
 - Lifecycle mutations take a tenant scope and use a pessimistic row lock plus JPA `@Version`.
-- The `LlmExecutionContext` entity enforces lease transitions correctly (an active lease cannot be
-  stolen; after expiry a new owner may claim and increment `attempt`; stale owners cannot heartbeat,
-  complete, or fail after lease loss). **These are unit-tested entity rules, not runtime guarantees
-  — see the RR-1666 note below.**
-- **RR-322 / RR-1666 — the lease/attempt fence is BUILT BUT NOT WIRED.** `LlmExecutionDispatchGuard`
+- V351 adds `llm_execution_operation`, the independently leased operation state machine required
+  when several agents share one context. An exact `(operation id, invocation, attempt, UUID token)`
+  claim fences stale owners, while `not_reclaim_before` prevents a replacement from starting until
+  both the lease and any admitted external-attempt safety horizon expire. Explicit retry/re-review
+  creates the next immutable invocation; crash recovery reclaims the incomplete invocation. A
+  repeated cancellation request terminalizes an ownerless `CANCEL_REQUESTED` operation after both
+  horizons, so dead owners cannot strand cancellation forever. V351 also adds versioned, nullable
+  operation-fence columns to `llm_usage_attempt_intent`; version 0 preserves historical/unwired
+  rows and version 1 requires the exact context, attempt, token, admitted no-reclaim horizon and
+  transport deadline, with a database trigger rejecting fabricated or stale linkage.
+- **RR-322 / RR-1666 — the correct per-operation lease foundation is BUILT BUT NOT WIRED.**
+  `LlmExecutionDispatchGuard`
   contains two fences: (1) a context whose lease owner is set and whose lease has EXPIRED is not
   dispatchable, and (2) a caller that declares `LlmRequest.llmExecutionAttempt` must match the
   context's current `attempt`. Both are correct and unit-tested, but **neither can fire in
@@ -73,16 +80,14 @@ terminal, cross-tenant, out-of-policy and exhausted contexts fail before provide
   runtime. This is not closed by the RR-321 budget reservation: a duplicate worker is bounded only
   by shared budget, not fenced off.
 
-  **Exact remaining wiring** (all in context-creation/execution callers, not the guard): (a) `claim`
-  the context — RUNNING + lease owner + `attempt` — when a worker takes ownership; (b) heartbeat the
-  lease during long work; (c) propagate the claimed `attempt` onto every
-  `LlmRequest.llmExecutionAttempt`; (d) release (`complete`/`fail`) on terminal. Only then can
-  dispatch be restricted to `RUNNING` and the lease made mandatory. The blocker is that ONE run
-  context is inherited by planner/worker/reviewer/compaction/report/chat, so a single per-context
-  lease owner conflicts with concurrent multi-agent use — wiring needs per-owner sub-leases or an
-  ownership redesign, plus context hydration + re-claim on the three `RunLifecycleService`
-  resume/retry/re-review roots (still open per the residual inventory below). Restricting dispatch
-  to `RUNNING` today would fail-close all customer dispatch rather than fence a stale worker.
+  **Exact remaining wiring:** every production execution root must claim the correct operation and
+  propagate its full token through `ExecutionContext`/`LlmRequest`; heartbeats and terminal release
+  must wrap bounded agent work; resume must reclaim while explicit retry/re-review creates a new
+  invocation. Most importantly, operation validation, aggregate-budget reservation,
+  `not_reclaim_before` extension and immutable physical-attempt intent insertion must commit in one
+  transaction immediately before EVERY provider transport, including retries, failover, Gemini
+  cache mint, Anthropic forced-tool calls and embedding capabilities. V351 deliberately does none
+  of that and activates no flag, so production still has no runtime zombie-worker fence.
 - Cancellation is immediate for queued/expired work and cooperative for active work.
 - Reusing an idempotency key with a different immutable request fails closed.
 
@@ -90,6 +95,10 @@ terminal, cross-tenant, out-of-policy and exhausted contexts fail before provide
 
 - `LlmExecutionContext` — entity, policy snapshot storage, and lease transition rules.
 - `LlmExecutionContextService` — tenant-scoped create/load/claim/heartbeat/terminal operations.
+- `LlmExecutionOperation` + `LlmExecutionOperationService` — V351 dormant per-operation
+  invocation/attempt state machine for shared contexts; no production dispatch caller yet.
+- `LlmExecutionOperationDescriptor` + `LlmExecutionOperationClaim` — immutable operation identity
+  and opaque owner/token fencing capability.
 - `LlmExecutionScope` — customer versus platform-internal isolation boundary.
 - `LlmPolicySnapshot` — normalized provider/model/key-source route policy without secrets.
 - `LlmExecutionBudget` — optional per-context token/cost/call ceilings.
@@ -157,12 +166,17 @@ terminal, cross-tenant, out-of-policy and exhausted contexts fail before provide
 - Project chat/compaction/compiler, architecture, generated docs, project brief/memory, PR Review
   and Code Review create explicit project contexts and resolve the project provider without a
   hidden Anthropic default.
+- Generated project documents use the compact `project-doc:<uuid>` source/correlation/idempotency
+  identity. Project and feature already occupy dedicated context columns, so the full run id is not
+  duplicated into the bounded correlation field; this keeps the value below the 96-character
+  database limit without weakening uniqueness.
 - `AvailableProviderResolver` no longer reads the dead `RunKeyStore`; it reloads V282 and current
   credential provenance, failing closed to no candidates on missing/stale/tenant-mismatched state.
 - Project document/code indexing and query vectors use explicit `EMBEDDING_JOB` contexts through
   `LlmExecutionDispatchGuard.authorizeProviderCapability`. The fixed vector schema supports only
-  OpenAI `text-embedding-3-small`; any other selected provider or unavailable key is an honest
-  lexical state, never a global-key fallback.
+  OpenAI `text-embedding-3-small`, resolved as a dedicated capability rather than inherited from
+  the project's code-generation provider. An unavailable or policy-disallowed OpenAI key is an
+  honest lexical state, never a global-key fallback.
 
 ## Deliberate residual gates
 

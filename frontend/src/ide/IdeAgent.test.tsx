@@ -426,6 +426,27 @@ describe('IdeAgent', () => {
     expect(host.querySelector('[role="alert"]')).toBeNull();
   });
 
+  it('keeps a newly created workspace selected instead of reloading the previous session', async () => {
+    const freshSession = {...session, id: 's2', title: 'Fresh workspace'};
+    api.createAgentSession.mockResolvedValueOnce(freshSession);
+    ({host, root} = await renderAgent('/agent'));
+    const initialLoads = api.listAgentSessions.mock.calls.length;
+
+    const newSandbox = [...host.querySelectorAll<HTMLButtonElement>('.agent-bar-btn')].find(
+      (button) => button.textContent?.includes('New sandbox'),
+    );
+    if (!newSandbox) throw new Error('New sandbox control was not rendered.');
+    await act(async () => {
+      newSandbox.click();
+      await Promise.resolve();
+    });
+    await flush();
+
+    expect(host.textContent).toContain('Fresh workspace');
+    expect(api.listAgentSessions).toHaveBeenCalledTimes(initialLoads);
+    expect(api.listAgentTurns).toHaveBeenCalledWith('s2', {limit: 50});
+  });
+
   it('reconciles the transcript and approval inbox when a suspended mobile tab resumes', async () => {
     ({host, root} = await renderAgent('/agent'));
     const baseline = api.listAgentSessions.mock.calls.length;

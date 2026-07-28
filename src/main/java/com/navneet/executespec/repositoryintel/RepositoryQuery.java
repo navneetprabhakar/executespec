@@ -15,7 +15,8 @@ public record RepositoryQuery(
     String filePattern,
     RepositorySnapshotId expectedSnapshot,
     QueryBudget budget,
-    boolean providerBackedRetrievalAllowed) {
+    boolean providerBackedRetrievalAllowed,
+    RepositoryAccessContext accessContext) {
 
   private static final int MAX_QUERY_CHARS = 4_000;
 
@@ -42,6 +43,9 @@ public record RepositoryQuery(
       throw new IllegalArgumentException("projectId must match expectedSnapshot");
     }
     budget = budget == null ? QueryBudget.DEFAULT : budget;
+    if (accessContext == null) {
+      throw new IllegalArgumentException("accessContext is required");
+    }
   }
 
   public String fingerprint() {
@@ -59,7 +63,8 @@ public record RepositoryQuery(
         filePattern,
         expectedSnapshot.stableId(),
         budget.stableKey(),
-        Boolean.toString(providerBackedRetrievalAllowed));
+        Boolean.toString(providerBackedRetrievalAllowed),
+        accessContext.stableKey());
   }
 
   private static String normalizeRelativePath(String value) {

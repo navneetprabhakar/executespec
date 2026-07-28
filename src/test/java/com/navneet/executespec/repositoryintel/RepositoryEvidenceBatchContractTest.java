@@ -435,7 +435,8 @@ class RepositoryEvidenceBatchContractTest {
         null,
         snapshot,
         budget,
-        false);
+        false,
+        new RepositoryAccessContext("actor-1", "org-1"));
   }
 
   private static RepositoryEvidence evidence(

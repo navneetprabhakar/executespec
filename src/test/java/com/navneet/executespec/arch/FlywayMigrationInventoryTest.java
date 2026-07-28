@@ -44,9 +44,10 @@ class FlywayMigrationInventoryTest {
     // contract) for 333 — contiguous above V336. V348 then adds atomic plan-gate decision
     // integrity, and V349 separates the immutable payer org from the host-project tenant org for
     // external collaborators. V350 carries that split into pipeline and durable LLM context
-    // identity, bringing the exact inventory to 336.
-    assertThat(migrations).hasSize(336);
-    assertThat(migrations.getLast().version()).isEqualTo("350");
+    // identity, bringing the exact inventory to 336. V351 adds the dormant per-operation LLM
+    // attempt-fencing foundation, bringing the exact inventory to 337.
+    assertThat(migrations).hasSize(337);
+    assertThat(migrations.getLast().version()).isEqualTo("351");
 
     assertThat(migrations.stream().map(MigrationFile::version)).doesNotHaveDuplicates();
     assertThat(migrations.stream().map(MigrationFile::fileName))

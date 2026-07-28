@@ -45,6 +45,7 @@ import {
   taskGoalLine,
   testEvidenceSummary,
   testResultSummary,
+  timelineTiming,
   usd,
   verdictFor,
 } from './runResultUtils';
@@ -243,6 +244,27 @@ describe('runResultUtils', () => {
       {sign: '+', text: 'new'},
       {sign: ' ', text: 'same'},
     ]);
+  });
+
+  it('rejects missing, epoch and inverted task timestamps instead of showing epoch durations', () => {
+    const now = Date.parse('2026-07-28T04:30:00Z');
+    expect(timelineTiming({startedAt: null, completedAt: null}, now)).toBeNull();
+    expect(timelineTiming({startedAt: '1970-01-01T00:00:00Z'}, now)).toBeNull();
+    expect(
+      timelineTiming({startedAt: '2026-07-28T04:29:00Z', completedAt: '2026-07-28T04:28:00Z'}, now),
+    ).toBeNull();
+  });
+
+  it('returns a bounded duration for valid completed and active task timestamps', () => {
+    const now = Date.parse('2026-07-28T04:30:00Z');
+    expect(
+      timelineTiming({startedAt: '2026-07-28T04:28:00Z', completedAt: '2026-07-28T04:29:30Z'}, now),
+    ).toEqual({
+      startMs: Date.parse('2026-07-28T04:28:00Z'),
+      endMs: Date.parse('2026-07-28T04:29:30Z'),
+      durationMs: 90_000,
+    });
+    expect(timelineTiming({startedAt: '2026-07-28T04:29:00Z'}, now)?.durationMs).toBe(60_000);
   });
 
   it('formats log rows and skips noisy run-detail events', () => {

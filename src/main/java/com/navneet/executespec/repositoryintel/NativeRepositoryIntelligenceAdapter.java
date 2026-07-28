@@ -18,10 +18,13 @@ import java.util.concurrent.TimeoutException;
 import com.navneet.executespec.project.rag.CodeIndexStateStore;
 import com.navneet.executespec.tool.RepositorySearchService;
 
+import org.springframework.stereotype.Component;
+
 /**
  * Conservative adapter over the existing deterministic search and semantic-index readiness stores.
  * It never clones, indexes, embeds, generates documents, or invokes a model.
  */
+@Component
 public final class NativeRepositoryIntelligenceAdapter implements RepositoryIntelligencePort {
 
   private static final Set<RepositoryCapability> SEARCH_CAPABILITIES =
@@ -70,19 +73,17 @@ public final class NativeRepositoryIntelligenceAdapter implements RepositoryInte
       rejectUnavailableSnapshot(query, outcomes, "INVENTORY_FINGERPRINT_REQUIRED");
       return batch(query, List.of(), outcomes, false);
     }
-    if (query.expectedSnapshot().dirtyFingerprint() != null
-        && !query
-            .expectedSnapshot()
-            .dirtyFingerprint()
-            .equals(query.expectedSnapshot().inventoryFingerprint())) {
-      rejectUnavailableSnapshot(query, outcomes, "DIRTY_FINGERPRINT_NOT_VALIDATABLE");
+    if (query.expectedSnapshot().dirtyFingerprint() != null) {
+      rejectUnavailableSnapshot(query, outcomes, "DIRTY_WORKTREE_NOT_CERTIFIABLE");
       return batch(query, List.of(), outcomes, false);
     }
 
+    AuthorizedRepositoryHandle handle;
     Path root;
     try {
-      root = deadline.call(() -> rootResolver.resolve(query));
-      if (root == null) throw new IllegalStateException("repository root is unavailable");
+      handle = deadline.call(() -> rootResolver.resolve(query));
+      if (handle == null) throw new IllegalStateException("repository handle is unavailable");
+      root = handle.requireMatches(query);
     } catch (RepositoryQueryTimeoutException timeout) {
       failAll(query, outcomes, "QUERY_TIMEOUT");
       return batch(query, List.of(), outcomes, false);
@@ -121,6 +122,12 @@ public final class NativeRepositoryIntelligenceAdapter implements RepositoryInte
                           false)));
       return batch(query, List.of(), outcomes, false);
     }
+    try {
+      handle.requireMatches(query);
+    } catch (RuntimeException materializationChanged) {
+      failAll(query, outcomes, "REPOSITORY_ROOT_CHANGED");
+      return batch(query, List.of(), outcomes, false);
+    }
 
     List<RepositoryEvidence> evidence = new ArrayList<>();
     BudgetCounter budget = new BudgetCounter(query);
@@ -142,7 +149,22 @@ public final class NativeRepositoryIntelligenceAdapter implements RepositoryInte
         calls++;
         try {
           SearchContribution contribution =
-              deadline.call(() -> searchCapability(root, query, capability, snapshotProbe));
+              deadline.call(() -> searchCapability(root, query, capability));
+          String changed =
+              snapshotMismatch(
+                  query.expectedSnapshot(),
+                  contribution.repositorySha(),
+                  contribution.inventoryFingerprint());
+          try {
+            handle.requireMatches(query);
+          } catch (RuntimeException materializationChanged) {
+            rejectChangedSnapshot(query, outcomes, "REPOSITORY_ROOT_CHANGED");
+            return batch(query, List.of(), outcomes, false);
+          }
+          if (changed != null) {
+            rejectChangedSnapshot(query, outcomes, changed);
+            return batch(query, List.of(), outcomes, false);
+          }
           int accepted = budget.add(evidence, contribution.evidence());
           boolean capabilityTruncated =
               contribution.hasMore() || accepted < contribution.evidence().size();
@@ -195,10 +217,7 @@ public final class NativeRepositoryIntelligenceAdapter implements RepositoryInte
   }
 
   private SearchContribution searchCapability(
-      Path root,
-      RepositoryQuery query,
-      RepositoryCapability capability,
-      RepositorySearchService.SearchResult snapshotProbe) {
+      Path root, RepositoryQuery query, RepositoryCapability capability) {
     int limit = Math.min(200, query.budget().maxHitsPerCapability());
     if (capability == RepositoryCapability.HEURISTIC_RELATIONSHIP) {
       RepositorySearchService.RelationshipResult result =
@@ -208,23 +227,18 @@ public final class NativeRepositoryIntelligenceAdapter implements RepositoryInte
                   query.text(), true, query.relativeRoot(), query.filePattern(), limit, 0));
       List<RepositoryEvidence> evidence =
           result.edges().stream().map(edge -> relationshipEvidence(query, edge)).toList();
-      return new SearchContribution(evidence, result.hasMore());
+      return new SearchContribution(
+          evidence, result.hasMore(), result.repositorySha(), result.inventoryFingerprint());
     }
     RepositorySearchService.SearchMode mode =
         capability == RepositoryCapability.SYMBOL
             ? RepositorySearchService.SearchMode.SYMBOL
             : RepositorySearchService.SearchMode.EXACT;
-    RepositorySearchService.SearchResult result =
-        capability == RepositoryCapability.EXACT_TEXT
-                && query.relativeRoot() == null
-                && query.filePattern() == null
-                && snapshotProbe.hits().size() <= limit
-                && !snapshotProbe.hasMore()
-            ? snapshotProbe
-            : search(root, query, mode, limit);
+    RepositorySearchService.SearchResult result = search(root, query, mode, limit);
     List<RepositoryEvidence> evidence =
         result.hits().stream().map(hit -> searchEvidence(query, capability, hit)).toList();
-    return new SearchContribution(evidence, result.hasMore());
+    return new SearchContribution(
+        evidence, result.hasMore(), result.repositorySha(), result.inventoryFingerprint());
   }
 
   private RepositorySearchService.SearchResult search(
@@ -353,6 +367,30 @@ public final class NativeRepositoryIntelligenceAdapter implements RepositoryInte
     return null;
   }
 
+  private static String snapshotMismatch(
+      RepositorySnapshotId expected, String repositorySha, String inventoryFingerprint) {
+    if (expected.commitSha() != null && !expected.commitSha().equalsIgnoreCase(repositorySha)) {
+      return "COMMIT_SHA_CHANGED";
+    }
+    if (expected.inventoryFingerprint() != null
+        && !expected.inventoryFingerprint().equalsIgnoreCase(inventoryFingerprint)) {
+      return "INVENTORY_FINGERPRINT_CHANGED";
+    }
+    return null;
+  }
+
+  private static void rejectChangedSnapshot(
+      RepositoryQuery query, Map<RepositoryCapability, CapabilityOutcome> outcomes, String reason) {
+    query
+        .capabilities()
+        .forEach(
+            capability ->
+                outcomes.put(
+                    capability,
+                    new CapabilityOutcome(
+                        capability, RepositoryCapabilityState.STALE_REJECTED, reason, 0, false)));
+  }
+
   private static CapabilityOutcome outcome(
       RepositoryCapability capability, int hits, boolean truncated, String reason) {
     if (truncated) return partial(capability, reason, hits);
@@ -430,7 +468,11 @@ public final class NativeRepositoryIntelligenceAdapter implements RepositoryInte
         0, Math.min(normalized.length(), CapabilityOutcome.MAX_REASON_CHARACTERS));
   }
 
-  private record SearchContribution(List<RepositoryEvidence> evidence, boolean hasMore) {}
+  private record SearchContribution(
+      List<RepositoryEvidence> evidence,
+      boolean hasMore,
+      String repositorySha,
+      String inventoryFingerprint) {}
 
   /**
    * One monotonic deadline shared by root resolution, snapshot validation, and all capabilities.

@@ -1,0 +1,50 @@
+# Isolated, provider-free browser-functional profile.
+#
+# Run this profile against a disposable PostgreSQL database only. It deliberately does not include
+# local/dev, so EvidenceSafeExecutionGateProfileInitializer cannot rewrite environment flags. The
+# Provider-free browser harness refuses to proceed unless this is the sole runtime profile and live
+# LLM dispatch is disabled. The fixture controller is available only under this profile.
+executespec:
+  live-llm:
+    enabled: false
+    test-mode: false
+    reservation-id: ""
+
+agent:
+  recovery:
+    enabled: false
+    auto-resume-on-startup: false
+  integrations:
+    enabled: false
+  deployment:
+    recovery-safe-enabled: false
+
+preview:
+  proxy:
+    enabled: false
+  vm:
+    enabled: false
+
+spring:
+  ai:
+    anthropic:
+      api-key: ""
+    openai:
+      api-key: ""
+    google:
+      genai:
+        api-key: ""
+    openrouter:
+      api-key: ""
+    deepseek:
+      api-key: ""
+    fireworks:
+      api-key: ""
+
+management:
+  tracing:
+    enabled: false
+  otlp:
+    metrics:
+      export:
+        enabled: false

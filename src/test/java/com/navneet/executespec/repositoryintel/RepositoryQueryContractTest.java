@@ -46,7 +46,8 @@ class RepositoryQueryContractTest {
             "*.java",
             snapshot,
             new QueryBudget(2, 10, 20, 2_000, 500, 1_000),
-            false);
+            false,
+            access());
     RepositoryQuery providerAllowed =
         new RepositoryQuery(
             "project-1",
@@ -57,10 +58,24 @@ class RepositoryQueryContractTest {
             "*.java",
             snapshot,
             QueryBudget.DEFAULT,
-            true);
+            true,
+            access());
+    RepositoryQuery differentActor =
+        new RepositoryQuery(
+            "project-1",
+            "repo-1",
+            "find Widget",
+            Set.of(RepositoryCapability.EXACT_TEXT),
+            "src",
+            "*.java",
+            snapshot,
+            QueryBudget.DEFAULT,
+            false,
+            new RepositoryAccessContext("actor-2", "org-1"));
 
     assertThat(differentBudget.fingerprint()).isNotEqualTo(baseline.fingerprint());
     assertThat(providerAllowed.fingerprint()).isNotEqualTo(baseline.fingerprint());
+    assertThat(differentActor.fingerprint()).isNotEqualTo(baseline.fingerprint());
   }
 
   @Test
@@ -78,7 +93,8 @@ class RepositoryQueryContractTest {
                     null,
                     snapshot,
                     QueryBudget.DEFAULT,
-                    false))
+                    false,
+                    access()))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("within the repository");
 
@@ -104,7 +120,8 @@ class RepositoryQueryContractTest {
                     null,
                     other,
                     null,
-                    false))
+                    false,
+                    access()))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("must match");
   }
@@ -135,7 +152,8 @@ class RepositoryQueryContractTest {
                     null,
                     projectSnapshot,
                     QueryBudget.DEFAULT,
-                    false))
+                    false,
+                    access()))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("projectId must match");
     assertThatThrownBy(
@@ -149,9 +167,31 @@ class RepositoryQueryContractTest {
                     null,
                     unscopedSnapshot,
                     QueryBudget.DEFAULT,
-                    false))
+                    false,
+                    access()))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("projectId must match");
+  }
+
+  @Test
+  void rejectsMissingRepositoryAccessContext() {
+    RepositorySnapshotId snapshot = snapshot(Instant.EPOCH);
+
+    assertThatThrownBy(
+            () ->
+                new RepositoryQuery(
+                    "project-1",
+                    "repo-1",
+                    "query",
+                    Set.of(RepositoryCapability.EXACT_TEXT),
+                    null,
+                    null,
+                    snapshot,
+                    QueryBudget.DEFAULT,
+                    false,
+                    null))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("accessContext is required");
   }
 
   @Test
@@ -193,7 +233,12 @@ class RepositoryQueryContractTest {
         "*.java",
         snapshot,
         QueryBudget.DEFAULT,
-        false);
+        false,
+        access());
+  }
+
+  private static RepositoryAccessContext access() {
+    return new RepositoryAccessContext("actor-1", "org-1");
   }
 
   private static RepositorySnapshotId snapshot(Instant capturedAt) {

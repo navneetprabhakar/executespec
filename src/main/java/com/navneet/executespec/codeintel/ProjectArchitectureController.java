@@ -137,9 +137,9 @@ public class ProjectArchitectureController {
   }
 
   /**
-   * v2.5.5 (UX-4.2) — source file changes between two architecture versions. Uses GitHub's compare
-   * API against each repo's SHAs captured at generate-time. The text diff of {@code
-   * architecture.md} remains client-side (LCS).
+   * v2.5.5 (UX-4.2) — actual architecture document bodies plus source-file changes between two
+   * versions. The client renders the document line diff; GitHub compare data explains which source
+   * revisions accompanied it.
    */
   @GetMapping("/api/projects/{projectId}/architecture/diff")
   public ResponseEntity<ArchitectureDiffService.DiffReport> diff(

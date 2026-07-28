@@ -304,8 +304,7 @@ public class CodeIndexingService {
         stateStore.fail(lease, "SOURCE_CLONE_URL_UNAVAILABLE");
         return new IndexResult(Outcome.UNSUPPORTED_SOURCE, readiness(projectId, repo));
       }
-      String shaKey = shortSha(sourceSha);
-      String cloneWsId = "projchat-" + repo.getId() + "-" + shaKey;
+      String cloneWsId = CodeIndexWorkspaceIdentity.workspaceId(projectId, repo);
       try {
         String gitUsername =
             "BITBUCKET".equalsIgnoreCase(repo.getScmProvider())
@@ -599,13 +598,7 @@ public class CodeIndexingService {
   }
 
   private static String sourceRevision(ProjectRepo repo) {
-    if (repo.getLastSyncedSha() != null && !repo.getLastSyncedSha().isBlank()) {
-      return repo.getLastSyncedSha().trim();
-    }
-    if (repo.getSourceRevision() != null && !repo.getSourceRevision().isBlank()) {
-      return repo.getSourceRevision().trim();
-    }
-    return "UNPINNED";
+    return CodeIndexWorkspaceIdentity.sourceRevision(repo);
   }
 
   private static String sourceDisplayName(ProjectRepo repo) {

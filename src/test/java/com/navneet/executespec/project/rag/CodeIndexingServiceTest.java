@@ -243,25 +243,24 @@ class CodeIndexingServiceTest {
   }
 
   @Test
-  void unsupportedSelectedProviderFailsClosedBeforeCloneOrGlobalEmbedding() throws Exception {
+  void unavailableGovernedOpenAiEmbeddingFailsClosedBeforeCloneOrDispatch() throws Exception {
     when(embedder.availability("proj-1"))
         .thenReturn(
             new EmbeddingPolicyResolver.Availability(
                 EmbeddingPolicyResolver.Mode.LEXICAL,
                 false,
                 true,
-                "deepseek",
+                "openai",
                 null,
-                "SELECTED_PROVIDER_HAS_NO_COMPATIBLE_EMBEDDING_MODEL"));
+                "OPENAI_CREDENTIAL_UNAVAILABLE"));
 
     var result = service(4000).indexRepo("proj-1", repo, null);
 
     assertThat(result.outcome()).isEqualTo(CodeIndexingService.Outcome.UNSUPPORTED_SOURCE);
     assertThat(result.readiness().semanticSearchAvailable()).isFalse();
     assertThat(result.readiness().lexicalFallbackAvailable()).isTrue();
-    assertThat(result.readiness().reason())
-        .isEqualTo("EMBEDDING_SELECTED_PROVIDER_HAS_NO_COMPATIBLE_EMBEDDING_MODEL");
-    verify(states).fail(lease, "EMBEDDING_SELECTED_PROVIDER_HAS_NO_COMPATIBLE_EMBEDDING_MODEL");
+    assertThat(result.readiness().reason()).isEqualTo("EMBEDDING_OPENAI_CREDENTIAL_UNAVAILABLE");
+    verify(states).fail(lease, "EMBEDDING_OPENAI_CREDENTIAL_UNAVAILABLE");
     verify(ws, never()).cloneFromRepo(anyString(), anyString(), any(), any());
     verify(embedder, never())
         .embedForProject(
@@ -279,7 +278,7 @@ class CodeIndexingServiceTest {
 
     verify(ws)
         .cloneFromRepo(
-            anyString(),
+            eq(CodeIndexWorkspaceIdentity.workspaceId("proj-1", repo)),
             eq("https://bitbucket.org/acme/widget.git"),
             eq("x-bitbucket-api-token-auth"),
             eq("scoped-api-token"));
@@ -309,6 +308,24 @@ class CodeIndexingServiceTest {
     verify(embedder, never())
         .embedForProject(
             anyString(), anyList(), anyString(), anyString(), anyString(), nullable(String.class));
+  }
+
+  @Test
+  void workspaceIdentitySeparatesProjectsAndUsesTheCompleteRevision() {
+    ProjectRepo sameRepository = repo();
+    sameRepository.setId(repo.getId());
+    sameRepository.setLastSyncedSha("123456789012aaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+    ProjectRepo collidingPrefix = repo();
+    collidingPrefix.setId(repo.getId());
+    collidingPrefix.setLastSyncedSha("123456789012bbbbbbbbbbbbbbbbbbbbbbbbbbbb");
+
+    String first = CodeIndexWorkspaceIdentity.workspaceId("proj-1", sameRepository);
+
+    assertThat(CodeIndexWorkspaceIdentity.workspaceId("proj-2", sameRepository))
+        .isNotEqualTo(first);
+    assertThat(CodeIndexWorkspaceIdentity.workspaceId("proj-1", collidingPrefix))
+        .isNotEqualTo(first);
+    assertThat(first).matches("projchat-" + repo.getId() + "-[0-9a-f]{64}");
   }
 
   private static ProjectRepo repo() {
