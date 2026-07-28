@@ -292,6 +292,21 @@ try {
   }
   pass('Code tab', 'Responsive workspace explorer rendered the real README.md fixture file.');
 
+  // Exercise the production timestamp parser through the rendered Timeline tab. The original
+  // regression treated a missing start as Unix epoch and displayed a multi-million-minute task.
+  // This fixture has an exact 30-second interval, so the browser assertion covers both the API
+  // payload and the real chart formatter rather than only the pure utility test.
+  await selectRunTab(page, 'Timeline', 'Timeline');
+  await visibleText(page, '30s');
+  const timelineText = await page.locator('body').innerText();
+  if (/\b\d{5,}m\b/.test(timelineText)) {
+    throw new Error(`Timeline rendered an epoch-scale duration: ${timelineText.slice(0, 600)}`);
+  }
+  pass(
+    'Timeline timestamp integrity',
+    'The authenticated result view rendered the persisted 30-second task interval without an epoch-scale duration.',
+  );
+
   await selectRunTab(page, 'Screens', 'Screens');
   await visibleText(page, 'Screen rendering is turned off for this deployment.');
   pass(
@@ -327,6 +342,21 @@ try {
   pass(
     'fixture Tests presentation only',
     'Two pre-seeded fixture result rows rendered as 2/2; no generated code or test suite was executed.',
+  );
+
+  await selectRunTab(page, 'Cost', 'Cost');
+  await visibleText(page, 'AI credits used');
+  await visibleText(page, 'Cache-read tokens');
+  pass(
+    'Cost ledger presentation',
+    'The authenticated cost surface rendered run-credit and cache-token fields without invoking a provider.',
+  );
+
+  await selectRunTab(page, 'Pull request', 'Pull request');
+  await visibleText(page, 'No pull request yet');
+  pass(
+    'Pull request empty state',
+    'The result view rendered the actionable no-PR state for a run without a linked repository mutation.',
   );
 
   await selectRunTab(page, 'Ask', 'Ask about this work');

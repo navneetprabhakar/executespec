@@ -1,7 +1,6 @@
 import {
   ApplyResult,
   AuthUser,
-  ChatResponse,
   LaunchEstimate,
   PagedResponse,
   RunChatMessage,
@@ -14,6 +13,15 @@ import {
   UserRunsSummaryData,
   req,
 } from './core';
+
+/** Response from POST /api/runs/{id}/chat. */
+export interface ChatResponse {
+  reply: string;
+  messageCount: number;
+  maxMessages: number;
+  complete: boolean;
+  incompleteReason: 'PROVIDER_OUTPUT_LIMIT' | string | null;
+}
 
 export const getRuns = (params?: {
   status?: string;

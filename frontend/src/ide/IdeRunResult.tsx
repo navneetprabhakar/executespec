@@ -74,6 +74,7 @@ import {
   latestContinuationAction,
   runArtifactActionAvailability,
   friendlyAiFailureMessage,
+  runChatResponseContent,
   runPhaseDiagnosis,
   SEV,
   shouldUseRunEvidenceChat,
@@ -832,7 +833,7 @@ export default function IdeRunResult() {
           ...(prev || []),
           {
             role: 'assistant',
-            content: friendlyAiFailureMessage(reply.reply),
+            content: runChatResponseContent(reply),
           },
         ]);
         return;

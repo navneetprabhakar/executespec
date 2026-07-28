@@ -132,7 +132,29 @@ public class ChatService {
 
   public record ChatMessage(String role, String content) {}
 
-  public record SendResult(String reply, int messageCount, int maxMessages) {}
+  public static final String OUTPUT_LIMIT_REASON = "PROVIDER_OUTPUT_LIMIT";
+
+  private static final String OUTPUT_LIMIT_NOTICE =
+      "\n\n"
+          + "_(The provider stopped at its output limit, so this answer is incomplete. Ask a"
+          + " narrower question or name the specific file or evidence to inspect, then retry.)_";
+
+  /**
+   * Additive completion contract for Ask. The text remains available for diagnosis, but callers can
+   * no longer mistake a provider-limited prefix for a complete answer.
+   */
+  public record SendResult(
+      String reply, int messageCount, int maxMessages, boolean complete, String incompleteReason) {}
+
+  record ChatAnswer(String text, boolean complete, String incompleteReason) {
+    static ChatAnswer complete(String text) {
+      return new ChatAnswer(text, true, null);
+    }
+
+    static ChatAnswer outputLimited(String text) {
+      return new ChatAnswer(text + OUTPUT_LIMIT_NOTICE, false, OUTPUT_LIMIT_REASON);
+    }
+  }
 
   /** Loaded history for the chat tab — empty list when no messages yet. */
   public List<ChatMessage> history(String runId) {
@@ -183,7 +205,7 @@ public class ChatService {
       run.setChatHistoryJson(serialize(history));
       run.setChatMessageCount(history.size());
       runRepo.save(run);
-      return new SendResult(reply, (int) userCount + 1, MAX_USER_MESSAGES);
+      return new SendResult(reply, (int) userCount + 1, MAX_USER_MESSAGES, true, null);
     }
 
     // Resolve provider + model (LIGHTWEIGHT tier — chat is Q&A, not planning).
@@ -241,8 +263,10 @@ public class ChatService {
     List<ToolCallback> tools = runChatTools.bind(new RunChatTools.ToolContext(runId, ctx));
 
     String reply;
+    ChatAnswer answer;
     try {
-      reply = runToolLoop(runId, providerName, model.getModel(), messages, ctx, tools);
+      answer = runToolLoop(runId, providerName, model.getModel(), messages, ctx, tools);
+      reply = answer.text();
       if (reply.isBlank())
         reply = "(The model returned an empty response. Try rephrasing the question.)";
       reply = contextSanitizer.sanitizeOutput(reply);
@@ -274,7 +298,12 @@ public class ChatService {
     run.setChatMessageCount(history.size());
     runRepo.save(run);
 
-    return new SendResult(reply, (int) userCount + 1, MAX_USER_MESSAGES);
+    return new SendResult(
+        reply,
+        (int) userCount + 1,
+        MAX_USER_MESSAGES,
+        answer.complete(),
+        answer.incompleteReason());
   }
 
   /**
@@ -298,7 +327,7 @@ public class ChatService {
    * Mirrors {@code ProjectChatService.send}. Returns only the model's final answer — intermediate
    * tool narration is kept in the in-memory conversation but never persisted as the answer.
    */
-  String runToolLoop(
+  ChatAnswer runToolLoop(
       String runId,
       String providerName,
       String modelName,
@@ -336,11 +365,22 @@ public class ChatService {
           calls.addAll(gen.getOutput().getToolCalls());
         }
       }
+      // A tool-bearing prefix may itself be incomplete. Never execute a possibly truncated tool
+      // argument payload, and never project its narration as a completed Ask answer.
+      if (responseWasTruncated(resp)) {
+        String partial = turnText.toString();
+        if (ToolProtocolLeakGuard.containsProtocolMarkup(partial)) {
+          log.warn("Run chat suppressed truncated textual tool-protocol markup for run {}", runId);
+          partial =
+              "The provider reached its output limit before it produced a safe grounded answer. "
+                  + "Internal tool protocol was suppressed.";
+        }
+        return ChatAnswer.outputLimited(partial);
+      }
       // Fail closed when a provider serializes its private tool protocol as assistant text.
       if (calls.isEmpty()) {
-        if (!ToolProtocolLeakGuard.containsProtocolMarkup(turnText.toString())) {
-          return turnText.toString();
-        }
+        if (!ToolProtocolLeakGuard.containsProtocolMarkup(turnText.toString()))
+          return ChatAnswer.complete(turnText.toString());
         log.warn("Run chat suppressed textual tool-protocol markup for run {}", runId);
         conversation.add(new AssistantMessage(turnText.toString()));
         conversation.add(
@@ -397,7 +437,7 @@ public class ChatService {
     return synthesizeFinal(runId, providerName, modelName, conversation, ctx);
   }
 
-  private String synthesizeFinal(
+  private ChatAnswer synthesizeFinal(
       String runId,
       String providerName,
       String modelName,
@@ -427,12 +467,30 @@ public class ChatService {
       if (!answer.isEmpty()) answer.append('\n');
       answer.append(text);
     }
+    boolean truncated = responseWasTruncated(finalResponse);
     if (answer.isEmpty() || ToolProtocolLeakGuard.containsProtocolMarkup(answer.toString())) {
       log.warn("Run chat synthesis produced no safe customer answer for run {}", runId);
-      return "I could not produce a grounded answer from the available run evidence. No internal "
-          + "tool output was used as a substitute for evidence.";
+      String safeFallback =
+          "I could not produce a grounded answer from the available run evidence. No internal "
+              + "tool output was used as a substitute for evidence.";
+      return truncated ? ChatAnswer.outputLimited(safeFallback) : ChatAnswer.complete(safeFallback);
     }
-    return answer.toString();
+    return truncated
+        ? ChatAnswer.outputLimited(answer.toString())
+        : ChatAnswer.complete(answer.toString());
+  }
+
+  static boolean responseWasTruncated(ChatResponse response) {
+    if (response == null || response.getResults() == null) return false;
+    return response.getResults().stream()
+        .filter(java.util.Objects::nonNull)
+        .map(org.springframework.ai.chat.model.Generation::getMetadata)
+        .filter(java.util.Objects::nonNull)
+        .map(org.springframework.ai.chat.metadata.ChatGenerationMetadata::getFinishReason)
+        .filter(java.util.Objects::nonNull)
+        .map(Object::toString)
+        .map(reason -> reason.trim().toLowerCase(java.util.Locale.ROOT))
+        .anyMatch(reason -> reason.equals("length") || reason.equals("max_tokens"));
   }
 
   /**
@@ -489,49 +547,7 @@ public class ChatService {
    * still produces useful output.
    */
   String renderValidationReport(String runId) {
-    ValidationReport rpt = findValidationReport(runId);
-    if (rpt == null) return "";
-
-    StringBuilder sb = new StringBuilder("## Validation report\n");
-    if (rpt.getVerifiedScore() != null) {
-      sb.append("- verifiedScore: ").append(rpt.getVerifiedScore()).append("/100");
-      sb.append(" — internal summary score, not independent proof");
-      sb.append('\n');
-    }
-    if (rpt.getAccuracyScore() != null) {
-      sb.append("- accuracyScore: ").append(rpt.getAccuracyScore()).append("/100");
-      if (rpt.getAccuracyGrade() != null)
-        sb.append(" (").append(rpt.getAccuracyGrade()).append(")");
-      sb.append(" — LLM-assessed, treat as estimate\n");
-    }
-    if (rpt.getReviewerVerdict() != null) {
-      sb.append("- reviewerVerdict: ").append(rpt.getReviewerVerdict()).append('\n');
-    }
-    sb.append("- finalBuildPassed: ").append(rpt.getFinalBuildPassed()).append('\n');
-    if (rpt.getTestsTotal() != null && rpt.getTestsTotal() > 0) {
-      sb.append("- tests: ").append(rpt.getTestsPassed()).append("/").append(rpt.getTestsTotal());
-      sb.append('\n');
-    }
-
-    // Per-dimension scores (skip nulls).
-    appendScoreLine(sb, "codeQuality", rpt.getCodeQualityScore());
-    appendScoreLine(sb, "testCoverage", rpt.getTestCoverageScore());
-    appendScoreLine(sb, "architecture", rpt.getArchitectureScore());
-    appendScoreLine(sb, "security", rpt.getSecurityScore());
-    appendScoreLine(sb, "performance", rpt.getPerformanceScore());
-    appendScoreLine(sb, "designCompliance", rpt.getDesignComplianceScore());
-
-    // Issues — capped at 8 most critical so the prompt stays bounded.
-    String issuesJson = rpt.getIssuesJson();
-    if (issuesJson != null && !issuesJson.isBlank() && !"[]".equals(issuesJson.trim())) {
-      sb.append("\n### Issues caught (raw JSON, up to 8)\n");
-      String capped = issuesJson;
-      if (capped.length() > 4_000) {
-        capped = capped.substring(0, 4_000) + "\n…(truncated)";
-      }
-      sb.append(capped).append('\n');
-    }
-    return sb.toString();
+    return RunChatValidationEvidence.render(findValidationReport(runId));
   }
 
   private ValidationReport findValidationReport(String runId) {
@@ -542,10 +558,6 @@ public class ChatService {
           "ChatService validation-report lookup failed for run={}: {}", runId, e.getMessage());
       return null;
     }
-  }
-
-  private static void appendScoreLine(StringBuilder sb, String label, Integer score) {
-    if (score != null) sb.append("- ").append(label).append(": ").append(score).append("/100\n");
   }
 
   /** Snapshot the top level of the workspace — files first, then directories. */

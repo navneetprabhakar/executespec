@@ -225,6 +225,35 @@ The Spring Boot plugin propagates the profile's safety properties into the forke
 Without both the profile and a matching reservation, `LlmRouter` rejects provider dispatch. Reconcile
 or conservatively close the reservation after the test; never reuse it for a different run.
 
+The authenticated pipeline E2E is not part of normal `mvn verify`: Surefire excludes the `e2e`
+tag unless `-Pintegration` is explicit. Each live invocation runs exactly one lifecycle scenario
+(`happy`, `reject`, or `cancel`) on the non-frontier DeepSeek Flash route with a hard `$0.10`
+per-run cap. Reserve the UUID before starting the test so the provider guard can match the first
+planner dispatch:
+
+```bash
+export E2E_SCENARIO=happy
+export E2E_RUN_ID="$(uuidgen | tr '[:upper:]' '[:lower:]')"
+export RESERVATION_ID="$(
+  node scripts/provider-budget-ledger.mjs reserve \
+    --provider deepseek \
+    --model deepseek-v4-flash-native \
+    --run "$E2E_RUN_ID" \
+    --safe-max-usd 0.10
+)"
+
+JAVA_HOME=/opt/homebrew/opt/openjdk@21 \
+  mvn -Pintegration,live-llm-test \
+    -Dtest=PipelineE2ETest \
+    -Dexecutespec.live-llm.reservation-id="$RESERVATION_ID" \
+    test
+```
+
+Use a fresh UUID and reservation for every scenario. Afterward, reconcile the reservation with the
+run's recorded cost or use `close-unknown` to charge the full reserved `$0.10` conservatively.
+Missing scenario, UUID, live-test profile, or reservation skips the provider-backed scenario; the
+router independently remains fail-closed.
+
 Operators can set `execution.continuation.low-complexity-worker-start-tier=LIGHTWEIGHT` to start LOW worker tasks on the cheaper tier while preserving automatic step-up; the default remains `WORKHORSE`. Web Compose, web/CLI/VS Code agent confirmation, and legacy spec-chat `submit_run` can send `lowComplexityWorkerStartTier=LIGHTWEIGHT` without setting `modelName`, so it is not a route pin. Run-detail continuation policy evidence shows both the configured and effective LOW start tier, so invalid values that fell back to `WORKHORSE` stay visible.
 
 ### Project Chat paid actions
@@ -330,13 +359,43 @@ diff attributable to that task, and persisted executable verification distinguis
 the headline score is a summary and must not be treated as independent proof.
 Post-run Ask follows the same rule: configured build success is not test success, missing concrete
 test counts remain an explicit verification gap, and provider tool-protocol markup is suppressed
-rather than displayed to customers. Web/CLI agent answers have bounded 8,192-token direct and
+rather than displayed to customers. A post-run Ask response stopped by `length` / `max_tokens`
+returns `complete=false` with `incompleteReason=PROVIDER_OUTPUT_LIMIT`; the web client retains the
+partial text but renders an explicit incomplete/retry notice instead of treating it as a complete
+answer. Web/CLI agent answers have bounded 8,192-token direct and
 4,096-token final-synthesis ceilings and visibly warn when a provider stops for output length.
-Long-running architecture and generated-document actions use finite operation-specific client
-timeouts rather than inheriting the ordinary 30-second API deadline. Compare History renders the
+System-map refresh is a durable asynchronous job: the write-gated POST returns 202, identical
+compatible requests reuse one stable job id, and the web console resumes/polls persisted state
+without holding a provider-duration HTTP request open. Admission performs only database/config
+work. PREPARING snapshots every linked repository at an exact revision using that link's credential
+subject, binds separate exact PLANNING repo-map and project-synthesis contexts, and
+never persists SCM credentials. Paid execution is not automatically replayed after an expired
+lease: uncertain work becomes `NEEDS_CONFIRMATION`. Generated artifacts remain invisible until one
+transactional publisher verifies the database lease/fence, unchanged source revisions, and staged
+digest, then saves every canonical artifact and marks the job SUCCEEDED atomically. Cancellation,
+deadlines, and abnormal provider finish reasons fail closed; truncated provider prose is never
+published. Other classified provider failures may use an explicit WARNING-quality deterministic
+fallback rather than being mislabeled as provider success. Async refresh deliberately
+suppresses customer-repository codemap PR publication until that external side effect has its own
+idempotency/fencing contract.
+`NEEDS_CONFIRMATION` blocks ordinary retries for web, CLI, and API callers; only the explicit
+confirm-retry action by the original requester can requeue the same durable identity, and every
+confirmation appends an immutable actor/time receipt. The latest-job read restores terminal truth
+after reload. Per-repository regenerate intent also enters this project-wide boundary so it cannot
+race a whole-project refresh.
+Compare History renders the
 actual authorized document-content diff, Timeline omits invalid timestamps instead of fabricating
 epoch durations, and the provider-key screen exposes OpenRouter's organization-scoped status and
 route to org settings.
+
+Generated EXPLANATION/SETUP documents use provider-neutral external prompts and a fair 60k source
+budget across architecture plus every linked repository. Each repository section must come from the
+codemap at the exact SHA captured by that architecture version; source drift fails closed. Every
+abnormal provider finish reason is rejected. Required structure, balanced code fences, secrets, and
+tool-protocol leakage are checked before save, while reads/downloads re-scan retained legacy
+documents. Provider transport runs without a database transaction; only the exact-source recheck,
+shared project publication lock, cache recheck, version allocation, save, and pruning use a short
+transaction.
 
 **Frontend**
 

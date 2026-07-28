@@ -158,6 +158,8 @@ public class ArchitectureDocGenerator {
             "combined-arch",
             executionReference);
 
+    RepoArchitectureGenerator.requireCompleteTermination(
+        response, "combined architecture for project " + projectId);
     String text = response.getResult().getOutput().getText();
     if (text == null || text.isBlank()) {
       throw new IllegalStateException(

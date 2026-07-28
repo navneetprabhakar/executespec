@@ -21,6 +21,7 @@ import lombok.RequiredArgsConstructor;
 public class ProjectArchitectureController {
 
   private final ProjectArchitectureService service;
+  private final ProjectArchitectureJobService architectureJobs;
   private final StalenessService stalenessService;
   private final com.navneet.executespec.project.workspace.ProjectWorkspaceService workspace;
   private final ArchitectureDiffService diffService;
@@ -58,8 +59,103 @@ public class ProjectArchitectureController {
     }
   }
 
+  public record ArchitectureJobDto(
+      UUID id,
+      String projectId,
+      String status,
+      String phase,
+      boolean terminal,
+      Integer architectureVersion,
+      String errorCode,
+      String errorMessage,
+      String qualityStatus,
+      String qualityEvidence,
+      Instant createdAt,
+      Instant startedAt,
+      Instant completedAt) {
+    static ArchitectureJobDto from(ProjectArchitectureJobStore.Job job) {
+      return new ArchitectureJobDto(
+          job.id(),
+          job.projectId(),
+          job.status().name(),
+          job.phase(),
+          job.status().terminal(),
+          job.resultArchitectureVersion(),
+          job.errorCode(),
+          job.errorMessage(),
+          job.qualityStatus(),
+          job.qualityEvidenceJson(),
+          job.createdAt(),
+          job.startedAt(),
+          job.completedAt());
+    }
+  }
+
+  /**
+   * Web-preferred durable refresh contract. Admission is synchronous and idempotent; provider and
+   * repository work is claimed by the V353 background worker after this transaction has ended.
+   */
+  @PostMapping("/api/projects/{projectId}/architecture/generate-async")
+  public ResponseEntity<ArchitectureJobDto> generateAsync(
+      @org.springframework.security.core.annotation.AuthenticationPrincipal
+          com.navneet.executespec.auth.security.AppUserDetails userDetails,
+      @PathVariable String projectId) {
+    projectAccessGuard.assertCanWrite(projectId, userDetails);
+    projectRepoService.requireProjectCapability(
+        projectId,
+        com.navneet.executespec.repo.ScmCapability.ARCHITECTURE,
+        "generate project architecture");
+    if (userDetails == null || userDetails.getUser() == null) {
+      throw new ResponseStatusException(HttpStatus.UNAUTHORIZED);
+    }
+    ProjectArchitectureJobStore.Job job =
+        architectureJobs.request(projectId, userDetails.getUser().getId());
+    return ResponseEntity.accepted()
+        .location(
+            java.net.URI.create("/api/projects/" + projectId + "/architecture/jobs/" + job.id()))
+        .body(ArchitectureJobDto.from(job));
+  }
+
+  @GetMapping("/api/projects/{projectId}/architecture/jobs/{jobId}")
+  public ResponseEntity<ArchitectureJobDto> architectureJob(
+      @org.springframework.security.core.annotation.AuthenticationPrincipal
+          com.navneet.executespec.auth.security.AppUserDetails userDetails,
+      @PathVariable String projectId,
+      @PathVariable UUID jobId) {
+    projectAccessGuard.assertCanRead(projectId, userDetails);
+    return ResponseEntity.ok(ArchitectureJobDto.from(architectureJobs.get(projectId, jobId)));
+  }
+
+  @GetMapping("/api/projects/{projectId}/architecture/jobs/active")
+  public ResponseEntity<ArchitectureJobDto> activeArchitectureJob(
+      @org.springframework.security.core.annotation.AuthenticationPrincipal
+          com.navneet.executespec.auth.security.AppUserDetails userDetails,
+      @PathVariable String projectId) {
+    projectAccessGuard.assertCanRead(projectId, userDetails);
+    return architectureJobs
+        .latestActive(projectId)
+        .map(job -> ResponseEntity.ok(ArchitectureJobDto.from(job)))
+        .orElseGet(() -> ResponseEntity.noContent().build());
+  }
+
+  /** Reload-visible latest state, including terminal failures and NEEDS_CONFIRMATION. */
+  @GetMapping("/api/projects/{projectId}/architecture/jobs/latest")
+  public ResponseEntity<ArchitectureJobDto> latestArchitectureJob(
+      @org.springframework.security.core.annotation.AuthenticationPrincipal
+          com.navneet.executespec.auth.security.AppUserDetails userDetails,
+      @PathVariable String projectId) {
+    projectAccessGuard.assertCanRead(projectId, userDetails);
+    return architectureJobs
+        .latest(projectId)
+        .map(job -> ResponseEntity.ok(ArchitectureJobDto.from(job)))
+        .orElseGet(() -> ResponseEntity.noContent().build());
+  }
+
+  /**
+   * Compatibility route; it admits the same durable job as {@link #generateAsync} and returns 202.
+   */
   @PostMapping("/api/projects/{projectId}/architecture/generate")
-  public ResponseEntity<ArchDocDto> generate(
+  public ResponseEntity<ArchitectureJobDto> generate(
       @org.springframework.security.core.annotation.AuthenticationPrincipal
           com.navneet.executespec.auth.security.AppUserDetails userDetails,
       @PathVariable String projectId) {
@@ -69,15 +165,20 @@ public class ProjectArchitectureController {
         projectId,
         com.navneet.executespec.repo.ScmCapability.ARCHITECTURE,
         "generate project architecture");
-    String pat = userDetails != null ? userDetails.getUser().getGithubPat() : null;
-    ProjectArchitectureDoc doc = service.generate(projectId, null, pat);
-    stalenessService.invalidate(projectId);
-    return ResponseEntity.status(HttpStatus.CREATED).body(ArchDocDto.from(doc));
+    if (userDetails == null || userDetails.getUser() == null) {
+      throw new ResponseStatusException(HttpStatus.UNAUTHORIZED);
+    }
+    ProjectArchitectureJobStore.Job job =
+        architectureJobs.request(projectId, userDetails.getUser().getId());
+    return ResponseEntity.accepted()
+        .location(
+            java.net.URI.create("/api/projects/" + projectId + "/architecture/jobs/" + job.id()))
+        .body(ArchitectureJobDto.from(job));
   }
 
   /** Alias + preferred entry: regenerates codemaps + architecture + summary on disk. */
   @PostMapping("/api/projects/{projectId}/analyse")
-  public ResponseEntity<ArchDocDto> analyse(
+  public ResponseEntity<ArchitectureJobDto> analyse(
       @org.springframework.security.core.annotation.AuthenticationPrincipal
           com.navneet.executespec.auth.security.AppUserDetails userDetails,
       @PathVariable String projectId,
@@ -88,10 +189,42 @@ public class ProjectArchitectureController {
         projectId,
         com.navneet.executespec.repo.ScmCapability.ARCHITECTURE,
         "analyse project architecture");
-    String pat = userDetails != null ? userDetails.getUser().getGithubPat() : null;
-    ProjectArchitectureDoc doc = service.generate(projectId, branch, pat);
-    stalenessService.invalidate(projectId);
-    return ResponseEntity.status(HttpStatus.CREATED).body(ArchDocDto.from(doc));
+    if (userDetails == null || userDetails.getUser() == null) {
+      throw new ResponseStatusException(HttpStatus.UNAUTHORIZED);
+    }
+    ProjectArchitectureJobStore.Job job =
+        architectureJobs.request(projectId, userDetails.getUser().getId(), branch);
+    return ResponseEntity.accepted()
+        .location(
+            java.net.URI.create("/api/projects/" + projectId + "/architecture/jobs/" + job.id()))
+        .body(ArchitectureJobDto.from(job));
+  }
+
+  @DeleteMapping("/api/projects/{projectId}/architecture/jobs/{jobId}")
+  public ResponseEntity<Void> cancelArchitectureJob(
+      @org.springframework.security.core.annotation.AuthenticationPrincipal
+          com.navneet.executespec.auth.security.AppUserDetails userDetails,
+      @PathVariable String projectId,
+      @PathVariable UUID jobId) {
+    projectAccessGuard.assertCanWrite(projectId, userDetails);
+    return architectureJobs.cancel(projectId, jobId)
+        ? ResponseEntity.accepted().build()
+        : ResponseEntity.noContent().build();
+  }
+
+  @PostMapping("/api/projects/{projectId}/architecture/jobs/{jobId}/confirm-retry")
+  public ResponseEntity<ArchitectureJobDto> confirmArchitectureRetry(
+      @org.springframework.security.core.annotation.AuthenticationPrincipal
+          com.navneet.executespec.auth.security.AppUserDetails userDetails,
+      @PathVariable String projectId,
+      @PathVariable UUID jobId) {
+    projectAccessGuard.assertCanWrite(projectId, userDetails);
+    if (userDetails == null || userDetails.getUser() == null) {
+      throw new ResponseStatusException(HttpStatus.UNAUTHORIZED);
+    }
+    ProjectArchitectureJobStore.Job job =
+        architectureJobs.confirmRetry(projectId, jobId, userDetails.getUser().getId());
+    return ResponseEntity.accepted().body(ArchitectureJobDto.from(job));
   }
 
   @GetMapping("/api/projects/{projectId}/summary")
@@ -219,16 +352,12 @@ public class ProjectArchitectureController {
   }
 
   /**
-   * Task #82 — explicit per-repo architecture regen (Steps 1 + 2: codemap + per-repo arch doc),
-   * split out of the {@code POST /api/repos/{repoId}/sync} path so Sync stays a cheap metadata
-   * refresh and never holds a DB connection across the LLM calls. Mirrors {@link #generate}: a paid
-   * LLM call + workspace mutation, so it's write-gated and runs synchronously (the caller
-   * explicitly asked to regenerate); {@link ProjectArchitectureService#regenerateForRepo} is
-   * deliberately not {@code @Transactional}. Invalidates the staleness cache so the dashboard badge
-   * refreshes.
+   * Per-repository UI intent is admitted through the project-wide durable boundary. The immutable
+   * project snapshot is regenerated coherently; direct per-repo canonical writes would race a
+   * project refresh and expose a mixed-version map.
    */
   @PostMapping("/api/projects/{projectId}/repos/{repoId}/regenerate-architecture")
-  public ResponseEntity<RepoArchDto> regenerateRepoArchitecture(
+  public ResponseEntity<ArchitectureJobDto> regenerateRepoArchitecture(
       @org.springframework.security.core.annotation.AuthenticationPrincipal
           com.navneet.executespec.auth.security.AppUserDetails userDetails,
       @PathVariable String projectId,
@@ -240,10 +369,15 @@ public class ProjectArchitectureController {
         repoId,
         com.navneet.executespec.repo.ScmCapability.ARCHITECTURE,
         "regenerate repository architecture");
-    String pat = userDetails != null ? userDetails.getUser().getGithubPat() : null;
-    RepoArchitectureDoc doc = service.regenerateForRepo(projectId, repoId, pat);
-    stalenessService.invalidate(projectId);
-    return ResponseEntity.status(HttpStatus.CREATED).body(RepoArchDto.from(doc));
+    if (userDetails == null || userDetails.getUser() == null) {
+      throw new ResponseStatusException(HttpStatus.UNAUTHORIZED);
+    }
+    ProjectArchitectureJobStore.Job job =
+        architectureJobs.request(projectId, userDetails.getUser().getId());
+    return ResponseEntity.accepted()
+        .location(
+            java.net.URI.create("/api/projects/" + projectId + "/architecture/jobs/" + job.id()))
+        .body(ArchitectureJobDto.from(job));
   }
 
   // 2026-05-16 — file-browse endpoints for Project → Code → Browse

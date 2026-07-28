@@ -81,7 +81,7 @@ public class ProjectGeneratedDoc {
    * of the cache key — combined with {@link #sourceArchVersion} so a same-version arch but
    * different repo SHA still invalidates. Null on legacy rows.
    */
-  @Column(name = "source_shas_fingerprint", length = 255)
+  @Column(name = "source_shas_fingerprint", columnDefinition = "TEXT")
   private String sourceShasFingerprint;
 
   @PrePersist
