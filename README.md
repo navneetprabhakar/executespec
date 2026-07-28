@@ -44,7 +44,7 @@ explicit linked-repository selection, provider/key/spend preflight, and durable 
 applied before dispatch. Pending RequirementIR V1 gates are decoded and approved through a frozen
 V1 wire codec and semantic validator rather than the rolling current-schema implementation.
 
-The current uncommitted V350 implementation carries that separation through execution:
+Committed backend checkpoint `13ead3f40` carries that V350 separation through execution:
 `pipeline_run.org_id` and CUSTOMER `llm_execution_context.org_id` remain the host data/governance
 tenant, while `pipeline_run.billing_org_id` and `llm_execution_context.credential_org_id` retain
 the submitting actor's payer/provider-policy organization for key-policy revalidation and managed-

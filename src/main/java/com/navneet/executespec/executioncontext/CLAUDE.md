@@ -16,7 +16,7 @@ terminal, cross-tenant, out-of-policy and exhausted contexts fail before provide
   PostgreSQL triggers that reject changes to `pipeline_run.billing_org_id` and
   `llm_execution_context.credential_org_id`. Application creation and dispatch guards enforce the
   same immutable binding before spend. The named V350 migration/immutability PostgreSQL gate and
-  clean 5,738-test backend verification pass on the current uncommitted source.
+  clean 5,738-test backend verification pass at checkpoint `13ead3f40`.
 - `PLATFORM_INTERNAL` is explicit and uses `isolationKey=platform:internal`.
 - Provider credentials or encrypted credential envelopes are never persisted here.
 - `LlmPolicySnapshot` records allowed providers/models and only the credential source label

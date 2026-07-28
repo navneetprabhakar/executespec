@@ -4,7 +4,7 @@
 failure, and code-review autofix findings. It remains PATCH-specific and must not be routed through
 the BUILD-only customer submission service.
 
-The current uncommitted V350-era implementation resolves the active host project and active finding
+Backend checkpoint `13ead3f40` resolves the active host project and active finding
 actor before dedupe or dispatch. The project organization is the run's data/governance tenant; the
 actor's home organization is the payer, credential, and provider-policy authority. It submits both
 identities through `RunOrchestrator.SubmitPolicy` and stamps `triggered_by_finding` on the child.

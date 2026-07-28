@@ -4,7 +4,7 @@
 to the same customer admission and orchestrator path as other cloud runs; it must not persist a
 detached `PipelineRun` or recreate project/repository/provider policy locally.
 
-## Current uncommitted reservation and recovery contract
+## Committed reservation and recovery contract (`13ead3f40`)
 
 - `ExecutionSolutionDispatchRegistry` uses the existing V90 unique
   `(solution_id, attempt_number)` row as the durable pre-dispatch claim. Attempt numbers are
@@ -20,7 +20,7 @@ detached `PipelineRun` or recreate project/repository/provider policy locally.
   winner publishes terminal launch/solution effects.
 - These changes add no migration: they reuse V90 uniqueness and V315 recovery fields. The named
   PostgreSQL dispatch-reservation race/replay gate and clean 5,738-test backend verification pass
-  on the current uncommitted source.
+  at backend checkpoint `13ead3f40`.
 
 Do not describe this as exactly-once provider/tool execution. It fences approved-solution identity
 and terminal observation; ordinary WORKING side effects retain their existing recovery semantics.
