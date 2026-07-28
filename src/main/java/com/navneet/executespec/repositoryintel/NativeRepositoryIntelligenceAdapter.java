@@ -18,6 +18,7 @@ import java.util.concurrent.TimeoutException;
 import com.navneet.executespec.project.rag.CodeIndexStateStore;
 import com.navneet.executespec.tool.RepositorySearchService;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 /**
@@ -32,23 +33,43 @@ public final class NativeRepositoryIntelligenceAdapter implements RepositoryInte
           RepositoryCapability.EXACT_TEXT,
           RepositoryCapability.SYMBOL,
           RepositoryCapability.HEURISTIC_RELATIONSHIP);
+  private static final Set<RepositoryCapability> PERSISTED_ARTIFACT_CAPABILITIES =
+      Set.of(RepositoryCapability.CODEMAP, RepositoryCapability.ARCHITECTURE);
 
   private final RepositorySearchService searchService;
   private final CodeIndexStateStore codeIndexStateStore;
   private final RepositoryRootResolver rootResolver;
+  private final RepositoryArtifactEvidenceSource artifactEvidenceSource;
 
+  @Autowired
   public NativeRepositoryIntelligenceAdapter(
       RepositorySearchService searchService,
       CodeIndexStateStore codeIndexStateStore,
-      RepositoryRootResolver rootResolver) {
+      RepositoryRootResolver rootResolver,
+      RepositoryArtifactEvidenceSource artifactEvidenceSource) {
     if (searchService == null) throw new IllegalArgumentException("searchService is required");
     if (codeIndexStateStore == null) {
       throw new IllegalArgumentException("codeIndexStateStore is required");
     }
     if (rootResolver == null) throw new IllegalArgumentException("rootResolver is required");
+    if (artifactEvidenceSource == null) {
+      throw new IllegalArgumentException("artifactEvidenceSource is required");
+    }
     this.searchService = searchService;
     this.codeIndexStateStore = codeIndexStateStore;
     this.rootResolver = rootResolver;
+    this.artifactEvidenceSource = artifactEvidenceSource;
+  }
+
+  NativeRepositoryIntelligenceAdapter(
+      RepositorySearchService searchService,
+      CodeIndexStateStore codeIndexStateStore,
+      RepositoryRootResolver rootResolver) {
+    this(
+        searchService,
+        codeIndexStateStore,
+        rootResolver,
+        RepositoryArtifactEvidenceSource.unavailable());
   }
 
   @Override
@@ -130,7 +151,7 @@ public final class NativeRepositoryIntelligenceAdapter implements RepositoryInte
     }
 
     List<RepositoryEvidence> evidence = new ArrayList<>();
-    BudgetCounter budget = new BudgetCounter(query);
+    RepositoryEvidenceBudgetCounter budget = new RepositoryEvidenceBudgetCounter(query);
     boolean truncated = false;
     int calls = 0;
     for (RepositoryCapability capability : RepositoryCapability.values()) {
@@ -188,6 +209,50 @@ public final class NativeRepositoryIntelligenceAdapter implements RepositoryInte
                   capability,
                   RepositoryCapabilityState.FAILED,
                   "CAPABILITY_QUERY_FAILED",
+                  0,
+                  false));
+        }
+      } else if (PERSISTED_ARTIFACT_CAPABILITIES.contains(capability)) {
+        if (calls >= query.budget().maxAdapterCalls()) {
+          outcomes.put(capability, partial(capability, "ADAPTER_CALL_BUDGET", 0));
+          truncated = true;
+          continue;
+        }
+        calls++;
+        try {
+          RepositoryArtifactEvidenceSource.Contribution contribution =
+              deadline.call(
+                  () ->
+                      artifactEvidenceSource.query(
+                          capability,
+                          query,
+                          handle,
+                          Math.min(200, query.budget().maxHitsPerCapability())));
+          RepositorySearchService.SearchResult afterArtifactRead =
+              deadline.call(() -> snapshotProbe(root, query));
+          String changed = snapshotMismatch(query.expectedSnapshot(), afterArtifactRead);
+          if (changed != null) {
+            rejectChangedSnapshot(query, outcomes, changed);
+            return batch(query, List.of(), outcomes, false);
+          }
+          handle.requireMatches(query);
+          int accepted = budget.add(evidence, contribution.evidence());
+          boolean capabilityTruncated =
+              contribution.hasMore() || accepted < contribution.evidence().size();
+          outcomes.put(capability, contribution.outcome(capability, accepted, capabilityTruncated));
+          truncated |= capabilityTruncated;
+        } catch (RepositoryQueryTimeoutException timeout) {
+          outcomes.put(capability, partial(capability, "QUERY_TIMEOUT", 0));
+          truncated = true;
+        } catch (RepositoryQueryInterruptedException interrupted) {
+          throw interrupted;
+        } catch (RuntimeException capabilityFailure) {
+          outcomes.put(
+              capability,
+              new CapabilityOutcome(
+                  capability,
+                  RepositoryCapabilityState.FAILED,
+                  "PERSISTED_ARTIFACT_QUERY_FAILED",
                   0,
                   false));
         }
@@ -530,35 +595,6 @@ public final class NativeRepositoryIntelligenceAdapter implements RepositoryInte
   static final class RepositoryQueryInterruptedException extends RuntimeException {
     private RepositoryQueryInterruptedException(InterruptedException cause) {
       super("repository intelligence query interrupted", cause);
-    }
-  }
-
-  private static final class BudgetCounter {
-    private final QueryBudget budget;
-    private int hits;
-    private int characters;
-    private int tokens;
-
-    private BudgetCounter(RepositoryQuery query) {
-      this.budget = query.budget();
-      this.characters = RepositoryJsonBudget.reservedBatchCharacters(query);
-      this.tokens = Math.max(1, (characters + 3) / 4);
-    }
-
-    private int add(List<RepositoryEvidence> target, List<RepositoryEvidence> candidates) {
-      int accepted = 0;
-      for (RepositoryEvidence candidate : candidates) {
-        int addedCharacters = candidate.characterCount() + (hits == 0 ? 0 : 1);
-        if (hits + 1 > budget.maxTotalHits()
-            || characters + addedCharacters > budget.maxCharacters()
-            || tokens + Math.max(1, (addedCharacters + 3) / 4) > budget.maxEstimatedTokens()) break;
-        target.add(candidate);
-        hits++;
-        characters += addedCharacters;
-        tokens += Math.max(1, (addedCharacters + 3) / 4);
-        accepted++;
-      }
-      return accepted;
     }
   }
 }

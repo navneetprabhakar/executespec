@@ -44,11 +44,25 @@ unsupported capability into an empty-success result.
 ## Native adapter checkpoint
 
 `NativeRepositoryIntelligenceAdapter` currently wraps deterministic exact-text, symbol, and
-heuristic-relationship search from `RepositorySearchService`. It can report semantic-index
-readiness but deliberately returns `SEMANTIC_RETRIEVER_NOT_BOUND_TO_NATIVE_ADAPTER`; it does not
-perform embeddings or provider-backed retrieval. AST, codemap, project-document, architecture, and
-ADR adapters remain subsequent Phase 2 work. The native adapter is registered as the current
-`RepositoryIntelligencePort`, but no planner/worker/reviewer caller has migrated to it.
+heuristic-relationship search from `RepositorySearchService`. It also delegates CODEMAP and
+per-repository ARCHITECTURE reads to `PersistedProjectEvidenceSource`, which reads only artifacts
+that already exist in `ProjectCodeMapRepository` / `RepoArchitectureDocRepository`; it never
+generates, refreshes, indexes, embeds, or calls a provider. CODEMAP evidence is deterministic,
+confidence `1.0`, `UNAMBIGUOUS`, and pinned to the exact current authorized handle/source SHA,
+except that model-generated `**Purpose:**` summary lines are excluded. Partial inventories remain
+explicitly `PARTIAL`. ARCHITECTURE evidence is explicitly model-derived, confidence `0.65`,
+ambiguity `UNKNOWN`, and is accepted only when both its source SHA and `sourceCodeMapId` match the
+exact current codemap. Fallback/failed architecture documents are unavailable, not evidence.
+
+The adapter can report semantic-index readiness but deliberately returns
+`SEMANTIC_RETRIEVER_NOT_BOUND_TO_NATIVE_ADAPTER`; it does not perform embeddings or provider-backed
+retrieval. Project documents, ADRs, AST-backed relationships, semantic retrieval and pipeline
+consumers remain open. The native adapter is registered as the current
+`RepositoryIntelligencePort`, but no planner/worker/reviewer caller has migrated to it. This
+checkpoint adds evidence plumbing only and makes no repository-understanding or generated-code
+quality claim.
+`RepositoryEvidenceBudgetCounter` owns the shared hit/character/token output accounting so the
+registered adapter remains at the 600-line architecture ceiling without weakening that gate.
 Each capability read is independently fenced against the requested repository-wide commit and
 inventory identity; evidence is discarded as stale if the tree changes after the initial probe.
 The search implementation also rehashes each decoded file and the final repository inventory before
