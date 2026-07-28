@@ -36,6 +36,40 @@ class RequirementIrApprovalCompatibilityRegistryTest {
   }
 
   @Test
+  void frozenProjectionAcceptsBlockedCanonicalEvidenceWithoutMakingItApprovalCompatible() {
+    String blockedSource = "Handle the UI error appropriately.";
+    RequirementIrDocument blockedDocument =
+        compiler.compile(
+            blockedSource,
+            Plan.builder()
+                .requirements(
+                    List.of(
+                        new RequirementSpec(
+                            "R1", blockedSource, RequirementSpec.RequirementKind.FUNCTIONAL)))
+                .tasks(List.of())
+                .build());
+    RunRequirementContract blocked =
+        contract(blockedDocument, currentCodec.writeCanonical(blockedDocument));
+
+    var projection = registry.projectFrozenVersion(blocked, blockedSource);
+
+    assertThat(projection.completeness()).isEqualTo("BLOCKED");
+    assertThat(projection.approvalReady()).isFalse();
+    assertThat(projection.requirements()).extracting(r -> r.kind()).containsExactly("ERROR");
+    assertThat(projection.issues())
+        .anySatisfy(
+            issue -> {
+              assertThat(issue.code()).isEqualTo("MISSING_TASK");
+              assertThat(issue.blocking()).isTrue();
+              assertThat(issue.message()).isNotBlank();
+              assertThat(issue.requirementIds()).contains("R1");
+            });
+    assertThatThrownBy(() -> registry.verifyApprovalCompatible(blocked, blockedSource))
+        .isInstanceOf(IncompatibleRequirementIrException.class)
+        .hasMessageContaining("not approval compatible");
+  }
+
+  @Test
   void retainedV1WireShapeRejectsAnUnregisteredFutureFieldEvenWithReboundDigests() {
     String canonical = currentCodec.writeCanonical(document());
     String changed = canonical.substring(0, canonical.length() - 1) + ",\"futureField\":true}";
@@ -44,6 +78,34 @@ class RequirementIrApprovalCompatibilityRegistryTest {
     assertThatThrownBy(() -> registry.verifyApprovalCompatible(contract, SOURCE))
         .isInstanceOf(IncompatibleRequirementIrException.class)
         .hasMessageContaining("cannot be decoded");
+  }
+
+  @Test
+  void frozenProjectionExposesDerivedBlockersMissingFromPersistedIssueLedger() {
+    RequirementIrDocument incompleteLedger =
+        new RequirementIrDocument(
+            RequirementIrDocument.CURRENT_SCHEMA_VERSION,
+            RequirementIrCompiler.COMPILER_FINGERPRINT,
+            RequirementIrValidator.sha256(SOURCE),
+            List.of(),
+            List.of(),
+            List.of(),
+            List.of(),
+            RequirementIrDocument.Completeness.BLOCKED);
+    String canonical = currentCodec.writeCanonical(incompleteLedger);
+
+    var projection = registry.projectFrozenVersion(contract(incompleteLedger, canonical), SOURCE);
+
+    assertThat(projection.approvalReady()).isFalse();
+    assertThat(projection.persistedIssueCount()).isZero();
+    assertThat(projection.issues())
+        .anySatisfy(
+            issue -> {
+              assertThat(issue.code()).isEqualTo("UNCOVERED_SOURCE_CLAUSE");
+              assertThat(issue.blocking()).isTrue();
+              assertThat(issue.message()).contains("frozen validation");
+              assertThat(issue.requirementIds()).isEmpty();
+            });
   }
 
   @Test
@@ -146,7 +208,10 @@ class RequirementIrApprovalCompatibilityRegistryTest {
   }
 
   private RunRequirementContract contract(String canonical) {
-    RequirementIrDocument document = document();
+    return contract(document(), canonical);
+  }
+
+  private RunRequirementContract contract(RequirementIrDocument document, String canonical) {
     String artifactDigest = RequirementContractDigests.artifactDigest(canonical);
     String planFingerprint = currentCodec.exactPlanFingerprint(PLAN_JSON);
     long blocking = document.issues().stream().filter(issue -> issue.blocking()).count();

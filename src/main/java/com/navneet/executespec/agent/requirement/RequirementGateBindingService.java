@@ -2,7 +2,6 @@ package com.navneet.executespec.agent.requirement;
 
 import java.util.Objects;
 import java.util.UUID;
-import java.util.stream.Collectors;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.agent.requirement.entity.RunRequirementContract;
@@ -15,7 +14,6 @@ import org.springframework.stereotype.Service;
 public class RequirementGateBindingService {
 
   private final RunRequirementContractRepository repository;
-  private final RequirementIrCodec codec;
   private final RequirementIrApprovalCompatibilityRegistry compatibilityRegistry;
 
   public RequirementGateBindingService(
@@ -23,7 +21,7 @@ public class RequirementGateBindingService {
       ObjectMapper objectMapper,
       RequirementIrApprovalCompatibilityRegistry compatibilityRegistry) {
     this.repository = repository;
-    this.codec = new RequirementIrCodec(objectMapper);
+    if (objectMapper == null) throw new IllegalArgumentException("objectMapper is required");
     this.compatibilityRegistry = compatibilityRegistry;
   }
 
@@ -32,8 +30,9 @@ public class RequirementGateBindingService {
    * bytes. No "latest artifact" fallback is permitted.
    *
    * <p>LEGACY never consults RequirementIR. SHADOW returns typed diagnostic outcomes. ENFORCED
-   * returns only an approval-ready exact binding and otherwise throws a typed, HTTP-neutral
-   * exception.
+   * returns an approval-ready exact binding or a structurally valid BLOCKED binding that may open a
+   * visible pending gate but cannot be approved. Missing, invalid, and unavailable bindings throw a
+   * typed, HTTP-neutral exception.
    */
   public RequirementGateBinding select(
       String runId, String exactSource, String exactPlanJson, RequestedMode requestedMode) {
@@ -46,7 +45,9 @@ public class RequirementGateBindingService {
 
     RequirementGateBinding result =
         selectNonLegacy(runId, exactSource, exactPlanJson, requestedMode);
-    if (requestedMode == RequestedMode.ENFORCED && !result.approvable()) {
+    if (requestedMode == RequestedMode.ENFORCED
+        && !result.approvable()
+        && result.status() != BindingStatus.BLOCKED) {
       throw new RequirementGateBindingException(result.reasonCode(), result);
     }
     return result;
@@ -59,7 +60,7 @@ public class RequirementGateBindingService {
     }
 
     String planFingerprint = ExactPlanFingerprint.sha256(exactPlanJson);
-    String sourceSha256 = RequirementIrValidator.sha256(exactSource);
+    String sourceSha256 = RequirementIrV1ApprovalValidator.sha256(exactSource);
     var compatibility = compatibilityRegistry.current();
     RunRequirementContract row;
     try {
@@ -105,107 +106,61 @@ public class RequirementGateBindingService {
       return failure(
           mode, BindingStatus.INVALID, ReasonCode.SOURCE_MISMATCH, planFingerprint, sourceSha256);
     }
-
-    RequirementIrDocument document;
-    try {
-      document = codec.read(row.getCanonicalArtifactJson());
-    } catch (RuntimeException invalidJson) {
-      return failure(
-          mode, BindingStatus.INVALID, ReasonCode.DECODE_FAILED, planFingerprint, sourceSha256);
-    }
-    if (!Objects.equals(codec.writeCanonical(document), row.getCanonicalArtifactJson())) {
-      return failure(
-          mode,
-          BindingStatus.INVALID,
-          ReasonCode.NON_CANONICAL_ARTIFACT,
-          planFingerprint,
-          sourceSha256);
-    }
-    if (document.schemaVersion() != row.getSchemaVersion()
-        || !Objects.equals(document.compilerFingerprint(), row.getCompilerFingerprint())
-        || !Objects.equals(document.sourceSha256(), row.getSourceSha256())) {
-      return failure(
-          mode,
-          BindingStatus.INVALID,
-          ReasonCode.DOCUMENT_METADATA_MISMATCH,
-          planFingerprint,
-          sourceSha256);
-    }
-
     String artifactDigest =
         RequirementContractDigests.artifactDigest(row.getCanonicalArtifactJson());
     if (!Objects.equals(artifactDigest, row.getArtifactDigest())) {
-      return failure(
-          mode,
-          BindingStatus.INVALID,
-          ReasonCode.ARTIFACT_DIGEST_MISMATCH,
-          planFingerprint,
-          sourceSha256);
+      return failureWithRow(
+          mode, row, ReasonCode.ARTIFACT_DIGEST_MISMATCH, "stored artifact digest mismatch");
     }
     String boundDigest =
         RequirementContractDigests.boundDigest(planFingerprint, sourceSha256, artifactDigest);
     if (!Objects.equals(boundDigest, row.getBoundDigest())) {
-      return failure(
-          mode,
-          BindingStatus.INVALID,
-          ReasonCode.BOUND_DIGEST_MISMATCH,
-          planFingerprint,
-          sourceSha256);
+      return failureWithRow(
+          mode, row, ReasonCode.BOUND_DIGEST_MISMATCH, "stored bound digest mismatch");
     }
 
-    int blockingIssueCount =
-        Math.toIntExact(document.issues().stream().filter(issue -> issue.blocking()).count());
-    if (row.getCompleteness() != document.completeness()
-        || row.getRequirementCount() != document.requirements().size()
-        || row.getAcceptanceCriterionCount() != document.acceptanceCriteria().size()
-        || row.getTaskBindingCount() != document.taskBindings().size()
-        || row.getIssueCount() != document.issues().size()
-        || row.getBlockingIssueCount() != blockingIssueCount) {
-      return failure(
-          mode,
-          BindingStatus.INVALID,
-          ReasonCode.PERSISTED_SUMMARY_MISMATCH,
-          planFingerprint,
-          sourceSha256);
-    }
-
-    RequirementIrValidator.ValidationResult structure =
-        RequirementIrValidator.validateStructure(document, exactSource);
-    if (!structure.valid()) {
-      String details =
-          structure.violations().stream()
-              .map(violation -> violation.code().name())
-              .distinct()
-              .sorted()
-              .collect(Collectors.joining(","));
-      return binding(
-          mode, BindingStatus.INVALID, ReasonCode.STRUCTURE_INVALID, row, false, details);
-    }
-
-    RequirementIrValidator.CompletenessDecision approval =
-        RequirementIrValidator.validateForApproval(document, exactSource);
-    if (!approval.approvable()) {
-      String details =
-          approval.blockingCodes().stream()
-              .map(Enum::name)
-              .sorted()
-              .collect(Collectors.joining(","));
-      return binding(mode, BindingStatus.BLOCKED, ReasonCode.APPROVAL_BLOCKED, row, false, details);
-    }
+    RequirementIrApprovalCompatibilityRegistry.FrozenProjection projection;
     try {
-      compatibilityRegistry.verifyApprovalCompatible(row, exactSource);
+      projection = compatibilityRegistry.projectFrozenVersion(row, exactSource);
     } catch (
         RequirementIrApprovalCompatibilityRegistry.IncompatibleRequirementIrException
             incompatible) {
-      return binding(
+      return failureWithRow(
           mode,
-          BindingStatus.INVALID,
-          ReasonCode.APPROVAL_COMPATIBILITY_FAILED,
           row,
-          false,
+          mapCompatibilityFailure(incompatible.failureKind()),
           incompatible.getMessage());
     }
+    if (!projection.approvalReady()) {
+      String details =
+          projection.issues().stream()
+              .filter(RequirementIrApprovalCompatibilityRegistry.IssueProjection::blocking)
+              .map(RequirementIrApprovalCompatibilityRegistry.IssueProjection::code)
+              .filter(Objects::nonNull)
+              .distinct()
+              .sorted()
+              .collect(java.util.stream.Collectors.joining(","));
+      return binding(mode, BindingStatus.BLOCKED, ReasonCode.APPROVAL_BLOCKED, row, false, details);
+    }
     return binding(mode, BindingStatus.BOUND, ReasonCode.NONE, row, true, null);
+  }
+
+  private static ReasonCode mapCompatibilityFailure(
+      RequirementIrApprovalCompatibilityRegistry.FailureKind failureKind) {
+    return switch (failureKind) {
+      case DECODE_FAILED -> ReasonCode.DECODE_FAILED;
+      case NON_CANONICAL -> ReasonCode.NON_CANONICAL_ARTIFACT;
+      case DOCUMENT_METADATA_MISMATCH -> ReasonCode.DOCUMENT_METADATA_MISMATCH;
+      case PERSISTED_SUMMARY_MISMATCH -> ReasonCode.PERSISTED_SUMMARY_MISMATCH;
+      case STRUCTURE_INVALID -> ReasonCode.STRUCTURE_INVALID;
+      case APPROVAL_BLOCKED -> ReasonCode.APPROVAL_BLOCKED;
+      case UNSUPPORTED -> ReasonCode.APPROVAL_COMPATIBILITY_FAILED;
+    };
+  }
+
+  private static RequirementGateBinding failureWithRow(
+      RequestedMode mode, RunRequirementContract row, ReasonCode reason, String details) {
+    return binding(mode, BindingStatus.INVALID, reason, row, false, details);
   }
 
   private static RequirementGateBinding binding(

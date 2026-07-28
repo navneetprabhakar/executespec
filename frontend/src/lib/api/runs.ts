@@ -143,6 +143,74 @@ export interface PlanContractGateReport {
 export const getPlanContractGate = (runId: string) =>
   req<PlanContractGateReport | undefined>(`/runs/${runId}/plan-contract-gate`);
 
+export interface RequirementGateRequirement {
+  id: string;
+  text: string;
+  kind: string;
+  origin: string;
+  state: string;
+  inferenceRationale?: string | null;
+  deferredReason?: string | null;
+  acceptanceIds: string[];
+  taskIds: string[];
+}
+
+export interface RequirementGateAcceptanceCriterion {
+  id: string;
+  requirementIds: string[];
+  kind: string;
+  evidenceType: string;
+  expected: string;
+}
+
+export interface RequirementGateTaskBinding {
+  taskId: string;
+  requirementIds: string[];
+}
+
+export interface RequirementGateIssue {
+  code: string;
+  blocking: boolean;
+  message: string;
+  requirementIds: string[];
+}
+
+/**
+ * Exact, version-compatible RequirementIR evidence bound to the plan gate the user is reviewing.
+ * Identity digests refer to immutable server bytes; no LLM/provider interpretation occurs here.
+ */
+export interface RequirementGateEvidence {
+  runId: string;
+  gateKey: string;
+  gateStatus: string;
+  /** Null is retained for historical gates created before RequirementIR binding existed. */
+  bindingMode: 'LEGACY' | 'SHADOW' | 'ENFORCED' | null;
+  bindingStatus: string;
+  bindingReason?: string | null;
+  enforced: boolean;
+  approvalReady: boolean;
+  schemaVersion?: number | null;
+  compilerFingerprint?: string | null;
+  sourceSha256?: string | null;
+  exactPlanFingerprint?: string | null;
+  artifactDigest?: string | null;
+  boundDigest?: string | null;
+  completeness?: string | null;
+  requirementCount: number;
+  acceptanceCriterionCount: number;
+  taskBindingCount: number;
+  issueCount: number;
+  blockingIssueCount: number;
+  requirements: RequirementGateRequirement[];
+  acceptanceCriteria: RequirementGateAcceptanceCriterion[];
+  taskBindings: RequirementGateTaskBinding[];
+  issues: RequirementGateIssue[];
+}
+
+/** 204 means this run has not opened a durable plan gate yet. */
+export const getRequirementGate = (runId: string) =>
+  req<RequirementGateEvidence | undefined>(`/runs/${runId}/requirement-gate`);
+
 export const approveRun = (
   id: string,
   approved: boolean,

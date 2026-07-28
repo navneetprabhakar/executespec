@@ -235,6 +235,70 @@ class PlanGateDecisionServicePostgresIntegrationTest extends PostgresIntegration
   }
 
   @Test
+  void enforcedBlockedRequirementGateRejectsApprovalBeforeAdmissionAndCanBeRejected() {
+    Fixture fixture = openFixture(false, RequestedMode.ENFORCED, false, true);
+    Map<String, Object> gateBefore = gateRow(fixture.runId());
+
+    assertThatThrownBy(
+            () ->
+                inTransaction(
+                    () -> service.decide(fixture.runId(), fixture.approve(), fixture.actor())))
+        .isInstanceOfSatisfying(
+            ResponseStatusException.class,
+            error -> {
+              assertThat(error.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+              assertThat(error.getReason()).contains("not approval compatible");
+            });
+
+    assertThat(gateRow(fixture.runId())).containsExactlyInAnyOrderEntriesOf(gateBefore);
+    assertThat(runs.findById(fixture.runId()).orElseThrow().getStatus())
+        .isEqualTo("AWAITING_APPROVAL");
+    assertThat(outbox.findById(fixture.runId()).orElseThrow().getStatus()).isEqualTo("WAITING");
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT credits_charged FROM pipeline_run WHERE run_id=?",
+                Integer.class,
+                fixture.runId()))
+        .isEqualTo(3);
+    verifyNoInteractions(apiKeys, managedAi, governance, events);
+
+    PlanGateDecisionService.DecisionResult rejected =
+        inTransaction(
+            () ->
+                service.decide(
+                    fixture.runId(), PlanApprovalService.Command.rejectLegacy(), fixture.actor()));
+    assertThat(rejected.decision()).isEqualTo(PlanGateDecisionService.DecisionKind.REJECT);
+    assertCoherentTuple(fixture.runId(), "REJECT", "REJECTED", "CANCELLED", "CANCELLED");
+  }
+
+  @Test
+  void
+      enforcedBlockedRequirementGateCanBeCancelledWithoutApprovalCompatibilityOrPolicyEvaluation() {
+    Fixture fixture = openFixture(false, RequestedMode.ENFORCED, false, true);
+
+    PlanGateDecisionService.DecisionResult cancelled =
+        inTransaction(
+            () ->
+                service.cancel(
+                    fixture.runId(),
+                    fixture.actor(),
+                    PlanGateDecisionService.ResolutionSource.RUN_CANCEL_API,
+                    "cancelled with unresolved requirements"));
+
+    assertThat(cancelled.replayed()).isFalse();
+    assertThat(cancelled.decision()).isEqualTo(PlanGateDecisionService.DecisionKind.CANCEL);
+    assertThat(cancelled.evidence().bindingMode()).isEqualTo("ENFORCED");
+    assertThat(cancelled.evidence().bindingStatus()).isEqualTo("BLOCKED");
+    assertThat(cancelled.evidence().requirementCompleteness()).isEqualTo("BLOCKED");
+    assertThat(cancelled.evidence().blockingIssueCount()).isPositive();
+    assertCoherentTuple(fixture.runId(), "CANCEL", "CANCELLED", "CANCELLED", "CANCELLED");
+    assertThat(gateRow(fixture.runId()).get("resolution_reason"))
+        .isEqualTo("cancelled with unresolved requirements");
+    verifyNoInteractions(apiKeys, managedAi, governance);
+    verify(events, never()).publishEvent(new PlanGateResumeReadyCommitted(fixture.runId()));
+  }
+
+  @Test
   void legacyApprovalWithoutPlanFingerprintRemainsCompatible() {
     Fixture fixture = openFixture(false, RequestedMode.LEGACY);
     allowApproval(fixture);
@@ -963,6 +1027,14 @@ class PlanGateDecisionServicePostgresIntegrationTest extends PostgresIntegration
 
   private Fixture openFixture(
       boolean withBreakingReport, RequestedMode bindingMode, boolean externalPayer) {
+    return openFixture(withBreakingReport, bindingMode, externalPayer, false);
+  }
+
+  private Fixture openFixture(
+      boolean withBreakingReport,
+      RequestedMode bindingMode,
+      boolean externalPayer,
+      boolean blockedRequirementArtifact) {
     String runId = PREFIX + UUID.randomUUID();
     String ownerId = PREFIX + "owner-" + UUID.randomUUID();
     String orgId = PREFIX + "org-" + UUID.randomUUID();
@@ -1022,7 +1094,7 @@ class PlanGateDecisionServicePostgresIntegrationTest extends PostgresIntegration
 
     UUID requirementContractId = null;
     if (bindingMode == RequestedMode.ENFORCED) {
-      requirementContractId = insertReadyRequirementContract(runId);
+      requirementContractId = insertRequirementContract(runId, blockedRequirementArtifact);
     }
 
     String reportDigest = null;
@@ -1070,30 +1142,38 @@ class PlanGateDecisionServicePostgresIntegrationTest extends PostgresIntegration
     return new Fixture(runId, ownerId, orgId, projectId, actor, approve, requirementContractId);
   }
 
-  private UUID insertReadyRequirementContract(String runId) {
+  private UUID insertRequirementContract(String runId, boolean blocked) {
     String source = "Return 404 when an order is absent.";
     Plan plan =
-        Plan.builder()
-            .requirements(
-                List.of(
-                    new RequirementSpec("R1", source, RequirementSpec.RequirementKind.FUNCTIONAL)))
-            .tasks(
-                List.of(
-                    PlannedTask.builder()
-                        .id("T1")
-                        .title("Implement order lookup")
-                        .description(source)
-                        .meetsRequirements(List.of("R1"))
-                        .build()))
-            .build();
+        blocked
+            ? Plan.builder().requirements(List.of()).tasks(List.of()).build()
+            : Plan.builder()
+                .requirements(
+                    List.of(
+                        new RequirementSpec(
+                            "R1", source, RequirementSpec.RequirementKind.FUNCTIONAL)))
+                .tasks(
+                    List.of(
+                        PlannedTask.builder()
+                            .id("T1")
+                            .title("Implement order lookup")
+                            .description(source)
+                            .meetsRequirements(List.of("R1"))
+                            .build()))
+                .build();
     RequirementIrDocument document = new RequirementIrCompiler().compile(source, plan);
     RequirementIrCodec codec = new RequirementIrCodec(objectMapper);
     String canonicalArtifact = codec.writeCanonical(document);
     String artifactDigest = RequirementContractDigests.artifactDigest(canonicalArtifact);
     String planFingerprint = ExactPlanFingerprint.sha256(PLAN_JSON);
     long blockingIssues = document.issues().stream().filter(issue -> issue.blocking()).count();
-    assertThat(document.completeness()).isEqualTo(RequirementIrDocument.Completeness.READY);
-    assertThat(blockingIssues).isZero();
+    assertThat(document.completeness())
+        .isEqualTo(
+            blocked
+                ? RequirementIrDocument.Completeness.BLOCKED
+                : RequirementIrDocument.Completeness.READY);
+    if (blocked) assertThat(blockingIssues).isPositive();
+    else assertThat(blockingIssues).isZero();
     return requirements
         .saveAndFlush(
             RunRequirementContract.builder()
