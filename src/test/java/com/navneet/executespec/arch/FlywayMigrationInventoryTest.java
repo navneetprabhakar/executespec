@@ -41,9 +41,10 @@ class FlywayMigrationInventoryTest {
     // (durable sandbox cleanup retry), V343 (sandbox release-readiness gates), V344
     // (validation test-evidence scope), V345 (immutable RequirementIR artifact), V346 (durable
     // plan-gate admission binding + continuation outbox), and V347 (atomic gate-open identity
-    // contract) for 333 — contiguous above V336.
-    assertThat(migrations).hasSize(333);
-    assertThat(migrations.getLast().version()).isEqualTo("347");
+    // contract) for 333 — contiguous above V336. V348 then adds atomic plan-gate decision
+    // integrity, bringing the exact inventory to 334.
+    assertThat(migrations).hasSize(334);
+    assertThat(migrations.getLast().version()).isEqualTo("348");
 
     assertThat(migrations.stream().map(MigrationFile::version)).doesNotHaveDuplicates();
     assertThat(migrations.stream().map(MigrationFile::fileName))

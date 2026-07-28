@@ -211,7 +211,9 @@ public class ExecutionController {
             req.planFingerprint(),
             req.breakingChangeAck(),
             req.breakingChangeReportDigest()),
-        principal);
+        principal,
+        com.navneet.executespec.integration.PlanGateDecisionService.ResolutionSource
+            .EXECUTION_VIEW_API);
     orchestrator.projectApprovedPlan(id, approvedPipelineRunId);
     return ResponseEntity.accepted().build();
   }

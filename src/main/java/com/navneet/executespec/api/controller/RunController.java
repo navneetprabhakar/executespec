@@ -700,7 +700,9 @@ public class RunController {
                 req.planFingerprint(),
                 req.breakingChangeAck(),
                 req.breakingChangeReportDigest()),
-            userDetails);
+            userDetails,
+            com.navneet.executespec.integration.PlanGateDecisionService.ResolutionSource
+                .PLAN_APPROVAL_API);
     var outcome = decision.outcome();
 
     // Wave 2.1 — activation funnel step 4 (fires once per user, only on
@@ -1217,7 +1219,7 @@ public class RunController {
       @PathVariable String runId, @AuthenticationPrincipal AppUserDetails userDetails) {
     guard.requireRunWriteAccess(runId, userDetails);
     log.info("DELETE /api/runs/{}", runId);
-    boolean cancelled = runLifecycleService.cancel(runId);
+    boolean cancelled = runLifecycleService.cancel(runId, userDetails);
     return cancelled ? ResponseEntity.ok().build() : ResponseEntity.notFound().build();
   }
 

@@ -2,7 +2,7 @@
 
 > This file is read by Claude Code at session start. Keep it accurate.
 
-**Version:** `2.0.0` ([`Version`](Version)). Migration head: **V304** in the current worktree. Default branch: `main`. Dev environment: `dev.executespec.ai`.
+**Version:** `2.0.0` ([`Version`](Version)). Migration head: **V348** in the current worktree; next allocatable migration **V349**, with **334 migration source files**. V348 adds atomic plan-gate decisions and leased durable continuation handoff. `requirement.ir.gate.mode` remains `LEGACY`. Default branch: `main`. Dev environment: `dev.executespec.ai`.
 
 Spec-driven AI coding platform. Customer submits a spec in natural language → V2 pipeline plans, codes across one or more repos, builds + tests, opens a pull request with a deterministic verified score. Human approves at the plan gate; everything after is automatic.
 
@@ -26,6 +26,53 @@ RunOrchestrator
   ├─ ValidationReport persistence + verifiedScore
   └─ auto-preview kickoff + test generation in background
 ```
+
+**C03C plan-gate contract (V348):** `PlanGateDecisionService` is the only plan-decision
+transaction. It records APPROVE, REJECT, and pre-approval CANCEL as distinct decisions; locks run,
+gate, outbox, optional contract report, RequirementIR, and policy rows in fixed order; persists
+byte-stable `DecisionEvidenceV1` plus the SHA-256 of canonical `DecisionRequestBytesV1`; and performs
+no filesystem, SSE, executor, or provider side effect in the transaction. Exact replay returns the
+stored receipt without re-evaluating mutable policies, while an opposite decision conflicts.
+The transaction coordinator is 400 lines after extracting the exact 73-field receipt/replay checks
+to package-private `PlanGateDecisionEvidence` (478 lines) and the locked admission/acknowledgement
+evaluation to `PlanGateDecisionAdmission` (266 lines); all three remain below the 600-line new-class
+ceiling. The decomposition's focused compile/receipt/service/architecture cohort passes 35/35, but
+C03C is now `VERIFIED`: all six independent PostgreSQL classes pass 73/73
+(12+32+18+5+5+1), the active-registry/continuation/dispatcher cohort passes 31/31, architecture
+ceilings pass, and a clean Java 21 `mvn clean verify -q` passes 5,630/5,630 with zero failures,
+errors, or skips.
+The receipt is cross-bound to the run's provider, execution mode, fixed-six-decimal
+`estimateHighUsd`, separate nullable `hardCapUsd`, expected/confirmed credits, payer, continuation,
+exact contract-report digest, and the report's typed-ack timestamp/actor/text. New C03C
+acknowledgements persist uppercase `BREAKING`. Existing pre-V348 text, including lowercase or
+whitespace, is never rewritten; APPROVE/REJECT/CANCEL snapshot the exact tuple, with REJECT/CANCEL
+outcome `NOT_EVALUATED`. A legacy client that omits `planFingerprint` is recorded
+honestly as absent with `planFingerprintMatched=null`; a supplied fingerprint must match, and an
+ENFORCED RequirementIR binding cannot be approved without one.
+APPROVE commits `PENDING → APPROVED`, `AWAITING_APPROVAL → APPROVAL_RESUMING`, and
+`WAITING → READY` together. REJECT/CANCEL cancel the run/outbox atomically; cancellation after
+approval preserves the APPROVE receipt.
+
+`PlanGateResumeDispatcher` owns the leased `WAITING → READY → PROCESSING → COMPLETED` continuation
+lifecycle. COMPLETED means the transaction handed the run to durable WORKING recovery, not that the
+run itself completed. It claims with `FOR UPDATE SKIP LOCKED`, fences owner/token/expiry, validates
+payload/schema/receipt/plan/cross-row identity, performs a leased database preflight before any
+workspace restore, renews the lease during bounded restore, then repeats the identity fence while
+atomically writing run `APPROVAL_RESUMING → WORKING` and outbox `PROCESSING → COMPLETED` before
+executor dispatch. AFTER_COMMIT, scheduled, and startup sweeps drive it; generic startup recovery
+does not submit APPROVAL_RESUMING runs. V348 blocks direct deletion of versioned gate/outbox rows
+and referenced or acknowledged contract reports while their run exists, but preserves the existing
+parent-run retention/GDPR cascade. Its report→run foreign key is `NOT VALID`: new writes are checked
+without making historical orphan reports a deployment blocker. Recovery registers each `FutureTask`
+in the active-run map before executor submission, closing the fast/inline-executor stale-handle
+race; executor rejection removes that registration. `requirement.ir.gate.mode` remains `LEGACY`.
+`PlanGateResumeStore` is 564 lines after extracting the 220-line
+`PlanGateResumeIntegrityValidator`; `PlanGateResumeDispatcher` is 475 lines and
+`ActiveRunRegistry` is 152 lines. Active-run registration now fails closed unless the durable
+ownership claim updates exactly one row, rolls back the exact new registration on zero-row claims
+or repository errors, restores a replaced prior registration on failed replacement, and prevents
+stale cleanup from removing a newer Future. C03C proves the gate-to-WORKING handoff boundary; it
+does not add per-attempt fencing to later WORKING tool/provider calls or terminal output generation.
 
 Run modes (`pipeline_run.run_mode`): **`BUILD`** (default — the diagram above) and **`PATCH`** (single thin-agent loop against a failing-test spec; skips classifier / planner / reviewer; used by the four autofix surfaces below and the SWE-bench / ProgramBench adapters).
 
@@ -154,7 +201,7 @@ When a terminal waste/failed goal decision still says another model/provider mig
 - **LLM prompts:** external files in `src/main/resources/prompts/*.md` (and rollback archives `.txt`). Assembled via `PromptAssembler.assemble(path, vars)` — resolves `{{include:fragment}}` markers from `prompts/fragments/` and `{{VAR}}` substitutions. Never use `Resource.getContentAsString()` directly in agents.
 - **Tool calling:** provider-native end-to-end. Strict JSON schemas on every entry in `tool/`. No XML `<tool_call>` parsing in V2.
 - **Naming:** `*Agent.java` for agents, `*Service.java` for services, `*Controller.java` for REST, `*Spec.java` for security specifications.
-- **DB migrations:** Flyway `V{n}__description.sql` in `src/main/resources/db/migration/` (head **V304** in the current worktree; 305 source files including historical V60_1). Applied migrations are immutable. V273–V292 retain the executable-verification, durable route, brownfield source, provider-neutral SCM, code-index, governed data, outbox, scoped-confirmation and activity-audit contracts. V293–V299 add the current enterprise/recovery contracts; V300 adds durable idempotent failed-run quota compensation; V301 snapshots the human authorization role on immutable LLM attempt intents; V302 adds preview-render bundles; V303 adds durable atomic run-submission idempotency; V304 adds per-attempt benchmark route attribution. Any future consolidation must use a clean-install baseline migration plus forward migrations; never rewrite an applied V-file. Current migration details are in [`executespec-docs/backend/architecture/CODEMAP.md`](../executespec-docs/backend/architecture/CODEMAP.md).
+- **DB migrations:** Flyway `V{n}__description.sql` in `src/main/resources/db/migration/` (head **V348**, next **V349**, **334 source files** in the current worktree). Applied migrations are immutable. V273–V299 retain the executable-verification, durable route, brownfield source, provider-neutral SCM, code-index, governed data, outbox, scoped-confirmation and activity-audit contracts. V300–V348 are forward migrations; V348 enforces canonical plan-gate decision receipts/request fingerprints and coherent run/gate/outbox handoff. Any future consolidation must use a clean-install baseline migration plus forward migrations; never rewrite an applied V-file. Current migration details are in [`executespec-docs/backend/architecture/CODEMAP.md`](../executespec-docs/backend/architecture/CODEMAP.md).
 
 Production Flyway is strict: `application-prod.yml` disables automatic baselining and out-of-order application. Recovery of an unmanaged database is an explicit operator procedure; do not enable those settings globally.
 
@@ -195,7 +242,7 @@ Standing rule from 2026-04-25: every commit must keep the project's documentatio
 
 ### Current-state corrections (2026-07-11)
 
-- The current migration head is V347; the next allocatable number is V348. Older migration references in this file are historical unless they explicitly describe their migration contracts.
+- The current migration head is V348; the next allocatable number is V349; the migration directory contains 334 source files. Older migration references in this file are historical unless they explicitly describe their migration contracts.
 - `execution.continuation.require-benchmark-prior-for-automatic-continuation` is false in the active YAML; benchmark-required continuation is an explicit opt-in.
 - Current source-size facts are RunOrchestrator 4,084 lines, `frontend/src/lib/api/core.ts` 1,927 lines, and `frontend/src/signal/pages/ExtraPages.tsx` 377 lines. Recheck before copying older debt counts.
 
@@ -280,7 +327,7 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318/v1/traces
 | POST   | `/api/runs`                           | Submit run (202). Body includes `aiProvider`, `executionMode`, `runMode`, `tddMode`, optional `userCostCap`, optional `figmaUrl`, optional `selectedRepoIds[]`, optional `requireConfirmationBeforeExpensiveContinuation`, optional `requireBenchmarkPriorForAutomaticContinuation`, optional `modelName` (ENTERPRISE per-run model pin, Beta — overrides org matrix + YAML via `RunModelOverrides.withRunPin`). |
 | GET    | `/api/runs`                           | List runs (paginated, filtered by visibility + tier).                                                                                                             |
 | GET    | `/api/runs/{id}`                      | Run detail (incl. `githubPrUrl`, `verifiedScore`, `statusReason`, `planStrategy`, per-phase costs).                                                               |
-| POST   | `/api/runs/{id}/approve`              | Plan gate approval; body `{approved, creditsConfirmed?}`. Charges credits.                                                                                        |
+| POST   | `/api/runs/{id}/approve`              | Atomic plan-gate APPROVE/REJECT; body `{approved, creditsConfirmed?, planFingerprint?, breakingChangeAck?, breakingChangeReportDigest?}`. A supplied plan fingerprint must match; omission is recorded absent/null and ENFORCED RequirementIR requires one. Typed `BREAKING` acknowledgement is stored and cross-bound in the canonical receipt. |
 | POST   | `/api/runs/{id}/pause`                | PAUSED (V168, flag `v2.pause.enabled`, default OFF).                                                                                                              |
 | POST   | `/api/runs/{id}/resume`               | Same-JVM only; workspace must exist.                                                                                                                              |
 | DELETE | `/api/runs/{id}`                      | Cancel — `RunOrchestrator.cancel(runId)`. Signals plan gate, interrupts pipeline future, closes opened PRs.                                                       |
@@ -417,6 +464,8 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318/v1/traces
 | Purpose                         | Path                                                                                                                                                                                                 |
 | ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Run orchestrator                | [`integration/RunOrchestrator.java`](src/main/java/com/navneet/executespec/integration/RunOrchestrator.java)                                                                                         |
+| Plan-gate decision              | [`integration/PlanGateDecisionService.java`](src/main/java/com/navneet/executespec/integration/PlanGateDecisionService.java) + `PlanGateDecisionEvidence` + `PlanGateDecisionAdmission` + `DecisionEvidenceV1` + `DecisionRequestBytesV1`                                                                                  |
+| Plan-gate continuation          | [`integration/PlanGateResumeDispatcher.java`](src/main/java/com/navneet/executespec/integration/PlanGateResumeDispatcher.java) + `PlanGateResumeStore`                                                                                                          |
 | Sequential executor             | [`harness/SequentialExecutor.java`](src/main/java/com/navneet/executespec/harness/SequentialExecutor.java)                                                                                           |
 | Worker agent                    | [`engine/WorkerAgent.java`](src/main/java/com/navneet/executespec/engine/WorkerAgent.java) (moved from `agent/` — Phase 4)                                                                            |
 | Outline planner                 | [`agent/OutlinePlannerAgent.java`](src/main/java/com/navneet/executespec/agent/OutlinePlannerAgent.java)                                                                                             |
@@ -455,7 +504,7 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318/v1/traces
 | Prompt assembler                | [`agent/PromptAssembler.java`](src/main/java/com/navneet/executespec/agent/PromptAssembler.java) + `prompts/fragments/*.md` + `prompts/scaffolds/*.md`                                               |
 | LLM prompts                     | `src/main/resources/prompts/*.md`                                                                                                                                                                    |
 | App config                      | `src/main/resources/application.yml`                                                                                                                                                                 |
-| DB migrations                   | `src/main/resources/db/migration/V*.sql` (head V304; 305 source files; applied V-files immutable)                                                                                                                       |
+| DB migrations                   | `src/main/resources/db/migration/V*.sql` (head V348; next V349; 334 source files; applied V-files immutable)                                                                                                                       |
 | Frontend entry                  | `frontend/src/main.tsx`                                                                                                                                                                              |
 | Frontend API client             | `frontend/src/lib/api/` (`core.ts` + domain modules)                                                                                                                                                 |
 | Observability stack             | `observability/docker-compose.yml`                                                                                                                                                                   |

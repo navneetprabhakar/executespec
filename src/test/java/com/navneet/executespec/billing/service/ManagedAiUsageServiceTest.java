@@ -589,7 +589,33 @@ class ManagedAiUsageServiceTest {
 
   @Test
   void approvalEstimateGateBypassesOwnKeys() {
-    service.assertCanApproveEstimatedSpend(userDetails(), true, 100.0);
+    ManagedAiUsageService.ApprovalEvaluation evaluation =
+        service.assertCanApproveEstimatedSpend(userDetails(), true, 100.0);
+
+    assertThat(evaluation.outcome()).isEqualTo("ALLOWED");
+    assertThat(evaluation.mode()).isEqualTo("BYOK_EXEMPT");
+    assertThat(evaluation.grantCredits()).isNull();
+    assertThat(evaluation.remainingCredits()).isNull();
+    assertThat(evaluation.estimatedCredits()).isNull();
+    assertThat(evaluation.hardRawUsd()).isNull();
+    assertThat(evaluation.remainingRawUsd()).isNull();
+    verify(periodRepo, never()).findCurrentForUpdate(anyString(), any());
+  }
+
+  @Test
+  void approvalEstimateGateUsesExplicitNullsForUnmanagedEnterpriseLimits() {
+    when(tierResolver.resolveUserTier("u1")).thenReturn("ENTERPRISE");
+
+    ManagedAiUsageService.ApprovalEvaluation evaluation =
+        service.assertCanApproveEstimatedSpend(userDetails(), false, 100.0);
+
+    assertThat(evaluation.outcome()).isEqualTo("ALLOWED");
+    assertThat(evaluation.mode()).isEqualTo("UNMANAGED_TIER");
+    assertThat(evaluation.grantCredits()).isNull();
+    assertThat(evaluation.remainingCredits()).isNull();
+    assertThat(evaluation.estimatedCredits()).isNull();
+    assertThat(evaluation.hardRawUsd()).isNull();
+    assertThat(evaluation.remainingRawUsd()).isNull();
     verify(periodRepo, never()).findCurrentForUpdate(anyString(), any());
   }
 

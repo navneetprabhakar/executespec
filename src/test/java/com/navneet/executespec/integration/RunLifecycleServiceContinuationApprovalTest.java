@@ -3,21 +3,18 @@ package com.navneet.executespec.integration;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyBoolean;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Optional;
-import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -34,7 +31,6 @@ import com.navneet.executespec.harness.ExecutionRequest;
 import com.navneet.executespec.harness.ExecutionResult;
 import com.navneet.executespec.harness.GateStore;
 import com.navneet.executespec.harness.SequentialExecutor;
-import com.navneet.executespec.harness.entity.GateRecord;
 import com.navneet.executespec.observability.Metrics;
 import com.navneet.executespec.report.ValidationReportRepository;
 import com.navneet.executespec.reviewer.ReviewerAgent;
@@ -69,6 +65,7 @@ class RunLifecycleServiceContinuationApprovalTest {
   private final AgentProperties agentProps = new AgentProperties();
   private final ObjectMapper objectMapper = new ObjectMapper();
   private final PipelineExecutorPool pool = mock(PipelineExecutorPool.class);
+  private final ExecutorService executorService = mock(ExecutorService.class);
   private final SequentialExecutor executor = mock(SequentialExecutor.class);
   private final ReviewerAgent reviewer = mock(ReviewerAgent.class);
   private final RunCostTracker costTracker = mock(RunCostTracker.class);
@@ -84,12 +81,16 @@ class RunLifecycleServiceContinuationApprovalTest {
       mock(ValidationReportRepository.class);
   private final LlmExecutionPolicyFactory llmExecutionPolicyFactory =
       mock(LlmExecutionPolicyFactory.class);
+  private final PlanGateDecisionService planGateDecisionService =
+      mock(PlanGateDecisionService.class);
+  private final PlanGateResumeStore planGateResumeStore = mock(PlanGateResumeStore.class);
 
   private RunLifecycleService service;
 
   @BeforeEach
   void setUp() {
     agentProps.setWorkspace(tempDir.toString());
+    when(pool.executor()).thenReturn(executorService);
     when(costTracker.snapshot(any())).thenReturn(new RunCostTracker.Snapshot(0, 0, 0, 0, 0.0, 0));
     service =
         new RunLifecycleService(
@@ -112,79 +113,19 @@ class RunLifecycleServiceContinuationApprovalTest {
             contextComposer,
             validationKickoff,
             modelResolver,
-            validationReportRepository);
+            validationReportRepository,
+            null,
+            null,
+            null,
+            null,
+            null,
+            llmExecutionPolicyFactory,
+            planGateDecisionService,
+            planGateResumeStore);
     when(llmExecutionPolicyFactory.forRun(any()))
         .thenReturn(
             new LlmExecutionReference(
                 "llmctx-continuation-test", LlmExecutionScope.customer("test-org")));
-    org.springframework.test.util.ReflectionTestUtils.setField(
-        service, "llmExecutionPolicyFactory", llmExecutionPolicyFactory);
-  }
-
-  @Test
-  void planApproval_isIdempotentAndQueuesExactlyOneResume() throws Exception {
-    Files.createDirectories(tempDir.resolve(RUN_ID));
-    PipelineRun run = approvedPlanRun("AWAITING_APPROVAL");
-    when(runRepo.findById(RUN_ID)).thenReturn(Optional.of(run));
-    when(gateStore.claimPlanGate(RUN_ID, true))
-        .thenReturn(GateStore.PlanGateClaim.CLAIMED)
-        .thenReturn(GateStore.PlanGateClaim.ALREADY_APPROVED);
-    when(gateStore.findPlanGate(RUN_ID)).thenReturn(Optional.of(approvedGate()));
-    when(runRepo.claimApprovalResume(eq(RUN_ID), any())).thenReturn(1);
-    when(pool.submit(any(Runnable.class))).thenReturn(CompletableFuture.completedFuture(null));
-
-    assertThat(service.resolvePlanGate(RUN_ID, true))
-        .isEqualTo(RunLifecycleService.PlanApprovalOutcome.RESUME_QUEUED);
-    assertThat(service.resolvePlanGate(RUN_ID, true))
-        .isEqualTo(RunLifecycleService.PlanApprovalOutcome.ALREADY_RESOLVED);
-
-    verify(pool, times(1)).submit(any(Runnable.class));
-    verify(controlPort, times(1)).putActiveRun(eq(RUN_ID), any());
-  }
-
-  @Test
-  void approvedGateReplayAfterCrashQueuesTheMissingContinuation() throws Exception {
-    Files.createDirectories(tempDir.resolve(RUN_ID));
-    PipelineRun run = approvedPlanRun("AWAITING_APPROVAL");
-    when(runRepo.findById(RUN_ID)).thenReturn(Optional.of(run));
-    when(gateStore.claimPlanGate(RUN_ID, true))
-        .thenReturn(GateStore.PlanGateClaim.ALREADY_APPROVED);
-    when(gateStore.findPlanGate(RUN_ID)).thenReturn(Optional.of(approvedGate()));
-    when(runRepo.claimApprovalResume(eq(RUN_ID), any())).thenReturn(1);
-    when(pool.submit(any(Runnable.class))).thenReturn(CompletableFuture.completedFuture(null));
-
-    assertThat(service.resolvePlanGate(RUN_ID, true))
-        .isEqualTo(RunLifecycleService.PlanApprovalOutcome.RESUME_QUEUED);
-
-    verify(pool).submit(any(Runnable.class));
-    verify(controlPort).putActiveRun(eq(RUN_ID), any());
-  }
-
-  @Test
-  void duplicateApprovalAfterRunProgressedIsAnIdempotentNoOp() throws Exception {
-    PipelineRun run = approvedPlanRun("WORKING");
-    when(runRepo.findById(RUN_ID)).thenReturn(Optional.of(run));
-    when(gateStore.findPlanGate(RUN_ID)).thenReturn(Optional.of(approvedGate()));
-
-    assertThat(service.resolvePlanGate(RUN_ID, true))
-        .isEqualTo(RunLifecycleService.PlanApprovalOutcome.ALREADY_RESOLVED);
-
-    verify(gateStore, never()).claimPlanGate(anyString(), anyBoolean());
-    verify(pool, never()).submit(any(Runnable.class));
-  }
-
-  @Test
-  void cancelWithoutLocalGateWaiter_releasesTransientGateSignal() {
-    when(runRepo.findById(RUN_ID))
-        .thenReturn(
-            Optional.of(PipelineRun.builder().runId(RUN_ID).status("AWAITING_APPROVAL").build()));
-    when(runRepo.claimTerminalTransitionWithReasons(
-            eq(RUN_ID), eq("CANCELLED"), isNull(), any(), any()))
-        .thenReturn(1);
-    assertThat(service.cancel(RUN_ID)).isTrue();
-
-    verify(gateStore).setPlanGate(RUN_ID, false);
-    verify(gateStore).clearPlanGate(RUN_ID);
   }
 
   @Test
@@ -221,56 +162,48 @@ class RunLifecycleServiceContinuationApprovalTest {
   }
 
   @Test
-  void restartRecovery_queuesApprovedPersistedPlanWithoutReplanning() throws Exception {
-    Files.createDirectories(tempDir.resolve(RUN_ID));
-    PipelineRun run = approvedPlanRun("AWAITING_APPROVAL");
-    GateRecord gate = approvedGate();
-    when(runRepo.findById(RUN_ID)).thenReturn(Optional.of(run));
-    when(gateStore.findPlanGate(RUN_ID)).thenReturn(Optional.of(gate));
-    when(runRepo.claimApprovalResume(eq(RUN_ID), any())).thenReturn(1);
-    ArgumentCaptor<Runnable> runnable = ArgumentCaptor.forClass(Runnable.class);
-    when(pool.submit(runnable.capture())).thenReturn(CompletableFuture.completedFuture(null));
+  void cancellationFallsThroughWhenConcurrentApprovalWinsTheDecisionLock() {
+    PipelineRun optimistic =
+        PipelineRun.builder().runId(RUN_ID).status("AWAITING_APPROVAL").build();
+    PipelineRun approved = PipelineRun.builder().runId(RUN_ID).status("APPROVAL_RESUMING").build();
+    when(runRepo.findById(RUN_ID)).thenReturn(Optional.of(optimistic), Optional.of(approved));
+    when(planGateDecisionService.cancel(eq(RUN_ID), isNull(), any(), any()))
+        .thenReturn(
+            new PlanGateDecisionService.DecisionResult(
+                approved, PlanGateDecisionService.DecisionKind.APPROVE, null, true));
+    when(planGateResumeStore.cancelApprovedRun(eq(RUN_ID), any(), any())).thenReturn(true);
 
-    assertThat(service.recoverPlanGate(RUN_ID))
-        .isEqualTo(RunLifecycleService.PlanApprovalOutcome.RESUME_QUEUED);
-    runnable.getValue().run();
+    assertThat(service.cancel(RUN_ID)).isTrue();
 
-    ArgumentCaptor<RunOrchestrator.RunPipelineRequest> request =
-        ArgumentCaptor.forClass(RunOrchestrator.RunPipelineRequest.class);
-    verify(controlPort).runPipelineForResume(request.capture());
-    assertThat(request.getValue().skipApproval()).isTrue();
-    assertThat(request.getValue().planGateContinuation()).isNotNull();
-    assertThat(request.getValue().planGateContinuation().localRun()).isTrue();
-    assertThat(request.getValue().planGateContinuation().pinnedModel()).isEqualTo("pinned-model");
+    verify(planGateResumeStore).cancelApprovedRun(eq(RUN_ID), any(), any());
+    verify(runRepo, never()).claimTerminalTransitionWithReasons(any(), any(), any(), any(), any());
+    verify(broadcaster).complete(RUN_ID);
   }
 
-  @Test
-  void approvalCannotResurrectRunCancelledAfterInitialStateRead() throws Exception {
-    Files.createDirectories(tempDir.resolve(RUN_ID));
-    PipelineRun run = approvedPlanRun("AWAITING_APPROVAL");
-    when(runRepo.findById(RUN_ID)).thenReturn(Optional.of(run));
-    when(gateStore.claimPlanGate(RUN_ID, true)).thenReturn(GateStore.PlanGateClaim.CLAIMED);
-    when(gateStore.findPlanGate(RUN_ID)).thenReturn(Optional.of(approvedGate()));
-    // Cancellation (or another terminal lifecycle action) won the atomic status transition.
-    when(runRepo.claimApprovalResume(eq(RUN_ID), any())).thenReturn(0);
-
-    assertThat(service.resolvePlanGate(RUN_ID, true))
-        .isEqualTo(RunLifecycleService.PlanApprovalOutcome.INVALID_STATE);
-    verify(pool, never()).submit(any(Runnable.class));
-    verify(controlPort, never()).putActiveRun(eq(RUN_ID), any());
-  }
-
-  /**
-   * RR-479 — a run the customer submitted as local-hands must never be retried through the
-   * server-side worker/tool path. With no usable local transport the retry is refused visibly and
-   * nothing is dispatched.
-   */
+  /** A local-hands run must never be retried through the server-side tool path. */
   @Test
   void localHandsRunRetryIsRefusedInsteadOfFallingBackToServerExecution() throws Exception {
     Files.createDirectories(tempDir.resolve(RUN_ID));
-    PipelineRun run = approvedPlanRun("PARTIAL");
-    run.setLocalExecutionRequested(true);
+    PipelineRun run =
+        PipelineRun.builder()
+            .runId(RUN_ID)
+            .status("PARTIAL")
+            .userRequest("implement feature")
+            .planJson(
+                """
+                {
+                  "planTitle": "Approved plan",
+                  "planSummary": "",
+                  "tasks": [{"id": "T1", "title": "Implement", "description": ""}]
+                }
+                """)
+            .aiProvider("deepseek")
+            .workerModel("deepseek-chat")
+            .approvedExecutionMode("REALTIME")
+            .localExecutionRequested(true)
+            .build();
     when(runRepo.findById(RUN_ID)).thenReturn(Optional.of(run));
+
     assertThatThrownBy(() -> service.retryTask(RUN_ID, TASK_ID))
         .isInstanceOf(IllegalStateException.class)
         .hasMessageContaining("local hands");
@@ -280,33 +213,40 @@ class RunLifecycleServiceContinuationApprovalTest {
     verify(taskRepo, never()).save(any());
   }
 
-  private PipelineRun approvedPlanRun(String status) {
-    return PipelineRun.builder()
-        .runId(RUN_ID)
-        .status(status)
-        .userRequest("implement feature")
-        .planJson(
-            """
-            {
-              "planTitle": "Approved plan",
-              "planSummary": "",
-              "tasks": [{"id": "T1", "title": "Implement", "description": ""}]
-            }
-            """)
-        .aiProvider("deepseek")
-        .workerModel("deepseek-chat")
-        .approvedExecutionMode("REALTIME")
-        .build();
+  @Test
+  void crashRecoveryRehydratesTheExactCompletedPlanGateContinuation() throws Exception {
+    String payload =
+        objectMapper.writeValueAsString(
+            new PlanGateContinuation(1, true, true, false, "pinned-model", "WORKHORSE"));
+    when(planGateResumeStore.completedContinuation(RUN_ID))
+        .thenReturn(
+            Optional.of(
+                new PlanGateResumeStore.ContinuationPayload(
+                    payload, DecisionEvidenceV1.sha256(payload), 1)));
+
+    PlanGateContinuation restored =
+        service.persistedPlanGateContinuation(PipelineRun.builder().runId(RUN_ID).build());
+
+    assertThat(restored.localRun()).isTrue();
+    assertThat(restored.requireContinuationConfirmation()).isTrue();
+    assertThat(restored.requireContinuationBenchmarkPrior()).isFalse();
+    assertThat(restored.pinnedModel()).isEqualTo("pinned-model");
+    assertThat(restored.lowComplexityWorkerStartTierOverride()).isEqualTo("WORKHORSE");
   }
 
-  private GateRecord approvedGate() throws Exception {
-    GateRecord gate = GateRecord.pending("gate:plan:" + RUN_ID, RUN_ID, "PLAN");
-    gate.setStatus("APPROVED");
-    gate.setComment(
-        objectMapper.writeValueAsString(
-            new RunOrchestrator.PlanGateContinuation(
-                1, true, true, false, "pinned-model", "WORKHORSE")));
-    return gate;
+  @Test
+  void crashRecoveryFailsClosedOnCorruptCompletedContinuation() {
+    when(planGateResumeStore.completedContinuation(RUN_ID))
+        .thenReturn(
+            Optional.of(
+                new PlanGateResumeStore.ContinuationPayload(
+                    "{\"schemaVersion\":1}", "0".repeat(64), 1)));
+
+    assertThatThrownBy(
+            () ->
+                service.persistedPlanGateContinuation(PipelineRun.builder().runId(RUN_ID).build()))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("identity validation");
   }
 
   @Test
@@ -348,7 +288,7 @@ class RunLifecycleServiceContinuationApprovalTest {
     when(taskRepo.findById(TASK_KEY)).thenReturn(Optional.of(task));
     when(runRepo.findById(RUN_ID)).thenReturn(Optional.of(run));
     ArgumentCaptor<Runnable> runnable = ArgumentCaptor.forClass(Runnable.class);
-    when(pool.submit(runnable.capture())).thenReturn(CompletableFuture.completedFuture(null));
+    org.mockito.Mockito.doNothing().when(executorService).execute(runnable.capture());
     when(contextComposer.buildMultiRepoSummary(any(), any())).thenReturn("workspace");
     when(executor.execute(any(ExecutionRequest.class), any(SequentialExecutor.ResumeRequest.class)))
         .thenReturn(ExecutionResult.builder().overall(ExecutionResult.Overall.ALL_SUCCESS).build());
@@ -420,7 +360,7 @@ class RunLifecycleServiceContinuationApprovalTest {
     when(taskRepo.findById(TASK_KEY)).thenReturn(Optional.of(task));
     when(runRepo.findById(RUN_ID)).thenReturn(Optional.of(run));
     ArgumentCaptor<Runnable> runnable = ArgumentCaptor.forClass(Runnable.class);
-    when(pool.submit(runnable.capture())).thenReturn(CompletableFuture.completedFuture(null));
+    org.mockito.Mockito.doNothing().when(executorService).execute(runnable.capture());
     when(contextComposer.buildMultiRepoSummary(any(), any())).thenReturn("workspace");
     when(executor.execute(any(ExecutionRequest.class), any(SequentialExecutor.ResumeRequest.class)))
         .thenReturn(ExecutionResult.builder().overall(ExecutionResult.Overall.ALL_SUCCESS).build());
@@ -500,7 +440,7 @@ class RunLifecycleServiceContinuationApprovalTest {
     when(taskRepo.findById(TASK_KEY)).thenReturn(Optional.of(task));
     when(runRepo.findById(RUN_ID)).thenReturn(Optional.of(run));
     ArgumentCaptor<Runnable> runnable = ArgumentCaptor.forClass(Runnable.class);
-    when(pool.submit(runnable.capture())).thenReturn(CompletableFuture.completedFuture(null));
+    org.mockito.Mockito.doNothing().when(executorService).execute(runnable.capture());
     when(contextComposer.buildMultiRepoSummary(any(), any())).thenReturn("workspace");
     when(executor.execute(any(ExecutionRequest.class), any(SequentialExecutor.ResumeRequest.class)))
         .thenReturn(ExecutionResult.builder().overall(ExecutionResult.Overall.ALL_SUCCESS).build());
@@ -569,7 +509,7 @@ class RunLifecycleServiceContinuationApprovalTest {
     when(taskRepo.findById(TASK_KEY)).thenReturn(Optional.of(task));
     when(runRepo.findById(RUN_ID)).thenReturn(Optional.of(run));
     ArgumentCaptor<Runnable> runnable = ArgumentCaptor.forClass(Runnable.class);
-    when(pool.submit(runnable.capture())).thenReturn(CompletableFuture.completedFuture(null));
+    org.mockito.Mockito.doNothing().when(executorService).execute(runnable.capture());
     when(contextComposer.buildMultiRepoSummary(any(), any())).thenReturn("workspace");
     when(executor.execute(any(ExecutionRequest.class), any(SequentialExecutor.ResumeRequest.class)))
         .thenReturn(retryResult);

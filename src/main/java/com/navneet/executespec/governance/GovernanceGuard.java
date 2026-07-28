@@ -68,10 +68,23 @@ public class GovernanceGuard {
    * @param caller who's clicking Approve.
    */
   public void assertCanApproveCost(String orgId, double estimatedUsd, AppUserDetails caller) {
-    if (orgId == null || isSuperAdmin(caller)) return;
-    if (isOrgAdminOrBilling(caller)) return;
+    evaluateApprovalCost(orgId, estimatedUsd, caller);
+  }
+
+  /** Returns the exact org threshold evaluated by plan admission, or null when none applies. */
+  public OrgCostEvaluation evaluateApprovalCost(
+      String orgId, double estimatedUsd, AppUserDetails caller) {
+    if (orgId == null) return new OrgCostEvaluation("ALLOWED", null, estimatedUsd, "NO_ORG");
+    if (isSuperAdmin(caller)) {
+      return new OrgCostEvaluation("ALLOWED", null, estimatedUsd, "SUPER_ADMIN_BYPASS");
+    }
+    if (isOrgAdminOrBilling(caller)) {
+      return new OrgCostEvaluation("ALLOWED", null, estimatedUsd, "PRIVILEGED_ACTOR");
+    }
     Org org = orgRepo.findById(orgId).orElse(null);
-    if (org == null || org.getRequireAdminApprovalAboveUsd() == null) return;
+    if (org == null || org.getRequireAdminApprovalAboveUsd() == null) {
+      return new OrgCostEvaluation("ALLOWED", null, estimatedUsd, "NO_THRESHOLD");
+    }
     BigDecimal threshold = org.getRequireAdminApprovalAboveUsd();
     if (BigDecimal.valueOf(estimatedUsd).compareTo(threshold) > 0) {
       log.warn(
@@ -89,6 +102,7 @@ public class GovernanceGuard {
               + String.format("%.2f", estimatedUsd)
               + ".");
     }
+    return new OrgCostEvaluation("ALLOWED", threshold, estimatedUsd, "BELOW_THRESHOLD");
   }
 
   /**
@@ -100,9 +114,20 @@ public class GovernanceGuard {
    * @param estimatedUsd the buffered cost estimate for this run.
    */
   public void assertProjectSpendCap(String projectId, double estimatedUsd) {
-    if (projectId == null) return;
+    evaluateProjectSpendCap(projectId, estimatedUsd);
+  }
+
+  /** Returns the exact cap/current/projected values evaluated by plan admission. */
+  public ProjectSpendEvaluation evaluateProjectSpendCap(String projectId, double estimatedUsd) {
+    if (projectId == null) {
+      return new ProjectSpendEvaluation(
+          "ALLOWED", null, BigDecimal.ZERO, BigDecimal.valueOf(estimatedUsd), "NO_PROJECT");
+    }
     Project project = projectRepo.findById(projectId).orElse(null);
-    if (project == null || project.getSpendCapUsdMonthly() == null) return;
+    if (project == null || project.getSpendCapUsdMonthly() == null) {
+      return new ProjectSpendEvaluation(
+          "ALLOWED", null, BigDecimal.ZERO, BigDecimal.valueOf(estimatedUsd), "NO_CAP");
+    }
     BigDecimal cap = project.getSpendCapUsdMonthly();
 
     Instant monthStart =
@@ -134,7 +159,19 @@ public class GovernanceGuard {
               + String.format("%.2f", projected)
               + ". Ask the project owner to raise the cap or split the work.");
     }
+    return new ProjectSpendEvaluation(
+        "ALLOWED", cap, BigDecimal.valueOf(mtdSpend), BigDecimal.valueOf(projected), "WITHIN_CAP");
   }
+
+  public record OrgCostEvaluation(
+      String outcome, BigDecimal thresholdUsd, Double estimateUsd, String reason) {}
+
+  public record ProjectSpendEvaluation(
+      String outcome,
+      BigDecimal capUsd,
+      BigDecimal monthToDateUsd,
+      BigDecimal projectedUsd,
+      String reason) {}
 
   private double projectMtdSpend(String projectId, Instant monthStart) {
     // Cheaper than loading every run — sum the cost column directly.

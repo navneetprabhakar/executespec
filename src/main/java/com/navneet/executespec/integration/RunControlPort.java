@@ -20,9 +20,27 @@ interface RunControlPort {
   void putActiveRun(String runId, Future<?> future);
 
   /**
+   * Register a cancellable Future whose durable heartbeat is owned by a dedicated protocol. Generic
+   * runtime heartbeat refresh must not cancel it merely because the normal runtime owner has not
+   * been installed yet.
+   */
+  void putExternallyHeartbeatedActiveRun(String runId, Future<?> future);
+
+  /** Transfer an exact registered Future from protocol-owned to normal runtime heartbeats. */
+  boolean adoptRuntimeHeartbeat(String runId, Future<?> expectedFuture);
+
+  /**
    * Remove + return the in-flight pipeline {@link Future} for {@code runId} ({@code null} if none).
    */
   Future<?> removeActiveRun(String runId);
+
+  /**
+   * Remove the active-run registration only when it is still the caller's exact future.
+   *
+   * <p>Completion cleanup must use this compare-and-remove form. A key-only removal can delete a
+   * newer recovery registration when an older future finishes after ownership was replaced.
+   */
+  boolean removeActiveRun(String runId, Future<?> expectedFuture);
 
   /** Resume entry into the canonical (staying) {@code runPipeline} 11-arg overload. */
   void runPipelineForResume(RunOrchestrator.RunPipelineRequest req);

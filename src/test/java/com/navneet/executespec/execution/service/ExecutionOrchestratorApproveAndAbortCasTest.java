@@ -132,7 +132,6 @@ class ExecutionOrchestratorApproveAndAbortCasTest {
 
     orchestrator.projectApprovedPlan("exec-1", "run-1");
 
-    verify(runLifecycleService, never()).resolvePlanGate("run-1", true);
     verify(pipelineRunRepo).findById("run-1");
     assertThat(row.getPlanApprovedAt()).isNotNull();
   }
