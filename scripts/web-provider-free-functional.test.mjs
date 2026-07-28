@@ -7,6 +7,10 @@ const launcher = await readFile(
   new URL('./run-web-provider-free-functional.sh', import.meta.url),
   'utf8',
 );
+const profile = await readFile(
+  new URL('../src/main/resources/application-web-qa.yml', import.meta.url),
+  'utf8',
+);
 
 test('browser functional harness is fail-closed to the provider-free web-qa profile', () => {
   assert.match(browser, /fixture\.safety\?\.safe !== true/);
@@ -83,4 +87,8 @@ test('launcher uses disposable services and allowlisted process environments', (
   assert.match(launcher, /EXECUTESPEC_QA_SUPERADMIN_EMAIL/);
   assert.match(launcher, /EXECUTESPEC_QA_SUPERADMIN_PASSWORD/);
   assert.match(launcher, /npm run qa:cli-behavior/);
+});
+
+test('provider-free profile disables deployment credential discovery', () => {
+  assert.match(profile, /deployment:\n(?:[^\n]*\n)*?\s+enabled: false/);
 });
