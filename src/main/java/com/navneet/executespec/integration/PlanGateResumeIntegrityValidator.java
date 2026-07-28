@@ -111,7 +111,7 @@ class PlanGateResumeIntegrityValidator {
         || !Objects.equals(evidence.billingOwnerUserId(), gate.getBillingOwnerUserId())
         || !Objects.equals(evidence.billingOwnerUserId(), run.getCreatedByUserId())
         || !Objects.equals(evidence.billingOrgId(), gate.getBillingOrgId())
-        || !Objects.equals(evidence.billingOrgId(), run.getOrgId())
+        || !Objects.equals(evidence.billingOrgId(), run.getBillingOrgId())
         || !Objects.equals(evidence.executionMode(), normalizedExecutionMode(run))
         || !Objects.equals(evidence.provider(), normalizedProvider(run.getAiProvider()))
         || !Objects.equals(evidence.estimateHighUsd(), estimateHighUsd(run))

@@ -312,7 +312,7 @@ describe('protected transcript visual contract', () => {
     expect(gate).not.toBeNull();
     expect(gate?.querySelector('.agent-card-actions')?.children).toHaveLength(3);
     expect(gate?.querySelector('button')?.textContent).toContain('Add a deliberately long');
-    expect(gate?.textContent).toContain('Approve & run');
+    expect(gate?.textContent).toContain('Review & approve');
     expect(gate?.textContent).toContain('Open full plan');
   });
 

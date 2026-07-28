@@ -1,9 +1,11 @@
 package com.navneet.executespec.finding;
 
 import java.util.List;
-import java.util.Optional;
 
+import com.navneet.executespec.auth.entity.AppUser;
+import com.navneet.executespec.auth.entity.Project;
 import com.navneet.executespec.auth.repository.AppUserRepository;
+import com.navneet.executespec.auth.repository.ProjectRepository;
 import com.navneet.executespec.integration.RunOrchestrator;
 import com.navneet.executespec.state.RunMode;
 import com.navneet.executespec.state.entity.PipelineRun;
@@ -31,10 +33,10 @@ import lombok.extern.slf4j.Slf4j;
  *   <li>Dedupes against any existing active patch run for the same {@link Finding#findingKey()}. If
  *       one is in-flight, returns it without dispatching a duplicate (prevents double-PRs from
  *       impatient operators or duplicate webhooks).
- *   <li>Calls {@link RunOrchestrator#submitRun} with {@code runMode=PATCH} + {@code source} =
- *       {@code "finding:<TYPE>"} so the orchestrator's terminal-time push logic can distinguish
- *       project-mode finding patches (push to remote) from bench-mode runs (no push — bench
- *       services capture the diff themselves).
+ *   <li>Calls {@link RunOrchestrator#submitRunWithLocalExecution} with {@code runMode=PATCH} +
+ *       {@code source} = {@code "finding:<TYPE>"} so the orchestrator's terminal-time push logic
+ *       can distinguish project-mode finding patches (push to remote) from bench-mode runs (no push
+ *       — bench services capture the diff themselves).
  *   <li>Stamps {@code triggered_by_finding} on the run row immediately after persistence so the
  *       dedupe lookup, the dashboard ribbon, and per-finding cost telemetry can all read it before
  *       the async pipeline thread reaches a checkpoint.
@@ -51,6 +53,7 @@ public class FindingPatchSubmitter {
   private final RunOrchestrator orchestrator;
   private final PipelineRunRepository runRepo;
   private final AppUserRepository userRepo;
+  private final ProjectRepository projectRepo;
 
   /**
    * Result of {@link #submit(Finding)}. Either {@link Outcome#DISPATCHED} (a fresh run was created)
@@ -69,7 +72,13 @@ public class FindingPatchSubmitter {
    * targeting the same finding key.
    */
   public SubmitResult submit(Finding finding) {
+    if (finding == null) throw new IllegalArgumentException("finding is required");
     String key = finding.findingKey();
+
+    // Resolve both authorities before even returning a deduped run id. The surface caller has
+    // already authorized the finding action; this boundary still fails closed when its durable
+    // actor/project records are missing or no longer eligible for work.
+    SubmissionTenancy tenancy = resolveSubmissionTenancy(finding);
 
     // 1. Dedupe — if there's an active run for this finding, reuse it.
     List<PipelineRun> active = runRepo.findActiveByTriggeredByFinding(key);
@@ -83,17 +92,13 @@ public class FindingPatchSubmitter {
       return new SubmitResult(SubmitResult.Outcome.REUSED_ACTIVE, existing.getRunId(), key);
     }
 
-    // 2. Resolve user's org so the run row's tenant fields are populated.
-    String orgId =
-        Optional.ofNullable(finding.userId())
-            .flatMap(userRepo::findById)
-            .map(u -> u.getOrgId())
-            .orElse(null);
-
-    // 3. Submit through the orchestrator.
+    // 2. Submit through the server-internal PATCH route. The host project's org owns the data
+    // boundary; the actor's home org remains the payer, credential and provider-policy authority.
+    // This deliberately does not enter CustomerRunSubmissionService, whose admission contract is
+    // BUILD-only and would incorrectly reclassify an already-authorized finding automation.
     String source = "finding:" + finding.type().name();
     PipelineRun run =
-        orchestrator.submitRun(
+        orchestrator.submitRunWithLocalExecution(
             finding.userPrompt(),
             /* source */ source,
             /* repoUrl */ null,
@@ -105,7 +110,7 @@ public class FindingPatchSubmitter {
             /* modelName */ null,
             /* aiProvider */ finding.aiProvider(),
             /* createdByUserId */ finding.userId(),
-            /* orgId */ orgId,
+            /* orgId */ tenancy.billingOrgId(),
             /* projectId */ finding.projectId(),
             /* executionMode */ "PROTOTYPE",
             /* selectedRepoIds */ finding.selectedRepoIds(),
@@ -113,9 +118,18 @@ public class FindingPatchSubmitter {
             /* tddMode */ false,
             /* branchOverride */ finding.branchOverride(),
             /* prReviewComments */ null,
-            /* runMode */ RunMode.PATCH);
+            /* runMode */ RunMode.PATCH,
+            /* requireConfirmationBeforeExpensiveContinuation */ null,
+            /* requireBenchmarkPriorForAutomaticContinuation */ null,
+            /* lowComplexityWorkerStartTier */ null,
+            /* localExecutionRequested */ false,
+            new RunOrchestrator.SubmitPolicy(
+                /* userCostCap */ null,
+                /* skipAutoPush */ false,
+                tenancy.tenantOrgId(),
+                tenancy.billingOrgId()));
 
-    // 4. Stamp the finding key on the row.
+    // 3. Stamp the finding key on the row.
     runRepo
         .findById(run.getRunId())
         .ifPresent(
@@ -134,4 +148,41 @@ public class FindingPatchSubmitter {
 
     return new SubmitResult(SubmitResult.Outcome.DISPATCHED, run.getRunId(), key);
   }
+
+  private SubmissionTenancy resolveSubmissionTenancy(Finding finding) {
+    AppUser actor =
+        userRepo
+            .findById(finding.userId())
+            .orElseThrow(
+                () ->
+                    new IllegalStateException(
+                        "Finding PATCH actor does not exist: " + finding.userId()));
+    String billingOrgId = requireOrgId(actor.getOrgId(), "Finding PATCH actor");
+    if (!"ACTIVE".equals(actor.getStatus())) {
+      throw new IllegalStateException("Finding PATCH actor is not active: " + finding.userId());
+    }
+
+    Project project =
+        projectRepo
+            .findById(finding.projectId())
+            .orElseThrow(
+                () ->
+                    new IllegalStateException(
+                        "Finding PATCH project does not exist: " + finding.projectId()));
+    String tenantOrgId = requireOrgId(project.getOrgId(), "Finding PATCH project");
+    if (!"ACTIVE".equals(project.getStatus()) || project.getDeletedAt() != null) {
+      throw new IllegalStateException(
+          "Finding PATCH project is not active: " + finding.projectId());
+    }
+    return new SubmissionTenancy(tenantOrgId, billingOrgId);
+  }
+
+  private static String requireOrgId(String orgId, String owner) {
+    if (orgId == null || orgId.isBlank()) {
+      throw new IllegalStateException(owner + " has no organization");
+    }
+    return orgId;
+  }
+
+  private record SubmissionTenancy(String tenantOrgId, String billingOrgId) {}
 }

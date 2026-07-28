@@ -54,6 +54,19 @@ class AgentActionCatalogTest {
   }
 
   @Test
+  void cloudRunConfirmationRequiresExactRepositorySelection() {
+    var createRun =
+        catalog.capabilities("WEB", "FREE").stream()
+            .filter(c -> c.name().equals("create_cloud_run"))
+            .findFirst()
+            .orElseThrow();
+
+    java.util.List<?> required = (java.util.List<?>) createRun.inputSchema().get("required");
+    assertThat(required.stream().map(String::valueOf).toList())
+        .contains("spec", "projectId", "selectedRepoIds");
+  }
+
+  @Test
   void actionDescriptorsStayAlignedWithCapabilityMetadata() {
     var capabilitiesByName =
         catalog.allCapabilities().stream()

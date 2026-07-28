@@ -41,6 +41,23 @@ public class RunIdempotencyService {
   private final long ttlMillis;
   private final String owner = "es-" + UUID.randomUUID();
 
+  public enum CompletionStatus {
+    NOT_REQUIRED,
+    PUBLISHED,
+    ALREADY_PUBLISHED,
+    FENCED_TO_OTHER_RUN,
+    FENCED_UNRESOLVED
+  }
+
+  /** Authoritative result of publishing a created run under an owned claim. */
+  public record Completion(CompletionStatus status, String canonicalRunId) {
+    public boolean authoritative() {
+      return status == CompletionStatus.NOT_REQUIRED
+          || status == CompletionStatus.PUBLISHED
+          || status == CompletionStatus.ALREADY_PUBLISHED;
+    }
+  }
+
   public RunIdempotencyService(
       RunSubmissionClaimStore store,
       @Value("${run.idempotency.lease-millis:120000}") long leaseMillis,
@@ -119,21 +136,60 @@ public class RunIdempotencyService {
     };
   }
 
-  /** Publish the run created under this claim. */
-  public void complete(RunIdempotencyClaim claim, String runId) {
-    if (!claim.owned() || isBlank(runId)) return;
-    boolean published =
-        store.complete(
-            claim.actorId(), claim.idempotencyKey(), claim.owner(), claim.fencingToken(), runId);
-    if (!published) {
-      // Fenced out: this claim's lease elapsed and another JVM legitimately took over. The run we
-      // created is now an orphan. Surfaced loudly rather than silently ignored.
-      log.warn(
-          "Run idempotency claim for key {} was superseded before completion; run {} is orphaned."
-              + " Increase run.idempotency.lease-millis if this recurs.",
-          claim.idempotencyKey(),
-          runId);
+  /**
+   * Publish the run created under this claim and report the durable binding authoritatively.
+   * Callers must not return a newly created run when this result is non-authoritative.
+   */
+  public Completion complete(RunIdempotencyClaim claim, String runId) {
+    if (claim == null || !claim.owned()) {
+      return new Completion(CompletionStatus.NOT_REQUIRED, runId);
     }
+    if (isBlank(runId)) throw new IllegalArgumentException("runId is required to complete a claim");
+    try {
+      if (store.complete(
+          claim.actorId(), claim.idempotencyKey(), claim.owner(), claim.fencingToken(), runId)) {
+        return new Completion(CompletionStatus.PUBLISHED, runId);
+      }
+    } catch (RuntimeException completionFailure) {
+      log.error(
+          "Run idempotency completion write failed key={} run={} failureType={}",
+          claim.idempotencyKey(),
+          runId,
+          completionFailure.getClass().getSimpleName());
+    }
+
+    // The write either lost its fence or its acknowledgement. Re-read durable truth: an ACK-loss
+    // after a committed UPDATE is safe when the row names this run; a different run is canonical.
+    Optional<RunSubmissionClaimStore.Record> durable;
+    try {
+      durable = store.find(claim.actorId(), claim.idempotencyKey());
+    } catch (RuntimeException readFailure) {
+      log.error(
+          "Run idempotency completion could not be reconciled key={} run={} failureType={}",
+          claim.idempotencyKey(),
+          runId,
+          readFailure.getClass().getSimpleName());
+      return new Completion(CompletionStatus.FENCED_UNRESOLVED, null);
+    }
+    if (durable.isPresent()
+        && RunSubmissionClaimStore.STATE_COMPLETED.equals(durable.get().state())
+        && !isBlank(durable.get().runId())) {
+      if (runId.equals(durable.get().runId())) {
+        return new Completion(CompletionStatus.ALREADY_PUBLISHED, runId);
+      }
+      log.warn(
+          "Run idempotency claim key={} was fenced to canonical run={} instead of created run={}",
+          claim.idempotencyKey(),
+          durable.get().runId(),
+          runId);
+      return new Completion(CompletionStatus.FENCED_TO_OTHER_RUN, durable.get().runId());
+    }
+    log.warn(
+        "Run idempotency claim key={} lost completion authority for created run={} without a"
+            + " canonical completed row",
+        claim.idempotencyKey(),
+        runId);
+    return new Completion(CompletionStatus.FENCED_UNRESOLVED, null);
   }
 
   /** Release the claim so a later retry of the same body may proceed (transient failure). */

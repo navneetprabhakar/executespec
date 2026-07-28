@@ -240,6 +240,8 @@ export interface AgentRunConfirmationRequest {
   sessionId: string;
   turnId: string;
   confirmed: boolean;
+  /** Exact linked-repository boundary. Empty means the project has no linked repositories. */
+  selectedRepoIds: string[];
   aiProvider?: string | null;
   modelName?: string | null;
   userCostCap?: number | null;

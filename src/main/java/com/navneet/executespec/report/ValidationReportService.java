@@ -1061,6 +1061,8 @@ public class ValidationReportService {
             runStatus(reportRun),
             entity.getPipelineResult(),
             verificationLedger),
+        goalProofEvaluator.evidenceReferences(
+            runStatus(reportRun), entity.getPipelineResult(), verificationLedger),
         effectiveRubricScore,
         entity.getPreviewUrl());
   }

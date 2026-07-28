@@ -1,6 +1,7 @@
 package com.navneet.executespec.execution.repository;
 
 import java.util.List;
+import java.util.Optional;
 
 import com.navneet.executespec.execution.entity.ExecutionSolutionRun;
 
@@ -10,7 +11,10 @@ public interface ExecutionSolutionRunRepository
     extends JpaRepository<ExecutionSolutionRun, String> {
   List<ExecutionSolutionRun> findBySolutionIdOrderByAttemptNumberAsc(String solutionId);
 
-  int countBySolutionId(String solutionId);
+  Optional<ExecutionSolutionRun> findBySolutionIdAndAttemptNumber(
+      String solutionId, int attemptNumber);
+
+  Optional<ExecutionSolutionRun> findByPipelineRunId(String pipelineRunId);
 
   /**
    * 2026-05-13 PR-A — every {@code pipeline_run_id} ever spawned for any solution of an execution.

@@ -16,11 +16,15 @@ public class RequirementGateBindingService {
 
   private final RunRequirementContractRepository repository;
   private final RequirementIrCodec codec;
+  private final RequirementIrApprovalCompatibilityRegistry compatibilityRegistry;
 
   public RequirementGateBindingService(
-      RunRequirementContractRepository repository, ObjectMapper objectMapper) {
+      RunRequirementContractRepository repository,
+      ObjectMapper objectMapper,
+      RequirementIrApprovalCompatibilityRegistry compatibilityRegistry) {
     this.repository = repository;
     this.codec = new RequirementIrCodec(objectMapper);
+    this.compatibilityRegistry = compatibilityRegistry;
   }
 
   /**
@@ -56,6 +60,7 @@ public class RequirementGateBindingService {
 
     String planFingerprint = ExactPlanFingerprint.sha256(exactPlanJson);
     String sourceSha256 = RequirementIrValidator.sha256(exactSource);
+    var compatibility = compatibilityRegistry.current();
     RunRequirementContract row;
     try {
       row =
@@ -63,8 +68,8 @@ public class RequirementGateBindingService {
               .findByRunIdAndExactPlanFingerprintAndSchemaVersionAndCompilerFingerprint(
                   runId,
                   planFingerprint,
-                  RequirementIrDocument.CURRENT_SCHEMA_VERSION,
-                  RequirementIrCompiler.COMPILER_FINGERPRINT)
+                  compatibility.schemaVersion(),
+                  compatibility.compilerFingerprint())
               .orElse(null);
     } catch (RuntimeException repositoryFailure) {
       return failure(
@@ -90,9 +95,9 @@ public class RequirementGateBindingService {
       RunRequirementContract row) {
     if (!Objects.equals(runId, row.getRunId())
         || !Objects.equals(planFingerprint, row.getExactPlanFingerprint())
-        || row.getSchemaVersion() != RequirementIrDocument.CURRENT_SCHEMA_VERSION
+        || row.getSchemaVersion() != compatibilityRegistry.current().schemaVersion()
         || !Objects.equals(
-            RequirementIrCompiler.COMPILER_FINGERPRINT, row.getCompilerFingerprint())) {
+            compatibilityRegistry.current().compilerFingerprint(), row.getCompilerFingerprint())) {
       return failure(
           mode, BindingStatus.INVALID, ReasonCode.IDENTITY_MISMATCH, planFingerprint, sourceSha256);
     }
@@ -187,6 +192,19 @@ public class RequirementGateBindingService {
               .collect(Collectors.joining(","));
       return binding(mode, BindingStatus.BLOCKED, ReasonCode.APPROVAL_BLOCKED, row, false, details);
     }
+    try {
+      compatibilityRegistry.verifyApprovalCompatible(row, exactSource);
+    } catch (
+        RequirementIrApprovalCompatibilityRegistry.IncompatibleRequirementIrException
+            incompatible) {
+      return binding(
+          mode,
+          BindingStatus.INVALID,
+          ReasonCode.APPROVAL_COMPATIBILITY_FAILED,
+          row,
+          false,
+          incompatible.getMessage());
+    }
     return binding(mode, BindingStatus.BOUND, ReasonCode.NONE, row, true, null);
   }
 
@@ -272,7 +290,8 @@ public class RequirementGateBindingService {
     BOUND_DIGEST_MISMATCH,
     PERSISTED_SUMMARY_MISMATCH,
     STRUCTURE_INVALID,
-    APPROVAL_BLOCKED
+    APPROVAL_BLOCKED,
+    APPROVAL_COMPATIBILITY_FAILED
   }
 
   public record RequirementGateBinding(

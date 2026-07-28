@@ -38,7 +38,7 @@ class ExecutionOrchestratorTerminalStatusTest {
   @Mock ExecutionBranchService branchService;
   @Mock com.navneet.executespec.sse.SseBroadcaster broadcaster;
   @Mock com.navneet.executespec.repo.GitHubRepoService gitHub;
-  @Mock com.navneet.executespec.integration.RunOrchestrator v2Orchestrator;
+  @Mock ExecutionPipelineSubmissionService v2Orchestrator;
   @Mock com.navneet.executespec.integration.RunLifecycleService runLifecycleService;
   @Mock com.navneet.executespec.project.pr.PullRequestRecordRepository prRecordRepo;
   @Mock com.navneet.executespec.state.repository.PipelineRunRepository pipelineRunRepo;

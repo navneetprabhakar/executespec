@@ -63,7 +63,7 @@ public class ExecutionOrchestrator {
   private final ExecutionBranchService branchService;
   private final SseBroadcaster broadcaster;
   private final com.navneet.executespec.repo.GitHubRepoService gitHub;
-  private final com.navneet.executespec.integration.RunOrchestrator v2Orchestrator;
+  private final ExecutionPipelineSubmissionService pipelineSubmissionService;
   private final com.navneet.executespec.integration.RunLifecycleService runLifecycleService;
   private final com.navneet.executespec.project.pr.PullRequestRecordRepository prRecordRepo;
   private final ExecutionRunCasUpdater runCas;
@@ -600,31 +600,10 @@ public class ExecutionOrchestrator {
     emit(executionRunId, ExecutionEventTypes.EXEC_PLANNING_STARTED, null);
 
     java.util.List<java.util.UUID> selectedRepoIds = parseSelectedRepoIds(run.getSelectedRepoIds());
-    String githubPat =
-        appUserRepo.findById(run.getCreatedBy()).map(AppUser::getGithubPat).orElse(null);
 
     com.navneet.executespec.state.entity.PipelineRun v2Run;
     try {
-      v2Run =
-          v2Orchestrator.submitRun(
-              run.getRequirement(),
-              "EXECUTION_VIEW",
-              /* repoUrl */ null,
-              /* repoMode */ "EXISTING",
-              githubPat,
-              /* githubOwner */ null,
-              /* skipApproval */ false,
-              /* autoMerge */ true,
-              /* modelName */ null,
-              run.getAiProvider(),
-              run.getCreatedBy(),
-              run.getOrgId(),
-              run.getProjectId(),
-              "PRODUCTION",
-              selectedRepoIds,
-              run.getFigmaUrl(),
-              /* tddMode */ false,
-              run.getBranch());
+      v2Run = pipelineSubmissionService.submitUnified(run, selectedRepoIds);
     } catch (Exception e) {
       log.error(
           "dispatchUnified: V2 submitRun failed for exec {}: {}",

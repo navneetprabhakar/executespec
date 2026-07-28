@@ -154,6 +154,23 @@ class ManagedAiUsagePeriodServiceTest {
   }
 
   @Test
+  void externalCollaboratorFallbackDebitsActorPayerOrgNeverHostTenant() {
+    PipelineRun run =
+        PipelineRun.builder()
+            .runId("run-external")
+            .createdByUserId("external-user")
+            .orgId("host-org")
+            .billingOrgId("payer-org")
+            .userTier("PRO")
+            .build();
+    when(pipelineRunRepository.findById("run-external")).thenReturn(Optional.of(run));
+
+    ManagedAiUserContext user = service.resolveUser("run-external", null);
+
+    assertThat(user).isEqualTo(new ManagedAiUserContext("external-user", "payer-org", "PRO"));
+  }
+
+  @Test
   void saveWithTransitionPersistsMutationAndNotifiesOnlyOnChangedState() {
     ManagedAiUsagePeriod period = period();
     period.setRawCogsUsedUsd(12.5);

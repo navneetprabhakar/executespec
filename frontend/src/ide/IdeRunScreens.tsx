@@ -77,6 +77,8 @@ export default function IdeRunScreens({
   const [html, setHtml] = useState<string | null>(null);
   const [viewport, setViewport] = useState<ViewportId>('auto');
   const [error, setError] = useState<string | null>(null);
+  const [errorKind, setErrorKind] = useState<'manifest' | 'surface' | 'start' | null>(null);
+  const [surfaceRetry, setSurfaceRetry] = useState(0);
   const [starting, setStarting] = useState(false);
   const [loadingManifest, setLoadingManifest] = useState(true);
   const [loadingSurface, setLoadingSurface] = useState(false);
@@ -91,10 +93,12 @@ export default function IdeRunScreens({
       if (activeRunRef.current !== runId) return null;
       setManifest(next);
       setError(null);
+      setErrorKind(null);
       return next;
     } catch (e) {
       if (activeRunRef.current !== runId) return null;
       setError(e instanceof Error ? e.message : 'Could not load the preview.');
+      setErrorKind('manifest');
       return null;
     }
   }, [runId]);
@@ -105,6 +109,7 @@ export default function IdeRunScreens({
     setSelected(null);
     setHtml(null);
     setError(null);
+    setErrorKind(null);
     setLoadingManifest(true);
     void load().finally(() => {
       if (activeRunRef.current === runId) setLoadingManifest(false);
@@ -142,14 +147,21 @@ export default function IdeRunScreens({
     }
     let cancelled = false;
     setLoadingSurface(true);
+    setError(null);
+    setErrorKind(null);
     getPreviewRenderSurfaceHtml(runId, selected)
       .then((text) => {
-        if (!cancelled) setHtml(text);
+        if (!cancelled) {
+          setHtml(text);
+          setError(null);
+          setErrorKind(null);
+        }
       })
       .catch((e: unknown) => {
         if (!cancelled) {
           setHtml(null);
           setError(e instanceof Error ? e.message : 'Could not load that screen.');
+          setErrorKind('surface');
         }
       })
       .finally(() => {
@@ -158,11 +170,18 @@ export default function IdeRunScreens({
     return () => {
       cancelled = true;
     };
-  }, [runId, selected]);
+  }, [runId, selected, surfaceRetry]);
+
+  const retryManifest = async () => {
+    setLoadingManifest(true);
+    await load();
+    if (activeRunRef.current === runId) setLoadingManifest(false);
+  };
 
   const start = async () => {
     setStarting(true);
     setError(null);
+    setErrorKind(null);
     try {
       await startPreviewRender(runId);
       setSelected(null);
@@ -170,6 +189,7 @@ export default function IdeRunScreens({
       await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not start the preview.');
+      setErrorKind('start');
     } finally {
       setStarting(false);
     }
@@ -228,7 +248,28 @@ export default function IdeRunScreens({
         )}
       </div>
 
-      {error && <div className='ide-screens-error'>{error}</div>}
+      {error && (
+        <div className='ide-screens-error' role='alert'>
+          <span>{error}</span>
+          <button
+            type='button'
+            className='ide-btn ghost'
+            style={{marginLeft: 10}}
+            disabled={loadingManifest || loadingSurface || starting}
+            onClick={() => {
+              if (errorKind === 'manifest') void retryManifest();
+              else if (errorKind === 'surface') setSurfaceRetry((attempt) => attempt + 1);
+              else if (errorKind === 'start') void start();
+            }}
+          >
+            {errorKind === 'surface'
+              ? 'Retry loading screen'
+              : errorKind === 'start'
+                ? 'Retry rendering'
+                : 'Retry loading screens'}
+          </button>
+        </div>
+      )}
 
       {manifest?.fidelityNote && rendered.length > 0 && (
         <p className='ide-screens-note'>{manifest.fidelityNote}</p>

@@ -14,6 +14,7 @@ public record LlmExecutionContextCreateRequest(
     String correlationId,
     LlmExecutionScope scope,
     String userId,
+    String credentialOrgId,
     String projectId,
     UUID repoId,
     LlmPolicySnapshot policy,
@@ -43,10 +44,14 @@ public record LlmExecutionContextCreateRequest(
     idempotencyKey = require(idempotencyKey, "idempotencyKey");
     parentContextId = trimToNull(parentContextId);
     userId = trimToNull(userId);
+    credentialOrgId = trimToNull(credentialOrgId);
     projectId = trimToNull(projectId);
 
     if (scope.mode() == LlmExecutionScope.ScopeMode.CUSTOMER) {
       if (userId == null) throw new IllegalArgumentException("customer context requires userId");
+      if (credentialOrgId == null) {
+        throw new IllegalArgumentException("customer context requires credentialOrgId");
+      }
       if (policy.keySubjectUserId() == null) {
         throw new IllegalArgumentException("customer context requires keySubjectUserId");
       }

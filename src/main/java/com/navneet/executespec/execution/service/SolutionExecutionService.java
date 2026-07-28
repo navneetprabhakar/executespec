@@ -15,7 +15,6 @@ import com.navneet.executespec.execution.model.ExecutionDecision;
 import com.navneet.executespec.execution.repository.ExecutionRunRepository;
 import com.navneet.executespec.execution.repository.ExecutionSolutionRepository;
 import com.navneet.executespec.execution.repository.ExecutionSolutionRunRepository;
-import com.navneet.executespec.integration.RunOrchestrator;
 import com.navneet.executespec.project.repository.ProjectRepoRepository;
 import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
@@ -62,6 +61,9 @@ public class SolutionExecutionService {
 
   private static final long FENCE_ACK_POLL_MS = 1_000L;
 
+  /** A dead terminal-projection owner may be taken over after this durable quiet period. */
+  static final java.time.Duration TERMINAL_RECONCILIATION_LEASE = java.time.Duration.ofMinutes(5);
+
   /**
    * RR-530 — the single legal prior state for a human execution decision. {@link #handleFailure}
    * writes FAILED and pauses the launch; that pause is what the decision endpoints answer.
@@ -88,7 +90,7 @@ public class SolutionExecutionService {
   private static final Set<String> NON_RETRYABLE_WHEN_WORKER_CLEAN =
       Set.of("FINAL_BUILD_FAILED", "TESTS_FAILED");
 
-  private final RunOrchestrator v2Orchestrator;
+  private final ExecutionPipelineSubmissionService pipelineSubmissionService;
   private final CrossRepoContextService contextService;
   private final ExecutionBranchService branchService;
   private final ExecutionJiraSync jiraSync;
@@ -124,24 +126,45 @@ public class SolutionExecutionService {
     String pipelineRunId;
     ExecutionSolutionRun attempt;
     try {
-      pipelineRunId = submitV2Run(solution, run);
+      ExecutionPipelineSubmissionService.ApprovedSolutionSubmission submission =
+          submitV2Run(solution, run);
+      pipelineRunId = submission.run().getRunId();
+      attempt = submission.attempt();
       solution.setPipelineRunId(pipelineRunId);
       solutionRepo.save(solution);
-
-      // RR-532 — the attempt number was computed as countBySolutionId+1 and inserted against the
-      // V90 unique index (solution_id, attempt_number). If a concurrent/retried start selected the
-      // same number, one insert failed and the whole submission was reported as failed even though
-      // its paid child run already existed and kept executing — an untracked, uncancelled orphan.
-      // Reconcile the collision instead of orphaning: on the unique-constraint violation, recompute
-      // the next attempt number and retry so the already-submitted child run is always recorded.
-      attempt = saveAttemptWithUniqueRetry(solution.getId(), pipelineRunId);
     } catch (Exception e) {
       handleFailure(run, solution, "RUNNING", "V2 submit failed: " + shortMsg(e));
       return;
     }
 
-    // Poll V2 terminal status. Passing the ExecutionRun id lets the loop
-    // short-circuit on abort (otherwise it sleeps for up to 2h).
+    observeCanonicalAttempt(solution, run, attempt, pipelineRunId, false);
+  }
+
+  /**
+   * Observe and project an already-created canonical child without submitting another run.
+   *
+   * <p>The terminal projection is protected by a conditional RUNNING -> RECONCILING claim. A normal
+   * poller and a restart observer may both notice the terminal child, but exactly one may apply
+   * solution/attempt/JIRA/cost side effects. Recovery may take over a RECONCILING row only after
+   * its lease timestamp is stale, covering a crash immediately after that claim.
+   */
+  public void observeCanonicalAttempt(
+      ExecutionSolution solution,
+      ExecutionRun run,
+      ExecutionSolutionRun attempt,
+      String pipelineRunId,
+      boolean recovery) {
+    if (solution == null || run == null || attempt == null || pipelineRunId == null) {
+      throw new IllegalArgumentException(
+          "solution, execution, attempt and pipelineRunId are required");
+    }
+    if (!java.util.Objects.equals(attempt.getSolutionId(), solution.getId())
+        || !java.util.Objects.equals(attempt.getPipelineRunId(), pipelineRunId)) {
+      throw new IllegalArgumentException("attempt is not the canonical child for this solution");
+    }
+
+    // Poll V2 terminal status. Passing the ExecutionRun id lets the loop short-circuit on abort
+    // (otherwise it sleeps for up to 2h).
     String terminal = pollUntilTerminal(pipelineRunId, run.getId());
     if (terminal == null) {
       // RR-531 — the child was previously abandoned here: the solution recorded TIMEOUT and the
@@ -161,35 +184,67 @@ public class SolutionExecutionService {
             solution.getId(),
             pipelineRunId,
             fenced);
-        recordAttemptTerminal(attempt, fenced, pipelineRunId);
-        switch (fenced) {
-          case "COMPLETE" -> onV2Complete(run, solution);
-          case "PARTIAL" -> onV2Partial(run, solution);
-          default -> onV2Failed(run, solution, fenced);
-        }
+        reconcileObservedTerminal(run, solution, attempt, pipelineRunId, fenced, recovery);
         return;
       }
-      recordAttemptTerminal(attempt, "TIMEOUT", pipelineRunId);
-      handleFailure(
-          run,
-          solution,
-          "RUNNING",
-          fenced == null
-              ? "V2 run timed out after 2h and could not be confirmed cancelled — treat the child"
-                  + " run as possibly still active"
-              : "V2 run timed out after 2h; child run cancelled");
+      reconcileObservedTerminal(run, solution, attempt, pipelineRunId, "TIMEOUT", recovery);
       return;
     }
+    reconcileObservedTerminal(run, solution, attempt, pipelineRunId, terminal, recovery);
+  }
+
+  private void reconcileObservedTerminal(
+      ExecutionRun run,
+      ExecutionSolution solution,
+      ExecutionSolutionRun attempt,
+      String pipelineRunId,
+      String terminal,
+      boolean recovery) {
+    Instant claimedAt = Instant.now();
+    int claimed =
+        solutionRepo.claimTerminalReconciliation(
+            solution.getId(), run.getId(), pipelineRunId, claimedAt);
+    if (claimed == 0 && recovery) {
+      claimed =
+          solutionRepo.claimStaleTerminalReconciliation(
+              solution.getId(),
+              run.getId(),
+              pipelineRunId,
+              claimedAt,
+              claimedAt.minus(TERMINAL_RECONCILIATION_LEASE));
+    }
+    if (claimed == 0) {
+      log.info(
+          "[exec={} sol={}] terminal child {}={} already has a live reconciliation owner;"
+              + " skipping duplicate projection",
+          run.getId(),
+          solution.getId(),
+          pipelineRunId,
+          terminal);
+      return;
+    }
+
+    // Re-read after the bulk conditional update cleared the persistence context. Handlers mutate
+    // this fresh row, replacing RECONCILING with its real lifecycle outcome.
+    ExecutionSolution claimedSolution =
+        solutionRepo.findByIdAndExecutionRun_Id(solution.getId(), run.getId()).orElse(solution);
     recordAttemptTerminal(attempt, terminal, pipelineRunId);
 
     switch (terminal) {
-      case "COMPLETE" -> onV2Complete(run, solution);
-      case "PARTIAL" -> onV2Partial(run, solution);
-      default -> onV2Failed(run, solution, terminal);
+      case "COMPLETE" -> onV2Complete(run, claimedSolution);
+      case "PARTIAL" -> onV2Partial(run, claimedSolution);
+      case "TIMEOUT" ->
+          handleFailure(
+              run,
+              claimedSolution,
+              "RUNNING",
+              "V2 run timed out after 2h; child cancellation could not be proven cleanly");
+      default -> onV2Failed(run, claimedSolution, terminal);
     }
   }
 
-  private String submitV2Run(ExecutionSolution solution, ExecutionRun run) {
+  private ExecutionPipelineSubmissionService.ApprovedSolutionSubmission submitV2Run(
+      ExecutionSolution solution, ExecutionRun run) {
     String handover = contextService.buildHandoverContext(solution);
     String fullRequest =
         solution.getDescription() == null ? solution.getTitle() : solution.getDescription();
@@ -254,43 +309,17 @@ public class SolutionExecutionService {
                 + " — refusing to execute against an unresolved target");
       }
     }
-    boolean hasRepos = !mappedRepoIds.isEmpty();
     // repoUrl stays null for the multi-repo/EXISTING path; the selected repo ids drive per-repo
     // cloning. Only a solution with zero mapped repos falls back to a NEW repository.
-    String repoUrl = null;
-    String githubPat =
-        appUserRepo.findById(run.getCreatedBy()).map(u -> u.getGithubPat()).orElse(null);
+    // The approved-solution route keeps its distinct server-authorized bypass; the adapter owns
+    // that exception so this lifecycle service cannot accidentally drift into customer admission.
+    return pipelineSubmissionService.submitApprovedSolution(
+        solution, run, fullRequest, mappedRepoIds, attemptGeneration(solution.getRetryCount()));
+  }
 
-    // Use the Launch's aiProvider so the worker runs on the provider the user
-    // picked (project default or explicit override). Without this the
-    // orchestrator normalises null -> openai + gpt-5.4-mini, silently
-    // overriding the Anthropic choice on the project.
-    PipelineRun pipelineRun =
-        v2Orchestrator.submitRun(
-            fullRequest,
-            // RR-241 — this dispatch legitimately skips the V2 plan gate, but only because
-            // ExecutionOrchestrator.executeApprovedPlan has already proven the launch's own durable
-            // plan approval. The distinct source token is what grants that authority in
-            // PlanGateBypassPolicy; the unified dispatch path uses plain "EXECUTION_VIEW" and does
-            // NOT skip the gate.
-            "EXECUTION_VIEW_APPROVED",
-            repoUrl,
-            hasRepos ? "EXISTING" : "NEW",
-            githubPat,
-            null,
-            true,
-            true,
-            null,
-            run.getAiProvider(),
-            run.getCreatedBy(),
-            run.getOrgId(),
-            run.getProjectId(),
-            "PRODUCTION",
-            mappedRepoIds,
-            null,
-            false,
-            run.getBranch());
-    return pipelineRun.getRunId();
+  static int attemptGeneration(int retryCount) {
+    if (retryCount < 0) throw new IllegalArgumentException("retryCount cannot be negative");
+    return Math.addExact(retryCount, 1);
   }
 
   /**
@@ -301,12 +330,6 @@ public class SolutionExecutionService {
   private String pollUntilTerminal(String pipelineRunId, String executionRunId) {
     long deadline = System.currentTimeMillis() + POLL_TIMEOUT_MS;
     while (System.currentTimeMillis() < deadline) {
-      try {
-        Thread.sleep(POLL_INTERVAL_MS);
-      } catch (InterruptedException ie) {
-        Thread.currentThread().interrupt();
-        return null;
-      }
       // Bail out if the user hit Abort — the ExecutionRun status flips
       // to ABORTED which RunOrchestrator.cancel already signalled, but
       // we stop waiting here so the solution records CANCELLED promptly.
@@ -325,6 +348,12 @@ public class SolutionExecutionService {
       String status = run.getStatus();
       if (status != null && V2_TERMINAL.contains(status.toUpperCase())) {
         return status.toUpperCase();
+      }
+      try {
+        Thread.sleep(POLL_INTERVAL_MS);
+      } catch (InterruptedException ie) {
+        Thread.currentThread().interrupt();
+        return null;
       }
     }
     return null;
@@ -786,30 +815,6 @@ public class SolutionExecutionService {
   private void emit(String executionRunId, String type, String payload) {
     broadcaster.emit(
         "exec:" + executionRunId, new RunEvent(type, executionRunId, payload, null, Instant.now()));
-  }
-
-  /**
-   * RR-532 — allocate and persist the attempt row, reconciling the V90 unique-index collision
-   * (solution_id, attempt_number) so an already-submitted paid child run is always recorded rather
-   * than orphaned. {@code saveAndFlush} forces the constraint to fire now (a deferred {@code save}
-   * would only surface the violation at commit, outside this retry).
-   */
-  ExecutionSolutionRun saveAttemptWithUniqueRetry(String solutionId, String pipelineRunId) {
-    org.springframework.dao.DataIntegrityViolationException last = null;
-    for (int i = 0; i < 5; i++) {
-      int attemptNumber = solutionRunRepo.countBySolutionId(solutionId) + 1;
-      try {
-        return solutionRunRepo.saveAndFlush(
-            ExecutionSolutionRun.builder()
-                .solutionId(solutionId)
-                .pipelineRunId(pipelineRunId)
-                .attemptNumber(attemptNumber)
-                .build());
-      } catch (org.springframework.dao.DataIntegrityViolationException dup) {
-        last = dup; // a concurrent starter took this attempt number — recompute and retry
-      }
-    }
-    throw last;
   }
 
   private void recordAttemptTerminal(

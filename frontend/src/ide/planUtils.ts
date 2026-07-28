@@ -84,16 +84,16 @@ export function managedAiStatusLabel(input: {
  * `RunController.planFingerprintOf`: lowercase hex SHA-256 over the UTF-8 bytes of the persisted
  * plan JSON.
  *
- * Returns `undefined` when the run carries no plan, or when the browser exposes no WebCrypto
- * digest (an insecure context, or a test environment). The server treats an absent fingerprint as
- * "not supplied" and falls back to the credits check, so an unavailable digest degrades to the
- * previous behaviour rather than fabricating an identity that would either wrongly pass or
- * wrongly block.
+ * Returns `undefined` only when the run carries no plan. A browser that cannot compute SHA-256
+ * must fail closed: silently omitting the fingerprint turns reviewed-plan identity back into a
+ * price-only check and is not valid approval evidence.
  */
 export async function planFingerprint(planJson?: string | null): Promise<string | undefined> {
   if (!planJson || !planJson.trim()) return undefined;
   const subtle = globalThis.crypto?.subtle;
-  if (!subtle || typeof subtle.digest !== 'function') return undefined;
+  if (!subtle || typeof subtle.digest !== 'function') {
+    throw new Error('Exact plan verification is unavailable in this browser.');
+  }
   try {
     const bytes = new TextEncoder().encode(planJson);
     const digest = await subtle.digest('SHA-256', bytes);
@@ -101,6 +101,6 @@ export async function planFingerprint(planJson?: string | null): Promise<string 
       .map((b) => b.toString(16).padStart(2, '0'))
       .join('');
   } catch {
-    return undefined;
+    throw new Error('Exact plan verification failed.');
   }
 }

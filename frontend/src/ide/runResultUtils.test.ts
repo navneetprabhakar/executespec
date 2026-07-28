@@ -12,6 +12,8 @@ import {
   fmtDur,
   goalDecisionHelp,
   goalDecisionLabel,
+  goalProofKind,
+  goalProofLabel,
   goalStateLabel,
   goalStateKind,
   hasRunCostEvidence,
@@ -32,6 +34,7 @@ import {
   modelRankingLabel,
   num,
   runArtifactActionAvailability,
+  friendlyAiFailureMessage,
   terminalFailureEvidence,
   runPhaseDiagnosis,
   shouldUseRunEvidenceChat,
@@ -396,6 +399,15 @@ describe('runResultUtils', () => {
     expect(goalDecisionLabel('STOP_FAILED')).not.toContain('STOP_FAILED');
   });
 
+  it('renders typed goal-proof reference states without exposing backend enums', () => {
+    expect(goalProofLabel('PROVEN')).toBe('Proven');
+    expect(goalProofLabel('BLOCKING')).toBe('Blocking');
+    expect(goalProofLabel('UNPROVEN')).toBe('Unproven');
+    expect(goalProofKind('PROVEN')).toBe('ok');
+    expect(goalProofKind('BLOCKING')).toBe('bad');
+    expect(goalProofKind('UNPROVEN')).toBe('warn');
+  });
+
   it('keeps continuation and budget presentation logic independently testable', () => {
     const task: api.TaskSummary = {
       taskId: 'task-1',
@@ -685,5 +697,21 @@ describe('runResultUtils', () => {
     expect(evidenceKind('FAIL')).toBe('bad');
     expect(confidenceColor('LOW')).toBe('var(--ide-red)');
     expect(TAB_LABEL.Chat).toBe('Ask');
+  });
+
+  it('turns dispatch-budget failures into actionable Ask guidance', () => {
+    const message = friendlyAiFailureMessage(
+      new Error('LlmDispatchPolicyException: Durable LLM execution-context budget is exhausted'),
+    );
+
+    expect(message).toContain('used its available AI context');
+    expect(message).toContain('without additional AI spend');
+    expect(message).not.toContain('LlmDispatchPolicyException');
+  });
+
+  it('keeps an unknown Ask failure visible for diagnosis', () => {
+    expect(friendlyAiFailureMessage(new Error('chat service unavailable'))).toBe(
+      'chat service unavailable',
+    );
   });
 });

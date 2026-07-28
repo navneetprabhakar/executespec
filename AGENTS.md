@@ -2,7 +2,7 @@
 
 > This file is read by Claude Code at session start. Keep it accurate.
 
-**Version:** `2.0.0` ([`Version`](Version)). Migration head: **V348** in the current worktree; next allocatable migration **V349**, with **334 migration source files**. V348 adds atomic plan-gate decisions and leased durable continuation handoff. `requirement.ir.gate.mode` remains `LEGACY`. Default branch: `main`. Dev environment: `dev.executespec.ai`.
+**Version:** `2.0.0` ([`Version`](Version)). Migration head: **V350** in the current worktree; next allocatable migration **V351**, with **336 migration source files**. The uncommitted V350 source carries an external collaborator's payer/credential org separately from the host run tenant across pipeline runs and LLM execution contexts. Clean Java 21 verification passes 5,738/5,738 with zero failures, errors, or skips; the named PostgreSQL V350/dispatch/lifecycle/plan-gate gates pass independently. `requirement.ir.gate.mode` remains `LEGACY`. Default branch: `main`. Dev environment: `dev.executespec.ai`.
 
 Spec-driven AI coding platform. Customer submits a spec in natural language → V2 pipeline plans, codes across one or more repos, builds + tests, opens a pull request with a deterministic verified score. Human approves at the plan gate; everything after is automatic.
 
@@ -11,7 +11,7 @@ Spec-driven AI coding platform. Customer submits a spec in natural language → 
 - **Backend:** Java 21, Spring Boot 3.5, Spring AI 1.1.6, PostgreSQL (Cloud SQL) + Redis. Single Spring Boot JAR; frontend served from `static/`.
 - **Frontend:** React 18, Vite 5, Tailwind CSS 4, TypeScript 5.3. **Console** (`frontend/src/console/`) is now the only protected web-app shell (RL-2026-06-027): `App.tsx` mounts `ConsoleShell` for every protected route, `/home` renders `ConsoleHome`, `/decisions` renders `ConsoleDecisions`, and the old `localStorage es:console` gate plus `IdeWorkspace` shell are gone. The VS Code-style `frontend/src/ide/` package remains the route-level implementation surface for runs, projects, billing, org settings, benchmark tracking, etc., while the actual in-editor IDE metaphor belongs to the VS Code extension. Protected routes lazy-load the heavy admin/discovery/billing/org/legal chunks so the run loop stays in the entry path. The production **Signal** chrome was retired and its pages were ported IDE-native then **deleted in the 2026-05-23 cleanup** (App.tsx's dead `ide ? Ide : Signal` ternaries collapsed + the `const ide` flag dropped; `Shell.tsx` + 22 orphaned pages removed). `frontend/src/signal/` now holds only the standalone **public** pages (auth/marketing/legal/shared + `AdminPage` for `/admin/*`) plus shared `components/` + `signal.css` reused by protected surfaces. The legacy V2 sidebar + V3 top-bar chromes (`components/`, `pages/`, `v3/`) were **deleted** (commit `5f5e4aaa`) — only `signal/`, `ide/`, `console/`, `hooks/`, `lib/`, `stores/`, `types`, `design-system/` remain under `frontend/src/`.
 - **Infra:** GCP us-east4. Single GCE VM serves prod + dev; Cloud Run serves on-demand previews. Cloudflare in front of `*.executespec.ai`.
-- **Codebase shape:** 76 Java package roots / major package groups under `com.navneet.executespec.*` (flat; the historical `v2.*` / `v3.*` prefixes were retired in 2026-05-07's unification pass). Current worktree inventory includes 107 REST controller classes and the new `agentsession/` package for CLI/VS Code agent sessions. Frontend ~75K LOC.
+- **Codebase shape:** 77 Java package roots / major package groups under `com.navneet.executespec.*` (flat; the historical `v2.*` / `v3.*` prefixes were retired in 2026-05-07's unification pass). Current worktree inventory includes 107 REST controller classes, `agentsession/` for cross-surface agent sessions, and the uncommitted `repositoryintel/` read-only evidence port. Frontend ~75K LOC.
 
 ### V2 pipeline (the only execution path)
 
@@ -90,7 +90,11 @@ Reviewer (`reviewer/ReviewerAgent.java`): general pass → wiring pass → `Post
 
 ### Four customer-facing autofix surfaces (V183 `triggered_by_finding`)
 
-All routed through one chokepoint `finding/FindingPatchSubmitter`. Submitter dedupes per finding key, dispatches with `runMode=PATCH` + `source="finding:<TYPE>"`, and `runPatchPipeline` auto-pushes via `scmPushService.push()` on terminal:
+All routed through one chokepoint `finding/FindingPatchSubmitter`. The current uncommitted V350-era
+implementation resolves the host project's org as the PATCH data tenant and the active finding
+actor's home org as payer/provider-policy authority before dedupe or dispatch. Submitter dedupes per
+finding key, dispatches with `runMode=PATCH` + `source="finding:<TYPE>"`, and `runPatchPipeline`
+auto-pushes via `scmPushService.push()` on terminal; current-source deterministic verification is green:
 
 | Phase | Surface                               | UX                                                                                                                 |
 | ----- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
@@ -201,7 +205,7 @@ When a terminal waste/failed goal decision still says another model/provider mig
 - **LLM prompts:** external files in `src/main/resources/prompts/*.md` (and rollback archives `.txt`). Assembled via `PromptAssembler.assemble(path, vars)` — resolves `{{include:fragment}}` markers from `prompts/fragments/` and `{{VAR}}` substitutions. Never use `Resource.getContentAsString()` directly in agents.
 - **Tool calling:** provider-native end-to-end. Strict JSON schemas on every entry in `tool/`. No XML `<tool_call>` parsing in V2.
 - **Naming:** `*Agent.java` for agents, `*Service.java` for services, `*Controller.java` for REST, `*Spec.java` for security specifications.
-- **DB migrations:** Flyway `V{n}__description.sql` in `src/main/resources/db/migration/` (head **V348**, next **V349**, **334 source files** in the current worktree). Applied migrations are immutable. V273–V299 retain the executable-verification, durable route, brownfield source, provider-neutral SCM, code-index, governed data, outbox, scoped-confirmation and activity-audit contracts. V300–V348 are forward migrations; V348 enforces canonical plan-gate decision receipts/request fingerprints and coherent run/gate/outbox handoff. Any future consolidation must use a clean-install baseline migration plus forward migrations; never rewrite an applied V-file. Current migration details are in [`executespec-docs/backend/architecture/CODEMAP.md`](../executespec-docs/backend/architecture/CODEMAP.md).
+- **DB migrations:** Flyway `V{n}__description.sql` in `src/main/resources/db/migration/` (head **V350**, next **V351**, **336 source files** in the current worktree). Applied migrations are immutable. V273–V299 retain the executable-verification, durable route, brownfield source, provider-neutral SCM, code-index, governed data, outbox, scoped-confirmation and activity-audit contracts. V300–V350 are forward migrations; V350 carries external-collaborator payer identity separately from the host tenant through pipeline and LLM execution records. Any future consolidation must use a clean-install baseline migration plus forward migrations; never rewrite an applied V-file. Current migration details are in [`executespec-docs/backend/architecture/CODEMAP.md`](../executespec-docs/backend/architecture/CODEMAP.md).
 
 Production Flyway is strict: `application-prod.yml` disables automatic baselining and out-of-order application. Recovery of an unmanaged database is an explicit operator procedure; do not enable those settings globally.
 
@@ -242,7 +246,7 @@ Standing rule from 2026-04-25: every commit must keep the project's documentatio
 
 ### Current-state corrections (2026-07-11)
 
-- The current migration head is V348; the next allocatable number is V349; the migration directory contains 334 source files. Older migration references in this file are historical unless they explicitly describe their migration contracts.
+- The current migration head is V350; the next allocatable number is V351; the migration directory contains 336 source files. Older migration references in this file are historical unless they explicitly describe their migration contracts.
 - `execution.continuation.require-benchmark-prior-for-automatic-continuation` is false in the active YAML; benchmark-required continuation is an explicit opt-in.
 - Current source-size facts are RunOrchestrator 4,084 lines, `frontend/src/lib/api/core.ts` 1,927 lines, and `frontend/src/signal/pages/ExtraPages.tsx` 377 lines. Recheck before copying older debt counts.
 
@@ -464,6 +468,7 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318/v1/traces
 | Purpose                         | Path                                                                                                                                                                                                 |
 | ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Run orchestrator                | [`integration/RunOrchestrator.java`](src/main/java/com/navneet/executespec/integration/RunOrchestrator.java)                                                                                         |
+| Customer BUILD admission        | [`run/CustomerRunSubmissionService.java`](src/main/java/com/navneet/executespec/run/CustomerRunSubmissionService.java) — shared REST, confirmed Web Agent, fork, and unified Execution View admission boundary                                                                 |
 | Plan-gate decision              | [`integration/PlanGateDecisionService.java`](src/main/java/com/navneet/executespec/integration/PlanGateDecisionService.java) + `PlanGateDecisionEvidence` + `PlanGateDecisionAdmission` + `DecisionEvidenceV1` + `DecisionRequestBytesV1`                                                                                  |
 | Plan-gate continuation          | [`integration/PlanGateResumeDispatcher.java`](src/main/java/com/navneet/executespec/integration/PlanGateResumeDispatcher.java) + `PlanGateResumeStore`                                                                                                          |
 | Sequential executor             | [`harness/SequentialExecutor.java`](src/main/java/com/navneet/executespec/harness/SequentialExecutor.java)                                                                                           |
@@ -482,6 +487,7 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318/v1/traces
 | Model registry                  | [`router/ModelRegistry.java`](src/main/java/com/navneet/executespec/router/ModelRegistry.java)                                                                                                       |
 | Validation report               | [`report/ValidationReportService.java`](src/main/java/com/navneet/executespec/report/ValidationReportService.java) + `ValidationReportGenerator`                                                     |
 | Project architecture            | [`codeintel/ProjectArchitectureService.java`](src/main/java/com/navneet/executespec/codeintel/ProjectArchitectureService.java)                                                                       |
+| Repository intelligence port    | [`repositoryintel/`](src/main/java/com/navneet/executespec/repositoryintel/) — typed snapshot/query/evidence/outcome/budget contracts plus the conservative native search adapter                                                                                  |
 | Project memory                  | [`memory/RunLedgerAgent.java`](src/main/java/com/navneet/executespec/memory/RunLedgerAgent.java) + `MemoryCompactionService` + `ProjectMemoryProvider`                                               |
 | GitHub integration              | [`repo/GitHubRepoService.java`](src/main/java/com/navneet/executespec/repo/GitHubRepoService.java) + `BitbucketRepoService`                                                                          |
 | Multi-repo push                 | [`integration/scm/ScmPushService.java`](src/main/java/com/navneet/executespec/integration/scm/ScmPushService.java)                                                                                   |
@@ -504,7 +510,7 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318/v1/traces
 | Prompt assembler                | [`agent/PromptAssembler.java`](src/main/java/com/navneet/executespec/agent/PromptAssembler.java) + `prompts/fragments/*.md` + `prompts/scaffolds/*.md`                                               |
 | LLM prompts                     | `src/main/resources/prompts/*.md`                                                                                                                                                                    |
 | App config                      | `src/main/resources/application.yml`                                                                                                                                                                 |
-| DB migrations                   | `src/main/resources/db/migration/V*.sql` (head V348; next V349; 334 source files; applied V-files immutable)                                                                                                                       |
+| DB migrations                   | `src/main/resources/db/migration/V*.sql` (head V350; next V351; 336 source files; applied V-files immutable)                                                                                                                       |
 | Frontend entry                  | `frontend/src/main.tsx`                                                                                                                                                                              |
 | Frontend API client             | `frontend/src/lib/api/` (`core.ts` + domain modules)                                                                                                                                                 |
 | Observability stack             | `observability/docker-compose.yml`                                                                                                                                                                   |

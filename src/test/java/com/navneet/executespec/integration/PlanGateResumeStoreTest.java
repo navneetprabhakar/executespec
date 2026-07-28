@@ -548,6 +548,7 @@ class PlanGateResumeStoreTest {
         .planJson("{\"tasks\":[{\"id\":\"t1\"}]}")
         .createdByUserId("owner-1")
         .orgId("org-1")
+        .billingOrgId("org-1")
         .aiProvider("anthropic")
         .creditsCharged(1)
         .hardCapUsd(5.0)

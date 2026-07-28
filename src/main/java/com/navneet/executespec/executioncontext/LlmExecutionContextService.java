@@ -243,6 +243,7 @@ public class LlmExecutionContextService {
             request.correlationId(),
             request.scope().toString(),
             String.valueOf(request.userId()),
+            String.valueOf(request.credentialOrgId()),
             String.valueOf(request.projectId()),
             String.valueOf(request.repoId()),
             request.policy().canonicalForm(),

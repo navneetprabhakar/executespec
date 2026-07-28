@@ -93,7 +93,6 @@ final class PlanGateDecisionEvidence {
         && Objects.equals(evidence.billingOwnerUserId(), gate.getBillingOwnerUserId())
         && Objects.equals(evidence.billingOwnerUserId(), run.getCreatedByUserId())
         && Objects.equals(evidence.billingOrgId(), gate.getBillingOrgId())
-        && Objects.equals(evidence.billingOrgId(), run.getOrgId())
         && Objects.equals(
             evidence.executionMode(), normalizedExecutionMode(run.getApprovedExecutionMode()))
         && Objects.equals(evidence.provider(), normalizedProvider(run.getAiProvider()))
@@ -101,7 +100,7 @@ final class PlanGateDecisionEvidence {
         && Objects.equals(evidence.hardCapUsd(), decimal(run.getHardCapUsd()))
         && Objects.equals(evidence.expectedCredits(), expectedCredits(run))
         && validCreditReplay(evidence)
-        && validCredentialReplay(evidence, run)
+        && validCredentialReplay(evidence)
         && Objects.equals(evidence.contractGateReportDigest(), gate.getContractGateReportDigest())
         && Objects.equals(
             evidence.contractGateReportDigest(),
@@ -116,9 +115,9 @@ final class PlanGateDecisionEvidence {
         && Boolean.TRUE.equals(evidence.creditsMatched());
   }
 
-  private static boolean validCredentialReplay(DecisionEvidenceV1 evidence, PipelineRun run) {
+  private static boolean validCredentialReplay(DecisionEvidenceV1 evidence) {
     if ("APPROVE".equals(evidence.decision())) {
-      return Objects.equals(evidence.credentialAuthorizationOrgId(), run.getOrgId())
+      return Objects.equals(evidence.credentialAuthorizationOrgId(), evidence.billingOrgId())
           && evidence.credentialAuthorizationSource() != null
           && (evidence.suppliedPlanFingerprint() == null
               || Boolean.TRUE.equals(evidence.planFingerprintMatched()));
@@ -189,7 +188,9 @@ final class PlanGateDecisionEvidence {
         command.creditsConfirmed(),
         admission.credits().matched(),
         run.getCreatedByUserId(),
-        run.getOrgId(),
+        kind == PlanGateDecisionService.DecisionKind.APPROVE
+            ? admission.credentialAuthorizationOrgId()
+            : run.getOrgId(),
         admission.provider(),
         admission.keySourceMode(),
         admission.credentialOrigin(),

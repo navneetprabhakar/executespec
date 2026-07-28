@@ -69,10 +69,13 @@ executor failure, org-override restoration, async route propagation, and aggrega
 
 Per-turn hard limits are 5 tool-enabled model rounds plus at most one tool-free final synthesis, 12
 tool calls, 40,000 observed input+output tokens, $0.50 incremental provider cost, and 60,000
-conversation characters. Crossing a limit prevents further tool/provider work and produces a
-bounded terminal explanation. Provider text, tool envelopes, SSE fields, and exception
-descriptions pass through `ContextSanitizer`; raw credentials and raw provider exception messages
-must never reach a client/model.
+conversation characters. The durable provider-call ceiling is 24 physical attempts: six logical
+rounds multiplied by the router's four-attempt same-provider retry envelope. Physical retries
+therefore cannot prematurely consume later logical rounds, while the independent model-round guard
+still prevents retries from granting extra reasoning turns. Crossing a limit prevents further
+tool/provider work and produces a bounded terminal explanation. Provider text, tool envelopes, SSE
+fields, and exception descriptions pass through `ContextSanitizer`; raw credentials and raw
+provider exception messages must never reach a client/model.
 
 The compatibility `POST /api/spec/chat` turn does not run on the servlet thread. `SpecChatController`
 hands the loop to `SpecChatTurnDispatcher`, which admits it onto a context-propagating virtual thread

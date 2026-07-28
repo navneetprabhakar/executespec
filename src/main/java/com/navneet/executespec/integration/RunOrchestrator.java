@@ -270,14 +270,20 @@ public class RunOrchestrator implements RunControlPort {
    *
    * @param userCostCap customer's "stop at $X" ceiling; null means platform cap only
    * @param skipAutoPush true when the customer asked NOT to publish automatically
-   * @param payerOrgId org that owns/pays for this run — the authorized project's org when the run
-   *     is project-scoped, otherwise the actor's own org
+   * @param tenantOrgId org that owns the project/data boundary; host project org when scoped
+   * @param billingOrgId immutable payer/provider-policy org from the submitting actor
    */
-  public record SubmitPolicy(Double userCostCap, boolean skipAutoPush, String payerOrgId) {
-    public static final SubmitPolicy NONE = new SubmitPolicy(null, false, null);
+  public record SubmitPolicy(
+      Double userCostCap, boolean skipAutoPush, String tenantOrgId, String billingOrgId) {
+    public static final SubmitPolicy NONE = new SubmitPolicy(null, false, null, null);
   }
 
   private final ThreadLocal<SubmitPolicy> submitPolicyIntent = new ThreadLocal<>();
+
+  public PipelineRun withReservedRunId(
+      String reservedRunId, java.util.function.Supplier<PipelineRun> submission) {
+    return reservedPipelineRunStore.withReservedRunId(reservedRunId, submission);
+  }
 
   /**
    * Source-workspace lineage for a follow-up BUILD run. Like the other submit intents above, this
@@ -381,6 +387,9 @@ public class RunOrchestrator implements RunControlPort {
    * a server-internal automation surface with its own authorization step.
    */
   private final PlanGateBypassPolicy planGateBypassPolicy;
+
+  /** Assigned-id INSERT boundary used only by durable Execution View attempt reservations. */
+  private final ReservedPipelineRunStore reservedPipelineRunStore;
 
   /** Resolves the durable provider/model route a submitted run advertises. */
   private final RunRouteContractResolver routeContractResolver;
@@ -491,8 +500,7 @@ public class RunOrchestrator implements RunControlPort {
           null,
           null,
           false,
-          new SubmitPolicy(
-              inherited.userCostCap(), inherited.skipAutoPush(), inherited.payerOrgId()));
+          IterationSubmitPolicyFactory.from(inherited, actorOrgId));
     } finally {
       submitSourceRunIntent.remove();
     }
@@ -525,7 +533,7 @@ public class RunOrchestrator implements RunControlPort {
       boolean tddMode,
       Double userCostCap,
       boolean skipAutoPush,
-      String payerOrgId) {}
+      String tenantOrgId) {}
 
   static String normalizeIterationExecutionMode(String executionMode) {
     return "PROTOTYPE".equalsIgnoreCase(executionMode) ? "PROTOTYPE" : "PRODUCTION";
@@ -539,9 +547,9 @@ public class RunOrchestrator implements RunControlPort {
    * RR-233 / RR-234 / RR-236 — the submit entry point that stamps submit-time policy atomically
    * with run creation.
    *
-   * <p>Callers that carry a customer cost cap, a "do not auto-publish" consent, or a payer org
-   * distinct from the actor's home org MUST use this overload. Persisting any of those after {@code
-   * submitRun} returns is a race against the pipeline thread that consumes them.
+   * <p>Callers that carry a customer cost cap, a "do not auto-publish" consent, or a host tenant
+   * distinct from the actor's payer org MUST use this overload. Persisting any of those after
+   * {@code submitRun} returns is a race against the pipeline thread that consumes them.
    */
   public PipelineRun submitRunWithLocalExecution(
       String userRequest,
@@ -998,7 +1006,7 @@ public class RunOrchestrator implements RunControlPort {
       Boolean requireConfirmationBeforeExpensiveContinuation,
       Boolean requireBenchmarkPriorForAutomaticContinuation,
       String lowComplexityWorkerStartTier) {
-    String runId = UUID.randomUUID().toString();
+    String runId = reservedPipelineRunStore.currentOrRandomRunId();
     String provider = contextComposer.normalizeProvider(aiProvider, projectId, runId);
 
     // RR-241 — the plan gate is the cost/governance checkpoint before provider spend and
@@ -1037,17 +1045,7 @@ public class RunOrchestrator implements RunControlPort {
     // to carry the host projectId with their personal orgId, splitting the run away from the tenant
     // whose project, quota and audit trail it actually belongs to. The actor stays on
     // createdByUserId.
-    String effectiveOrgId =
-        policy.payerOrgId() != null && !policy.payerOrgId().isBlank() ? policy.payerOrgId() : orgId;
-    if (policy.payerOrgId() != null
-        && !policy.payerOrgId().isBlank()
-        && !policy.payerOrgId().equals(orgId)) {
-      log.info(
-          "RunOrchestrator run={} tenant resolved to host project org={} (actor home org={})",
-          runId,
-          policy.payerOrgId(),
-          orgId);
-    }
+    RunSubmitAuthority submitAuthority = RunSubmitAuthority.resolve(policy, orgId, runId);
 
     PipelineRun run =
         PipelineRun.builder()
@@ -1075,7 +1073,8 @@ public class RunOrchestrator implements RunControlPort {
             .executionMode(executionMode != null ? executionMode : "PRODUCTION")
             .approvedExecutionMode("REALTIME")
             .createdByUserId(createdByUserId)
-            .orgId(effectiveOrgId)
+            .orgId(submitAuthority.tenantOrgId())
+            .billingOrgId(submitAuthority.billingOrgId())
             .projectId(projectId)
             // RR-233 — expose the hard ceiling before the planner can persist its estimate; a
             // post-submit write races a fast planner and clamps against the wrong cap.
@@ -1100,7 +1099,16 @@ public class RunOrchestrator implements RunControlPort {
             .sourceRunId(submitSourceRunIntent.get())
             .localExecutionRequested(Boolean.TRUE.equals(submitLocalExecutionIntent.get()))
             .build();
-    run = runRepo.save(run);
+    ReservedPipelineRunStore.InitialRunPersistence initialPersistence =
+        ReservedPipelineRunStore.persistInitial(
+            reservedPipelineRunStore, runRepo, run, reservedPipelineRunStore.hasReservation());
+    if (!initialPersistence.created()) {
+      log.info(
+          "RunOrchestrator reserved run identity {} already exists; returning canonical row",
+          runId);
+      return initialPersistence.run();
+    }
+    run = initialPersistence.run();
 
     log.info(
         "RunOrchestrator submitRun runId={} provider={} model={} user={} org={} project={}",

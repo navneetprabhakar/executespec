@@ -10,6 +10,7 @@ import com.navneet.executespec.auth.service.TierEnforcementService;
 import com.navneet.executespec.billing.service.ManagedAiUsageService;
 import com.navneet.executespec.billing.service.UsageTrackingService;
 import com.navneet.executespec.config.featureflag.FeatureFlagService;
+import com.navneet.executespec.integration.RunLifecycleService;
 import com.navneet.executespec.integration.RunOrchestrator;
 import com.navneet.executespec.integration.RunPipelineSupport;
 import com.navneet.executespec.project.service.ProjectRepoService;
@@ -23,10 +24,12 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
 /** Creates a BUILD follow-up from a terminal run while preserving its workspace lineage. */
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class RunIterationService {
 
   private static final Set<String> ITERABLE_STATUSES = Set.of("COMPLETE", "PARTIAL", "FAILED");
@@ -43,6 +46,7 @@ public class RunIterationService {
   private final TierEnforcementService tierEnforcementService;
   private final UsageTrackingService usageTrackingService;
   private final ProjectRepoService projectRepoService;
+  private final RunLifecycleService runLifecycleService;
 
   public IterationResult iterate(
       String sourceRunId, String followUpRequest, String idempotencyKey, AppUserDetails actor) {
@@ -100,8 +104,6 @@ public class RunIterationService {
             source.getProjectId(),
             RunPipelineSupport.deserializeRepoIds(source.getSelectedRepoIds()));
       }
-      tierEnforcementService.incrementRunCountForAnalytics(actorId);
-
       PipelineRun child =
           orchestrator.submitIterationRun(
               source,
@@ -110,8 +112,12 @@ public class RunIterationService {
               actor.getUser().getOrgId(),
               actor.getUser().getGithubPat(),
               actor.getUser().getGithubOwner());
-      idempotencyService.complete(claim, child.getRunId());
-      usageTrackingService.increment(actorId, "RUNS", 1);
+      RunIdempotencyService.Completion completion =
+          idempotencyService.complete(claim, child.getRunId());
+      if (!completion.authoritative()) {
+        return resolveCompletionLoss(child, completion, actorId, sourceRunId);
+      }
+      recordPostDispatchAccounting(actorId, child.getRunId());
       return new IterationResult(child, false);
     } catch (ResponseStatusException e) {
       if (e.getStatusCode().is4xxClientError()) {
@@ -123,6 +129,79 @@ public class RunIterationService {
     } catch (RuntimeException e) {
       idempotencyService.releaseForRetry(claim, e.getClass().getSimpleName());
       throw e;
+    }
+  }
+
+  private IterationResult resolveCompletionLoss(
+      PipelineRun child,
+      RunIdempotencyService.Completion completion,
+      String actorId,
+      String sourceRunId) {
+    boolean cancelled = false;
+    try {
+      cancelled = runLifecycleService.cancel(child.getRunId());
+    } catch (RuntimeException cancellationFailure) {
+      log.error(
+          "Could not cancel non-authoritative iteration run={} failureType={}",
+          child.getRunId(),
+          cancellationFailure.getClass().getSimpleName());
+    }
+    boolean cancellationConfirmed = cancelled;
+    if (completion.canonicalRunId() != null) {
+      if (!cancellationConfirmed) {
+        throw completionLoss(
+            child.getRunId(),
+            false,
+            "a canonical iteration was published but the losing attempt remains unaccounted for");
+      }
+      PipelineRun canonical =
+          runRepo
+              .findById(completion.canonicalRunId())
+              .filter(run -> actorId.equals(run.getCreatedByUserId()))
+              .filter(run -> sourceRunId.equals(run.getSourceRunId()))
+              .orElseThrow(
+                  () ->
+                      completionLoss(
+                          child.getRunId(),
+                          cancellationConfirmed,
+                          "canonical iteration is not readable"));
+      return new IterationResult(canonical, true);
+    }
+    throw completionLoss(
+        child.getRunId(), cancellationConfirmed, "no canonical iteration was published");
+  }
+
+  private static ResponseStatusException completionLoss(
+      String childRunId, boolean cancelled, String detail) {
+    return new ResponseStatusException(
+        HttpStatus.SERVICE_UNAVAILABLE,
+        "Iteration idempotency completion lost authority; created attempt "
+            + childRunId
+            + (cancelled ? " was cancelled" : " could not be confirmed cancelled")
+            + " and "
+            + detail
+            + ". Retry the same Idempotency-Key.");
+  }
+
+  private void recordPostDispatchAccounting(String actorId, String runId) {
+    try {
+      tierEnforcementService.incrementRunCountForAnalytics(actorId);
+    } catch (RuntimeException analyticsFailure) {
+      log.error(
+          "Iteration analytics counter failed after dispatch run={} user={} failureType={}",
+          runId,
+          actorId,
+          analyticsFailure.getClass().getSimpleName());
+    }
+    try {
+      usageTrackingService.increment(actorId, "RUNS", 1);
+    } catch (RuntimeException usageFailure) {
+      log.error(
+          "Iteration usage counter failed after dispatch run={} user={} failureType={};"
+              + " pipeline_run remains canonical",
+          runId,
+          actorId,
+          usageFailure.getClass().getSimpleName());
     }
   }
 
