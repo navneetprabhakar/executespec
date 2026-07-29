@@ -360,6 +360,31 @@ public class LocalHandsStateService {
     }
   }
 
+  /**
+   * Fail-closed session-local check used before a conversation is archived.
+   *
+   * <p>Unlike {@link #pending(String)}, this method does not suppress persistence/read failures:
+   * lifecycle closure must not hide a tool call whose terminal result is still owed.
+   */
+  public boolean hasPendingForSession(String sessionId) {
+    if (sessionId == null || sessionId.isBlank()) return false;
+    List<AgentActionEvent> events =
+        eventRepo.findBySessionIdAndTypeInOrderByCreatedAtAsc(sessionId, REPLAYABLE_TYPES);
+    Map<String, PendingCall> latest = new LinkedHashMap<>();
+    for (AgentActionEvent event : events == null ? List.<AgentActionEvent>of() : events) {
+      if (event == null || event.getActionId() == null) continue;
+      PendingCall call = from(event);
+      if (call == null) continue;
+      PendingCall previous = latest.get(event.getActionId());
+      if (isAfter(call, previous)) latest.put(event.getActionId(), call);
+    }
+    return latest.values().stream()
+        .anyMatch(
+            call ->
+                call.state() == LocalHandsState.AWAITING_CLIENT
+                    || call.state() == LocalHandsState.CLIENT_RECONNECTED);
+  }
+
   /** Close durable calls whose worker future belonged to a previous JVM. */
   public int closeForWorkerRestart(String runId) {
     if (runId == null || runId.isBlank()) return 0;

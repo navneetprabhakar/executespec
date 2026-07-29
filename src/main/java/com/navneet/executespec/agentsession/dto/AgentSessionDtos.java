@@ -42,7 +42,23 @@ public final class AgentSessionDtos {
       Instant latestLinkedRunCompletedAt,
       String latestLinkedRunPrUrl,
       Instant createdAt,
-      Instant updatedAt) {}
+      Instant updatedAt,
+      Instant archivedAt,
+      String archivedByUserId,
+      String archiveReason) {}
+
+  public record AgentSessionLifecycleResponse(
+      String sessionId,
+      String state,
+      boolean alreadyArchived,
+      Instant archivedAt,
+      String archivedByUserId,
+      String archiveReason,
+      long preservedTurns,
+      long preservedEvents) {}
+
+  /** Conversation-only provider/model defaults; these never become generated-run route pins. */
+  public record AgentSessionRouteRequest(String provider, String model) {}
 
   /** Replayable session event page. Initial pages also carry the durable session state snapshot. */
   public record AgentEventReplayResponse(
@@ -400,7 +416,20 @@ public final class AgentSessionDtos {
       long reasoningTokens,
       double costUsd,
       String status,
-      Instant createdAt) {}
+      Instant createdAt,
+      Integer assistantCharCount,
+      Integer assistantByteCount,
+      Integer assistantLineCount,
+      String assistantSha256) {}
+
+  public record AgentTurnPage(
+      List<AgentTurnResponse> turns,
+      long totalTurns,
+      boolean hasMore,
+      String nextBeforeTurnId,
+      String sessionState,
+      boolean archived,
+      Instant archivedAt) {}
 
   public record AgentActionDescriptor(
       String type,

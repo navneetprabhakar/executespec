@@ -2,6 +2,20 @@
 
 Spec-driven AI coding platform. A customer submits a spec in natural language, the V2 pipeline plans, codes across one or more repos, builds + tests, and opens a pull request with a deterministic verified score. A human approves at the plan gate; everything after is automatic. Backend is a single Spring Boot 3.5 JAR (Java 21) serving the React 18 / Vite 5 frontend out of `static/`. Postgres + Redis are the only required infra; observability and billing are pluggable. The codebase is structured so the same Worker tool surface drives both the build-from-scratch path (`runMode=BUILD`) and the patch-mode path (`runMode=PATCH`) that powers the SWE-bench / ProgramBench adapters and four customer-facing autofix surfaces.
 
+ExecuteSpec has capabilities across code generation, pull request creation, CI status, CI autofix,
+deployment, and deployment tracking. This is not yet one enforced end-to-end release gate: the
+unattended CI-autofix path remains feature-flagged, and deployment does not currently require proof
+of merge plus green CI. Runtime operations and incident response are a separate future PilotSRE
+boundary: the intended handoff is the existing A2A contract plus deployment evidence, with
+PagerDuty, New Relic, and similar integrations still roadmap items rather than shipped ExecuteSpec
+capabilities.
+
+The Web Agent stores complete chat snapshots and exposes paginated conversation history, but a chat
+snapshot is not a restorable filesystem image. Projects remain the canonical durable repository
+context: the agent can select an existing project or hand off to the normal Projects creation flow
+and return with that project selected. Closing a Web Agent workspace archives its conversation
+after active work is clear; it does not delete the linked project.
+
 The BUILD planner preserves exact behavioral clauses, keeps focused maintained tests with the
 production task they verify, and bounds task breadth to avoid one runaway worker context. Workers
 reject disposable root-level smoke scripts as test substitutes and stop repeated same-path rewrite
@@ -63,11 +77,19 @@ source run's host tenant while assigning the current actor as payer on BUILD ite
 server-internal finding PATCH submission resolve its active host project and active actor before
 dedupe or dispatch.
 
-The current deployment candidate advances the migration source head to V355. V354 adds
+The current deployment candidate advances the migration source head to V359. V354 adds
 rollout-gated operation-fenced provider-attempt admission; its default remains
 `EXECUTESPEC_LLM_OPERATION_ADMISSION_MODE=LEGACY`, so this deployment does not activate the new
 admission path. V355 adds bounded oldest-first recovery for stale streamed agent turns and never
-replays provider transport. RequirementIR also remains `LEGACY`.
+replays provider transport. V356 preserves complete Web Agent transcripts with integrity metadata
+and adds tenant-safe archive/close plus paginated conversation history. V357 persists the exact
+per-task routing tier, category, and source before provider dispatch. V358 makes generated project
+documents durable asynchronous jobs with exact-route admission, fenced publication, reloadable
+status, and bounded terminal-job retention. V359 gives each immutable GitHub check-run/head-SHA
+failure a unique database claim before CI autofix submission, binds the canonical PATCH run in the
+next fenced transaction, and permits a later delivery to retry after a fenced failed submission or
+an expired claim with no discoverable run.
+RequirementIR also remains `LEGACY`.
 
 ## Versions
 
@@ -76,7 +98,7 @@ replays provider transport. RequirementIR also remains `LEGACY`.
 | Project           | `2.0.0`             | [`VERSION`](VERSION), [`Version`](Version), [`pom.xml`](pom.xml) `<version>` |
 | Spring Boot       | `3.5.14`            | [`pom.xml`](pom.xml) `<parent>` (bumped from `3.3.0` by Dependabot #132, 2026-05-16) |
 | Spring AI         | `1.1.6`             | [`pom.xml`](pom.xml) `<spring-ai.version>` (BOM import)                |
-| Flyway head       | `V355`              | V354 adds rollout-gated atomic operation/attempt admission; V355 adds stale streamed-turn recovery; next V356; both operation admission and RequirementIR remain `LEGACY` |
+| Flyway head       | `V359`              | V357 adds task-route evidence; V358 adds durable project-document jobs; V359 adds CI-failure delivery claims; next V360 |
 | Frontend          | `2.0.0`             | [`frontend/package.json`](frontend/package.json) `"version"`           |
 
 `VERSION` and `Version` are kept identical by hand; the project's own conventions reference `Version` as the source of truth. The frontend ships under the same release stamp as the backend.
@@ -104,7 +126,7 @@ ownership must be aligned explicitly before rollout.
 | Framework           | Spring Boot 3.5.14 (Web, Data JPA, Security, OAuth2 client, Mail, Thymeleaf, Actuator, AOP, Validation, Retry, Data Redis) | [`pom.xml`](pom.xml) deps 1, 5, 14–20, 30, 36–39, 60 |
 | LLM SDK             | Spring AI 1.1.6 starters for Anthropic, OpenAI, Google GenAI                        | [`pom.xml`](pom.xml) deps 2–4                                                    |
 | LLM auto-config     | Provider auto-configurations disabled in favor of manual `AgentModelConfig` beans   | [`src/main/java/com/navneet/executespec/ExecutespecApplication.java`](src/main/java/com/navneet/executespec/ExecutespecApplication.java) |
-| Database            | PostgreSQL (Cloud SQL in prod), Flyway migrations head V355                         | [`pom.xml`](pom.xml) deps 6–8, `src/main/resources/db/migration/`                 |
+| Database            | PostgreSQL (Cloud SQL in prod), Flyway migrations head V359                         | [`pom.xml`](pom.xml) deps 6–8, `src/main/resources/db/migration/`                 |
 | Cache / lock        | Redis (Lettuce), ShedLock 7.7.0                                                     | [`pom.xml`](pom.xml) deps 30–32                                                  |
 | Auth                | JJWT 0.13.0 + Spring Security OAuth2 client (Google, GitHub)                        | [`pom.xml`](pom.xml) deps 14–18                                                  |
 | Billing             | Stripe 32.1.0, Razorpay (HMAC), invoice PDFs via OpenPDF 2.0.3 + flying-saucer 9.4.0 | [`pom.xml`](pom.xml) deps 21–22, 56; HMAC via commons-codec 1.22.0 (dep 35)     |

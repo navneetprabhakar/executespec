@@ -10,10 +10,24 @@ public record TaskSummary(
     String complexity,
     String status,
     String assignedModel,
-    /** Actual AI provider used for this task (e.g. "anthropic", "openai"). Null if not yet run. */
+    /** Requested/tier-resolved provider for this task. */
     String provider,
-    /** Actual model used for this task (e.g. "claude-sonnet-4-5"). Null if not yet run. */
+    /** Requested/tier-resolved model for this task. */
     String model,
+    /** Physical provider proven by the successful-attempt ledger; null for MIXED/UNATTRIBUTED. */
+    String effectiveProvider,
+    /** Physical model proven by the successful-attempt ledger; null for MIXED/UNATTRIBUTED. */
+    String effectiveModel,
+    /** LEDGER, MIXED, or UNATTRIBUTED. */
+    String effectiveRouteAttribution,
+    /** True when the physical route differs from the requested task route. */
+    Boolean routeDiverged,
+    /** Persisted LIGHTWEIGHT, WORKHORSE, or PLANNING tier selected at dispatch. */
+    String routingTier,
+    /** Persisted semantic routing category such as GREENFIELD_BUILD or BUG_FIX. */
+    String routingTaskCategory,
+    /** Durable selection authority such as DEFAULT_MATRIX, ORG_OVERRIDE, or RUN_OVERRIDE. */
+    String routingSource,
     String branchName,
     Boolean readmeUpdated,
     Long inputTokens,

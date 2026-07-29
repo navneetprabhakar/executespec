@@ -33,6 +33,35 @@ class RunMapperTaskProofStatusTest {
   }
 
   @Test
+  void taskSummarySeparatesRequestedAndEffectiveRouteWithPersistedExplanation() {
+    AgentTask task =
+        AgentTask.builder()
+            .taskId("T1")
+            .status("COMPLETE")
+            .complexity("HIGH")
+            .provider("ANTHROPIC")
+            .model("claude-sonnet-5")
+            .effectiveProvider("OPENAI")
+            .effectiveModel("gpt-5.4")
+            .effectiveRouteAttribution("LEDGER")
+            .routingTier("PLANNING")
+            .routingTaskCategory("BUG_FIX")
+            .routingSource("ORG_OVERRIDE")
+            .build();
+
+    TaskSummary summary = mapper.toTaskSummary(task);
+
+    assertThat(summary.provider()).isEqualTo("ANTHROPIC");
+    assertThat(summary.model()).isEqualTo("claude-sonnet-5");
+    assertThat(summary.effectiveProvider()).isEqualTo("OPENAI");
+    assertThat(summary.effectiveModel()).isEqualTo("gpt-5.4");
+    assertThat(summary.routeDiverged()).isTrue();
+    assertThat(summary.routingTier()).isEqualTo("PLANNING");
+    assertThat(summary.routingTaskCategory()).isEqualTo("BUG_FIX");
+    assertThat(summary.routingSource()).isEqualTo("ORG_OVERRIDE");
+  }
+
+  @Test
   void provenAndLegacyCompleteTasksRemainComplete() {
     AgentTask proven =
         AgentTask.builder()

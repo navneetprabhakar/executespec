@@ -31,6 +31,10 @@ LOCAL-hands runs are excluded from GCS workspace upload queries and the event li
 - `preview/vm/PreviewRegistry.java` — JPA entity for `preview_registry` table. Tracks status, VM assignment, port, TTL, deploy duration.
 - `preview/vm/PreviewVmController.java` — REST: teardown, extend TTL, list active, stats, per-VM stats.
 - `DeploymentService.java` — Full Cloud Run deployment. 9-language support. Tier-based deployment limits enforced via `tier_config.max_deployments` (FREE=1, PRO=3, TEAM/ENTERPRISE=-1).
+- `DeploymentController` treats an omitted `repoMode` as `NONE`, matching the Web Agent deploy
+  action instead of dereferencing a missing mode. `GET /api/deployments?runId=...` is the authorized
+  run-scoped tracking contract used by the run result and Deployments screen; the frontend polls
+  non-terminal deployments and exposes retry on transport failure.
 - `config/OperationalReleasePolicy.java` — release containment for deployment creation. `prod` and
   `benchmark` mask the Web capability and reject create/analyse/confirm with 503 before quota or
   deployment-state mutation unless `agent.deployment.recovery-safe-enabled=true`. Existing

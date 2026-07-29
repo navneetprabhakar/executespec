@@ -27,6 +27,12 @@ User-selected provider routing with YAML as the single source of truth and a Red
 | `RunModelOverrides.java` + `RunRoutePolicyService.java` | **F3 / V275** — `RunModelOverrides` carries org/per-run tier cells across the active thread and explicitly captured child tasks. V275 also persists `requested_provider`, `requested_model`, `routing_mode` and `route_pinned` on `pipeline_run`; `RunRoutePolicyService` caches the immutable row and `LlmRouter` rechecks every run-scoped dispatch. `EXACT_LOCK` requires the exact provider/model, forces strict transport, rejects managed-AI substitution and survives restart/retry/reviewer/chat/background work. Missing rows are not cached, avoiding a submit/start race. Per-run exact selection remains Enterprise-only and fails closed instead of being silently ignored. |
 | `OrgModelOverrideService.java` migration | **V205** `org_model_overrides` — adds `org.model_overrides_json TEXT`. |
 
+V357 persists each worker task's initial `routing_tier`, semantic `routing_task_category`, and
+`routing_source` before dispatch, so Web run details explain the task-level matrix decision.
+`TaskOutcomeMetricService` now attributes outcomes only to one unambiguous physical effective
+provider/model; missing or mixed routes are skipped rather than poisoning requested-route priors.
+This supersedes the older route-truth caveat in the table above.
+
 ## Agent tier mapping (from `application.yml`)
 
 | Tier | Anthropic | OpenAI | Gemini | Agents |

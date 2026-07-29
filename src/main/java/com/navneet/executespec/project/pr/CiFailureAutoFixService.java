@@ -1,6 +1,8 @@
 package com.navneet.executespec.project.pr;
 
-import java.time.Instant;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -11,10 +13,8 @@ import com.navneet.executespec.finding.Finding;
 import com.navneet.executespec.finding.FindingPatchSubmitter;
 import com.navneet.executespec.finding.FindingType;
 import com.navneet.executespec.state.entity.PipelineRun;
-import com.navneet.executespec.state.repository.PipelineRunRepository;
 
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -35,11 +35,14 @@ import lombok.extern.slf4j.Slf4j;
  *       PipelineRun} by {@code runId}.
  *   <li>Bails if {@link #MAX_AUTO_FIX_ATTEMPTS} reached, the originating run is missing the project
  *       / org context (so we can't re-submit cleanly), or the PR is no longer OPEN.
- *   <li>Builds a seeded user request: original spec + failure tail + same-branch instruction.
- *   <li>Submits via {@link RunOrchestrator#submitRun} with {@code branchOverride=headBranch} so
- *       {@code WorkspaceInitService.cloneMultipleRepos} clones from the PR branch's tip and {@code
- *       ScmPushService} pushes incrementally onto the same branch.
- *   <li>Increments {@code ciAutoFixAttempts} on the PR record.
+ *   <li>Commits a unique V359 delivery claim and reserves one PR attempt before any asynchronous
+ *       run submission. Concurrent redeliveries observe that claim and stop.
+ *   <li>Builds a seeded user request from the failure tail plus the same-branch instruction.
+ *   <li>Submits through {@link FindingPatchSubmitter} with {@code branchOverride=headBranch}; the
+ *       run's initial row carries the same finding key, and terminal PATCH publication pushes
+ *       incrementally onto the existing PR branch.
+ *   <li>Fenced completion binds the canonical run to the delivery claim. A caught submission
+ *       failure marks the claim FAILED and releases its reserved attempt for a later redelivery.
  * </ol>
  *
  * <p>Retry budget: {@link #MAX_AUTO_FIX_ATTEMPTS} per PR. After cap is hit, the webhook still
@@ -54,7 +57,8 @@ public class CiFailureAutoFixService {
   public static final int MAX_AUTO_FIX_ATTEMPTS = 3;
 
   private final PullRequestRecordRepository prRepo;
-  private final PipelineRunRepository pipelineRunRepo;
+  private final CiFailureRunRepository pipelineRunRepo;
+  private final CiFailureDeliveryClaimStore deliveryClaimStore;
   private final FindingPatchSubmitter findingSubmitter;
   private final AppUserRepository userRepository;
   private final FeatureFlagService featureFlagService;
@@ -95,9 +99,29 @@ public class CiFailureAutoFixService {
    * @param checkRunUrl GitHub URL of the check run for human inspection (from {@code
    *     check_run.html_url}). Lands at the bottom of the seeded prompt as a deep-link.
    */
-  @Transactional
   public AutoFixResult onCheckRunFailed(
       String repoFullName, String headBranch, String checkRunSummary, String checkRunUrl) {
+    return onCheckRunFailed(
+        repoFullName,
+        headBranch,
+        checkRunSummary,
+        checkRunUrl,
+        fallbackCheckIdentity(repoFullName, headBranch, checkRunSummary, checkRunUrl),
+        null);
+  }
+
+  /**
+   * Idempotent check-run entry point. GitHub may redeliver the same signed webhook after the first
+   * PATCH run has already become terminal, so active-run dedupe alone is insufficient. The
+   * check-run id plus head SHA names one immutable CI observation.
+   */
+  public AutoFixResult onCheckRunFailed(
+      String repoFullName,
+      String headBranch,
+      String checkRunSummary,
+      String checkRunUrl,
+      String checkRunId,
+      String headSha) {
     if (repoFullName == null
         || repoFullName.isBlank()
         || headBranch == null
@@ -161,6 +185,38 @@ public class CiFailureAutoFixService {
       return AutoFixResult.skipped("originating run missing user/project context");
     }
 
+    String findingId = ciFindingId(pr, checkRunId, headSha);
+    String findingKey = FindingType.CI_FAILURE.name() + ":" + findingId;
+    CiFailureDeliveryClaimStore.Claim deliveryClaim =
+        deliveryClaimStore.claim(
+            findingKey, pr.getId(), checkRunId, headSha, MAX_AUTO_FIX_ATTEMPTS);
+    if (!deliveryClaim.acquired()) {
+      if (deliveryClaim.outcome() == CiFailureDeliveryClaimStore.Outcome.ATTEMPT_LIMIT) {
+        return AutoFixResult.skipped("max auto-fix attempts reached");
+      }
+      if (deliveryClaim.outcome() == CiFailureDeliveryClaimStore.Outcome.PR_NOT_OPEN) {
+        return AutoFixResult.skipped("PR is no longer open");
+      }
+      String existingRun = deliveryClaim.runId() == null ? "" : " by run " + deliveryClaim.runId();
+      return AutoFixResult.skipped(
+          deliveryClaim.outcome() == CiFailureDeliveryClaimStore.Outcome.DISPATCHED
+              ? "duplicate check_run delivery already handled" + existingRun
+              : "duplicate check_run delivery is already being handled");
+    }
+
+    // V359 starts with an empty claim table. Reconcile a pre-migration delivery from the durable
+    // run marker before submitting anything, then bind that historical run into the new claim.
+    Optional<PipelineRun> priorDelivery =
+        pipelineRunRepo.findFirstByTriggeredByFindingOrderByStartedAtDesc(findingKey);
+    if (priorDelivery.isPresent()) {
+      PipelineRun prior = priorDelivery.orElseThrow();
+      if (!deliveryClaimStore.complete(deliveryClaim, prior.getRunId())) {
+        throw new IllegalStateException("CI delivery claim lost before historical reconciliation");
+      }
+      return AutoFixResult.skipped(
+          "duplicate check_run delivery already handled by run " + prior.getRunId());
+    }
+
     // Seeded user prompt — finding shape this time. We don't replay the full original
     // spec the way the legacy build-mode path did; the patch agent is meant to fix
     // ONE failing CI check, not redo the whole feature. Embedding the failure log is
@@ -203,10 +259,9 @@ public class CiFailureAutoFixService {
     Finding finding =
         new Finding(
             FindingType.CI_FAILURE,
-            // Combined PR id + attempt index so a re-failure on the same branch can
-            // dispatch a fresh run (each attempt has a unique finding key) within the
-            // MAX_AUTO_FIX_ATTEMPTS budget.
-            pr.getId() + "|attempt-" + (attempts + 1),
+            // Stable for one GitHub check observation. A new head SHA/check-run id gets a fresh
+            // attempt; duplicate delivery of the same event can never consume another attempt.
+            findingId,
             original.getProjectId(),
             parseRepoIds(original.getSelectedRepoIds()),
             prompt,
@@ -218,6 +273,9 @@ public class CiFailureAutoFixService {
     try {
       result = findingSubmitter.submit(finding);
     } catch (Exception e) {
+      if (!deliveryClaimStore.fail(deliveryClaim, e.getClass().getSimpleName())) {
+        throw new IllegalStateException("CI delivery claim lost while recording submit failure", e);
+      }
       log.warn(
           "CiFailureAutoFixService: FindingPatchSubmitter failed for {} #{}: {}",
           repoFullName,
@@ -226,10 +284,17 @@ public class CiFailureAutoFixService {
       return AutoFixResult.skipped("submit failed: " + e.getMessage());
     }
 
-    pr.setCiAutoFixAttempts(attempts + 1);
-    pr.setUpdatedAt(Instant.now());
-    prRepo.save(pr);
+    if (result.outcome() == FindingPatchSubmitter.SubmitResult.Outcome.REUSED_ACTIVE) {
+      if (!deliveryClaimStore.complete(deliveryClaim, result.runId())) {
+        throw new IllegalStateException("CI delivery claim lost while binding active PATCH run");
+      }
+      return AutoFixResult.skipped(
+          "duplicate check_run delivery already active as run " + result.runId());
+    }
 
+    if (!deliveryClaimStore.complete(deliveryClaim, result.runId())) {
+      throw new IllegalStateException("CI delivery claim lost before PATCH run publication");
+    }
     log.info(
         "CiFailureAutoFixService: auto-fix run {} dispatched for {} #{} (attempt {}/{}),"
             + " branchOverride={} outcome={}",
@@ -241,6 +306,41 @@ public class CiFailureAutoFixService {
         headBranch,
         result.outcome());
     return AutoFixResult.dispatched(result.runId());
+  }
+
+  private static String ciFindingId(PullRequestRecord pr, String checkRunId, String headSha) {
+    String check =
+        checkRunId == null || checkRunId.isBlank()
+            ? "unknown"
+            : checkRunId.replaceAll("[^A-Za-z0-9._-]", "_");
+    String sha =
+        headSha == null || headSha.isBlank()
+            ? "unknown"
+            : headSha
+                .replaceAll("[^A-Fa-f0-9]", "")
+                .substring(0, Math.min(16, headSha.replaceAll("[^A-Fa-f0-9]", "").length()));
+    if (sha.isBlank()) sha = "unknown";
+    return pr.getId() + "|check-" + check + "|sha-" + sha;
+  }
+
+  private static String fallbackCheckIdentity(
+      String repoFullName, String headBranch, String summary, String url) {
+    try {
+      String material =
+          String.join(
+              "\u001f",
+              repoFullName == null ? "" : repoFullName,
+              headBranch == null ? "" : headBranch,
+              summary == null ? "" : summary,
+              url == null ? "" : url);
+      return HexFormat.of()
+          .formatHex(
+              MessageDigest.getInstance("SHA-256")
+                  .digest(material.getBytes(StandardCharsets.UTF_8)))
+          .substring(0, 32);
+    } catch (Exception impossible) {
+      throw new IllegalStateException("SHA-256 unavailable", impossible);
+    }
   }
 
   private String resolveCallerPat(String userId) {

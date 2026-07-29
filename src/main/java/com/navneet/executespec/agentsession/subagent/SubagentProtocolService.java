@@ -144,7 +144,8 @@ public class SubagentProtocolService {
   public void recordCoordinatorTrigger(
       SpawnRequest request, String childSessionId, String actorUserId, String actorOrgId) {
     validateSpawnRequest(request);
-    AgentSession parent = requireOwnedSession(request.parentSessionId(), actorUserId, actorOrgId);
+    AgentSession parent =
+        requireOwnedSessionForUpdate(request.parentSessionId(), actorUserId, actorOrgId);
     requireParentActive(parent);
     validateParentTurn(parent, request.parentTurnId());
     append(
@@ -173,7 +174,9 @@ public class SubagentProtocolService {
   public Handle spawnAndRecordCoordinator(
       SpawnRequest request, String actorUserId, String actorOrgId) {
     Handle handle = spawn(request, actorUserId, actorOrgId);
-    AgentSession parent = requireOwnedSession(request.parentSessionId(), actorUserId, actorOrgId);
+    AgentSession parent =
+        requireOwnedSessionForUpdate(request.parentSessionId(), actorUserId, actorOrgId);
+    requireParentActive(parent);
     append(
         parent.getId(),
         request.parentTurnId(),
@@ -191,7 +194,8 @@ public class SubagentProtocolService {
   @Transactional
   public Handle spawn(SpawnRequest request, String actorUserId, String actorOrgId) {
     validateSpawnRequest(request);
-    AgentSession parent = requireOwnedSession(request.parentSessionId(), actorUserId, actorOrgId);
+    AgentSession parent =
+        requireOwnedSessionForUpdate(request.parentSessionId(), actorUserId, actorOrgId);
     requireParentActive(parent);
     validateParentTurn(parent, request.parentTurnId());
 
@@ -361,6 +365,28 @@ public class SubagentProtocolService {
     return reservation;
   }
 
+  /** Returns whether this parent still owns any durable single-writer reservation. */
+  @Transactional(readOnly = true)
+  public boolean hasActiveWriterReservation(String parentSessionId) {
+    return writerHistory(parentSessionId, null).stream()
+        .anyMatch(reservation -> "ACTIVE".equals(reservation.status()));
+  }
+
+  /** Returns whether a parent still owns a READY or RUNNING child session. */
+  @Transactional(readOnly = true)
+  public boolean hasActiveChildren(String parentSessionId) {
+    for (AgentActionEvent event :
+        eventRepository.findBySessionIdAndTypeOrderByCreatedAtAsc(
+            parentSessionId, EVENT_CHILD_SPAWNED)) {
+      ParentLink link = read(event.getPayloadJson(), ParentLink.class);
+      AgentSession child = sessionRepository.findById(link.childSessionId()).orElse(null);
+      if (child != null && List.of("READY", "RUNNING").contains(child.getStatus())) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   /** Releases an active writer reservation; repeated release is idempotent. */
   @Transactional
   public WriterReservation releaseWriter(
@@ -459,15 +485,18 @@ public class SubagentProtocolService {
   /** Claims a READY child for execution. Idempotent while the child is already RUNNING. */
   @Transactional
   public Handle start(String childSessionId, String actorUserId, String actorOrgId) {
-    // Claim the READY row under a database lock. A plain findById allows two coordinators to both
-    // observe READY and dispatch the same child before either transaction commits RUNNING.
+    ChildMetadata metadata = metadataOf(childSessionId);
+    AgentSession parent =
+        requireOwnedSessionForUpdate(metadata.parentSessionId(), actorUserId, actorOrgId);
+    requireParentActive(parent);
+    // Parent-before-child is the global lock order shared with archive. It prevents a child start
+    // from publishing parent activity after the parent has become terminal.
     AgentSession child =
         sessionRepository
             .findByIdForUpdate(childSessionId)
             .orElseThrow(
                 () -> new IllegalArgumentException("Agent session not found: " + childSessionId));
     requireOwnership(child, actorUserId, actorOrgId);
-    ChildMetadata metadata = metadataOf(childSessionId);
     if ("RUNNING".equals(child.getStatus())) return handleFromMetadata(child, metadata);
     if (!"READY".equals(child.getStatus())) {
       throw new IllegalStateException("Subagent cannot start from status " + child.getStatus());
@@ -491,9 +520,15 @@ public class SubagentProtocolService {
   @Transactional
   public Result complete(
       String childSessionId, Completion completion, String actorUserId, String actorOrgId) {
-    AgentSession child = requireOwnedSession(childSessionId, actorUserId, actorOrgId);
     ChildMetadata metadata = metadataOf(childSessionId);
+    AgentSession parent =
+        requireOwnedSessionForUpdate(metadata.parentSessionId(), actorUserId, actorOrgId);
+    requireParentActive(parent);
+    AgentSession child = requireOwnedSessionForUpdate(childSessionId, actorUserId, actorOrgId);
     requireRunningChild(child);
+    if (hasActiveChildren(childSessionId)) {
+      throw new IllegalStateException("Subagent cannot complete while a child agent is active");
+    }
     if (completion == null || completion.summary() == null || completion.summary().isBlank()) {
       throw new IllegalArgumentException("completion summary is required");
     }
@@ -545,8 +580,11 @@ public class SubagentProtocolService {
   @Transactional
   public Handle cancel(
       String childSessionId, String reason, String actorUserId, String actorOrgId) {
-    AgentSession child = requireOwnedSession(childSessionId, actorUserId, actorOrgId);
     ChildMetadata metadata = metadataOf(childSessionId);
+    AgentSession parent =
+        requireOwnedSessionForUpdate(metadata.parentSessionId(), actorUserId, actorOrgId);
+    requireParentActive(parent);
+    AgentSession child = requireOwnedSessionForUpdate(childSessionId, actorUserId, actorOrgId);
     if ("COMPLETED".equals(child.getStatus())) {
       throw new IllegalStateException("Completed subagent cannot be cancelled");
     }
@@ -573,7 +611,8 @@ public class SubagentProtocolService {
   @Transactional
   public int cancelChildren(
       String parentSessionId, String reason, String actorUserId, String actorOrgId) {
-    requireOwnedSession(parentSessionId, actorUserId, actorOrgId);
+    AgentSession parent = requireOwnedSessionForUpdate(parentSessionId, actorUserId, actorOrgId);
+    requireParentActive(parent);
     int cancelled = 0;
     for (AgentActionEvent event :
         eventRepository.findBySessionIdAndTypeOrderByCreatedAtAsc(
@@ -775,6 +814,15 @@ public class SubagentProtocolService {
     AgentSession session =
         sessionRepository
             .findById(id)
+            .orElseThrow(() -> new IllegalArgumentException("Agent session not found: " + id));
+    requireOwnership(session, userId, orgId);
+    return session;
+  }
+
+  private AgentSession requireOwnedSessionForUpdate(String id, String userId, String orgId) {
+    AgentSession session =
+        sessionRepository
+            .findByIdForUpdate(id)
             .orElseThrow(() -> new IllegalArgumentException("Agent session not found: " + id));
     requireOwnership(session, userId, orgId);
     return session;

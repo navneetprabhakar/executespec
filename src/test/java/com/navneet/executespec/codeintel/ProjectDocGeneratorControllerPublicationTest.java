@@ -6,8 +6,11 @@ import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import java.time.Instant;
 import java.util.Optional;
+import java.util.UUID;
 
+import com.navneet.executespec.auth.entity.AppUser;
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.codeintel.entity.ProjectGeneratedDoc;
 import com.navneet.executespec.codeintel.entity.ProjectGeneratedDoc.DocType;
@@ -18,6 +21,52 @@ import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
 
 class ProjectDocGeneratorControllerPublicationTest {
+
+  @Test
+  void generationReturnsAcceptedDurableJobWithExactRoute() {
+    ProjectDocGeneratorService service = mock(ProjectDocGeneratorService.class);
+    ProjectGeneratedDocJobService jobs = mock(ProjectGeneratedDocJobService.class);
+    ProjectAccessGuard guard = mock(ProjectAccessGuard.class);
+    AppUserDetails principal = mock(AppUserDetails.class);
+    AppUser user = mock(AppUser.class);
+    when(principal.getUser()).thenReturn(user);
+    when(user.getId()).thenReturn("user-1");
+    UUID jobId = UUID.randomUUID();
+    var job =
+        new ProjectGeneratedDocJobStore.Job(
+            jobId,
+            "project-1",
+            "org-1",
+            "user-1",
+            "EXPLANATION",
+            "ANTHROPIC",
+            "claude-sonnet-4-6",
+            ProjectGeneratedDocJobStore.Status.QUEUED,
+            0,
+            Instant.now(),
+            Instant.now().plusSeconds(1800),
+            null,
+            0,
+            null,
+            null,
+            null,
+            null,
+            null,
+            Instant.now(),
+            null,
+            null);
+    when(jobs.request("project-1", DocType.EXPLANATION, "user-1")).thenReturn(job);
+    ProjectDocGeneratorController controller =
+        new ProjectDocGeneratorController(service, jobs, guard);
+
+    var response = controller.generate("project-1", "EXPLANATION", principal);
+
+    assertThat(response.getStatusCode().value()).isEqualTo(202);
+    assertThat(response.getHeaders().getLocation().toString())
+        .endsWith("/docs/EXPLANATION/jobs/" + jobId);
+    assertThat(response.getBody().provider()).isEqualTo("ANTHROPIC");
+    assertThat(response.getBody().model()).isEqualTo("claude-sonnet-4-6");
+  }
 
   @Test
   void generatedDocumentDownloadRejectsCredentialMaterialWithoutEchoingIt() {
@@ -36,7 +85,9 @@ class ProjectDocGeneratorControllerPublicationTest {
     doThrow(new ProjectDocGeneratorService.UnsafeGeneratedDocumentException())
         .when(service)
         .assertSafeForCustomer("setup evidence=" + secret);
-    ProjectDocGeneratorController controller = new ProjectDocGeneratorController(service, guard);
+    ProjectDocGeneratorController controller =
+        new ProjectDocGeneratorController(
+            service, mock(ProjectGeneratedDocJobService.class), guard);
 
     assertThatThrownBy(() -> controller.download("project-1", "SETUP", principal))
         .isInstanceOfSatisfying(
@@ -48,21 +99,17 @@ class ProjectDocGeneratorControllerPublicationTest {
   }
 
   @Test
-  void truncatedGenerationIsProjectedAsBadGatewayAndNotCreated() {
+  void generationAdmissionRequiresAnAuthenticatedActor() {
     ProjectDocGeneratorService service = mock(ProjectDocGeneratorService.class);
     ProjectAccessGuard guard = mock(ProjectAccessGuard.class);
-    when(service.generate("project-1", DocType.EXPLANATION, null, null))
-        .thenThrow(
-            new ProjectDocGeneratorService.IncompleteGenerationException(DocType.EXPLANATION));
-    ProjectDocGeneratorController controller = new ProjectDocGeneratorController(service, guard);
+    ProjectDocGeneratorController controller =
+        new ProjectDocGeneratorController(
+            service, mock(ProjectGeneratedDocJobService.class), guard);
 
     assertThatThrownBy(() -> controller.generate("project-1", "EXPLANATION", null))
         .isInstanceOfSatisfying(
             ResponseStatusException.class,
-            error -> {
-              assertThat(error.getStatusCode()).isEqualTo(HttpStatus.BAD_GATEWAY);
-              assertThat(error.getReason()).contains("no document was saved");
-            });
+            error -> assertThat(error.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED));
   }
 
   @Test
@@ -81,7 +128,9 @@ class ProjectDocGeneratorControllerPublicationTest {
     doThrow(new ProjectDocGeneratorService.UnsafeGeneratedDocumentException())
         .when(service)
         .assertSafeForCustomer("# Architecture\ncredential=" + secret);
-    ProjectDocGeneratorController controller = new ProjectDocGeneratorController(service, guard);
+    ProjectDocGeneratorController controller =
+        new ProjectDocGeneratorController(
+            service, mock(ProjectGeneratedDocJobService.class), guard);
 
     assertThatThrownBy(() -> controller.latest("project-1", "EXPLANATION", null))
         .isInstanceOfSatisfying(
@@ -93,20 +142,17 @@ class ProjectDocGeneratorControllerPublicationTest {
   }
 
   @Test
-  void unsafeGenerationIsProjectedAsUnprocessableAndNotCreated() {
+  void unknownDocumentTypeIsRejectedBeforeJobAdmission() {
     ProjectDocGeneratorService service = mock(ProjectDocGeneratorService.class);
     ProjectAccessGuard guard = mock(ProjectAccessGuard.class);
-    when(service.generate("project-1", DocType.SETUP, null, null))
-        .thenThrow(new ProjectDocGeneratorService.UnsafeGeneratedDocumentException());
-    ProjectDocGeneratorController controller = new ProjectDocGeneratorController(service, guard);
+    ProjectDocGeneratorController controller =
+        new ProjectDocGeneratorController(
+            service, mock(ProjectGeneratedDocJobService.class), guard);
 
-    assertThatThrownBy(() -> controller.generate("project-1", "SETUP", null))
+    assertThatThrownBy(() -> controller.generate("project-1", "UNKNOWN", null))
         .isInstanceOfSatisfying(
             ResponseStatusException.class,
-            error -> {
-              assertThat(error.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_ENTITY);
-              assertThat(error.getReason()).contains("no document was saved");
-            });
+            error -> assertThat(error.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST));
   }
 
   @Test
@@ -124,7 +170,9 @@ class ProjectDocGeneratorControllerPublicationTest {
     doThrow(new ProjectDocGeneratorService.UnsafeGeneratedDocumentException())
         .when(service)
         .assertSafeForCustomer(protocol);
-    ProjectDocGeneratorController controller = new ProjectDocGeneratorController(service, guard);
+    ProjectDocGeneratorController controller =
+        new ProjectDocGeneratorController(
+            service, mock(ProjectGeneratedDocJobService.class), guard);
 
     assertThatThrownBy(() -> controller.latest("project-1", "EXPLANATION", null))
         .isInstanceOfSatisfying(

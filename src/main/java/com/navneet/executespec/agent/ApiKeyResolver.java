@@ -72,9 +72,10 @@ public class ApiKeyResolver {
     String keySourceMode = "HYBRID";
     Set<String> enabledProviders = null;
     Map<String, CredentialOrigin> origins = new LinkedHashMap<>();
+    AppUser user = null;
 
     if (userId != null) {
-      AppUser user = userRepo.findById(userId).orElse(null);
+      user = userRepo.findById(userId).orElse(null);
       if (user != null) {
         anthropic = blankToNull(user.getAnthropicApiKey());
         openAi = blankToNull(user.getOpenAiApiKey());
@@ -98,6 +99,12 @@ public class ApiKeyResolver {
     if (org != null) {
       keySourceMode = org.getKeySourceMode() != null ? org.getKeySourceMode() : "HYBRID";
       enabledProviders = parseProviders(org.getEnabledProviders());
+
+      // Tier entitlement is authoritative even when an older downgrade path left a stale
+      // OWN_KEYS/HYBRID marker and encrypted keys on the row.
+      if (!isByokCapableTier(org.getTier())) {
+        keySourceMode = "SYSTEM";
+      }
 
       if ("SYSTEM".equals(keySourceMode)) {
         // Platform keys only — ignore any user/org keys
@@ -135,6 +142,16 @@ public class ApiKeyResolver {
           if (fireworks != null) origins.put("fireworks", CredentialOrigin.ORG);
         }
       }
+    }
+    if (org == null && !isByokCapableTier(user == null ? null : user.getTier())) {
+      keySourceMode = "SYSTEM";
+      anthropic = null;
+      openAi = null;
+      gemini = null;
+      openRouter = null;
+      deepSeek = null;
+      fireworks = null;
+      origins.clear();
     }
 
     // Level 3: system keys (null = LlmRouter uses the configured system transport)
@@ -180,7 +197,7 @@ public class ApiKeyResolver {
     if (user == null || user.getOrgId() == null) return false;
     Org org = orgRepo.findById(user.getOrgId()).orElse(null);
     if (org == null) return false;
-    return "OWN_KEYS".equals(org.getKeySourceMode());
+    return isByokCapableTier(org.getTier()) && "OWN_KEYS".equals(org.getKeySourceMode());
   }
 
   /**
@@ -217,6 +234,12 @@ public class ApiKeyResolver {
 
   private static String blankToNull(String s) {
     return (s != null && !s.isBlank()) ? s.strip() : null;
+  }
+
+  private static boolean isByokCapableTier(String tier) {
+    if (tier == null) return false;
+    return Set.of("BYOK", "TEAM", "ENTERPRISE")
+        .contains(tier.trim().toUpperCase(java.util.Locale.ROOT));
   }
 
   private static Set<String> parseProviders(String csv) {

@@ -12,6 +12,10 @@ final class IterationSubmitPolicyFactory {
       throw new IllegalArgumentException("iteration actor org is required");
     }
     return new RunOrchestrator.SubmitPolicy(
-        inherited.userCostCap(), inherited.skipAutoPush(), inherited.tenantOrgId(), actorOrgId);
+        inherited.userCostCap(),
+        inherited.skipAutoPush(),
+        inherited.tenantOrgId(),
+        actorOrgId,
+        null);
   }
 }

@@ -4,6 +4,7 @@ export * from './transport';
 export type {GoalProofEvidenceReference} from './validationReportTypes';
 
 import type {GoalProofEvidenceReference} from './validationReportTypes';
+import type {TaskSummary} from './tasks';
 // Billing DTOs moved to the billing domain module, but remain type-re-exported here so existing
 // `@/lib/api/core` consumers keep compiling while the god-file shrinks.
 export type {BillingOverviewData, PaymentAuditEntry, PricingRow, UsageMetrics} from './billing';
@@ -93,126 +94,6 @@ export interface RunSummary {
    * validation report in one batched query. Null until the run is terminal and scored.
    */
   verifiedScore?: number | null;
-}
-
-export interface TaskSummary {
-  taskId: string;
-  title: string;
-  status: string;
-  assignedModel: string;
-  /** Actual AI provider used for this task (e.g. "anthropic", "openai"). Null if not yet run. */
-  provider?: string | null;
-  /** Actual model used for this task (e.g. "claude-sonnet-4-5"). Null if not yet run. */
-  model?: string | null;
-  inputTokens: number;
-  outputTokens: number;
-  durationMs: number;
-  branchName: string | null;
-  startedAt: string | null;
-  completedAt: string | null;
-  readmeUpdated: boolean;
-  /** Present when the task ended in PARTIAL / BLOCKED / FAILED — explains why. */
-  failureReason?: string | null;
-  /** Structured goal-doneness decision from the executor task boundary. */
-  goalDoneness?: GoalDonenessDecisionData | null;
-  /** Structured continuation / step-up / provider-change advice from the executor. */
-  continuationDecision?: {
-    decision?: string;
-    /** Where this continuation proposal came from, e.g. task boundary, reviewer, validation report. */
-    source?: string;
-    approvalRequiredReason?: string;
-    selectedCandidate?: {
-      provider?: string;
-      model?: string;
-      taskCategory?: string;
-      qualityScore?: number;
-      requiredQualityThreshold?: number;
-      costPerMillionTokens?: number;
-      latencyP50Ms?: number;
-      latencyP95Ms?: number;
-      benchmarkQualityPriorAvailable?: boolean;
-      reasons?: string[];
-    } | null;
-    policy?: {
-      taskCategory?: string;
-      requiredQualityThreshold?: number;
-      defaultRequiredQualityThreshold?: number;
-      providerSwitchesUsed?: number;
-      maxProviderSwitches?: number;
-      modelStepUpsUsed?: number;
-      maxModelStepUps?: number;
-      modelStepDownsUsed?: number;
-      maxModelStepDowns?: number;
-      lowComplexityWorkerStartTierConfigured?: string;
-      lowComplexityWorkerStartTierEffective?: string;
-      requireConfirmationBeforeExpensiveContinuation?: boolean;
-      requireBenchmarkPriorForAutomaticContinuation?: boolean;
-      maxTotalCostUsd?: number;
-      maxTotalTokens?: number;
-      maxTaskWallClockMs?: number;
-      providerBehaviorPoor?: boolean;
-      userConfirmedExpensiveContinuation?: boolean;
-      userConfirmedContinuationAction?: string;
-      userConfirmedContinuationProvider?: string;
-      userConfirmedContinuationModel?: string;
-      routePinned?: boolean;
-      /** Mirrors continuationDecision.source for persisted policy/action audits. */
-      source?: string;
-      actingEnabled?: boolean;
-      maxRerunsPerTask?: number;
-      rankingPolicy?: string;
-      rankingQualityTieBand?: number;
-      rankingReasons?: string[];
-      eligibleCandidateCount?: number;
-      rejectedBelowQualityThresholdCount?: number;
-      topEligibleCandidates?: {
-        provider?: string;
-        model?: string;
-        qualityScore?: number;
-        requiredQualityThreshold?: number;
-        costPerMillionTokens?: number;
-        latencyP50Ms?: number;
-        latencyP95Ms?: number;
-        benchmarkQualityPriorAvailable?: boolean;
-      }[];
-      topRejectedCandidates?: {
-        provider?: string;
-        model?: string;
-        qualityScore?: number;
-        requiredQualityThreshold?: number;
-        costPerMillionTokens?: number;
-        latencyP50Ms?: number;
-        latencyP95Ms?: number;
-        benchmarkQualityPriorAvailable?: boolean;
-      }[];
-    };
-    reasons?: string[];
-  } | null;
-  /** Durable history of continuation actions actually executed or skipped for this task. */
-  continuationActions?:
-    | {
-        status?: string;
-        decision?: string;
-        provider?: string;
-        model?: string;
-        reason?: string;
-        limitName?: string;
-        usedLimit?: number;
-        maxLimit?: number;
-        attempt?: number;
-        source?: string;
-      }[]
-    | null;
-  /** The planner's objective/description for this task — shown in the expanded card. */
-  objective?: string | null;
-  /** The worker's summary of what was implemented. */
-  completionNotes?: string | null;
-  /** Parent task ID if this is a subtask (null for top-level tasks). */
-  parentTaskId?: string | null;
-  /** 1-based index within parent's subtask list. */
-  subtaskIndex?: number | null;
-  /** Total number of subtasks in the parent. */
-  subtaskTotal?: number | null;
 }
 
 export interface GoalDonenessDecisionData {

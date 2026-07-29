@@ -53,6 +53,7 @@ public class ProviderReadinessService {
   private final AppUserRepository userRepository;
   private final OrgRepository orgRepository;
   private final ProviderHealthTracker healthTracker;
+  private final ModelRegistry modelRegistry;
 
   @Value("${spring.ai.anthropic.api-key:}")
   private String systemAnthropicKey;
@@ -110,6 +111,11 @@ public class ProviderReadinessService {
           mode,
           "Provider is disabled by the effective organization policy.");
     }
+    if (isFreeTier(user, org)
+        && !name.equals(modelRegistry.freeTierProvider().trim().toLowerCase(Locale.ROOT))) {
+      return result(
+          provider, State.POLICY_BLOCKED, mode, "Provider is not available on the free tier.");
+    }
 
     Source source = effectiveSource(provider, user, org, mode);
     if (source == Source.NONE) {
@@ -139,13 +145,25 @@ public class ProviderReadinessService {
   }
 
   private Source effectiveSource(LlmProvider provider, AppUser user, Org org, String mode) {
-    if (!"SYSTEM".equals(mode)) {
+    if (!"SYSTEM".equals(mode) && customerKeysEntitled(user, org)) {
       if (hasUserKey(provider, user)) return Source.USER;
       if (hasOrgKey(provider, org)) return Source.ORG;
     }
     if (!"OWN_KEYS".equals(mode) && hasSystemKey(provider)) return Source.MANAGED;
 
     return Source.NONE;
+  }
+
+  private static boolean customerKeysEntitled(AppUser user, Org org) {
+    String tier = org != null ? org.getTier() : user == null ? null : user.getTier();
+    if (tier == null) return false;
+    return Set.of("BYOK", "TEAM", "ENTERPRISE")
+        .contains(tier.trim().toUpperCase(java.util.Locale.ROOT));
+  }
+
+  private static boolean isFreeTier(AppUser user, Org org) {
+    String tier = org != null ? org.getTier() : user == null ? null : user.getTier();
+    return tier != null && "FREE".equals(tier.trim().toUpperCase(Locale.ROOT));
   }
 
   private boolean hasUserKey(LlmProvider provider, AppUser user) {

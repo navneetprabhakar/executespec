@@ -33,31 +33,23 @@ describe('project API', () => {
     vi.unstubAllGlobals();
   });
 
-  it('keeps project document generation alive past the shared 30 second deadline', async () => {
-    vi.useFakeTimers();
-    const captured: {signal: AbortSignal | null} = {signal: null};
-    const fetchMock = vi.fn<typeof fetch>().mockImplementation((_url, init) => {
-      captured.signal = init?.signal ?? null;
-      return new Promise<Response>((_resolve, reject) => {
-        captured.signal?.addEventListener(
-          'abort',
-          () => reject(new DOMException('The operation was aborted.', 'AbortError')),
-          {once: true},
-        );
-      });
-    });
+  it('admits project document generation as a durable asynchronous job', async () => {
+    const job = {
+      id: 'doc-job-1',
+      projectId: 'project-1',
+      docType: 'EXPLANATION',
+      status: 'QUEUED',
+      terminal: false,
+      provider: 'ANTHROPIC',
+      model: 'claude-sonnet-4-6',
+    };
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(new Response(JSON.stringify(job), {status: 202}));
     vi.stubGlobal('fetch', fetchMock);
 
-    const request = generateProjectDoc('project-1', 'EXPLANATION').catch((error: unknown) => error);
-    await vi.advanceTimersByTimeAsync(30_000);
-    expect(captured.signal?.aborted).toBe(false);
-
-    await vi.advanceTimersByTimeAsync(150_000);
-    await expect(request).resolves.toMatchObject({
-      message: 'The request timed out. Please check your connection and try again.',
-      status: 0,
-    });
-    expect(fetchMock.mock.calls[0]?.[1]).not.toHaveProperty('timeoutMs');
+    await expect(generateProjectDoc('project-1', 'EXPLANATION')).resolves.toMatchObject(job);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/projects/project-1/docs/EXPLANATION/generate');
   });
 
   it('uses durable job endpoints for latest state, per-repo admission, and confirmed retry', async () => {

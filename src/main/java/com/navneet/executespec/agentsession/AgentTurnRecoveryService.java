@@ -94,7 +94,7 @@ class AgentTurnRecoveryService {
     // The business outcome is flushed first. Any operation cancellation below joins this same
     // transaction, so a crash cannot commit one side without the other.
     turn.setStatus("ERROR");
-    turn.setAssistantSummary(RECOVERY_SUMMARY);
+    AgentStreamTurnLifecycle.setAssistantContent(turn, RECOVERY_SUMMARY);
     turnRepository.saveAndFlush(turn);
 
     String operationReconciliation;

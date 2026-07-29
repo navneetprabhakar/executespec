@@ -25,11 +25,13 @@ class ProviderReadinessServiceTest {
   private final AppUserRepository users = mock(AppUserRepository.class);
   private final OrgRepository orgs = mock(OrgRepository.class);
   private final ProviderHealthTracker health = mock(ProviderHealthTracker.class);
+  private final ModelRegistry modelRegistry = mock(ModelRegistry.class);
   private ProviderReadinessService service;
 
   @BeforeEach
   void setUp() {
-    service = new ProviderReadinessService(keyResolver, users, orgs, health);
+    service = new ProviderReadinessService(keyResolver, users, orgs, health, modelRegistry);
+    when(modelRegistry.freeTierProvider()).thenReturn("deepseek");
     ReflectionTestUtils.setField(service, "systemAnthropicKey", "managed-anthropic");
     ReflectionTestUtils.setField(service, "systemOpenAiKey", "");
     ReflectionTestUtils.setField(service, "systemGeminiKey", "");
@@ -43,7 +45,13 @@ class ProviderReadinessServiceTest {
   @Test
   void distinguishesUserOrgAndManagedCredentials() {
     AppUser user = AppUser.builder().id("u1").orgId("o1").openAiApiKey("user-openai").build();
-    Org org = Org.builder().id("o1").geminiApiKey("org-gemini").keySourceMode("HYBRID").build();
+    Org org =
+        Org.builder()
+            .id("o1")
+            .tier("TEAM")
+            .geminiApiKey("org-gemini")
+            .keySourceMode("HYBRID")
+            .build();
     when(users.findById("u1")).thenReturn(Optional.of(user));
     when(orgs.findById("o1")).thenReturn(Optional.of(org));
     when(keyResolver.resolve("u1"))
@@ -61,7 +69,7 @@ class ProviderReadinessServiceTest {
   @Test
   void explicitProviderPolicyWinsOverCredentialPresence() {
     AppUser user = AppUser.builder().id("u1").orgId("o1").openAiApiKey("user-openai").build();
-    Org org = Org.builder().id("o1").keySourceMode("HYBRID").build();
+    Org org = Org.builder().id("o1").tier("TEAM").keySourceMode("HYBRID").build();
     when(users.findById("u1")).thenReturn(Optional.of(user));
     when(orgs.findById("o1")).thenReturn(Optional.of(org));
     when(keyResolver.resolve("u1"))
@@ -78,7 +86,7 @@ class ProviderReadinessServiceTest {
   @Test
   void ownKeysModeNeverReportsManagedCredentialAsAvailable() {
     AppUser user = AppUser.builder().id("u1").orgId("o1").build();
-    Org org = Org.builder().id("o1").keySourceMode("OWN_KEYS").build();
+    Org org = Org.builder().id("o1").tier("TEAM").keySourceMode("OWN_KEYS").build();
     when(users.findById("u1")).thenReturn(Optional.of(user));
     when(orgs.findById("o1")).thenReturn(Optional.of(org));
     when(keyResolver.resolve("u1"))
@@ -103,6 +111,26 @@ class ProviderReadinessServiceTest {
 
     assertThat(item.state()).isEqualTo(State.CIRCUIT_OPEN);
     assertThat(item.dispatchable()).isFalse();
+  }
+
+  @Test
+  void downgradedOrgCannotUseRetainedOwnKeys() {
+    AppUser user =
+        AppUser.builder().id("u1").orgId("o1").tier("FREE").openAiApiKey("user-openai").build();
+    Org org =
+        Org.builder()
+            .id("o1")
+            .tier("FREE")
+            .keySourceMode("OWN_KEYS")
+            .openAiApiKey("org-openai")
+            .build();
+    when(users.findById("u1")).thenReturn(Optional.of(user));
+    when(orgs.findById("o1")).thenReturn(Optional.of(org));
+    when(keyResolver.resolve("u1"))
+        .thenReturn(
+            new ResolvedKeys(null, "user-openai", null, null, null, null, "OWN_KEYS", null));
+
+    assertThat(state(service.resolve("u1"), LlmProvider.OPENAI)).isEqualTo(State.POLICY_BLOCKED);
   }
 
   @Test

@@ -275,8 +275,12 @@ public class RunOrchestrator implements RunControlPort {
    * @param billingOrgId immutable payer/provider-policy org from the submitting actor
    */
   public record SubmitPolicy(
-      Double userCostCap, boolean skipAutoPush, String tenantOrgId, String billingOrgId) {
-    public static final SubmitPolicy NONE = new SubmitPolicy(null, false, null, null);
+      Double userCostCap,
+      boolean skipAutoPush,
+      String tenantOrgId,
+      String billingOrgId,
+      String triggeredByFinding) {
+    public static final SubmitPolicy NONE = new SubmitPolicy(null, false, null, null, null);
   }
 
   private final ThreadLocal<SubmitPolicy> submitPolicyIntent = new ThreadLocal<>();
@@ -1077,6 +1081,10 @@ public class RunOrchestrator implements RunControlPort {
             .orgId(submitAuthority.tenantOrgId())
             .billingOrgId(submitAuthority.billingOrgId())
             .projectId(projectId)
+            // V359 — finding automation must stamp its immutable delivery identity in the initial
+            // INSERT. Writing it after submitRun returns leaves a crash/race window in which a
+            // duplicate webhook cannot discover the already-created PATCH run.
+            .triggeredByFinding(policy.triggeredByFinding())
             // RR-233 — expose the hard ceiling before the planner can persist its estimate; a
             // post-submit write races a fast planner and clamps against the wrong cap.
             .userCostCap(policy.userCostCap())

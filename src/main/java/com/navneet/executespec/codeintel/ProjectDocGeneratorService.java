@@ -276,6 +276,35 @@ public class ProjectDocGeneratorService {
       String generatedByUser,
       LlmProvider provider,
       LlmExecutionReference confirmedActionReference) {
+    return generate(
+        projectId,
+        docType,
+        generatedByUser,
+        provider,
+        confirmedActionReference,
+        null,
+        ignored -> {});
+  }
+
+  ProjectGeneratedDoc generateExactForJob(
+      String projectId,
+      DocType docType,
+      String generatedByUser,
+      LlmProvider provider,
+      String exactModel,
+      java.util.function.Consumer<ProjectGeneratedDoc> publicationFence) {
+    return generate(
+        projectId, docType, generatedByUser, provider, null, exactModel, publicationFence);
+  }
+
+  private ProjectGeneratedDoc generate(
+      String projectId,
+      DocType docType,
+      String generatedByUser,
+      LlmProvider provider,
+      LlmExecutionReference confirmedActionReference,
+      String exactModelOverride,
+      java.util.function.Consumer<ProjectGeneratedDoc> publicationFence) {
     Project project =
         projectRepo
             .findById(projectId)
@@ -319,6 +348,7 @@ public class ProjectDocGeneratorService {
             docType,
             cached.get().getVersion(),
             sourceArchVersion);
+        publicationFence.accept(cached.get());
         return cached.get();
       }
     }
@@ -329,7 +359,8 @@ public class ProjectDocGeneratorService {
     String systemPrompt = promptAssembler.assemble(promptPath(docType));
 
     LlmProvider effective = provider != null ? provider : resolveProvider(project);
-    ResolvedModel resolved = modelResolver.resolve("ProjectDocGeneratorService", effective);
+    ResolvedModel resolved =
+        ProjectGeneratedDocAssembly.route(modelResolver, effective, exactModelOverride);
     String exactModel = resolved.getModel();
     GenerationKey generationKey =
         new GenerationKey(
@@ -357,7 +388,8 @@ public class ProjectDocGeneratorService {
                 sourceArchVersion,
                 sourceFingerprint,
                 sourceRepositories,
-                codemapEvidence));
+                codemapEvidence,
+                publicationFence));
   }
 
   private ProjectGeneratedDoc generateOnce(
@@ -373,7 +405,8 @@ public class ProjectDocGeneratorService {
       Integer sourceArchVersion,
       String sourceFingerprint,
       java.util.Set<String> sourceRepositories,
-      String codemapEvidence) {
+      String codemapEvidence,
+      java.util.function.Consumer<ProjectGeneratedDoc> publicationFence) {
     String projectId = project.getId();
     List<Message> initialMessages =
         List.of(
@@ -417,23 +450,20 @@ public class ProjectDocGeneratorService {
     // v2.6.4 (V174) — compute USD cost so the project dashboard can roll doc-gen spend up.
     double cost = costTracker.computeCost(resolved.providerName(), exactModel, inTok, outTok);
     ProjectGeneratedDoc candidate =
-        ProjectGeneratedDoc.builder()
-            .projectId(projectId)
-            .docType(docType)
-            .content(content)
-            .generatedBy(generatedByUser)
-            .modelUsed(exactModel)
-            .inputTokens(inTok)
-            .outputTokens(outTok)
-            .costUsd(cost)
-            // PR-Q (2026-05-13) — persist the cache key so the next /generate call can decide
-            // whether to short-circuit. sourceArchVersion + sourceFingerprint were computed
-            // above for the cache-hit check; reuse the same values here so the round-trip is
-            // a true round-trip (no risk of a one-iteration drift).
-            .sourceArchVersion(sourceArchVersion)
-            .sourceShasFingerprint(sourceFingerprint)
-            .build();
-    ProjectGeneratedDoc doc = persistGeneratedDoc(candidate, sourceRepositories, codemapEvidence);
+        ProjectGeneratedDocAssembly.candidate(
+            projectId,
+            docType,
+            content,
+            generatedByUser,
+            exactModel,
+            inTok,
+            outTok,
+            cost,
+            sourceArchVersion,
+            sourceFingerprint);
+    ProjectGeneratedDoc doc =
+        publisher.publishValidated(
+            candidate, sourceRepositories, codemapEvidence, publicationFence);
 
     // Mirror to disk so the UI can use the same read path as summary.md.
     try {
@@ -452,21 +482,6 @@ public class ProjectDocGeneratorService {
         outTok,
         exactModel);
     return doc;
-  }
-
-  private ProjectGeneratedDoc persistGeneratedDoc(
-      ProjectGeneratedDoc candidate,
-      java.util.Set<String> sourceRepositories,
-      String codemapEvidence) {
-    return publisher.publish(
-        candidate,
-        existing ->
-            ProjectGeneratedDocValidator.validate(
-                    existing.getDocType(),
-                    existing.getContent(),
-                    sourceRepositories,
-                    codemapEvidence)
-                .isEmpty());
   }
 
   private ProjectGeneratedDoc singleFlight(
