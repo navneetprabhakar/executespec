@@ -126,6 +126,23 @@ public class ModelAccessService {
     }
   }
 
+  /**
+   * Rejects an explicit provider-only route that would bypass the FREE model lock when no exact
+   * model was supplied. Tier-routed paid providers are still premium choices.
+   */
+  public void assertProviderAllowed(String userId, String provider) {
+    if (provider == null || provider.isBlank() || !userIsFreeTier(userId)) return;
+    String normalized = provider.trim().toLowerCase(Locale.ROOT);
+    if ("google".equals(normalized)) normalized = "gemini";
+    if (!normalized.equals(modelRegistry.freeTierProvider().trim().toLowerCase(Locale.ROOT))) {
+      throw new ResponseStatusException(
+          HttpStatus.FORBIDDEN,
+          "Provider '"
+              + provider
+              + "' isn't available on the free tier. Upgrade to Pro to use it.");
+    }
+  }
+
   /** Returns the canonical provider that owns a registered model, or {@code null} when unknown. */
   public String providerForModel(String modelName) {
     if (modelName == null || modelName.isBlank()) return null;

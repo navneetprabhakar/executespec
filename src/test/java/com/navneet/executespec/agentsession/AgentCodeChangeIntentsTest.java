@@ -77,6 +77,36 @@ class AgentCodeChangeIntentsTest {
   }
 
   @Test
+  void buildTodoUiWithProjectCreatesACloudRunProposal() {
+    var decision =
+        decide(
+            "i want to build a simple web ui todo app",
+            "project-1",
+            new ClientCapabilities(false, true, true, true));
+
+    assertThat(decision.route()).isEqualTo("CODE_RUN_REQUIRED");
+    assertThat(decision.proposedAction().type()).isEqualTo("create_cloud_run");
+    assertThat(decision.proposedAction().arguments())
+        .containsEntry("spec", "i want to build a simple web ui todo app")
+        .containsEntry("projectId", "project-1");
+  }
+
+  @Test
+  void buildTodoUiWithoutProjectReturnsTypedProjectSelectionBlocker() {
+    var decision =
+        decide(
+            "i want to build a simple web ui todo app",
+            null,
+            new ClientCapabilities(false, true, true, true));
+
+    assertThat(decision.route()).isEqualTo("IMPLEMENTATION_PROPOSAL");
+    assertThat(decision.proposedAction()).isNull();
+    assertThat(decision.actionContext().projectSelectionRequired()).isTrue();
+    assertThat(decision.actionContext().recommendedAction())
+        .isEqualTo(AgentActionContext.ACTION_SELECT_PROJECT);
+  }
+
+  @Test
   void confirmableCloudRunCarriesConfirmableContextOnTheActionItself() {
     var decision =
         decide(

@@ -112,7 +112,8 @@ public class CustomerRunSubmissionService {
                   command.userCostCap(),
                   command.skipAutoPush(),
                   hostProject == null ? actor.getUser().getOrgId() : hostProject.getOrgId(),
-                  actor.getUser().getOrgId()));
+                  actor.getUser().getOrgId(),
+                  null));
     } catch (ResponseStatusException e) {
       finishFailedClaim(claim, e);
       throw e;
@@ -280,6 +281,7 @@ public class CustomerRunSubmissionService {
     if (blankToNull(provider) == null && blankToNull(command.modelName()) != null) {
       provider = modelAccessService.providerForModel(command.modelName());
     }
+    modelAccessService.assertProviderAllowed(userId, provider);
     modelAccessService.assertProviderModelPair(provider, command.modelName());
     return provider;
   }

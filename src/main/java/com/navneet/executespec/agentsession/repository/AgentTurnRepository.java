@@ -31,6 +31,8 @@ public interface AgentTurnRepository extends JpaRepository<AgentTurn, String> {
 
   boolean existsByIdAndSessionId(String id, String sessionId);
 
+  boolean existsBySessionIdAndStatus(String sessionId, String status);
+
   /**
    * Oldest-first bounded recovery scan backed by V355's partial {@code (created_at,id) WHERE
    * status='STREAMING'} index.

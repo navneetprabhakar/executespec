@@ -5,39 +5,40 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 
+import com.navneet.executespec.cost.EffectiveRouteProjection;
+import com.navneet.executespec.cost.RunEffectiveRouteService;
 import com.navneet.executespec.harness.TaskOutcome;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 /**
  * Persists deterministic task quality outcomes for future routing decisions.
  *
- * <p><b>Known route-truth limitation (C1, 2026-07-19; RR-395).</b> {@code model_task_metric} is
- * keyed on {@code TaskOutcome.dispatchedProvider}/{@code dispatchedModel} — the REQUESTED,
- * tier-resolved route, not the physical route that served the task. When cross-provider failover or
- * a managed-AI tier lock substitutes the route, this metric accumulates under a model that did not
- * do the work, and {@link ModelProviderCandidateService} then consumes it as that model's quality
- * prior.
- *
- * <p>The physical route is now recorded per task in {@code agent_task.effective_provider} / {@code
- * effective_model} (V305), so the corrected evidence exists. The write key here was deliberately
- * NOT switched in the same change: this table is read as a rolling window of the newest 200 rows
- * per {@code (provider, model, tier)} key, so re-keying splits history across two keys. Existing
- * rows are not migrated, so the effective-route key would start below {@code
- * execution.continuation.outcome-min-sample-tasks} (default 5) and return no prior at all for a
- * while, while the stale requested-route key keeps serving a wrong prior from its retained history.
- * That is a routing-ranking change and needs a measured sample-count check against real data plus
- * its own {@link ModelProviderCandidateService} regression pass before it lands.
+ * <p>New rows are keyed to the physical successful-attempt route when the canonical usage ledger
+ * proves exactly one route. Mixed-route tasks are deliberately not recorded: attributing their
+ * outcome to one requested model would poison future routing quality. Legacy/test callers without a
+ * route projector retain the requested-route fallback for compatibility.
  */
 @Service
-@RequiredArgsConstructor
 @Slf4j
 public class TaskOutcomeMetricService {
 
   private final ModelTaskMetricRepository repository;
+  private final RunEffectiveRouteService effectiveRoutes;
+
+  public TaskOutcomeMetricService(ModelTaskMetricRepository repository) {
+    this(repository, null);
+  }
+
+  @Autowired
+  public TaskOutcomeMetricService(
+      ModelTaskMetricRepository repository, RunEffectiveRouteService effectiveRoutes) {
+    this.repository = repository;
+    this.effectiveRoutes = effectiveRoutes;
+  }
 
   /**
    * Sentinel stored in {@code first_error_gate} for an UNMEASURED task outcome — a worker that
@@ -110,6 +111,14 @@ public class TaskOutcomeMetricService {
         || outcome.dispatchedModel() == null) {
       return null;
     }
+    RouteKey route = routeKey(runId, outcome);
+    if (route == null) {
+      log.info(
+          "Skipping task outcome metric for mixed physical route run={} task={}",
+          runId,
+          outcome.taskId());
+      return null;
+    }
     // RR-396 tri-state outcome: PASSED | FAILED | UNMEASURED.
     //  - A worker that did NOT complete is a measured FAILED (a genuine negative for this model).
     //  - A completed worker with an executed smoke gate is PASSED (gate true) or FAILED (gate
@@ -139,8 +148,8 @@ public class TaskOutcomeMetricService {
         ModelTaskMetric.builder()
             .runId(runId)
             .taskId(outcome.taskId())
-            .modelName(outcome.dispatchedModel())
-            .provider(outcome.dispatchedProvider())
+            .modelName(route.model())
+            .provider(route.provider())
             .tier(taskCategory == null ? "UNKNOWN" : taskCategory)
             .complexity(complexity == null ? "UNKNOWN" : complexity)
             .language(language)
@@ -228,4 +237,18 @@ public class TaskOutcomeMetricService {
   private static boolean isSuccessful(TaskOutcome.Status status) {
     return status == TaskOutcome.Status.SUCCESS || status == TaskOutcome.Status.SUCCESS_AFTER_RETRY;
   }
+
+  private RouteKey routeKey(String runId, TaskOutcome outcome) {
+    if (effectiveRoutes == null) {
+      return new RouteKey(outcome.dispatchedProvider(), outcome.dispatchedModel());
+    }
+    EffectiveRouteProjection effective = effectiveRoutes.forTask(runId, outcome.taskId());
+    return switch (effective.attribution()) {
+      case LEDGER -> new RouteKey(effective.provider(), effective.model());
+      case MIXED -> null;
+      case UNATTRIBUTED -> new RouteKey(outcome.dispatchedProvider(), outcome.dispatchedModel());
+    };
+  }
+
+  private record RouteKey(String provider, String model) {}
 }

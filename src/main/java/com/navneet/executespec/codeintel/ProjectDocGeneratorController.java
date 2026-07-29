@@ -26,6 +26,7 @@ import lombok.RequiredArgsConstructor;
 public class ProjectDocGeneratorController {
 
   private final ProjectDocGeneratorService service;
+  private final ProjectGeneratedDocJobService jobs;
   private final com.navneet.executespec.project.security.ProjectAccessGuard projectAccessGuard;
 
   public record GeneratedDocDto(
@@ -52,32 +53,84 @@ public class ProjectDocGeneratorController {
     }
   }
 
+  public record GeneratedDocJobDto(
+      UUID id,
+      String projectId,
+      String docType,
+      String status,
+      boolean terminal,
+      String provider,
+      String model,
+      UUID resultDocId,
+      Integer resultDocVersion,
+      String errorCode,
+      String errorMessage,
+      Instant createdAt,
+      Instant startedAt,
+      Instant completedAt) {
+    static GeneratedDocJobDto from(ProjectGeneratedDocJobStore.Job job) {
+      return new GeneratedDocJobDto(
+          job.id(),
+          job.projectId(),
+          job.docType(),
+          job.status().name(),
+          job.status().terminal(),
+          job.requestedProvider(),
+          job.requestedModel(),
+          job.resultDocId(),
+          job.resultDocVersion(),
+          job.errorCode(),
+          job.errorMessage(),
+          job.createdAt(),
+          job.startedAt(),
+          job.completedAt());
+    }
+  }
+
   @PostMapping("/api/projects/{projectId}/docs/{docType}/generate")
-  public ResponseEntity<GeneratedDocDto> generate(
+  public ResponseEntity<GeneratedDocJobDto> generate(
       @PathVariable String projectId,
       @PathVariable String docType,
       @AuthenticationPrincipal AppUserDetails userDetails) {
     projectAccessGuard.assertCanWrite(projectId, userDetails);
     DocType type = parseType(docType);
-    String userId = userDetails == null ? null : userDetails.getUser().getId();
-    try {
-      ProjectGeneratedDoc doc = service.generate(projectId, type, userId, null);
-      return ResponseEntity.status(HttpStatus.CREATED).body(safeDto(doc));
-    } catch (ProjectDocGeneratorService.IncompleteGenerationException e) {
-      throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, e.getMessage());
-    } catch (ProjectDocGeneratorService.ProviderNonCompleteGenerationException e) {
-      throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, e.getMessage());
-    } catch (ProjectDocGeneratorService.StaleSourceException e) {
-      throw new ResponseStatusException(HttpStatus.CONFLICT, e.getMessage());
-    } catch (ProjectDocGeneratorService.UnsafeGeneratedDocumentException
-        | ProjectDocGeneratorService.InvalidGeneratedDocumentException e) {
-      throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY, e.getMessage());
-    } catch (IllegalStateException e) {
-      // e.g. no architecture doc yet — caller should run /analyse first.
-      throw new ResponseStatusException(HttpStatus.CONFLICT, e.getMessage());
-    } catch (IllegalArgumentException e) {
-      throw new ResponseStatusException(HttpStatus.NOT_FOUND, e.getMessage());
+    if (userDetails == null || userDetails.getUser() == null) {
+      throw new ResponseStatusException(HttpStatus.UNAUTHORIZED);
     }
+    ProjectGeneratedDocJobStore.Job job =
+        jobs.request(projectId, type, userDetails.getUser().getId());
+    return ResponseEntity.accepted()
+        .location(
+            java.net.URI.create(
+                "/api/projects/" + projectId + "/docs/" + type + "/jobs/" + job.id()))
+        .body(GeneratedDocJobDto.from(job));
+  }
+
+  @GetMapping("/api/projects/{projectId}/docs/{docType}/jobs/{jobId}")
+  public ResponseEntity<GeneratedDocJobDto> job(
+      @PathVariable String projectId,
+      @PathVariable String docType,
+      @PathVariable UUID jobId,
+      @AuthenticationPrincipal AppUserDetails userDetails) {
+    projectAccessGuard.assertCanRead(projectId, userDetails);
+    DocType type = parseType(docType);
+    ProjectGeneratedDocJobStore.Job job = jobs.get(projectId, jobId);
+    if (!job.docType().equals(type.name())) {
+      throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Document generation job not found");
+    }
+    return ResponseEntity.ok(GeneratedDocJobDto.from(job));
+  }
+
+  @GetMapping("/api/projects/{projectId}/docs/{docType}/jobs/latest")
+  public ResponseEntity<GeneratedDocJobDto> latestJob(
+      @PathVariable String projectId,
+      @PathVariable String docType,
+      @AuthenticationPrincipal AppUserDetails userDetails) {
+    projectAccessGuard.assertCanRead(projectId, userDetails);
+    DocType type = parseType(docType);
+    return jobs.latest(projectId, type)
+        .map(job -> ResponseEntity.ok(GeneratedDocJobDto.from(job)))
+        .orElseGet(() -> ResponseEntity.noContent().build());
   }
 
   @GetMapping("/api/projects/{projectId}/docs/{docType}")

@@ -8,6 +8,7 @@ import {
   developerRows,
   filterRuns,
   isLiveStatus,
+  isDeploymentTerminal,
   limitRows,
   notificationChannelLabel,
   notificationPreferenceLabel,
@@ -149,6 +150,17 @@ describe('moreUtils', () => {
   it('normalizes notification preference labels', () => {
     expect(notificationPreferenceLabel('RUN_COMPLETED')).toBe('run completed');
     expect(notificationChannelLabel('IN_APP')).toBe('in_app channel');
+  });
+
+  it('keeps polling only while deployment work can still advance', () => {
+    expect(isDeploymentTerminal('PENDING')).toBe(false);
+    expect(isDeploymentTerminal('BUILDING')).toBe(false);
+    expect(isDeploymentTerminal('DEPLOYING')).toBe(false);
+    expect(isDeploymentTerminal('ROLLING_BACK')).toBe(false);
+    expect(isDeploymentTerminal('LIVE')).toBe(true);
+    expect(isDeploymentTerminal('FAILED')).toBe(true);
+    expect(isDeploymentTerminal('ROLLED_BACK')).toBe(true);
+    expect(isDeploymentTerminal('DESTROYED')).toBe(true);
   });
 });
 

@@ -25,7 +25,6 @@ import {
   asText,
   friendlyTool,
   isTerminalRunStatus,
-  pct,
   runOpenPath,
   runPhaseLabel,
   runProgress,
@@ -41,7 +40,6 @@ import {
   type StreamTimelineItem,
 } from '@/ide/agentState';
 
-import {hasUnlimitedAiCredits} from '@/ide/planUtils';
 import {useAuthStore, selectIsSuperAdmin} from '@/stores/useAuthStore';
 import {Paperclip, ArrowUp, StopIcon, FolderIcon} from '@/ide/agentIcons';
 import {
@@ -58,6 +56,8 @@ import {
   repositoryConfirmationDisabled,
   type CloudRunRepoSelection,
 } from '@/ide/AgentRepositoryScope';
+import {ConversationHistoryPager, ConversationHistoryRow} from '@/ide/AgentConversationHistory';
+import {AgentManagedAiBalance} from '@/ide/AgentManagedAiBalance';
 
 export type {CloudRunRepoChoice, CloudRunRepoSelection} from '@/ide/AgentRepositoryScope';
 
@@ -148,9 +148,13 @@ export function AgentTopBar({
 }) {
   return (
     <div className='agent-bar'>
-      <button className='agent-bar-btn' onClick={onToggleChats} aria-label='Show chats'>
+      <button
+        className='agent-bar-btn'
+        onClick={onToggleChats}
+        aria-label='Show conversation history'
+      >
         <CommandIcon size={16} />
-        <span>Chats</span>
+        <span>Conversations</span>
       </button>
       {scopeLabel && (
         <span className='agent-bar-scope'>
@@ -162,8 +166,8 @@ export function AgentTopBar({
         {selected
           ? sessionTitle(selected)
           : remoteSandboxEnabled
-            ? 'Remote sandbox operator'
-            : 'Remote workspace operator'}
+            ? 'Remote agent conversation'
+            : 'Agent conversation'}
       </div>
       <span className='agent-bar-spacer' />
       <span
@@ -187,10 +191,10 @@ export function AgentTopBar({
         className='agent-bar-btn'
         onClick={onNewChat}
         disabled={busy}
-        aria-label={remoteSandboxEnabled ? 'Start a new sandbox' : 'Start a new workspace'}
+        aria-label='Start a new conversation'
       >
         <PlusIcon size={14} />
-        <span>{remoteSandboxEnabled ? 'New sandbox' : 'New workspace'}</span>
+        <span>New conversation</span>
       </button>
       <div className='agent-bar-settings'>
         <button
@@ -307,7 +311,7 @@ function SettingsPopover({
           <code>charged after approval</code>
         </div>
         <div className='agent-pop-row agent-model-controls'>
-          <label htmlFor='agent-provider-select'>Provider</label>
+          <label htmlFor='agent-provider-select'>Chat provider</label>
           <select
             id='agent-provider-select'
             value={selectedProvider}
@@ -346,7 +350,7 @@ function SettingsPopover({
                     ? 'Checking provider readiness…'
                     : providerReadinessLabel(selectedReadiness)}
           </small>
-          <label htmlFor='agent-model-select'>Model</label>
+          <label htmlFor='agent-model-select'>Chat model</label>
           <select
             id='agent-model-select'
             value={selectedModel}
@@ -361,11 +365,12 @@ function SettingsPopover({
             ))}
           </select>
           <small>
-            Provider changes use that provider's default route. Choosing a model pins that exact
-            account-eligible model for the next turn.
+            These settings control conversation replies only. Generated-code runs use the
+            organization model matrix and per-task tier routing. Web Agent does not turn the chat
+            model into a run-wide pin.
           </small>
         </div>
-        {managedAi && <ManagedAiBalance balance={managedAi} />}
+        {managedAi && <AgentManagedAiBalance balance={managedAi} />}
         <details className='agent-pop-diagnostics'>
           <summary>Operator diagnostics</summary>
           <div className='agent-pop-row'>
@@ -393,44 +398,6 @@ function SettingsPopover({
   );
 }
 
-function ManagedAiBalance({balance}: {balance: api.ManagedAiBalance}) {
-  const isSuperAdmin = useAuthStore(selectIsSuperAdmin);
-  const unlimited = hasUnlimitedAiCredits(balance);
-  const totalCredits = balance.includedAiCredits + (balance.purchasedAiCredits ?? 0);
-  const configured = unlimited || totalCredits > 0 || balance.rawCogsCapUsd > 0;
-  return (
-    <div className='agent-pop-balance'>
-      <span>Managed AI balance</span>
-      {unlimited ? (
-        <>
-          <strong>Unlimited AI credits</strong>
-          <small>This tier is not blocked by managed-AI credit limits.</small>
-        </>
-      ) : configured ? (
-        <>
-          <strong>
-            {balance.aiCreditsRemaining} of {totalCredits} credits left
-          </strong>
-          <div className='agent-meter'>
-            <span style={{width: `${pct(balance.aiCreditsUsed, totalCredits)}%`}} />
-          </div>
-          {isSuperAdmin && (
-            <small>
-              Raw spend ${balance.rawCogsUsedUsd.toFixed(4)} of ${balance.rawCogsCapUsd.toFixed(4)}{' '}
-              monthly cap.
-            </small>
-          )}
-        </>
-      ) : (
-        <>
-          <strong>Managed credits not configured</strong>
-          <small>Runs use the configured provider keys and still require plan approval.</small>
-        </>
-      )}
-    </div>
-  );
-}
-
 /** Sessions as a slide-over drawer with auto-titled, time-stamped rows. */
 export function AgentChatsDrawer({
   open,
@@ -443,6 +410,9 @@ export function AgentChatsDrawer({
   onApproveGate,
   onRejectGate,
   onOpenGate,
+  onCloseSession = () => {},
+  closeDisabledReason,
+  sessionLimitReached = false,
   onClose,
   remoteSandboxEnabled = false,
 }: {
@@ -456,6 +426,9 @@ export function AgentChatsDrawer({
   onApproveGate: (gate: api.AgentGateDecisionCard) => void;
   onRejectGate: (gate: api.AgentGateDecisionCard) => void;
   onOpenGate: (runId: string) => void;
+  onCloseSession?: (session: api.AgentSessionResponse) => void;
+  closeDisabledReason?: string | null;
+  sessionLimitReached?: boolean;
   onClose: () => void;
   remoteSandboxEnabled?: boolean;
 }) {
@@ -476,21 +449,27 @@ export function AgentChatsDrawer({
         tabIndex={-1}
       >
         <div className='agent-drawer-head'>
-          <strong id='agent-chats-title'>
-            Remote {remoteSandboxEnabled ? 'sandboxes' : 'workspaces'}
-          </strong>
-          <button className='agent-drawer-close' onClick={onClose} aria-label='Close chats'>
+          <strong id='agent-chats-title'>Conversations</strong>
+          <button className='agent-drawer-close' onClick={onClose} aria-label='Close conversations'>
             ×
           </button>
           <button className='ide-btn ghost' onClick={onNewChat}>
             <PlusIcon size={13} />
-            New {remoteSandboxEnabled ? 'sandbox' : 'workspace'}
+            New conversation
           </button>
         </div>
         <div className='agent-drawer-summary'>
           <span>{gates.length} waiting approval</span>
           <span>{sessions.length} conversations</span>
         </div>
+        <p className='agent-drawer-truth'>
+          Conversation history restores messages and run links; its filesystem is not restorable.
+        </p>
+        {sessionLimitReached && (
+          <p className='agent-drawer-truth' role='status'>
+            Showing the 100 most recent conversations.
+          </p>
+        )}
         {gates.length > 0 && (
           <div className='agent-drawer-section'>
             <div className='agent-drawer-label'>Approval inbox</div>
@@ -533,26 +512,28 @@ export function AgentChatsDrawer({
         {status === 'loadingSession' ? (
           <div className='agent-muted'>Loading…</div>
         ) : sessions.length === 0 ? (
-          <div className='agent-muted'>
-            No {remoteSandboxEnabled ? 'sandbox' : 'workspace'} conversations yet.
-          </div>
+          <div className='agent-muted'>No conversations yet.</div>
         ) : (
           <div className='agent-drawer-section'>
-            <div className='agent-drawer-label'>Conversations</div>
+            <div className='agent-drawer-label'>Conversation history</div>
             <div className='agent-drawer-list'>
               {sessions.map((s) => (
-                <button
+                <ConversationHistoryRow
                   key={s.id}
-                  className={s.id === selectedId ? 'active' : ''}
-                  onClick={() => onSelect(s.id)}
-                >
-                  <span className='agent-drawer-title'>{sessionTitle(s)}</span>
-                  <span className='agent-drawer-meta'>
-                    {sessionDrawerMeta(s, remoteSandboxEnabled)}
-                    {' · '}
-                    {relTime(s.updatedAt)}
-                  </span>
-                </button>
+                  title={sessionTitle(s)}
+                  meta={`${sessionDrawerMeta(s, remoteSandboxEnabled)} · ${relTime(s.updatedAt)}`}
+                  active={s.id === selectedId}
+                  archived={s.status === 'ARCHIVED'}
+                  closeDisabledReason={
+                    s.latestLinkedRunStatus && !isTerminalRunStatus(s.latestLinkedRunStatus)
+                      ? `Run ${s.latestLinkedRunStatus.toLowerCase().split('_').join(' ')}; close it after the run finishes.`
+                      : s.id === selectedId
+                        ? closeDisabledReason
+                        : null
+                  }
+                  onSelect={() => onSelect(s.id)}
+                  onClose={() => onCloseSession(s)}
+                />
               ))}
             </div>
           </div>
@@ -1507,6 +1488,10 @@ export function AgentConversation({
   onOpenGate,
   onOpenRun,
   onStopRun,
+  hasEarlierTurns = false,
+  loadingEarlierTurns = false,
+  earlierTurnsError = null,
+  onLoadEarlierTurns,
 }: {
   messages: LocalMessage[];
   streamEvents: StreamTimelineItem[];
@@ -1539,6 +1524,10 @@ export function AgentConversation({
   onOpenGate: (runId: string) => void;
   onOpenRun: (path: string) => void;
   onStopRun: () => void;
+  hasEarlierTurns?: boolean;
+  loadingEarlierTurns?: boolean;
+  earlierTurnsError?: string | null;
+  onLoadEarlierTurns?: () => void;
 }) {
   const empty = messages.length === 0 && !isBusy && !visibleAction && !runCard;
   const showOperatorIntro = !visibleAction && !runCard && gates.length === 0 && !isBusy;
@@ -1569,6 +1558,12 @@ export function AgentConversation({
               : ''}
         </div>
         <div className='agent-chat-col'>
+          <ConversationHistoryPager
+            hasEarlier={hasEarlierTurns}
+            loading={loadingEarlierTurns}
+            error={earlierTurnsError}
+            onLoad={onLoadEarlierTurns}
+          />
           {showOperatorInScroll && (
             <OperatorIntro
               hasHistory={messages.length > 0}

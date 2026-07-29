@@ -18,6 +18,9 @@ const api = vi.hoisted(() => ({
   listAgentCapabilities: vi.fn(),
   getRuntimeClientCapabilities: vi.fn(),
   getManagedAiBalance: vi.fn(),
+  getAvailableModels: vi.fn(),
+  getMyModels: vi.fn(),
+  getProviderReadiness: vi.fn(),
   listAgentTurns: vi.fn(),
   listAgentEvents: vi.fn(),
   replayAgentEvents: vi.fn(),
@@ -29,6 +32,9 @@ const api = vi.hoisted(() => ({
   getLiveCost: vi.fn(),
   cancelRun: vi.fn(),
   getProjectRepos: vi.fn(),
+  getProjects: vi.fn(),
+  closeAgentSession: vi.fn(),
+  updateAgentSessionRoute: vi.fn(),
 }));
 
 vi.mock('@/lib/api', () => api);
@@ -92,6 +98,20 @@ const managedAi = {
 };
 
 function setHappyPathMocks() {
+  api.getProjects.mockResolvedValue([
+    {
+      id: 'p1',
+      orgId: 'o1',
+      name: 'ExecuteSpec',
+      description: null,
+      status: 'ACTIVE',
+      aiProvider: 'DEEPSEEK',
+      createdAt: '2026-06-19T00:00:00Z',
+      archivedAt: null,
+    },
+  ]);
+  api.closeAgentSession.mockResolvedValue(undefined);
+  api.updateAgentSessionRoute.mockResolvedValue(session);
   api.getRuntimeClientCapabilities.mockResolvedValue({
     remoteSandbox: {
       supported: true,
@@ -150,6 +170,56 @@ function setHappyPathMocks() {
     },
   ]);
   api.getManagedAiBalance.mockResolvedValue(managedAi);
+  api.getAvailableModels.mockResolvedValue({
+    providers: [
+      {
+        id: 'deepseek',
+        label: 'DeepSeek',
+        models: [{id: 'deepseek-v4-pro-native', tier: 'WORKHORSE', label: 'DeepSeek V4'}],
+      },
+      {
+        id: 'openai',
+        label: 'OpenAI',
+        models: [{id: 'gpt-5.4', tier: 'WORKHORSE', label: 'GPT-5.4'}],
+      },
+    ],
+  });
+  api.getMyModels.mockResolvedValue([
+    {
+      id: 'deepseek-v4-pro-native',
+      provider: 'deepseek',
+      label: 'DeepSeek V4',
+      minTier: 'FREE',
+      available: true,
+    },
+    {
+      id: 'gpt-5.4',
+      provider: 'openai',
+      label: 'GPT-5.4',
+      minTier: 'PRO',
+      available: true,
+    },
+  ]);
+  api.getProviderReadiness.mockResolvedValue({
+    schemaVersion: 1,
+    generatedAt: '2026-07-29T00:00:00Z',
+    providers: [
+      {
+        provider: 'DEEPSEEK',
+        state: 'AVAILABLE_MANAGED',
+        dispatchable: true,
+        keySourceMode: 'SYSTEM',
+        reason: 'ready',
+      },
+      {
+        provider: 'OPENAI',
+        state: 'AVAILABLE_MANAGED',
+        dispatchable: true,
+        keySourceMode: 'SYSTEM',
+        reason: 'ready',
+      },
+    ],
+  });
   api.listAgentEvents.mockResolvedValue([]);
   api.replayAgentEvents.mockResolvedValue({events: [], lastSequence: 0, snapshot: true});
   api.listAgentTurns.mockResolvedValue([
@@ -258,8 +328,8 @@ describe('IdeAgent', () => {
     ({host, root} = await renderAgent('/agent'));
 
     // Chat-first chrome (no jargon strip / rails in the main view)
-    expect(host.textContent).toContain('Chats');
-    expect(host.textContent).toContain('New sandbox');
+    expect(host.textContent).toContain('Conversations');
+    expect(host.textContent).toContain('New conversation');
     expect(host.textContent).toContain('Web agent');
     expect(host.textContent).toContain('140 tokens');
     expect(host.textContent).toContain('chat included');
@@ -290,6 +360,8 @@ describe('IdeAgent', () => {
     expect(host.textContent).not.toContain('0 of 0 credits left');
     expect(host.textContent).toContain('Run credits');
     expect(host.textContent).toContain('Operator diagnostics');
+    expect(host.textContent).toContain('These settings control conversation replies only');
+    expect(host.textContent).toContain('does not turn the chat model into a run-wide pin');
   });
 
   it('does not advertise an isolated sandbox when the runtime gates are off', async () => {
@@ -307,10 +379,38 @@ describe('IdeAgent', () => {
 
     ({host, root} = await renderAgent('/agent'));
 
-    expect(host.textContent).toContain('New workspace');
+    expect(host.textContent).toContain('New conversation');
     expect(host.textContent).toContain('Remote workspaces waiting for your approval');
-    expect(host.textContent).not.toContain('New sandbox');
+    expect(host.textContent).not.toContain('Remote agent conversation');
     expect(host.textContent).not.toContain('Remote sandboxes waiting for your approval');
+  });
+
+  it('persists a Web Agent conversation provider instead of keeping transient UI state', async () => {
+    ({host, root} = await renderAgent());
+    const settingsBtn = [...host.querySelectorAll<HTMLButtonElement>('button')].find(
+      (button) => button.getAttribute('aria-label') === 'Agent settings and usage',
+    );
+    if (!settingsBtn) throw new Error('Settings button was not rendered.');
+    await act(async () => settingsBtn.click());
+    const provider = host.querySelector<HTMLSelectElement>('#agent-provider-select');
+    if (!provider) throw new Error('Provider selector was not rendered.');
+    const nextProvider =
+      [...provider.options]
+        .map((option) => option.value)
+        .find((value) => value && value !== 'deepseek') ?? '';
+    if (!nextProvider) throw new Error('A second provider option was not rendered.');
+
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set;
+      setter?.call(provider, nextProvider);
+      provider.dispatchEvent(new Event('change', {bubbles: true}));
+    });
+    await flush();
+
+    expect(api.updateAgentSessionRoute).toHaveBeenCalledWith('s1', {
+      provider: nextProvider,
+      model: null,
+    });
   });
 
   it('does not expose a dispatch exception as an agent answer', async () => {
@@ -349,9 +449,9 @@ describe('IdeAgent', () => {
 
     ({host, root} = await renderAgent('/agent'));
 
-    expect(host.textContent).toContain('New workspace');
+    expect(host.textContent).toContain('New conversation');
     expect(host.textContent).toContain('Remote workspaces waiting for your approval');
-    expect(host.textContent).not.toContain('New sandbox');
+    expect(host.textContent).not.toContain('Remote agent conversation');
     expect(host.textContent).not.toContain('Remote sandboxes waiting for your approval');
   });
 
@@ -387,13 +487,13 @@ describe('IdeAgent', () => {
     expect(status?.textContent).toContain('Reconnecting');
   });
 
-  it('names the mobile new-sandbox control when its visible label collapses', async () => {
+  it('names the mobile new-conversation control when its visible label collapses', async () => {
     ({host, root} = await renderAgent('/agent'));
 
     const newSandbox = [...host.querySelectorAll<HTMLButtonElement>('.agent-bar-btn')].find(
-      (button) => button.textContent?.includes('New sandbox'),
+      (button) => button.textContent?.includes('New conversation'),
     );
-    expect(newSandbox?.getAttribute('aria-label')).toBe('Start a new sandbox');
+    expect(newSandbox?.getAttribute('aria-label')).toBe('Start a new conversation');
   });
 
   it('retries new-session creation with the same idempotency key', async () => {
@@ -401,9 +501,9 @@ describe('IdeAgent', () => {
     ({host, root} = await renderAgent('/agent'));
 
     const newSandbox = [...host.querySelectorAll<HTMLButtonElement>('.agent-bar-btn')].find(
-      (button) => button.textContent?.includes('New sandbox'),
+      (button) => button.textContent?.includes('New conversation'),
     );
-    if (!newSandbox) throw new Error('New sandbox control was not rendered.');
+    if (!newSandbox) throw new Error('New conversation control was not rendered.');
     await act(async () => {
       newSandbox.dispatchEvent(new MouseEvent('click', {bubbles: true}));
       await Promise.resolve();
@@ -433,9 +533,9 @@ describe('IdeAgent', () => {
     const initialLoads = api.listAgentSessions.mock.calls.length;
 
     const newSandbox = [...host.querySelectorAll<HTMLButtonElement>('.agent-bar-btn')].find(
-      (button) => button.textContent?.includes('New sandbox'),
+      (button) => button.textContent?.includes('New conversation'),
     );
-    if (!newSandbox) throw new Error('New sandbox control was not rendered.');
+    if (!newSandbox) throw new Error('New conversation control was not rendered.');
     await act(async () => {
       newSandbox.click();
       await Promise.resolve();
@@ -444,7 +544,7 @@ describe('IdeAgent', () => {
 
     expect(host.textContent).toContain('Fresh workspace');
     expect(api.listAgentSessions).toHaveBeenCalledTimes(initialLoads);
-    expect(api.listAgentTurns).toHaveBeenCalledWith('s2', {limit: 50});
+    expect(api.listAgentTurns).toHaveBeenCalledWith('s2', {limit: 100});
   });
 
   it('allows a new workspace while a hydrated run waits for approval without unlocking its composer', async () => {
@@ -495,7 +595,7 @@ describe('IdeAgent', () => {
     await flush();
 
     const newWorkspace = host.querySelector<HTMLButtonElement>(
-      'button.agent-bar-btn[aria-label="Start a new sandbox"]',
+      'button.agent-bar-btn[aria-label="Start a new conversation"]',
     );
     const composer = host.querySelector<HTMLTextAreaElement>('[aria-label="Message the agent"]');
     expect(newWorkspace?.disabled).toBe(false);
@@ -560,14 +660,15 @@ describe('IdeAgent', () => {
     ({host, root} = await renderAgent('/agent'));
 
     const chatsBtn = [...host.querySelectorAll('button')].find((button) =>
-      button.textContent?.includes('Chats'),
+      button.textContent?.includes('Conversations'),
     );
-    if (!chatsBtn) throw new Error('Chats button was not rendered.');
+    if (!chatsBtn) throw new Error('Conversations button was not rendered.');
     await act(async () => {
       chatsBtn.dispatchEvent(new MouseEvent('click', {bubbles: true}));
     });
 
-    expect(host.textContent).toContain('Remote sandboxes');
+    expect(host.textContent).toContain('Conversation history');
+    expect(host.textContent).toContain('filesystem is not restorable');
     expect(host.textContent).toContain('1 waiting approval');
     expect(host.textContent).toContain('Approval inbox');
     expect(host.textContent).toContain('2 credits');
@@ -608,9 +709,9 @@ describe('IdeAgent', () => {
     ({host, root} = await renderAgent('/agent'));
 
     const chatsBtn = [...host.querySelectorAll('button')].find((button) =>
-      button.textContent?.includes('Chats'),
+      button.textContent?.includes('Conversations'),
     );
-    if (!chatsBtn) throw new Error('Chats button was not rendered.');
+    if (!chatsBtn) throw new Error('Conversations button was not rendered.');
     await act(async () => {
       chatsBtn.dispatchEvent(new MouseEvent('click', {bubbles: true}));
     });
@@ -638,8 +739,8 @@ describe('IdeAgent', () => {
     ({host, root} = await renderAgent('/projects/p1/agent'));
 
     expect(host.textContent).toContain('Project agent');
-    expect(api.listAgentTurns).toHaveBeenCalledWith('project-session', {limit: 50});
-    expect(api.listAgentTurns).not.toHaveBeenCalledWith('global-session', {limit: 50});
+    expect(api.listAgentTurns).toHaveBeenCalledWith('project-session', {limit: 100});
+    expect(api.listAgentTurns).not.toHaveBeenCalledWith('global-session', {limit: 100});
   });
 
   it('shows the remote sandbox launcher before any historical transcript', async () => {
@@ -1638,5 +1739,182 @@ describe('IdeAgent', () => {
 
     expect(api.streamAgentTurn).toHaveBeenCalledTimes(streamCalls);
     expect(api.listAgentSessions.mock.calls.length).toBeGreaterThan(sessionLoads);
+  });
+
+  it('shows project recovery, searches existing projects, and binds the selected project', async () => {
+    api.listAgentGates.mockResolvedValue([]);
+    api.createAgentSession.mockImplementation(async (request) => ({
+      ...session,
+      id: request.id,
+      projectId: request.projectId,
+      title: 'Project agent',
+    }));
+    ({host, root} = await renderAgent('/agent'));
+
+    expect(host.textContent).toContain('No project linked');
+    expect(host.textContent).toContain('continue a general conversation');
+    const composer = host.querySelector<HTMLTextAreaElement>('.agent-composer textarea');
+    if (!composer) throw new Error('Agent composer was not rendered.');
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+      setter?.call(composer, 'Keep this unsent draft');
+      composer.dispatchEvent(new Event('input', {bubbles: true}));
+    });
+    const search = host.querySelector<HTMLInputElement>('#agent-project-search');
+    if (!search) throw new Error('Project search was not rendered.');
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+      setter?.call(search, 'execute');
+      search.dispatchEvent(new Event('input', {bubbles: true}));
+    });
+    const project = [
+      ...host.querySelectorAll<HTMLButtonElement>('.agent-project-results button'),
+    ].find((button) => button.textContent?.includes('ExecuteSpec'));
+    if (!project) throw new Error('Matching project was not rendered.');
+    await act(async () => project.click());
+    await flush();
+
+    expect(api.createAgentSession).toHaveBeenCalledWith(
+      expect.objectContaining({projectId: 'p1', surface: 'WEB'}),
+    );
+    expect(host.textContent).toContain('Current project');
+    expect(host.textContent).toContain('ExecuteSpec');
+    expect(host.querySelector<HTMLTextAreaElement>('.agent-composer textarea')?.value).toBe(
+      'Keep this unsent draft',
+    );
+  });
+
+  it('locks project switch and unlink controls while an execution waits at its gate', async () => {
+    api.listAgentTurns.mockResolvedValue([
+      {
+        turnId: 't-run',
+        sessionId: 's1',
+        sequence: 1,
+        userMessage: 'Run it',
+        assistantSummary: 'Waiting for approval.',
+        intentType: 'RUN',
+        intentConfidence: 1,
+        route: 'CODE_RUN_REQUIRED',
+        reasonCode: 'run',
+        actionType: null,
+        proposedActionJson: null,
+        linkedRunId: 'run-awaiting',
+        inputTokens: 1,
+        outputTokens: 1,
+        reasoningTokens: 0,
+        costUsd: 0,
+        status: 'COMPLETED',
+        createdAt: '2026-06-20T00:00:00Z',
+      },
+    ]);
+    api.getRun.mockResolvedValue({
+      runId: 'run-awaiting',
+      runTitle: 'Waiting run',
+      status: 'AWAITING_APPROVAL',
+      tasks: [],
+    });
+    ({host, root} = await renderAgent('/agent'));
+    await flush();
+
+    const createProject = [...host.querySelectorAll<HTMLButtonElement>('button')].find(
+      (button) => button.textContent === 'Create project',
+    );
+    const switchProject = host.querySelector<HTMLButtonElement>('.agent-project-results button');
+    expect(createProject?.disabled).toBe(true);
+    expect(switchProject?.disabled).toBe(true);
+    expect(host.textContent).toContain(
+      'cannot change while this conversation has an active execution',
+    );
+  });
+
+  it('shows project-loading errors and retries without hiding the conversation', async () => {
+    api.listAgentGates.mockResolvedValue([]);
+    api.getProjects.mockRejectedValueOnce(new Error('project service unavailable'));
+    ({host, root} = await renderAgent('/agent'));
+
+    expect(host.querySelector('.agent-project-error[role="alert"]')?.textContent).toContain(
+      'project service unavailable',
+    );
+    expect(host.textContent).toContain('One plan is waiting for approval.');
+    const retry = host.querySelector<HTMLButtonElement>('.agent-project-error button');
+    await act(async () => retry?.click());
+    await flush();
+
+    expect(api.getProjects).toHaveBeenCalledTimes(2);
+    expect(host.querySelector('.agent-project-error[role="alert"]')).toBeNull();
+    expect(host.textContent).toContain('ExecuteSpec');
+  });
+
+  it('loads earlier transcript pages using the oldest turn id cursor', async () => {
+    api.listAgentGates.mockResolvedValue([]);
+    const page = Array.from({length: 100}, (_, index) => ({
+      turnId: `turn-${index + 1}`,
+      sessionId: 's1',
+      sequence: index + 1,
+      userMessage: `Message ${index + 1}`,
+      assistantSummary: `Answer ${index + 1}`,
+      intentType: 'QUESTION',
+      intentConfidence: 1,
+      route: 'CHAT_ONLY',
+      reasonCode: 'question',
+      actionType: null,
+      proposedActionJson: null,
+      linkedRunId: null,
+      inputTokens: 1,
+      outputTokens: 1,
+      reasoningTokens: 0,
+      costUsd: 0,
+      status: 'COMPLETED',
+      createdAt: '2026-06-20T00:00:00Z',
+    }));
+    api.listAgentTurns.mockImplementation(async (_id, options) =>
+      options.before ? [{...page[0], turnId: 'turn-0', sequence: 0, userMessage: 'Oldest'}] : page,
+    );
+    ({host, root} = await renderAgent('/agent'));
+
+    const earlier = [...host.querySelectorAll<HTMLButtonElement>('button')].find(
+      (button) => button.textContent === 'Load earlier messages',
+    );
+    if (!earlier) throw new Error('Load earlier control was not rendered.');
+    await act(async () => earlier.click());
+    await flush();
+
+    expect(api.listAgentTurns).toHaveBeenCalledWith('s1', {limit: 100, before: 'turn-1'});
+    expect(host.textContent).toContain('Oldest');
+    expect(host.textContent).not.toContain('Load earlier messages');
+  });
+
+  it('supports keyboard cancel and visible server errors when closing a conversation', async () => {
+    api.listAgentGates.mockResolvedValue([]);
+    ({host, root} = await renderAgent('/agent'));
+    const conversations = [...host.querySelectorAll<HTMLButtonElement>('button')].find((button) =>
+      button.textContent?.includes('Conversations'),
+    );
+    await act(async () => conversations?.click());
+    const close = host.querySelector<HTMLButtonElement>(
+      '[aria-label="Close conversation Web agent"]',
+    );
+    await act(async () => close?.click());
+    expect(host.querySelector('[role="dialog"][aria-label="Close conversation?"]')).not.toBeNull();
+    expect(document.activeElement?.getAttribute('tabindex')).toBe('-1');
+
+    await act(async () => window.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape'})));
+    expect(host.querySelector('[role="dialog"][aria-label="Close conversation?"]')).toBeNull();
+    expect(api.closeAgentSession).not.toHaveBeenCalled();
+
+    await act(async () => conversations?.click());
+    const closeAgain = host.querySelector<HTMLButtonElement>(
+      '[aria-label="Close conversation Web agent"]',
+    );
+    await act(async () => closeAgain?.click());
+    api.closeAgentSession.mockRejectedValueOnce(new Error('archive service unavailable'));
+    const confirm = [...host.querySelectorAll<HTMLButtonElement>('button')].find(
+      (button) => button.textContent === 'Close conversation',
+    );
+    await act(async () => confirm?.click());
+    await flush();
+    expect(host.querySelector('[role="alert"]')?.textContent).toContain(
+      'archive service unavailable',
+    );
   });
 });

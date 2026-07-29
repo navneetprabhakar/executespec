@@ -129,7 +129,7 @@ class AgentStreamTurnLifecycleTest {
   }
 
   @Test
-  void disconnectRetainsCappedPartialSummaryForReplay() {
+  void disconnectRetainsExactPartialSummaryAndBoundedEventPreviewForReplay() {
     AgentTurn turn = turn("t4", "STREAMING");
     when(turnRepo.findById("t4")).thenReturn(Optional.of(turn));
 
@@ -141,7 +141,12 @@ class AgentStreamTurnLifecycleTest {
     var event = ArgumentCaptor.forClass(AgentActionEvent.class);
     verify(eventRepo).save(event.capture());
     assertThat(event.getValue().getPayloadJson())
-        .contains("\"partial\":true", "\"partialSummary\":\"partial answer\"");
+        .contains(
+            "\"partial\":true",
+            "\"partialSummary\":{\"text\":\"partial answer\"",
+            "\"truncated\":false",
+            "\"originalChars\":14",
+            "\"originalBytes\":14");
   }
 
   @Test

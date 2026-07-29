@@ -2,10 +2,14 @@ import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
 import {
   confirmAgentRunProposal,
+  closeAgentSession,
   createAgentSession,
+  listAgentTurnPage,
+  listAgentTurns,
   parseAgentSseFrame,
   replayAgentEvents,
   streamAgentTurn,
+  updateAgentSessionRoute,
 } from './agent';
 
 describe('agent API SSE helpers', () => {
@@ -29,6 +33,58 @@ describe('agent API SSE helpers', () => {
       event: 'token',
       data: {delta: 'hello'},
     });
+  });
+
+  it('uses the server close contract and cursor-based transcript pagination', async () => {
+    localStorage.setItem('access_token', 'test-token');
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify([]), {status: 200}));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await listAgentTurns('session/one', {limit: 100, before: 'turn/oldest'});
+    await closeAgentSession('session/one');
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      '/api/agent/sessions/session%2Fone/turns?limit=100&before=turn%2Foldest',
+      expect.any(Object),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      '/api/agent/sessions/session%2Fone/close',
+      expect.objectContaining({method: 'POST'}),
+    );
+  });
+
+  it('loads authoritative transcript completeness from the paged contract', async () => {
+    localStorage.setItem('access_token', 'test-token');
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify({turns: [], totalTurns: 100, hasMore: false}), {status: 200}),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await listAgentTurnPage('session/one', {limit: 100, before: 'turn/oldest'});
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/agent/sessions/session%2Fone/turns/page?limit=100&before=turn%2Foldest',
+      expect.any(Object),
+    );
+  });
+
+  it('persists conversation routing separately from generated-run confirmation', async () => {
+    localStorage.setItem('access_token', 'test-token');
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({id: 's1'}), {status: 200}));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await updateAgentSessionRoute('session/one', {provider: 'OPENAI', model: 'gpt-5.4'});
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/agent/sessions/session%2Fone/route',
+      expect.objectContaining({
+        method: 'PUT',
+        body: JSON.stringify({provider: 'OPENAI', model: 'gpt-5.4'}),
+      }),
+    );
   });
 
   it('joins multi-line data frames as plain text when not JSON', () => {

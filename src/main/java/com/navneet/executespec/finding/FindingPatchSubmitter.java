@@ -127,16 +127,8 @@ public class FindingPatchSubmitter {
                 /* userCostCap */ null,
                 /* skipAutoPush */ false,
                 tenancy.tenantOrgId(),
-                tenancy.billingOrgId()));
-
-    // 3. Stamp the finding key on the row.
-    runRepo
-        .findById(run.getRunId())
-        .ifPresent(
-            r -> {
-              r.setTriggeredByFinding(key);
-              runRepo.save(r);
-            });
+                tenancy.billingOrgId(),
+                key));
 
     log.info(
         "FindingPatchSubmitter DISPATCHED finding={} run={} project={} repos={} branchOverride={}",

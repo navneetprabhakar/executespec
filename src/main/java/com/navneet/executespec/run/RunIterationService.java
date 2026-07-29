@@ -96,6 +96,7 @@ public class RunIterationService {
               firstNonBlank(source.getRequestedProvider(), source.getAiProvider()));
       String pinnedModel = source.isRoutePinned() ? source.getRequestedModel() : null;
       modelAccessService.assertModelAllowed(actorId, pinnedModel);
+      modelAccessService.assertProviderAllowed(actorId, provider);
       modelAccessService.assertProviderModelPair(provider, pinnedModel);
       managedAiUsageService.assertCanStartRun(actor, apiKeyResolver.isOwnKeysMode(actorId));
       apiKeyResolver.validateKeyAvailability(actorId);

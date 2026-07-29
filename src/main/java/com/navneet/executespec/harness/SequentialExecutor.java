@@ -667,7 +667,9 @@ to boot — skip it for those.""";
             : req.requireBenchmarkPriorForAutomaticContinuation());
     continuationRoutePinnedByRun.put(runId, Boolean.TRUE.equals(req.routePinned()));
     lowComplexityWorkerStartTierConfiguredByRun.put(
-        runId, configuredLowComplexityWorkerStartTier(req.lowComplexityWorkerStartTier()));
+        runId,
+        TaskRoutePersistence.configuredLowComplexityTier(
+            lowComplexityWorkerStartTier, req.lowComplexityWorkerStartTier()));
     lowComplexityWorkerStartTierEffectiveByRun.put(
         runId, lowComplexityWorkerStartTier(req.lowComplexityWorkerStartTier()).name());
     continuationConfirmationScopeByRun.put(runId, ContinuationConfirmationScope.from(req));
@@ -1970,6 +1972,20 @@ to boot — skip it for those.""";
     if (providerModelOverride != null) {
       cfg = cfg.withProviderModel(providerModelOverride.provider(), providerModelOverride.model());
     }
+    TaskRoutePersistence.persist(
+        taskRepo,
+        runId,
+        task.id(),
+        cfg.provider(),
+        cfg.model(),
+        cfg.tier(),
+        TaskCategoryClassifier.classify(task),
+        TaskRoutePersistence.source(
+            req.routePinned(),
+            initialRoute != null && initialRoute.changed(),
+            providerModelOverride != null,
+            cfg.provider(),
+            cfg.tier()));
     // 2026-05-04 — quirky pre-dispatch log so the Live Log tab has more than just
     // token counters during long worker loops. Format mirrors the "Starting task:" line so
     // the rendering stays uniform; copy varies by complexity to surface what the user is
@@ -3362,7 +3378,7 @@ to boot — skip it for those.""";
         return configured;
       }
     }
-    return configuredLowComplexityWorkerStartTier();
+    return TaskRoutePersistence.configuredLowComplexityTier(lowComplexityWorkerStartTier, null);
   }
 
   private String effectiveLowComplexityWorkerStartTier(String runId) {
@@ -4095,6 +4111,7 @@ to boot — skip it for those.""";
   private record TierConfig(
       String provider,
       String model,
+      AgentTier tier,
       int maxIter,
       int maxTokens,
       int stagnationWarnAfter,
@@ -4105,6 +4122,7 @@ to boot — skip it for those.""";
       return new TierConfig(
           provider,
           model,
+          tier,
           maxIter,
           maxTokens,
           stagnationWarnAfter,
@@ -4172,6 +4190,7 @@ to boot — skip it for those.""";
       return new TierConfig(
           resolved.providerName(),
           resolved.getModel(),
+          tier,
           maxIter,
           maxTokens,
           profileThresholds[0] > 0 ? profileThresholds[0] : stagnationWarnAfter,
@@ -4189,6 +4208,7 @@ to boot — skip it for those.""";
       return new TierConfig(
           runProvider,
           runModel,
+          tier,
           maxIter,
           maxTokens,
           profileThresholds[0] > 0 ? profileThresholds[0] : stagnationWarnAfter,
@@ -4272,10 +4292,6 @@ to boot — skip it for those.""";
     }
   }
 
-  private AgentTier lowComplexityWorkerStartTier() {
-    return lowComplexityWorkerStartTier(null);
-  }
-
   private AgentTier lowComplexityWorkerStartTier(String override) {
     String configured = hasText(override) ? override : lowComplexityWorkerStartTier;
     if (configured == null || configured.isBlank()) {
@@ -4290,18 +4306,6 @@ to boot — skip it for those.""";
           configured);
       return AgentTier.WORKHORSE;
     }
-  }
-
-  private String configuredLowComplexityWorkerStartTier() {
-    return configuredLowComplexityWorkerStartTier(null);
-  }
-
-  private String configuredLowComplexityWorkerStartTier(String override) {
-    String configured = hasText(override) ? override : lowComplexityWorkerStartTier;
-    if (configured == null || configured.isBlank()) {
-      return AgentTier.WORKHORSE.name();
-    }
-    return configured.trim().toUpperCase(Locale.ROOT);
   }
 
   public void persistTaskStatus(String runId, String taskIdShort, String status) {

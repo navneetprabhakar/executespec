@@ -178,6 +178,9 @@ Auth, account, org, project, RBAC, PAT, OAuth, and user-level client preferences
 ## Tier Permissions
 
 - `GET /api/auth/me/permissions` keeps the legacy `monthlyRunLimit` integer for backward compatibility, but clients must read `quotaModel`, `includedAiCredits`, `unlimitedAiCredits`, and `quotaDescription` to understand the active customer-facing quota boundary. Managed-key tiers such as FREE/PRO/PRO_PLUS report `quotaModel=MANAGED_AI_CREDITS`; BYOK/TEAM/ENTERPRISE report `OWN_KEYS_UNLIMITED`.
+- Downgrades to managed-key tiers reset the organization to `keySourceMode=SYSTEM`. Key-source
+  updates reject `OWN_KEYS`/`HYBRID` on managed tiers, and provider readiness/key resolution
+  re-check effective tier so retained encrypted key columns cannot preserve BYOK authority.
 
 ## Org Lifecycle
 
@@ -222,6 +225,10 @@ Auth, account, org, project, RBAC, PAT, OAuth, and user-level client preferences
 - `V253__ai_credit_pricing_ladder.sql` refreshes Free/Pro/Pro+/BYOK/Team seed rows and restores Team's 2-seat minimum.
 - `V292__project_chat_scoped_confirmations.sql` adds hashed, actor/tenant/project/route/target-scoped
   one-shot Project Chat authority and makes the existing `activity_audit` table database-append-only.
+
+Organization OpenRouter keys follow the same configurable model-matrix entitlement as other BYOK
+credentials: BYOK, TEAM, and ENTERPRISE may save the key. The provider-key UI and `OrgService`
+enforce the same tier set; lower tiers remain rejected.
 
 ## Data-export field allowlist (RR-204, 2026-07-21)
 

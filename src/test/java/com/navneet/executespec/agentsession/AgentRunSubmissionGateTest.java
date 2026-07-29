@@ -147,7 +147,7 @@ class AgentRunSubmissionGateTest {
   }
 
   @Test
-  void confirmationInheritsSessionRouteAndNormalizesExecutionHints() {
+  void confirmationKeepsChatRouteSeparateAndNormalizesExecutionHints() {
     PipelineRun run = PipelineRun.builder().runId("run-2").createdByUserId("u1").build();
     when(customerRunSubmissionService.submit(any(), any()))
         .thenReturn(new CustomerRunSubmissionService.Submission(run, true, false));
@@ -182,11 +182,32 @@ class AgentRunSubmissionGateTest {
     var command = ArgumentCaptor.forClass(CustomerRunSubmissionService.Command.class);
     verify(customerRunSubmissionService).submit(command.capture(), any());
     assertThat(command.getValue().userRequest()).isEqualTo("edited spec");
-    assertThat(command.getValue().modelName()).isEqualTo("claude-sonnet-4-6");
-    assertThat(command.getValue().aiProvider()).isEqualTo("ANTHROPIC");
+    assertThat(command.getValue().modelName()).isNull();
+    assertThat(command.getValue().aiProvider()).isNull();
     assertThat(command.getValue().executionMode()).isEqualTo("PROTOTYPE");
     assertThat(command.getValue().lowComplexityWorkerStartTier()).isEqualTo("LIGHTWEIGHT");
     assertThat(command.getValue().userCostCap()).isEqualTo(2.5);
+  }
+
+  @Test
+  void confirmationUsesOnlyAnExplicitExecutionRoutePin() {
+    PipelineRun run = PipelineRun.builder().runId("run-3").createdByUserId("u1").build();
+    when(customerRunSubmissionService.submit(any(), any()))
+        .thenReturn(new CustomerRunSubmissionService.Submission(run, true, false));
+
+    gate.submitConfirmed(
+        session(),
+        turn("Implement OAuth login"),
+        decision("CODE_RUN_REQUIRED", true),
+        new OrchestratorRunConfirmationRequest(
+            "s1", "turn-1", true, "OPENAI", "gpt-5.4", null, null, null, null, null, List.of()),
+        user());
+
+    var command = ArgumentCaptor.forClass(CustomerRunSubmissionService.Command.class);
+    verify(customerRunSubmissionService).submit(command.capture(), any());
+    assertThat(command.getValue().aiProvider()).isEqualTo("OPENAI");
+    assertThat(command.getValue().modelName()).isEqualTo("gpt-5.4");
+    assertThat(command.getValue().inferProviderFromModelFirst()).isTrue();
   }
 
   @Test

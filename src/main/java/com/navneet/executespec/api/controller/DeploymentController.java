@@ -80,7 +80,13 @@ public class DeploymentController {
     // (per-user maxDeployments check).
     requireDeployEntitlement(userDetails);
     try {
-      RunRepo.RepoMode mode = RunRepo.RepoMode.valueOf(request.repoMode().toUpperCase());
+      // Older Web bundles sent only {runId}. That is the direct workspace-deploy contract and must
+      // resolve to NONE rather than dereferencing a nullable repoMode and returning an uncaught
+      // NullPointerException. NEW/EXISTING remain explicit because they carry repository side
+      // effects and additional required fields.
+      String requestedRepoMode =
+          request.repoMode() == null || request.repoMode().isBlank() ? "NONE" : request.repoMode();
+      RunRepo.RepoMode mode = RunRepo.RepoMode.valueOf(requestedRepoMode.toUpperCase());
       Deployment d =
           deploymentService.deploy(request.runId(), mode, request.repoUrl(), request.repoName());
       return ResponseEntity.accepted().body(DeploymentSummary.from(d));

@@ -33,6 +33,23 @@ export function isLiveStatus(status?: string | null): boolean {
   return isLiveRunStatus(status);
 }
 
+const TERMINAL_DEPLOYMENT_STATUSES = new Set([
+  'LIVE',
+  'DELETED',
+  'FAILED',
+  'HEALTH_CHECK_FAILED',
+  'DEGRADED',
+  'STOPPED',
+  'ROLLED_BACK',
+  'DESTROYED',
+]);
+
+/** True only when the deployment will not advance without a new user action. */
+export function isDeploymentTerminal(status?: string | null): boolean {
+  if (!status) return false;
+  return TERMINAL_DEPLOYMENT_STATUSES.has(status.toUpperCase());
+}
+
 export function scoreOf(r: api.RunSummary): number | null | undefined {
   return r.verifiedScore;
 }

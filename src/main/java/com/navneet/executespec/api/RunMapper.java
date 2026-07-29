@@ -383,21 +383,10 @@ public class RunMapper {
    */
   static final Comparator<AgentTask> TASK_DISPLAY_ORDER =
       Comparator.comparingInt((AgentTask t) -> planOrder(t.getPlanIndex()))
-          .thenComparingInt(t -> taskStatusOrder(t.getStatus()));
+          .thenComparingInt(t -> TaskPresentation.statusOrder(t.getStatus()));
 
   private static int planOrder(Integer planIndex) {
     return planIndex == null ? Integer.MAX_VALUE : planIndex;
-  }
-
-  private static int taskStatusOrder(String status) {
-    return switch (status != null ? status : "") {
-      case "WORKING" -> 0;
-      case "PENDING", "LOCKED" -> 1;
-      case "PARTIAL", "BLOCKED" -> 2;
-      case "FAILED" -> 3;
-      case "COMPLETE" -> 4;
-      default -> 5;
-    };
   }
 
   public TaskSummary toTaskSummary(AgentTask t) {
@@ -415,6 +404,13 @@ public class RunMapper {
         t.getAssignedModel(),
         t.getProvider(),
         t.getModel(),
+        t.getEffectiveProvider(),
+        t.getEffectiveModel(),
+        t.getEffectiveRouteAttribution(),
+        TaskPresentation.routeDiverged(t),
+        t.getRoutingTier(),
+        t.getRoutingTaskCategory(),
+        t.getRoutingSource(),
         t.getBranchName(),
         t.getReadmeUpdated(),
         t.getInputTokens() != null ? t.getInputTokens().longValue() : null,

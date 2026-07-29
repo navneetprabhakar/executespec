@@ -113,14 +113,11 @@ public class AgentRunSubmissionGate {
     }
 
     String explicitModel = request == null ? null : AgentText.blankToNull(request.modelName());
-    String modelName =
-        AgentText.firstNonBlank(explicitModel, AgentText.blankToNull(session.getDefaultModel()));
+    // Session defaults route the conversational agent only. A generated-code run uses org/task
+    // matrix routing unless the confirmation request explicitly pins a run route.
+    String modelName = explicitModel;
     String providerOverride = request == null ? null : AgentText.blankToNull(request.aiProvider());
-    String provider =
-        explicitModel == null
-            ? AgentText.firstNonBlank(
-                providerOverride, AgentText.blankToNull(session.getDefaultProvider()))
-            : providerOverride;
+    String provider = providerOverride;
     String lowStartTier =
         request == null
             ? null

@@ -28,8 +28,7 @@ import org.springframework.web.server.ResponseStatusException;
  * <ul>
  *   <li>A blank value means "leave unchanged", not "clear" — the settings UI saves one provider at
  *       a time and sends only the edited field, so an unconditional set would wipe the others.
- *   <li>OpenRouter is Enterprise-only: a key on a lower tier is rejected with 403; on ENTERPRISE it
- *       is stored.
+ *   <li>OpenRouter follows the same BYOK-capable tier contract as the provider-key settings UI.
  *   <li>Keys are trimmed before persistence.
  * </ul>
  *
@@ -98,21 +97,25 @@ class OrgServiceAiKeysTest {
   }
 
   @Test
-  void openRouterRejectedOnNonEnterprise() {
-    seedOrg("TEAM", null, null, null, null);
+  void openRouterRejectedOnUnentitledTier() {
+    seedOrg("PRO", null, null, null, null);
 
     assertThatThrownBy(() -> svc.updateAiKeySettings("org-1", "", "", "", "sk-or", "actor"))
         .isInstanceOf(ResponseStatusException.class)
-        .hasMessageContaining("Enterprise");
+        .hasMessageContaining("TEAM, BYOK or Enterprise");
   }
 
   @Test
-  void openRouterAcceptedOnEnterprise() {
-    Org org = seedOrg("ENTERPRISE", null, null, null, null);
+  void openRouterAcceptedOnTeamAndByok() {
+    Org org = seedOrg("TEAM", null, null, null, null);
 
     svc.updateAiKeySettings("org-1", "", "", "", "sk-or-new", "actor");
 
     assertThat(org.getOpenRouterApiKey()).isEqualTo("sk-or-new");
+
+    Org byok = seedOrg("BYOK", null, null, null, null);
+    svc.updateAiKeySettings("org-1", "", "", "", "sk-or-byok", "actor");
+    assertThat(byok.getOpenRouterApiKey()).isEqualTo("sk-or-byok");
   }
 
   @Test
@@ -123,6 +126,31 @@ class OrgServiceAiKeysTest {
 
     assertThat(org.getKeySourceMode()).isEqualTo("OWN_KEYS");
     assertThat(org.getEnabledProviders()).isEqualTo("gemini");
+  }
+
+  @Test
+  void keySourcePolicyRejectsCustomerKeysOnManagedTier() {
+    Org org = seedOrg("PRO", null, null, null, null);
+    org.setKeySourceMode("SYSTEM");
+
+    assertThatThrownBy(
+            () ->
+                svc.updateKeySourceSettings(
+                    "org-1", "OWN_KEYS", java.util.List.of("openai"), "actor"))
+        .isInstanceOf(ResponseStatusException.class)
+        .hasMessageContaining("TEAM, BYOK or Enterprise");
+    assertThat(org.getKeySourceMode()).isEqualTo("SYSTEM");
+  }
+
+  @Test
+  void adminTierDowngradeRevokesCustomerKeyAuthority() {
+    Org org = seedOrg("TEAM", "sk-ant", null, null, null);
+    org.setKeySourceMode("OWN_KEYS");
+
+    svc.changeOrgTier("org-1", "FREE", "super-admin");
+
+    assertThat(org.getTier()).isEqualTo("FREE");
+    assertThat(org.getKeySourceMode()).isEqualTo("SYSTEM");
   }
 
   @Test

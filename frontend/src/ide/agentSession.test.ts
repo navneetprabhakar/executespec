@@ -49,6 +49,15 @@ describe('agentSession helpers', () => {
     expect(selectScopedAgentSession(sessions, {projectId: 'p2'})).toBeNull();
   });
 
+  it('never selects an archived conversation as the writable scoped default', () => {
+    const archived = session('archived', 'p1', null);
+    archived.status = 'ARCHIVED';
+    const active = session('active', 'p1', null);
+
+    expect(selectScopedAgentSession([archived, active], {projectId: 'p1'})?.id).toBe('active');
+    expect(selectScopedAgentSession([archived], {projectId: 'p1'})).toBeNull();
+  });
+
   it('builds the standard web session request', () => {
     expect(webAgentSessionRequest({projectId: 'p1', runId: 'run-1'})).toEqual({
       surface: 'WEB',

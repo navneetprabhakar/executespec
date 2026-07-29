@@ -45,7 +45,11 @@ class AgentTurnReadModel {
         turn.getReasoningTokens(),
         turn.getCostUsd(),
         turn.getStatus(),
-        turn.getCreatedAt());
+        turn.getCreatedAt(),
+        turn.getAssistantCharCount(),
+        turn.getAssistantByteCount(),
+        turn.getAssistantLineCount(),
+        turn.getAssistantSha256());
   }
 
   OrchestratorTurnResponse replayOrchestratorTurn(AgentTurn turn) {

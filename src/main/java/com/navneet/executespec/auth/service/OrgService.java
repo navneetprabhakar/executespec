@@ -588,13 +588,13 @@ public class OrgService {
     if (geminiKey != null && !geminiKey.isBlank()) {
       org.setGeminiApiKey(geminiKey.trim());
     }
-    // OpenRouter (gateway) is Enterprise-only — reject the key on lower tiers so the provider can
-    // never be offered (AvailableProviderResolver treats key-present as the Enterprise signal).
+    // OpenRouter is an organization-scoped BYOK gateway, so its entitlement must match the
+    // provider-key settings surface: BYOK, TEAM, and ENTERPRISE.
     String openRouter = blankToNull(openRouterKey);
     if (openRouter != null) {
-      if (!"ENTERPRISE".equalsIgnoreCase(org.getTier())) {
+      if (!isByokCapableTier(org.getTier())) {
         throw new ResponseStatusException(
-            HttpStatus.FORBIDDEN, "OpenRouter is an Enterprise-tier feature");
+            HttpStatus.FORBIDDEN, "OpenRouter requires a TEAM, BYOK or Enterprise tier");
       }
       org.setOpenRouterApiKey(openRouter);
     }
@@ -603,9 +603,7 @@ public class OrgService {
     // (TierPermissionService). Gating the ORG lane to ENTERPRISE-only contradicted both the
     // documented contract and the personal-key path, so a Team/BYOK admin was shown key management
     // yet could not configure these providers for the team — an availability difference by storage
-    // location. Allow the BYOK-capable tiers here so org and personal scope agree. OpenRouter stays
-    // Enterprise-only above: it is the gateway that AvailableProviderResolver treats as the
-    // Enterprise signal, not a direct BYOK provider lane.
+    // location. Allow the BYOK-capable tiers here so org and personal scope agree.
     String deepSeek = blankToNull(deepSeekKey);
     if (deepSeek != null) {
       if (!isByokCapableTier(org.getTier())) {
@@ -705,6 +703,11 @@ public class OrgService {
         throw new ResponseStatusException(
             HttpStatus.BAD_REQUEST,
             "Invalid keySourceMode: " + keySourceMode + ". Must be SYSTEM, OWN_KEYS, or HYBRID.");
+      }
+      if (!"SYSTEM".equals(normalizedMode) && !isByokCapableTier(org.getTier())) {
+        throw new ResponseStatusException(
+            HttpStatus.FORBIDDEN,
+            "OWN_KEYS and HYBRID key sources require a TEAM, BYOK or Enterprise plan.");
       }
       org.setKeySourceMode(normalizedMode);
     }
@@ -863,7 +866,7 @@ public class OrgService {
    */
   private static boolean isByokCapableTier(String tier) {
     if (tier == null) return false;
-    String t = tier.toUpperCase();
+    String t = tier.trim().toUpperCase(java.util.Locale.ROOT);
     return t.equals("TEAM") || t.equals("BYOK") || t.equals("ENTERPRISE");
   }
 
@@ -922,6 +925,9 @@ public class OrgService {
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Org not found"));
     String oldTier = org.getTier();
     org.setTier(newTier);
+    if (!isByokCapableTier(newTier)) {
+      org.setKeySourceMode("SYSTEM");
+    }
     // V143 product_id flip retired (V179, single-surface retirement
     // 2026-05-06) — there's no surface to swap to.
     org.setUpdatedAt(Instant.now());

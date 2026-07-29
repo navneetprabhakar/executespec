@@ -1,5 +1,5 @@
 import {useEffect, useMemo, useState} from 'react';
-import {Link, useNavigate} from 'react-router-dom';
+import {Link, useNavigate, useSearchParams} from 'react-router-dom';
 import * as api from '@/lib/api';
 import {IdeBadge, IdeLoader} from '@/ide/IdeKit';
 import {LoadError} from '@/ide/LoadError';
@@ -13,6 +13,7 @@ import {
 import {useProviderReadiness} from '@/ide/useProviderReadiness';
 import {useAuthStore, selectIsSuperAdmin} from '@/stores/useAuthStore';
 import {fmtCost} from '@/lib/utils';
+import {readAgentProjectHandoff} from '@/ide/agentProjectHandoff';
 
 type Dash = Record<string, unknown>;
 const numOf = (s: Dash, k: string): number | undefined =>
@@ -27,6 +28,9 @@ const debtTotal = (r: api.TechDebtReport): number =>
 
 export default function IdeProjects() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const agentHandoffId = searchParams.get('agentProjectHandoff');
+  const agentHandoff = readAgentProjectHandoff(agentHandoffId);
   const isSuperAdmin = useAuthStore(selectIsSuperAdmin);
   const [stats, setStats] = useState<Record<string, Dash>>({});
   // Tech-debt count keyed by project id, fetched lazily alongside the dashboard.
@@ -85,7 +89,12 @@ export default function IdeProjects() {
     try {
       setCreateError('');
       const p = await api.createProject({name, aiProvider: newProvider || undefined});
-      navigate(`/projects/${(p as {id?: string}).id ?? ''}`);
+      const createdId = (p as {id?: string}).id ?? '';
+      navigate(
+        agentHandoff && agentHandoffId
+          ? `/projects/${createdId}/agent?agentProjectHandoff=${encodeURIComponent(agentHandoffId)}`
+          : `/projects/${createdId}`,
+      );
     } catch (error) {
       setCreateError(error instanceof Error ? error.message : 'Project creation failed.');
     }
@@ -174,6 +183,18 @@ export default function IdeProjects() {
 
   return (
     <div className='ide-pane'>
+      {agentHandoff && (
+        <div className='ide-card' role='status' style={{marginBottom: 12}}>
+          <strong>Create a project for this conversation</strong>
+          <p className='ide-sub' style={{margin: '6px 0 10px'}}>
+            Your conversation and draft are preserved. After creation, the agent will open with the
+            new project linked.
+          </p>
+          <button className='ide-btn ghost' onClick={() => navigate(agentHandoff.returnPath)}>
+            Cancel and return to conversation
+          </button>
+        </div>
+      )}
       <div style={{display: 'flex', alignItems: 'center', gap: 12, marginBottom: 4}}>
         <h1 className='ide-h1' style={{margin: 0}}>
           Projects

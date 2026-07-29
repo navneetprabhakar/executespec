@@ -24,7 +24,11 @@ export function selectScopedAgentSession(
   sessions: api.AgentSessionResponse[],
   scope: AgentSessionScope,
 ): api.AgentSessionResponse | null {
-  return sessions.find((session) => agentSessionMatchesScope(session, scope)) ?? null;
+  return (
+    sessions.find(
+      (session) => session.status === 'ACTIVE' && agentSessionMatchesScope(session, scope),
+    ) ?? null
+  );
 }
 
 export function webAgentSessionRequest(scope: AgentSessionScope): api.CreateAgentSessionRequest {

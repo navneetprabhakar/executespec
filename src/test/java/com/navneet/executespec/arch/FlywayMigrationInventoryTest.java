@@ -51,9 +51,11 @@ class FlywayMigrationInventoryTest {
     // idempotent project-architecture refresh jobs, bringing the exact inventory to 339. V354
     // makes physical LLM-attempt admission atomic with the exact logical-operation lease, and V355
     // adds the ordered partial index used for bounded stale agent-turn recovery, bringing the exact
-    // inventory to 341.
-    assertThat(migrations).hasSize(341);
-    assertThat(migrations.getLast().version()).isEqualTo("355");
+    // inventory to 341. V356 adds agent-session archive/transcript integrity, V357 persists task
+    // route explanations, V358 adds durable generated-document jobs, and V359 adds first-writer-
+    // wins CI-failure delivery claims, bringing the exact inventory to 345.
+    assertThat(migrations).hasSize(345);
+    assertThat(migrations.getLast().version()).isEqualTo("359");
 
     assertThat(migrations.stream().map(MigrationFile::version)).doesNotHaveDuplicates();
     assertThat(migrations.stream().map(MigrationFile::fileName))

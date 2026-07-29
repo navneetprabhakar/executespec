@@ -54,7 +54,7 @@ class PeriodEndDowngradeSchedulerTest {
             .currentPeriodEnd(Instant.now().plus(20, ChronoUnit.DAYS))
             .build();
     AppUser user = AppUser.builder().id("user-1").email("u@example.com").tier("TEAM").build();
-    Org org = Org.builder().id("org-1").tier("TEAM").build();
+    Org org = Org.builder().id("org-1").tier("TEAM").keySourceMode("OWN_KEYS").build();
 
     when(subRepo.findOtherLiveByUserId("user-1", expired.getId())).thenReturn(List.of(newerPaid));
     when(subRepo.findOtherLiveByOrgId("org-1", expired.getId())).thenReturn(List.of(newerPaid));
@@ -89,6 +89,7 @@ class PeriodEndDowngradeSchedulerTest {
 
     assertThat(user.getTier()).isEqualTo("FREE");
     assertThat(org.getTier()).isEqualTo("FREE");
+    assertThat(org.getKeySourceMode()).isEqualTo("SYSTEM");
     assertThat(expired.getStatus()).isEqualTo("DOWNGRADED");
   }
 
