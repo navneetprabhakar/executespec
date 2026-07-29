@@ -3,6 +3,7 @@ package com.navneet.executespec.previewrender;
 import java.util.List;
 import java.util.Map;
 
+import com.navneet.executespec.agent.LlmRequest;
 import com.navneet.executespec.agent.LlmRouter;
 import com.navneet.executespec.agent.PromptAssembler;
 import com.navneet.executespec.agent.PromptTrustBoundary;
@@ -12,6 +13,7 @@ import com.navneet.executespec.router.AgentTier;
 import com.navneet.executespec.router.LlmProvider;
 import com.navneet.executespec.router.ModelResolver;
 import com.navneet.executespec.router.ResolvedModel;
+import com.navneet.executespec.tool.ExecutionContext;
 
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.SystemMessage;
@@ -66,13 +68,28 @@ public class PreviewRenderAgent {
   /** Renders a single surface. Never throws — a failed render degrades to a reason code. */
   public RenderedSurface render(
       PreviewSurface surface, LlmProvider provider, String runId, String renderAttemptId) {
-    try {
-      ResolvedModel resolved =
-          modelResolver.resolve(
-              "PreviewRenderAgent",
-              provider == null ? LlmProvider.ANTHROPIC : provider,
-              AgentTier.WORKHORSE);
+    ResolvedModel resolved =
+        modelResolver.resolve(
+            "PreviewRenderAgent",
+            provider == null ? LlmProvider.ANTHROPIC : provider,
+            AgentTier.WORKHORSE);
+    return render(surface, resolved, runId, renderAttemptId, null);
+  }
 
+  ResolvedModel resolveRoute(LlmProvider provider) {
+    return modelResolver.resolve(
+        "PreviewRenderAgent",
+        provider == null ? LlmProvider.ANTHROPIC : provider,
+        AgentTier.WORKHORSE);
+  }
+
+  RenderedSurface render(
+      PreviewSurface surface,
+      ResolvedModel resolved,
+      String runId,
+      String renderAttemptId,
+      ExecutionContext executionContext) {
+    try {
       String systemPrompt =
           promptAssembler.assemble(
               PROMPT,
@@ -85,17 +102,34 @@ public class PreviewRenderAgent {
       List<Message> messages =
           List.of(new SystemMessage(systemPrompt), new UserMessage(buildEvidence(surface)));
 
-      ChatResponse response =
-          llmRouter.callText(
-              resolved.providerName(),
-              resolved.getModel(),
-              messages,
-              runId,
-              "PreviewRenderAgent",
-              "render:" + surface.id(),
-              MAX_OUTPUT_TOKENS,
-              com.navneet.executespec.agent.LlmRequest.PromptCacheStrategy.DEFAULT,
-              executionPolicyFactory.forRunPreviewSurface(runId, renderAttemptId));
+      ChatResponse response;
+      if (executionContext == null) {
+        response =
+            llmRouter.callText(
+                resolved.providerName(),
+                resolved.getModel(),
+                messages,
+                runId,
+                "PreviewRenderAgent",
+                "render:" + surface.id(),
+                MAX_OUTPUT_TOKENS,
+                LlmRequest.PromptCacheStrategy.DEFAULT,
+                executionPolicyFactory.forRunPreviewSurface(runId, renderAttemptId));
+      } else {
+        response =
+            llmRouter.call(
+                LlmRequest.builder()
+                    .provider(resolved.providerName())
+                    .model(resolved.getModel())
+                    .messages(messages)
+                    .context(executionContext)
+                    .toolsOverride(List.of())
+                    .agentRole("PreviewRenderAgent")
+                    .stepId("render:" + surface.id())
+                    .maxTokens(MAX_OUTPUT_TOKENS)
+                    .promptCacheStrategy(LlmRequest.PromptCacheStrategy.DEFAULT)
+                    .build());
+      }
 
       String raw = response.getResult().getOutput().getText();
       String html = stripFences(raw);

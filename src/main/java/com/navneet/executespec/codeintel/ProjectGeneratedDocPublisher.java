@@ -2,6 +2,7 @@ package com.navneet.executespec.codeintel;
 
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 
 import com.navneet.executespec.auth.repository.ProjectRepository;
@@ -41,7 +42,8 @@ final class ProjectGeneratedDocPublisher {
         transactionManager == null ? null : new TransactionTemplate(transactionManager);
   }
 
-  ProjectGeneratedDoc publish(ProjectGeneratedDoc candidate) {
+  ProjectGeneratedDoc publish(
+      ProjectGeneratedDoc candidate, Predicate<ProjectGeneratedDoc> reusableDocument) {
     Supplier<ProjectGeneratedDoc> persistence =
         () -> {
           projectRepo
@@ -69,7 +71,8 @@ final class ProjectGeneratedDocPublisher {
                           candidate.getDocType(),
                           candidate.getSourceArchVersion(),
                           candidate.getSourceShasFingerprint())
-                      .filter(doc -> doc.getContent() != null && !doc.getContent().isBlank());
+                      .filter(doc -> doc.getContent() != null && !doc.getContent().isBlank())
+                      .filter(reusableDocument);
           if (alreadyPersisted.isPresent()) return alreadyPersisted.get();
 
           int nextVersion =

@@ -9,12 +9,14 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.security.MessageDigest;
 import java.text.Normalizer;
+import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 import com.navneet.executespec.auth.entity.ActivityAudit;
 import com.navneet.executespec.auth.entity.Org;
@@ -60,6 +62,7 @@ public class ProjectDocumentService {
   private final ProjectDocumentProperties properties;
   private final ChunkingService chunker;
   private final EmbeddingService embedder;
+  private final EmbeddingOperationRoot operationRoot;
   private final ChunkStore chunkStore;
   private final PlatformTransactionManager transactionManager;
   private final ApplicationEventPublisher events;
@@ -169,6 +172,7 @@ public class ProjectDocumentService {
     ProcessingLease lease = claim(documentId, semanticReindex);
     if (lease == null) return;
     ProjectDocument claimed = lease.document();
+    EmbeddingOperationRoot.Active operation = null;
     try {
       byte[] bytes =
           blobRepo
@@ -202,7 +206,29 @@ public class ProjectDocumentService {
       var embedding = embedder.availability(claimed.getProjectId());
       if (embedding.semanticSearchAvailable()) {
         if (!updateLeasedStatus(lease, ProjectDocument.Status.EMBEDDING, null, null, false)) return;
+        EmbeddingOperationRoot.Request operationRequest = documentOperation(claimed);
         try {
+          operation =
+              operationRoot
+                  .claim(operationRequest, lease.owner(), processingLeaseDuration())
+                  .orElse(null);
+          if (operation == null) {
+            failTerminal(
+                lease,
+                "EMBEDDING_OPERATION_NOT_CLAIMABLE",
+                "A prior embedding attempt has an uncertain or terminal outcome.");
+            return;
+          }
+          EmbeddingOperationRoot.Active activeOperation = operation;
+          if (!heartbeatEmbedding(lease)
+              || !operationRoot.heartbeat(activeOperation, processingLeaseDuration())) {
+            terminateOperation(
+                activeOperation,
+                "DOCUMENT_INDEX_LEASE_LOST",
+                "Document-index lease was lost before provider dispatch");
+            operation = null;
+            return;
+          }
           List<float[]> embeddings =
               embedder.embedForProject(
                   claimed.getProjectId(),
@@ -216,15 +242,29 @@ public class ProjectDocumentService {
                   // moment ownership is lost, so a slow multi-batch call cannot expire its own
                   // lease
                   // and then be unable to publish.
-                  (completed, total) -> heartbeatEmbedding(lease));
+                  (completed, total) ->
+                      heartbeatEmbedding(lease)
+                          && operationRoot.heartbeat(activeOperation, processingLeaseDuration()),
+                  activeOperation.authority());
           if (publishReady(lease, extraction, chunks, embeddings)) {
+            operationRoot.complete(activeOperation);
+            operation = null;
             log.info(
                 "Semantically indexed project document id {} with {} chunks",
                 documentId,
                 chunks.size());
+          } else {
+            terminateOperation(
+                activeOperation,
+                "DOCUMENT_INDEX_LEASE_LOST",
+                "Document-index publication lease was lost");
+            operation = null;
           }
           return;
         } catch (EmbeddingOwnershipLostException ownershipLost) {
+          terminateOperation(
+              operation, "DOCUMENT_INDEX_LEASE_LOST", "Document-index lease was lost");
+          operation = null;
           // A takeover/delete now owns this document; stop without downgrading or retrying.
           log.info(
               "Project document {} embedding abandoned — lease lost mid-call: {}",
@@ -232,6 +272,9 @@ public class ProjectDocumentService {
               ownershipLost.getMessage());
           return;
         } catch (EmbeddingUnavailableException policyChanged) {
+          terminateOperation(
+              operation, "DOCUMENT_EMBEDDING_UNAVAILABLE", "Document embedding became unavailable");
+          operation = null;
           log.info(
               "Project document {} changed to lexical indexing because embedding policy is {}",
               documentId,
@@ -244,9 +287,21 @@ public class ProjectDocumentService {
             "Lexically indexed project document id {} with {} chunks", documentId, chunks.size());
       }
     } catch (DocumentAdmissionException e) {
+      terminateOperation(operation, e.code(), "Document indexing was rejected");
       failTerminal(lease, e.code(), e.getMessage());
     } catch (Exception e) {
-      scheduleRetryOrFail(lease);
+      if (operation != null) {
+        terminateOperation(
+            operation, "DOCUMENT_INDEX_FAILED", "Document indexing did not complete");
+        // Provider transport may have succeeded without returning. Do not automatically replay an
+        // uncertain embedding operation under a new processing attempt.
+        failTerminal(
+            lease,
+            "EMBEDDING_OUTCOME_UNCERTAIN",
+            "Embedding outcome is uncertain; re-upload or explicitly rebuild the document.");
+      } else {
+        scheduleRetryOrFail(lease);
+      }
       log.warn("Project document indexing failed for id {}", documentId);
     }
   }
@@ -262,12 +317,16 @@ public class ProjectDocumentService {
   public void delete(String projectId, String documentId) {
     final String[] storedPath = new String[1];
     AtomicBoolean deleted = new AtomicBoolean(false);
+    AtomicReference<EmbeddingOperationRoot.Request> operationCancellation = new AtomicReference<>();
     new TransactionTemplate(transactionManager)
         .executeWithoutResult(
             status -> {
               ProjectDocument doc = repo.findByIdForUpdate(documentId).orElse(null);
               if (doc == null || !projectId.equals(doc.getProjectId())) return;
               storedPath[0] = doc.getPathRelative();
+              if (doc.getStatus() == ProjectDocument.Status.EMBEDDING) {
+                operationCancellation.set(documentOperation(doc));
+              }
               doc.setCancellationRequested(true);
               doc.setStatus(ProjectDocument.Status.CANCELLED);
               doc.setDeletedAt(OffsetDateTime.now());
@@ -283,6 +342,9 @@ public class ProjectDocumentService {
               deleted.set(true);
             });
     if (!deleted.get()) return;
+    if (operationCancellation.get() != null) {
+      operationRoot.requestCancellation(operationCancellation.get());
+    }
     chunkStore.deleteByDocument(documentId);
     if (storedPath[0] != null) {
       try {
@@ -533,6 +595,44 @@ public class ProjectDocumentService {
 
   private OffsetDateTime leaseExpiry(OffsetDateTime from) {
     return from.plusNanos(properties.getStaleProcessingMillis() * 1_000_000);
+  }
+
+  private Duration processingLeaseDuration() {
+    return Duration.ofMillis(properties.getStaleProcessingMillis());
+  }
+
+  private static EmbeddingOperationRoot.Request documentOperation(ProjectDocument document) {
+    String attemptIdentity =
+        EmbeddingOperationIdentity.document(
+            document.getId(), document.getSha256(), document.getProcessingAttempt());
+    return new EmbeddingOperationRoot.Request(
+        document.getProjectId(),
+        "ProjectDocumentEmbedding",
+        "PROJECT_DOCUMENT",
+        attemptIdentity,
+        document.getUploadedBy(),
+        "project-document-index:" + document.getId() + ":" + document.getProcessingAttempt(),
+        "PROJECT_DOCUMENT_INDEX",
+        document.getProjectId()
+            + "|"
+            + document.getId()
+            + "|"
+            + document.getSha256()
+            + "|"
+            + document.getProcessingAttempt());
+  }
+
+  private void terminateOperation(
+      EmbeddingOperationRoot.Active operation, String code, String message) {
+    if (operation == null) return;
+    try {
+      operationRoot.terminate(operation, code, message);
+    } catch (RuntimeException terminalFailure) {
+      log.warn(
+          "document-index logical-operation cleanup failed document={} type={}",
+          operation.reference().contextId(),
+          terminalFailure.getClass().getSimpleName());
+    }
   }
 
   private static void clearLease(ProjectDocument doc) {

@@ -79,6 +79,22 @@ public class ProjectArchitectureJobPublisher {
       throw new IllegalStateException("Staged architecture contract is invalid");
     }
     validateExactStage(live, staged, sourceSnapshot);
+    String sourceEvidence =
+        staged.codeMaps().stream()
+            .map(ProjectArchitectureService.StagedCodeMap::content)
+            .filter(java.util.Objects::nonNull)
+            .collect(java.util.stream.Collectors.joining("\n"));
+    Map<UUID, String> groundedRepoArchitectures = new LinkedHashMap<>();
+    for (ProjectArchitectureService.StagedRepoArchitecture repoArchitecture :
+        staged.repoArchitectures()) {
+      groundedRepoArchitectures.put(
+          repoArchitecture.repoId(),
+          GeneratedSignatureGrounding.sanitize(repoArchitecture.content(), sourceEvidence));
+    }
+    String groundedProjectArchitecture =
+        GeneratedSignatureGrounding.sanitize(
+            staged.projectArchitecture().content(), sourceEvidence);
+    String groundedSummary = GeneratedSignatureGrounding.sanitize(staged.summary(), sourceEvidence);
 
     List<ProjectCodeMap> savedCodeMaps = new ArrayList<>();
     Map<UUID, ProjectCodeMap> codeMapByRepo = new LinkedHashMap<>();
@@ -120,7 +136,7 @@ public class ProjectArchitectureJobPublisher {
                   .projectId(live.projectId())
                   .repoId(stagedRepo.repoId())
                   .version(nextVersion)
-                  .content(stagedRepo.content())
+                  .content(groundedRepoArchitectures.get(stagedRepo.repoId()))
                   .sourceCodeMapId(source.getId())
                   .generatedFromSha(stagedRepo.revision())
                   .generatedBy(live.requestedByUserId())
@@ -145,7 +161,7 @@ public class ProjectArchitectureJobPublisher {
             ProjectArchitectureDoc.builder()
                 .projectId(live.projectId())
                 .version(projectVersion)
-                .content(stagedProject.content())
+                .content(groundedProjectArchitecture)
                 .generatedFromShas(stagedProject.generatedFromShas())
                 .generatedFromBranches(stagedProject.generatedFromBranches())
                 .costUsd(stagedProject.costUsd())
@@ -158,7 +174,7 @@ public class ProjectArchitectureJobPublisher {
         List.copyOf(savedCodeMaps),
         List.copyOf(savedRepoArchitectures),
         List.copyOf(repoNames),
-        staged.summary());
+        groundedSummary);
   }
 
   /**

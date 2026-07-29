@@ -1,6 +1,7 @@
 package com.navneet.executespec.reviewjob;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -21,6 +22,23 @@ import com.navneet.executespec.prreview.PrReviewService;
 import org.junit.jupiter.api.Test;
 
 class ReviewBackgroundWorkerTest {
+
+  @Test
+  void pollTerminalizesExpiredFinalAttemptsBeforeClaimingNewWork() {
+    ReviewBackgroundJobStore store = mock(ReviewBackgroundJobStore.class);
+    when(store.claimCandidates(anyInt())).thenReturn(List.of());
+    ReviewBackgroundWorker worker =
+        new ReviewBackgroundWorker(
+            store, mock(CodeReviewService.class), mock(PrReviewService.class), new ObjectMapper());
+    try {
+      worker.poll();
+    } finally {
+      worker.shutdown();
+    }
+
+    verify(store).finishAbandonedCancellations();
+    verify(store).finishExhaustedLeases();
+  }
 
   @Test
   void restartPublishesStagedResultWithoutRepeatingProviderWork() throws Exception {

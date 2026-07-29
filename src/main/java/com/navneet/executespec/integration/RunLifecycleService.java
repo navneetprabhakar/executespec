@@ -141,6 +141,7 @@ public class RunLifecycleService {
         null,
         null,
         null,
+        null,
         null);
   }
 
@@ -187,6 +188,7 @@ public class RunLifecycleService {
   private final LlmExecutionPolicyFactory llmExecutionPolicyFactory;
   private final PlanGateDecisionService planGateDecisionService;
   private final PlanGateResumeStore planGateResumeStore;
+  private final RunLlmOperationLifecycleService runOperationLifecycle;
 
   public enum PlanApprovalOutcome {
     RESUME_QUEUED,
@@ -757,6 +759,7 @@ public class RunLifecycleService {
       PlanGateContinuation continuation) {
     Instant startedAt = Instant.now();
     boolean localRun = false;
+    RunLlmOperationLifecycleService.PhaseLease operation = null;
     try {
       // Re-resolve BYOK keys for this resumed run — same pattern as runPipeline().
       try {
@@ -806,6 +809,8 @@ public class RunLifecycleService {
       ExecutionResult execResult = null;
       RunCostTracker.Snapshot afterExec = null;
       if (!fromReviewing) {
+        operation = requireRunOperationLifecycle().claimExecution(rootCtx, runId, provider, model);
+        ExecutionContext executionContext = operation.context();
         persistenceWriter.updateStatus(runId, "WORKING");
         try {
           execResult =
@@ -814,7 +819,7 @@ public class RunLifecycleService {
                       .plan(plan)
                       .provider(provider)
                       .model(model)
-                      .runContext(rootCtx)
+                      .runContext(executionContext)
                       .maxIterationsPerTask(null)
                       .enableSmokeTests(!localRun)
                       .localHandsMode(localRun)
@@ -852,6 +857,7 @@ public class RunLifecycleService {
           return;
         }
         persistenceWriter.applyExecutionResultToTasks(runId, execResult);
+        operation = requireRunOperationLifecycle().completeAndClear(operation);
         afterExec = costTracker.snapshot(runId);
       }
 
@@ -893,19 +899,23 @@ public class RunLifecycleService {
             model);
       }
       ReviewerResult reviewResult = null;
+      operation =
+          requireRunOperationLifecycle().claimReview(rootCtx, runId, provider, reviewerModel);
+      ExecutionContext reviewContext = operation.context();
       try {
         reviewResult =
             reviewer.review(
                 ReviewerRequest.builder()
                     .provider(provider)
                     .model(reviewerModel)
-                    .context(rootCtx)
+                    .context(reviewContext)
                     .buildCommand(plan.buildCommand())
                     .skipWiringPass(false)
                     .originalGoal(row.getUserRequest())
                     .requirements(plan.requirements())
                     .build());
         persistenceWriter.persistReview(runId, reviewResult);
+        operation = requireRunOperationLifecycle().completeAndClear(operation);
       } catch (Exception e) {
         if (Thread.currentThread().isInterrupted() || pool.isShuttingDown()) {
           log.info(
@@ -916,6 +926,7 @@ public class RunLifecycleService {
         }
         log.warn("resume run={} reviewer failed — recording partial review", runId, e);
         persistenceWriter.persistReviewFailure(runId, e);
+        operation = requireRunOperationLifecycle().finishReviewAndClear(operation, true);
       }
 
       contextComposer.ensureReadme(
@@ -948,6 +959,9 @@ public class RunLifecycleService {
           RunOrchestrator.INTERNAL_ERROR_REASON,
           startedAt);
     } finally {
+      if (runOperationLifecycle != null) {
+        runOperationLifecycle.closeQuietly(runId, operation);
+      }
       RunModelOverrides.clear();
       keyContextStore.evict(runId);
       if (localRun) {
@@ -1005,6 +1019,14 @@ public class RunLifecycleService {
       throw new IllegalStateException(
           "Run workspace cannot be resolved for durable LLM dispatch: " + runId, workspaceFailure);
     }
+  }
+
+  private RunLlmOperationLifecycleService requireRunOperationLifecycle() {
+    if (runOperationLifecycle == null) {
+      throw new IllegalStateException(
+          "Run LLM operation lifecycle is unavailable for retry/recovery work");
+    }
+    return runOperationLifecycle;
   }
 
   /**
@@ -1132,6 +1154,18 @@ public class RunLifecycleService {
     } catch (Exception e) {
       throw new IllegalStateException("Plan JSON corrupted: " + e.getMessage());
     }
+    String retryProvider =
+        override == null
+            ? (run.getAiProvider() == null ? "anthropic" : run.getAiProvider())
+            : override.provider();
+    String retryModel =
+        override == null
+            ? (run.isRoutePinned() ? run.getRequestedModel() : run.getWorkerModel())
+            : override.model();
+    ExecutionContext retryBaseContext = durableRunRootContext(runId, workspace);
+    RunLlmOperationLifecycleService.PhaseLease retryLease =
+        requireRunOperationLifecycle()
+            .beginExecutionRetry(retryBaseContext, runId, retryProvider, retryModel);
 
     log.info(
         "RunOrchestrator retryTask: run={} task={} override={}/{} dispatching real re-execution"
@@ -1155,9 +1189,10 @@ public class RunLifecycleService {
     broadcaster.emit(
         runId, RunEvent.log(runId, "retry", retryMessage(taskId, prevRunStatus, override)));
 
-    final java.nio.file.Path retryWorkspace = workspace;
     final String fullTargetTaskId = task.getTaskId(); // already prefixed with runId-short
     AtomicReference<FutureTask<Void>> registeredRetry = new AtomicReference<>();
+    AtomicReference<RunLlmOperationLifecycleService.PhaseLease> retryOperation =
+        new AtomicReference<>(retryLease);
     FutureTask<Void> future =
         new FutureTask<>(
             () -> {
@@ -1190,7 +1225,7 @@ public class RunLifecycleService {
                       runId);
                 }
 
-                ExecutionContext rootCtx = durableRunRootContext(runId, retryWorkspace);
+                ExecutionContext rootCtx = retryOperation.get().context();
                 List<UUID> selectedRepoIds =
                     row == null ? List.of() : deserializeRepoIds(row.getSelectedRepoIds());
                 RunCostTracker.Snapshot beforeRetry = costTracker.snapshot(runId);
@@ -1228,6 +1263,7 @@ public class RunLifecycleService {
                         new com.navneet.executespec.harness.SequentialExecutor.ResumeRequest(
                             fullTargetTaskId));
                 persistenceWriter.applyExecutionResultToTasks(runId, result);
+                requireRunOperationLifecycle().complete(retryOperation.getAndSet(null));
                 RunCostTracker.Snapshot afterRetry = costTracker.snapshot(runId);
                 tokenAttributor.attributeWorkerAdditionalTask(
                     runId,
@@ -1278,6 +1314,9 @@ public class RunLifecycleService {
                     RunOrchestrator.INTERNAL_ERROR_REASON,
                     null);
               } finally {
+                if (runOperationLifecycle != null) {
+                  runOperationLifecycle.closeQuietly(runId, retryOperation.getAndSet(null));
+                }
                 RunModelOverrides.clear();
                 keyContextStore.evict(runId);
                 if (localRun) {
@@ -1300,6 +1339,7 @@ public class RunLifecycleService {
       pool.executor().execute(future);
     } catch (RuntimeException dispatchFailure) {
       controlPort.removeActiveRun(runId, future);
+      requireRunOperationLifecycle().fail(retryOperation.getAndSet(null), "RETRY_DISPATCH_FAILED");
       throw dispatchFailure;
     }
   }
@@ -1315,13 +1355,16 @@ public class RunLifecycleService {
     persistenceWriter.updateStatus(runId, "REVIEWING");
     RunOrchestrator.ProviderModel reviewerRoute =
         RunOrchestrator.reviewerRouteFor(approvedProvider, approvedModel, result);
+    RunLlmOperationLifecycleService.PhaseLease reviewOperation =
+        requireRunOperationLifecycle()
+            .beginReviewRetry(rootCtx, runId, reviewerRoute.provider(), reviewerRoute.model());
     try {
       ReviewerResult reviewResult =
           reviewer.review(
               ReviewerRequest.builder()
                   .provider(reviewerRoute.provider())
                   .model(reviewerRoute.model())
-                  .context(rootCtx)
+                  .context(reviewOperation.context())
                   .buildCommand(plan.buildCommand())
                   .skipWiringPass(false)
                   .originalGoal(
@@ -1329,6 +1372,8 @@ public class RunLifecycleService {
                   .requirements(plan.requirements())
                   .build());
       persistenceWriter.persistReview(runId, reviewResult);
+      requireRunOperationLifecycle().complete(reviewOperation);
+      reviewOperation = null;
       RunCostTracker.Snapshot afterReview = costTracker.snapshot(runId);
       tokenAttributor.attributePhaseAdditional(
           runId,
@@ -1342,7 +1387,13 @@ public class RunLifecycleService {
       log.warn(
           "approved post-review continuation reviewer failed run={}: {}", runId, e.getMessage());
       persistenceWriter.persistReviewFailure(runId, e);
+      requireRunOperationLifecycle().fail(reviewOperation, "REVIEW_FAILED");
+      reviewOperation = null;
       return RunOrchestrator.reviewerFailedResult(e);
+    } finally {
+      if (runOperationLifecycle != null) {
+        runOperationLifecycle.closeQuietly(runId, reviewOperation);
+      }
     }
   }
 
@@ -1716,6 +1767,22 @@ public class RunLifecycleService {
           "re-review requires a terminal run (current: " + run.getStatus() + ")");
     }
     log.info("RunOrchestrator reReview: run={} previous status={}", runId, run.getStatus());
+    Path workspace = Path.of(agentProps.getWorkspace(), runId).toAbsolutePath().normalize();
+    if (!Files.isDirectory(workspace)) {
+      throw new IllegalStateException("re-review workspace is unavailable: " + workspace);
+    }
+    String operationProvider =
+        run.isRoutePinned() && run.getRequestedProvider() != null
+            ? run.getRequestedProvider()
+            : run.getAiProvider();
+    String operationModel =
+        run.isRoutePinned() && run.getRequestedModel() != null
+            ? run.getRequestedModel()
+            : run.getReviewerModel();
+    RunLlmOperationLifecycleService.PhaseLease reviewOperation =
+        requireRunOperationLifecycle()
+            .beginReviewRetry(
+                durableRunRootContext(runId, workspace), runId, operationProvider, operationModel);
 
     validationReportRepository
         .findByRunId(runId)
@@ -1735,31 +1802,39 @@ public class RunLifecycleService {
     runRepo.save(run);
     broadcaster.emit(runId, RunEvent.runStatus(runId, "REVIEWING"));
 
-    pool.submit(
-        () -> {
-          try {
-            runReReviewBlocking(runId);
-          } catch (Exception e) {
-            log.error("RunOrchestrator reReview run={} failed unexpectedly", runId, e);
+    try {
+      pool.submit(
+          () -> {
+            RunLlmOperationLifecycleService.PhaseLease activeReview = reviewOperation;
             try {
-              var stuck = runRepo.findById(runId).orElse(null);
-              if (stuck != null && "REVIEWING".equals(stuck.getStatus())) {
-                stuck.setStatus("PARTIAL");
-                stuck.setStatusReason("RE_REVIEW_FAILED");
-                stuck.setCompletedAt(Instant.now());
-                runRepo.save(stuck);
-                broadcaster.emit(runId, RunEvent.complete(runId, "PARTIAL", "RE_REVIEW_FAILED"));
+              runReReviewBlocking(runId, activeReview);
+              activeReview = null;
+            } catch (Exception e) {
+              log.error("RunOrchestrator reReview run={} failed unexpectedly", runId, e);
+              try {
+                var stuck = runRepo.findById(runId).orElse(null);
+                if (stuck != null && "REVIEWING".equals(stuck.getStatus())) {
+                  stuck.setStatus("PARTIAL");
+                  stuck.setStatusReason("RE_REVIEW_FAILED");
+                  stuck.setCompletedAt(Instant.now());
+                  runRepo.save(stuck);
+                  broadcaster.emit(runId, RunEvent.complete(runId, "PARTIAL", "RE_REVIEW_FAILED"));
+                }
+              } catch (Exception ignored) {
+                // give up — operator can hit the endpoint again
               }
-            } catch (Exception ignored) {
-              // give up — operator can hit the endpoint again
+            } finally {
+              runOperationLifecycle.closeQuietly(runId, activeReview);
+              // RR-486 — backstop: pool threads are reused, so an uncleared bound route (e.g. an
+              // unchecked throw before runReReviewBlocking's own clear) must not leak an exact pin
+              // onto the next task that runs on this thread.
+              RunModelOverrides.clear();
             }
-          } finally {
-            // RR-486 — backstop: pool threads are reused, so an uncleared bound route (e.g. an
-            // unchecked throw before runReReviewBlocking's own clear) must not leak an exact pin
-            // onto the next task that runs on this thread.
-            RunModelOverrides.clear();
-          }
-        });
+          });
+    } catch (RuntimeException dispatchFailure) {
+      requireRunOperationLifecycle().fail(reviewOperation, "RE_REVIEW_DISPATCH_FAILED");
+      throw dispatchFailure;
+    }
   }
 
   /**
@@ -1767,11 +1842,11 @@ public class RunLifecycleService {
    * fresh {@code ExecutionContext}, runs reviewer + validation report generation, then derives +
    * persists the new terminal status.
    */
-  private void runReReviewBlocking(String runId) {
+  private void runReReviewBlocking(
+      String runId, RunLlmOperationLifecycleService.PhaseLease reviewOperation) {
     var run = runRepo.findById(runId).orElse(null);
     if (run == null) {
-      log.warn("RunOrchestrator reReview: run {} disappeared mid-flight", runId);
-      return;
+      throw new IllegalStateException("re-review run disappeared mid-flight: " + runId);
     }
     // RR-486 — reconstruct the run's immutable routing authority instead of silently defaulting to
     // OpenAI, and bind org overrides + the exact pin so the refreshed reviewer spends the SAME
@@ -1818,10 +1893,11 @@ public class RunLifecycleService {
       run.setCompletedAt(Instant.now());
       runRepo.save(run);
       broadcaster.emit(runId, RunEvent.complete(runId, "PARTIAL", "RE_REVIEW_NO_WORKSPACE"));
+      requireRunOperationLifecycle().fail(reviewOperation, "RE_REVIEW_NO_WORKSPACE");
       RunModelOverrides.clear(); // RR-486
       return;
     }
-    ExecutionContext rootCtx = durableRunRootContext(runId, workspace).child("_re_review_");
+    ExecutionContext rootCtx = reviewOperation.context().child("_re_review_");
 
     String buildCommand = null;
     Plan parsedPlan = null;
@@ -1837,6 +1913,7 @@ public class RunLifecycleService {
     }
 
     ReviewerResult reviewResult = null;
+    boolean reviewFailed = false;
     try {
       log.info(
           "RunOrchestrator reReview run={} provider={} model={} buildCmd={}",
@@ -1857,8 +1934,11 @@ public class RunLifecycleService {
                   .build());
       persistenceWriter.persistReview(runId, reviewResult);
     } catch (Exception e) {
+      reviewFailed = true;
       log.warn("RunOrchestrator reReview run={} reviewer failed: {}", runId, e.getMessage());
       persistenceWriter.persistReviewFailure(runId, e);
+    } finally {
+      requireRunOperationLifecycle().finishReviewAndClear(reviewOperation, reviewFailed);
     }
 
     ExecutionResult execResult = persistenceWriter.reconstructExecResultFromTasks(runId);

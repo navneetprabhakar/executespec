@@ -14,19 +14,18 @@ const api = vi.hoisted(() => ({
   listOnboardingSamples: vi.fn(),
   updateProviderPreference: vi.fn(),
 }));
+const readiness = vi.hoisted(() => ({
+  loading: false,
+  error: false,
+  supported: true,
+  rows: [] as Array<Record<string, unknown>>,
+  byProvider: new Map<string, Record<string, unknown>>(),
+}));
 
 vi.mock('@/lib/api', () => api);
 vi.mock('@/signal/components/SpecChat', () => ({SpecChat: () => null}));
 vi.mock('@/ide/useProviderReadiness', () => ({
-  useProviderReadiness: () => ({
-    loading: false,
-    error: false,
-    supported: true,
-    rows: [],
-    byProvider: new Map([
-      ['ANTHROPIC', {provider: 'ANTHROPIC', state: 'AVAILABLE_MANAGED', dispatchable: true}],
-    ]),
-  }),
+  useProviderReadiness: () => readiness,
 }));
 vi.mock('@/stores/useAuthStore', () => {
   const state = {
@@ -59,6 +58,13 @@ function button(label: string): HTMLButtonElement | undefined {
 
 beforeEach(() => {
   sessionStorage.clear();
+  readiness.loading = false;
+  readiness.error = false;
+  readiness.supported = true;
+  readiness.rows = [];
+  readiness.byProvider = new Map([
+    ['ANTHROPIC', {provider: 'ANTHROPIC', state: 'AVAILABLE_MANAGED', dispatchable: true}],
+  ]);
   host = document.createElement('div');
   document.body.appendChild(host);
   root = createRoot(host);
@@ -78,6 +84,26 @@ afterEach(() => {
 });
 
 describe('IdeCompose repository discovery', () => {
+  it('disables desktop plan creation when the selected provider cannot dispatch', async () => {
+    readiness.byProvider = new Map([
+      ['ANTHROPIC', {provider: 'ANTHROPIC', state: 'UNAVAILABLE', dispatchable: false}],
+    ]);
+
+    await act(async () => {
+      root.render(
+        <MemoryRouter>
+          <IdeCompose />
+        </MemoryRouter>,
+      );
+    });
+
+    await vi.waitFor(() => expect(button('Create plan')?.disabled).toBe(true));
+    expect(host.textContent).toContain(
+      'Unavailable because no permitted provider credential is configured.',
+    );
+    expect(api.createRun).not.toHaveBeenCalled();
+  });
+
   it('fails closed on discovery error and recovers only after an explicit retry succeeds', async () => {
     api.getProjectRepos
       .mockRejectedValueOnce(new Error('repository service unavailable'))

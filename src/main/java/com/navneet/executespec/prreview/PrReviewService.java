@@ -300,7 +300,7 @@ public class PrReviewService {
               null,
               ReviewBackgroundJobStore.Status.QUEUED,
               0,
-              3,
+              1,
               Instant.now(),
               null,
               0,
@@ -325,6 +325,17 @@ public class PrReviewService {
       int prNumber,
       String headSha,
       GitHubRepoService.PullRequestSnapshot snapshot,
+      Runnable checkpoint) {
+    return runDurableJob(lease, repoFullName, prNumber, headSha, snapshot, null, checkpoint);
+  }
+
+  public DurablePrReviewResult runDurableJob(
+      ReviewBackgroundJobStore.Lease lease,
+      String repoFullName,
+      int prNumber,
+      String headSha,
+      GitHubRepoService.PullRequestSnapshot snapshot,
+      com.navneet.executespec.tool.ExecutionContext executionContext,
       Runnable checkpoint) {
     ReviewBackgroundJobStore.Job job = lease.job();
     AppUser actor =
@@ -353,6 +364,7 @@ public class PrReviewService {
                     job.model(),
                     actor.getId(),
                     new LlmExecutionReference(job.executionContextId(), scope),
+                    executionContext,
                     checkpoint)));
     return result.get();
   }
@@ -371,6 +383,7 @@ public class PrReviewService {
       String pinnedModel,
       String actorUserId,
       LlmExecutionReference executionReference,
+      com.navneet.executespec.tool.ExecutionContext executionContext,
       Runnable checkpoint) {
     UUID reviewId = lease.job().subjectId();
     String projectId = lease.job().projectId();
@@ -423,6 +436,7 @@ public class PrReviewService {
             .model(pinnedModel)
             .actorUserId(actorUserId)
             .executionReference(executionReference)
+            .executionContext(executionContext)
             .build();
 
     final PrReviewAgent.AgentReview result;

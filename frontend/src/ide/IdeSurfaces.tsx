@@ -991,6 +991,9 @@ export function IdeCompose() {
                 onClick={submit}
                 disabled={
                   busy ||
+                  providerReadiness.loading ||
+                  providerReadiness.error ||
+                  !selectedProviderReady ||
                   !repositoryScopeReady ||
                   (projectRepos.length > 0 && selectedRepoIds.length === 0)
                 }

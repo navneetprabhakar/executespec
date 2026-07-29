@@ -24,6 +24,18 @@ List common change patterns and the evidenced files a contributor should inspect
 Rules:
 - Plain Markdown; do not wrap section headings in code formatting.
 - Do not invent components, behavior, paths, or relationships.
+- A symbol declaration proves only that the symbol exists. The supplied codemap is declaration
+  inventory, not call-graph or runtime-activity evidence. Do not claim that one class or method
+  calls, invokes, delegates to, dispatches to, routes to, works with, interacts with, collaborates
+  with or forms a collaboration with, depends on, uses, or is exposed by another. Do not label a
+  symbol inactive, unused, dead, stubbed, unwired, unreachable, not called, not used, hinted,
+  placeholder, prototype, candidate, or not/partially integrated. Do not say the architecture
+  relies on a symbol or that a mechanism is hinted at by one. List the relevant symbols without
+  asserting an edge, liveness, or maturity. Omit Mermaid flowchart arrows and sequence-diagram
+  messages: directional diagrams also assert relationships that declaration inventory cannot prove.
+- Do not mention two distinct codemap symbols in the same prose sentence. Without deterministic
+  relationship evidence, even neutral-sounding co-occurrence can imply collaboration or ownership.
+  Use one declaration-only sentence per symbol.
 - Treat every repository section as independent evidence; do not assume omitted content is absent
   from the repository.
 - Mermaid node identifiers must not contain spaces. Use `-->` for flowcharts and `->>` for

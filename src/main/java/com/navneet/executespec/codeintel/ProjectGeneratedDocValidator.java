@@ -17,6 +17,11 @@ final class ProjectGeneratedDocValidator {
   private ProjectGeneratedDocValidator() {}
 
   static Optional<String> validate(DocType type, String content, Set<String> expectedRepositories) {
+    return validate(type, content, expectedRepositories, "");
+  }
+
+  static Optional<String> validate(
+      DocType type, String content, Set<String> expectedRepositories, String codemapEvidence) {
     if (content == null || content.isBlank()) return Optional.of("empty output");
     long meaningful = content.chars().filter(c -> !Character.isWhitespace(c)).count();
     if (meaningful < MIN_NON_WHITESPACE_CHARACTERS) return Optional.of("output is too short");
@@ -71,6 +76,11 @@ final class ProjectGeneratedDocValidator {
       if (!clone.contains("git clone") || count(clone, "```") < 2) {
         return Optional.of("clone commands must be present in a fenced block");
       }
+    }
+    if (type == DocType.EXPLANATION) {
+      Optional<String> unsupported =
+          GeneratedSignatureGrounding.unsupportedBehaviorClaim(content, codemapEvidence);
+      if (unsupported.isPresent()) return unsupported;
     }
     return Optional.empty();
   }

@@ -1313,6 +1313,10 @@ executespec:
     # Server-owned protocol floor advertised on every /api response. The split CLI/VS Code core
     # turns an older identified client into an actionable, non-retryable 426 upgrade error.
     minimum-cli-version: ${EXECUTESPEC_MIN_CLI_VERSION:1.0.0}
+  llm:
+    operation-admission:
+      # V354 stays inert until every durable logical root and physical attempt is fenced.
+      mode: ${EXECUTESPEC_LLM_OPERATION_ADMISSION_MODE:LEGACY}
   # Production/runtime calls remain enabled. Maven test forks override this to false unless the
   # explicit live-llm-test profile is selected after a provider-budget reservation is acquired.
   live-llm:

@@ -387,7 +387,28 @@ export function continuationApprovalCandidate(t: api.TaskSummary) {
   ) {
     return null;
   }
+  if (matchingContinuationApprovalRecorded(t)) return null;
   return candidate;
+}
+
+/**
+ * The task decision can remain STOP_BLOCKED briefly after approval while the async retry settles.
+ * The durable action history is authoritative during that window: never offer the same paid
+ * approval twice when the selected route already has an APPROVED or EXECUTED action.
+ */
+export function matchingContinuationApprovalRecorded(t: api.TaskSummary): boolean {
+  const candidate = t.continuationDecision?.selectedCandidate;
+  if (!candidate?.provider || !candidate.model) return false;
+  const provider = candidate.provider.toLowerCase();
+  const model = candidate.model.toLowerCase();
+  return (t.continuationActions || []).some((action) => {
+    const status = (action.status || '').toUpperCase();
+    return (
+      ['APPROVED', 'EXECUTED'].includes(status) &&
+      (action.provider || '').toLowerCase() === provider &&
+      (action.model || '').toLowerCase() === model
+    );
+  });
 }
 
 export function continuationApprovalReason(t: api.TaskSummary): string | null {
@@ -502,6 +523,112 @@ export function taskBudgetFacts(t: api.TaskSummary): {k: string; v: string}[] {
   }
   if (goal.budgetCeilingReason) facts.push({k: 'Ceiling', v: goal.budgetCeilingReason});
   return facts;
+}
+
+const RAW_COMMAND_TITLE =
+  /^(?:\$|>|npm(?:\s+run)?|npx|pnpm|yarn|mvnw?|gradlew?|gradle|pytest|python\d*|docker|git|go\s+test|cargo)\b/i;
+
+/**
+ * Planner titles are durable audit evidence, but some older plans used a build command or a
+ * multi-line instruction as the title. Keep that raw value in Technical details and give the
+ * default customer surface a bounded, readable label.
+ */
+export function customerStepTitle(t: Pick<api.TaskSummary, 'title'>, index: number): string {
+  const firstLine = (t.title || '').trim().split(/\r?\n/, 1)[0]?.trim() || '';
+  if (!firstLine || RAW_COMMAND_TITLE.test(firstLine)) return `Step ${index + 1}`;
+  const withoutCommandFragments = firstLine
+    .replace(
+      /`(?:npm|npx|pnpm|yarn|mvnw?|gradlew?|gradle|pytest|python\d*|docker|git|go\s+test|cargo)[^`]*`/gi,
+      'the project checks',
+    )
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!withoutCommandFragments) return `Step ${index + 1}`;
+  return withoutCommandFragments.length > 120
+    ? `${withoutCommandFragments.slice(0, 117).trimEnd()}…`
+    : withoutCommandFragments;
+}
+
+/** One non-technical status sentence for the collapsed customer-facing step card. */
+export function customerStepSummary(t: Pick<api.TaskSummary, 'status'>): string {
+  switch ((t.status || '').toUpperCase()) {
+    case 'COMPLETE':
+    case 'SUCCESS':
+      return 'Completed with recorded execution evidence.';
+    case 'FAILED':
+    case 'ERROR':
+      return 'This step did not complete. Review technical details or retry it.';
+    case 'BLOCKED':
+      return 'This step needs input or approval before it can continue.';
+    case 'PARTIAL':
+      return 'This step completed only part of its objective. Review the remaining work.';
+    default:
+      return 'This step is still in progress.';
+  }
+}
+
+export function customerStepStatusLabel(status?: string | null): string {
+  switch ((status || '').toUpperCase()) {
+    case 'COMPLETE':
+    case 'SUCCESS':
+      return 'Complete';
+    case 'FAILED':
+    case 'ERROR':
+      return 'Failed';
+    case 'BLOCKED':
+      return 'Needs input';
+    case 'PARTIAL':
+      return 'Needs review';
+    default:
+      return 'In progress';
+  }
+}
+
+/** Customer-safe continuation copy; exact action enums, routes and models remain in diagnostics. */
+export function customerContinuationSummary(t: api.TaskSummary): string | null {
+  if (matchingContinuationApprovalRecorded(t)) {
+    return 'The approved recovery was recorded. Review its result in technical details.';
+  }
+  if (continuationApprovalCandidate(t)) {
+    return 'Approval is needed before ExecuteSpec can try the recommended recovery.';
+  }
+  const decision = (t.continuationDecision?.decision || '').toUpperCase();
+  if (['STEP_UP_MODEL', 'STEP_DOWN_MODEL', 'CHANGE_PROVIDER'].includes(decision)) {
+    return 'ExecuteSpec identified another recovery option for this step.';
+  }
+  if (decision === 'STOP_BLOCKED') {
+    return 'Automatic recovery is blocked. Open technical details for the recorded reason.';
+  }
+  return null;
+}
+
+/**
+ * Do not surface the legacy catch-all "budget, token, iteration, or wall-clock ceiling" sentence.
+ * Resolve a concrete reached limit when the recorded metrics allow it; otherwise state honestly
+ * that a configured guard fired and point to the disclosed diagnostics.
+ */
+export function customerLimitSummary(t: api.TaskSummary): string | null {
+  if (['COMPLETE', 'SUCCESS'].includes((t.status || '').toUpperCase())) return null;
+  const reason = t.goalDoneness?.budgetCeilingReason?.trim();
+  if (!reason) return null;
+  const goal = t.goalDoneness;
+  const policy = t.continuationDecision?.policy;
+  const cost = positive(goal?.costUsd);
+  const costLimit = positive(policy?.maxTotalCostUsd);
+  if (cost != null && costLimit != null && cost >= costLimit) {
+    return `Stopped at the configured ${preciseUsd(costLimit)} cost limit.`;
+  }
+  const tokens = positive(goal?.totalTokens);
+  const tokenLimit = positive(policy?.maxTotalTokens);
+  if (tokens != null && tokenLimit != null && tokens >= tokenLimit) {
+    return 'Stopped at the configured processing limit.';
+  }
+  const wall = positive(goal?.wallClockMs);
+  const wallLimit = positive(policy?.maxTaskWallClockMs);
+  if (wall != null && wallLimit != null && wall >= wallLimit) {
+    return `Stopped at the configured ${fmtDur(wallLimit)} time limit.`;
+  }
+  return 'Execution stopped at a configured safety limit. Open technical details to see the recorded guard.';
 }
 
 export function shouldUseRunEvidenceChat(message: string): boolean {

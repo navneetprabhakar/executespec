@@ -1,6 +1,7 @@
 package com.navneet.executespec.cost;
 
 import java.time.Instant;
+import java.util.UUID;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -99,4 +100,27 @@ public class LlmUsageAttemptIntent {
 
   @Column(name = "started_at", nullable = false)
   private Instant startedAt;
+
+  /**
+   * V351/V354: 0 is a legacy row without operation-fence fields. Durable-context attribution is
+   * accepted for previous-binary rollback compatibility; 1 is atomically operation-fenced.
+   */
+  @Column(name = "operation_fence_version", nullable = false)
+  @Builder.Default
+  private short operationFenceVersion = 0;
+
+  @Column(name = "llm_execution_operation_id", length = 64)
+  private String llmExecutionOperationId;
+
+  @Column(name = "llm_execution_operation_attempt")
+  private Integer llmExecutionOperationAttempt;
+
+  @Column(name = "llm_execution_lease_token")
+  private UUID llmExecutionLeaseToken;
+
+  @Column(name = "operation_not_reclaim_before")
+  private Instant operationNotReclaimBefore;
+
+  @Column(name = "transport_deadline_at")
+  private Instant transportDeadlineAt;
 }

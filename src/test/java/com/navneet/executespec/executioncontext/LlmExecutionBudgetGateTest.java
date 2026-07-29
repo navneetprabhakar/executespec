@@ -83,6 +83,18 @@ class LlmExecutionBudgetGateTest {
   }
 
   @Test
+  void zeroOutputProviderOperationReservesCallButNoOutputTokens() {
+    when(context.getMaxOutputTokens()).thenReturn(1L);
+    when(context.getMaxTotalTokens()).thenReturn(1L);
+    when(models.maxOutputForModel("m")).thenReturn(131_072);
+
+    gate.reserveProviderCall(context, 0);
+
+    verify(context).recordProviderCallReservation(1L);
+    verify(repository).save(context);
+  }
+
+  @Test
   void runChatBudgetAdmitsFourFullReasoningRoundsAndForcedSynthesis() {
     LlmExecutionBudget chatBudget = LlmExecutionPolicyFactory.RUN_CHAT_TURN_BUDGET;
     when(context.getMaxOutputTokens()).thenReturn(chatBudget.maxOutputTokens());

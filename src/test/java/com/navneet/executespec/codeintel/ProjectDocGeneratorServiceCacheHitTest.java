@@ -7,6 +7,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.util.List;
@@ -134,7 +135,7 @@ class ProjectDocGeneratorServiceCacheHitTest {
         .projectId("p-1")
         .docType(type)
         .version(version)
-        .content("# " + type.name() + " v" + version)
+        .content(validDoc(type, type.name() + " v" + version))
         .sourceArchVersion(archVersion)
         .sourceShasFingerprint(fingerprint)
         .build();
@@ -145,6 +146,7 @@ class ProjectDocGeneratorServiceCacheHitTest {
     String shasJson = "{\"owner/repo-a\":\"aaa\"}";
     when(projectRepo.findById("p-1")).thenReturn(Optional.of(project("p-1")));
     when(architectureService.latest("p-1")).thenReturn(Optional.of(archDoc(7, shasJson)));
+    wireExactSourceRepository("aaa");
 
     ProjectGeneratedDoc cached = generatedDoc(DocType.EXPLANATION, 3, 7, shasJson);
     when(docRepo
@@ -157,7 +159,7 @@ class ProjectDocGeneratorServiceCacheHitTest {
 
     assertThat(result).isSameAs(cached);
     // The LLM router must NOT have been called — that's the whole point of the short-circuit.
-    verify(llmRouter, never()).callText(any(), any(), any(), any(), any(), any());
+    verifyNoInteractions(llmRouter);
     // ModelResolver should also not be called — we never even resolved a model.
     verify(modelResolver, never()).resolve(any(), any());
     // No new doc saved.
@@ -171,6 +173,7 @@ class ProjectDocGeneratorServiceCacheHitTest {
     String shasJson = "{\"owner/repo-a\":\"aaa\"}";
     when(projectRepo.findById("p-1")).thenReturn(Optional.of(project("p-1")));
     when(architectureService.latest("p-1")).thenReturn(Optional.of(archDoc(7, shasJson)));
+    wireExactSourceRepository("aaa");
 
     ProjectGeneratedDoc emptyCached = generatedDoc(DocType.EXPLANATION, 3, 7, shasJson);
     emptyCached.setContent(""); // simulate empty-content row
@@ -192,6 +195,68 @@ class ProjectDocGeneratorServiceCacheHitTest {
     // The fact that we got past the cache check + tried to resolve a model proves the empty
     // doc was correctly rejected as a cache hit.
     verify(modelResolver).resolve("ProjectDocGeneratorService", LlmProvider.ANTHROPIC);
+  }
+
+  @Test
+  void cacheHitWithUnsupportedBehaviorIsRegeneratedInsteadOfReturned() {
+    wireCacheMiss();
+    wireExactSourceRepository(
+        "aaa",
+        """
+        ## Functions
+        ### `src/AIPlayer.java`
+        - `class AIPlayer`
+        - `evaluate`
+        ### `src/TicTacToe.java`
+        - `class TicTacToe`
+        - `checkWin`
+        """);
+    String shasJson = "{\"owner/repo-a\":\"aaa\"}";
+    ProjectGeneratedDoc stale = generatedDoc(DocType.EXPLANATION, 3, 7, shasJson);
+    stale.setContent(
+        validDoc(DocType.EXPLANATION, "Legacy")
+            .replace(
+                "## Key data flows",
+                "`AIPlayer.evaluate` invokes `TicTacToe.checkWin`.\n## Key data flows"));
+    String evidence =
+        GeneratedSignatureGrounding.codemapEvidence(
+            svc.buildSourceBundle(project("p-1"), archDoc(7, shasJson)));
+    assertThat(GeneratedSignatureGrounding.unsupportedBehaviorClaim(stale.getContent(), evidence))
+        .isPresent();
+    when(docRepo
+            .findFirstByProjectIdAndDocTypeAndSourceArchVersionAndSourceShasFingerprintOrderByVersionDesc(
+                "p-1", DocType.EXPLANATION, 7, shasJson))
+        .thenReturn(Optional.of(stale));
+    when(llmRouter.callTextStrict(
+            anyString(),
+            anyString(),
+            anyList(),
+            anyString(),
+            anyString(),
+            anyString(),
+            org.mockito.ArgumentMatchers.nullable(Integer.class),
+            any(LlmExecutionReference.class)))
+        .thenReturn(textResponse(validDoc(DocType.EXPLANATION, "Regenerated"), "stop"));
+    when(docRepo.save(any(ProjectGeneratedDoc.class)))
+        .thenAnswer(invocation -> invocation.getArgument(0));
+
+    ProjectGeneratedDoc result =
+        svc.generate("p-1", DocType.EXPLANATION, "actor-1", LlmProvider.ANTHROPIC);
+
+    assertThat(result).isNotSameAs(stale);
+    assertThat(result.getContent())
+        .isEqualTo(validDoc(DocType.EXPLANATION, "Regenerated"))
+        .doesNotContain("invokes");
+    verify(llmRouter)
+        .callTextStrict(
+            anyString(),
+            anyString(),
+            anyList(),
+            anyString(),
+            anyString(),
+            anyString(),
+            org.mockito.ArgumentMatchers.nullable(Integer.class),
+            any(LlmExecutionReference.class));
   }
 
   @Test
@@ -392,13 +457,14 @@ class ProjectDocGeneratorServiceCacheHitTest {
             org.mockito.ArgumentMatchers.nullable(String.class),
             anyString()))
         .thenReturn(reference);
-    when(llmRouter.callText(
+    when(llmRouter.callTextStrict(
             anyString(),
             anyString(),
             anyList(),
             anyString(),
             anyString(),
             anyString(),
+            org.mockito.ArgumentMatchers.nullable(Integer.class),
             any(LlmExecutionReference.class)))
         .thenReturn(
             new ChatResponse(
@@ -438,13 +504,14 @@ class ProjectDocGeneratorServiceCacheHitTest {
   @Test
   void truncatedProviderOutputIsRejectedAndNeverPersistedOrMirrored() {
     wireCacheMiss();
-    when(llmRouter.callText(
+    when(llmRouter.callTextStrict(
             anyString(),
             anyString(),
             anyList(),
             anyString(),
             anyString(),
             anyString(),
+            org.mockito.ArgumentMatchers.nullable(Integer.class),
             any(LlmExecutionReference.class)))
         .thenReturn(textResponse("# Cut document", "MAX_TOKENS"));
 
@@ -470,13 +537,14 @@ class ProjectDocGeneratorServiceCacheHitTest {
     wireCacheMiss();
     CountDownLatch providerEntered = new CountDownLatch(1);
     CountDownLatch releaseProvider = new CountDownLatch(1);
-    when(llmRouter.callText(
+    when(llmRouter.callTextStrict(
             anyString(),
             anyString(),
             anyList(),
             anyString(),
             anyString(),
             anyString(),
+            org.mockito.ArgumentMatchers.nullable(Integer.class),
             any(LlmExecutionReference.class)))
         .thenAnswer(
             ignored -> {
@@ -508,13 +576,14 @@ class ProjectDocGeneratorServiceCacheHitTest {
           .isEqualTo(validDoc(DocType.EXPLANATION, "Generated once"));
     }
     verify(llmRouter, org.mockito.Mockito.times(1))
-        .callText(
+        .callTextStrict(
             anyString(),
             anyString(),
             anyList(),
             anyString(),
             anyString(),
             anyString(),
+            org.mockito.ArgumentMatchers.nullable(Integer.class),
             any(LlmExecutionReference.class));
     verify(docRepo, org.mockito.Mockito.times(1)).save(any(ProjectGeneratedDoc.class));
     verify(projectRepo, org.mockito.Mockito.times(1)).findByIdForQuotaUpdate("p-1");
@@ -525,13 +594,14 @@ class ProjectDocGeneratorServiceCacheHitTest {
     wireCacheMiss();
     CountDownLatch bothProvidersEntered = new CountDownLatch(2);
     CountDownLatch releaseProviders = new CountDownLatch(1);
-    when(llmRouter.callText(
+    when(llmRouter.callTextStrict(
             anyString(),
             anyString(),
             anyList(),
             anyString(),
             anyString(),
             anyString(),
+            org.mockito.ArgumentMatchers.nullable(Integer.class),
             any(LlmExecutionReference.class)))
         .thenAnswer(
             invocation -> {
@@ -568,26 +638,28 @@ class ProjectDocGeneratorServiceCacheHitTest {
           .isEqualTo(validDoc(DocType.EXPLANATION, "Independently generated"));
     }
     verify(llmRouter, org.mockito.Mockito.times(2))
-        .callText(
+        .callTextStrict(
             anyString(),
             anyString(),
             anyList(),
             anyString(),
             anyString(),
             anyString(),
+            org.mockito.ArgumentMatchers.nullable(Integer.class),
             any(LlmExecutionReference.class));
   }
 
   @Test
   void failedGenerationIsRemovedFromSingleFlightSoRetryCanSucceed() {
     wireCacheMiss();
-    when(llmRouter.callText(
+    when(llmRouter.callTextStrict(
             anyString(),
             anyString(),
             anyList(),
             anyString(),
             anyString(),
             anyString(),
+            org.mockito.ArgumentMatchers.nullable(Integer.class),
             any(LlmExecutionReference.class)))
         .thenReturn(
             textResponse("# Cut", "length"),
@@ -603,13 +675,14 @@ class ProjectDocGeneratorServiceCacheHitTest {
 
     assertThat(retry.getContent()).isEqualTo(validDoc(DocType.SETUP, "Complete"));
     verify(llmRouter, org.mockito.Mockito.times(2))
-        .callText(
+        .callTextStrict(
             anyString(),
             anyString(),
             anyList(),
             anyString(),
             anyString(),
             anyString(),
+            org.mockito.ArgumentMatchers.nullable(Integer.class),
             any(LlmExecutionReference.class));
   }
 
@@ -621,13 +694,14 @@ class ProjectDocGeneratorServiceCacheHitTest {
     when(architectureService.latest("p-1"))
         .thenReturn(
             Optional.of(archDoc(7, oldFingerprint)), Optional.of(archDoc(8, newFingerprint)));
-    when(llmRouter.callText(
+    when(llmRouter.callTextStrict(
             anyString(),
             anyString(),
             anyList(),
             anyString(),
             anyString(),
             anyString(),
+            org.mockito.ArgumentMatchers.nullable(Integer.class),
             any(LlmExecutionReference.class)))
         .thenReturn(textResponse(validDoc(DocType.EXPLANATION, "Obsolete"), "stop"));
 
@@ -644,13 +718,14 @@ class ProjectDocGeneratorServiceCacheHitTest {
   void credentialLikeProviderOutputIsRejectedBeforePersistenceOrMirror() {
     wireCacheMiss();
     String unsafe = validDoc(DocType.SETUP, "Unsafe") + "\nActual key: sk-ant-" + "A".repeat(40);
-    when(llmRouter.callText(
+    when(llmRouter.callTextStrict(
             anyString(),
             anyString(),
             anyList(),
             anyString(),
             anyString(),
             anyString(),
+            org.mockito.ArgumentMatchers.nullable(Integer.class),
             any(LlmExecutionReference.class)))
         .thenReturn(textResponse(unsafe, "stop"));
 
@@ -663,15 +738,143 @@ class ProjectDocGeneratorServiceCacheHitTest {
   }
 
   @Test
-  void malformedShortProviderOutputFailsTheDocumentQualityGate() {
+  void missingRequiredHeadingGetsOneSameRouteCorrectiveRetryBeforePublication() {
     wireCacheMiss();
-    when(llmRouter.callText(
+    String missingArchitecture =
+        validDoc(DocType.EXPLANATION, "First")
+            .replace("## High-level architecture", "## Architecture");
+    when(llmRouter.callTextStrict(
             anyString(),
             anyString(),
             anyList(),
             anyString(),
             anyString(),
             anyString(),
+            org.mockito.ArgumentMatchers.nullable(Integer.class),
+            any(LlmExecutionReference.class)))
+        .thenReturn(
+            textResponse(missingArchitecture, "stop"),
+            textResponse(validDoc(DocType.EXPLANATION, "Corrected"), "stop"));
+    when(docRepo.save(any(ProjectGeneratedDoc.class)))
+        .thenAnswer(invocation -> invocation.getArgument(0));
+
+    ProjectGeneratedDoc generated =
+        svc.generate("p-1", DocType.EXPLANATION, "actor-1", LlmProvider.ANTHROPIC);
+
+    @SuppressWarnings("unchecked")
+    ArgumentCaptor<List<org.springframework.ai.chat.messages.Message>> messages =
+        ArgumentCaptor.forClass(List.class);
+    ArgumentCaptor<String> providers = ArgumentCaptor.forClass(String.class);
+    ArgumentCaptor<String> models = ArgumentCaptor.forClass(String.class);
+    ArgumentCaptor<String> steps = ArgumentCaptor.forClass(String.class);
+    ArgumentCaptor<LlmExecutionReference> references =
+        ArgumentCaptor.forClass(LlmExecutionReference.class);
+    verify(llmRouter, org.mockito.Mockito.times(2))
+        .callTextStrict(
+            providers.capture(),
+            models.capture(),
+            messages.capture(),
+            org.mockito.ArgumentMatchers.eq("project-doc-explanation-p-1"),
+            org.mockito.ArgumentMatchers.eq("project-doc-explanation"),
+            steps.capture(),
+            org.mockito.ArgumentMatchers.nullable(Integer.class),
+            references.capture());
+
+    assertThat(generated.getContent()).isEqualTo(validDoc(DocType.EXPLANATION, "Corrected"));
+    assertThat(providers.getAllValues()).containsExactly("anthropic", "anthropic");
+    assertThat(models.getAllValues()).containsExactly("claude-test", "claude-test");
+    assertThat(steps.getAllValues()).containsExactly("generate", "generate-corrective-retry");
+    assertThat(references.getAllValues()).allMatch(reference -> reference == references.getValue());
+    assertThat(messages.getAllValues().get(1).get(2).getText())
+        .contains("PROJECT_DOC_VALIDATION_ERROR")
+        .contains("missing required heading ## high-level architecture")
+        .contains(
+            "The corrected EXPLANATION must retain each of these exact H2 heading lines exactly"
+                + " once")
+        .contains(
+            "## Repositories",
+            "## High-level architecture",
+            "## Key data flows",
+            "## Where to contribute")
+        .contains("Do not rename, delete, merge, reorder, or demote any of these headings");
+    verify(docRepo, org.mockito.Mockito.times(1)).save(any(ProjectGeneratedDoc.class));
+    verify(workspace, org.mockito.Mockito.times(1))
+        .writeRawFile(
+            org.mockito.ArgumentMatchers.eq("p-1"),
+            org.mockito.ArgumentMatchers.eq("docs/explanation.md"),
+            org.mockito.ArgumentMatchers.eq(validDoc(DocType.EXPLANATION, "Corrected")));
+  }
+
+  @Test
+  void unsupportedBehaviorClaimIsDeterministicallyDegradedWithoutProviderRetry() {
+    wireCacheMiss();
+    wireExactSourceRepository(
+        "aaa",
+        """
+        ## Functions
+        ### `src/AIPlayer.java`
+        - `class AIPlayer`
+        - `evaluate`
+        ### `src/TicTacToe.java`
+        - `class TicTacToe`
+        - `checkWin`
+        - `generateCacheString`
+        """);
+    String unsupported =
+        validDoc(DocType.EXPLANATION, "First")
+            .replace(
+                "## Key data flows",
+                "`AIPlayer.evaluate` invokes `TicTacToe.checkWin`, while"
+                    + " `generateCacheString` is an inactive stub.\n## Key data flows");
+    when(llmRouter.callTextStrict(
+            anyString(),
+            anyString(),
+            anyList(),
+            anyString(),
+            anyString(),
+            anyString(),
+            org.mockito.ArgumentMatchers.nullable(Integer.class),
+            any(LlmExecutionReference.class)))
+        .thenReturn(textResponse(unsupported, "stop"));
+    when(docRepo.save(any(ProjectGeneratedDoc.class)))
+        .thenAnswer(invocation -> invocation.getArgument(0));
+
+    ProjectGeneratedDoc generated =
+        svc.generate("p-1", DocType.EXPLANATION, "actor-1", LlmProvider.ANTHROPIC);
+
+    assertThat(generated.getContent())
+        .contains(
+            "Declared codemap symbols:",
+            "codemap evidence does not establish runtime relationships or liveness")
+        .contains(
+            "## Repositories",
+            "## High-level architecture",
+            "## Key data flows",
+            "## Where to contribute")
+        .doesNotContain("invokes", "inactive stub");
+    verify(llmRouter, org.mockito.Mockito.times(1))
+        .callTextStrict(
+            anyString(),
+            anyString(),
+            anyList(),
+            anyString(),
+            anyString(),
+            anyString(),
+            org.mockito.ArgumentMatchers.nullable(Integer.class),
+            any(LlmExecutionReference.class));
+  }
+
+  @Test
+  void malformedShortProviderOutputRetriesOnceThenFailsTheDocumentQualityGate() {
+    wireCacheMiss();
+    when(llmRouter.callTextStrict(
+            anyString(),
+            anyString(),
+            anyList(),
+            anyString(),
+            anyString(),
+            anyString(),
+            org.mockito.ArgumentMatchers.nullable(Integer.class),
             any(LlmExecutionReference.class)))
         .thenReturn(textResponse("# Generated", "stop"));
 
@@ -680,6 +883,16 @@ class ProjectDocGeneratorServiceCacheHitTest {
         .isInstanceOf(ProjectDocGeneratorService.InvalidGeneratedDocumentException.class)
         .hasMessageContaining("too short");
 
+    verify(llmRouter, org.mockito.Mockito.times(2))
+        .callTextStrict(
+            anyString(),
+            anyString(),
+            anyList(),
+            anyString(),
+            anyString(),
+            anyString(),
+            org.mockito.ArgumentMatchers.nullable(Integer.class),
+            any(LlmExecutionReference.class));
     verify(docRepo, never()).save(any(ProjectGeneratedDoc.class));
     verify(workspace, never()).writeRawFile(anyString(), anyString(), anyString());
   }
@@ -687,13 +900,14 @@ class ProjectDocGeneratorServiceCacheHitTest {
   @Test
   void explicitSafetyTerminationIsRejectedEvenWhenProviderReturnsNonblankText() {
     wireCacheMiss();
-    when(llmRouter.callText(
+    when(llmRouter.callTextStrict(
             anyString(),
             anyString(),
             anyList(),
             anyString(),
             anyString(),
             anyString(),
+            org.mockito.ArgumentMatchers.nullable(Integer.class),
             any(LlmExecutionReference.class)))
         .thenReturn(textResponse(validDoc(DocType.EXPLANATION, "Unsafe prefix"), "SAFETY"));
 
@@ -708,13 +922,14 @@ class ProjectDocGeneratorServiceCacheHitTest {
   @Test
   void abnormalFinishInAnyGenerationRejectsTheWholeDocument() {
     wireCacheMiss();
-    when(llmRouter.callText(
+    when(llmRouter.callTextStrict(
             anyString(),
             anyString(),
             anyList(),
             anyString(),
             anyString(),
             anyString(),
+            org.mockito.ArgumentMatchers.nullable(Integer.class),
             any(LlmExecutionReference.class)))
         .thenReturn(
             new ChatResponse(
@@ -760,7 +975,7 @@ class ProjectDocGeneratorServiceCacheHitTest {
                 svc.buildSourceBundle(
                     project("p-1"), archDoc(7, "{\"owner/old-repo\":\"source-sha\"}")))
         .isInstanceOf(ProjectDocGeneratorService.StaleSourceException.class);
-    verify(llmRouter, never()).callText(any(), any(), any(), any(), any(), any());
+    verifyNoInteractions(llmRouter);
   }
 
   @Test
@@ -838,6 +1053,10 @@ class ProjectDocGeneratorServiceCacheHitTest {
   }
 
   private void wireExactSourceRepository(String sha) {
+    wireExactSourceRepository(sha, "source map for " + sha);
+  }
+
+  private void wireExactSourceRepository(String sha, String content) {
     when(linkRepo.findByProjectId("p-1"))
         .thenReturn(
             List.of(ProjectRepoLink.builder().projectId("p-1").repoId(SOURCE_REPO_ID).build()));
@@ -855,7 +1074,7 @@ class ProjectDocGeneratorServiceCacheHitTest {
                     .projectId("p-1")
                     .repoId(SOURCE_REPO_ID)
                     .generatedFromSha(sha)
-                    .content("source map for " + sha)
+                    .content(content)
                     .build()));
   }
 

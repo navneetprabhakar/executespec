@@ -19,6 +19,7 @@ import com.navneet.executespec.codereview.CodeReviewService;
 import com.navneet.executespec.prreview.PrReviewService;
 import com.navneet.executespec.repo.GitHubRepoService;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -39,6 +40,7 @@ public class ReviewBackgroundWorker {
   private final CodeReviewService codeReviewService;
   private final PrReviewService prReviewService;
   private final ObjectMapper mapper;
+  private final ReviewLlmOperationRoot operationRoot;
   private final AtomicInteger inFlight = new AtomicInteger();
   private final String workerId = hostLabel() + ":" + UUID.randomUUID();
   private final ExecutorService executor =
@@ -58,20 +60,32 @@ public class ReviewBackgroundWorker {
             return thread;
           });
 
+  @Autowired
   public ReviewBackgroundWorker(
       ReviewBackgroundJobStore store,
       CodeReviewService codeReviewService,
       PrReviewService prReviewService,
-      ObjectMapper mapper) {
+      ObjectMapper mapper,
+      ReviewLlmOperationRoot operationRoot) {
     this.store = store;
     this.codeReviewService = codeReviewService;
     this.prReviewService = prReviewService;
     this.mapper = mapper;
+    this.operationRoot = operationRoot;
+  }
+
+  ReviewBackgroundWorker(
+      ReviewBackgroundJobStore store,
+      CodeReviewService codeReviewService,
+      PrReviewService prReviewService,
+      ObjectMapper mapper) {
+    this(store, codeReviewService, prReviewService, mapper, null);
   }
 
   @Scheduled(fixedDelayString = "${review.jobs.poll-interval-millis:2000}")
   public void poll() {
     store.finishAbandonedCancellations();
+    store.finishExhaustedLeases();
     int available = Math.max(0, PARALLELISM - inFlight.get());
     for (UUID candidate : store.claimCandidates(available)) {
       var lease = store.tryAcquire(candidate, workerId, LEASE);
@@ -96,13 +110,17 @@ public class ReviewBackgroundWorker {
   void process(ReviewBackgroundJobStore.Lease lease) {
     AtomicBoolean leaseLost = new AtomicBoolean();
     AtomicBoolean cancelled = new AtomicBoolean();
+    java.util.concurrent.atomic.AtomicReference<ReviewLlmOperationRoot.Active> operation =
+        new java.util.concurrent.atomic.AtomicReference<>();
     ScheduledFuture<?> heartbeat =
         heartbeatExecutor.scheduleAtFixedRate(
             () -> {
               try {
                 if (store.cancellationRequested(lease)) {
                   cancelled.set(true);
-                } else if (!store.heartbeat(lease, LEASE)) {
+                } else if (!store.heartbeat(lease, LEASE)
+                    || operation.get() != null
+                        && !operationRoot.heartbeat(operation.get(), LEASE)) {
                   leaseLost.set(true);
                 }
               } catch (RuntimeException error) {
@@ -120,10 +138,21 @@ public class ReviewBackgroundWorker {
           }
           if (leaseLost.get()) throw new LeaseLostException();
           if (!store.heartbeat(lease, LEASE)) throw new LeaseLostException();
+          if (operation.get() != null && !operationRoot.heartbeat(operation.get(), LEASE)) {
+            throw new LeaseLostException();
+          }
         };
     try {
       JsonNode payload = mapper.readTree(lease.job().payload());
       checkpoint.run();
+      if (lease.job().resultPayload() == null && operationRoot != null) {
+        boolean confirmedRetry = "CONFIRMED_RETRY".equals(lease.job().lastErrorCode());
+        operation.set(
+            operationRoot
+                .claim(
+                    lease.job(), lease.owner() + ":" + lease.fencingToken(), LEASE, confirmedRetry)
+                .orElseThrow(LogicalOperationUnavailableException::new));
+      }
       switch (lease.job().type()) {
         case CODE_REVIEW -> {
           var result =
@@ -132,6 +161,7 @@ public class ReviewBackgroundWorker {
                       lease,
                       required(payload, "repoFullName"),
                       required(payload, "sha"),
+                      operation.get() == null ? null : operation.get().context(),
                       checkpoint)
                   : mapper.readValue(
                       lease.job().resultPayload(), CodeReviewService.DurableCodeReviewResult.class);
@@ -152,6 +182,7 @@ public class ReviewBackgroundWorker {
                       required(payload, "headSha"),
                       mapper.treeToValue(
                           payload.path("snapshot"), GitHubRepoService.PullRequestSnapshot.class),
+                      operation.get() == null ? null : operation.get().context(),
                       checkpoint)
                   : mapper.readValue(
                       lease.job().resultPayload(), PrReviewService.DurablePrReviewResult.class);
@@ -163,11 +194,17 @@ public class ReviewBackgroundWorker {
           prReviewService.publishDurableResult(lease, result);
         }
       }
+      if (operation.get() != null) operationRoot.complete(operation.get());
     } catch (CancellationRequestedException cancelledWork) {
+      if (operationRoot != null && operation.get() != null) {
+        operationRoot.requestCancellation(lease.job());
+      }
+      terminateOperation(operation.get(), "REVIEW_CANCELLED", "cancelled by user");
       store.finishCancellation(lease);
     } catch (LeaseLostException | ReviewBackgroundJobStore.LeaseFencedException lost) {
       log.warn("review job lease lost job={} token={}", lease.job().id(), lease.fencingToken());
     } catch (Exception failure) {
+      terminateOperation(operation.get(), errorCode(failure), failure.getMessage());
       if (store.cancellationRequested(lease)) {
         store.finishCancellation(lease);
       } else {
@@ -191,6 +228,9 @@ public class ReviewBackgroundWorker {
   }
 
   private static String errorCode(Exception failure) {
+    if (failure instanceof LogicalOperationUnavailableException) {
+      return "LLM_OPERATION_NOT_REPLAYABLE";
+    }
     if (failure instanceof IllegalArgumentException) return "INVALID_JOB_PAYLOAD";
     if (failure instanceof IllegalStateException) return "DEPENDENCY_UNAVAILABLE";
     return "REVIEW_EXECUTION_FAILED";
@@ -210,4 +250,17 @@ public class ReviewBackgroundWorker {
   static final class CancellationRequestedException extends RuntimeException {}
 
   static final class LeaseLostException extends RuntimeException {}
+
+  static final class LogicalOperationUnavailableException extends RuntimeException {}
+
+  private void terminateOperation(
+      ReviewLlmOperationRoot.Active operation, String code, String message) {
+    if (operationRoot == null || operation == null) return;
+    try {
+      operationRoot.terminate(operation, code, message);
+    } catch (RuntimeException terminalizationFailure) {
+      log.error(
+          "review LLM operation terminalization failed code={}", code, terminalizationFailure);
+    }
+  }
 }

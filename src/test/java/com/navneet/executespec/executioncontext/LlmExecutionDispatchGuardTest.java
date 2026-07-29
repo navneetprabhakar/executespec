@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -85,6 +86,73 @@ class LlmExecutionDispatchGuardTest {
 
     assertThat(result.apiKey()).isEqualTo("current-user-key");
     assertThat(result.keySource()).isEqualTo(RunKeyContext.Source.USER);
+    verify(budgetGate, times(1))
+        .reserveProviderCall(
+            org.mockito.ArgumentMatchers.any(),
+            org.mockito.ArgumentMatchers.nullable(Integer.class));
+  }
+
+  @Test
+  void physicalAttemptReauthorizationReloadsRotatedKeyWithoutReservingBudget() {
+    LlmExecutionScope scope = LlmExecutionScope.customer("org-a");
+    stubContext(scope, exactOwnKeyPolicy(), null);
+    when(apiKeys.resolveWithProvenance("user-a"))
+        .thenReturn(
+            new ApiKeyResolver.CredentialResolution(
+                keys("first-user-key", "OWN_KEYS", Set.of("openai")),
+                "org-a",
+                Map.of("openai", ApiKeyResolver.CredentialOrigin.USER)),
+            new ApiKeyResolver.CredentialResolution(
+                keys("rotated-user-key", "OWN_KEYS", Set.of("openai")),
+                "org-a",
+                Map.of("openai", ApiKeyResolver.CredentialOrigin.USER)));
+    LlmRequest request = request("ctx-1", scope, "openai", "gpt-test");
+
+    assertThat(guard.reauthorize(request).apiKey()).isEqualTo("first-user-key");
+    assertThat(guard.reauthorize(request).apiKey()).isEqualTo("rotated-user-key");
+
+    verify(apiKeys, times(2)).resolveWithProvenance("user-a");
+    verify(budgetGate, never())
+        .reserveProviderCall(
+            org.mockito.ArgumentMatchers.any(),
+            org.mockito.ArgumentMatchers.nullable(Integer.class));
+  }
+
+  @Test
+  void physicalAttemptReauthorizationRejectsCurrentCredentialSourceDriftWithoutReservation() {
+    LlmExecutionScope scope = LlmExecutionScope.customer("org-a");
+    stubContext(scope, exactOwnKeyPolicy(), null);
+    when(apiKeys.resolveWithProvenance("user-a"))
+        .thenReturn(
+            new ApiKeyResolver.CredentialResolution(
+                keys("moved-org-key", "OWN_KEYS", Set.of("openai")),
+                "org-a",
+                Map.of("openai", ApiKeyResolver.CredentialOrigin.ORG)));
+
+    assertThatThrownBy(() -> guard.reauthorize(request("ctx-1", scope, "openai", "gpt-test")))
+        .isInstanceOf(LlmDispatchPolicyException.class)
+        .extracting(error -> ((LlmDispatchPolicyException) error).reason())
+        .isEqualTo(LlmDispatchPolicyException.Reason.CREDENTIAL_SOURCE_CHANGED);
+    verify(budgetGate, never())
+        .reserveProviderCall(
+            org.mockito.ArgumentMatchers.any(),
+            org.mockito.ArgumentMatchers.nullable(Integer.class));
+  }
+
+  @Test
+  void physicalAttemptReauthorizationStillEnforcesExactDurableRouteWithoutReservation() {
+    LlmExecutionScope scope = LlmExecutionScope.customer("org-a");
+    stubContext(scope, exactOwnKeyPolicy(), null);
+
+    assertThatThrownBy(() -> guard.reauthorize(request("ctx-1", scope, "anthropic", "gpt-test")))
+        .isInstanceOf(LlmDispatchPolicyException.class)
+        .extracting(error -> ((LlmDispatchPolicyException) error).reason())
+        .isEqualTo(LlmDispatchPolicyException.Reason.PROVIDER_NOT_ALLOWED);
+    verify(apiKeys, never()).resolveWithProvenance(org.mockito.ArgumentMatchers.any());
+    verify(budgetGate, never())
+        .reserveProviderCall(
+            org.mockito.ArgumentMatchers.any(),
+            org.mockito.ArgumentMatchers.nullable(Integer.class));
   }
 
   @Test
@@ -117,15 +185,20 @@ class LlmExecutionDispatchGuardTest {
   }
 
   /**
-   * RR-321 — the guard must still refuse before touching credentials when the budget gate rejects.
-   * The ceiling arithmetic itself now lives in {@link LlmExecutionBudgetGate}, which evaluates it
-   * under a pessimistic row lock and commits a reservation; here we pin only that its rejection is
-   * honoured ahead of credential resolution.
+   * RR-321 — the compatibility entry point first refreshes authorization, then reserves exactly
+   * once. The ceiling arithmetic itself lives in {@link LlmExecutionBudgetGate}, which evaluates it
+   * under a pessimistic row lock and commits the logical-call reservation.
    */
   @Test
   void providerCallBudgetIsCheckedAgainstDurableAttemptLedger() {
     LlmExecutionScope scope = LlmExecutionScope.customer("org-a");
     stubContext(scope, exactOwnKeyPolicy(), 2);
+    when(apiKeys.resolveWithProvenance("user-a"))
+        .thenReturn(
+            new ApiKeyResolver.CredentialResolution(
+                keys("current-user-key", "OWN_KEYS", Set.of("openai")),
+                "org-a",
+                Map.of("openai", ApiKeyResolver.CredentialOrigin.USER)));
     org.mockito.Mockito.doThrow(
             new LlmDispatchPolicyException(
                 LlmDispatchPolicyException.Reason.BUDGET_EXHAUSTED, "exhausted"))
@@ -138,7 +211,11 @@ class LlmExecutionDispatchGuardTest {
         .isInstanceOf(LlmDispatchPolicyException.class)
         .extracting(error -> ((LlmDispatchPolicyException) error).reason())
         .isEqualTo(LlmDispatchPolicyException.Reason.BUDGET_EXHAUSTED);
-    verify(apiKeys, never()).resolveWithProvenance(org.mockito.ArgumentMatchers.any());
+    verify(apiKeys).resolveWithProvenance("user-a");
+    verify(budgetGate, times(1))
+        .reserveProviderCall(
+            org.mockito.ArgumentMatchers.any(),
+            org.mockito.ArgumentMatchers.nullable(Integer.class));
   }
 
   @Test
@@ -157,6 +234,28 @@ class LlmExecutionDispatchGuardTest {
 
     assertThat(dispatch.apiKey()).isEqualTo("current-user-key");
     assertThat(dispatch.keySource()).isEqualTo(RunKeyContext.Source.USER);
+  }
+
+  @Test
+  void providerCapabilityPhysicalReauthorizationDoesNotReserveBudget() {
+    LlmExecutionScope scope = LlmExecutionScope.customer("org-a");
+    stubContext(scope, exactOwnKeyPolicy(), null);
+    when(apiKeys.resolveWithProvenance("user-a"))
+        .thenReturn(
+            new ApiKeyResolver.CredentialResolution(
+                keys("current-user-key", "OWN_KEYS", Set.of("openai")),
+                "org-a",
+                Map.of("openai", ApiKeyResolver.CredentialOrigin.USER)));
+
+    var dispatch =
+        guard.reauthorizeProviderCapability(new LlmExecutionReference("ctx-1", scope), "openai");
+
+    assertThat(dispatch.apiKey()).isEqualTo("current-user-key");
+    assertThat(dispatch.keySource()).isEqualTo(RunKeyContext.Source.USER);
+    verify(budgetGate, never())
+        .reserveProviderCall(
+            org.mockito.ArgumentMatchers.any(),
+            org.mockito.ArgumentMatchers.nullable(Integer.class));
   }
 
   @Test

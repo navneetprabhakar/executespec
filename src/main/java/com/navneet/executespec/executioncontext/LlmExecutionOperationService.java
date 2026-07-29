@@ -2,7 +2,6 @@ package com.navneet.executespec.executioncontext;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
-import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.HexFormat;
@@ -25,7 +24,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class LlmExecutionOperationService {
 
   private static final Duration MAX_LEASE = Duration.ofHours(24);
-  private static final Duration MAX_RECLAIM_FENCE = Duration.ofHours(24);
+  private static final Duration MAX_RETRY_DELAY = Duration.ofHours(24);
   private static final int MAX_REDACTED_ERROR_CHARS = 4000;
   private static final List<LlmExecutionOperation.Status> NON_TERMINAL =
       List.of(
@@ -51,22 +50,13 @@ public class LlmExecutionOperationService {
 
   private final LlmExecutionContextRepository contextRepository;
   private final LlmExecutionOperationRepository operationRepository;
-  private final Clock clock;
 
   @Autowired
   public LlmExecutionOperationService(
       LlmExecutionContextRepository contextRepository,
       LlmExecutionOperationRepository operationRepository) {
-    this(contextRepository, operationRepository, Clock.systemUTC());
-  }
-
-  LlmExecutionOperationService(
-      LlmExecutionContextRepository contextRepository,
-      LlmExecutionOperationRepository operationRepository,
-      Clock clock) {
     this.contextRepository = contextRepository;
     this.operationRepository = operationRepository;
-    this.clock = clock;
   }
 
   /** Claims the latest nonterminal invocation or creates invocation one for a new operation key. */
@@ -77,22 +67,24 @@ public class LlmExecutionOperationService {
       String leaseOwner,
       Duration leaseDuration) {
     validate(reference, descriptor, leaseOwner, leaseDuration);
-    LlmExecutionContext context = lockActiveContext(reference);
+    LlmExecutionContext context = lockContext(reference);
+    Optional<LlmExecutionOperation> latest =
+        operationRepository.findFirstByLlmExecutionContextIdAndOperationKeyOrderByInvocationDesc(
+            context.getId(), descriptor.operationKey());
+    Instant now = contextRepository.databaseNow();
+    requireActiveContext(context, now);
     LlmExecutionOperation operation =
-        operationRepository
-            .findFirstByLlmExecutionContextIdAndOperationKeyOrderByInvocationDesc(
-                context.getId(), descriptor.operationKey())
-            .orElseGet(
-                () ->
-                    operationRepository.saveAndFlush(
-                        LlmExecutionOperation.queued(
-                            operationId(context.getId(), descriptor.operationKey(), 1),
-                            context.getId(),
-                            descriptor,
-                            1,
-                            clock.instant())));
+        latest.orElseGet(
+            () ->
+                operationRepository.saveAndFlush(
+                    LlmExecutionOperation.queued(
+                        operationId(context.getId(), descriptor.operationKey(), 1),
+                        context.getId(),
+                        descriptor,
+                        1,
+                        now)));
     requireSameIdentity(operation, descriptor);
-    return claim(reference, operation, leaseOwner.trim(), leaseDuration);
+    return claim(reference, operation, leaseOwner.trim(), leaseDuration, now);
   }
 
   /**
@@ -103,11 +95,13 @@ public class LlmExecutionOperationService {
   public Optional<LlmExecutionOperationClaim> resumeOwned(
       LlmExecutionOperationClaim claim, String leaseOwner, Duration leaseDuration) {
     validateClaimMutation(claim, leaseOwner, leaseDuration);
-    LlmExecutionContext context = lockActiveContext(claim.context());
+    LlmExecutionContext context = lockContext(claim.context());
     LlmExecutionOperation operation = lockOperation(claim, context);
+    Instant now = contextRepository.databaseNow();
+    requireActiveContext(context, now);
     boolean retained =
         operation.heartbeat(
-            leaseOwner.trim(), claim.leaseToken(), claim.attempt(), clock.instant(), leaseDuration);
+            leaseOwner.trim(), claim.leaseToken(), claim.attempt(), now, leaseDuration);
     if (!retained) return Optional.empty();
     operationRepository.save(operation);
     return Optional.of(claim);
@@ -121,10 +115,12 @@ public class LlmExecutionOperationService {
       String leaseOwner,
       Duration leaseDuration) {
     validate(reference, descriptor, leaseOwner, leaseDuration);
-    LlmExecutionContext context = lockActiveContext(reference);
+    LlmExecutionContext context = lockContext(reference);
     Optional<LlmExecutionOperation> latest =
         operationRepository.findFirstByLlmExecutionContextIdAndOperationKeyOrderByInvocationDesc(
             context.getId(), descriptor.operationKey());
+    Instant now = contextRepository.databaseNow();
+    requireActiveContext(context, now);
     if (latest.isPresent()) {
       if (!latest.get().isTerminal()) {
         throw error(
@@ -145,8 +141,8 @@ public class LlmExecutionOperationService {
                 context.getId(),
                 descriptor,
                 invocation,
-                clock.instant()));
-    return claim(reference, operation, leaseOwner.trim(), leaseDuration)
+                now));
+    return claim(reference, operation, leaseOwner.trim(), leaseDuration, now)
         .orElseThrow(
             () ->
                 error(
@@ -159,34 +155,13 @@ public class LlmExecutionOperationService {
   public boolean heartbeat(
       LlmExecutionOperationClaim claim, String leaseOwner, Duration leaseDuration) {
     validateClaimMutation(claim, leaseOwner, leaseDuration);
-    LlmExecutionContext context = lockActiveContext(claim.context());
+    LlmExecutionContext context = lockContext(claim.context());
     LlmExecutionOperation operation = lockOperation(claim, context);
+    Instant now = contextRepository.databaseNow();
+    requireActiveContext(context, now);
     boolean changed =
         operation.heartbeat(
-            leaseOwner.trim(), claim.leaseToken(), claim.attempt(), clock.instant(), leaseDuration);
-    if (changed) operationRepository.save(operation);
-    return changed;
-  }
-
-  /**
-   * Extends the no-reclaim horizon for an admitted external attempt. The future transport-wiring
-   * slice must call this atomically with budget reservation and attempt-intent insertion.
-   */
-  @Transactional
-  public boolean protectFromReclaimUntil(
-      LlmExecutionOperationClaim claim, String leaseOwner, Instant deadline) {
-    requireClaimAndOwner(claim, leaseOwner);
-    Instant now = clock.instant();
-    if (deadline == null
-        || !deadline.isAfter(now)
-        || deadline.isAfter(now.plus(MAX_RECLAIM_FENCE))) {
-      throw new IllegalArgumentException("deadline must be in the next 24 hours");
-    }
-    LlmExecutionContext context = lockActiveContext(claim.context());
-    LlmExecutionOperation operation = lockOperation(claim, context);
-    boolean changed =
-        operation.protectUntil(
-            leaseOwner.trim(), claim.leaseToken(), claim.attempt(), now, deadline);
+            leaseOwner.trim(), claim.leaseToken(), claim.attempt(), now, leaseDuration);
     if (changed) operationRepository.save(operation);
     return changed;
   }
@@ -196,8 +171,9 @@ public class LlmExecutionOperationService {
     requireClaimAndOwner(claim, leaseOwner);
     LlmExecutionContext context = lockContext(claim.context());
     LlmExecutionOperation operation = lockOperation(claim, context);
+    Instant now = contextRepository.databaseNow();
     boolean changed =
-        operation.complete(leaseOwner.trim(), claim.leaseToken(), claim.attempt(), clock.instant());
+        operation.complete(leaseOwner.trim(), claim.leaseToken(), claim.attempt(), now);
     if (changed) operationRepository.save(operation);
     return changed;
   }
@@ -206,18 +182,20 @@ public class LlmExecutionOperationService {
   public boolean fail(LlmExecutionOperationClaim claim, String leaseOwner, Failure failure) {
     requireClaimAndOwner(claim, leaseOwner);
     if (failure == null) throw new IllegalArgumentException("failure required");
+    validateRetryDelay(failure.retryDelay());
     LlmExecutionContext context = lockContext(claim.context());
     LlmExecutionOperation operation = lockOperation(claim, context);
+    Instant now = contextRepository.databaseNow();
     boolean changed =
         operation.fail(
             leaseOwner.trim(),
             claim.leaseToken(),
             claim.attempt(),
-            clock.instant(),
+            now,
             normalizeErrorCode(failure.code()),
             redact(failure.redactedMessage()),
             failure.retryable(),
-            failure.retryAt());
+            retryAt(now, failure.retryDelay()));
     if (changed) operationRepository.save(operation);
     return changed;
   }
@@ -230,8 +208,9 @@ public class LlmExecutionOperationService {
     Optional<LlmExecutionOperation> operation =
         operationRepository.findFirstByLlmExecutionContextIdAndOperationKeyOrderByInvocationDesc(
             context.getId(), key);
+    Instant now = contextRepository.databaseNow();
     if (operation.isEmpty()) return Optional.empty();
-    LlmExecutionOperation.Status status = operation.get().requestCancellation(clock.instant());
+    LlmExecutionOperation.Status status = operation.get().requestCancellation(now);
     operationRepository.save(operation.get());
     return Optional.of(status);
   }
@@ -242,7 +221,7 @@ public class LlmExecutionOperationService {
     LlmExecutionContext context = lockContext(reference);
     List<LlmExecutionOperation> active =
         operationRepository.findNonTerminalForUpdate(context.getId(), NON_TERMINAL);
-    Instant now = clock.instant();
+    Instant now = contextRepository.databaseNow();
     active.forEach(operation -> operation.requestCancellation(now));
     operationRepository.saveAll(active);
     return active.size();
@@ -255,7 +234,7 @@ public class LlmExecutionOperationService {
   @Transactional
   public int finalizeDueCancellations(int limit) {
     if (limit <= 0 || limit > 1000) throw new IllegalArgumentException("limit must be 1..1000");
-    Instant now = clock.instant();
+    Instant now = contextRepository.databaseNow();
     var candidates =
         operationRepository.findDueCancellationCandidates(
             LlmExecutionOperation.Status.CANCEL_REQUESTED, now, PageRequest.of(0, limit));
@@ -279,9 +258,10 @@ public class LlmExecutionOperationService {
     requireClaimAndOwner(claim, leaseOwner);
     LlmExecutionContext context = lockContext(claim.context());
     LlmExecutionOperation operation = lockOperation(claim, context);
+    Instant now = contextRepository.databaseNow();
     boolean changed =
         operation.acknowledgeCancellation(
-            leaseOwner.trim(), claim.leaseToken(), claim.attempt(), clock.instant());
+            leaseOwner.trim(), claim.leaseToken(), claim.attempt(), now);
     if (changed) operationRepository.save(operation);
     return changed;
   }
@@ -290,9 +270,9 @@ public class LlmExecutionOperationService {
       LlmExecutionReference reference,
       LlmExecutionOperation operation,
       String owner,
-      Duration leaseDuration) {
-    LlmExecutionOperation.ClaimOutcome outcome =
-        operation.claim(owner, clock.instant(), leaseDuration);
+      Duration leaseDuration,
+      Instant now) {
+    LlmExecutionOperation.ClaimOutcome outcome = operation.claim(owner, now, leaseDuration);
     if (outcome == LlmExecutionOperation.ClaimOutcome.CLAIMED
         || outcome == LlmExecutionOperation.ClaimOutcome.TERMINALIZED) {
       operationRepository.save(operation);
@@ -303,19 +283,16 @@ public class LlmExecutionOperationService {
     return Optional.of(toClaim(reference, operation));
   }
 
-  private LlmExecutionContext lockActiveContext(LlmExecutionReference reference) {
-    LlmExecutionContext context = lockContext(reference);
-    Instant now = clock.instant();
+  private static void requireActiveContext(LlmExecutionContext context, Instant databaseNow) {
     boolean active =
         (context.getStatus() == LlmExecutionContext.Status.QUEUED
                 || context.getStatus() == LlmExecutionContext.Status.RUNNING)
-            && (context.getExpiresAt() == null || context.getExpiresAt().isAfter(now));
+            && (context.getExpiresAt() == null || context.getExpiresAt().isAfter(databaseNow));
     if (!active) {
       throw error(
           LlmExecutionOperationException.Reason.CONTEXT_NOT_ACTIVE,
           "Execution context is terminal, cancelled, or expired");
     }
-    return context;
   }
 
   private LlmExecutionContext lockContext(LlmExecutionReference reference) {
@@ -395,6 +372,17 @@ public class LlmExecutionOperationService {
     }
   }
 
+  private static void validateRetryDelay(Duration retryDelay) {
+    if (retryDelay == null) return;
+    if (retryDelay.isNegative() || retryDelay.compareTo(MAX_RETRY_DELAY) > 0) {
+      throw new IllegalArgumentException("retryDelay must be non-negative and at most 24 hours");
+    }
+  }
+
+  private static Instant retryAt(Instant databaseNow, Duration retryDelay) {
+    return retryDelay == null ? null : databaseNow.plus(retryDelay);
+  }
+
   private static String operationId(String contextId, String key, int invocation) {
     return "llmop_" + sha256(contextId + "|" + key + "|" + invocation).substring(0, 32);
   }
@@ -438,5 +426,6 @@ public class LlmExecutionOperationService {
     return new LlmExecutionOperationException(reason, message);
   }
 
-  public record Failure(String code, String redactedMessage, boolean retryable, Instant retryAt) {}
+  public record Failure(
+      String code, String redactedMessage, boolean retryable, Duration retryDelay) {}
 }

@@ -136,17 +136,18 @@ public class ReviewBackgroundJobStore {
     return jdbc.query(
         """
         SELECT id FROM review_background_job
-        WHERE attempt_count < max_attempts AND (
-          (status='QUEUED' AND next_attempt_at<=NOW())
-          OR (status='RUNNING' AND lease_expires_at<NOW())
-        )
+        WHERE (status='QUEUED' AND attempt_count < max_attempts AND next_attempt_at<=NOW())
+          OR (status='RUNNING' AND lease_expires_at<NOW() AND result_payload IS NOT NULL)
         ORDER BY next_attempt_at, created_at LIMIT ?
         """,
         (rs, ignored) -> rs.getObject(1, UUID.class),
         limit);
   }
 
-  /** Atomically claims queued work or takes over an expired lease, incrementing its fence. */
+  /**
+   * Atomically claims queued work or a staged-result publication. Expired provider work without a
+   * durable result is never replayed automatically.
+   */
   @Transactional
   public Optional<Lease> tryAcquire(UUID id, String owner, Duration leaseDuration) {
     Instant expiresAt = Instant.now().plus(leaseDuration);
@@ -155,12 +156,12 @@ public class ReviewBackgroundJobStore {
             """
             UPDATE review_background_job SET
               status='RUNNING', lease_owner=?, lease_token=lease_token+1,
-              lease_expires_at=?, heartbeat_at=NOW(), attempt_count=attempt_count+1,
-              started_at=COALESCE(started_at, NOW()), last_error_code=NULL,
-              last_error_message=NULL
-            WHERE id=? AND attempt_count<max_attempts AND (
-              (status='QUEUED' AND next_attempt_at<=NOW())
-              OR (status='RUNNING' AND lease_expires_at<NOW())
+              lease_expires_at=?, heartbeat_at=NOW(),
+              attempt_count=attempt_count+CASE WHEN status='QUEUED' THEN 1 ELSE 0 END,
+              started_at=COALESCE(started_at, NOW())
+            WHERE id=? AND (
+              (status='QUEUED' AND attempt_count<max_attempts AND next_attempt_at<=NOW())
+              OR (status='RUNNING' AND lease_expires_at<NOW() AND result_payload IS NOT NULL)
             )
             RETURNING *
             """,
@@ -306,7 +307,8 @@ WHERE id=? AND status='RUNNING' AND lease_owner=? AND lease_token=?
             """
             UPDATE review_background_job SET status='QUEUED', next_attempt_at=NOW(),
               completed_at=NULL, cancel_requested_at=NULL, lease_owner=NULL,
-              lease_expires_at=NULL, last_error_code=NULL, last_error_message=NULL,
+              lease_expires_at=NULL, last_error_code='CONFIRMED_RETRY',
+              last_error_message=NULL,
               -- Explicit human retry resets the AUTOMATIC attempt budget rather than
               -- consuming it. Previously this carried `AND attempt_count < max_attempts`,
               -- so once the background worker exhausted its attempts the operator's
@@ -362,8 +364,7 @@ WHERE id=? AND status='RUNNING' AND lease_owner=? AND lease_token=?
   /** Fenced retry/failure transition; stale JVM owners cannot overwrite a takeover. */
   @Transactional
   public Status failOrRequeue(Lease lease, String code, String message, Duration delay) {
-    boolean retry = lease.job().attemptCount() < lease.job().maxAttempts();
-    String status = retry ? "QUEUED" : "FAILED";
+    String status = "FAILED";
     int changed =
         jdbc.update(
             """
@@ -382,10 +383,8 @@ WHERE id=? AND status='RUNNING' AND lease_owner=? AND lease_token=?
             lease.owner(),
             lease.fencingToken());
     if (changed == 1) {
-      if (retry) resetSubjectForRetry(lease.job());
-      else
-        updateSubjectTerminal(
-            lease.job(), "FAILED", "background job exhausted retries: " + bounded(code, 64));
+      updateSubjectTerminal(
+          lease.job(), "FAILED", "background job requires explicit retry: " + bounded(code, 64));
       return Status.valueOf(status);
     }
     return get(lease.job().id()).orElseThrow().status();
@@ -403,6 +402,32 @@ WHERE id=? AND status='RUNNING' AND lease_owner=? AND lease_token=?
             """,
             ReviewBackgroundJobStore::map);
     abandoned.forEach(job -> updateSubjectTerminal(job, "CANCELLED", "cancelled by user"));
+  }
+
+  /**
+   * Terminalizes expired provider work without a staged result. The provider transport may have
+   * accepted the request before the owner died, so such a RUNNING review must never be selected for
+   * automatic replay.
+   */
+  @Transactional
+  public void finishExhaustedLeases() {
+    List<Job> exhausted =
+        jdbc.query(
+            """
+            UPDATE review_background_job SET status='FAILED', completed_at=NOW(),
+              lease_owner=NULL, lease_expires_at=NULL,
+              last_error_code='UNCERTAIN_PROVIDER_OUTCOME',
+              last_error_message='worker lease expired after the final automatic attempt'
+            WHERE status='RUNNING' AND lease_expires_at<NOW() AND result_payload IS NULL
+            RETURNING *
+            """,
+            ReviewBackgroundJobStore::map);
+    exhausted.forEach(
+        job ->
+            updateSubjectTerminal(
+                job,
+                "FAILED",
+                "provider outcome uncertain after worker lease expiry; explicit retry required"));
   }
 
   private void resetSubjectForRetry(Job job) {

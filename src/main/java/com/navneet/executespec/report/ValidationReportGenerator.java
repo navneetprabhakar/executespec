@@ -7,6 +7,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 
+import com.navneet.executespec.agent.LlmRequest;
 import com.navneet.executespec.agent.LlmRouter;
 import com.navneet.executespec.agent.PromptTrustBoundary;
 import com.navneet.executespec.agent.model.WorkerReport;
@@ -20,6 +21,7 @@ import com.navneet.executespec.router.ResolvedModel;
 import com.navneet.executespec.testgen.model.TestExecutionSummary;
 import com.navneet.executespec.testgen.model.TestResult;
 import com.navneet.executespec.testgen.model.TestResultStatus;
+import com.navneet.executespec.tool.ExecutionContext;
 
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
@@ -49,6 +51,11 @@ public class ValidationReportGenerator {
   public record LlmReportResult(String markdown, String model, int inputTokens, int outputTokens) {}
 
   public LlmReportResult generate(ReportInput input) throws IOException {
+    return generate(input, null);
+  }
+
+  public LlmReportResult generate(ReportInput input, ExecutionContext operationContext)
+      throws IOException {
     String systemPrompt = promptTemplate.getContentAsString(StandardCharsets.UTF_8);
     String userMessage =
         PromptTrustBoundary.wrap("VALIDATION_REPORT_EVIDENCE", buildUserMessage(input));
@@ -59,14 +66,29 @@ public class ValidationReportGenerator {
     String runId = input.run().getRunId();
     ResolvedModel resolved =
         modelResolver.resolve("ValidationReportGenerator", input.run().getAiProviderEnum());
-    ChatResponse response =
-        llmRouter.callText(
-            resolved.providerName(),
-            resolved.getModel(),
-            prompt.getInstructions(),
-            runId,
-            "validation-report",
-            "generate");
+    ChatResponse response;
+    if (operationContext == null) {
+      response =
+          llmRouter.callText(
+              resolved.providerName(),
+              resolved.getModel(),
+              prompt.getInstructions(),
+              runId,
+              "validation-report",
+              "generate");
+    } else {
+      response =
+          llmRouter.call(
+              LlmRequest.builder()
+                  .provider(resolved.providerName())
+                  .model(resolved.getModel())
+                  .messages(prompt.getInstructions())
+                  .context(operationContext.child("validation-report"))
+                  .toolsOverride(List.of())
+                  .agentRole("ValidationReportGenerator")
+                  .stepId("generate")
+                  .build());
+    }
     String markdown = response.getResult().getOutput().getText();
     int inTokens = response.getMetadata().getUsage().getPromptTokens().intValue();
     int outTokens = response.getMetadata().getUsage().getCompletionTokens().intValue();

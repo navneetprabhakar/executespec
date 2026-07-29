@@ -53,7 +53,25 @@ public class LlmExecutionDispatchGuard {
   @Value("${spring.ai.fireworks.api-key:}")
   private String platformFireworksKey;
 
+  /**
+   * Compatibility entry point for logical-call authorization. Physical transport retries and
+   * failover attempts must use {@link #reauthorize(LlmRequest)} so they refresh policy and
+   * credentials without reserving the logical call's budget a second time.
+   */
   public ResolvedDispatch authorize(LlmRequest request) {
+    ResolvedDispatch dispatch = reauthorize(request);
+    checkBudget(dispatch.context(), request.maxTokens());
+    return dispatch;
+  }
+
+  /**
+   * Reauthorizes one physical provider attempt from current durable policy and credential rows.
+   *
+   * <p>This method deliberately does not reserve provider/output budget. Admission owns physical
+   * attempt accounting; this guard only repeats route, model, tenant, kill-switch, credential and
+   * fencing checks immediately before transport.
+   */
+  public ResolvedDispatch reauthorize(LlmRequest request) {
     if (request.llmExecutionContextId() == null || request.llmExecutionScope() == null) {
       throw reject(
           LlmDispatchPolicyException.Reason.CONTEXT_REQUIRED,
@@ -98,7 +116,6 @@ public class LlmExecutionDispatchGuard {
           "Provider failover is disabled by the durable execution policy");
     }
     checkFencing(context, request.llmExecutionAttempt());
-    checkBudget(context, request.maxTokens());
 
     if (context.getScopeMode() == LlmExecutionScope.ScopeMode.PLATFORM_INTERNAL) {
       return platformCapabilityDispatch(context, provider, policy);
@@ -152,6 +169,19 @@ public class LlmExecutionDispatchGuard {
    */
   public ResolvedDispatch authorizeProviderCapability(
       LlmExecutionReference reference, String requestedProvider) {
+    ResolvedDispatch dispatch = reauthorizeProviderCapability(reference, requestedProvider);
+    checkBudget(dispatch.context(), null);
+    return dispatch;
+  }
+
+  /**
+   * Reauthorizes one physical non-chat provider-capability attempt without reserving budget.
+   *
+   * <p>The logical capability admission remains {@link #authorizeProviderCapability}; transport
+   * retries use this method to refresh exact provider, tenant and credential policy.
+   */
+  public ResolvedDispatch reauthorizeProviderCapability(
+      LlmExecutionReference reference, String requestedProvider) {
     if (reference == null) {
       throw reject(
           LlmDispatchPolicyException.Reason.CONTEXT_REQUIRED,
@@ -186,7 +216,6 @@ public class LlmExecutionDispatchGuard {
           "Provider capability differs from the project's selected provider");
     }
     checkFencing(context, null);
-    checkBudget(context, null);
 
     if (context.getScopeMode() == LlmExecutionScope.ScopeMode.PLATFORM_INTERNAL) {
       return platformCapabilityDispatch(context, provider, policy);

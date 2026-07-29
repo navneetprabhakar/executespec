@@ -3,14 +3,15 @@ package com.navneet.executespec.executioncontext;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.clearInvocations;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.when;
 
-import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
-import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -39,8 +40,8 @@ class LlmExecutionOperationServiceTest {
   void setUp() {
     context = context();
     reference = new LlmExecutionReference(context.getId(), SCOPE);
-    service =
-        new LlmExecutionOperationService(contexts, operations, Clock.fixed(NOW, ZoneOffset.UTC));
+    service = new LlmExecutionOperationService(contexts, operations);
+    lenient().when(contexts.databaseNow()).thenReturn(NOW);
     lenient()
         .when(contexts.findForUpdate(context.getId(), SCOPE.isolationKey()))
         .thenReturn(Optional.of(context));
@@ -69,6 +70,21 @@ class LlmExecutionOperationServiceTest {
     assertThat(claim.attempt()).isEqualTo(1);
     assertThat(claim.leaseToken()).isNotNull();
     assertThat(context.getStatus()).isEqualTo(LlmExecutionContext.Status.QUEUED);
+  }
+
+  @Test
+  void claimUsesExactlyOneDatabaseClockSampleForAllLifecycleDecisions() {
+    var descriptor = descriptor("worker/task-database-clock", "identity-db-clock");
+    when(operations.findFirstByLlmExecutionContextIdAndOperationKeyOrderByInvocationDesc(
+            context.getId(), descriptor.operationKey()))
+        .thenReturn(Optional.empty());
+    clearInvocations(contexts);
+
+    service.claimOrResume(reference, descriptor, "owner-a", Duration.ofMinutes(2)).orElseThrow();
+
+    var order = inOrder(contexts);
+    order.verify(contexts).findForUpdate(context.getId(), SCOPE.isolationKey());
+    order.verify(contexts, times(1)).databaseNow();
   }
 
   @Test
@@ -194,6 +210,46 @@ class LlmExecutionOperationServiceTest {
 
     assertThat(retry.invocation()).isEqualTo(2);
     assertThat(retry.attempt()).isEqualTo(1);
+  }
+
+  @Test
+  void retryDelayIsDerivedFromDatabaseTimeAndBounded() {
+    var descriptor = descriptor("worker/task-retry", "identity-retry");
+    LlmExecutionOperation active =
+        LlmExecutionOperation.queued("llmop_retry", context.getId(), descriptor, 1, NOW);
+    active.claim("owner-a", NOW, Duration.ofMinutes(2));
+    var claim =
+        new LlmExecutionOperationClaim(
+            reference, active.getId(), 1, active.getAttempt(), active.getLeaseToken());
+    when(operations.findForUpdate(active.getId(), context.getId())).thenReturn(Optional.of(active));
+
+    assertThat(
+            service.fail(
+                claim,
+                "owner-a",
+                new LlmExecutionOperationService.Failure(
+                    "TRANSIENT", "retry later", true, Duration.ofMinutes(7))))
+        .isTrue();
+    assertThat(active.getNextAttemptAt()).isEqualTo(NOW.plus(Duration.ofMinutes(7)));
+
+    assertThatThrownBy(
+            () ->
+                service.fail(
+                    claim,
+                    "owner-a",
+                    new LlmExecutionOperationService.Failure(
+                        "TRANSIENT", "retry later", true, Duration.ofSeconds(-1))))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("retryDelay");
+    assertThatThrownBy(
+            () ->
+                service.fail(
+                    claim,
+                    "owner-a",
+                    new LlmExecutionOperationService.Failure(
+                        "TRANSIENT", "retry later", true, Duration.ofHours(25))))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("retryDelay");
   }
 
   private static LlmExecutionOperationDescriptor descriptor(String key, String identity) {

@@ -32,7 +32,10 @@ credential ephemerally through `ScmCredentialResolver`; each linked repository u
 `linkedBy` credential subject (falling back to the requesting actor only for legacy rows). No
 credential is persisted. PREPARING resolves exact branch revisions, binds the immutable source and
 the two execution contexts, and then durably moves to EXECUTING before the first provider-capable
-call. An expired EXECUTING/PUBLISHING lease becomes `NEEDS_CONFIRMATION` with
+call. The execution-context source/correlation identity is a compact 128-bit SHA-256 projection of
+the full job UUID, source digest, and attempt deadline, keeping distinct source snapshots and
+confirmed retries within the shared 96-character execution-context column contract. An expired
+EXECUTING/PUBLISHING lease becomes `NEEDS_CONFIRMATION` with
 `OUTCOME_UNCERTAIN`; automatic provider replay is forbidden. A second live revision check after
 generation prevents a moving repository from being reported as current.
 The job claims, heartbeats, and terminalizes both exact-route LLM contexts. Partial context creation
@@ -50,7 +53,11 @@ artifacts, and marks SUCCEEDED atomically. Workspace mirroring and retention run
 and are best-effort; the database remains authoritative. Provider truncation or abnormal finish
 reasons become explicit terminal failure and are never published. Deterministic fallback remains
 available only for other classified provider failures and is explicit WARNING quality evidence,
-not provider success.
+not provider success. Before any canonical row is saved, `GeneratedSignatureGrounding` checks
+inline-code method contracts against the staged codemaps. Unverifiable parameter/arity/type claims
+are downgraded to the qualified method name; codemaps remain unchanged source evidence. The same
+gate covers repository architecture, combined architecture, and summary while preserving the
+publisher's atomic no-partial-save boundary.
 
 V353's database trigger enforces project/org and result/project coherence. SUCCEEDED jobs retain a
 RESTRICT reference to their architecture proof; terminal-job retention must remove the job before
@@ -69,10 +76,33 @@ transitions are short database writes.
 ## Generated project documents
 
 `ProjectDocGeneratorService` generates `EXPLANATION` and `SETUP` documents only through
-`LlmRouter.callText`. Its provider-neutral system prompts are
+`ProjectDocValidatedGeneration`, whose bounded two-attempt loop uses
+`LlmRouter.callTextStrict` on the exact resolved route and rejects truncated, unsafe, or
+deterministically invalid output before publication. Its provider-neutral system prompts are
 `prompts/project-doc-explanation.md` and `prompts/project-doc-setup.md`, assembled through
 `PromptAssembler`. Project metadata, architecture, and codemaps stay in the separately wrapped
 `PROJECT_DOC_EVIDENCE` user message.
+Concrete inline-code method signatures in generated documents are grounded only against the
+codemap sections of that evidence bundle, never against generated architecture prose; unverifiable
+contracts are reduced to method-name-only references before publication.
+Declaration co-occurrence is not call-graph or liveness proof. The EXPLANATION validator rejects
+high-confidence method/class call-edge claims (including works/interacts/collaborates/depends/uses
+euphemisms) and inactive/unused/stub/dead/unwired assertions when they name codemap symbols but
+declaration-only evidence cannot establish that behavior. Speculative hinted/placeholder/prototype/
+candidate labels are rejected only when they occur near a known symbol, avoiding unrelated prose
+such as candidate moves. Grounding runs before final validation. Unsupported prose sentences are
+deterministically replaced with a declaration-only symbol list plus the explicit evidence-limit
+note. To avoid endless semantic synonym chasing, every prose sentence containing two or more
+distinct known codemap symbols is treated as an unproven relationship regardless of its verb;
+single-symbol descriptive inventory remains unless it attributes reliance, a hinted mechanism, or
+incomplete integration (including grammatical variants). Directional Mermaid/sequence blocks are
+removed as a whole and replaced with the same non-directional note. Other content and headings
+remain in place.
+The provider retry is therefore reserved for remaining structural failures. Every EXPLANATION
+corrective retry enumerates the four
+mandatory H2 lines verbatim/exactly once and forbids renaming, deleting, merging, reordering, or
+demoting them. The validator remains as a fail-closed post-sanitization backstop, and cache hits are
+checked under the same current grounding contract before reuse.
 
 The source bundle has a hard 60,000-character ceiling. Budgeting is section-aware: architecture and
 every linked repository receive an independent water-filled share, short sections return unused
@@ -87,10 +117,15 @@ A provider `length` or `max_tokens` finish reason is `PROVIDER_OUTPUT_LIMIT`; ev
 non-complete finish reason (including safety, refusal, recitation, and content filtering) also fails
 closed. Before publication, a provider-neutral deterministic validator requires the documented
 headings, a meaningful minimum body, balanced fences, no private tool protocol, and no
-high-confidence credential material. Rejected output is neither inserted into
-`project_generated_doc` nor mirrored into the workspace. POST maps provider non-completion to 502
-and unsafe/malformed content to 422; GET and download rescan retained legacy rows before returning
-content.
+high-confidence credential material. A complete and customer-safe response that fails only this
+deterministic content contract gets at most one corrective regeneration: the validation reason is
+fed back, the full document is requested again, and the same exact provider/model plus the same
+durable execution context are reused through strict routing. Both physical calls consume the shared
+operation budget and their token usage is included in the saved document's cost fields. Truncation,
+provider non-completion, and unsafe content never retry. Nothing is inserted into
+`project_generated_doc` or mirrored into the workspace until a response validates; two malformed
+responses still fail atomically. POST maps provider non-completion to 502 and unsafe/malformed
+content to 422; GET and download rescan retained legacy rows before returning content.
 
 Provider transport runs outside a database transaction. Same-source requests share one in-flight
 future within a JVM only when provider, resolved model, actor, and confirmed authority context also
@@ -110,6 +145,7 @@ only after durable persistence.
 codemap lookup, architecture-fingerprint parsing, and the final section-aware evidence budget.
 `ProjectGeneratedDocPublisher` owns the short project-row-locked publication transaction:
 source revalidation, same-source deduplication, version assignment, save, and retention. Provider
-dispatch and customer-safety validation stay in `ProjectDocGeneratorService`, while
+dispatch and deterministic retry/shape validation stay in `ProjectDocValidatedGeneration`;
+customer-safety validation stays in `ProjectDocGeneratorService`, while
 `ProjectDocResponsePolicy` owns fail-closed provider finish-reason classification. Do not fold these
 source, publication, or response-policy responsibilities back into that service.

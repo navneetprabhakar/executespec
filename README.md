@@ -14,6 +14,12 @@ starts a new BUILD run, records `sourceRunId`, inherits the source route/project
 execution/publication policies, and initializes from a fail-closed Git-tracked workspace snapshot.
 Callers may provide `Idempotency-Key`; the route requires write access to the source run.
 
+Standalone remote `repoMode=EXISTING` runs clone `repoUrl` into the run workspace before the first
+model call and fail closed unless the checkout contains Git metadata plus a deterministic source
+inventory. Project-linked runs retain their multi-repository admission path, source-run iterations
+retain their required parent snapshot copy, and local-hands runs retain the client working-tree
+handshake.
+
 Plan-gate decisions are durable and restart-safe. V348 routes APPROVE, REJECT, and pre-approval
 CANCEL through one atomic `PlanGateDecisionService` transaction, persists byte-stable canonical
 decision evidence plus a request fingerprint, and updates gate/run/outbox state together. The
@@ -57,6 +63,12 @@ source run's host tenant while assigning the current actor as payer on BUILD ite
 server-internal finding PATCH submission resolve its active host project and active actor before
 dedupe or dispatch.
 
+The current deployment candidate advances the migration source head to V355. V354 adds
+rollout-gated operation-fenced provider-attempt admission; its default remains
+`EXECUTESPEC_LLM_OPERATION_ADMISSION_MODE=LEGACY`, so this deployment does not activate the new
+admission path. V355 adds bounded oldest-first recovery for stale streamed agent turns and never
+replays provider transport. RequirementIR also remains `LEGACY`.
+
 ## Versions
 
 | Component         | Version             | Source                                                                 |
@@ -64,7 +76,7 @@ dedupe or dispatch.
 | Project           | `2.0.0`             | [`VERSION`](VERSION), [`Version`](Version), [`pom.xml`](pom.xml) `<version>` |
 | Spring Boot       | `3.5.14`            | [`pom.xml`](pom.xml) `<parent>` (bumped from `3.3.0` by Dependabot #132, 2026-05-16) |
 | Spring AI         | `1.1.6`             | [`pom.xml`](pom.xml) `<spring-ai.version>` (BOM import)                |
-| Flyway head       | `V350`              | V350 carries host-tenant versus payer/credential identity through pipeline runs and durable LLM contexts; next V351; `requirement.ir.gate.mode` remains `LEGACY` |
+| Flyway head       | `V355`              | V354 adds rollout-gated atomic operation/attempt admission; V355 adds stale streamed-turn recovery; next V356; both operation admission and RequirementIR remain `LEGACY` |
 | Frontend          | `2.0.0`             | [`frontend/package.json`](frontend/package.json) `"version"`           |
 
 `VERSION` and `Version` are kept identical by hand; the project's own conventions reference `Version` as the source of truth. The frontend ships under the same release stamp as the backend.
@@ -92,7 +104,7 @@ ownership must be aligned explicitly before rollout.
 | Framework           | Spring Boot 3.5.14 (Web, Data JPA, Security, OAuth2 client, Mail, Thymeleaf, Actuator, AOP, Validation, Retry, Data Redis) | [`pom.xml`](pom.xml) deps 1, 5, 14–20, 30, 36–39, 60 |
 | LLM SDK             | Spring AI 1.1.6 starters for Anthropic, OpenAI, Google GenAI                        | [`pom.xml`](pom.xml) deps 2–4                                                    |
 | LLM auto-config     | Provider auto-configurations disabled in favor of manual `AgentModelConfig` beans   | [`src/main/java/com/navneet/executespec/ExecutespecApplication.java`](src/main/java/com/navneet/executespec/ExecutespecApplication.java) |
-| Database            | PostgreSQL (Cloud SQL in prod), Flyway migrations head V350                         | [`pom.xml`](pom.xml) deps 6–8, `src/main/resources/db/migration/`                 |
+| Database            | PostgreSQL (Cloud SQL in prod), Flyway migrations head V355                         | [`pom.xml`](pom.xml) deps 6–8, `src/main/resources/db/migration/`                 |
 | Cache / lock        | Redis (Lettuce), ShedLock 7.7.0                                                     | [`pom.xml`](pom.xml) deps 30–32                                                  |
 | Auth                | JJWT 0.13.0 + Spring Security OAuth2 client (Google, GitHub)                        | [`pom.xml`](pom.xml) deps 14–18                                                  |
 | Billing             | Stripe 32.1.0, Razorpay (HMAC), invoice PDFs via OpenPDF 2.0.3 + flying-saucer 9.4.0 | [`pom.xml`](pom.xml) deps 21–22, 56; HMAC via commons-codec 1.22.0 (dep 35)     |
@@ -104,7 +116,7 @@ ownership must be aligned explicitly before rollout.
 | Charts / UI         | Monaco editor 4.7, d3 7.9, recharts 2.12, framer-motion 11, lucide-react, cmdk, Radix Tabs, react-markdown + remark-gfm | [`frontend/package.json`](frontend/package.json) |
 | Frontend telemetry  | OpenTelemetry web SDK 2.7 + auto-instrumentations 0.63 + OTLP HTTP exporter; PostHog | [`frontend/package.json`](frontend/package.json), [`frontend/src/main.tsx`](frontend/src/main.tsx) |
 | Typography          | JetBrains Mono (variable) — `font-family: 'JetBrains Mono', ui-monospace, ...` for both `sans` and `mono` aliases | [`frontend/tailwind.config.ts`](frontend/tailwind.config.ts), [`frontend/src/index.css`](frontend/src/index.css) |
-| CI                  | GitHub Actions: `lint.yml` on PRs to `dev`/`main`; `deploy.yml` on push to `dev` and `benchmark` | [`.github/workflows/lint.yml`](.github/workflows/lint.yml), [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) |
+| CI                  | GitHub Actions: `lint.yml` on PRs to `dev`/`main`; `deploy.yml` on push to `dev`/`benchmark` plus manual protected `prod` dispatch | [`.github/workflows/lint.yml`](.github/workflows/lint.yml), [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) |
 | Cloud               | GCP us-east4 — single GCE VM serves prod + dev; Cloud Run for on-demand previews; Workload Identity Federation for deploy auth | [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) |
 
 Python previews resolve bounded nested application packages: a FastAPI app declared in
@@ -144,10 +156,10 @@ Gemini 3.5 Flash/3.5 Flash-Lite, native DeepSeek V4, and the surviving Fireworks
 │   ├── billing/ auth/ ratelimit/ Tier + payment + JWT + scoped SSE token paths
 │   ├── swebench/ programbench/   Cleanroom container adapters for the patch-mode pipeline
 │   ├── agentsession/             Durable CLI/VS Code agent-session protocol (V240, /api/agent/*)
-│   └── ... (77 package roots total under com.navneet.executespec)
+│   └── ... (78 package roots total under com.navneet.executespec)
 ├── src/main/resources/
 │   ├── application.yml           Single source of truth for model matrix, provider routes, pricing, failover
-│   ├── db/migration/             Flyway V*.sql (head V350; next V351; 336 source files; immutable post-apply)
+│   ├── db/migration/             Flyway V*.sql (head V355; next V356; 341 source files; immutable post-apply)
 │   ├── prompts/                  External LLM prompts (assembled by PromptAssembler)
 │   └── static/                   Vite build output served by Spring Boot
 ├── src/test/java/                Unit + ArchUnit guard tests (e.g. AccessGuardCoverageTest)
@@ -393,7 +405,18 @@ budget across architecture plus every linked repository. Each repository section
 codemap at the exact SHA captured by that architecture version; source drift fails closed. Every
 abnormal provider finish reason is rejected. Required structure, balanced code fences, secrets, and
 tool-protocol leakage are checked before save, while reads/downloads re-scan retained legacy
-documents. Provider transport runs without a database transaction; only the exact-source recheck,
+documents. EXPLANATION output also fails closed on concrete symbol-to-symbol call edges and
+inactive/unused/stub/dead-code claims, plus directional Mermaid edges, that declaration-only
+codemaps cannot prove. Relationship euphemisms such as works/interacts/collaborates/depends/uses and
+symbol-local hinted/placeholder/prototype/candidate labels are covered by the same narrow gate.
+Unsupported prose is deterministically reduced to declaration-only symbol notes before validation;
+any prose sentence containing two or more distinct known codemap symbols is conservatively treated
+as an unproven relationship regardless of verb, while single-symbol inventory remains unless it
+claims reliance, a hinted mechanism, or incomplete integration. Directional Mermaid/sequence
+blocks are replaced by a non-directional evidence-limit note. The provider retry is reserved for
+remaining structural failures, and cached output is revalidated under the same rule before reuse.
+Provider transport runs without a database
+transaction; only the exact-source recheck,
 shared project publication lock, cache recheck, version allocation, save, and pruning use a short
 transaction.
 

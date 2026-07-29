@@ -58,20 +58,58 @@ class LlmExecutionOperationPostgresIntegrationTest extends PostgresIntegrationBa
     String originalOwner = ownerFor(original, claims);
     String replacementOwner = originalOwner.equals("owner-a") ? "owner-b" : "owner-a";
 
-    // Poll through the normal lock path rather than relying on one scheduler-sensitive sleep.
-    Optional<LlmExecutionOperationClaim> replacementResult = Optional.empty();
-    for (int attempt = 0; attempt < 100 && replacementResult.isEmpty(); attempt++) {
-      Thread.sleep(10);
-      replacementResult =
-          service.claimOrResume(reference, descriptor, replacementOwner, Duration.ofSeconds(30));
+    // Observe expiry using database time. The concurrent claims use a one-second lease: long
+    // enough that the second lock waiter cannot legitimately reclaim during the one-winner
+    // assertion, but short enough to test the normal reclaim path without timestamp tampering.
+    boolean expired = false;
+    for (int attempt = 0; attempt < 400 && !expired; attempt++) {
+      expired =
+          Boolean.TRUE.equals(
+              jdbc.queryForObject(
+                  "SELECT clock_timestamp() >= lease_expires_at "
+                      + "FROM llm_execution_operation WHERE id=?",
+                  Boolean.class,
+                  original.operationId()));
+      if (!expired) Thread.sleep(5);
     }
-    LlmExecutionOperationClaim replacement = replacementResult.orElseThrow();
+    assertThat(expired).isTrue();
+    LlmExecutionOperationClaim replacement =
+        service
+            .claimOrResume(reference, descriptor, replacementOwner, Duration.ofSeconds(30))
+            .orElseThrow();
 
     assertThat(replacement.attempt()).isEqualTo(2);
     assertThat(replacement.leaseToken()).isNotEqualTo(original.leaseToken());
     assertThat(service.heartbeat(original, originalOwner, Duration.ofSeconds(30))).isFalse();
     assertThat(service.complete(original, originalOwner)).isFalse();
     assertThat(service.complete(replacement, replacementOwner)).isTrue();
+  }
+
+  @Test
+  void retryDelayIsPersistedRelativeToTheSingleDatabaseClockSample() {
+    var reference = new LlmExecutionReference(CONTEXT_ID, SCOPE);
+    var descriptor =
+        LlmExecutionOperationDescriptor.of("worker/retry-delay", "WORKER", "retry-delay-v1", 3);
+    LlmExecutionOperationClaim claim =
+        service
+            .claimOrResume(reference, descriptor, "owner-retry", Duration.ofMinutes(1))
+            .orElseThrow();
+
+    assertThat(
+            service.fail(
+                claim,
+                "owner-retry",
+                new LlmExecutionOperationService.Failure(
+                    "TRANSIENT", "retry later", true, Duration.ofMinutes(7))))
+        .isTrue();
+
+    Double persistedDelaySeconds =
+        jdbc.queryForObject(
+            "SELECT EXTRACT(EPOCH FROM (next_attempt_at - updated_at)) "
+                + "FROM llm_execution_operation WHERE id=?",
+            Double.class,
+            claim.operationId());
+    assertThat(persistedDelaySeconds).isEqualTo(420.0);
   }
 
   private Optional<LlmExecutionOperationClaim> claimAfterBarrier(
@@ -83,7 +121,7 @@ class LlmExecutionOperationPostgresIntegrationTest extends PostgresIntegrationBa
       throws InterruptedException {
     ready.countDown();
     assertThat(start.await(10, TimeUnit.SECONDS)).isTrue();
-    return service.claimOrResume(reference, descriptor, owner, Duration.ofMillis(5));
+    return service.claimOrResume(reference, descriptor, owner, Duration.ofSeconds(1));
   }
 
   private static String ownerFor(

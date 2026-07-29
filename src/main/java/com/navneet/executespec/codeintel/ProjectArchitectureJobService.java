@@ -17,7 +17,10 @@ import com.navneet.executespec.auth.entity.Project;
 import com.navneet.executespec.auth.repository.ProjectRepository;
 import com.navneet.executespec.executioncontext.LlmExecutionBudget;
 import com.navneet.executespec.executioncontext.LlmExecutionContextService;
+import com.navneet.executespec.executioncontext.LlmExecutionOperationCoordinator;
+import com.navneet.executespec.executioncontext.LlmExecutionOperationDescriptor;
 import com.navneet.executespec.executioncontext.LlmExecutionPolicyFactory;
+import com.navneet.executespec.executioncontext.LlmExecutionReference;
 import com.navneet.executespec.executioncontext.LlmExecutionScope;
 import com.navneet.executespec.project.entity.ProjectRepo;
 import com.navneet.executespec.project.repository.ProjectRepoLinkRepository;
@@ -28,6 +31,7 @@ import com.navneet.executespec.repo.ScmProvider;
 import com.navneet.executespec.router.LlmProvider;
 import com.navneet.executespec.router.ModelResolver;
 import com.navneet.executespec.router.ProjectProviderResolver;
+import com.navneet.executespec.tool.ExecutionContext;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -64,6 +68,7 @@ public class ProjectArchitectureJobService {
   private final ModelResolver modelResolver;
   private final LlmExecutionPolicyFactory executionPolicyFactory;
   private final LlmExecutionContextService executionContexts;
+  private final LlmExecutionOperationCoordinator operationCoordinator;
   private final ProjectArchitectureJobProperties properties;
   private final ObjectMapper objectMapper;
 
@@ -297,43 +302,55 @@ public class ProjectArchitectureJobService {
   ProjectArchitectureJobStore.Job bindPrepared(
       ProjectArchitectureJobStore.Lease lease, Prepared prepared) {
     ProjectArchitectureJobStore.Job job = lease.job();
-    var repoReference =
+    // A confirmation retry receives a fresh deadline. Include it in the durable context identity so
+    // the retry cannot inherit a terminal context or operation invocation from the rejected
+    // attempt.
+    String sourceIdentity =
+        architectureContextId(job.id(), prepared.digest(), job.deadlineAt().toEpochMilli());
+    var architectureReference =
         executionPolicyFactory.forProject(
             job.projectId(),
-            "project-architecture-repositories",
-            "ARCHITECTURE_JOB_REPOS",
-            job.id() + ":repos",
-            job.id() + ":repos",
-            job.requestedProvider(),
-            job.repoArchitectureModel(),
-            job.requestedByUserId(),
-            new LlmExecutionBudget(700_000L, 80_000L, 780_000L, new BigDecimal("5.00"), 48));
-    var projectReference =
-        executionPolicyFactory.forProject(
-            job.projectId(),
-            "project-architecture-combined",
-            "ARCHITECTURE_JOB_PROJECT",
-            job.id() + ":project",
-            job.id() + ":project",
+            "project-architecture",
+            "ARCHITECTURE_JOB",
+            sourceIdentity,
+            sourceIdentity,
             job.requestedProvider(),
             job.projectArchitectureModel(),
             job.requestedByUserId(),
-            new LlmExecutionBudget(300_000L, 40_000L, 340_000L, new BigDecimal("5.00"), 16));
+            new LlmExecutionBudget(1_000_000L, 120_000L, 1_120_000L, new BigDecimal("10.00"), 64));
     try {
       if (!store.bindPrepared(
           lease,
           prepared.canonicalJson(),
           prepared.digest(),
-          repoReference.contextId(),
-          projectReference.contextId())) {
+          architectureReference.contextId(),
+          architectureReference.contextId())) {
         throw new LeaseLostException();
       }
     } catch (RuntimeException bindFailure) {
-      executionContexts.requestCancellation(repoReference.scope(), repoReference.contextId());
-      executionContexts.requestCancellation(projectReference.scope(), projectReference.contextId());
+      executionContexts.requestCancellation(
+          architectureReference.scope(), architectureReference.contextId());
       throw bindFailure;
     }
     return store.get(job.id()).orElseThrow();
+  }
+
+  /**
+   * Builds the durable source/correlation identity for one architecture-job attempt.
+   *
+   * <p>The raw job UUID + 64-character source digest + deadline epoch exceeds the execution
+   * context's {@code source_id}/{@code correlation_id VARCHAR(96)} contract. Hash the complete
+   * tuple into a 128-bit key: source changes and confirmation retries remain distinct without
+   * duplicating their full evidence in constrained identity columns.
+   */
+  static String architectureContextId(UUID jobId, String sourceDigest, long deadlineEpochMillis) {
+    String identityEvidence =
+        java.util.Objects.requireNonNull(jobId, "jobId")
+            + "\u001f"
+            + java.util.Objects.requireNonNull(sourceDigest, "sourceDigest")
+            + "\u001f"
+            + deadlineEpochMillis;
+    return "architecture-job:" + sha256(identityEvidence).substring(0, 32);
   }
 
   void claimContexts(ProjectArchitectureJobStore.Job job, String owner, Duration leaseDuration) {
@@ -343,6 +360,7 @@ public class ProjectArchitectureJobService {
         .isEmpty()) {
       throw new IllegalStateException("Repository architecture execution context is not claimable");
     }
+    if (sameContext(job)) return;
     if (executionContexts
         .claim(scope, job.projectExecutionContextId(), owner, leaseDuration)
         .isEmpty()) {
@@ -355,15 +373,20 @@ public class ProjectArchitectureJobService {
   boolean heartbeatContexts(
       ProjectArchitectureJobStore.Job job, String owner, Duration leaseDuration) {
     LlmExecutionScope scope = LlmExecutionScope.customer(job.orgId());
-    return executionContexts.heartbeat(scope, job.repoExecutionContextId(), owner, leaseDuration)
-        && executionContexts.heartbeat(
-            scope, job.projectExecutionContextId(), owner, leaseDuration);
+    boolean repo =
+        executionContexts.heartbeat(scope, job.repoExecutionContextId(), owner, leaseDuration);
+    return repo
+        && (sameContext(job)
+            || executionContexts.heartbeat(
+                scope, job.projectExecutionContextId(), owner, leaseDuration));
   }
 
   void completeContexts(ProjectArchitectureJobStore.Job job, String owner) {
     LlmExecutionScope scope = LlmExecutionScope.customer(job.orgId());
     boolean repo = executionContexts.complete(scope, job.repoExecutionContextId(), owner);
-    boolean project = executionContexts.complete(scope, job.projectExecutionContextId(), owner);
+    boolean project =
+        sameContext(job)
+            || executionContexts.complete(scope, job.projectExecutionContextId(), owner);
     if (!repo || !project) {
       throw new IllegalStateException("Architecture execution contexts could not be completed");
     }
@@ -376,7 +399,84 @@ public class ProjectArchitectureJobService {
         new LlmExecutionContextService.Failure(
             code, "Architecture job ended before publication", false, null);
     executionContexts.fail(scope, job.repoExecutionContextId(), owner, failure);
-    executionContexts.fail(scope, job.projectExecutionContextId(), owner, failure);
+    if (!sameContext(job)) {
+      executionContexts.fail(scope, job.projectExecutionContextId(), owner, failure);
+    }
+  }
+
+  java.util.Optional<LlmExecutionOperationCoordinator.Lease> claimOperation(
+      ProjectArchitectureJobStore.Job job, String owner, Duration leaseDuration) {
+    return operationCoordinator.claimOrResume(
+        operationReference(job), operationDescriptor(job), owner, leaseDuration);
+  }
+
+  ExecutionContext bindOperationContext(
+      ProjectArchitectureJobStore.Job job, LlmExecutionOperationCoordinator.Lease operationLease) {
+    ExecutionContext base =
+        new ExecutionContext(
+            "project-architecture-" + job.id(),
+            "architecture-job",
+            java.nio.file.Path.of(System.getProperty("java.io.tmpdir", "/tmp"))
+                .toAbsolutePath()
+                .normalize(),
+            operationReference(job));
+    return operationCoordinator.bind(base, operationLease);
+  }
+
+  boolean heartbeatOperation(
+      LlmExecutionOperationCoordinator.Lease operationLease, Duration leaseDuration) {
+    return operationCoordinator.heartbeat(operationLease, leaseDuration);
+  }
+
+  void completeOperation(LlmExecutionOperationCoordinator.Lease operationLease) {
+    if (!operationCoordinator.complete(operationLease)) {
+      throw new IllegalStateException("Architecture logical operation could not be completed");
+    }
+  }
+
+  void terminateOperation(
+      LlmExecutionOperationCoordinator.Lease operationLease, String code, String message) {
+    if (operationLease == null) return;
+    if (operationCoordinator.acknowledgeCancellation(operationLease)) return;
+    if (!operationCoordinator.fail(operationLease, code, message, false, null)) {
+      throw new IllegalStateException("Architecture logical operation could not be terminalized");
+    }
+  }
+
+  private LlmExecutionReference operationReference(ProjectArchitectureJobStore.Job job) {
+    return new LlmExecutionReference(
+        job.repoExecutionContextId(), LlmExecutionScope.customer(job.orgId()));
+  }
+
+  private LlmExecutionOperationDescriptor operationDescriptor(ProjectArchitectureJobStore.Job job) {
+    String digest = requirePrepared(job.sourceSnapshotDigest(), "source snapshot digest");
+    String operationKey = "project-architecture:" + job.id() + ":" + digest.substring(0, 16);
+    String immutableIdentity =
+        String.join(
+            "|",
+            job.id().toString(),
+            job.projectId(),
+            digest,
+            job.deadlineAt().toString(),
+            job.requestedProvider(),
+            job.repoArchitectureModel(),
+            job.projectArchitectureModel());
+    // One provider-bearing invocation per explicit architecture-job attempt. An expired/uncertain
+    // invocation is never auto-replayed; confirmRetry creates a fresh context identity via
+    // deadline.
+    return LlmExecutionOperationDescriptor.of(
+        operationKey, "PROJECT_ARCHITECTURE", immutableIdentity, 1);
+  }
+
+  private static String requirePrepared(String value, String field) {
+    if (value == null || value.isBlank()) {
+      throw new IllegalStateException("Architecture job missing " + field);
+    }
+    return value;
+  }
+
+  private static boolean sameContext(ProjectArchitectureJobStore.Job job) {
+    return java.util.Objects.equals(job.repoExecutionContextId(), job.projectExecutionContextId());
   }
 
   /** Re-read every snapshotted revision with that link's established current credential. */
@@ -455,8 +555,15 @@ public class ProjectArchitectureJobService {
   }
 
   public boolean cancel(String projectId, UUID jobId) {
-    get(projectId, jobId);
-    return store.cancel(jobId, projectId);
+    ProjectArchitectureJobStore.Job current = get(projectId, jobId);
+    boolean cancelled = store.cancel(jobId, projectId);
+    if (cancelled
+        && current.repoExecutionContextId() != null
+        && current.sourceSnapshotDigest() != null) {
+      operationCoordinator.requestCancellation(
+          operationReference(current), operationDescriptor(current).operationKey());
+    }
+    return cancelled;
   }
 
   public ProjectArchitectureJobStore.Job confirmRetry(

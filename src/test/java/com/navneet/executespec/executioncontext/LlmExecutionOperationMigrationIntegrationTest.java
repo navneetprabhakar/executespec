@@ -57,13 +57,14 @@ class LlmExecutionOperationMigrationIntegrationTest {
   }
 
   private static void assertContract(JdbcTemplate jdbc) {
-    jdbc.update(platformContextInsert(), "llmctx_operation_test");
-    jdbc.update(platformContextInsert(), "llmctx_operation_other");
+    jdbc.update(platformContextInsert(), "llmctx_operation_test", "platform-operation-idem-test");
+    jdbc.update(platformContextInsert(), "llmctx_operation_other", "platform-operation-idem-other");
     jdbc.update(
         queuedOperationInsert(),
         "llmop_1",
         "llmctx_operation_test",
         "worker/task-1",
+        "WORKER",
         1,
         "a".repeat(64));
     jdbc.update(
@@ -104,6 +105,7 @@ class LlmExecutionOperationMigrationIntegrationTest {
                     "llmop_2",
                     "llmctx_operation_test",
                     "worker/task-1",
+                    "WORKER",
                     2,
                     "c".repeat(64)))
         .rootCause()
@@ -174,7 +176,7 @@ class LlmExecutionOperationMigrationIntegrationTest {
                         5),
                     "intent-incomplete"))
         .rootCause()
-        .hasMessageContaining("ck_llm_usage_attempt_operation_fence_complete");
+        .hasMessageContaining("operation fence references a missing operation");
 
     assertThatThrownBy(
             () ->
@@ -317,7 +319,7 @@ class LlmExecutionOperationMigrationIntegrationTest {
         + "status,max_attempts,idempotency_key,request_fingerprint) VALUES (?,"
         + "'INTERNAL_TEST','test','INTERNAL','source','correlation','PLATFORM_INTERNAL',"
         + "'platform:internal','SYSTEM','[]'::jsonb,'{}'::jsonb,'{}'::jsonb,'{}'::jsonb,"
-        + "'PROVIDER_PREFERRED',1,'QUEUED',1,'platform-operation-idem',repeat('d',64))";
+        + "'PROVIDER_PREFERRED',1,'QUEUED',1,?,repeat('d',64))";
   }
 
   private static DriverManagerDataSource dataSource(String schema) {

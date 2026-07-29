@@ -16,6 +16,7 @@ on:
         options:
           - dev
           - benchmark
+          - prod
       target_sha:
         description: 'Commit SHA to deploy (leave blank for latest)'
         required: false
@@ -35,14 +36,14 @@ env:
 
 jobs:
   build-and-deploy:
-    name: Build → Deploy (${{ (inputs.target_env || github.ref_name) == 'main' && 'prod' || (inputs.target_env || github.ref_name) == 'benchmark' && 'benchmark' || 'dev' }})
+    name: Build → Deploy (${{ (inputs.target_env == 'prod' || github.ref_name == 'main') && 'prod' || (inputs.target_env || github.ref_name) == 'benchmark' && 'benchmark' || 'dev' }})
     runs-on: ubuntu-latest
 
     # ── Environment ───────────────────
-    environment: ${{ (inputs.target_env || github.ref_name) == 'main' && 'production' || (inputs.target_env || github.ref_name) == 'benchmark' && 'benchmark' || 'development' }}
+    environment: ${{ (inputs.target_env == 'prod' || github.ref_name == 'main') && 'production' || (inputs.target_env || github.ref_name) == 'benchmark' && 'benchmark' || 'development' }}
 
     env:
-      DEPLOY_ENV:    ${{ (inputs.target_env || github.ref_name) == 'main' && 'prod' || (inputs.target_env || github.ref_name) == 'benchmark' && 'benchmark' || 'dev' }}
+      DEPLOY_ENV:    ${{ (inputs.target_env == 'prod' || github.ref_name == 'main') && 'prod' || (inputs.target_env || github.ref_name) == 'benchmark' && 'benchmark' || 'dev' }}
       TARGET_SHA:    ${{ inputs.target_sha || github.sha }}
       GCP_PROJECT:   ${{ secrets.GCP_PROJECT }}
       GCP_REGION:    ${{ secrets.GCP_REGION }}
@@ -61,6 +62,16 @@ jobs:
         with:
           ref: ${{ env.TARGET_SHA }}
           fetch-depth: 0 # Ensure we can get commit messages for Slack
+
+      - name: Resolve immutable target SHA
+        run: |
+          RESOLVED_SHA=$(git rev-parse HEAD)
+          if ! [[ "$RESOLVED_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::Checkout did not resolve to a full immutable commit SHA."
+            exit 1
+          fi
+          echo "TARGET_SHA=$RESOLVED_SHA" >> "$GITHUB_ENV"
+          echo "Resolved deploy source: $RESOLVED_SHA"
 
       # ── Java setup ────────────────────────────────────────────────────────
       - name: Set up Java ${{ env.JAVA_VERSION }}
@@ -101,6 +112,21 @@ jobs:
       - name: Build JAR (skip tests — PR-gated)
         run: mvn -B -q -DskipTests package
 
+      # Record the exact deployable bytes before any upload. The checksum file travels with the
+      # JAR and is verified on the VM before the live symlink changes.
+      - name: Record deploy artifact checksum
+        run: |
+          JAR=$(ls target/*.jar | head -1)
+          JAR_SHA256=$(sha256sum "$JAR" | awk '{print $1}')
+          JAR_BASENAME="app-${{ env.TARGET_SHA }}.jar"
+          JAR_CHECKSUM_FILE="target/${JAR_BASENAME}.sha256"
+          echo "${JAR_SHA256}  ${JAR_BASENAME}" > "$JAR_CHECKSUM_FILE"
+          echo "JAR_PATH=$JAR" >> "$GITHUB_ENV"
+          echo "JAR_SHA256=$JAR_SHA256" >> "$GITHUB_ENV"
+          echo "JAR_CHECKSUM_FILE=$JAR_CHECKSUM_FILE" >> "$GITHUB_ENV"
+          echo "Deploy artifact: ${JAR_BASENAME}" >> "$GITHUB_STEP_SUMMARY"
+          echo "SHA-256: \`${JAR_SHA256}\`" >> "$GITHUB_STEP_SUMMARY"
+
       # ── Authenticate to GCP (Workload Identity Federation — no keys) ─────
       - name: Authenticate to GCP
         uses: google-github-actions/auth@v3
@@ -136,14 +162,28 @@ jobs:
           fi
 
       # ── Upload JAR keyed by commit SHA ────────────────────────────────────
-      # JAR is stored permanently by SHA — never overwritten — full rollback history.
+      # JAR is stored by immutable source SHA. Existing objects are accepted only when their
+      # recorded digest matches the locally built candidate; a mismatch fails closed.
       - name: Upload JAR to GCS
         if: env.DEPLOY_ENV != 'benchmark'
         run: |
-          JAR=$(ls target/*.jar | head -1)
-          gsutil cp "$JAR" "$DEPLOY_BUCKET/releases/app-${{ env.TARGET_SHA }}.jar"
+          JAR_URI="$DEPLOY_BUCKET/releases/app-${{ env.TARGET_SHA }}.jar"
+          if gsutil -q stat "$JAR_URI"; then
+            RECORDED_SHA256=$(gcloud storage objects describe "$JAR_URI" \
+              --format='value(metadata.sha256)')
+            if [ "$RECORDED_SHA256" != "${{ env.JAR_SHA256 }}" ]; then
+              echo "::error::Immutable artifact collision for $JAR_URI: recorded checksum is missing or differs."
+              exit 1
+            fi
+            echo "Existing immutable artifact matches SHA-256 $RECORDED_SHA256; upload skipped."
+          else
+            gsutil \
+              -h "x-goog-if-generation-match:0" \
+              -h "x-goog-meta-sha256:${{ env.JAR_SHA256 }}" \
+              cp "${{ env.JAR_PATH }}" "$JAR_URI"
+          fi
           echo "${{ env.TARGET_SHA }}" | gsutil cp - "$DEPLOY_BUCKET/CURRENT_SHA"
-          echo "Uploaded: $DEPLOY_BUCKET/releases/app-${{ env.TARGET_SHA }}.jar"
+          echo "Ready: $JAR_URI (sha256 ${{ env.JAR_SHA256 }})"
 
       # ── Set static instance name (standalone VM — no MIG) ──────────────
       - name: Set instance name
@@ -408,6 +448,7 @@ jobs:
         run: |
           REMOTE_ENV_PATCH="/tmp/env-patch-${{ github.run_id }}-${{ github.run_attempt }}.sh"
           REMOTE_JAR="/tmp/app-${{ env.TARGET_SHA }}.jar"
+          REMOTE_CHECKSUM="${REMOTE_JAR}.sha256"
           REMOTE_SERVICE="/tmp/executespec-benchmark-${{ github.run_id }}-${{ github.run_attempt }}.service"
 
           # Upload env-patch script to the VM
@@ -419,6 +460,11 @@ jobs:
           if [ "${{ env.DEPLOY_ENV }}" = "benchmark" ]; then
             JAR=$(ls target/*.jar | head -1)
             gcloud compute scp "$JAR" ${{ env.GCE_INSTANCE_RESOLVED }}:${REMOTE_JAR} \
+              --project ${{ env.GCP_PROJECT }} \
+              --zone ${{ env.GCE_ZONE_RESOLVED }} \
+              --tunnel-through-iap \
+              --strict-host-key-checking=no
+            gcloud compute scp "${{ env.JAR_CHECKSUM_FILE }}" ${{ env.GCE_INSTANCE_RESOLVED }}:${REMOTE_CHECKSUM} \
               --project ${{ env.GCP_PROJECT }} \
               --zone ${{ env.GCE_ZONE_RESOLVED }} \
               --tunnel-through-iap \
@@ -439,14 +485,20 @@ jobs:
               set -e
               REMOTE_ENV_PATCH='${REMOTE_ENV_PATCH}'
               REMOTE_JAR='${REMOTE_JAR}'
+              REMOTE_CHECKSUM='${REMOTE_CHECKSUM}'
               REMOTE_SERVICE='${REMOTE_SERVICE}'
-              trap 'sudo rm -f \"\$REMOTE_ENV_PATCH\" \"\$REMOTE_SERVICE\"' EXIT
+              trap 'sudo rm -f \"\$REMOTE_ENV_PATCH\" \"\$REMOTE_CHECKSUM\" \"\$REMOTE_SERVICE\"' EXIT
               sudo mkdir -p /opt/app/releases
               if [ '${{ env.DEPLOY_ENV }}' = 'benchmark' ]; then
                 sudo mv \"\$REMOTE_JAR\" /opt/app/releases/app-${{ env.TARGET_SHA }}.jar
+                sudo mv \"\$REMOTE_CHECKSUM\" /opt/app/releases/app-${{ env.TARGET_SHA }}.jar.sha256
               else
                 sudo gsutil cp $DEPLOY_BUCKET/releases/app-${{ env.TARGET_SHA }}.jar /opt/app/releases/
+                echo '${{ env.JAR_SHA256 }}  app-${{ env.TARGET_SHA }}.jar' \
+                  | sudo tee /opt/app/releases/app-${{ env.TARGET_SHA }}.jar.sha256 >/dev/null
               fi
+              cd /opt/app/releases
+              sudo sha256sum -c app-${{ env.TARGET_SHA }}.jar.sha256
               sudo bash \"\$REMOTE_ENV_PATCH\" '${{ env.APP_PUBLIC_URL }}' '${{ env.DEPLOY_BUCKET_PREFIX }}-${{ env.DEPLOY_ENV }}-deploy' '${{ env.DEPLOY_ENV }}'
               sudo ln -sf /opt/app/releases/app-${{ env.TARGET_SHA }}.jar /opt/app/app.jar
               echo '${{ env.TARGET_SHA }}' | sudo tee /opt/app/RUNNING_SHA
