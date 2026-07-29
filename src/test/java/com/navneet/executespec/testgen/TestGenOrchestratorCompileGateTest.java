@@ -58,7 +58,14 @@ class TestGenOrchestratorCompileGateTest {
     when(tasks.findByTestPlanIdAndStatus(7L, TestTaskStatus.FAILED)).thenReturn(List.of());
 
     TestPlannerAgent planner = mock(TestPlannerAgent.class);
-    when(planner.planTests(any(), any(), any(), anyBoolean(), anyBoolean())).thenReturn(plan);
+    when(planner.planTests(
+            any(),
+            any(),
+            any(),
+            anyBoolean(),
+            anyBoolean(),
+            any(com.navneet.executespec.tool.ExecutionContext.class)))
+        .thenReturn(plan);
 
     TestGenerationAdmissionService admission = mock(TestGenerationAdmissionService.class);
     when(admission.assess(RUN_ID, false, false))
@@ -73,6 +80,28 @@ class TestGenOrchestratorCompileGateTest {
     when(admission.targetExists(any(), any())).thenReturn(true);
 
     ApplicationEventPublisher events = mock(ApplicationEventPublisher.class);
+    var operationService =
+        mock(com.navneet.executespec.executioncontext.LlmExecutionOperationService.class);
+    var policyFactory =
+        mock(com.navneet.executespec.executioncontext.LlmExecutionPolicyFactory.class);
+    var reference =
+        new com.navneet.executespec.executioncontext.LlmExecutionReference(
+            "ctx-testgen",
+            com.navneet.executespec.executioncontext.LlmExecutionScope.customer("org-test"));
+    var claim =
+        new com.navneet.executespec.executioncontext.LlmExecutionOperationClaim(
+            reference, "op-testgen", 1, 1, java.util.UUID.randomUUID());
+    when(policyFactory.forRun(RUN_ID)).thenReturn(reference);
+    when(operationService.claimOrResume(any(), any(), any(), any()))
+        .thenReturn(java.util.Optional.of(claim));
+    when(operationService.heartbeat(any(), any(), any())).thenReturn(true);
+    when(operationService.complete(any(), any())).thenReturn(true);
+    var operationLifecycle =
+        new com.navneet.executespec.integration.RunLlmOperationLifecycleService(
+            mock(com.navneet.executespec.state.repository.PipelineRunRepository.class),
+            policyFactory,
+            new com.navneet.executespec.executioncontext.LlmExecutionOperationCoordinator(
+                operationService));
 
     TestGenOrchestrator orchestrator =
         new TestGenOrchestrator(
@@ -90,11 +119,14 @@ class TestGenOrchestratorCompileGateTest {
             mock(ApiSurfaceExtractor.class),
             mock(com.navneet.executespec.harness.WorkspaceInitService.class),
             admission,
+            operationLifecycle,
             mock(ObjectProvider.class));
 
     orchestrator.runTestGenPipeline(RUN_ID, "build alpha", "{}");
 
     assertEquals(TestPlanStatus.FAILED, plan.getStatus());
+    verify(operationService).claimOrResume(any(), any(), any(), any());
+    verify(operationService).complete(any(), any());
     verify(events, never()).publishEvent(any(TestsReadyEvent.class));
     verify(gate, never()).markCompiled(any());
   }

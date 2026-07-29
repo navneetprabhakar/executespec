@@ -3,6 +3,7 @@ import {Link, useNavigate, useParams} from 'react-router-dom';
 import {PrCommentInbox} from '@/signal/components/PrCommentInbox';
 import {humanStatusReason, providerLabel} from '@/signal/lib/runUtils';
 import {RunTimeline} from '@/ide/RunTimeline';
+import {RunTechnicalDetails} from '@/ide/RunTechnicalDetails';
 import {LoadError} from '@/ide/LoadError';
 import {toLoadFailure, type LoadFailure} from '@/lib/loadState';
 import IdeRunScreens from '@/ide/IdeRunScreens';
@@ -47,6 +48,11 @@ import {
   continuationApprovalCandidate,
   continuationApprovalReason,
   countProducedWorkspaceFiles,
+  customerContinuationSummary,
+  customerLimitSummary,
+  customerStepSummary,
+  customerStepStatusLabel,
+  customerStepTitle,
   evidenceKind,
   emptyCodeTabMessage,
   fileCountSummary,
@@ -1970,13 +1976,43 @@ export default function IdeRunResult() {
                     {goalDecisionHelp(effectiveRunGoal.recommendedDecision)}
                   </div>
                 )}
-                {effectiveRunGoal.reason && (
-                  <div style={{fontSize: 13, marginTop: 8}}>{effectiveRunGoal.reason}</div>
-                )}
-                {effectiveRunGoal.recommendedNextStep && (
-                  <div style={{fontSize: 12, marginTop: 8, color: 'var(--ide-fg-muted)'}}>
-                    Next: {effectiveRunGoal.recommendedNextStep}
-                  </div>
+                {(effectiveRunGoal.reason ||
+                  effectiveRunGoal.recommendedNextStep ||
+                  effectiveRunGoal.evidence?.length ||
+                  effectiveRunGoal.incompleteItems?.length ||
+                  effectiveRunGoal.risks?.length) && (
+                  <RunTechnicalDetails style={{marginTop: 10}}>
+                    {effectiveRunGoal.reason && (
+                      <div>
+                        <strong>Recorded reason:</strong> {effectiveRunGoal.reason}
+                      </div>
+                    )}
+                    {effectiveRunGoal.recommendedNextStep && (
+                      <div>
+                        <strong>Recorded next step:</strong> {effectiveRunGoal.recommendedNextStep}
+                      </div>
+                    )}
+                    {!!effectiveRunGoal.incompleteItems?.length && (
+                      <div>
+                        <strong>Incomplete:</strong> {effectiveRunGoal.incompleteItems.join(' · ')}
+                      </div>
+                    )}
+                    {!!effectiveRunGoal.risks?.length && (
+                      <div>
+                        <strong>Risks:</strong> {effectiveRunGoal.risks.join(' · ')}
+                      </div>
+                    )}
+                    {!!effectiveRunGoal.evidence?.length && (
+                      <div>
+                        <strong>Evidence:</strong>
+                        <ul style={{margin: '4px 0 0', paddingLeft: 18}}>
+                          {effectiveRunGoal.evidence.map((item, idx) => (
+                            <li key={`${idx}:${item}`}>{item}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </RunTechnicalDetails>
                 )}
               </div>
             )}
@@ -1998,11 +2034,15 @@ export default function IdeRunResult() {
               <div className='ide-card' style={{padding: 0}}>
                 {run.tasks.map((t, i) => {
                   const taskComplete = t.status === 'COMPLETE' || t.status === 'SUCCESS';
-                  const goalLine = taskComplete ? null : taskGoalLine(t);
+                  const safeTitle = customerStepTitle(t, i);
+                  const safeSummary = customerStepSummary(t);
+                  const continuationSummary = customerContinuationSummary(t);
+                  const limitSummary = customerLimitSummary(t);
+                  const goalLine = taskGoalLine(t);
                   const continuationActionLine = latestContinuationAction(t);
-                  const budgetFacts = taskComplete ? [] : taskBudgetFacts(t);
-                  const incompleteItems = taskComplete ? [] : t.goalDoneness?.incompleteItems || [];
-                  const risks = taskComplete ? [] : t.goalDoneness?.risks || [];
+                  const budgetFacts = taskBudgetFacts(t);
+                  const incompleteItems = t.goalDoneness?.incompleteItems || [];
+                  const risks = t.goalDoneness?.risks || [];
                   const approvalCandidate = continuationApprovalCandidate(t);
                   const approvalReason = continuationApprovalReason(t);
                   const policy = t.continuationDecision?.policy;
@@ -2033,9 +2073,9 @@ export default function IdeRunResult() {
                                 : 'warn'
                           }
                         >
-                          {t.status}
+                          {customerStepStatusLabel(t.status)}
                         </IdeBadge>
-                        <span style={{flex: 1, fontWeight: 500}}>{t.title}</span>
+                        <span style={{flex: 1, fontWeight: 500}}>{safeTitle}</span>
                         <span style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}>
                           {fmtDur(t.durationMs)}
                         </span>
@@ -2063,7 +2103,7 @@ export default function IdeRunResult() {
                             className='ide-btn primary'
                             style={{padding: '3px 8px'}}
                             disabled={busy === `continuation-${t.taskId}`}
-                            title={`Approve continuation with ${approvalCandidate.provider}/${approvalCandidate.model}`}
+                            title='Approve the recommended recovery'
                             onClick={() =>
                               action(
                                 `continuation-${t.taskId}`,
@@ -2076,64 +2116,85 @@ export default function IdeRunResult() {
                               )
                             }
                           >
-                            Approve upgrade
+                            Approve recovery
                           </button>
                         )}
                       </div>
-                      {t.failureReason && (
-                        <div style={{fontSize: 12, color: 'var(--ide-red)', marginTop: 4}}>
-                          {t.failureReason}
-                        </div>
-                      )}
-                      <div style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 4}}>
-                        {(t.provider || '').toLowerCase()} · {t.model || t.assignedModel} ·{' '}
-                        {num(t.inputTokens + t.outputTokens)} tok
+                      <div style={{fontSize: 12, color: 'var(--ide-fg-muted)', marginTop: 6}}>
+                        {safeSummary}
                       </div>
-                      {goalLine && (
-                        <div style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 4}}>
-                          {goalLine}
-                        </div>
-                      )}
-                      {approvalReason && (
+                      {continuationSummary && (
                         <div style={{fontSize: 11, color: 'var(--ide-amber)', marginTop: 4}}>
-                          {approvalReason}
+                          {continuationSummary}
                         </div>
                       )}
-                      {continuationActionLine && (
-                        <div style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 4}}>
-                          {continuationActionLine}
+                      {limitSummary && (
+                        <div style={{fontSize: 11, color: 'var(--ide-amber)', marginTop: 4}}>
+                          {limitSummary}
                         </div>
                       )}
-                      {!taskComplete && t.goalDoneness?.recommendedNextStep && (
-                        <div style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 4}}>
-                          Next: {t.goalDoneness.recommendedNextStep}
+                      <RunTechnicalDetails style={{marginTop: 8}}>
+                        {safeTitle !== t.title && (
+                          <div>
+                            <strong>Planner step:</strong> {t.title}
+                          </div>
+                        )}
+                        {t.objective && (
+                          <div>
+                            <strong>Objective:</strong> {t.objective}
+                          </div>
+                        )}
+                        {t.failureReason && (
+                          <div style={{color: 'var(--ide-red)'}}>
+                            <strong>Failure:</strong> {t.failureReason}
+                          </div>
+                        )}
+                        <div className='ide-mono'>
+                          Route: {(t.provider || 'unknown').toLowerCase()} ·{' '}
+                          {t.model || t.assignedModel || 'unknown'} ·{' '}
+                          {num(t.inputTokens + t.outputTokens)} tokens
                         </div>
-                      )}
-                      {showModelRanking && policy && (
-                        <details
-                          style={{
-                            border: '1px solid var(--ide-border)',
-                            borderRadius: 6,
-                            padding: '7px 8px',
-                            marginTop: 8,
-                            fontSize: 11,
-                            color: 'var(--ide-fg-muted)',
-                          }}
-                        >
-                          <summary
+                        {goalLine && <div>{goalLine}</div>}
+                        {approvalReason && (
+                          <div style={{color: 'var(--ide-amber)'}}>{approvalReason}</div>
+                        )}
+                        {continuationActionLine && <div>{continuationActionLine}</div>}
+                        {!taskComplete && t.goalDoneness?.recommendedNextStep && (
+                          <div>Recorded next step: {t.goalDoneness.recommendedNextStep}</div>
+                        )}
+                        {t.goalDoneness?.reason && (
+                          <div>Recorded reason: {t.goalDoneness.reason}</div>
+                        )}
+                        {showModelRanking && policy && (
+                          <div
                             style={{
-                              cursor: 'pointer',
-                              color: 'var(--ide-fg-bright)',
+                              border: '1px solid var(--ide-border)',
+                              borderRadius: 6,
+                              padding: '7px 8px',
                             }}
                           >
-                            Routing diagnostics
-                          </summary>
-                          <div style={{display: 'grid', gap: 6, marginTop: 7}}>
-                            <div>{modelRankingLabel(policy.rankingPolicy)}</div>
-                            {rankingDetails.length > 0 && <div>{rankingDetails.join(' · ')}</div>}
-                            {rejectedRankingCount > 0 && (
-                              <div>{rejectedRankingCount} below quality bar</div>
-                            )}
+                            <div
+                              style={{
+                                display: 'flex',
+                                gap: 8,
+                                alignItems: 'center',
+                                flexWrap: 'wrap',
+                                marginBottom: 5,
+                              }}
+                            >
+                              <span style={{color: 'var(--ide-fg-bright)'}}>
+                                Model route choice
+                              </span>
+                              <span className='ide-mono'>
+                                {modelRankingLabel(policy.rankingPolicy)}
+                              </span>
+                              {rankingDetails.map((detail) => (
+                                <span key={detail}>{detail}</span>
+                              ))}
+                              {rejectedRankingCount > 0 && (
+                                <span>{rejectedRankingCount} below quality bar</span>
+                              )}
+                            </div>
                             <div style={{display: 'grid', gap: 4}}>
                               {rankingCandidates.map((candidate, idx) => (
                                 <div
@@ -2153,83 +2214,70 @@ export default function IdeRunResult() {
                               ))}
                             </div>
                           </div>
-                        </details>
-                      )}
-                      {budgetFacts.length > 0 && (
-                        <div
-                          style={{
-                            display: 'grid',
-                            gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
-                            gap: 6,
-                            marginTop: 8,
-                          }}
-                        >
-                          {budgetFacts.map((fact) => (
-                            <div
-                              key={fact.k}
-                              style={{
-                                border: '1px solid var(--ide-border)',
-                                borderRadius: 6,
-                                padding: '6px 8px',
-                                minWidth: 0,
-                              }}
-                            >
+                        )}
+                        {budgetFacts.length > 0 && (
+                          <div
+                            style={{
+                              display: 'grid',
+                              gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
+                              gap: 6,
+                            }}
+                          >
+                            {budgetFacts.map((fact) => (
                               <div
+                                key={fact.k}
                                 style={{
-                                  fontSize: 10,
-                                  color: 'var(--ide-fg-muted)',
-                                  textTransform: 'uppercase',
+                                  border: '1px solid var(--ide-border)',
+                                  borderRadius: 6,
+                                  padding: '6px 8px',
+                                  minWidth: 0,
                                 }}
                               >
-                                {fact.k}
+                                <div style={{fontSize: 10, textTransform: 'uppercase'}}>
+                                  {fact.k}
+                                </div>
+                                <div className='ide-mono'>{fact.v}</div>
                               </div>
-                              <div
-                                className='ide-mono'
-                                style={{
-                                  fontSize: 11,
-                                  color: 'var(--ide-fg)',
-                                  overflowWrap: 'anywhere',
-                                }}
-                              >
-                                {fact.v}
+                            ))}
+                          </div>
+                        )}
+                        {(incompleteItems.length > 0 || risks.length > 0) && (
+                          <div
+                            style={{
+                              display: 'grid',
+                              gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+                              gap: 8,
+                            }}
+                          >
+                            {incompleteItems.length > 0 && (
+                              <div>
+                                <div style={{color: 'var(--ide-fg-bright)'}}>Incomplete</div>
+                                {incompleteItems.map((item, idx) => (
+                                  <div key={`${idx}:${item}`}>- {item}</div>
+                                ))}
                               </div>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                      {(incompleteItems.length > 0 || risks.length > 0) && (
-                        <div
-                          style={{
-                            display: 'grid',
-                            gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-                            gap: 8,
-                            marginTop: 8,
-                            fontSize: 11,
-                            color: 'var(--ide-fg-muted)',
-                          }}
-                        >
-                          {incompleteItems.length > 0 && (
-                            <div>
-                              <div style={{color: 'var(--ide-fg-bright)', marginBottom: 3}}>
-                                Remaining
+                            )}
+                            {risks.length > 0 && (
+                              <div>
+                                <div style={{color: 'var(--ide-fg-bright)'}}>Risks</div>
+                                {risks.map((risk, idx) => (
+                                  <div key={`${idx}:${risk}`}>- {risk}</div>
+                                ))}
                               </div>
-                              {incompleteItems.slice(0, 3).map((item) => (
-                                <div key={item}>- {item}</div>
+                            )}
+                          </div>
+                        )}
+                        {!!t.goalDoneness?.evidence?.length && (
+                          <div>
+                            <div style={{color: 'var(--ide-fg-bright)'}}>Evidence</div>
+                            <ul style={{margin: '4px 0 0', paddingLeft: 18}}>
+                              {t.goalDoneness.evidence.map((item, idx) => (
+                                <li key={`${idx}:${item}`}>{item}</li>
                               ))}
-                            </div>
-                          )}
-                          {risks.length > 0 && (
-                            <div>
-                              <div style={{color: 'var(--ide-fg-bright)', marginBottom: 3}}>
-                                Risks
-                              </div>
-                              {risks.slice(0, 3).map((risk) => (
-                                <div key={risk}>- {risk}</div>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      )}
+                            </ul>
+                          </div>
+                        )}
+                      </RunTechnicalDetails>
                     </div>
                   );
                 })}

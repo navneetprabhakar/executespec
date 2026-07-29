@@ -29,11 +29,10 @@ import com.navneet.executespec.router.ProjectProviderResolver;
 import com.navneet.executespec.router.ResolvedModel;
 import com.navneet.executespec.security.GeneratedSecretScanner;
 
+import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
-import org.springframework.ai.chat.metadata.Usage;
 import org.springframework.ai.chat.model.ChatResponse;
-import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -81,7 +80,6 @@ public class ProjectDocGeneratorService {
   private final com.navneet.executespec.cost.RunCostTracker costTracker;
 
   static final int SOURCE_BUNDLE_CHAR_LIMIT = 60_000;
-
   public static final String OUTPUT_LIMIT_REASON = "PROVIDER_OUTPUT_LIMIT";
   public static final String STALE_SOURCE_REASON = "STALE_SOURCE";
   public static final String UNSAFE_CONTENT_REASON = "UNSAFE_GENERATED_CONTENT";
@@ -288,6 +286,10 @@ public class ProjectDocGeneratorService {
       throw new IllegalStateException("project has no architecture doc yet — call /analyse first");
     }
     ProjectArchitectureDoc arch = archOpt.get();
+    String userPayload = buildSourceBundle(project, arch);
+    String codemapEvidence = GeneratedSignatureGrounding.codemapEvidence(userPayload);
+    java.util.Set<String> sourceRepositories =
+        sourceBundleBuilder.parseSourceShas(arch.getGeneratedFromShas()).keySet();
 
     // PR-Q (2026-05-13) — short-circuit cache. Same idea as PR-K's fingerprint short-circuit
     // on combined-arch regen, one layer up: if the most recent doc of this type was generated
@@ -302,7 +304,12 @@ public class ProjectDocGeneratorService {
           docRepo
               .findFirstByProjectIdAndDocTypeAndSourceArchVersionAndSourceShasFingerprintOrderByVersionDesc(
                   projectId, docType, sourceArchVersion, sourceFingerprint)
-              .filter(d -> d.getContent() != null && !d.getContent().isBlank());
+              .filter(d -> d.getContent() != null && !d.getContent().isBlank())
+              .filter(
+                  d ->
+                      ProjectGeneratedDocValidator.validate(
+                              docType, d.getContent(), sourceRepositories, codemapEvidence)
+                          .isEmpty());
       if (cached.isPresent()) {
         assertSafeForCustomer(cached.get().getContent());
         log.info(
@@ -321,7 +328,6 @@ public class ProjectDocGeneratorService {
     }
     String systemPrompt = promptAssembler.assemble(promptPath(docType));
 
-    String userPayload = buildSourceBundle(project, arch);
     LlmProvider effective = provider != null ? provider : resolveProvider(project);
     ResolvedModel resolved = modelResolver.resolve("ProjectDocGeneratorService", effective);
     String exactModel = resolved.getModel();
@@ -349,7 +355,9 @@ public class ProjectDocGeneratorService {
                 systemPrompt,
                 userPayload,
                 sourceArchVersion,
-                sourceFingerprint));
+                sourceFingerprint,
+                sourceRepositories,
+                codemapEvidence));
   }
 
   private ProjectGeneratedDoc generateOnce(
@@ -363,13 +371,14 @@ public class ProjectDocGeneratorService {
       String systemPrompt,
       String userPayload,
       Integer sourceArchVersion,
-      String sourceFingerprint) {
+      String sourceFingerprint,
+      java.util.Set<String> sourceRepositories,
+      String codemapEvidence) {
     String projectId = project.getId();
-    Prompt prompt =
-        new Prompt(
-            List.of(
-                new SystemMessage(systemPrompt),
-                new UserMessage(PromptTrustBoundary.wrap("PROJECT_DOC_EVIDENCE", userPayload))));
+    List<Message> initialMessages =
+        List.of(
+            new SystemMessage(systemPrompt),
+            new UserMessage(PromptTrustBoundary.wrap("PROJECT_DOC_EVIDENCE", userPayload)));
 
     String runId = "project-doc-" + docType.name().toLowerCase() + "-" + projectId;
     if (executionPolicyFactory == null) {
@@ -388,35 +397,22 @@ public class ProjectDocGeneratorService {
                 resolved.getActualProvider().name(),
                 exactModel,
                 generatedByUser);
-    ChatResponse response =
-        llmRouter.callText(
-            resolved.providerName(),
+    ProjectDocValidatedGeneration.Result generation =
+        ProjectDocValidatedGeneration.generate(
+            llmRouter,
+            this::assertSafeForCustomer,
+            projectId,
+            docType,
+            resolved,
             exactModel,
-            prompt.getInstructions(),
             runId,
-            "project-doc-" + docType.name().toLowerCase(),
-            "generate",
-            executionReference);
-
-    if (responseWasTruncated(response)) {
-      log.warn(
-          "[{}] Refusing truncated {} document response (reason={})",
-          projectId,
-          docType,
-          OUTPUT_LIMIT_REASON);
-      throw new IncompleteGenerationException(docType);
-    }
-    ProjectDocResponsePolicy.requireComplete(response);
-    String content = response.getResult().getOutput().getText();
-    if (content == null || content.isBlank()) {
-      throw new IllegalStateException("LLM returned empty content for " + docType);
-    }
-    content = content.trim();
-    validatePublishableContent(docType, content, sourceFingerprint);
-
-    Usage usage = response.getMetadata() != null ? response.getMetadata().getUsage() : null;
-    int inTok = usage == null ? 0 : safeInt(usage.getPromptTokens());
-    int outTok = usage == null ? 0 : safeInt(usage.getCompletionTokens());
+            executionReference,
+            initialMessages,
+            sourceRepositories,
+            codemapEvidence);
+    String content = generation.content();
+    int inTok = generation.inputTokens();
+    int outTok = generation.outputTokens();
 
     // v2.6.4 (V174) — compute USD cost so the project dashboard can roll doc-gen spend up.
     double cost = costTracker.computeCost(resolved.providerName(), exactModel, inTok, outTok);
@@ -437,7 +433,7 @@ public class ProjectDocGeneratorService {
             .sourceArchVersion(sourceArchVersion)
             .sourceShasFingerprint(sourceFingerprint)
             .build();
-    ProjectGeneratedDoc doc = persistGeneratedDoc(candidate);
+    ProjectGeneratedDoc doc = persistGeneratedDoc(candidate, sourceRepositories, codemapEvidence);
 
     // Mirror to disk so the UI can use the same read path as summary.md.
     try {
@@ -458,8 +454,19 @@ public class ProjectDocGeneratorService {
     return doc;
   }
 
-  private ProjectGeneratedDoc persistGeneratedDoc(ProjectGeneratedDoc candidate) {
-    return publisher.publish(candidate);
+  private ProjectGeneratedDoc persistGeneratedDoc(
+      ProjectGeneratedDoc candidate,
+      java.util.Set<String> sourceRepositories,
+      String codemapEvidence) {
+    return publisher.publish(
+        candidate,
+        existing ->
+            ProjectGeneratedDocValidator.validate(
+                    existing.getDocType(),
+                    existing.getContent(),
+                    sourceRepositories,
+                    codemapEvidence)
+                .isEmpty());
   }
 
   private ProjectGeneratedDoc singleFlight(
@@ -501,17 +508,6 @@ public class ProjectDocGeneratorService {
     }
   }
 
-  private void validatePublishableContent(
-      DocType docType, String content, String sourceFingerprint) {
-    assertSafeForCustomer(content);
-    ProjectGeneratedDocValidator.validate(
-            docType, content, parseSourceShas(sourceFingerprint).keySet())
-        .ifPresent(
-            reason -> {
-              throw new InvalidGeneratedDocumentException(reason);
-            });
-  }
-
   /** Latest persisted doc of the given type, or empty if not yet generated. */
   public Optional<ProjectGeneratedDoc> latest(String projectId, DocType docType) {
     return docRepo.findFirstByProjectIdAndDocTypeOrderByVersionDesc(projectId, docType);
@@ -523,10 +519,6 @@ public class ProjectDocGeneratorService {
    */
   String buildSourceBundle(Project project, ProjectArchitectureDoc arch) {
     return sourceBundleBuilder.build(project, arch);
-  }
-
-  private java.util.Map<String, String> parseSourceShas(String sourceFingerprint) {
-    return sourceBundleBuilder.parseSourceShas(sourceFingerprint);
   }
 
   /**
@@ -583,9 +575,5 @@ public class ProjectDocGeneratorService {
       throw new IllegalStateException("Project provider is required for document generation");
     }
     return project.getAiProvider();
-  }
-
-  private static int safeInt(Integer i) {
-    return i == null ? 0 : i;
   }
 }

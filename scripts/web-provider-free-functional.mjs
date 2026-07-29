@@ -251,6 +251,45 @@ try {
     'A real authenticated project was created, persisted, and loaded through the protected project UI without an LLM call.',
   );
 
+  // The fixture's inert DeepSeek marker exists only to exercise provider-selectable project setup.
+  // Remove it before Compose so the real readiness endpoint has no dispatchable route.
+  await api('/api/auth/settings/ai-keys/deepseek', {
+    method: 'DELETE',
+    headers: authHeaders,
+  });
+  const composeReadinessResponse = page.waitForResponse(
+    (response) =>
+      response.request().method() === 'GET' &&
+      new URL(response.url()).pathname === '/api/v3/provider-readiness',
+    {timeout: 20_000},
+  );
+  await page.goto(`${frontend}/compose`, {waitUntil: 'domcontentloaded'});
+  const composeReadiness = await (await composeReadinessResponse).json();
+  const readinessRows = Array.isArray(composeReadiness?.providers)
+    ? composeReadiness.providers
+    : [];
+  if (readinessRows.length === 0 || readinessRows.some((row) => row?.dispatchable === true)) {
+    throw new Error(`provider-free Compose readiness drifted: ${JSON.stringify(readinessRows)}`);
+  }
+  const createPlanButton = page.getByRole('button', {name: 'Create plan', exact: true});
+  await createPlanButton.waitFor({state: 'visible', timeout: 20_000});
+  if (!(await createPlanButton.isDisabled())) {
+    throw new Error('desktop Compose enabled Create plan without a dispatchable provider');
+  }
+  pass(
+    'provider-free Compose admission',
+    'At the 1440px desktop viewport, every readiness row was non-dispatchable and Create plan remained disabled.',
+  );
+
+  // The optional CLI pass follows the browser and already relies on this inert fixture marker.
+  if (preserveProviderReadiness) {
+    await api('/api/auth/settings/ai-keys', {
+      method: 'PUT',
+      headers: {...authHeaders, 'Content-Type': 'application/json'},
+      body: JSON.stringify({deepSeekApiKey: 'web-qa-disabled-provider-key'}),
+    });
+  }
+
   // OpenRouter is deliberately an org-scoped key, but it must still be discoverable from the
   // customer-facing provider-key route that originally omitted it. Follow the shipped handoff to
   // the canonical org input without saving a credential.

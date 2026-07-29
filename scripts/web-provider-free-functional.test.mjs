@@ -50,6 +50,15 @@ test('project setup uses a real disposable project and guarantees cleanup', () =
   assert.match(browser, /new-project cleanup/);
 });
 
+test('desktop Compose stays disabled when no provider is dispatchable', () => {
+  assert.match(browser, /api\('\/api\/auth\/settings\/ai-keys\/deepseek'/);
+  assert.match(browser, /pathname === '\/api\/v3\/provider-readiness'/);
+  assert.match(browser, /readinessRows\.some\(\(row\) => row\?\.dispatchable === true\)/);
+  assert.match(browser, /getByRole\('button', \{name: 'Create plan', exact: true\}\)/);
+  assert.match(browser, /await createPlanButton\.isDisabled\(\)/);
+  assert.match(browser, /provider-free Compose admission/);
+});
+
 test('OpenRouter is discoverable from provider keys without writing a credential', () => {
   assert.match(browser, /page\.goto\(`\$\{frontend\}\/provider-keys`/);
   assert.match(browser, /getByRole\('link', \{name: 'Configure org key'\}\)/);

@@ -9,6 +9,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Optional;
 import java.util.Set;
@@ -35,6 +36,12 @@ import com.navneet.executespec.auth.entity.AppUser;
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.config.featureflag.FeatureFlagService;
 import com.navneet.executespec.cost.RunCostTracker;
+import com.navneet.executespec.executioncontext.LlmExecutionOperationClaim;
+import com.navneet.executespec.executioncontext.LlmExecutionOperationCoordinator;
+import com.navneet.executespec.executioncontext.LlmExecutionOperationDescriptor;
+import com.navneet.executespec.executioncontext.LlmExecutionOperationService;
+import com.navneet.executespec.executioncontext.LlmExecutionReference;
+import com.navneet.executespec.executioncontext.LlmExecutionScope;
 import com.navneet.executespec.specchat.SpecChatService;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -263,6 +270,72 @@ class SubagentExecutionServiceTest {
     verify(turns).save(persisted.capture());
     assertThat(persisted.getValue().getIntentType()).isEqualTo("SUBAGENT_VERIFIER");
     assertThat(persisted.getValue().getCostUsd()).isEqualTo(0.02);
+  }
+
+  @Test
+  void durableChildCompletesOperationOnlyAfterTurnsAndChildResultCommit() {
+    LlmExecutionOperationService operationService = mock(LlmExecutionOperationService.class);
+    LlmExecutionOperationCoordinator coordinator =
+        new LlmExecutionOperationCoordinator(operationService);
+    LlmExecutionReference reference =
+        new LlmExecutionReference("ctx-child", LlmExecutionScope.customer("org"));
+    LlmExecutionOperationClaim claim =
+        new LlmExecutionOperationClaim(reference, "llmop-child", 1, 1, java.util.UUID.randomUUID());
+    when(operationService.claimOrResume(any(), any(), any(), any())).thenReturn(Optional.of(claim));
+    when(operationService.complete(eq(claim), eq("subagent-test"))).thenReturn(true);
+    var lease =
+        coordinator
+            .claimOrResume(
+                reference,
+                LlmExecutionOperationDescriptor.of(
+                    "agent-turn", "AGENT_TURN", "child|parent-turn|objective", 1),
+                "subagent-test",
+                Duration.ofMinutes(30))
+            .orElseThrow();
+    SubagentExecutionService durable =
+        new SubagentExecutionService(
+            protocol, sessions, turns, orchestrator, chat, costs, flags, coordinator);
+    doAnswer(
+            invocation -> {
+              SpecChatService.Sink sink = invocation.getArgument(0);
+              Runnable beforeRound = invocation.getArgument(10);
+              java.util.function.Consumer<SpecChatService.DurableTurnOperation> consumer =
+                  invocation.getArgument(12);
+              consumer.accept(new SpecChatService.DurableTurnOperation(reference, lease));
+              beforeRound.run();
+              sink.token("Verified src/AuthService.java:42");
+              sink.done(1, new RunCostTracker.Snapshot(20, 10, 0, 0, 0.02, 1));
+              return null;
+            })
+        .when(chat)
+        .runDurableTurnBounded(
+            any(),
+            eq(user),
+            eq("child"),
+            eq("project"),
+            eq("run"),
+            eq("org"),
+            any(),
+            eq("anthropic"),
+            any(),
+            eq(3),
+            any(),
+            eq("parent-turn"),
+            any());
+    when(protocol.complete(eq("child"), any(), eq("user"), eq("org")))
+        .thenAnswer(
+            invocation -> {
+              Completion completion = invocation.getArgument(1);
+              return new Result(
+                  running, completion.summary(), completion.evidence(), 2, 0.02, Instant.now());
+            });
+
+    durable.execute(request, user, "org");
+
+    var order = org.mockito.Mockito.inOrder(turns, protocol, operationService);
+    order.verify(turns, org.mockito.Mockito.atLeastOnce()).save(any(AgentTurn.class));
+    order.verify(protocol).complete(eq("child"), any(), eq("user"), eq("org"));
+    order.verify(operationService).complete(claim, "subagent-test");
   }
 
   @Test

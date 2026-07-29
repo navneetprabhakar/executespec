@@ -2,6 +2,7 @@ package com.navneet.executespec.agent;
 
 import java.net.http.HttpClient;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
@@ -17,6 +18,8 @@ import com.github.benmanes.caffeine.cache.Caffeine;
 import com.navneet.executespec.config.featureflag.FeatureFlagService;
 import com.navneet.executespec.cost.RunCostTracker;
 import com.navneet.executespec.cost.RunStepUsageRecorder;
+import com.navneet.executespec.executioncontext.LlmExecutionOperationAdmissionPolicy;
+import com.navneet.executespec.executioncontext.PhysicalProviderAttemptAdmissionService;
 
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
@@ -29,6 +32,7 @@ import org.springframework.ai.chat.metadata.DefaultUsage;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.tool.ToolCallback;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
@@ -37,7 +41,6 @@ import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestClient;
 
 import lombok.Builder;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 /**
@@ -71,7 +74,6 @@ import lombok.extern.slf4j.Slf4j;
  */
 @Component
 @Slf4j
-@RequiredArgsConstructor
 public class GeminiNativeToolClient {
 
   private static final String DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com";
@@ -98,6 +100,39 @@ public class GeminiNativeToolClient {
   private final FeatureFlagService featureFlagService;
   private final RunCostTracker costTracker;
   private final RunStepUsageRecorder stepUsageRecorder;
+  private final LlmExecutionOperationAdmissionPolicy operationAdmissionPolicy;
+  private final PhysicalProviderAttemptAdmissionService physicalAttemptAdmission;
+
+  @Autowired
+  public GeminiNativeToolClient(
+      ObjectMapper objectMapper,
+      FeatureFlagService featureFlagService,
+      RunCostTracker costTracker,
+      RunStepUsageRecorder stepUsageRecorder,
+      LlmExecutionOperationAdmissionPolicy operationAdmissionPolicy,
+      PhysicalProviderAttemptAdmissionService physicalAttemptAdmission) {
+    this.objectMapper = objectMapper;
+    this.featureFlagService = featureFlagService;
+    this.costTracker = costTracker;
+    this.stepUsageRecorder = stepUsageRecorder;
+    this.operationAdmissionPolicy = operationAdmissionPolicy;
+    this.physicalAttemptAdmission = physicalAttemptAdmission;
+  }
+
+  /** Test/source compatibility: operation admission remains fail-closed LEGACY. */
+  GeminiNativeToolClient(
+      ObjectMapper objectMapper,
+      FeatureFlagService featureFlagService,
+      RunCostTracker costTracker,
+      RunStepUsageRecorder stepUsageRecorder) {
+    this(
+        objectMapper,
+        featureFlagService,
+        costTracker,
+        stepUsageRecorder,
+        new LlmExecutionOperationAdmissionPolicy("LEGACY"),
+        null);
+  }
 
   @Value("${spring.ai.google.genai.api-key:}")
   private String defaultApiKey;
@@ -167,33 +202,33 @@ public class GeminiNativeToolClient {
   }
 
   private AuditedCallResult callInternal(GeminiToolCallRequest request, AuditContext auditContext) {
+    LlmExecutionOperationAdmissionPolicy.Decision initialAdmissionDecision =
+        auditContext == null ? null : operationAdmissionPolicy.decide(auditContext.request());
+    if (initialAdmissionDecision != null && initialAdmissionDecision.rejectsBeforeTransport()) {
+      throw new IllegalStateException(
+          "Gemini call rejected by operation-admission policy: "
+              + initialAdmissionDecision.reason());
+    }
     String apiKey =
         (request.apiKey() != null && !request.apiKey().isBlank())
             ? request.apiKey()
             : defaultApiKey;
-    if (apiKey == null || apiKey.isBlank()) {
+    boolean atomicAdmission =
+        initialAdmissionDecision != null && initialAdmissionDecision.usesAtomicV1();
+    if ((apiKey == null || apiKey.isBlank()) && !atomicAdmission) {
       throw new IllegalStateException("Gemini api-key not configured (set GOOGLE_API_KEY)");
     }
-    HttpClient jdkClient = HttpClient.newBuilder().connectTimeout(CONNECT_TIMEOUT).build();
-    JdkClientHttpRequestFactory factory = new JdkClientHttpRequestFactory(jdkClient);
+    if (apiKey == null) apiKey = "";
     Duration effectiveReadTimeout =
         request.readTimeoutSeconds() != null && request.readTimeoutSeconds() > 0
             ? Duration.ofSeconds(request.readTimeoutSeconds())
             : READ_TIMEOUT;
-    factory.setReadTimeout(effectiveReadTimeout);
-    // Google explicitly recommends the header form. Keeping the key out of the URI prevents it
-    // from entering access logs, tracing attributes, proxy diagnostics and exception messages.
-    RestClient client =
-        RestClient.builder()
-            .baseUrl(baseUrl)
-            .defaultHeader("x-goog-api-key", apiKey)
-            .requestFactory(factory)
-            .build();
 
     // RL-2026-05-059 — resolve (or mint) an explicit cache for the stable system+tools prefix.
     // null = caching disabled / ineligible / mint failed → inline body (today's behaviour).
     String prefixKey = null;
     String cacheName = null;
+    String cacheApiKey = apiKey;
     if (explicitCacheEligible(request)) {
       prefixKey = explicitCachePrefixKey(request, apiKey);
       cacheName = explicitCacheNameByPrefix.getIfPresent(prefixKey);
@@ -206,12 +241,21 @@ public class GeminiNativeToolClient {
           cacheName != null,
           explicitCacheNameByPrefix.estimatedSize());
       if (cacheName == null) {
-        cacheName = createExplicitCache(client, request, apiKey, auditContext);
-        if (cacheName != null) explicitCacheNameByPrefix.put(prefixKey, cacheName);
+        MintedExplicitCache minted =
+            createExplicitCache(request, apiKey, effectiveReadTimeout, auditContext);
+        if (minted != null) {
+          cacheName = minted.name();
+          cacheApiKey = minted.apiKey();
+          prefixKey = explicitCachePrefixKey(request, minted.apiKey());
+          explicitCacheNameByPrefix.put(prefixKey, cacheName);
+        }
       }
     }
 
     ObjectNode body = buildRequestBody(request, cacheName);
+    ObjectNode inlineBody = cacheName == null ? body : buildRequestBody(request, null);
+    String cacheCredentialFingerprint =
+        cacheName == null ? null : credentialFingerprint(cacheApiKey);
     String uri = "/v1beta/models/" + request.model() + ":generateContent";
     log.info(
         "Gemini wrapper POST {} model={} tools={} cached={}",
@@ -222,7 +266,16 @@ public class GeminiNativeToolClient {
 
     PendingHttpSuccess pendingSuccess;
     try {
-      pendingSuccess = postWithRateLimitRetry(client, uri, body, auditContext, "PRIMARY");
+      pendingSuccess =
+          postWithRateLimitRetry(
+              apiKey,
+              effectiveReadTimeout,
+              uri,
+              body,
+              inlineBody,
+              cacheCredentialFingerprint,
+              auditContext,
+              "PRIMARY");
     } catch (HttpClientErrorException e) {
       // A cached prefix can expire / be GC'd server-side before our 45m client TTL; the call then
       // 4xxs. Evict + retry once inline so the run survives (fail-safe, no model/behaviour change).
@@ -233,7 +286,14 @@ public class GeminiNativeToolClient {
             e.getStatusCode());
         pendingSuccess =
             postWithRateLimitRetry(
-                client, uri, buildRequestBody(request, null), auditContext, "RETRY");
+                apiKey,
+                effectiveReadTimeout,
+                uri,
+                inlineBody,
+                inlineBody,
+                null,
+                auditContext,
+                "RETRY");
       } else {
         throw e;
       }
@@ -287,20 +347,33 @@ public class GeminiNativeToolClient {
    * 2026-04-26 hardening for the HIGH-band Gemini stall.
    */
   private PendingHttpSuccess postWithRateLimitRetry(
-      RestClient client,
+      String legacyApiKey,
+      Duration effectiveReadTimeout,
       String uri,
-      ObjectNode body,
+      ObjectNode cachedBody,
+      ObjectNode inlineBody,
+      String cacheCredentialFingerprint,
       AuditContext auditContext,
       String firstAttemptKind) {
     int attempts = 0;
     while (true) {
       attempts++;
-      RunStepUsageRecorder.AttemptHandle handle =
-          prepareAttempt(auditContext, attempts == 1 ? firstAttemptKind : "RETRY");
+      PreparedHttpAttempt attempt =
+          prepareAttempt(
+              auditContext,
+              attempts == 1 ? firstAttemptKind : "RETRY",
+              legacyApiKey,
+              effectiveReadTimeout);
+      ObjectNode body =
+          cacheCredentialFingerprint == null
+                  || cacheCredentialFingerprint.equals(credentialFingerprint(attempt.apiKey()))
+              ? cachedBody
+              : inlineBody;
       long startedAt = System.currentTimeMillis();
       try {
         JsonNode response =
-            client
+            clientFor(
+                    attempt.apiKey(), boundedReadTimeout(effectiveReadTimeout, attempt.deadline()))
                 .post()
                 .uri(uri)
                 .contentType(MediaType.APPLICATION_JSON)
@@ -308,12 +381,12 @@ public class GeminiNativeToolClient {
                 .retrieve()
                 .body(JsonNode.class);
         return new PendingHttpSuccess(
-            response, handle, Math.max(0, System.currentTimeMillis() - startedAt));
+            response, attempt.handle(), Math.max(0, System.currentTimeMillis() - startedAt));
       } catch (HttpClientErrorException.TooManyRequests e) {
         recordFailure(
             auditContext,
             new PendingHttpSuccess(
-                null, handle, Math.max(0, System.currentTimeMillis() - startedAt)),
+                null, attempt.handle(), Math.max(0, System.currentTimeMillis() - startedAt)),
             e);
         if (attempts > RATE_LIMIT_RETRIES) {
           log.error(
@@ -336,7 +409,7 @@ public class GeminiNativeToolClient {
         recordFailure(
             auditContext,
             new PendingHttpSuccess(
-                null, handle, Math.max(0, System.currentTimeMillis() - startedAt)),
+                null, attempt.handle(), Math.max(0, System.currentTimeMillis() - startedAt)),
             e);
         throw e;
       }
@@ -346,6 +419,33 @@ public class GeminiNativeToolClient {
   /** Package-private test seam; production uses an interruptible wall-clock sleep. */
   void rateLimitSleep(long sleepMs) throws InterruptedException {
     Thread.sleep(sleepMs);
+  }
+
+  private RestClient clientFor(String apiKey, Duration readTimeout) {
+    if (apiKey == null || apiKey.isBlank()) {
+      throw new IllegalStateException("Gemini api-key unavailable immediately before transport");
+    }
+    Duration connectTimeout =
+        readTimeout.compareTo(CONNECT_TIMEOUT) < 0 ? readTimeout : CONNECT_TIMEOUT;
+    HttpClient jdkClient = HttpClient.newBuilder().connectTimeout(connectTimeout).build();
+    JdkClientHttpRequestFactory factory = new JdkClientHttpRequestFactory(jdkClient);
+    factory.setReadTimeout(readTimeout);
+    // Google explicitly recommends the header form. Keeping the key out of the URI prevents it
+    // from entering access logs, tracing attributes, proxy diagnostics and exception messages.
+    return RestClient.builder()
+        .baseUrl(baseUrl)
+        .defaultHeader("x-goog-api-key", apiKey)
+        .requestFactory(factory)
+        .build();
+  }
+
+  private static Duration boundedReadTimeout(Duration configured, Instant transportDeadline) {
+    if (transportDeadline == null) return configured;
+    Duration remaining = Duration.between(Instant.now(), transportDeadline);
+    if (remaining.isZero() || remaining.isNegative()) {
+      throw new IllegalStateException("Gemini transport deadline elapsed before HTTP dispatch");
+    }
+    return remaining.compareTo(configured) < 0 ? remaining : configured;
   }
 
   private long computeBackoff(HttpClientErrorException.TooManyRequests e, int attempt) {
@@ -815,7 +915,7 @@ public class GeminiNativeToolClient {
       tools = String.valueOf(request.tools().size());
     }
     String toolMode = toolMode(request);
-    String credentialFingerprint = sha256(effectiveApiKey == null ? "" : effectiveApiKey);
+    String credentialFingerprint = credentialFingerprint(effectiveApiKey);
     return sha256(
         request.model()
             + "\u0000"
@@ -828,13 +928,20 @@ public class GeminiNativeToolClient {
             + credentialFingerprint);
   }
 
+  private String credentialFingerprint(String apiKey) {
+    return sha256(apiKey == null ? "" : apiKey);
+  }
+
   /**
    * Mint a {@code cachedContents} resource for {model, systemInstruction, tools}. Returns its
    * server name ({@code cachedContents/...}) or null on ANY failure — most commonly a 400 when the
    * prefix is below the per-model minimum cacheable token count — so the caller falls back inline.
    */
-  private String createExplicitCache(
-      RestClient client, GeminiToolCallRequest request, String apiKey, AuditContext auditContext) {
+  private MintedExplicitCache createExplicitCache(
+      GeminiToolCallRequest request,
+      String legacyApiKey,
+      Duration effectiveReadTimeout,
+      AuditContext auditContext) {
     RunStepUsageRecorder.AttemptHandle handle = null;
     long startedAt = 0;
     try {
@@ -868,10 +975,12 @@ public class GeminiNativeToolClient {
       body.put("ttl", EXPLICIT_CACHE_TTL);
       // Intent is written immediately before transport. Local body/schema failures therefore do
       // not masquerade as provider attempts, while an intent-write failure still blocks spend.
-      handle = prepareAttempt(auditContext, "CACHE_MINT");
+      PreparedHttpAttempt attempt =
+          prepareAttempt(auditContext, "CACHE_MINT", legacyApiKey, effectiveReadTimeout);
+      handle = attempt.handle();
       startedAt = System.currentTimeMillis();
       JsonNode resp =
-          client
+          clientFor(attempt.apiKey(), boundedReadTimeout(effectiveReadTimeout, attempt.deadline()))
               .post()
               .uri("/v1beta/cachedContents")
               .contentType(MediaType.APPLICATION_JSON)
@@ -886,7 +995,7 @@ public class GeminiNativeToolClient {
           null);
       if (name != null && !name.isBlank()) {
         log.info("Gemini explicit cache minted: {} (model={})", name, request.model());
-        return name;
+        return new MintedExplicitCache(name, attempt.apiKey());
       }
       return null;
     } catch (HttpClientErrorException he) {
@@ -895,24 +1004,57 @@ public class GeminiNativeToolClient {
       log.warn("Gemini explicit cache mint failed http={}", he.getStatusCode());
       return null;
     } catch (Exception e) {
+      if (handle == null
+          && auditContext != null
+          && operationAdmissionPolicy.decide(auditContext.request()).usesAtomicV1()) {
+        throw e instanceof RuntimeException runtime ? runtime : new IllegalStateException(e);
+      }
       recordFailure(auditContext, new PendingHttpSuccess(null, handle, elapsedSince(startedAt)), e);
       log.warn("Gemini explicit cache mint skipped errorClass={}", e.getClass().getSimpleName());
       return null;
     }
   }
 
-  private RunStepUsageRecorder.AttemptHandle prepareAttempt(
-      AuditContext auditContext, String attemptKind) {
-    if (auditContext == null) return null;
+  private PreparedHttpAttempt prepareAttempt(
+      AuditContext auditContext,
+      String attemptKind,
+      String legacyApiKey,
+      Duration transportTimeout) {
+    if (auditContext == null) {
+      return new PreparedHttpAttempt(null, legacyApiKey, null);
+    }
     int ordinal = auditContext.attemptOrdinal().incrementAndGet();
-    return stepUsageRecorder.prepareAttempt(
-        auditContext.request(),
-        "gemini",
-        auditContext.request().model(),
-        auditContext.keySource(),
-        ordinal,
-        attemptKind,
-        auditContext.parentAttemptId().get());
+    LlmExecutionOperationAdmissionPolicy.Decision decision =
+        operationAdmissionPolicy.decide(auditContext.request());
+    if (decision.rejectsBeforeTransport()) {
+      throw new IllegalStateException(
+          "Gemini physical attempt rejected by operation-admission policy: " + decision.reason());
+    }
+    if (decision.usesAtomicV1()) {
+      if (physicalAttemptAdmission == null) {
+        throw new IllegalStateException("Atomic Gemini attempt admission is unavailable");
+      }
+      PhysicalProviderAttemptAdmissionService.AdmittedPhysicalAttempt admitted =
+          physicalAttemptAdmission.admitChatAttempt(
+              auditContext.request(),
+              ordinal,
+              attemptKind,
+              auditContext.parentAttemptId().get(),
+              transportTimeout,
+              CONNECT_TIMEOUT);
+      return new PreparedHttpAttempt(
+          admitted.handle(), admitted.apiKey(), admitted.transportDeadline());
+    }
+    RunStepUsageRecorder.AttemptHandle handle =
+        stepUsageRecorder.prepareAttempt(
+            auditContext.request(),
+            "gemini",
+            auditContext.request().model(),
+            auditContext.keySource(),
+            ordinal,
+            attemptKind,
+            auditContext.parentAttemptId().get());
+    return new PreparedHttpAttempt(handle, legacyApiKey, null);
   }
 
   private String recordSuccess(
@@ -1040,4 +1182,9 @@ public class GeminiNativeToolClient {
 
   private record PendingHttpSuccess(
       JsonNode response, RunStepUsageRecorder.AttemptHandle handle, long latencyMs) {}
+
+  private record PreparedHttpAttempt(
+      RunStepUsageRecorder.AttemptHandle handle, String apiKey, Instant deadline) {}
+
+  private record MintedExplicitCache(String name, String apiKey) {}
 }

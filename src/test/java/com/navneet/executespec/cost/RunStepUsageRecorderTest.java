@@ -8,8 +8,11 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.nio.file.Path;
+import java.util.UUID;
 
 import com.navneet.executespec.agent.LlmRequest;
+import com.navneet.executespec.executioncontext.LlmExecutionOperationAuthority;
+import com.navneet.executespec.executioncontext.LlmExecutionOperationClaim;
 import com.navneet.executespec.executioncontext.LlmExecutionReference;
 import com.navneet.executespec.executioncontext.LlmExecutionScope;
 import com.navneet.executespec.observability.Metrics;
@@ -157,6 +160,153 @@ class RunStepUsageRecorderTest {
   }
 
   @Test
+  void draftAttemptReturnsStableUnfencedIdentityWithoutPersistenceOrAuthorityLeakage() {
+    LlmExecutionReference reference =
+        new LlmExecutionReference("llmctx-1", LlmExecutionScope.customer("org-1"));
+    UUID leaseToken = UUID.fromString("00000000-0000-0000-0000-000000000901");
+    LlmExecutionOperationAuthority authority =
+        LlmExecutionOperationAuthority.issue(
+            new LlmExecutionOperationClaim(reference, "llmop-secret", 1, 2, leaseToken),
+            "owner-secret");
+    LlmRequest request =
+        request(
+            new ExecutionContext(
+                "run-1",
+                "task-1",
+                Path.of(".").toAbsolutePath().normalize(),
+                reference,
+                authority));
+    when(attributionResolver.resolve(request))
+        .thenReturn(
+            new LlmUsageAttributionResolver.Attribution(
+                "llmctx-1",
+                "org-1",
+                "user-1",
+                "project-1",
+                null,
+                "WORKER",
+                "PIPELINE_RUN",
+                "run-1",
+                "corr-1"));
+    when(modelRegistry.chainTierFor("deepseek-v4")).thenReturn("CAPABLE");
+    when(roleSnapshotResolver.resolve("org-1", "user-1", "project-1")).thenReturn("ORG_ADMIN");
+
+    RunStepUsageRecorder.AttemptDraft draft =
+        recorder.draftAttempt(request, "deepseek", "deepseek-v4", "ORG", 2);
+
+    assertThat(draft.handle().physicalAttemptId())
+        .isEqualTo(request.usageLogicalCallId() + ":deepseek:2");
+    assertThat(draft.intent().getPhysicalAttemptId()).isEqualTo(draft.handle().physicalAttemptId());
+    assertThat(draft.intent().getLogicalCallId()).isEqualTo(draft.handle().logicalCallId());
+    assertThat(draft.intent().getAttemptOrdinal()).isEqualTo(draft.handle().attemptOrdinal());
+    assertThat(draft.intent().getLlmExecutionContextId()).isEqualTo("llmctx-1");
+    assertThat(draft.intent().getCorrelationId()).isEqualTo("corr-1");
+    assertThat(draft.intent().getHumanRoleSnapshot()).isEqualTo("ORG_ADMIN");
+    assertThat(draft.intent().getRoleProvenance()).isEqualTo("CAPTURED_AT_DISPATCH");
+    assertThat(draft.intent().getStartedAt()).isNull();
+    assertThat(draft.intent().getOperationFenceVersion()).isZero();
+    assertThat(draft.intent().getLlmExecutionOperationId()).isNull();
+    assertThat(draft.intent().getLlmExecutionOperationAttempt()).isNull();
+    assertThat(draft.intent().getLlmExecutionLeaseToken()).isNull();
+    assertThat(draft.intent().getOperationNotReclaimBefore()).isNull();
+    assertThat(draft.intent().getTransportDeadlineAt()).isNull();
+    assertThat(draft.toString())
+        .doesNotContain(
+            "llmExecutionOperationAuthority",
+            "llmop-secret",
+            leaseToken.toString(),
+            "owner-secret",
+            "REDACTED");
+    verify(intentRepository, never()).save(any());
+    verify(metrics, never()).recordLlmUsagePersistence("STARTED", "ok");
+  }
+
+  @Test
+  void capabilityDraftPreservesGovernedAttributionWithoutPersistenceOrApplicationTime() {
+    LlmExecutionReference reference =
+        new LlmExecutionReference("llmctx-embed", LlmExecutionScope.customer("org-1"));
+    when(attributionResolver.resolve(reference))
+        .thenReturn(
+            new LlmUsageAttributionResolver.Attribution(
+                "llmctx-embed",
+                "org-1",
+                "user-1",
+                "project-1",
+                null,
+                "projectdocumentembedding",
+                "PROJECT_DOCUMENT",
+                "doc-1",
+                "corr-embed"));
+    when(modelRegistry.chainTierFor("text-embedding-3-small")).thenReturn("EMBEDDING");
+    when(roleSnapshotResolver.resolve("org-1", "user-1", "project-1")).thenReturn("DEVELOPER");
+
+    RunStepUsageRecorder.AttemptDraft draft =
+        recorder.draftCapabilityAttempt(
+            reference,
+            "embedding:doc-1",
+            "batch-1",
+            "ProjectDocumentEmbedding",
+            "embedding.batch",
+            "openai",
+            "text-embedding-3-small",
+            "ORG",
+            1);
+
+    assertThat(draft.handle().attemptKind()).isEqualTo("CAPABILITY");
+    assertThat(draft.intent().getPhysicalAttemptId()).isEqualTo(draft.handle().physicalAttemptId());
+    assertThat(draft.intent().getLlmExecutionContextId()).isEqualTo("llmctx-embed");
+    assertThat(draft.intent().getOrgId()).isEqualTo("org-1");
+    assertThat(draft.intent().getProjectId()).isEqualTo("project-1");
+    assertThat(draft.intent().getSourceType()).isEqualTo("PROJECT_DOCUMENT");
+    assertThat(draft.intent().getSourceId()).isEqualTo("doc-1");
+    assertThat(draft.intent().getHumanRoleSnapshot()).isEqualTo("DEVELOPER");
+    assertThat(draft.intent().getStartedAt()).isNull();
+    assertThat(draft.intent().getOperationFenceVersion()).isZero();
+    verify(intentRepository, never()).save(any());
+  }
+
+  @Test
+  void legacyCapabilityPrepareStillPersistsTheDraftWithAnApplicationStartTime() {
+    LlmExecutionReference reference =
+        new LlmExecutionReference("llmctx-embed", LlmExecutionScope.customer("org-1"));
+    when(attributionResolver.resolve(reference))
+        .thenReturn(
+            new LlmUsageAttributionResolver.Attribution(
+                "llmctx-embed",
+                "org-1",
+                "user-1",
+                "project-1",
+                null,
+                "projectdocumentembedding",
+                "PROJECT_DOCUMENT",
+                "doc-1",
+                "corr-embed"));
+    when(modelRegistry.chainTierFor("text-embedding-3-small")).thenReturn("EMBEDDING");
+    when(roleSnapshotResolver.resolve("org-1", "user-1", "project-1")).thenReturn("DEVELOPER");
+
+    RunStepUsageRecorder.AttemptHandle handle =
+        recorder.prepareProviderCapabilityAttempt(
+            reference,
+            "embedding:doc-1",
+            "batch-1",
+            "ProjectDocumentEmbedding",
+            "embedding.batch",
+            "openai",
+            "text-embedding-3-small",
+            "ORG",
+            1);
+
+    ArgumentCaptor<LlmUsageAttemptIntent> captor =
+        ArgumentCaptor.forClass(LlmUsageAttemptIntent.class);
+    verify(intentRepository).save(captor.capture());
+    assertThat(captor.getValue().getPhysicalAttemptId()).isEqualTo(handle.physicalAttemptId());
+    assertThat(captor.getValue().getStartedAt()).isNotNull();
+    assertThat(captor.getValue().getOperationFenceVersion()).isZero();
+    assertThat(captor.getValue().getLlmExecutionContextId()).isNull();
+    verify(metrics).recordLlmUsagePersistence("STARTED", "ok");
+  }
+
+  @Test
   void prepareAttemptWritesImmutableIntentBeforeTransport() {
     LlmRequest request = request();
     when(attributionResolver.resolve(request))
@@ -192,6 +342,8 @@ class RunStepUsageRecorderTest {
     assertThat(intent.getModelTier()).isEqualTo("CAPABLE");
     assertThat(intent.getAttemptKind()).isEqualTo("PRIMARY");
     assertThat(intent.getStartedAt()).isNotNull();
+    assertThat(intent.getOperationFenceVersion()).isZero();
+    assertThat(intent.getLlmExecutionContextId()).isNull();
     verify(metrics).recordLlmUsagePersistence("STARTED", "ok");
   }
 
@@ -221,6 +373,7 @@ class RunStepUsageRecorderTest {
     assertThat(intent.getAttemptOrdinal()).isEqualTo(3);
     assertThat(intent.getAttemptKind()).isEqualTo("RETRY");
     assertThat(intent.getParentAttemptId()).isEqualTo(request.usageLogicalCallId() + ":gemini:2");
+    assertThat(intent.getLlmExecutionContextId()).isNull();
   }
 
   @Test
@@ -299,11 +452,16 @@ class RunStepUsageRecorderTest {
   }
 
   private static LlmRequest request() {
+    return request(
+        new ExecutionContext("run-1", "task-1", Path.of(".").toAbsolutePath().normalize()));
+  }
+
+  private static LlmRequest request(ExecutionContext context) {
     return LlmRequest.builder()
         .provider("deepseek")
         .model("deepseek-v4")
         .messages(java.util.List.of(new UserMessage("test")))
-        .context(new ExecutionContext("run-1", "task-1", Path.of(".").toAbsolutePath().normalize()))
+        .context(context)
         .agentRole("WorkerAgent")
         .stepId("worker.iteration")
         .build();

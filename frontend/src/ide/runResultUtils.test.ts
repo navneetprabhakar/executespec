@@ -7,6 +7,11 @@ import {
   continuationApprovalReason,
   continuationSourceLabel,
   countProducedWorkspaceFiles,
+  customerContinuationSummary,
+  customerLimitSummary,
+  customerStepStatusLabel,
+  customerStepSummary,
+  customerStepTitle,
   evidenceKind,
   emptyCodeTabMessage,
   fileCountSummary,
@@ -33,6 +38,7 @@ import {
   modelRankingCandidateMetrics,
   modelRankingDetails,
   modelRankingLabel,
+  matchingContinuationApprovalRecorded,
   num,
   runArtifactActionAvailability,
   runChatResponseContent,
@@ -555,6 +561,141 @@ describe('runResultUtils', () => {
       'quality 93 · $4.50 per 1M tokens · p50 2s · benchmark evidence missing',
     );
     expect(modelRankingCandidateMetrics(candidate)).not.toContain('no bench');
+  });
+
+  it('keeps raw planner commands, route jargon, and token volume out of collapsed step copy', () => {
+    const task: api.TaskSummary = {
+      taskId: 'T1',
+      title: 'npm run build && npm test\nthen inspect the raw compiler output',
+      status: 'BLOCKED',
+      assignedModel: 'grok-4.20',
+      provider: 'openrouter',
+      model: 'grok-4.20',
+      inputTokens: 120_000,
+      outputTokens: 8_000,
+      durationMs: 65_000,
+      branchName: null,
+      startedAt: null,
+      completedAt: null,
+      readmeUpdated: false,
+      goalDoneness: {
+        budgetCeilingReason: 'budget, token, iteration, or wall-clock ceiling reached',
+        totalTokens: 128_000,
+        wallClockMs: 65_000,
+      },
+      continuationDecision: {
+        decision: 'STOP_BLOCKED',
+        approvalRequiredReason: 'BENCHMARK_PRIOR_REQUIRED',
+        selectedCandidate: {
+          provider: 'openrouter',
+          model: 'grok-4.20',
+          benchmarkQualityPriorAvailable: false,
+        },
+        policy: {
+          requireBenchmarkPriorForAutomaticContinuation: true,
+          maxTotalTokens: 100_000,
+        },
+        reasons: ['proposed action CHANGE_PROVIDER -> openrouter/grok-4.20'],
+      },
+    };
+
+    const collapsed = [
+      customerStepTitle(task, 0),
+      customerStepStatusLabel(task.status),
+      customerStepSummary(task),
+      customerContinuationSummary(task),
+      customerLimitSummary(task),
+    ].join(' ');
+
+    expect(customerStepTitle(task, 0)).toBe('Step 1');
+    expect(customerStepStatusLabel(task.status)).toBe('Needs input');
+    expect(customerContinuationSummary(task)).toBe(
+      'Approval is needed before ExecuteSpec can try the recommended recovery.',
+    );
+    expect(customerLimitSummary(task)).toBe('Stopped at the configured processing limit.');
+    expect(collapsed).not.toContain('npm run build');
+    expect(collapsed).not.toContain('CHANGE_PROVIDER');
+    expect(collapsed).not.toContain('openrouter');
+    expect(collapsed).not.toContain('grok-4.20');
+    expect(collapsed).not.toContain('128,000');
+    expect(collapsed).not.toContain('ceiling reached');
+  });
+
+  it('does not claim a configured limit stopped a completed step with stale ceiling evidence', () => {
+    expect(
+      customerLimitSummary({
+        status: 'COMPLETE',
+        goalDoneness: {
+          budgetCeilingReason: 'budget, token, iteration, or wall-clock ceiling reached',
+        },
+      } as api.TaskSummary),
+    ).toBeNull();
+    expect(customerStepTitle({title: 'Run `npm test` and repair failures'}, 2)).toBe(
+      'Run the project checks and repair failures',
+    );
+  });
+
+  it('does not offer or request the same recovery approval after its durable action was recorded', () => {
+    const task: api.TaskSummary = {
+      taskId: 'T-approved',
+      title: 'Recover failed build',
+      status: 'PARTIAL',
+      assignedModel: 'grok-4.20',
+      inputTokens: 0,
+      outputTokens: 0,
+      durationMs: 1000,
+      branchName: null,
+      startedAt: null,
+      completedAt: null,
+      readmeUpdated: false,
+      continuationDecision: {
+        decision: 'STOP_BLOCKED',
+        approvalRequiredReason: 'BENCHMARK_PRIOR_REQUIRED',
+        selectedCandidate: {
+          provider: 'openrouter',
+          model: 'grok-4.20',
+          benchmarkQualityPriorAvailable: false,
+        },
+        policy: {
+          requireBenchmarkPriorForAutomaticContinuation: true,
+        },
+      },
+      continuationActions: [
+        {
+          status: 'APPROVED',
+          decision: 'CHANGE_PROVIDER',
+          provider: 'OPENROUTER',
+          model: 'grok-4.20',
+        },
+        {
+          status: 'SIMULATED',
+          decision: 'CHANGE_PROVIDER',
+          provider: 'OPENROUTER',
+          model: 'grok-4.20',
+        },
+      ],
+    };
+
+    expect(matchingContinuationApprovalRecorded(task)).toBe(true);
+    expect(continuationApprovalCandidate(task)).toBeNull();
+    expect(customerContinuationSummary(task)).toBe(
+      'The approved recovery was recorded. Review its result in technical details.',
+    );
+    expect(customerContinuationSummary(task)).not.toContain('Approval is needed');
+
+    const unrelatedApproval: api.TaskSummary = {
+      ...task,
+      continuationActions: [
+        {
+          status: 'EXECUTED',
+          decision: 'CHANGE_PROVIDER',
+          provider: 'OPENAI',
+          model: 'gpt-5.4',
+        },
+      ],
+    };
+    expect(matchingContinuationApprovalRecorded(unrelatedApproval)).toBe(false);
+    expect(continuationApprovalCandidate(unrelatedApproval)).not.toBeNull();
   });
 
   it('routes run evidence questions away from fresh-run proposals', () => {

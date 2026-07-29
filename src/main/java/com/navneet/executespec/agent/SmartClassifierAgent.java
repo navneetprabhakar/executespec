@@ -169,7 +169,13 @@ public class SmartClassifierAgent {
       LlmProvider aiProvider,
       String projectMemorySnippet) {
     return classify(
-        spec, repoFullNames, projectId, projectType, aiProvider, projectMemorySnippet, null);
+        spec,
+        repoFullNames,
+        projectId,
+        projectType,
+        aiProvider,
+        projectMemorySnippet,
+        (com.navneet.executespec.executioncontext.LlmExecutionReference) null);
   }
 
   /** Production pipeline overload carrying the exact durable run policy into the verifier call. */
@@ -202,6 +208,27 @@ public class SmartClassifierAgent {
       String projectMemorySnippet,
       com.navneet.executespec.executioncontext.LlmExecutionReference executionReference,
       String usageRunId) {
+    ExecutionContext context =
+        new ExecutionContext(
+            usageRunId == null || usageRunId.isBlank()
+                ? "classify-" + (projectId == null ? "anon" : projectId)
+                : usageRunId,
+            "__planner_classifier__",
+            Paths.get(System.getProperty("java.io.tmpdir")).toAbsolutePath(),
+            executionReference);
+    return classify(
+        spec, repoFullNames, projectId, projectType, aiProvider, projectMemorySnippet, context);
+  }
+
+  /** Production overload reusing the planning phase's process-local operation authority. */
+  public ClassificationResult classify(
+      String spec,
+      List<String> repoFullNames,
+      String projectId,
+      String projectType,
+      LlmProvider aiProvider,
+      String projectMemorySnippet,
+      ExecutionContext executionContext) {
     int repoCount = repoFullNames == null ? 1 : Math.max(1, repoFullNames.size());
     String cacheKey =
         cacheKey(spec, repoFullNames, projectId, projectType, aiProvider, projectMemorySnippet);
@@ -256,9 +283,7 @@ public class SmartClassifierAgent {
                 projectMemorySnippet,
                 heuristic,
                 aiProvider,
-                projectId,
-                executionReference,
-                usageRunId),
+                executionContext),
             repoCount);
     // RR-1201 — never cache a TRANSIENT fallback. Model-resolve, prompt-assembly, empty-body,
     // JSON-parse and transport failures all return a LLM_FALLBACK_TO_HEURISTIC verdict; caching it
@@ -382,9 +407,7 @@ public class SmartClassifierAgent {
       String projectMemorySnippet,
       HeuristicVerdict heuristic,
       LlmProvider aiProvider,
-      String projectId,
-      com.navneet.executespec.executioncontext.LlmExecutionReference executionReference,
-      String usageRunId) {
+      ExecutionContext executionContext) {
     ResolvedModel resolved;
     try {
       resolved =
@@ -460,14 +483,7 @@ public class SmartClassifierAgent {
                 + "Respond with one JSON object and nothing else."));
     messages.add(new UserMessage(prompt));
 
-    ExecutionContext ctx =
-        new ExecutionContext(
-            usageRunId == null || usageRunId.isBlank()
-                ? "classify-" + (projectId == null ? "anon" : projectId)
-                : usageRunId,
-            "__planner_classifier__",
-            Paths.get(System.getProperty("java.io.tmpdir")).toAbsolutePath(),
-            executionReference);
+    ExecutionContext ctx = executionContext.child("__planner_classifier__");
 
     try {
       ChatResponse resp =

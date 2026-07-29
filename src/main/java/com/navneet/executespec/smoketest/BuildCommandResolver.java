@@ -3,6 +3,7 @@ package com.navneet.executespec.smoketest;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Optional;
+import java.util.regex.Pattern;
 
 import org.springframework.stereotype.Component;
 
@@ -29,6 +30,11 @@ import lombok.extern.slf4j.Slf4j;
 @Component
 @Slf4j
 public class BuildCommandResolver {
+
+  private static final Pattern DEPENDENCY_FREE_JAVA_SMOKE =
+      Pattern.compile(
+          "^javac(?:\\s+(?:[A-Za-z0-9_$*]+/)*[A-Za-z0-9_$*]+\\.java)+"
+              + "(?:\\s*&&\\s*java\\s+[A-Za-z_$][A-Za-z0-9_$.]*)?$");
 
   public BuildCommand resolve(Path workspaceRoot, String plannerDeclaredCommand) {
     Optional<BuildCommand> fullStack = inferDirectChildBuilds(workspaceRoot);
@@ -223,7 +229,10 @@ public class BuildCommandResolver {
       // ship only python3, bare `python` often exits 127 with "command not found".
       return Optional.of(build("python3 -m compileall -q .", 120, "inferred:python"));
     }
-    // Last-resort: loose .py files with no project manifest (e.g. single-shot "write fib.py").
+    // Last-resort: loose source files with no project manifest.
+    if (hasAnyTopLevelJavaFile(workspaceRoot)) {
+      return Optional.of(build("javac *.java", 120, "inferred:java-loose"));
+    }
     if (hasAnyPythonFile(workspaceRoot)) {
       return Optional.of(build("python3 -m compileall -q .", 60, "inferred:python-loose"));
     }
@@ -263,6 +272,11 @@ public class BuildCommandResolver {
   static boolean isRepeatableBuildSmoke(String command) {
     if (command == null || command.isBlank()) return false;
     String normalized = command.trim().toLowerCase(java.util.Locale.ROOT).replaceAll("\\s+", " ");
+    // Dependency-free Java submissions often have no Maven/Gradle marker and verify themselves
+    // with one compile followed by one no-argument test main. Accept only that closed grammar:
+    // arbitrary shell chains, compiler flags, runtime arguments and traversal paths remain
+    // rejected here, while BuildProjectTool still applies ShellSandboxPolicy before execution.
+    if (isDependencyFreeJavaSmoke(command)) return true;
     if (normalized.contains("&&")
         || normalized.contains(";")
         || normalized.contains("|")
@@ -281,6 +295,11 @@ public class BuildCommandResolver {
             + " -jar)(?: |$).*$");
   }
 
+  static boolean isDependencyFreeJavaSmoke(String command) {
+    if (command == null || command.isBlank()) return false;
+    return DEPENDENCY_FREE_JAVA_SMOKE.matcher(command.trim().replaceAll("\\s+", " ")).matches();
+  }
+
   private static boolean exists(Path root, String relative) {
     return Files.exists(root.resolve(relative));
   }
@@ -289,6 +308,16 @@ public class BuildCommandResolver {
     if (!Files.isDirectory(root)) return false;
     try (var stream = Files.walk(root, 3)) {
       return stream.anyMatch(p -> p.toString().endsWith(".py") && Files.isRegularFile(p));
+    } catch (java.io.IOException e) {
+      return false;
+    }
+  }
+
+  private static boolean hasAnyTopLevelJavaFile(Path root) {
+    if (!Files.isDirectory(root)) return false;
+    try (var stream = Files.list(root)) {
+      return stream.anyMatch(
+          path -> Files.isRegularFile(path) && path.getFileName().toString().endsWith(".java"));
     } catch (java.io.IOException e) {
       return false;
     }

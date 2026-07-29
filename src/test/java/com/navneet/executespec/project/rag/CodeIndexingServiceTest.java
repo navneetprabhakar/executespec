@@ -7,6 +7,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -23,6 +24,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
+import com.navneet.executespec.executioncontext.LlmExecutionOperationAuthority;
 import com.navneet.executespec.harness.WorkspaceInitService;
 import com.navneet.executespec.project.entity.ProjectRepo;
 import com.navneet.executespec.project.rag.CodeIndexStateStore.Completion;
@@ -116,6 +118,56 @@ class CodeIndexingServiceTest {
             eq("PROJECT_REPOSITORY"),
             eq(repo.getId().toString()),
             eq("member-1"));
+  }
+
+  @Test
+  void logicalOperationCompletesOnlyAfterDurableIndexState(@TempDir Path root) throws Exception {
+    Files.createDirectories(root.resolve("src"));
+    Files.writeString(root.resolve("src/Foo.java"), "public class Foo {}\n");
+    when(ws.runWorkspacePath(anyString())).thenReturn(root);
+    EmbeddingOperationRoot operationRoot = mock(EmbeddingOperationRoot.class);
+    EmbeddingOperationRoot.Active operation =
+        EmbeddingOperationTestFixture.active("ctx-code-index", lease.owner());
+    when(operationRoot.claim(any(), eq(lease.owner()), any(), eq(true)))
+        .thenReturn(Optional.of(operation));
+    when(operationRoot.heartbeat(eq(operation), any())).thenReturn(true);
+    when(embedder.embedForProject(
+            anyString(),
+            anyList(),
+            anyString(),
+            anyString(),
+            anyString(),
+            nullable(String.class),
+            any(),
+            nullable(LlmExecutionOperationAuthority.class)))
+        .thenReturn(List.of(new float[] {0.1f, 0.2f}));
+    CodeIndexingService service =
+        new CodeIndexingService(
+            ws,
+            chunker,
+            embedder,
+            chunks,
+            states,
+            new com.navneet.executespec.security.GeneratedSecretScanner(),
+            operationRoot,
+            4000);
+
+    assertThat(service.indexRepo("proj-1", repo, null, null, "member-1").outcome())
+        .isEqualTo(CodeIndexingService.Outcome.READY);
+
+    var order = inOrder(states, operationRoot);
+    order.verify(states).complete(eq(lease), any());
+    order.verify(operationRoot).complete(operation);
+    verify(embedder)
+        .embedForProject(
+            eq("proj-1"),
+            anyList(),
+            eq("ProjectCodeEmbedding"),
+            eq("PROJECT_REPOSITORY"),
+            eq(EmbeddingOperationIdentity.codeIndex(repo.getId(), repo.getLastSyncedSha())),
+            eq("member-1"),
+            any(),
+            nullable(LlmExecutionOperationAuthority.class));
   }
 
   @Test

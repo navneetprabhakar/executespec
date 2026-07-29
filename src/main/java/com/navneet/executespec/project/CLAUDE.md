@@ -225,6 +225,18 @@ bypassed with a raw user id.
   PLATFORM is possible only when SYSTEM/HYBRID policy explicitly authorized it; OWN_KEYS cannot
   fall through. Every physical embedding attempt writes a V283 provider/model/key-source/tenant/
   user/project/token/cost/latency success-or-failure row.
+- V354 logical-operation admission is rooted in the durable document processing attempt or the
+  `(project, repo, source SHA)` code-index identity. `EmbeddingOperationRoot` issues one-shot
+  authority, document/code workers heartbeat it with their existing DB lease, and every batch
+  carries that authority into `EmbeddingService`. Completion follows the durable chunk/READY or
+  code-index completion boundary. Lazy project-chat indexing cannot replay PARTIAL/FAILED provider
+  work; only the explicit code-index refresh may begin a new invocation. Interactive retrieval
+  queries still have no durable query-attempt row, so ENFORCED mode rejects semantic embedding
+  before transport and uses lexical fallback; SHADOW remains observational until a real query root
+  exists. Document and code-index source/correlation IDs are compact 128-bit SHA-256 projections of
+  their full immutable identities, preserving document/revision/attempt separation within the
+  execution-context columns' 96-character limit. `EmbeddingService` enforces the same limit when it
+  normalizes any remaining caller-supplied embedding source.
 - V290 adds `retrieval_mode`, `embedding_provider`, and `embedding_model` to
   `project_document`; historical READY rows are truthfully backfilled to OpenAI
   `text-embedding-3-small`. `project_document_chunk.embedding` is nullable so lexical-only chunks

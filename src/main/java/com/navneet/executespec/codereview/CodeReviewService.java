@@ -390,7 +390,7 @@ public class CodeReviewService {
               null,
               ReviewBackgroundJobStore.Status.QUEUED,
               0,
-              3,
+              1,
               Instant.now(),
               null,
               0,
@@ -411,6 +411,15 @@ public class CodeReviewService {
   /** Executes one V299 job using only its durable actor, route and target snapshots. */
   public DurableCodeReviewResult runDurableJob(
       ReviewBackgroundJobStore.Lease lease, String repoFullName, String sha, Runnable checkpoint) {
+    return runDurableJob(lease, repoFullName, sha, null, checkpoint);
+  }
+
+  public DurableCodeReviewResult runDurableJob(
+      ReviewBackgroundJobStore.Lease lease,
+      String repoFullName,
+      String sha,
+      com.navneet.executespec.tool.ExecutionContext executionContext,
+      Runnable checkpoint) {
     ReviewBackgroundJobStore.Job job = lease.job();
     AppUser actor =
         appUserRepository
@@ -438,6 +447,7 @@ public class CodeReviewService {
                     job.model(),
                     actor.getId(),
                     reference,
+                    executionContext,
                     checkpoint)));
     return result.get();
   }
@@ -451,6 +461,7 @@ public class CodeReviewService {
       String confirmedModel,
       String actorUserId,
       LlmExecutionReference confirmedActionReference,
+      com.navneet.executespec.tool.ExecutionContext executionContext,
       Runnable checkpoint) {
     UUID scanId = lease.job().subjectId();
     String projectId = lease.job().projectId();
@@ -473,6 +484,7 @@ public class CodeReviewService {
           confirmedModel,
           actorUserId,
           confirmedActionReference,
+          executionContext,
           checkpoint,
           scanId,
           projectId,
@@ -494,6 +506,7 @@ public class CodeReviewService {
       String confirmedModel,
       String actorUserId,
       LlmExecutionReference confirmedActionReference,
+      com.navneet.executespec.tool.ExecutionContext executionContext,
       Runnable checkpoint,
       UUID scanId,
       String projectId,
@@ -603,6 +616,7 @@ public class CodeReviewService {
             .model(confirmedModel)
             .actorUserId(actorUserId)
             .executionReference(confirmedActionReference)
+            .executionContext(executionContext)
             .build();
 
     CodeReviewAgent.AgentResult agentResult;

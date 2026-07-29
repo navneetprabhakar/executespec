@@ -62,6 +62,7 @@ final class PlanDocumentedCommandContractGate {
       List<String> violations) {
     Matcher command = commandPattern.matcher(evidence);
     while (command.find()) {
+      if (isNegatedCommandMention(evidence, command.start())) continue;
       String workingDirectory = workingDirectory(evidence, command.start());
       for (String rawToken : command.group(1).trim().split("\\s+")) {
         String token = cleanToken(rawToken);
@@ -274,5 +275,10 @@ final class PlanDocumentedCommandContractGate {
     return prefix.matches(
         "(?is).*(?:(?:do not|don't|never|must not)\\s+(?:use|set|document|export|read)"
             + "?|instead of)\\s+$");
+  }
+
+  private static boolean isNegatedCommandMention(String evidence, int commandStart) {
+    String prefix = evidence.substring(Math.max(0, commandStart - 64), commandStart);
+    return prefix.matches("(?is).*(?:do not|don't|never|must not)\\s+(?:use|run|invoke)\\s+$");
   }
 }

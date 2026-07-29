@@ -183,6 +183,30 @@ public class LlmExecutionOperation {
     return true;
   }
 
+  /**
+   * Extends both ownership and the reclaim fence before an external transport can start.
+   *
+   * <p>The two horizons move together to at least {@code protectedUntil}. A different worker may
+   * reclaim only after both have elapsed, so a slow-but-bounded provider request cannot overlap a
+   * replacement attempt. This mutation is valid only for the exact live owner/token/attempt.
+   */
+  boolean admitTransport(
+      String owner, UUID token, int claimedAttempt, Instant now, Instant protectedUntil) {
+    if (!hasValidLease(owner, token, claimedAttempt, now) || cancellationRequestedAt != null) {
+      return false;
+    }
+    if (protectedUntil == null || !protectedUntil.isAfter(now)) return false;
+    heartbeatAt = now;
+    if (leaseExpiresAt == null || protectedUntil.isAfter(leaseExpiresAt)) {
+      leaseExpiresAt = protectedUntil;
+    }
+    if (notReclaimBefore == null || protectedUntil.isAfter(notReclaimBefore)) {
+      notReclaimBefore = protectedUntil;
+    }
+    updatedAt = now;
+    return true;
+  }
+
   boolean complete(String owner, UUID token, int claimedAttempt, Instant now) {
     if (!hasValidLease(owner, token, claimedAttempt, now) || cancellationRequestedAt != null) {
       return false;

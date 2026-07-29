@@ -5,6 +5,7 @@ import java.util.List;
 import com.navneet.executespec.router.LlmProvider;
 import com.navneet.executespec.router.ModelResolver;
 import com.navneet.executespec.router.ResolvedModel;
+import com.navneet.executespec.tool.ExecutionContext;
 
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
@@ -50,20 +51,38 @@ public class RunTitleSummarizer {
    * @return a tightened title, or {@code null} if summarization failed
    */
   public String summarize(String spec, LlmProvider provider, String runId) {
+    return summarize(spec, provider, runId, null);
+  }
+
+  /** Reuses the planning phase's operation authority when one is already bound. */
+  public String summarize(
+      String spec, LlmProvider provider, String runId, ExecutionContext executionContext) {
     if (spec == null || spec.isBlank()) return null;
     try {
       LlmProvider effective = provider != null ? provider : LlmProvider.OPENAI;
       ResolvedModel resolved = modelResolver.resolve("RunTitleSummarizer", effective);
       List<org.springframework.ai.chat.messages.Message> messages =
           List.of(new SystemMessage(SYSTEM_PROMPT), new UserMessage(spec));
-      ChatResponse response =
-          llmRouter.callText(
-              resolved.providerName(),
-              resolved.getModel(),
-              messages,
-              runId == null ? "title-" + spec.hashCode() : runId,
-              "RunTitleSummarizer",
-              "title");
+      ChatResponse response;
+      if (executionContext != null) {
+        response =
+            llmRouter.callText(
+                resolved.providerName(),
+                resolved.getModel(),
+                messages,
+                executionContext,
+                "RunTitleSummarizer",
+                "title");
+      } else {
+        response =
+            llmRouter.callText(
+                resolved.providerName(),
+                resolved.getModel(),
+                messages,
+                runId == null ? "title-" + spec.hashCode() : runId,
+                "RunTitleSummarizer",
+                "title");
+      }
       String text = response.getResult().getOutput().getText();
       return clean(text);
     } catch (Exception e) {

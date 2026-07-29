@@ -4,6 +4,7 @@ import java.util.List;
 
 import com.navneet.executespec.deployment.preview.PreviewService;
 import com.navneet.executespec.deployment.preview.PreviewStatus;
+import com.navneet.executespec.integration.RunLlmOperationLifecycleService;
 import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
 import com.navneet.executespec.testgen.event.TestExecutionCompletedEvent;
@@ -11,6 +12,7 @@ import com.navneet.executespec.testgen.event.TestsReadyEvent;
 import com.navneet.executespec.testgen.model.*;
 import com.navneet.executespec.testgen.repository.TestPlanRepository;
 import com.navneet.executespec.testgen.repository.TestTaskRepository;
+import com.navneet.executespec.tool.ExecutionContext;
 
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.ApplicationEventPublisher;
@@ -45,6 +47,7 @@ public class TestGenOrchestrator {
   private final ApiSurfaceExtractor apiSurfaceExtractor;
   private final com.navneet.executespec.harness.WorkspaceInitService workspaceInitService;
   private final TestGenerationAdmissionService admissionService;
+  private final RunLlmOperationLifecycleService operationLifecycle;
 
   /**
    * Provider avoids the circular dependency: PreviewService → TestPreviewCoordinator →
@@ -56,6 +59,7 @@ public class TestGenOrchestrator {
    * Entry point — triggered when plan is approved. Runs on a virtual thread, parallel to code gen.
    */
   public void runTestGenPipeline(String runId, String userRequest, String planJson) {
+    RunLlmOperationLifecycleService.PhaseLease operation = null;
     try {
       log.info("[TestGen] Starting test generation pipeline for run {}", runId);
       emitTestEvent(runId, "TEST_GEN_STARTED", "Test generation pipeline started");
@@ -79,6 +83,15 @@ public class TestGenOrchestrator {
         return;
       }
 
+      operation =
+          operationLifecycle.claimAsyncTestGeneration(
+              runId,
+              admission.sourceFingerprint()
+                  + "|"
+                  + admission.workspaceFingerprint()
+                  + "|test-planner-v1");
+      ExecutionContext operationContext = operation.context();
+
       // 2. Scaffold test project (Playwright POM for static HTML, RestAssured for REST APIs)
       testProjectScaffold.scaffold(runId, isStaticHtml);
 
@@ -92,7 +105,13 @@ public class TestGenOrchestrator {
           "TEST_PLANNING_STARTED",
           "Planning integration tests (CLI: " + isCli + ", staticHtml: " + isStaticHtml + ")");
       TestPlan testPlan =
-          testPlannerAgent.planTests(runId, userRequest, conventionsDoc, isCli, isStaticHtml);
+          testPlannerAgent.planTests(
+              runId,
+              userRequest,
+              conventionsDoc,
+              isCli,
+              isStaticHtml,
+              operationContext.child("planner"));
       testPlan.setSourceFingerprint(admission.sourceFingerprint());
       testPlan.setWorkspaceFingerprint(admission.workspaceFingerprint());
       testPlan.setPromptVersion("test-planner-v1");
@@ -122,8 +141,11 @@ public class TestGenOrchestrator {
                 testPlan.getId(),
                 TestExecutionSummary.unavailable(
                     "no-valid-test-target", "No planned test target exists in admitted source")));
+        operationLifecycle.complete(operation);
+        operation = null;
         return;
       }
+      operationLifecycle.heartbeat(operation);
       emitTestEvent(
           runId,
           "TEST_PLANNING_COMPLETED",
@@ -176,7 +198,8 @@ public class TestGenOrchestrator {
                                           userRequest,
                                           isCli,
                                           isStaticHtml,
-                                          probeResults);
+                                          probeResults,
+                                          operationContext.child("worker-" + task.getId()));
                                     } catch (Exception e) {
                                       log.error(
                                           "[TestGen] Test generation failed for task {}: {}",
@@ -193,8 +216,10 @@ public class TestGenOrchestrator {
           t.join();
         } catch (InterruptedException ie) {
           Thread.currentThread().interrupt();
+          throw new IllegalStateException("Interrupted while joining test-generation workers", ie);
         }
       }
+      operationLifecycle.heartbeat(operation);
 
       // 7. Compile all generated tests together
       emitTestEvent(runId, "TEST_COMPILATION_STARTED", "Compiling generated tests");
@@ -215,19 +240,31 @@ public class TestGenOrchestrator {
                 userRequest,
                 isCli,
                 isStaticHtml,
-                apiProbeResults);
+                apiProbeResults,
+                operationContext);
         if (!survived) {
+          operationLifecycle.complete(operation);
+          operation = null;
           return;
         }
       }
 
       testPlanRepository.save(testPlan);
+      operationLifecycle.complete(operation);
+      operation = null;
 
       // 7. Publish event — tests are ready for execution
       eventPublisher.publishEvent(new TestsReadyEvent(runId, testPlan.getId()));
       log.info("[TestGen] Test generation complete for run {} — ready for execution", runId);
 
     } catch (Exception e) {
+      if (operation != null) {
+        try {
+          operationLifecycle.terminateOneShot(operation, "ASYNC_TEST_GENERATION_FAILED");
+        } catch (RuntimeException terminalFailure) {
+          e.addSuppressed(terminalFailure);
+        }
+      }
       log.error("[TestGen] Test gen pipeline failed for run {}: {}", runId, e.getMessage(), e);
       emitTestEvent(
           runId, "TEST_PIPELINE_FAILED", "Test generation pipeline failed: " + e.getMessage());
@@ -282,13 +319,21 @@ public class TestGenOrchestrator {
       String userRequest,
       boolean isCli,
       boolean isStaticHtml,
-      String apiProbeResults) {
+      String apiProbeResults,
+      ExecutionContext operationContext) {
     // Mark failed tasks and try one retry per failed test
     testCompilationGate.markFailedTasks(
         testPlan.getId(), compilationResult.failedClasses(), compilationResult.output());
 
     handleCompilationRetries(
-        runId, testPlan, conventionsDoc, userRequest, isCli, isStaticHtml, apiProbeResults);
+        runId,
+        testPlan,
+        conventionsDoc,
+        userRequest,
+        isCli,
+        isStaticHtml,
+        apiProbeResults,
+        operationContext);
 
     // Re-compile after retries
     TestCompilationGate.CompilationResult retryResult = testCompilationGate.compileTests(runId);
@@ -332,7 +377,8 @@ public class TestGenOrchestrator {
       String userRequest,
       boolean isCli,
       boolean isStaticHtml,
-      String apiProbeResults) {
+      String apiProbeResults,
+      ExecutionContext operationContext) {
     List<TestTask> failedTasks =
         testTaskRepository.findByTestPlanIdAndStatus(testPlan.getId(), TestTaskStatus.FAILED);
 
@@ -347,7 +393,8 @@ public class TestGenOrchestrator {
             task.getCompilationError(),
             isCli,
             isStaticHtml,
-            apiProbeResults);
+            apiProbeResults,
+            operationContext.child("compile-retry-" + task.getId()));
         task.setStatus(TestTaskStatus.GENERATING);
         testTaskRepository.save(task);
       } catch (Exception e) {

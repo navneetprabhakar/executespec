@@ -11,6 +11,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
+import com.navneet.executespec.executioncontext.LlmExecutionOperationCoordinator;
 import com.navneet.executespec.project.service.ProjectRepoService;
 import com.navneet.executespec.repo.ScmCapability;
 
@@ -104,6 +105,12 @@ public class ProjectArchitectureJobWorker {
     AtomicBoolean executionStarted = new AtomicBoolean(false);
     AtomicBoolean contextsClaimed = new AtomicBoolean(false);
     AtomicReference<ProjectArchitectureJobStore.Job> contextJob = new AtomicReference<>();
+    AtomicReference<LlmExecutionOperationCoordinator.Lease> operationLease =
+        new AtomicReference<>();
+    AtomicReference<String> operationFailureCode =
+        new AtomicReference<>("ARCHITECTURE_JOB_TERMINATED");
+    AtomicReference<String> operationFailureMessage =
+        new AtomicReference<>("Architecture job ended before durable publication");
     ProjectArchitectureJobStore.Lease lease = initialLease;
     ScheduledFuture<?> heartbeat = null;
     try {
@@ -118,6 +125,10 @@ public class ProjectArchitectureJobWorker {
                           && !jobs.heartbeatContexts(
                               contextJob.get(),
                               heartbeatLease.owner(),
+                              Duration.ofSeconds(properties.getLeaseSeconds())))
+                      || (operationLease.get() != null
+                          && !jobs.heartbeatOperation(
+                              operationLease.get(),
                               Duration.ofSeconds(properties.getLeaseSeconds())))) {
                     leaseLost.set(true);
                   }
@@ -148,15 +159,23 @@ public class ProjectArchitectureJobWorker {
       if (!store.beginExecuting(lease)) {
         throw new ProjectArchitectureJobService.LeaseLostException();
       }
-
       executionStarted.set(true);
+      operationLease.set(
+          jobs.claimOperation(
+                  preparedJob, lease.owner(), Duration.ofSeconds(properties.getLeaseSeconds()))
+              .orElseThrow(
+                  () ->
+                      new IllegalStateException(
+                          "Architecture logical operation is not claimable")));
+      var operationContext = jobs.bindOperationContext(preparedJob, operationLease.get());
       ProjectArchitectureJobStore.Lease executionLease = lease;
       var staged =
           architecture.stageForDurableJob(
               preparedJob,
               prepared.snapshot(),
               jobs.resolveCredentials(preparedJob),
-              () -> requireLive(leaseLost, executionLease));
+              () -> requireLive(leaseLost, executionLease),
+              operationContext);
       String stagedJson = jobs.canonicalJson(staged);
       String stagedDigest = ProjectArchitectureJobService.sha256(stagedJson);
       String qualityEvidence =
@@ -174,24 +193,28 @@ public class ProjectArchitectureJobWorker {
       ProjectArchitectureJobStore.Job stagedJob = store.get(preparedJob.id()).orElseThrow();
       requireLive(leaseLost, lease);
       if (leaseLost.get() || !jobs.sourceStillCurrent(stagedJob)) {
+        operationFailureCode.set("SOURCE_CHANGED_DURING_EXECUTION");
+        operationFailureMessage.set("Architecture source changed before publication");
         store.fail(
             lease,
             "SOURCE_CHANGED_DURING_EXECUTION",
             "Linked repository source changed while the map refresh was running.");
         return;
       }
+      // store.stage durably committed the provider's immutable business output and digest. Close
+      // the one-shot logical operation at that boundary. A later publication failure requires the
+      // existing explicit confirmation path and is never automatically replayed as provider work.
+      jobs.completeOperation(operationLease.get());
+      operationLease.set(null);
       requireLive(leaseLost, lease);
       if (leaseLost.get() || !store.beginPublishing(lease)) {
         throw new ProjectArchitectureJobService.LeaseLostException();
       }
 
-      // Provider work is finished before the canonical publication transaction begins. Terminalize
-      // both exact-route contexts first so a crash after DB publication cannot leave spend-capable
-      // contexts orphaned.
-      jobs.completeContexts(preparedJob, lease.owner());
-      contextsClaimed.set(false);
       ProjectArchitectureJobPublisher.Published published =
           publisher.promote(lease, prepared.digest());
+      jobs.completeContexts(preparedJob, lease.owner());
+      contextsClaimed.set(false);
       // No workspace/customer-visible side effect occurs before the DB promotion commits.
       try {
         publisher.publishWorkspace(preparedJob.projectId(), published);
@@ -224,11 +247,15 @@ public class ProjectArchitectureJobWorker {
           published.architecture().getVersion(),
           staged.qualityStatus());
     } catch (ProjectArchitectureJobService.LeaseLostException leaseFailure) {
+      operationFailureCode.set("ARCHITECTURE_JOB_LEASE_LOST");
+      operationFailureMessage.set("Architecture job lease or cancellation fence was lost");
       log.warn(
           "architecture job lease/cancellation/deadline fence stopped job={} token={}",
           lease.job().id(),
           lease.fencingToken());
     } catch (Exception failure) {
+      operationFailureCode.set(errorCode(failure));
+      operationFailureMessage.set(safeMessage(failure));
       ProjectArchitectureJobStore.Status status;
       if (executionStarted.get()) {
         status =
@@ -255,6 +282,17 @@ public class ProjectArchitectureJobWorker {
           errorCode(failure));
     } finally {
       if (heartbeat != null) heartbeat.cancel(false);
+      if (operationLease.get() != null) {
+        try {
+          jobs.terminateOperation(
+              operationLease.get(), operationFailureCode.get(), operationFailureMessage.get());
+        } catch (Exception operationFailure) {
+          log.warn(
+              "architecture logical-operation cleanup deferred job={} errorClass={}",
+              lease.job().id(),
+              operationFailure.getClass().getSimpleName());
+        }
+      }
       if (contextsClaimed.get() && contextJob.get() != null) {
         try {
           jobs.failContexts(contextJob.get(), lease.owner(), "ARCHITECTURE_JOB_TERMINATED");

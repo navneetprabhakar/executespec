@@ -13,6 +13,8 @@ import java.util.UUID;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.auth.entity.Project;
 import com.navneet.executespec.auth.repository.ProjectRepository;
+import com.navneet.executespec.executioncontext.LlmExecutionOperationCoordinator;
+import com.navneet.executespec.executioncontext.LlmExecutionOperationDescriptor;
 import com.navneet.executespec.executioncontext.LlmExecutionPolicyFactory;
 import com.navneet.executespec.project.entity.ProjectRepo;
 import com.navneet.executespec.project.entity.ProjectRepoLink;
@@ -32,6 +34,7 @@ class ProjectArchitectureJobServiceTest {
   private ProjectRepoRepository repos;
   private ScmCredentialResolver credentials;
   private GitHubRepoService github;
+  private LlmExecutionOperationCoordinator operationCoordinator;
   private ProjectArchitectureJobService service;
   private UUID repoId;
 
@@ -43,6 +46,7 @@ class ProjectArchitectureJobServiceTest {
     repos = mock(ProjectRepoRepository.class);
     credentials = mock(ScmCredentialResolver.class);
     github = mock(GitHubRepoService.class);
+    operationCoordinator = mock(LlmExecutionOperationCoordinator.class);
     ProjectProviderResolver providers = mock(ProjectProviderResolver.class);
     ModelResolver models = mock(ModelResolver.class);
     var properties = new ProjectArchitectureJobProperties();
@@ -58,6 +62,7 @@ class ProjectArchitectureJobServiceTest {
             models,
             mock(LlmExecutionPolicyFactory.class),
             mock(com.navneet.executespec.executioncontext.LlmExecutionContextService.class),
+            operationCoordinator,
             properties,
             new ObjectMapper());
     Project project =
@@ -136,6 +141,48 @@ class ProjectArchitectureJobServiceTest {
         .contains("\"revision\":\"" + "1".repeat(40) + "\"")
         .contains("\"credentialSubjectUserId\":\"link-owner-1\"")
         .doesNotContain("top-secret-pat");
+  }
+
+  @Test
+  void architectureContextIdentityFitsExecutionContextColumnsAndBindsAllAttemptEvidence() {
+    UUID jobId = UUID.fromString("4dfbcf24-3b91-4e8f-bda1-f31585082968");
+    String digest = "a".repeat(64);
+
+    String identity =
+        ProjectArchitectureJobService.architectureContextId(jobId, digest, 1_785_286_800_000L);
+
+    assertThat(identity).startsWith("architecture-job:").hasSize(49);
+    assertThat(identity.length()).isLessThanOrEqualTo(96);
+    assertThat(
+            ProjectArchitectureJobService.architectureContextId(
+                jobId, "b".repeat(64), 1_785_286_800_000L))
+        .isNotEqualTo(identity);
+    assertThat(
+            ProjectArchitectureJobService.architectureContextId(jobId, digest, 1_785_286_800_001L))
+        .isNotEqualTo(identity);
+    assertThat(
+            ProjectArchitectureJobService.architectureContextId(
+                UUID.fromString("5dfbcf24-3b91-4e8f-bda1-f31585082968"),
+                digest,
+                1_785_286_800_000L))
+        .isNotEqualTo(identity);
+  }
+
+  @Test
+  void logicalOperationNeverAutoReplaysAnUncertainInvocation() {
+    var job =
+        ProjectArchitectureJobFixture.job(ProjectArchitectureJobStore.Status.RUNNING, "EXECUTING");
+    Duration leaseDuration = Duration.ofMinutes(2);
+    when(operationCoordinator.claimOrResume(any(), any(), eq("worker-1"), eq(leaseDuration)))
+        .thenReturn(Optional.empty());
+
+    assertThat(service.claimOperation(job, "worker-1", leaseDuration)).isEmpty();
+
+    var descriptor = org.mockito.ArgumentCaptor.forClass(LlmExecutionOperationDescriptor.class);
+    verify(operationCoordinator)
+        .claimOrResume(any(), descriptor.capture(), eq("worker-1"), eq(leaseDuration));
+    assertThat(descriptor.getValue().maxAttempts()).isEqualTo(1);
+    verify(operationCoordinator, never()).beginNewInvocation(any(), any(), anyString(), any());
   }
 
   @Test

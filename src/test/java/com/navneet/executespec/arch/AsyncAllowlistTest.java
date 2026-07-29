@@ -148,6 +148,11 @@ class AsyncAllowlistTest {
               // code-RAG — clone + walk + embed into project_code_chunk (file I/O + DB;
               // RL-2026-05-052)
               "CodeIndexingService#indexRepoAsync",
+              // Explicit refresh delegates to the same indexRepo path as indexRepoAsync. The
+              // detached ProjectRepo is used only through scalar metadata getters (id, source
+              // revision/name, clone URL and SCM provider); it does not traverse a lazy
+              // collection.
+              "CodeIndexingService#indexRepoExplicitAsync",
 
               // deployment — reads the run then uploads to GCS; no lazy nav
               "WorkspaceGcsUploadListener#onRunCompleted",

@@ -24,6 +24,7 @@ import com.navneet.executespec.router.AgentTier;
 import com.navneet.executespec.router.LlmProvider;
 import com.navneet.executespec.router.ProjectProviderResolver;
 import com.navneet.executespec.router.RunModelOverrides;
+import com.navneet.executespec.tool.ExecutionContext;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -248,6 +249,15 @@ public class ProjectArchitectureService {
       ProjectArchitectureJobService.SourceSnapshot snapshot,
       java.util.Map<UUID, String> credentials,
       Runnable cooperativeFence) {
+    return stageForDurableJob(job, snapshot, credentials, cooperativeFence, null);
+  }
+
+  StagedArtifacts stageForDurableJob(
+      ProjectArchitectureJobStore.Job job,
+      ProjectArchitectureJobService.SourceSnapshot snapshot,
+      java.util.Map<UUID, String> credentials,
+      Runnable cooperativeFence,
+      ExecutionContext operationContext) {
     LlmProvider provider = LlmProvider.valueOf(job.requestedProvider());
     if (!java.util.Objects.equals(job.repoArchitectureModel(), job.projectArchitectureModel())) {
       throw new IllegalStateException(
@@ -320,13 +330,21 @@ public class ProjectArchitectureService {
         try {
           cooperativeFence.run();
           generatedRepo =
-              repoArchGenerator.generate(
-                  job.projectId(),
-                  source.repoFullName(),
-                  codeMapContent,
-                  provider,
-                  job.requestedByUserId(),
-                  repoReference);
+              operationContext == null
+                  ? repoArchGenerator.generate(
+                      job.projectId(),
+                      source.repoFullName(),
+                      codeMapContent,
+                      provider,
+                      job.requestedByUserId(),
+                      repoReference)
+                  : repoArchGenerator.generateWithOperationContext(
+                      job.projectId(),
+                      source.repoFullName(),
+                      codeMapContent,
+                      provider,
+                      job.requestedByUserId(),
+                      operationContext.child("repo-architecture-" + source.repoId()));
           cooperativeFence.run();
         } catch (RepoArchitectureGenerator.ProviderOutputIncompleteException incomplete) {
           throw incomplete;
@@ -380,13 +398,21 @@ public class ProjectArchitectureService {
       try {
         cooperativeFence.run();
         combined =
-            archDocGenerator.generate(
-                job.projectId(),
-                transientRepoDocs,
-                repoNames,
-                provider,
-                job.requestedByUserId(),
-                projectReference);
+            operationContext == null
+                ? archDocGenerator.generate(
+                    job.projectId(),
+                    transientRepoDocs,
+                    repoNames,
+                    provider,
+                    job.requestedByUserId(),
+                    projectReference)
+                : archDocGenerator.generateWithOperationContext(
+                    job.projectId(),
+                    transientRepoDocs,
+                    repoNames,
+                    provider,
+                    job.requestedByUserId(),
+                    operationContext.child("combined-architecture"));
         cooperativeFence.run();
       } catch (RepoArchitectureGenerator.ProviderOutputIncompleteException incomplete) {
         throw incomplete;

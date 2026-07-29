@@ -3,6 +3,7 @@ package com.navneet.executespec.integration;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.atLeastOnce;
@@ -13,7 +14,9 @@ import static org.mockito.Mockito.when;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.Optional;
+import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -24,6 +27,9 @@ import com.navneet.executespec.cost.RunCostTracker;
 import com.navneet.executespec.cost.RunTokenAttributor;
 import com.navneet.executespec.deployment.WorkspaceRestoreService;
 import com.navneet.executespec.execution.model.RunContinuationDecision;
+import com.navneet.executespec.executioncontext.LlmExecutionOperationClaim;
+import com.navneet.executespec.executioncontext.LlmExecutionOperationCoordinator;
+import com.navneet.executespec.executioncontext.LlmExecutionOperationService;
 import com.navneet.executespec.executioncontext.LlmExecutionPolicyFactory;
 import com.navneet.executespec.executioncontext.LlmExecutionReference;
 import com.navneet.executespec.executioncontext.LlmExecutionScope;
@@ -84,6 +90,13 @@ class RunLifecycleServiceContinuationApprovalTest {
   private final PlanGateDecisionService planGateDecisionService =
       mock(PlanGateDecisionService.class);
   private final PlanGateResumeStore planGateResumeStore = mock(PlanGateResumeStore.class);
+  private final LlmExecutionOperationService operationService =
+      mock(LlmExecutionOperationService.class);
+  private final RunLlmOperationLifecycleService runOperationLifecycle =
+      new RunLlmOperationLifecycleService(
+          runRepo,
+          llmExecutionPolicyFactory,
+          new LlmExecutionOperationCoordinator(operationService));
 
   private RunLifecycleService service;
 
@@ -121,11 +134,24 @@ class RunLifecycleServiceContinuationApprovalTest {
             null,
             llmExecutionPolicyFactory,
             planGateDecisionService,
-            planGateResumeStore);
-    when(llmExecutionPolicyFactory.forRun(any()))
-        .thenReturn(
-            new LlmExecutionReference(
-                "llmctx-continuation-test", LlmExecutionScope.customer("test-org")));
+            planGateResumeStore,
+            runOperationLifecycle);
+    LlmExecutionReference reference =
+        new LlmExecutionReference(
+            "llmctx-continuation-test", LlmExecutionScope.customer("test-org"));
+    when(llmExecutionPolicyFactory.forRun(any())).thenReturn(reference);
+    when(operationService.beginNewInvocation(
+            eq(reference), any(), anyString(), eq(Duration.ofHours(4))))
+        .thenAnswer(
+            invocation ->
+                new LlmExecutionOperationClaim(
+                    invocation.getArgument(0),
+                    "llmop-continuation-" + UUID.randomUUID(),
+                    1,
+                    1,
+                    UUID.randomUUID()));
+    when(operationService.complete(any(), anyString())).thenReturn(true);
+    when(operationService.fail(any(), anyString(), any())).thenReturn(true);
   }
 
   @Test
@@ -309,6 +335,9 @@ class RunLifecycleServiceContinuationApprovalTest {
         .isEqualTo(RunContinuationDecision.CHANGE_PROVIDER);
     assertThat(request.getValue().userConfirmedContinuationProvider()).isEqualTo("openai");
     assertThat(request.getValue().userConfirmedContinuationModel()).isEqualTo("gpt-5.4");
+    assertThat(request.getValue().runContext().llmExecutionContextId())
+        .isEqualTo("llmctx-continuation-test");
+    assertThat(request.getValue().runContext().llmExecutionOperationAuthority()).isNotNull();
     assertThat(request.getValue().initialProviderSwitchesUsed()).isEqualTo(1);
     assertThat(request.getValue().initialModelStepUpsUsed()).isZero();
     assertThat(request.getValue().initialModelStepDownsUsed()).isZero();

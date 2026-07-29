@@ -67,27 +67,28 @@ terminal, cross-tenant, out-of-policy and exhausted contexts fail before provide
   operation-fence columns to `llm_usage_attempt_intent`; version 0 preserves historical/unwired
   rows and version 1 requires the exact context, attempt, token, admitted no-reclaim horizon and
   transport deadline, with a database trigger rejecting fabricated or stale linkage.
-- **RR-322 / RR-1666 — the correct per-operation lease foundation is BUILT BUT NOT WIRED.**
-  `LlmExecutionDispatchGuard`
-  contains two fences: (1) a context whose lease owner is set and whose lease has EXPIRED is not
-  dispatchable, and (2) a caller that declares `LlmRequest.llmExecutionAttempt` must match the
-  context's current `attempt`. Both are correct and unit-tested, but **neither can fire in
-  production**, because nothing on any real dispatch path populates the state they read:
-  `LlmExecutionContextService.claim` (the only thing that sets a lease owner or advances `attempt`)
-  has ZERO production callers, and no production caller sets `LlmRequest.llmExecutionAttempt` (it is
-  always `null`). Every real context therefore stays `QUEUED` with a null lease and `attempt=0`, so
-  a stolen/zombie worker is **not** fenced today — the durable-attempt contract does not hold at
-  runtime. This is not closed by the RR-321 budget reservation: a duplicate worker is bounded only
-  by shared budget, not fenced off.
-
-  **Exact remaining wiring:** every production execution root must claim the correct operation and
-  propagate its full token through `ExecutionContext`/`LlmRequest`; heartbeats and terminal release
-  must wrap bounded agent work; resume must reclaim while explicit retry/re-review creates a new
-  invocation. Most importantly, operation validation, aggregate-budget reservation,
-  `not_reclaim_before` extension and immutable physical-attempt intent insertion must commit in one
-  transaction immediately before EVERY provider transport, including retries, failover, Gemini
-  cache mint, Anthropic forced-tool calls and embedding capabilities. V351 deliberately does none
-  of that and activates no flag, so production still has no runtime zombie-worker fence.
+- **RR-322 / RR-1666 — operation ownership is now wired, while physical-attempt enforcement
+  remains rollout-gated.** Pipeline planning/execution/review/patch/validation, retry/re-review,
+  agent turns, bounded subagents, architecture jobs, background reviews, preview rendering and
+  embedding jobs claim an independently fenced operation, bind its process-local authority into
+  `ExecutionContext`/`LlmRequest`, heartbeat bounded work and terminalize only after the business
+  result is durable. Explicit retry/re-review begins a new invocation; recovery reclaims or
+  cancels the incomplete invocation instead of reconstructing authority from identifiers.
+- V354 adds the atomic physical-attempt boundary. `LlmExecutionOperationAdmissionService` locks the
+  aggregate context and exact operation in one transaction, validates the opaque authority,
+  reserves aggregate call/output budget, extends the lease and no-reclaim horizon, and flushes a
+  version-1 immutable attempt intent before transport. `PhysicalProviderAttemptAdmissionService`
+  applies the same boundary to chat and capability transports; `LlmRouter`, Gemini's native/cache
+  attempts and embeddings select it through `LlmExecutionOperationAdmissionPolicy`. V354 is an
+  expand/contract migration: version-0 rows may retain durable-context attribution so the previous
+  binary remains rollback-compatible, but no version-0 row may carry operation-fence fields.
+- **Active boundary:** `executespec.llm.operation-admission.mode` still defaults to `LEGACY`.
+  Therefore current default execution continues to prepare version-0 physical attempt intents even
+  when a production root carries authority. `SHADOW` uses atomic version 1 where authority is
+  present and records bounded legacy fallbacks; `ENFORCED` rejects durable requests without
+  authority before transport. Do not claim runtime at-most-once provider dispatch or zombie-worker
+  exclusion until the exact deployment runs in `ENFORCED` and rolling-restart/provider-timeout
+  evidence is captured.
 - Cancellation is immediate for queued/expired work and cooperative for active work.
 - Reusing an idempotency key with a different immutable request fails closed.
 
@@ -95,10 +96,16 @@ terminal, cross-tenant, out-of-policy and exhausted contexts fail before provide
 
 - `LlmExecutionContext` — entity, policy snapshot storage, and lease transition rules.
 - `LlmExecutionContextService` — tenant-scoped create/load/claim/heartbeat/terminal operations.
-- `LlmExecutionOperation` + `LlmExecutionOperationService` — V351 dormant per-operation
-  invocation/attempt state machine for shared contexts; no production dispatch caller yet.
+- `LlmExecutionOperation` + `LlmExecutionOperationService` — V351 per-operation
+  invocation/attempt/token state machine, including heartbeat, cancellation and recovery horizons.
 - `LlmExecutionOperationDescriptor` + `LlmExecutionOperationClaim` — immutable operation identity
   and opaque owner/token fencing capability.
+- `LlmExecutionOperationCoordinator` + `LlmExecutionOperationAuthority` — root-facing lease
+  lifecycle and process-local authority binding; authority is never serialized or reconstructed.
+- `LlmExecutionOperationAdmissionPolicy` — `LEGACY` / `SHADOW` / `ENFORCED` rollout decision.
+- `LlmExecutionOperationAdmissionService` + `PhysicalProviderAttemptAdmissionService` — V354
+  context+operation locked budget reservation, horizon extension and version-1 attempt-intent
+  insertion immediately before a chat or capability transport.
 - `LlmExecutionScope` — customer versus platform-internal isolation boundary.
 - `LlmPolicySnapshot` — normalized provider/model/key-source route policy without secrets.
 - `LlmExecutionBudget` — optional per-context token/cost/call ceilings.
@@ -185,8 +192,8 @@ terminal, cross-tenant, out-of-policy and exhausted contexts fail before provide
 - Legacy pre-flight `ConversationController`, `ExecutionPlannerService` and file-purpose summaries
   still lack a durable customer identity. Enforcement blocks provider transport instead of guessing
   a provider, but those surfaces require an authenticated run/session/project binding to function.
-- Cross-JVM job leasing/recovery for PR Review and Code Review remains separate from route safety.
-  Their provider dispatch is governed, but their in-memory scheduling is not restart-safe yet.
+- Operation admission remains `LEGACY`; provider-timeout, forced-tool/cache and rolling-restart
+  evidence in `ENFORCED` is still required before an at-most-once external-attempt claim.
 
 ### Exact residual call-site inventory (2026-07-17)
 
@@ -194,7 +201,7 @@ terminal, cross-tenant, out-of-policy and exhausted contexts fail before provide
 | --- | --- | --- |
 | `project/rag/EmbeddingService` and its document/code/query callers | V290 uses a project EMBEDDING_JOB context, current exact credential source and V283 attempt rows; unsupported routes are lexical | Run V289→V290 PostgreSQL rehearsal and deployed OWN_KEYS zero-platform-attempt journey |
 | `integration/RunLifecycleService` resume/retry/re-review roots | V282 is rehydrated through `durableRunRootContext`; missing factory wiring fails before executor/reviewer dispatch | Keep the recovery-root regression test and verify a real rolling-restart run |
-| `agentsession/subagent/ImplementerExecutionService` / `ImplementerMutationService` | Parent-session worker context lacks a turn reference | Bind the approved parent session/turn policy before any model mutation |
+| `agentsession/SubagentExecutionService` | Read-only child turns claim and heartbeat a durable operation, but physical attempts still follow the global rollout mode | Prove cancellation/takeover with operation admission `ENFORCED` before claiming cross-node at-most-once transport |
 | `terminalbench/TerminalBenchRunService` | Operator benchmark worker has no explicit context | Create a bounded explicit PLATFORM_INTERNAL benchmark context |
 | `eval/v2/TierEvalRunner`, `eval/ModelEvaluator`, `eval/LlmJudgeValidator`, `agentsession/OrchestratorRoutingPromptEvalRunner`, router/worker/planner/reviewer test controllers and benchmark fixture harnesses | Synthetic ids are rejected before transport | Create explicit PLATFORM_INTERNAL contexts only on authenticated operator/test paths |
 | `api/controller/ConversationController`, `execution/service/ExecutionPlannerService`, `codeintel/FilePurposeSummaryService` | Customer identity is absent, so enforcement rejects before transport; FilePurpose retains a dead Anthropic default | Bind authenticated agent/run/project identity or retire the surface; never restore a global fallback |
@@ -202,6 +209,7 @@ terminal, cross-tenant, out-of-policy and exhausted contexts fail before provide
 | `chat/ApplyService` | Tool-only context is currently safe only while no LLM request uses it | Bind `forRun` before any future model-backed apply step |
 
 `CodeGenEngineImpl` PATCH workers and the SmartClassifier production shadow call were closed in
-this pass: both now hydrate the persisted run context. Their narrow additions were made after the
-149-test coordinated cohort and therefore require inclusion in the parent's next compile/regression
-slot before release evidence is claimed.
+the earlier context-enforcement pass: both hydrate the persisted run context. The current
+operation-authority fixture repairs pass provider-free test compilation and the focused 18-test
+lifecycle/context/async-governance cohort. Full current-worktree verification and an
+`ENFORCED`-mode transport/restart exercise remain separate release evidence gates.

@@ -531,20 +531,6 @@ to boot — skip it for those.""";
   private final ConcurrentMap<String, Integer> taskRecoveryAttemptByTask =
       new ConcurrentHashMap<>();
 
-  private record ContinuationConfirmationScope(
-      boolean confirmed, RunContinuationDecision action, String provider, String model) {
-    static ContinuationConfirmationScope from(ExecutionRequest req) {
-      if (req == null || !Boolean.TRUE.equals(req.userConfirmedExpensiveContinuation())) {
-        return new ContinuationConfirmationScope(false, null, null, null);
-      }
-      return new ContinuationConfirmationScope(
-          true,
-          req.userConfirmedContinuationAction(),
-          req.userConfirmedContinuationProvider(),
-          req.userConfirmedContinuationModel());
-    }
-  }
-
   @Value("${execution.continuation.required-quality-threshold:70.0}")
   private double goalRequiredQualityThreshold = 70.0;
 
@@ -2750,6 +2736,7 @@ to boot — skip it for those.""";
         decideContinuation(
             runId,
             task,
+            workerResult,
             decision,
             dispatchedProvider,
             dispatchedModel,
@@ -2821,6 +2808,7 @@ to boot — skip it for those.""";
         decideContinuation(
             runId,
             task,
+            primary,
             goalDecision,
             cfg.provider,
             cfg.model,
@@ -2931,6 +2919,7 @@ to boot — skip it for those.""";
   private GoalContinuationPolicyDecision decideContinuation(
       String runId,
       PlannedTask task,
+      WorkerResult workerResult,
       GoalDonenessDecision decision,
       String provider,
       String model,
@@ -2940,7 +2929,8 @@ to boot — skip it for those.""";
     boolean confirmationRequired = requireConfirmationBeforeExpensiveContinuation(runId);
     boolean benchmarkPriorRequired = requireBenchmarkPriorForAutomaticContinuation(runId);
     boolean routePinned = continuationRoutePinned(runId);
-    ContinuationConfirmationScope confirmationScope = continuationConfirmationScope(runId);
+    ContinuationConfirmationScope confirmationScope =
+        continuationConfirmationScope(runId).withSimplicity(task, workerResult, decision);
     int providerSwitchesUsed = providerSwitchesUsed(runId);
     int modelStepUpsUsed = modelStepUpsUsed(runId, task.id());
     int modelStepDownsUsed = modelStepDownsUsed(runId, task.id());
@@ -2975,6 +2965,7 @@ to boot — skip it for those.""";
                   .requiredContextTokens(requiredContextTokens(task))
                   .qualityInsufficient(decision != null && decision.anotherModelProviderMightHelp())
                   .providerBehaviorPoor(providerBehaviorPoor)
+                  .taskSimplerThanExpected(confirmationScope.simplerThanExpected())
                   .routePinned(routePinned)
                   .expensiveContinuationRequiresConfirmation(confirmationRequired)
                   .benchmarkQualityPriorRequiredForAutomaticContinuation(benchmarkPriorRequired)
@@ -3051,6 +3042,7 @@ to boot — skip it for those.""";
                 .userConfirmedContinuationProvider(confirmationScope.provider())
                 .userConfirmedContinuationModel(confirmationScope.model())
                 .providerBehaviorPoor(providerBehaviorPoor)
+                .taskSimplerThanExpected(confirmationScope.simplerThanExpected())
                 .providerSwitchesUsed(providerSwitchesUsed)
                 .maxProviderSwitches(maxProviderSwitches())
                 .modelStepUpsUsed(modelStepUpsUsed)
@@ -3327,6 +3319,7 @@ to boot — skip it for those.""";
         configuredLowComplexityWorkerStartTierForRun(runId));
     data.put("lowComplexityWorkerStartTierEffective", effectiveLowComplexityWorkerStartTier(runId));
     data.put("providerBehaviorPoor", providerBehaviorPoor);
+    confirmationScope.appendSimplicityEvidence(data);
     data.put("requireConfirmationBeforeExpensiveContinuation", confirmationRequired);
     data.put("userConfirmedExpensiveContinuation", confirmationScope.confirmed());
     if (confirmationScope.action() != null) {

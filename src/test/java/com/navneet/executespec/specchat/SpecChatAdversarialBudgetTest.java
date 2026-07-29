@@ -249,7 +249,8 @@ class SpecChatAdversarialBudgetTest {
         mock(RunKeyContextStore.class),
         new InputSanitizer(),
         new ContextSanitizer(),
-        policyResolver);
+        policyResolver,
+        mock(com.navneet.executespec.executioncontext.LlmExecutionOperationCoordinator.class));
   }
 
   private static ProjectChatPolicyResolver allowingPolicyResolver() {
