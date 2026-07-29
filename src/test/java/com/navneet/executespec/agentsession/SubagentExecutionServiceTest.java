@@ -477,7 +477,7 @@ class SubagentExecutionServiceTest {
   }
 
   @Test
-  void batchRetainsCompletedSuccessWhenEarlierSiblingFails() throws Exception {
+  void batchRetainsCompletedSuccessWhenLaterSiblingFails() throws Exception {
     SpawnRequest second =
         new SpawnRequest("req-2", "parent", "parent-turn", Role.SCOUT, "locate routes", 4, 0.5);
     Handle secondHandle =
@@ -502,7 +502,10 @@ class SubagentExecutionServiceTest {
         .when(spy)
         .executeReserved(any(SpawnRequest.class), any(Handle.class), eq(user), eq("org"));
 
-    var batch = spy.executeBatch(java.util.List.of(request, second), user, "org");
+    // Put the successful child first so executeBatch has observed its terminal result before the
+    // later sibling fails. The separate interruption test below covers an earlier failure while a
+    // sibling is still genuinely in flight.
+    var batch = spy.executeBatch(java.util.List.of(second, request), user, "org");
 
     assertThat(batch.results()).extracting(Result::summary).containsExactly("second");
     assertThat(batch.failures())
