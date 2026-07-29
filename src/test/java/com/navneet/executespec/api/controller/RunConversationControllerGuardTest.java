@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.auth.security.RunAccessGuard;
@@ -92,6 +93,36 @@ class RunConversationControllerGuardTest {
         .isInstanceOf(ResponseStatusException.class)
         .hasMessageContaining("402")
         .hasMessageContaining("managed AI credits unavailable");
+  }
+
+  @Test
+  void sendMessageProjectsTypedIncompleteProviderResponse() {
+    RunAccessGuard guard = mock(RunAccessGuard.class);
+    ChatService chat = mock(ChatService.class);
+    RunConversationController controller =
+        new RunConversationController(
+            guard,
+            chat,
+            mock(ApplyService.class),
+            mock(ApplyResultStore.class),
+            mock(RunIterationService.class));
+    AppUserDetails user = mock(AppUserDetails.class);
+    when(chat.send("run-1", "explain all files"))
+        .thenReturn(
+            new ChatService.SendResult(
+                "partial\n\n_(incomplete)_",
+                1,
+                ChatService.MAX_USER_MESSAGES,
+                false,
+                ChatService.OUTPUT_LIMIT_REASON));
+
+    var response =
+        controller.sendMessage(
+            "run-1", new RunConversationController.ChatMessageBody("explain all files"), user);
+
+    org.assertj.core.api.Assertions.assertThat(response.getBody().complete()).isFalse();
+    org.assertj.core.api.Assertions.assertThat(response.getBody().incompleteReason())
+        .isEqualTo(ChatService.OUTPUT_LIMIT_REASON);
   }
 
   @Test

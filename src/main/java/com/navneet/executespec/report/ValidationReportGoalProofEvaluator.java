@@ -10,6 +10,7 @@ import com.navneet.executespec.execution.model.GoalDonenessDecision;
 import com.navneet.executespec.execution.model.GoalDonenessState;
 import com.navneet.executespec.execution.model.RunContinuationDecision;
 import com.navneet.executespec.report.entity.PipelineResult;
+import com.navneet.executespec.report.model.GoalProofEvidenceReferenceDTO;
 import com.navneet.executespec.report.model.VerificationEvidenceDTO;
 
 /**
@@ -30,9 +31,104 @@ public class ValidationReportGoalProofEvaluator {
   private static final Set<String> OPTIONAL_PROOF_IDS =
       Set.of("spec-adherence", "endpoint-coverage", "test-coverage-judgment", "trust-cap");
 
+  private static final List<String> PROOF_ORDER =
+      List.of(
+          "code-delivered",
+          "build",
+          "tests",
+          "reviewer",
+          REPORT_ISSUES_ID,
+          "spec-adherence",
+          "endpoint-coverage",
+          "test-coverage-judgment",
+          "trust-cap");
+
   public GoalDonenessDecision evaluate(
       String runId, PipelineResult pipelineResult, List<VerificationEvidenceDTO> ledger) {
     return evaluate(runId, null, pipelineResult, ledger);
+  }
+
+  /** Reconstruct typed provenance/artifact references from the same rows used by goal proof. */
+  public List<GoalProofEvidenceReferenceDTO> evidenceReferences(
+      String runStatus, PipelineResult pipelineResult, List<VerificationEvidenceDTO> ledger) {
+    Map<String, VerificationEvidenceDTO> byId = new HashMap<>();
+    if (ledger != null) {
+      for (VerificationEvidenceDTO row : ledger) {
+        if (row != null && row.id() != null && !row.id().isBlank()) {
+          byId.put(row.id(), row);
+        }
+      }
+    }
+    List<GoalProofEvidenceReferenceDTO> references = new ArrayList<>();
+    if (runStatus != null && !runStatus.isBlank()) {
+      String lifecycle = runStatus.toUpperCase();
+      boolean terminalFailure =
+          "CANCELLED".equals(lifecycle)
+              || "FAILED".equals(lifecycle)
+              || "PARTIAL".equals(lifecycle)
+              || "ABORTED".equals(lifecycle)
+              || "REJECTED".equals(lifecycle);
+      String lifecycleProof =
+          terminalFailure ? "BLOCKING" : "COMPLETE".equals(lifecycle) ? "PROVEN" : "UNPROVEN";
+      references.add(
+          new GoalProofEvidenceReferenceDTO(
+              "run-lifecycle",
+              "Run lifecycle",
+              lifecycleProof,
+              lifecycle,
+              "DURABLE_RUN_STATE",
+              "HIGH",
+              "pipeline_run.status",
+              null,
+              null));
+    }
+    String result = pipelineResult == null ? "UNKNOWN" : pipelineResult.name();
+    String resultProof =
+        pipelineResult == PipelineResult.PASSED
+                || pipelineResult == PipelineResult.PASSED_WITH_FIXES
+            ? "PROVEN"
+            : pipelineResult == null ? "UNPROVEN" : "BLOCKING";
+    references.add(
+        new GoalProofEvidenceReferenceDTO(
+            "pipeline-result",
+            "Validation result",
+            resultProof,
+            result,
+            "DURABLE_VALIDATION_REPORT",
+            "HIGH",
+            "validation_report.pipeline_result",
+            null,
+            null));
+    for (String id : PROOF_ORDER) {
+      VerificationEvidenceDTO row = byId.get(id);
+      boolean required = REQUIRED_HARD_PASS_IDS.contains(id) || REPORT_ISSUES_ID.equals(id);
+      if (row == null && !required && !"spec-adherence".equals(id)) continue;
+      String observedStatus = status(row);
+      String proofStatus = proofStatus(id, row, observedStatus, required);
+      references.add(
+          new GoalProofEvidenceReferenceDTO(
+              id,
+              label(row, id),
+              proofStatus,
+              observedStatus,
+              row == null ? null : row.source(),
+              row == null ? null : row.confidence(),
+              row == null ? null : row.artifact(),
+              row == null ? null : row.observed(),
+              row == null ? null : row.total()));
+    }
+    return List.copyOf(references);
+  }
+
+  private static String proofStatus(
+      String id, VerificationEvidenceDTO row, String observedStatus, boolean required) {
+    if ("PASS".equals(observedStatus)) {
+      return "tests".equals(id) && !trustedTestProof(row) ? "UNPROVEN" : "PROVEN";
+    }
+    if ("FAIL".equals(observedStatus) || "WARN".equals(observedStatus)) {
+      return "BLOCKING";
+    }
+    return required || "spec-adherence".equals(id) ? "UNPROVEN" : "CONTEXT";
   }
 
   public GoalDonenessDecision evaluate(
@@ -220,7 +316,9 @@ public class ValidationReportGoalProofEvaluator {
     String normalized = runStatus == null ? "" : runStatus.toUpperCase();
     if ("CANCELLED".equals(normalized)
         || "FAILED".equals(normalized)
-        || "PARTIAL".equals(normalized)) {
+        || "PARTIAL".equals(normalized)
+        || "ABORTED".equals(normalized)
+        || "REJECTED".equals(normalized)) {
       return decision(
           GoalDonenessState.FAILED,
           RunContinuationDecision.STOP_FAILED,
@@ -235,6 +333,24 @@ public class ValidationReportGoalProofEvaluator {
                   .map(ValidationReportGoalProofEvaluator::evidenceLine)
                   .toList(),
           List.of("terminal run lifecycle contradicts completed-goal proof"),
+          false,
+          false);
+    }
+    if (!normalized.isBlank() && !"COMPLETE".equals(normalized)) {
+      return decision(
+          GoalDonenessState.UNCERTAIN,
+          RunContinuationDecision.CONTINUE_SAME_MODEL_PROVIDER,
+          "run lifecycle is " + normalized + "; final completion is not yet durable",
+          goal(runId, goalSummary),
+          List.of(),
+          List.of("run lifecycle is " + normalized.toLowerCase()),
+          ledger == null
+              ? List.of()
+              : ledger.stream()
+                  .filter(java.util.Objects::nonNull)
+                  .map(ValidationReportGoalProofEvaluator::evidenceLine)
+                  .toList(),
+          List.of("non-terminal run lifecycle cannot prove completion"),
           false,
           false);
     }

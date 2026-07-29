@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.navneet.executespec.agent.LlmRequest;
 import com.navneet.executespec.agent.LlmRouter;
 import com.navneet.executespec.agent.PromptTrustBoundary;
 import com.navneet.executespec.agent.RequirementSpec;
@@ -13,6 +14,7 @@ import com.navneet.executespec.reviewer.model.ReviewIssue;
 import com.navneet.executespec.router.ModelResolver;
 import com.navneet.executespec.router.ResolvedModel;
 import com.navneet.executespec.state.StateStore;
+import com.navneet.executespec.tool.ExecutionContext;
 import com.navneet.executespec.tool.FileSystemTool;
 
 import org.springframework.ai.chat.messages.AssistantMessage;
@@ -269,7 +271,7 @@ SCORE COMPUTATION GUIDANCE:
       ResolvedModel model,
       String originalGoal,
       List<ReviewIssue> issues) {
-    return assess(runId, provider, model, originalGoal, List.of(), issues);
+    return assess(runId, provider, model, originalGoal, List.of(), issues, null);
   }
 
   /**
@@ -284,6 +286,17 @@ SCORE COMPUTATION GUIDANCE:
       String originalGoal,
       List<RequirementSpec> requirements,
       List<ReviewIssue> issues) {
+    return assess(runId, provider, model, originalGoal, requirements, issues, null);
+  }
+
+  public AccuracyReport assess(
+      String runId,
+      String provider,
+      ResolvedModel model,
+      String originalGoal,
+      List<RequirementSpec> requirements,
+      List<ReviewIssue> issues,
+      ExecutionContext operationContext) {
     log.info(
         "[AccuracyAssessment] Starting assessment for run {} using {}", runId, model.getModel());
 
@@ -307,13 +320,8 @@ SCORE COMPUTATION GUIDANCE:
           new UserMessage(PromptTrustBoundary.wrap("ACCURACY_ASSESSMENT_EVIDENCE", userMessage)));
 
       ChatResponse response =
-          llmRouter.callText(
-              provider,
-              model.getModel(),
-              messages,
-              runId,
-              "AccuracyAssessmentService",
-              "assessment");
+          callAssessment(
+              provider, model.getModel(), messages, runId, "assessment", operationContext);
 
       // Track tokens
       try {
@@ -355,13 +363,13 @@ SCORE COMPUTATION GUIDANCE:
                     + " required format. No markdown, no explanation."));
         try {
           ChatResponse retryResponse =
-              llmRouter.callText(
+              callAssessment(
                   provider,
                   model.getModel(),
                   messages,
                   runId,
-                  "AccuracyAssessmentService",
-                  "assessment-retry");
+                  "assessment-retry",
+                  operationContext);
           String retryText = retryResponse.getResult().getOutput().getText();
           String retryCleaned = stripMarkdownFences(retryText).trim();
           report = mapper.readValue(retryCleaned, AccuracyReport.class);
@@ -413,6 +421,29 @@ SCORE COMPUTATION GUIDANCE:
       log.error("[AccuracyAssessment] Unexpected failure for run {}: {}", runId, e.getMessage(), e);
       return defaultReport(issues);
     }
+  }
+
+  private ChatResponse callAssessment(
+      String provider,
+      String model,
+      List<Message> messages,
+      String runId,
+      String stepId,
+      ExecutionContext operationContext) {
+    if (operationContext == null) {
+      return llmRouter.callText(
+          provider, model, messages, runId, "AccuracyAssessmentService", stepId);
+    }
+    return llmRouter.call(
+        LlmRequest.builder()
+            .provider(provider)
+            .model(model)
+            .messages(messages)
+            .context(operationContext.child("accuracy-" + stepId))
+            .toolsOverride(List.of())
+            .agentRole("AccuracyAssessmentService")
+            .stepId(stepId)
+            .build());
   }
 
   // Layer 4 — drop requirements whose evidence is execution-time / VCS-only.

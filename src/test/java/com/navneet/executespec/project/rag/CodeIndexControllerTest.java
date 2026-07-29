@@ -91,7 +91,8 @@ class CodeIndexControllerTest {
     assertThat(response.getBody().fallback()).isEqualTo("RIPGREP");
     assertThat(response.getBody().relationshipGraphAvailable()).isFalse();
     verify(guard).assertCanWrite("project-1", principal);
-    verify(indexing).indexRepoAsync("project-1", repo, "bb-user", "bb-app-password", "user-1");
+    verify(indexing)
+        .indexRepoExplicitAsync("project-1", repo, "bb-user", "bb-app-password", "user-1");
   }
 
   @Test
@@ -109,7 +110,7 @@ class CodeIndexControllerTest {
     assertThat(response.getStatusCode().value()).isEqualTo(202);
     assertThat(response.getBody().status()).isEqualTo("READY");
     verify(indexing, never())
-        .indexRepoAsync(
+        .indexRepoExplicitAsync(
             org.mockito.ArgumentMatchers.anyString(),
             org.mockito.ArgumentMatchers.any(),
             org.mockito.ArgumentMatchers.any(),

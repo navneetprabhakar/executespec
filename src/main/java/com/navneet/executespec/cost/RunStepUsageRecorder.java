@@ -62,6 +62,123 @@ public class RunStepUsageRecorder {
       String model,
       String keySource,
       int attemptNumber) {
+    AttemptDraft draft =
+        draftCapabilityAttempt(
+            reference, runId, taskId, agentRole, stepId, provider, model, keySource, attemptNumber);
+    try {
+      // The current LEGACY writer deliberately emits a context-free v0 row; org/user/project/run
+      // attribution stays intact for compatibility reporting. V354 also accepts the immediately
+      // previous binary's durable-context v0 shape so database migration does not break rollback.
+      draft.intent().setLlmExecutionContextId(null);
+      draft.intent().setStartedAt(Instant.now());
+      intentRepository.save(draft.intent());
+      metrics.recordLlmUsagePersistence("STARTED", "ok");
+      return draft.handle();
+    } catch (RuntimeException persistenceFailure) {
+      metrics.recordLlmUsagePersistence("STARTED", "failed");
+      throw new LlmUsagePersistenceException(
+          "Provider capability blocked because usage intent could not be persisted",
+          persistenceFailure);
+    }
+  }
+
+  /**
+   * Persists a write-ahead intent for a provider client that performs multiple physical HTTP
+   * operations inside one router call (for example Gemini cache mint + generate retries). Attempt
+   * ordinals are supplied by the caller's single logical-call counter and the explicit parent links
+   * the resulting append-only chain.
+   */
+  @Transactional(propagation = Propagation.REQUIRES_NEW)
+  public AttemptHandle prepareAttempt(
+      LlmRequest request,
+      String provider,
+      String model,
+      String keySource,
+      int attemptNumber,
+      String attemptKind,
+      String parentAttemptId) {
+    AttemptDraft draft =
+        draftAttempt(
+            request, provider, model, keySource, attemptNumber, attemptKind, parentAttemptId);
+    try {
+      // Atomic admission persists the untouched draft. This compatibility method intentionally
+      // emits the current context-free v0 shape; V354 separately retains the previous binary's
+      // durable-context v0 shape for rollback compatibility.
+      draft.intent().setLlmExecutionContextId(null);
+      draft.intent().setStartedAt(Instant.now());
+      intentRepository.save(draft.intent());
+      metrics.recordLlmUsagePersistence("STARTED", "ok");
+      return draft.handle();
+    } catch (RuntimeException persistenceFailure) {
+      metrics.recordLlmUsagePersistence("STARTED", "failed");
+      log.error(
+          "LLM attempt intent write FAILED run={} task={} provider={} errorClass={}; provider call"
+              + " blocked",
+          request.context().runId(),
+          request.context().taskId(),
+          provider,
+          persistenceFailure.getClass().getSimpleName());
+      throw new LlmUsagePersistenceException(
+          "Provider call blocked because usage intent could not be persisted", persistenceFailure);
+    }
+  }
+
+  /**
+   * Builds, but does not persist, a chat/provider attempt identity and unfenced intent.
+   *
+   * <p>The atomic operation-admission transaction owns {@code startedAt} and every fence field.
+   * This method performs attribution and role capture only; it never reconstructs or serializes the
+   * process-local operation authority carried by the request.
+   */
+  public AttemptDraft draftAttempt(
+      LlmRequest request, String provider, String model, String keySource, int attemptNumber) {
+    return draftAttempt(request, provider, model, keySource, attemptNumber, null, null);
+  }
+
+  /** Builds a non-persisted nested physical attempt with an explicit kind and parent identity. */
+  public AttemptDraft draftAttempt(
+      LlmRequest request,
+      String provider,
+      String model,
+      String keySource,
+      int attemptNumber,
+      String attemptKind,
+      String parentAttemptId) {
+    if (request == null) throw new IllegalArgumentException("request required");
+    AttemptHandle handle =
+        handleFor(
+            request,
+            provider,
+            model,
+            keySource,
+            attemptNumber,
+            attemptKind,
+            parentAttemptId,
+            attributionResolver.resolve(request));
+    String humanRoleSnapshot =
+        roleSnapshotResolver.resolve(
+            handle.attribution().orgId(),
+            handle.attribution().userId(),
+            handle.attribution().projectId());
+    return new AttemptDraft(handle, handle.toUnfencedIntent(request, humanRoleSnapshot));
+  }
+
+  /**
+   * Builds, but does not persist, a governed non-chat capability attempt.
+   *
+   * <p>The returned intent deliberately has no application-clock start time and no operation fence;
+   * atomic admission supplies both immediately before transport.
+   */
+  public AttemptDraft draftCapabilityAttempt(
+      LlmExecutionReference reference,
+      String runId,
+      String taskId,
+      String agentRole,
+      String stepId,
+      String provider,
+      String model,
+      String keySource,
+      int attemptNumber) {
     if (runId == null || runId.isBlank()) throw new IllegalArgumentException("runId required");
     var attribution = attributionResolver.resolve(reference);
     AttemptHandle handle =
@@ -87,75 +204,15 @@ public class RunStepUsageRecorder {
             .humanRoleSnapshot(
                 roleSnapshotResolver.resolve(
                     attribution.orgId(), attribution.userId(), attribution.projectId()))
-            // RR-430 — this role is resolved before the provider attempt begins.
+            // RR-430 — this role is resolved before transport, even though persistence is deferred.
             .roleProvenance(ROLE_CAPTURED_AT_DISPATCH)
             .stepId(blankToNull(stepId))
             .provider(handle.provider())
             .model(handle.model())
             .modelTier(handle.modelTier())
             .keySource(handle.keySource())
-            .startedAt(Instant.now())
             .build();
-    try {
-      intentRepository.save(intent);
-      metrics.recordLlmUsagePersistence("STARTED", "ok");
-      return handle;
-    } catch (RuntimeException persistenceFailure) {
-      metrics.recordLlmUsagePersistence("STARTED", "failed");
-      throw new LlmUsagePersistenceException(
-          "Provider capability blocked because usage intent could not be persisted",
-          persistenceFailure);
-    }
-  }
-
-  /**
-   * Persists a write-ahead intent for a provider client that performs multiple physical HTTP
-   * operations inside one router call (for example Gemini cache mint + generate retries). Attempt
-   * ordinals are supplied by the caller's single logical-call counter and the explicit parent links
-   * the resulting append-only chain.
-   */
-  @Transactional(propagation = Propagation.REQUIRES_NEW)
-  public AttemptHandle prepareAttempt(
-      LlmRequest request,
-      String provider,
-      String model,
-      String keySource,
-      int attemptNumber,
-      String attemptKind,
-      String parentAttemptId) {
-    if (request == null) throw new IllegalArgumentException("request required");
-    AttemptHandle handle =
-        handleFor(
-            request,
-            provider,
-            model,
-            keySource,
-            attemptNumber,
-            attemptKind,
-            parentAttemptId,
-            attributionResolver.resolve(request));
-    try {
-      intentRepository.save(
-          handle.toIntent(
-              request,
-              roleSnapshotResolver.resolve(
-                  handle.attribution().orgId(),
-                  handle.attribution().userId(),
-                  handle.attribution().projectId())));
-      metrics.recordLlmUsagePersistence("STARTED", "ok");
-      return handle;
-    } catch (RuntimeException persistenceFailure) {
-      metrics.recordLlmUsagePersistence("STARTED", "failed");
-      log.error(
-          "LLM attempt intent write FAILED run={} task={} provider={} errorClass={}; provider call"
-              + " blocked",
-          request.context().runId(),
-          request.context().taskId(),
-          provider,
-          persistenceFailure.getClass().getSimpleName());
-      throw new LlmUsagePersistenceException(
-          "Provider call blocked because usage intent could not be persisted", persistenceFailure);
-    }
+    return new AttemptDraft(handle, intent);
   }
 
   /** Backward-compatible success API for older tests/callers. */
@@ -661,7 +718,7 @@ public class RunStepUsageRecorder {
       String keySource,
       int attemptNumber,
       LlmUsageAttributionResolver.Attribution attribution) {
-    private LlmUsageAttemptIntent toIntent(LlmRequest request, String humanRoleSnapshot) {
+    private LlmUsageAttemptIntent toUnfencedIntent(LlmRequest request, String humanRoleSnapshot) {
       return LlmUsageAttemptIntent.builder()
           .physicalAttemptId(physicalAttemptId)
           .logicalCallId(logicalCallId)
@@ -687,8 +744,23 @@ public class RunStepUsageRecorder {
           .model(model)
           .modelTier(modelTier)
           .keySource(keySource)
-          .startedAt(Instant.now())
           .build();
+    }
+  }
+
+  /** Paired immutable identity and mutable unfenced intent for atomic pre-transport admission. */
+  public record AttemptDraft(AttemptHandle handle, LlmUsageAttemptIntent intent) {
+    public AttemptDraft {
+      if (handle == null) throw new IllegalArgumentException("handle required");
+      if (intent == null) throw new IllegalArgumentException("intent required");
+      if (!handle.physicalAttemptId().equals(intent.getPhysicalAttemptId())
+          || !handle.logicalCallId().equals(intent.getLogicalCallId())
+          || handle.attemptOrdinal() != intent.getAttemptOrdinal()) {
+        throw new IllegalArgumentException("attempt handle and intent identity must match");
+      }
+      if (intent.getStartedAt() != null) {
+        throw new IllegalArgumentException("draft attempt cannot carry an application start time");
+      }
     }
   }
 

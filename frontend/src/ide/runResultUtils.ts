@@ -181,13 +181,59 @@ export function toLines(s: string): string[] {
 
 /**
  * LCS line diff: `base` (old) -> `head` (new). Deletions in a hunk are emitted before additions
- * that replace them, matching standard diff grouping.
+ * that replace them, matching standard diff grouping. The public boundary is deliberately bounded:
+ * the classic traceback matrix is quadratic and must never be allocated for arbitrary provider- or
+ * repository-sized content.
  */
-export function lineDiff(base: string, head: string): DiffLine[] {
+export const LINE_DIFF_LIMITS = Object.freeze({
+  maxInputCharsPerSide: 200_000,
+  maxLinesPerSide: 2_000,
+  maxMatrixCells: 1_000_000,
+});
+
+export interface LineDiffResult {
+  lines: DiffLine[];
+  truncated: boolean;
+  reason: string;
+}
+
+export function boundedLineDiff(
+  base: string,
+  head: string,
+  limits: {
+    maxInputCharsPerSide?: number;
+    maxLinesPerSide?: number;
+    maxMatrixCells?: number;
+  } = {},
+): LineDiffResult {
+  const maxInputCharsPerSide = limits.maxInputCharsPerSide ?? LINE_DIFF_LIMITS.maxInputCharsPerSide;
+  const maxLinesPerSide = limits.maxLinesPerSide ?? LINE_DIFF_LIMITS.maxLinesPerSide;
+  const maxMatrixCells = limits.maxMatrixCells ?? LINE_DIFF_LIMITS.maxMatrixCells;
   const a = toLines(base);
   const b = toLines(head);
   const n = a.length;
   const m = b.length;
+  if (base.length > maxInputCharsPerSide || head.length > maxInputCharsPerSide) {
+    return {
+      lines: [],
+      truncated: true,
+      reason: `Content diff was not computed because one version exceeds the ${maxInputCharsPerSide.toLocaleString()}-character safety limit.`,
+    };
+  }
+  if (n > maxLinesPerSide || m > maxLinesPerSide) {
+    return {
+      lines: [],
+      truncated: true,
+      reason: `Content diff was not computed because one version exceeds the ${maxLinesPerSide.toLocaleString()}-line safety limit.`,
+    };
+  }
+  if (n * m > maxMatrixCells) {
+    return {
+      lines: [],
+      truncated: true,
+      reason: `Content diff was not computed because the ${n.toLocaleString()} × ${m.toLocaleString()} comparison exceeds the ${maxMatrixCells.toLocaleString()}-cell safety limit.`,
+    };
+  }
   const lcs: number[][] = Array.from({length: n + 1}, () => new Array<number>(m + 1).fill(0));
   for (let i = n - 1; i >= 0; i--) {
     for (let j = m - 1; j >= 0; j--) {
@@ -212,13 +258,44 @@ export function lineDiff(base: string, head: string): DiffLine[] {
   }
   while (i < n) out.push({sign: '-', text: a[i++]});
   while (j < m) out.push({sign: '+', text: b[j++]});
-  return out;
+  return {lines: out, truncated: false, reason: ''};
+}
+
+/** Backward-compatible safe line list for existing viewers that do not render truncation metadata. */
+export function lineDiff(base: string, head: string): DiffLine[] {
+  return boundedLineDiff(base, head).lines;
 }
 
 export function fmtDur(ms?: number | null) {
   if (!ms) return '—';
   const s = Math.round(ms / 1000);
   return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
+}
+
+export interface TimelineTaskTiming {
+  startedAt?: string | null;
+  completedAt?: string | null;
+}
+
+/**
+ * Convert persisted task timestamps into safe chart coordinates.
+ *
+ * Historical and interrupted tasks can legitimately have no start timestamp. JavaScript treats
+ * `new Date(null)` as the Unix epoch, which previously rendered those rows as multi-million-minute
+ * tasks. Only finite, positive starts are chartable; a malformed or pre-start completion is also
+ * rejected instead of fabricating a duration.
+ */
+export function timelineTiming(
+  task: TimelineTaskTiming,
+  nowMs = Date.now(),
+): {startMs: number; endMs: number; durationMs: number} | null {
+  if (!task.startedAt) return null;
+  const startMs = Date.parse(task.startedAt);
+  if (!Number.isFinite(startMs) || startMs <= 0) return null;
+
+  const parsedEnd = task.completedAt ? Date.parse(task.completedAt) : nowMs;
+  if (!Number.isFinite(parsedEnd) || parsedEnd < startMs) return null;
+  return {startMs, endMs: parsedEnd, durationMs: parsedEnd - startMs};
 }
 
 export function testResultSummary(
@@ -310,7 +387,28 @@ export function continuationApprovalCandidate(t: api.TaskSummary) {
   ) {
     return null;
   }
+  if (matchingContinuationApprovalRecorded(t)) return null;
   return candidate;
+}
+
+/**
+ * The task decision can remain STOP_BLOCKED briefly after approval while the async retry settles.
+ * The durable action history is authoritative during that window: never offer the same paid
+ * approval twice when the selected route already has an APPROVED or EXECUTED action.
+ */
+export function matchingContinuationApprovalRecorded(t: api.TaskSummary): boolean {
+  const candidate = t.continuationDecision?.selectedCandidate;
+  if (!candidate?.provider || !candidate.model) return false;
+  const provider = candidate.provider.toLowerCase();
+  const model = candidate.model.toLowerCase();
+  return (t.continuationActions || []).some((action) => {
+    const status = (action.status || '').toUpperCase();
+    return (
+      ['APPROVED', 'EXECUTED'].includes(status) &&
+      (action.provider || '').toLowerCase() === provider &&
+      (action.model || '').toLowerCase() === model
+    );
+  });
 }
 
 export function continuationApprovalReason(t: api.TaskSummary): string | null {
@@ -369,6 +467,21 @@ export function goalStateKind(state?: string | null): 'ok' | 'warn' | 'bad' {
   return 'warn';
 }
 
+export function goalProofKind(proofStatus?: string | null): 'ok' | 'warn' | 'bad' {
+  const status = (proofStatus || '').toUpperCase();
+  if (status === 'PROVEN') return 'ok';
+  if (status === 'BLOCKING') return 'bad';
+  return 'warn';
+}
+
+export function goalProofLabel(proofStatus?: string | null): string {
+  const status = (proofStatus || '').toUpperCase();
+  if (status === 'PROVEN') return 'Proven';
+  if (status === 'BLOCKING') return 'Blocking';
+  if (status === 'UNPROVEN') return 'Unproven';
+  return 'Context';
+}
+
 function preciseUsd(n?: number | null): string {
   if (n == null) return '—';
   if (Math.abs(n) < 1) return `$${n.toFixed(4)}`;
@@ -412,6 +525,112 @@ export function taskBudgetFacts(t: api.TaskSummary): {k: string; v: string}[] {
   return facts;
 }
 
+const RAW_COMMAND_TITLE =
+  /^(?:\$|>|npm(?:\s+run)?|npx|pnpm|yarn|mvnw?|gradlew?|gradle|pytest|python\d*|docker|git|go\s+test|cargo)\b/i;
+
+/**
+ * Planner titles are durable audit evidence, but some older plans used a build command or a
+ * multi-line instruction as the title. Keep that raw value in Technical details and give the
+ * default customer surface a bounded, readable label.
+ */
+export function customerStepTitle(t: Pick<api.TaskSummary, 'title'>, index: number): string {
+  const firstLine = (t.title || '').trim().split(/\r?\n/, 1)[0]?.trim() || '';
+  if (!firstLine || RAW_COMMAND_TITLE.test(firstLine)) return `Step ${index + 1}`;
+  const withoutCommandFragments = firstLine
+    .replace(
+      /`(?:npm|npx|pnpm|yarn|mvnw?|gradlew?|gradle|pytest|python\d*|docker|git|go\s+test|cargo)[^`]*`/gi,
+      'the project checks',
+    )
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!withoutCommandFragments) return `Step ${index + 1}`;
+  return withoutCommandFragments.length > 120
+    ? `${withoutCommandFragments.slice(0, 117).trimEnd()}…`
+    : withoutCommandFragments;
+}
+
+/** One non-technical status sentence for the collapsed customer-facing step card. */
+export function customerStepSummary(t: Pick<api.TaskSummary, 'status'>): string {
+  switch ((t.status || '').toUpperCase()) {
+    case 'COMPLETE':
+    case 'SUCCESS':
+      return 'Completed with recorded execution evidence.';
+    case 'FAILED':
+    case 'ERROR':
+      return 'This step did not complete. Review technical details or retry it.';
+    case 'BLOCKED':
+      return 'This step needs input or approval before it can continue.';
+    case 'PARTIAL':
+      return 'This step completed only part of its objective. Review the remaining work.';
+    default:
+      return 'This step is still in progress.';
+  }
+}
+
+export function customerStepStatusLabel(status?: string | null): string {
+  switch ((status || '').toUpperCase()) {
+    case 'COMPLETE':
+    case 'SUCCESS':
+      return 'Complete';
+    case 'FAILED':
+    case 'ERROR':
+      return 'Failed';
+    case 'BLOCKED':
+      return 'Needs input';
+    case 'PARTIAL':
+      return 'Needs review';
+    default:
+      return 'In progress';
+  }
+}
+
+/** Customer-safe continuation copy; exact action enums, routes and models remain in diagnostics. */
+export function customerContinuationSummary(t: api.TaskSummary): string | null {
+  if (matchingContinuationApprovalRecorded(t)) {
+    return 'The approved recovery was recorded. Review its result in technical details.';
+  }
+  if (continuationApprovalCandidate(t)) {
+    return 'Approval is needed before ExecuteSpec can try the recommended recovery.';
+  }
+  const decision = (t.continuationDecision?.decision || '').toUpperCase();
+  if (['STEP_UP_MODEL', 'STEP_DOWN_MODEL', 'CHANGE_PROVIDER'].includes(decision)) {
+    return 'ExecuteSpec identified another recovery option for this step.';
+  }
+  if (decision === 'STOP_BLOCKED') {
+    return 'Automatic recovery is blocked. Open technical details for the recorded reason.';
+  }
+  return null;
+}
+
+/**
+ * Do not surface the legacy catch-all "budget, token, iteration, or wall-clock ceiling" sentence.
+ * Resolve a concrete reached limit when the recorded metrics allow it; otherwise state honestly
+ * that a configured guard fired and point to the disclosed diagnostics.
+ */
+export function customerLimitSummary(t: api.TaskSummary): string | null {
+  if (['COMPLETE', 'SUCCESS'].includes((t.status || '').toUpperCase())) return null;
+  const reason = t.goalDoneness?.budgetCeilingReason?.trim();
+  if (!reason) return null;
+  const goal = t.goalDoneness;
+  const policy = t.continuationDecision?.policy;
+  const cost = positive(goal?.costUsd);
+  const costLimit = positive(policy?.maxTotalCostUsd);
+  if (cost != null && costLimit != null && cost >= costLimit) {
+    return `Stopped at the configured ${preciseUsd(costLimit)} cost limit.`;
+  }
+  const tokens = positive(goal?.totalTokens);
+  const tokenLimit = positive(policy?.maxTotalTokens);
+  if (tokens != null && tokenLimit != null && tokens >= tokenLimit) {
+    return 'Stopped at the configured processing limit.';
+  }
+  const wall = positive(goal?.wallClockMs);
+  const wallLimit = positive(policy?.maxTaskWallClockMs);
+  if (wall != null && wallLimit != null && wall >= wallLimit) {
+    return `Stopped at the configured ${fmtDur(wallLimit)} time limit.`;
+  }
+  return 'Execution stopped at a configured safety limit. Open technical details to see the recorded guard.';
+}
+
 export function shouldUseRunEvidenceChat(message: string): boolean {
   const text = message.trim().toLowerCase();
   if (!text) return true;
@@ -432,6 +651,53 @@ export function shouldUseRunEvidenceChat(message: string): boolean {
   if (explicitMutation && !questionPrefix && !hardEvidenceKeyword) return false;
   if (questionPrefix || evidenceKeyword) return true;
   return !explicitMutation;
+}
+
+/**
+ * Provider/dispatch failures are operator diagnostics, not useful chat answers. Keep the durable
+ * failure visible in server logs while giving the run owner a bounded recovery path instead of
+ * leaking an implementation exception into the Ask surface.
+ */
+export function friendlyAiFailureMessage(error: unknown): string {
+  const raw = error instanceof Error ? error.message : typeof error === 'string' ? error : '';
+  const normalized = raw.toLowerCase();
+  if (
+    normalized.includes('durable llm execution-context budget is exhausted') ||
+    (normalized.includes('llmdispatchpolicyexception') && normalized.includes('budget'))
+  ) {
+    return 'This run has used its available AI context, so it cannot answer another question in the current context. Start follow-up work for a code change, or open Evidence, Code, and Activity log to inspect this run without additional AI spend.';
+  }
+  if (
+    normalized.includes('managed ai credit') ||
+    normalized.includes('ai credits required') ||
+    normalized.includes('provider budget')
+  ) {
+    return 'Ask is unavailable because this account has no usable AI budget. Review the run evidence without additional AI spend, or update the provider or AI-credit settings before retrying.';
+  }
+  if (
+    normalized.includes('provider credential') ||
+    normalized.includes('api-key not configured') ||
+    normalized.includes('api key not configured')
+  ) {
+    return 'Ask cannot reach the selected provider. Check the provider credential and route, then retry.';
+  }
+  return raw || 'Ask could not complete. Retry, or inspect Evidence and Activity log for this run.';
+}
+
+/**
+ * Preserve the typed Ask completion contract at the rendering boundary. Current servers append the
+ * same notice to the reply, while this fallback keeps mixed-version deployments honest.
+ */
+export function runChatResponseContent(response: api.ChatResponse): string {
+  const content = friendlyAiFailureMessage(response.reply);
+  if (response.complete !== false) return content;
+  if (
+    response.incompleteReason === 'PROVIDER_OUTPUT_LIMIT' &&
+    !content.toLowerCase().includes('provider stopped at its output limit')
+  ) {
+    return `${content}\n\n_(The provider stopped at its output limit, so this answer is incomplete. Ask a narrower question or name a specific file, then retry.)_`;
+  }
+  return content;
 }
 
 export function isFailedTerminalStatus(status?: string | null): boolean {

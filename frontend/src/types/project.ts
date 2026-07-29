@@ -209,6 +209,31 @@ export interface ArchitectureDoc {
   generatedAt: string;
 }
 
+export type ArchitectureJobStatus =
+  | 'QUEUED'
+  | 'RUNNING'
+  | 'SUCCEEDED'
+  | 'FAILED'
+  | 'CANCELLED'
+  | 'NEEDS_CONFIRMATION';
+
+export interface ArchitectureJob {
+  id: string;
+  projectId: string;
+  status: ArchitectureJobStatus;
+  phase: 'PREPARING' | 'EXECUTING' | 'PUBLISHING';
+  terminal: boolean;
+  architectureVersion: number | null;
+  errorCode: string | null;
+  errorMessage: string | null;
+  qualityStatus?: 'QUALIFIED' | 'WARNING' | 'FAILED' | null;
+  /** Canonical JSON evidence emitted by the server for operator diagnosis. */
+  qualityEvidence?: string | null;
+  createdAt: string;
+  startedAt: string | null;
+  completedAt: string | null;
+}
+
 export type Complexity = 'S' | 'M' | 'L';
 
 export interface AssessmentResult {

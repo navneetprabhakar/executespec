@@ -83,6 +83,28 @@ class PlanDocumentedCommandContractGateTest {
   }
 
   @Test
+  void ignoresNegatedRunnerMentionInJavaDocumentationTask() {
+    PlannedTask javaTests =
+        task(
+            "T1",
+            "Implement Java tests",
+            "Add the Maven-owned verification suite.",
+            List.of("src/test/java/com/acme/CheckoutTest.java"));
+    PlannedTask docs =
+        task(
+            "T2",
+            "Document Java verification",
+            "This is a Java service: do not use pytest, Maven wrappers from unrelated projects, or"
+                + " Gradle. Document the repository's supported Java command.",
+            List.of("README.md"));
+    List<String> violations = new ArrayList<>();
+
+    PlanDocumentedCommandContractGate.addViolations(plan(javaTests, docs), violations);
+
+    assertThat(violations).isEmpty();
+  }
+
+  @Test
   void rejectsOriginsVariableThatDisagreesWithExplicitRuntimeProducer() {
     PlannedTask runtime =
         task(

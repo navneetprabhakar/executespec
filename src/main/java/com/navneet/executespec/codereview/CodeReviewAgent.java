@@ -127,6 +127,19 @@ public class CodeReviewAgent {
                 provider,
                 req.model(),
                 req.actorUserId());
+    ExecutionContext executionContext =
+        req.executionContext() != null
+            ? new ExecutionContext(
+                "code-review-" + req.scanId(),
+                "review",
+                java.nio.file.Paths.get("/"),
+                executionReference,
+                req.executionContext().llmExecutionOperationAuthority())
+            : new ExecutionContext(
+                "code-review-" + req.scanId(),
+                "review",
+                java.nio.file.Paths.get("/"),
+                executionReference);
 
     ChatResponse resp;
     try {
@@ -139,12 +152,7 @@ public class CodeReviewAgent {
                   .temperature(0.0)
                   .maxTokens(16384)
                   .toolsOverride(List.of(submitTool))
-                  .context(
-                      new ExecutionContext(
-                          "code-review-" + req.scanId(),
-                          "review",
-                          java.nio.file.Paths.get("/"),
-                          executionReference))
+                  .context(executionContext)
                   .agentRole("CodeReviewAgent")
                   .stepId("code-review.scan")
                   .build());
@@ -524,7 +532,8 @@ public class CodeReviewAgent {
       String provider,
       String model,
       String actorUserId,
-      LlmExecutionReference executionReference) {}
+      LlmExecutionReference executionReference,
+      ExecutionContext executionContext) {}
 
   /** One issue surfaced by the agent — already triaged + categorized. */
   public record AgentIssue(

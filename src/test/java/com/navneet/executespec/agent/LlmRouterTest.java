@@ -19,19 +19,28 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.nio.file.Path;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import com.navneet.executespec.billing.service.ManagedAiUsageService;
 import com.navneet.executespec.config.featureflag.FeatureFlagService;
+import com.navneet.executespec.cost.LlmUsageAttemptIntent;
 import com.navneet.executespec.cost.RunCostTracker;
 import com.navneet.executespec.cost.RunStepUsageRecorder;
 import com.navneet.executespec.executioncontext.LlmDispatchPolicyException;
 import com.navneet.executespec.executioncontext.LlmExecutionContext;
 import com.navneet.executespec.executioncontext.LlmExecutionDispatchGuard;
+import com.navneet.executespec.executioncontext.LlmExecutionOperationAdmissionPolicy;
+import com.navneet.executespec.executioncontext.LlmExecutionOperationAuthority;
+import com.navneet.executespec.executioncontext.LlmExecutionOperationClaim;
 import com.navneet.executespec.executioncontext.LlmExecutionPolicyFactory;
+import com.navneet.executespec.executioncontext.LlmExecutionReference;
 import com.navneet.executespec.executioncontext.LlmExecutionScope;
+import com.navneet.executespec.executioncontext.PhysicalProviderAttemptAdmissionService;
 import com.navneet.executespec.observability.Metrics;
 import com.navneet.executespec.router.ModelRegistry;
 import com.navneet.executespec.router.RunRoutePolicyService;
@@ -66,6 +75,7 @@ class LlmRouterTest {
   private Metrics metrics;
   private RunCostTracker costTracker;
   private RunStepUsageRecorder stepUsageRecorder;
+  private PhysicalProviderAttemptAdmissionService physicalAttemptAdmission;
   private AnthropicForcedToolClient anthropicForcedToolClient;
   private ManagedAiUsageService managedAiUsageService;
   private RunRoutePolicyService routePolicyService;
@@ -85,6 +95,32 @@ class LlmRouterTest {
     metrics = mock(Metrics.class);
     costTracker = mock(RunCostTracker.class);
     stepUsageRecorder = mock(RunStepUsageRecorder.class);
+    lenient()
+        .when(
+            stepUsageRecorder.prepareAttempt(
+                any(LlmRequest.class), anyString(), anyString(), anyString(), anyInt()))
+        .thenAnswer(
+            invocation -> {
+              LlmRequest request = invocation.getArgument(0);
+              String provider = invocation.getArgument(1);
+              String model = invocation.getArgument(2);
+              String keySource = invocation.getArgument(3);
+              int ordinal = invocation.getArgument(4);
+              return new RunStepUsageRecorder.AttemptHandle(
+                  request.usageLogicalCallId() + ":" + provider + ":" + ordinal,
+                  request.usageLogicalCallId(),
+                  ordinal > 1
+                      ? request.usageLogicalCallId() + ":" + provider + ":" + (ordinal - 1)
+                      : request.retryOf(),
+                  ordinal > 1 ? "RETRY" : request.retryOf() == null ? "PRIMARY" : "FAILOVER",
+                  ordinal,
+                  provider,
+                  model,
+                  "WORKHORSE",
+                  keySource,
+                  ordinal,
+                  null);
+            });
     lenient()
         .when(
             stepUsageRecorder.prepareAttempt(
@@ -126,6 +162,7 @@ class LlmRouterTest {
     broadcaster = mock(SseBroadcaster.class);
     keyStore = mock(RunKeyContextStore.class);
     executionDispatchGuard = mock(LlmExecutionDispatchGuard.class);
+    physicalAttemptAdmission = mock(PhysicalProviderAttemptAdmissionService.class);
     executionPolicyFactory = mock(LlmExecutionPolicyFactory.class);
     lenient().when(keyStore.get(anyString())).thenReturn(null); // platform keys by default
     keySourceModeResolver = mock(RunKeySourceModeResolver.class);
@@ -160,6 +197,8 @@ class LlmRouterTest {
             broadcaster,
             keyStore,
             executionDispatchGuard,
+            new LlmExecutionOperationAdmissionPolicy("LEGACY"),
+            physicalAttemptAdmission,
             executionPolicyFactory,
             keySourceModeResolver,
             anthropicForcedToolClient,
@@ -371,7 +410,8 @@ class LlmRouterTest {
     AnthropicChatModel anthropic = mock(AnthropicChatModel.class);
     when(anthropicModelProvider.getIfAvailable()).thenReturn(anthropic);
     when(anthropicForcedToolClient.canAttempt(any(), any(), any())).thenReturn(true);
-    when(anthropicForcedToolClient.forcedToolCallOutcome(anyString(), any(), any(), any(), any()))
+    when(anthropicForcedToolClient.forcedToolCallOutcome(
+            anyString(), any(), any(), any(), any(), nullable(Integer.class)))
         .thenReturn(
             new AnthropicForcedToolClient.ForcedToolCallOutcome(
                 null, false, new RuntimeException("forced transport failed"), true));
@@ -446,7 +486,8 @@ class LlmRouterTest {
     AnthropicChatModel anthropic = mock(AnthropicChatModel.class);
     when(anthropicModelProvider.getIfAvailable()).thenReturn(anthropic);
     when(anthropicForcedToolClient.canAttempt(any(), any(), any())).thenReturn(true);
-    when(anthropicForcedToolClient.forcedToolCallOutcome(anyString(), any(), any(), any(), any()))
+    when(anthropicForcedToolClient.forcedToolCallOutcome(
+            anyString(), any(), any(), any(), any(), nullable(Integer.class)))
         .thenReturn(new AnthropicForcedToolClient.ForcedToolCallOutcome(ok(), false, null, true));
     when(anthropic.call(any(Prompt.class))).thenReturn(ok());
     LlmRequest request =
@@ -482,6 +523,56 @@ class LlmRouterTest {
             any(),
             any(),
             eq(RunKeyContext.Source.PLATFORM));
+  }
+
+  @Test
+  void shadowAuthorityAtomicallyAdmitsAnthropicForcedAttemptWithFreshKeyAndDeadline() {
+    build();
+    ReflectionTestUtils.setField(
+        router, "operationAdmissionPolicy", new LlmExecutionOperationAdmissionPolicy("SHADOW"));
+    LlmRequest request =
+        atomicRequest("anthropic", "claude-forced-atomic-test").toBuilder()
+            .toolChoice("required")
+            .build();
+    LlmExecutionContext durableContext = mock(LlmExecutionContext.class);
+    when(durableContext.getRequestedProvider()).thenReturn("anthropic");
+    when(durableContext.getUserId()).thenReturn("u1");
+    when(durableContext.getCredentialOrgId()).thenReturn("org-1");
+    when(executionDispatchGuard.reauthorize(any()))
+        .thenReturn(
+            new LlmExecutionDispatchGuard.ResolvedDispatch(
+                "logical-key", RunKeyContext.Source.PLATFORM, durableContext));
+    when(physicalAttemptAdmission.admitChatAttempt(
+            eq(request),
+            eq(1),
+            eq("PRIMARY"),
+            nullable(String.class),
+            eq(Duration.ofSeconds(300)),
+            eq(Duration.ofSeconds(15))))
+        .thenReturn(admittedAttempt(request, 1, "PRIMARY", null, "fresh-anthropic-key"));
+    when(anthropicForcedToolClient.canAttempt(any(), any(), any())).thenReturn(true);
+    when(anthropicForcedToolClient.forcedToolCallOutcome(
+            anyString(), any(), any(), any(), any(), anyInt()))
+        .thenReturn(new AnthropicForcedToolClient.ForcedToolCallOutcome(ok(), true, null, true));
+
+    assertThat(router.call(request)).isNotNull();
+
+    verify(anthropicForcedToolClient)
+        .forcedToolCallOutcome(
+            eq("claude-forced-atomic-test"),
+            any(),
+            any(),
+            any(),
+            eq("fresh-anthropic-key"),
+            argThat(timeout -> timeout >= 1 && timeout <= 60));
+    verify(executionDispatchGuard, never()).authorize(any());
+    verify(stepUsageRecorder)
+        .recordSuccess(
+            argThat(handle -> handle.attemptOrdinal() == 1),
+            eq(request),
+            anyLong(),
+            any(RunCostTracker.CallUsage.class),
+            any(ChatResponse.class));
   }
 
   @Test
@@ -787,6 +878,90 @@ class LlmRouterTest {
     verify(gemini, never()).call(any());
   }
 
+  @Test
+  void enforcedAdmissionRejectsMissingAuthorityBeforeAnyProviderOrLegacyReservation() {
+    build();
+    ReflectionTestUtils.setField(
+        router, "operationAdmissionPolicy", new LlmExecutionOperationAdmissionPolicy("ENFORCED"));
+    LlmRequest request =
+        req("openai", "gpt-x").toBuilder()
+            .llmExecutionContextId("ctx-enforced")
+            .llmExecutionScope(LlmExecutionScope.customer("org-1"))
+            .build();
+
+    assertThatThrownBy(() -> router.call(request))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("MISSING_AUTHORITY_ENFORCED");
+
+    verify(executionDispatchGuard, never()).authorize(any());
+    verify(executionDispatchGuard, never()).reauthorize(any());
+    verify(physicalAttemptAdmission, never())
+        .admitChatAttempt(any(), anyInt(), anyString(), any(), any(), any());
+    verify(openai, never()).call(any());
+  }
+
+  @Test
+  void shadowAuthorityAtomicallyAdmitsEveryOpenAiRetryWithFreshKeyAndDeadline() {
+    build();
+    ReflectionTestUtils.setField(
+        router, "operationAdmissionPolicy", new LlmExecutionOperationAdmissionPolicy("SHADOW"));
+    LlmRequest request = atomicRequest("openai", "gpt-x");
+    LlmExecutionContext durableContext = mock(LlmExecutionContext.class);
+    when(durableContext.getRequestedProvider()).thenReturn("openai");
+    when(durableContext.getUserId()).thenReturn("u1");
+    when(durableContext.getCredentialOrgId()).thenReturn("org-1");
+    when(executionDispatchGuard.reauthorize(any()))
+        .thenReturn(
+            new LlmExecutionDispatchGuard.ResolvedDispatch(
+                "logical-key", RunKeyContext.Source.PLATFORM, durableContext));
+    when(physicalAttemptAdmission.admitChatAttempt(
+            eq(request), anyInt(), anyString(), nullable(String.class), any(), any()))
+        .thenAnswer(
+            invocation -> {
+              int ordinal = invocation.getArgument(1);
+              String kind = invocation.getArgument(2);
+              String parent = invocation.getArgument(3);
+              return admittedAttempt(request, ordinal, kind, parent, "fresh-key-" + ordinal);
+            });
+    when(openai.call(any()))
+        .thenThrow(new RuntimeException("503 service unavailable"))
+        .thenReturn(ok());
+
+    assertThat(router.call(request)).isNotNull();
+
+    ArgumentCaptor<OpenAiNativeToolClient.OpenAiToolCallRequest> wire =
+        ArgumentCaptor.forClass(OpenAiNativeToolClient.OpenAiToolCallRequest.class);
+    verify(openai, times(2)).call(wire.capture());
+    assertThat(wire.getAllValues())
+        .extracting(OpenAiNativeToolClient.OpenAiToolCallRequest::apiKey)
+        .containsExactly("fresh-key-1", "fresh-key-2");
+    assertThat(wire.getAllValues())
+        .extracting(OpenAiNativeToolClient.OpenAiToolCallRequest::readTimeoutSeconds)
+        .allSatisfy(timeout -> assertThat(timeout).isBetween(1, 60));
+    verify(executionDispatchGuard, never()).authorize(any());
+    verify(physicalAttemptAdmission, times(2))
+        .admitChatAttempt(
+            eq(request),
+            anyInt(),
+            anyString(),
+            nullable(String.class),
+            eq(Duration.ofSeconds(120)),
+            eq(Duration.ofSeconds(15)));
+    verify(stepUsageRecorder)
+        .recordFailure(
+            argThat(handle -> handle.attemptOrdinal() == 1),
+            eq(request),
+            anyLong(),
+            any(RuntimeException.class));
+    verify(stepUsageRecorder)
+        .recordSuccess(
+            argThat(handle -> handle.attemptOrdinal() == 2),
+            eq(request),
+            anyLong(),
+            any(RunCostTracker.CallUsage.class),
+            any(ChatResponse.class));
+  }
+
   /**
    * C1 Step 1 — a controlled benchmark/SWE-bench worker carries a durable context whose policy sets
    * {@code allowProviderFailover=false}. The dispatch guard therefore rejects every alternate route
@@ -817,6 +992,18 @@ class LlmRouterTest {
               return new LlmExecutionDispatchGuard.ResolvedDispatch(
                   "primary-key", RunKeyContext.Source.PLATFORM, benchmarkContext);
             });
+    when(executionDispatchGuard.reauthorize(any()))
+        .thenAnswer(
+            invocation -> {
+              LlmRequest attempted = invocation.getArgument(0);
+              if (!"openai".equals(attempted.provider())) {
+                throw new LlmDispatchPolicyException(
+                    LlmDispatchPolicyException.Reason.PROVIDER_NOT_ALLOWED,
+                    "Provider failover is disabled by the durable execution policy");
+              }
+              return new LlmExecutionDispatchGuard.ResolvedDispatch(
+                  "primary-key", RunKeyContext.Source.PLATFORM, benchmarkContext);
+            });
 
     LlmRequest req =
         req("openai", "gpt-x").toBuilder()
@@ -829,6 +1016,49 @@ class LlmRouterTest {
         .hasMessageContaining("503 service unavailable");
     verify(gemini, never()).call(any());
     verify(gemini, never()).callAudited(any(), any());
+  }
+
+  private static LlmRequest atomicRequest(String provider, String model) {
+    LlmExecutionReference reference =
+        new LlmExecutionReference("ctx-router", LlmExecutionScope.customer("org-1"));
+    LlmExecutionOperationAuthority authority =
+        LlmExecutionOperationAuthority.issue(
+            new LlmExecutionOperationClaim(reference, "llmop-router", 1, 1, UUID.randomUUID()),
+            "owner-router");
+    return req(provider, model).toBuilder()
+        .context(
+            new ExecutionContext("run-1", "T1", Path.of("/tmp/router-test"), reference, authority))
+        .llmExecutionContextId(reference.contextId())
+        .llmExecutionScope(reference.scope())
+        .llmExecutionOperationAuthority(authority)
+        .build();
+  }
+
+  private static PhysicalProviderAttemptAdmissionService.AdmittedPhysicalAttempt admittedAttempt(
+      LlmRequest request, int ordinal, String kind, String parent, String apiKey) {
+    String physicalId = request.usageLogicalCallId() + ":" + request.provider() + ":" + ordinal;
+    RunStepUsageRecorder.AttemptHandle handle =
+        new RunStepUsageRecorder.AttemptHandle(
+            physicalId,
+            request.usageLogicalCallId(),
+            parent,
+            kind,
+            ordinal,
+            request.provider(),
+            request.model(),
+            "WORKHORSE",
+            "PLATFORM",
+            ordinal,
+            null);
+    LlmUsageAttemptIntent intent =
+        LlmUsageAttemptIntent.builder()
+            .physicalAttemptId(physicalId)
+            .logicalCallId(request.usageLogicalCallId())
+            .attemptKind(kind)
+            .attemptOrdinal(ordinal)
+            .build();
+    return new PhysicalProviderAttemptAdmissionService.AdmittedPhysicalAttempt(
+        handle, intent, apiKey, RunKeyContext.Source.PLATFORM, Instant.now().plusSeconds(60));
   }
 
   @Test

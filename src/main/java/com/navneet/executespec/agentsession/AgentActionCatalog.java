@@ -112,7 +112,8 @@ public class AgentActionCatalog {
               ALL_SURFACES,
               true,
               "spec",
-              "projectId"),
+              "projectId",
+              "selectedRepoIds"),
           action(
               "local_code_task",
               "Ask a local-capable client to handle a coding task in the working tree.",

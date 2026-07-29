@@ -13,7 +13,11 @@ import com.navneet.executespec.agentsession.repository.AgentActionEventRepositor
 import com.navneet.executespec.agentsession.repository.AgentSessionRepository;
 import com.navneet.executespec.agentsession.repository.AgentTurnRepository;
 import com.navneet.executespec.auth.entity.AppUser;
+import com.navneet.executespec.auth.repository.AppUserRepository;
 import com.navneet.executespec.auth.security.AppUserDetails;
+import com.navneet.executespec.config.featureflag.FeatureFlagService;
+import com.navneet.executespec.harness.entity.GateRecord;
+import com.navneet.executespec.harness.repository.GateRepository;
 import com.navneet.executespec.report.ValidationReportRepository;
 import com.navneet.executespec.report.entity.ValidationReport;
 import com.navneet.executespec.sse.SseBroadcaster;
@@ -22,6 +26,7 @@ import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.AgentTaskRepository;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
 import com.navneet.executespec.testgen.model.TestPlan;
+import com.navneet.executespec.testgen.model.TestResult;
 import com.navneet.executespec.testgen.model.TestTask;
 import com.navneet.executespec.testgen.repository.TestPlanRepository;
 import com.navneet.executespec.testgen.repository.TestResultRepository;
@@ -29,6 +34,8 @@ import com.navneet.executespec.testgen.repository.TestTaskRepository;
 
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.context.annotation.Profile;
+import org.springframework.core.env.Environment;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -56,6 +63,7 @@ class WebQaFixtureControllerTest {
             .status("AWAITING_APPROVAL")
             .build();
     AgentTaskRepository tasks = mock(AgentTaskRepository.class);
+    GateRepository gates = mock(GateRepository.class);
     when(tasks.findByRunId("web-qa-run")).thenReturn(List.of());
     ValidationReportRepository reports = mock(ValidationReportRepository.class);
     TestPlanRepository plans = mock(TestPlanRepository.class);
@@ -66,6 +74,7 @@ class WebQaFixtureControllerTest {
     when(sessions.findByUserIdAndIdStartingWith("user-1", "web-qa-")).thenReturn(List.of(session));
     AgentActionEventRepository events = mock(AgentActionEventRepository.class);
     AgentTurnRepository turns = mock(AgentTurnRepository.class);
+    AppUserRepository users = mock(AppUserRepository.class);
     AppUser user =
         AppUser.builder()
             .id("user-1")
@@ -74,10 +83,13 @@ class WebQaFixtureControllerTest {
             .globalRole("SUPER_ADMIN")
             .orgId("org-1")
             .status("ACTIVE")
+            .deepSeekApiKey("web-qa-disabled-provider-key")
             .build();
+    when(users.findById("user-1")).thenReturn(java.util.Optional.of(user));
     WebQaFixtureController controller =
         new WebQaFixtureController(
             runs,
+            gates,
             tasks,
             reports,
             plans,
@@ -86,16 +98,41 @@ class WebQaFixtureControllerTest {
             sessions,
             turns,
             events,
-            mock(SseBroadcaster.class));
+            users,
+            mock(SseBroadcaster.class),
+            featureFlags(),
+            webQaEnvironment());
 
     Map<String, Object> result = controller.cleanup(new AppUserDetails(user, null));
 
     assertThat(result).containsEntry("deletedAgentSessions", 1);
     assertThat(result).containsEntry("deletedRuns", 1);
+    verify(gates).findFirstByRunIdAndGateType("web-qa-run", "PLAN");
     verify(runs).delete(run);
     verify(events).deleteBySessionId("web-qa-session");
     verify(turns).deleteBySessionId("web-qa-session");
     verify(sessions).delete(session);
+    verify(users).save(user);
+    assertThat(user.getDeepSeekApiKey()).isNull();
+  }
+
+  @Test
+  void cleanupAlsoDeletesTheExactRealBrowserSessionOwnedByTheAuthenticatedUser() throws Exception {
+    AgentSession seeded = AgentSession.builder().id("web-qa-session").userId("user-1").build();
+    AgentSession created = AgentSession.builder().id("browser-session").userId("user-1").build();
+    AgentSessionRepository sessions = mock(AgentSessionRepository.class);
+    when(sessions.findByUserIdAndIdStartingWith("user-1", "web-qa-")).thenReturn(List.of(seeded));
+    when(sessions.findById("browser-session")).thenReturn(java.util.Optional.of(created));
+    PipelineRunRepository runs = mock(PipelineRunRepository.class);
+    when(runs.findByCreatedByUserIdOrderByStartedAtDesc(eq("user-1"), any()))
+        .thenReturn(new PageImpl<>(List.of()));
+    WebQaFixtureController controller = controller(runs, sessions);
+
+    Map<String, Object> result = controller.cleanup(user(), "browser-session", false);
+
+    assertThat(result).containsEntry("deletedAgentSessions", 2);
+    verify(sessions).delete(seeded);
+    verify(sessions).delete(created);
   }
 
   @Test
@@ -198,6 +235,7 @@ class WebQaFixtureControllerTest {
     WebQaFixtureController controller =
         new WebQaFixtureController(
             runs,
+            mock(GateRepository.class),
             tasks,
             reports,
             plans,
@@ -206,7 +244,10 @@ class WebQaFixtureControllerTest {
             mock(AgentSessionRepository.class),
             mock(AgentTurnRepository.class),
             mock(AgentActionEventRepository.class),
-            mock(SseBroadcaster.class));
+            mock(AppUserRepository.class),
+            mock(SseBroadcaster.class),
+            featureFlags(),
+            webQaEnvironment());
 
     PipelineRun run =
         controller.createRun("user-1", "org-1", "COMPLETE", "CLEAN_COMPLETION", "fixture", true);
@@ -215,6 +256,114 @@ class WebQaFixtureControllerTest {
     verify(reports).save(reportCaptor.capture());
     assertThat(run.getRunId()).startsWith("web-qa-");
     assertThat(reportCaptor.getValue().getVerifiedScore()).isNull();
+    ArgumentCaptor<TestResult> resultCaptor = ArgumentCaptor.forClass(TestResult.class);
+    verify(testResults, times(2)).save(resultCaptor.capture());
+    assertThat(resultCaptor.getAllValues())
+        .extracting(TestResult::getTestMethod)
+        .containsExactly("fixture smoke", "fixture edge case");
+  }
+
+  @Test
+  void seededApprovalFixturePersistsCoherentLegacyPlanGate() {
+    GateRepository gates = mock(GateRepository.class);
+    WebQaFixtureController controller =
+        new WebQaFixtureController(
+            mock(PipelineRunRepository.class),
+            gates,
+            mock(AgentTaskRepository.class),
+            mock(ValidationReportRepository.class),
+            mock(TestPlanRepository.class),
+            mock(TestTaskRepository.class),
+            mock(TestResultRepository.class),
+            mock(AgentSessionRepository.class),
+            mock(AgentTurnRepository.class),
+            mock(AgentActionEventRepository.class),
+            mock(AppUserRepository.class),
+            mock(SseBroadcaster.class),
+            featureFlags(),
+            webQaEnvironment());
+
+    controller.createLegacyPlanGate("web-qa-gate");
+
+    ArgumentCaptor<GateRecord> gate = ArgumentCaptor.forClass(GateRecord.class);
+    verify(gates).save(gate.capture());
+    assertThat(gate.getValue())
+        .extracting(
+            GateRecord::getGateKey,
+            GateRecord::getRunId,
+            GateRecord::getGateType,
+            GateRecord::getStatus,
+            GateRecord::getBindingMode,
+            GateRecord::getBindingStatus)
+        .containsExactly(
+            "gate:plan:web-qa-gate", "web-qa-gate", "PLAN", "PENDING", "LEGACY", "UNBOUND");
+  }
+
+  @Test
+  void safetyEvidenceRequiresOnlyTheProviderFreeWebQaProfile() {
+    assertThat(WebQaFixtureController.class.getAnnotation(Profile.class).value())
+        .containsExactly("web-qa");
+    WebQaFixtureController controller =
+        controller(mock(PipelineRunRepository.class), mock(AgentSessionRepository.class));
+
+    assertThat(controller.safetyEvidence())
+        .satisfies(
+            evidence -> {
+              assertThat(evidence.safe()).isTrue();
+              assertThat(evidence.activeProfiles()).containsExactly("web-qa");
+              assertThat(evidence.liveLlmEnabled()).isFalse();
+              assertThat(evidence.featureFlagSnapshotSha256()).hasSize(64);
+            });
+
+    Environment unsafe = mock(Environment.class);
+    when(unsafe.getActiveProfiles()).thenReturn(new String[] {"web-qa", "dev"});
+    WebQaFixtureController sharedProfileController =
+        new WebQaFixtureController(
+            mock(PipelineRunRepository.class),
+            mock(GateRepository.class),
+            mock(AgentTaskRepository.class),
+            mock(ValidationReportRepository.class),
+            mock(TestPlanRepository.class),
+            mock(TestTaskRepository.class),
+            mock(TestResultRepository.class),
+            mock(AgentSessionRepository.class),
+            mock(AgentTurnRepository.class),
+            mock(AgentActionEventRepository.class),
+            mock(AppUserRepository.class),
+            mock(SseBroadcaster.class),
+            featureFlags(),
+            unsafe);
+    assertThat(sharedProfileController.safetyEvidence().safe()).isFalse();
+  }
+
+  @Test
+  void seedFailsBeforeAnyWriteWhenTheRuntimeIsNotProviderFreeAndIsolated() {
+    PipelineRunRepository runs = mock(PipelineRunRepository.class);
+    AgentSessionRepository sessions = mock(AgentSessionRepository.class);
+    Environment unsafe = mock(Environment.class);
+    when(unsafe.getActiveProfiles()).thenReturn(new String[] {"web-qa", "dev"});
+    WebQaFixtureController controller =
+        new WebQaFixtureController(
+            runs,
+            mock(GateRepository.class),
+            mock(AgentTaskRepository.class),
+            mock(ValidationReportRepository.class),
+            mock(TestPlanRepository.class),
+            mock(TestTaskRepository.class),
+            mock(TestResultRepository.class),
+            sessions,
+            mock(AgentTurnRepository.class),
+            mock(AgentActionEventRepository.class),
+            mock(AppUserRepository.class),
+            mock(SseBroadcaster.class),
+            featureFlags(),
+            unsafe);
+
+    assertThatThrownBy(() -> controller.seed(user()))
+        .isInstanceOf(ResponseStatusException.class)
+        .extracting(error -> ((ResponseStatusException) error).getStatusCode().value())
+        .isEqualTo(503);
+    verifyNoInteractions(runs, sessions);
   }
 
   private static AppUserDetails user() {
@@ -238,6 +387,7 @@ class WebQaFixtureControllerTest {
       PipelineRunRepository runs, AgentSessionRepository sessions, AgentTaskRepository tasks) {
     return new WebQaFixtureController(
         runs,
+        mock(GateRepository.class),
         tasks,
         mock(ValidationReportRepository.class),
         mock(TestPlanRepository.class),
@@ -246,6 +396,21 @@ class WebQaFixtureControllerTest {
         sessions,
         mock(AgentTurnRepository.class),
         mock(AgentActionEventRepository.class),
-        mock(SseBroadcaster.class));
+        mock(AppUserRepository.class),
+        mock(SseBroadcaster.class),
+        featureFlags(),
+        webQaEnvironment());
+  }
+
+  private static FeatureFlagService featureFlags() {
+    FeatureFlagService flags = mock(FeatureFlagService.class);
+    when(flags.listAll()).thenReturn(List.of());
+    return flags;
+  }
+
+  private static Environment webQaEnvironment() {
+    Environment environment = mock(Environment.class);
+    when(environment.getActiveProfiles()).thenReturn(new String[] {"web-qa"});
+    return environment;
   }
 }

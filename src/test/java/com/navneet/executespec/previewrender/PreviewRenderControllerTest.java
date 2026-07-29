@@ -1,6 +1,7 @@
 package com.navneet.executespec.previewrender;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -14,6 +15,8 @@ import com.navneet.executespec.auth.security.RunAccessGuard;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.server.ResponseStatusException;
 
 class PreviewRenderControllerTest {
 
@@ -31,16 +34,31 @@ class PreviewRenderControllerTest {
   }
 
   @Test
-  void featureOffTakesPrecedenceWithoutInspectingProductChanges() {
+  void featureOffHidesStaleJobsAndBundlesWithoutInspectingProductChanges() {
     when(service.enabled()).thenReturn(false);
-    when(service.latestJob(RUN_ID)).thenReturn(Optional.empty());
 
     PreviewRenderDtos.RenderManifest manifest = controller.manifest(RUN_ID, null).getBody();
 
     assertThat(manifest).isNotNull();
     assertThat(manifest.available()).isFalse();
     assertThat(manifest.renderAllowed()).isFalse();
+    assertThat(manifest.jobId()).isNull();
+    assertThat(manifest.surfaces()).isEmpty();
+    verify(service, never()).latestJob(anyString());
     verify(service, never()).hasProductFilesToRender(anyString());
+  }
+
+  @Test
+  void featureOffRefusesToServeAStoredSurface() {
+    when(service.enabled()).thenReturn(false);
+
+    assertThatThrownBy(() -> controller.surface(RUN_ID, "surface-1", null))
+        .isInstanceOfSatisfying(
+            ResponseStatusException.class,
+            error -> assertThat(error.getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE))
+        .hasMessageContaining("not enabled");
+
+    verify(service, never()).latestJob(anyString());
   }
 
   @Test

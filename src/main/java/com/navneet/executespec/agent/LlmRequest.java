@@ -3,6 +3,8 @@ package com.navneet.executespec.agent;
 import java.util.List;
 import java.util.UUID;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.navneet.executespec.executioncontext.LlmExecutionOperationAuthority;
 import com.navneet.executespec.executioncontext.LlmExecutionScope;
 import com.navneet.executespec.tool.ExecutionContext;
 
@@ -46,6 +48,8 @@ import lombok.Builder;
  *     attribution. Must be paired with {@code llmExecutionScope}; null preserves legacy callers.
  * @param llmExecutionScope tenant scope used to load {@code llmExecutionContextId}. The router and
  *     usage recorder never infer a durable context from run/source/correlation strings.
+ * @param llmExecutionOperationAuthority process-local operation capability derived only from {@code
+ *     context}; never serialized, logged, or reconstructed from durable request fields
  * @param strictProvider when true, transient failures are not routed to another provider
  * @param usageLogicalCallId stable identity shared by retries/failovers of one logical LLM call;
  *     generated once when omitted and preserved by {@link #toBuilder()}
@@ -66,6 +70,7 @@ public record LlmRequest(
     String retryOf,
     String llmExecutionContextId,
     LlmExecutionScope llmExecutionScope,
+    @JsonIgnore LlmExecutionOperationAuthority llmExecutionOperationAuthority,
     /**
      * RR-322 — optional fencing token: the {@code attempt} generation of the execution-context
      * claim this caller believes it holds. When supplied, {@code LlmExecutionDispatchGuard} rejects
@@ -101,14 +106,56 @@ public record LlmRequest(
       throw new IllegalArgumentException(
           "llmExecutionContextId and llmExecutionScope must be supplied together");
     }
-    if (llmExecutionContextId == null && context.llmExecutionContextId() != null) {
-      llmExecutionContextId = context.llmExecutionContextId();
-      llmExecutionScope = context.llmExecutionScope();
+    String contextId = context.llmExecutionContextId();
+    LlmExecutionScope contextScope = context.llmExecutionScope();
+    if (llmExecutionContextId == null && contextId != null) {
+      llmExecutionContextId = contextId;
+      llmExecutionScope = contextScope;
+    } else if (llmExecutionContextId != null
+        && contextId != null
+        && (!llmExecutionContextId.equals(contextId) || !llmExecutionScope.equals(contextScope))) {
+      throw new IllegalArgumentException(
+          "LLM request durable execution reference must match its tool context");
+    }
+    LlmExecutionOperationAuthority contextAuthority = context.llmExecutionOperationAuthority();
+    if (llmExecutionOperationAuthority == null) {
+      llmExecutionOperationAuthority = contextAuthority;
+    } else if (llmExecutionOperationAuthority != contextAuthority) {
+      throw new IllegalArgumentException(
+          "LLM request operation authority must be derived from its tool context");
+    }
+    if (llmExecutionOperationAuthority != null && llmExecutionContextId == null) {
+      throw new IllegalArgumentException(
+          "llmExecutionOperationAuthority requires a durable execution reference");
     }
     if (usageLogicalCallId == null || usageLogicalCallId.isBlank()) {
       usageLogicalCallId = UUID.randomUUID().toString();
     }
     if (temperature == null) temperature = 0.0;
     if (promptCacheStrategy == null) promptCacheStrategy = PromptCacheStrategy.DEFAULT;
+  }
+
+  /** Omits the opaque operation authority and prompt contents from diagnostic rendering. */
+  @Override
+  public String toString() {
+    return "LlmRequest[provider="
+        + provider
+        + ", model="
+        + model
+        + ", messageCount="
+        + messages.size()
+        + ", context="
+        + context
+        + ", agentRole="
+        + agentRole
+        + ", stepId="
+        + stepId
+        + ", llmExecutionContextId="
+        + llmExecutionContextId
+        + ", llmExecutionScope="
+        + llmExecutionScope
+        + ", strictProvider="
+        + strictProvider
+        + "]";
   }
 }

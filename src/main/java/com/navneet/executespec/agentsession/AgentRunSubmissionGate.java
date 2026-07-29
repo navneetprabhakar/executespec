@@ -1,28 +1,20 @@
 package com.navneet.executespec.agentsession;
 
+import java.util.Arrays;
+import java.util.List;
 import java.util.Locale;
+import java.util.UUID;
+import java.util.stream.Collectors;
 
-import com.navneet.executespec.agent.ApiKeyResolver;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.OrchestratorRunConfirmationRequest;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.OrchestratorTurnResponse;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.TypedAction;
 import com.navneet.executespec.agentsession.entity.AgentSession;
 import com.navneet.executespec.agentsession.entity.AgentTurn;
 import com.navneet.executespec.auth.security.AppUserDetails;
-import com.navneet.executespec.auth.service.AiProviderPreferenceService;
-import com.navneet.executespec.auth.service.TierEnforcementService;
-import com.navneet.executespec.billing.service.ManagedAiUsageService;
-import com.navneet.executespec.billing.service.UsageTrackingService;
 import com.navneet.executespec.config.featureflag.FeatureFlagService;
-import com.navneet.executespec.integration.RunOrchestrator;
-import com.navneet.executespec.project.security.ProjectAccessGuard;
-import com.navneet.executespec.router.ModelAccessService;
-import com.navneet.executespec.run.RunIdempotencyService;
-import com.navneet.executespec.run.RunIdempotencyStatus;
+import com.navneet.executespec.run.CustomerRunSubmissionService;
 import com.navneet.executespec.run.RunRequestFingerprint;
-import com.navneet.executespec.security.InputSanitizer;
-import com.navneet.executespec.state.StateStore;
-import com.navneet.executespec.state.entity.PipelineRun;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -34,7 +26,9 @@ import lombok.RequiredArgsConstructor;
  * The only agent-session component allowed to submit a new cloud run from an orchestrator turn.
  *
  * <p>Normal turns remain decision-only. This gate accepts only a stored {@code CODE_RUN_REQUIRED}
- * decision, explicit user confirmation, and a policy that already allows the run API.
+ * decision, explicit user confirmation, and a policy that already allows the run API. The actual
+ * BUILD admission is delegated to {@link CustomerRunSubmissionService}; agent confirmations must
+ * not grow a second authorization, repository, idempotency, quota, or ownership path.
  */
 @Service
 @RequiredArgsConstructor
@@ -42,18 +36,8 @@ public class AgentRunSubmissionGate {
 
   private static final String IDEMPOTENCY_PREFIX = "agent-orchestrator:";
 
-  private final RunOrchestrator runOrchestrator;
+  private final CustomerRunSubmissionService customerRunSubmissionService;
   private final FeatureFlagService featureFlagService;
-  private final InputSanitizer inputSanitizer;
-  private final ModelAccessService modelAccessService;
-  private final TierEnforcementService tierEnforcementService;
-  private final UsageTrackingService usageTrackingService;
-  private final ApiKeyResolver apiKeyResolver;
-  private final ManagedAiUsageService managedAiUsageService;
-  private final AiProviderPreferenceService aiProviderPreferenceService;
-  private final RunIdempotencyService runIdempotencyService;
-  private final StateStore stateStore;
-  private final ProjectAccessGuard projectAccessGuard;
 
   public Submission submitConfirmed(
       AgentSession session,
@@ -105,12 +89,7 @@ public class AgentRunSubmissionGate {
     if (projectId == null) {
       throw new ResponseStatusException(HttpStatus.CONFLICT, "project context is required");
     }
-    projectAccessGuard.assertCanWrite(projectId, user);
-    // RR-825 — this surface has no bean validation, so a caller could send "NaN"/"Infinity" as the
-    // hard cost cap and disable the worker ceiling. Reject before the claim, the quota accounting
-    // and any provider spend rather than after the asynchronous pipeline has already started.
-    com.navneet.executespec.cost.CostCapValues.requireValidOptional(
-        request == null ? null : request.userCostCap());
+
     boolean localExecutionRequested =
         request != null && Boolean.TRUE.equals(request.localExecution());
     if (localExecutionRequested && !featureFlagService.isEnabled("worker.local-hands.enabled")) {
@@ -128,117 +107,92 @@ public class AgentRunSubmissionGate {
     if (localExecutionRequested) {
       throw new ResponseStatusException(
           HttpStatus.UNPROCESSABLE_ENTITY,
-          "Agent proposal confirmation cannot bind a local connector and repository selection."
-              + " Submit through the CLI/VS Code local-run command so selectedRepoIds and"
-              + " localInstallationId are verified before any run or provider spend.");
+          "Agent proposal confirmation cannot bind a local connector. Submit through the CLI/VS"
+              + " Code local-run command so localInstallationId is verified before any run or"
+              + " provider spend.");
     }
 
-    // Durable atomic claim (V303): one confirmed turn can only ever produce one run, even when the
-    // same confirmation is dispatched twice in parallel. Taken before quota/usage accounting below.
+    String explicitModel = request == null ? null : AgentText.blankToNull(request.modelName());
+    String modelName =
+        AgentText.firstNonBlank(explicitModel, AgentText.blankToNull(session.getDefaultModel()));
+    String providerOverride = request == null ? null : AgentText.blankToNull(request.aiProvider());
+    String provider =
+        explicitModel == null
+            ? AgentText.firstNonBlank(
+                providerOverride, AgentText.blankToNull(session.getDefaultProvider()))
+            : providerOverride;
+    String lowStartTier =
+        request == null
+            ? null
+            : normalizeLowComplexityWorkerStartTier(request.lowComplexityWorkerStartTier());
+    String executionMode = normalizeExecutionMode(request == null ? null : request.executionMode());
+    List<UUID> selectedRepoIds = request == null ? null : request.selectedRepoIds();
+    Double userCostCap = request == null ? null : request.userCostCap();
     String idempotencyKey = IDEMPOTENCY_PREFIX + turn.getId();
-    var claim =
-        runIdempotencyService.claim(
-            user.getUser().getId(),
-            idempotencyKey,
-            RunRequestFingerprint.of(java.util.Arrays.asList(projectId, spec)));
-    if (claim.status() == RunIdempotencyStatus.DUPLICATE) {
-      var prior = stateStore.findRun(claim.runId());
-      if (prior.isPresent() && user.getUser().getId().equals(prior.get().getCreatedByUserId())) {
-        return new Submission(prior.get().getRunId(), false, "ALREADY_SUBMITTED");
-      }
-    }
-    if (!claim.owned() && claim.status() != RunIdempotencyStatus.DISABLED) {
-      throw new ResponseStatusException(
-          HttpStatus.CONFLICT,
-          "This confirmation is already being submitted. Reload the session before retrying.");
-    }
 
-    // Everything from here to submitRun is inside the claim's failure handling. A throw from the
-    // validation band used to leave the durable claim held with no run id, so the very next retry
-    // -- after the user topped up credits or fixed their key -- was rejected as a duplicate
-    // submission until the lease elapsed.
-    PipelineRun run;
-    try {
-      inputSanitizer.scan(spec);
-      if (featureFlagService.isEnabled("submissions.paused")) {
-        throw new ResponseStatusException(
-            HttpStatus.SERVICE_UNAVAILABLE,
-            "Run submissions are temporarily paused for maintenance. Please try again later.");
-      }
+    var command =
+        CustomerRunSubmissionService.Command.builder()
+            .userRequest(spec)
+            .source("AGENT_ORCHESTRATOR")
+            .repoMode("EXISTING")
+            .modelName(modelName)
+            .aiProvider(provider)
+            .rememberProviderPreference(providerOverride != null || explicitModel != null)
+            .inferProviderFromModelFirst(explicitModel != null)
+            .projectId(projectId)
+            .executionMode(executionMode)
+            .selectedRepoIds(selectedRepoIds)
+            .userCostCap(userCostCap)
+            .lowComplexityWorkerStartTier(lowStartTier)
+            .localExecution(false)
+            .patAuthenticated(patAuthenticated)
+            .idempotencyKey(idempotencyKey)
+            .requestFingerprint(
+                fingerprint(
+                    projectId,
+                    spec,
+                    modelName,
+                    provider,
+                    lowStartTier,
+                    userCostCap,
+                    executionMode,
+                    selectedRepoIds))
+            .build();
 
-      String explicitModel = request == null ? null : AgentText.blankToNull(request.modelName());
-      String modelName =
-          AgentText.firstNonBlank(explicitModel, AgentText.blankToNull(session.getDefaultModel()));
-      modelAccessService.assertModelAllowed(user.getUser().getId(), modelName);
-      String lowStartTier =
-          request == null
-              ? null
-              : normalizeLowComplexityWorkerStartTier(request.lowComplexityWorkerStartTier());
-      // Run-count retirement (2026-06-22): gate on managed ES AI credits, not a run cap.
-      managedAiUsageService.assertCanStartRun(
-          user, apiKeyResolver.isOwnKeysMode(user.getUser().getId()));
-      tierEnforcementService.incrementRunCountForAnalytics(user.getUser().getId());
-      apiKeyResolver.validateKeyAvailability(user.getUser().getId());
+    var admitted = customerRunSubmissionService.submit(command, user);
+    return new Submission(
+        admitted.run().getRunId(),
+        admitted.created(),
+        admitted.created() ? "SUBMITTED" : "ALREADY_SUBMITTED");
+  }
 
-      String providerOverride =
-          request == null ? null : AgentText.blankToNull(request.aiProvider());
-      String modelProvider =
-          explicitModel == null ? null : modelAccessService.providerForModel(explicitModel);
-      String sessionProvider = AgentText.blankToNull(session.getDefaultProvider());
-      String selectedProvider =
-          AgentText.firstNonBlank(providerOverride, modelProvider, sessionProvider);
-      String effectiveProvider =
-          selectedProvider != null
-              ? (providerOverride != null || modelProvider != null
-                  ? aiProviderPreferenceService.updatePreferredProvider(user, selectedProvider)
-                  : selectedProvider)
-              : aiProviderPreferenceService.preferredProvider(user);
-      modelAccessService.assertProviderModelPair(effectiveProvider, modelName);
-      String executionMode =
-          normalizeExecutionMode(request == null ? null : request.executionMode());
+  private static String fingerprint(
+      String projectId,
+      String spec,
+      String modelName,
+      String provider,
+      String lowStartTier,
+      Double userCostCap,
+      String executionMode,
+      List<UUID> selectedRepoIds) {
+    return RunRequestFingerprint.of(
+        Arrays.asList(
+            projectId,
+            spec,
+            modelName,
+            provider,
+            lowStartTier,
+            String.valueOf(userCostCap),
+            executionMode,
+            canonicalRepoIds(selectedRepoIds)));
+  }
 
-      run =
-          runOrchestrator.submitRun(
-              spec,
-              "AGENT_ORCHESTRATOR",
-              null,
-              "EXISTING",
-              user.getUser().getGithubPat(),
-              user.getUser().getGithubOwner(),
-              false,
-              false,
-              modelName,
-              effectiveProvider,
-              user.getUser().getId(),
-              user.getUser().getOrgId(),
-              projectId,
-              executionMode,
-              null,
-              null,
-              false,
-              null,
-              null,
-              null,
-              null,
-              lowStartTier);
-    } catch (ResponseStatusException e) {
-      if (e.getStatusCode().is4xxClientError()) {
-        runIdempotencyService.failFinal(claim, e.getStatusCode() + " " + e.getReason());
-      } else {
-        runIdempotencyService.releaseForRetry(claim, String.valueOf(e.getStatusCode()));
-      }
-      throw e;
-    } catch (RuntimeException e) {
-      runIdempotencyService.releaseForRetry(claim, e.getClass().getSimpleName());
-      throw e;
-    }
-
-    runIdempotencyService.complete(claim, run.getRunId());
-    usageTrackingService.increment(user.getUser().getId(), "RUNS", 1);
-    if (request != null && request.userCostCap() != null) {
-      stateStore.setUserCostCap(run.getRunId(), request.userCostCap());
-    }
-    return new Submission(run.getRunId(), true, "SUBMITTED");
+  private static String canonicalRepoIds(List<UUID> ids) {
+    if (ids == null) return "null";
+    return ids.stream()
+        .map(id -> id == null ? "" : id.toString())
+        .sorted()
+        .collect(Collectors.joining(","));
   }
 
   public record Submission(String runId, boolean calledRunApi, String status) {}
@@ -247,7 +201,7 @@ public class AgentRunSubmissionGate {
     if (value == null || value.isBlank()) {
       return null;
     }
-    String normalized = value.trim().toUpperCase(java.util.Locale.ROOT);
+    String normalized = value.trim().toUpperCase(Locale.ROOT);
     return "LIGHTWEIGHT".equals(normalized) || "WORKHORSE".equals(normalized) ? normalized : null;
   }
 

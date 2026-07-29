@@ -39,7 +39,7 @@ public class ProjectChatPolicyResolver {
       new ProjectChatPolicy.TurnBudgets(
           ChatToolPolicy.MAX_TURN_TOKENS,
           BigDecimal.valueOf(ChatToolPolicy.MAX_TURN_COST_USD),
-          ChatToolPolicy.MAX_MODEL_ROUNDS + 1,
+          ChatToolPolicy.MAX_PROVIDER_CALLS_PER_TURN,
           ChatToolPolicy.MAX_TOOL_CALLS,
           ChatToolPolicy.MAX_MODEL_ROUNDS + 1);
 

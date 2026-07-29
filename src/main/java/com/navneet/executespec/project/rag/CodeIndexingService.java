@@ -151,6 +151,7 @@ public class CodeIndexingService {
   private final CodeChunkStore codeChunkStore;
   private final CodeIndexStateStore stateStore;
   private final GeneratedSecretScanner secretScanner;
+  private final EmbeddingOperationRoot operationRoot;
   private final int maxRefreshedFiles;
 
   @Autowired
@@ -160,7 +161,8 @@ public class CodeIndexingService {
       EmbeddingService embedder,
       CodeChunkStore codeChunkStore,
       CodeIndexStateStore stateStore,
-      GeneratedSecretScanner secretScanner) {
+      GeneratedSecretScanner secretScanner,
+      EmbeddingOperationRoot operationRoot) {
     this(
         workspaceInitService,
         chunker,
@@ -168,6 +170,7 @@ public class CodeIndexingService {
         codeChunkStore,
         stateStore,
         secretScanner,
+        operationRoot,
         DEFAULT_MAX_REFRESHED_FILES);
   }
 
@@ -186,6 +189,7 @@ public class CodeIndexingService {
         codeChunkStore,
         stateStore,
         new GeneratedSecretScanner(),
+        null,
         maxRefreshedFiles);
   }
 
@@ -197,12 +201,33 @@ public class CodeIndexingService {
       CodeIndexStateStore stateStore,
       GeneratedSecretScanner secretScanner,
       int maxRefreshedFiles) {
+    this(
+        workspaceInitService,
+        chunker,
+        embedder,
+        codeChunkStore,
+        stateStore,
+        secretScanner,
+        null,
+        maxRefreshedFiles);
+  }
+
+  CodeIndexingService(
+      WorkspaceInitService workspaceInitService,
+      ChunkingService chunker,
+      EmbeddingService embedder,
+      CodeChunkStore codeChunkStore,
+      CodeIndexStateStore stateStore,
+      GeneratedSecretScanner secretScanner,
+      EmbeddingOperationRoot operationRoot,
+      int maxRefreshedFiles) {
     this.workspaceInitService = workspaceInitService;
     this.chunker = chunker;
     this.embedder = embedder;
     this.codeChunkStore = codeChunkStore;
     this.stateStore = stateStore;
     this.secretScanner = secretScanner;
+    this.operationRoot = operationRoot;
     this.maxRefreshedFiles = Math.max(1, maxRefreshedFiles);
   }
 
@@ -249,7 +274,18 @@ public class CodeIndexingService {
       String credentialUsername,
       String credentialSecret,
       String actorUserId) {
-    indexRepo(projectId, repo, credentialUsername, credentialSecret, actorUserId);
+    indexRepo(projectId, repo, credentialUsername, credentialSecret, actorUserId, false);
+  }
+
+  /** Explicit user refresh may start a new one-shot invocation after a prior terminal attempt. */
+  @Async
+  public void indexRepoExplicitAsync(
+      String projectId,
+      ProjectRepo repo,
+      String credentialUsername,
+      String credentialSecret,
+      String actorUserId) {
+    indexRepo(projectId, repo, credentialUsername, credentialSecret, actorUserId, true);
   }
 
   /** Clone/cache → deterministic inventory → SHA-incremental fenced publication. */
@@ -268,6 +304,16 @@ public class CodeIndexingService {
       String credentialUsername,
       String credentialSecret,
       String actorUserId) {
+    return indexRepo(projectId, repo, credentialUsername, credentialSecret, actorUserId, true);
+  }
+
+  private IndexResult indexRepo(
+      String projectId,
+      ProjectRepo repo,
+      String credentialUsername,
+      String credentialSecret,
+      String actorUserId,
+      boolean confirmedNewInvocation) {
     if (repo == null || repo.getId() == null || projectId == null || projectId.isBlank()) {
       return new IndexResult(
           Outcome.UNSUPPORTED_SOURCE,
@@ -280,6 +326,12 @@ public class CodeIndexingService {
     Readiness before = readiness(projectId, repo);
     if (before.semanticSearchAvailable()) {
       return new IndexResult(Outcome.ALREADY_READY, before);
+    }
+    if (!confirmedNewInvocation
+        && (before.status() == Status.PARTIAL || before.status() == Status.FAILED)) {
+      // Project-chat lazy indexing is not confirmation to replay a terminal/partial provider
+      // operation. The explicit refresh endpoint is the only authority to begin a new invocation.
+      return new IndexResult(Outcome.FAILED, before);
     }
 
     String owner = INSTANCE_ID + ":" + UUID.randomUUID();
@@ -297,6 +349,7 @@ public class CodeIndexingService {
       return new IndexResult(Outcome.UNSUPPORTED_SOURCE, readiness(projectId, repo));
     }
 
+    EmbeddingOperationRoot.Active operation = null;
     try {
       String fullName = sourceDisplayName(repo);
       String cloneUrl = cloneUrl(repo);
@@ -304,8 +357,7 @@ public class CodeIndexingService {
         stateStore.fail(lease, "SOURCE_CLONE_URL_UNAVAILABLE");
         return new IndexResult(Outcome.UNSUPPORTED_SOURCE, readiness(projectId, repo));
       }
-      String shaKey = shortSha(sourceSha);
-      String cloneWsId = "projchat-" + repo.getId() + "-" + shaKey;
+      String cloneWsId = CodeIndexWorkspaceIdentity.workspaceId(projectId, repo);
       try {
         String gitUsername =
             "BITBUCKET".equalsIgnoreCase(repo.getScmProvider())
@@ -344,6 +396,17 @@ public class CodeIndexingService {
       Inventory inventory = inventory(root);
       Map<String, String> indexed =
           codeChunkStore.indexedFileShas(projectId, repo.getId().toString());
+      EmbeddingOperationRoot.Request operationRequest =
+          codeIndexOperation(projectId, repo, sourceSha, lease, actorUserId);
+      if (operationRoot != null) {
+        operation =
+            operationRoot
+                .claim(operationRequest, lease.owner(), LEASE_DURATION, confirmedNewInvocation)
+                .orElseThrow(
+                    () ->
+                        new IllegalStateException("Code-index logical operation is not claimable"));
+      }
+      EmbeddingOperationRoot.Active activeOperation = operation;
       Set<String> currentEligiblePaths = new HashSet<>();
       int discovered = inventory.discoveredFiles();
       int eligible = 0;
@@ -353,8 +416,14 @@ public class CodeIndexingService {
       int deleted = 0;
       int failed = 0;
       int capDeferred = 0;
+      int candidatesSinceHeartbeat = 0;
 
       for (Candidate candidate : inventory.files()) {
+        candidatesSinceHeartbeat++;
+        if (activeOperation != null && candidatesSinceHeartbeat >= 100) {
+          if (!renewLeases(lease, activeOperation)) throw new LeaseLostException();
+          candidatesSinceHeartbeat = 0;
+        }
         if (SensitiveWorkspacePathPolicy.isSensitive(candidate.relativePath())
             || isBinaryName(candidate.relativePath())
             || candidate.size() == 0
@@ -393,7 +462,7 @@ public class CodeIndexingService {
           capDeferred++;
           continue;
         }
-        if (!stateStore.renew(lease, LEASE_DURATION)) throw new LeaseLostException();
+        if (!renewLeases(lease, activeOperation)) throw new LeaseLostException();
 
         try {
           List<ChunkingService.Chunk> chunks = chunker.chunk(content);
@@ -403,16 +472,28 @@ public class CodeIndexingService {
             continue;
           }
           List<float[]> embeddings =
-              embedder.embedForProject(
-                  projectId,
-                  chunks.stream().map(ChunkingService.Chunk::content).toList(),
-                  "ProjectCodeEmbedding",
-                  "PROJECT_REPOSITORY",
-                  repo.getId().toString(),
-                  actorUserId);
+              activeOperation == null
+                  ? embedder.embedForProject(
+                      projectId,
+                      chunks.stream().map(ChunkingService.Chunk::content).toList(),
+                      "ProjectCodeEmbedding",
+                      "PROJECT_REPOSITORY",
+                      repo.getId().toString(),
+                      actorUserId)
+                  : embedder.embedForProject(
+                      projectId,
+                      chunks.stream().map(ChunkingService.Chunk::content).toList(),
+                      "ProjectCodeEmbedding",
+                      "PROJECT_REPOSITORY",
+                      operationRequest.sourceId(),
+                      actorUserId,
+                      (completed, total) -> renewLeases(lease, activeOperation),
+                      activeOperation.authority());
           codeChunkStore.replaceFileChunks(
               lease, fullName, candidate.relativePath(), contentSha, chunks, embeddings);
           refreshed++;
+        } catch (EmbeddingOwnershipLostException lost) {
+          throw new LeaseLostException();
         } catch (LeaseLostException lost) {
           throw lost;
         } catch (Exception fileFailure) {
@@ -429,7 +510,7 @@ public class CodeIndexingService {
       if (!inventory.truncated()) {
         for (String stalePath : indexed.keySet()) {
           if (!currentEligiblePaths.contains(stalePath)) {
-            if (!stateStore.renew(lease, LEASE_DURATION)) throw new LeaseLostException();
+            if (!renewLeases(lease, activeOperation)) throw new LeaseLostException();
             if (codeChunkStore.deleteFile(lease, stalePath)) deleted++;
           }
         }
@@ -467,6 +548,10 @@ public class CodeIndexingService {
               coverage,
               inventory.truncated());
       if (!stateStore.complete(lease, completion)) throw new LeaseLostException();
+      if (operation != null) {
+        operationRoot.complete(operation);
+        operation = null;
+      }
       Readiness after = readiness(projectId, repo);
       log.info(
           "code index finished repo={} status={} coverage={} indexed={} eligible={} refreshed={}"
@@ -481,9 +566,11 @@ public class CodeIndexingService {
           inventory.truncated());
       return new IndexResult(ready ? Outcome.READY : Outcome.PARTIAL, after);
     } catch (LeaseLostException lost) {
+      terminateOperation(operation, "CODE_INDEX_LEASE_LOST", "Code-index lease was lost");
       log.info("code index lease lost project={} repo={}", projectId, repo.getId());
       return new IndexResult(Outcome.LEASE_LOST, readiness(projectId, repo));
     } catch (Exception failure) {
+      terminateOperation(operation, "CODE_INDEX_FAILED", "Code indexing did not complete");
       stateStore.fail(lease, "INDEX_FAILED_" + failureType(failure));
       log.warn(
           "code index failed project={} repo={} type={}",
@@ -492,6 +579,35 @@ public class CodeIndexingService {
           failureType(failure));
       return new IndexResult(Outcome.FAILED, readiness(projectId, repo));
     }
+  }
+
+  private static EmbeddingOperationRoot.Request codeIndexOperation(
+      String projectId, ProjectRepo repo, String sourceSha, Lease lease, String actorUserId) {
+    String sourceIdentity = EmbeddingOperationIdentity.codeIndex(repo.getId(), sourceSha);
+    return new EmbeddingOperationRoot.Request(
+        projectId,
+        "ProjectCodeEmbedding",
+        "PROJECT_REPOSITORY",
+        sourceIdentity,
+        actorUserId,
+        "project-code-index:" + projectId + ":" + repo.getId() + ":" + shortSha(sourceSha),
+        "PROJECT_CODE_INDEX",
+        projectId + "|" + repo.getId() + "|" + sourceSha);
+  }
+
+  private void terminateOperation(
+      EmbeddingOperationRoot.Active operation, String code, String message) {
+    if (operation == null || operationRoot == null) return;
+    try {
+      operationRoot.terminate(operation, code, message);
+    } catch (RuntimeException terminalFailure) {
+      log.warn("code-index logical-operation cleanup failed type={}", failureType(terminalFailure));
+    }
+  }
+
+  private boolean renewLeases(Lease lease, EmbeddingOperationRoot.Active operation) {
+    return stateStore.renew(lease, LEASE_DURATION)
+        && (operation == null || operationRoot.heartbeat(operation, LEASE_DURATION));
   }
 
   /**
@@ -599,13 +715,7 @@ public class CodeIndexingService {
   }
 
   private static String sourceRevision(ProjectRepo repo) {
-    if (repo.getLastSyncedSha() != null && !repo.getLastSyncedSha().isBlank()) {
-      return repo.getLastSyncedSha().trim();
-    }
-    if (repo.getSourceRevision() != null && !repo.getSourceRevision().isBlank()) {
-      return repo.getSourceRevision().trim();
-    }
-    return "UNPINNED";
+    return CodeIndexWorkspaceIdentity.sourceRevision(repo);
   }
 
   private static String sourceDisplayName(ProjectRepo repo) {

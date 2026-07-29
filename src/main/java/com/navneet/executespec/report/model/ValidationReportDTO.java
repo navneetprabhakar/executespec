@@ -56,6 +56,11 @@ public record ValidationReportDTO(
      */
     GoalDonenessDecision runGoalDecision,
     /**
+     * Typed references to the exact ledger rows used by {@link #runGoalDecision}. `proofStatus`
+     * distinguishes proven, blocking, unproven, and contextual rows without parsing reason text.
+     */
+    List<GoalProofEvidenceReferenceDTO> goalProofReferences,
+    /**
      * PR-E Phase A (2026-05-13, V194) — additive rubric score 0-100. Each dimension contributes
      * points independently so a single zero factor doesn't collapse the headline number the way the
      * multiplicative {@link #verifiedScore} does. UI picks the more informative of the two per run

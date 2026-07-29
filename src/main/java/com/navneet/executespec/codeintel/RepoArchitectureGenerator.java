@@ -10,6 +10,7 @@ import com.navneet.executespec.router.LlmProvider;
 import com.navneet.executespec.router.ModelResolver;
 import com.navneet.executespec.router.ResolvedModel;
 import com.navneet.executespec.router.RunModelOverrides;
+import com.navneet.executespec.tool.ExecutionContext;
 
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.SystemMessage;
@@ -107,6 +108,36 @@ public class RepoArchitectureGenerator {
       LlmProvider provider,
       String actorUserId,
       LlmExecutionReference confirmedActionReference) {
+    return generateInternal(
+        projectId,
+        repoFullName,
+        codeMapMarkdown,
+        provider,
+        actorUserId,
+        confirmedActionReference,
+        null);
+  }
+
+  Result generateWithOperationContext(
+      String projectId,
+      String repoFullName,
+      String codeMapMarkdown,
+      LlmProvider provider,
+      String actorUserId,
+      ExecutionContext operationContext) {
+    if (operationContext == null) throw new IllegalArgumentException("operationContext required");
+    return generateInternal(
+        projectId, repoFullName, codeMapMarkdown, provider, actorUserId, null, operationContext);
+  }
+
+  private Result generateInternal(
+      String projectId,
+      String repoFullName,
+      String codeMapMarkdown,
+      LlmProvider provider,
+      String actorUserId,
+      LlmExecutionReference confirmedActionReference,
+      ExecutionContext operationContext) {
     if (codeMapMarkdown == null || codeMapMarkdown.isBlank()) {
       throw new IllegalArgumentException("code map is empty for " + repoFullName);
     }
@@ -124,28 +155,39 @@ public class RepoArchitectureGenerator {
             new UserMessage(PromptTrustBoundary.wrap("REPO_ARCHITECTURE_EVIDENCE", userPayload)));
     String contextId = "repo-arch-" + java.util.UUID.randomUUID();
     var executionReference =
-        confirmedActionReference != null
-            ? confirmedActionReference
-            : executionPolicyFactory.forProject(
-                projectId,
-                "repo-architecture",
-                "ARCHITECTURE",
-                contextId,
-                contextId,
-                effective.name(),
-                exactModel,
-                actorUserId);
+        operationContext != null
+            ? null
+            : (confirmedActionReference != null
+                ? confirmedActionReference
+                : executionPolicyFactory.forProject(
+                    projectId,
+                    "repo-architecture",
+                    "ARCHITECTURE",
+                    contextId,
+                    contextId,
+                    effective.name(),
+                    exactModel,
+                    actorUserId));
 
     // All providers use the canonical text router; architecture generation has no tool callbacks.
     ChatResponse response =
-        ArchLlmDispatch.dispatch(
-            llmRouter.getObject(),
-            resolved,
-            messages,
-            "repo-arch-" + safeSlug(repoFullName),
-            "repo-arch",
-            executionReference);
+        operationContext == null
+            ? ArchLlmDispatch.dispatch(
+                llmRouter.getObject(),
+                resolved,
+                messages,
+                "repo-arch-" + safeSlug(repoFullName),
+                "repo-arch",
+                executionReference)
+            : ArchLlmDispatch.dispatch(
+                llmRouter.getObject(),
+                resolved,
+                messages,
+                "repo-arch-" + safeSlug(repoFullName),
+                "repo-arch",
+                operationContext);
 
+    requireCompleteTermination(response, "repository architecture for " + repoFullName);
     String text = response.getResult().getOutput().getText();
     if (text == null || text.isBlank()) {
       throw new IllegalStateException("LLM returned empty arch content for " + repoFullName);
@@ -160,6 +202,32 @@ public class RepoArchitectureGenerator {
         outTok,
         resolved.getModel());
     return new Result(text.trim(), inTok, outTok, resolved.getModel());
+  }
+
+  static void requireCompleteTermination(ChatResponse response, String operation) {
+    Object reason =
+        response == null
+                || response.getResult() == null
+                || response.getResult().getMetadata() == null
+            ? null
+            : response.getResult().getMetadata().getFinishReason();
+    if (reason == null) return;
+    String normalized = String.valueOf(reason).trim().toLowerCase(java.util.Locale.ROOT);
+    if (normalized.isBlank()
+        || normalized.equals("stop")
+        || normalized.equals("end_turn")
+        || normalized.equals("complete")
+        || normalized.equals("completed")) {
+      return;
+    }
+    throw new ProviderOutputIncompleteException(
+        operation + " terminated before completion (finishReason=" + normalized + ")");
+  }
+
+  static final class ProviderOutputIncompleteException extends RuntimeException {
+    ProviderOutputIncompleteException(String message) {
+      super(message);
+    }
   }
 
   private static String safeSlug(String s) {

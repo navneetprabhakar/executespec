@@ -3,6 +3,7 @@ package com.navneet.executespec.specchat;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -10,6 +11,7 @@ import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -20,6 +22,10 @@ import com.navneet.executespec.agent.RunKeyContextStore;
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.config.AgentProperties;
 import com.navneet.executespec.cost.RunCostTracker;
+import com.navneet.executespec.executioncontext.LlmExecutionOperationClaim;
+import com.navneet.executespec.executioncontext.LlmExecutionOperationCoordinator;
+import com.navneet.executespec.executioncontext.LlmExecutionOperationDescriptor;
+import com.navneet.executespec.executioncontext.LlmExecutionOperationService;
 import com.navneet.executespec.executioncontext.LlmExecutionReference;
 import com.navneet.executespec.executioncontext.LlmExecutionScope;
 import com.navneet.executespec.executioncontext.LlmPolicySnapshot;
@@ -35,6 +41,7 @@ import org.mockito.ArgumentCaptor;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
+import org.springframework.ai.chat.metadata.ChatGenerationMetadata;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.tool.ToolCallback;
@@ -89,6 +96,14 @@ class SpecChatServiceTest {
         List.of(new Generation(AssistantMessage.builder().content(text).build())));
   }
 
+  private static ChatResponse textResponse(String text, String finishReason) {
+    Generation generation =
+        new Generation(
+            AssistantMessage.builder().content(text).build(),
+            ChatGenerationMetadata.builder().finishReason(finishReason).build());
+    return new ChatResponse(List.of(generation));
+  }
+
   private static ChatResponse toolResponse(AssistantMessage.ToolCall... calls) {
     return new ChatResponse(
         List.of(
@@ -133,6 +148,20 @@ class SpecChatServiceTest {
       List<ToolCallback> actionToolList,
       List<ToolCallback> projectToolList,
       LlmProvider actualProvider) {
+    return newService(
+        router,
+        actionToolList,
+        projectToolList,
+        actualProvider,
+        mock(LlmExecutionOperationCoordinator.class));
+  }
+
+  private static SpecChatService newService(
+      LlmRouter router,
+      List<ToolCallback> actionToolList,
+      List<ToolCallback> projectToolList,
+      LlmProvider actualProvider,
+      LlmExecutionOperationCoordinator operationCoordinator) {
     ModelResolver modelResolver = mock(ModelResolver.class);
     ResolvedModel model = mock(ResolvedModel.class);
     when(model.getModel()).thenReturn("test-model");
@@ -176,7 +205,8 @@ class SpecChatServiceTest {
         keyContextStore,
         new com.navneet.executespec.security.InputSanitizer(),
         contextSanitizer,
-        policyResolver);
+        policyResolver,
+        operationCoordinator);
   }
 
   private static ProjectChatPolicy allowingPolicy(LlmProvider provider) {
@@ -213,6 +243,152 @@ class SpecChatServiceTest {
   }
 
   @Test
+  void durableAgentTurnClaimsExactPolicyReferenceAndBindsOneLeaseAcrossAllRounds() {
+    LlmRouter router = mock(LlmRouter.class);
+    when(router.call(any()))
+        .thenReturn(toolResponse(toolCall("lookup", "{}")))
+        .thenReturn(textResponse("grounded answer"));
+    LlmExecutionOperationService operationService = mock(LlmExecutionOperationService.class);
+    LlmExecutionOperationCoordinator coordinator =
+        new LlmExecutionOperationCoordinator(operationService);
+    LlmExecutionReference reference =
+        new LlmExecutionReference("llmctx-test", LlmExecutionScope.customer("org-1"));
+    LlmExecutionOperationClaim claim =
+        new LlmExecutionOperationClaim(reference, "llmop-test", 1, 1, UUID.randomUUID());
+    when(operationService.claimOrResume(any(), any(), any(), any())).thenReturn(Optional.of(claim));
+    SpecChatService svc =
+        newService(
+            router,
+            List.of(fakeTool("lookup", "{\"ok\":true}")),
+            List.of(),
+            LlmProvider.ANTHROPIC,
+            coordinator);
+
+    java.util.concurrent.atomic.AtomicReference<SpecChatService.DurableTurnOperation> operation =
+        new java.util.concurrent.atomic.AtomicReference<>();
+    svc.runDurableAgentTurn(
+        new RecordingSink(),
+        mock(AppUserDetails.class),
+        "sess-durable",
+        null,
+        null,
+        "org-1",
+        List.of(Map.of("role", "user", "content", "inspect")),
+        "anthropic",
+        null,
+        Set.of("lookup"),
+        "turn-durable",
+        operation::set);
+
+    ArgumentCaptor<LlmExecutionOperationDescriptor> descriptor =
+        ArgumentCaptor.forClass(LlmExecutionOperationDescriptor.class);
+    org.mockito.Mockito.verify(operationService)
+        .claimOrResume(
+            eq(reference), descriptor.capture(), any(), eq(java.time.Duration.ofMinutes(30)));
+    assertThat(descriptor.getValue().operationKey())
+        .isEqualTo(SpecChatService.AGENT_TURN_OPERATION_KEY);
+    assertThat(descriptor.getValue().operationKind()).isEqualTo("AGENT_TURN");
+    assertThat(descriptor.getValue().maxAttempts()).isEqualTo(1);
+    assertThat(operation.get().lease()).isNotNull();
+
+    ArgumentCaptor<LlmRequest> requests = ArgumentCaptor.forClass(LlmRequest.class);
+    org.mockito.Mockito.verify(router, org.mockito.Mockito.times(2)).call(requests.capture());
+    var authority = requests.getAllValues().get(0).context().llmExecutionOperationAuthority();
+    assertThat(authority).isNotNull();
+    assertThat(requests.getAllValues())
+        .allSatisfy(
+            request ->
+                assertThat(request.context().llmExecutionOperationAuthority()).isSameAs(authority));
+  }
+
+  @Test
+  void durableAgentTurnDoesNotDispatchWhenOperationCannotBeClaimed() {
+    LlmRouter router = mock(LlmRouter.class);
+    LlmExecutionOperationService operationService = mock(LlmExecutionOperationService.class);
+    LlmExecutionOperationCoordinator coordinator =
+        new LlmExecutionOperationCoordinator(operationService);
+    when(operationService.claimOrResume(any(), any(), any(), any())).thenReturn(Optional.empty());
+    SpecChatService svc =
+        newService(router, List.of(), List.of(), LlmProvider.ANTHROPIC, coordinator);
+
+    assertThatThrownBy(
+            () ->
+                svc.runDurableAgentTurn(
+                    new RecordingSink(),
+                    mock(AppUserDetails.class),
+                    "sess-busy",
+                    null,
+                    null,
+                    "org-1",
+                    List.of(Map.of("role", "user", "content", "hello")),
+                    "anthropic",
+                    null,
+                    Set.of(),
+                    "turn-busy",
+                    ignored -> {}))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("already active or terminal");
+
+    org.mockito.Mockito.verifyNoInteractions(router);
+  }
+
+  @Test
+  void reusedTurnFingerprintIsCanonicalButConflictsWhenConversationPayloadChanges() {
+    LlmRouter router = mock(LlmRouter.class);
+    when(router.call(any())).thenReturn(textResponse("answer"));
+    LlmExecutionOperationService operationService = mock(LlmExecutionOperationService.class);
+    LlmExecutionOperationCoordinator coordinator =
+        new LlmExecutionOperationCoordinator(operationService);
+    LlmExecutionReference reference =
+        new LlmExecutionReference("llmctx-test", LlmExecutionScope.customer("org-1"));
+    when(operationService.claimOrResume(any(), any(), any(), any()))
+        .thenReturn(
+            Optional.of(
+                new LlmExecutionOperationClaim(
+                    reference, "llmop-fingerprint", 1, 1, UUID.randomUUID())));
+    SpecChatService svc =
+        newService(router, List.of(), List.of(), LlmProvider.ANTHROPIC, coordinator);
+
+    Set<String> reverseTools = new java.util.LinkedHashSet<>(List.of("web_fetch", "web_search"));
+    Set<String> sortedTools = new java.util.LinkedHashSet<>(List.of("web_search", "web_fetch"));
+    Map<String, Object> contentFirst = new java.util.LinkedHashMap<>();
+    contentFirst.put("content", "same payload");
+    contentFirst.put("role", "user");
+    Map<String, Object> roleFirst = new java.util.LinkedHashMap<>();
+    roleFirst.put("role", "user");
+    roleFirst.put("content", "same payload");
+    runDurableForFingerprint(svc, List.of(contentFirst), reverseTools);
+    runDurableForFingerprint(svc, List.of(roleFirst), sortedTools);
+    runDurableForFingerprint(
+        svc, List.of(Map.of("role", "user", "content", "changed payload")), sortedTools);
+
+    ArgumentCaptor<LlmExecutionOperationDescriptor> descriptors =
+        ArgumentCaptor.forClass(LlmExecutionOperationDescriptor.class);
+    org.mockito.Mockito.verify(operationService, org.mockito.Mockito.times(3))
+        .claimOrResume(any(), descriptors.capture(), any(), any());
+    List<LlmExecutionOperationDescriptor> captured = descriptors.getAllValues();
+    assertThat(captured.get(0).fingerprint()).isEqualTo(captured.get(1).fingerprint());
+    assertThat(captured.get(2).fingerprint()).isNotEqualTo(captured.get(0).fingerprint());
+  }
+
+  private static void runDurableForFingerprint(
+      SpecChatService service, List<Map<String, Object>> conversation, Set<String> allowedTools) {
+    service.runDurableAgentTurn(
+        new RecordingSink(),
+        mock(AppUserDetails.class),
+        "sess-reused",
+        null,
+        null,
+        "org-1",
+        conversation,
+        "anthropic",
+        null,
+        allowedTools,
+        "turn-reused",
+        ignored -> {});
+  }
+
+  @Test
   void dispatchesResolvedFallbackProviderWithItsModel() {
     LlmRouter router = mock(LlmRouter.class);
     when(router.call(any())).thenReturn(textResponse("fallback answer"));
@@ -234,6 +410,8 @@ class SpecChatServiceTest {
     assertThat(request.getValue().context().llmExecutionContextId()).isEqualTo("llmctx-test");
     assertThat(request.getValue().context().llmExecutionScope())
         .isEqualTo(LlmExecutionScope.customer("org-1"));
+    assertThat(request.getValue().maxTokens())
+        .isEqualTo(SpecChatService.DIRECT_RESPONSE_MAX_TOKENS);
   }
 
   @Test
@@ -256,6 +434,27 @@ class SpecChatServiceTest {
     assertThat(sink.toolCalls).isEmpty();
     assertThat(sink.toolResults).isEmpty();
     assertThat(sink.doneTurnCount).isEqualTo(1);
+  }
+
+  @Test
+  void outputLimitIsSurfacedInsteadOfPresentingPartialCodeAsComplete() {
+    LlmRouter router = mock(LlmRouter.class);
+    when(router.call(any())).thenReturn(textResponse("```html\n<div>", "length"));
+    SpecChatService svc = newService(router, List.of());
+
+    RecordingSink sink = new RecordingSink();
+    svc.runTurn(
+        sink,
+        mock(AppUserDetails.class),
+        "sess-truncated",
+        null,
+        "org-1",
+        List.of(Map.of("role", "user", "content", "build a small todo app")),
+        "openai");
+
+    assertThat(sink.tokens)
+        .contains("```html\n<div>")
+        .anySatisfy(message -> assertThat(message).contains("response is incomplete"));
   }
 
   @Test
@@ -638,6 +837,39 @@ class SpecChatServiceTest {
         .contains("The evidence shows the scheduler is the highest-risk seam.")
         .noneMatch(token -> token.contains("ask me to continue"));
     assertThat(sink.doneTurnCount).isEqualTo(2);
+  }
+
+  @Test
+  void finalSynthesisUsesItsDedicatedCapAndSurfacesOutputLimit() {
+    LlmRouter router = mock(LlmRouter.class);
+    when(router.call(any()))
+        .thenReturn(
+            toolResponse(toolCall("list_recent_runs", "{\"limit\":5}")),
+            textResponse("The partial final answer", "max_tokens"));
+    SpecChatService svc =
+        newService(router, List.of(fakeTool("list_recent_runs", "{\"ok\":true}")));
+
+    RecordingSink sink = new RecordingSink();
+    svc.runTurnBounded(
+        sink,
+        mock(AppUserDetails.class),
+        "sess-truncated-synthesis",
+        null,
+        null,
+        "org-1",
+        List.of(Map.of("role", "user", "content", "summarize the evidence")),
+        "anthropic",
+        Set.of("list_recent_runs"),
+        1,
+        () -> {});
+
+    ArgumentCaptor<LlmRequest> requests = ArgumentCaptor.forClass(LlmRequest.class);
+    org.mockito.Mockito.verify(router, org.mockito.Mockito.times(2)).call(requests.capture());
+    assertThat(requests.getAllValues().get(1).maxTokens())
+        .isEqualTo(SpecChatService.FINAL_SYNTHESIS_MAX_TOKENS);
+    assertThat(sink.tokens)
+        .contains("The partial final answer")
+        .anySatisfy(message -> assertThat(message).contains("synthesis is incomplete"));
   }
 
   @Test

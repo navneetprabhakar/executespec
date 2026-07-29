@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -22,6 +23,7 @@ import com.navneet.executespec.router.LlmProvider;
 import com.navneet.executespec.state.StateStore;
 import com.navneet.executespec.state.entity.PipelineRun;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
@@ -30,7 +32,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 
 import io.micrometer.context.ContextSnapshotFactory;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 /**
@@ -46,7 +47,6 @@ import lombok.extern.slf4j.Slf4j;
  */
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class PreviewRenderService {
 
   public static final String FLAG = "preview.render-agent.enabled";
@@ -59,6 +59,50 @@ public class PreviewRenderService {
   private final RunChangeEvidenceService changeEvidenceService;
   private final StateStore stateStore;
   private final FeatureFlagService featureFlagService;
+  private final PreviewRenderOperationRoot operationRoot;
+
+  @Autowired
+  public PreviewRenderService(
+      PreviewSurfaceDiscovery discovery,
+      PreviewRenderAgent renderAgent,
+      PreviewRenderJobRepository jobRepository,
+      PreviewRenderBundleRepository bundleRepository,
+      WorkspaceRestoreService workspaceRestoreService,
+      RunChangeEvidenceService changeEvidenceService,
+      StateStore stateStore,
+      FeatureFlagService featureFlagService,
+      PreviewRenderOperationRoot operationRoot) {
+    this.discovery = discovery;
+    this.renderAgent = renderAgent;
+    this.jobRepository = jobRepository;
+    this.bundleRepository = bundleRepository;
+    this.workspaceRestoreService = workspaceRestoreService;
+    this.changeEvidenceService = changeEvidenceService;
+    this.stateStore = stateStore;
+    this.featureFlagService = featureFlagService;
+    this.operationRoot = operationRoot;
+  }
+
+  PreviewRenderService(
+      PreviewSurfaceDiscovery discovery,
+      PreviewRenderAgent renderAgent,
+      PreviewRenderJobRepository jobRepository,
+      PreviewRenderBundleRepository bundleRepository,
+      WorkspaceRestoreService workspaceRestoreService,
+      RunChangeEvidenceService changeEvidenceService,
+      StateStore stateStore,
+      FeatureFlagService featureFlagService) {
+    this(
+        discovery,
+        renderAgent,
+        jobRepository,
+        bundleRepository,
+        workspaceRestoreService,
+        changeEvidenceService,
+        stateStore,
+        featureFlagService,
+        null);
+  }
 
   @Value("${preview.render.max-surfaces:6}")
   private int maxSurfaces;
@@ -243,10 +287,12 @@ public class PreviewRenderService {
     }
 
     AtomicBoolean running = new AtomicBoolean(true);
-    Thread renewal = startLeaseRenewal(jobId, owner, running);
+    ConcurrentHashMap<String, PreviewRenderOperationRoot.Active> operations =
+        new ConcurrentHashMap<>();
+    Thread renewal = startLeaseRenewal(jobId, owner, running, operations);
     Outcome outcome;
     try {
-      outcome = renderJob(jobId, runId, provider);
+      outcome = renderJob(jobId, runId, provider, owner, operations);
     } catch (RuntimeException e) {
       log.error("preview-render job failed run={} job={}", runId, jobId, e);
       outcome = Outcome.of(PreviewRenderJob.Status.FAILED, "RENDER_JOB_ERROR");
@@ -270,7 +316,12 @@ public class PreviewRenderService {
     }
   }
 
-  private Outcome renderJob(UUID jobId, String runId, LlmProvider provider) {
+  private Outcome renderJob(
+      UUID jobId,
+      String runId,
+      LlmProvider provider,
+      String owner,
+      ConcurrentHashMap<String, PreviewRenderOperationRoot.Active> operations) {
     Path workspace;
     try {
       workspace = workspaceRestoreService.ensureWorkspaceAvailable(runId);
@@ -285,7 +336,7 @@ public class PreviewRenderService {
       return Outcome.of(PreviewRenderJob.Status.NO_SURFACES, null);
     }
 
-    int rendered = renderSurfaces(jobId, runId, provider, surfaces);
+    int rendered = renderSurfaces(jobId, runId, provider, owner, surfaces, operations);
     return new Outcome(
         rendered > 0 ? PreviewRenderJob.Status.READY : PreviewRenderJob.Status.FAILED,
         rendered > 0 ? null : "ALL_SURFACES_FAILED",
@@ -295,7 +346,12 @@ public class PreviewRenderService {
 
   /** Renders every discovered surface, persisting each result. Returns how many were admitted. */
   private int renderSurfaces(
-      UUID jobId, String runId, LlmProvider provider, List<PreviewSurface> surfaces) {
+      UUID jobId,
+      String runId,
+      LlmProvider provider,
+      String owner,
+      List<PreviewSurface> surfaces,
+      ConcurrentHashMap<String, PreviewRenderOperationRoot.Active> operations) {
 
     ExecutorService pool = Executors.newFixedThreadPool(Math.max(1, parallelism));
     try {
@@ -306,24 +362,55 @@ public class PreviewRenderService {
         futures.add(
             pool.submit(
                 snapshot.wrap(
-                    () -> renderAgent.render(surface, provider, runId, renderAttemptId))));
+                    () -> {
+                      if (operationRoot == null) {
+                        return renderAgent.render(surface, provider, runId, renderAttemptId);
+                      }
+                      var route = renderAgent.resolveRoute(provider);
+                      PreviewRenderOperationRoot.Active active =
+                          operationRoot
+                              .claim(
+                                  jobId,
+                                  runId,
+                                  surface,
+                                  route,
+                                  owner + ":" + surface.id(),
+                                  Duration.ofSeconds(leaseSeconds))
+                              .orElse(null);
+                      if (active == null) {
+                        return new PreviewRenderAgent.RenderedSurface(
+                            surface.id(), null, "UNCERTAIN_PREVIOUS_ATTEMPT");
+                      }
+                      operations.put(surface.id(), active);
+                      return renderAgent.render(
+                          surface, route, runId, renderAttemptId, active.context());
+                    })));
       }
 
       int rendered = 0;
       for (int i = 0; i < surfaces.size(); i++) {
         PreviewSurface surface = surfaces.get(i);
         PreviewRenderAgent.RenderedSurface result;
+        boolean uncertain = false;
         try {
           result = futures.get(i).get(timeoutSeconds, TimeUnit.SECONDS);
         } catch (Exception e) {
           log.warn("preview-render surface timed out run={} surface={}", runId, surface.id(), e);
           futures.get(i).cancel(true);
           result = new PreviewRenderAgent.RenderedSurface(surface.id(), null, "TIMEOUT");
+          uncertain = true;
         }
-        if (result.ok()) {
-          rendered++;
+        PreviewRenderOperationRoot.Active active = operations.remove(surface.id());
+        boolean persisted = persistSurface(jobId, runId, surface, result, i);
+        if (persisted && active != null && !uncertain) {
+          operationRoot.complete(active);
+        } else if (active != null) {
+          terminateOperation(
+              active,
+              uncertain ? "PREVIEW_PROVIDER_OUTCOME_UNCERTAIN" : "PREVIEW_BUNDLE_PERSIST_FAILED",
+              uncertain ? "surface render timed out" : "bundle persistence failed");
         }
-        persistSurface(jobId, runId, surface, result, i);
+        if (persisted && result.ok()) rendered++;
       }
       return rendered;
     } finally {
@@ -335,7 +422,11 @@ public class PreviewRenderService {
    * Keeps the lease alive while the render runs. A render can take several minutes, and the lease
    * has to be short enough that a crash heals quickly — so it is renewed rather than pre-sized.
    */
-  private Thread startLeaseRenewal(UUID jobId, String owner, AtomicBoolean running) {
+  private Thread startLeaseRenewal(
+      UUID jobId,
+      String owner,
+      AtomicBoolean running,
+      ConcurrentHashMap<String, PreviewRenderOperationRoot.Active> operations) {
     return Thread.ofVirtual()
         .name("preview-render-lease-" + jobId)
         .start(
@@ -356,6 +447,14 @@ public class PreviewRenderService {
                       == 0) {
                     log.warn("preview-render lease no longer held job={}", jobId);
                     return;
+                  }
+                  if (operationRoot != null) {
+                    for (var operation : operations.values()) {
+                      if (!operationRoot.heartbeat(operation, Duration.ofSeconds(leaseSeconds))) {
+                        log.warn("preview-render operation lease no longer held job={}", jobId);
+                        return;
+                      }
+                    }
                   }
                 } catch (RuntimeException e) {
                   log.warn("preview-render lease renewal failed job={}", jobId, e);
@@ -383,7 +482,7 @@ public class PreviewRenderService {
     }
   }
 
-  private void persistSurface(
+  private boolean persistSurface(
       UUID jobId,
       String runId,
       PreviewSurface surface,
@@ -410,8 +509,19 @@ public class PreviewRenderService {
               .failureReason(result.failureReason())
               .displayOrder(order)
               .build());
+      return true;
     } catch (RuntimeException e) {
       log.warn("preview-render could not persist surface={} run={}", surface.id(), runId, e);
+      return false;
+    }
+  }
+
+  private void terminateOperation(
+      PreviewRenderOperationRoot.Active active, String code, String message) {
+    try {
+      operationRoot.terminate(active, code, message);
+    } catch (RuntimeException failure) {
+      log.warn("preview-render operation terminalization failed code={}", code, failure);
     }
   }
 }

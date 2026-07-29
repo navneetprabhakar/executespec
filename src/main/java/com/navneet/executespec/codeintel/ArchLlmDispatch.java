@@ -2,9 +2,11 @@ package com.navneet.executespec.codeintel;
 
 import java.util.List;
 
+import com.navneet.executespec.agent.LlmRequest;
 import com.navneet.executespec.agent.LlmRouter;
 import com.navneet.executespec.executioncontext.LlmExecutionReference;
 import com.navneet.executespec.router.ResolvedModel;
+import com.navneet.executespec.tool.ExecutionContext;
 
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.model.ChatResponse;
@@ -48,5 +50,31 @@ final class ArchLlmDispatch {
         MAX_OUTPUT_TOKENS,
         com.navneet.executespec.agent.LlmRequest.PromptCacheStrategy.DEFAULT,
         reference);
+  }
+
+  /**
+   * Operation-fenced dispatch. The root-issued authority stays inside the bound context and reaches
+   * the router without being serialized or reconstructed from the durable context id.
+   */
+  static ChatResponse dispatch(
+      LlmRouter llmRouter,
+      ResolvedModel resolved,
+      List<Message> messages,
+      String source,
+      String label,
+      ExecutionContext operationContext) {
+    if (operationContext == null) throw new IllegalArgumentException("operationContext required");
+    return llmRouter.call(
+        LlmRequest.builder()
+            .provider(resolved.providerName())
+            .model(resolved.getModel())
+            .messages(messages)
+            .context(operationContext)
+            .toolsOverride(List.of())
+            .agentRole("ArchLlmDispatch")
+            .stepId(label)
+            .maxTokens(MAX_OUTPUT_TOKENS)
+            .promptCacheStrategy(LlmRequest.PromptCacheStrategy.DEFAULT)
+            .build());
   }
 }

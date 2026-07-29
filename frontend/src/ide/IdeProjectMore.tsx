@@ -2,7 +2,7 @@ import {useEffect, useMemo, useRef, useState} from 'react';
 import {Link, useNavigate, useParams} from 'react-router-dom';
 import * as api from '@/lib/api';
 import {writeSpecHandoff} from '@/lib/specHandoff';
-import type {ArchitectureDoc} from '@/types/project';
+import type {ArchitectureDoc, ArchitectureJob} from '@/types/project';
 import {IdeBadge, IdeCodeViewer, IdeFileTree, IdeLoader} from '@/ide/IdeKit';
 import {ProjectTabs} from '@/ide/IdeProjectTabs';
 import {LoadError} from '@/ide/LoadError';
@@ -38,6 +38,7 @@ import {
   techDebtCategories,
   uiBound,
 } from '@/ide/projectMoreUtils';
+import {boundedLineDiff} from '@/ide/runResultUtils';
 import {
   formatProjectList,
   formatProjectRunList,
@@ -1370,6 +1371,9 @@ export function IdeProjectArchitecture() {
   const [busy, setBusy] = useState('');
   const [err, setErr] = useState('');
   const [msg, setMsg] = useState('');
+  const [refreshJob, setRefreshJob] = useState<ArchitectureJob | null>(null);
+  const [refreshPollingPaused, setRefreshPollingPaused] = useState(false);
+  const [refreshAccessBlocked, setRefreshAccessBlocked] = useState(false);
 
   const [arch, setArch] = useState<ArchitectureDoc | null | undefined>(undefined);
   // RR-1313 — a real failure of the primary map request is a retryable error, not
@@ -1409,6 +1413,69 @@ export function IdeProjectArchitecture() {
   // commit is now gated on the refresh generation captured when the request wave started, so only
   // the active route's results are published.
   const refreshGen = useRef(0);
+  const jobPollGen = useRef(0);
+  const jobRouteGen = useRef(0);
+  const refreshJobRef = useRef<ArchitectureJob | null>(null);
+  const refreshStartGen = useRef<number | null>(null);
+  const refreshJobDiscovery = useRef<{
+    routeGen: number;
+    promise: Promise<ArchitectureJob | null>;
+  } | null>(null);
+  const pollTimers = useRef(new Map<number, (completed: boolean) => void>());
+
+  function stopArchitecturePolling() {
+    jobPollGen.current += 1;
+    for (const [timer, resolve] of pollTimers.current) {
+      window.clearTimeout(timer);
+      resolve(false);
+    }
+    pollTimers.current.clear();
+  }
+
+  function pollDelay(delayMs: number, pollGen: number, routeGen: number) {
+    return new Promise<boolean>((resolve) => {
+      if (pollGen !== jobPollGen.current || routeGen !== jobRouteGen.current) {
+        resolve(false);
+        return;
+      }
+      const timer = window.setTimeout(() => {
+        pollTimers.current.delete(timer);
+        resolve(pollGen === jobPollGen.current && routeGen === jobRouteGen.current);
+      }, delayMs);
+      pollTimers.current.set(timer, resolve);
+    });
+  }
+
+  function refreshErrorStatus(error: unknown): number | null {
+    if (
+      typeof error === 'object' &&
+      error !== null &&
+      'status' in error &&
+      typeof error.status === 'number'
+    ) {
+      return error.status;
+    }
+    return null;
+  }
+
+  function isTransientRefreshError(error: unknown) {
+    const status = refreshErrorStatus(error);
+    return status === 0 || status === 429 || (status != null && status >= 500);
+  }
+
+  function isRefreshAccessError(error: unknown) {
+    const status = refreshErrorStatus(error);
+    return status === 401 || status === 403 || status === 404;
+  }
+
+  function refreshErrorMessage(error: unknown, fallback: string) {
+    return error instanceof Error ? error.message : fallback;
+  }
+
+  function rememberRefreshJob(job: ArchitectureJob | null) {
+    refreshJobRef.current = job;
+    setRefreshJob(job);
+  }
 
   function refresh() {
     if (!projectId) return;
@@ -1507,22 +1574,264 @@ export function IdeProjectArchitecture() {
   }
 
   useEffect(() => {
+    stopArchitecturePolling();
+    const routeGen = ++jobRouteGen.current;
+    setBusy('');
+    setErr('');
+    setMsg('');
+    setRefreshPollingPaused(false);
+    setRefreshAccessBlocked(false);
+    rememberRefreshJob(null);
+    refreshStartGen.current = null;
     refresh();
+    // Discover the latest durable state, not only active work. NEEDS_CONFIRMATION is terminal and
+    // must survive a browser reload so the user cannot accidentally submit duplicate provider
+    // work by refreshing the page.
+    const discovery = api.getLatestArchitectureRefreshJob(projectId);
+    refreshJobDiscovery.current = {routeGen, promise: discovery};
+    discovery
+      .then((job) => {
+        if (routeGen !== jobRouteGen.current) return;
+        if (job) {
+          if (!job.terminal) {
+            setMsg(
+              job.status === 'RUNNING'
+                ? 'Resumed status checks for the running map refresh.'
+                : 'Resumed status checks for the queued map refresh.',
+            );
+          }
+          void pollArchitectureJob(job, routeGen);
+        }
+      })
+      .catch((error: unknown) => {
+        if (routeGen !== jobRouteGen.current) return;
+        if (isTransientRefreshError(error)) {
+          setMsg(
+            'Map refresh status is temporarily unavailable. Refresh will re-check before starting any job.',
+          );
+          return;
+        }
+        setRefreshAccessBlocked(true);
+        setErr(
+          refreshErrorMessage(
+            error,
+            'Map refresh status cannot be accessed. Reload after restoring project access.',
+          ),
+        );
+      });
+    return () => {
+      if (routeGen === jobRouteGen.current) {
+        jobRouteGen.current += 1;
+        refreshStartGen.current = null;
+        refreshJobDiscovery.current = null;
+        stopArchitecturePolling();
+      }
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
+  async function pollArchitectureJob(initial: ArchitectureJob, routeGen = jobRouteGen.current) {
+    if (routeGen !== jobRouteGen.current || initial.projectId !== projectId) return;
+    stopArchitecturePolling();
+    const pollGen = jobPollGen.current;
+    const finishPolling = () => {
+      if (pollGen === jobPollGen.current && routeGen === jobRouteGen.current) setBusy('');
+    };
+    setBusy('regen');
+    setRefreshPollingPaused(false);
+    setRefreshAccessBlocked(false);
+    let job = initial;
+    rememberRefreshJob(job);
+
+    const applyTerminal = (terminalJob: ArchitectureJob) => {
+      if (terminalJob.status === 'SUCCEEDED') {
+        setMsg(
+          `${
+            terminalJob.architectureVersion == null
+              ? 'System map refresh completed.'
+              : `System map refreshed to v${terminalJob.architectureVersion}.`
+          }${terminalJob.qualityStatus === 'WARNING' ? ' The generated map has quality warnings.' : ''}`,
+        );
+        refresh();
+      } else if (terminalJob.status === 'FAILED') {
+        setErr(
+          terminalJob.errorMessage || 'Map refresh failed. Retry after checking repository access.',
+        );
+      } else if (terminalJob.status === 'NEEDS_CONFIRMATION') {
+        setErr(
+          terminalJob.errorMessage ||
+            'The refresh outcome is uncertain. Confirm before starting another potentially billable refresh.',
+        );
+      } else if (terminalJob.status === 'CANCELLED') {
+        setMsg(terminalJob.errorMessage || 'Map refresh was cancelled.');
+      }
+      finishPolling();
+    };
+    if (job.terminal) {
+      applyTerminal(job);
+      return;
+    }
+
+    // Finite backoff: quick feedback first, then at most one read every five seconds. A stopped
+    // poller leaves the last truthful server state visible; it never submits a duplicate job.
+    const delays = [500, 1000, 1500, 2000, 3000, ...Array(55).fill(5000)] as number[];
+    for (const delayMs of delays) {
+      if (job.terminal || pollGen !== jobPollGen.current) break;
+      if (!(await pollDelay(delayMs, pollGen, routeGen))) return;
+      try {
+        job = await api.getArchitectureRefreshJob(projectId, job.id);
+      } catch (error: unknown) {
+        if (pollGen !== jobPollGen.current || routeGen !== jobRouteGen.current) return;
+        if (isTransientRefreshError(error)) {
+          // A transient poll failure is not a failed architecture job. Keep the last server state
+          // and continue the bounded schedule; only a persisted FAILED state is rendered as failed.
+          setMsg('Map refresh status is temporarily unavailable; keeping the last known state.');
+          continue;
+        }
+        setRefreshAccessBlocked(true);
+        setErr(
+          refreshErrorMessage(
+            error,
+            'Map refresh status cannot be accessed. Reload after restoring project access.',
+          ),
+        );
+        finishPolling();
+        return;
+      }
+      if (
+        pollGen !== jobPollGen.current ||
+        routeGen !== jobRouteGen.current ||
+        job.projectId !== projectId
+      ) {
+        return;
+      }
+      rememberRefreshJob(job);
+      if (job.terminal) {
+        applyTerminal(job);
+        return;
+      }
+    }
+    if (!job.terminal && pollGen === jobPollGen.current && routeGen === jobRouteGen.current) {
+      setRefreshPollingPaused(true);
+      setMsg(
+        'System map refresh is still running. Automatic checks paused; resume status checks when ready.',
+      );
+    }
+    finishPolling();
+  }
+
   async function regenerate() {
+    const routeGen = jobRouteGen.current;
+    if (
+      !projectId ||
+      refreshAccessBlocked ||
+      refreshStartGen.current === routeGen ||
+      routeGen === 0
+    ) {
+      return;
+    }
+    refreshStartGen.current = routeGen;
     setBusy('regen');
     setErr('');
     setMsg('');
     try {
-      await api.generateArchitecture(projectId);
-      setMsg('System map refresh started.');
-      refresh();
+      let job = refreshJobRef.current;
+      if (job?.status === 'QUEUED' || job?.status === 'RUNNING') {
+        await pollArchitectureJob(job, routeGen);
+        return;
+      }
+
+      // Wait for the mount/reload discovery before POSTing. If it failed transiently, make one
+      // explicit re-check now. We never turn an unknown server state into a duplicate paid job.
+      const discovery = refreshJobDiscovery.current;
+      if (discovery?.routeGen === routeGen) {
+        try {
+          job = await discovery.promise;
+        } catch {
+          job = await api.getLatestArchitectureRefreshJob(projectId);
+        }
+      } else {
+        job = await api.getLatestArchitectureRefreshJob(projectId);
+      }
+      if (routeGen !== jobRouteGen.current) return;
+      if (job?.status === 'QUEUED' || job?.status === 'RUNNING') {
+        rememberRefreshJob(job);
+        setMsg(
+          job.status === 'RUNNING'
+            ? 'Following the running map refresh already recorded by the server.'
+            : 'Following the queued map refresh already recorded by the server.',
+        );
+        await pollArchitectureJob(job, routeGen);
+        return;
+      }
+
+      const previous = refreshJobRef.current;
+      if (previous?.status === 'NEEDS_CONFIRMATION') {
+        if (
+          !window.confirm(
+            'The previous refresh may have reached the provider before its outcome became uncertain. Retry that same refresh with the same route? This may incur additional usage.',
+          )
+        ) {
+          setMsg('The uncertain refresh was not retried.');
+          return;
+        }
+        job = await api.confirmArchitectureRefreshRetry(projectId, previous.id);
+      } else {
+        job = await api.startArchitectureRefresh(projectId);
+      }
+
+      if (routeGen !== jobRouteGen.current || job.projectId !== projectId) return;
+      rememberRefreshJob(job);
+      setMsg(
+        job.status === 'RUNNING' ? 'System map refresh is running.' : 'System map refresh queued.',
+      );
+      await pollArchitectureJob(job, routeGen);
     } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : 'Refresh failed.');
+      if (routeGen !== jobRouteGen.current) return;
+      // A confirmation race (409) or validation response is retryable through a fresh durable
+      // discovery. Only lost authentication/project access disables the control.
+      if (isRefreshAccessError(e)) setRefreshAccessBlocked(true);
+      setErr(refreshErrorMessage(e, 'Refresh failed.'));
     } finally {
-      setBusy('');
+      if (refreshStartGen.current === routeGen) refreshStartGen.current = null;
+      if (routeGen === jobRouteGen.current) setBusy('');
+    }
+  }
+
+  async function cancelRefresh() {
+    const job = refreshJobRef.current;
+    const routeGen = jobRouteGen.current;
+    if (
+      !job ||
+      job.terminal ||
+      (job.status !== 'QUEUED' && job.status !== 'RUNNING') ||
+      routeGen === 0
+    ) {
+      return;
+    }
+    setBusy('cancel-regen');
+    setErr('');
+    setMsg('');
+    try {
+      await api.cancelArchitectureRefreshJob(projectId, job.id);
+      if (routeGen !== jobRouteGen.current) return;
+      stopArchitecturePolling();
+      const cancelled = await api.getArchitectureRefreshJob(projectId, job.id);
+      if (routeGen !== jobRouteGen.current || cancelled.projectId !== projectId) return;
+      rememberRefreshJob(cancelled);
+      if (cancelled.status === 'CANCELLED') {
+        setMsg(cancelled.errorMessage || 'Map refresh was cancelled.');
+      } else {
+        setMsg(
+          'Cancellation requested. Refresh status will update when the current operation stops.',
+        );
+        void pollArchitectureJob(cancelled, routeGen);
+      }
+    } catch (e: unknown) {
+      if (routeGen !== jobRouteGen.current) return;
+      setErr(refreshErrorMessage(e, 'Could not cancel the map refresh.'));
+    } finally {
+      if (routeGen === jobRouteGen.current) setBusy('');
     }
   }
 
@@ -1614,6 +1923,11 @@ export function IdeProjectArchitecture() {
   }
 
   const violByInv = useMemo(() => invariantViolationCounts(violations), [violations]);
+  const architectureContentDiff = useMemo(
+    () =>
+      diffReport ? boundedLineDiff(diffReport.fromContent || '', diffReport.toContent || '') : null,
+    [diffReport],
+  );
 
   const docMd = arch?.content || '';
   const freshness = architectureFreshnessBadge(staleness);
@@ -1629,9 +1943,35 @@ export function IdeProjectArchitecture() {
           <span style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}>v{arch.version}</span>
         )}
         <span style={{flex: 1}} />
-        <button className='ide-btn ghost' onClick={regenerate} disabled={busy === 'regen'}>
-          {busy === 'regen' ? 'Refreshing…' : 'Refresh map'}
+        <button
+          className='ide-btn ghost'
+          onClick={regenerate}
+          disabled={busy !== '' || refreshAccessBlocked}
+        >
+          {refreshPollingPaused && !refreshJob?.terminal
+            ? 'Resume status checks'
+            : refreshJob?.status === 'QUEUED'
+              ? 'Refresh queued…'
+              : refreshJob?.status === 'RUNNING'
+                ? busy === 'regen'
+                  ? 'Refreshing…'
+                  : 'Check refresh status'
+                : busy === 'regen'
+                  ? 'Starting…'
+                  : 'Refresh map'}
         </button>
+        {refreshJob &&
+          !refreshJob.terminal &&
+          (refreshJob.status === 'QUEUED' || refreshJob.status === 'RUNNING') && (
+            <button
+              className='ide-btn ghost'
+              onClick={cancelRefresh}
+              disabled={busy === 'cancel-regen'}
+              aria-label='Cancel map refresh'
+            >
+              {busy === 'cancel-regen' ? 'Cancelling…' : 'Cancel refresh'}
+            </button>
+          )}
       </div>
       <div style={{marginTop: 12}}>
         <RTabs
@@ -1647,6 +1987,22 @@ export function IdeProjectArchitecture() {
         />
       </div>
       <Banner err={err} msg={msg} />
+      {refreshJob && !refreshJob.terminal && (
+        <div className='ide-muted' role='status' style={{marginTop: 8}}>
+          Map refresh {refreshJob.status === 'QUEUED' ? 'is queued' : 'is running'} · job{' '}
+          {refreshJob.id.slice(0, 8)}
+        </div>
+      )}
+      {refreshJob?.status === 'SUCCEEDED' && refreshJob.qualityStatus === 'WARNING' && (
+        <div className='ide-muted' role='status' style={{marginTop: 8}}>
+          Map quality warning
+          {refreshJob.qualityEvidence ? ` · ${refreshJob.qualityEvidence}` : ''}
+        </div>
+      )}
+      <div className='ide-muted' style={{marginTop: 8}}>
+        Refresh updates ExecuteSpec&apos;s stored system map. It does not publish codemap changes or
+        open a pull request.
+      </div>
 
       {/* ── Current ── */}
       {sub === 'current' &&
@@ -1759,54 +2115,106 @@ export function IdeProjectArchitecture() {
               {diffReport && (
                 <div style={{marginTop: 12, fontSize: 13}}>
                   <div style={{fontWeight: 600, marginBottom: 6, color: 'var(--ide-fg-bright)'}}>
-                    v{diffReport.fromVersion} → v{diffReport.toVersion} · {diffReport.totalFiles}{' '}
-                    file{diffReport.totalFiles === 1 ? '' : 's'} changed
+                    System map content · v{diffReport.fromVersion} → v{diffReport.toVersion}
                   </div>
-                  {diffReport.totalFiles === 0 ? (
-                    <span style={{color: 'var(--ide-fg-muted)'}}>No source-file changes.</span>
-                  ) : (
-                    <div style={{maxHeight: 260, overflowY: 'auto'}}>
-                      {diffReport.perRepo.map((pr) => (
-                        <div key={pr.repoFullName} style={{marginBottom: 8}}>
-                          <div
-                            className='ide-mono'
-                            style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginBottom: 4}}
-                          >
-                            {pr.repoFullName}
-                          </div>
-                          <ul style={{listStyle: 'none', padding: 0, margin: 0}}>
-                            {pr.files.map((f, i) => {
-                              const status = (f.status || 'modified').toUpperCase();
-                              const color =
-                                status === 'ADDED'
-                                  ? 'var(--ide-green)'
-                                  : status === 'REMOVED'
-                                    ? 'var(--ide-red)'
-                                    : 'var(--ide-yellow)';
-                              return (
-                                <li
-                                  key={i}
-                                  className='ide-mono'
-                                  style={{
-                                    fontSize: 12,
-                                    padding: '3px 0',
-                                    whiteSpace: 'nowrap',
-                                    overflow: 'hidden',
-                                    textOverflow: 'ellipsis',
-                                  }}
-                                >
-                                  <span style={{color, fontWeight: 700, marginRight: 8}}>
-                                    {status[0]}
-                                  </span>
-                                  {f.filename}
-                                </li>
-                              );
-                            })}
-                          </ul>
-                        </div>
-                      ))}
+                  {architectureContentDiff?.truncated ? (
+                    <div className='ide-banner warn' role='status'>
+                      {architectureContentDiff.reason} The versions remain available separately;
+                      this is not a claim that their content is unchanged.
                     </div>
+                  ) : architectureContentDiff?.lines.some((line) => line.sign !== ' ') ? (
+                    <IdeCodeViewer
+                      filename='architecture.md'
+                      content={diffReport.toContent || ''}
+                      diff={architectureContentDiff.lines}
+                    />
+                  ) : (
+                    <div style={{color: 'var(--ide-fg-muted)'}}>No system-map content changes.</div>
                   )}
+                  <details style={{marginTop: 12}}>
+                    <summary style={{cursor: 'pointer', color: 'var(--ide-fg-muted)'}}>
+                      Source revisions · {diffReport.totalFiles} file
+                      {diffReport.totalFiles === 1 ? '' : 's'} changed
+                    </summary>
+                    {(diffReport.unverified ?? []).length > 0 && (
+                      <div className='ide-banner warn' role='status' style={{marginTop: 8}}>
+                        Source comparison unavailable for {diffReport.unverified.length} repositor
+                        {diffReport.unverified.length === 1 ? 'y' : 'ies'}. Their source changes are
+                        unknown.
+                        <ul style={{margin: '6px 0 0', paddingLeft: 18}}>
+                          {diffReport.unverified.map((issue) => (
+                            <li key={`${issue.repoFullName}:${issue.status}`}>
+                              <span className='ide-mono'>{issue.repoFullName}</span> ·{' '}
+                              {issue.detail}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                    {(diffReport.skipped ?? []).length > 0 && (
+                      <div className='ide-banner warn' role='status' style={{marginTop: 8}}>
+                        Not compared: {diffReport.skipped.length} repositor
+                        {diffReport.skipped.length === 1 ? 'y' : 'ies'}.
+                        <ul style={{margin: '6px 0 0', paddingLeft: 18}}>
+                          {diffReport.skipped.map((issue) => (
+                            <li key={`${issue.repoFullName}:${issue.status}`}>
+                              <span className='ide-mono'>{issue.repoFullName}</span> ·{' '}
+                              {issue.detail}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                    {diffReport.totalFiles === 0 &&
+                    (diffReport.unverified ?? []).length === 0 &&
+                    (diffReport.skipped ?? []).length === 0 ? (
+                      <div style={{color: 'var(--ide-fg-muted)', marginTop: 8}}>
+                        No source-file changes were found across all comparable repository pairs.
+                      </div>
+                    ) : diffReport.totalFiles > 0 ? (
+                      <div style={{maxHeight: 260, overflowY: 'auto', marginTop: 8}}>
+                        {diffReport.perRepo.map((pr) => (
+                          <div key={pr.repoFullName} style={{marginBottom: 8}}>
+                            <div
+                              className='ide-mono'
+                              style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginBottom: 4}}
+                            >
+                              {pr.repoFullName}
+                            </div>
+                            <ul style={{listStyle: 'none', padding: 0, margin: 0}}>
+                              {pr.files.map((f, i) => {
+                                const status = (f.status || 'modified').toUpperCase();
+                                const color =
+                                  status === 'ADDED'
+                                    ? 'var(--ide-green)'
+                                    : status === 'REMOVED'
+                                      ? 'var(--ide-red)'
+                                      : 'var(--ide-yellow)';
+                                return (
+                                  <li
+                                    key={i}
+                                    className='ide-mono'
+                                    style={{
+                                      fontSize: 12,
+                                      padding: '3px 0',
+                                      whiteSpace: 'nowrap',
+                                      overflow: 'hidden',
+                                      textOverflow: 'ellipsis',
+                                    }}
+                                  >
+                                    <span style={{color, fontWeight: 700, marginRight: 8}}>
+                                      {status[0]}
+                                    </span>
+                                    {f.filename}
+                                  </li>
+                                );
+                              })}
+                            </ul>
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+                  </details>
                 </div>
               )}
             </div>

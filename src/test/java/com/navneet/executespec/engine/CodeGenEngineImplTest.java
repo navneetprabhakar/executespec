@@ -1,6 +1,7 @@
 package com.navneet.executespec.engine;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
@@ -11,12 +12,18 @@ import static org.mockito.Mockito.when;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 
 import com.navneet.executespec.agent.PromptAssembler;
 import com.navneet.executespec.config.featureflag.FeatureFlagService;
 import com.navneet.executespec.cost.RunCostTracker;
+import com.navneet.executespec.executioncontext.LlmExecutionOperationAuthority;
+import com.navneet.executespec.executioncontext.LlmExecutionOperationClaim;
+import com.navneet.executespec.executioncontext.LlmExecutionReference;
+import com.navneet.executespec.executioncontext.LlmExecutionScope;
 import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
+import com.navneet.executespec.tool.ExecutionContext;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -107,6 +114,59 @@ class CodeGenEngineImplTest {
     assertThat(r.cost().usd()).isEqualTo(1.25);
     // @TempDir is not a git repo → host-side `git diff` exits non-zero → empty diff, no throw.
     assertThat(r.diff()).isEmpty();
+  }
+
+  @Test
+  void solvePreservesCallerOperationAuthorityForPatchWorker(@TempDir Path workspace)
+      throws Exception {
+    stubWorker(
+        WorkerResult.builder()
+            .outcome(WorkerResult.Outcome.COMPLETED)
+            .toolCallLog(List.of())
+            .build());
+    LlmExecutionReference reference =
+        new LlmExecutionReference("ctx-patch", LlmExecutionScope.customer("org-test"));
+    LlmExecutionOperationAuthority authority =
+        LlmExecutionOperationAuthority.issue(
+            new LlmExecutionOperationClaim(reference, "patch-operation", 1, 1, UUID.randomUUID()),
+            "patch-owner");
+    ExecutionContext context =
+        new ExecutionContext("run-1", "__root__", workspace.toRealPath(), reference, authority);
+    EngineRequest request =
+        EngineRequest.builder()
+            .taskSpec("fix the login bug")
+            .workspace(workspace)
+            .provider("anthropic")
+            .model("claude-sonnet-4-6")
+            .runId("run-1")
+            .taskId("task-1")
+            .context(context)
+            .build();
+
+    engine.solve(request);
+
+    ArgumentCaptor<WorkerTaskRequest> captured = ArgumentCaptor.forClass(WorkerTaskRequest.class);
+    verify(workerAgent).run(captured.capture());
+    assertThat(captured.getValue().context().llmExecutionOperationAuthority()).isSameAs(authority);
+  }
+
+  @Test
+  void solveRejectsCallerContextForAnotherRun(@TempDir Path workspace) throws Exception {
+    EngineRequest request =
+        EngineRequest.builder()
+            .taskSpec("fix the login bug")
+            .workspace(workspace)
+            .provider("anthropic")
+            .model("claude-sonnet-4-6")
+            .runId("run-1")
+            .taskId("task-1")
+            .context(new ExecutionContext("run-2", "__root__", workspace.toRealPath()))
+            .build();
+
+    assertThatThrownBy(() -> engine.solve(request))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("does not match request run/workspace");
+    verifyNoInteractions(workerAgent);
   }
 
   @ParameterizedTest(name = "{0} -> {1}")

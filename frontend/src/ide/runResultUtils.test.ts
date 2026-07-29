@@ -1,17 +1,25 @@
 import {describe, expect, it} from 'vitest';
 
 import {
+  boundedLineDiff,
   confidenceColor,
   continuationApprovalCandidate,
   continuationApprovalReason,
   continuationSourceLabel,
   countProducedWorkspaceFiles,
+  customerContinuationSummary,
+  customerLimitSummary,
+  customerStepStatusLabel,
+  customerStepSummary,
+  customerStepTitle,
   evidenceKind,
   emptyCodeTabMessage,
   fileCountSummary,
   fmtDur,
   goalDecisionHelp,
   goalDecisionLabel,
+  goalProofKind,
+  goalProofLabel,
   goalStateLabel,
   goalStateKind,
   hasRunCostEvidence,
@@ -30,8 +38,11 @@ import {
   modelRankingCandidateMetrics,
   modelRankingDetails,
   modelRankingLabel,
+  matchingContinuationApprovalRecorded,
   num,
   runArtifactActionAvailability,
+  runChatResponseContent,
+  friendlyAiFailureMessage,
   terminalFailureEvidence,
   runPhaseDiagnosis,
   shouldUseRunEvidenceChat,
@@ -42,6 +53,7 @@ import {
   taskGoalLine,
   testEvidenceSummary,
   testResultSummary,
+  timelineTiming,
   usd,
   verdictFor,
 } from './runResultUtils';
@@ -242,6 +254,43 @@ describe('runResultUtils', () => {
     ]);
   });
 
+  it('computes at the exact line/matrix threshold and refuses the first comparison above it', () => {
+    const limits = {maxInputCharsPerSide: 100, maxLinesPerSide: 4, maxMatrixCells: 9};
+    const atThreshold = boundedLineDiff('a\nb\nc', 'a\nx\nc', limits);
+    expect(atThreshold.truncated).toBe(false);
+    expect(atThreshold.lines.some((line) => line.sign === '-' && line.text === 'b')).toBe(true);
+    expect(atThreshold.lines.some((line) => line.sign === '+' && line.text === 'x')).toBe(true);
+
+    const overThreshold = boundedLineDiff('a\nb\nc', 'a\nx\nc\nd', limits);
+    expect(overThreshold).toMatchObject({
+      lines: [],
+      truncated: true,
+    });
+    expect(overThreshold.reason).toContain('3 × 4');
+    expect(overThreshold.reason).toContain('9-cell safety limit');
+  });
+
+  it('rejects missing, epoch and inverted task timestamps instead of showing epoch durations', () => {
+    const now = Date.parse('2026-07-28T04:30:00Z');
+    expect(timelineTiming({startedAt: null, completedAt: null}, now)).toBeNull();
+    expect(timelineTiming({startedAt: '1970-01-01T00:00:00Z'}, now)).toBeNull();
+    expect(
+      timelineTiming({startedAt: '2026-07-28T04:29:00Z', completedAt: '2026-07-28T04:28:00Z'}, now),
+    ).toBeNull();
+  });
+
+  it('returns a bounded duration for valid completed and active task timestamps', () => {
+    const now = Date.parse('2026-07-28T04:30:00Z');
+    expect(
+      timelineTiming({startedAt: '2026-07-28T04:28:00Z', completedAt: '2026-07-28T04:29:30Z'}, now),
+    ).toEqual({
+      startMs: Date.parse('2026-07-28T04:28:00Z'),
+      endMs: Date.parse('2026-07-28T04:29:30Z'),
+      durationMs: 90_000,
+    });
+    expect(timelineTiming({startedAt: '2026-07-28T04:29:00Z'}, now)?.durationMs).toBe(60_000);
+  });
+
   it('formats log rows and skips noisy run-detail events', () => {
     expect(logIcon('TOOL_CALL')).toBe('🔧');
     expect(logIcon('TASK_WAVE_PLAN')).toBe('≋');
@@ -396,6 +445,15 @@ describe('runResultUtils', () => {
     expect(goalDecisionLabel('STOP_FAILED')).not.toContain('STOP_FAILED');
   });
 
+  it('renders typed goal-proof reference states without exposing backend enums', () => {
+    expect(goalProofLabel('PROVEN')).toBe('Proven');
+    expect(goalProofLabel('BLOCKING')).toBe('Blocking');
+    expect(goalProofLabel('UNPROVEN')).toBe('Unproven');
+    expect(goalProofKind('PROVEN')).toBe('ok');
+    expect(goalProofKind('BLOCKING')).toBe('bad');
+    expect(goalProofKind('UNPROVEN')).toBe('warn');
+  });
+
   it('keeps continuation and budget presentation logic independently testable', () => {
     const task: api.TaskSummary = {
       taskId: 'task-1',
@@ -503,6 +561,141 @@ describe('runResultUtils', () => {
       'quality 93 · $4.50 per 1M tokens · p50 2s · benchmark evidence missing',
     );
     expect(modelRankingCandidateMetrics(candidate)).not.toContain('no bench');
+  });
+
+  it('keeps raw planner commands, route jargon, and token volume out of collapsed step copy', () => {
+    const task: api.TaskSummary = {
+      taskId: 'T1',
+      title: 'npm run build && npm test\nthen inspect the raw compiler output',
+      status: 'BLOCKED',
+      assignedModel: 'grok-4.20',
+      provider: 'openrouter',
+      model: 'grok-4.20',
+      inputTokens: 120_000,
+      outputTokens: 8_000,
+      durationMs: 65_000,
+      branchName: null,
+      startedAt: null,
+      completedAt: null,
+      readmeUpdated: false,
+      goalDoneness: {
+        budgetCeilingReason: 'budget, token, iteration, or wall-clock ceiling reached',
+        totalTokens: 128_000,
+        wallClockMs: 65_000,
+      },
+      continuationDecision: {
+        decision: 'STOP_BLOCKED',
+        approvalRequiredReason: 'BENCHMARK_PRIOR_REQUIRED',
+        selectedCandidate: {
+          provider: 'openrouter',
+          model: 'grok-4.20',
+          benchmarkQualityPriorAvailable: false,
+        },
+        policy: {
+          requireBenchmarkPriorForAutomaticContinuation: true,
+          maxTotalTokens: 100_000,
+        },
+        reasons: ['proposed action CHANGE_PROVIDER -> openrouter/grok-4.20'],
+      },
+    };
+
+    const collapsed = [
+      customerStepTitle(task, 0),
+      customerStepStatusLabel(task.status),
+      customerStepSummary(task),
+      customerContinuationSummary(task),
+      customerLimitSummary(task),
+    ].join(' ');
+
+    expect(customerStepTitle(task, 0)).toBe('Step 1');
+    expect(customerStepStatusLabel(task.status)).toBe('Needs input');
+    expect(customerContinuationSummary(task)).toBe(
+      'Approval is needed before ExecuteSpec can try the recommended recovery.',
+    );
+    expect(customerLimitSummary(task)).toBe('Stopped at the configured processing limit.');
+    expect(collapsed).not.toContain('npm run build');
+    expect(collapsed).not.toContain('CHANGE_PROVIDER');
+    expect(collapsed).not.toContain('openrouter');
+    expect(collapsed).not.toContain('grok-4.20');
+    expect(collapsed).not.toContain('128,000');
+    expect(collapsed).not.toContain('ceiling reached');
+  });
+
+  it('does not claim a configured limit stopped a completed step with stale ceiling evidence', () => {
+    expect(
+      customerLimitSummary({
+        status: 'COMPLETE',
+        goalDoneness: {
+          budgetCeilingReason: 'budget, token, iteration, or wall-clock ceiling reached',
+        },
+      } as api.TaskSummary),
+    ).toBeNull();
+    expect(customerStepTitle({title: 'Run `npm test` and repair failures'}, 2)).toBe(
+      'Run the project checks and repair failures',
+    );
+  });
+
+  it('does not offer or request the same recovery approval after its durable action was recorded', () => {
+    const task: api.TaskSummary = {
+      taskId: 'T-approved',
+      title: 'Recover failed build',
+      status: 'PARTIAL',
+      assignedModel: 'grok-4.20',
+      inputTokens: 0,
+      outputTokens: 0,
+      durationMs: 1000,
+      branchName: null,
+      startedAt: null,
+      completedAt: null,
+      readmeUpdated: false,
+      continuationDecision: {
+        decision: 'STOP_BLOCKED',
+        approvalRequiredReason: 'BENCHMARK_PRIOR_REQUIRED',
+        selectedCandidate: {
+          provider: 'openrouter',
+          model: 'grok-4.20',
+          benchmarkQualityPriorAvailable: false,
+        },
+        policy: {
+          requireBenchmarkPriorForAutomaticContinuation: true,
+        },
+      },
+      continuationActions: [
+        {
+          status: 'APPROVED',
+          decision: 'CHANGE_PROVIDER',
+          provider: 'OPENROUTER',
+          model: 'grok-4.20',
+        },
+        {
+          status: 'SIMULATED',
+          decision: 'CHANGE_PROVIDER',
+          provider: 'OPENROUTER',
+          model: 'grok-4.20',
+        },
+      ],
+    };
+
+    expect(matchingContinuationApprovalRecorded(task)).toBe(true);
+    expect(continuationApprovalCandidate(task)).toBeNull();
+    expect(customerContinuationSummary(task)).toBe(
+      'The approved recovery was recorded. Review its result in technical details.',
+    );
+    expect(customerContinuationSummary(task)).not.toContain('Approval is needed');
+
+    const unrelatedApproval: api.TaskSummary = {
+      ...task,
+      continuationActions: [
+        {
+          status: 'EXECUTED',
+          decision: 'CHANGE_PROVIDER',
+          provider: 'OPENAI',
+          model: 'gpt-5.4',
+        },
+      ],
+    };
+    expect(matchingContinuationApprovalRecorded(unrelatedApproval)).toBe(false);
+    expect(continuationApprovalCandidate(unrelatedApproval)).not.toBeNull();
   });
 
   it('routes run evidence questions away from fresh-run proposals', () => {
@@ -685,5 +878,35 @@ describe('runResultUtils', () => {
     expect(evidenceKind('FAIL')).toBe('bad');
     expect(confidenceColor('LOW')).toBe('var(--ide-red)');
     expect(TAB_LABEL.Chat).toBe('Ask');
+  });
+
+  it('turns dispatch-budget failures into actionable Ask guidance', () => {
+    const message = friendlyAiFailureMessage(
+      new Error('LlmDispatchPolicyException: Durable LLM execution-context budget is exhausted'),
+    );
+
+    expect(message).toContain('used its available AI context');
+    expect(message).toContain('without additional AI spend');
+    expect(message).not.toContain('LlmDispatchPolicyException');
+  });
+
+  it('keeps an unknown Ask failure visible for diagnosis', () => {
+    expect(friendlyAiFailureMessage(new Error('chat service unavailable'))).toBe(
+      'chat service unavailable',
+    );
+  });
+
+  it('does not discard typed Ask incompleteness when a server omits the text notice', () => {
+    const content = runChatResponseContent({
+      reply: 'Partial repository analysis',
+      messageCount: 1,
+      maxMessages: 50,
+      complete: false,
+      incompleteReason: 'PROVIDER_OUTPUT_LIMIT',
+    });
+
+    expect(content).toContain('Partial repository analysis');
+    expect(content).toContain('answer is incomplete');
+    expect(content).toContain('specific file');
   });
 });

@@ -206,6 +206,14 @@ public class Metrics {
         .increment();
   }
 
+  /** Shadow RequirementIR artifact persistence; failures remain visible before gate enforcement. */
+  public void recordRequirementContractShadow(String result) {
+    Counter.builder(NS + "requirement_contract.shadow")
+        .tag("result", nonNull(result))
+        .register(registry)
+        .increment();
+  }
+
   /** Current count of write-ahead intents whose terminal fact has not arrived before the SLA. */
   public void recordStaleLlmUsageIntents(long count) {
     staleLlmUsageIntents.set(Math.max(0, count));

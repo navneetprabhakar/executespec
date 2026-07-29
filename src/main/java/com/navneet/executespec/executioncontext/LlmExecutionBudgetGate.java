@@ -88,7 +88,20 @@ class LlmExecutionBudgetGate {
                     new LlmDispatchPolicyException(
                         LlmDispatchPolicyException.Reason.CONTEXT_NOT_FOUND,
                         "LLM execution context disappeared before budget reservation"));
+    reserveLockedContext(context, requestedMaxOutputTokens);
+  }
 
+  /**
+   * Applies the unchanged budget arithmetic to a context row already locked by the caller.
+   *
+   * <p>This seam exists so operation validation, budget reservation, lease extension and immutable
+   * intent insertion can share one transaction. Callers must lock the context before the operation;
+   * this method deliberately performs no additional lock acquisition.
+   */
+  void reserveLockedContext(LlmExecutionContext context, Integer requestedMaxOutputTokens) {
+    if (requestedMaxOutputTokens != null && requestedMaxOutputTokens < 0) {
+      throw new IllegalArgumentException("requestedMaxOutputTokens must be non-negative");
+    }
     String id = context.getId();
     long recordedCalls = usageRepository.countByLlmExecutionContextId(id);
     long reserved = Math.max(context.getReservedProviderCalls(), recordedCalls);
@@ -104,8 +117,11 @@ class LlmExecutionBudgetGate {
     // for them. The call being authorized is known and can use the smaller transport max_tokens.
     long existingInFlight = Math.max(0L, reserved - recordedCalls);
     long worstCaseOutputPerCall = worstCaseOutputTokensPerCall(context);
+    // null means the caller cannot supply an exact transport cap, so reserve the policy-wide
+    // worst case. Zero is a real exact cap for provider operations that cannot emit output tokens
+    // (for example Gemini cache mint and embedding batches).
     long currentCallOutput =
-        requestedMaxOutputTokens != null && requestedMaxOutputTokens > 0
+        requestedMaxOutputTokens != null
             ? Math.min(requestedMaxOutputTokens.longValue(), worstCaseOutputPerCall)
             : worstCaseOutputPerCall;
     long projectedOutput =

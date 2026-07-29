@@ -21,7 +21,6 @@ import com.navneet.executespec.execution.entity.ExecutionRun;
 import com.navneet.executespec.execution.event.ExecutionEventTypes;
 import com.navneet.executespec.execution.repository.ExecutionRunRepository;
 import com.navneet.executespec.integration.PipelineExecutorPool;
-import com.navneet.executespec.integration.RunOrchestrator;
 import com.navneet.executespec.repo.GitHubRepoService;
 import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
@@ -55,11 +54,10 @@ class ExecutionOrchestratorMirrorAndAdmissionTest {
   @Mock ExecutionBranchService branchService;
   @Mock SseBroadcaster broadcaster;
   @Mock GitHubRepoService gitHub;
-  @Mock RunOrchestrator v2Orchestrator;
+  @Mock ExecutionPipelineSubmissionService v2Orchestrator;
   @Mock com.navneet.executespec.integration.RunLifecycleService runLifecycleService;
   @Mock com.navneet.executespec.project.pr.PullRequestRecordRepository prRecordRepo;
   @Mock com.navneet.executespec.state.repository.PipelineRunRepository pipelineRunRepo;
-  @Mock com.navneet.executespec.harness.GateStore gateStore;
   @Mock ExecutionPlannerService plannerService;
   @Mock ExecutionCostAggregator costAggregator;
   @Mock EntityManager em;
@@ -89,7 +87,6 @@ class ExecutionOrchestratorMirrorAndAdmissionTest {
             prRecordRepo,
             runCas,
             pipelineRunRepo,
-            gateStore,
             plannerService,
             costAggregator,
             new org.springframework.beans.factory.ObjectProvider<ExecutionOrchestrator>() {

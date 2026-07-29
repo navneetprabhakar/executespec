@@ -14,6 +14,61 @@ starts a new BUILD run, records `sourceRunId`, inherits the source route/project
 execution/publication policies, and initializes from a fail-closed Git-tracked workspace snapshot.
 Callers may provide `Idempotency-Key`; the route requires write access to the source run.
 
+Standalone remote `repoMode=EXISTING` runs clone `repoUrl` into the run workspace before the first
+model call and fail closed unless the checkout contains Git metadata plus a deterministic source
+inventory. Project-linked runs retain their multi-repository admission path, source-run iterations
+retain their required parent snapshot copy, and local-hands runs retain the client working-tree
+handshake.
+
+Plan-gate decisions are durable and restart-safe. V348 routes APPROVE, REJECT, and pre-approval
+CANCEL through one atomic `PlanGateDecisionService` transaction, persists byte-stable canonical
+decision evidence plus a request fingerprint, and updates gate/run/outbox state together. The
+receipt cross-binds provider, execution mode, separate fixed-six-decimal `estimateHighUsd` and
+nullable `hardCapUsd`, expected/confirmed credits, payer, continuation, contract report, and the
+exact persisted typed acknowledgement. A complete pre-V348 acknowledgement tuple is retained
+byte-for-byte: `BREAKING` validity is trim/case-insensitive, while receipt/report equality remains
+exact. An omitted
+legacy client plan fingerprint remains absent with a null match result; a supplied fingerprint must
+match, and ENFORCED RequirementIR approval requires one. An
+approved continuation follows `WAITING → READY → PROCESSING → COMPLETED` under a fenced lease;
+COMPLETED means the dispatcher atomically handed `APPROVAL_RESUMING` to normal durable `WORKING`
+recovery, not that the run finished. The dispatcher validates the leased database tuple before
+workspace restore and revalidates it at the atomic handoff. Approval execution starts only after
+that commit, and startup recovery uses the outbox rather than directly resubmitting
+`APPROVAL_RESUMING`. Versioned gate/outbox evidence and referenced/acknowledged reports reject
+direct child deletion while parent-run deletion retains its normal cascade; the new report→run FK
+is `NOT VALID` only so historical orphan rows do not block deployment while every new write is
+checked. Recovery tasks are registered before executor submission to avoid stale active-run
+handles when an inline/fast executor finishes immediately. The
+`requirement.ir.gate.mode` flag remains `LEGACY`.
+
+V349 corrects external-collaborator approval without weakening tenant isolation: the run and
+project remain in the host organization, while the immutable gate receipt records the submitting
+user's payer/credential organization. REST submit, confirmed Web Agent cloud runs, forks, and the
+unified Execution View now share `CustomerRunSubmissionService`, so project write authority,
+explicit linked-repository selection, provider/key/spend preflight, and durable idempotency are
+applied before dispatch. Pending RequirementIR V1 gates are decoded and approved through a frozen
+V1 wire codec and semantic validator rather than the rolling current-schema implementation.
+
+Committed backend checkpoint `13ead3f40` carries that V350 separation through execution:
+`pipeline_run.org_id` and CUSTOMER `llm_execution_context.org_id` remain the host data/governance
+tenant, while `pipeline_run.billing_org_id` and `llm_execution_context.credential_org_id` retain
+the submitting actor's payer/provider-policy organization for key-policy revalidation and managed-
+AI debit. The migration is forward-only and installs separate PostgreSQL rejection triggers for
+`billing_org_id` and `credential_org_id`; application admission and dispatch guards independently
+enforce the same immutable binding before spend. The V350 migration/immutability and related named
+PostgreSQL gates pass independently, and clean Java 21 verification passes 5,738/5,738 with zero
+failures, errors, or skips. The same locally verified source shape preserves the
+source run's host tenant while assigning the current actor as payer on BUILD iterations, and makes
+server-internal finding PATCH submission resolve its active host project and active actor before
+dedupe or dispatch.
+
+The current deployment candidate advances the migration source head to V355. V354 adds
+rollout-gated operation-fenced provider-attempt admission; its default remains
+`EXECUTESPEC_LLM_OPERATION_ADMISSION_MODE=LEGACY`, so this deployment does not activate the new
+admission path. V355 adds bounded oldest-first recovery for stale streamed agent turns and never
+replays provider transport. RequirementIR also remains `LEGACY`.
+
 ## Versions
 
 | Component         | Version             | Source                                                                 |
@@ -21,7 +76,7 @@ Callers may provide `Idempotency-Key`; the route requires write access to the so
 | Project           | `2.0.0`             | [`VERSION`](VERSION), [`Version`](Version), [`pom.xml`](pom.xml) `<version>` |
 | Spring Boot       | `3.5.14`            | [`pom.xml`](pom.xml) `<parent>` (bumped from `3.3.0` by Dependabot #132, 2026-05-16) |
 | Spring AI         | `1.1.6`             | [`pom.xml`](pom.xml) `<spring-ai.version>` (BOM import)                |
-| Flyway head       | `V344`              | `src/main/resources/db/migration/V344__validation_report_test_evidence_scope.sql` |
+| Flyway head       | `V355`              | V354 adds rollout-gated atomic operation/attempt admission; V355 adds stale streamed-turn recovery; next V356; both operation admission and RequirementIR remain `LEGACY` |
 | Frontend          | `2.0.0`             | [`frontend/package.json`](frontend/package.json) `"version"`           |
 
 `VERSION` and `Version` are kept identical by hand; the project's own conventions reference `Version` as the source of truth. The frontend ships under the same release stamp as the backend.
@@ -49,7 +104,7 @@ ownership must be aligned explicitly before rollout.
 | Framework           | Spring Boot 3.5.14 (Web, Data JPA, Security, OAuth2 client, Mail, Thymeleaf, Actuator, AOP, Validation, Retry, Data Redis) | [`pom.xml`](pom.xml) deps 1, 5, 14–20, 30, 36–39, 60 |
 | LLM SDK             | Spring AI 1.1.6 starters for Anthropic, OpenAI, Google GenAI                        | [`pom.xml`](pom.xml) deps 2–4                                                    |
 | LLM auto-config     | Provider auto-configurations disabled in favor of manual `AgentModelConfig` beans   | [`src/main/java/com/navneet/executespec/ExecutespecApplication.java`](src/main/java/com/navneet/executespec/ExecutespecApplication.java) |
-| Database            | PostgreSQL (Cloud SQL in prod), Flyway migrations head V340                         | [`pom.xml`](pom.xml) deps 6–8, `src/main/resources/db/migration/`                 |
+| Database            | PostgreSQL (Cloud SQL in prod), Flyway migrations head V355                         | [`pom.xml`](pom.xml) deps 6–8, `src/main/resources/db/migration/`                 |
 | Cache / lock        | Redis (Lettuce), ShedLock 7.7.0                                                     | [`pom.xml`](pom.xml) deps 30–32                                                  |
 | Auth                | JJWT 0.13.0 + Spring Security OAuth2 client (Google, GitHub)                        | [`pom.xml`](pom.xml) deps 14–18                                                  |
 | Billing             | Stripe 32.1.0, Razorpay (HMAC), invoice PDFs via OpenPDF 2.0.3 + flying-saucer 9.4.0 | [`pom.xml`](pom.xml) deps 21–22, 56; HMAC via commons-codec 1.22.0 (dep 35)     |
@@ -61,7 +116,7 @@ ownership must be aligned explicitly before rollout.
 | Charts / UI         | Monaco editor 4.7, d3 7.9, recharts 2.12, framer-motion 11, lucide-react, cmdk, Radix Tabs, react-markdown + remark-gfm | [`frontend/package.json`](frontend/package.json) |
 | Frontend telemetry  | OpenTelemetry web SDK 2.7 + auto-instrumentations 0.63 + OTLP HTTP exporter; PostHog | [`frontend/package.json`](frontend/package.json), [`frontend/src/main.tsx`](frontend/src/main.tsx) |
 | Typography          | JetBrains Mono (variable) — `font-family: 'JetBrains Mono', ui-monospace, ...` for both `sans` and `mono` aliases | [`frontend/tailwind.config.ts`](frontend/tailwind.config.ts), [`frontend/src/index.css`](frontend/src/index.css) |
-| CI                  | GitHub Actions: `lint.yml` on PRs to `dev`/`main`; `deploy.yml` on push to `dev` and `benchmark` | [`.github/workflows/lint.yml`](.github/workflows/lint.yml), [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) |
+| CI                  | GitHub Actions: `lint.yml` on PRs to `dev`/`main`; `deploy.yml` on push to `dev`/`benchmark` plus manual protected `prod` dispatch | [`.github/workflows/lint.yml`](.github/workflows/lint.yml), [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) |
 | Cloud               | GCP us-east4 — single GCE VM serves prod + dev; Cloud Run for on-demand previews; Workload Identity Federation for deploy auth | [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) |
 
 Python previews resolve bounded nested application packages: a FastAPI app declared in
@@ -101,10 +156,10 @@ Gemini 3.5 Flash/3.5 Flash-Lite, native DeepSeek V4, and the surviving Fireworks
 │   ├── billing/ auth/ ratelimit/ Tier + payment + JWT + scoped SSE token paths
 │   ├── swebench/ programbench/   Cleanroom container adapters for the patch-mode pipeline
 │   ├── agentsession/             Durable CLI/VS Code agent-session protocol (V240, /api/agent/*)
-│   └── ... (76 package roots total under com.navneet.executespec)
+│   └── ... (78 package roots total under com.navneet.executespec)
 ├── src/main/resources/
 │   ├── application.yml           Single source of truth for model matrix, provider routes, pricing, failover
-│   ├── db/migration/             Flyway V*.sql (head V340, immutable post-apply)
+│   ├── db/migration/             Flyway V*.sql (head V355; next V356; 341 source files; immutable post-apply)
 │   ├── prompts/                  External LLM prompts (assembled by PromptAssembler)
 │   └── static/                   Vite build output served by Spring Boot
 ├── src/test/java/                Unit + ArchUnit guard tests (e.g. AccessGuardCoverageTest)
@@ -182,6 +237,35 @@ The Spring Boot plugin propagates the profile's safety properties into the forke
 Without both the profile and a matching reservation, `LlmRouter` rejects provider dispatch. Reconcile
 or conservatively close the reservation after the test; never reuse it for a different run.
 
+The authenticated pipeline E2E is not part of normal `mvn verify`: Surefire excludes the `e2e`
+tag unless `-Pintegration` is explicit. Each live invocation runs exactly one lifecycle scenario
+(`happy`, `reject`, or `cancel`) on the non-frontier DeepSeek Flash route with a hard `$0.10`
+per-run cap. Reserve the UUID before starting the test so the provider guard can match the first
+planner dispatch:
+
+```bash
+export E2E_SCENARIO=happy
+export E2E_RUN_ID="$(uuidgen | tr '[:upper:]' '[:lower:]')"
+export RESERVATION_ID="$(
+  node scripts/provider-budget-ledger.mjs reserve \
+    --provider deepseek \
+    --model deepseek-v4-flash-native \
+    --run "$E2E_RUN_ID" \
+    --safe-max-usd 0.10
+)"
+
+JAVA_HOME=/opt/homebrew/opt/openjdk@21 \
+  mvn -Pintegration,live-llm-test \
+    -Dtest=PipelineE2ETest \
+    -Dexecutespec.live-llm.reservation-id="$RESERVATION_ID" \
+    test
+```
+
+Use a fresh UUID and reservation for every scenario. Afterward, reconcile the reservation with the
+run's recorded cost or use `close-unknown` to charge the full reserved `$0.10` conservatively.
+Missing scenario, UUID, live-test profile, or reservation skips the provider-backed scenario; the
+router independently remains fail-closed.
+
 Operators can set `execution.continuation.low-complexity-worker-start-tier=LIGHTWEIGHT` to start LOW worker tasks on the cheaper tier while preserving automatic step-up; the default remains `WORKHORSE`. Web Compose, web/CLI/VS Code agent confirmation, and legacy spec-chat `submit_run` can send `lowComplexityWorkerStartTier=LIGHTWEIGHT` without setting `modelName`, so it is not a route pin. Run-detail continuation policy evidence shows both the configured and effective LOW start tier, so invalid values that fell back to `WORKHORSE` stay visible.
 
 ### Project Chat paid actions
@@ -258,13 +342,83 @@ mvn -Pintegration verify        # opt-in integration tests (e2e, integration, ch
 
 `mvn verify` runs Spotless in `check` mode (the same gate CI enforces in `lint.yml`) and binds JaCoCo so a coverage report lands under `target/site/jacoco/`. Surefire excludes the `e2e`, `integration`, and `chaos` JUnit groups by default; pass `-Pintegration` (or the equivalent profile your CI uses) to run them.
 
+For provider-free protected-Web functional coverage, run
+`scripts/run-web-provider-free-functional.sh`. It launches disposable PostgreSQL and Redis
+containers, starts the backend with the isolated `web-qa` profile, creates a one-run QA identity,
+and drives the real React UI through login, workspace creation, run tabs, failure recovery, plan
+gate rendering, and fixture-only lifecycle transitions. The profile disables live LLM dispatch and
+does not activate the local/dev feature-flag initializer; the harness also compares a digest of all
+feature-flag values and audit metadata before and after the browser run. Browser session creation
+uses the real provider-free backend contract and its exact session is included in fixture cleanup.
+The fixture assigns the disposable user an unusable DeepSeek readiness marker solely so real project
+create/delete policy can be exercised. Live dispatch remains disabled. Browser-only cleanup removes
+the marker; a combined browser/CLI pass retains it between those phases, then destroys the database.
+Frontend, browser, backend, and optional CLI child processes receive purpose-specific allowlisted
+environments; the harness never reads a credential file and destroys its disposable services on
+exit. This proves deterministic browser contracts, not provider-backed Ask answers, screen
+generation, sandbox isolation, or generated-code quality.
+
+Set `WEB_QA_CLIENT_ROOT` to an absolute standalone client-checkout path to run the CLI behavioral
+suite against that same disposable backend and identity after the browser checks. The client harness
+mints and revokes its own PAT in guaranteed cleanup, removes its temporary config/workspaces, and
+removes the disposable email/password plus unrelated credentials from all child processes. Live-web
+and update checks are disabled for that optional pass. The variable is optional; no client checkout
+path is hardcoded.
+
 Validation evidence is fail-closed: code-changing tasks require an admitted baseline-to-final product
 diff attributable to that task, and persisted executable verification distinguishes `PASSED`,
 `BUILD_ONLY`, `FAILED`, and `UNAVAILABLE`. The Web evidence ledger exposes those deterministic facts;
 the headline score is a summary and must not be treated as independent proof.
 Post-run Ask follows the same rule: configured build success is not test success, missing concrete
 test counts remain an explicit verification gap, and provider tool-protocol markup is suppressed
-rather than displayed to customers.
+rather than displayed to customers. A post-run Ask response stopped by `length` / `max_tokens`
+returns `complete=false` with `incompleteReason=PROVIDER_OUTPUT_LIMIT`; the web client retains the
+partial text but renders an explicit incomplete/retry notice instead of treating it as a complete
+answer. Web/CLI agent answers have bounded 8,192-token direct and
+4,096-token final-synthesis ceilings and visibly warn when a provider stops for output length.
+System-map refresh is a durable asynchronous job: the write-gated POST returns 202, identical
+compatible requests reuse one stable job id, and the web console resumes/polls persisted state
+without holding a provider-duration HTTP request open. Admission performs only database/config
+work. PREPARING snapshots every linked repository at an exact revision using that link's credential
+subject, binds separate exact PLANNING repo-map and project-synthesis contexts, and
+never persists SCM credentials. Paid execution is not automatically replayed after an expired
+lease: uncertain work becomes `NEEDS_CONFIRMATION`. Generated artifacts remain invisible until one
+transactional publisher verifies the database lease/fence, unchanged source revisions, and staged
+digest, then saves every canonical artifact and marks the job SUCCEEDED atomically. Cancellation,
+deadlines, and abnormal provider finish reasons fail closed; truncated provider prose is never
+published. Other classified provider failures may use an explicit WARNING-quality deterministic
+fallback rather than being mislabeled as provider success. Async refresh deliberately
+suppresses customer-repository codemap PR publication until that external side effect has its own
+idempotency/fencing contract.
+`NEEDS_CONFIRMATION` blocks ordinary retries for web, CLI, and API callers; only the explicit
+confirm-retry action by the original requester can requeue the same durable identity, and every
+confirmation appends an immutable actor/time receipt. The latest-job read restores terminal truth
+after reload. Per-repository regenerate intent also enters this project-wide boundary so it cannot
+race a whole-project refresh.
+Compare History renders the
+actual authorized document-content diff, Timeline omits invalid timestamps instead of fabricating
+epoch durations, and the provider-key screen exposes OpenRouter's organization-scoped status and
+route to org settings.
+
+Generated EXPLANATION/SETUP documents use provider-neutral external prompts and a fair 60k source
+budget across architecture plus every linked repository. Each repository section must come from the
+codemap at the exact SHA captured by that architecture version; source drift fails closed. Every
+abnormal provider finish reason is rejected. Required structure, balanced code fences, secrets, and
+tool-protocol leakage are checked before save, while reads/downloads re-scan retained legacy
+documents. EXPLANATION output also fails closed on concrete symbol-to-symbol call edges and
+inactive/unused/stub/dead-code claims, plus directional Mermaid edges, that declaration-only
+codemaps cannot prove. Relationship euphemisms such as works/interacts/collaborates/depends/uses and
+symbol-local hinted/placeholder/prototype/candidate labels are covered by the same narrow gate.
+Unsupported prose is deterministically reduced to declaration-only symbol notes before validation;
+any prose sentence containing two or more distinct known codemap symbols is conservatively treated
+as an unproven relationship regardless of verb, while single-symbol inventory remains unless it
+claims reliance, a hinted mechanism, or incomplete integration. Directional Mermaid/sequence
+blocks are replaced by a non-directional evidence-limit note. The provider retry is reserved for
+remaining structural failures, and cached output is revalidated under the same rule before reuse.
+Provider transport runs without a database
+transaction; only the exact-source recheck,
+shared project publication lock, cache recheck, version allocation, save, and pruning use a short
+transaction.
 
 **Frontend**
 

@@ -3572,6 +3572,57 @@
   display: grid;
   gap: 5px;
 }
+.agent-repo-boundary {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--ide-border);
+  border-radius: 8px;
+  background: var(--ide-bg);
+}
+.agent-repo-options {
+  display: grid;
+  gap: 6px;
+}
+.agent-repo-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  padding: 5px 8px;
+  border: 1px solid var(--ide-border);
+  border-radius: 6px;
+  color: var(--ide-fg);
+  cursor: pointer;
+}
+.agent-repo-option:hover:not(.disabled) {
+  border-color: var(--ide-blue);
+  background: var(--ide-hover);
+}
+.agent-repo-option.disabled {
+  color: var(--ide-fg-muted);
+  cursor: not-allowed;
+}
+.agent-repo-option input {
+  margin: 0;
+}
+.agent-repo-option small {
+  margin-left: auto;
+  color: var(--ide-fg-muted);
+  font-size: 11px;
+}
+.agent-repo-boundary-warning,
+.agent-repo-boundary-error {
+  color: var(--ide-warning, #cca700);
+  font-size: 12px;
+}
+.agent-repo-boundary-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--ide-error, #f14c4c);
+}
 .agent-card-tasks {
   margin: 0;
   padding-left: 18px;

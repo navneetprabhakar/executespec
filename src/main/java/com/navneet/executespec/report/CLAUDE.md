@@ -40,6 +40,13 @@ invalid reports are excluded and counted separately.
   `DETERMINISTIC_WORKSPACE_SUITE`, `DETERMINISTIC_EXECUTION` for legacy fresh-but-unscoped rows,
   `UNVERIFIED_COUNT`, `LLM_REVIEWER`, `LLM_ASSESSMENT`, `LLM_ASSISTED_COUNT`, `HYBRID`, or
   `INTERNAL_FORMULA`). A score is a summary, not independent proof.
+- Authenticated report DTOs expose `goalProofReferences`: a typed, reloadable projection of the
+  durable run lifecycle, validation result, and exact verification-ledger rows used by final goal
+  proof. Each reference carries a proof role (`PROVEN`, `BLOCKING`, `UNPROVEN`, or `CONTEXT`),
+  observed status, provenance, confidence, artifact pointer, and measured count. Frontends must use
+  these references instead of parsing `GoalDonenessDecision.reason`, `recommendedNextStep`, or the
+  legacy prose evidence list. Missing rows render as explicit UNPROVEN references with no invented
+  artifact.
 - V317's `validation_report.test_execution_verified` proves count freshness. V344 adds
   `test_evidence_scope` so freshness is not confused with the boundary exercised:
   `LIVE_PREVIEW_FUNCTIONAL` is independent product-level proof, while `WORKSPACE_TEST_SUITE` is

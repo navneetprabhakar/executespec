@@ -3,32 +3,46 @@ package com.navneet.executespec.project.rag;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.nullable;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
+import java.util.UUID;
 import java.util.stream.IntStream;
 
+import com.navneet.executespec.agent.ProviderDispatchAuthorization;
 import com.navneet.executespec.agent.RunKeyContext;
 import com.navneet.executespec.billing.service.ManagedAiUsageService;
+import com.navneet.executespec.cost.LlmUsageAttemptIntent;
 import com.navneet.executespec.cost.LlmUsageAttributionResolver;
 import com.navneet.executespec.cost.RunCostTracker;
 import com.navneet.executespec.cost.RunStepUsageRecorder;
 import com.navneet.executespec.executioncontext.LlmDispatchPolicyException;
+import com.navneet.executespec.executioncontext.LlmExecutionContext;
 import com.navneet.executespec.executioncontext.LlmExecutionDispatchGuard;
+import com.navneet.executespec.executioncontext.LlmExecutionOperationAdmissionPolicy;
+import com.navneet.executespec.executioncontext.LlmExecutionOperationAuthority;
+import com.navneet.executespec.executioncontext.LlmExecutionOperationClaim;
 import com.navneet.executespec.executioncontext.LlmExecutionPolicyFactory;
 import com.navneet.executespec.executioncontext.LlmExecutionReference;
 import com.navneet.executespec.executioncontext.LlmExecutionScope;
+import com.navneet.executespec.executioncontext.PhysicalProviderAttemptAdmissionService;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.test.util.ReflectionTestUtils;
 
 class EmbeddingServiceTest {
@@ -39,6 +53,11 @@ class EmbeddingServiceTest {
   private final OpenAiEmbeddingTransport transport = mock(OpenAiEmbeddingTransport.class);
   private final RunStepUsageRecorder usage = mock(RunStepUsageRecorder.class);
   private final ManagedAiUsageService managedUsage = mock(ManagedAiUsageService.class);
+  private LlmExecutionOperationAdmissionPolicy admissionPolicy;
+  private final PhysicalProviderAttemptAdmissionService physicalAdmission =
+      mock(PhysicalProviderAttemptAdmissionService.class);
+  private final ProviderDispatchAuthorization providerAuthorization =
+      mock(ProviderDispatchAuthorization.class);
   private final RunStepUsageRecorder.AttemptHandle attempt =
       new RunStepUsageRecorder.AttemptHandle(
           "attempt-1",
@@ -67,15 +86,7 @@ class EmbeddingServiceTest {
 
   @BeforeEach
   void setUp() {
-    service =
-        new EmbeddingService(
-            policy,
-            contexts,
-            guard,
-            transport,
-            usage,
-            managedUsage,
-            new com.navneet.executespec.agent.ProviderDispatchAuthorization(true, false, ""));
+    useAdmissionMode("LEGACY");
     when(policy.resolve("project-1")).thenReturn(semantic());
     when(contexts.forProjectEmbedding(
             eq("project-1"),
@@ -299,6 +310,179 @@ class EmbeddingServiceTest {
   }
 
   @Test
+  void atomicBatchUsesFreshAdmittedCredentialZeroOutputCapAndPairedTerminalHandle() {
+    useAdmissionMode("SHADOW");
+    LlmExecutionOperationAuthority authority = authority();
+    LlmExecutionContext durable = mock(LlmExecutionContext.class);
+    when(durable.getKeySubjectUserId()).thenReturn("user-1");
+    when(durable.getOrgId()).thenReturn("org-1");
+    when(guard.reauthorizeProviderCapability(reference, "openai"))
+        .thenReturn(
+            new LlmExecutionDispatchGuard.ResolvedDispatch(
+                "preflight-key", RunKeyContext.Source.ORG, durable));
+    LlmUsageAttemptIntent intent =
+        LlmUsageAttemptIntent.builder()
+            .physicalAttemptId(attempt.physicalAttemptId())
+            .logicalCallId(attempt.logicalCallId())
+            .attemptKind(attempt.attemptKind())
+            .attemptOrdinal(attempt.attemptOrdinal())
+            .build();
+    when(physicalAdmission.admitCapabilityAttempt(any()))
+        .thenReturn(
+            new PhysicalProviderAttemptAdmissionService.AdmittedPhysicalAttempt(
+                attempt,
+                intent,
+                "fresh-admitted-key",
+                RunKeyContext.Source.ORG,
+                Instant.parse("2026-07-28T10:00:00Z")));
+    when(transport.embed(
+            eq("fresh-admitted-key"), eq(EmbeddingService.DEFAULT_MODEL), eq(List.of("hello"))))
+        .thenReturn(new OpenAiEmbeddingTransport.Result(List.of(new float[] {0.2f}), 5));
+
+    assertThat(
+            service.embedForProject(
+                "project-1",
+                List.of("hello"),
+                "ProjectDocumentEmbedding",
+                "PROJECT_DOCUMENT",
+                "doc-1",
+                "user-1",
+                null,
+                authority))
+        .hasSize(1);
+
+    ArgumentCaptor<PhysicalProviderAttemptAdmissionService.CapabilityAttempt> request =
+        ArgumentCaptor.forClass(PhysicalProviderAttemptAdmissionService.CapabilityAttempt.class);
+    var order = inOrder(providerAuthorization, guard, managedUsage, physicalAdmission, transport);
+    order
+        .verify(providerAuthorization)
+        .authorize("openai", EmbeddingService.DEFAULT_MODEL, "embedding:doc-1");
+    order.verify(guard).reauthorizeProviderCapability(reference, "openai");
+    order
+        .verify(managedUsage)
+        .authorizeFixedCapabilityCall(
+            eq("embedding:doc-1"),
+            eq("openai"),
+            eq(EmbeddingService.DEFAULT_MODEL),
+            eq("ProjectDocumentEmbedding"),
+            any(RunKeyContext.class),
+            eq(RunKeyContext.Source.ORG));
+    order.verify(physicalAdmission).admitCapabilityAttempt(request.capture());
+    order
+        .verify(transport)
+        .embed(eq("fresh-admitted-key"), eq(EmbeddingService.DEFAULT_MODEL), eq(List.of("hello")));
+    assertThat(request.getValue().reference()).isEqualTo(reference);
+    assertThat(request.getValue().authority()).isSameAs(authority);
+    assertThat(request.getValue().requestedMaxOutputTokens()).isZero();
+    assertThat(request.getValue().transportTimeout()).isEqualTo(Duration.ofSeconds(65));
+    assertThat(request.getValue().safetyMargin()).isEqualTo(Duration.ofSeconds(15));
+    verify(guard, never()).authorizeProviderCapability(reference, "openai");
+    verify(usage, never())
+        .prepareProviderCapabilityAttempt(
+            any(),
+            anyString(),
+            anyString(),
+            anyString(),
+            anyString(),
+            anyString(),
+            anyString(),
+            anyString(),
+            anyInt());
+    verify(usage)
+        .recordProviderCapabilitySuccess(
+            eq(attempt),
+            eq("embedding:doc-1"),
+            eq("embedding.batch.1"),
+            eq("EmbeddingService"),
+            eq("embedding.batch"),
+            anyLong(),
+            any());
+  }
+
+  @Test
+  void atomicProviderFailureUsesTheAdmittedHandleForTerminalFailure() {
+    useAdmissionMode("SHADOW");
+    LlmExecutionOperationAuthority authority = authority();
+    LlmExecutionContext durable = mock(LlmExecutionContext.class);
+    when(durable.getKeySubjectUserId()).thenReturn("user-1");
+    when(durable.getOrgId()).thenReturn("org-1");
+    when(guard.reauthorizeProviderCapability(reference, "openai"))
+        .thenReturn(
+            new LlmExecutionDispatchGuard.ResolvedDispatch(
+                "preflight-key", RunKeyContext.Source.ORG, durable));
+    LlmUsageAttemptIntent intent =
+        LlmUsageAttemptIntent.builder()
+            .physicalAttemptId(attempt.physicalAttemptId())
+            .logicalCallId(attempt.logicalCallId())
+            .attemptKind(attempt.attemptKind())
+            .attemptOrdinal(attempt.attemptOrdinal())
+            .build();
+    when(physicalAdmission.admitCapabilityAttempt(any()))
+        .thenReturn(
+            new PhysicalProviderAttemptAdmissionService.AdmittedPhysicalAttempt(
+                attempt,
+                intent,
+                "fresh-admitted-key",
+                RunKeyContext.Source.ORG,
+                Instant.parse("2026-07-28T10:00:00Z")));
+    when(transport.embed(anyString(), anyString(), any()))
+        .thenThrow(new IllegalStateException("provider down"));
+
+    assertThatThrownBy(
+            () ->
+                service.embedForProject(
+                    "project-1",
+                    List.of("hello"),
+                    "ProjectDocumentEmbedding",
+                    "PROJECT_DOCUMENT",
+                    "doc-1",
+                    "user-1",
+                    null,
+                    authority))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessage("provider down");
+
+    verify(usage)
+        .recordProviderCapabilityFailure(
+            eq(attempt),
+            eq("embedding:doc-1"),
+            eq("embedding.batch.1"),
+            eq("EmbeddingService"),
+            eq("embedding.batch"),
+            anyLong(),
+            any(IllegalStateException.class));
+  }
+
+  @Test
+  void enforcedModeWithoutAuthorityRejectsBeforeAnyAttemptSideEffect() {
+    useAdmissionMode("ENFORCED");
+
+    assertThatThrownBy(
+            () ->
+                service.embedForProject(
+                    "project-1",
+                    List.of("hello"),
+                    "ProjectDocumentEmbedding",
+                    "PROJECT_DOCUMENT",
+                    "doc-1"))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("MISSING_AUTHORITY_ENFORCED");
+
+    verifyNoInteractions(guard, physicalAdmission, providerAuthorization, managedUsage, transport);
+    verify(usage, never())
+        .prepareProviderCapabilityAttempt(
+            any(),
+            anyString(),
+            anyString(),
+            anyString(),
+            anyString(),
+            anyString(),
+            anyString(),
+            anyString(),
+            anyInt());
+  }
+
+  @Test
   void reauthorizesImmediatelyBeforeEveryPhysicalBatch() {
     when(guard.authorizeProviderCapability(reference, "openai"))
         .thenReturn(
@@ -457,5 +641,26 @@ class EmbeddingServiceTest {
         "openai",
         EmbeddingService.DEFAULT_MODEL,
         "AVAILABLE");
+  }
+
+  private LlmExecutionOperationAuthority authority() {
+    return LlmExecutionOperationAuthority.issue(
+        new LlmExecutionOperationClaim(reference, "llmop-embedding", 1, 1, UUID.randomUUID()),
+        "embedding-owner");
+  }
+
+  private void useAdmissionMode(String mode) {
+    admissionPolicy = new LlmExecutionOperationAdmissionPolicy(mode);
+    service =
+        new EmbeddingService(
+            policy,
+            contexts,
+            guard,
+            transport,
+            usage,
+            managedUsage,
+            admissionPolicy,
+            physicalAdmission,
+            providerAuthorization);
   }
 }

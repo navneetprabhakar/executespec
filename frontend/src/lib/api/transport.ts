@@ -81,6 +81,9 @@ export function parseErrorMessage(status: number, raw: string): string {
  */
 export const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 
+/** Request options for operations whose server-side contract has a different bounded duration. */
+export type ApiRequestInit = RequestInit & {timeoutMs?: number};
+
 /**
  * Builds an `AbortSignal` that fires after `timeoutMs`, composed with an optional caller signal so
  * a component that unmounts can still cancel. Uses a manual `AbortController` rather than
@@ -168,7 +171,7 @@ function endDeadSession(): void {
   window.location.replace(onAuthPage ? '/login' : `/login?redirect=${encodeURIComponent(here)}`);
 }
 
-async function fetchJson(url: string, opts?: RequestInit): Promise<Response> {
+async function fetchJson(url: string, opts?: ApiRequestInit): Promise<Response> {
   // Audit r5 (P0-2, 2026-05-06): a backend OOM crash during the new-user
   // walkthrough surfaced as `fetch()` rejecting with `TypeError: Failed
   // to fetch`. The catch site (RegisterPage / LoginPage / etc.) printed
@@ -179,12 +182,13 @@ async function fetchJson(url: string, opts?: RequestInit): Promise<Response> {
   // retry UI). Genuine 4xx/5xx responses still reach the original status
   // path.
   // RR-169: compose a total deadline so a stalled request fails typed instead of hanging forever.
-  const deadline = timeoutSignal(opts?.signal ?? undefined, DEFAULT_REQUEST_TIMEOUT_MS);
+  const {timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS, ...requestInit} = opts ?? {};
+  const deadline = timeoutSignal(requestInit.signal ?? undefined, timeoutMs);
   let res: Response;
   try {
-    const headers = {'Content-Type': 'application/json', ...authHeader(), ...opts?.headers};
+    const headers = {'Content-Type': 'application/json', ...authHeader(), ...requestInit.headers};
     res = await fetch(BASE + url, {
-      ...opts,
+      ...requestInit,
       headers,
       credentials: 'include', // send refresh_token cookie
       signal: deadline.signal,
@@ -227,7 +231,7 @@ async function fetchText(url: string): Promise<Response> {
   }
 }
 
-export async function req<T>(url: string, opts?: RequestInit): Promise<T> {
+export async function req<T>(url: string, opts?: ApiRequestInit): Promise<T> {
   let res = await fetchJson(url, opts);
   if (res.status === 401 && shouldAttemptRefresh(url)) {
     if (await refreshAccessTokenOnce()) {

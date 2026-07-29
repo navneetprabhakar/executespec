@@ -37,11 +37,15 @@ import lombok.extern.slf4j.Slf4j;
  *
  * <ul>
  *   <li>{@code AWAITING_APPROVAL} — untouched. The plan gate is user-facing; the user can approve
- *       whenever, and that path does not require the old orchestrator thread.
+ *       whenever. {@code PlanGateResumeDispatcher} independently sweeps its durable outbox.
+ *   <li>{@code APPROVAL_RESUMING} — never scanned here; READY/PROCESSING continuation recovery is
+ *       exclusively owned by the leased plan-gate outbox dispatcher.
  *   <li>{@code PLANNING} — recovered only when the persisted plan/task state is sufficient;
  *       otherwise failed with an explicit restart-required reason.
  *   <li>{@code WORKING} / {@code REVIEWING} — resumed from the persisted checkpoint when the
- *       workspace and heartbeat checks pass; stale, exhausted, or unrecoverable rows fail cleanly.
+ *       workspace and heartbeat checks pass, except a process-unique queued plan-gate handoff which
+ *       remains dispatcher-owned until its Future transfers to the runtime owner; stale, exhausted,
+ *       or unrecoverable rows fail cleanly.
  * </ul>
  *
  * <p>Scoping: only touches rows where {@code harnessVersion = "v2"}. V1's {@code StartupRunResumer}
@@ -54,7 +58,7 @@ public class StartupRunResumer {
 
   /** Statuses that indicate a run was in-flight when the JVM died. */
   private static final List<String> RESUMABLE_STATUSES =
-      List.of("PLANNING", "WORKING", "REVIEWING", "AWAITING_APPROVAL", "APPROVAL_RESUMING");
+      List.of("PLANNING", "WORKING", "REVIEWING");
 
   /**
    * Hard cap on resume attempts per run. Once exceeded the run is permanently FAILED; the user can
@@ -138,19 +142,29 @@ public class StartupRunResumer {
     Instant heartbeatCutoff = Instant.now().minus(Duration.ofMinutes(2));
     List<PipelineRun> candidates =
         runRepo.findByStatusIn(RESUMABLE_STATUSES).stream()
+            // Defensive fence for repository substitutes and rolling schema readers: plan-gate
+            // states are exclusively owned by PlanGateResumeDispatcher.
+            .filter(r -> RESUMABLE_STATUSES.contains(r.getStatus()))
             .filter(r -> "v2".equalsIgnoreCase(r.getHarnessVersion()))
+            // A WORKING+COMPLETED handoff can still be sitting in the executor queue. Its
+            // process-unique owner is recovered only by PlanGateResumeDispatcher, which knows the
+            // immutable receipt/outbox attempt budget. Once the Future starts, ownership is
+            // atomically transferred to the normal runtime host and generic checkpoint recovery
+            // applies again after a crash.
+            .filter(
+                r ->
+                    !com.navneet.executespec.integration.PlanGateResumeDispatcher
+                        .isQueuedHandoffOwner(r.getExecutingInstance()))
             // Periodic recovery must not poll every live run or durable plan gate. It exists only
             // to revisit takeover candidates once the previous owner's heartbeat can satisfy the
             // same two-minute stale fence enforced by RunLifecycleService.claimCrashResume.
             .filter(
                 r ->
-                    !scheduledSweep
-                        || (!("AWAITING_APPROVAL".equals(r.getStatus())
-                                || "APPROVAL_RESUMING".equals(r.getStatus()))
-                            && (r.getExecutionHeartbeat() != null
-                                ? !r.getExecutionHeartbeat().isAfter(heartbeatCutoff)
-                                : r.getStartedAt() == null
-                                    || !r.getStartedAt().isAfter(heartbeatCutoff))))
+                    r.getExecutionHeartbeat() != null
+                        ? !r.getExecutionHeartbeat().isAfter(heartbeatCutoff)
+                        : !scheduledSweep
+                            || r.getStartedAt() == null
+                            || !r.getStartedAt().isAfter(heartbeatCutoff))
             .toList();
 
     if (candidates.isEmpty()) {
@@ -160,7 +174,6 @@ public class StartupRunResumer {
 
     log.warn("StartupRunResumer: found {} interrupted V2 run(s); recovering", candidates.size());
 
-    int awaitingApproval = 0;
     int failedInterrupted = 0;
     int failedCapped = 0;
     int failedStale = 0;
@@ -168,24 +181,6 @@ public class StartupRunResumer {
     Instant cutoff = Instant.now().minus(STALE_CUTOFF);
     for (PipelineRun run : candidates) {
       String status = run.getStatus();
-      if ("AWAITING_APPROVAL".equals(status) || "APPROVAL_RESUMING".equals(status)) {
-        try {
-          var outcome = runLifecycleServiceProvider.getObject().recoverPlanGate(run.getRunId());
-          log.info(
-              "StartupRunResumer: run={} status={} recoverPlanGate → {}",
-              run.getRunId(),
-              status,
-              outcome);
-          awaitingApproval++;
-        } catch (Exception e) {
-          // Leave the durable gate untouched. A later approval retry or next restart can reconcile
-          // it; failing the run here would destroy a valid user decision.
-          log.error(
-              "StartupRunResumer: durable plan-gate recovery failed for {}", run.getRunId(), e);
-        }
-        continue;
-      }
-
       int attempts = run.getResumeAttempts() == null ? 0 : run.getResumeAttempts();
       if (attempts >= MAX_RESUME_ATTEMPTS) {
         markFailed(
@@ -267,9 +262,8 @@ public class StartupRunResumer {
       }
     }
     log.warn(
-        "StartupRunResumer: recovery complete — awaiting-approval={} "
-            + "interrupted={} deferred={} cap-exceeded={} stale={}",
-        awaitingApproval,
+        "StartupRunResumer: recovery complete — interrupted={} deferred={} cap-exceeded={}"
+            + " stale={}",
         failedInterrupted,
         deferred,
         failedCapped,

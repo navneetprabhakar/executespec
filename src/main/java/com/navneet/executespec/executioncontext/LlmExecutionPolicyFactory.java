@@ -105,10 +105,18 @@ public class LlmExecutionPolicyFactory {
     if (ownKeysContext.isPresent()) {
       return ownKeysContext.get();
     }
+    ApiKeyResolver.CredentialResolution runCredentials =
+        apiKeyResolver.resolveWithProvenance(userId);
+    String credentialOrgId = require(runCredentials.orgId(), "credential org");
+    String durableBillingOrgId = firstNonBlank(run.getBillingOrgId(), orgId);
+    if (!durableBillingOrgId.equals(credentialOrgId)) {
+      throw new IllegalStateException(
+          "Run credential subject no longer belongs to the durable billing org");
+    }
     Org org =
         orgRepository
-            .findById(orgId)
-            .orElseThrow(() -> new IllegalArgumentException("customer org not found"));
+            .findById(credentialOrgId)
+            .orElseThrow(() -> new IllegalArgumentException("credential policy org not found"));
     boolean ownKeysProviderLock = isOwnKeys(keySourceMode(org.getKeySourceMode()));
     boolean controlledWorker = isControlledWorkerRun(run.getSourceType());
     String routePolicyKey =
@@ -186,6 +194,7 @@ public class LlmExecutionPolicyFactory {
             .orElseThrow(() -> new IllegalArgumentException("pipeline run not found"));
     String userId = require(run.getCreatedByUserId(), "run owner");
     String orgId = require(run.getOrgId(), "run org");
+    requireRunCredentialBinding(run, userId, orgId);
     String requestedProvider = firstNonBlank(run.getRequestedProvider(), run.getAiProvider());
     boolean pinned = run.isRoutePinned();
     String requestedModel = pinned ? require(run.getRequestedModel(), "pinned model") : null;
@@ -224,6 +233,7 @@ public class LlmExecutionPolicyFactory {
             .orElseThrow(() -> new IllegalArgumentException("pipeline run not found"));
     String userId = require(run.getCreatedByUserId(), "run owner");
     String orgId = require(run.getOrgId(), "run org");
+    requireRunCredentialBinding(run, userId, orgId);
     String requestedProvider = firstNonBlank(run.getRequestedProvider(), run.getAiProvider());
     boolean pinned = run.isRoutePinned();
     String requestedModel = pinned ? require(run.getRequestedModel(), "pinned model") : null;
@@ -512,6 +522,7 @@ public class LlmExecutionPolicyFactory {
                 null,
                 null,
                 null,
+                null,
                 policy,
                 LlmExecutionBudget.UNBOUNDED,
                 1,
@@ -574,18 +585,16 @@ public class LlmExecutionPolicyFactory {
       java.time.Instant expiresAt) {
     require(userId, "userId");
     require(keySubjectUserId, "keySubjectUserId");
-    require(orgId, "orgId");
-    Org org =
-        orgRepository
-            .findById(orgId)
-            .orElseThrow(() -> new IllegalArgumentException("customer org not found"));
+    String tenantOrgId = require(orgId, "orgId");
     ApiKeyResolver.CredentialResolution credentials =
         apiKeyResolver.resolveWithProvenance(keySubjectUserId);
-    if (!orgId.equals(credentials.orgId())) {
-      throw new IllegalStateException("LLM credential subject is outside the requested org");
-    }
-    LlmPolicySnapshot.KeySourceMode mode = keySourceMode(org.getKeySourceMode());
-    Set<String> enabled = parseProviders(org.getEnabledProviders());
+    String credentialOrgId = require(credentials.orgId(), "credentialOrgId");
+    Org credentialOrg =
+        orgRepository
+            .findById(credentialOrgId)
+            .orElseThrow(() -> new IllegalArgumentException("credential policy org not found"));
+    LlmPolicySnapshot.KeySourceMode mode = keySourceMode(credentialOrg.getKeySourceMode());
+    Set<String> enabled = parseProviders(credentialOrg.getEnabledProviders());
     Set<String> allowed = new LinkedHashSet<>();
     Map<String, LlmPolicySnapshot.CredentialSource> sources = new LinkedHashMap<>();
     for (String provider : PROVIDERS) {
@@ -645,7 +654,7 @@ public class LlmExecutionPolicyFactory {
             // provider policy.
             !exact && !ownKeysProviderLock && !controlledWorker,
             ownKeysProviderLock ? 2 : 1);
-    LlmExecutionScope scope = LlmExecutionScope.customer(orgId);
+    LlmExecutionScope scope = LlmExecutionScope.customer(tenantOrgId);
     LlmExecutionContext context =
         contextService.create(
             new LlmExecutionContextCreateRequest(
@@ -657,6 +666,7 @@ public class LlmExecutionPolicyFactory {
                 correlationId,
                 scope,
                 userId,
+                credentialOrgId,
                 projectId,
                 null,
                 policy,
@@ -686,6 +696,17 @@ public class LlmExecutionPolicyFactory {
             });
     byProvider.replaceAll((provider, models) -> List.copyOf(models));
     return byProvider;
+  }
+
+  private void requireRunCredentialBinding(
+      com.navneet.executespec.state.entity.PipelineRun run, String userId, String tenantOrgId) {
+    String durableBillingOrgId = firstNonBlank(run.getBillingOrgId(), tenantOrgId);
+    String currentCredentialOrgId =
+        require(apiKeyResolver.resolveWithProvenance(userId).orgId(), "credential org");
+    if (!durableBillingOrgId.equals(currentCredentialOrgId)) {
+      throw new IllegalStateException(
+          "Run credential subject no longer belongs to the durable billing org");
+    }
   }
 
   private void validateModel(String provider, String model) {

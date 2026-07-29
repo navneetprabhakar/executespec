@@ -4,6 +4,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import com.navneet.executespec.agent.LlmRouter;
+
 import org.springframework.ai.tool.ToolCallback;
 
 /**
@@ -30,6 +32,20 @@ public final class ChatToolPolicy {
   }
 
   public static final int MAX_MODEL_ROUNDS = 5;
+
+  /**
+   * The router can make up to four physical same-provider attempts for one logical model round.
+   * Durable execution contexts count terminal physical-attempt rows, so the provider-call ceiling
+   * must reserve the retry envelope rather than only the logical round count. This remains a
+   * separate guard from the model-round counter: retries do not grant the model another turn.
+   */
+  public static final int MAX_PROVIDER_ATTEMPTS_PER_MODEL_ROUND =
+      LlmRouter.TRANSIENT_RETRY_MAX_ATTEMPTS;
+
+  /** Five tool-enabled rounds plus one forced synthesis, each with the bounded retry envelope. */
+  public static final int MAX_PROVIDER_CALLS_PER_TURN =
+      (MAX_MODEL_ROUNDS + 1) * MAX_PROVIDER_ATTEMPTS_PER_MODEL_ROUND;
+
   public static final int MAX_TOOL_CALLS = 12;
   public static final long MAX_TURN_TOKENS = 40_000;
   public static final double MAX_TURN_COST_USD = 0.50;

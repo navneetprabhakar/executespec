@@ -94,7 +94,7 @@ public class CodeIndexController {
                   repoId.toString(), "UNAVAILABLE", "RIPGREP", false, readiness.reason()));
     }
     boolean bitbucket = "BITBUCKET".equalsIgnoreCase(repo.getScmProvider());
-    indexingService.indexRepoAsync(
+    indexingService.indexRepoExplicitAsync(
         projectId,
         repo,
         bitbucket ? userDetails.getUser().getBitbucketUsername() : null,

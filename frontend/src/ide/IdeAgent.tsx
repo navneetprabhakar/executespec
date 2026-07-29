@@ -11,9 +11,19 @@ import {
   toolEventTimelineItem,
   type PendingAction,
 } from '@/ide/agentState';
-import {AgentChatsDrawer, AgentConversation, AgentTopBar} from '@/ide/agentPanels';
+import {
+  AgentChatsDrawer,
+  AgentConversation,
+  AgentTopBar,
+  type CloudRunRepoChoice,
+  type CloudRunRepoSelection,
+} from '@/ide/agentPanels';
 import {agentSessionMatchesScope, selectScopedAgentSession} from '@/ide/agentSession';
-import {cloudRunBlockingCopy, isConfirmableCloudRun} from '@/ide/agentActionPolicy';
+import {
+  cloudRunBlockingCopy,
+  cloudRunProjectId,
+  isConfirmableCloudRun,
+} from '@/ide/agentActionPolicy';
 import {
   createCanonicalAgentSession,
   newAgentSessionRequest,
@@ -26,6 +36,33 @@ import {conversationForStream, usageFromTurns} from '@/ide/agentConversationCont
 import {providerIsDispatchable, providerReadinessLabel} from '@/ide/providerReadiness';
 import {useProviderReadiness} from '@/ide/useProviderReadiness';
 import {eligibleAgentProviderCatalog, exactModelMatchesProvider} from '@/ide/agentModelRouting';
+import {repoDisplayName, repoIdFor} from '@/signal/lib/runUtils';
+import {repoSupports} from '@/ide/projectRepoUi';
+import {friendlyAiFailureMessage} from '@/ide/runResultUtils';
+
+interface RepoBoundaryState {
+  actionKey: string | null;
+  projectId: string | null;
+  status: 'idle' | 'loading' | 'ready' | 'error';
+  repos: CloudRunRepoChoice[];
+  selectedRepoIds: string[];
+  error: string | null;
+}
+
+type AgentErrorRecovery = {
+  kind: 'retry-session';
+  request: NewAgentSessionRequest;
+  error: string;
+};
+
+const EMPTY_REPO_BOUNDARY: RepoBoundaryState = {
+  actionKey: null,
+  projectId: null,
+  status: 'idle',
+  repos: [],
+  selectedRepoIds: [],
+  error: null,
+};
 
 export default function IdeAgent() {
   const navigate = useNavigate();
@@ -40,6 +77,10 @@ export default function IdeAgent() {
   const [availableModels, setAvailableModels] = useState<api.ProviderEntry[]>([]);
   const [selectedProvider, setSelectedProvider] = useState('');
   const [selectedModel, setSelectedModel] = useState('');
+  const [repoBoundary, setRepoBoundary] = useState<RepoBoundaryState>(EMPTY_REPO_BOUNDARY);
+  const [repoBoundaryReload, setRepoBoundaryReload] = useState(0);
+  const [errorRecovery, setErrorRecovery] = useState<AgentErrorRecovery | null>(null);
+  const [recovering, setRecovering] = useState(false);
   // Isolation is a server capability, never a client-side assumption. Until the
   // capability request explicitly proves it is enabled, describe this surface
   // as the policy-guarded remote workspace it actually is.
@@ -131,6 +172,91 @@ export default function IdeAgent() {
     [state.turns],
   );
   const visibleAction = state.pendingAction ?? historicalActions[0] ?? null;
+  const visibleActionKey = visibleAction
+    ? `${visibleAction.sessionId}:${visibleAction.turnId}`
+    : null;
+  const visibleActionProjectId = cloudRunProjectId(visibleAction?.action);
+
+  useEffect(() => {
+    if (!visibleAction || !isConfirmableCloudRun(visibleAction.action) || !visibleActionProjectId) {
+      setRepoBoundary(EMPTY_REPO_BOUNDARY);
+      return;
+    }
+    let cancelled = false;
+    setRepoBoundary({
+      actionKey: visibleActionKey,
+      projectId: visibleActionProjectId,
+      status: 'loading',
+      repos: [],
+      selectedRepoIds: [],
+      error: null,
+    });
+    void api
+      .getProjectRepos(visibleActionProjectId)
+      .then((links) => {
+        if (cancelled) return;
+        const repos = (links as unknown[])
+          .map((link) => ({
+            id: repoIdFor(link),
+            label: repoDisplayName(link),
+            selectable: repoSupports(link, 'CLOUD_RUN'),
+          }))
+          .filter((repo) => repo.id.length > 0);
+        setRepoBoundary({
+          actionKey: visibleActionKey,
+          projectId: visibleActionProjectId,
+          status: 'ready',
+          repos,
+          // Repository authority must be affirmative. Do not silently broaden a new proposal to
+          // every linked repository merely because the list finished loading.
+          selectedRepoIds: [],
+          error: null,
+        });
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        setRepoBoundary({
+          actionKey: visibleActionKey,
+          projectId: visibleActionProjectId,
+          status: 'error',
+          repos: [],
+          selectedRepoIds: [],
+          error:
+            error instanceof Error ? error.message : 'Linked repositories could not be loaded.',
+        });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [visibleAction, visibleActionKey, visibleActionProjectId, repoBoundaryReload]);
+
+  const proposalRepoSelection = useMemo<CloudRunRepoSelection>(
+    () => ({
+      status: repoBoundary.status,
+      projectId: repoBoundary.projectId,
+      repos: repoBoundary.repos,
+      selectedRepoIds: repoBoundary.selectedRepoIds,
+      error: repoBoundary.error,
+      onToggle: (repoId) => {
+        setRepoBoundary((current) => {
+          if (
+            current.status !== 'ready' ||
+            !current.repos.some((repo) => repo.id === repoId && repo.selectable)
+          ) {
+            return current;
+          }
+          return {
+            ...current,
+            selectedRepoIds: current.selectedRepoIds.includes(repoId)
+              ? current.selectedRepoIds.filter((id) => id !== repoId)
+              : [...current.selectedRepoIds, repoId],
+          };
+        });
+      },
+      onRetry: () => setRepoBoundaryReload((value) => value + 1),
+    }),
+    [repoBoundary],
+  );
   const latestLinkedRunId = useMemo(() => {
     for (let i = state.turns.length - 1; i >= 0; i -= 1) {
       const run = state.turns[i]?.linkedRunId;
@@ -297,10 +423,8 @@ export default function IdeAgent() {
           userModelsPromise,
         ]);
       setAvailableModels(eligibleAgentProviderCatalog(modelCatalog.providers ?? [], userModels));
-      const current = sessionRows.find((session) => session.id === state.selectedId) ?? null;
       const scoped = selectScopedAgentSession(sessionRows, scope);
-      const selectedId =
-        current && agentSessionMatchesScope(current, scope) ? current.id : (scoped?.id ?? null);
+      const selectedId = scoped?.id ?? null;
       dispatch({
         type: 'load:success',
         sessions: sessionRows,
@@ -316,7 +440,7 @@ export default function IdeAgent() {
         error: e instanceof Error ? e.message : 'Failed to load agent state.',
       });
     }
-  }, [loadTurns, scope, state.selectedId]);
+  }, [loadTurns, scope]);
 
   useEffect(() => {
     void load();
@@ -410,12 +534,15 @@ export default function IdeAgent() {
   // initial loading. Without this boundary a rejected promise only hits the
   // console and leaves the operator with a button that appears to do nothing.
   async function startNewSession() {
+    const request = newAgentSessionRequest(scope);
     try {
-      await createSession();
+      await createSessionForRequest(request);
     } catch (e) {
+      const error = e instanceof Error ? e.message : 'Failed to create a new sandbox.';
+      setErrorRecovery({kind: 'retry-session', request, error});
       dispatch({
         type: 'error',
-        error: e instanceof Error ? e.message : 'Failed to create a new sandbox.',
+        error,
       });
     }
   }
@@ -427,9 +554,11 @@ export default function IdeAgent() {
   const fulfilRequest = useCallback(
     (request: NewAgentSessionRequest) => {
       createSessionForRequest(request).catch((e: unknown) => {
+        const error = e instanceof Error ? e.message : 'Failed to create a new sandbox.';
+        setErrorRecovery({kind: 'retry-session', request, error});
         dispatch({
           type: 'error',
-          error: e instanceof Error ? e.message : 'Failed to create a new sandbox.',
+          error,
         });
       });
     },
@@ -593,8 +722,10 @@ export default function IdeAgent() {
                 detail: `$${(done.cost_usd ?? 0).toFixed(4)} · ${done.input_tokens ?? 0}/${done.output_tokens ?? 0} tokens`,
               },
             }),
-          onErrorEvent: (error) =>
-            dispatch({type: 'error', error: error.message || 'Agent stream failed.'}),
+          onErrorEvent: (error) => {
+            setErrorRecovery(null);
+            dispatch({type: 'error', error: error.message || 'Agent stream failed.'});
+          },
         },
         abort.signal,
       );
@@ -622,6 +753,7 @@ export default function IdeAgent() {
           // Preserve the original stream error; replay is best-effort.
         }
       }
+      setErrorRecovery(null);
       dispatch({type: 'error', error: e instanceof Error ? e.message : 'Agent turn failed.'});
     } finally {
       abortRef.current = null;
@@ -636,11 +768,45 @@ export default function IdeAgent() {
       if (blocked) dispatch({type: 'error', error: blocked});
       return;
     }
+    const pendingActionKey = `${pending.sessionId}:${pending.turnId}`;
+    const pendingProjectId = cloudRunProjectId(pending.action);
+    if (
+      repoBoundary.actionKey !== pendingActionKey ||
+      repoBoundary.projectId !== pendingProjectId ||
+      repoBoundary.status !== 'ready'
+    ) {
+      dispatch({
+        type: 'error',
+        error: 'Repository scope is not ready. Reload the linked repositories before confirming.',
+      });
+      return;
+    }
+    const runnableRepos = repoBoundary.repos.filter((repo) => repo.selectable);
+    if (runnableRepos.length === 0 && repoBoundary.repos.length > 0) {
+      dispatch({type: 'error', error: 'No linked repository supports remote execution.'});
+      return;
+    }
+    if (runnableRepos.length > 0 && repoBoundary.selectedRepoIds.length === 0) {
+      dispatch({
+        type: 'error',
+        error: 'Select at least one runnable repository before creating the plan.',
+      });
+      return;
+    }
+    const runnableRepoIds = new Set(runnableRepos.map((repo) => repo.id));
+    if (repoBoundary.selectedRepoIds.some((repoId) => !runnableRepoIds.has(repoId))) {
+      dispatch({
+        type: 'error',
+        error: 'Repository scope changed. Reload the linked repositories before confirming.',
+      });
+      return;
+    }
     try {
       const response = await api.confirmAgentRunProposal({
         sessionId: pending.sessionId,
         turnId: pending.turnId,
         confirmed: true,
+        selectedRepoIds: [...repoBoundary.selectedRepoIds],
       });
       dispatch({type: 'run:submitted', runId: response.runId});
       dispatch({
@@ -654,27 +820,34 @@ export default function IdeAgent() {
       });
       await refreshAfterMutation(pending.sessionId);
     } catch (e) {
+      setErrorRecovery(null);
       dispatch({type: 'error', error: e instanceof Error ? e.message : 'Run confirmation failed.'});
     }
   }
 
-  async function approveGate(gate: api.AgentGateDecisionCard) {
-    try {
-      dispatch({
-        type: 'stream:event',
-        item: {
-          id: `gate:${gate.runId}:approve`,
-          type: 'system',
-          title: 'Approving plan gate',
-          detail: gate.runId,
-        },
-      });
-      await api.approveRun(gate.runId, true, gate.creditsRequired ?? undefined);
-      dispatch({type: 'run:submitted', runId: gate.runId});
-      await refreshAfterMutation();
-    } catch (e) {
-      dispatch({type: 'error', error: e instanceof Error ? e.message : 'Plan approval failed.'});
+  async function recoverFromError() {
+    const retryable = errorRecovery?.error === state.error ? errorRecovery : null;
+    if (!retryable) {
+      setErrorRecovery(null);
+      await load();
+      return;
     }
+    setRecovering(true);
+    try {
+      await createSessionForRequest(retryable.request);
+      setErrorRecovery(null);
+      dispatch({type: 'error:clear'});
+    } catch (e) {
+      const error = e instanceof Error ? e.message : 'Failed to create a new sandbox.';
+      setErrorRecovery({...retryable, error});
+      dispatch({type: 'error', error});
+    } finally {
+      setRecovering(false);
+    }
+  }
+
+  function approveGate(gate: api.AgentGateDecisionCard) {
+    navigate(`/plan/${gate.runId}`);
   }
 
   async function rejectGate(gate: api.AgentGateDecisionCard) {
@@ -708,6 +881,13 @@ export default function IdeAgent() {
     state.status === 'streaming' ||
     state.status === 'toolRunning' ||
     state.status === 'runStreaming';
+  // Tracking a run must keep the current session's composer mutation-gated, but it must not trap
+  // the operator in that session. A run can remain active (or wait at its plan gate) for minutes;
+  // creating an independent workspace during that time is safe and does not mutate the run.
+  const sessionCreationBusy =
+    state.status === 'loadingSession' ||
+    state.status === 'streaming' ||
+    state.status === 'toolRunning';
 
   const runActive =
     !!runDetail &&
@@ -743,7 +923,7 @@ export default function IdeAgent() {
         selected={selected}
         barStatus={barStatus}
         scopeLabel={scopeLabel}
-        busy={isBusy}
+        busy={sessionCreationBusy}
         settingsOpen={settingsOpen}
         managedAi={state.managedAi}
         sessionUsage={sessionUsage}
@@ -782,21 +962,30 @@ export default function IdeAgent() {
         <div className='ide-card agent-error' role='alert'>
           <span className='agent-error-body'>
             <b>Something went wrong</b>
-            <span>{state.error}</span>
+            <span>{friendlyAiFailureMessage(state.error)}</span>
           </span>
           <button
             className='agent-error-dismiss'
-            onClick={() => dispatch({type: 'error:clear'})}
+            onClick={() => {
+              setErrorRecovery(null);
+              dispatch({type: 'error:clear'});
+            }}
             aria-label='Dismiss error'
           >
             ×
           </button>
           <button
             className='agent-error-retry'
-            onClick={() => void load()}
-            disabled={state.status === 'loadingSession'}
+            onClick={() => void recoverFromError()}
+            disabled={state.status === 'loadingSession' || recovering}
           >
-            {state.status === 'loadingSession' ? 'Retrying…' : 'Retry'}
+            {state.status === 'loadingSession' || recovering
+              ? errorRecovery?.error === state.error
+                ? 'Retrying…'
+                : 'Refreshing…'
+              : errorRecovery?.error === state.error
+                ? 'Retry new session'
+                : 'Refresh'}
           </button>
         </div>
       )}
@@ -817,7 +1006,7 @@ export default function IdeAgent() {
         }}
         onApproveGate={(gate) => {
           setChatsOpen(false);
-          void approveGate(gate);
+          approveGate(gate);
         }}
         onRejectGate={(gate) => {
           setChatsOpen(false);
@@ -844,6 +1033,7 @@ export default function IdeAgent() {
         runUnavailable={liveRun.unavailable}
         routingState={state.routingState}
         remoteSandboxEnabled={remoteSandboxEnabled}
+        repoSelection={proposalRepoSelection}
         hasNewActivity={hasNewActivity}
         input={state.input}
         attachments={state.attachments}
@@ -861,7 +1051,7 @@ export default function IdeAgent() {
           dispatch({type: 'attachment:remove', attachmentId: id});
         }}
         onConfirmAction={(pending) => void confirmAction(pending)}
-        onApproveGate={(gate) => void approveGate(gate)}
+        onApproveGate={approveGate}
         onRejectGate={(gate) => void rejectGate(gate)}
         onOpenGate={(id) => navigate(`/plan/${id}`)}
         onOpenRun={(path) => navigate(path)}

@@ -6,11 +6,13 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.StreamTurnRequest;
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.config.featureflag.FeatureFlagService;
 import com.navneet.executespec.cost.RunCostTracker;
+import com.navneet.executespec.executioncontext.LlmExecutionOperationCoordinator;
 import com.navneet.executespec.specchat.SpecChatService;
 
 import org.springframework.beans.factory.annotation.Autowired;
@@ -20,6 +22,10 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 @Service
 public class AgentStreamTurnRunner {
 
+  private static final String WEB_QA_FIXTURE_PREFIX = "web-qa-";
+  private static final String WEB_QA_PROFILE = "web-qa";
+  private static final String LIVE_LLM_ENABLED_PROPERTY = "executespec.live-llm.enabled";
+
   private final AgentSessionService sessionService;
   private final SpecChatService specChatService;
   private final FeatureFlagService featureFlags;
@@ -27,6 +33,8 @@ public class AgentStreamTurnRunner {
   private final AgentEventRecorder eventRecorder;
   private final RunCostTracker costTracker;
   private final org.springframework.core.env.Environment environment;
+  private final LlmExecutionOperationCoordinator operationCoordinator;
+  private final AgentTurnOperationLifecycle operationLifecycle;
 
   /** Compatibility constructor retained for focused tests and older package-local callers. */
   AgentStreamTurnRunner(
@@ -60,6 +68,26 @@ public class AgentStreamTurnRunner {
         attachmentService,
         eventRecorder,
         costTracker,
+        null,
+        null);
+  }
+
+  AgentStreamTurnRunner(
+      AgentSessionService sessionService,
+      SpecChatService specChatService,
+      FeatureFlagService featureFlags,
+      AgentAttachmentService attachmentService,
+      AgentEventRecorder eventRecorder,
+      RunCostTracker costTracker,
+      org.springframework.core.env.Environment environment) {
+    this(
+        sessionService,
+        specChatService,
+        featureFlags,
+        attachmentService,
+        eventRecorder,
+        costTracker,
+        environment,
         null);
   }
 
@@ -71,7 +99,8 @@ public class AgentStreamTurnRunner {
       AgentAttachmentService attachmentService,
       AgentEventRecorder eventRecorder,
       RunCostTracker costTracker,
-      org.springframework.core.env.Environment environment) {
+      org.springframework.core.env.Environment environment,
+      LlmExecutionOperationCoordinator operationCoordinator) {
     this.sessionService = sessionService;
     this.specChatService = specChatService;
     this.featureFlags = featureFlags;
@@ -79,6 +108,8 @@ public class AgentStreamTurnRunner {
     this.eventRecorder = eventRecorder;
     this.costTracker = costTracker;
     this.environment = environment;
+    this.operationCoordinator = operationCoordinator;
+    this.operationLifecycle = new AgentTurnOperationLifecycle(operationCoordinator);
   }
 
   public void run(
@@ -88,6 +119,8 @@ public class AgentStreamTurnRunner {
       StreamTurnRequest request) {
     AccumulatingSink sink = null;
     StringBuilder fixtureText = new StringBuilder();
+    AtomicReference<SpecChatService.DurableTurnOperation> operation = new AtomicReference<>();
+    boolean operationCompleted = false;
     // RR-488 / RR-1453 — the per-turn cost baseline. Success settles the delta computed inside
     // SpecChatService, but disconnect and failure happen out here after that internal baseline is
     // lost. Snapshot the scope before dispatch so a terminal path records only this turn's spend
@@ -122,13 +155,12 @@ public class AgentStreamTurnRunner {
               "run_api_allowed", ctx.decision().policy().runApiAllowed(),
               "requires_confirmation", ctx.decision().requiresUserConfirmation()));
 
-      // Provider-free scripted stream used only by the local/dev Web release fixture. RR-487:
+      // Provider-free scripted stream used only by the isolated Web release fixture. RR-487:
       // admission rejects a customer-minted `web-qa-` id (AgentSessionCreationService), and this
-      // branch additionally fails closed in any non-local/dev runtime so a stray fixture session
-      // can
-      // never emit fabricated tool/verification evidence in production.
-      if (ctx.sessionId().startsWith("web-qa-")) {
-        if (fixtureProfileActive()) {
+      // branch additionally requires the sole `web-qa` profile with live LLM dispatch disabled.
+      // Local/dev/test runtimes must never emit fabricated tool/verification evidence.
+      if (ctx.sessionId().startsWith(WEB_QA_FIXTURE_PREFIX)) {
+        if (fixtureStreamEnabled(ctx.sessionId())) {
           runWebQaFixtureStream(emitter, ctx, fixtureText);
           return;
         }
@@ -180,20 +212,7 @@ public class AgentStreamTurnRunner {
       conversation =
           attachmentService.withMediaAttachments(
               conversation, ctx.sessionId(), request.attachmentIds());
-      if (ctx.model() == null || ctx.model().isBlank()) {
-        specChatService.runTurn(
-            sink,
-            user,
-            ctx.sessionId(),
-            ctx.projectId(),
-            ctx.runId(),
-            ctx.orgId(),
-            conversation,
-            ctx.provider(),
-            null,
-            AgentStreamTurnSupport.allowedReadOnlyTools(),
-            ctx.turnId());
-      } else {
+      if (operationCoordinator == null) {
         specChatService.runTurn(
             sink,
             user,
@@ -206,18 +225,52 @@ public class AgentStreamTurnRunner {
             ctx.model(),
             AgentStreamTurnSupport.allowedReadOnlyTools(),
             ctx.turnId());
+      } else if (ctx.model() == null || ctx.model().isBlank()) {
+        specChatService.runDurableAgentTurn(
+            sink,
+            user,
+            ctx.sessionId(),
+            ctx.projectId(),
+            ctx.runId(),
+            ctx.orgId(),
+            conversation,
+            ctx.provider(),
+            null,
+            AgentStreamTurnSupport.allowedReadOnlyTools(),
+            ctx.turnId(),
+            operation::set);
+      } else {
+        specChatService.runDurableAgentTurn(
+            sink,
+            user,
+            ctx.sessionId(),
+            ctx.projectId(),
+            ctx.runId(),
+            ctx.orgId(),
+            conversation,
+            ctx.provider(),
+            ctx.model(),
+            AgentStreamTurnSupport.allowedReadOnlyTools(),
+            ctx.turnId(),
+            operation::set);
+      }
+      if (operationLifecycle.enabled()) {
+        operationLifecycle.complete(operation.get());
+        operationCompleted = true;
       }
       emitter.complete();
     } catch (Exception e) {
       if (AgentStreamTurnSupport.isClientDisconnect(e)) {
         String partial = sink == null ? partialText(fixtureText) : sink.partialSummary();
         sessionService.disconnectStreamTurn(ctx, partial, turnDelta(turnBaseline, latestCost(ctx)));
+        operationLifecycle.cancel(operation.get(), operationCompleted);
         emitter.complete();
         return;
       }
       String message = userFacingStreamError(e, ctx.provider());
       // RR-1453 — a paid provider/tool failure must still settle this turn's usage, not zero.
       sessionService.failStreamTurn(ctx, message, turnDelta(turnBaseline, latestCost(ctx)));
+      operationLifecycle.fail(operation.get(), operationCompleted, message);
       try {
         send(
             emitter,
@@ -261,15 +314,16 @@ public class AgentStreamTurnRunner {
         Math.max(0, after.reasoningTokens() - before.reasoningTokens()));
   }
 
-  /**
-   * RR-487 — the provider-free fixture stream is only allowed when the local or dev profile is
-   * active. A null environment (focused test constructor) keeps the fixture behaviour tests depend
-   * on; a real runtime that is not local/dev fails closed.
-   */
-  private boolean fixtureProfileActive() {
-    if (environment == null) return true;
-    return environment.acceptsProfiles(
-        org.springframework.core.env.Profiles.of("local", "dev", "test"));
+  /** RR-487 — scripted evidence exists only inside the isolated, provider-free Web QA runtime. */
+  boolean fixtureStreamEnabled(String sessionId) {
+    if (sessionId == null || !sessionId.startsWith(WEB_QA_FIXTURE_PREFIX) || environment == null) {
+      return false;
+    }
+    String[] activeProfiles = environment.getActiveProfiles();
+    if (activeProfiles.length != 1 || !WEB_QA_PROFILE.equals(activeProfiles[0])) {
+      return false;
+    }
+    return !environment.getProperty(LIVE_LLM_ENABLED_PROPERTY, Boolean.class, true);
   }
 
   private void runWebQaFixtureStream(

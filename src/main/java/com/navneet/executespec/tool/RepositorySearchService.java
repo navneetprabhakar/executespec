@@ -82,6 +82,47 @@ public class RepositorySearchService {
       };
   private long inventoryRequestSequence;
 
+  /**
+   * Capture the same repository-wide commit and content-inventory identity used by search results,
+   * without requiring a fabricated search term. This method is read-only: it does not clone,
+   * checkout, index semantically, or invoke a provider.
+   */
+  public Snapshot snapshot(Path workspace) {
+    if (workspace == null) throw new IllegalArgumentException("workspace is required");
+    try {
+      Path root = canonicalWorkspace(workspace);
+      if (!Files.isDirectory(root)) {
+        throw new IllegalArgumentException("workspace must be a directory");
+      }
+      String revisionBeforeInventory = readRepositorySha(root);
+      String dirtyBeforeInventory = dirtyFingerprint(root);
+      List<Path> files = indexedFiles(root, root);
+      String inventoryFingerprint = fingerprint(root, files);
+      String revisionAfterInventory = readRepositorySha(root);
+      String dirtyAfterInventory = dirtyFingerprint(root);
+      if (!revisionBeforeInventory.equals(revisionAfterInventory)) {
+        throw new IllegalStateException("repository revision changed while capturing snapshot");
+      }
+      if (!java.util.Objects.equals(dirtyBeforeInventory, dirtyAfterInventory)) {
+        throw new IllegalStateException("repository worktree changed while capturing snapshot");
+      }
+      assertCanonicalWorkspace(root);
+      return new Snapshot(
+          revisionAfterInventory,
+          inventoryFingerprint,
+          dirtyAfterInventory,
+          files.size(),
+          "java-deterministic");
+    } catch (IOException e) {
+      throw new IllegalStateException("repository snapshot failed", e);
+    }
+  }
+
+  /** Package-visible test seam for proving the snapshot's before/after revision fence. */
+  String readRepositorySha(Path root) {
+    return gitSha(root);
+  }
+
   public SearchResult search(Path workspace, SearchRequest request) {
     if (workspace == null
         || request == null
@@ -90,7 +131,7 @@ public class RepositorySearchService {
       throw new IllegalArgumentException("workspace and non-blank query are required");
     }
     try {
-      Path root = workspace.toRealPath();
+      Path root = canonicalWorkspace(workspace);
       Path searchRoot =
           request.relativeRoot() == null || request.relativeRoot().isBlank()
               ? root
@@ -98,15 +139,17 @@ public class RepositorySearchService {
       if (!searchRoot.startsWith(root))
         throw new SecurityException("search root escapes workspace");
       String repoSha = gitSha(root);
-      List<Path> files = indexedFiles(root, searchRoot);
-      Map<Path, String> contentHashes = new HashMap<>(files.size());
-      String fingerprint = fingerprint(files, contentHashes);
+      List<Path> repositoryFiles = indexedFiles(root, root);
+      Map<Path, String> contentHashes = new HashMap<>(repositoryFiles.size());
+      String fingerprint = fingerprint(root, repositoryFiles, contentHashes);
+      List<Path> files =
+          repositoryFiles.stream().filter(path -> path.startsWith(searchRoot)).toList();
       Pattern pattern = compile(request);
       List<SearchHit> hits = new ArrayList<>();
       for (Path file : files) {
         if (request.fileGlob() != null
             && !file.getFileName().toString().matches(globRegex(request.fileGlob()))) continue;
-        List<String> lines = indexedLines(root, file, contentHashes.get(file));
+        List<String> lines = readIndexedLines(root, file, contentHashes.get(file));
         if (lines == null) continue;
         for (int i = 0; i < lines.size(); i++) {
           String line = lines.get(i);
@@ -141,6 +184,7 @@ public class RepositorySearchService {
               .thenComparingInt(SearchHit::line));
       int from = Math.min(request.offset(), hits.size());
       int to = Math.min(from + request.limit(), hits.size());
+      assertRepositoryUnchanged(root, repoSha, fingerprint);
       return new SearchResult(
           repoSha,
           fingerprint,
@@ -292,7 +336,8 @@ public class RepositorySearchService {
     }
   }
 
-  private List<String> indexedLines(Path root, Path file, String contentHash) {
+  /** Package-visible mutation seam used to prove the hash/read fence deterministically. */
+  List<String> readIndexedLines(Path root, Path file, String contentHash) {
     CachedWorkspace cached;
     synchronized (workspaceIndex) {
       cached = workspaceIndex.get(root);
@@ -340,6 +385,11 @@ public class RepositorySearchService {
           return previous.lines;
         }
         List<String> current = Files.readAllLines(file);
+        String afterReadHash = contentHash(file);
+        if (!contentHash.equals(afterReadHash)) {
+          removeSnapshot(file);
+          throw new IllegalStateException("repository file changed while reading search evidence");
+        }
         putSnapshot(file, new FileSnapshot(contentHash, current, characterCount(current)));
         return current;
       } catch (IOException | OutOfMemoryError e) {
@@ -618,15 +668,19 @@ public class RepositorySearchService {
     }
   }
 
-  private static String fingerprint(List<Path> files) throws IOException {
-    return fingerprint(files, new HashMap<>(files.size()));
+  private static String fingerprint(Path root, List<Path> files) throws IOException {
+    return fingerprint(root, files, new HashMap<>(files.size()));
   }
 
-  private static String fingerprint(List<Path> files, Map<Path, String> contentHashes)
+  private static String fingerprint(Path root, List<Path> files, Map<Path, String> contentHashes)
       throws IOException {
     MessageDigest digest = digest();
     for (Path file : files) {
-      digest.update(file.toString().getBytes(StandardCharsets.UTF_8));
+      Path relative = root.relativize(file);
+      if (relative.isAbsolute() || relative.startsWith("..")) {
+        throw new SecurityException("inventory file escapes workspace");
+      }
+      digest.update(relative.toString().getBytes(StandardCharsets.UTF_8));
       String hash = contentHash(file);
       contentHashes.put(file, hash);
       digest.update(hash.getBytes(StandardCharsets.US_ASCII));
@@ -646,6 +700,63 @@ public class RepositorySearchService {
       while ((read = input.read(buffer)) != -1) digest.update(buffer, 0, read);
     }
     return HexFormat.of().formatHex(digest.digest());
+  }
+
+  private void assertRepositoryUnchanged(
+      Path root, String expectedRepositorySha, String expectedInventoryFingerprint)
+      throws IOException {
+    assertCanonicalWorkspace(root);
+    String currentRepositorySha = gitSha(root);
+    List<Path> currentFiles = indexedFiles(root, root);
+    String currentInventoryFingerprint = fingerprint(root, currentFiles);
+    if (!expectedRepositorySha.equals(currentRepositorySha)
+        || !expectedInventoryFingerprint.equals(currentInventoryFingerprint)) {
+      throw new IllegalStateException("repository changed while reading search evidence");
+    }
+    assertCanonicalWorkspace(root);
+  }
+
+  private static Path canonicalWorkspace(Path workspace) throws IOException {
+    Path normalized = workspace.toAbsolutePath().normalize();
+    if (Files.isSymbolicLink(normalized)) {
+      throw new SecurityException("workspace root must not be a symbolic link");
+    }
+    return normalized.toRealPath();
+  }
+
+  private static void assertCanonicalWorkspace(Path root) throws IOException {
+    if (Files.isSymbolicLink(root) || !root.toRealPath().equals(root)) {
+      throw new SecurityException("workspace root changed during repository read");
+    }
+  }
+
+  /** Null means clean. A non-null digest means tracked or untracked worktree state is present. */
+  String dirtyFingerprint(Path root) {
+    if (!Files.isDirectory(root.resolve(".git"), java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+      return null;
+    }
+    try {
+      BoundedProcess.Outcome status =
+          BoundedProcess.run(
+              new ProcessBuilder(
+                      "git",
+                      "-C",
+                      root.toString(),
+                      "status",
+                      "--porcelain=v1",
+                      "--untracked-files=all")
+                  .redirectErrorStream(true),
+              Duration.ofSeconds(30));
+      if (!status.finished() || status.exitCode() != 0) {
+        throw new IllegalStateException("repository worktree status unavailable");
+      }
+      return status.output().isBlank() ? null : sha256(status.output());
+    } catch (InterruptedException interrupted) {
+      Thread.currentThread().interrupt();
+      throw new IllegalStateException("repository worktree status interrupted", interrupted);
+    } catch (Exception failure) {
+      throw new IllegalStateException("repository worktree status failed", failure);
+    }
   }
 
   private static String sha256(String value) {
@@ -812,6 +923,19 @@ public class RepositorySearchService {
     }
   }
 
+  /** Repository-wide immutable identity observed by {@link #snapshot(Path)}. */
+  public record Snapshot(
+      String repositorySha,
+      String inventoryFingerprint,
+      String dirtyFingerprint,
+      int discoveredFiles,
+      String engine) {
+    public Snapshot(
+        String repositorySha, String inventoryFingerprint, int discoveredFiles, String engine) {
+      this(repositorySha, inventoryFingerprint, null, discoveredFiles, engine);
+    }
+  }
+
   /**
    * Rejects citations from an inventory that changed after the search. This intentionally checks
    * both the inventory fingerprint and the cited line, so a caller cannot reuse a path:line after a
@@ -823,13 +947,13 @@ public class RepositorySearchService {
         || citation.repositoryFingerprint().isBlank()
         || !result.inventoryFingerprint().equals(citation.repositoryFingerprint())) return false;
     try {
-      Path root = workspace.toRealPath();
+      Path root = canonicalWorkspace(workspace);
       Path file = root.resolve(citation.path()).normalize();
       if (!file.startsWith(root)
           || !Files.isRegularFile(file)
           || !isInsideRealWorkspace(root, file)) return false;
       List<Path> files = inventory(root, root);
-      if (!result.inventoryFingerprint().equals(fingerprint(files))) return false;
+      if (!result.inventoryFingerprint().equals(fingerprint(root, files))) return false;
       List<String> lines = Files.readAllLines(file);
       if (citation.line() < 1 || citation.line() > lines.size()) return false;
       String current = lines.get(citation.line() - 1);

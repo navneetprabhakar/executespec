@@ -119,7 +119,9 @@ class ManagedAiUsagePeriodService {
         run.getUserTier() == null || run.getUserTier().isBlank()
             ? tierResolver.resolveUserTier(run.getCreatedByUserId())
             : run.getUserTier().trim().toUpperCase(Locale.ROOT);
-    return new ManagedAiUserContext(run.getCreatedByUserId(), blankToNull(run.getOrgId()), tier);
+    String billingOrgId = blankToNull(run.getBillingOrgId());
+    if (billingOrgId == null) billingOrgId = blankToNull(run.getOrgId());
+    return new ManagedAiUserContext(run.getCreatedByUserId(), billingOrgId, tier);
   }
 
   void syncState(ManagedAiUsagePeriod period, String state) {

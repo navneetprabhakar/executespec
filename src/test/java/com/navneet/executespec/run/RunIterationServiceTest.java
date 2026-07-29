@@ -13,6 +13,7 @@ import com.navneet.executespec.auth.service.TierEnforcementService;
 import com.navneet.executespec.billing.service.ManagedAiUsageService;
 import com.navneet.executespec.billing.service.UsageTrackingService;
 import com.navneet.executespec.config.featureflag.FeatureFlagService;
+import com.navneet.executespec.integration.RunLifecycleService;
 import com.navneet.executespec.integration.RunOrchestrator;
 import com.navneet.executespec.project.service.ProjectRepoService;
 import com.navneet.executespec.router.ModelAccessService;
@@ -22,6 +23,7 @@ import com.navneet.executespec.state.repository.PipelineRunRepository;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
 
 class RunIterationServiceTest {
@@ -38,6 +40,7 @@ class RunIterationServiceTest {
   private final TierEnforcementService tiers = mock(TierEnforcementService.class);
   private final UsageTrackingService usage = mock(UsageTrackingService.class);
   private final ProjectRepoService projectRepos = mock(ProjectRepoService.class);
+  private final RunLifecycleService lifecycle = mock(RunLifecycleService.class);
   private final RunIterationService service =
       new RunIterationService(
           runRepo,
@@ -51,7 +54,8 @@ class RunIterationServiceTest {
           keys,
           tiers,
           usage,
-          projectRepos);
+          projectRepos,
+          lifecycle);
 
   private AppUserDetails actor;
 
@@ -67,6 +71,10 @@ class RunIterationServiceTest {
     when(providers.normalizeProvider(anyString())).thenReturn("ANTHROPIC");
     when(idempotency.claim(anyString(), any(), anyString()))
         .thenReturn(RunIdempotencyClaim.disabled());
+    when(idempotency.complete(any(), anyString()))
+        .thenReturn(
+            new RunIdempotencyService.Completion(
+                RunIdempotencyService.CompletionStatus.NOT_REQUIRED, null));
   }
 
   @Test
@@ -116,6 +124,36 @@ class RunIterationServiceTest {
   }
 
   @Test
+  void fencedIterationDoesNotHideLosingAttemptWhenCancellationIsUnconfirmed() {
+    PipelineRun source = source("COMPLETE");
+    PipelineRun child = PipelineRun.builder().runId("child-losing").sourceRunId("source-1").build();
+    when(runRepo.findById("source-1")).thenReturn(java.util.Optional.of(source));
+    when(idempotency.claim(eq("user-1"), eq("idem-1"), anyString()))
+        .thenReturn(RunIdempotencyClaim.claimed("user-1", "idem-1", "owner", 1L));
+    when(orchestrator.submitIterationRun(
+            source, "add edge cases", "user-1", "actor-org", "actor-pat", "actor-owner"))
+        .thenReturn(child);
+    when(idempotency.complete(any(), eq("child-losing")))
+        .thenReturn(
+            new RunIdempotencyService.Completion(
+                RunIdempotencyService.CompletionStatus.FENCED_TO_OTHER_RUN, "child-canonical"));
+    when(lifecycle.cancel("child-losing")).thenReturn(false);
+
+    assertThatThrownBy(() -> service.iterate("source-1", "add edge cases", "idem-1", actor))
+        .isInstanceOf(ResponseStatusException.class)
+        .satisfies(
+            error ->
+                assertThat(((ResponseStatusException) error).getStatusCode())
+                    .isEqualTo(HttpStatus.SERVICE_UNAVAILABLE))
+        .hasMessageContaining("child-losing")
+        .hasMessageContaining("could not be confirmed cancelled")
+        .hasMessageContaining("losing attempt remains unaccounted for");
+    verify(runRepo, never()).findById("child-canonical");
+    verify(tiers, never()).incrementRunCountForAnalytics("user-1");
+    verifyNoInteractions(usage);
+  }
+
+  @Test
   void rejectsNonTerminalSourceBeforeProviderOrSpendChecks() {
     when(runRepo.findById("source-1")).thenReturn(java.util.Optional.of(source("WORKING")));
 
@@ -124,6 +162,26 @@ class RunIterationServiceTest {
         .hasMessageContaining("409");
 
     verifyNoInteractions(orchestrator, managedAi, modelAccess);
+  }
+
+  @Test
+  void postDispatchUsageFailureStillReturnsCreatedIteration() {
+    PipelineRun source = source("COMPLETE");
+    PipelineRun child =
+        PipelineRun.builder().runId("child-1").sourceRunId("source-1").status("PLANNING").build();
+    when(runRepo.findById("source-1")).thenReturn(java.util.Optional.of(source));
+    when(orchestrator.submitIterationRun(
+            source, "add edge cases", "user-1", "actor-org", "actor-pat", "actor-owner"))
+        .thenReturn(child);
+    doThrow(new IllegalStateException("usage unavailable"))
+        .when(usage)
+        .increment("user-1", "RUNS", 1);
+
+    RunIterationService.IterationResult result =
+        service.iterate("source-1", "add edge cases", null, actor);
+
+    assertThat(result.run()).isSameAs(child);
+    assertThat(result.replayed()).isFalse();
   }
 
   private static PipelineRun source(String status) {

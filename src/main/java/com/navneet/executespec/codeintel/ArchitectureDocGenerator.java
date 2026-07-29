@@ -13,6 +13,7 @@ import com.navneet.executespec.router.LlmProvider;
 import com.navneet.executespec.router.ModelResolver;
 import com.navneet.executespec.router.ResolvedModel;
 import com.navneet.executespec.router.RunModelOverrides;
+import com.navneet.executespec.tool.ExecutionContext;
 
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.SystemMessage;
@@ -118,6 +119,36 @@ public class ArchitectureDocGenerator {
       LlmProvider provider,
       String actorUserId,
       LlmExecutionReference confirmedActionReference) {
+    return generateInternal(
+        projectId,
+        repoArchDocs,
+        repoFullNames,
+        provider,
+        actorUserId,
+        confirmedActionReference,
+        null);
+  }
+
+  Result generateWithOperationContext(
+      String projectId,
+      List<RepoArchitectureDoc> repoArchDocs,
+      List<String> repoFullNames,
+      LlmProvider provider,
+      String actorUserId,
+      ExecutionContext operationContext) {
+    if (operationContext == null) throw new IllegalArgumentException("operationContext required");
+    return generateInternal(
+        projectId, repoArchDocs, repoFullNames, provider, actorUserId, null, operationContext);
+  }
+
+  private Result generateInternal(
+      String projectId,
+      List<RepoArchitectureDoc> repoArchDocs,
+      List<String> repoFullNames,
+      LlmProvider provider,
+      String actorUserId,
+      LlmExecutionReference confirmedActionReference,
+      ExecutionContext operationContext) {
     if (repoArchDocs == null || repoArchDocs.isEmpty()) {
       throw new IllegalArgumentException(
           "combined arch needs at least one per-repo arch doc; got 0");
@@ -136,28 +167,40 @@ public class ArchitectureDocGenerator {
             new UserMessage(PromptTrustBoundary.wrap("ARCHITECTURE_EVIDENCE", userPayload)));
     String contextId = "combined-arch-" + java.util.UUID.randomUUID();
     var executionReference =
-        confirmedActionReference != null
-            ? confirmedActionReference
-            : executionPolicyFactory.forProject(
-                projectId,
-                "project-architecture",
-                "ARCHITECTURE",
-                contextId,
-                contextId,
-                effective.name(),
-                exactModel,
-                actorUserId);
+        operationContext != null
+            ? null
+            : (confirmedActionReference != null
+                ? confirmedActionReference
+                : executionPolicyFactory.forProject(
+                    projectId,
+                    "project-architecture",
+                    "ARCHITECTURE",
+                    contextId,
+                    contextId,
+                    effective.name(),
+                    exactModel,
+                    actorUserId));
 
     // All providers use the canonical text router; architecture generation has no tool callbacks.
     ChatResponse response =
-        ArchLlmDispatch.dispatch(
-            llmRouter.getObject(),
-            resolved,
-            messages,
-            "combined-arch-" + projectId,
-            "combined-arch",
-            executionReference);
+        operationContext == null
+            ? ArchLlmDispatch.dispatch(
+                llmRouter.getObject(),
+                resolved,
+                messages,
+                "combined-arch-" + projectId,
+                "combined-arch",
+                executionReference)
+            : ArchLlmDispatch.dispatch(
+                llmRouter.getObject(),
+                resolved,
+                messages,
+                "combined-arch-" + projectId,
+                "combined-arch",
+                operationContext);
 
+    RepoArchitectureGenerator.requireCompleteTermination(
+        response, "combined architecture for project " + projectId);
     String text = response.getResult().getOutput().getText();
     if (text == null || text.isBlank()) {
       throw new IllegalStateException(

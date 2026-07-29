@@ -1,5 +1,6 @@
 package com.navneet.executespec.executioncontext;
 
+import java.time.Instant;
 import java.util.Optional;
 
 import jakarta.persistence.LockModeType;
@@ -30,4 +31,18 @@ interface LlmExecutionContextRepository extends JpaRepository<LlmExecutionContex
           + "WHERE c.id = :id AND c.isolationKey = :isolationKey")
   Optional<LlmExecutionContext> findForUpdate(
       @Param("id") String id, @Param("isolationKey") String isolationKey);
+
+  /**
+   * Internal recovery sweep lookup; callers already obtained the durable context id from a row FK.
+   */
+  @Lock(LockModeType.PESSIMISTIC_WRITE)
+  @Query("SELECT c FROM LlmExecutionContext c WHERE c.id = :id")
+  Optional<LlmExecutionContext> findForUpdateById(@Param("id") String id);
+
+  /**
+   * Authoritative transaction-time sample for lease/deadline admission. Application-host clocks are
+   * never used to decide whether a durable operation lease is live.
+   */
+  @Query(value = "SELECT clock_timestamp()", nativeQuery = true)
+  Instant databaseNow();
 }

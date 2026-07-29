@@ -33,6 +33,9 @@ let host: HTMLDivElement;
 let root: Root;
 
 beforeEach(() => {
+  vi.mocked(reviews.getPreviewRender).mockReset();
+  vi.mocked(reviews.getPreviewRenderSurfaceHtml).mockReset();
+  vi.mocked(reviews.startPreviewRender).mockReset();
   vi.mocked(reviews.getPreviewRender).mockResolvedValue(absentManifest);
   host = document.createElement('div');
   document.body.appendChild(host);
@@ -46,6 +49,86 @@ afterEach(() => {
 });
 
 describe('IdeRunScreens evidence gate', () => {
+  it('recovers an initial manifest failure without reloading the route', async () => {
+    vi.mocked(reviews.getPreviewRender)
+      .mockRejectedValueOnce(new Error('manifest unavailable'))
+      .mockResolvedValue({...absentManifest, renderAllowed: true});
+
+    await act(async () => {
+      root.render(<IdeRunScreens runId='retry-run' hasProducedWorkspace={true} />);
+      await Promise.resolve();
+    });
+
+    expect(host.querySelector('[role="alert"]')?.textContent).toContain('manifest unavailable');
+    expect(host.textContent).not.toContain('See what you built');
+
+    await act(async () => {
+      const retry = Array.from(host.querySelectorAll('button')).find((candidate) =>
+        candidate.textContent?.includes('Retry loading screens'),
+      );
+      retry?.click();
+      await Promise.resolve();
+    });
+
+    expect(host.querySelector('[role="alert"]')).toBeNull();
+    expect(host.textContent).toContain('Render screens');
+    expect(reviews.getPreviewRender).toHaveBeenCalledTimes(2);
+  });
+
+  it('recovers a selected surface failure and preserves the opaque-origin iframe sandbox', async () => {
+    vi.mocked(reviews.getPreviewRender).mockResolvedValue({
+      ...absentManifest,
+      runId: 'surface-run',
+      jobId: 'job-1',
+      status: 'READY',
+      surfacesFound: 1,
+      surfacesRendered: 1,
+      renderAllowed: true,
+      surfaces: [
+        {
+          surfaceId: 'home',
+          sourcePath: 'src/Home.tsx',
+          displayName: 'Home',
+          target: 'WEB',
+          fidelity: 'STRUCTURAL',
+          viewportWidth: 1280,
+          viewportHeight: 800,
+          rendered: true,
+          failureReason: null,
+        },
+      ],
+    });
+    vi.mocked(reviews.getPreviewRenderSurfaceHtml)
+      .mockRejectedValueOnce(new Error('surface unavailable'))
+      .mockResolvedValue('<html><body>Recovered</body></html>');
+
+    await act(async () => {
+      root.render(<IdeRunScreens runId='surface-run' hasProducedWorkspace={true} />);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    await vi.waitFor(() => {
+      expect(host.querySelector('[role="alert"]')?.textContent).toContain('surface unavailable');
+    });
+
+    await act(async () => {
+      const retry = Array.from(host.querySelectorAll('button')).find((candidate) =>
+        candidate.textContent?.includes('Retry loading screen'),
+      );
+      retry?.click();
+      await Promise.resolve();
+    });
+
+    await vi.waitFor(() => {
+      const iframe = host.querySelector('iframe');
+      expect(iframe?.getAttribute('sandbox')).toBe('allow-scripts');
+      expect(iframe?.getAttribute('srcdoc')).toContain('Recovered');
+    });
+    expect(host.querySelector('[role="alert"]')).toBeNull();
+    expect(reviews.getPreviewRenderSurfaceHtml).toHaveBeenCalledTimes(2);
+  });
+
   it('does not offer a render when the run produced no product files', async () => {
     vi.mocked(reviews.getPreviewRender).mockResolvedValue({
       ...absentManifest,

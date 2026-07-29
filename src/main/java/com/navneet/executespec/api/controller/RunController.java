@@ -21,14 +21,11 @@ import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.auth.security.JwtAuthenticationFilter;
 import com.navneet.executespec.auth.security.RunAccessGuard;
 import com.navneet.executespec.auth.security.RunVisibilitySpec;
-import com.navneet.executespec.auth.service.AiProviderPreferenceService;
-import com.navneet.executespec.auth.service.TierEnforcementService;
-import com.navneet.executespec.billing.service.UsageTrackingService;
 import com.navneet.executespec.deployment.GcsWorkspaceStore;
 import com.navneet.executespec.deployment.WorkspaceExportService;
 import com.navneet.executespec.deployment.WorkspaceFileService;
 import com.navneet.executespec.integration.scm.ScmPushService;
-import com.navneet.executespec.router.ModelAccessService;
+import com.navneet.executespec.run.CustomerRunSubmissionService;
 import com.navneet.executespec.state.StateStore;
 import com.navneet.executespec.state.entity.AgentMessage;
 import com.navneet.executespec.state.entity.PipelineRun;
@@ -58,8 +55,9 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class RunController {
 
-  private final com.navneet.executespec.integration.RunOrchestrator v2Orchestrator;
+  private final CustomerRunSubmissionService customerRunSubmissionService;
   private final com.navneet.executespec.integration.RunLifecycleService runLifecycleService;
+  private final com.navneet.executespec.integration.PlanApprovalService planApprovalService;
   private final ScmPushService scmPushService;
   private final StateStore stateStore;
   private final RunMapper mapper;
@@ -68,20 +66,11 @@ public class RunController {
   private final WorkspaceFileService workspaceFileService;
   private final GcsWorkspaceStore gcsWorkspaceStore;
   private final AgentMessageRepository agentMessageRepository;
-  private final TierEnforcementService tierEnforcementService;
-  private final ModelAccessService modelAccessService;
-  private final UsageTrackingService usageTrackingService;
   private final RunVisibilitySpec runVisibilitySpec;
   private final com.navneet.executespec.auth.repository.ProjectMemberRepository
       projectMemberRepository;
   private final RunAccessGuard guard;
   private final com.navneet.executespec.project.security.ProjectAccessGuard projectAccessGuard;
-  private final com.navneet.executespec.project.service.ProjectRepoService projectRepoService;
-  private final com.navneet.executespec.agent.ApiKeyResolver apiKeyResolver;
-  private final com.navneet.executespec.billing.service.ManagedAiUsageService managedAiUsageService;
-
-  /** M-032 + M-033 (Wave 3) — plan-approval governance guards. */
-  private final com.navneet.executespec.governance.GovernanceGuard governanceGuard;
 
   private final com.navneet.executespec.contracts.gate.PlanContractGateService planContractGate;
 
@@ -94,21 +83,9 @@ public class RunController {
   private final com.navneet.executespec.cost.RunCostEvidenceService runCostEvidenceService;
   private final com.navneet.executespec.harness.GateStore gateStore;
   private final com.navneet.executespec.config.featureflag.FeatureFlagService featureFlagService;
-  private final com.navneet.executespec.security.InputSanitizer inputSanitizer;
-
-  /** RR-241 — rejects customer submits that impersonate a server-internal automation source. */
-  private final com.navneet.executespec.integration.PlanGateBypassPolicy planGateBypassPolicy;
 
   /** Audit r5 (#5, 2026-05-06) — staged-PR-before-push mode. */
   private final com.navneet.executespec.run.RunSkipPushFlag runSkipPushFlag;
-
-  /** P3 local-hands (RL-2026-06-014) — per-run LOCAL-execution marker. */
-  private final com.navneet.executespec.run.RunLocalExecutionFlag runLocalExecutionFlag;
-
-  /** RL-2026-06-005 — server-side dedupe of retried submits carrying an {@code Idempotency-Key}. */
-  private final com.navneet.executespec.run.RunIdempotencyService runIdempotencyService;
-
-  private final AiProviderPreferenceService aiProviderPreferenceService;
 
   /**
    * Wave 2.1 — activation funnel (SPEC_SUBMITTED fired here on run submit, PLAN_APPROVED here on
@@ -130,205 +107,47 @@ public class RunController {
           String idempotencyKey) {
     guard.requireAuthenticated(userDetails);
     log.info("POST /api/runs — goal: {}", req.userRequest());
-
-    // Content-level security scan (prompt injection, shell embedding, abuse patterns)
-    inputSanitizer.scan(req.userRequest());
-    if (req.localRepositoryInventory() != null) {
-      validateLocalRepositoryInventory(req.localRepositoryInventory());
-      inputSanitizer.scan(req.localRepositoryInventory());
-    }
-
-    // Check if submissions are paused (maintenance mode)
-    if (featureFlagService.isEnabled("submissions.paused")) {
-      throw new ResponseStatusException(
-          HttpStatus.SERVICE_UNAVAILABLE,
-          "Run submissions are temporarily paused for maintenance. Please try again later.");
-    }
-
-    // RR-241 — `source` is caller-supplied and is what PlanGateBypassPolicy keys plan-gate bypass
-    // authority on. Reject any attempt to claim one of the server-internal automation surfaces from
-    // the public submit API, so the allowlist cannot be spoofed by a request body.
-    if (planGateBypassPolicy.isReservedAutomationSource(req.source())) {
-      throw new ResponseStatusException(
-          HttpStatus.BAD_REQUEST,
-          "Run source '" + req.source() + "' is reserved for server-internal automation.");
-    }
-
-    boolean localExecutionRequested = Boolean.TRUE.equals(req.localExecution());
-    if (localExecutionRequested && !featureFlagService.isEnabled("worker.local-hands.enabled")) {
-      throw new ResponseStatusException(
-          HttpStatus.CONFLICT,
-          "Local-hands execution is not enabled on this backend. Use remote run submit or ask an"
-              + " operator to enable worker.local-hands.enabled.");
-    }
-    if (localExecutionRequested && !isPatAuthenticated(httpRequest)) {
-      throw new ResponseStatusException(
-          HttpStatus.FORBIDDEN,
-          "Local-hands execution requires a CLI or VS Code Personal Access Token session; web UI"
-              + " runs execute remotely.");
-    }
-
-    // Brownfield admission happens before quota accounting and before the asynchronous pipeline.
-    // A project with linked repositories must submit an exact, fully-linked code boundary. Local
-    // runs go through the same write guard plus the V278 LOCAL-source binding contract: a LOCAL
-    // source is admitted only for the connector installation that holds an ONLINE lease.
-    // RR-236 — hold on to the authorized host project. Its org, not the caller's home org, is the
-    // tenant that owns this run: an external collaborator's run used to carry the host projectId
-    // with their personal orgId, so the work and its tenant disagreed.
-    com.navneet.executespec.auth.entity.Project hostProject = null;
-    if (req.projectId() != null && !req.projectId().isBlank()) {
-      hostProject = projectAccessGuard.assertCanWrite(req.projectId(), userDetails);
-      if (localExecutionRequested) {
-        projectRepoService.resolveForLocalRunStrict(
-            req.projectId(),
-            req.selectedRepoIds(),
-            req.localInstallationId(),
-            userDetails.getUser().getId());
-      } else {
-        projectRepoService.resolveForRunStrict(req.projectId(), req.selectedRepoIds());
-      }
-    }
-
-    // Idempotent submit (RL-2026-06-005, made durable + atomic by V303). The claim is taken BEFORE
-    // the quota/usage increments below, so a client retry — or a genuinely parallel duplicate —
-    // never creates a second run nor double-charges the user's quota. Exactly one caller can own a
-    // key at a time across every JVM sharing this database; losers resolve to the winner's run.
-    // Scoped by userId, so one user's key can never reference another user's run.
-    final String userId = userDetails.getUser().getId();
-    final com.navneet.executespec.run.RunIdempotencyClaim idempotencyClaim =
-        runIdempotencyService.claim(
-            userId,
-            idempotencyKey,
-            com.navneet.executespec.run.RunRequestFingerprint.of(
-                new java.util.ArrayList<>(fingerprintOf(req).values())));
-    var alreadySubmitted = resolveIdempotentSubmit(idempotencyClaim, userId);
-    if (alreadySubmitted != null) return alreadySubmitted;
-
-    // Everything from here to run creation runs under the idempotency claim. Any failure must
-    // publish a terminal claim state, otherwise the key would stay locked until its lease elapses.
-    final com.navneet.executespec.auth.entity.Project authorizedProject = hostProject;
-    PipelineRun run;
-    try {
-      // Tier gate: a free-tier caller can't run a premium model (the client shows the whole catalog
-      // and lets them pick, but a gated choice is rejected here). Before the quota increment so a
-      // rejected model never burns the user's monthly quota.
-      modelAccessService.assertModelAllowed(userId, req.modelName());
-      String effectiveAiProvider =
-          req.aiProvider() != null && !req.aiProvider().isBlank()
-              ? aiProviderPreferenceService.updatePreferredProvider(userDetails, req.aiProvider())
-              : aiProviderPreferenceService.preferredProvider(userDetails);
-      if ((effectiveAiProvider == null || effectiveAiProvider.isBlank())
-          && req.modelName() != null
-          && !req.modelName().isBlank()) {
-        effectiveAiProvider = modelAccessService.providerForModel(req.modelName());
-      }
-      modelAccessService.assertProviderModelPair(effectiveAiProvider, req.modelName());
-
-      // Run-count retirement (2026-06-22): spend is gated by managed ES AI credits, not a monthly
-      // run
-      // cap. assertCanStartRun throws 402 only when a managed tier (FREE/PRO) is EXHAUSTED and the
-      // caller is not pure BYOK (own-key spend is cap-exempt). The run counter is still bumped for
-      // analytics — no enforcement, no refund needed. Per-call debit/step-down in LlmRouter remains
-      // the mid-run source of truth.
-      managedAiUsageService.assertCanStartRun(userDetails, apiKeyResolver.isOwnKeysMode(userId));
-      tierEnforcementService.incrementRunCountForAnalytics(userId);
-      // Pre-flight: in OWN_KEYS mode, ensure at least one enabled provider has a key
-      apiKeyResolver.validateKeyAvailability(userDetails.getUser().getId());
-
-      // Extract per-user GitHub credentials to pass into the run
-      String githubPat = userDetails.getUser().getGithubPat();
-      String githubOwner = userDetails.getUser().getGithubOwner();
-      // Pass ALL pre-async fields INTO submitRun so they're set on the entity
-      // BEFORE the async pipeline thread starts (avoids race condition where the
-      // pipeline thread re-loads and re-saves the run without ownership fields).
-      String executionMode = req.executionMode() != null ? req.executionMode() : "PRODUCTION";
-
-      // V2 is the only harness; HarnessVersionResolver retired with deprecation P3.
-      String planningRequest =
-          localExecutionRequested
-                  && req.localRepositoryInventory() != null
-                  && !req.localRepositoryInventory().isBlank()
-              ? req.userRequest()
-                  + "\n\n--- LOCAL REPOSITORY INVENTORY (untrusted path-only evidence) ---\n"
-                  + req.localRepositoryInventory()
-                  + "\n--- END LOCAL REPOSITORY INVENTORY ---"
-              : req.userRequest();
-      run =
-          v2Orchestrator.submitRunWithLocalExecution(
-              planningRequest,
-              req.source() != null ? req.source() : "REST",
-              req.repoUrl(),
-              req.repoMode(),
-              githubPat,
-              githubOwner,
-              Boolean.TRUE.equals(req.skipApproval()),
-              Boolean.TRUE.equals(req.autoMerge()),
-              req.modelName(),
-              effectiveAiProvider,
-              userDetails.getUser().getId(),
-              userDetails.getUser().getOrgId(),
-              req.projectId(),
-              executionMode,
-              req.selectedRepoIds(),
-              req.figmaUrl(),
-              Boolean.TRUE.equals(req.tddMode()),
-              req.branch(),
-              req.prReviewComments(),
-              com.navneet.executespec.state.RunMode.BUILD,
-              req.requireConfirmationBeforeExpensiveContinuation(),
-              req.requireBenchmarkPriorForAutomaticContinuation(),
-              req.lowComplexityWorkerStartTier(),
-              localExecutionRequested,
-              // RR-233 / RR-234 / RR-236 — every control that governs this run is stamped
-              // atomically with run creation. Writing any of them after submit returns is a race
-              // against the pipeline thread that consumes them.
-              new com.navneet.executespec.integration.RunOrchestrator.SubmitPolicy(
-                  req.userCostCap(),
-                  Boolean.TRUE.equals(req.skipAutoPush()),
-                  authorizedProject == null ? null : authorizedProject.getOrgId()));
-
-    } catch (ResponseStatusException e) {
-      // A 4xx is deterministic for this exact body: retrying it would fail identically, so the key
-      // is closed rather than left open for a retry storm. Anything else may succeed on retry.
-      if (e.getStatusCode().is4xxClientError()) {
-        runIdempotencyService.failFinal(idempotencyClaim, e.getStatusCode() + " " + e.getReason());
-      } else {
-        runIdempotencyService.releaseForRetry(idempotencyClaim, String.valueOf(e.getStatusCode()));
-      }
-      throw e;
-    } catch (RuntimeException e) {
-      runIdempotencyService.releaseForRetry(idempotencyClaim, e.getClass().getSimpleName());
-      throw e;
-    }
-
-    // Publish the run against the claim immediately after creation, so a concurrent loser (which is
-    // waiting on this key) and any later retry both resolve to THIS run instead of creating
-    // another.
-    runIdempotencyService.complete(idempotencyClaim, run.getRunId());
-
-    // Run count incremented atomically inside `assertAndIncrementRunCount` above. The
-    // usageTrackingService increment below tracks the BILLING surface (not the quota counter),
-    // which is independent and used by `assertWithinLimits` for the plan-tier billing limits.
-    usageTrackingService.increment(userDetails.getUser().getId(), "RUNS", 1);
-
-    // RR-233 — the customer's hard cost cap was written HERE, after submitRunWithLocalExecution
-    // had already started the async pipeline. RunOrchestrator.persistEstimate reads userCostCap at
-    // planner completion, so a fast planner clamped hard_cap_usd to the platform cap before the
-    // customer's tighter ceiling was ever visible. It is now stamped inside run creation.
-    //
-    // RR-234 — the "do not auto-publish" consent was likewise marked here, into a Redis-only key
-    // whose documented failure mode reverts to auto-push after a crash. It is now a durable column
-    // stamped in the same builder, and the auto-push gate fails closed.
-
-    // P3 local-hands (RL-2026-06-014) — mark LOCAL execution the same transient way;
-    // RunOrchestrator
-    // consumes it once at pipeline start (gated by worker.local-hands.enabled, default OFF).
-    if (localExecutionRequested) {
-      runLocalExecutionFlag.mark(run.getRunId());
-    }
-
+    boolean patAuthenticated = isPatAuthenticated(httpRequest);
+    var submission =
+        customerRunSubmissionService.submit(
+            CustomerRunSubmissionService.Command.builder()
+                .userRequest(req.userRequest())
+                .source(req.source())
+                .repoUrl(req.repoUrl())
+                .repoMode(req.repoMode())
+                .skipApproval(Boolean.TRUE.equals(req.skipApproval()))
+                .autoMerge(Boolean.TRUE.equals(req.autoMerge()))
+                .modelName(req.modelName())
+                .aiProvider(req.aiProvider())
+                .rememberProviderPreference(req.aiProvider() != null && !req.aiProvider().isBlank())
+                .projectId(req.projectId())
+                .executionMode(req.executionMode())
+                .selectedRepoIds(req.selectedRepoIds())
+                .figmaUrl(req.figmaUrl())
+                .tddMode(Boolean.TRUE.equals(req.tddMode()))
+                .branchOverride(req.branch())
+                .prReviewComments(req.prReviewComments())
+                .userCostCap(req.userCostCap())
+                .skipAutoPush(Boolean.TRUE.equals(req.skipAutoPush()))
+                .requireConfirmationBeforeExpensiveContinuation(
+                    req.requireConfirmationBeforeExpensiveContinuation())
+                .requireBenchmarkPriorForAutomaticContinuation(
+                    req.requireBenchmarkPriorForAutomaticContinuation())
+                .lowComplexityWorkerStartTier(req.lowComplexityWorkerStartTier())
+                .localExecution(Boolean.TRUE.equals(req.localExecution()))
+                .patAuthenticated(patAuthenticated)
+                .localInstallationId(req.localInstallationId())
+                .localRepositoryInventory(req.localRepositoryInventory())
+                .idempotencyKey(idempotencyKey)
+                .requestFingerprint(
+                    com.navneet.executespec.run.RunRequestFingerprint.of(
+                        new java.util.ArrayList<>(fingerprintOf(req).values())))
+                .build(),
+            userDetails);
     return ResponseEntity.status(HttpStatus.ACCEPTED)
-        .body(mapper.toSummary(run, localExecutionRequested, localExecutionRequested));
+        .body(
+            mapper.toSummary(
+                submission.run(), submission.localExecution(), submission.localExecution()));
   }
 
   /**
@@ -388,49 +207,6 @@ public class RunController {
         .map(id -> id == null ? "" : id.toString())
         .sorted()
         .collect(java.util.stream.Collectors.joining(","));
-  }
-
-  /**
-   * Translate a lost idempotency claim into a response, or null when this caller owns the claim and
-   * must proceed with the submission.
-   */
-  private ResponseEntity<RunSummary> resolveIdempotentSubmit(
-      com.navneet.executespec.run.RunIdempotencyClaim claim, String userId) {
-    switch (claim.status()) {
-      case DISABLED, CLAIMED -> {
-        return null;
-      }
-      case DUPLICATE -> {
-        java.util.Optional<PipelineRun> prior = stateStore.findRun(claim.runId());
-        if (prior.isPresent() && userId.equals(prior.get().getCreatedByUserId())) {
-          log.info(
-              "Idempotent submit — returning existing run {} for a repeated Idempotency-Key",
-              prior.get().getRunId());
-          return ResponseEntity.status(HttpStatus.ACCEPTED).body(mapper.toSummary(prior.get()));
-        }
-        // The claim resolved to a run this caller does not own, or one that no longer exists.
-        // Failing closed is the only safe answer: never fabricate a second run for a claimed key.
-        throw new ResponseStatusException(
-            HttpStatus.CONFLICT,
-            "This Idempotency-Key is already bound to a run that is not available to you.");
-      }
-      case CONFLICT ->
-          throw new ResponseStatusException(
-              HttpStatus.CONFLICT,
-              "This Idempotency-Key was already used with a different request body. Use a new"
-                  + " key.");
-      case FAILED_FINAL ->
-          throw new ResponseStatusException(
-              HttpStatus.CONFLICT,
-              "This Idempotency-Key already failed permanently ("
-                  + claim.detail()
-                  + "). Use a new key.");
-      case IN_PROGRESS ->
-          throw new ResponseStatusException(
-              HttpStatus.CONFLICT,
-              "A submission with this Idempotency-Key is still in flight. Retry shortly.");
-    }
-    return null;
   }
 
   /**
@@ -692,138 +468,20 @@ public class RunController {
         req.executionMode(),
         approveRun.getHarnessVersion());
 
-    // Historical BATCH rows remain readable, but batch execution was never wired into the V2
-    // executor. Reject new approvals explicitly instead of persisting BATCH and silently running
-    // realtime workers with batch-only preview/notification behavior.
-    rejectRetiredBatchApproval(req.approved(), req.executionMode());
-
-    // RR-1459 — bind the approval to the exact plan the approver reviewed. The credits check below
-    // is a price check, not an identity check: a client that is still displaying run A's plan while
-    // the route has already moved to run B passes it whenever the two estimates happen to match.
-    if (req.approved() && req.planFingerprint() != null && !req.planFingerprint().isBlank()) {
-      String actual = planFingerprintOf(approveRun.getPlanJson());
-      if (!req.planFingerprint().trim().equalsIgnoreCase(actual)) {
-        throw new ResponseStatusException(
-            HttpStatus.CONFLICT,
-            "The plan you reviewed is not the plan currently on this run. Reload the plan and"
-                + " review it again before approving.");
-      }
-    }
-
-    // Validate creditsConfirmed matches the current estimate (prevents stale approvals)
-    if (req.approved() && req.creditsConfirmed() != null) {
-      stateStore
-          .findRun(runId)
-          .ifPresent(
-              run -> {
-                int expected;
-                if ("BATCH".equalsIgnoreCase(req.executionMode())
-                    && run.getBatchCredits() != null) {
-                  expected = run.getBatchCredits();
-                } else {
-                  expected = run.getCreditsCharged() != null ? run.getCreditsCharged() : 1;
-                }
-                if (!req.creditsConfirmed().equals(expected)) {
-                  throw new ResponseStatusException(
-                      HttpStatus.CONFLICT,
-                      "Credits mismatch: expected "
-                          + expected
-                          + " but confirmed "
-                          + req.creditsConfirmed()
-                          + ". Cost estimate may have changed — please review.");
-                }
-              });
-    }
-
-    // Planning is the first point where a useful whole-run estimate exists. Submission reserves
-    // only one minimum managed-AI credit, so re-check the conservative high estimate here before
-    // an approval can knowingly launch a run whose later tasks/reviewer will be denied mid-flight.
-    if (req.approved()) {
-      double estimateHighUsd =
-          approveRun.getCostEstimateHigh() != null
-              ? approveRun.getCostEstimateHigh()
-              : (approveRun.getHardCapUsd() != null ? approveRun.getHardCapUsd() : 0.0);
-      managedAiUsageService.assertCanApproveEstimatedSpend(
-          userDetails,
-          apiKeyResolver.isOwnKeysMode(userDetails.getUser().getId()),
-          estimateHighUsd);
-    }
-
-    // RR-819 — the breaking-change gate. PlanBreakingChangeReport's own contract says approval must
-    // be disabled until the approver types BREAKING when a touched contract has declared consumers.
-    // That was never enforced anywhere: the classifier ran AFTER the worker wrote the change and
-    // its verdict became a MINOR issue with a "[REQUIRES ACK]" suffix, so consumer-breaking API and
-    // schema changes could be approved and auto-published with no friction and no record. The gate
-    // report is composed while the run parks at AWAITING_APPROVAL; here it is enforced.
-    if (req.approved()) {
-      var ack =
-          planContractGate.acknowledge(
-              runId,
-              req.breakingChangeAck(),
-              req.breakingChangeReportDigest(),
-              userDetails == null ? null : userDetails.getUser().getId());
-      switch (ack) {
-        case MISSING ->
-            throw new ResponseStatusException(
-                HttpStatus.CONFLICT,
-                "This plan changes a contract that other repositories consume. Review the"
-                    + " breaking-change report and type BREAKING to acknowledge it before"
-                    + " approving.");
-        case STALE_REPORT ->
-            throw new ResponseStatusException(
-                HttpStatus.CONFLICT,
-                "The breaking-change report you acknowledged is not the one currently on this run."
-                    + " Reload the plan and review the change again before approving.");
-        default -> {
-          /* NOT_REQUIRED or ACKNOWLEDGED — proceed. */
-        }
-      }
-    }
-
-    // M-032 + M-033 (Wave 3) — governance gates run before we ever
-    // signal the plan gate. Skip on rejection (req.approved == false).
-    if (req.approved()) {
-      double estUsd =
-          approveRun.getCostEstimateHigh() != null
-              ? approveRun.getCostEstimateHigh()
-              : (approveRun.getHardCapUsd() != null ? approveRun.getHardCapUsd() : 0.0);
-      governanceGuard.assertCanApproveCost(approveRun.getOrgId(), estUsd, userDetails);
-      governanceGuard.assertProjectSpendCap(approveRun.getProjectId(), estUsd);
-    }
-
-    // Validate and persist execution mode choice
-    if (req.approved() && "BATCH".equalsIgnoreCase(req.executionMode())) {
-      stateStore
-          .findRun(runId)
-          .ifPresent(
-              run -> {
-                if (!Boolean.TRUE.equals(run.getBatchAvailable())) {
-                  throw new ResponseStatusException(
-                      HttpStatus.BAD_REQUEST, "Batch execution is not available for this run.");
-                }
-              });
-      stateStore.setApprovedExecutionMode(runId, "BATCH");
-    }
-
-    var outcome = runLifecycleService.resolvePlanGate(runId, req.approved());
-    if (outcome
-        == com.navneet.executespec.integration.RunLifecycleService.PlanApprovalOutcome
-            .CONFLICTING_DECISION) {
-      throw new ResponseStatusException(
-          HttpStatus.CONFLICT, "Plan gate was already resolved with the opposite decision.");
-    }
-    if (outcome
-            == com.navneet.executespec.integration.RunLifecycleService.PlanApprovalOutcome
-                .INVALID_STATE
-        || outcome
-            == com.navneet.executespec.integration.RunLifecycleService.PlanApprovalOutcome
-                .PLAN_MISSING
-        || outcome
-            == com.navneet.executespec.integration.RunLifecycleService.PlanApprovalOutcome
-                .WORKSPACE_GONE) {
-      throw new ResponseStatusException(
-          HttpStatus.CONFLICT, "Plan approval cannot resume from the run's current state.");
-    }
+    var decision =
+        planApprovalService.decide(
+            runId,
+            new com.navneet.executespec.integration.PlanApprovalService.Command(
+                req.approved(),
+                req.creditsConfirmed(),
+                req.executionMode(),
+                req.planFingerprint(),
+                req.breakingChangeAck(),
+                req.breakingChangeReportDigest()),
+            userDetails,
+            com.navneet.executespec.integration.PlanGateDecisionService.ResolutionSource
+                .PLAN_APPROVAL_API);
+    var outcome = decision.outcome();
 
     // Wave 2.1 — activation funnel step 4 (fires once per user, only on
     // positive approval — rejections don't count as "crossed the credit bar").
@@ -836,8 +494,10 @@ public class RunController {
           approveRun.getCreatedByUserId(),
           com.navneet.executespec.analytics.EventName.PLAN_APPROVED,
           java.util.Map.of(
-              "executionMode", req.executionMode() == null ? "REALTIME" : req.executionMode(),
-              "creditsConfirmed", req.creditsConfirmed() == null ? 0 : req.creditsConfirmed()));
+              "executionMode",
+              decision.executionMode(),
+              "creditsConfirmed",
+              req.creditsConfirmed() == null ? 0 : req.creditsConfirmed()));
     }
     return ResponseEntity.ok().build();
   }
@@ -896,31 +556,18 @@ public class RunController {
   public ResponseEntity<RunSummary> forkRun(
       @PathVariable String runId,
       @AuthenticationPrincipal AppUserDetails userDetails,
-      @RequestBody(required = false) ForkOverrides overrides) {
+      @RequestBody(required = false) ForkOverrides overrides,
+      @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) {
     guard.requireRunAccess(runId, userDetails);
     PipelineRun source =
         stateStore
             .findRun(runId)
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Run not found"));
 
-    String forkerId = userDetails.getUser().getId();
-
-    // Fork creates a fresh run, so apply the same managed-AI start gate to the forker.
-    // Run-count quota is analytics-only here.
-    managedAiUsageService.assertCanStartRun(userDetails, apiKeyResolver.isOwnKeysMode(forkerId));
-    tierEnforcementService.incrementRunCountForAnalytics(forkerId);
-    apiKeyResolver.validateKeyAvailability(userDetails.getUser().getId());
-    modelAccessService.assertModelAllowed(forkerId, source.getPlannerModel());
-    if (source.getAiProvider() != null && !source.getAiProvider().isBlank()) {
-      aiProviderPreferenceService.normalizeProvider(source.getAiProvider());
-    }
-
     String userRequest =
         overrides != null && overrides.userRequest() != null && !overrides.userRequest().isBlank()
             ? overrides.userRequest()
             : source.getUserRequest();
-    // Re-scan in case the user edited the spec in the fork dialog.
-    inputSanitizer.scan(userRequest);
     // RR-1217 — two different axes were being confused here. `executionMode` is the
     // PRODUCTION/PROTOTYPE governance axis that decides whether the plan gate runs;
     // `approvedExecutionMode` is the REALTIME/BATCH scheduling axis. The fork used to read the
@@ -936,32 +583,33 @@ public class RunController {
             : source.getExecutionMode();
     String execMode = normalizeForkExecutionMode(requestedExecMode);
 
-    log.info("Forking run {} as new run for user {}", runId, forkerId);
-    PipelineRun forked =
-        v2Orchestrator.submitRun(
-            userRequest,
-            "FORK",
-            source.getRepoUrl(),
-            source.getRepoUrl() != null ? "EXISTING" : null,
-            userDetails.getUser().getGithubPat(),
-            userDetails.getUser().getGithubOwner(),
-            false, // skipApproval — caller approves their fork explicitly
-            false, // autoMerge — same
-            source.getPlannerModel(),
-            source.getAiProvider(),
-            forkerId,
-            userDetails.getUser().getOrgId(),
-            source.getProjectId(),
-            execMode,
+    log.info("Forking run {} as new run for user {}", runId, userDetails.getUser().getId());
+    var commandBuilder =
+        CustomerRunSubmissionService.Command.builder()
+            .userRequest(userRequest)
+            .source("FORK")
+            .repoUrl(source.getRepoUrl())
+            .repoMode(source.getRepoUrl() != null ? "EXISTING" : null)
+            .modelName(source.getPlannerModel())
+            .aiProvider(source.getAiProvider())
+            .projectId(source.getProjectId())
+            .executionMode(execMode)
             // RR-1217 — preserve the source run's exact repository selection. Passing null meant
-            // "every linked repo", so a multi-repo fork could touch repositories the source run
-            // never selected (and that the project may have gained since).
-            com.navneet.executespec.integration.RunPipelineSupport.deserializeRepoIds(
-                source.getSelectedRepoIds()),
-            source.getFigmaUrl(),
-            source.isTddMode() // RR-1217 — inherit, was hardcoded false
-            );
-    return ResponseEntity.status(HttpStatus.ACCEPTED).body(mapper.toSummary(forked));
+            // "every linked repo", so a multi-repo fork could silently broaden scope.
+            .selectedRepoIds(
+                com.navneet.executespec.integration.RunPipelineSupport.deserializeRepoIds(
+                    source.getSelectedRepoIds()))
+            .figmaUrl(source.getFigmaUrl())
+            .tddMode(source.isTddMode())
+            .idempotencyKey(idempotencyKey);
+    CustomerRunSubmissionService.Command effectiveCommand = commandBuilder.build();
+    String requestFingerprint =
+        com.navneet.executespec.run.RunRequestFingerprint.of(
+            new java.util.ArrayList<>(forkFingerprintOf(runId, effectiveCommand).values()));
+    var submission =
+        customerRunSubmissionService.submit(
+            commandBuilder.requestFingerprint(requestFingerprint).build(), userDetails);
+    return ResponseEntity.status(HttpStatus.ACCEPTED).body(mapper.toSummary(submission.run()));
   }
 
   /**
@@ -969,16 +617,7 @@ public class RunController {
    * which case no client-supplied fingerprint can match and the approval is rejected.
    */
   static String planFingerprintOf(String planJson) {
-    if (planJson == null || planJson.isBlank()) return null;
-    try {
-      java.security.MessageDigest md = java.security.MessageDigest.getInstance("SHA-256");
-      byte[] hash = md.digest(planJson.getBytes(java.nio.charset.StandardCharsets.UTF_8));
-      StringBuilder sb = new StringBuilder(hash.length * 2);
-      for (byte b : hash) sb.append(String.format("%02x", b));
-      return sb.toString();
-    } catch (java.security.NoSuchAlgorithmException e) {
-      throw new IllegalStateException("SHA-256 unavailable", e);
-    }
+    return com.navneet.executespec.agent.requirement.ExactPlanFingerprint.sha256(planJson);
   }
 
   /**
@@ -995,6 +634,49 @@ public class RunController {
 
   /** Optional overrides for {@code POST /api/runs/{id}/fork}. All fields nullable. */
   public record ForkOverrides(String userRequest, String executionMode) {}
+
+  /**
+   * Complete effective fork identity. Transport-only idempotency fields are intentionally excluded;
+   * the source run id is included so two source runs with coincidentally equal settings are not
+   * interchangeable.
+   */
+  static LinkedHashMap<String, String> forkFingerprintOf(
+      String sourceRunId, CustomerRunSubmissionService.Command command) {
+    LinkedHashMap<String, String> values = new LinkedHashMap<>();
+    values.put("sourceRunId", sourceRunId);
+    values.put("userRequest", command.userRequest());
+    values.put("source", command.source());
+    values.put("repoUrl", command.repoUrl());
+    values.put("repoMode", command.repoMode());
+    values.put("skipApproval", String.valueOf(command.skipApproval()));
+    values.put("autoMerge", String.valueOf(command.autoMerge()));
+    values.put("modelName", command.modelName());
+    values.put("aiProvider", command.aiProvider());
+    values.put("rememberProviderPreference", String.valueOf(command.rememberProviderPreference()));
+    values.put(
+        "inferProviderFromModelFirst", String.valueOf(command.inferProviderFromModelFirst()));
+    values.put("projectId", command.projectId());
+    values.put("executionMode", command.executionMode());
+    values.put("selectedRepoIds", canonicalRepoIds(command.selectedRepoIds()));
+    values.put("figmaUrl", command.figmaUrl());
+    values.put("tddMode", String.valueOf(command.tddMode()));
+    values.put("branchOverride", command.branchOverride());
+    values.put("prReviewComments", command.prReviewComments());
+    values.put("userCostCap", String.valueOf(command.userCostCap()));
+    values.put("skipAutoPush", String.valueOf(command.skipAutoPush()));
+    values.put(
+        "requireConfirmationBeforeExpensiveContinuation",
+        String.valueOf(command.requireConfirmationBeforeExpensiveContinuation()));
+    values.put(
+        "requireBenchmarkPriorForAutomaticContinuation",
+        String.valueOf(command.requireBenchmarkPriorForAutomaticContinuation()));
+    values.put("lowComplexityWorkerStartTier", command.lowComplexityWorkerStartTier());
+    values.put("localExecution", String.valueOf(command.localExecution()));
+    values.put("patAuthenticated", String.valueOf(command.patAuthenticated()));
+    values.put("localInstallationId", String.valueOf(command.localInstallationId()));
+    values.put("localRepositoryInventory", command.localRepositoryInventory());
+    return values;
+  }
 
   /**
    * Pause a running V2 run. The pause request is observed at the next task / iteration boundary
@@ -1346,7 +1028,7 @@ public class RunController {
       @PathVariable String runId, @AuthenticationPrincipal AppUserDetails userDetails) {
     guard.requireRunWriteAccess(runId, userDetails);
     log.info("DELETE /api/runs/{}", runId);
-    boolean cancelled = runLifecycleService.cancel(runId);
+    boolean cancelled = runLifecycleService.cancel(runId, userDetails);
     return cancelled ? ResponseEntity.ok().build() : ResponseEntity.notFound().build();
   }
 
@@ -1954,33 +1636,8 @@ public class RunController {
       Integer subtaskIndex,
       Integer subtaskTotal) {}
 
-  static void rejectRetiredBatchApproval(boolean approved, String executionMode) {
-    if (approved && "BATCH".equalsIgnoreCase(executionMode)) {
-      throw new ResponseStatusException(
-          HttpStatus.GONE,
-          "BATCH_EXECUTION_RETIRED: batch execution is not available in ExecuteSpec 2.0; use"
-              + " REALTIME");
-    }
-  }
-
   static void validateLocalRepositoryInventory(String inventory) {
-    if (inventory == null || inventory.isBlank()) return;
-    for (String line : inventory.split("\\R")) {
-      if (line.isBlank()) continue;
-      if (!line.startsWith("- ")) {
-        throw new ResponseStatusException(
-            HttpStatus.BAD_REQUEST, "Local repository inventory must contain path entries only");
-      }
-      String path = line.substring(2).trim().replace('\\', '/');
-      if ("(inventory truncated)".equals(path)) continue;
-      if (path.isBlank()
-          || path.startsWith("/")
-          || path.matches("^[A-Za-z]:/.*")
-          || java.util.Arrays.asList(path.split("/")).contains("..")) {
-        throw new ResponseStatusException(
-            HttpStatus.BAD_REQUEST, "Local repository inventory contains an unsafe path");
-      }
-    }
+    CustomerRunSubmissionService.validateLocalRepositoryInventory(inventory);
   }
 
   public record MessageResponse(String fromAgent, String contentSummary, Instant sentAt) {}

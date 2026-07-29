@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
@@ -23,11 +24,21 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 import com.navneet.executespec.config.featureflag.FeatureFlagService;
 import com.navneet.executespec.deployment.WorkspaceRestoreService;
+import com.navneet.executespec.executioncontext.LlmExecutionOperationClaim;
+import com.navneet.executespec.executioncontext.LlmExecutionOperationCoordinator;
+import com.navneet.executespec.executioncontext.LlmExecutionOperationService;
+import com.navneet.executespec.executioncontext.LlmExecutionPolicyFactory;
+import com.navneet.executespec.executioncontext.LlmExecutionReference;
+import com.navneet.executespec.executioncontext.LlmExecutionScope;
 import com.navneet.executespec.report.RunChangeEvidenceService;
+import com.navneet.executespec.router.AgentTier;
 import com.navneet.executespec.router.LlmProvider;
+import com.navneet.executespec.router.ResolvedModel;
 import com.navneet.executespec.state.StateStore;
 import com.navneet.executespec.state.entity.PipelineRun;
 
@@ -60,6 +71,7 @@ class PreviewRenderServiceTest {
   private FeatureFlagService flags;
   private WorkspaceRestoreService restore;
   private RunChangeEvidenceService changes;
+  private StateStore stateStore;
   private PreviewRenderService service;
 
   @BeforeEach
@@ -155,7 +167,7 @@ class PreviewRenderServiceTest {
     flags = mock(FeatureFlagService.class);
     restore = mock(WorkspaceRestoreService.class);
 
-    StateStore stateStore = mock(StateStore.class);
+    stateStore = mock(StateStore.class);
     changes = mock(RunChangeEvidenceService.class);
 
     PipelineRun run = new PipelineRun();
@@ -178,10 +190,7 @@ class PreviewRenderServiceTest {
             stateStore,
             flags);
 
-    ReflectionTestUtils.setField(service, "maxSurfaces", 6);
-    ReflectionTestUtils.setField(service, "characterBudget", 200_000);
-    ReflectionTestUtils.setField(service, "parallelism", 2);
-    ReflectionTestUtils.setField(service, "timeoutSeconds", 20);
+    configure(service);
   }
 
   @Test
@@ -194,6 +203,14 @@ class PreviewRenderServiceTest {
 
     assertThat(jobStore).isEmpty();
     verify(changes, never()).meaningfulProductDiffCount(anyString());
+  }
+
+  @Test
+  void availabilityFailsClosedWhenTheFlagStoreCannotBeRead() {
+    when(flags.isEnabled(PreviewRenderService.FLAG))
+        .thenThrow(new IllegalStateException("flag store unavailable"));
+
+    assertThat(service.enabled()).isFalse();
   }
 
   @Test
@@ -236,6 +253,58 @@ class PreviewRenderServiceTest {
     assertThat(saved)
         .extracting(PreviewRenderBundle::getRenderTarget)
         .containsOnly(PreviewRenderTarget.WEB.name());
+  }
+
+  @Test
+  void durableSurfaceCompletesOperationOnlyAfterBundlePersistence() throws Exception {
+    writeScreen("src/pages/Home.tsx", "Home");
+    LlmExecutionPolicyFactory policies = mock(LlmExecutionPolicyFactory.class);
+    LlmExecutionOperationService operationService = mock(LlmExecutionOperationService.class);
+    LlmExecutionReference reference =
+        new LlmExecutionReference("ctx-preview", LlmExecutionScope.customer("org"));
+    LlmExecutionOperationClaim claim =
+        new LlmExecutionOperationClaim(reference, "llmop-preview", 1, 1, UUID.randomUUID());
+    when(policies.forRunPreviewSurface(eq(RUN_ID), anyString())).thenReturn(reference);
+    when(operationService.claimOrResume(any(), any(), anyString(), any()))
+        .thenReturn(Optional.of(claim));
+    when(operationService.complete(eq(claim), anyString())).thenReturn(true);
+    PreviewRenderOperationRoot operationRoot =
+        new PreviewRenderOperationRoot(
+            policies, new LlmExecutionOperationCoordinator(operationService));
+    ResolvedModel route =
+        ResolvedModel.builder()
+            .requestedProvider(LlmProvider.ANTHROPIC)
+            .actualProvider(LlmProvider.ANTHROPIC)
+            .model("claude-sonnet")
+            .agentTier(AgentTier.WORKHORSE)
+            .build();
+    when(agent.resolveRoute(LlmProvider.ANTHROPIC)).thenReturn(route);
+    when(agent.render(any(), eq(route), eq(RUN_ID), anyString(), any()))
+        .thenAnswer(
+            invocation -> {
+              PreviewSurface surface = invocation.getArgument(0);
+              return new PreviewRenderAgent.RenderedSurface(
+                  surface.id(), "<html><body>Home</body></html>", null);
+            });
+    service =
+        new PreviewRenderService(
+            new PreviewSurfaceDiscovery(),
+            agent,
+            jobs,
+            bundles,
+            restore,
+            changes,
+            stateStore,
+            flags,
+            operationRoot);
+    configure(service);
+
+    PreviewRenderJob job = service.requestRender(RUN_ID, "user");
+    awaitTerminal(job);
+
+    var order = org.mockito.Mockito.inOrder(bundles, operationService);
+    order.verify(bundles).save(any(PreviewRenderBundle.class));
+    order.verify(operationService).complete(eq(claim), anyString());
   }
 
   @Test
@@ -382,7 +451,20 @@ class PreviewRenderServiceTest {
   @Test
   void yieldsTheWinningJobWhenTheDatabaseRejectsAConcurrentSecondJob() throws Exception {
     writeScreen("src/pages/Home.tsx", "Home");
-    stubSuccessfulRender();
+    CountDownLatch renderStarted = new CountDownLatch(1);
+    CountDownLatch releaseRender = new CountDownLatch(1);
+    when(agent.render(any(), any(), anyString(), anyString()))
+        .thenAnswer(
+            inv -> {
+              renderStarted.countDown();
+              if (!releaseRender.await(5, TimeUnit.SECONDS)) {
+                throw new IllegalStateException("test did not release the winning render");
+              }
+              return new PreviewRenderAgent.RenderedSurface(
+                  ((PreviewSurface) inv.getArgument(0)).id(),
+                  "<html><body><div>ok</div></body></html>",
+                  null);
+            });
     enforceOneActiveJobPerRun();
 
     // Both callers observe an empty active set, exactly as an interleaved read-then-write does.
@@ -392,14 +474,27 @@ class PreviewRenderServiceTest {
         .findActiveForRun(anyString());
 
     PreviewRenderJob first = service.requestRender(RUN_ID, "user");
-    PreviewRenderJob second = service.requestRender(RUN_ID, "user");
+    assertThat(renderStarted.await(5, TimeUnit.SECONDS)).isTrue();
 
-    assertThat(second.getId()).isEqualTo(first.getId());
-    assertThat(jobStore).hasSize(1);
+    try {
+      PreviewRenderJob second = service.requestRender(RUN_ID, "user");
+      assertThat(second.getId()).isEqualTo(first.getId());
+      assertThat(jobStore).hasSize(1);
+    } finally {
+      releaseRender.countDown();
+    }
     awaitTerminal(first);
   }
 
   // ---------------------------------------------------------------- helpers
+
+  private static void configure(PreviewRenderService service) {
+    ReflectionTestUtils.setField(service, "maxSurfaces", 6);
+    ReflectionTestUtils.setField(service, "characterBudget", 200_000);
+    ReflectionTestUtils.setField(service, "parallelism", 2);
+    ReflectionTestUtils.setField(service, "timeoutSeconds", 20);
+    ReflectionTestUtils.setField(service, "leaseSeconds", 120);
+  }
 
   /** Stands in for the partial unique index on (run_id) WHERE status IN ('QUEUED','RENDERING'). */
   private void enforceOneActiveJobPerRun() {

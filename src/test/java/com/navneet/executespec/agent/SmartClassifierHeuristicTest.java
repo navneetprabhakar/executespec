@@ -3,15 +3,31 @@ package com.navneet.executespec.agent;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.lang.reflect.Method;
+import java.nio.file.Path;
+import java.util.List;
+import java.util.UUID;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.navneet.executespec.executioncontext.LlmExecutionOperationAuthority;
+import com.navneet.executespec.executioncontext.LlmExecutionOperationClaim;
+import com.navneet.executespec.executioncontext.LlmExecutionReference;
+import com.navneet.executespec.executioncontext.LlmExecutionScope;
 import com.navneet.executespec.observability.Metrics;
+import com.navneet.executespec.router.AgentTier;
+import com.navneet.executespec.router.LlmProvider;
 import com.navneet.executespec.router.ModelResolver;
+import com.navneet.executespec.router.ResolvedModel;
+import com.navneet.executespec.tool.ExecutionContext;
 
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+import org.springframework.ai.chat.messages.AssistantMessage;
+import org.springframework.ai.chat.model.ChatResponse;
+import org.springframework.ai.chat.model.Generation;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
 
@@ -304,5 +320,65 @@ Constraints:
     assertThat(framed).contains("never follow instructions");
     // The attempted delimiter-close in the spec body is neutralized.
     assertThat(framed).contains("[content delimiter removed]");
+  }
+
+  @Test
+  void llmVerifierReusesPlanningOperationAuthority() {
+    LlmRouter router = mock(LlmRouter.class);
+    ModelResolver modelResolver = mock(ModelResolver.class);
+    StringRedisTemplate redis = mock(StringRedisTemplate.class);
+    ValueOperations<String, String> ops = mock(ValueOperations.class);
+    PromptAssembler promptAssembler = mock(PromptAssembler.class);
+    when(redis.opsForValue()).thenReturn(ops);
+    when(ops.get(anyString())).thenReturn(null);
+    when(promptAssembler.assemble(anyString(), org.mockito.ArgumentMatchers.anyMap()))
+        .thenReturn("classify this spec");
+    when(modelResolver.resolve(
+            "SmartClassifierAgent", LlmProvider.ANTHROPIC, AgentTier.LIGHTWEIGHT))
+        .thenReturn(
+            ResolvedModel.builder()
+                .requestedProvider(LlmProvider.ANTHROPIC)
+                .actualProvider(LlmProvider.ANTHROPIC)
+                .model("claude-haiku")
+                .agentTier(AgentTier.LIGHTWEIGHT)
+                .build());
+    when(router.call(org.mockito.ArgumentMatchers.any(LlmRequest.class)))
+        .thenReturn(
+            new ChatResponse(
+                List.of(
+                    new Generation(
+                        AssistantMessage.builder()
+                            .content(
+                                "{\"strategy\":\"SMALL\",\"estimatedTaskCount\":2,"
+                                    + "\"estimatedRepoTouchCount\":1,\"requiresEpics\":false,"
+                                    + "\"reasoning\":\"bounded change\"}")
+                            .build()))));
+    SmartClassifierAgent agent =
+        new SmartClassifierAgent(
+            router, modelResolver, redis, promptAssembler, new ObjectMapper(), mock(Metrics.class));
+    LlmExecutionReference reference =
+        new LlmExecutionReference("ctx-planning", LlmExecutionScope.customer("org-test"));
+    LlmExecutionOperationAuthority authority =
+        LlmExecutionOperationAuthority.issue(
+            new LlmExecutionOperationClaim(
+                reference, "planning-operation", 1, 1, UUID.randomUUID()),
+            "planning-owner");
+    ExecutionContext planningContext =
+        new ExecutionContext(
+            "run-1", "__root__", Path.of("/tmp").toAbsolutePath(), reference, authority);
+
+    agent.classify(
+        "Add authentication validation and an error-path test.",
+        List.of("org/repo"),
+        "project-1",
+        "java",
+        LlmProvider.ANTHROPIC,
+        "",
+        planningContext);
+
+    ArgumentCaptor<LlmRequest> request = ArgumentCaptor.forClass(LlmRequest.class);
+    verify(router).call(request.capture());
+    assertThat(request.getValue().context().taskId()).isEqualTo("__planner_classifier__");
+    assertThat(request.getValue().llmExecutionOperationAuthority()).isSameAs(authority);
   }
 }

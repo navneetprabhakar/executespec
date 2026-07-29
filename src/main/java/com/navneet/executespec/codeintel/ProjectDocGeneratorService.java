@@ -2,9 +2,16 @@ package com.navneet.executespec.codeintel;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Supplier;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.agent.LlmRouter;
+import com.navneet.executespec.agent.PromptAssembler;
 import com.navneet.executespec.agent.PromptTrustBoundary;
+import com.navneet.executespec.agent.ToolProtocolLeakGuard;
 import com.navneet.executespec.auth.entity.Project;
 import com.navneet.executespec.auth.repository.ProjectRepository;
 import com.navneet.executespec.codeintel.entity.ProjectArchitectureDoc;
@@ -13,8 +20,6 @@ import com.navneet.executespec.codeintel.entity.ProjectGeneratedDoc.DocType;
 import com.navneet.executespec.codeintel.repository.ProjectGeneratedDocRepository;
 import com.navneet.executespec.executioncontext.LlmExecutionPolicyFactory;
 import com.navneet.executespec.executioncontext.LlmExecutionReference;
-import com.navneet.executespec.project.entity.ProjectRepo;
-import com.navneet.executespec.project.entity.ProjectRepoLink;
 import com.navneet.executespec.project.repository.ProjectRepoLinkRepository;
 import com.navneet.executespec.project.repository.ProjectRepoRepository;
 import com.navneet.executespec.project.workspace.ProjectWorkspaceService;
@@ -22,16 +27,15 @@ import com.navneet.executespec.router.LlmProvider;
 import com.navneet.executespec.router.ModelResolver;
 import com.navneet.executespec.router.ProjectProviderResolver;
 import com.navneet.executespec.router.ResolvedModel;
-import com.navneet.executespec.router.RunModelOverrides;
+import com.navneet.executespec.security.GeneratedSecretScanner;
 
+import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
-import org.springframework.ai.chat.metadata.Usage;
 import org.springframework.ai.chat.model.ChatResponse;
-import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
 
 import lombok.extern.slf4j.Slf4j;
 
@@ -60,17 +64,101 @@ public class ProjectDocGeneratorService {
   private final ProjectArchitectureService architectureService;
   private final ProjectWorkspaceService workspace;
   private final ProjectGeneratedDocRepository docRepo;
-  private final VersionRetentionService versionRetention;
   private final ProjectRepository projectRepo;
-  private final ProjectRepoLinkRepository linkRepo;
-  private final ProjectRepoRepository repoRepo;
   private final LlmRouter llmRouter;
   private final ModelResolver modelResolver;
   private final ProjectProviderResolver projectProviderResolver;
   private final LlmExecutionPolicyFactory executionPolicyFactory;
+  private final PromptAssembler promptAssembler;
+  private final GeneratedSecretScanner secretScanner;
+  private final ProjectDocSourceBundleBuilder sourceBundleBuilder;
+  private final ProjectGeneratedDocPublisher publisher;
+  private final ConcurrentHashMap<GenerationKey, CompletableFuture<ProjectGeneratedDoc>> inFlight =
+      new ConcurrentHashMap<>();
 
   /** v2.6.4 — compute USD cost from tokens × pricing matrix for the dashboard rollup. */
   private final com.navneet.executespec.cost.RunCostTracker costTracker;
+
+  static final int SOURCE_BUNDLE_CHAR_LIMIT = 60_000;
+  public static final String OUTPUT_LIMIT_REASON = "PROVIDER_OUTPUT_LIMIT";
+  public static final String STALE_SOURCE_REASON = "STALE_SOURCE";
+  public static final String UNSAFE_CONTENT_REASON = "UNSAFE_GENERATED_CONTENT";
+  public static final String INVALID_CONTENT_REASON = "INVALID_GENERATED_CONTENT";
+  public static final String PROVIDER_NON_COMPLETE_REASON = "PROVIDER_NON_COMPLETE_TERMINATION";
+
+  private record GenerationKey(
+      String projectId,
+      DocType docType,
+      Integer sourceArchVersion,
+      String sourceFingerprint,
+      LlmProvider provider,
+      String model,
+      String actor,
+      String authorityContextId) {}
+
+  record SourceSection(String heading, String content) {}
+
+  /** A provider-limited document is diagnostic output, not a publishable document version. */
+  public static final class IncompleteGenerationException extends IllegalStateException {
+    public IncompleteGenerationException(DocType docType) {
+      super(
+          "Provider stopped at its output limit while generating "
+              + docType
+              + "; no document was saved. Retry after narrowing the project evidence.");
+    }
+
+    public String reason() {
+      return OUTPUT_LIMIT_REASON;
+    }
+  }
+
+  /**
+   * The source changed while the provider was generating; obsolete output must not be published.
+   */
+  public static final class StaleSourceException extends IllegalStateException {
+    public StaleSourceException() {
+      super(
+          "Project architecture changed during document generation; no document was saved. Retry.");
+    }
+
+    public String reason() {
+      return STALE_SOURCE_REASON;
+    }
+  }
+
+  /** Provider output contained credential-like or private protocol material. */
+  public static final class UnsafeGeneratedDocumentException extends IllegalStateException {
+    public UnsafeGeneratedDocumentException() {
+      super("Generated document failed the publication safety check; no document was saved.");
+    }
+
+    public String reason() {
+      return UNSAFE_CONTENT_REASON;
+    }
+  }
+
+  /** Provider output did not satisfy the deterministic document contract. */
+  public static final class InvalidGeneratedDocumentException extends IllegalStateException {
+    public InvalidGeneratedDocumentException(String detail) {
+      super(
+          "Generated document is incomplete or malformed (" + detail + "); no document was saved.");
+    }
+
+    public String reason() {
+      return INVALID_CONTENT_REASON;
+    }
+  }
+
+  /** The provider explicitly reported a refusal/safety/error termination instead of completion. */
+  public static final class ProviderNonCompleteGenerationException extends IllegalStateException {
+    public ProviderNonCompleteGenerationException() {
+      super("Provider did not complete the generated document; no document was saved. Retry.");
+    }
+
+    public String reason() {
+      return PROVIDER_NON_COMPLETE_REASON;
+    }
+  }
 
   @Autowired
   public ProjectDocGeneratorService(
@@ -85,24 +173,66 @@ public class ProjectDocGeneratorService {
       ModelResolver modelResolver,
       com.navneet.executespec.cost.RunCostTracker costTracker,
       ProjectProviderResolver projectProviderResolver,
-      LlmExecutionPolicyFactory executionPolicyFactory) {
+      LlmExecutionPolicyFactory executionPolicyFactory,
+      PromptAssembler promptAssembler,
+      GeneratedSecretScanner secretScanner,
+      ObjectMapper objectMapper,
+      PlatformTransactionManager transactionManager) {
     this.architectureService = architectureService;
     this.workspace = workspace;
     this.docRepo = docRepo;
-    this.versionRetention = versionRetention;
     this.projectRepo = projectRepo;
-    this.linkRepo = linkRepo;
-    this.repoRepo = repoRepo;
     this.llmRouter = llmRouter;
     this.modelResolver = modelResolver;
     this.costTracker = costTracker;
     this.projectProviderResolver = projectProviderResolver;
     this.executionPolicyFactory = executionPolicyFactory;
+    this.promptAssembler = promptAssembler;
+    this.secretScanner = secretScanner == null ? new GeneratedSecretScanner() : secretScanner;
+    ObjectMapper sourceObjectMapper = objectMapper == null ? new ObjectMapper() : objectMapper;
+    this.sourceBundleBuilder =
+        new ProjectDocSourceBundleBuilder(
+            architectureService, linkRepo, repoRepo, sourceObjectMapper);
+    this.publisher =
+        new ProjectGeneratedDocPublisher(
+            architectureService, docRepo, versionRetention, projectRepo, transactionManager);
   }
 
-  /**
-   * Compatibility constructor for package tests and older callers; provider policy is canonical.
-   */
+  /** Compatibility constructor for focused tests that do not boot a transaction manager. */
+  ProjectDocGeneratorService(
+      ProjectArchitectureService architectureService,
+      ProjectWorkspaceService workspace,
+      ProjectGeneratedDocRepository docRepo,
+      VersionRetentionService versionRetention,
+      ProjectRepository projectRepo,
+      ProjectRepoLinkRepository linkRepo,
+      ProjectRepoRepository repoRepo,
+      LlmRouter llmRouter,
+      ModelResolver modelResolver,
+      com.navneet.executespec.cost.RunCostTracker costTracker,
+      ProjectProviderResolver projectProviderResolver,
+      LlmExecutionPolicyFactory executionPolicyFactory,
+      PromptAssembler promptAssembler) {
+    this(
+        architectureService,
+        workspace,
+        docRepo,
+        versionRetention,
+        projectRepo,
+        linkRepo,
+        repoRepo,
+        llmRouter,
+        modelResolver,
+        costTracker,
+        projectProviderResolver,
+        executionPolicyFactory,
+        promptAssembler,
+        new GeneratedSecretScanner(),
+        new ObjectMapper(),
+        null);
+  }
+
+  /** Compatibility constructor for package tests and older callers. */
   public ProjectDocGeneratorService(
       ProjectArchitectureService architectureService,
       ProjectWorkspaceService workspace,
@@ -126,121 +256,20 @@ public class ProjectDocGeneratorService {
         modelResolver,
         costTracker,
         null,
+        null,
+        null,
+        new GeneratedSecretScanner(),
+        new ObjectMapper(),
         null);
   }
 
-  private static final String EXPLANATION_SYSTEM =
-      """
-      You are writing a project explanation document for a new developer joining the team.
-      You will be given the project's architecture document, codemaps for each linked repo,
-      and project metadata. Produce a single markdown document with these sections:
-
-      # <Project name>
-      <one-paragraph elevator pitch>
-
-      ## Repositories
-      One bullet per repo: name, purpose, primary tech stack.
-
-      ## High-level architecture
-      2-4 paragraphs describing how the pieces fit together. Reference specific
-      components from the codemap where relevant. PR-P (2026-05-13): include ONE
-      mermaid diagram (```mermaid ... ```) when the architecture has 3+ components
-      with clear relationships — flowchart LR or graph TB are the right shapes.
-      Skip the diagram for single-repo / two-component projects where it would add
-      visual noise without information.
-
-      ## Key data flows
-      Numbered list of 3-6 end-to-end flows (e.g. "User signs up" → HTTP route → service
-      → DB write → event fired → ...). Cite file paths from the codemap as evidence.
-      PR-P (2026-05-13): for the most complex flow (the one with the most hops or
-      cross-component boundaries), include a mermaid sequenceDiagram showing the
-      messages between participants. One sequence diagram max — the rest stay
-      bullet-listed.
-
-      ## Where to contribute
-      Short list of common change patterns (add a feature, fix a bug, add a test) and
-      the files a contributor touches first.
-
-      Rules:
-      - Plain markdown. No backticks around section headings.
-      - Do not invent components. If the architecture / codemap doesn't show it, don't
-        claim it exists.
-      - Mermaid syntax MUST be valid — node names without spaces (use camelCase or
-        underscores), edges typed correctly (--> for flowchart, ->> for sequence).
-        GitHub renders mermaid in markdown previews, so syntax errors are visible.
-      - Use mermaid only where it earns its keep — 2 diagrams maximum across the
-        whole document. Prose + bullet lists are still the default.
-      - Aim for 600-1200 words. Dense, scannable, citation-rich.
-      """;
-
-  private static final String SETUP_SYSTEM =
-      """
-      You are writing a local-setup README for a new developer joining the team.
-      You will be given the project's architecture document, codemaps for each linked
-      repo, and project metadata. Produce a single markdown document with these sections:
-
-      # Setting up <Project name>
-
-      ## Prerequisites
-      Bulleted list: runtimes, tools, local services (docker, postgres, redis, node, etc).
-      Infer from the codemap's detected stack.
-
-      ## Clone
-      Exact `git clone` commands, one per repo, with the correct owner/name (infer from
-      the architecture doc or leave `<owner>` as a placeholder if unsure).
-
-      ## Environment variables
-      Table of env vars required by each repo (grep the codemap for references). Columns:
-      var | repo | purpose | example.
-
-      ## First-run per repo
-      For each repo, show the commands to install deps, migrate the DB if relevant,
-      start the service in dev mode. Label each block with the repo name.
-
-      ## Running the full stack locally
-      Recommended order of services to bring up + health-check URLs. PR-P (2026-05-13):
-      include an ASCII service-topology diagram in a ``` fenced block when 3+ services
-      are involved. Aim for the form:
-          ┌──────────┐    ┌──────────┐    ┌──────────┐
-          │ frontend │ -> │ backend  │ -> │ postgres │
-          └──────────┘    └──────────┘    └──────────┘
-                                │
-                                v
-                            ┌──────────┐
-                            │  redis   │
-                            └──────────┘
-      One ASCII diagram max. Keep arrows simple (-> or v). Box widths consistent.
-
-      ## Troubleshooting
-      3-5 common setup errors and their fix.
-
-      Rules:
-      - Use fenced code blocks for every command. Prefer `bash` for shell, `yaml` for
-        config.
-      - ASCII diagram (if present) lives in its own ``` fenced block (no language tag,
-        renders monospace).
-      - Do NOT invent env vars. Only include ones visible in the codemaps / architecture.
-      - Aim for 500-1200 words.
-      """;
-
-  /**
-   * Generate (or regenerate) the requested doc type for the given project. Synchronous — typical
-   * runtime is 15-40s depending on project size.
-   *
-   * @param projectId project to document
-   * @param docType EXPLANATION or SETUP
-   * @param generatedByUser user who initiated the request (for audit); may be null
-   * @param provider LLM provider override; null uses project default
-   * @return the persisted document
-   */
-  @Transactional
+  /** Generate or regenerate a project document synchronously. */
   public ProjectGeneratedDoc generate(
       String projectId, DocType docType, String generatedByUser, LlmProvider provider) {
     return generate(projectId, docType, generatedByUser, provider, null);
   }
 
   /** Confirmed action path with one shared exact-route budget context. */
-  @Transactional
   public ProjectGeneratedDoc generate(
       String projectId,
       DocType docType,
@@ -257,6 +286,10 @@ public class ProjectDocGeneratorService {
       throw new IllegalStateException("project has no architecture doc yet — call /analyse first");
     }
     ProjectArchitectureDoc arch = archOpt.get();
+    String userPayload = buildSourceBundle(project, arch);
+    String codemapEvidence = GeneratedSignatureGrounding.codemapEvidence(userPayload);
+    java.util.Set<String> sourceRepositories =
+        sourceBundleBuilder.parseSourceShas(arch.getGeneratedFromShas()).keySet();
 
     // PR-Q (2026-05-13) — short-circuit cache. Same idea as PR-K's fingerprint short-circuit
     // on combined-arch regen, one layer up: if the most recent doc of this type was generated
@@ -271,8 +304,14 @@ public class ProjectDocGeneratorService {
           docRepo
               .findFirstByProjectIdAndDocTypeAndSourceArchVersionAndSourceShasFingerprintOrderByVersionDesc(
                   projectId, docType, sourceArchVersion, sourceFingerprint)
-              .filter(d -> d.getContent() != null && !d.getContent().isBlank());
+              .filter(d -> d.getContent() != null && !d.getContent().isBlank())
+              .filter(
+                  d ->
+                      ProjectGeneratedDocValidator.validate(
+                              docType, d.getContent(), sourceRepositories, codemapEvidence)
+                          .isEmpty());
       if (cached.isPresent()) {
+        assertSafeForCustomer(cached.get().getContent());
         log.info(
             "[{}] doc-gen short-circuit type={} — reusing v{} (arch v{} + SHAs unchanged); skipped"
                 + " LLM",
@@ -284,29 +323,68 @@ public class ProjectDocGeneratorService {
       }
     }
 
-    String systemPrompt =
-        switch (docType) {
-          case EXPLANATION -> EXPLANATION_SYSTEM;
-          case SETUP -> SETUP_SYSTEM;
-        };
-
-    String userPayload = buildSourceBundle(project, arch);
+    if (promptAssembler == null) {
+      throw new IllegalStateException("Prompt assembler is required for project docs");
+    }
+    String systemPrompt = promptAssembler.assemble(promptPath(docType));
 
     LlmProvider effective = provider != null ? provider : resolveProvider(project);
     ResolvedModel resolved = modelResolver.resolve("ProjectDocGeneratorService", effective);
-    String exactModel = RunModelOverrides.lookup(effective, resolved.getAgentTier());
+    String exactModel = resolved.getModel();
+    GenerationKey generationKey =
+        new GenerationKey(
+            projectId,
+            docType,
+            sourceArchVersion,
+            sourceFingerprint,
+            resolved.getActualProvider(),
+            exactModel,
+            generatedByUser,
+            confirmedActionReference == null ? null : confirmedActionReference.contextId());
+    return singleFlight(
+        generationKey,
+        () ->
+            generateOnce(
+                project,
+                docType,
+                generatedByUser,
+                effective,
+                resolved,
+                exactModel,
+                confirmedActionReference,
+                systemPrompt,
+                userPayload,
+                sourceArchVersion,
+                sourceFingerprint,
+                sourceRepositories,
+                codemapEvidence));
+  }
 
-    Prompt prompt =
-        new Prompt(
-            List.of(
-                new SystemMessage(systemPrompt),
-                new UserMessage(PromptTrustBoundary.wrap("PROJECT_DOC_EVIDENCE", userPayload))));
+  private ProjectGeneratedDoc generateOnce(
+      Project project,
+      DocType docType,
+      String generatedByUser,
+      LlmProvider effective,
+      ResolvedModel resolved,
+      String exactModel,
+      LlmExecutionReference confirmedActionReference,
+      String systemPrompt,
+      String userPayload,
+      Integer sourceArchVersion,
+      String sourceFingerprint,
+      java.util.Set<String> sourceRepositories,
+      String codemapEvidence) {
+    String projectId = project.getId();
+    List<Message> initialMessages =
+        List.of(
+            new SystemMessage(systemPrompt),
+            new UserMessage(PromptTrustBoundary.wrap("PROJECT_DOC_EVIDENCE", userPayload)));
 
     String runId = "project-doc-" + docType.name().toLowerCase() + "-" + projectId;
     if (executionPolicyFactory == null) {
       throw new IllegalStateException("Execution policy factory is required for project docs");
     }
-    String contextId = runId + "-" + java.util.UUID.randomUUID();
+    String contextId = projectDocContextId(java.util.UUID.randomUUID());
     var executionReference =
         confirmedActionReference != null
             ? confirmedActionReference
@@ -316,46 +394,35 @@ public class ProjectDocGeneratorService {
                 "PROJECT_DOC",
                 contextId,
                 contextId,
-                effective.name(),
+                resolved.getActualProvider().name(),
                 exactModel,
                 generatedByUser);
-    ChatResponse response =
-        llmRouter.callText(
-            resolved.providerName(),
-            resolved.getModel(),
-            prompt.getInstructions(),
+    ProjectDocValidatedGeneration.Result generation =
+        ProjectDocValidatedGeneration.generate(
+            llmRouter,
+            this::assertSafeForCustomer,
+            projectId,
+            docType,
+            resolved,
+            exactModel,
             runId,
-            "project-doc-" + docType.name().toLowerCase(),
-            "generate",
-            executionReference);
-
-    String content = response.getResult().getOutput().getText();
-    if (content == null || content.isBlank()) {
-      throw new IllegalStateException("LLM returned empty content for " + docType);
-    }
-    content = content.trim();
-
-    Usage usage = response.getMetadata() != null ? response.getMetadata().getUsage() : null;
-    int inTok = usage == null ? 0 : safeInt(usage.getPromptTokens());
-    int outTok = usage == null ? 0 : safeInt(usage.getCompletionTokens());
-
-    int nextVersion =
-        docRepo
-            .findFirstByProjectIdAndDocTypeOrderByVersionDesc(projectId, docType)
-            .map(d -> d.getVersion() + 1)
-            .orElse(1);
+            executionReference,
+            initialMessages,
+            sourceRepositories,
+            codemapEvidence);
+    String content = generation.content();
+    int inTok = generation.inputTokens();
+    int outTok = generation.outputTokens();
 
     // v2.6.4 (V174) — compute USD cost so the project dashboard can roll doc-gen spend up.
-    double cost =
-        costTracker.computeCost(resolved.providerName(), resolved.getModel(), inTok, outTok);
-    ProjectGeneratedDoc doc =
+    double cost = costTracker.computeCost(resolved.providerName(), exactModel, inTok, outTok);
+    ProjectGeneratedDoc candidate =
         ProjectGeneratedDoc.builder()
             .projectId(projectId)
             .docType(docType)
             .content(content)
-            .version(nextVersion)
             .generatedBy(generatedByUser)
-            .modelUsed(resolved.getModel())
+            .modelUsed(exactModel)
             .inputTokens(inTok)
             .outputTokens(outTok)
             .costUsd(cost)
@@ -366,13 +433,12 @@ public class ProjectDocGeneratorService {
             .sourceArchVersion(sourceArchVersion)
             .sourceShasFingerprint(sourceFingerprint)
             .build();
-    doc = docRepo.save(doc);
-    versionRetention.pruneGeneratedDoc(projectId, docType);
+    ProjectGeneratedDoc doc = persistGeneratedDoc(candidate, sourceRepositories, codemapEvidence);
 
     // Mirror to disk so the UI can use the same read path as summary.md.
     try {
       String rel = "docs/" + docType.name().toLowerCase() + ".md";
-      workspace.writeRawFile(projectId, rel, content);
+      workspace.writeRawFile(projectId, rel, doc.getContent());
     } catch (Exception e) {
       log.warn("[{}] doc-gen ok but disk mirror failed: {}", projectId, e.getMessage());
     }
@@ -381,11 +447,65 @@ public class ProjectDocGeneratorService {
         "[{}] Generated {} doc v{} ({} in / {} out tokens, model={})",
         projectId,
         docType,
-        nextVersion,
+        doc.getVersion(),
         inTok,
         outTok,
-        resolved.getModel());
+        exactModel);
     return doc;
+  }
+
+  private ProjectGeneratedDoc persistGeneratedDoc(
+      ProjectGeneratedDoc candidate,
+      java.util.Set<String> sourceRepositories,
+      String codemapEvidence) {
+    return publisher.publish(
+        candidate,
+        existing ->
+            ProjectGeneratedDocValidator.validate(
+                    existing.getDocType(),
+                    existing.getContent(),
+                    sourceRepositories,
+                    codemapEvidence)
+                .isEmpty());
+  }
+
+  private ProjectGeneratedDoc singleFlight(
+      GenerationKey key, Supplier<ProjectGeneratedDoc> generation) {
+    CompletableFuture<ProjectGeneratedDoc> mine = new CompletableFuture<>();
+    CompletableFuture<ProjectGeneratedDoc> active = inFlight.putIfAbsent(key, mine);
+    if (active != null) {
+      try {
+        return active.join();
+      } catch (CompletionException e) {
+        throw rethrow(e.getCause());
+      }
+    }
+    try {
+      ProjectGeneratedDoc generated = generation.get();
+      mine.complete(generated);
+      return generated;
+    } catch (Throwable failure) {
+      mine.completeExceptionally(failure);
+      throw rethrow(failure);
+    } finally {
+      inFlight.remove(key, mine);
+    }
+  }
+
+  private static RuntimeException rethrow(Throwable failure) {
+    return failure instanceof RuntimeException runtime
+        ? runtime
+        : new IllegalStateException("Project document generation failed", failure);
+  }
+
+  /**
+   * Uniform customer-publication boundary used by generate, display, download, and project chat.
+   */
+  public void assertSafeForCustomer(String content) {
+    if (secretScanner.scan(content).isPresent()
+        || ToolProtocolLeakGuard.containsProtocolMarkup(content)) {
+      throw new UnsafeGeneratedDocumentException();
+    }
   }
 
   /** Latest persisted doc of the given type, or empty if not yet generated. */
@@ -397,61 +517,56 @@ public class ProjectDocGeneratorService {
    * Build the source bundle fed to the LLM: project name + description + repo list +
    * architecture.md + per-repo codemaps.
    */
-  private String buildSourceBundle(Project project, ProjectArchitectureDoc arch) {
-    StringBuilder sb = new StringBuilder();
-    sb.append("# Project metadata\n");
-    sb.append("- Name: ").append(nullToDash(project.getName())).append('\n');
-    sb.append("- Description: ").append(nullToDash(project.getDescription())).append('\n');
-    sb.append("- GitHub owner: ").append(nullToDash(project.getGithubOwner())).append('\n');
-
-    List<ProjectRepoLink> links = linkRepo.findByProjectId(project.getId());
-    sb.append("\n# Linked repositories\n");
-    for (ProjectRepoLink link : links) {
-      ProjectRepo repo = repoRepo.findById(link.getRepoId()).orElse(null);
-      if (repo == null) continue;
-      sb.append("- ")
-          .append(repo.getGithubRepoFullName())
-          .append(" (default branch: ")
-          .append(repo.getDefaultBranch() == null ? "main" : repo.getDefaultBranch())
-          .append(")\n");
-    }
-
-    sb.append("\n# Architecture document (v").append(arch.getVersion()).append(")\n");
-    sb.append(arch.getContent() == null ? "" : arch.getContent());
-
-    sb.append("\n\n# Per-repo codemaps\n");
-    for (ProjectRepoLink link : links) {
-      ProjectRepo repo = repoRepo.findById(link.getRepoId()).orElse(null);
-      if (repo == null) continue;
-      architectureService
-          .latestCodeMap(project.getId(), repo.getId())
-          .ifPresent(
-              cm -> {
-                sb.append("\n## ").append(repo.getGithubRepoFullName()).append(" codemap\n");
-                sb.append(cm.getContent() == null ? "" : cm.getContent());
-              });
-    }
-
-    return capSourceBundle(sb.toString());
+  String buildSourceBundle(Project project, ProjectArchitectureDoc arch) {
+    return sourceBundleBuilder.build(project, arch);
   }
 
   /**
-   * Caps the document source at a line boundary so a large-repository bundle never ends in the
-   * middle of a path, code-map record, or environment-variable row. The explicit marker tells the
-   * model that evidence is incomplete instead of making the cut look like a complete source file.
+   * Budgets every architecture/repository section independently. The former whole-prefix cap could
+   * omit every later repository; this water-filling allocation guarantees each section a share,
+   * then redistributes unused capacity from short sections to longer ones.
+   */
+  static String fairBudgetSourceSections(List<SourceSection> sections) {
+    List<ProjectDocSourceBudgeter.Section> budgetSections =
+        sections == null
+            ? List.of()
+            : sections.stream()
+                .map(
+                    section ->
+                        new ProjectDocSourceBudgeter.Section(section.heading(), section.content()))
+                .toList();
+    return ProjectDocSourceBudgeter.budget(budgetSections, SOURCE_BUNDLE_CHAR_LIMIT);
+  }
+
+  private static String promptPath(DocType docType) {
+    return switch (docType) {
+      case EXPLANATION -> "project-doc-explanation.md";
+      case SETUP -> "project-doc-setup.md";
+    };
+  }
+
+  static boolean responseWasTruncated(ChatResponse response) {
+    return ProjectDocResponsePolicy.wasTruncated(response);
+  }
+
+  /**
+   * Backward-compatible single-section cap used by focused callers. Multi-repository generation
+   * uses {@link #fairBudgetSourceSections(List)} so later repositories cannot be prefix-starved.
    */
   static String capSourceBundle(String source) {
-    if (source == null || source.length() <= 60_000) return source;
-    int cut = source.lastIndexOf('\n', 60_000);
-    boolean lineBoundary = cut >= 1;
-    if (lineBoundary) cut++;
-    else cut = 60_000;
-    String boundaryNote = lineBoundary ? "the last complete source line" : "the 60k context limit";
-    return source.substring(0, cut)
-        + "\n\n"
-        + "[truncated at "
-        + boundaryNote
-        + "; additional repository evidence omitted]\n";
+    return fairBudgetSourceSections(List.of(new SourceSection("# Source evidence", source)));
+  }
+
+  /**
+   * Builds the durable source/correlation/idempotency identity for one document-generation call.
+   *
+   * <p>The former value prefixed the full project-doc run id to a UUID. For EXPLANATION documents
+   * that produced 97 characters and failed the database's {@code correlation_id VARCHAR(96)}
+   * constraint before any provider call. Project and feature already have dedicated context
+   * columns, so keep this identity compact and collision-resistant instead of duplicating them.
+   */
+  static String projectDocContextId(java.util.UUID nonce) {
+    return "project-doc:" + java.util.Objects.requireNonNull(nonce, "nonce");
   }
 
   private LlmProvider resolveProvider(Project project) {
@@ -460,13 +575,5 @@ public class ProjectDocGeneratorService {
       throw new IllegalStateException("Project provider is required for document generation");
     }
     return project.getAiProvider();
-  }
-
-  private static String nullToDash(String s) {
-    return s == null || s.isBlank() ? "—" : s;
-  }
-
-  private static int safeInt(Integer i) {
-    return i == null ? 0 : i;
   }
 }

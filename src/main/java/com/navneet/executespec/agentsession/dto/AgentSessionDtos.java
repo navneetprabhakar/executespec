@@ -305,7 +305,34 @@ public final class AgentSessionDtos {
       Double userCostCap,
       String executionMode,
       Boolean localExecution,
-      String spec) {
+      String spec,
+      List<java.util.UUID> selectedRepoIds) {
+    /** Back-compat constructor for clients that predate exact repository selection. */
+    public OrchestratorRunConfirmationRequest(
+        String sessionId,
+        String turnId,
+        Boolean confirmed,
+        String aiProvider,
+        String modelName,
+        String lowComplexityWorkerStartTier,
+        Double userCostCap,
+        String executionMode,
+        Boolean localExecution,
+        String spec) {
+      this(
+          sessionId,
+          turnId,
+          confirmed,
+          aiProvider,
+          modelName,
+          lowComplexityWorkerStartTier,
+          userCostCap,
+          executionMode,
+          localExecution,
+          spec,
+          null);
+    }
+
     /** Back-compat constructor for tests and clients that predate execution target fields. */
     public OrchestratorRunConfirmationRequest(
         String sessionId,
@@ -323,6 +350,7 @@ public final class AgentSessionDtos {
           modelName,
           lowComplexityWorkerStartTier,
           userCostCap,
+          null,
           null,
           null,
           null);

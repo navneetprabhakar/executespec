@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -21,6 +22,7 @@ import com.navneet.executespec.auth.repository.ProjectRepository;
 import com.navneet.executespec.router.LlmProvider;
 import com.navneet.executespec.router.ModelMatrixProperties;
 import com.navneet.executespec.router.ModelRegistry;
+import com.navneet.executespec.specchat.ChatToolPolicy;
 import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
 
@@ -42,11 +44,18 @@ class LlmExecutionPolicyFactoryAggregatorTest {
     LlmExecutionScope scope = LlmExecutionScope.customer("org-1");
     LlmExecutionReference original = new LlmExecutionReference("llmctx-original", scope);
     OrgRepository orgs = mock(OrgRepository.class);
+    ApiKeyResolver keys = mock(ApiKeyResolver.class);
     when(runs.findById("run-1")).thenReturn(java.util.Optional.of(run));
     when(orgs.findById("org-1"))
         .thenReturn(
             java.util.Optional.of(
                 Org.builder().id("org-1").tier("PRO").keySourceMode("HYBRID").build()));
+    when(keys.resolveWithProvenance("user-1"))
+        .thenReturn(
+            new ApiKeyResolver.CredentialResolution(
+                new ResolvedKeys(null, null, null, null, null, null, "HYBRID", Set.of("deepseek")),
+                "org-1",
+                Map.of()));
     when(contexts.findReference(scope, "pipeline", "PIPELINE_RUN", "run-1", "route-v1"))
         .thenReturn(java.util.Optional.of(original));
     LlmExecutionPolicyFactory factory =
@@ -56,7 +65,7 @@ class LlmExecutionPolicyFactoryAggregatorTest {
             mock(AgentSessionRepository.class),
             mock(ProjectRepository.class),
             orgs,
-            mock(ApiKeyResolver.class),
+            keys,
             mock(ModelRegistry.class));
 
     assertThat(factory.forRun("run-1")).isEqualTo(original);
@@ -303,6 +312,164 @@ class LlmExecutionPolicyFactoryAggregatorTest {
     assertThat(created.policy().keySourceMode())
         .isEqualTo(LlmPolicySnapshot.KeySourceMode.OWN_KEYS);
     assertThat(created.policy().allowedProviders()).containsExactly("deepseek");
+  }
+
+  @Test
+  void externalCollaboratorRunAskAndPreviewKeepHostTenantButUseDurablePayerPolicy() {
+    LlmExecutionContextService contexts = mock(LlmExecutionContextService.class);
+    PipelineRunRepository runs = mock(PipelineRunRepository.class);
+    OrgRepository orgs = mock(OrgRepository.class);
+    ApiKeyResolver keys = mock(ApiKeyResolver.class);
+    ModelRegistry registry = mock(ModelRegistry.class);
+    PipelineRun run = new PipelineRun();
+    run.setRunId("external-run");
+    run.setCreatedByUserId("external-user");
+    run.setOrgId("host-org");
+    run.setBillingOrgId("payer-org");
+    run.setProjectId("host-project");
+    run.setAiProvider("DEEPSEEK");
+    when(runs.findById("external-run")).thenReturn(java.util.Optional.of(run));
+    when(orgs.findById("payer-org"))
+        .thenReturn(
+            java.util.Optional.of(
+                Org.builder().id("payer-org").tier("BYOK").keySourceMode("OWN_KEYS").build()));
+    when(keys.resolveWithProvenance("external-user"))
+        .thenReturn(
+            new ApiKeyResolver.CredentialResolution(
+                new ResolvedKeys(
+                    null,
+                    null,
+                    null,
+                    null,
+                    "payer-deepseek-secret",
+                    null,
+                    "OWN_KEYS",
+                    Set.of("deepseek")),
+                "payer-org",
+                Map.of("deepseek", ApiKeyResolver.CredentialOrigin.USER)));
+    when(registry.allModels()).thenReturn(Map.of());
+    LlmExecutionContext saved = mock(LlmExecutionContext.class);
+    when(saved.getId()).thenReturn("external-context");
+    when(contexts.create(any())).thenReturn(saved);
+    LlmExecutionPolicyFactory factory =
+        new LlmExecutionPolicyFactory(
+            contexts,
+            runs,
+            mock(AgentSessionRepository.class),
+            mock(ProjectRepository.class),
+            orgs,
+            keys,
+            registry);
+
+    factory.forRun("external-run");
+    factory.forRunChatTurn("external-run", "ask-turn");
+    factory.forRunPreviewSurface("external-run", "screen-attempt");
+
+    ArgumentCaptor<LlmExecutionContextCreateRequest> requests =
+        ArgumentCaptor.forClass(LlmExecutionContextCreateRequest.class);
+    verify(contexts, times(3)).create(requests.capture());
+    assertThat(requests.getAllValues())
+        .extracting(request -> request.scope().orgId())
+        .containsOnly("host-org");
+    assertThat(requests.getAllValues())
+        .extracting(LlmExecutionContextCreateRequest::credentialOrgId)
+        .containsOnly("payer-org");
+    assertThat(requests.getAllValues())
+        .extracting(LlmExecutionContextCreateRequest::userId)
+        .containsOnly("external-user");
+    assertThat(requests.getAllValues())
+        .extracting(request -> request.policy().keySubjectUserId())
+        .containsOnly("external-user");
+    assertThat(requests.getAllValues())
+        .extracting(LlmExecutionContextCreateRequest::feature)
+        .containsExactly("pipeline", "run-chat", "preview-render");
+  }
+
+  @Test
+  void webAgentTurnsCreateDistinctDurableBudgetContexts() {
+    LlmExecutionContextService contexts = mock(LlmExecutionContextService.class);
+    OrgRepository orgs = mock(OrgRepository.class);
+    ApiKeyResolver keys = mock(ApiKeyResolver.class);
+    ModelRegistry registry = mock(ModelRegistry.class);
+    when(orgs.findById("org-1"))
+        .thenReturn(
+            java.util.Optional.of(
+                Org.builder().id("org-1").tier("PRO").keySourceMode("OWN_KEYS").build()));
+    when(keys.resolveWithProvenance("user-1"))
+        .thenReturn(
+            new ApiKeyResolver.CredentialResolution(
+                new ResolvedKeys(
+                    null,
+                    null,
+                    null,
+                    null,
+                    "deepseek-secret",
+                    null,
+                    "OWN_KEYS",
+                    Set.of("deepseek")),
+                "org-1",
+                Map.of("deepseek", ApiKeyResolver.CredentialOrigin.USER)));
+    when(registry.allModels()).thenReturn(Map.of());
+    LlmExecutionContext first = mock(LlmExecutionContext.class);
+    LlmExecutionContext second = mock(LlmExecutionContext.class);
+    when(first.getId()).thenReturn("chat-turn-context-1");
+    when(second.getId()).thenReturn("chat-turn-context-2");
+    when(contexts.create(any())).thenReturn(first, second);
+    LlmExecutionPolicyFactory factory =
+        new LlmExecutionPolicyFactory(
+            contexts,
+            mock(PipelineRunRepository.class),
+            mock(AgentSessionRepository.class),
+            mock(ProjectRepository.class),
+            orgs,
+            keys,
+            registry);
+    LlmExecutionBudget budget =
+        new LlmExecutionBudget(
+            null,
+            null,
+            40_000L,
+            new java.math.BigDecimal("0.50"),
+            ChatToolPolicy.MAX_PROVIDER_CALLS_PER_TURN);
+
+    LlmExecutionReference firstReference =
+        factory.forChatTurn(
+            "user-1",
+            "org-1",
+            null,
+            "spec-chat",
+            "session-1",
+            "turn-1",
+            "correlation-1",
+            "deepseek",
+            null,
+            budget);
+    LlmExecutionReference secondReference =
+        factory.forChatTurn(
+            "user-1",
+            "org-1",
+            null,
+            "spec-chat",
+            "session-1",
+            "turn-2",
+            "correlation-2",
+            "deepseek",
+            null,
+            budget);
+
+    assertThat(firstReference.contextId()).isNotEqualTo(secondReference.contextId());
+    ArgumentCaptor<LlmExecutionContextCreateRequest> requests =
+        ArgumentCaptor.forClass(LlmExecutionContextCreateRequest.class);
+    verify(contexts, times(2)).create(requests.capture());
+    assertThat(requests.getAllValues())
+        .extracting(LlmExecutionContextCreateRequest::sourceId)
+        .doesNotHaveDuplicates();
+    assertThat(requests.getAllValues())
+        .extracting(LlmExecutionContextCreateRequest::correlationId)
+        .containsExactly("correlation-1", "correlation-2");
+    assertThat(requests.getAllValues())
+        .extracting(LlmExecutionContextCreateRequest::budget)
+        .containsOnly(budget);
   }
 
   @Test

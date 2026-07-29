@@ -4,7 +4,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.List;
 
 import org.junit.jupiter.api.Test;
 
@@ -12,15 +11,6 @@ class ProviderDispatchGuardCoverageTest {
 
   @Test
   void everyRemainingDirectProviderSpendingPathHasAuthorizationBoundary() throws Exception {
-    for (String file : List.of("test/NativeToolsTestController.java")) {
-      String source =
-          Files.readString(Path.of("src/main/java/com/navneet/executespec").resolve(file));
-      assertThat(source)
-          .as("direct provider path %s", file)
-          .contains("ProviderDispatchAuthorization")
-          .contains("dispatchAuthorization.authorize(");
-    }
-
     // RR-392 — the canonical router must delegate to the SHARED authorization component, not
     // re-implement the kill switch and reservation guard from its own @Value fields.
     assertThat(source("agent/LlmRouter.java"))
@@ -28,6 +18,24 @@ class ProviderDispatchGuardCoverageTest {
         .contains("providerDispatchAuthorization.authorize(");
     assertThat(source("project/rag/EmbeddingService.java"))
         .contains("providerDispatchAuthorization.authorize(");
+  }
+
+  @Test
+  void nativeToolsCompatibilityRoutesRemainProviderInertUntilDurableAuthorityExists()
+      throws Exception {
+    String source = source("test/NativeToolsTestController.java");
+
+    assertThat(source)
+        .contains("LIVE_PROVIDER_SMOKE_DISABLED")
+        .contains("PLATFORM_INTERNAL")
+        .doesNotContain(
+            "OpenAiNativeToolClient",
+            "AnthropicChatModel",
+            "GoogleGenAiChatModel",
+            "ProviderDispatchAuthorization",
+            "import com.navneet.executespec.agent.LlmRouter",
+            "private final LlmRouter",
+            ".call(");
   }
 
   @Test
