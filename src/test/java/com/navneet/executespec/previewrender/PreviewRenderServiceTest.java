@@ -24,6 +24,8 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 import com.navneet.executespec.config.featureflag.FeatureFlagService;
 import com.navneet.executespec.deployment.WorkspaceRestoreService;
@@ -449,7 +451,20 @@ class PreviewRenderServiceTest {
   @Test
   void yieldsTheWinningJobWhenTheDatabaseRejectsAConcurrentSecondJob() throws Exception {
     writeScreen("src/pages/Home.tsx", "Home");
-    stubSuccessfulRender();
+    CountDownLatch renderStarted = new CountDownLatch(1);
+    CountDownLatch releaseRender = new CountDownLatch(1);
+    when(agent.render(any(), any(), anyString(), anyString()))
+        .thenAnswer(
+            inv -> {
+              renderStarted.countDown();
+              if (!releaseRender.await(5, TimeUnit.SECONDS)) {
+                throw new IllegalStateException("test did not release the winning render");
+              }
+              return new PreviewRenderAgent.RenderedSurface(
+                  ((PreviewSurface) inv.getArgument(0)).id(),
+                  "<html><body><div>ok</div></body></html>",
+                  null);
+            });
     enforceOneActiveJobPerRun();
 
     // Both callers observe an empty active set, exactly as an interleaved read-then-write does.
@@ -459,10 +474,15 @@ class PreviewRenderServiceTest {
         .findActiveForRun(anyString());
 
     PreviewRenderJob first = service.requestRender(RUN_ID, "user");
-    PreviewRenderJob second = service.requestRender(RUN_ID, "user");
+    assertThat(renderStarted.await(5, TimeUnit.SECONDS)).isTrue();
 
-    assertThat(second.getId()).isEqualTo(first.getId());
-    assertThat(jobStore).hasSize(1);
+    try {
+      PreviewRenderJob second = service.requestRender(RUN_ID, "user");
+      assertThat(second.getId()).isEqualTo(first.getId());
+      assertThat(jobStore).hasSize(1);
+    } finally {
+      releaseRender.countDown();
+    }
     awaitTerminal(first);
   }
 

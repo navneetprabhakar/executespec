@@ -13,6 +13,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReferenceArray;
 
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.OrchestratorClientCapabilities;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.OrchestratorMode;
@@ -307,11 +308,22 @@ public class SubagentExecutionService {
     List<Result> results = new ArrayList<>();
     List<BatchFailure> failures = new ArrayList<>();
     List<Future<Result>> futures = new ArrayList<>(reserved.size());
+    AtomicReferenceArray<Result> completedResults = new AtomicReferenceArray<>(reserved.size());
     try (ExecutorService executor = Executors.newFixedThreadPool(reserved.size())) {
       for (int index = 0; index < requests.size(); index++) {
         SpawnRequest request = requests.get(index);
         Handle handle = reserved.get(index);
-        futures.add(executor.submit(() -> executeReserved(request, handle, user, orgId)));
+        int resultIndex = index;
+        futures.add(
+            executor.submit(
+                () -> {
+                  Result result = executeReserved(request, handle, user, orgId);
+                  // Publish a durable child success before FutureTask transitions to DONE. A
+                  // sibling can fail in that narrow transition window; relying only on isDone()
+                  // would then cancel this already-completed child and discard its result.
+                  completedResults.set(resultIndex, result);
+                  return result;
+                }));
       }
       boolean failed = false;
       Set<Integer> processed = new LinkedHashSet<>();
@@ -340,6 +352,12 @@ public class SubagentExecutionService {
         for (int index = 0; index < futures.size(); index++) {
           Future<Result> future = futures.get(index);
           if (processed.contains(index)) continue;
+          Result completedResult = completedResults.get(index);
+          if (completedResult != null) {
+            results.add(completedResult);
+            processed.add(index);
+            continue;
+          }
           if (!future.isDone()) {
             future.cancel(true);
             failures.add(
