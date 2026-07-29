@@ -57,8 +57,28 @@ public interface ExecutionRunRepository extends JpaRepository<ExecutionRun, Stri
           // RR-345 — PARTIAL is terminal; a PARTIAL launch must not be reconciled to FAILED by the
           // stale-launch sweep.
           + "WHERE e.status NOT IN ('COMPLETE', 'PARTIAL', 'FAILED', 'CANCELLED', 'ABORTED') "
+          // Approved-solution launches have their own observer recovery. Feeding a launch with a
+          // RUNNING/RECONCILING solution into executeApprovedPlan would skip that solution and
+          // derive a false terminal failure while its canonical child is still running.
+          + "AND NOT (e.status = 'EXECUTING' AND e.pipelineRunId IS NULL AND EXISTS ("
+          + "  SELECT 1 FROM ExecutionSolution s WHERE s.executionRun.id = e.id "
+          + "  AND s.status IN ('RUNNING', 'RECONCILING')"
+          + ")) "
           + "AND e.updatedAt < :cutoff")
   List<ExecutionRun> findStaleNonTerminal(@Param("cutoff") Instant cutoff);
+
+  /**
+   * Recovery candidates for the legacy approved-solution path. Kept separate from {@link
+   * #findStaleNonTerminal(Instant)} because these launches must re-arm their canonical child
+   * observers before normal layer execution can resume.
+   */
+  @Query(
+      "SELECT e FROM ExecutionRun e WHERE e.status = 'EXECUTING' "
+          + "AND e.pipelineRunId IS NULL AND e.updatedAt < :cutoff AND EXISTS ("
+          + "  SELECT 1 FROM ExecutionSolution s WHERE s.executionRun.id = e.id "
+          + "  AND s.status IN ('RUNNING', 'RECONCILING')"
+          + ")")
+  List<ExecutionRun> findStaleApprovedSolutionExecutions(@Param("cutoff") Instant cutoff);
 
   /**
    * V315 (RR-905) — atomically claim boot-recovery ownership of one interrupted launch.
@@ -92,6 +112,16 @@ public interface ExecutionRunRepository extends JpaRepository<ExecutionRun, Stri
       @Param("now") Instant now,
       @Param("staleBefore") Instant staleBefore,
       @Param("instanceId") String instanceId);
+
+  /** Refresh a boot-recovery lease only while the same instance still owns the execution. */
+  @Modifying
+  @Transactional
+  @Query(
+      "UPDATE ExecutionRun e SET e.recoveryHeartbeat = :now, e.version = e.version + 1 "
+          + "WHERE e.id = :id AND e.status = 'EXECUTING' "
+          + "AND e.recoveringInstance = :instanceId")
+  int heartbeatBootRecovery(
+      @Param("id") String id, @Param("instanceId") String instanceId, @Param("now") Instant now);
 
   /**
    * v2.5.7 — count non-terminal executions for a project. Used to gate {@code POST

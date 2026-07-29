@@ -106,7 +106,9 @@ public class AdminReconciliationService {
    * ExecutionOrchestrator boot-resume can re-dispatch them. Used only by {@link
    * #onApplicationReady}; the {@code @Scheduled} sweep keeps the broader cutoff because by the time
    * it fires, any EXECUTING row that ExecutionOrchestrator was supposed to resume has either
-   * advanced to a terminal status OR genuinely got stuck and deserves to be failed.
+   * advanced to a terminal status OR genuinely got stuck and deserves to be failed. The repository
+   * query deliberately excludes approved-solution launches with a RUNNING/RECONCILING child; {@link
+   * ExecutionSolutionObserverRecovery} owns those rows and their canonical child observers.
    */
   @Transactional
   ReconcileReport reconcileOrphansExcludingExecuting(long staleMinutes) {

@@ -6,6 +6,12 @@ tool must be explicitly classified in `ChatToolPolicy` as `PROJECT_READ`, `PROJE
 `PROJECT_READ` only. Run submission, plan decisions, cancellation, project generation, code-review
 scans, and child-agent spend use their explicit structured endpoints/proposals instead.
 
+The legacy write callbacks retained in `ProjectChatActionTools` remain filtered out of model-bound
+tool sets. Their plan APPROVE/REJECT implementation routes through `PlanApprovalService` and the
+V348 `PlanGateDecisionService` with typed `PROJECT_CHAT_ACTION` resolution evidence, so a future
+explicit binding cannot bypass atomic admission or use the legacy `GateStore` compatibility methods
+as a decision authority.
+
 `policy/ProjectChatPolicyResolver` resolves one immutable, secret-free `ProjectChatPolicy` before
 every legacy Spec Chat, persistent agent-session chat, and direct project-chat model turn. It binds
 the authenticated actor, actor org, host project org, effective project role, exact capabilities,
@@ -63,10 +69,18 @@ executor failure, org-override restoration, async route propagation, and aggrega
 
 Per-turn hard limits are 5 tool-enabled model rounds plus at most one tool-free final synthesis, 12
 tool calls, 40,000 observed input+output tokens, $0.50 incremental provider cost, and 60,000
-conversation characters. Crossing a limit prevents further tool/provider work and produces a
-bounded terminal explanation. Provider text, tool envelopes, SSE fields, and exception
-descriptions pass through `ContextSanitizer`; raw credentials and raw provider exception messages
-must never reach a client/model.
+conversation characters. The durable provider-call ceiling is 24 physical attempts: six logical
+rounds multiplied by the router's four-attempt same-provider retry envelope. Physical retries
+therefore cannot prematurely consume later logical rounds, while the independent model-round guard
+still prevents retries from granting extra reasoning turns. Crossing a limit prevents further
+tool/provider work and produces a bounded terminal explanation. Provider text, tool envelopes, SSE
+fields, and exception descriptions pass through `ContextSanitizer`; raw credentials and raw
+provider exception messages must never reach a client/model.
+
+Direct answer rounds request at most 8,192 output tokens and the forced tool-free synthesis requests
+at most 4,096. These ceilings replace the former 1,200/1,600 limits that cut otherwise valid code
+answers mid-file. A provider finish reason of `length` or `max_tokens` appends an explicit incomplete
+response warning; truncated generated files must not be presented as complete.
 
 The compatibility `POST /api/spec/chat` turn does not run on the servlet thread. `SpecChatController`
 hands the loop to `SpecChatTurnDispatcher`, which admits it onto a context-propagating virtual thread
@@ -90,3 +104,21 @@ append-only `agent_action_event`; legacy/project-chat admission and tool allow/d
 is additionally written through `ChatSecurityAuditService` to the hash-chained `activity_audit`.
 Audit metadata contains only tool/capability/outcome identifiers, never prompts, arguments,
 results, exception bodies, or secrets.
+
+The retained model-filtered `approve_plan` callback is not a gate shortcut. It first reauthorizes
+run write access and then uses `PlanApprovalService`, so managed-AI, governance, breaking-contract,
+and V348 canonical decision policy match the web/run and retained Execution View routes. The legacy
+tool schema carries no plan fingerprint or credit confirmation, so it cannot prove that the chat
+caller reviewed an exact plan/cost; a required breaking-report acknowledgement still fails closed
+and must move to the explicit plan UI. If admitted, the callback records a typed
+`PROJECT_CHAT_ACTION` resolution source. The breaking acknowledgement, immutable canonical receipt,
+gate status, run lifecycle, and outbox decision now commit atomically. Exact same-decision replay
+returns the stored receipt without re-evaluating mutable policy; an opposite decision conflicts.
+Because the legacy callback supplies no fingerprint, its receipt records the supplied fingerprint
+and match result as null rather than claiming a match; ENFORCED RequirementIR therefore fails
+closed. Explicit UI approval stores the report's ack timestamp, actor, and exact stored text in the
+receipt and cross-binds them to the report row. New acknowledgements persist uppercase `BREAKING`;
+an already-acknowledged pre-V348 report retains its exact historical spelling, is semantically
+validated by trimmed case-insensitive `BREAKING`, and remains exact-cross-bound.
+APPROVE produces `APPROVAL_RESUMING` + READY for the leased dispatcher, while REJECT remains distinct
+from pre-approval CANCEL. `requirement.ir.gate.mode` remains `LEGACY`.

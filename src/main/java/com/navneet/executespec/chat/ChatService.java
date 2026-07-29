@@ -8,10 +8,8 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.stream.Stream;
 
-import com.navneet.executespec.agent.LlmRequest;
 import com.navneet.executespec.agent.LlmRouter;
 import com.navneet.executespec.agent.PromptTrustBoundary;
-import com.navneet.executespec.agent.ToolProtocolLeakGuard;
 import com.navneet.executespec.config.AgentProperties;
 import com.navneet.executespec.executioncontext.LlmDispatchPolicyException;
 import com.navneet.executespec.executioncontext.LlmExecutionPolicyFactory;
@@ -29,7 +27,6 @@ import com.navneet.executespec.tool.ExecutionContext;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.SystemMessage;
-import org.springframework.ai.chat.messages.ToolResponseMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.tool.ToolCallback;
@@ -65,9 +62,6 @@ public class ChatService {
    */
   private static final int MAX_FILE_TREE_LINES = 120;
 
-  /** Hard cap on tool-execution rounds per chat turn — mirrors ProjectChatService. */
-  private static final int MAX_TOOL_ROUNDS = 4;
-
   /**
    * Visible-answer allowance for each bounded Ask call. Reasoning-capable providers count hidden
    * reasoning against maxTokens, so the old 1,200 ceiling could consume the full allowance and
@@ -82,13 +76,13 @@ public class ChatService {
   static final int MAX_HISTORY_CHARS_IN_PROMPT = 32_000;
 
   private final PipelineRunRepository runRepo;
-  private final LlmRouter router;
   private final ModelResolver modelResolver;
   private final AgentProperties agentProps;
   private final ValidationReportRepository validationReportRepo;
   private final RunChatTools runChatTools;
   private final LlmExecutionPolicyFactory executionPolicyFactory;
   private final ContextSanitizer contextSanitizer;
+  private final RunChatTurnExecutor turnExecutor;
   private static final ChatHistoryCodec HISTORY_CODEC = new ChatHistoryCodec();
 
   @Autowired
@@ -102,13 +96,13 @@ public class ChatService {
       LlmExecutionPolicyFactory executionPolicyFactory,
       ContextSanitizer contextSanitizer) {
     this.runRepo = runRepo;
-    this.router = router;
     this.modelResolver = modelResolver;
     this.agentProps = agentProps;
     this.validationReportRepo = validationReportRepo;
     this.runChatTools = runChatTools;
     this.executionPolicyFactory = executionPolicyFactory;
     this.contextSanitizer = contextSanitizer;
+    this.turnExecutor = new RunChatTurnExecutor(router);
   }
 
   /** Compatibility constructor for deterministic unit callers. */
@@ -132,7 +126,29 @@ public class ChatService {
 
   public record ChatMessage(String role, String content) {}
 
-  public record SendResult(String reply, int messageCount, int maxMessages) {}
+  public static final String OUTPUT_LIMIT_REASON = "PROVIDER_OUTPUT_LIMIT";
+
+  private static final String OUTPUT_LIMIT_NOTICE =
+      "\n\n"
+          + "_(The provider stopped at its output limit, so this answer is incomplete. Ask a"
+          + " narrower question or name the specific file or evidence to inspect, then retry.)_";
+
+  /**
+   * Additive completion contract for Ask. The text remains available for diagnosis, but callers can
+   * no longer mistake a provider-limited prefix for a complete answer.
+   */
+  public record SendResult(
+      String reply, int messageCount, int maxMessages, boolean complete, String incompleteReason) {}
+
+  record ChatAnswer(String text, boolean complete, String incompleteReason) {
+    static ChatAnswer complete(String text) {
+      return new ChatAnswer(text, true, null);
+    }
+
+    static ChatAnswer outputLimited(String text) {
+      return new ChatAnswer(text + OUTPUT_LIMIT_NOTICE, false, OUTPUT_LIMIT_REASON);
+    }
+  }
 
   /** Loaded history for the chat tab — empty list when no messages yet. */
   public List<ChatMessage> history(String runId) {
@@ -183,7 +199,7 @@ public class ChatService {
       run.setChatHistoryJson(serialize(history));
       run.setChatMessageCount(history.size());
       runRepo.save(run);
-      return new SendResult(reply, (int) userCount + 1, MAX_USER_MESSAGES);
+      return new SendResult(reply, (int) userCount + 1, MAX_USER_MESSAGES, true, null);
     }
 
     // Resolve provider + model (LIGHTWEIGHT tier — chat is Q&A, not planning).
@@ -241,8 +257,10 @@ public class ChatService {
     List<ToolCallback> tools = runChatTools.bind(new RunChatTools.ToolContext(runId, ctx));
 
     String reply;
+    ChatAnswer answer;
     try {
-      reply = runToolLoop(runId, providerName, model.getModel(), messages, ctx, tools);
+      answer = runToolLoop(runId, providerName, model.getModel(), messages, ctx, tools);
+      reply = answer.text();
       if (reply.isBlank())
         reply = "(The model returned an empty response. Try rephrasing the question.)";
       reply = contextSanitizer.sanitizeOutput(reply);
@@ -274,7 +292,12 @@ public class ChatService {
     run.setChatMessageCount(history.size());
     runRepo.save(run);
 
-    return new SendResult(reply, (int) userCount + 1, MAX_USER_MESSAGES);
+    return new SendResult(
+        reply,
+        (int) userCount + 1,
+        MAX_USER_MESSAGES,
+        answer.complete(),
+        answer.incompleteReason());
   }
 
   /**
@@ -290,160 +313,18 @@ public class ChatService {
         history, MAX_HISTORY_MESSAGES_IN_PROMPT, MAX_HISTORY_CHARS_IN_PROMPT);
   }
 
-  /**
-   * Manual tool-execution loop. {@link LlmRouter} sets {@code internalToolExecutionEnabled(false)}
-   * (the V2 worker pattern handles its own loop), so we dispatch each {@code tool_use} block
-   * through the matching read-only {@link ToolCallback}, append a {@link ToolResponseMessage}, and
-   * re-call the LLM until it stops emitting tool calls (or we hit {@link #MAX_TOOL_ROUNDS}).
-   * Mirrors {@code ProjectChatService.send}. Returns only the model's final answer — intermediate
-   * tool narration is kept in the in-memory conversation but never persisted as the answer.
-   */
-  String runToolLoop(
+  ChatAnswer runToolLoop(
       String runId,
       String providerName,
       String modelName,
       List<Message> seed,
       ExecutionContext ctx,
       List<ToolCallback> tools) {
-    List<Message> conversation = new ArrayList<>(seed);
-
-    for (int round = 0; round < MAX_TOOL_ROUNDS; round++) {
-      LlmRequest req =
-          LlmRequest.builder()
-              .provider(providerName)
-              .model(modelName)
-              .messages(conversation)
-              .context(ctx)
-              .agentRole("RunChatAgent")
-              .stepId("run-chat.round-" + (round + 1))
-              .temperature(0.2) // tiny bit of variety for a chat voice
-              .maxTokens(MAX_TOKENS_PER_CALL)
-              .toolsOverride(tools) // read-only: list_run_files / read_run_file only
-              .build();
-
-      ChatResponse resp = router.call(req);
-
-      // Aggregate text + tool calls across generations (Spring AI normally returns one).
-      StringBuilder turnText = new StringBuilder();
-      List<AssistantMessage.ToolCall> calls = new ArrayList<>();
-      for (var gen : resp.getResults()) {
-        String t = gen.getOutput().getText();
-        if (t != null && !t.isEmpty()) {
-          if (turnText.length() > 0) turnText.append('\n');
-          turnText.append(t);
-        }
-        if (gen.getOutput().getToolCalls() != null) {
-          calls.addAll(gen.getOutput().getToolCalls());
-        }
-      }
-      // Fail closed when a provider serializes its private tool protocol as assistant text.
-      if (calls.isEmpty()) {
-        if (!ToolProtocolLeakGuard.containsProtocolMarkup(turnText.toString())) {
-          return turnText.toString();
-        }
-        log.warn("Run chat suppressed textual tool-protocol markup for run {}", runId);
-        conversation.add(new AssistantMessage(turnText.toString()));
-        conversation.add(
-            new UserMessage(
-                "Your previous response exposed internal tool-call markup instead of an answer. "
-                    + "Do not call or describe tools. Answer the original question now using only "
-                    + "the run metadata and validation evidence already supplied. If that evidence "
-                    + "is insufficient, state the exact missing evidence plainly."));
-        return synthesizeFinal(runId, providerName, modelName, conversation, ctx);
-      }
-
-      // Append the assistant turn (text + tool_calls), then dispatch each read-only tool.
-      conversation.add(
-          AssistantMessage.builder().content(turnText.toString()).toolCalls(calls).build());
-
-      List<ToolResponseMessage.ToolResponse> toolResponses = new ArrayList<>();
-      for (AssistantMessage.ToolCall tc : calls) {
-        ToolCallback callback = findCallback(tools, tc.name());
-        String envelope;
-        if (callback == null) {
-          envelope = "{\"ok\":false,\"message\":\"unknown tool '" + tc.name() + "'\"}";
-          log.warn("Run chat: model called unknown tool '{}' for run {}", tc.name(), runId);
-        } else {
-          try {
-            envelope = callback.call(tc.arguments());
-          } catch (Exception ex) {
-            log.warn(
-                "Run chat tool '{}' threw {}: {}",
-                tc.name(),
-                ex.getClass().getSimpleName(),
-                ex.getMessage());
-            envelope = "{\"ok\":false,\"message\":\"" + ex.getClass().getSimpleName() + "\"}";
-          }
-        }
-        toolResponses.add(
-            new ToolResponseMessage.ToolResponse(
-                tc.id() == null ? "tc-" + System.nanoTime() : tc.id(), tc.name(), envelope));
-      }
-      conversation.add(ToolResponseMessage.builder().responses(toolResponses).build());
-    }
-
-    // The model used every inspection round. Intermediate narration such as "let me inspect the
-    // tests" is not an answer and must never be returned as if the turn completed. Make one final
-    // synthesis call with tools removed, so it must answer from the evidence already in the
-    // conversation. This call is bounded and cannot recurse into another tool loop.
-    log.warn(
-        "Run chat hit MAX_TOOL_ROUNDS={} for run {}; forcing synthesis", MAX_TOOL_ROUNDS, runId);
-    conversation.add(
-        new UserMessage(
-            "Tool inspection is complete. Answer the user's original question now using only the"
-                + " evidence already collected. Apply the evidence precedence and fact-versus-"
-                + "hypothesis rules from the system prompt. Be specific and do not describe future"
-                + " tool actions."));
-    return synthesizeFinal(runId, providerName, modelName, conversation, ctx);
+    return turnExecutor.execute(runId, providerName, modelName, seed, ctx, tools);
   }
 
-  private String synthesizeFinal(
-      String runId,
-      String providerName,
-      String modelName,
-      List<Message> conversation,
-      ExecutionContext ctx) {
-    LlmRequest synthesis =
-        LlmRequest.builder()
-            .provider(providerName)
-            .model(modelName)
-            .messages(conversation)
-            .context(ctx)
-            .agentRole("RunChatAgent")
-            .stepId("run-chat.synthesis")
-            .temperature(0.2)
-            // Reasoning models count hidden reasoning against this cap. At 1,200 tokens DeepSeek
-            // exhausted the entire allowance in reasoning and returned an empty visible answer.
-            // Keep this bounded, but leave enough room for both reasoning and a concise synthesis.
-            .maxTokens(MAX_TOKENS_PER_CALL)
-            .toolsOverride(List.of())
-            .toolChoice("none")
-            .build();
-    ChatResponse finalResponse = router.call(synthesis);
-    StringBuilder answer = new StringBuilder();
-    for (var generation : finalResponse.getResults()) {
-      String text = generation.getOutput().getText();
-      if (text == null || text.isBlank()) continue;
-      if (!answer.isEmpty()) answer.append('\n');
-      answer.append(text);
-    }
-    if (answer.isEmpty() || ToolProtocolLeakGuard.containsProtocolMarkup(answer.toString())) {
-      log.warn("Run chat synthesis produced no safe customer answer for run {}", runId);
-      return "I could not produce a grounded answer from the available run evidence. No internal "
-          + "tool output was used as a substitute for evidence.";
-    }
-    return answer.toString();
-  }
-
-  /**
-   * Lookup a {@link ToolCallback} by tool name. Returns null when the model calls an unknown tool.
-   */
-  private static ToolCallback findCallback(List<ToolCallback> tools, String name) {
-    if (name == null) return null;
-    for (ToolCallback t : tools) {
-      if (name.equals(t.getToolDefinition().name())) return t;
-    }
-    return null;
+  static boolean responseWasTruncated(ChatResponse response) {
+    return RunChatTurnExecutor.responseWasTruncated(response);
   }
 
   private static boolean isTerminal(String status) {
@@ -489,49 +370,7 @@ public class ChatService {
    * still produces useful output.
    */
   String renderValidationReport(String runId) {
-    ValidationReport rpt = findValidationReport(runId);
-    if (rpt == null) return "";
-
-    StringBuilder sb = new StringBuilder("## Validation report\n");
-    if (rpt.getVerifiedScore() != null) {
-      sb.append("- verifiedScore: ").append(rpt.getVerifiedScore()).append("/100");
-      sb.append(" — internal summary score, not independent proof");
-      sb.append('\n');
-    }
-    if (rpt.getAccuracyScore() != null) {
-      sb.append("- accuracyScore: ").append(rpt.getAccuracyScore()).append("/100");
-      if (rpt.getAccuracyGrade() != null)
-        sb.append(" (").append(rpt.getAccuracyGrade()).append(")");
-      sb.append(" — LLM-assessed, treat as estimate\n");
-    }
-    if (rpt.getReviewerVerdict() != null) {
-      sb.append("- reviewerVerdict: ").append(rpt.getReviewerVerdict()).append('\n');
-    }
-    sb.append("- finalBuildPassed: ").append(rpt.getFinalBuildPassed()).append('\n');
-    if (rpt.getTestsTotal() != null && rpt.getTestsTotal() > 0) {
-      sb.append("- tests: ").append(rpt.getTestsPassed()).append("/").append(rpt.getTestsTotal());
-      sb.append('\n');
-    }
-
-    // Per-dimension scores (skip nulls).
-    appendScoreLine(sb, "codeQuality", rpt.getCodeQualityScore());
-    appendScoreLine(sb, "testCoverage", rpt.getTestCoverageScore());
-    appendScoreLine(sb, "architecture", rpt.getArchitectureScore());
-    appendScoreLine(sb, "security", rpt.getSecurityScore());
-    appendScoreLine(sb, "performance", rpt.getPerformanceScore());
-    appendScoreLine(sb, "designCompliance", rpt.getDesignComplianceScore());
-
-    // Issues — capped at 8 most critical so the prompt stays bounded.
-    String issuesJson = rpt.getIssuesJson();
-    if (issuesJson != null && !issuesJson.isBlank() && !"[]".equals(issuesJson.trim())) {
-      sb.append("\n### Issues caught (raw JSON, up to 8)\n");
-      String capped = issuesJson;
-      if (capped.length() > 4_000) {
-        capped = capped.substring(0, 4_000) + "\n…(truncated)";
-      }
-      sb.append(capped).append('\n');
-    }
-    return sb.toString();
+    return RunChatValidationEvidence.render(findValidationReport(runId));
   }
 
   private ValidationReport findValidationReport(String runId) {
@@ -542,10 +381,6 @@ public class ChatService {
           "ChatService validation-report lookup failed for run={}: {}", runId, e.getMessage());
       return null;
     }
-  }
-
-  private static void appendScoreLine(StringBuilder sb, String label, Integer score) {
-    if (score != null) sb.append("- ").append(label).append(": ").append(score).append("/100\n");
   }
 
   /** Snapshot the top level of the workspace — files first, then directories. */

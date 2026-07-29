@@ -109,6 +109,19 @@ public class PrReviewAgent {
                 provider,
                 req.model(),
                 req.actorUserId());
+    ExecutionContext executionContext =
+        req.executionContext() != null
+            ? new ExecutionContext(
+                "pr-review-" + req.prReviewId(),
+                "review",
+                java.nio.file.Paths.get("/"),
+                executionReference,
+                req.executionContext().llmExecutionOperationAuthority())
+            : new ExecutionContext(
+                "pr-review-" + req.prReviewId(),
+                "review",
+                java.nio.file.Paths.get("/"),
+                executionReference);
 
     ChatResponse resp;
     try {
@@ -126,12 +139,7 @@ public class PrReviewAgent {
                   // Cost tracker scoping — runId/taskId convention used to attribute the
                   // tokens to a synthetic "pr-review-{prReviewId}" bucket so per-tier
                   // billing reports can pivot on it.
-                  .context(
-                      new ExecutionContext(
-                          "pr-review-" + req.prReviewId(),
-                          "review",
-                          java.nio.file.Paths.get("/"),
-                          executionReference))
+                  .context(executionContext)
                   .build());
     } catch (Exception e) {
       throw new PrReviewAgentException("LLM dispatch failed: " + e.getMessage());
@@ -327,7 +335,8 @@ public class PrReviewAgent {
       String provider,
       String model,
       String actorUserId,
-      LlmExecutionReference executionReference) {}
+      LlmExecutionReference executionReference,
+      ExecutionContext executionContext) {}
 
   public record AgentReviewComment(
       String filePath,

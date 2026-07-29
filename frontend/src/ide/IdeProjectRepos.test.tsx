@@ -19,6 +19,7 @@ const api = vi.hoisted(() => ({
   getProject: vi.fn(),
   getWorkspaceHealth: vi.fn(),
   getProjectCodeIndex: vi.fn(),
+  regenerateRepoArchitecture: vi.fn(),
 }));
 
 vi.mock('@/lib/api', () => api);
@@ -42,6 +43,11 @@ beforeEach(() => {
   api.getProject.mockResolvedValue({name: 'Project one'});
   api.getWorkspaceHealth.mockResolvedValue({repos: []});
   api.getProjectCodeIndex.mockRejectedValue(new Error('index readiness unavailable'));
+  api.regenerateRepoArchitecture.mockResolvedValue({
+    id: 'job-12345678',
+    projectId: 'project-1',
+    status: 'QUEUED',
+  });
 });
 
 afterEach(() => {
@@ -69,5 +75,45 @@ describe('IdeProjectRepos semantic-index honesty', () => {
       'This is not a claim that you have no semantic index status',
     );
     expect(host.textContent).toContain('Retry');
+  });
+
+  it('reports per-repo regeneration as a durable project map job, not completed work', async () => {
+    api.getProjectCodeIndex.mockResolvedValue([]);
+    api.getProjectRepos.mockResolvedValue([
+      {
+        id: 'repo-1',
+        githubRepoFullName: 'forge/service-one',
+        scmProvider: 'GITHUB',
+        sourceCapabilities: ['ARCHITECTURE'],
+      },
+    ]);
+
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={['/projects/project-1/repos']}>
+          <Routes>
+            <Route path='/projects/:projectId/repos' element={<IdeProjectRepos />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const regenerate = Array.from(host.querySelectorAll('button')).find(
+      (button) => button.textContent === 'Regenerate',
+    );
+    expect(regenerate).toBeDefined();
+    await act(async () => {
+      regenerate?.click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(api.regenerateRepoArchitecture).toHaveBeenCalledWith('project-1', 'repo-1');
+    expect(host.textContent).toContain(
+      'System map refresh was queued · job job-1234. Track progress in System map.',
+    );
+    expect(host.textContent).not.toContain('Architecture regenerated.');
   });
 });

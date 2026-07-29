@@ -66,12 +66,16 @@ public class PreviewRenderController {
     accessGuard.requireRunAccess(runId, userDetails);
 
     boolean available = renderService.enabled();
+    if (!available) {
+      // The release flag is an availability boundary, not only a spend gate. Do not disclose stale
+      // job or bundle metadata while the feature is disabled.
+      return ResponseEntity.ok(PreviewRenderDtos.RenderManifest.absent(runId, false, false));
+    }
     PreviewRenderJob job = renderService.latestJob(runId).orElse(null);
     // Feature-off wins and avoids a needless workspace/Git inspection. An active job remains
     // reloadable even if its workspace evidence disappears after it was admitted.
     boolean renderAllowed =
-        available
-            && ((job != null && !job.isTerminal()) || renderService.hasProductFilesToRender(runId));
+        (job != null && !job.isTerminal()) || renderService.hasProductFilesToRender(runId);
     if (job == null) {
       return ResponseEntity.ok(
           PreviewRenderDtos.RenderManifest.absent(runId, available, renderAllowed));
@@ -95,6 +99,10 @@ public class PreviewRenderController {
       @AuthenticationPrincipal AppUserDetails userDetails) {
 
     accessGuard.requireRunAccess(runId, userDetails);
+    if (!renderService.enabled()) {
+      throw new ResponseStatusException(
+          HttpStatus.SERVICE_UNAVAILABLE, "preview render is not enabled");
+    }
 
     PreviewRenderJob job =
         renderService

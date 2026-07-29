@@ -7,7 +7,10 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
+import java.util.Objects;
 import java.util.UUID;
+import java.util.concurrent.FutureTask;
+import java.util.concurrent.atomic.AtomicReference;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -15,6 +18,7 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.navneet.executespec.agent.Plan;
 import com.navneet.executespec.agent.RunKeyContextStore;
+import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.config.AgentProperties;
 import com.navneet.executespec.config.OperationalReleasePolicy;
 import com.navneet.executespec.config.featureflag.FeatureFlagService;
@@ -135,6 +139,9 @@ public class RunLifecycleService {
         null,
         null,
         null,
+        null,
+        null,
+        null,
         null);
   }
 
@@ -179,6 +186,9 @@ public class RunLifecycleService {
   private final ModelRegistry modelRegistry;
   private final OperationalReleasePolicy operationalReleasePolicy;
   private final LlmExecutionPolicyFactory llmExecutionPolicyFactory;
+  private final PlanGateDecisionService planGateDecisionService;
+  private final PlanGateResumeStore planGateResumeStore;
+  private final RunLlmOperationLifecycleService runOperationLifecycle;
 
   public enum PlanApprovalOutcome {
     RESUME_QUEUED,
@@ -191,122 +201,23 @@ public class RunLifecycleService {
     PLAN_MISSING
   }
 
-  /**
-   * Atomically resolves a durable plan gate and, on approval, queues the canonical post-plan
-   * pipeline. Repeating the same decision is a no-op; only an opposite decision conflicts.
-   */
-  public PlanApprovalOutcome resolvePlanGate(String runId, boolean approved) {
-    PipelineRun run = runRepo.findById(runId).orElse(null);
-    if (run == null) return PlanApprovalOutcome.NOT_FOUND;
-    if (!"AWAITING_APPROVAL".equals(run.getStatus())
-        && !"APPROVAL_RESUMING".equals(run.getStatus())) {
-      return PlanApprovalOutcome.INVALID_STATE;
-    }
-
-    GateStore.PlanGateClaim claim = gateStore.claimPlanGate(runId, approved);
-    if (claim != GateStore.PlanGateClaim.CLAIMED) {
-      boolean sameDecision =
-          (approved && claim == GateStore.PlanGateClaim.ALREADY_APPROVED)
-              || (!approved && claim == GateStore.PlanGateClaim.ALREADY_REJECTED);
-      return sameDecision
-          ? PlanApprovalOutcome.ALREADY_RESOLVED
-          : PlanApprovalOutcome.CONFLICTING_DECISION;
-    }
-
-    if (!approved) {
-      controlPort.terminate(runId, "CANCELLED", "plan rejected at approval gate", Instant.now());
-      return PlanApprovalOutcome.REJECTED;
-    }
-    return queueApprovedPlan(run, continuationFor(runId));
-  }
-
-  /** Reconciles an approved/rejected durable gate after a JVM restart. Pending gates stay idle. */
-  public PlanApprovalOutcome recoverPlanGate(String runId) {
-    PipelineRun run = runRepo.findById(runId).orElse(null);
-    if (run == null) return PlanApprovalOutcome.NOT_FOUND;
-    var gate = gateStore.findPlanGate(runId).orElse(null);
-    if (gate == null || "PENDING".equals(gate.getStatus())) {
-      return PlanApprovalOutcome.ALREADY_RESOLVED;
-    }
-    if ("REJECTED".equals(gate.getStatus())) {
-      controlPort.terminate(runId, "CANCELLED", "plan rejected at approval gate", Instant.now());
-      return PlanApprovalOutcome.REJECTED;
-    }
-    if (!"APPROVED".equals(gate.getStatus())) return PlanApprovalOutcome.INVALID_STATE;
-    return queueApprovedPlan(run, continuationFor(runId));
-  }
-
-  private RunOrchestrator.PlanGateContinuation continuationFor(String runId) {
-    String payload = gateStore.findPlanGate(runId).map(g -> g.getComment()).orElse(null);
-    if (payload == null || payload.isBlank()) {
-      return new RunOrchestrator.PlanGateContinuation(1, false, false, true, null, null);
-    }
-    try {
-      RunOrchestrator.PlanGateContinuation continuation =
-          objectMapper.readValue(payload, RunOrchestrator.PlanGateContinuation.class);
-      if (continuation.schemaVersion() != 1) {
-        throw new IllegalStateException(
-            "Unsupported plan-gate continuation schema " + continuation.schemaVersion());
-      }
-      return continuation;
-    } catch (Exception e) {
-      throw new IllegalStateException("Invalid plan-gate continuation for run " + runId, e);
-    }
-  }
-
-  private PlanApprovalOutcome queueApprovedPlan(
-      PipelineRun run, RunOrchestrator.PlanGateContinuation continuation) {
-    String runId = run.getRunId();
-    if (run.getPlanJson() == null || run.getPlanJson().isBlank()) {
-      controlPort.terminate(runId, "FAILED", "plan missing on approval resume", Instant.now());
-      return PlanApprovalOutcome.PLAN_MISSING;
-    }
-    Path workspace = Path.of(agentProps.getWorkspace(), runId).toAbsolutePath().normalize();
-    if (!Files.isDirectory(workspace)) {
-      try {
-        workspaceRestoreService.ensureWorkspaceAvailable(runId);
-      } catch (Exception e) {
-        log.warn("plan approval resume={} workspace restore failed: {}", runId, e.getMessage());
-      }
-      if (!Files.isDirectory(workspace)) {
-        controlPort.terminate(runId, "FAILED", "workspace gone on approval resume", Instant.now());
-        return PlanApprovalOutcome.WORKSPACE_GONE;
-      }
-    }
-
-    Instant resumedAt = Instant.now();
-    if ("AWAITING_APPROVAL".equals(run.getStatus())) {
-      // The initial state check in resolvePlanGate is intentionally not trusted here: cancel
-      // can win the race between that read and this queue operation. Claim the transition in the
-      // database so an approved run can never resurrect a concurrently-cancelled run.
-      if (runRepo.claimApprovalResume(runId, resumedAt) != 1) {
-        log.info("plan approval resume lost lifecycle race for run={}", runId);
-        return PlanApprovalOutcome.INVALID_STATE;
-      }
-      run.setStatus("APPROVAL_RESUMING");
-      run.setResumedAt(resumedAt);
-    } else if (!"APPROVAL_RESUMING".equals(run.getStatus())) {
-      return PlanApprovalOutcome.INVALID_STATE;
-    }
-    broadcaster.emit(runId, RunEvent.runStatus(runId, "APPROVAL_RESUMING"));
-    broadcaster.emit(runId, RunEvent.log(runId, "approval", "Plan approved — resuming execution"));
-
-    RunOrchestrator.RunPipelineRequest request =
-        RunOrchestrator.RunPipelineRequest.fromApprovedPlanRow(run, continuation);
-    java.util.concurrent.Future<?> future =
-        pool.submit(
-            () -> {
-              try {
-                controlPort.runPipelineForResume(request);
-              } finally {
-                controlPort.removeActiveRun(runId);
-              }
-            });
-    controlPort.putActiveRun(runId, future);
-    return PlanApprovalOutcome.RESUME_QUEUED;
-  }
-
   public boolean cancel(String runId) {
+    return cancel(runId, null);
+  }
+
+  public boolean cancel(String runId, AppUserDetails actor) {
+    return cancel(
+        runId,
+        actor,
+        actor == null
+            ? PlanGateDecisionService.ResolutionSource.SYSTEM_CANCEL
+            : PlanGateDecisionService.ResolutionSource.RUN_CANCEL_API);
+  }
+
+  public boolean cancel(
+      String runId,
+      AppUserDetails actor,
+      PlanGateDecisionService.ResolutionSource resolutionSource) {
     var opt = runRepo.findById(runId);
     if (opt.isEmpty()) return false;
     var run = opt.get();
@@ -315,6 +226,36 @@ public class RunLifecycleService {
 
     log.info("RunOrchestrator cancel: run={} prev={}", runId, status);
 
+    if ("AWAITING_APPROVAL".equals(status)) {
+      if (planGateDecisionService == null) return false;
+      PlanGateDecisionService.DecisionResult decision =
+          planGateDecisionService.cancel(runId, actor, resolutionSource, "Cancelled by user");
+      if (decision.decision() == PlanGateDecisionService.DecisionKind.CANCEL) {
+        emitCancellation(runId);
+        return true;
+      }
+      // Approval may have committed after the optimistic status read but before the decision
+      // service acquired its run/gate/outbox locks. Reload and continue through the fenced
+      // post-approval or normal WORKING cancellation path; never report a false conflict or make
+      // the caller retry.
+      PipelineRun current = runRepo.findById(runId).orElse(null);
+      if (current == null || isTerminal(current.getStatus())) return false;
+      status = current.getStatus();
+    }
+    if ("APPROVAL_RESUMING".equals(status)) {
+      if (planGateResumeStore != null
+          && planGateResumeStore.cancelApprovedRun(
+              runId, "Cancelled by user after approval", Instant.now())) {
+        emitCancellation(runId);
+        return true;
+      }
+      // Handoff may have won between our initial read and the fenced cancellation transaction.
+      // Reload and continue through normal WORKING cancellation rather than making the user retry.
+      PipelineRun current = runRepo.findById(runId).orElse(null);
+      if (current == null || isTerminal(current.getStatus())) return false;
+      status = current.getStatus();
+    }
+
     // Claim cancellation before touching transient state. A reviewer/validation thread may reach
     // terminal at the same time; only one terminal writer is allowed to win, and this narrow query
     // avoids saving a stale PipelineRun entity over concurrent usage/evidence fields.
@@ -322,15 +263,6 @@ public class RunLifecycleService {
             runId, "CANCELLED", null, "Cancelled by user from status " + status, Instant.now())
         != 1) {
       return false;
-    }
-
-    // Resolve the durable gate for auditability, then release the transient Redis signal. Approval
-    // never blocks a pipeline thread; it queues a fresh continuation from the persisted run row.
-    try {
-      gateStore.setPlanGate(runId, false);
-      gateStore.clearPlanGate(runId);
-    } catch (Exception e) {
-      log.debug("cancel: plan gate signal failed (likely no gate open): {}", e.getMessage());
     }
 
     // Interrupt before snapshotting so an in-flight provider request is asked to unwind first.
@@ -343,11 +275,15 @@ public class RunLifecycleService {
     persistenceWriter.raiseUsageFloor(runId, cost);
 
     // SSE makes the UI reflect the already-persisted cancellation immediately.
+    emitCancellation(runId);
+    return true;
+  }
+
+  private void emitCancellation(String runId) {
     broadcaster.emit(runId, RunEvent.runStatus(runId, "CANCELLED"));
     broadcaster.emit(runId, RunEvent.complete(runId, "CANCELLED"));
     broadcaster.complete(runId);
     metrics.recordRunOutcome("CANCELLED");
-    return true;
   }
 
   /**
@@ -524,17 +460,8 @@ public class RunLifecycleService {
     // skips earlier tasks; ContextStore's saved snapshot rehydrates the
     // worker conversation for the partly-completed task.
     final RunOrchestrator.RunPipelineRequest reReq =
-        RunOrchestrator.RunPipelineRequest.fromPausedRow(run);
-    java.util.concurrent.Future<?> future =
-        pool.submit(
-            () -> {
-              try {
-                controlPort.runPipelineForResume(reReq);
-              } finally {
-                controlPort.removeActiveRun(runId);
-              }
-            });
-    controlPort.putActiveRun(runId, future);
+        RunOrchestrator.RunPipelineRequest.fromPausedRow(run, persistedPlanGateContinuation(run));
+    dispatchRegistered(runId, () -> controlPort.runPipelineForResume(reReq));
     return RunOrchestrator.ResumeOutcome.OK;
   }
 
@@ -696,17 +623,8 @@ public class RunLifecycleService {
       broadcaster.emit(
           runId, RunEvent.log(runId, "resume", "Resuming after crash — re-running planner"));
       RunOrchestrator.RunPipelineRequest req =
-          RunOrchestrator.RunPipelineRequest.fromPausedRow(run);
-      java.util.concurrent.Future<?> future =
-          pool.submit(
-              () -> {
-                try {
-                  controlPort.runPipelineForResume(req);
-                } finally {
-                  controlPort.removeActiveRun(runId);
-                }
-              });
-      controlPort.putActiveRun(runId, future);
+          RunOrchestrator.RunPipelineRequest.fromPausedRow(run, persistedPlanGateContinuation(run));
+      dispatchRegistered(runId, () -> controlPort.runPipelineForResume(req));
       return RunOrchestrator.CrashResumeOutcome.OK;
     }
 
@@ -754,17 +672,41 @@ public class RunLifecycleService {
 
     final Path resumeWorkspace = workspace;
     final boolean resumeFromReviewing = "REVIEWING".equals(status);
-    java.util.concurrent.Future<?> future =
-        pool.submit(
+    final PlanGateContinuation durableContinuation = persistedPlanGateContinuation(run);
+    dispatchRegistered(
+        runId,
+        () ->
+            runPipelineFromExecuteCheckpoint(
+                runId, plan, resumeWorkspace, resumeFromReviewing, durableContinuation));
+    return RunOrchestrator.CrashResumeOutcome.OK;
+  }
+
+  /**
+   * Registers a recovery task before the executor can run its first instruction. Using {@code
+   * submitting a task and registering the returned future afterwards left a real window in which an
+   * inline/fast executor could finish (and remove itself) before the stale future was put into the
+   * active-run map. Rejection removes the pre-registered handle as well.
+   */
+  void dispatchRegistered(String runId, Runnable operation) {
+    AtomicReference<FutureTask<Void>> registeredTask = new AtomicReference<>();
+    FutureTask<Void> task =
+        new FutureTask<>(
             () -> {
               try {
-                runPipelineFromExecuteCheckpoint(runId, plan, resumeWorkspace, resumeFromReviewing);
+                operation.run();
               } finally {
-                controlPort.removeActiveRun(runId);
+                controlPort.removeActiveRun(runId, registeredTask.get());
               }
+              return null;
             });
-    controlPort.putActiveRun(runId, future);
-    return RunOrchestrator.CrashResumeOutcome.OK;
+    registeredTask.set(task);
+    controlPort.putActiveRun(runId, task);
+    try {
+      pool.executor().execute(task);
+    } catch (RuntimeException e) {
+      controlPort.removeActiveRun(runId, task);
+      throw e;
+    }
   }
 
   private boolean hasFreshActiveTask(String runId, Instant staleBefore) {
@@ -813,9 +755,11 @@ public class RunLifecycleService {
       String runId,
       com.navneet.executespec.agent.Plan plan,
       Path workspace,
-      boolean fromReviewing) {
+      boolean fromReviewing,
+      PlanGateContinuation continuation) {
     Instant startedAt = Instant.now();
     boolean localRun = false;
+    RunLlmOperationLifecycleService.PhaseLease operation = null;
     try {
       // Re-resolve BYOK keys for this resumed run — same pattern as runPipeline().
       try {
@@ -846,12 +790,18 @@ public class RunLifecycleService {
         return;
       }
       localRun = row.isLocalExecutionRequested() && localHandsEnabled;
+      if (continuation != null && continuation.localRun() != row.isLocalExecutionRequested()) {
+        throw new IllegalStateException("Persisted plan continuation local-run intent mismatch");
+      }
       if (localRun) {
         remoteToolDispatcher.registerAfterWorkerRestart(runId);
         log.info("resume run={} restoring LOCAL-hANDS transport; awaiting client reconnect", runId);
       }
       String provider = row.getAiProvider() == null ? "anthropic" : row.getAiProvider();
-      String model = row.isRoutePinned() ? row.getRequestedModel() : row.getWorkerModel();
+      String model =
+          continuation != null && continuation.pinnedModel() != null
+              ? continuation.pinnedModel()
+              : row.isRoutePinned() ? row.getRequestedModel() : row.getWorkerModel();
       String upperProvider = provider.toUpperCase();
       String projectId = row.getProjectId();
       List<UUID> selectedRepoIds = deserializeRepoIds(row.getSelectedRepoIds());
@@ -859,6 +809,8 @@ public class RunLifecycleService {
       ExecutionResult execResult = null;
       RunCostTracker.Snapshot afterExec = null;
       if (!fromReviewing) {
+        operation = requireRunOperationLifecycle().claimExecution(rootCtx, runId, provider, model);
+        ExecutionContext executionContext = operation.context();
         persistenceWriter.updateStatus(runId, "WORKING");
         try {
           execResult =
@@ -867,11 +819,19 @@ public class RunLifecycleService {
                       .plan(plan)
                       .provider(provider)
                       .model(model)
-                      .runContext(rootCtx)
+                      .runContext(executionContext)
                       .maxIterationsPerTask(null)
                       .enableSmokeTests(!localRun)
                       .localHandsMode(localRun)
+                      .requireConfirmationBeforeExpensiveContinuation(
+                          continuation != null && continuation.requireContinuationConfirmation())
+                      .requireBenchmarkPriorForAutomaticContinuation(
+                          continuation != null && continuation.requireContinuationBenchmarkPrior())
                       .routePinned(row.isRoutePinned())
+                      .lowComplexityWorkerStartTier(
+                          continuation == null
+                              ? null
+                              : continuation.lowComplexityWorkerStartTierOverride())
                       .originalGoal(row.getUserRequest())
                       .designBlock(null) // not persisted on the row — runs without it on resume
                       .projectId(projectId)
@@ -897,6 +857,7 @@ public class RunLifecycleService {
           return;
         }
         persistenceWriter.applyExecutionResultToTasks(runId, execResult);
+        operation = requireRunOperationLifecycle().completeAndClear(operation);
         afterExec = costTracker.snapshot(runId);
       }
 
@@ -938,19 +899,23 @@ public class RunLifecycleService {
             model);
       }
       ReviewerResult reviewResult = null;
+      operation =
+          requireRunOperationLifecycle().claimReview(rootCtx, runId, provider, reviewerModel);
+      ExecutionContext reviewContext = operation.context();
       try {
         reviewResult =
             reviewer.review(
                 ReviewerRequest.builder()
                     .provider(provider)
                     .model(reviewerModel)
-                    .context(rootCtx)
+                    .context(reviewContext)
                     .buildCommand(plan.buildCommand())
                     .skipWiringPass(false)
                     .originalGoal(row.getUserRequest())
                     .requirements(plan.requirements())
                     .build());
         persistenceWriter.persistReview(runId, reviewResult);
+        operation = requireRunOperationLifecycle().completeAndClear(operation);
       } catch (Exception e) {
         if (Thread.currentThread().isInterrupted() || pool.isShuttingDown()) {
           log.info(
@@ -961,6 +926,7 @@ public class RunLifecycleService {
         }
         log.warn("resume run={} reviewer failed — recording partial review", runId, e);
         persistenceWriter.persistReviewFailure(runId, e);
+        operation = requireRunOperationLifecycle().finishReviewAndClear(operation, true);
       }
 
       contextComposer.ensureReadme(
@@ -993,6 +959,9 @@ public class RunLifecycleService {
           RunOrchestrator.INTERNAL_ERROR_REASON,
           startedAt);
     } finally {
+      if (runOperationLifecycle != null) {
+        runOperationLifecycle.closeQuietly(runId, operation);
+      }
       RunModelOverrides.clear();
       keyContextStore.evict(runId);
       if (localRun) {
@@ -1002,6 +971,36 @@ public class RunLifecycleService {
           log.debug("resume run={} local-hands unregister failed", runId);
         }
       }
+    }
+  }
+
+  /**
+   * Rehydrates the exact continuation that crossed the approval boundary. Absence is valid only for
+   * runs that never had a plan gate; a present but non-COMPLETED/corrupt row fails closed.
+   */
+  PlanGateContinuation persistedPlanGateContinuation(PipelineRun run) {
+    if (planGateResumeStore == null) return null;
+    var persisted = planGateResumeStore.completedContinuation(run.getRunId()).orElse(null);
+    if (persisted == null) return null;
+    if (persisted.handlerContractVersion()
+            != PlanGateResumeDispatcher.SUPPORTED_HANDLER_CONTRACT_VERSION
+        || persisted.payload() == null
+        || persisted.payloadSha256() == null
+        || !Objects.equals(
+            persisted.payloadSha256(), DecisionEvidenceV1.sha256(persisted.payload()))) {
+      throw new IllegalStateException("Persisted plan continuation failed identity validation");
+    }
+    try {
+      PlanGateContinuation continuation =
+          objectMapper.readValue(persisted.payload(), PlanGateContinuation.class);
+      if (continuation.schemaVersion() != persisted.handlerContractVersion()) {
+        throw new IllegalStateException("Persisted plan continuation schema mismatch");
+      }
+      return continuation;
+    } catch (IllegalStateException e) {
+      throw e;
+    } catch (Exception e) {
+      throw new IllegalStateException("Persisted plan continuation is invalid", e);
     }
   }
 
@@ -1020,6 +1019,14 @@ public class RunLifecycleService {
       throw new IllegalStateException(
           "Run workspace cannot be resolved for durable LLM dispatch: " + runId, workspaceFailure);
     }
+  }
+
+  private RunLlmOperationLifecycleService requireRunOperationLifecycle() {
+    if (runOperationLifecycle == null) {
+      throw new IllegalStateException(
+          "Run LLM operation lifecycle is unavailable for retry/recovery work");
+    }
+    return runOperationLifecycle;
   }
 
   /**
@@ -1147,6 +1154,18 @@ public class RunLifecycleService {
     } catch (Exception e) {
       throw new IllegalStateException("Plan JSON corrupted: " + e.getMessage());
     }
+    String retryProvider =
+        override == null
+            ? (run.getAiProvider() == null ? "anthropic" : run.getAiProvider())
+            : override.provider();
+    String retryModel =
+        override == null
+            ? (run.isRoutePinned() ? run.getRequestedModel() : run.getWorkerModel())
+            : override.model();
+    ExecutionContext retryBaseContext = durableRunRootContext(runId, workspace);
+    RunLlmOperationLifecycleService.PhaseLease retryLease =
+        requireRunOperationLifecycle()
+            .beginExecutionRetry(retryBaseContext, runId, retryProvider, retryModel);
 
     log.info(
         "RunOrchestrator retryTask: run={} task={} override={}/{} dispatching real re-execution"
@@ -1170,10 +1189,12 @@ public class RunLifecycleService {
     broadcaster.emit(
         runId, RunEvent.log(runId, "retry", retryMessage(taskId, prevRunStatus, override)));
 
-    final java.nio.file.Path retryWorkspace = workspace;
     final String fullTargetTaskId = task.getTaskId(); // already prefixed with runId-short
-    java.util.concurrent.Future<?> future =
-        pool.submit(
+    AtomicReference<FutureTask<Void>> registeredRetry = new AtomicReference<>();
+    AtomicReference<RunLlmOperationLifecycleService.PhaseLease> retryOperation =
+        new AtomicReference<>(retryLease);
+    FutureTask<Void> future =
+        new FutureTask<>(
             () -> {
               try {
                 PipelineRun row = runRepo.findById(runId).orElse(null);
@@ -1204,7 +1225,7 @@ public class RunLifecycleService {
                       runId);
                 }
 
-                ExecutionContext rootCtx = durableRunRootContext(runId, retryWorkspace);
+                ExecutionContext rootCtx = retryOperation.get().context();
                 List<UUID> selectedRepoIds =
                     row == null ? List.of() : deserializeRepoIds(row.getSelectedRepoIds());
                 RunCostTracker.Snapshot beforeRetry = costTracker.snapshot(runId);
@@ -1242,6 +1263,7 @@ public class RunLifecycleService {
                         new com.navneet.executespec.harness.SequentialExecutor.ResumeRequest(
                             fullTargetTaskId));
                 persistenceWriter.applyExecutionResultToTasks(runId, result);
+                requireRunOperationLifecycle().complete(retryOperation.getAndSet(null));
                 RunCostTracker.Snapshot afterRetry = costTracker.snapshot(runId);
                 tokenAttributor.attributeWorkerAdditionalTask(
                     runId,
@@ -1292,6 +1314,9 @@ public class RunLifecycleService {
                     RunOrchestrator.INTERNAL_ERROR_REASON,
                     null);
               } finally {
+                if (runOperationLifecycle != null) {
+                  runOperationLifecycle.closeQuietly(runId, retryOperation.getAndSet(null));
+                }
                 RunModelOverrides.clear();
                 keyContextStore.evict(runId);
                 if (localRun) {
@@ -1301,13 +1326,22 @@ public class RunLifecycleService {
                     log.debug("retry run={} local-hands unregister failed", runId);
                   }
                 }
-                controlPort.removeActiveRun(runId);
+                controlPort.removeActiveRun(runId, registeredRetry.get());
               }
+              return null;
             });
+    registeredRetry.set(future);
     if (override != null) {
       appendApprovedContinuationAction(task, override);
     }
     controlPort.putActiveRun(runId, future);
+    try {
+      pool.executor().execute(future);
+    } catch (RuntimeException dispatchFailure) {
+      controlPort.removeActiveRun(runId, future);
+      requireRunOperationLifecycle().fail(retryOperation.getAndSet(null), "RETRY_DISPATCH_FAILED");
+      throw dispatchFailure;
+    }
   }
 
   private ReviewerResult runReviewerAfterApprovedPostReviewContinuation(
@@ -1321,13 +1355,16 @@ public class RunLifecycleService {
     persistenceWriter.updateStatus(runId, "REVIEWING");
     RunOrchestrator.ProviderModel reviewerRoute =
         RunOrchestrator.reviewerRouteFor(approvedProvider, approvedModel, result);
+    RunLlmOperationLifecycleService.PhaseLease reviewOperation =
+        requireRunOperationLifecycle()
+            .beginReviewRetry(rootCtx, runId, reviewerRoute.provider(), reviewerRoute.model());
     try {
       ReviewerResult reviewResult =
           reviewer.review(
               ReviewerRequest.builder()
                   .provider(reviewerRoute.provider())
                   .model(reviewerRoute.model())
-                  .context(rootCtx)
+                  .context(reviewOperation.context())
                   .buildCommand(plan.buildCommand())
                   .skipWiringPass(false)
                   .originalGoal(
@@ -1335,6 +1372,8 @@ public class RunLifecycleService {
                   .requirements(plan.requirements())
                   .build());
       persistenceWriter.persistReview(runId, reviewResult);
+      requireRunOperationLifecycle().complete(reviewOperation);
+      reviewOperation = null;
       RunCostTracker.Snapshot afterReview = costTracker.snapshot(runId);
       tokenAttributor.attributePhaseAdditional(
           runId,
@@ -1348,7 +1387,13 @@ public class RunLifecycleService {
       log.warn(
           "approved post-review continuation reviewer failed run={}: {}", runId, e.getMessage());
       persistenceWriter.persistReviewFailure(runId, e);
+      requireRunOperationLifecycle().fail(reviewOperation, "REVIEW_FAILED");
+      reviewOperation = null;
       return RunOrchestrator.reviewerFailedResult(e);
+    } finally {
+      if (runOperationLifecycle != null) {
+        runOperationLifecycle.closeQuietly(runId, reviewOperation);
+      }
     }
   }
 
@@ -1722,6 +1767,22 @@ public class RunLifecycleService {
           "re-review requires a terminal run (current: " + run.getStatus() + ")");
     }
     log.info("RunOrchestrator reReview: run={} previous status={}", runId, run.getStatus());
+    Path workspace = Path.of(agentProps.getWorkspace(), runId).toAbsolutePath().normalize();
+    if (!Files.isDirectory(workspace)) {
+      throw new IllegalStateException("re-review workspace is unavailable: " + workspace);
+    }
+    String operationProvider =
+        run.isRoutePinned() && run.getRequestedProvider() != null
+            ? run.getRequestedProvider()
+            : run.getAiProvider();
+    String operationModel =
+        run.isRoutePinned() && run.getRequestedModel() != null
+            ? run.getRequestedModel()
+            : run.getReviewerModel();
+    RunLlmOperationLifecycleService.PhaseLease reviewOperation =
+        requireRunOperationLifecycle()
+            .beginReviewRetry(
+                durableRunRootContext(runId, workspace), runId, operationProvider, operationModel);
 
     validationReportRepository
         .findByRunId(runId)
@@ -1741,31 +1802,39 @@ public class RunLifecycleService {
     runRepo.save(run);
     broadcaster.emit(runId, RunEvent.runStatus(runId, "REVIEWING"));
 
-    pool.submit(
-        () -> {
-          try {
-            runReReviewBlocking(runId);
-          } catch (Exception e) {
-            log.error("RunOrchestrator reReview run={} failed unexpectedly", runId, e);
+    try {
+      pool.submit(
+          () -> {
+            RunLlmOperationLifecycleService.PhaseLease activeReview = reviewOperation;
             try {
-              var stuck = runRepo.findById(runId).orElse(null);
-              if (stuck != null && "REVIEWING".equals(stuck.getStatus())) {
-                stuck.setStatus("PARTIAL");
-                stuck.setStatusReason("RE_REVIEW_FAILED");
-                stuck.setCompletedAt(Instant.now());
-                runRepo.save(stuck);
-                broadcaster.emit(runId, RunEvent.complete(runId, "PARTIAL", "RE_REVIEW_FAILED"));
+              runReReviewBlocking(runId, activeReview);
+              activeReview = null;
+            } catch (Exception e) {
+              log.error("RunOrchestrator reReview run={} failed unexpectedly", runId, e);
+              try {
+                var stuck = runRepo.findById(runId).orElse(null);
+                if (stuck != null && "REVIEWING".equals(stuck.getStatus())) {
+                  stuck.setStatus("PARTIAL");
+                  stuck.setStatusReason("RE_REVIEW_FAILED");
+                  stuck.setCompletedAt(Instant.now());
+                  runRepo.save(stuck);
+                  broadcaster.emit(runId, RunEvent.complete(runId, "PARTIAL", "RE_REVIEW_FAILED"));
+                }
+              } catch (Exception ignored) {
+                // give up — operator can hit the endpoint again
               }
-            } catch (Exception ignored) {
-              // give up — operator can hit the endpoint again
+            } finally {
+              runOperationLifecycle.closeQuietly(runId, activeReview);
+              // RR-486 — backstop: pool threads are reused, so an uncleared bound route (e.g. an
+              // unchecked throw before runReReviewBlocking's own clear) must not leak an exact pin
+              // onto the next task that runs on this thread.
+              RunModelOverrides.clear();
             }
-          } finally {
-            // RR-486 — backstop: pool threads are reused, so an uncleared bound route (e.g. an
-            // unchecked throw before runReReviewBlocking's own clear) must not leak an exact pin
-            // onto the next task that runs on this thread.
-            RunModelOverrides.clear();
-          }
-        });
+          });
+    } catch (RuntimeException dispatchFailure) {
+      requireRunOperationLifecycle().fail(reviewOperation, "RE_REVIEW_DISPATCH_FAILED");
+      throw dispatchFailure;
+    }
   }
 
   /**
@@ -1773,11 +1842,11 @@ public class RunLifecycleService {
    * fresh {@code ExecutionContext}, runs reviewer + validation report generation, then derives +
    * persists the new terminal status.
    */
-  private void runReReviewBlocking(String runId) {
+  private void runReReviewBlocking(
+      String runId, RunLlmOperationLifecycleService.PhaseLease reviewOperation) {
     var run = runRepo.findById(runId).orElse(null);
     if (run == null) {
-      log.warn("RunOrchestrator reReview: run {} disappeared mid-flight", runId);
-      return;
+      throw new IllegalStateException("re-review run disappeared mid-flight: " + runId);
     }
     // RR-486 — reconstruct the run's immutable routing authority instead of silently defaulting to
     // OpenAI, and bind org overrides + the exact pin so the refreshed reviewer spends the SAME
@@ -1824,10 +1893,11 @@ public class RunLifecycleService {
       run.setCompletedAt(Instant.now());
       runRepo.save(run);
       broadcaster.emit(runId, RunEvent.complete(runId, "PARTIAL", "RE_REVIEW_NO_WORKSPACE"));
+      requireRunOperationLifecycle().fail(reviewOperation, "RE_REVIEW_NO_WORKSPACE");
       RunModelOverrides.clear(); // RR-486
       return;
     }
-    ExecutionContext rootCtx = durableRunRootContext(runId, workspace).child("_re_review_");
+    ExecutionContext rootCtx = reviewOperation.context().child("_re_review_");
 
     String buildCommand = null;
     Plan parsedPlan = null;
@@ -1843,6 +1913,7 @@ public class RunLifecycleService {
     }
 
     ReviewerResult reviewResult = null;
+    boolean reviewFailed = false;
     try {
       log.info(
           "RunOrchestrator reReview run={} provider={} model={} buildCmd={}",
@@ -1863,8 +1934,11 @@ public class RunLifecycleService {
                   .build());
       persistenceWriter.persistReview(runId, reviewResult);
     } catch (Exception e) {
+      reviewFailed = true;
       log.warn("RunOrchestrator reReview run={} reviewer failed: {}", runId, e.getMessage());
       persistenceWriter.persistReviewFailure(runId, e);
+    } finally {
+      requireRunOperationLifecycle().finishReviewAndClear(reviewOperation, reviewFailed);
     }
 
     ExecutionResult execResult = persistenceWriter.reconstructExecResultFromTasks(runId);

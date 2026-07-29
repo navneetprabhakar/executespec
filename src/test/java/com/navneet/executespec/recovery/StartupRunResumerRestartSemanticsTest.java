@@ -53,7 +53,7 @@ class StartupRunResumerRestartSemanticsTest {
   }
 
   @Test
-  void awaitingApproval_isLeftUntouchedWhenItsPendingGateIsReconciled() {
+  void awaitingApproval_isOwnedExclusivelyByPlanGateOutboxDispatcher() {
     PipelineRun run =
         PipelineRun.builder()
             .runId(RUN_ID)
@@ -65,19 +65,14 @@ class StartupRunResumerRestartSemanticsTest {
     SseBroadcaster broadcaster = mock(SseBroadcaster.class);
     @SuppressWarnings("unchecked")
     ObjectProvider<RunLifecycleService> lifecycleProvider = mock(ObjectProvider.class);
-    RunLifecycleService lifecycle = mock(RunLifecycleService.class);
-
     when(runRepo.findByStatusIn(any())).thenReturn(List.of(run));
-    when(lifecycleProvider.getObject()).thenReturn(lifecycle);
-    when(lifecycle.recoverPlanGate(RUN_ID))
-        .thenReturn(RunLifecycleService.PlanApprovalOutcome.ALREADY_RESOLVED);
 
     StartupRunResumer resumer =
         new StartupRunResumer(runRepo, taskRepo, broadcaster, lifecycleProvider);
     resumer.scanAndRecover();
 
     assertThat(run.getStatus()).isEqualTo("AWAITING_APPROVAL");
-    verify(lifecycle).recoverPlanGate(RUN_ID);
+    verify(lifecycleProvider, never()).getObject();
     verify(runRepo, never()).save(any(PipelineRun.class));
     verify(taskRepo, never()).findByRunId(RUN_ID);
     verify(broadcaster, never()).emit(eq(RUN_ID), any());
@@ -96,17 +91,13 @@ class StartupRunResumerRestartSemanticsTest {
     SseBroadcaster broadcaster = mock(SseBroadcaster.class);
     @SuppressWarnings("unchecked")
     ObjectProvider<RunLifecycleService> lifecycleProvider = mock(ObjectProvider.class);
-    RunLifecycleService lifecycle = mock(RunLifecycleService.class);
-
     when(runRepo.findByStatusIn(any())).thenReturn(List.of(run));
-    when(lifecycleProvider.getObject()).thenReturn(lifecycle);
-    when(lifecycle.recoverPlanGate(RUN_ID))
-        .thenReturn(RunLifecycleService.PlanApprovalOutcome.ALREADY_RESOLVED);
 
     new StartupRunResumer(runRepo, taskRepo, broadcaster, lifecycleProvider).scanAndRecover();
 
     verify(runRepo, never()).save(any(PipelineRun.class));
     verify(taskRepo, never()).findByRunId(RUN_ID);
+    verify(lifecycleProvider, never()).getObject();
   }
 
   @Test
@@ -163,7 +154,7 @@ class StartupRunResumerRestartSemanticsTest {
   }
 
   @Test
-  void longRunningRunWithFreshHeartbeatRemainsEligibleForCrashRecovery() {
+  void startupDoesNotRaceAWorkerWithFreshDurableExecutionOwnership() {
     PipelineRun run =
         PipelineRun.builder()
             .runId(RUN_ID)
@@ -172,24 +163,15 @@ class StartupRunResumerRestartSemanticsTest {
             .startedAt(Instant.now().minusSeconds(12 * 60 * 60))
             .executionHeartbeat(Instant.now().minusSeconds(30))
             .build();
-    AgentTask active =
-        AgentTask.builder().taskId(RUN_ID + "-task").runId(RUN_ID).status("WORKING").build();
     PipelineRunRepository runRepo = mock(PipelineRunRepository.class);
     AgentTaskRepository taskRepo = mock(AgentTaskRepository.class);
     SseBroadcaster broadcaster = mock(SseBroadcaster.class);
     @SuppressWarnings("unchecked")
     ObjectProvider<RunLifecycleService> lifecycleProvider = mock(ObjectProvider.class);
-    RunLifecycleService lifecycle = mock(RunLifecycleService.class);
-
     when(runRepo.findByStatusIn(any())).thenReturn(List.of(run));
-    when(taskRepo.findByRunId(RUN_ID)).thenReturn(List.of(active));
-    when(lifecycleProvider.getObject()).thenReturn(lifecycle);
-    when(lifecycle.resumeAfterCrash(RUN_ID))
-        .thenReturn(com.navneet.executespec.integration.RunOrchestrator.CrashResumeOutcome.OK);
-
     new StartupRunResumer(runRepo, taskRepo, broadcaster, lifecycleProvider).scanAndRecover();
 
-    verify(lifecycle).resumeAfterCrash(RUN_ID);
+    verify(lifecycleProvider, never()).getObject();
     verify(runRepo, never()).save(any(PipelineRun.class));
     assertThat(run.getStatus()).isEqualTo("WORKING");
   }
@@ -245,5 +227,58 @@ class StartupRunResumerRestartSemanticsTest {
     verify(lifecycleProvider, never()).getObject();
     verify(runRepo, never()).save(any(PipelineRun.class));
     assertThat(run.getStatus()).isEqualTo("PLANNING");
+  }
+
+  @Test
+  void genericRecoveryExcludesQueuedCompletedPlanGateHandoffOwner() {
+    PipelineRun run =
+        PipelineRun.builder()
+            .runId(RUN_ID)
+            .status("WORKING")
+            .harnessVersion("v2")
+            .executingInstance(
+                "node-a"
+                    + com.navneet.executespec.integration.PlanGateResumeDispatcher
+                        .QUEUED_HANDOFF_OWNER_MARKER
+                    + "process-1")
+            .executionHeartbeat(Instant.now().minusSeconds(180))
+            .build();
+    PipelineRunRepository runRepo = mock(PipelineRunRepository.class);
+    AgentTaskRepository taskRepo = mock(AgentTaskRepository.class);
+    SseBroadcaster broadcaster = mock(SseBroadcaster.class);
+    @SuppressWarnings("unchecked")
+    ObjectProvider<RunLifecycleService> lifecycleProvider = mock(ObjectProvider.class);
+    when(runRepo.findByStatusIn(any())).thenReturn(List.of(run));
+
+    new StartupRunResumer(runRepo, taskRepo, broadcaster, lifecycleProvider).scanAndRecover();
+
+    verify(lifecycleProvider, never()).getObject();
+    verify(runRepo, never()).save(any(PipelineRun.class));
+  }
+
+  @Test
+  void runtimeStartedPlanGateWorkerUsesNormalCheckpointRecoveryAfterCrash() {
+    PipelineRun run =
+        PipelineRun.builder()
+            .runId(RUN_ID)
+            .status("WORKING")
+            .harnessVersion("v2")
+            .executingInstance("node-a")
+            .executionHeartbeat(Instant.now().minusSeconds(180))
+            .build();
+    PipelineRunRepository runRepo = mock(PipelineRunRepository.class);
+    AgentTaskRepository taskRepo = mock(AgentTaskRepository.class);
+    SseBroadcaster broadcaster = mock(SseBroadcaster.class);
+    @SuppressWarnings("unchecked")
+    ObjectProvider<RunLifecycleService> lifecycleProvider = mock(ObjectProvider.class);
+    RunLifecycleService lifecycle = mock(RunLifecycleService.class);
+    when(runRepo.findByStatusIn(any())).thenReturn(List.of(run));
+    when(lifecycleProvider.getObject()).thenReturn(lifecycle);
+    when(lifecycle.resumeAfterCrash(RUN_ID))
+        .thenReturn(com.navneet.executespec.integration.RunOrchestrator.CrashResumeOutcome.OK);
+
+    new StartupRunResumer(runRepo, taskRepo, broadcaster, lifecycleProvider).scanAndRecover();
+
+    verify(lifecycle).resumeAfterCrash(RUN_ID);
   }
 }

@@ -1,4 +1,5 @@
 import type {
+  ArchitectureJob,
   ProjectDashboardDTO,
   ProjectCodeIndexStatus,
   ProjectCodeIndexRefreshAccepted,
@@ -418,20 +419,52 @@ export const updateRepoRelationships = (
   });
 
 // Architecture docs (R3)
+export const startArchitectureRefresh = (projectId: string) =>
+  req<ArchitectureJob>(`/projects/${projectId}/architecture/generate-async`, {
+    method: 'POST',
+  });
+
+export const getArchitectureRefreshJob = (projectId: string, jobId: string) =>
+  req<ArchitectureJob>(`/projects/${projectId}/architecture/jobs/${jobId}`);
+
+export const getActiveArchitectureRefreshJob = async (projectId: string) =>
+  (await req<ArchitectureJob | undefined>(`/projects/${projectId}/architecture/jobs/active`)) ??
+  null;
+
+/** Latest durable state, including terminal NEEDS_CONFIRMATION after a browser reload. */
+export const getLatestArchitectureRefreshJob = async (projectId: string) =>
+  (await req<ArchitectureJob | undefined>(`/projects/${projectId}/architecture/jobs/latest`)) ??
+  null;
+
+export const cancelArchitectureRefreshJob = (projectId: string, jobId: string) =>
+  req<void>(`/projects/${projectId}/architecture/jobs/${jobId}`, {method: 'DELETE'});
+
+/**
+ * Explicitly confirms a retry of the same durable job after the server reports an uncertain
+ * provider outcome. Starting a fresh job is intentionally not a substitute for this route.
+ */
+export const confirmArchitectureRefreshRetry = (projectId: string, jobId: string) =>
+  req<ArchitectureJob>(`/projects/${projectId}/architecture/jobs/${jobId}/confirm-retry`, {
+    method: 'POST',
+  });
+
+/** Compatibility for older clients; the web console uses startArchitectureRefresh. */
 export const generateArchitecture = (projectId: string) =>
-  req<ArchitectureDoc>(`/projects/${projectId}/architecture/generate`, {method: 'POST'});
+  req<ArchitectureJob>(`/projects/${projectId}/architecture/generate`, {
+    method: 'POST',
+  });
 
 // Per-repo architecture regen (Task #82) — explicit, heavy (codemap + per-repo arch LLM calls).
-// Split out of syncRepo, which is now a fast metadata-only refresh.
+// The intent is admitted through the same durable project-wide refresh boundary so canonical
+// project and repository map versions cannot be published independently.
 export const regenerateRepoArchitecture = (projectId: string, repoId: string) =>
-  req<{id: string; version: number; content: string; generatedAt: string}>(
-    `/projects/${projectId}/repos/${repoId}/regenerate-architecture`,
-    {method: 'POST'},
-  );
+  req<ArchitectureJob>(`/projects/${projectId}/repos/${repoId}/regenerate-architecture`, {
+    method: 'POST',
+  });
 
 // Project workspace analyse (regenerates codemaps + architecture.md + summary.md on disk)
 export const analyseProject = (projectId: string, branch?: string) =>
-  req<ArchitectureDoc>(
+  req<ArchitectureJob>(
     `/projects/${projectId}/analyse${branch ? `?branch=${encodeURIComponent(branch)}` : ''}`,
     {method: 'POST'},
   );
@@ -537,7 +570,10 @@ export const getProjectSummary = (projectId: string) =>
   req<{content: string}>(`/projects/${projectId}/summary`);
 
 export const generateProjectDoc = (projectId: string, docType: GeneratedDocType) =>
-  req<GeneratedDocRow>(`/projects/${projectId}/docs/${docType}/generate`, {method: 'POST'});
+  req<GeneratedDocRow>(`/projects/${projectId}/docs/${docType}/generate`, {
+    method: 'POST',
+    timeoutMs: 3 * 60_000,
+  });
 
 /**
  * Returns null (204) when the doc hasn't been generated yet. Callers should

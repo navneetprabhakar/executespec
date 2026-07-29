@@ -7,9 +7,8 @@ import java.util.UUID;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.auth.security.AppUserDetails;
-import com.navneet.executespec.codeintel.ProjectArchitectureService;
+import com.navneet.executespec.codeintel.ProjectArchitectureJobService;
 import com.navneet.executespec.codeintel.ProjectDocGeneratorService;
-import com.navneet.executespec.codeintel.StalenessService;
 import com.navneet.executespec.codeintel.entity.ProjectGeneratedDoc.DocType;
 import com.navneet.executespec.codereview.CodeReviewService;
 import com.navneet.executespec.executioncontext.LlmExecutionPolicyFactory;
@@ -30,11 +29,10 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class ProjectChatConfirmedActionExecutor {
 
-  private final ProjectArchitectureService architectureService;
+  private final ProjectArchitectureJobService architectureJobs;
   private final ProjectDocGeneratorService docGeneratorService;
   private final CodeReviewService codeReviewService;
   private final ProjectRepoService projectRepoService;
-  private final StalenessService stalenessService;
   private final LlmExecutionPolicyFactory executionPolicyFactory;
   private final ObjectMapper objectMapper;
 
@@ -44,6 +42,9 @@ public class ProjectChatConfirmedActionExecutor {
       AppUserDetails principal) {
     Map<String, String> target = parseTarget(confirmation.getTargetJson());
     LlmProvider provider = LlmProvider.valueOf(confirmation.getProvider().toUpperCase());
+    if (action == ProjectChatConfirmationService.Action.REGENERATE_ARCHITECTURE) {
+      return regenerate(confirmation, principal, provider, target);
+    }
     String actionId = confirmation.getId().toString();
     LlmExecutionReference actionReference;
     try {
@@ -69,8 +70,7 @@ public class ProjectChatConfirmedActionExecutor {
         RunModelOverrides.withRunPin(Map.of(), provider, confirmation.getModel()));
     try {
       return switch (action) {
-        case REGENERATE_ARCHITECTURE ->
-            regenerate(confirmation, principal, provider, target, actionReference);
+        case REGENERATE_ARCHITECTURE -> throw new IllegalStateException("handled before context");
         case GENERATE_PROJECT_DOC ->
             generateDoc(confirmation, principal, provider, target, actionReference);
         case RUN_CODE_REVIEW ->
@@ -85,29 +85,20 @@ public class ProjectChatConfirmedActionExecutor {
       ProjectChatConfirmation confirmation,
       AppUserDetails principal,
       LlmProvider provider,
-      Map<String, String> target,
-      LlmExecutionReference actionReference) {
+      Map<String, String> target) {
     projectRepoService.requireProjectCapability(
         confirmation.getProjectId(), ScmCapability.ARCHITECTURE, "regenerate project architecture");
-    String pat = principal.getUser().getGithubPat();
-    var document =
-        architectureService.generate(
+    var job =
+        architectureJobs.requestExact(
             confirmation.getProjectId(),
-            blankToNull(target.get("branch")),
-            pat,
-            provider,
             confirmation.getActorUserId(),
-            actionReference);
-    if (isDeterministicFallback(document.getContent())) {
-      throw new ResponseStatusException(
-          HttpStatus.SERVICE_UNAVAILABLE,
-          "Exact confirmed architecture route failed; deterministic fallback was retained");
-    }
-    stalenessService.invalidate(confirmation.getProjectId());
+            blankToNull(target.get("branch")),
+            provider,
+            confirmation.getModel());
     Map<String, Object> result = new LinkedHashMap<>();
     result.put("action", ActionName.REGENERATE_ARCHITECTURE.name());
-    result.put("architectureVersion", document.getVersion());
-    result.put("status", "COMPLETED");
+    result.put("jobId", job.id().toString());
+    result.put("status", "QUEUED");
     addRouteEvidence(result, confirmation);
     return result;
   }
@@ -168,13 +159,6 @@ public class ProjectChatConfirmedActionExecutor {
     result.put("provider", confirmation.getProvider());
     result.put("model", confirmation.getModel());
     result.put("routePinned", true);
-  }
-
-  private static boolean isDeterministicFallback(String content) {
-    return content == null
-        || content.isBlank()
-        || content.startsWith("# Project architecture (deterministic)")
-        || content.contains("LLM generation failed");
   }
 
   private Map<String, String> parseTarget(String targetJson) {

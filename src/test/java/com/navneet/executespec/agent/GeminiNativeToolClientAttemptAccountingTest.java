@@ -1,6 +1,7 @@
 package com.navneet.executespec.agent;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
@@ -12,11 +13,15 @@ import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.nio.file.Path;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -26,6 +31,12 @@ import com.navneet.executespec.config.featureflag.FeatureFlagService;
 import com.navneet.executespec.cost.LlmUsageAttributionResolver;
 import com.navneet.executespec.cost.RunCostTracker;
 import com.navneet.executespec.cost.RunStepUsageRecorder;
+import com.navneet.executespec.executioncontext.LlmExecutionOperationAdmissionPolicy;
+import com.navneet.executespec.executioncontext.LlmExecutionOperationAuthority;
+import com.navneet.executespec.executioncontext.LlmExecutionOperationClaim;
+import com.navneet.executespec.executioncontext.LlmExecutionReference;
+import com.navneet.executespec.executioncontext.LlmExecutionScope;
+import com.navneet.executespec.executioncontext.PhysicalProviderAttemptAdmissionService;
 import com.navneet.executespec.tool.ExecutionContext;
 
 import org.junit.jupiter.api.AfterEach;
@@ -185,6 +196,113 @@ class GeminiNativeToolClientAttemptAccountingTest {
   }
 
   @Test
+  void atomicModeReadmitsEvery429HttpAttemptAndUsesEachFreshCredential() throws Exception {
+    when(flags.isEnabled("gemini.explicit-cache.enabled")).thenReturn(false);
+    server.enqueue(rateLimited());
+    server.enqueue(json(200, SUCCESS));
+    LlmRequest atomicRequest = atomicAuditRequest();
+    PhysicalProviderAttemptAdmissionService physical =
+        mock(PhysicalProviderAttemptAdmissionService.class);
+    List<String> kinds = new ArrayList<>();
+    when(physical.admitChatAttempt(
+            eq(atomicRequest),
+            anyInt(),
+            anyString(),
+            nullable(String.class),
+            any(Duration.class),
+            any(Duration.class)))
+        .thenAnswer(
+            invocation -> {
+              int ordinal = invocation.getArgument(1);
+              String kind = invocation.getArgument(2);
+              kinds.add(kind);
+              return admitted(atomicRequest, ordinal, kind, "fresh-key-" + ordinal);
+            });
+    client =
+        spy(
+            new GeminiNativeToolClient(
+                new ObjectMapper(),
+                flags,
+                costTracker,
+                recorder,
+                new LlmExecutionOperationAdmissionPolicy("ENFORCED"),
+                physical));
+    doNothing().when(client).rateLimitSleep(anyLong());
+    ReflectionTestUtils.setField(client, "baseUrl", server.url("/").toString());
+
+    client.callAudited(
+        wireRequest,
+        new GeminiNativeToolClient.AuditContext(
+            atomicRequest, "ORG", new AtomicInteger(), new AtomicReference<>()));
+
+    assertThat(kinds).containsExactly("PRIMARY", "RETRY");
+    assertThat(server.takeRequest(1, TimeUnit.SECONDS).getHeader("x-goog-api-key"))
+        .isEqualTo("fresh-key-1");
+    assertThat(server.takeRequest(1, TimeUnit.SECONDS).getHeader("x-goog-api-key"))
+        .isEqualTo("fresh-key-2");
+    verify(recorder, org.mockito.Mockito.never())
+        .prepareAttempt(
+            any(),
+            anyString(),
+            anyString(),
+            anyString(),
+            anyInt(),
+            anyString(),
+            nullable(String.class));
+  }
+
+  @Test
+  void atomicModeDoesNotAdmitAnIntentWhenLocalRequestBodyPreflightFails() {
+    when(flags.isEnabled("gemini.explicit-cache.enabled")).thenReturn(false);
+    LlmRequest atomicRequest = atomicAuditRequest();
+    PhysicalProviderAttemptAdmissionService physical =
+        mock(PhysicalProviderAttemptAdmissionService.class);
+    client =
+        new GeminiNativeToolClient(
+            new ObjectMapper(),
+            flags,
+            costTracker,
+            recorder,
+            new LlmExecutionOperationAdmissionPolicy("ENFORCED"),
+            physical);
+    ToolDefinition invalidDefinition =
+        DefaultToolDefinition.builder()
+            .name("invalid")
+            .description("invalid")
+            .inputSchema("{not-json")
+            .build();
+    ToolCallback invalidTool =
+        new ToolCallback() {
+          @Override
+          public ToolDefinition getToolDefinition() {
+            return invalidDefinition;
+          }
+
+          @Override
+          public String call(String toolInput) {
+            return "";
+          }
+        };
+    GeminiNativeToolClient.GeminiToolCallRequest invalidWireRequest =
+        GeminiNativeToolClient.GeminiToolCallRequest.builder()
+            .model(MODEL)
+            .messages(wireRequest.messages())
+            .tools(List.of(invalidTool))
+            .apiKey("stale-key")
+            .build();
+
+    assertThatThrownBy(
+            () ->
+                client.callAudited(
+                    invalidWireRequest,
+                    new GeminiNativeToolClient.AuditContext(
+                        atomicRequest, "ORG", new AtomicInteger(), new AtomicReference<>())))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("Invalid JSON schema");
+    verifyNoInteractions(physical);
+  }
+
+  @Test
   void sendsApiKeyOnlyInHeaderNeverInRequestUri() throws Exception {
     when(flags.isEnabled("gemini.explicit-cache.enabled")).thenReturn(false);
     server.enqueue(json(200, SUCCESS));
@@ -335,11 +453,110 @@ class GeminiNativeToolClientAttemptAccountingTest {
     assertThat(generate.getRequestUrl().queryParameterNames()).doesNotContain("key");
   }
 
+  @Test
+  void atomicModeSeparatelyAdmitsCacheMintAndGenerationWithFreshKeys() throws Exception {
+    when(flags.isEnabled("gemini.explicit-cache.enabled")).thenReturn(true);
+    server.enqueue(json(200, "{\"name\":\"cachedContents/atomic-cache\"}"));
+    server.enqueue(json(200, SUCCESS));
+    LlmRequest atomicRequest = atomicAuditRequest();
+    PhysicalProviderAttemptAdmissionService physical =
+        mock(PhysicalProviderAttemptAdmissionService.class);
+    List<String> kinds = new ArrayList<>();
+    when(physical.admitChatAttempt(
+            eq(atomicRequest),
+            anyInt(),
+            anyString(),
+            nullable(String.class),
+            any(Duration.class),
+            any(Duration.class)))
+        .thenAnswer(
+            invocation -> {
+              int ordinal = invocation.getArgument(1);
+              String kind = invocation.getArgument(2);
+              kinds.add(kind);
+              return admitted(atomicRequest, ordinal, kind, "atomic-key-" + ordinal);
+            });
+    client =
+        spy(
+            new GeminiNativeToolClient(
+                new ObjectMapper(),
+                flags,
+                costTracker,
+                recorder,
+                new LlmExecutionOperationAdmissionPolicy("ENFORCED"),
+                physical));
+    ReflectionTestUtils.setField(client, "baseUrl", server.url("/").toString());
+
+    client.callAudited(
+        wireRequest,
+        new GeminiNativeToolClient.AuditContext(
+            atomicRequest, "ORG", new AtomicInteger(), new AtomicReference<>()));
+
+    assertThat(kinds).containsExactly("CACHE_MINT", "PRIMARY");
+    assertThat(server.takeRequest(1, TimeUnit.SECONDS).getHeader("x-goog-api-key"))
+        .isEqualTo("atomic-key-1");
+    assertThat(server.takeRequest(1, TimeUnit.SECONDS).getHeader("x-goog-api-key"))
+        .isEqualTo("atomic-key-2");
+  }
+
   private GeminiNativeToolClient.AuditedCallResult callWithFreshAuditContext() {
     return client.callAudited(
         wireRequest,
         new GeminiNativeToolClient.AuditContext(
             auditRequest, "ORG", new AtomicInteger(), new AtomicReference<>()));
+  }
+
+  private LlmRequest atomicAuditRequest() {
+    LlmExecutionReference reference =
+        new LlmExecutionReference("ctx-gemini", LlmExecutionScope.customer("org-a"));
+    LlmExecutionOperationAuthority authority =
+        LlmExecutionOperationAuthority.issue(
+            new LlmExecutionOperationClaim(reference, "llmop-gemini", 1, 1, UUID.randomUUID()),
+            "owner-a");
+    return auditRequest.toBuilder()
+        .context(
+            new ExecutionContext(
+                "run-1", "task-1", Path.of("/").toAbsolutePath(), reference, authority))
+        .llmExecutionContextId(reference.contextId())
+        .llmExecutionScope(reference.scope())
+        .llmExecutionOperationAuthority(authority)
+        .build();
+  }
+
+  private static PhysicalProviderAttemptAdmissionService.AdmittedPhysicalAttempt admitted(
+      LlmRequest request, int ordinal, String kind, String apiKey) {
+    String physicalId = request.usageLogicalCallId() + ":gemini:" + ordinal;
+    RunStepUsageRecorder.AttemptHandle handle =
+        new RunStepUsageRecorder.AttemptHandle(
+            physicalId,
+            request.usageLogicalCallId(),
+            ordinal == 1 ? null : request.usageLogicalCallId() + ":gemini:" + (ordinal - 1),
+            kind,
+            ordinal,
+            "gemini",
+            request.model(),
+            "WORKHORSE",
+            "USER",
+            ordinal,
+            new LlmUsageAttributionResolver.Attribution(
+                request.llmExecutionContextId(),
+                "org-a",
+                "user-a",
+                null,
+                null,
+                "WorkerAgent",
+                "PIPELINE_RUN",
+                "run-1",
+                "run-1"));
+    com.navneet.executespec.cost.LlmUsageAttemptIntent intent =
+        com.navneet.executespec.cost.LlmUsageAttemptIntent.builder()
+            .physicalAttemptId(handle.physicalAttemptId())
+            .logicalCallId(handle.logicalCallId())
+            .attemptKind(handle.attemptKind())
+            .attemptOrdinal(handle.attemptOrdinal())
+            .build();
+    return new PhysicalProviderAttemptAdmissionService.AdmittedPhysicalAttempt(
+        handle, intent, apiKey, RunKeyContext.Source.USER, Instant.now().plusSeconds(60));
   }
 
   private void stubRecorderAfterClear() {

@@ -20,8 +20,11 @@ import com.navneet.executespec.project.entity.ProjectRepoLink;
 import com.navneet.executespec.project.repository.ProjectRepoLinkRepository;
 import com.navneet.executespec.project.repository.ProjectRepoRepository;
 import com.navneet.executespec.project.workspace.ProjectWorkspaceService;
+import com.navneet.executespec.router.AgentTier;
 import com.navneet.executespec.router.LlmProvider;
 import com.navneet.executespec.router.ProjectProviderResolver;
+import com.navneet.executespec.router.RunModelOverrides;
+import com.navneet.executespec.tool.ExecutionContext;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -93,6 +96,10 @@ public class ProjectArchitectureService {
     return generate(projectId, null, null);
   }
 
+  public Optional<ProjectArchitectureDoc> findById(UUID id) {
+    return id == null ? Optional.empty() : archDocRepo.findById(id);
+  }
+
   public ProjectArchitectureDoc generate(String projectId, String branchOverride) {
     return generate(projectId, branchOverride, null);
   }
@@ -104,7 +111,8 @@ public class ProjectArchitectureService {
    */
   public ProjectArchitectureDoc generate(
       String projectId, String branchOverride, String patOverride, LlmProvider providerOverride) {
-    return generateInternal(projectId, branchOverride, patOverride, providerOverride, null, null);
+    return generateInternal(
+        projectId, branchOverride, patOverride, providerOverride, null, null, true);
   }
 
   /** Confirmed Project Chat path with immutable initiating-actor attribution. */
@@ -115,7 +123,7 @@ public class ProjectArchitectureService {
       LlmProvider providerOverride,
       String actorUserId) {
     return generateInternal(
-        projectId, branchOverride, patOverride, providerOverride, actorUserId, null);
+        projectId, branchOverride, patOverride, providerOverride, actorUserId, null, true);
   }
 
   /** Confirmed action path: all downstream LLM calls share one durable hard budget. */
@@ -132,7 +140,8 @@ public class ProjectArchitectureService {
         patOverride,
         providerOverride,
         actorUserId,
-        confirmedActionReference);
+        confirmedActionReference,
+        true);
   }
 
   /**
@@ -170,7 +179,314 @@ public class ProjectArchitectureService {
    */
   public ProjectArchitectureDoc generate(
       String projectId, String branchOverride, String patOverride) {
-    return generateInternal(projectId, branchOverride, patOverride, null, null, null);
+    return generateInternal(projectId, branchOverride, patOverride, null, null, null, true);
+  }
+
+  /**
+   * Durable V353 job path. Customer-repository publication is suppressed because that external PR
+   * side effect does not yet carry the job's database fencing token; the generated codemap,
+   * architecture rows, workspace documents, and UI result remain complete.
+   */
+  public ProjectArchitectureDoc generateForDurableJob(
+      String projectId,
+      String patOverride,
+      LlmProvider provider,
+      String actorUserId,
+      LlmExecutionReference executionReference) {
+    return generateInternal(
+        projectId, null, patOverride, provider, actorUserId, executionReference, false);
+  }
+
+  public record StagedCodeMap(
+      UUID repoId, String repoFullName, String branch, String revision, String content) {}
+
+  public record StagedRepoArchitecture(
+      UUID repoId,
+      String repoFullName,
+      String branch,
+      String revision,
+      String content,
+      String modelUsed,
+      int inputTokens,
+      int outputTokens,
+      double costUsd,
+      boolean fallback) {}
+
+  public record StagedProjectArchitecture(
+      String content,
+      String generatedFromShas,
+      String generatedFromBranches,
+      double costUsd,
+      String modelUsed,
+      int inputTokens,
+      int outputTokens,
+      boolean fallback) {}
+
+  public record StagedArtifacts(
+      int schemaVersion,
+      String projectId,
+      List<StagedCodeMap> codeMaps,
+      List<StagedRepoArchitecture> repoArchitectures,
+      StagedProjectArchitecture projectArchitecture,
+      String summary,
+      String qualityStatus,
+      List<String> qualityEvidence) {}
+
+  /**
+   * Generate entirely in memory from an immutable V353 source snapshot. This method performs no
+   * repository save, workspace write, retention prune, activity event, or customer-repository PR.
+   * Only {@link ProjectArchitectureJobPublisher} can make this stage visible.
+   */
+  public StagedArtifacts stageForDurableJob(
+      ProjectArchitectureJobStore.Job job,
+      ProjectArchitectureJobService.SourceSnapshot snapshot,
+      java.util.Map<UUID, String> credentials) {
+    return stageForDurableJob(job, snapshot, credentials, () -> {});
+  }
+
+  StagedArtifacts stageForDurableJob(
+      ProjectArchitectureJobStore.Job job,
+      ProjectArchitectureJobService.SourceSnapshot snapshot,
+      java.util.Map<UUID, String> credentials,
+      Runnable cooperativeFence) {
+    return stageForDurableJob(job, snapshot, credentials, cooperativeFence, null);
+  }
+
+  StagedArtifacts stageForDurableJob(
+      ProjectArchitectureJobStore.Job job,
+      ProjectArchitectureJobService.SourceSnapshot snapshot,
+      java.util.Map<UUID, String> credentials,
+      Runnable cooperativeFence,
+      ExecutionContext operationContext) {
+    LlmProvider provider = LlmProvider.valueOf(job.requestedProvider());
+    if (!java.util.Objects.equals(job.repoArchitectureModel(), job.projectArchitectureModel())) {
+      throw new IllegalStateException(
+          "Repository and project architecture routes must share the configured PLANNING model");
+    }
+    java.util.Map<String, String> exactRoutes =
+        java.util.Map.of(
+            RunModelOverrides.key(provider, AgentTier.PLANNING), job.projectArchitectureModel());
+    java.util.Map<String, String> previous = RunModelOverrides.capture();
+    RunModelOverrides.bind(exactRoutes);
+    try {
+      List<StagedCodeMap> codeMaps = new ArrayList<>();
+      List<StagedRepoArchitecture> repoArchitectures = new ArrayList<>();
+      List<RepoArchitectureDoc> transientRepoDocs = new ArrayList<>();
+      List<String> repoNames = new ArrayList<>();
+      List<String> warnings = new ArrayList<>();
+      java.util.LinkedHashMap<String, String> shas = new java.util.LinkedHashMap<>();
+      java.util.LinkedHashMap<String, String> branches = new java.util.LinkedHashMap<>();
+      LlmExecutionReference repoReference =
+          new LlmExecutionReference(
+              job.repoExecutionContextId(),
+              com.navneet.executespec.executioncontext.LlmExecutionScope.customer(job.orgId()));
+      LlmExecutionReference projectReference =
+          new LlmExecutionReference(
+              job.projectExecutionContextId(),
+              com.navneet.executespec.executioncontext.LlmExecutionScope.customer(job.orgId()));
+
+      for (ProjectArchitectureJobService.SourceRepo source : snapshot.repositories()) {
+        cooperativeFence.run();
+        ProjectRepo repo =
+            repoRepo
+                .findById(source.repoId())
+                .orElseThrow(() -> new IllegalStateException("Snapshotted repository was removed"));
+        String credential = credentials.get(source.repoId());
+        if (credential == null || credential.isBlank()) {
+          throw new IllegalStateException("No current credential for snapshotted repository");
+        }
+        ProjectCodeMap latest =
+            codeMapRepo
+                .findFirstByProjectIdAndRepoIdOrderByVersionDesc(job.projectId(), source.repoId())
+                .filter(cm -> source.revision().equals(cm.getGeneratedFromSha()))
+                .orElse(null);
+        String codeMapContent;
+        if (latest != null && latest.getContent() != null && !latest.getContent().isBlank()) {
+          codeMapContent = latest.getContent();
+        } else {
+          CodeMapGenerator.Result generated =
+              codeMapGenerator.generateWithSha(source.repoFullName(), source.branch(), credential);
+          cooperativeFence.run();
+          if (!source.revision().equals(generated.sha())) {
+            throw new IllegalStateException("Repository changed while its codemap was generated");
+          }
+          codeMapContent = generated.markdown();
+        }
+        if (codeMapContent == null || codeMapContent.isBlank()) {
+          throw new IllegalStateException("Generated codemap is empty");
+        }
+        codeMaps.add(
+            new StagedCodeMap(
+                source.repoId(),
+                source.repoFullName(),
+                source.branch(),
+                source.revision(),
+                codeMapContent));
+        shas.put(source.repoFullName(), source.revision());
+        branches.put(source.repoFullName(), source.branch());
+
+        RepoArchitectureGenerator.Result generatedRepo;
+        boolean repoFallback = false;
+        try {
+          cooperativeFence.run();
+          generatedRepo =
+              operationContext == null
+                  ? repoArchGenerator.generate(
+                      job.projectId(),
+                      source.repoFullName(),
+                      codeMapContent,
+                      provider,
+                      job.requestedByUserId(),
+                      repoReference)
+                  : repoArchGenerator.generateWithOperationContext(
+                      job.projectId(),
+                      source.repoFullName(),
+                      codeMapContent,
+                      provider,
+                      job.requestedByUserId(),
+                      operationContext.child("repo-architecture-" + source.repoId()));
+          cooperativeFence.run();
+        } catch (RepoArchitectureGenerator.ProviderOutputIncompleteException incomplete) {
+          throw incomplete;
+        } catch (Exception failure) {
+          repoFallback = true;
+          warnings.add("REPOSITORY_ARCHITECTURE_FALLBACK:" + source.repoId());
+          generatedRepo =
+              new RepoArchitectureGenerator.Result(
+                  fallbackRepoArchitectureMarkdown(source.repoFullName(), codeMapContent),
+                  0,
+                  0,
+                  "fallback");
+        }
+        double repoCost =
+            repoFallback
+                ? 0.0
+                : costTracker.computeCost(
+                    providerNameFor(provider),
+                    generatedRepo.modelUsed(),
+                    generatedRepo.inputTokens(),
+                    generatedRepo.outputTokens());
+        repoArchitectures.add(
+            new StagedRepoArchitecture(
+                source.repoId(),
+                source.repoFullName(),
+                source.branch(),
+                source.revision(),
+                generatedRepo.markdown(),
+                generatedRepo.modelUsed(),
+                generatedRepo.inputTokens(),
+                generatedRepo.outputTokens(),
+                repoCost,
+                repoFallback));
+        transientRepoDocs.add(
+            RepoArchitectureDoc.builder()
+                .projectId(job.projectId())
+                .repoId(source.repoId())
+                .version(1)
+                .content(generatedRepo.markdown())
+                .generatedFromSha(source.revision())
+                .modelUsed(generatedRepo.modelUsed())
+                .inputTokens(generatedRepo.inputTokens())
+                .outputTokens(generatedRepo.outputTokens())
+                .costUsd(repoCost)
+                .build());
+        repoNames.add(source.repoFullName());
+      }
+
+      ArchitectureDocGenerator.Result combined;
+      boolean combinedFallback = false;
+      try {
+        cooperativeFence.run();
+        combined =
+            operationContext == null
+                ? archDocGenerator.generate(
+                    job.projectId(),
+                    transientRepoDocs,
+                    repoNames,
+                    provider,
+                    job.requestedByUserId(),
+                    projectReference)
+                : archDocGenerator.generateWithOperationContext(
+                    job.projectId(),
+                    transientRepoDocs,
+                    repoNames,
+                    provider,
+                    job.requestedByUserId(),
+                    operationContext.child("combined-architecture"));
+        cooperativeFence.run();
+      } catch (RepoArchitectureGenerator.ProviderOutputIncompleteException incomplete) {
+        throw incomplete;
+      } catch (Exception failure) {
+        combinedFallback = true;
+        warnings.add("PROJECT_ARCHITECTURE_DETERMINISTIC_FALLBACK");
+        java.util.LinkedHashMap<String, String> byRepo = new java.util.LinkedHashMap<>();
+        for (int i = 0; i < transientRepoDocs.size(); i++) {
+          byRepo.put(repoNames.get(i), transientRepoDocs.get(i).getContent());
+        }
+        combined =
+            new ArchitectureDocGenerator.Result(
+                ArchitectureDocGenerator.deterministicCombined(job.projectId(), byRepo),
+                0,
+                0,
+                "deterministic");
+      }
+      if (combined.markdown() == null || combined.markdown().isBlank()) {
+        throw new IllegalStateException("Generated project architecture is empty");
+      }
+      double combinedCost =
+          combinedFallback
+              ? 0.0
+              : costTracker.computeCost(
+                  providerNameFor(provider),
+                  combined.modelUsed(),
+                  combined.inputTokens(),
+                  combined.outputTokens());
+      StagedProjectArchitecture projectArchitecture =
+          new StagedProjectArchitecture(
+              combined.markdown(),
+              writeJson(shas),
+              writeJson(branches),
+              combinedCost,
+              combined.modelUsed(),
+              combined.inputTokens(),
+              combined.outputTokens(),
+              combinedFallback);
+
+      // Brief generation is deliberately excluded from the durable provider context. Sharing the
+      // PLANNING context with this LIGHTWEIGHT operation would violate the exact-route contract.
+      String summary = deterministicSummary(combined.markdown());
+      return new StagedArtifacts(
+          1,
+          job.projectId(),
+          List.copyOf(codeMaps),
+          List.copyOf(repoArchitectures),
+          projectArchitecture,
+          summary,
+          warnings.isEmpty() ? "QUALIFIED" : "WARNING",
+          List.copyOf(warnings));
+    } finally {
+      RunModelOverrides.bind(previous);
+    }
+  }
+
+  private String writeJson(Object value) {
+    try {
+      return objectMapper.writeValueAsString(value);
+    } catch (Exception failure) {
+      throw new IllegalStateException("Could not stage architecture source evidence", failure);
+    }
+  }
+
+  private static String deterministicSummary(String markdown) {
+    if (markdown == null || markdown.isBlank()) return "";
+    String first =
+        markdown
+            .lines()
+            .map(String::trim)
+            .filter(line -> !line.isBlank() && !line.startsWith("#"))
+            .findFirst()
+            .orElse("Project architecture is available.");
+    return first.length() <= 500 ? first : first.substring(0, 500);
   }
 
   private ProjectArchitectureDoc generateInternal(
@@ -179,7 +495,9 @@ public class ProjectArchitectureService {
       String patOverride,
       LlmProvider providerOverride,
       String actorUserId,
-      LlmExecutionReference confirmedActionReference) {
+      LlmExecutionReference confirmedActionReference,
+      boolean publishToCustomerRepos) {
+    rejectDirectPublication();
     List<ProjectRepoLink> links = linkRepo.findByProjectId(projectId);
     if (links.isEmpty()) {
       throw new ResponseStatusException(
@@ -359,7 +677,9 @@ public class ProjectArchitectureService {
     workspaceWarmer.warmDiskCache(projectId);
     // E1.2 — also publish each per-repo codemap to .executespec/arch/codemap.md
     // on the customer repo. Best-effort: never fails the regen flow.
-    publishCodemapsToCustomerRepos(projectId, codeMaps, repoFullNames, patOverride);
+    if (publishToCustomerRepos) {
+      publishCodemapsToCustomerRepos(projectId, codeMaps, repoFullNames, patOverride);
+    }
     return doc;
   }
 
@@ -917,6 +1237,7 @@ public class ProjectArchitectureService {
    */
   /** Same connection-leak reasoning as {@link #generate} — no outer tx. */
   public RepoArchitectureDoc regenerateForRepo(String projectId, UUID repoId, String patOverride) {
+    rejectDirectPublication();
     ProjectRepo repo =
         repoRepo
             .findById(repoId)
@@ -967,8 +1288,26 @@ public class ProjectArchitectureService {
     return rad;
   }
 
+  private static void rejectDirectPublication() {
+    throw new IllegalStateException(
+        "Direct architecture publication is retired; admit a durable architecture job");
+  }
+
   public Optional<ProjectArchitectureDoc> latest(String projectId) {
     return archDocRepo.findFirstByProjectIdOrderByVersionDesc(projectId);
+  }
+
+  /**
+   * Reads the codemap bound to one exact architecture-source revision. Callers generating derived
+   * artifacts must not mix a newer latest codemap into an older architecture snapshot.
+   */
+  public Optional<ProjectCodeMap> codeMapForSourceSha(
+      String projectId, UUID repoId, String sourceSha) {
+    if (projectId == null || repoId == null || sourceSha == null || sourceSha.isBlank()) {
+      return Optional.empty();
+    }
+    return codeMapRepo.findFirstByProjectIdAndRepoIdAndGeneratedFromShaOrderByVersionDesc(
+        projectId, repoId, sourceSha);
   }
 
   public List<ProjectArchitectureDoc> versions(String projectId) {

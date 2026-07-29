@@ -558,6 +558,22 @@ class ManagedAiUsageServiceTest {
   }
 
   @Test
+  void approvalRunOwnerOverloadUsesRunOwnerAndOrgAsBillingPrincipal() {
+    when(tierResolver.resolveUserTier("run-owner")).thenReturn("PRO");
+    when(periodRepo.saveAndFlush(any())).thenAnswer(inv -> inv.getArgument(0));
+
+    service.assertCanApproveEstimatedSpend("run-owner", "run-org", false, 1.0);
+
+    ArgumentCaptor<ManagedAiUsagePeriod> createdPeriod =
+        ArgumentCaptor.forClass(ManagedAiUsagePeriod.class);
+    verify(periodRepo).saveAndFlush(createdPeriod.capture());
+    assertThat(createdPeriod.getValue().getUserId()).isEqualTo("run-owner");
+    assertThat(createdPeriod.getValue().getOrgId()).isEqualTo("run-org");
+    assertThat(createdPeriod.getValue().getTier()).isEqualTo("PRO");
+    verify(tierResolver).resolveUserTier("run-owner");
+  }
+
+  @Test
   void approvalRefusesPlanWhoseEstimateExceedsRemainingRawBudget() {
     ManagedAiUsagePeriod period = period();
     period.setAiCreditsUsed(100);
@@ -573,7 +589,33 @@ class ManagedAiUsageServiceTest {
 
   @Test
   void approvalEstimateGateBypassesOwnKeys() {
-    service.assertCanApproveEstimatedSpend(userDetails(), true, 100.0);
+    ManagedAiUsageService.ApprovalEvaluation evaluation =
+        service.assertCanApproveEstimatedSpend(userDetails(), true, 100.0);
+
+    assertThat(evaluation.outcome()).isEqualTo("ALLOWED");
+    assertThat(evaluation.mode()).isEqualTo("BYOK_EXEMPT");
+    assertThat(evaluation.grantCredits()).isNull();
+    assertThat(evaluation.remainingCredits()).isNull();
+    assertThat(evaluation.estimatedCredits()).isNull();
+    assertThat(evaluation.hardRawUsd()).isNull();
+    assertThat(evaluation.remainingRawUsd()).isNull();
+    verify(periodRepo, never()).findCurrentForUpdate(anyString(), any());
+  }
+
+  @Test
+  void approvalEstimateGateUsesExplicitNullsForUnmanagedEnterpriseLimits() {
+    when(tierResolver.resolveUserTier("u1")).thenReturn("ENTERPRISE");
+
+    ManagedAiUsageService.ApprovalEvaluation evaluation =
+        service.assertCanApproveEstimatedSpend(userDetails(), false, 100.0);
+
+    assertThat(evaluation.outcome()).isEqualTo("ALLOWED");
+    assertThat(evaluation.mode()).isEqualTo("UNMANAGED_TIER");
+    assertThat(evaluation.grantCredits()).isNull();
+    assertThat(evaluation.remainingCredits()).isNull();
+    assertThat(evaluation.estimatedCredits()).isNull();
+    assertThat(evaluation.hardRawUsd()).isNull();
+    assertThat(evaluation.remainingRawUsd()).isNull();
     verify(periodRepo, never()).findCurrentForUpdate(anyString(), any());
   }
 

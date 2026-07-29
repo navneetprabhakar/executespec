@@ -2,7 +2,6 @@ package com.navneet.executespec.project.pr;
 
 import java.util.List;
 
-import com.navneet.executespec.codeintel.ProjectArchitectureService;
 import com.navneet.executespec.codeintel.StalenessService;
 import com.navneet.executespec.notification.InAppNotificationService;
 import com.navneet.executespec.project.entity.ProjectRepo;
@@ -30,17 +29,15 @@ import lombok.extern.slf4j.Slf4j;
  *       post-merge banner). Sync, ~ms, called once per merged PR. Safe to invoke inline from a
  *       request thread.
  *   <li>{@link #regenerateAfterMerge(String)} — per-project heavy path (staleness invalidation +
- *       architecture regeneration via {@code ProjectArchitectureService.generate}). Annotated
- *       {@code @Async}, fire-and-forget. Callers should DEDUPE by projectId — one merge batch
- *       producing 3 PR-merge events into the same project should fire this method once, not three
- *       times.
+ *       durable architecture-job admission). Annotated {@code @Async}, fire-and-forget. Callers
+ *       should DEDUPE by projectId — one merge batch producing 3 PR-merge events into the same
+ *       project should fire this method once, not three times.
  * </ul>
  *
  * <p>2026-05-04 P0 fix #3 — the original {@code onMerged} folded both phases into a single sync
- * call. With 3 PRs all merging into one project, that produced 3 sequential {@code
- * architectureService.generate(projectId)} invocations, each of which spans codemap regeneration +
- * architecture-doc LLM call (~30-60s). Total wall-clock easily blew past the 100s Cloudflare edge
- * timeout → HTTP 524. Splitting + async-firing the heavy path lets refresh return fast.
+ * call. With 3 PRs all merging into one project, that produced 3 sequential provider-duration
+ * architecture generations. The durable job now deduplicates compatible admission in the database
+ * and moves all source/provider work behind the request transaction.
  */
 @Service
 @RequiredArgsConstructor
@@ -48,7 +45,8 @@ import lombok.extern.slf4j.Slf4j;
 public class PostMergeCascadeService {
 
   private final StalenessService stalenessService;
-  private final ProjectArchitectureService architectureService;
+  private final com.navneet.executespec.codeintel.ProjectArchitectureJobService architectureJobs;
+  private final com.navneet.executespec.auth.repository.ProjectRepository projectRepository;
   private final InAppNotificationService notifications;
   private final PipelineRunRepository pipelineRunRepo;
   private final ProjectRepoLinkRepository linkRepo;
@@ -111,8 +109,16 @@ public class PostMergeCascadeService {
       log.warn("PostMergeCascade(async): invalidate failed for {}: {}", projectId, e.getMessage());
     }
     try {
-      architectureService.generate(projectId);
-      log.info("PostMergeCascade(async): regenerated arch for project {}", projectId);
+      String actor =
+          projectRepository
+              .findById(projectId)
+              .map(com.navneet.executespec.auth.entity.Project::getCreatedBy)
+              .orElseThrow();
+      var job = architectureJobs.request(projectId, actor);
+      log.info(
+          "PostMergeCascade(async): queued architecture job {} for project {}",
+          job.id(),
+          projectId);
     } catch (Exception e) {
       log.warn("PostMergeCascade(async): regenerate failed for {}: {}", projectId, e.getMessage());
     }

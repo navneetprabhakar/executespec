@@ -10,6 +10,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -17,6 +18,10 @@ import org.springframework.transaction.annotation.Transactional;
 
 public interface PipelineRunRepository
     extends JpaRepository<PipelineRun, String>, JpaSpecificationExecutor<PipelineRun> {
+  @Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+  @Query("SELECT r FROM PipelineRun r WHERE r.runId = :runId")
+  Optional<PipelineRun> findByIdForPlanGateOpen(@Param("runId") String runId);
+
   // Atomic token counter updates (avoids read-modify-write race)
   @Modifying
   @Transactional

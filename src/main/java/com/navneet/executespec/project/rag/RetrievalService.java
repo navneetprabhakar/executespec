@@ -56,6 +56,10 @@ public class RetrievalService {
     String semanticFallbackReason = "SEMANTIC_RESULTS_UNAVAILABLE";
     if (availability.semanticSearchAvailable()) {
       try {
+        // Interactive retrieval has no durable query row/attempt identity today. Do not manufacture
+        // process-local authority: ENFORCED operation admission rejects this semantic call before
+        // transport and this method falls back to lexical retrieval. SHADOW retains rollout
+        // observability until a real durable query root exists.
         float[] queryVector =
             embeddingService.embedQueryForProject(
                 projectId,

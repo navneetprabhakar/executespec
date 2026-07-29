@@ -48,36 +48,47 @@ class RunPersistenceWriter {
   private final SseBroadcaster broadcaster;
   private final ObjectMapper objectMapper;
 
-  void persistCompiledPlan(String runId, Plan plan) {
-    persistPlan(runId, plan);
+  PersistedCompiledPlan persistCompiledPlan(String runId, Plan plan) {
+    String exactPlanJson = serializePlan(plan);
+    boolean planStored = persistPlan(runId, plan, exactPlanJson);
     persistTasks(runId, plan);
     persistRunTitle(runId, plan);
+    return new PersistedCompiledPlan(planStored ? exactPlanJson : null);
   }
 
   void persistPlan(String runId, Plan plan) {
-    runRepo
-        .findById(runId)
-        .ifPresent(
-            r -> {
-              try {
-                r.setPlanJson(objectMapper.writeValueAsString(plan));
-              } catch (Exception e) {
-                log.warn("RunOrchestrator run={} failed to serialize plan JSON", runId, e);
-              }
-              // v2.5.11 (Validation v3 / Pillar 1) — persist the enumerated
-              // requirement graph alongside the plan JSON so the reviewer (Pillar
-              // 2) and the UI (Pillar 5) can render per-requirement evidence.
-              // Null when plan.requirements is empty (legacy / flag off).
-              try {
-                if (plan.requirements() != null && !plan.requirements().isEmpty()) {
-                  r.setPlanRequirementsJson(objectMapper.writeValueAsString(plan.requirements()));
-                }
-              } catch (Exception e) {
-                log.warn(
-                    "RunOrchestrator run={} failed to serialize plan_requirements_json", runId, e);
-              }
-              runRepo.save(r);
-            });
+    persistPlan(runId, plan, serializePlan(plan));
+  }
+
+  private String serializePlan(Plan plan) {
+    try {
+      return objectMapper.writeValueAsString(plan);
+    } catch (Exception e) {
+      log.warn(
+          "RunOrchestrator failed to serialize plan JSON errorClass={}",
+          e.getClass().getSimpleName());
+      return null;
+    }
+  }
+
+  private boolean persistPlan(String runId, Plan plan, String exactPlanJson) {
+    var run = runRepo.findById(runId);
+    if (run.isEmpty()) return false;
+    var r = run.get();
+    if (exactPlanJson != null) r.setPlanJson(exactPlanJson);
+    // v2.5.11 (Validation v3 / Pillar 1) — persist the enumerated
+    // requirement graph alongside the plan JSON so the reviewer (Pillar
+    // 2) and the UI (Pillar 5) can render per-requirement evidence.
+    // Null when plan.requirements is empty (legacy / flag off).
+    try {
+      if (plan.requirements() != null && !plan.requirements().isEmpty()) {
+        r.setPlanRequirementsJson(objectMapper.writeValueAsString(plan.requirements()));
+      }
+    } catch (Exception e) {
+      log.warn("RunOrchestrator run={} failed to serialize plan_requirements_json", runId, e);
+    }
+    runRepo.save(r);
+    return exactPlanJson != null;
   }
 
   void persistTasks(String runId, Plan plan) {
@@ -133,6 +144,8 @@ class RunPersistenceWriter {
       taskRepo.save(row);
     }
   }
+
+  record PersistedCompiledPlan(String exactPlanJson) {}
 
   /**
    * Map each {@link TaskOutcome} back to the corresponding {@link AgentTask} row and update status

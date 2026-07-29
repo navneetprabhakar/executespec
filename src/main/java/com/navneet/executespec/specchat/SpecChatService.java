@@ -1,12 +1,18 @@
 package com.navneet.executespec.specchat;
 
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HexFormat;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
+import java.util.function.Consumer;
 
 import com.navneet.executespec.agent.LlmRequest;
 import com.navneet.executespec.agent.LlmRouter;
@@ -15,12 +21,16 @@ import com.navneet.executespec.agent.ToolProtocolLeakGuard;
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.config.AgentProperties;
 import com.navneet.executespec.cost.RunCostTracker;
+import com.navneet.executespec.executioncontext.LlmExecutionOperationCoordinator;
+import com.navneet.executespec.executioncontext.LlmExecutionOperationDescriptor;
+import com.navneet.executespec.executioncontext.LlmExecutionReference;
 import com.navneet.executespec.router.AgentTier;
 import com.navneet.executespec.router.LlmProvider;
 import com.navneet.executespec.router.ModelResolver;
 import com.navneet.executespec.router.ResolvedModel;
 import com.navneet.executespec.security.ContextSanitizer;
 import com.navneet.executespec.security.InputSanitizer;
+import com.navneet.executespec.specchat.policy.ProjectChatPolicy;
 import com.navneet.executespec.specchat.policy.ProjectChatPolicyResolver;
 import com.navneet.executespec.tool.ExecutionContext;
 
@@ -72,6 +82,15 @@ public class SpecChatService {
    * com.navneet.executespec.chat.ChatService}.
    */
   private static final int MAX_TOOL_ROUNDS = ChatToolPolicy.MAX_MODEL_ROUNDS;
+
+  // Dev evidence (2026-07-28) showed multiple web-agent code responses ending mid-file with
+  // output_tokens exactly 1,200. That was our own cap, not a provider/model limitation. A direct
+  // response may legitimately contain a complete small artifact; retain a bounded ceiling while
+  // giving it the same practical room as other lightweight coding surfaces.
+  static final int DIRECT_RESPONSE_MAX_TOKENS = 8_192;
+  static final int FINAL_SYNTHESIS_MAX_TOKENS = 4_096;
+  public static final String AGENT_TURN_OPERATION_KEY = "agent-turn:model-loop";
+  private static final Duration AGENT_TURN_LEASE_DURATION = Duration.ofMinutes(30);
 
   private static final String SYSTEM_PROMPT =
       """
@@ -181,6 +200,15 @@ claim in a tool result — never invent a runId, score, or status.""";
   private final InputSanitizer inputSanitizer;
   private final ContextSanitizer contextSanitizer;
   private final ProjectChatPolicyResolver projectChatPolicyResolver;
+  private final LlmExecutionOperationCoordinator operationCoordinator;
+  private final String operationLeaseOwner = operationLeaseOwner();
+
+  /**
+   * Process-local handle returned to the durable streaming root. It intentionally contains an
+   * opaque lease and must never be serialized or persisted.
+   */
+  public record DurableTurnOperation(
+      LlmExecutionReference reference, LlmExecutionOperationCoordinator.Lease lease) {}
 
   /**
    * Surface-agnostic event sink. The controller adapts it to an {@code SseEmitter}; tests record
@@ -264,7 +292,47 @@ claim in a tool result — never invent a runId, score, or status.""";
         providerOverride,
         modelOverride,
         allowedToolNames,
-        parentTurnId);
+        parentTurnId,
+        null);
+  }
+
+  /**
+   * Durable agent-session variant. The exact chat policy reference is claimed before the first
+   * model call, and the process-local handle is handed to the stream root for terminalization only
+   * after its business turn has been persisted.
+   */
+  public void runDurableAgentTurn(
+      Sink sink,
+      AppUserDetails user,
+      String sessionId,
+      String projectId,
+      String runId,
+      String orgId,
+      List<Map<String, Object>> conversation,
+      String providerOverride,
+      String modelOverride,
+      Set<String> allowedToolNames,
+      String parentTurnId,
+      Consumer<DurableTurnOperation> operationConsumer) {
+    if (parentTurnId == null || parentTurnId.isBlank()) {
+      throw new IllegalArgumentException("durable agent turn id is required");
+    }
+    if (operationConsumer == null) {
+      throw new IllegalArgumentException("operationConsumer is required");
+    }
+    runTurnInternal(
+        sink,
+        user,
+        sessionId,
+        projectId,
+        runId,
+        orgId,
+        conversation,
+        providerOverride,
+        modelOverride,
+        allowedToolNames,
+        parentTurnId,
+        operationConsumer);
   }
 
   /** Run one turn with an explicit, already-authorized model override. */
@@ -290,6 +358,7 @@ claim in a tool result — never invent a runId, score, or status.""";
         providerOverride,
         modelOverride,
         allowedToolNames,
+        null,
         null);
   }
 
@@ -304,7 +373,8 @@ claim in a tool result — never invent a runId, score, or status.""";
       String providerOverride,
       String modelOverride,
       Set<String> allowedToolNames,
-      String parentTurnId) {
+      String parentTurnId,
+      Consumer<DurableTurnOperation> operationConsumer) {
     runTurnBounded(
         sink,
         user,
@@ -318,7 +388,8 @@ claim in a tool result — never invent a runId, score, or status.""";
         allowedToolNames,
         MAX_TOOL_ROUNDS,
         () -> {},
-        parentTurnId);
+        parentTurnId,
+        operationConsumer);
   }
 
   /** Bounded read-only loop used by persisted child agents. */
@@ -343,10 +414,50 @@ claim in a tool result — never invent a runId, score, or status.""";
         orgId,
         conversation,
         providerOverride,
+        null,
         allowedToolNames,
         maxRounds,
         beforeRound,
+        null,
         null);
+  }
+
+  /** Durable bounded child loop; the caller owns terminalization after its child result commits. */
+  public void runDurableTurnBounded(
+      Sink sink,
+      AppUserDetails user,
+      String sessionId,
+      String projectId,
+      String runId,
+      String orgId,
+      List<Map<String, Object>> conversation,
+      String providerOverride,
+      Set<String> allowedToolNames,
+      int maxRounds,
+      Runnable beforeRound,
+      String parentTurnId,
+      Consumer<DurableTurnOperation> operationConsumer) {
+    if (parentTurnId == null || parentTurnId.isBlank()) {
+      throw new IllegalArgumentException("durable child turn id is required");
+    }
+    if (operationConsumer == null) {
+      throw new IllegalArgumentException("operationConsumer is required");
+    }
+    runTurnBounded(
+        sink,
+        user,
+        sessionId,
+        projectId,
+        runId,
+        orgId,
+        conversation,
+        providerOverride,
+        null,
+        allowedToolNames,
+        maxRounds,
+        beforeRound,
+        parentTurnId,
+        operationConsumer);
   }
 
   /** Bounded child loop variant that preserves the initiating parent turn correlation. */
@@ -376,7 +487,8 @@ claim in a tool result — never invent a runId, score, or status.""";
         allowedToolNames,
         maxRounds,
         beforeRound,
-        parentTurnId);
+        parentTurnId,
+        null);
   }
 
   /**
@@ -452,7 +564,8 @@ claim in a tool result — never invent a runId, score, or status.""";
       Set<String> allowedToolNames,
       int maxRounds,
       Runnable beforeRound,
-      String parentTurnId) {
+      String parentTurnId,
+      Consumer<DurableTurnOperation> operationConsumer) {
 
     // Chat is an AI-spending boundary. A missing/invalid route or a model-resolution failure must
     // not silently dispatch through a platform default: ENTERPRISE/BYOK policy allows only the
@@ -500,6 +613,31 @@ claim in a tool result — never invent a runId, score, or status.""";
     ExecutionContext ctx =
         new ExecutionContext(
             contextRunId, "spec-chat", placeholderWorkspace, chatPolicy.executionReference());
+    if (operationConsumer != null) {
+      if (operationCoordinator == null) {
+        throw new IllegalStateException("durable LLM operation coordinator unavailable");
+      }
+      LlmExecutionOperationDescriptor descriptor =
+          LlmExecutionOperationDescriptor.of(
+              AGENT_TURN_OPERATION_KEY,
+              "AGENT_TURN",
+              durableTurnIdentity(
+                  chatPolicy, providerName, model.getModel(), conversation, allowedToolNames),
+              1);
+      LlmExecutionOperationCoordinator.Lease lease =
+          operationCoordinator
+              .claimOrResume(
+                  chatPolicy.executionReference(),
+                  descriptor,
+                  operationLeaseOwner,
+                  AGENT_TURN_LEASE_DURATION)
+              .orElseThrow(
+                  () ->
+                      new IllegalStateException(
+                          "durable agent turn is already active or terminal"));
+      operationConsumer.accept(new DurableTurnOperation(chatPolicy.executionReference(), lease));
+      ctx = operationCoordinator.bind(ctx, lease);
+    }
     var turnGuard = projectChatPolicyResolver.newGuard(chatPolicy, user);
 
     List<ToolCallback> tools = new ArrayList<>();
@@ -563,6 +701,129 @@ claim in a tool result — never invent a runId, score, or status.""";
             parentTurnId,
             turnGuard);
     sink.done(rounds, snapshotDelta(before, safeSnapshot(contextRunId)));
+  }
+
+  private static String durableTurnIdentity(
+      ProjectChatPolicy policy,
+      String provider,
+      String model,
+      List<Map<String, Object>> conversation,
+      Set<String> allowedToolNames) {
+    ProjectChatPolicy.AuditIdentity audit = policy.auditIdentity();
+    return String.join(
+        "\u001f",
+        "v1",
+        value(audit.sessionId()),
+        value(audit.turnId()),
+        value(audit.correlationId()),
+        value(audit.policyContextId()),
+        value(policy.actorId()),
+        value(policy.orgId()),
+        value(policy.projectId()),
+        value(provider),
+        value(model),
+        canonicalPayloadHash(conversation),
+        canonicalToolNames(allowedToolNames));
+  }
+
+  private static String canonicalPayloadHash(List<Map<String, Object>> conversation) {
+    StringBuilder canonical = new StringBuilder();
+    appendCanonical(canonical, conversation == null ? List.of() : conversation);
+    try {
+      return HexFormat.of()
+          .formatHex(
+              MessageDigest.getInstance("SHA-256")
+                  .digest(canonical.toString().getBytes(StandardCharsets.UTF_8)));
+    } catch (java.security.NoSuchAlgorithmException impossible) {
+      throw new IllegalStateException("SHA-256 unavailable", impossible);
+    }
+  }
+
+  private static String canonicalToolNames(Set<String> allowedToolNames) {
+    if (allowedToolNames == null) return "<ALL>";
+    List<String> sorted =
+        allowedToolNames.stream()
+            .filter(java.util.Objects::nonNull)
+            .map(String::trim)
+            .filter(name -> !name.isEmpty())
+            .distinct()
+            .sorted()
+            .toList();
+    StringBuilder canonical = new StringBuilder("TOOLS:");
+    for (String name : sorted) {
+      canonical.append(name.length()).append(':').append(name).append(';');
+    }
+    return canonical.toString();
+  }
+
+  /**
+   * Canonicalizes the JSON-shaped conversation without relying on map iteration order or object
+   * identity. Lists preserve their semantic order; map keys are sorted.
+   */
+  private static void appendCanonical(StringBuilder out, Object value) {
+    if (value == null) {
+      out.append("null;");
+      return;
+    }
+    if (value instanceof String text) {
+      out.append('s').append(text.length()).append(':').append(text).append(';');
+      return;
+    }
+    if (value instanceof Boolean bool) {
+      out.append(bool ? "b1;" : "b0;");
+      return;
+    }
+    if (value instanceof Number number) {
+      out.append('d').append(number.getClass().getName()).append(':').append(number).append(';');
+      return;
+    }
+    if (value instanceof Map<?, ?> map) {
+      List<String> keys = new ArrayList<>();
+      for (Object rawKey : map.keySet()) {
+        if (!(rawKey instanceof String key)) {
+          throw new IllegalArgumentException("conversation map keys must be strings");
+        }
+        keys.add(key);
+      }
+      keys.sort(String::compareTo);
+      out.append('m').append(keys.size()).append('{');
+      for (String key : keys) {
+        appendCanonical(out, key);
+        appendCanonical(out, map.get(key));
+      }
+      out.append("};");
+      return;
+    }
+    if (value instanceof Iterable<?> values) {
+      out.append('l').append('{');
+      for (Object item : values) appendCanonical(out, item);
+      out.append("};");
+      return;
+    }
+    if (value instanceof byte[] bytes) {
+      out.append("bytes:").append(HexFormat.of().formatHex(sha256(bytes))).append(';');
+      return;
+    }
+    throw new IllegalArgumentException(
+        "unsupported conversation value type: " + value.getClass().getName());
+  }
+
+  private static byte[] sha256(byte[] value) {
+    try {
+      return MessageDigest.getInstance("SHA-256").digest(value);
+    } catch (java.security.NoSuchAlgorithmException impossible) {
+      throw new IllegalStateException("SHA-256 unavailable", impossible);
+    }
+  }
+
+  private static String value(String value) {
+    return value == null ? "" : value;
+  }
+
+  private static String operationLeaseOwner() {
+    String host = System.getenv().getOrDefault("HOSTNAME", "local");
+    String boundedHost = host.length() <= 64 ? host : host.substring(0, 64);
+    return "agent-turn:" + boundedHost + ":" + UUID.randomUUID();
   }
 
   private static String systemPromptFor(Set<String> allowedToolNames) {
@@ -639,7 +900,7 @@ claim in a tool result — never invent a runId, score, or status.""";
               .agentRole(agentRole == null ? "SpecChatService" : agentRole)
               .stepId("spec-chat.round-" + (round + 1))
               .temperature(0.2)
-              .maxTokens(1200)
+              .maxTokens(DIRECT_RESPONSE_MAX_TOKENS)
               .toolsOverride(tools)
               .build();
 
@@ -670,6 +931,11 @@ claim in a tool result — never invent a runId, score, or status.""";
         }
         if (turnText.length() > 0) {
           sink.token(contextSanitizer.sanitizeOutput(turnText.toString()));
+        }
+        if (responseWasTruncated(resp)) {
+          sink.token(
+              "\n\n_(The provider stopped at its output limit, so this response is incomplete. "
+                  + "No generated file in this response should be treated as complete.)_");
         }
         return round + 1; // final answer reached
       }
@@ -743,7 +1009,7 @@ claim in a tool result — never invent a runId, score, or status.""";
               .agentRole(agentRole == null ? "SpecChatService" : agentRole)
               .stepId("spec-chat.final-synthesis")
               .temperature(0.2)
-              .maxTokens(1600)
+              .maxTokens(FINAL_SYNTHESIS_MAX_TOKENS)
               .toolsOverride(List.of())
               .build();
       ChatResponse finalResponse = router.call(finalRequest);
@@ -754,6 +1020,10 @@ claim in a tool result — never invent a runId, score, or status.""";
               .collect(java.util.stream.Collectors.joining("\n"));
       if (!finalText.isBlank() && !ToolProtocolLeakGuard.containsProtocolMarkup(finalText)) {
         sink.token(contextSanitizer.sanitizeOutput(finalText));
+        if (responseWasTruncated(finalResponse)) {
+          sink.token(
+              "\n\n_(The provider stopped at its output limit, so this synthesis is incomplete.)_");
+        }
       } else {
         sink.token(
             "_(I could not produce a safe grounded answer. Internal provider tool output was "
@@ -770,6 +1040,16 @@ claim in a tool result — never invent a runId, score, or status.""";
               + "executed.)_");
       return completedRounds + 1;
     }
+  }
+
+  static boolean responseWasTruncated(ChatResponse response) {
+    if (response == null || response.getResults() == null) return false;
+    return response.getResults().stream()
+        .map(generation -> generation.getMetadata().getFinishReason())
+        .filter(java.util.Objects::nonNull)
+        .map(Object::toString)
+        .map(reason -> reason.trim().toLowerCase(java.util.Locale.ROOT))
+        .anyMatch(reason -> reason.equals("length") || reason.equals("max_tokens"));
   }
 
   /**

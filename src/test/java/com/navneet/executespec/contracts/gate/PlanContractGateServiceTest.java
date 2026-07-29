@@ -29,6 +29,8 @@ import com.navneet.executespec.project.service.ProjectRepoService;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.core.annotation.AnnotatedElementUtils;
+import org.springframework.transaction.annotation.Transactional;
 
 /**
  * RR-819 — the plan-approval contract gate. Before this gate, {@code requiresTypedAck} was a
@@ -237,5 +239,19 @@ class PlanContractGateServiceTest {
         PlanContractGateService.AckOutcome.ACKNOWLEDGED,
         service.acknowledge("run-1", "BREAKING", "abc123", "u1"));
     verify(gateRepo, never()).claimAcknowledgement(any(), any(), any(), any(), any());
+  }
+
+  @Test
+  void acknowledgement_claim_has_its_own_transaction_boundary() throws Exception {
+    var method =
+        PlanContractGateReportRepository.class.getMethod(
+            "claimAcknowledgement",
+            String.class,
+            String.class,
+            String.class,
+            String.class,
+            Instant.class);
+
+    assertTrue(AnnotatedElementUtils.hasAnnotation(method, Transactional.class));
   }
 }

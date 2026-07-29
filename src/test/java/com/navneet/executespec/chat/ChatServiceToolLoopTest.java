@@ -24,6 +24,7 @@ import org.mockito.ArgumentCaptor;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.UserMessage;
+import org.springframework.ai.chat.metadata.ChatGenerationMetadata;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
 
@@ -111,7 +112,7 @@ class ChatServiceToolLoopTest {
             mock(RunChatTools.class));
     List<Message> seed = List.of(new UserMessage("Why did the run fail?"));
 
-    String reply =
+    ChatService.ChatAnswer answer =
         service.runToolLoop(
             "run-1",
             "deepseek",
@@ -120,9 +121,10 @@ class ChatServiceToolLoopTest {
             new ExecutionContext("run-1", "chat", Path.of(".").toAbsolutePath().normalize()),
             List.of());
 
-    assertThat(reply)
+    assertThat(answer.text())
         .contains("configured build command")
         .doesNotContain("Let me inspect", "tool-call limit");
+    assertThat(answer.complete()).isTrue();
     verify(router, times(5)).call(org.mockito.ArgumentMatchers.any());
     ArgumentCaptor<LlmRequest> requests = ArgumentCaptor.forClass(LlmRequest.class);
     verify(router, times(5)).call(requests.capture());
@@ -164,7 +166,7 @@ class ChatServiceToolLoopTest {
             mock(ValidationReportRepository.class),
             mock(RunChatTools.class));
 
-    String reply =
+    ChatService.ChatAnswer answer =
         service.runToolLoop(
             "run-1",
             "deepseek",
@@ -173,9 +175,10 @@ class ChatServiceToolLoopTest {
             new ExecutionContext("run-1", "chat", Path.of(".").toAbsolutePath().normalize()),
             List.of());
 
-    assertThat(reply)
+    assertThat(answer.text())
         .contains("failed 1 of 10")
         .doesNotContain("DSML", "tool_calls", "read_run_file");
+    assertThat(answer.complete()).isTrue();
     ArgumentCaptor<LlmRequest> requests = ArgumentCaptor.forClass(LlmRequest.class);
     verify(router, times(2)).call(requests.capture());
     assertThat(requests.getAllValues().get(1).toolsOverride()).isEmpty();
@@ -190,5 +193,178 @@ class ChatServiceToolLoopTest {
         .isTrue();
     assertThat(ToolProtocolLeakGuard.containsProtocolMarkup("The report mentions tool calls."))
         .isFalse();
+  }
+
+  @Test
+  void directLengthLimitedAnswerIsTypedIncompleteAndActionable() {
+    LlmRouter router = mock(LlmRouter.class);
+    when(router.call(org.mockito.ArgumentMatchers.any()))
+        .thenReturn(textResponse("Partial answer", "length"));
+    ChatService service =
+        new ChatService(
+            mock(PipelineRunRepository.class),
+            router,
+            mock(ModelResolver.class),
+            new AgentProperties(),
+            mock(ValidationReportRepository.class),
+            mock(RunChatTools.class));
+
+    ChatService.ChatAnswer answer =
+        service.runToolLoop(
+            "run-1",
+            "openai",
+            "gpt-test",
+            List.of(new UserMessage("Explain every file")),
+            new ExecutionContext("run-1", "chat", Path.of(".").toAbsolutePath().normalize()),
+            List.of());
+
+    assertThat(answer.complete()).isFalse();
+    assertThat(answer.incompleteReason()).isEqualTo(ChatService.OUTPUT_LIMIT_REASON);
+    assertThat(answer.text())
+        .contains("Partial answer", "answer is incomplete", "specific file or evidence");
+  }
+
+  @Test
+  void truncatedTextualToolProtocolIsTypedIncompleteButNeverExposed() {
+    LlmRouter router = mock(LlmRouter.class);
+    when(router.call(org.mockito.ArgumentMatchers.any()))
+        .thenReturn(
+            textResponse(
+                "<｜｜DSML｜｜tool_calls><｜｜DSML｜｜invoke name=\"read_run_file\">", "max_tokens"));
+    ChatService service =
+        new ChatService(
+            mock(PipelineRunRepository.class),
+            router,
+            mock(ModelResolver.class),
+            new AgentProperties(),
+            mock(ValidationReportRepository.class),
+            mock(RunChatTools.class));
+
+    ChatService.ChatAnswer answer =
+        service.runToolLoop(
+            "run-1",
+            "deepseek",
+            "deepseek-test",
+            List.of(new UserMessage("Explain every file")),
+            new ExecutionContext("run-1", "chat", Path.of(".").toAbsolutePath().normalize()),
+            List.of());
+
+    assertThat(answer.complete()).isFalse();
+    assertThat(answer.incompleteReason()).isEqualTo(ChatService.OUTPUT_LIMIT_REASON);
+    assertThat(answer.text())
+        .contains("Internal tool protocol was suppressed", "answer is incomplete")
+        .doesNotContain("DSML", "tool_calls", "read_run_file");
+    verify(router, times(1)).call(org.mockito.ArgumentMatchers.any());
+  }
+
+  @Test
+  void missingFinishMetadataIsUnknownAndDoesNotCrashAsk() {
+    ChatResponse response =
+        new ChatResponse(List.of(new Generation(new AssistantMessage("Complete answer"), null)));
+
+    assertThat(ChatService.responseWasTruncated(response)).isFalse();
+  }
+
+  @Test
+  void finalSynthesisMaxTokensIsTypedIncomplete() {
+    LlmRouter router = mock(LlmRouter.class);
+    ChatResponse toolTurn =
+        ChatResponse.builder()
+            .generations(
+                List.of(
+                    new Generation(
+                        AssistantMessage.builder()
+                            .content("Inspecting.")
+                            .toolCalls(
+                                List.of(
+                                    new AssistantMessage.ToolCall(
+                                        "call-1", "function", "read_run_file", "{}")))
+                            .build())))
+            .build();
+    when(router.call(org.mockito.ArgumentMatchers.any()))
+        .thenReturn(
+            toolTurn,
+            toolTurn,
+            toolTurn,
+            toolTurn,
+            textResponse("Evidence-based prefix", "MAX_TOKENS"));
+    ChatService service =
+        new ChatService(
+            mock(PipelineRunRepository.class),
+            router,
+            mock(ModelResolver.class),
+            new AgentProperties(),
+            mock(ValidationReportRepository.class),
+            mock(RunChatTools.class));
+
+    ChatService.ChatAnswer answer =
+        service.runToolLoop(
+            "run-1",
+            "gemini",
+            "gemini-test",
+            List.of(new UserMessage("Why?")),
+            new ExecutionContext("run-1", "chat", Path.of(".").toAbsolutePath().normalize()),
+            List.of());
+
+    assertThat(answer.complete()).isFalse();
+    assertThat(answer.incompleteReason()).isEqualTo(ChatService.OUTPUT_LIMIT_REASON);
+    assertThat(answer.text()).contains("Evidence-based prefix", "output limit");
+  }
+
+  @Test
+  void truncatedProtocolFromFinalSynthesisIsSuppressedAndRemainsTypedIncomplete() {
+    LlmRouter router = mock(LlmRouter.class);
+    ChatResponse toolTurn =
+        ChatResponse.builder()
+            .generations(
+                List.of(
+                    new Generation(
+                        AssistantMessage.builder()
+                            .content("Inspecting.")
+                            .toolCalls(
+                                List.of(
+                                    new AssistantMessage.ToolCall(
+                                        "call-1", "function", "read_run_file", "{}")))
+                            .build())))
+            .build();
+    when(router.call(org.mockito.ArgumentMatchers.any()))
+        .thenReturn(
+            toolTurn,
+            toolTurn,
+            toolTurn,
+            toolTurn,
+            textResponse(
+                "<｜｜DSML｜｜tool_calls><｜｜DSML｜｜invoke name=\"read_run_file\">", "MAX_TOKENS"));
+    ChatService service =
+        new ChatService(
+            mock(PipelineRunRepository.class),
+            router,
+            mock(ModelResolver.class),
+            new AgentProperties(),
+            mock(ValidationReportRepository.class),
+            mock(RunChatTools.class));
+
+    ChatService.ChatAnswer answer =
+        service.runToolLoop(
+            "run-1",
+            "gemini",
+            "gemini-test",
+            List.of(new UserMessage("Why?")),
+            new ExecutionContext("run-1", "chat", Path.of(".").toAbsolutePath().normalize()),
+            List.of());
+
+    assertThat(answer.complete()).isFalse();
+    assertThat(answer.incompleteReason()).isEqualTo(ChatService.OUTPUT_LIMIT_REASON);
+    assertThat(answer.text())
+        .contains("could not produce a grounded answer", "output limit")
+        .doesNotContain("DSML", "tool_calls", "read_run_file");
+  }
+
+  private static ChatResponse textResponse(String text, String finishReason) {
+    Generation generation =
+        new Generation(
+            new AssistantMessage(text),
+            ChatGenerationMetadata.builder().finishReason(finishReason).build());
+    return new ChatResponse(List.of(generation));
   }
 }

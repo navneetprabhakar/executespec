@@ -1,11 +1,16 @@
 package com.navneet.executespec.agentsession.repository;
 
+import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
+
+import jakarta.persistence.LockModeType;
 
 import com.navneet.executespec.agentsession.entity.AgentTurn;
 
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -25,6 +30,28 @@ public interface AgentTurnRepository extends JpaRepository<AgentTurn, String> {
   void deleteBySessionId(String sessionId);
 
   boolean existsByIdAndSessionId(String id, String sessionId);
+
+  /**
+   * Oldest-first bounded recovery scan backed by V355's partial {@code (created_at,id) WHERE
+   * status='STREAMING'} index.
+   */
+  @Query(
+      """
+      SELECT t FROM AgentTurn t
+      WHERE t.status = 'STREAMING'
+        AND t.createdAt <= :staleBefore
+      ORDER BY t.createdAt ASC, t.id ASC
+      """)
+  List<AgentTurn> findStaleStreaming(@Param("staleBefore") Instant staleBefore, Pageable pageable);
+
+  /** Rechecks terminal state under a row lock before recovery mutates the candidate. */
+  @Lock(LockModeType.PESSIMISTIC_WRITE)
+  @Query("SELECT t FROM AgentTurn t WHERE t.id = :id")
+  Optional<AgentTurn> findByIdForUpdate(@Param("id") String id);
+
+  /** One authoritative PostgreSQL clock sample per recovery batch. */
+  @Query(value = "SELECT clock_timestamp()", nativeQuery = true)
+  Instant databaseNow();
 
   @Query(
       """

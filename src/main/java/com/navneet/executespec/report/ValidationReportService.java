@@ -29,6 +29,7 @@ import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.testgen.model.TestExecutionSummary;
 import com.navneet.executespec.testgen.model.TestResult;
 import com.navneet.executespec.testgen.model.TestResultStatus;
+import com.navneet.executespec.tool.ExecutionContext;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationEventPublisher;
@@ -143,6 +144,11 @@ public class ValidationReportService {
   }
 
   public Optional<ValidationReport> generateAndPersist(String runId, ReportInput input) {
+    return generateAndPersist(runId, input, null);
+  }
+
+  public Optional<ValidationReport> generateAndPersist(
+      String runId, ReportInput input, ExecutionContext operationContext) {
     long startTime = System.currentTimeMillis();
 
     try {
@@ -161,7 +167,10 @@ public class ValidationReportService {
       int inputTokens = 0;
       int outputTokens = 0;
       try {
-        var llmResult = generator.generate(input);
+        var llmResult =
+            operationContext == null
+                ? generator.generate(input)
+                : generator.generate(input, operationContext);
         reportMarkdown = llmResult.markdown();
         modelUsed = llmResult.model();
         inputTokens = llmResult.inputTokens();
@@ -1061,6 +1070,8 @@ public class ValidationReportService {
             runStatus(reportRun),
             entity.getPipelineResult(),
             verificationLedger),
+        goalProofEvaluator.evidenceReferences(
+            runStatus(reportRun), entity.getPipelineResult(), verificationLedger),
         effectiveRubricScore,
         entity.getPreviewUrl());
   }

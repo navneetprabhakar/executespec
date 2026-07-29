@@ -151,6 +151,13 @@ class ValidationReportServiceVerificationLedgerTest {
     assertEquals("UNCERTAIN", dto.runGoalDecision().state().name());
     assertEquals(
         "CONTINUE_SAME_MODEL_PROVIDER", dto.runGoalDecision().recommendedDecision().name());
+    assertTrue(
+        dto.goalProofReferences().stream()
+            .anyMatch(
+                reference ->
+                    "spec-adherence".equals(reference.evidenceId())
+                        && "BLOCKING".equals(reference.proofStatus())
+                        && "LLM_ASSESSMENT".equals(reference.source())));
     assertEquals(84, dto.verifiedScore());
     assertEquals("WARN", find(dto.verificationLedger(), "score-summary").status());
   }
@@ -446,6 +453,13 @@ class ValidationReportServiceVerificationLedgerTest {
     assertEquals("DONE", dto.runGoalDecision().state().name());
     assertEquals("STOP_DONE", dto.runGoalDecision().recommendedDecision().name());
     assertEquals("run goal: Generate a project setup guide", dto.runGoalDecision().goalSummary());
+    assertTrue(
+        dto.goalProofReferences().stream()
+            .anyMatch(
+                reference ->
+                    "pipeline-result".equals(reference.evidenceId())
+                        && "PROVEN".equals(reference.proofStatus())
+                        && "validation_report.pipeline_result".equals(reference.artifact())));
   }
 
   @Test

@@ -77,12 +77,22 @@ public class CodeGenEngineImpl implements CodeGenEngine {
     ExecutionContext ctx;
     try {
       String taskId = request.taskId() != null ? request.taskId() : "__root__";
-      ctx =
-          new ExecutionContext(
-              request.runId(),
-              taskId,
-              workspace.toRealPath(),
-              executionPolicyFactory.forRun(request.runId()));
+      Path realWorkspace = workspace.toRealPath();
+      if (request.context() != null) {
+        if (!request.runId().equals(request.context().runId())
+            || !realWorkspace.equals(request.context().workspaceRoot())) {
+          throw new IllegalArgumentException(
+              "Engine execution context does not match request run/workspace");
+        }
+        ctx = request.context().child(taskId);
+      } else {
+        ctx =
+            new ExecutionContext(
+                request.runId(),
+                taskId,
+                realWorkspace,
+                executionPolicyFactory.forRun(request.runId()));
+      }
     } catch (IOException ioe) {
       log.error("engine: workspace realpath failed for run {}", request.runId(), ioe);
       return EngineResult.builder()

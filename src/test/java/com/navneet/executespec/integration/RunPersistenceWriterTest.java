@@ -12,6 +12,7 @@ import java.util.List;
 import java.util.Optional;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.navneet.executespec.agent.Plan;
 import com.navneet.executespec.billing.cost.RunCostLogRepository;
 import com.navneet.executespec.cost.RunCostTracker;
 import com.navneet.executespec.harness.ExecutionResult;
@@ -34,6 +35,19 @@ class RunPersistenceWriterTest {
 
   private final RunPersistenceWriter writer =
       new RunPersistenceWriter(runRepo, taskRepo, costLogRepo, broadcaster, new ObjectMapper());
+
+  @Test
+  void compiledPlanReturnsTheExactJsonBytesStoredOnTheLegacyRun() {
+    PipelineRun run = PipelineRun.builder().runId("run-plan").status("PLANNING").build();
+    when(runRepo.findById("run-plan")).thenReturn(Optional.of(run));
+    Plan plan =
+        Plan.builder().planTitle("Exact plan").requirements(List.of()).tasks(List.of()).build();
+
+    RunPersistenceWriter.PersistedCompiledPlan persisted =
+        writer.persistCompiledPlan("run-plan", plan);
+
+    assertThat(persisted.exactPlanJson()).isNotBlank().isEqualTo(run.getPlanJson());
+  }
 
   @Test
   void updateStatusDoesNotClobberCancelledRun() {

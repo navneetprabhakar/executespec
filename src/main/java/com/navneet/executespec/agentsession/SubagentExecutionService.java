@@ -2,7 +2,6 @@ package com.navneet.executespec.agentsession;
 
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -14,8 +13,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
+import java.util.concurrent.atomic.AtomicReferenceArray;
 
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.OrchestratorClientCapabilities;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.OrchestratorMode;
@@ -37,28 +35,17 @@ import com.navneet.executespec.agentsession.subagent.SubagentProtocolService;
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.config.featureflag.FeatureFlagService;
 import com.navneet.executespec.cost.RunCostTracker;
+import com.navneet.executespec.executioncontext.LlmExecutionOperationCoordinator;
 import com.navneet.executespec.specchat.SpecChatService;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
-
-import lombok.RequiredArgsConstructor;
 
 /** Executes one bounded, read-only persisted role-contract child-agent assignment. */
 @Service
-@RequiredArgsConstructor
 public class SubagentExecutionService {
 
   private static final int MAX_EXECUTION_ROUNDS = 4;
-
-  /**
-   * Lease-renewal period for an executing child. Must stay comfortably below {@code
-   * AgentSessionStartupRecovery.STALE_AFTER_SECONDS} so a couple of missed ticks still cannot make
-   * a live child look abandoned.
-   */
-  private static final long HEARTBEAT_INTERVAL_MILLIS = 30_000L;
-
-  private static final Pattern CITATION =
-      Pattern.compile("(?m)([A-Za-z0-9_./-]+\\.[A-Za-z0-9_-]+):(\\d+)");
 
   private final SubagentProtocolService protocolService;
   private final AgentSessionRepository sessionRepository;
@@ -67,6 +54,48 @@ public class SubagentExecutionService {
   private final SpecChatService specChatService;
   private final RunCostTracker costTracker;
   private final FeatureFlagService featureFlagService;
+  private final LlmExecutionOperationCoordinator operationCoordinator;
+  private final SubagentOperationLifecycle operationLifecycle;
+
+  @Autowired
+  public SubagentExecutionService(
+      SubagentProtocolService protocolService,
+      AgentSessionRepository sessionRepository,
+      AgentTurnRepository turnRepository,
+      AgentOrchestratorTurnService orchestratorTurnService,
+      SpecChatService specChatService,
+      RunCostTracker costTracker,
+      FeatureFlagService featureFlagService,
+      LlmExecutionOperationCoordinator operationCoordinator) {
+    this.protocolService = protocolService;
+    this.sessionRepository = sessionRepository;
+    this.turnRepository = turnRepository;
+    this.orchestratorTurnService = orchestratorTurnService;
+    this.specChatService = specChatService;
+    this.costTracker = costTracker;
+    this.featureFlagService = featureFlagService;
+    this.operationCoordinator = operationCoordinator;
+    this.operationLifecycle = new SubagentOperationLifecycle(protocolService, operationCoordinator);
+  }
+
+  SubagentExecutionService(
+      SubagentProtocolService protocolService,
+      AgentSessionRepository sessionRepository,
+      AgentTurnRepository turnRepository,
+      AgentOrchestratorTurnService orchestratorTurnService,
+      SpecChatService specChatService,
+      RunCostTracker costTracker,
+      FeatureFlagService featureFlagService) {
+    this(
+        protocolService,
+        sessionRepository,
+        turnRepository,
+        orchestratorTurnService,
+        specChatService,
+        costTracker,
+        featureFlagService,
+        null);
+  }
 
   public static final String COORDINATOR_AUTO_FLAG = "agent.subagents.coordinator-auto.enabled";
 
@@ -104,7 +133,8 @@ public class SubagentExecutionService {
     // A single WORKHORSE round routinely outlives the startup-recovery stale window, and turn
     // admission is the only other heartbeat. Without this renewal a peer JVM booting mid-call
     // cancels a child that is actively spending, so keep the lease fresh for the whole execution.
-    Thread heartbeat = startHeartbeat(child.getId(), userId, orgId);
+    SubagentOperationLifecycle.Lease operation =
+        operationLifecycle.start(child.getId(), userId, orgId);
     try {
       var route =
           orchestratorTurnService.orchestrate(
@@ -134,21 +164,20 @@ public class SubagentExecutionService {
             "SUBAGENT_TURN_BUDGET_EXHAUSTED", "Subagent turn budget exhausted");
       int maxRounds = Math.min(MAX_EXECUTION_ROUNDS, remainingTurns);
       AtomicInteger roundsStarted = new AtomicInteger();
-      CapturingSink sink = new CapturingSink();
+      SubagentTurnSupport.CapturingSink sink = new SubagentTurnSupport.CapturingSink();
+      String durableTurnId =
+          handle.parentTurnId() == null || handle.parentTurnId().isBlank()
+              ? child.getId() + ":subagent-execution"
+              : handle.parentTurnId();
       List<Map<String, Object>> conversation =
-          List.of(Map.of("role", "user", "content", rolePrompt(handle.role(), handle.objective())));
+          List.of(
+              Map.of(
+                  "role",
+                  "user",
+                  "content",
+                  SubagentTurnSupport.rolePrompt(handle.role(), handle.objective())));
 
-      specChatService.runTurnBounded(
-          sink,
-          user,
-          child.getId(),
-          child.getProjectId(),
-          child.getRunId(),
-          orgId,
-          conversation,
-          child.getDefaultProvider(),
-          AgentStreamTurnSupport.allowedReadOnlyTools(),
-          maxRounds,
+      Runnable beforeRound =
           () -> {
             var budget = protocolService.authorizeNextTurn(child.getId(), userId, orgId);
             if (!budget.canContinue()) {
@@ -166,8 +195,37 @@ public class SubagentExecutionService {
               throw new SubagentBudgetExceededException(
                   "SUBAGENT_COST_BUDGET_EXHAUSTED", "subagent cost budget exhausted");
             }
-          },
-          handle.parentTurnId());
+          };
+      if (operationCoordinator == null) {
+        specChatService.runTurnBounded(
+            sink,
+            user,
+            child.getId(),
+            child.getProjectId(),
+            child.getRunId(),
+            orgId,
+            conversation,
+            child.getDefaultProvider(),
+            AgentStreamTurnSupport.allowedReadOnlyTools(),
+            maxRounds,
+            beforeRound,
+            durableTurnId);
+      } else {
+        specChatService.runDurableTurnBounded(
+            sink,
+            user,
+            child.getId(),
+            child.getProjectId(),
+            child.getRunId(),
+            orgId,
+            conversation,
+            child.getDefaultProvider(),
+            AgentStreamTurnSupport.allowedReadOnlyTools(),
+            maxRounds,
+            beforeRound,
+            durableTurnId,
+            operation::bind);
+      }
 
       RunCostTracker.Snapshot usage = sink.usage();
       if (usage.costUsd() > handle.maxCostUsd()) {
@@ -175,7 +233,7 @@ public class SubagentExecutionService {
             "SUBAGENT_COST_BUDGET_EXHAUSTED", "subagent cost budget exceeded");
       }
       String summary = sink.summary();
-      List<Evidence> evidence = extractEvidence(summary, sink.toolEvidence());
+      List<Evidence> evidence = SubagentTurnSupport.extractEvidence(summary, sink.toolEvidence());
       if (handle.role().contract().requiresEvidence() && evidence.isEmpty()) {
         throw new IllegalStateException(
             handle.role().name().toLowerCase(java.util.Locale.ROOT)
@@ -183,43 +241,26 @@ public class SubagentExecutionService {
       }
       persistExecutionTurns(
           child, handle.role(), handle.objective(), summary, usage, sink.turnCount());
-      return protocolService.complete(
-          child.getId(), new SubagentProtocol.Completion(summary, evidence), userId, orgId);
+      Result completed =
+          protocolService.complete(
+              child.getId(), new SubagentProtocol.Completion(summary, evidence), userId, orgId);
+      operationLifecycle.complete(operation);
+      return completed;
     } catch (RuntimeException e) {
       try {
         protocolService.cancel(
-            child.getId(), "execution stopped: " + safeMessage(e), userId, orgId);
+            child.getId(),
+            "execution stopped: " + SubagentTurnSupport.safeMessage(e),
+            userId,
+            orgId);
       } catch (RuntimeException ignored) {
         // Preserve the original execution failure; terminal/racing cancellation is harmless.
       }
+      operationLifecycle.terminate(operation, e);
       throw e;
     } finally {
-      heartbeat.interrupt();
+      operation.close();
     }
-  }
-
-  /**
-   * Starts a bounded lease-renewal ticker for one executing child.
-   *
-   * <p>The ticker is advisory: a failed renewal is logged by the protocol service and never fails
-   * the turn, and the returned thread is interrupted on every terminal path.
-   */
-  private Thread startHeartbeat(String childSessionId, String userId, String orgId) {
-    return Thread.ofVirtual()
-        .name("subagent-heartbeat-" + childSessionId)
-        .start(
-            () -> {
-              while (!Thread.currentThread().isInterrupted()) {
-                try {
-                  Thread.sleep(HEARTBEAT_INTERVAL_MILLIS);
-                  protocolService.heartbeat(childSessionId, userId, orgId);
-                } catch (InterruptedException interrupted) {
-                  Thread.currentThread().interrupt();
-                } catch (RuntimeException renewalFailure) {
-                  // Keep ticking: one failed renewal must not silently end the lease.
-                }
-              }
-            });
   }
 
   /**
@@ -267,11 +308,22 @@ public class SubagentExecutionService {
     List<Result> results = new ArrayList<>();
     List<BatchFailure> failures = new ArrayList<>();
     List<Future<Result>> futures = new ArrayList<>(reserved.size());
+    AtomicReferenceArray<Result> completedResults = new AtomicReferenceArray<>(reserved.size());
     try (ExecutorService executor = Executors.newFixedThreadPool(reserved.size())) {
       for (int index = 0; index < requests.size(); index++) {
         SpawnRequest request = requests.get(index);
         Handle handle = reserved.get(index);
-        futures.add(executor.submit(() -> executeReserved(request, handle, user, orgId)));
+        int resultIndex = index;
+        futures.add(
+            executor.submit(
+                () -> {
+                  Result result = executeReserved(request, handle, user, orgId);
+                  // Publish a durable child success before FutureTask transitions to DONE. A
+                  // sibling can fail in that narrow transition window; relying only on isDone()
+                  // would then cancel this already-completed child and discard its result.
+                  completedResults.set(resultIndex, result);
+                  return result;
+                }));
       }
       boolean failed = false;
       Set<Integer> processed = new LinkedHashSet<>();
@@ -300,6 +352,12 @@ public class SubagentExecutionService {
         for (int index = 0; index < futures.size(); index++) {
           Future<Result> future = futures.get(index);
           if (processed.contains(index)) continue;
+          Result completedResult = completedResults.get(index);
+          if (completedResult != null) {
+            results.add(completedResult);
+            processed.add(index);
+            continue;
+          }
           if (!future.isDone()) {
             future.cancel(true);
             failures.add(
@@ -491,103 +549,5 @@ public class SubagentExecutionService {
   private static double portion(double total, int parts, int index) {
     double base = total / parts;
     return index == parts - 1 ? total - base * (parts - 1) : base;
-  }
-
-  private static String rolePrompt(Role role, String objective) {
-    String contract =
-        switch (role) {
-          case SCOUT ->
-              "Locate the smallest relevant code surface. Report findings only; do not propose or"
-                  + " perform edits. Cite every concrete finding as path:line.";
-          case VERIFIER ->
-              "Independently verify the stated objective against repository evidence. Do not edit,"
-                  + " run lifecycle actions, or claim success without path:line citations.";
-          case REPRODUCER ->
-              "Trace the smallest deterministic reproduction path using repository evidence only."
-                  + " Do not execute commands or edit files; report prerequisites, expected failure"
-                  + " signatures, and path:line evidence.";
-          case REVIEWER ->
-              "Review the relevant implementation for correctness, regressions, and missing tests."
-                  + " Do not edit or run lifecycle actions; report findings with path:line"
-                  + " evidence.";
-          case DOCS_SCOUT ->
-              "Find the authoritative documentation and contract surfaces relevant to the"
-                  + " objective. Do not edit; report stale or missing documentation with path:line"
-                  + " evidence.";
-          case IMPLEMENTER ->
-              "Implementer execution is only available through the explicit single-writer"
-                  + " mutation seam; do not use this read-only child executor.";
-        };
-    return "ROLE: " + role + " (strictly read-only)\n" + contract + "\n\nOBJECTIVE:\n" + objective;
-  }
-
-  private static List<Evidence> extractEvidence(String summary, List<String> toolEvidence) {
-    Set<String> citations = new LinkedHashSet<>();
-    collectCitations(summary, citations);
-    for (String value : toolEvidence) collectCitations(value, citations);
-    return citations.stream()
-        .limit(20)
-        .map(citation -> new Evidence(citation, "read-only subagent evidence"))
-        .toList();
-  }
-
-  private static void collectCitations(String value, Set<String> citations) {
-    if (value == null) return;
-    Matcher matcher = CITATION.matcher(value);
-    while (matcher.find()) citations.add(matcher.group(1) + ":" + matcher.group(2));
-  }
-
-  private static String safeMessage(RuntimeException e) {
-    String message = e.getMessage();
-    return message == null || message.isBlank() ? e.getClass().getSimpleName() : message;
-  }
-
-  private static final class CapturingSink implements SpecChatService.Sink {
-    private final StringBuilder text = new StringBuilder();
-    private final List<String> toolEvidence = new ArrayList<>();
-    private final Map<String, String> toolNames = new LinkedHashMap<>();
-    private RunCostTracker.Snapshot usage = new RunCostTracker.Snapshot(0, 0, 0, 0, 0, 0);
-    private int turnCount;
-
-    @Override
-    public void token(String text) {
-      if (text == null || text.isBlank()) return;
-      if (!this.text.isEmpty()) this.text.append('\n');
-      this.text.append(text);
-    }
-
-    @Override
-    public void toolCall(String tool, String argsJson, String id) {
-      toolNames.put(id, tool);
-    }
-
-    @Override
-    public void toolResult(String id, String resultJson) {
-      toolEvidence.add(toolNames.getOrDefault(id, "tool") + ": " + resultJson);
-    }
-
-    @Override
-    public void done(int turnCount, RunCostTracker.Snapshot cost) {
-      this.turnCount = turnCount;
-      usage = cost == null ? usage : cost;
-    }
-
-    String summary() {
-      return text.isEmpty()
-          ? "Read-only subagent completed without a textual summary."
-          : text.toString();
-    }
-
-    List<String> toolEvidence() {
-      return List.copyOf(toolEvidence);
-    }
-
-    RunCostTracker.Snapshot usage() {
-      return usage;
-    }
-
-    int turnCount() {
-      return turnCount;
-    }
   }
 }

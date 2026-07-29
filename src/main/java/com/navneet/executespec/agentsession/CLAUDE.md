@@ -52,6 +52,11 @@ turns separately from runs.
 - Streaming turns route, guard and persist `AgentStreamTurnSupport.routedUserText(request)` — the
   last user entry of the conversation the provider will execute — not `request.message()`, which
   the runner discards whenever `conversation` is non-empty.
+- Provider-free scripted stream evidence is reachable only for the reserved server-minted
+  `web-qa-*` session namespace when `web-qa` is the sole active profile and
+  `executespec.live-llm.enabled=false`. Missing/mixed profiles, local/dev/test, a null environment,
+  live dispatch, and ordinary session ids all fail closed; ordinary sessions continue through the
+  real stream path and never inherit fixture events.
 - The deterministic run-id grammar accepts only a canonical UUID. A bare hex token is not a run id:
   commit SHAs, hex-looking words and long digit strings used to produce credit-charging
   approve/cancel confirmation cards for the wrong target.
@@ -196,12 +201,21 @@ turns separately from runs.
   binds a fresh remote session, marks old call ids `WORKER_RESTARTED`, and lets the resumed worker
   issue a new call from the last clean tool-response boundary. This is bounded checkpoint recovery,
   not JVM hot-resume; the old provider future is never claimed to be rebound.
+- Streamed agent turns claim one durable `agent-turn:model-loop` operation. The terminal turn and
+  usage/event evidence are persisted before `AgentTurnOperationLifecycle` completes the operation;
+  failure or disconnect performs a fenced fail/cancel transition instead of fabricating a new
+  lease. V355 adds the partial `(created_at,id)` index used by bounded stale-`STREAMING` recovery.
+  Startup and scheduled recovery mark sufficiently old unfinished turns `ERROR` with
+  `OUTCOME_UNCERTAIN`, append `STREAM_RECOVERED_OUTCOME_UNCERTAIN`, and request operation
+  cancellation. They never replay a provider call. The default stale threshold is deliberately
+  beyond the maximum 24-hour transport/reclaim horizon.
 - Startup recovery reconciles persisted child sessions left in `RUNNING` after a JVM restart to
   `CANCELLED` and appends a `SUBAGENT_RECOVERY` event with `reason=SERVER_RESTART`. Provider calls
   and in-memory tool futures cannot be resumed across a process boundary; cancelling the stale
   child releases its reserved descendant budget and lets the parent request a fresh bounded child.
   Liveness is a lease, not an assumption: `SubagentExecutionService` renews the child heartbeat
-  every 30s for the whole execution (turn admission alone does not cover a long model round), and
+  and the claimed LLM-operation lease every 30s for the whole execution (turn admission alone does
+  not cover a long model round), and
   `AgentSessionStartupRecovery` only cancels a child whose lease has been unrenewed for 300s.
   **Known scope limit:** that sweep reads the whole `agent_session` table and has no owner/instance
   identity to fence on, so it cannot prove a candidate belongs to the booting JVM. A child whose
@@ -214,7 +228,7 @@ turns separately from runs.
 | ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `OrchestratorController.java`              | Primary structured `/api/orchestrator/turn` endpoint for route/policy decisions plus explicit `/turn/confirm` for confirmed cloud-run submissions.                                                                  |
 | `OrchestratorService.java`                 | Stable controller-to-service facade for structured turn decisions and explicit confirmed run submission; delegates persistence to `AgentSessionService` and keeps run creation behind `AgentRunSubmissionGate`.     |
-| `AgentRunSubmissionGate.java`              | The only agent-session path allowed to create a new cloud run from a stored `CODE_RUN_REQUIRED` decision. It requires canonical project write authority. Local execution fails closed here because the confirmation DTO cannot bind `selectedRepoIds` + `localInstallationId`; clients must use normal local-run admission. Confirmed cloud submissions can carry `lowComplexityWorkerStartTier` so LOW tasks can start cheap without using a route-pinning model override. |
+| `AgentRunSubmissionGate.java`              | The only agent-session path allowed to create a new cloud run from a stored `CODE_RUN_REQUIRED` decision. It delegates BUILD admission to `CustomerRunSubmissionService`, including canonical project write authority, exact `selectedRepoIds`, idempotency, spend/key gates, and host-project org ownership. Local execution still fails closed because confirmation cannot bind a `localInstallationId`; clients must use normal local-run admission. Confirmed cloud submissions can carry `lowComplexityWorkerStartTier` so LOW tasks can start cheap without using a route-pinning model override. |
 | `AgentActionArguments.java`                | Package-local typed-action argument helper shared by confirmed run submission and confirmation write guards.                                                                                                        |
 | `AgentSessionController.java`              | REST surface under `/api/agent`: sessions, streaming + recorded turns, action catalog, context resolution, gate decision cards.                                                                                     |
 | `AgentSessionHistoryService.java`          | Ownership-checked, transactional transcript reset used by the cross-surface `/sessions/{id}/history` DELETE contract; preserves session identity and usage audit rows.                                         |
@@ -230,6 +244,8 @@ turns separately from runs.
 | `subagent/ImplementerWorkspaceScope.java` | Server-authoritative scope binder for the writer seam: derives the root from the session (run workspace or per-session sandbox), accepts only relative narrowing proven contained by `SafeWorkspacePath`, and refuses caller-supplied absolute host paths. |
 | `subagent/ImplementerExecutionService.java` | Disabled-by-default bounded WORKHORSE IMPLEMENTER loop; binds the allowlisted read/edit/build/test tools, routes mutations through the reservation seam, persists checkpoints and terminal turn evidence, and releases the reservation on terminal paths. |
 | `SubagentExecutionService.java`            | Executes persisted role-contract children through the read-only orchestrator policy and bounded `SpecChatService`/`LlmRouter` tool loop; records each model round, requires evidence for verification/reproduction/review/docs roles, propagates cancellation, and gates deterministic coordinator-triggered execution. |
+| `SubagentOperationLifecycle.java`          | Renews the child-session and durable LLM-operation leases during a bounded child turn, then owns their fenced completion/failure transitions. |
+| `SubagentTurnSupport.java`                 | Package-local role prompt, citation extraction, safe-error, and bounded result-capture mechanics for read-only child turns. |
 | `AgentEventRecorder.java`                  | Appends durable action events with consistent ids, timestamps, turn/action scoping, and payload JSON fallback.                                                                                                      |
 | `AgentRunEventBridge.java`                 | Mirrors typed task-wave and goal/continuation `RunEvent`s into active run-scoped `agent_action_event` rows so reloadable web/CLI/VS Code sessions can show the same run decision trail, including approved continuation actions (`CONTINUATION_ACTION` with `status=APPROVED`).                              |
 | `AgentValidationReportEventBridge.java`    | Mirrors saved validation-report evidence ledgers plus conservative `runGoalDecision` proof into active run-scoped `agent_action_event` rows as `RUN_VALIDATION_EVIDENCE`.                                           |
@@ -242,6 +258,9 @@ turns separately from runs.
 | `AgentStreamTurnStarter.java`              | Starts streaming turns: route decision, initial turn row, provider preference update, title update, and `STREAM_STARTED` trace event.                                                                               |
 | `AgentStreamTurnLifecycle.java`            | Persists stream terminal states: completion usage ledger rows, failure events, and disconnect cancellation behavior. Disconnects retain a capped partial assistant summary plus any latest usage snapshot in the turn row, usage ledger, and `STREAM_DISCONNECTED` event. |
 | `AgentStreamTurnRunner.java`               | Executes one SSE streaming turn after start: emits ack/route/proposal/token/tool/done frames, binds read-only tools, handles decision-only routes, and records completion/failure/disconnect. Stream failures send an SSE `error` frame and close normally instead of rethrowing into Spring's JSON error renderer after `text/event-stream` is committed; provider credential failures are normalized into provider-key recovery copy instead of exposing raw upstream JSON/request ids. Client disconnects pass the accumulated bounded text to the lifecycle so replay retains partial progress. |
+| `AgentTurnOperationLifecycle.java`         | Owns the fenced complete/fail/cancel transitions for the durable LLM operation claimed by one streamed agent turn. |
+| `AgentTurnRecoveryService.java`            | Bounded oldest-first recovery for stale persisted `STREAMING` turns: records outcome uncertainty, never replays transport, and reconciles the matching operation cancellation under transactional locks. |
+| `AgentTurnRecoveryScheduler.java`          | Runs stale-turn reconciliation at startup and on a bounded schedule; clamps the stale threshold beyond the maximum transport/reclaim horizon. |
 | `AgentStreamTurnSupport.java`              | Package-local stream support policy: read-only tool allowlist (incl. `web_search`/`web_fetch`), conversation fallback, server-side attachment-block injection, and client-disconnect detection.                     |
 | `AgentAttachmentService.java`              | Validates + extracts + sanitizes a chat upload (magic-byte type allow-list + Tika + `InputSanitizer` injection scan + `ContextSanitizer`), stores it, and builds the untrusted-delimited injection block for the turn. Audits accept/reject. |
 | `AgentAttachmentStore.java`                | Redis-backed store (2h TTL) for validated, sanitized upload text keyed by session + attachment id, loaded server-side at turn time.                                                                                 |
@@ -308,9 +327,11 @@ turns separately from runs.
   require imperative command wording plus run ids and confirmation actions, list-runs/list-gates
   stays read-only, and approval-boundary wording inside code-run requests (for example "do not
   code until I approve") is not claimed by lifecycle routing.
-- `AgentRunSubmissionGateTest` pins confirmed cloud-run submission idempotency, canonical project
-  write denial, fail-closed local confirmation without connector/repo binding, and propagation of
-  `lowComplexityWorkerStartTier=LIGHTWEIGHT|WORKHORSE` as a normalized non-pinning run hint.
+- `AgentRunSubmissionGateTest` pins confirmed cloud-run delegation through the shared customer
+  BUILD admission boundary, exact repository selection propagation, duplicate semantics,
+  fail-closed local confirmation without connector binding, and propagation of
+  `lowComplexityWorkerStartTier=LIGHTWEIGHT|WORKHORSE` as a normalized non-pinning run hint. A
+  structural assertion forbids this gate from regaining a direct `RunOrchestrator` dependency.
 - `AgentCodeChangeIntentsTest` pins the only code-run-producing branch directly: local tools yield
   `local_code_task` without run API access, project-scoped cloud runs require confirmation, and
   missing/blank project context cannot call the run API. It also pins the typed blocking contract:
@@ -346,7 +367,8 @@ turns separately from runs.
   It also pins confirmed run submission idempotency, turn-to-run linking, and trace fields such as
   `promptVersion`, `calledRunApi`, `createdRunId`, and `policyDecisions`.
 - `AgentRunSubmissionGateTest` pins that only stored, confirmed `CODE_RUN_REQUIRED` decisions reach
-  `RunOrchestrator.submitRun`; non-run routes and missing confirmation fail before a run is created.
+  `CustomerRunSubmissionService`; non-run routes and missing confirmation fail before shared BUILD
+  admission.
 - `AgentActionCatalogTest` pins surface/tier filtering and descriptor/capability metadata alignment
   so local-only tools stay out of WEB and action billing/confirmation fields do not drift, and pins
   `web_search`/`web_fetch` exposure on every surface.

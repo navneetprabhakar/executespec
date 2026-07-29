@@ -162,6 +162,7 @@ class SpecChatBudgetTranslationTest {
         mock(RunKeyContextStore.class),
         new InputSanitizer(),
         new ContextSanitizer(),
-        mock(ProjectChatPolicyResolver.class));
+        mock(ProjectChatPolicyResolver.class),
+        mock(com.navneet.executespec.executioncontext.LlmExecutionOperationCoordinator.class));
   }
 }

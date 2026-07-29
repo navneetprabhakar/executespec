@@ -386,6 +386,12 @@ export function IdeCompose() {
   const [projectQuery, setProjectQuery] = useState('');
   const [projectRepos, setProjectRepos] = useState<Array<Record<string, unknown>>>([]);
   const [selectedRepoIds, setSelectedRepoIds] = useState<string[]>([]);
+  const [repoDiscovery, setRepoDiscovery] = useState<{
+    projectId: string | null;
+    status: 'idle' | 'loading' | 'ready' | 'error';
+    error: string | null;
+  }>({projectId: null, status: 'idle', error: null});
+  const [repoDiscoveryRetry, setRepoDiscoveryRetry] = useState(0);
   // Per-tier max hard cap, mirroring TierEnforcementService.resolveRunCostBudget:
   // FREE $3 · PRO $5 (BYOK lifts it server-side) · TEAM/ENTERPRISE have no platform
   // cap, so the input there only sets a voluntary ceiling.
@@ -529,9 +535,13 @@ export function IdeCompose() {
     if (!projectId) {
       setProjectRepos([]);
       setSelectedRepoIds([]);
+      setRepoDiscovery({projectId: null, status: 'idle', error: null});
       return;
     }
     let cancelled = false;
+    setProjectRepos([]);
+    setSelectedRepoIds([]);
+    setRepoDiscovery({projectId, status: 'loading', error: null});
     api
       .getProjectRepos(projectId)
       .then((rs) => {
@@ -544,16 +554,25 @@ export function IdeCompose() {
             .map((r) => repoIdFor(r))
             .filter(Boolean),
         );
+        setRepoDiscovery({projectId, status: 'ready', error: null});
       })
-      .catch(() => {
+      .catch((error: unknown) => {
         if (cancelled) return;
         setProjectRepos([]);
         setSelectedRepoIds([]);
+        setRepoDiscovery({
+          projectId,
+          status: 'error',
+          error:
+            error instanceof Error && error.message
+              ? error.message
+              : 'Linked repositories could not be loaded.',
+        });
       });
     return () => {
       cancelled = true;
     };
-  }, [projectId]);
+  }, [projectId, repoDiscoveryRetry]);
 
   // Debounced p25/p75 estimate. Only meaningful inside a project (the
   // estimator pulls from project history).
@@ -702,6 +721,13 @@ export function IdeCompose() {
                 : 'Managed-AI balance unavailable; backend policy still applies.';
 
   function pickProject(id: string | null) {
+    setProjectRepos([]);
+    setSelectedRepoIds([]);
+    setRepoDiscovery({
+      projectId: id,
+      status: id ? 'loading' : 'idle',
+      error: null,
+    });
     setProjectId(id);
     setProjectPickerOpen(false);
     setProjectQuery('');
@@ -725,6 +751,14 @@ export function IdeCompose() {
           : providerReadiness.loading
             ? 'Provider readiness is still being checked.'
             : providerReadinessLabel(selectedProviderReadiness),
+      );
+      return;
+    }
+    if (projectId && (repoDiscovery.projectId !== projectId || repoDiscovery.status !== 'ready')) {
+      setErr(
+        repoDiscovery.status === 'error'
+          ? 'Linked repositories could not be loaded. Retry repository discovery before creating the plan.'
+          : 'Linked repositories are still loading. Wait before creating the plan.',
       );
       return;
     }
@@ -759,6 +793,9 @@ export function IdeCompose() {
     : 'Standalone';
   const mobileCanAdvanceFromSpec = spec.trim().length > 0;
   const mobileNextBlocked = mobileStep === 1 && !mobileCanAdvanceFromSpec;
+  const repositoryScopeReady =
+    projectId == null ||
+    (repoDiscovery.projectId === projectId && repoDiscovery.status === 'ready');
 
   return (
     <div className='ide-pane ide-compose' style={{maxWidth: 1060}}>
@@ -900,10 +937,31 @@ export function IdeCompose() {
               )}
               <div className='ide-sub' style={{marginTop: 0, marginBottom: 0}}>
                 {projectId
-                  ? `${projects.find((p) => p.id === projectId)?.name}. ${selectedRepoIds.length} ${selectedRepoIds.length === 1 ? 'repo' : 'repos'} selected.`
+                  ? repoDiscovery.projectId !== projectId || repoDiscovery.status === 'loading'
+                    ? `${projects.find((p) => p.id === projectId)?.name}. Loading repositories…`
+                    : repoDiscovery.status === 'error'
+                      ? `${projects.find((p) => p.id === projectId)?.name}. Repository discovery failed.`
+                      : `${projects.find((p) => p.id === projectId)?.name}. ${selectedRepoIds.length} ${selectedRepoIds.length === 1 ? 'repo' : 'repos'} selected.`
                   : 'Standalone starts a run without linking a repository.'}
               </div>
             </div>
+
+            {projectId &&
+              repoDiscovery.projectId === projectId &&
+              repoDiscovery.status === 'error' && (
+                <div className='ide-card' role='alert'>
+                  <div style={{color: 'var(--ide-red)', marginBottom: 10}}>
+                    Linked repositories could not be loaded. {repoDiscovery.error}
+                  </div>
+                  <button
+                    type='button'
+                    className='ide-btn ghost'
+                    onClick={() => setRepoDiscoveryRetry((attempt) => attempt + 1)}
+                  >
+                    Retry repository discovery
+                  </button>
+                </div>
+              )}
 
             {samples.length > 0 && (
               <details className='ide-card ide-compose-samples ide-compose-advanced'>
@@ -931,7 +989,14 @@ export function IdeCompose() {
               <button
                 className='ide-btn'
                 onClick={submit}
-                disabled={busy || (projectRepos.length > 0 && selectedRepoIds.length === 0)}
+                disabled={
+                  busy ||
+                  providerReadiness.loading ||
+                  providerReadiness.error ||
+                  !selectedProviderReady ||
+                  !repositoryScopeReady ||
+                  (projectRepos.length > 0 && selectedRepoIds.length === 0)
+                }
               >
                 {busy ? 'Submitting...' : 'Create plan'}
               </button>

@@ -120,7 +120,7 @@ class AsyncAllowlistTest {
               // execution orchestration — originally triggered 3a17e9aa bug;
               // fixed via findWithRepoMappingsBy* eager-load queries + compensation logic
               "ExecutionOrchestrator#triggerAnalysis",
-              "ExecutionOrchestrator#approvePlanAndExecute",
+              "ExecutionOrchestrator#projectApprovedPlan",
               "ExecutionOrchestrator#executeApprovedPlan",
               "ExecutionPlannerService#generatePlan",
               // V188 (2026-05-13) unified-dispatch path: both methods read the V2 PipelineRun via
@@ -148,6 +148,11 @@ class AsyncAllowlistTest {
               // code-RAG — clone + walk + embed into project_code_chunk (file I/O + DB;
               // RL-2026-05-052)
               "CodeIndexingService#indexRepoAsync",
+              // Explicit refresh delegates to the same indexRepo path as indexRepoAsync. The
+              // detached ProjectRepo is used only through scalar metadata getters (id, source
+              // revision/name, clone URL and SCM provider); it does not traverse a lazy
+              // collection.
+              "CodeIndexingService#indexRepoExplicitAsync",
 
               // deployment — reads the run then uploads to GCS; no lazy nav
               "WorkspaceGcsUploadListener#onRunCompleted",
@@ -156,6 +161,10 @@ class AsyncAllowlistTest {
               // v2 post-merge orchestrator + recovery
               "PostMergeOrchestrator#onMergeCompleted",
               "StartupRunResumer#onApplicationReady",
+              // Durable plan-gate continuation events and startup recovery carry primitive run
+              // ids only; each async path reloads and locks all JPA state in its own transaction.
+              "PlanGateResumeDispatcher#onResumeReady",
+              "PlanGateResumeDispatcher#onApplicationReady",
 
               // programbench — async background that polls run row + tars submission.
               // Reads the PipelineRun via id (no lazy navigation), shells out to docker.

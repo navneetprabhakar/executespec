@@ -2,6 +2,7 @@ import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {Link, useLocation, useNavigate, useParams} from 'react-router-dom';
 import * as api from '@/lib/api';
 import type {
+  ArchitectureJob,
   ProjectCodeIndexRefreshAccepted,
   ProjectCodeIndexStatus,
   ProjectRepo,
@@ -1902,7 +1903,10 @@ export function IdeProjectRepos() {
                         act(
                           `regen${id}`,
                           () => api.regenerateRepoArchitecture(projectId, id),
-                          'Architecture regenerated.',
+                          (result) => {
+                            const job = result as ArchitectureJob;
+                            return `System map refresh ${job.status === 'RUNNING' ? 'is running' : 'was queued'} · job ${job.id.slice(0, 8)}. Track progress in System map.`;
+                          },
                         )
                       }
                     >

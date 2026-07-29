@@ -127,6 +127,22 @@ export function IdeApiKeys() {
   const user = useAuthStore((s) => s.user);
   const permissions = useAuthStore((s) => s.permissions);
   const canManage = permissions?.canManageAiKeys ?? ['BYOK', 'TEAM', 'ENTERPRISE'].includes(tier);
+  const [org, setOrg] = useState<api.OrgDto | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .getMyOrg()
+      .then((value) => {
+        if (!cancelled) setOrg(value);
+      })
+      .catch(() => {
+        // Personal-key management remains usable if the optional org status read fails.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Per-provider "key already saved" flags (raw keys are never returned) —
   // drives the "Leave blank to keep your current key" hint under each row.
@@ -312,6 +328,27 @@ export function IdeApiKeys() {
         {ProviderRow('Gemini', 'GEMINI', geminiKey, setGeminiKey, false)}
         {ProviderRow('DeepSeek', 'DEEPSEEK', deepSeekKey, setDeepSeekKey, false)}
         {ProviderRow('Fireworks', 'FIREWORKS', fireworksKey, setFireworksKey, true)}
+      </div>
+      <div className='ide-card' style={{marginTop: 12}}>
+        <div style={{display: 'flex', alignItems: 'center', gap: 10}}>
+          <div style={{flex: 1}}>
+            <div style={{fontSize: 13.5, fontWeight: 600, color: 'var(--ide-fg-bright)'}}>
+              OpenRouter
+            </div>
+            <div style={{fontSize: 11.5, color: 'var(--ide-fg-muted)', marginTop: 4}}>
+              OpenRouter is an organization gateway credential, shared under the org provider policy
+              rather than stored as a personal key.
+            </div>
+          </div>
+          <IdeBadge kind={org?.hasOpenRouterKey ? 'ok' : 'warn'}>
+            {org?.hasOpenRouterKey ? 'Connected' : 'Not set'}
+          </IdeBadge>
+          <Link className='ide-btn' to='/org/settings#provider-keys'>
+            {user?.orgRole === 'ORG_ADMIN' || user?.globalRole === 'SUPER_ADMIN'
+              ? 'Configure org key'
+              : 'View org setting'}
+          </Link>
+        </div>
       </div>
       <ConfirmModal
         open={confirmRevoke !== null}
@@ -1470,7 +1507,9 @@ export function IdeOrgSettings() {
       </div>
 
       {/* ── AI provider keys ── */}
-      <div className='ide-h2'>AI provider keys</div>
+      <div className='ide-h2' id='provider-keys'>
+        AI provider keys
+      </div>
       <InfoCard>
         {orgTier === 'FREE' || orgTier === 'PRO' || orgTier === 'PRO_PLUS'
           ? 'Org-wide provider keys are available on BYOK, TEAM, and ENTERPRISE workspaces. This page shows current status only for your tier.'

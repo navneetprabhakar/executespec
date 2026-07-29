@@ -165,10 +165,11 @@ public class PlanContractGateService {
   }
 
   /**
-   * Enforce the gate at plan approval. The acknowledgement is server-verified: exact text, bound to
-   * the exact report digest, recorded with the acting user. A replayed acknowledgement against an
-   * already-acknowledged gate is accepted (idempotent approval retry); one against a different
-   * digest is refused.
+   * Enforce the gate at plan approval. The acknowledgement is server-verified as semantic {@code
+   * BREAKING} after trimming/case-folding, bound to the exact report digest, and recorded with the
+   * acting user; persisted acknowledgement bytes are not rewritten. A replayed acknowledgement
+   * against an already-acknowledged gate is accepted (idempotent approval retry); one against a
+   * different digest is refused.
    */
   public AckOutcome acknowledge(String runId, String ackText, String digest, String userId) {
     var existing = find(runId).orElse(null);

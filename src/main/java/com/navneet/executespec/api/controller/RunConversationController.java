@@ -97,7 +97,8 @@ public class RunConversationController {
 
   public record ChatMessageBody(String message) {}
 
-  public record ChatResponseBody(String reply, int messageCount, int maxMessages) {}
+  public record ChatResponseBody(
+      String reply, int messageCount, int maxMessages, boolean complete, String incompleteReason) {}
 
   public record ChatHistoryItem(String role, String content) {}
 
@@ -142,7 +143,9 @@ public class RunConversationController {
     }
     try {
       ChatService.SendResult r = chatService.send(runId, body.message());
-      return ResponseEntity.ok(new ChatResponseBody(r.reply(), r.messageCount(), r.maxMessages()));
+      return ResponseEntity.ok(
+          new ChatResponseBody(
+              r.reply(), r.messageCount(), r.maxMessages(), r.complete(), r.incompleteReason()));
     } catch (IllegalArgumentException e) {
       throw new ResponseStatusException(HttpStatus.NOT_FOUND, e.getMessage());
     } catch (IllegalStateException e) {

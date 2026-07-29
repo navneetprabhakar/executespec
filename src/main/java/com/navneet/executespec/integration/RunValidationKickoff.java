@@ -59,10 +59,12 @@ class RunValidationKickoff {
   private final com.navneet.executespec.smoketest.WorkspaceTestRunner workspaceTestRunner;
   private final com.navneet.executespec.deployment.preview.verify.PreviewVerifier previewVerifier;
   private final com.navneet.executespec.config.featureflag.FeatureFlagService featureFlagService;
+  private final RunLlmOperationLifecycleService operationLifecycle;
 
   java.util.Optional<ValidationReport> generateValidationReport(
       String runId, ExecutionResult execResult, ReviewerResult reviewResult, Plan plan) {
-    return generateValidationReport(runId, execResult, reviewResult, plan, java.util.List.of());
+    return generateValidationReport(
+        runId, execResult, reviewResult, plan, java.util.List.of(), null);
   }
 
   /**
@@ -76,6 +78,17 @@ class RunValidationKickoff {
       ReviewerResult reviewResult,
       Plan plan,
       java.util.List<com.navneet.executespec.reviewer.model.ReviewIssue> extraIssues) {
+    return generateValidationReport(runId, execResult, reviewResult, plan, extraIssues, null);
+  }
+
+  java.util.Optional<ValidationReport> generateValidationReport(
+      String runId,
+      ExecutionResult execResult,
+      ReviewerResult reviewResult,
+      Plan plan,
+      java.util.List<com.navneet.executespec.reviewer.model.ReviewIssue> extraIssues,
+      String operationPhase) {
+    RunLlmOperationLifecycleService.PhaseLease operation = null;
     try {
       var run = runRepo.findById(runId).orElse(null);
       if (run == null) return java.util.Optional.empty();
@@ -218,6 +231,18 @@ class RunValidationKickoff {
           new java.util.ArrayList<>(synthesiseReviewIssues(reviewResult, compile, null));
       deterministicReviewIssues.addAll(workspaceDiagnosticIssues);
 
+      if (operationPhase != null) {
+        operation =
+            operationLifecycle.claimValidation(
+                runId,
+                operationPhase,
+                run.getAiProvider()
+                    + "|"
+                    + (run.getReviewerModel() == null ? "unresolved" : run.getReviewerModel()));
+      }
+      com.navneet.executespec.tool.ExecutionContext validationContext =
+          operation == null ? null : operation.context();
+
       // Run accuracy assessment — V1 does this inside ReviewerAgentV2 phase 3,
       // but V2's ReviewerAgent skips it, so the ValidationReport was coming
       // back with accuracyScore=null. Call it here so the report gets populated.
@@ -239,7 +264,8 @@ class RunValidationKickoff {
                 planningModel,
                 run.getUserRequest() == null ? "" : run.getUserRequest(),
                 plan == null ? java.util.List.of() : plan.requirements(),
-                deterministicReviewIssues);
+                deterministicReviewIssues,
+                validationContext == null ? null : validationContext.child("accuracy-assessment"));
         review.setAccuracyReport(accuracy);
       } catch (Exception e) {
         log.warn("RunOrchestrator run={} accuracy assessment failed: {}", runId, e.getMessage());
@@ -301,10 +327,29 @@ class RunValidationKickoff {
       // billing-attribution hazard (any reader of run.aiProvider during the swap saw the wrong
       // provider). The report now generates on the run's actual provider, entity untouched.
       java.util.Optional<ValidationReport> savedReport =
-          validationReportService.generateAndPersist(runId, input);
+          validationContext == null
+              ? validationReportService.generateAndPersist(runId, input)
+              : validationReportService.generateAndPersist(
+                  runId, input, validationContext.child("validation-report"));
+      if (operation != null) {
+        if (savedReport.isPresent()) {
+          operationLifecycle.complete(operation);
+          operation = null;
+        } else {
+          operationLifecycle.terminateOneShot(operation, "VALIDATION_RESULT_NOT_PERSISTED");
+          operation = null;
+        }
+      }
       log.info("RunOrchestrator run={} validation report generated", runId);
       return savedReport;
     } catch (Exception e) {
+      if (operation != null) {
+        try {
+          operationLifecycle.terminateOneShot(operation, "VALIDATION_FAILED");
+        } catch (RuntimeException terminalFailure) {
+          e.addSuppressed(terminalFailure);
+        }
+      }
       log.warn("RunOrchestrator run={} validation report failed: {}", runId, e.getMessage(), e);
       return java.util.Optional.empty();
     }

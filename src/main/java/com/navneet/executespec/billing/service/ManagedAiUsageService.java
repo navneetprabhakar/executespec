@@ -283,15 +283,31 @@ public class ManagedAiUsageService {
    * estimate is not a spend reservation.
    */
   @Transactional
-  public void assertCanApproveEstimatedSpend(
+  public ApprovalEvaluation assertCanApproveEstimatedSpend(
       AppUserDetails userDetails, boolean ownKeysMode, double estimateHighUsd) {
-    if (!properties.isEnabled() || ownKeysMode || estimateHighUsd <= 0.0) return;
-    String userId = userDetails.getUser().getId();
+    return assertCanApproveEstimatedSpend(
+        userDetails.getUser().getId(),
+        userDetails.getUser().getOrgId(),
+        ownKeysMode,
+        estimateHighUsd);
+  }
+
+  /**
+   * Run-owner form of the plan-approval check. The actor clicking Approve is not necessarily the
+   * principal whose managed credits and provider-key hierarchy will fund subsequent calls.
+   */
+  @Transactional
+  public ApprovalEvaluation assertCanApproveEstimatedSpend(
+      String billingUserId, String billingOrgId, boolean ownKeysMode, double estimateHighUsd) {
+    if (!properties.isEnabled() || ownKeysMode || estimateHighUsd <= 0.0) {
+      return ApprovalEvaluation.unlimited(
+          ownKeysMode ? "BYOK_EXEMPT" : !properties.isEnabled() ? "DISABLED" : "ZERO_ESTIMATE");
+    }
     ManagedAiUserContext user =
         new ManagedAiUserContext(
-            userId, userDetails.getUser().getOrgId(), tierResolver.resolveUserTier(userId));
+            billingUserId, billingOrgId, tierResolver.resolveUserTier(billingUserId));
     ManagedAiProperties.TierPolicy policy = properties.policyFor(user.tier());
-    if (!isManaged(policy)) return;
+    if (!isManaged(policy)) return ApprovalEvaluation.unlimited("UNMANAGED_TIER");
 
     ManagedAiUsagePeriod period = periodService.currentOrCreate(user, policy, Instant.now(), true);
     long grant = period.getIncludedAiCredits() + period.getPurchasedAiCredits();
@@ -321,6 +337,26 @@ public class ManagedAiUsageService {
           org.springframework.http.HttpStatus.PAYMENT_REQUIRED,
           "This plan's high estimate exceeds the remaining managed-AI provider budget. Use your"
               + " own provider key or reduce the plan before approving.");
+    }
+    return new ApprovalEvaluation(
+        "ALLOWED", "MANAGED", grant, remainingCredits, estimatedCredits, hardRaw, remainingRaw);
+  }
+
+  /** Exact managed-AI values evaluated under the usage-period lock at plan approval. */
+  public record ApprovalEvaluation(
+      String outcome,
+      String mode,
+      Long grantCredits,
+      Long remainingCredits,
+      Long estimatedCredits,
+      Double hardRawUsd,
+      Double remainingRawUsd) {
+    private static ApprovalEvaluation unlimited(String mode) {
+      // These values are not limits with a special numeric value; they are not applicable for an
+      // unmanaged/BYOK/disabled approval. Keep the mode as the typed explanation and persist
+      // explicit nulls in the immutable plan-decision receipt. In particular, do not leak the
+      // customer-facing -1 "unlimited" display sentinel into canonical non-negative money fields.
+      return new ApprovalEvaluation("ALLOWED", mode, null, null, null, null, null);
     }
   }
 

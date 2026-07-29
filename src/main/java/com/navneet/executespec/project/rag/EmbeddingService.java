@@ -2,6 +2,7 @@ package com.navneet.executespec.project.rag;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
@@ -14,7 +15,10 @@ import com.navneet.executespec.cost.RunCostTracker;
 import com.navneet.executespec.cost.RunStepUsageRecorder;
 import com.navneet.executespec.executioncontext.LlmDispatchPolicyException;
 import com.navneet.executespec.executioncontext.LlmExecutionDispatchGuard;
+import com.navneet.executespec.executioncontext.LlmExecutionOperationAdmissionPolicy;
+import com.navneet.executespec.executioncontext.LlmExecutionOperationAuthority;
 import com.navneet.executespec.executioncontext.LlmExecutionPolicyFactory;
+import com.navneet.executespec.executioncontext.PhysicalProviderAttemptAdmissionService;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -39,6 +43,10 @@ public class EmbeddingService {
   public static final int VECTOR_DIMENSIONS = 1536;
   public static final String PROVIDER = "openai";
   private static final int BATCH_SIZE = 100;
+  // OpenAiEmbeddingTransport bounds connect to 5s and response reads to 60s by default. Atomic
+  // admission reserves that complete physical-call window plus a small terminal-recording margin.
+  private static final Duration TRANSPORT_TIMEOUT = Duration.ofSeconds(65);
+  private static final Duration TRANSPORT_SAFETY_MARGIN = Duration.ofSeconds(15);
 
   private final EmbeddingPolicyResolver policyResolver;
   private final LlmExecutionPolicyFactory executionPolicyFactory;
@@ -46,6 +54,8 @@ public class EmbeddingService {
   private final OpenAiEmbeddingTransport transport;
   private final RunStepUsageRecorder usageRecorder;
   private final ManagedAiUsageService managedAiUsageService;
+  private final LlmExecutionOperationAdmissionPolicy operationAdmissionPolicy;
+  private final PhysicalProviderAttemptAdmissionService physicalAttemptAdmissionService;
 
   /**
    * RR-392 (2026-07-20) — the embedding transport is a real provider-spending path that carried no
@@ -118,6 +128,27 @@ public class EmbeddingService {
       String sourceId,
       String actorUserId,
       BatchProgressCallback progress) {
+    return embedForProject(
+        projectId, texts, feature, sourceType, sourceId, actorUserId, progress, null);
+  }
+
+  /**
+   * Operation-authority-capable embedding path.
+   *
+   * <p>Logical roots opt in by passing the opaque authority issued for {@code reference}. Rollout
+   * policy remains the sole switch: LEGACY preserves the existing write-ahead path, SHADOW falls
+   * back only when authority is absent, and ENFORCED rejects missing authority before transport.
+   * This method owns physical attempts only; it never completes the logical operation.
+   */
+  public List<float[]> embedForProject(
+      String projectId,
+      List<String> texts,
+      String feature,
+      String sourceType,
+      String sourceId,
+      String actorUserId,
+      BatchProgressCallback progress,
+      LlmExecutionOperationAuthority operationAuthority) {
     if (texts == null || texts.isEmpty()) return List.of();
     var availability = policyResolver.resolve(projectId);
     if (!availability.semanticSearchAvailable()) {
@@ -134,6 +165,12 @@ public class EmbeddingService {
             PROVIDER,
             actorUserId);
     String runId = usageRunId(sourceId);
+    LlmExecutionOperationAdmissionPolicy.Decision admissionDecision =
+        operationAdmissionPolicy.decide(reference, operationAuthority);
+    if (admissionDecision.rejectsBeforeTransport()) {
+      throw new IllegalStateException(
+          "Embedding operation admission rejected before transport: " + admissionDecision.reason());
+    }
 
     List<float[]> vectors = new ArrayList<>(texts.size());
     int totalBatches = (texts.size() + BATCH_SIZE - 1) / BATCH_SIZE;
@@ -142,50 +179,18 @@ public class EmbeddingService {
       batchNumber++;
       List<String> batch = texts.subList(from, Math.min(from + BATCH_SIZE, texts.size()));
       String taskId = "embedding.batch." + batchNumber;
-      // RR-915 (2026-07-22) — resolve durable dispatch authorization and the provider key INSIDE
-      // the
-      // batch loop, not once before it. A large document embeds across many batches; resolving the
-      // guard a single time and caching the key/source meant cancellation, context expiry, an
-      // org-provider disablement, a key-source change or a credential rotation between batches did
-      // not stop subsequent physical provider calls. Re-authorizing per batch fails closed the
-      // moment
-      // authority is revoked and picks up a rotated key.
-      LlmExecutionDispatchGuard.ResolvedDispatch dispatch;
-      try {
-        dispatch = dispatchGuard.authorizeProviderCapability(reference, PROVIDER);
-      } catch (LlmDispatchPolicyException rejected) {
-        throw new EmbeddingUnavailableException(rejected.reason().name(), rejected);
-      }
-      String key = dispatch.apiKey();
-      if (key == null || key.isBlank()) {
-        throw new EmbeddingUnavailableException("AUTHORIZED_OPENAI_CREDENTIAL_UNAVAILABLE");
-      }
-      RunKeyContext managedKeys = managedAiContext(dispatch);
-      // Each batch is a distinct provider charge. Re-authorize managed credit immediately before
-      // every physical attempt so a large document cannot spend N batches under one stale admission
-      // decision.
-      managedAiUsageService.authorizeFixedCapabilityCall(
-          runId, PROVIDER, model, feature, managedKeys, dispatch.keySource());
-      var attempt =
-          usageRecorder.prepareProviderCapabilityAttempt(
-              reference,
-              runId,
-              taskId,
-              "EmbeddingService",
-              "embedding.batch",
-              PROVIDER,
-              model,
-              dispatch.keySource().name(),
-              batchNumber);
-      providerDispatchAuthorization.authorize(PROVIDER, model, runId);
+      BatchAdmission batchAdmission =
+          admissionDecision.usesAtomicV1()
+              ? admitAtomicBatch(reference, operationAuthority, runId, taskId, feature, batchNumber)
+              : admitLegacyBatch(reference, runId, taskId, feature, batchNumber);
       long started = System.currentTimeMillis();
       OpenAiEmbeddingTransport.Result result;
       try {
-        result = transport.embed(key, model, batch);
+        result = transport.embed(batchAdmission.apiKey(), model, batch);
       } catch (RuntimeException providerFailure) {
         long latency = Math.max(0, System.currentTimeMillis() - started);
         usageRecorder.recordProviderCapabilityFailure(
-            attempt,
+            batchAdmission.attempt(),
             runId,
             taskId,
             "EmbeddingService",
@@ -202,7 +207,13 @@ public class EmbeddingService {
           new RunCostTracker.CallUsage(PROVIDER, model, inputTokens, 0, 0, 0, cost, batchNumber, 0);
       String usageEventId =
           usageRecorder.recordProviderCapabilitySuccess(
-              attempt, runId, taskId, "EmbeddingService", "embedding.batch", latency, callUsage);
+              batchAdmission.attempt(),
+              runId,
+              taskId,
+              "EmbeddingService",
+              "embedding.batch",
+              latency,
+              callUsage);
       try {
         managedAiUsageService.recordSuccessfulCall(
             usageEventId,
@@ -213,8 +224,8 @@ public class EmbeddingService {
             PROVIDER,
             model,
             callUsage,
-            managedKeys,
-            dispatch.keySource());
+            batchAdmission.managedKeys(),
+            batchAdmission.keySource());
       } catch (RuntimeException accountingFailure) {
         // The provider succeeded and the canonical physical-attempt row already exists. Do not
         // misclassify or repeat the provider call because the secondary managed-credit projection
@@ -239,6 +250,95 @@ public class EmbeddingService {
     return List.copyOf(vectors);
   }
 
+  private BatchAdmission admitLegacyBatch(
+      com.navneet.executespec.executioncontext.LlmExecutionReference reference,
+      String runId,
+      String taskId,
+      String feature,
+      int batchNumber) {
+    // RR-915 — legacy rollout keeps the established ordering and version-0 intent writer exactly
+    // as-is. This path is removed only after every embedding logical root carries authority.
+    LlmExecutionDispatchGuard.ResolvedDispatch dispatch;
+    try {
+      dispatch = dispatchGuard.authorizeProviderCapability(reference, PROVIDER);
+    } catch (LlmDispatchPolicyException rejected) {
+      throw new EmbeddingUnavailableException(rejected.reason().name(), rejected);
+    }
+    String key = requireApiKey(dispatch.apiKey());
+    RunKeyContext managedKeys = managedAiContext(dispatch);
+    managedAiUsageService.authorizeFixedCapabilityCall(
+        runId, PROVIDER, model, feature, managedKeys, dispatch.keySource());
+    RunStepUsageRecorder.AttemptHandle attempt =
+        usageRecorder.prepareProviderCapabilityAttempt(
+            reference,
+            runId,
+            taskId,
+            "EmbeddingService",
+            "embedding.batch",
+            PROVIDER,
+            model,
+            dispatch.keySource().name(),
+            batchNumber);
+    providerDispatchAuthorization.authorize(PROVIDER, model, runId);
+    return new BatchAdmission(attempt, key, dispatch.keySource(), managedKeys);
+  }
+
+  private BatchAdmission admitAtomicBatch(
+      com.navneet.executespec.executioncontext.LlmExecutionReference reference,
+      LlmExecutionOperationAuthority operationAuthority,
+      String runId,
+      String taskId,
+      String feature,
+      int batchNumber) {
+    // The global kill switch and managed-credit preflight both run before the atomic service
+    // drafts or persists an intent. The central service then reauthorizes once more inside the
+    // admission sequence; only its fresh key/source may reach the transport.
+    providerDispatchAuthorization.authorize(PROVIDER, model, runId);
+    LlmExecutionDispatchGuard.ResolvedDispatch preflight;
+    try {
+      preflight = dispatchGuard.reauthorizeProviderCapability(reference, PROVIDER);
+    } catch (LlmDispatchPolicyException rejected) {
+      throw new EmbeddingUnavailableException(rejected.reason().name(), rejected);
+    }
+    RunKeyContext managedKeys = managedAiContext(preflight);
+    managedAiUsageService.authorizeFixedCapabilityCall(
+        runId, PROVIDER, model, feature, managedKeys, preflight.keySource());
+
+    PhysicalProviderAttemptAdmissionService.AdmittedPhysicalAttempt admitted;
+    try {
+      admitted =
+          physicalAttemptAdmissionService.admitCapabilityAttempt(
+              new PhysicalProviderAttemptAdmissionService.CapabilityAttempt(
+                  reference,
+                  operationAuthority,
+                  runId,
+                  taskId,
+                  "EmbeddingService",
+                  "embedding.batch",
+                  PROVIDER,
+                  model,
+                  batchNumber,
+                  0,
+                  TRANSPORT_TIMEOUT,
+                  TRANSPORT_SAFETY_MARGIN));
+    } catch (LlmDispatchPolicyException rejected) {
+      // Reauthorization occurs inside the central service before it drafts/persists the intent.
+      throw new EmbeddingUnavailableException(rejected.reason().name(), rejected);
+    }
+    return new BatchAdmission(
+        admitted.handle(),
+        requireApiKey(admitted.apiKey()),
+        admitted.keySource(),
+        managedAiContext(preflight, admitted.apiKey(), admitted.keySource()));
+  }
+
+  private static String requireApiKey(String key) {
+    if (key == null || key.isBlank()) {
+      throw new EmbeddingUnavailableException("AUTHORIZED_OPENAI_CREDENTIAL_UNAVAILABLE");
+    }
+    return key;
+  }
+
   public float[] embedQueryForProject(
       String projectId, String text, String feature, String sourceType, String sourceId) {
     return embedQueryForProject(projectId, text, feature, sourceType, sourceId, null);
@@ -251,7 +351,27 @@ public class EmbeddingService {
       String sourceType,
       String sourceId,
       String actorUserId) {
-    return embedForProject(projectId, List.of(text), feature, sourceType, sourceId, actorUserId)
+    return embedQueryForProject(projectId, text, feature, sourceType, sourceId, actorUserId, null);
+  }
+
+  /** Operation-authority-capable query-vector variant for durable chat/retrieval roots. */
+  public float[] embedQueryForProject(
+      String projectId,
+      String text,
+      String feature,
+      String sourceType,
+      String sourceId,
+      String actorUserId,
+      LlmExecutionOperationAuthority operationAuthority) {
+    return embedForProject(
+            projectId,
+            List.of(text),
+            feature,
+            sourceType,
+            sourceId,
+            actorUserId,
+            null,
+            operationAuthority)
         .get(0);
   }
 
@@ -305,25 +425,54 @@ public class EmbeddingService {
         context.getOrgId());
   }
 
+  private static RunKeyContext managedAiContext(
+      LlmExecutionDispatchGuard.ResolvedDispatch preflight,
+      String apiKey,
+      RunKeyContext.Source keySource) {
+    var context = preflight.context();
+    if (context == null) return null;
+    return new RunKeyContext(
+        null,
+        apiKey,
+        null,
+        null,
+        null,
+        null,
+        keySource,
+        keySource,
+        keySource,
+        keySource,
+        keySource,
+        keySource,
+        context.getKeySubjectUserId(),
+        context.getOrgId());
+  }
+
+  private record BatchAdmission(
+      RunStepUsageRecorder.AttemptHandle attempt,
+      String apiKey,
+      RunKeyContext.Source keySource,
+      RunKeyContext managedKeys) {}
+
   private static String usageRunId(String sourceId) {
     String safe = requireSource(sourceId).replaceAll("[^A-Za-z0-9._:-]", "_");
     String value = "embedding:" + safe;
     return value.substring(0, Math.min(96, value.length()));
   }
 
-  private static String requireSource(String sourceId) {
+  static String requireSource(String sourceId) {
     if (sourceId == null || sourceId.isBlank()) {
       throw new IllegalArgumentException("embedding sourceId required");
     }
     String normalized = sourceId.trim();
-    if (normalized.length() <= 150) return normalized;
+    if (normalized.length() <= 96) return normalized;
     try {
       String hash =
           HexFormat.of()
               .formatHex(
                   MessageDigest.getInstance("SHA-256")
                       .digest(normalized.getBytes(StandardCharsets.UTF_8)));
-      return normalized.substring(0, 80) + ":sha256:" + hash;
+      return normalized.substring(0, 23) + ":sha256:" + hash;
     } catch (java.security.NoSuchAlgorithmException impossible) {
       throw new IllegalStateException("SHA-256 unavailable", impossible);
     }

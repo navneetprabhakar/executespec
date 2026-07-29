@@ -201,7 +201,7 @@ public class OutlinePlannerAgent {
         req.spec() == null ? 0 : req.spec().length());
     LlmProvider provider = resolveProviderForTitle(req.provider());
     String runId = req.context() != null ? req.context().runId() : null;
-    String summarized = titleSummarizer.summarize(req.spec(), provider, runId);
+    String summarized = titleSummarizer.summarize(req.spec(), provider, runId, req.context());
     String title =
         (summarized != null && !summarized.isBlank()) ? summarized : cleanTitle(req.spec(), 70);
     Plan.RuntimeSurface runtimeSurface = SingleShotSurfaceClassifier.infer(req.spec());

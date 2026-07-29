@@ -1,10 +1,14 @@
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
 import {
+  generateProjectDoc,
   createRepo,
   createProjectExport,
+  confirmArchitectureRefreshRetry,
+  getLatestArchitectureRefreshJob,
   getProjectCodeIndex,
   listScmRepos,
+  regenerateRepoArchitecture,
   refreshProjectCodeIndex,
   issueProjectChatConfirmation,
   consumeProjectChatConfirmation,
@@ -24,7 +28,79 @@ describe('project API', () => {
     localStorage.setItem('access_token', 'test-token');
   });
 
-  afterEach(() => vi.unstubAllGlobals());
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it('keeps project document generation alive past the shared 30 second deadline', async () => {
+    vi.useFakeTimers();
+    const captured: {signal: AbortSignal | null} = {signal: null};
+    const fetchMock = vi.fn<typeof fetch>().mockImplementation((_url, init) => {
+      captured.signal = init?.signal ?? null;
+      return new Promise<Response>((_resolve, reject) => {
+        captured.signal?.addEventListener(
+          'abort',
+          () => reject(new DOMException('The operation was aborted.', 'AbortError')),
+          {once: true},
+        );
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const request = generateProjectDoc('project-1', 'EXPLANATION').catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(captured.signal?.aborted).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(150_000);
+    await expect(request).resolves.toMatchObject({
+      message: 'The request timed out. Please check your connection and try again.',
+      status: 0,
+    });
+    expect(fetchMock.mock.calls[0]?.[1]).not.toHaveProperty('timeoutMs');
+  });
+
+  it('uses durable job endpoints for latest state, per-repo admission, and confirmed retry', async () => {
+    const job = {
+      id: 'job-1',
+      projectId: 'project-1',
+      status: 'QUEUED',
+      phase: 'PREPARING',
+      terminal: false,
+      architectureVersion: null,
+      errorCode: null,
+      errorMessage: null,
+      qualityStatus: null,
+      qualityEvidence: null,
+      createdAt: '2026-07-28T00:00:00Z',
+      startedAt: null,
+      completedAt: null,
+    };
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockImplementation(async () => new Response(JSON.stringify(job), {status: 200}));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(getLatestArchitectureRefreshJob('project-1')).resolves.toEqual(job);
+    await expect(regenerateRepoArchitecture('project-1', 'repo-1')).resolves.toEqual(job);
+    await expect(confirmArchitectureRefreshRetry('project-1', 'job-1')).resolves.toEqual(job);
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      '/api/projects/project-1/architecture/jobs/latest',
+      expect.not.objectContaining({method: 'POST'}),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      '/api/projects/project-1/repos/repo-1/regenerate-architecture',
+      expect.objectContaining({method: 'POST'}),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      '/api/projects/project-1/architecture/jobs/job-1/confirm-retry',
+      expect.objectContaining({method: 'POST'}),
+    );
+  });
 
   it('uses the shared transport for the full project-settings patch contract', async () => {
     const fetchMock = vi

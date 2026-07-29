@@ -117,10 +117,9 @@ public class GateStore {
    * {@code POST /api/runs/{id}/approve} calls both returned 200 with the gate state written twice.
    * Now the loser cleanly returns 409.
    *
-   * <p>Relies on the pipeline thread having called {@link #openPlanGate} when entering
-   * AWAITING_APPROVAL. If the row is missing (e.g. old runs that pre-date this change, or manual DB
-   * cleanup), falls back to {@link #setPlanGate} idempotency — still safe, just without the
-   * loser-409 surface.
+   * <p>Relies on the pipeline thread having durably opened the gate before entering {@code
+   * AWAITING_APPROVAL}. A missing row is corruption, not permission to fabricate a continuation at
+   * approval time, and therefore fails closed.
    */
   public boolean tryClaimPlanGate(String runId, boolean approved) {
     return claimPlanGate(runId, approved) == PlanGateClaim.CLAIMED;
@@ -145,22 +144,9 @@ public class GateStore {
     if (updated == 0) {
       boolean missing = gateRepository.findById(key).isEmpty();
       if (missing) {
-        // No pending row — either opening-gate was skipped (legacy run) or race
-        // with an INSERT. Insert-then-claim, matching the pre-existing idempotent
-        // behaviour rather than blocking the caller.
-        openPlanGate(runId);
-        try {
-          updated =
-              gateRepository.tryResolveIfPending(
-                  key, approved ? "APPROVED" : "REJECTED", Instant.now());
-        } catch (Exception ex) {
-          throw new IllegalStateException(
-              "Unable to atomically resolve newly opened plan gate for run " + runId, ex);
-        }
-        if (updated == 0) return resolvedClaim(key);
-      } else {
-        return resolvedClaim(key);
+        throw new IllegalStateException("Plan gate was never durably opened for run " + runId);
       }
+      return resolvedClaim(key);
     }
     // We won the race — publish a short-lived signal for compatibility observers.
     try {
@@ -193,7 +179,31 @@ public class GateStore {
    * same-instance) and writes to Redis (cross-instance fallback for MIG).
    */
   public void setPlanGate(String runId, boolean approved) {
-    // Redis (cross-instance signal)
+    // Resolve through the same conditional database claim as customer approval. This method is
+    // retained for broad lifecycle cleanup (notably cancellation), so it must never rewrite a
+    // decision that was already durably APPROVED or REJECTED. The previous read-modify-save path
+    // could turn an approved gate into REJECTED after a later run cancellation, destroying the
+    // human-approval audit record.
+    try {
+      PlanGateClaim claim = claimPlanGate(runId, approved);
+      if (claim == PlanGateClaim.ALREADY_APPROVED || claim == PlanGateClaim.ALREADY_REJECTED) {
+        boolean durableDecision = claim == PlanGateClaim.ALREADY_APPROVED;
+        if (durableDecision != approved) {
+          log.info(
+              "[GateStore] preserving existing {} plan decision for run={} despite requested {}",
+              durableDecision ? "APPROVED" : "REJECTED",
+              runId,
+              approved ? "APPROVED" : "REJECTED");
+        }
+        // Keep compatibility observers aligned with the durable winner, never the losing request.
+        publishPlanSignal(runId, durableDecision);
+      }
+    } catch (Exception ex) {
+      log.warn("[GateStore] plan gate resolution failed for run={}: {}", runId, ex.getMessage());
+    }
+  }
+
+  private void publishPlanSignal(String runId, boolean approved) {
     try {
       redis.opsForValue().set(planKey(runId), approved ? "1" : "0", GATE_TTL);
     } catch (Exception ex) {
@@ -202,16 +212,6 @@ public class GateStore {
           runId,
           ex.getMessage());
       redisFailureCounter.increment();
-    }
-    // DB (durable fallback — upsert resolution)
-    try {
-      String key = planKey(runId);
-      GateRecord rec = gateRepository.findById(key).orElse(GateRecord.pending(key, runId, "PLAN"));
-      rec.setStatus(approved ? "APPROVED" : "REJECTED");
-      rec.setResolvedAt(Instant.now());
-      gateRepository.save(rec);
-    } catch (Exception ex) {
-      log.warn("[GateStore] DB write failed for plan gate run={}: {}", runId, ex.getMessage());
     }
   }
 

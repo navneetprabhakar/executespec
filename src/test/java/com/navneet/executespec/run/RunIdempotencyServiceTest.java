@@ -121,8 +121,66 @@ class RunIdempotencyServiceTest {
 
   @Test
   void completingWithoutARunIdIsRejected() {
-    service().complete(RunIdempotencyClaim.claimed("u", "k", "owner", 1L), " ");
+    assertThatThrownBy(
+            () -> service().complete(RunIdempotencyClaim.claimed("u", "k", "owner", 1L), " "))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("runId");
     verify(store, never()).complete(anyString(), anyString(), anyString(), anyLong(), anyString());
+  }
+
+  @Test
+  void successfulCompletionIsAuthoritative() {
+    var claim = RunIdempotencyClaim.claimed("u", "k", "owner", 7L);
+    when(store.complete("u", "k", "owner", 7L, "run-1")).thenReturn(true);
+
+    RunIdempotencyService.Completion completion = service().complete(claim, "run-1");
+
+    assertThat(completion.status()).isEqualTo(RunIdempotencyService.CompletionStatus.PUBLISHED);
+    assertThat(completion.authoritative()).isTrue();
+    assertThat(completion.canonicalRunId()).isEqualTo("run-1");
+  }
+
+  @Test
+  void acknowledgementLossReconcilesToTheSameDurableRun() {
+    var claim = RunIdempotencyClaim.claimed("u", "k", "owner", 7L);
+    when(store.complete("u", "k", "owner", 7L, "run-1"))
+        .thenThrow(new IllegalStateException("connection reset"));
+    when(store.find("u", "k")).thenReturn(Optional.of(record(HASH, "COMPLETED", "run-1", null)));
+
+    RunIdempotencyService.Completion completion = service().complete(claim, "run-1");
+
+    assertThat(completion.status())
+        .isEqualTo(RunIdempotencyService.CompletionStatus.ALREADY_PUBLISHED);
+    assertThat(completion.authoritative()).isTrue();
+  }
+
+  @Test
+  void lostFenceNamesTheOtherCanonicalRun() {
+    var claim = RunIdempotencyClaim.claimed("u", "k", "owner", 7L);
+    when(store.complete("u", "k", "owner", 7L, "run-created")).thenReturn(false);
+    when(store.find("u", "k"))
+        .thenReturn(Optional.of(record(HASH, "COMPLETED", "run-winner", null)));
+
+    RunIdempotencyService.Completion completion = service().complete(claim, "run-created");
+
+    assertThat(completion.status())
+        .isEqualTo(RunIdempotencyService.CompletionStatus.FENCED_TO_OTHER_RUN);
+    assertThat(completion.authoritative()).isFalse();
+    assertThat(completion.canonicalRunId()).isEqualTo("run-winner");
+  }
+
+  @Test
+  void lostFenceWithoutDurableWinnerIsExplicitlyNonAuthoritative() {
+    var claim = RunIdempotencyClaim.claimed("u", "k", "owner", 7L);
+    when(store.complete("u", "k", "owner", 7L, "run-created")).thenReturn(false);
+    when(store.find("u", "k")).thenReturn(Optional.of(record(HASH, "CLAIMED", null, null)));
+
+    RunIdempotencyService.Completion completion = service().complete(claim, "run-created");
+
+    assertThat(completion.status())
+        .isEqualTo(RunIdempotencyService.CompletionStatus.FENCED_UNRESOLVED);
+    assertThat(completion.authoritative()).isFalse();
+    assertThat(completion.canonicalRunId()).isNull();
   }
 
   @Test

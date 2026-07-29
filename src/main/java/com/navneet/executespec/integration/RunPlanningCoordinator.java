@@ -23,7 +23,6 @@ import com.navneet.executespec.agent.TaskExpanderAgent;
 import com.navneet.executespec.config.featureflag.FeatureFlagService;
 import com.navneet.executespec.cost.RunCostTracker;
 import com.navneet.executespec.engine.RepoOrientationService;
-import com.navneet.executespec.executioncontext.LlmExecutionPolicyFactory;
 import com.navneet.executespec.memory.ProjectMemoryProvider;
 import com.navneet.executespec.project.entity.ProjectRepo;
 import com.navneet.executespec.project.service.ProjectRepoService;
@@ -79,7 +78,6 @@ class RunPlanningCoordinator {
   private final RepoOrientationService repoOrientationService;
 
   private final FeatureFlagService featureFlagService;
-  private final LlmExecutionPolicyFactory executionPolicyFactory;
   private final ContextSanitizer contextSanitizer;
 
   PlanStrategy runClassifierShadow(
@@ -88,7 +86,8 @@ class RunPlanningCoordinator {
       String userRequest,
       String projectId,
       List<UUID> selectedRepoIds,
-      String provider) {
+      String provider,
+      ExecutionContext planningContext) {
     try {
       // Repo full names — best effort. Skip lookup if not multi-repo.
       List<String> repoNames = new ArrayList<>();
@@ -148,8 +147,7 @@ class RunPlanningCoordinator {
               projectType,
               providerEnum,
               projectMemorySnippet,
-              executionPolicyFactory.forRun(runId),
-              runId);
+              planningContext);
       RunCostTracker.Snapshot after = costTracker.snapshot(runId);
 
       long classifierIn = Math.max(0, after.inputTokens() - before.inputTokens());

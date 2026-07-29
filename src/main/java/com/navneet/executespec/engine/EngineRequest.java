@@ -2,6 +2,8 @@ package com.navneet.executespec.engine;
 
 import java.nio.file.Path;
 
+import com.navneet.executespec.tool.ExecutionContext;
+
 import lombok.Builder;
 
 /**
@@ -18,6 +20,8 @@ import lombok.Builder;
  *     VerifyMode#HARD_GATE} (the caller-selected verify lever)
  * @param runId correlation id for cost tracking / observability — NOT a product dependency
  * @param taskId correlation id within a run
+ * @param context optional caller-owned authority-bearing context; legacy benchmark callers may omit
+ *     it and use the reference-only compatibility path
  */
 @Builder
 public record EngineRequest(
@@ -28,4 +32,5 @@ public record EngineRequest(
     EngineBudget budget,
     VerifyMode verifyMode,
     String runId,
-    String taskId) {}
+    String taskId,
+    ExecutionContext context) {}

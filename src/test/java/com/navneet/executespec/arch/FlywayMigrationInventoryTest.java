@@ -38,10 +38,22 @@ class FlywayMigrationInventoryTest {
     // 322. The migration-safe additive-column P1 lane then added V337 (LLM-attempt role provenance,
     // RR-430), V338 (agent_task plan_index, RR-1446), V339 (code_review_scan coverage, RR-1696),
     // V340 (graduate the lean worker toolset), V341 (backfill the durable run-usage floor), V342
-    // (durable sandbox cleanup retry), V343 (sandbox release-readiness gates), and V344
-    // (validation test-evidence scope) for 330 — contiguous above the V336 head.
-    assertThat(migrations).hasSize(330);
-    assertThat(migrations.getLast().version()).isEqualTo("344");
+    // (durable sandbox cleanup retry), V343 (sandbox release-readiness gates), V344
+    // (validation test-evidence scope), V345 (immutable RequirementIR artifact), V346 (durable
+    // plan-gate admission binding + continuation outbox), and V347 (atomic gate-open identity
+    // contract) for 333 — contiguous above V336. V348 then adds atomic plan-gate decision
+    // integrity, and V349 separates the immutable payer org from the host-project tenant org for
+    // external collaborators. V350 carries that split into pipeline and durable LLM context
+    // identity, bringing the exact inventory to 336. V351 adds the dormant per-operation LLM
+    // attempt-fencing foundation, bringing the exact inventory to 337. V352 permits exact,
+    // structurally valid BLOCKED RequirementIR evidence to open a visible pending gate while
+    // preserving fail-closed approval, bringing the exact inventory to 338. V353 adds durable,
+    // idempotent project-architecture refresh jobs, bringing the exact inventory to 339. V354
+    // makes physical LLM-attempt admission atomic with the exact logical-operation lease, and V355
+    // adds the ordered partial index used for bounded stale agent-turn recovery, bringing the exact
+    // inventory to 341.
+    assertThat(migrations).hasSize(341);
+    assertThat(migrations.getLast().version()).isEqualTo("355");
 
     assertThat(migrations.stream().map(MigrationFile::version)).doesNotHaveDuplicates();
     assertThat(migrations.stream().map(MigrationFile::fileName))

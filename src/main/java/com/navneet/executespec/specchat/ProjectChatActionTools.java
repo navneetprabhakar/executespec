@@ -10,7 +10,6 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.auth.security.RunAccessGuard;
-import com.navneet.executespec.harness.GateStore;
 import com.navneet.executespec.integration.RunOrchestrator;
 import com.navneet.executespec.project.security.ProjectAccessGuard;
 import com.navneet.executespec.report.ValidationReportService;
@@ -50,9 +49,9 @@ public class ProjectChatActionTools {
 
   private final RunOrchestrator runOrchestrator;
   private final com.navneet.executespec.integration.RunLifecycleService runLifecycleService;
+  private final com.navneet.executespec.integration.PlanApprovalService planApprovalService;
   private final PipelineRunRepository pipelineRunRepo;
   private final ValidationReportService validationReportService;
-  private final GateStore gateStore;
   private final RunAccessGuard runAccessGuard;
   private final ProjectAccessGuard projectAccessGuard;
   private final ContextSanitizer contextSanitizer;
@@ -235,11 +234,23 @@ public class ProjectChatActionTools {
           // Write/governance action — must use the WRITE guard, not the read guard (design §10
           // defect #1): a cross-org read-only member must not be able to approve another's gate.
           PipelineRun run = runAccessGuard.requireRunWriteAccess(runId, ctx.userDetails());
-          gateStore.setPlanGate(runId, true);
+          var decision =
+              planApprovalService.decide(
+                  runId,
+                  com.navneet.executespec.integration.PlanApprovalService.Command.approveLegacy(),
+                  ctx.userDetails(),
+                  com.navneet.executespec.integration.PlanGateDecisionService.ResolutionSource
+                      .PROJECT_CHAT_ACTION);
           ObjectNode out = json.createObjectNode();
           out.put("ok", true);
           out.put("runId", run.getRunId());
-          out.put("summary", "Plan approved. Worker is resuming.");
+          out.put(
+              "summary",
+              decision.outcome()
+                      == com.navneet.executespec.integration.RunLifecycleService.PlanApprovalOutcome
+                          .RESUME_QUEUED
+                  ? "Plan approved. Worker is resuming."
+                  : "Plan was already approved.");
           return out;
         });
   }
@@ -270,16 +281,33 @@ public class ProjectChatActionTools {
           if (runId == null) return errorEnvelope("runId is required");
           // Write/governance action — WRITE guard (design §10 defect #1).
           PipelineRun run = runAccessGuard.requireRunWriteAccess(runId, ctx.userDetails());
-          // Same path as cancel — signals the plan gate to fail, persists CANCELLED.
-          boolean cancelled = runLifecycleService.cancel(runId);
+          // Rejection is a durable plan-gate decision, not a generic cancellation. Keeping the
+          // two paths distinct preserves the immutable decision kind and makes exact replay and
+          // opposite-decision conflicts auditable.
+          var decision =
+              planApprovalService.decide(
+                  runId,
+                  com.navneet.executespec.integration.PlanApprovalService.Command.rejectLegacy(),
+                  ctx.userDetails(),
+                  com.navneet.executespec.integration.PlanGateDecisionService.ResolutionSource
+                      .PROJECT_CHAT_ACTION);
+          boolean rejected =
+              decision.outcome()
+                      == com.navneet.executespec.integration.RunLifecycleService.PlanApprovalOutcome
+                          .REJECTED
+                  || decision.outcome()
+                      == com.navneet.executespec.integration.RunLifecycleService.PlanApprovalOutcome
+                          .ALREADY_RESOLVED;
           ObjectNode out = json.createObjectNode();
-          out.put("ok", cancelled);
+          out.put("ok", rejected);
           out.put("runId", run.getRunId());
           out.put(
               "summary",
-              cancelled
-                  ? "Plan rejected; run is being cancelled."
-                  : "Run is already in a terminal state; nothing to reject.");
+              rejected
+                  ? (decision.replayed()
+                      ? "Plan rejection was already recorded; the run remains cancelled."
+                      : "Plan rejected; the run is cancelled.")
+                  : "Plan decision was already resolved; nothing was changed.");
           return out;
         });
   }
@@ -310,7 +338,12 @@ public class ProjectChatActionTools {
           if (runId == null) return errorEnvelope("runId is required");
           // Write/governance action — WRITE guard (design §10 defect #1).
           PipelineRun run = runAccessGuard.requireRunWriteAccess(runId, ctx.userDetails());
-          boolean cancelled = runLifecycleService.cancel(runId);
+          boolean cancelled =
+              runLifecycleService.cancel(
+                  runId,
+                  ctx.userDetails(),
+                  com.navneet.executespec.integration.PlanGateDecisionService.ResolutionSource
+                      .PROJECT_CHAT_ACTION);
           ObjectNode out = json.createObjectNode();
           out.put("ok", cancelled);
           out.put("runId", run.getRunId());

@@ -84,6 +84,82 @@ class ValidationReportGoalProofEvaluatorTest {
   }
 
   @Test
+  void exposesTypedReferencesToExactLedgerProvenanceAndArtifacts() {
+    List<VerificationEvidenceDTO> ledger =
+        List.of(
+            row("code-delivered", "Code delivered", "PASS", "DETERMINISTIC"),
+            row("build", "Build", "FAIL", "DETERMINISTIC"),
+            row("tests", "Tests", "PASS", "DETERMINISTIC_WORKSPACE_SUITE"),
+            row("reviewer", "Reviewer", "UNKNOWN", "LLM_REVIEWER"),
+            row("report-issues", "Report issues", "PASS", "HYBRID"),
+            row("spec-adherence", "Spec adherence", "WARN", "LLM_ASSESSMENT"));
+
+    var references = evaluator.evidenceReferences("COMPLETE", PipelineResult.FAILED, ledger);
+
+    assertThat(references)
+        .extracting(reference -> reference.evidenceId() + ":" + reference.proofStatus())
+        .containsExactly(
+            "run-lifecycle:PROVEN",
+            "pipeline-result:BLOCKING",
+            "code-delivered:PROVEN",
+            "build:BLOCKING",
+            "tests:UNPROVEN",
+            "reviewer:UNPROVEN",
+            "report-issues:PROVEN",
+            "spec-adherence:BLOCKING");
+    assertThat(references.get(3).source()).isEqualTo("DETERMINISTIC");
+    assertThat(references.get(3).confidence()).isEqualTo("HIGH");
+    assertThat(references.get(3).artifact()).isEqualTo("artifact");
+  }
+
+  @Test
+  void missingRequiredRowsBecomeExplicitUnprovenReferencesWithoutInventedArtifacts() {
+    var references = evaluator.evidenceReferences(null, null, List.of());
+
+    assertThat(references)
+        .extracting(reference -> reference.evidenceId() + ":" + reference.proofStatus())
+        .containsExactly(
+            "pipeline-result:UNPROVEN",
+            "code-delivered:UNPROVEN",
+            "build:UNPROVEN",
+            "tests:UNPROVEN",
+            "reviewer:UNPROVEN",
+            "report-issues:UNPROVEN",
+            "spec-adherence:UNPROVEN");
+    assertThat(references)
+        .filteredOn(reference -> !"pipeline-result".equals(reference.evidenceId()))
+        .allSatisfy(reference -> assertThat(reference.artifact()).isNull());
+  }
+
+  @Test
+  void terminalRunLifecycleIsAHighConfidenceBlockingReference() {
+    var references =
+        evaluator.evidenceReferences("CANCELLED", PipelineResult.PASSED, passingLedger());
+
+    assertThat(references.getFirst().evidenceId()).isEqualTo("run-lifecycle");
+    assertThat(references.getFirst().proofStatus()).isEqualTo("BLOCKING");
+    assertThat(references.getFirst().source()).isEqualTo("DURABLE_RUN_STATE");
+    assertThat(references.getFirst().artifact()).isEqualTo("pipeline_run.status");
+  }
+
+  @Test
+  void passingLedgerCannotProveDoneBeforeRunLifecycleIsTerminal() {
+    var decision =
+        evaluator.evaluateForRun(
+            "run-validating",
+            "validating run",
+            "VALIDATING",
+            PipelineResult.PASSED,
+            passingLedger());
+    var references =
+        evaluator.evidenceReferences("VALIDATING", PipelineResult.PASSED, passingLedger());
+
+    assertThat(decision.state()).isEqualTo(GoalDonenessState.UNCERTAIN);
+    assertThat(decision.reason()).contains("not yet durable");
+    assertThat(references.getFirst().proofStatus()).isEqualTo("UNPROVEN");
+  }
+
+  @Test
   void cancelledRunCannotBeReclassifiedDoneByAStalePassingReport() {
     var decision =
         evaluator.evaluateForRun(

@@ -7,6 +7,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -23,6 +24,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
+import com.navneet.executespec.executioncontext.LlmExecutionOperationAuthority;
 import com.navneet.executespec.harness.WorkspaceInitService;
 import com.navneet.executespec.project.entity.ProjectRepo;
 import com.navneet.executespec.project.rag.CodeIndexStateStore.Completion;
@@ -116,6 +118,56 @@ class CodeIndexingServiceTest {
             eq("PROJECT_REPOSITORY"),
             eq(repo.getId().toString()),
             eq("member-1"));
+  }
+
+  @Test
+  void logicalOperationCompletesOnlyAfterDurableIndexState(@TempDir Path root) throws Exception {
+    Files.createDirectories(root.resolve("src"));
+    Files.writeString(root.resolve("src/Foo.java"), "public class Foo {}\n");
+    when(ws.runWorkspacePath(anyString())).thenReturn(root);
+    EmbeddingOperationRoot operationRoot = mock(EmbeddingOperationRoot.class);
+    EmbeddingOperationRoot.Active operation =
+        EmbeddingOperationTestFixture.active("ctx-code-index", lease.owner());
+    when(operationRoot.claim(any(), eq(lease.owner()), any(), eq(true)))
+        .thenReturn(Optional.of(operation));
+    when(operationRoot.heartbeat(eq(operation), any())).thenReturn(true);
+    when(embedder.embedForProject(
+            anyString(),
+            anyList(),
+            anyString(),
+            anyString(),
+            anyString(),
+            nullable(String.class),
+            any(),
+            nullable(LlmExecutionOperationAuthority.class)))
+        .thenReturn(List.of(new float[] {0.1f, 0.2f}));
+    CodeIndexingService service =
+        new CodeIndexingService(
+            ws,
+            chunker,
+            embedder,
+            chunks,
+            states,
+            new com.navneet.executespec.security.GeneratedSecretScanner(),
+            operationRoot,
+            4000);
+
+    assertThat(service.indexRepo("proj-1", repo, null, null, "member-1").outcome())
+        .isEqualTo(CodeIndexingService.Outcome.READY);
+
+    var order = inOrder(states, operationRoot);
+    order.verify(states).complete(eq(lease), any());
+    order.verify(operationRoot).complete(operation);
+    verify(embedder)
+        .embedForProject(
+            eq("proj-1"),
+            anyList(),
+            eq("ProjectCodeEmbedding"),
+            eq("PROJECT_REPOSITORY"),
+            eq(EmbeddingOperationIdentity.codeIndex(repo.getId(), repo.getLastSyncedSha())),
+            eq("member-1"),
+            any(),
+            nullable(LlmExecutionOperationAuthority.class));
   }
 
   @Test
@@ -243,25 +295,24 @@ class CodeIndexingServiceTest {
   }
 
   @Test
-  void unsupportedSelectedProviderFailsClosedBeforeCloneOrGlobalEmbedding() throws Exception {
+  void unavailableGovernedOpenAiEmbeddingFailsClosedBeforeCloneOrDispatch() throws Exception {
     when(embedder.availability("proj-1"))
         .thenReturn(
             new EmbeddingPolicyResolver.Availability(
                 EmbeddingPolicyResolver.Mode.LEXICAL,
                 false,
                 true,
-                "deepseek",
+                "openai",
                 null,
-                "SELECTED_PROVIDER_HAS_NO_COMPATIBLE_EMBEDDING_MODEL"));
+                "OPENAI_CREDENTIAL_UNAVAILABLE"));
 
     var result = service(4000).indexRepo("proj-1", repo, null);
 
     assertThat(result.outcome()).isEqualTo(CodeIndexingService.Outcome.UNSUPPORTED_SOURCE);
     assertThat(result.readiness().semanticSearchAvailable()).isFalse();
     assertThat(result.readiness().lexicalFallbackAvailable()).isTrue();
-    assertThat(result.readiness().reason())
-        .isEqualTo("EMBEDDING_SELECTED_PROVIDER_HAS_NO_COMPATIBLE_EMBEDDING_MODEL");
-    verify(states).fail(lease, "EMBEDDING_SELECTED_PROVIDER_HAS_NO_COMPATIBLE_EMBEDDING_MODEL");
+    assertThat(result.readiness().reason()).isEqualTo("EMBEDDING_OPENAI_CREDENTIAL_UNAVAILABLE");
+    verify(states).fail(lease, "EMBEDDING_OPENAI_CREDENTIAL_UNAVAILABLE");
     verify(ws, never()).cloneFromRepo(anyString(), anyString(), any(), any());
     verify(embedder, never())
         .embedForProject(
@@ -279,7 +330,7 @@ class CodeIndexingServiceTest {
 
     verify(ws)
         .cloneFromRepo(
-            anyString(),
+            eq(CodeIndexWorkspaceIdentity.workspaceId("proj-1", repo)),
             eq("https://bitbucket.org/acme/widget.git"),
             eq("x-bitbucket-api-token-auth"),
             eq("scoped-api-token"));
@@ -309,6 +360,24 @@ class CodeIndexingServiceTest {
     verify(embedder, never())
         .embedForProject(
             anyString(), anyList(), anyString(), anyString(), anyString(), nullable(String.class));
+  }
+
+  @Test
+  void workspaceIdentitySeparatesProjectsAndUsesTheCompleteRevision() {
+    ProjectRepo sameRepository = repo();
+    sameRepository.setId(repo.getId());
+    sameRepository.setLastSyncedSha("123456789012aaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+    ProjectRepo collidingPrefix = repo();
+    collidingPrefix.setId(repo.getId());
+    collidingPrefix.setLastSyncedSha("123456789012bbbbbbbbbbbbbbbbbbbbbbbbbbbb");
+
+    String first = CodeIndexWorkspaceIdentity.workspaceId("proj-1", sameRepository);
+
+    assertThat(CodeIndexWorkspaceIdentity.workspaceId("proj-2", sameRepository))
+        .isNotEqualTo(first);
+    assertThat(CodeIndexWorkspaceIdentity.workspaceId("proj-1", collidingPrefix))
+        .isNotEqualTo(first);
+    assertThat(first).matches("projchat-" + repo.getId() + "-[0-9a-f]{64}");
   }
 
   private static ProjectRepo repo() {

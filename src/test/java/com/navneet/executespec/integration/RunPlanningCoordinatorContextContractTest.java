@@ -148,7 +148,6 @@ class RunPlanningCoordinatorContextContractTest {
         null,
         orientation,
         flags,
-        null,
         null);
   }
 }

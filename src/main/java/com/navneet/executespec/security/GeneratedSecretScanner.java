@@ -29,7 +29,16 @@ public class GeneratedSecretScanner {
           rule("GOOGLE_KEY", "\\bAIza[A-Za-z0-9_-]{30,}\\b"),
           rule("GITHUB_TOKEN", "\\b(?:gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{40,})\\b"),
           rule("EXECUTESPEC_PAT", "\\bes_pat_[A-Za-z0-9_-]{24,}\\b"),
-          rule("AWS_ACCESS_KEY", "\\bAKIA[0-9A-Z]{16}\\b"));
+          rule("AWS_ACCESS_KEY", "\\bAKIA[0-9A-Z]{16}\\b"),
+          rule("STRIPE_RESTRICTED_KEY", "\\brk_live_[A-Za-z0-9]{20,}\\b"),
+          rule("SLACK_TOKEN", "\\bxox[baprs]-[A-Za-z0-9-]{10,}\\b"),
+          rule("JWT", "\\beyJ[A-Za-z0-9_-]+\\.eyJ[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\b"),
+          rule("BEARER_TOKEN", "(?i)\\bBearer\\s+[A-Za-z0-9_.~+/-]{20,}"),
+          rule("BASIC_AUTH", "(?i)\\bBasic\\s+[A-Za-z0-9+/]{16,}={0,2}"),
+          rule("CREDENTIAL_URL", "\\b[a-zA-Z][a-zA-Z0-9+.-]*://[^\\s:@/]+:[^\\s:@/]+@"),
+          rule(
+              "AWS_SECRET_KEY",
+              "(?i)\\baws_?secret_?access_?key\\s*[:=]\\s*['\"]?[A-Za-z0-9/+]{20,}"));
 
   private static final List<String> EXAMPLE_MARKERS =
       List.of("example", "placeholder", "replace_me", "changeme", "your_key", "dummy");

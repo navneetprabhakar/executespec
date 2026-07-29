@@ -22,7 +22,6 @@ import com.navneet.executespec.execution.repository.ExecutionSolutionRepository;
 import com.navneet.executespec.execution.repository.ExecutionSolutionRunRepository;
 import com.navneet.executespec.execution.service.SolutionExecutionService.DecisionOutcome;
 import com.navneet.executespec.integration.RunLifecycleService;
-import com.navneet.executespec.integration.RunOrchestrator;
 import com.navneet.executespec.project.repository.ProjectRepoRepository;
 import com.navneet.executespec.repo.GitHubRepoService;
 import com.navneet.executespec.sse.SseBroadcaster;
@@ -43,7 +42,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 @ExtendWith(MockitoExtension.class)
 class SolutionExecutionServiceDecisionAuthorityTest {
 
-  @Mock RunOrchestrator v2Orchestrator;
+  @Mock ExecutionPipelineSubmissionService v2Orchestrator;
   @Mock CrossRepoContextService contextService;
   @Mock ExecutionBranchService branchService;
   @Mock ExecutionJiraSync jiraSync;

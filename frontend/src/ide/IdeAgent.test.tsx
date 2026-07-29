@@ -28,6 +28,7 @@ const api = vi.hoisted(() => ({
   getRun: vi.fn(),
   getLiveCost: vi.fn(),
   cancelRun: vi.fn(),
+  getProjectRepos: vi.fn(),
 }));
 
 vi.mock('@/lib/api', () => api);
@@ -201,6 +202,7 @@ function setHappyPathMocks() {
   });
   api.getLiveCost.mockResolvedValue({costUsd: 0.18});
   api.cancelRun.mockResolvedValue({ok: true});
+  api.getProjectRepos.mockResolvedValue([]);
 }
 
 async function renderAgent(path = '/agent') {
@@ -214,6 +216,7 @@ async function renderAgent(path = '/agent') {
           <Route path='/agent' element={<IdeAgent />} />
           <Route path='/projects/:projectId/agent' element={<IdeAgent />} />
           <Route path='/runs/:runId/agent' element={<IdeAgent />} />
+          <Route path='/plan/:runId' element={<div>Full plan review</div>} />
         </Routes>
       </MemoryRouter>,
     );
@@ -310,6 +313,37 @@ describe('IdeAgent', () => {
     expect(host.textContent).not.toContain('Remote sandboxes waiting for your approval');
   });
 
+  it('does not expose a dispatch exception as an agent answer', async () => {
+    api.listAgentTurns.mockResolvedValue([
+      {
+        turnId: 't-budget',
+        sessionId: 's1',
+        sequence: 1,
+        userMessage: 'Tell me about the run',
+        assistantSummary:
+          'LlmDispatchPolicyException: Durable LLM execution-context budget is exhausted',
+        intentType: 'QUESTION',
+        intentConfidence: 0.9,
+        route: 'CHAT_ONLY',
+        reasonCode: 'question',
+        actionType: null,
+        proposedActionJson: null,
+        linkedRunId: null,
+        inputTokens: 100,
+        outputTokens: 0,
+        reasoningTokens: 0,
+        costUsd: 0,
+        status: 'FAILED',
+        createdAt: '2026-06-20T00:00:00Z',
+      },
+    ]);
+
+    ({host, root} = await renderAgent('/agent'));
+
+    expect(host.textContent).toContain('used its available AI context');
+    expect(host.textContent).not.toContain('LlmDispatchPolicyException');
+  });
+
   it('fails closed to remote-workspace language when capability discovery fails', async () => {
     api.getRuntimeClientCapabilities.mockRejectedValueOnce(new Error('capability unavailable'));
 
@@ -362,7 +396,7 @@ describe('IdeAgent', () => {
     expect(newSandbox?.getAttribute('aria-label')).toBe('Start a new sandbox');
   });
 
-  it('surfaces new-sandbox creation failures instead of leaving the action silent', async () => {
+  it('retries new-session creation with the same idempotency key', async () => {
     api.createAgentSession.mockRejectedValueOnce(new Error('session service unavailable'));
     ({host, root} = await renderAgent('/agent'));
 
@@ -378,6 +412,100 @@ describe('IdeAgent', () => {
     expect(host.querySelector('[role="alert"]')?.textContent).toContain(
       'session service unavailable',
     );
+    const firstRequest = api.createAgentSession.mock.calls[0]?.[0];
+    const retry = [...host.querySelectorAll<HTMLButtonElement>('button')].find((button) =>
+      button.textContent?.includes('Retry new session'),
+    );
+    if (!retry) throw new Error('Retry new session control was not rendered.');
+
+    await act(async () => retry.click());
+    await flush();
+
+    expect(api.createAgentSession).toHaveBeenCalledTimes(2);
+    expect(api.createAgentSession.mock.calls[1]?.[0]?.id).toBe(firstRequest?.id);
+    expect(host.querySelector('[role="alert"]')).toBeNull();
+  });
+
+  it('keeps a newly created workspace selected instead of reloading the previous session', async () => {
+    const freshSession = {...session, id: 's2', title: 'Fresh workspace'};
+    api.createAgentSession.mockResolvedValueOnce(freshSession);
+    ({host, root} = await renderAgent('/agent'));
+    const initialLoads = api.listAgentSessions.mock.calls.length;
+
+    const newSandbox = [...host.querySelectorAll<HTMLButtonElement>('.agent-bar-btn')].find(
+      (button) => button.textContent?.includes('New sandbox'),
+    );
+    if (!newSandbox) throw new Error('New sandbox control was not rendered.');
+    await act(async () => {
+      newSandbox.click();
+      await Promise.resolve();
+    });
+    await flush();
+
+    expect(host.textContent).toContain('Fresh workspace');
+    expect(api.listAgentSessions).toHaveBeenCalledTimes(initialLoads);
+    expect(api.listAgentTurns).toHaveBeenCalledWith('s2', {limit: 50});
+  });
+
+  it('allows a new workspace while a hydrated run waits for approval without unlocking its composer', async () => {
+    const waitingSession = {
+      ...session,
+      latestLinkedRunId: 'run-awaiting',
+      latestLinkedRunStatus: 'AWAITING_APPROVAL',
+    };
+    const freshSession = {...session, id: 's2', title: 'Independent workspace'};
+    api.listAgentSessions.mockResolvedValue([waitingSession]);
+    api.listAgentTurns.mockResolvedValue([
+      {
+        turnId: 't-awaiting',
+        sessionId: 's1',
+        sequence: 1,
+        userMessage: 'Implement the approved plan',
+        assistantSummary: 'The plan is waiting for approval.',
+        intentType: 'CODE_RUN_REQUIRED',
+        intentConfidence: 0.99,
+        route: 'CODE_RUN_REQUIRED',
+        reasonCode: 'code_run_required',
+        actionType: 'create_cloud_run',
+        proposedActionJson: null,
+        linkedRunId: 'run-awaiting',
+        inputTokens: 100,
+        outputTokens: 40,
+        reasoningTokens: 0,
+        costUsd: 0.001,
+        status: 'COMPLETED',
+        createdAt: '2026-06-20T00:00:00Z',
+      },
+    ]);
+    api.getRun.mockResolvedValue({
+      runId: 'run-awaiting',
+      runTitle: 'Plan awaiting approval',
+      status: 'AWAITING_APPROVAL',
+      aiProvider: 'deepseek',
+      workerModel: 'deepseek-v4-pro-native',
+      costEstimateHigh: 0.5,
+      verifiedScore: null,
+      scmPrUrl: null,
+      githubPrUrl: null,
+      tasks: [{title: 'Implement plan', status: 'PENDING'}],
+    });
+    api.createAgentSession.mockResolvedValueOnce(freshSession);
+
+    ({host, root} = await renderAgent('/agent'));
+    await flush();
+
+    const newWorkspace = host.querySelector<HTMLButtonElement>(
+      'button.agent-bar-btn[aria-label="Start a new sandbox"]',
+    );
+    const composer = host.querySelector<HTMLTextAreaElement>('[aria-label="Message the agent"]');
+    expect(newWorkspace?.disabled).toBe(false);
+    expect(composer?.disabled).toBe(true);
+
+    await act(async () => newWorkspace?.click());
+    await flush();
+
+    expect(api.createAgentSession).toHaveBeenCalledTimes(1);
+    expect(host.textContent).toContain('Independent workspace');
   });
 
   it('reconciles the transcript and approval inbox when a suspended mobile tab resumes', async () => {
@@ -448,10 +576,23 @@ describe('IdeAgent', () => {
     expect(host.textContent).toContain('~$0.25');
     expect(host.textContent).toContain('cap $5.00');
     expect(host.textContent).toContain('low risk');
-    expect(host.textContent).toContain('Approve & run');
+    expect(host.textContent).toContain('Review & approve');
     expect(host.textContent).toContain('Reject');
     expect(host.textContent).toContain('Full plan');
     expect(host.textContent).toContain('sandbox operator');
+  });
+
+  it('routes positive gate decisions through the full plan without approving inline', async () => {
+    ({host, root} = await renderAgent('/agent'));
+
+    const review = [...host.querySelectorAll('button')].find((button) =>
+      button.textContent?.includes('Review & approve'),
+    );
+    if (!review) throw new Error('Review action was not rendered.');
+    await act(async () => review.click());
+
+    expect(host.textContent).toContain('Full plan review');
+    expect(api.approveRun).not.toHaveBeenCalled();
   });
 
   it('shows latest linked sandbox status in the drawer when the backend provides it', async () => {
@@ -1127,6 +1268,18 @@ describe('IdeAgent', () => {
   });
 
   it('renders streamed route decisions and cloud-run proposal cards before execution', async () => {
+    api.getProjectRepos.mockResolvedValue([
+      {
+        id: 'link-1',
+        repoId: 'repo-1',
+        repo: {
+          id: 'repo-1',
+          githubRepoFullName: 'roundel/audit-service',
+          scmProvider: 'GITHUB',
+          sourceCapabilities: ['CLOUD_RUN'],
+        },
+      },
+    ]);
     api.streamAgentTurn.mockImplementation(async (_sessionId, _body, handlers) => {
       handlers.onAck?.({session_id: 's1', turn_id: 't2', sequence: 2});
       handlers.onRouteDecision?.({
@@ -1220,7 +1373,108 @@ describe('IdeAgent', () => {
     expect(host.textContent).not.toContain('Secrets are not displayed in chat');
     expect(host.textContent).not.toContain('Outbound network');
     expect(host.textContent).toContain('Approval required before any code runs');
-    expect(api.confirmAgentRunProposal).not.toHaveBeenCalled();
+    expect(api.getProjectRepos).toHaveBeenCalledWith('p1');
+    expect(host.textContent).toContain('Repository scope');
+    expect(host.textContent).toContain('roundel/audit-service');
+    expect(host.textContent).toContain('Nothing is selected automatically.');
+    const createPlan = [...host.querySelectorAll<HTMLButtonElement>('button')].find((button) =>
+      button.textContent?.includes('Create sandbox plan'),
+    );
+    if (!createPlan) throw new Error('Create sandbox plan button was not rendered.');
+    expect(createPlan.disabled).toBe(true);
+
+    const repoChoice = host.querySelector<HTMLInputElement>('input[type="checkbox"]');
+    if (!repoChoice) throw new Error('Repository checkbox was not rendered.');
+    await act(async () => {
+      repoChoice.click();
+    });
+    expect(createPlan.disabled).toBe(false);
+    await act(async () => {
+      createPlan.dispatchEvent(new MouseEvent('click', {bubbles: true}));
+    });
+    await flush();
+
+    expect(api.confirmAgentRunProposal).toHaveBeenCalledWith({
+      sessionId: 's1',
+      turnId: 't2',
+      confirmed: true,
+      selectedRepoIds: ['repo-1'],
+    });
+  });
+
+  it('offers Refresh after proposal confirmation fails without replaying the mutation', async () => {
+    api.getProjectRepos.mockResolvedValue([
+      {
+        repoId: 'repo-1',
+        repo: {
+          id: 'repo-1',
+          githubRepoFullName: 'roundel/audit-service',
+          scmProvider: 'GITHUB',
+          sourceCapabilities: ['CLOUD_RUN'],
+        },
+      },
+    ]);
+    api.listAgentTurns.mockResolvedValue([
+      {
+        turnId: 't-confirm',
+        sessionId: 's1',
+        sequence: 2,
+        userMessage: 'Add billing audit logs',
+        assistantSummary: 'Ready to create the plan.',
+        intentType: 'CODE_RUN_REQUIRED',
+        intentConfidence: 0.94,
+        route: 'CODE_RUN_REQUIRED',
+        reasonCode: 'explicit_code_mutation_request',
+        actionType: 'create_cloud_run',
+        proposedActionJson: JSON.stringify({
+          type: 'create_cloud_run',
+          arguments: {spec: 'Add billing audit logs', projectId: 'p1'},
+          requiresConfirmation: true,
+          billingImpact: 'run_credit_on_plan_approval',
+          confirmationPrompt: 'Create a remote sandbox?',
+          actionContext: {
+            requiredContext: [],
+            blockingReasons: [],
+            confirmable: true,
+            recommendedAction: 'CONFIRM_ACTION',
+            projectSelectionRequired: false,
+          },
+        }),
+        linkedRunId: null,
+        inputTokens: 10,
+        outputTokens: 4,
+        reasoningTokens: 0,
+        costUsd: 0.001,
+        status: 'NEEDS_CONFIRMATION',
+        createdAt: '2026-06-20T00:00:00Z',
+      },
+    ]);
+    api.confirmAgentRunProposal.mockRejectedValueOnce(new Error('confirmation unavailable'));
+
+    ({host, root} = await renderAgent('/agent'));
+    await vi.waitFor(() => expect(host?.querySelector('input[type="checkbox"]')).toBeTruthy());
+    await act(async () => {
+      host?.querySelector<HTMLInputElement>('input[type="checkbox"]')?.click();
+    });
+    const createPlan = [...host.querySelectorAll<HTMLButtonElement>('button')].find((button) =>
+      button.textContent?.includes('Create sandbox plan'),
+    );
+    if (!createPlan) throw new Error('Create sandbox plan button was not rendered.');
+    await act(async () => createPlan.click());
+    await flush();
+
+    expect(host.querySelector('[role="alert"]')?.textContent).toContain('confirmation unavailable');
+    const refresh = [...host.querySelectorAll<HTMLButtonElement>('button')].find(
+      (button) => button.textContent === 'Refresh',
+    );
+    if (!refresh) throw new Error('Refresh control was not rendered.');
+    const confirmationCalls = api.confirmAgentRunProposal.mock.calls.length;
+
+    await act(async () => refresh.click());
+    await flush();
+
+    expect(api.confirmAgentRunProposal).toHaveBeenCalledTimes(confirmationCalls);
+    expect(api.listAgentSessions.mock.calls.length).toBeGreaterThan(1);
   });
 
   // Phase 4 invariant: a proposal without project scope, or with a server-sent
@@ -1372,5 +1626,17 @@ describe('IdeAgent', () => {
       'The server persisted this turn before the stream disconnected.',
     );
     expect(host.textContent).toContain('Agent stream ended before the turn completed');
+    const refresh = [...host.querySelectorAll<HTMLButtonElement>('button')].find(
+      (button) => button.textContent === 'Refresh',
+    );
+    if (!refresh) throw new Error('Refresh control was not rendered.');
+    const streamCalls = api.streamAgentTurn.mock.calls.length;
+    const sessionLoads = api.listAgentSessions.mock.calls.length;
+
+    await act(async () => refresh.click());
+    await flush();
+
+    expect(api.streamAgentTurn).toHaveBeenCalledTimes(streamCalls);
+    expect(api.listAgentSessions.mock.calls.length).toBeGreaterThan(sessionLoads);
   });
 });

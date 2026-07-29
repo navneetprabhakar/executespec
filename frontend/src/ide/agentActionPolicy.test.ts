@@ -3,6 +3,7 @@ import type * as api from '@/lib/api';
 import {
   cloudRunBlockingCopy,
   cloudRunBlockingReasons,
+  cloudRunProjectId,
   isCloudRunAction,
   isConfirmableCloudRun,
   requiresProjectSelection,
@@ -23,6 +24,7 @@ describe('agentActionPolicy', () => {
   it('confirms a fully-scoped cloud-run proposal', () => {
     expect(isConfirmableCloudRun(action())).toBe(true);
     expect(cloudRunBlockingReasons(action())).toBeNull();
+    expect(cloudRunProjectId(action())).toBe('p1');
   });
 
   it('honours a server-sent blocked context even when the payload looks complete', () => {
@@ -52,6 +54,7 @@ describe('agentActionPolicy', () => {
 
   it('rejects a blank project id', () => {
     expect(isConfirmableCloudRun(action({arguments: {spec: 's', projectId: '   '}}))).toBe(false);
+    expect(cloudRunProjectId(action({arguments: {spec: 's', projectId: '   '}}))).toBeNull();
   });
 
   it('rejects a cloud-run action that does not ask for confirmation', () => {

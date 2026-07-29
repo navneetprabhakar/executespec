@@ -88,6 +88,10 @@ public class LlmExecutionContext {
   @Column(name = "user_id", length = 64)
   private String userId;
 
+  /** Payer org whose mutable provider/key policy is revalidated at dispatch time. */
+  @Column(name = "credential_org_id", length = 64)
+  private String credentialOrgId;
+
   @Column(name = "project_id", length = 64)
   private String projectId;
 
@@ -242,6 +246,7 @@ public class LlmExecutionContext {
     context.isolationKey = request.scope().isolationKey();
     context.orgId = request.scope().orgId();
     context.userId = request.userId();
+    context.credentialOrgId = request.credentialOrgId();
     context.projectId = request.projectId();
     context.repoId = request.repoId();
 

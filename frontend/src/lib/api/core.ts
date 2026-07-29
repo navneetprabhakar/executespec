@@ -1,6 +1,9 @@
 // Typed API contract definitions. Runtime transport is re-exported here to preserve the stable
 // `@/lib/api/core` import surface for existing API modules.
 export * from './transport';
+export type {GoalProofEvidenceReference} from './validationReportTypes';
+
+import type {GoalProofEvidenceReference} from './validationReportTypes';
 // Billing DTOs moved to the billing domain module, but remain type-re-exported here so existing
 // `@/lib/api/core` consumers keep compiling while the god-file shrinks.
 export type {BillingOverviewData, PaymentAuditEntry, PricingRow, UsageMetrics} from './billing';
@@ -386,8 +389,8 @@ export interface TimelineData {
   tasks: Array<{
     taskId: string;
     title: string;
-    startedAt: string;
-    completedAt: string;
+    startedAt: string | null;
+    completedAt: string | null;
     status: string;
   }>;
 }
@@ -618,15 +621,6 @@ export interface ConversationMessage {
 export interface RunChatMessage {
   role: 'user' | 'assistant';
   content: string;
-}
-
-/** Response from POST /api/runs/{id}/chat */
-export interface ChatResponse {
-  reply: string;
-  /** Number of user messages sent so far. */
-  messageCount: number;
-  /** Maximum user messages allowed. */
-  maxMessages: number;
 }
 
 // Apply Suggestion (Chat Copilot / Review)
@@ -1052,6 +1046,8 @@ export interface ValidationReportData {
   verificationLedger?: VerificationEvidence[];
   /** Conservative run-level proof derived from the final validation ledger. */
   runGoalDecision?: GoalDonenessDecisionData | null;
+  /** Exact durable ledger rows used by the final goal proof. */
+  goalProofReferences?: GoalProofEvidenceReference[];
 }
 
 export interface VerificationEvidence {
@@ -1238,22 +1234,31 @@ export interface SpecTemplate {
   createdAt: string;
 }
 
-// v2.5.5 (UX-4.2) — architecture diff source-file correlation.
-// The text diff of architecture.md stays client-side (LCS); this call
-// returns per-repo added/modified/removed/renamed files between the two
-// versions by hitting GitHub's compare API against the SHAs captured at
-// generate-time on each ProjectArchitectureDoc row.
+// v2.5.5 (UX-4.2) — architecture content diff + source-file correlation.
+// The two document bodies support the primary client-side LCS diff. Per-repo
+// source changes explain which commits accompanied the document change.
 export interface ArchChangedFile {
   filename: string;
   status: string; // added | modified | removed | renamed
   additions: number;
   deletions: number;
 }
+export interface ArchRepoDiffIssue {
+  repoFullName: string;
+  status: 'NOT_LINKED' | 'NO_BASELINE' | 'COMPARE_FAILED' | string;
+  detail: string;
+}
 export interface ArchDiffReport {
   fromVersion: number;
   toVersion: number;
+  fromContent: string;
+  toContent: string;
   perRepo: {repoFullName: string; files: ArchChangedFile[]}[];
   totalFiles: number;
+  /** Repositories intentionally not fetched/compared (for example, no longer linked). */
+  skipped: ArchRepoDiffIssue[];
+  /** Repositories whose comparison failed, so their source-change state is unknown. */
+  unverified: ArchRepoDiffIssue[];
 }
 
 // v2.5.2 — Tech Debt rollup for Project Overview. All DB-derived, no LLM.
