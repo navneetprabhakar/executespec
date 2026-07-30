@@ -168,21 +168,17 @@ public class AutomaticCorrectionLifecycle {
       CorrectionWorkspaceTransaction.Checkpoint checkpoint,
       EvidenceCheckpoint evidenceCheckpoint,
       CorrectionWorkspaceTransaction.DiffEvidence diff,
-      String previousStatus,
-      java.time.Instant previousStartedAt,
-      java.time.Instant previousCompletedAt,
-      Long previousDurationMs,
+      TaskState previous,
       CorrectionAcceptancePolicy.Decision rejection,
       CorrectionResolutionEvidence.ValidationSnapshot attemptValidation) {
     CorrectionResolutionEvidence.ValidationDelta validationDelta =
         captureValidationDelta(evidenceCheckpoint, attemptValidation);
     rollback(checkpoint);
     restoreEvidence(evidenceCheckpoint);
-    restoreTask(
-        taskKey, previousStatus, previousStartedAt, previousCompletedAt, previousDurationMs);
+    restoreTask(taskKey, previous);
     recordResolution(
         taskKey,
-        "ROLLED_BACK",
+        "REJECTED",
         rejection.code(),
         rejection.reason(),
         checkpoint.generation(),
@@ -190,6 +186,35 @@ public class AutomaticCorrectionLifecycle {
         diff,
         validationDelta,
         true);
+  }
+
+  public boolean rollbackIfEvidenceRegressed(
+      String runId,
+      String taskId,
+      String taskKey,
+      CorrectionWorkspaceTransaction.Checkpoint checkpoint,
+      EvidenceCheckpoint evidenceCheckpoint,
+      CorrectionWorkspaceTransaction.DiffEvidence diff,
+      TaskState previous) {
+    CorrectionResolutionEvidence.ValidationDelta delta = captureValidationDelta(evidenceCheckpoint);
+    CorrectionAcceptancePolicy.Decision decision =
+        CorrectionAcceptancePolicy.evaluateRegression(delta);
+    if (decision.accepted()) return false;
+    rollbackRejectedAttempt(
+        taskKey,
+        checkpoint,
+        evidenceCheckpoint,
+        diff,
+        previous,
+        decision,
+        delta == null ? null : delta.after());
+    broadcaster.emit(
+        runId,
+        RunEvent.log(
+            runId,
+            taskId,
+            "Automatic correction rejected after comparative validation: " + decision.reason()));
+    return true;
   }
 
   /**
@@ -205,7 +230,7 @@ public class AutomaticCorrectionLifecycle {
             .orElse(null);
     if (previous != null) {
       ValidationReport stale = copy(previous);
-      stale.setStatus("STALE");
+      markIndependentEvidenceStale(stale);
       validationReportRepository.saveAndFlush(stale);
     }
     return new EvidenceCheckpoint(runId, previous, inspectContracts(runId));
@@ -230,6 +255,49 @@ public class AutomaticCorrectionLifecycle {
     ValidationReport target = new ValidationReport();
     BeanUtils.copyProperties(source, target);
     return target;
+  }
+
+  static void markIndependentEvidenceStale(ValidationReport report) {
+    report.setStatus("STALE");
+    report.setWorkspaceGeneration(null);
+    report.setFinalBuildPassed(null);
+    report.setBuildCommand(null);
+    report.setBuildWorkingDirectory(null);
+    report.setBuildExitCode(null);
+    report.setBuildOutput(null);
+    report.setTestsPassed(null);
+    report.setTestsTotal(null);
+    report.setTestExecutionVerified(null);
+    report.setTestEvidenceScope(null);
+    report.setTestCommand(null);
+    report.setTestWorkingDirectory(null);
+    report.setTestExitCode(null);
+    report.setTestOutput(null);
+    report.setReviewerVerdict(null);
+    report.setWorkflowConfigEvidenceJson(null);
+    report.setFilesGenerated(-1);
+    report.setChecksPassed("");
+    report.setIssuesJson("[]");
+    report.setReportMarkdown(null);
+    report.setAccuracyScore(null);
+    report.setAccuracyGrade(null);
+    report.setAccuracyJson(null);
+    report.setCodeQualityScore(null);
+    report.setTestCoverageScore(null);
+    report.setArchitectureScore(null);
+    report.setSecurityScore(null);
+    report.setPerformanceScore(null);
+    report.setDesignComplianceScore(null);
+    report.setBootVerdict("STALE");
+    report.setBootHealthy(null);
+    report.setBootReason(null);
+    report.setExecutableTestsRun(null);
+    report.setExecutableTestsPassed(null);
+    report.setExecutableVerificationStatus("STALE");
+    report.setExecutableEvidenceJson(null);
+    report.setVerifiedScore(null);
+    report.setRubricScore(null);
+    report.setScoreZeroCauseJson(null);
   }
 
   public record EvidenceCheckpoint(
@@ -405,8 +473,12 @@ public class AutomaticCorrectionLifecycle {
     }
   }
 
-  public void restoreTask(
-      String taskKey, String status, Instant startedAt, Instant completedAt, Long durationMs) {
+  public TaskState snapshotTask(AgentTask task) {
+    return new TaskState(
+        task.getStatus(), task.getStartedAt(), task.getCompletedAt(), task.getDurationMs());
+  }
+
+  public void restoreTask(String taskKey, TaskState state) {
     if (taskKey == null || taskKey.isBlank()) {
       return;
     }
@@ -415,10 +487,10 @@ public class AutomaticCorrectionLifecycle {
           .findById(taskKey)
           .ifPresent(
               task -> {
-                task.setStatus(status);
-                task.setStartedAt(startedAt);
-                task.setCompletedAt(completedAt);
-                task.setDurationMs(durationMs);
+                task.setStatus(state.status());
+                task.setStartedAt(state.startedAt());
+                task.setCompletedAt(state.completedAt());
+                task.setDurationMs(state.durationMs());
                 taskRepository.save(task);
               });
     } catch (RuntimeException ex) {
@@ -428,6 +500,8 @@ public class AutomaticCorrectionLifecycle {
           ex.getMessage());
     }
   }
+
+  public record TaskState(String status, Instant startedAt, Instant completedAt, Long durationMs) {}
 
   private ArrayNode readActions(String json)
       throws com.fasterxml.jackson.core.JsonProcessingException {

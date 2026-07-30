@@ -267,6 +267,11 @@ public class WorkspaceTestRunner {
                 executionProven
                     ? null
                     : "test report freshness could not be proven for this attempt");
+            // This runner always exercises the repository-local suite in the frozen workspace.
+            // Freshness is independent from boundary: callers must not mistake this for a live
+            // preview/functional journey, but they can persist it as deterministic code-level
+            // evidence instead of leaving the scope null/legacy-unknown.
+            s.setEvidenceScope(TestExecutionSummary.EvidenceScope.WORKSPACE_TEST_SUITE);
           });
       log.info(
           "WorkspaceTestRunner run={} framework={} source={} → {}",

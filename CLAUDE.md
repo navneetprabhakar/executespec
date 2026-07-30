@@ -2,7 +2,7 @@
 
 > This file is read by Claude Code at session start. Keep it accurate.
 
-**Version:** `2.0.0` ([`Version`](Version)). The current worktree migration head is **V366** (**352 source files**; next **V367**). V360 persists brownfield HTTP-contract evidence; V361 binds validation evidence to an exact workspace generation; V362 persists deterministic workflow/build/test command evidence; V363 adds explicit confirmation before retrying generated-document jobs with uncertain provider outcomes; V364 atomically fences exact continuation approvals; V365 timestamps those receipts for bounded fail-closed crash recovery; V366 persists exact score-zero causality without attributing historical rows. V354's LLM operation admission remains `LEGACY`, and RequirementIR enforcement remains inactive by default. Default branch: `main`. Dev environment: `dev.executespec.ai`.
+**Version:** `2.0.0` ([`Version`](Version)). The current worktree migration head is **V367** (**353 source files**; next **V368**). V360 persists brownfield HTTP-contract evidence; V361 binds validation evidence to an exact workspace generation; V362 persists deterministic workflow/build/test command evidence; V363 adds explicit confirmation before retrying generated-document jobs with uncertain provider outcomes; V364 atomically fences exact continuation approvals; V365 timestamps those receipts for bounded fail-closed crash recovery; V366 persists exact score-zero causality without attributing historical rows; V367 binds validation reports to their runtime surface so non-HTTP endpoint coverage is explicitly not applicable. V354's LLM operation admission remains `LEGACY`, and RequirementIR enforcement remains inactive by default. Default branch: `main`. Dev environment: `dev.executespec.ai`.
 
 Spec-driven AI coding platform. Customer submits a spec in natural language → V2 pipeline plans, codes across one or more repos, builds + tests, opens a pull request with a deterministic verified score. Human approves at the plan gate; everything after is automatic.
 
@@ -24,8 +24,14 @@ approved continuation is workspace-mutating and therefore starts from a reversib
 content-addressed Git-tree checkpoint, immediately marks earlier validation evidence stale,
 requires a non-empty diff plus real all-green tests and deterministic workflow/contract checks, and
 receives a read-only final reviewer.
+The stale projection clears independently readable build, test, review, workflow, executable and
+score facts until rollback restores the byte-equivalent report or accepted validation regenerates
+them. Accepted corrections must also preserve the prior passing test population and protected
+deterministic evidence; a green but narrower suite is rejected. Policy rejection is persisted as
+`REJECTED`, while execution/transaction failure that requires recovery is `ROLLED_BACK`.
 Exact HTTP requirements and the admitted brownfield surface must pass before that reviewer runs;
-the brownfield guard also lives inside `RunValidationKickoff`, so normal completion, crash resume,
+the brownfield guard runs immediately after the normal worker and also lives inside
+`RunValidationKickoff`, so normal completion, crash resume,
 retry-validation, and re-review cannot persist a fresh report for a regressed public surface.
 Reviewer and regenerated validation evidence must match the same workspace generation. Rejected or
 failed corrections restore both workspace and validation state and persist a structured resolution
@@ -38,6 +44,10 @@ exact durable plan-gate receipt and matching contract report carry uppercase `BR
 Validation evidence is bound to a canonical workspace-generation SHA and persists deterministic
 workflow/config plus exact build/test command evidence. SCM publication and permanent deployment
 require that generation to remain current plus explicit passing build and execution-verified tests.
+SCM push responses distinguish Git transport, PR creation, repository resolution, workspace safety,
+and multi-repository publication through stable `code`, `blockingGate`, and `remediation` fields.
+The run Evidence view renders every durable correction in server task/action order; it does not
+hide earlier corrections or invent cross-task timestamps that are not persisted.
 Generated-document retries with ambiguous provider outcomes require explicit confirmation rather
 than risking duplicate spend; V363 widens the job status column before adding
 `NEEDS_CONFIRMATION`. Anthropic text responses are assembled across every returned generation, and
@@ -595,7 +605,7 @@ When a terminal waste/failed goal decision still says another model/provider mig
 - **LLM prompts:** external files in `src/main/resources/prompts/*.md` plus active `.txt` prompts for legacy/non-tool agents. Assembled via `PromptAssembler.assemble(path, vars)` where applicable — resolves `{{include:fragment}}` markers from `prompts/fragments/` and `{{VAR}}` substitutions. Dead rollback archives were removed in the 2026-07-02 prompt-audit cleanup; rollback uses `PromptAuditEntry.previousContent` and dynamically-created backups for live prompt files.
 - **Tool calling:** provider-native end-to-end. Strict JSON schemas on every entry in `tool/`. No XML `<tool_call>` parsing in V2.
 - **Naming:** `*Agent.java` for agents, `*Service.java` for services, `*Controller.java` for REST, `*Spec.java` for security specifications.
-- **DB migrations:** Flyway `V{n}__description.sql` in `src/main/resources/db/migration/` (current worktree head **V366**, next **V367**, **352 source files**). Applied migrations are immutable: never rewrite an applied V-file. V360 persists brownfield HTTP-contract evidence, V361 binds validation evidence to an exact workspace generation, V362 persists deterministic workflow/build/test command evidence, V363 adds confirmation-fenced uncertain generated-document retry, V364 atomically fences exact continuation approvals, V365 adds bounded stale-receipt recovery, and V366 persists exact score-zero causality. Any future consolidation must use a clean-install baseline migration plus forward migrations. Full chronology is in [`executespec-docs/backend/architecture/CODEMAP.md`](../executespec-docs/backend/architecture/CODEMAP.md).
+- **DB migrations:** Flyway `V{n}__description.sql` in `src/main/resources/db/migration/` (current worktree head **V367**, next **V368**, **353 source files**). Applied migrations are immutable: never rewrite an applied V-file. V360 persists brownfield HTTP-contract evidence, V361 binds validation evidence to an exact workspace generation, V362 persists deterministic workflow/build/test command evidence, V363 adds confirmation-fenced uncertain generated-document retry, V364 atomically fences exact continuation approvals, V365 adds bounded stale-receipt recovery, V366 persists exact score-zero causality, and V367 binds report runtime-surface applicability. Any future consolidation must use a clean-install baseline migration plus forward migrations. Full chronology is in [`executespec-docs/backend/architecture/CODEMAP.md`](../executespec-docs/backend/architecture/CODEMAP.md).
 
 Production Flyway is strict: `application-prod.yml` disables automatic baselining and out-of-order application. Recovery of an unmanaged database is an explicit operator procedure; do not enable those settings globally.
 
@@ -951,7 +961,7 @@ requires the consumer repository to be linked to that project before persistence
 | Agent web tools + chat uploads  | [`specchat/WebSearchChatTools.java`](src/main/java/com/navneet/executespec/specchat/WebSearchChatTools.java) (SSRF-hardened `web_search`/`web_fetch` for the chat surface) + [`agentsession/AgentAttachmentService.java`](src/main/java/com/navneet/executespec/agentsession/AgentAttachmentService.java) + `AgentAttachmentStore.java` (validate/extract/sanitize uploads → Redis → server-side untrusted injection) |
 | LLM prompts                     | `src/main/resources/prompts/*.md`                                                                                                                                                                                                                                                 |
 | App config                      | `src/main/resources/application.yml`                                                                                                                                                                                                                                              |
-| DB migrations                   | `src/main/resources/db/migration/V*.sql` (worktree head V366; next V367; 352 source files; applied V-files immutable). V360 adds brownfield HTTP evidence; V361 adds workspace-generation binding; V362 adds command/workflow evidence; V363 confirmation-fences uncertain document retries; V364 atomically fences exact continuation approvals; V365 bounds stale-receipt recovery; V366 persists exact score-zero causality. |
+| DB migrations                   | `src/main/resources/db/migration/V*.sql` (worktree head V367; next V368; 353 source files; applied V-files immutable). V360 adds brownfield HTTP evidence; V361 adds workspace-generation binding; V362 adds command/workflow evidence; V363 confirmation-fences uncertain document retries; V364 atomically fences exact continuation approvals; V365 bounds stale-receipt recovery; V366 persists exact score-zero causality; V367 persists runtime-surface applicability. |
 | Frontend entry                  | `frontend/src/main.tsx`                                                                                                                                                                                                                                                           |
 | Frontend API client             | `frontend/src/lib/api/` (`transport.ts` + domain DTO contracts, with `core.ts` retaining compatibility re-exports)                                                                                                                                                              |
 | Observability stack             | `observability/docker-compose.yml`                                                                                                                                                                                                                                                |
@@ -1308,7 +1318,7 @@ preview-render single-flight; V307 adds run sandbox lifecycle; **V308** retypes
 `contract_version.inline_content` from jsonb to text (RR-1629 — inline contract bodies are not always
 valid JSON, so the jsonb column rejected legitimate content); **V309** gives `file_lock` a run-scoped
 composite `(run_id, file_path)` identity (RR-1544 — the prior key let one run's lock collide with
-another's). The current source head is V366; the older V299-V309 statements above describe prior source tuples.
+another's). The current source head is V367; the older V299-V309 statements above describe prior source tuples.
 
 **V310–V317 are RESERVED** by the in-flight audit-remediation fix wave (one per lane: billing, auth,
 tool, path-containment, preview/deploy, execution-gate, spend-quota, scoring). Do not allocate from

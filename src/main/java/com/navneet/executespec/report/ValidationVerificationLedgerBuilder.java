@@ -313,26 +313,7 @@ final class ValidationVerificationLedgerBuilder {
             accuracy.score(),
             accuracy.score() == null ? null : 100));
 
-    out.add(
-        evidence(
-            "endpoint-coverage",
-            "Endpoint coverage",
-            "ENDPOINTS",
-            accuracy.endpointCoverage() == null
-                ? "UNKNOWN"
-                : accuracy.endpointCoverage() >= 95
-                    ? "PASS"
-                    : accuracy.endpointCoverage() >= 70 ? "WARN" : "FAIL",
-            "LLM_ASSISTED_COUNT",
-            accuracy.endpointCoverage() == null ? "LOW" : "MEDIUM",
-            "Expected API endpoints are present in the generated implementation.",
-            accuracy.endpointCoverage() == null
-                ? "No endpoint coverage evidence was captured; the rubric's N/A policy may still"
-                    + " award this dimension."
-                : "Endpoint coverage: " + accuracy.endpointCoverage() + "%.",
-            "validation_report.accuracy_json.endpointCoverage",
-            accuracy.endpointCoverage(),
-            accuracy.endpointCoverage() == null ? null : 100));
+    out.add(ValidationEndpointCoverageEvidence.build(entity, accuracy.endpointCoverage()));
 
     if (accuracy.testCoverageLevel() != null) {
       String level = accuracy.testCoverageLevel();

@@ -87,7 +87,7 @@ source run's host tenant while assigning the current actor as payer on BUILD ite
 server-internal finding PATCH submission resolve its active host project and active actor before
 dedupe or dispatch.
 
-The current deployment candidate advances the migration source head to V366. V354 adds
+The current deployment candidate advances the migration source head to V367. V354 adds
 rollout-gated operation-fenced provider-attempt admission; its default remains
 `EXECUTESPEC_LLM_OPERATION_ADMISSION_MODE=LEGACY`, so this deployment does not activate the new
 admission path. V355 adds bounded oldest-first recovery for stale streamed agent turns and never
@@ -134,6 +134,14 @@ without rewriting comparison evidence; the run Evidence tab renders route, build
 workflow/config, protected-contract, reviewer result, physical reviewer route, correction
 generations/diff/invalidation, freshness, and publication facts independently rather than treating
 the internal score as publication proof.
+Validation-report responses expose their lifecycle status; a stale/pending/failed report suppresses
+its previously computed pipeline result, and the Evidence UI presents regeneration state instead of
+relabeling old validation as current. Public report links reject those non-complete rows instead of
+publishing earlier scores or test claims. Known non-HTTP reports omit endpoint coverage from both score
+numerator and denominator rather than receiving a penalty or synthetic midpoint credit.
+SCM push failures expose a stable failure code, the exact blocking gate (for example `GIT_PUSH` or
+`PR_CREATION`), and remediation. Correction evidence shows the complete durable task/action history
+instead of only the last transaction.
 The internal headline reserves zero for an explicit deterministic gate. LLM assessments may cap a
 positive score no lower than 1; a zero report carries a `score-zero-cause` ledger row naming the
 exact deterministic artifact, while historical unattributed zeros say that their cause is
@@ -147,7 +155,7 @@ RequirementIR also remains `LEGACY`.
 | Project           | `2.0.0`             | [`VERSION`](VERSION), [`Version`](Version), [`pom.xml`](pom.xml) `<version>` |
 | Spring Boot       | `3.5.14`            | [`pom.xml`](pom.xml) `<parent>` (bumped from `3.3.0` by Dependabot #132, 2026-05-16) |
 | Spring AI         | `1.1.6`             | [`pom.xml`](pom.xml) `<spring-ai.version>` (BOM import)                |
-| Flyway head       | `V366`              | V365 bounds stale-receipt recovery; V366 persists score-zero causality; next V367 |
+| Flyway head       | `V367`              | V366 persists score-zero causality; V367 binds validation runtime-surface applicability; next V368 |
 | Frontend          | `2.0.0`             | [`frontend/package.json`](frontend/package.json) `"version"`           |
 
 `VERSION` and `Version` are kept identical by hand; the project's own conventions reference `Version` as the source of truth. The frontend ships under the same release stamp as the backend.
@@ -175,7 +183,7 @@ ownership must be aligned explicitly before rollout.
 | Framework           | Spring Boot 3.5.14 (Web, Data JPA, Security, OAuth2 client, Mail, Thymeleaf, Actuator, AOP, Validation, Retry, Data Redis) | [`pom.xml`](pom.xml) deps 1, 5, 14–20, 30, 36–39, 60 |
 | LLM SDK             | Spring AI 1.1.6 starters for Anthropic, OpenAI, Google GenAI                        | [`pom.xml`](pom.xml) deps 2–4                                                    |
 | LLM auto-config     | Provider auto-configurations disabled in favor of manual `AgentModelConfig` beans   | [`src/main/java/com/navneet/executespec/ExecutespecApplication.java`](src/main/java/com/navneet/executespec/ExecutespecApplication.java) |
-| Database            | PostgreSQL (Cloud SQL in prod), Flyway migrations head V366                         | [`pom.xml`](pom.xml) deps 6–8, `src/main/resources/db/migration/`                 |
+| Database            | PostgreSQL (Cloud SQL in prod), Flyway migrations head V367                         | [`pom.xml`](pom.xml) deps 6–8, `src/main/resources/db/migration/`                 |
 | Cache / lock        | Redis (Lettuce), ShedLock 7.7.0                                                     | [`pom.xml`](pom.xml) deps 30–32                                                  |
 | Auth                | JJWT 0.13.0 + Spring Security OAuth2 client (Google, GitHub)                        | [`pom.xml`](pom.xml) deps 14–18                                                  |
 | Billing             | Stripe 32.1.0, Razorpay (HMAC), invoice PDFs via OpenPDF 2.0.3 + flying-saucer 9.4.0 | [`pom.xml`](pom.xml) deps 21–22, 56; HMAC via commons-codec 1.22.0 (dep 35)     |
@@ -230,7 +238,7 @@ Gemini 3.5 Flash/3.5 Flash-Lite, native DeepSeek V4, and the surviving Fireworks
 │   └── ... (78 package roots total under com.navneet.executespec)
 ├── src/main/resources/
 │   ├── application.yml           Single source of truth for model matrix, provider routes, pricing, failover
-│   ├── db/migration/             Flyway V*.sql (head V366; next V367; 352 source files; immutable post-apply)
+│   ├── db/migration/             Flyway V*.sql (head V367; next V368; 353 source files; immutable post-apply)
 │   ├── prompts/                  External LLM prompts (assembled by PromptAssembler)
 │   └── static/                   Vite build output served by Spring Boot
 ├── src/test/java/                Unit + ArchUnit guard tests (e.g. AccessGuardCoverageTest)

@@ -224,6 +224,8 @@ export interface ArchitectureJob {
   phase: 'PREPARING' | 'EXECUTING' | 'PUBLISHING';
   terminal: boolean;
   architectureVersion: number | null;
+  attemptCount: number;
+  deadlineAt: string;
   errorCode: string | null;
   errorMessage: string | null;
   qualityStatus?: 'QUALIFIED' | 'WARNING' | 'FAILED' | null;

@@ -79,7 +79,8 @@ import {
   modelRankingLabel,
   num,
   latestContinuationAction,
-  latestCorrectionEvidence,
+  correctionEvidenceHistory,
+  reportPipelineLabel,
   publicationTrustFacts,
   runArtifactActionAvailability,
   friendlyAiFailureMessage,
@@ -138,7 +139,17 @@ function correctionSnapshotValue(
     : `${snapshot.score.verifiedScore}/100`;
 }
 
-function CorrectionEvidenceCard({action}: {action: CorrectionEvidenceAction}) {
+function CorrectionEvidenceCard({
+  action,
+  taskTitle,
+  ordinal,
+  total,
+}: {
+  action: CorrectionEvidenceAction;
+  taskTitle: string;
+  ordinal: number;
+  total: number;
+}) {
   const status = (action.status || action.code || 'RECORDED').toUpperCase();
   const failed = ['REJECTED', 'ROLLED_BACK', 'FAILED'].includes(status);
   const delta = action.validationDelta;
@@ -156,10 +167,13 @@ function CorrectionEvidenceCard({action}: {action: CorrectionEvidenceAction}) {
     <div className='ide-card' style={{marginTop: 14}} data-testid='correction-evidence-card'>
       <div style={{display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap'}}>
         <div className='ide-h2' style={{margin: 0}}>
-          Correction transaction
+          Correction transaction {ordinal}/{total}
         </div>
         <IdeBadge kind={failed ? 'bad' : status === 'ACCEPTED' ? 'ok' : 'warn'}>{status}</IdeBadge>
         {action.code && <span className='ide-mono'>{action.code}</span>}
+      </div>
+      <div style={{marginTop: 6, color: 'var(--ide-fg-muted)', fontSize: 12}}>
+        Durable task/action order · {taskTitle || 'Untitled task'}
       </div>
       {action.reason && (
         <p style={{margin: '10px 0', color: 'var(--ide-fg-muted)'}}>{action.reason}</p>
@@ -786,15 +800,18 @@ export default function IdeRunResult() {
       prUrl?: string;
       message?: string;
       code?: string;
+      blockingGate?: string | null;
       publicationEligible?: boolean;
       retryable?: boolean;
       retryGuidance?: string;
+      remediation?: string | null;
     };
     const status = (res.status || '').toUpperCase();
     const eligibility = res.publicationEligible === false ? 'Publication ineligible' : undefined;
     const retry =
       res.retryable === false && status === 'FAILED' ? 'Direct retry disabled' : undefined;
-    const diagnostic = [eligibility, retry, res.code, res.message, res.retryGuidance]
+    const guidance = res.remediation || res.retryGuidance;
+    const diagnostic = [eligibility, retry, res.blockingGate, res.code, res.message, guidance]
       .filter(Boolean)
       .join(' · ');
     switch (status) {
@@ -1193,7 +1210,7 @@ export default function IdeRunResult() {
         : 'Open the logs and evidence to identify the failing stage.');
   const durableFailureEvidence = terminalFailureEvidence(run);
   const trustFacts = publicationTrustFacts(run, publication);
-  const correctionEvidence = latestCorrectionEvidence(run);
+  const correctionHistory = correctionEvidenceHistory(run);
   // C2 — tab title carries the run name once loaded.
   useDocumentTitle(run?.runTitle || (run ? `R-${runId.slice(0, 6)}` : null));
 
@@ -1460,7 +1477,7 @@ export default function IdeRunResult() {
                       )
                     }
                   />
-                  <Kv k='Pipeline' v={report?.pipelineResult ?? '—'} />
+                  <Kv k='Pipeline' v={reportPipelineLabel(report)} />
                   {fileCounts.explanation && (
                     <div
                       className='ide-card'
@@ -2810,7 +2827,15 @@ export default function IdeRunResult() {
                 </div>
               ))}
             </div>
-            {correctionEvidence && <CorrectionEvidenceCard action={correctionEvidence} />}
+            {correctionHistory.map((entry, index) => (
+              <CorrectionEvidenceCard
+                key={`${entry.taskId}:${entry.actionIndex}`}
+                action={entry.action}
+                taskTitle={entry.taskTitle}
+                ordinal={index + 1}
+                total={correctionHistory.length}
+              />
+            ))}
             {publication && !publication.eligible && (
               <div className='ide-card' role='alert'>
                 <div style={{fontWeight: 600}}>{publication.reason}</div>
@@ -2845,7 +2870,7 @@ export default function IdeRunResult() {
             ) : (
               <>
                 <div className='ide-card'>
-                  <Kv k='Pipeline' v={report.pipelineResult} />
+                  <Kv k='Pipeline' v={reportPipelineLabel(report)} />
                   <Kv k='Files generated' v={report.filesGenerated} />
                   <Kv k='Build breakers' v={report.buildBreakers} />
                   <Kv k='Review failures' v={report.reviewFailures} />

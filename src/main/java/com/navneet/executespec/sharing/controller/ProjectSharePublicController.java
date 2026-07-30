@@ -132,6 +132,7 @@ public class ProjectSharePublicController {
     ValidationReport report =
         reportRepo
             .findByRunId(link.getScopeId())
+            .filter(candidate -> "COMPLETE".equalsIgnoreCase(candidate.getStatus()))
             .orElseThrow(
                 () ->
                     new ResponseStatusException(

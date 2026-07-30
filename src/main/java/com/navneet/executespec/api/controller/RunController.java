@@ -1020,9 +1020,11 @@ public class RunController {
             pushResult.succeeded(),
             pushResult.failed(),
             pushResult.code(),
+            pushResult.blockingGate(),
             pushResult.publicationEligible(),
             pushResult.retryable(),
-            pushResult.retryGuidance()));
+            pushResult.retryGuidance(),
+            pushResult.remediation()));
   }
 
   public record ScmPushResponse(
@@ -1035,9 +1037,11 @@ public class RunController {
       int succeeded,
       int failed,
       String code,
+      String blockingGate,
       boolean publicationEligible,
       boolean retryable,
-      String retryGuidance) {}
+      String retryGuidance,
+      String remediation) {}
 
   /**
    * Update the project association of an existing run. Send null or empty projectId to un-assign.

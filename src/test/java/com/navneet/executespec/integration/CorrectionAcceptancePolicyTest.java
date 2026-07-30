@@ -126,6 +126,75 @@ class CorrectionAcceptancePolicyTest {
     assertThat(decision.code()).isEqualTo("CORRECTION_NO_CHANGE");
   }
 
+  @Test
+  void rejectsGreenCorrectionThatDropsPreviouslyPassingTests() {
+    var before = validation("a", 12, 12);
+    var after = validation("b", 5, 5);
+
+    var decision =
+        CorrectionAcceptancePolicy.evaluateRegression(
+            CorrectionResolutionEvidence.delta(before, after));
+
+    assertThat(decision.accepted()).isFalse();
+    assertThat(decision.code()).isEqualTo("CORRECTION_PROTECTED_EVIDENCE_REGRESSION");
+    assertThat(decision.reason()).contains("12/12").contains("5/5");
+  }
+
+  @Test
+  void acceptsFreshEvidenceWhenNoPublishedBaselineExists() {
+    var decision =
+        CorrectionAcceptancePolicy.evaluateRegression(
+            CorrectionResolutionEvidence.delta(null, validation("b", 5, 5)));
+
+    assertThat(decision.accepted()).isTrue();
+    assertThat(decision.code()).isEqualTo("CORRECTION_EVIDENCE_BASELINE_NOT_APPLICABLE");
+  }
+
+  @Test
+  void rejectsCorrectionWhenPreviouslyPassingTestsBecomeUnproven() {
+    var before = validation("a", 12, 12);
+    var after =
+        new CorrectionResolutionEvidence.ValidationSnapshot(
+            "COMPLETE",
+            "b".repeat(64),
+            new CorrectionResolutionEvidence.BuildValidation("PASSED", true, 0),
+            new CorrectionResolutionEvidence.TestValidation(
+                "UNPROVEN", null, null, false, "UNAVAILABLE", null),
+            new CorrectionResolutionEvidence.WorkflowValidation("PASSED", 1, null),
+            new CorrectionResolutionEvidence.ReviewerValidation("CLEAN"),
+            new CorrectionResolutionEvidence.ContractValidation(
+                "COMPATIBLE", "base", "current", 0, 0),
+            new CorrectionResolutionEvidence.ScoreValidation(75, 75),
+            "PASSED",
+            "UNAVAILABLE",
+            null);
+
+    var decision =
+        CorrectionAcceptancePolicy.evaluateRegression(
+            CorrectionResolutionEvidence.delta(before, after));
+
+    assertThat(decision.accepted()).isFalse();
+    assertThat(decision.code()).isEqualTo("CORRECTION_PROTECTED_EVIDENCE_REGRESSION");
+    assertThat(decision.reason()).contains("unproven");
+  }
+
+  private static CorrectionResolutionEvidence.ValidationSnapshot validation(
+      String generation, int passed, int total) {
+    return new CorrectionResolutionEvidence.ValidationSnapshot(
+        "COMPLETE",
+        generation.repeat(64),
+        new CorrectionResolutionEvidence.BuildValidation("PASSED", true, 0),
+        new CorrectionResolutionEvidence.TestValidation(
+            "PASSED", passed, total, true, "WORKSPACE_TEST_SUITE", 0),
+        new CorrectionResolutionEvidence.WorkflowValidation("PASSED", 1, null),
+        new CorrectionResolutionEvidence.ReviewerValidation("CLEAN"),
+        new CorrectionResolutionEvidence.ContractValidation("COMPATIBLE", "base", "current", 0, 0),
+        new CorrectionResolutionEvidence.ScoreValidation(90, 90),
+        "PASSED",
+        "PASSED",
+        null);
+  }
+
   private static ExecutionResult execution(TaskOutcome task) {
     return ExecutionResult.builder().perTask(List.of(task)).build();
   }

@@ -45,7 +45,8 @@ class CorrectionValidationAdmission {
       String reviewerWorkspaceGeneration) {
     ValidationReport regenerated =
         validationKickoff
-            .generateValidationReport(runId, execution, review, plan)
+            .generateCorrectionValidationReport(
+                runId, execution, review, plan, reviewerWorkspaceGeneration)
             .orElseThrow(
                 () ->
                     new IllegalStateException(
@@ -65,10 +66,28 @@ class CorrectionValidationAdmission {
       throw new IllegalStateException(
           "CORRECTION_VALIDATION_FAILED: regenerated deterministic validation failed");
     }
+    assertCorrectionTestsPersisted(regenerated);
     deterministicHttpRequirementVerifier.assertSatisfied(plan, null, checkpoint);
     if (brownfieldHttpContractGuard.hasBaseline(runId)) {
       brownfieldHttpContractGuard.assertCompatible(runId);
     }
     return regenerated;
+  }
+
+  private static void assertCorrectionTestsPersisted(ValidationReport report) {
+    if (!Boolean.TRUE.equals(report.getTestExecutionVerified())
+        || report.getTestsTotal() == null
+        || report.getTestsTotal() <= 0
+        || report.getTestsPassed() == null
+        || !report.getTestsPassed().equals(report.getTestsTotal())
+        || !"WORKSPACE_TEST_SUITE".equals(report.getTestEvidenceScope())
+        || report.getTestCommand() == null
+        || report.getTestCommand().isBlank()
+        || report.getTestExitCode() == null
+        || report.getTestExitCode() != 0) {
+      throw new IllegalStateException(
+          "CORRECTION_TEST_EVIDENCE_UNPROVEN: regenerated correction validation did not persist"
+              + " a complete green workspace-suite command and provenance");
+    }
   }
 }

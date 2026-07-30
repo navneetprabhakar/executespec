@@ -31,18 +31,55 @@ export type CorrectionEvidenceAction = NonNullable<
   NonNullable<api.TaskSummary['continuationActions']>[number]
 >;
 
-export function latestCorrectionEvidence(
+export interface CorrectionEvidenceEntry {
+  action: CorrectionEvidenceAction;
+  taskId: string;
+  taskTitle: string;
+  taskIndex: number;
+  actionIndex: number;
+}
+
+/**
+ * A non-complete report cannot truthfully present its previously computed pipeline result as
+ * current evidence. Missing lifecycle status remains backward compatible with older servers.
+ */
+export function reportPipelineLabel(
+  report: Pick<api.ValidationReportData, 'reportStatus' | 'pipelineResult'> | null | undefined,
+): string {
+  if (!report) return '—';
+  const status = report.reportStatus?.trim().toUpperCase();
+  if (!status) return report.pipelineResult || '—';
+  if (status === 'COMPLETE') return report.pipelineResult || '—';
+  if (status === 'STALE') return 'Stale — validation regeneration required';
+  if (status === 'PENDING') return 'Validation pending';
+  if (status === 'FAILED') return 'Validation unavailable — generation failed';
+  return `Validation ${status.toLowerCase()}`;
+}
+
+/**
+ * Returns every durable correction in the exact task/action order delivered by run detail.
+ * Actions do not carry a global timestamp, so this deliberately avoids inventing chronology.
+ */
+export function correctionEvidenceHistory(
   run: Pick<api.RunDetail, 'tasks'> | null | undefined,
-): CorrectionEvidenceAction | null {
-  const corrections = (run?.tasks || [])
-    .flatMap((task) => task.continuationActions || [])
-    .filter(
-      (action) =>
-        action.beforeWorkspaceGeneration ||
-        action.afterWorkspaceGeneration ||
-        (action.code || '').toUpperCase().includes('CORRECTION'),
-    );
-  return corrections.length > 0 ? corrections[corrections.length - 1] : null;
+): CorrectionEvidenceEntry[] {
+  return (run?.tasks || []).flatMap((task, taskIndex) =>
+    (task.continuationActions || [])
+      .map((action, actionIndex) => ({action, actionIndex}))
+      .filter(
+        ({action}) =>
+          action.beforeWorkspaceGeneration ||
+          action.afterWorkspaceGeneration ||
+          (action.code || '').toUpperCase().includes('CORRECTION'),
+      )
+      .map(({action, actionIndex}) => ({
+        action,
+        taskId: task.taskId,
+        taskTitle: task.title,
+        taskIndex,
+        actionIndex,
+      })),
+  );
 }
 
 /**
@@ -98,7 +135,30 @@ export function publicationTrustFacts(
     } · ${attempt?.physicalAttemptIds?.length || 0} physical attempt${
       attempt?.physicalAttemptIds?.length === 1 ? '' : 's'
     })`;
-  const correction = latestCorrectionEvidence(run) || undefined;
+  const correctionHistory = correctionEvidenceHistory(run);
+  const correctionSummary = correctionHistory
+    .map(({action, taskTitle, taskId, taskIndex, actionIndex}) => {
+      const status = action.status || action.code || 'RECORDED';
+      const detail = [
+        `${taskIndex + 1}.${actionIndex + 1} ${taskTitle || taskId}: ${status}`,
+        `${action.beforeWorkspaceGeneration?.slice(0, 12) || 'unknown'} → ${
+          action.afterWorkspaceGeneration?.slice(0, 12) || 'unknown'
+        }`,
+        action.changedFiles?.length
+          ? `${action.changedFiles.length} changed: ${action.changedFiles.join(', ')}`
+          : 'changed files unreported',
+        action.diffDigest ? `diff ${action.diffDigest.slice(0, 12)}` : null,
+        action.evidenceInvalidated === true ? 'prior evidence invalidated' : null,
+        action.validationRegenerated === true ? 'validation regenerated' : null,
+      ]
+        .filter(Boolean)
+        .join(' · ');
+      return detail;
+    })
+    .join(' | ');
+  const correctionHasFailure = correctionHistory.some(({action}) =>
+    ['REJECTED', 'ROLLED_BACK', 'FAILED'].includes((action.status || '').toUpperCase()),
+  );
   const generationFresh =
     publication?.evidenceWorkspaceGeneration != null &&
     publication.currentWorkspaceGeneration != null &&
@@ -211,30 +271,11 @@ export function publicationTrustFacts(
             : 'warn',
     },
     {
-      label: 'Correction',
-      value: correction
-        ? [
-            correction.status || correction.code || 'Recorded',
-            `${correction.beforeWorkspaceGeneration?.slice(0, 12) || 'unknown'} → ${
-              correction.afterWorkspaceGeneration?.slice(0, 12) || 'unknown'
-            }`,
-            correction.changedFiles?.length
-              ? `${correction.changedFiles.length} changed: ${correction.changedFiles.join(', ')}`
-              : 'changed files unreported',
-            correction.diffDigest ? `diff ${correction.diffDigest.slice(0, 12)}` : null,
-            correction.evidenceInvalidated === true ? 'prior evidence invalidated' : null,
-            correction.validationRegenerated === true ? 'validation regenerated' : null,
-          ]
-            .filter(Boolean)
-            .join(' · ')
+      label: 'Correction transactions',
+      value: correctionHistory.length
+        ? `${correctionHistory.length} recorded in task/action order (not chronology) · ${correctionSummary}`
         : 'No correction transaction',
-      kind:
-        correction &&
-        ['REJECTED', 'ROLLED_BACK', 'FAILED'].includes((correction.status || '').toUpperCase())
-          ? 'bad'
-          : correction
-            ? 'neutral'
-            : 'neutral',
+      kind: correctionHasFailure ? 'warn' : 'neutral',
     },
     {
       label: 'Evidence freshness',

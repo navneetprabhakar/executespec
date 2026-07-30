@@ -109,6 +109,8 @@ describe('IdeProjectArchitecture empty-state contract', () => {
       status: 'RUNNING',
       terminal: false,
       architectureVersion: null,
+      attemptCount: 1,
+      deadlineAt: '2026-07-28T00:05:00Z',
       errorCode: null,
       errorMessage: null,
       createdAt: '2026-07-28T00:00:00Z',
@@ -126,6 +128,9 @@ describe('IdeProjectArchitecture empty-state contract', () => {
     });
 
     await renderArchitecture();
+
+    expect(host.textContent).toContain('attempts started 1');
+    expect(host.textContent).toContain('deadline');
     expect(host.textContent).toContain('Resumed status checks');
     expect(api.startArchitectureRefresh).not.toHaveBeenCalled();
     await act(async () => {

@@ -66,6 +66,30 @@ class VerifiedScoreBackfillServiceTest {
   }
 
   @Test
+  void backfillOmitsEndpointDimensionForPersistedCliRuntime() {
+    ValidationReportRepository repo = mock(ValidationReportRepository.class);
+    ValidationReport row = backfillableRow();
+    row.setRuntimeSurface("CLI");
+    row.setAccuracyJson(
+        """
+        {
+          "testCoverageLevel": "GOOD",
+          "endpointCoverage": {"coveragePercent": 0}
+        }
+        """);
+    when(repo.findByRunId("run-1")).thenReturn(Optional.of(row));
+
+    VerifiedScoreBackfillService.BackfillResult result =
+        new VerifiedScoreBackfillService(repo, scoringService())
+            .backfill(new VerifiedScoreBackfillService.BackfillRequest("run-1", null, true));
+
+    assertThat(result.changes()).hasSize(1);
+    assertThat(result.changes().getFirst().newVerifiedScore()).isEqualTo(100);
+    assertThat(result.changes().getFirst().newRubricScore()).isEqualTo(100);
+    verify(repo, never()).save(any());
+  }
+
+  @Test
   void backfillPersistsExactCauseForAnExistingNoDiffZero() {
     ValidationReportRepository repo = mock(ValidationReportRepository.class);
     ValidationReport row =

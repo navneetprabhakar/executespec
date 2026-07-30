@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import type {PublicationEligibility, RunDetail} from '@/lib/api';
+import type {PublicationEligibility, RunDetail, ValidationReportData} from '@/lib/api';
 
 import {
   boundedLineDiff,
@@ -30,7 +30,8 @@ import {
   isTestExecutionTerminal,
   lineDiff,
   latestContinuationAction,
-  latestCorrectionEvidence,
+  correctionEvidenceHistory,
+  reportPipelineLabel,
   logIcon,
   logLabel,
   logMeta,
@@ -138,7 +139,7 @@ describe('publicationTrustFacts', () => {
       'Protected contracts': 'COMPATIBLE',
       'Reviewer result': 'CLEAN',
       'Reviewer route': 'OPENROUTER/x-ai/grok-4.20 (LEDGER · 1 physical attempt)',
-      Correction: expect.stringContaining(
+      'Correction transactions': expect.stringContaining(
         '1 changed: src/todo.ts · diff cccccccccccc · prior evidence invalidated · validation regenerated',
       ),
       'Evidence freshness': expect.stringContaining('Fresh'),
@@ -176,8 +177,42 @@ describe('publicationTrustFacts', () => {
   });
 });
 
-describe('latestCorrectionEvidence', () => {
-  it('returns the latest durable correction with patch and validation delta intact', () => {
+describe('correctionEvidenceHistory', () => {
+  it('keeps every correction visible in stable task/action order', () => {
+    const run = {
+      tasks: [
+        {
+          taskId: 'task-a',
+          title: 'First task',
+          continuationActions: [
+            {decision: 'OTHER', code: 'OTHER_ACTION'},
+            {decision: 'CORRECTION_RESOLUTION', code: 'CORRECTION_REJECTED'},
+          ],
+        },
+        {
+          taskId: 'task-b',
+          title: 'Second task',
+          continuationActions: [
+            {decision: 'CORRECTION_RESOLUTION', code: 'CORRECTION_ACCEPTED'},
+            {decision: 'OTHER', code: 'UNRELATED'},
+          ],
+        },
+      ],
+    } as unknown as RunDetail;
+
+    expect(
+      correctionEvidenceHistory(run).map((entry) => [
+        entry.taskId,
+        entry.actionIndex,
+        entry.action.code,
+      ]),
+    ).toEqual([
+      ['task-a', 1, 'CORRECTION_REJECTED'],
+      ['task-b', 0, 'CORRECTION_ACCEPTED'],
+    ]);
+  });
+
+  it('preserves patch and validation delta without claiming global chronology', () => {
     const run = {
       tasks: [
         {
@@ -201,7 +236,10 @@ describe('latestCorrectionEvidence', () => {
       ],
     } as unknown as RunDetail;
 
-    expect(latestCorrectionEvidence(run)).toMatchObject({
+    const actions = correctionEvidenceHistory(run).map(({action}) => action);
+    expect(actions).toHaveLength(2);
+    expect(actions[0]).toMatchObject({code: 'CORRECTION_REJECTED'});
+    expect(actions[1]).toMatchObject({
       code: 'CORRECTION_ACCEPTED',
       unifiedPatch: 'diff --git a/App.java b/App.java',
       patchMetadata: {fullBytes: 34, truncated: false},
@@ -210,7 +248,62 @@ describe('latestCorrectionEvidence', () => {
   });
 
   it('does not invent correction evidence for an untouched run', () => {
-    expect(latestCorrectionEvidence({tasks: []} as unknown as RunDetail)).toBeNull();
+    expect(correctionEvidenceHistory({tasks: []} as unknown as RunDetail)).toEqual([]);
+  });
+
+  it('does not call reverse cross-task action order the latest correction', () => {
+    const run = {
+      tasks: [
+        {
+          taskId: 'task-early',
+          title: 'Earlier plan task',
+          continuationActions: [
+            {
+              decision: 'CORRECTION_RESOLUTION',
+              status: 'ACCEPTED',
+              code: 'CORRECTION_NEWER_IN_TIME',
+            },
+          ],
+        },
+        {
+          taskId: 'task-late',
+          title: 'Later plan task',
+          continuationActions: [
+            {
+              decision: 'CORRECTION_RESOLUTION',
+              status: 'REJECTED',
+              code: 'CORRECTION_OLDER_IN_TIME',
+            },
+          ],
+        },
+      ],
+    } as unknown as RunDetail;
+
+    const correctionFact = publicationTrustFacts(run).find(
+      (fact) => fact.label === 'Correction transactions',
+    );
+
+    expect(correctionFact?.value).toContain('task/action order (not chronology)');
+    expect(correctionFact?.value).toContain('Earlier plan task: ACCEPTED');
+    expect(correctionFact?.value).toContain('Later plan task: REJECTED');
+    expect(correctionFact?.value).not.toContain('latest');
+  });
+});
+
+describe('reportPipelineLabel', () => {
+  it('does not present a stale pipeline result as current evidence', () => {
+    expect(reportPipelineLabel({reportStatus: 'STALE', pipelineResult: 'PASSED'})).toBe(
+      'Stale — validation regeneration required',
+    );
+  });
+
+  it('keeps responses from older servers backward compatible', () => {
+    expect(reportPipelineLabel({pipelineResult: 'PASSED'})).toBe('PASSED');
+  });
+
+  it('keeps intentionally suppressed stale markdown nullable in the API contract', () => {
+    const stale = {reportMarkdown: null} satisfies Pick<ValidationReportData, 'reportMarkdown'>;
+    expect(stale.reportMarkdown).toBeNull();
   });
 });
 

@@ -31,9 +31,14 @@ import com.navneet.executespec.report.model.WorkflowConfigEvidence;
 import com.navneet.executespec.report.model.WorkflowConfigEvidence.FileEvidence;
 import com.navneet.executespec.report.model.WorkflowConfigEvidence.ParseStatus;
 import com.navneet.executespec.report.model.WorkflowConfigEvidence.Status;
+import com.navneet.executespec.reviewer.model.AccuracyReport;
+import com.navneet.executespec.reviewer.model.ReviewReport;
+import com.navneet.executespec.reviewer.model.ReviewVerdict;
 import com.navneet.executespec.scoring.ReviewScoringService;
 import com.navneet.executespec.state.StateStore;
 import com.navneet.executespec.state.entity.PipelineRun;
+import com.navneet.executespec.testgen.model.TestExecutionSummary;
+import com.navneet.executespec.testgen.model.TestExecutionSummary.EvidenceScope;
 
 import org.apache.commons.codec.digest.DigestUtils;
 import org.junit.jupiter.api.BeforeEach;
@@ -249,6 +254,141 @@ class ValidationReportServiceVerificationLedgerTest {
     assertEntry(ledger, "reviewer", "UNKNOWN", "LLM_REVIEWER", "MEDIUM");
     assertEntry(ledger, "spec-adherence", "UNKNOWN", "LLM_ASSESSMENT", "LOW");
     assertEntry(ledger, "endpoint-coverage", "UNKNOWN", "LLM_ASSISTED_COUNT", "LOW");
+  }
+
+  @Test
+  void ledgerMarksEndpointCoverageNotApplicableForCliRuntime() {
+    ValidationReport report =
+        ValidationReport.builder()
+            .id("vr-cli")
+            .runId("run-cli")
+            .runtimeSurface("CLI")
+            .filesGenerated(2)
+            .pipelineResult(PipelineResult.PASSED)
+            .build();
+
+    List<VerificationEvidenceDTO> ledger = svc.buildVerificationLedger(report, List.of());
+
+    assertEntry(ledger, "endpoint-coverage", "N/A", "NOT_APPLICABLE", "HIGH");
+    assertTrue(find(ledger, "endpoint-coverage").summary().contains("CLI"));
+  }
+
+  @Test
+  void generatedCliReportOmitsEndpointCoverageFromBothScoreFormulas() throws Exception {
+    ValidationReportRepository repository = mock(ValidationReportRepository.class);
+    ValidationReportGenerator generator = mock(ValidationReportGenerator.class);
+    ReviewScoringService reviewScoringService = mock(ReviewScoringService.class);
+    when(flags.isEnabled("scoring.additive-v2")).thenReturn(true);
+    when(flags.isEnabled("scoring.gaming-guards")).thenReturn(true);
+    ValidationReportService service =
+        new ValidationReportService(
+            repository,
+            generator,
+            new ObjectMapper(),
+            new SimpleMeterRegistry(),
+            null,
+            reviewScoringService,
+            flags);
+    PipelineRun run =
+        PipelineRun.builder()
+            .runId("run-cli-score")
+            .userRequest("Build a command-line todo manager")
+            .planJson("{\"runtimeSurface\":\"CLI\"}")
+            .build();
+    AccuracyReport accuracy =
+        AccuracyReport.builder()
+            .specAdherenceScore(100)
+            .overallAccuracyGrade("A")
+            .testCoverageLevel("GOOD")
+            // Adversarial stale/model output: this HTTP-only signal must be ignored for CLI.
+            .endpointCoverage(AccuracyReport.EndpointCoverage.builder().coveragePercent(0).build())
+            .build();
+    ReviewReport review =
+        ReviewReport.builder()
+            .verdict(ReviewVerdict.APPROVED)
+            .issues(List.of())
+            .accuracyReport(accuracy)
+            .build();
+    TestExecutionSummary tests =
+        TestExecutionSummary.builder()
+            .totalTests(4)
+            .passed(4)
+            .executionVerified(true)
+            .evidenceScope(EvidenceScope.LIVE_PREVIEW_FUNCTIONAL)
+            .build();
+    ReportInput input =
+        new ReportInput(
+            run,
+            List.of(
+                WorkerReport.builder()
+                    .filesCreated(List.of("src/main/java/example/TodoCli.java"))
+                    .filesModified(List.of())
+                    .build()),
+            review,
+            CompileResult.passed(1),
+            List.of(),
+            tests,
+            List.of(),
+            false,
+            null,
+            null,
+            "e".repeat(64),
+            null,
+            null,
+            null);
+    when(generator.generate(input))
+        .thenReturn(new ValidationReportGenerator.LlmReportResult("# CLI report", "model-a", 0, 0));
+    when(reviewScoringService.score(any(), any(), any(), any(), any()))
+        .thenReturn(new ReviewScoringService.Scores(null, null, null, null, null, null));
+    when(repository.findByRunId("run-cli-score")).thenReturn(Optional.empty());
+    when(repository.save(any(ValidationReport.class))).thenAnswer(inv -> inv.getArgument(0));
+
+    ValidationReport saved = service.generateAndPersist("run-cli-score", input).orElseThrow();
+
+    assertEquals("CLI", saved.getRuntimeSurface());
+    assertEquals(100, saved.getVerifiedScore());
+    assertEquals(100, saved.getRubricScore());
+    assertEntry(
+        service.buildVerificationLedger(saved, List.of()),
+        "endpoint-coverage",
+        "N/A",
+        "NOT_APPLICABLE",
+        "HIGH");
+  }
+
+  @Test
+  void staleReportDtoSuppressesPreviouslyComputedPipelineResult() {
+    ValidationReportRepository repository = mock(ValidationReportRepository.class);
+    ValidationReport report =
+        ValidationReport.builder()
+            .id("vr-stale")
+            .runId("run-stale")
+            .status("STALE")
+            .filesGenerated(2)
+            .pipelineResult(PipelineResult.PASSED)
+            .finalBuildPassed(true)
+            .testsPassed(8)
+            .testsTotal(8)
+            .reviewerVerdict("CLEAN")
+            .verifiedScore(100)
+            .rubricScore(100)
+            .reportMarkdown("# Superseded report")
+            .issuesJson("[]")
+            .build();
+    when(repository.findByRunId("run-stale")).thenReturn(Optional.of(report));
+    ValidationReportService service =
+        new ValidationReportService(repository, null, new ObjectMapper(), null, null, null, flags);
+
+    var dto = service.getByRunId("run-stale").orElseThrow();
+
+    assertEquals("STALE", dto.reportStatus());
+    assertEquals(null, dto.pipelineResult());
+    assertEquals(-1, dto.filesGenerated());
+    assertEquals(null, dto.finalBuildPassed());
+    assertEquals(null, dto.verifiedScore());
+    assertEquals(null, dto.reportMarkdown());
+    assertTrue(dto.verificationLedger().isEmpty());
+    assertEquals("UNCERTAIN", dto.runGoalDecision().state().name());
   }
 
   @Test
@@ -713,6 +853,27 @@ class ValidationReportServiceVerificationLedgerTest {
 
     assertTrue(service.getByShareToken(token).isEmpty());
     assertTrue(service.getByShareToken("short").isEmpty());
+  }
+
+  @Test
+  void legacySharedReportRejectsStaleEvidence() {
+    ValidationReportRepository repository = mock(ValidationReportRepository.class);
+    String token = "ccccccccccccccccccccccccccccccccccccccccccc";
+    ValidationReport stale =
+        ValidationReport.builder()
+            .id("vr-stale-share")
+            .runId("run-stale-share")
+            .status("STALE")
+            .shareTokenHash(DigestUtils.sha256Hex(token))
+            .shareExpiresAt(Instant.now().plusSeconds(3600))
+            .pipelineResult(PipelineResult.PASSED)
+            .verifiedScore(100)
+            .build();
+    when(repository.findByShareTokenHash(stale.getShareTokenHash())).thenReturn(Optional.of(stale));
+    ValidationReportService service =
+        new ValidationReportService(repository, null, new ObjectMapper(), null, null, null, flags);
+
+    assertTrue(service.getByShareToken(token).isEmpty());
   }
 
   /**
