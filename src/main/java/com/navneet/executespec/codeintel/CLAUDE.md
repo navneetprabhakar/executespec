@@ -101,7 +101,11 @@ on every job response instead of being represented by the browser's generic requ
 `ProjectDocGeneratorService` generates `EXPLANATION` and `SETUP` documents only through
 `ProjectDocValidatedGeneration`, whose bounded two-attempt loop uses
 `LlmRouter.callTextStrict` on the exact resolved route and rejects truncated, unsafe, or
-deterministically invalid output before publication. Its provider-neutral system prompts are
+deterministically invalid output before publication. Text is concatenated across every non-empty
+provider generation because Anthropic may return multiple generations; reading only the first can
+misclassify a paid, complete response as empty. New document rows use `saveAndFlush` before the
+durable job-result fence writes its PostgreSQL foreign key, while both writes remain in the same
+publisher transaction and roll back together on fence loss. Its provider-neutral system prompts are
 `prompts/project-doc-explanation.md` and `prompts/project-doc-setup.md`, assembled through
 `PromptAssembler`. Project metadata, architecture, and codemaps stay in the separately wrapped
 `PROJECT_DOC_EVIDENCE` user message.

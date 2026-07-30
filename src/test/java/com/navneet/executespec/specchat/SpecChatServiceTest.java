@@ -162,6 +162,18 @@ class SpecChatServiceTest {
       List<ToolCallback> projectToolList,
       LlmProvider actualProvider,
       LlmExecutionOperationCoordinator operationCoordinator) {
+    com.navneet.executespec.memory.chattools.ProjectChatTools projectTools =
+        mock(com.navneet.executespec.memory.chattools.ProjectChatTools.class);
+    when(projectTools.bind(any())).thenReturn(projectToolList);
+    return newService(router, actionToolList, actualProvider, operationCoordinator, projectTools);
+  }
+
+  private static SpecChatService newService(
+      LlmRouter router,
+      List<ToolCallback> actionToolList,
+      LlmProvider actualProvider,
+      LlmExecutionOperationCoordinator operationCoordinator,
+      com.navneet.executespec.memory.chattools.ProjectChatTools projectTools) {
     ModelResolver modelResolver = mock(ModelResolver.class);
     ResolvedModel model = mock(ResolvedModel.class);
     when(model.getModel()).thenReturn("test-model");
@@ -170,10 +182,6 @@ class SpecChatServiceTest {
 
     ProjectChatActionTools actionTools = mock(ProjectChatActionTools.class);
     when(actionTools.bind(any())).thenReturn(actionToolList);
-    com.navneet.executespec.memory.chattools.ProjectChatTools projectTools =
-        mock(com.navneet.executespec.memory.chattools.ProjectChatTools.class);
-    when(projectTools.bind(any())).thenReturn(projectToolList);
-
     AgentProperties props = new AgentProperties();
     props.setWorkspace(
         System.getProperty("java.io.tmpdir")); // absolute — ExecutionContext requires it
@@ -434,6 +442,44 @@ class SpecChatServiceTest {
     assertThat(sink.toolCalls).isEmpty();
     assertThat(sink.toolResults).isEmpty();
     assertThat(sink.doneTurnCount).isEqualTo(1);
+  }
+
+  @Test
+  void privateRepositoryCredentialComesFromAuthenticatedPrincipal() {
+    LlmRouter router = mock(LlmRouter.class);
+    when(router.call(any())).thenReturn(textResponse("grounded"));
+    var projectTools = mock(com.navneet.executespec.memory.chattools.ProjectChatTools.class);
+    when(projectTools.bind(any())).thenReturn(List.of());
+    SpecChatService service =
+        newService(
+            router,
+            List.of(),
+            LlmProvider.ANTHROPIC,
+            mock(LlmExecutionOperationCoordinator.class),
+            projectTools);
+    var user =
+        com.navneet.executespec.auth.entity.AppUser.builder()
+            .id("user-1")
+            .githubPat("private-repo-token")
+            .build();
+    AppUserDetails principal = new AppUserDetails(user, null);
+
+    service.runTurn(
+        new RecordingSink(),
+        principal,
+        "session-1",
+        "project-1",
+        "org-1",
+        List.of(Map.of("role", "user", "content", "find the controller")),
+        "anthropic");
+
+    ArgumentCaptor<com.navneet.executespec.memory.chattools.ProjectChatTools.ToolContext> context =
+        ArgumentCaptor.forClass(
+            com.navneet.executespec.memory.chattools.ProjectChatTools.ToolContext.class);
+    org.mockito.Mockito.verify(projectTools).bind(context.capture());
+    assertThat(context.getValue().callerPat()).isEqualTo("private-repo-token");
+    assertThat(context.getValue().projectId()).isEqualTo("project-1");
+    assertThat(context.getValue().hostOrgId()).isEqualTo("org-1");
   }
 
   @Test

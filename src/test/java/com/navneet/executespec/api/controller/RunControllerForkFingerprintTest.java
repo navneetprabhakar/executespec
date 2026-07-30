@@ -64,6 +64,30 @@ class RunControllerForkFingerprintTest {
     assertThat(hash("source-a", changedRequest)).isNotEqualTo(baseline);
   }
 
+  @Test
+  void providerOverrideChangesRouteAndClearsInheritedModelPin() {
+    var route =
+        RunController.resolveForkRoute(
+            "ANTHROPIC",
+            "claude-sonnet-4-6",
+            new RunController.ForkOverrides(null, null, " openai "));
+
+    assertThat(route.aiProvider()).isEqualTo("OPENAI");
+    assertThat(route.modelName()).isNull();
+  }
+
+  @Test
+  void absentOrSameProviderOverrideKeepsInheritedRoute() {
+    assertThat(RunController.resolveForkRoute("ANTHROPIC", "claude-sonnet-4-6", null))
+        .isEqualTo(new RunController.ForkRoute("ANTHROPIC", "claude-sonnet-4-6"));
+    assertThat(
+            RunController.resolveForkRoute(
+                "ANTHROPIC",
+                "claude-sonnet-4-6",
+                new RunController.ForkOverrides(null, null, "anthropic")))
+        .isEqualTo(new RunController.ForkRoute("ANTHROPIC", "claude-sonnet-4-6"));
+  }
+
   private static CustomerRunSubmissionService.Command command() {
     return CustomerRunSubmissionService.Command.builder()
         .userRequest("build")

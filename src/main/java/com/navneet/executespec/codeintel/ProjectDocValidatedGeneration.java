@@ -106,11 +106,14 @@ final class ProjectDocValidatedGeneration {
   }
 
   private static String responseText(ChatResponse response) {
-    return response.getResult() == null
-            || response.getResult().getOutput() == null
-            || response.getResult().getOutput().getText() == null
-        ? ""
-        : response.getResult().getOutput().getText().trim();
+    if (response == null || response.getResults() == null) return "";
+    return response.getResults().stream()
+        .filter(java.util.Objects::nonNull)
+        .map(org.springframework.ai.chat.model.Generation::getOutput)
+        .filter(java.util.Objects::nonNull)
+        .map(output -> output.getText() == null ? "" : output.getText().trim())
+        .filter(text -> !text.isBlank())
+        .collect(java.util.stream.Collectors.joining("\n"));
   }
 
   private static String correctiveGroundingInstruction(String reason) {

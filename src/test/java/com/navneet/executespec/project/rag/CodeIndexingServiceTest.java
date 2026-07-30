@@ -313,7 +313,7 @@ class CodeIndexingServiceTest {
     assertThat(result.readiness().lexicalFallbackAvailable()).isTrue();
     assertThat(result.readiness().reason()).isEqualTo("EMBEDDING_OPENAI_CREDENTIAL_UNAVAILABLE");
     verify(states).fail(lease, "EMBEDDING_OPENAI_CREDENTIAL_UNAVAILABLE");
-    verify(ws, never()).cloneFromRepo(anyString(), anyString(), any(), any());
+    verify(ws, never()).cloneReadOnlyRepository(anyString(), anyString(), any(), any());
     verify(embedder, never())
         .embedForProject(
             anyString(), anyList(), anyString(), anyString(), anyString(), nullable(String.class));
@@ -329,7 +329,7 @@ class CodeIndexingServiceTest {
     service(4000).indexRepo("proj-1", repo, "owner@acme.example", "scoped-api-token", "member-1");
 
     verify(ws)
-        .cloneFromRepo(
+        .cloneReadOnlyRepository(
             eq(CodeIndexWorkspaceIdentity.workspaceId("proj-1", repo)),
             eq("https://bitbucket.org/acme/widget.git"),
             eq("x-bitbucket-api-token-auth"),

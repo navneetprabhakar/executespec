@@ -151,20 +151,7 @@ public class WorkspaceInitService {
     }
   }
 
-  /**
-   * Clones an existing GitHub repository into the run workspace. Used when {@code
-   * repoMode=EXISTING} so the workspace starts from real code.
-   *
-   * <p>The PAT authenticates via {@link com.navneet.executespec.repo.GitProcessAuth} — an ephemeral
-   * env-backed credential helper — so it never appears in argv or the persisted origin URL
-   * (credential gate 2026-07-17).
-   *
-   * <p>Idempotent: no-ops if {@code .git/} already exists in the workspace.
-   *
-   * @param runId the pipeline run ID
-   * @param repoUrl HTTPS clone URL, e.g. {@code https://github.com/owner/repo}
-   * @param pat personal access token (may be null for public repos)
-   */
+  /** Clone an existing repository with ephemeral env-backed authentication. */
   public void cloneFromRepo(String runId, String repoUrl, String pat) throws Exception {
     cloneFromRepo(runId, repoUrl, null, pat);
   }
@@ -172,9 +159,21 @@ public class WorkspaceInitService {
   /** Provider-neutral clone overload (e.g. Bitbucket app-password username + secret). */
   public void cloneFromRepo(String runId, String repoUrl, String username, String secret)
       throws Exception {
+    cloneRepository(runId, repoUrl, username, secret, true);
+  }
+
+  /** Clone-only seam for read-only source inspection; it deliberately creates no run evidence. */
+  public void cloneReadOnlyRepository(
+      String workspaceId, String repoUrl, String username, String secret) throws Exception {
+    cloneRepository(workspaceId, repoUrl, username, secret, false);
+  }
+
+  private void cloneRepository(
+      String runId, String repoUrl, String username, String secret, boolean captureBaseline)
+      throws Exception {
     Path workspace = runWorkspacePath(runId);
     if (Files.isDirectory(workspace.resolve(".git"))) {
-      brownfieldHttpContractGuard.captureBaselineIfAbsent(runId, workspace);
+      if (captureBaseline) brownfieldHttpContractGuard.captureBaselineIfAbsent(runId, workspace);
       log.debug("Workspace for run {} already cloned: {}", runId, workspace);
       return;
     }
@@ -195,7 +194,7 @@ public class WorkspaceInitService {
     // RR-1546 — keep ExecuteSpec's internal .agent-context/ evidence out of the customer's tree
     // without mutating their tracked .gitignore.
     excludeAgentContextInClone(workspace);
-    brownfieldHttpContractGuard.captureBaselineIfAbsent(runId, workspace);
+    if (captureBaseline) brownfieldHttpContractGuard.captureBaselineIfAbsent(runId, workspace);
     log.info("Cloned workspace ready for run {}", runId);
   }
 

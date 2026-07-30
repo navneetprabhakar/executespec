@@ -53,6 +53,12 @@ tool-call ceiling immediately before invocation; the callback then repeats proje
 emits allow/deny/result decisions to the hash-chained activity audit, sanitizes/redacts its
 envelope, and labels repository/document payloads as untrusted data. `PROJECT_VIEWER` may read
 persisted history but cannot create a paid turn.
+Lexical `search_repo_files` resolves the canonical project/repository/full-revision clone through
+`CodeIndexWorkspaceMaterializer`; it does not maintain an independent short-SHA cache. Concurrent
+reads share one atomic materialization, partial clones are replaced, and failures expose stable
+source codes instead of being misreported as credential errors. GitHub PATs and Bitbucket
+username/app-password credentials are selected from the authenticated principal per SCM provider;
+one provider's secret is never sent to the other.
 
 ## Explicit confirmed actions (V292)
 

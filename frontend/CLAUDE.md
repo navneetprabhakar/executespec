@@ -173,7 +173,11 @@ Documented deviations from Google TypeScript style in [`executespec-docs/backend
 - `VerdictPill` — Shippable / Needs review / Blocked derived from build + tests + reviewer + verifiedScore. Numerics demoted to disclosure.
 - `CostProgressBar` — live spend vs budget (green 0-80% / amber 80-100% / red ≥100%, aria-progressbar attributes); on `IdeLive` it shows both spend-vs-hard-cap and spend-vs-estimate.
 - `PrCommentInbox` (shared `signal/components/`) — the PR tab's inbound review-comment inbox with Dismiss + apply-as-fix.
-- Header actions include fork / archive / unarchive / soft-delete, a `⬇ Code ZIP` download (`downloadRunCode` → `GET /api/runs/{id}/download?format=repo`), Report PDF, and Share.
+- Header actions include fork / archive / unarchive / soft-delete, a `⬇ Code ZIP` download (`downloadRunCode` → `GET /api/runs/{id}/download?format=repo`), Report PDF, and Share. "Try another provider" uses `forkRun` with only an `aiProvider` override so the backend preserves the persisted repository selection and clears an incompatible cross-provider model pin.
+- Push and permanent Deploy remain disabled until the read-only publication-eligibility endpoint
+  returns `eligible=true`; an absent or failed eligibility check fails closed in the UI. Preview,
+  code download, and manual test rerun remain available for a PARTIAL run that produced workspace
+  changes because those actions do not publish customer code.
 
 ### Screens tab (`ide/IdeRunScreens.tsx`)
 

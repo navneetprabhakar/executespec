@@ -48,12 +48,12 @@ export const archiveRun = (runId: string) =>
 /**
  * Phase 1.3 #35 — fork a teammate's run. Creates a new run owned by the
  * caller with the source's spec / repo / provider settings copied.
- * Optional `overrides.userRequest` lets the user tweak the spec before
- * the fork lands; otherwise it's an exact copy of the source spec.
+ * Optional overrides let the user tweak the spec, governance mode, or provider before
+ * the fork lands. The server preserves the source run's exact repository selection.
  */
 export const forkRun = (
   runId: string,
-  overrides?: {userRequest?: string; executionMode?: string},
+  overrides?: {userRequest?: string; executionMode?: string; aiProvider?: string},
 ) =>
   req<RunSummary>(`/runs/${runId}/fork`, {
     method: 'POST',

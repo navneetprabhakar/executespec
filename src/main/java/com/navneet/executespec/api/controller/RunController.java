@@ -563,7 +563,9 @@ public class RunController {
    * fork their own.
    *
    * <p>The fork inherits the source's tone (executionMode, tddMode, model choices) so the user gets
-   * exactly the same setup — they can override via the optional body before submitting.
+   * exactly the same setup — they can override the request, execution mode, or provider via the
+   * optional body before submitting. A provider change clears the source planner-model pin because
+   * model identifiers are provider-specific.
    */
   @PostMapping("/{runId}/fork")
   public ResponseEntity<RunSummary> forkRun(
@@ -595,6 +597,8 @@ public class RunController {
             ? overrides.executionMode()
             : source.getExecutionMode();
     String execMode = normalizeForkExecutionMode(requestedExecMode);
+    ForkRoute forkRoute =
+        resolveForkRoute(source.getAiProvider(), source.getPlannerModel(), overrides);
 
     log.info("Forking run {} as new run for user {}", runId, userDetails.getUser().getId());
     var commandBuilder =
@@ -603,8 +607,8 @@ public class RunController {
             .source("FORK")
             .repoUrl(source.getRepoUrl())
             .repoMode(source.getRepoUrl() != null ? "EXISTING" : null)
-            .modelName(source.getPlannerModel())
-            .aiProvider(source.getAiProvider())
+            .modelName(forkRoute.modelName())
+            .aiProvider(forkRoute.aiProvider())
             .projectId(source.getProjectId())
             .executionMode(execMode)
             // RR-1217 — preserve the source run's exact repository selection. Passing null meant
@@ -614,6 +618,8 @@ public class RunController {
                     source.getSelectedRepoIds()))
             .figmaUrl(source.getFigmaUrl())
             .tddMode(source.isTddMode())
+            .userCostCap(source.getUserCostCap())
+            .skipAutoPush(source.isSkipAutoPush())
             .idempotencyKey(idempotencyKey);
     CustomerRunSubmissionService.Command effectiveCommand = commandBuilder.build();
     String requestFingerprint =
@@ -646,7 +652,26 @@ public class RunController {
   }
 
   /** Optional overrides for {@code POST /api/runs/{id}/fork}. All fields nullable. */
-  public record ForkOverrides(String userRequest, String executionMode) {}
+  public record ForkOverrides(String userRequest, String executionMode, String aiProvider) {}
+
+  static ForkRoute resolveForkRoute(
+      String sourceProvider, String sourceModelName, ForkOverrides overrides) {
+    String requestedProvider =
+        overrides == null || overrides.aiProvider() == null || overrides.aiProvider().isBlank()
+            ? null
+            : overrides.aiProvider().trim().toUpperCase(java.util.Locale.ROOT);
+    String normalizedSourceProvider =
+        sourceProvider == null || sourceProvider.isBlank()
+            ? null
+            : sourceProvider.trim().toUpperCase(java.util.Locale.ROOT);
+    boolean providerChanged =
+        requestedProvider != null && !requestedProvider.equals(normalizedSourceProvider);
+    return new ForkRoute(
+        requestedProvider != null ? requestedProvider : sourceProvider,
+        providerChanged ? null : sourceModelName);
+  }
+
+  record ForkRoute(String aiProvider, String modelName) {}
 
   /**
    * Complete effective fork identity. Transport-only idempotency fields are intentionally excluded;

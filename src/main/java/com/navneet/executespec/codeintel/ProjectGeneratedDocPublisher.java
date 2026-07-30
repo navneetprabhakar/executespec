@@ -93,7 +93,10 @@ final class ProjectGeneratedDocPublisher {
                   .map(doc -> doc.getVersion() + 1)
                   .orElse(1);
           candidate.setVersion(nextVersion);
-          ProjectGeneratedDoc saved = docRepo.save(candidate);
+          // The durable-job publication fence writes result_doc_id through JdbcTemplate in this
+          // same transaction. Flush the JPA insert first so PostgreSQL can satisfy that foreign
+          // key; save() alone may defer the INSERT until after the JDBC fence executes.
+          ProjectGeneratedDoc saved = docRepo.saveAndFlush(candidate);
           publicationFence.accept(saved);
           versionRetention.pruneGeneratedDoc(candidate.getProjectId(), candidate.getDocType());
           return saved;

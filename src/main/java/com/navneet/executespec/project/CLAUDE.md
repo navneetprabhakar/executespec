@@ -152,6 +152,9 @@ bypassed with a raw user id.
 - `project/rag/CodeIndexingService` no longer treats the presence of any V223 chunk as readiness.
   `CodeIndexWorkspaceIdentity` now owns the canonical
   `projchat-<repoId>-<sha256(projectId,repoId,fullRevision)>` clone identity;
+  `CodeIndexWorkspaceMaterializer` publishes that clone through a bounded single flight and an
+  atomic temporary-directory move, removes poisoned partial targets, pins full commit revisions,
+  and returns structured source failure codes.
   repository-intelligence authority resolution reuses this exact server-derived identity rather
   than accepting or reconstructing an arbitrary filesystem path.
   `project_code_index_state` is authoritative per `(project_id, repo_id)` and binds every result to

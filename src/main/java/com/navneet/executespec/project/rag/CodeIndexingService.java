@@ -363,7 +363,8 @@ public class CodeIndexingService {
             "BITBUCKET".equalsIgnoreCase(repo.getScmProvider())
                 ? "x-bitbucket-api-token-auth"
                 : credentialUsername;
-        workspaceInitService.cloneFromRepo(cloneWsId, cloneUrl, gitUsername, credentialSecret);
+        workspaceInitService.cloneReadOnlyRepository(
+            cloneWsId, cloneUrl, gitUsername, credentialSecret);
       } catch (Exception cloneFailure) {
         stateStore.fail(lease, "SOURCE_CLONE_FAILED");
         log.warn("code index clone failed repo={} type={}", fullName, failureType(cloneFailure));
