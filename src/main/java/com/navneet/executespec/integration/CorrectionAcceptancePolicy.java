@@ -118,6 +118,85 @@ final class CorrectionAcceptancePolicy {
     return new Decision(true, "CORRECTION_ACCEPTED", "Correction passed every promotion gate");
   }
 
+  /**
+   * Rejects a correction whose freshly regenerated deterministic evidence is weaker than the
+   * evidence bound to the pre-correction generation. Green-but-narrower test execution is a
+   * regression: dropping tests cannot manufacture a passing correction.
+   */
+  static Decision evaluateRegression(CorrectionResolutionEvidence.ValidationDelta delta) {
+    if (delta == null || delta.after() == null) {
+      return Decision.reject(
+          "CORRECTION_COMPARATIVE_EVIDENCE_MISSING",
+          "Correction did not produce comparable before/after validation evidence");
+    }
+    if (delta.before() == null) {
+      return new Decision(
+          true,
+          "CORRECTION_EVIDENCE_BASELINE_NOT_APPLICABLE",
+          "No prior published validation evidence existed to regress");
+    }
+    var before = delta.before();
+    var after = delta.after();
+    if (passed(before.build()) && !passed(after.build())) {
+      return regression("build proof changed from passing to unproven or failing");
+    }
+    if (passed(before.tests())) {
+      if (!passed(after.tests())) {
+        return regression("test proof changed from passing to unproven or failing");
+      }
+      int beforeTotal = value(before.tests().total());
+      int afterTotal = value(after.tests().total());
+      int beforePassed = value(before.tests().passed());
+      int afterPassed = value(after.tests().passed());
+      if (afterTotal < beforeTotal || afterPassed < beforePassed) {
+        return regression(
+            "executed test evidence narrowed from "
+                + beforePassed
+                + "/"
+                + beforeTotal
+                + " to "
+                + afterPassed
+                + "/"
+                + afterTotal);
+      }
+    }
+    if (compatible(before.contracts()) && !compatible(after.contracts())) {
+      return regression("protected brownfield contract evidence regressed");
+    }
+    if (validWorkflow(before.workflow()) && !validWorkflow(after.workflow())) {
+      return regression("deterministic workflow/config evidence regressed");
+    }
+    return new Decision(
+        true,
+        "CORRECTION_EVIDENCE_NON_REGRESSIVE",
+        "Protected validation evidence did not regress");
+  }
+
+  private static Decision regression(String detail) {
+    return Decision.reject("CORRECTION_PROTECTED_EVIDENCE_REGRESSION", detail);
+  }
+
+  private static boolean passed(CorrectionResolutionEvidence.BuildValidation evidence) {
+    return evidence != null && "PASSED".equals(evidence.verdict());
+  }
+
+  private static boolean passed(CorrectionResolutionEvidence.TestValidation evidence) {
+    return evidence != null && "PASSED".equals(evidence.verdict());
+  }
+
+  private static boolean compatible(CorrectionResolutionEvidence.ContractValidation evidence) {
+    return evidence != null && "COMPATIBLE".equals(evidence.status());
+  }
+
+  private static boolean validWorkflow(CorrectionResolutionEvidence.WorkflowValidation evidence) {
+    return evidence != null
+        && ("PASSED".equals(evidence.status()) || "NOT_APPLICABLE".equals(evidence.status()));
+  }
+
+  private static int value(Integer value) {
+    return value == null ? 0 : value;
+  }
+
   private static boolean sameTask(String expected, String actual) {
     if (expected == null || actual == null) {
       return false;

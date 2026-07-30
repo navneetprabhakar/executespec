@@ -1420,15 +1420,26 @@ public class RunLifecycleService {
                   }
                   correctionDiff =
                       correctionWorkspaceTransaction.diffEvidence(correctionCheckpoint);
+                  com.navneet.executespec.report.model.WorkflowConfigEvidence correctionWorkflow =
+                      workflowConfigEvidenceInspector.inspect(rootCtx.workspaceRoot());
                   CorrectionAcceptancePolicy.Decision acceptance =
                       CorrectionAcceptancePolicy.evaluate(
                           taskId,
                           result,
                           reviewResult,
-                          workflowConfigEvidenceInspector.inspect(rootCtx.workspaceRoot()),
+                          correctionWorkflow,
                           correctionCheckpoint.generation(),
                           postReviewerGeneration);
                   if (!acceptance.accepted()) {
+                    CorrectionResolutionEvidence.ValidationSnapshot attemptValidation =
+                        CorrectionResolutionEvidence.attemptSnapshot(
+                            postReviewerGeneration,
+                            result,
+                            reviewResult,
+                            correctionWorkflow,
+                            inspectCorrectionContracts(runId));
+                    CorrectionResolutionEvidence.ValidationDelta correctionValidationDelta =
+                        captureValidationDelta(correctionEvidenceCheckpoint, attemptValidation);
                     correctionWorkspaceTransaction.rollback(correctionCheckpoint);
                     restoreValidationEvidence(correctionEvidenceCheckpoint);
                     restoreRejectedCorrection(
@@ -1441,7 +1452,8 @@ public class RunLifecycleService {
                         acceptance.code(),
                         acceptance.reason(),
                         correctionCheckpoint.generation(),
-                        correctionDiff);
+                        correctionDiff,
+                        correctionValidationDelta);
                     broadcaster.emit(
                         runId,
                         RunEvent.log(
@@ -1461,6 +1473,28 @@ public class RunLifecycleService {
                       plan,
                       correctionCheckpoint,
                       postReviewerGeneration);
+                  CorrectionResolutionEvidence.ValidationDelta correctionValidationDelta =
+                      captureValidationDelta(correctionEvidenceCheckpoint);
+                  CorrectionAcceptancePolicy.Decision comparativeAdmission =
+                      CorrectionAcceptancePolicy.evaluateRegression(correctionValidationDelta);
+                  if (!comparativeAdmission.accepted()) {
+                    correctionWorkspaceTransaction.rollback(correctionCheckpoint);
+                    restoreValidationEvidence(correctionEvidenceCheckpoint);
+                    restoreRejectedCorrection(
+                        runId,
+                        taskBeforeCorrection,
+                        runStatusBeforeCorrection,
+                        runReasonBeforeCorrection,
+                        runCompletedBeforeCorrection,
+                        runReviewBeforeCorrection,
+                        comparativeAdmission.code(),
+                        comparativeAdmission.reason(),
+                        correctionCheckpoint.generation(),
+                        correctionDiff,
+                        correctionValidationDelta);
+                    updateContinuationApprovalStatus(task, override, "REJECTED");
+                    return null;
+                  }
                   CorrectionWorkspaceTransaction.Accepted generations =
                       correctionWorkspaceTransaction.accept(correctionCheckpoint);
                   appendCorrectionResolution(
@@ -1471,7 +1505,7 @@ public class RunLifecycleService {
                       generations.beforeGeneration(),
                       generations.afterGeneration(),
                       correctionDiff,
-                      true,
+                      correctionValidationDelta,
                       true);
                 }
                 persistenceWriter.applyExecutionResultToTasks(runId, result);
@@ -1506,6 +1540,21 @@ public class RunLifecycleService {
                         e.addSuppressed(diffFailure);
                       }
                     }
+                    String failedGeneration;
+                    try {
+                      failedGeneration =
+                          correctionWorkspaceTransaction.currentGeneration(correctionCheckpoint);
+                    } catch (RuntimeException generationFailure) {
+                      e.addSuppressed(generationFailure);
+                      failedGeneration = correctionCheckpoint.generation();
+                    }
+                    CorrectionResolutionEvidence.ValidationDelta correctionValidationDelta =
+                        captureValidationDelta(
+                            correctionEvidenceCheckpoint,
+                            CorrectionResolutionEvidence.failedAttemptSnapshot(
+                                failedGeneration,
+                                e.getMessage(),
+                                inspectCorrectionContracts(runId)));
                     correctionWorkspaceTransaction.rollback(correctionCheckpoint);
                     restoreValidationEvidence(correctionEvidenceCheckpoint);
                     restoreRejectedCorrection(
@@ -1518,7 +1567,8 @@ public class RunLifecycleService {
                         "CORRECTION_EXECUTION_FAILED",
                         e.getMessage(),
                         correctionCheckpoint.generation(),
-                        correctionDiff);
+                        correctionDiff,
+                        correctionValidationDelta);
                     log.warn(
                         "Approved correction failed and was rolled back run={} task={}: {}",
                         runId,
@@ -2138,10 +2188,10 @@ public class RunLifecycleService {
             .orElse(null);
     if (previous != null) {
       ValidationReport stale = copyReport(previous);
-      stale.setStatus("STALE");
+      AutomaticCorrectionLifecycle.markIndependentEvidenceStale(stale);
       validationReportRepository.saveAndFlush(stale);
     }
-    return new ValidationEvidenceCheckpoint(runId, previous);
+    return new ValidationEvidenceCheckpoint(runId, previous, inspectCorrectionContracts(runId));
   }
 
   private void restoreValidationEvidence(ValidationEvidenceCheckpoint checkpoint) {
@@ -2164,7 +2214,48 @@ public class RunLifecycleService {
     return target;
   }
 
-  private record ValidationEvidenceCheckpoint(String runId, ValidationReport previous) {}
+  private record ValidationEvidenceCheckpoint(
+      String runId,
+      ValidationReport previous,
+      CorrectionResolutionEvidence.ContractValidation contractsBefore) {}
+
+  private CorrectionResolutionEvidence.ValidationDelta captureValidationDelta(
+      ValidationEvidenceCheckpoint checkpoint) {
+    return captureValidationDelta(checkpoint, null);
+  }
+
+  private CorrectionResolutionEvidence.ValidationDelta captureValidationDelta(
+      ValidationEvidenceCheckpoint checkpoint,
+      CorrectionResolutionEvidence.ValidationSnapshot fallbackAfter) {
+    if (checkpoint == null || checkpoint.runId() == null) return null;
+    CorrectionResolutionEvidence.ValidationSnapshot before =
+        CorrectionResolutionEvidence.snapshot(
+            objectMapper, checkpoint.previous(), checkpoint.contractsBefore());
+    ValidationReport current =
+        validationReportRepository.findByRunId(checkpoint.runId()).orElse(null);
+    CorrectionResolutionEvidence.ValidationSnapshot after =
+        current == null || "STALE".equalsIgnoreCase(current.getStatus())
+            ? fallbackAfter
+            : CorrectionResolutionEvidence.snapshot(
+                objectMapper, current, inspectCorrectionContracts(checkpoint.runId()));
+    return after == null ? null : CorrectionResolutionEvidence.delta(before, after);
+  }
+
+  private CorrectionResolutionEvidence.ContractValidation inspectCorrectionContracts(String runId) {
+    if (!brownfieldHttpContractGuard.hasBaseline(runId)) {
+      return CorrectionResolutionEvidence.ContractValidation.notApplicable();
+    }
+    try {
+      return CorrectionResolutionEvidence.contracts(
+          brownfieldHttpContractGuard.inspectCompatibility(runId));
+    } catch (RuntimeException unavailable) {
+      log.warn(
+          "correction: could not snapshot protected contracts for run {}: {}",
+          runId,
+          unavailable.getMessage());
+      return CorrectionResolutionEvidence.ContractValidation.unknown();
+    }
+  }
 
   private void restoreRejectedCorrection(
       String runId,
@@ -2176,7 +2267,8 @@ public class RunLifecycleService {
       String code,
       String reason,
       String generation,
-      CorrectionWorkspaceTransaction.DiffEvidence diffEvidence) {
+      CorrectionWorkspaceTransaction.DiffEvidence diffEvidence,
+      CorrectionResolutionEvidence.ValidationDelta validationDelta) {
     if (taskBeforeCorrection == null) {
       throw new IllegalStateException("Rejected correction has no durable task checkpoint");
     }
@@ -2189,14 +2281,14 @@ public class RunLifecycleService {
     taskRepo.saveAndFlush(taskBeforeCorrection);
     appendCorrectionResolution(
         taskBeforeCorrection.getTaskId(),
-        "ROLLED_BACK",
+        "CORRECTION_EXECUTION_FAILED".equals(code) ? "ROLLED_BACK" : "REJECTED",
         code,
         reason,
         generation,
         generation,
         diffEvidence,
-        true,
-        false);
+        validationDelta,
+        true);
 
     PipelineRun current =
         runRepo
@@ -2222,7 +2314,7 @@ public class RunLifecycleService {
       String beforeGeneration,
       String afterGeneration) {
     appendCorrectionResolution(
-        taskKey, status, code, reason, beforeGeneration, afterGeneration, null, false, false);
+        taskKey, status, code, reason, beforeGeneration, afterGeneration, null, null, false);
   }
 
   private void appendCorrectionResolution(
@@ -2233,8 +2325,8 @@ public class RunLifecycleService {
       String beforeGeneration,
       String afterGeneration,
       CorrectionWorkspaceTransaction.DiffEvidence diffEvidence,
-      boolean evidenceInvalidated,
-      boolean validationRegenerated) {
+      CorrectionResolutionEvidence.ValidationDelta validationDelta,
+      boolean evidenceInvalidated) {
     var task =
         taskRepo
             .findById(taskKey)
@@ -2242,25 +2334,17 @@ public class RunLifecycleService {
                 () -> new IllegalStateException("Correction task disappeared: " + taskKey));
     try {
       ArrayNode actions = readContinuationActions(task.getContinuationActionsJson());
-      ObjectNode resolution = actions.addObject();
-      resolution.put("status", status);
-      resolution.put("decision", "CORRECTION_RESOLUTION");
-      resolution.put("code", code == null ? "CORRECTION_UNKNOWN" : code);
-      resolution.put(
-          "reason",
-          reason == null || reason.length() <= 500
-              ? (reason == null ? "" : reason)
-              : reason.substring(0, 500));
-      resolution.put("beforeWorkspaceGeneration", beforeGeneration);
-      resolution.put("afterWorkspaceGeneration", afterGeneration);
-      if (diffEvidence != null) {
-        resolution.put("diffDigest", diffEvidence.diffDigest());
-        ArrayNode changedFiles = resolution.putArray("changedFiles");
-        diffEvidence.changedFiles().forEach(changedFiles::add);
-      }
-      resolution.put("evidenceInvalidated", evidenceInvalidated);
-      resolution.put("validationRegenerated", validationRegenerated);
-      resolution.put("attempt", actions.size());
+      CorrectionResolutionEvidence.append(
+          objectMapper,
+          actions,
+          status,
+          code,
+          reason,
+          beforeGeneration,
+          afterGeneration,
+          diffEvidence,
+          validationDelta,
+          evidenceInvalidated);
       task.setContinuationActionsJson(objectMapper.writeValueAsString(actions));
       taskRepo.saveAndFlush(task);
     } catch (com.fasterxml.jackson.core.JsonProcessingException e) {

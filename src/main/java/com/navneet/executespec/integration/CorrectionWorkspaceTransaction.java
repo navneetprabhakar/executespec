@@ -2,6 +2,7 @@ package com.navneet.executespec.integration;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -33,6 +34,7 @@ public class CorrectionWorkspaceTransaction {
 
   private static final Duration COMMAND_TIMEOUT = Duration.ofSeconds(30);
   private static final int MAX_OUTPUT_BYTES = 16_384;
+  static final int MAX_PATCH_BYTES = 32_768;
   private static final int MAX_REPOSITORIES = 32;
 
   /**
@@ -89,13 +91,17 @@ public class CorrectionWorkspaceTransaction {
   }
 
   /**
-   * Produces deterministic, bounded visibility evidence for the correction without exposing patch
-   * content or changing the index.
+   * Produces deterministic visibility evidence without changing the index. The authoritative digest
+   * covers every tree byte; the human-readable unified patch is separately bounded and excludes
+   * likely credential files and binary payloads.
    */
   public DiffEvidence diffEvidence(Checkpoint checkpoint) {
     Objects.requireNonNull(checkpoint, "checkpoint");
     List<String> changedFiles = new ArrayList<>();
     List<String> contentAddressedTreePairs = new ArrayList<>();
+    ByteArrayOutputStream patch = new ByteArrayOutputStream(MAX_PATCH_BYTES);
+    long fullPatchBytes = 0L;
+    boolean patchRedacted = false;
     for (int i = 0; i < checkpoint.repositories().size(); i++) {
       RepositoryCheckpoint repository = checkpoint.repositories().get(i);
       assertHeadUnchanged(repository);
@@ -112,19 +118,93 @@ public class CorrectionWorkspaceTransaction {
       if (output.isBlank()) {
         continue;
       }
+      List<String> safePaths = new ArrayList<>();
       for (String row : output.lines().limit(500).toList()) {
         String[] columns = row.trim().split("\\t");
         String path = columns.length == 0 ? row.trim() : columns[columns.length - 1];
-        changedFiles.add(i + ":" + path);
+        if (isSensitivePath(path)) {
+          changedFiles.add(i + ":[REDACTED_SENSITIVE_PATH]");
+          patchRedacted = true;
+        } else {
+          changedFiles.add(i + ":" + path);
+          safePaths.add(path);
+        }
+      }
+      if (!safePaths.isEmpty()) {
+        List<String> args = new ArrayList<>();
+        args.add("diff");
+        args.add("--no-ext-diff");
+        args.add("--no-textconv");
+        args.add("--no-color");
+        args.add("--no-renames");
+        args.add("--unified=3");
+        args.add(repository.tree());
+        args.add(currentTree);
+        args.add("--");
+        args.addAll(safePaths);
+        byte[] header = ("### repository " + i + "\n").getBytes(StandardCharsets.UTF_8);
+        fullPatchBytes += header.length;
+        appendBounded(patch, header);
+        BinaryCommandResult patchResult =
+            gitBytes(repository.repository(), MAX_PATCH_BYTES, args.toArray(String[]::new));
+        fullPatchBytes += patchResult.fullOutputBytes();
+        appendBounded(patch, patchResult.output());
       }
     }
     // Git tree object ids are content-addressed over every path, mode and blob. Hashing the exact
     // before/after tree pair therefore distinguishes two corrections that touch the same filenames
     // with different bytes without retaining or truncating sensitive patch content.
     String canonical = String.join("\n", contentAddressedTreePairs);
+    String unifiedPatch = utf8Prefix(patch.toByteArray(), MAX_PATCH_BYTES);
     return new DiffEvidence(
         List.copyOf(changedFiles),
-        org.apache.commons.codec.digest.DigestUtils.sha256Hex(canonical));
+        org.apache.commons.codec.digest.DigestUtils.sha256Hex(canonical),
+        unifiedPatch,
+        unifiedPatch.getBytes(StandardCharsets.UTF_8).length,
+        fullPatchBytes,
+        fullPatchBytes > MAX_PATCH_BYTES,
+        patchRedacted);
+  }
+
+  private static boolean isSensitivePath(String path) {
+    if (path == null || path.isBlank()) return true;
+    String normalized = path.replace('\\', '/').toLowerCase(java.util.Locale.ROOT);
+    String name = normalized.substring(normalized.lastIndexOf('/') + 1);
+    return name.equals(".env")
+        || name.startsWith(".env.")
+        || name.equals("credentials")
+        || name.startsWith("credentials.")
+        || name.equals("secrets.yml")
+        || name.equals("secrets.yaml")
+        || name.endsWith(".pem")
+        || name.endsWith(".key")
+        || name.endsWith(".p12")
+        || name.endsWith(".pfx")
+        || name.equals("id_rsa")
+        || name.equals("id_ed25519")
+        || normalized.contains("/.ssh/");
+  }
+
+  private static void appendBounded(ByteArrayOutputStream target, byte[] source) {
+    int remaining = MAX_PATCH_BYTES - target.size();
+    if (remaining > 0) target.write(source, 0, Math.min(remaining, source.length));
+  }
+
+  private static String utf8Prefix(byte[] bytes, int limit) {
+    int length = Math.min(bytes.length, limit);
+    while (length > 0) {
+      try {
+        return StandardCharsets.UTF_8
+            .newDecoder()
+            .onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
+            .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT)
+            .decode(java.nio.ByteBuffer.wrap(bytes, 0, length))
+            .toString();
+      } catch (java.nio.charset.CharacterCodingException incompleteSuffix) {
+        length--;
+      }
+    }
+    return "";
   }
 
   /** Restores every repository to the exact pre-correction tree and original {@code HEAD}. */
@@ -250,6 +330,23 @@ public class CorrectionWorkspaceTransaction {
     return result.output();
   }
 
+  private BinaryCommandResult gitBytes(Path repository, int captureLimit, String... args) {
+    List<String> command = new ArrayList<>(args.length + 1);
+    command.add("git");
+    command.addAll(List.of(args));
+    BinaryCommandResult result = runBytes(repository, captureLimit, command.toArray(String[]::new));
+    if (result.exitCode() != 0) {
+      throw new IllegalStateException(
+          String.join(" ", command)
+              + " failed in "
+              + repository
+              + " (exit="
+              + result.exitCode()
+              + ")");
+    }
+    return result;
+  }
+
   private IllegalStateException commandFailure(
       Path repository, CommandResult result, String command) {
     return new IllegalStateException(
@@ -301,6 +398,42 @@ public class CorrectionWorkspaceTransaction {
     }
   }
 
+  private BinaryCommandResult runBytes(Path repository, int captureLimit, String... command) {
+    try {
+      Process process =
+          new ProcessBuilder(command)
+              .directory(repository.toFile())
+              .redirectErrorStream(true)
+              .start();
+      BoundedCountingOutputStream output = new BoundedCountingOutputStream(captureLimit);
+      Thread reader =
+          Thread.ofVirtual()
+              .start(
+                  () -> {
+                    try (var input = process.getInputStream()) {
+                      input.transferTo(output);
+                    } catch (IOException ignored) {
+                      // Process exit/timeout remains the authoritative failure signal.
+                    }
+                  });
+      boolean completed = process.waitFor(COMMAND_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
+      if (!completed) {
+        process.destroyForcibly();
+        process.waitFor(5, TimeUnit.SECONDS);
+        reader.join(Duration.ofSeconds(5));
+        throw new IllegalStateException(
+            String.join(" ", command) + " exceeded the correction checkpoint timeout");
+      }
+      reader.join(Duration.ofSeconds(5));
+      return new BinaryCommandResult(process.exitValue(), output.captured(), output.count());
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+      throw new IllegalStateException("Correction checkpoint command was interrupted", e);
+    } catch (IOException e) {
+      throw new IllegalStateException("Correction checkpoint command could not start", e);
+    }
+  }
+
   public record Checkpoint(List<RepositoryCheckpoint> repositories) {
     public Checkpoint {
       repositories = repositories == null ? List.of() : List.copyOf(repositories);
@@ -320,13 +453,59 @@ public class CorrectionWorkspaceTransaction {
 
   public record Accepted(String beforeGeneration, String afterGeneration) {}
 
-  public record DiffEvidence(List<String> changedFiles, String diffDigest) {
+  public record DiffEvidence(
+      List<String> changedFiles,
+      String diffDigest,
+      String unifiedPatch,
+      int patchCapturedBytes,
+      long patchFullBytes,
+      boolean patchTruncated,
+      boolean patchRedacted) {
     public DiffEvidence {
       changedFiles = changedFiles == null ? List.of() : List.copyOf(changedFiles);
+      unifiedPatch = unifiedPatch == null ? "" : unifiedPatch;
+    }
+
+    public DiffEvidence(List<String> changedFiles, String diffDigest) {
+      this(changedFiles, diffDigest, "", 0, 0L, false, false);
     }
   }
 
   public record RepositoryCheckpoint(Path repository, String head, String tree) {}
 
   private record CommandResult(int exitCode, String output) {}
+
+  private record BinaryCommandResult(int exitCode, byte[] output, long fullOutputBytes) {}
+
+  private static final class BoundedCountingOutputStream extends OutputStream {
+    private final ByteArrayOutputStream captured;
+    private final int limit;
+    private long count;
+
+    private BoundedCountingOutputStream(int limit) {
+      this.limit = Math.max(0, limit);
+      this.captured = new ByteArrayOutputStream(this.limit);
+    }
+
+    @Override
+    public void write(int value) {
+      count++;
+      if (captured.size() < limit) captured.write(value);
+    }
+
+    @Override
+    public void write(byte[] bytes, int offset, int length) {
+      count += length;
+      int remaining = limit - captured.size();
+      if (remaining > 0) captured.write(bytes, offset, Math.min(remaining, length));
+    }
+
+    private byte[] captured() {
+      return captured.toByteArray();
+    }
+
+    private long count() {
+      return count;
+    }
+  }
 }

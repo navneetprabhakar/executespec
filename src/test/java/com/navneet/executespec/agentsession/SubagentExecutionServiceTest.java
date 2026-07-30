@@ -264,7 +264,8 @@ class SubagentExecutionServiceTest {
             eq(3),
             any(),
             eq("parent-turn"));
-    assertThat(tools.getValue()).contains("search_repo_files", "search_code");
+    assertThat(tools.getValue())
+        .contains("search_repo_files", "read_repo_file_range", "search_code");
     assertThat(tools.getValue()).doesNotContain("submit_run", "approve_plan", "shell");
     ArgumentCaptor<AgentTurn> persisted = ArgumentCaptor.forClass(AgentTurn.class);
     verify(turns).save(persisted.capture());

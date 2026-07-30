@@ -79,9 +79,11 @@ final class ValidationVerificationLedgerBuilder {
   }
 
   private final ObjectMapper objectMapper;
+  private final ValidationReportScoreZeroEvidenceBuilder scoreZeroEvidenceBuilder;
 
   ValidationVerificationLedgerBuilder(ObjectMapper objectMapper) {
     this.objectMapper = objectMapper;
+    this.scoreZeroEvidenceBuilder = new ValidationReportScoreZeroEvidenceBuilder(objectMapper);
   }
 
   List<VerificationEvidenceDTO> build(ValidationReport entity, List<ReportIssueDTO> issues) {
@@ -92,13 +94,17 @@ final class ValidationVerificationLedgerBuilder {
             "code-delivered",
             "Code delivered",
             "CODE",
-            entity.getFilesGenerated() > 0 ? "PASS" : "FAIL",
+            entity.getFilesGenerated() < 0
+                ? "UNKNOWN"
+                : entity.getFilesGenerated() > 0 ? "PASS" : "FAIL",
             "DETERMINISTIC",
-            "HIGH",
+            entity.getFilesGenerated() < 0 ? "MEDIUM" : "HIGH",
             "The run produced source changes.",
-            entity.getFilesGenerated() > 0
-                ? entity.getFilesGenerated() + " file(s) generated or modified."
-                : "No generated files were captured; the score cannot vouch for delivery.",
+            entity.getFilesGenerated() < 0
+                ? "The historical report did not retain a measured product-file count."
+                : entity.getFilesGenerated() > 0
+                    ? entity.getFilesGenerated() + " file(s) generated or modified."
+                    : "No generated files were captured; the score cannot vouch for delivery.",
             "validation_report.files_generated",
             entity.getFilesGenerated(),
             null));
@@ -307,26 +313,7 @@ final class ValidationVerificationLedgerBuilder {
             accuracy.score(),
             accuracy.score() == null ? null : 100));
 
-    out.add(
-        evidence(
-            "endpoint-coverage",
-            "Endpoint coverage",
-            "ENDPOINTS",
-            accuracy.endpointCoverage() == null
-                ? "UNKNOWN"
-                : accuracy.endpointCoverage() >= 95
-                    ? "PASS"
-                    : accuracy.endpointCoverage() >= 70 ? "WARN" : "FAIL",
-            "LLM_ASSISTED_COUNT",
-            accuracy.endpointCoverage() == null ? "LOW" : "MEDIUM",
-            "Expected API endpoints are present in the generated implementation.",
-            accuracy.endpointCoverage() == null
-                ? "No endpoint coverage evidence was captured; the rubric's N/A policy may still"
-                    + " award this dimension."
-                : "Endpoint coverage: " + accuracy.endpointCoverage() + "%.",
-            "validation_report.accuracy_json.endpointCoverage",
-            accuracy.endpointCoverage(),
-            accuracy.endpointCoverage() == null ? null : 100));
+    out.add(ValidationEndpointCoverageEvidence.build(entity, accuracy.endpointCoverage()));
 
     if (accuracy.testCoverageLevel() != null) {
       String level = accuracy.testCoverageLevel();
@@ -348,6 +335,12 @@ final class ValidationVerificationLedgerBuilder {
               "validation_report.accuracy_json.testCoverageLevel",
               null,
               null));
+    }
+
+    VerificationEvidenceDTO zeroCause =
+        scoreZeroEvidenceBuilder.build(entity, effectiveVerifiedScore);
+    if (zeroCause != null) {
+      out.add(zeroCause);
     }
 
     TrustCap trustCap =
@@ -403,25 +396,11 @@ final class ValidationVerificationLedgerBuilder {
             effectiveVerifiedScore == null ? null : 100));
 
     return out.stream()
-        .map(evidence -> bindWorkspaceGeneration(evidence, entity.getWorkspaceGeneration()))
+        .map(
+            evidence ->
+                ValidationReportScoreZeroEvidenceBuilder.bindWorkspaceGeneration(
+                    evidence, entity.getWorkspaceGeneration()))
         .toList();
-  }
-
-  private static VerificationEvidenceDTO bindWorkspaceGeneration(
-      VerificationEvidenceDTO evidence, String workspaceGeneration) {
-    return new VerificationEvidenceDTO(
-        evidence.id(),
-        evidence.label(),
-        evidence.category(),
-        evidence.status(),
-        evidence.source(),
-        evidence.confidence(),
-        workspaceGeneration,
-        evidence.claim(),
-        evidence.summary(),
-        evidence.artifact(),
-        evidence.observed(),
-        evidence.total());
   }
 
   private static String commandArtifact(

@@ -231,11 +231,15 @@ public class ValidationReportService {
       String reviewerVerdict =
           mapVerdictToV2Name(input.review() != null ? input.review().getVerdict() : null);
       int unfixedCritical = countUnfixedCritical(input);
+      String reportRuntimeSurface = runtimeSurface(input);
+      boolean endpointCoverageApplicable = endpointCoverageApplicable(reportRuntimeSurface);
       // P1.2 — feed the LLM-assisted endpoint coverage into the confidence score. This signal may
       // tighten/cap a score, but scoreEvidenceFailure must never promote it to deterministic
       // release-blocking evidence.
       Integer endpointCoveragePercent =
-          (accuracyReport != null && accuracyReport.getEndpointCoverage() != null)
+          endpointCoverageApplicable
+                  && accuracyReport != null
+                  && accuracyReport.getEndpointCoverage() != null
               ? accuracyReport.getEndpointCoverage().getCoveragePercent()
               : null;
       // PR-R (2026-05-14) — read the AccuracyAssessment testCoverageLevel signal once and
@@ -244,10 +248,11 @@ public class ValidationReportService {
       // (testCoverageLevel=GOOD/COMPREHENSIVE means "coverage matches what spec implied").
       String testCoverageLevel =
           accuracyReport != null ? accuracyReport.getTestCoverageLevel() : null;
+      boolean additiveFormula = additiveScoreEnabled();
       int verifiedScore =
           evidenceFailure != null
               ? 0
-              : computeVerifiedScore(
+              : computeVerifiedScoreForFormula(
                   finalBuildPassed,
                   testsPassedCount,
                   testsTotalCount,
@@ -256,9 +261,26 @@ public class ValidationReportService {
                   endpointCoveragePercent,
                   testCoverageLevel,
                   filesGenerated,
-                  input.bootVerification());
+                  input.bootVerification(),
+                  additiveFormula,
+                  endpointCoverageApplicable);
       verifiedScore = capScoreAtAdmittedSpecGaps(verifiedScore, accuracyReport);
       verifiedScore = capScoreWithoutIndependentFunctionalProof(verifiedScore, ts);
+      ValidationReportScoreZeroCause.Evidence scoreZeroCause =
+          ValidationReportScoreZeroCause.derive(
+              verifiedScore,
+              additiveFormula,
+              filesGenerated,
+              finalBuildPassed,
+              testsPassedCount,
+              testsTotalCount,
+              ts == null ? null : ts.getExecutionVerified(),
+              input.bootVerification());
+      if (verifiedScore == 0 && scoreZeroCause == null) {
+        verifiedScore = 1;
+      }
+      String scoreZeroCauseJson =
+          ValidationReportScoreZeroCause.toJson(objectMapper, scoreZeroCause);
 
       // PR-E Phase A (2026-05-13) — additive rubric companion. Fixes the verifiedScore=0
       // cliff where any single zero factor (failed build, REVIEW_FAILED) collapses the entire
@@ -274,7 +296,8 @@ public class ValidationReportService {
                   reviewerVerdict,
                   unfixedCritical,
                   endpointCoveragePercent,
-                  testCoverageLevel);
+                  testCoverageLevel,
+                  endpointCoverageApplicable);
       rubricScore = capScoreAtAdmittedSpecGaps(rubricScore, accuracyReport);
       rubricScore = capScoreWithoutIndependentFunctionalProof(rubricScore, ts);
 
@@ -303,6 +326,7 @@ public class ValidationReportService {
               .id(resolveReportId(runId))
               .runId(runId)
               .workspaceGeneration(input.workspaceGeneration())
+              .runtimeSurface(reportRuntimeSurface)
               .workflowConfigEvidenceJson(toEvidenceJson(input.workflowConfigEvidence()))
               .buildCommand(command(input.buildCommandEvidence()))
               .buildWorkingDirectory(workingDirectory(input.buildCommandEvidence()))
@@ -342,6 +366,7 @@ public class ValidationReportService {
                   ts == null || ts.getEvidenceScope() == null ? null : ts.getEvidenceScope().name())
               .reviewerVerdict(reviewerVerdict)
               .verifiedScore(verifiedScore)
+              .scoreZeroCauseJson(scoreZeroCauseJson)
               .rubricScore(rubricScore)
               .bootVerdict(
                   input.bootVerification() == null
@@ -522,34 +547,59 @@ public class ValidationReportService {
     report.setExecutableEvidenceJson(executableVerification.evidenceJson());
     // Keep the existing six-dimension test axis in sync for callers that still render it.
     report.setTestCoverageScore(deriveConcreteTestCoverageScore(total, passed));
-    report.setVerifiedScore(
-        capScoreWithoutIndependentFunctionalProof(
-            capScoreAtAdmittedSpecGaps(
-                computeVerifiedScore(
-                    report.getFinalBuildPassed(),
-                    passed,
-                    total,
-                    report.getReviewerVerdict(),
-                    criticals,
-                    accuracy.endpointCoverage(),
-                    concreteCoverageLevel,
-                    report.getFilesGenerated(),
-                    bootVerification(report)),
-                persistedAccuracy),
-            summary));
+    boolean additiveFormula = additiveScoreEnabled();
+    String evidenceFailure = scoreEvidenceFailure(report);
+    int rescoredVerified =
+        evidenceFailure != null
+            ? 0
+            : capScoreWithoutIndependentFunctionalProof(
+                capScoreAtAdmittedSpecGaps(
+                    computeVerifiedScoreForFormula(
+                        report.getFinalBuildPassed(),
+                        passed,
+                        total,
+                        report.getReviewerVerdict(),
+                        criticals,
+                        accuracy.endpointCoverage(),
+                        concreteCoverageLevel,
+                        report.getFilesGenerated(),
+                        bootVerification(report),
+                        additiveFormula,
+                        endpointCoverageApplicable(report.getRuntimeSurface())),
+                    persistedAccuracy),
+                summary);
+    ValidationReportScoreZeroCause.Evidence scoreZeroCause =
+        ValidationReportScoreZeroCause.derive(
+            rescoredVerified,
+            additiveFormula,
+            report.getFilesGenerated(),
+            report.getFinalBuildPassed(),
+            passed,
+            total,
+            provenTestExecution ? Boolean.TRUE : Boolean.FALSE,
+            bootVerification(report));
+    if (rescoredVerified == 0 && scoreZeroCause == null) {
+      rescoredVerified = 1;
+    }
+    report.setVerifiedScore(rescoredVerified);
+    report.setScoreZeroCauseJson(
+        ValidationReportScoreZeroCause.toJson(objectMapper, scoreZeroCause));
     report.setRubricScore(
-        capScoreWithoutIndependentFunctionalProof(
-            capScoreAtAdmittedSpecGaps(
-                computeRubricScore(
-                    report.getFinalBuildPassed(),
-                    passed,
-                    total,
-                    report.getReviewerVerdict(),
-                    criticals,
-                    accuracy.endpointCoverage(),
-                    concreteCoverageLevel),
-                persistedAccuracy),
-            summary));
+        evidenceFailure != null
+            ? 0
+            : capScoreWithoutIndependentFunctionalProof(
+                capScoreAtAdmittedSpecGaps(
+                    computeRubricScore(
+                        report.getFinalBuildPassed(),
+                        passed,
+                        total,
+                        report.getReviewerVerdict(),
+                        criticals,
+                        accuracy.endpointCoverage(),
+                        concreteCoverageLevel,
+                        endpointCoverageApplicable(report.getRuntimeSurface())),
+                    persistedAccuracy),
+                summary));
 
     ValidationReport saved = repository.save(report);
     List<VerificationEvidenceDTO> ledger = buildVerificationLedger(saved, issues);
@@ -660,8 +710,32 @@ public class ValidationReportService {
             report ->
                 report.getShareRevokedAt() == null
                     && report.getShareExpiresAt() != null
-                    && now.isBefore(report.getShareExpiresAt()))
+                    && now.isBefore(report.getShareExpiresAt())
+                    && "COMPLETE".equalsIgnoreCase(report.getStatus()))
         .map(this::toShareDTO);
+  }
+
+  private String runtimeSurface(ReportInput input) {
+    if (input == null || input.run() == null || input.run().getPlanJson() == null) {
+      return null;
+    }
+    try {
+      var plan = objectMapper.readTree(input.run().getPlanJson());
+      String surface = plan.path("runtimeSurface").asText(null);
+      return surface == null || surface.isBlank()
+          ? null
+          : surface.toUpperCase(java.util.Locale.ROOT);
+    } catch (Exception malformedHistoricalPlan) {
+      log.warn(
+          "Could not bind runtime surface for validation report run={}: {}",
+          input.run().getRunId(),
+          malformedHistoricalPlan.getMessage());
+      return null;
+    }
+  }
+
+  static boolean endpointCoverageApplicable(String runtimeSurface) {
+    return runtimeSurface == null || "HTTP".equalsIgnoreCase(runtimeSurface);
   }
 
   private List<ReportIssueDTO> extractIssues(ReportInput input) {
@@ -926,9 +1000,10 @@ public class ValidationReportService {
   }
 
   /**
-   * A summary score cannot exceed the assessor's own spec-adherence score once that assessor has
-   * identified a concrete missing/partial requirement or could not verify one. UNKNOWN is not a
-   * defect, but it also cannot support a headline score above the assessor's bounded confidence.
+   * A summary score is confidence-capped once the assessor identifies a missing/partial requirement
+   * or cannot verify one. UNKNOWN is not a defect, but it cannot support a passing headline. The
+   * LLM assessment remains advisory: its numeric zero cannot manufacture the deterministic zero
+   * reserved by {@link ValidationReportScorePolicy#capForAdmittedSpecGaps}.
    */
   static int capScoreAtAdmittedSpecGaps(int score, AccuracyReport accuracy) {
     if (accuracy == null) return score;
@@ -1068,32 +1143,40 @@ public class ValidationReportService {
   }
 
   private ValidationReportDTO toDTO(ValidationReport entity) {
-    List<ReportIssueDTO> issues = parseIssues(entity.getIssuesJson());
-    List<VerificationEvidenceDTO> verificationLedger = buildVerificationLedger(entity, issues);
+    boolean reportComplete = "COMPLETE".equalsIgnoreCase(entity.getStatus());
+    List<ReportIssueDTO> issues = reportComplete ? parseIssues(entity.getIssuesJson()) : List.of();
+    List<VerificationEvidenceDTO> verificationLedger =
+        reportComplete ? buildVerificationLedger(entity, issues) : List.of();
     Integer effectiveVerifiedScore =
-        ValidationReportScoreProjection.effectiveVerifiedScore(entity, objectMapper);
+        reportComplete
+            ? ValidationReportScoreProjection.effectiveVerifiedScore(entity, objectMapper)
+            : null;
     Integer effectiveRubricScore =
-        ValidationReportScoreProjection.effectiveRubricScore(entity, objectMapper);
+        reportComplete
+            ? ValidationReportScoreProjection.effectiveRubricScore(entity, objectMapper)
+            : null;
     List<String> languages =
-        entity.getLanguages() != null && !entity.getLanguages().isBlank()
+        reportComplete && entity.getLanguages() != null && !entity.getLanguages().isBlank()
             ? Arrays.asList(entity.getLanguages().split(","))
             : List.of();
     List<String> checksPassed =
-        entity.getChecksPassed() != null && !entity.getChecksPassed().isBlank()
+        reportComplete && entity.getChecksPassed() != null && !entity.getChecksPassed().isBlank()
             ? Arrays.asList(entity.getChecksPassed().split(","))
             : List.of();
     PipelineRun reportRun = findRunForReport(entity.getRunId());
+    PipelineResult currentPipelineResult = reportComplete ? entity.getPipelineResult() : null;
 
     return new ValidationReportDTO(
         entity.getId(),
         entity.getRunId(),
         entity.getWorkspaceGeneration(),
-        entity.getFilesGenerated(),
+        entity.getStatus(),
+        reportComplete ? entity.getFilesGenerated() : -1,
         languages,
-        entity.getPipelineResult(),
+        currentPipelineResult,
         issues,
         checksPassed,
-        entity.getReportMarkdown(),
+        reportComplete ? entity.getReportMarkdown() : null,
         entity.getModelUsed(),
         entity.getCreatedAt(),
         issues.size(),
@@ -1104,29 +1187,29 @@ public class ValidationReportService {
         legacyShareActive(entity),
         null,
         entity.isGeneratedAfterImprovements(),
-        entity.getAccuracyScore(),
-        entity.getAccuracyGrade(),
-        entity.getAccuracyJson(),
-        entity.getCodeQualityScore(),
-        entity.getTestCoverageScore(),
-        entity.getArchitectureScore(),
-        entity.getSecurityScore(),
-        entity.getPerformanceScore(),
-        entity.getDesignComplianceScore(),
-        entity.getFinalBuildPassed(),
-        entity.getTestsPassed(),
-        entity.getTestsTotal(),
-        entity.getReviewerVerdict(),
+        reportComplete ? entity.getAccuracyScore() : null,
+        reportComplete ? entity.getAccuracyGrade() : null,
+        reportComplete ? entity.getAccuracyJson() : null,
+        reportComplete ? entity.getCodeQualityScore() : null,
+        reportComplete ? entity.getTestCoverageScore() : null,
+        reportComplete ? entity.getArchitectureScore() : null,
+        reportComplete ? entity.getSecurityScore() : null,
+        reportComplete ? entity.getPerformanceScore() : null,
+        reportComplete ? entity.getDesignComplianceScore() : null,
+        reportComplete ? entity.getFinalBuildPassed() : null,
+        reportComplete ? entity.getTestsPassed() : null,
+        reportComplete ? entity.getTestsTotal() : null,
+        reportComplete ? entity.getReviewerVerdict() : null,
         effectiveVerifiedScore,
         verificationLedger,
         goalProofEvaluator.evaluateForRun(
             entity.getRunId(),
             runGoalSummary(reportRun),
             runStatus(reportRun),
-            entity.getPipelineResult(),
+            currentPipelineResult,
             verificationLedger),
         goalProofEvaluator.evidenceReferences(
-            runStatus(reportRun), entity.getPipelineResult(), verificationLedger),
+            runStatus(reportRun), currentPipelineResult, verificationLedger),
         effectiveRubricScore,
         entity.getPreviewUrl());
   }
@@ -1496,9 +1579,61 @@ public class ValidationReportService {
       String testCoverageLevel,
       int filesGenerated,
       BootVerification bootVerification) {
-    boolean additive =
-        featureFlagService == null || featureFlagService.isEnabled(FLAG_ADDITIVE_SCORE);
-    if (!additive) {
+    return computeVerifiedScoreForFormula(
+        finalBuildPassed,
+        testsPassed,
+        testsTotal,
+        reviewerVerdictName,
+        unfixedCriticalCount,
+        endpointCoveragePercent,
+        testCoverageLevel,
+        filesGenerated,
+        bootVerification,
+        additiveScoreEnabled());
+  }
+
+  boolean additiveScoreEnabled() {
+    return featureFlagService == null || featureFlagService.isEnabled(FLAG_ADDITIVE_SCORE);
+  }
+
+  int computeVerifiedScoreForFormula(
+      Boolean finalBuildPassed,
+      int testsPassed,
+      int testsTotal,
+      String reviewerVerdictName,
+      int unfixedCriticalCount,
+      Integer endpointCoveragePercent,
+      String testCoverageLevel,
+      int filesGenerated,
+      BootVerification bootVerification,
+      boolean additiveFormula) {
+    return computeVerifiedScoreForFormula(
+        finalBuildPassed,
+        testsPassed,
+        testsTotal,
+        reviewerVerdictName,
+        unfixedCriticalCount,
+        endpointCoveragePercent,
+        testCoverageLevel,
+        filesGenerated,
+        bootVerification,
+        additiveFormula,
+        true);
+  }
+
+  int computeVerifiedScoreForFormula(
+      Boolean finalBuildPassed,
+      int testsPassed,
+      int testsTotal,
+      String reviewerVerdictName,
+      int unfixedCriticalCount,
+      Integer endpointCoveragePercent,
+      String testCoverageLevel,
+      int filesGenerated,
+      BootVerification bootVerification,
+      boolean additiveFormula,
+      boolean endpointCoverageApplicable) {
+    if (!additiveFormula) {
       return computeVerifiedScoreMultiplicative(
           finalBuildPassed,
           testsPassed,
@@ -1521,7 +1656,8 @@ public class ValidationReportService {
         filesGenerated,
         endpointCoveragePercent,
         gamingGuards,
-        bootVerification);
+        bootVerification,
+        endpointCoverageApplicable);
   }
 
   /**
@@ -1582,6 +1718,32 @@ public class ValidationReportService {
       Integer endpointCoveragePercent,
       boolean gamingGuards,
       BootVerification bootVerification) {
+    return computeVerifiedScoreAdditive(
+        finalBuildPassed,
+        testsPassed,
+        testsTotal,
+        reviewerVerdictName,
+        unfixedCriticalCount,
+        testCoverageLevel,
+        filesGenerated,
+        endpointCoveragePercent,
+        gamingGuards,
+        bootVerification,
+        true);
+  }
+
+  int computeVerifiedScoreAdditive(
+      Boolean finalBuildPassed,
+      int testsPassed,
+      int testsTotal,
+      String reviewerVerdictName,
+      int unfixedCriticalCount,
+      String testCoverageLevel,
+      int filesGenerated,
+      Integer endpointCoveragePercent,
+      boolean gamingGuards,
+      BootVerification bootVerification,
+      boolean endpointCoverageApplicable) {
     return ValidationReportScoreCalculator.additive(
         finalBuildPassed,
         testsPassed,
@@ -1592,7 +1754,8 @@ public class ValidationReportService {
         filesGenerated,
         endpointCoveragePercent,
         gamingGuards,
-        bootVerification);
+        bootVerification,
+        endpointCoverageApplicable);
   }
 
   int computeVerifiedScoreAdditive(
@@ -2069,7 +2232,8 @@ public class ValidationReportService {
    *       #rubricTestPointsFromCoverageLevel} (PR-R, spec-aware)
    *   <li><b>Reviewer (20 pts):</b> CLEAN=20 / FIXED_ISSUES=15 / UNRESOLVED_ISSUES=5 /
    *       REVIEW_FAILED=0 / null=10 (neutral)
-   *   <li><b>Endpoints (15 pts):</b> linear endpointCoveragePercent × 0.15; null=15 (n/a)
+   *   <li><b>Endpoints (15 pts):</b> for HTTP/historical reports, linear coverage with a neutral
+   *       midpoint when unknown; known non-HTTP reports omit and renormalize this dimension
    *   <li><b>Critical-damper (10 pts):</b> max(0, 10 − unfixedCriticalCount)
    *   <li><b>Code quality (10 pts):</b> reviewerVerdict ≠ REVIEW_FAILED → 10; else 0
    * </ul>
@@ -2108,6 +2272,26 @@ public class ValidationReportService {
       int unfixedCriticalCount,
       Integer endpointCoveragePercent,
       String testCoverageLevel) {
+    return computeRubricScore(
+        finalBuildPassed,
+        testsPassed,
+        testsTotal,
+        reviewerVerdictName,
+        unfixedCriticalCount,
+        endpointCoveragePercent,
+        testCoverageLevel,
+        true);
+  }
+
+  int computeRubricScore(
+      Boolean finalBuildPassed,
+      int testsPassed,
+      int testsTotal,
+      String reviewerVerdictName,
+      int unfixedCriticalCount,
+      Integer endpointCoveragePercent,
+      String testCoverageLevel,
+      boolean endpointCoverageApplicable) {
     int total = 0;
 
     // Build — binary 25 / 0
@@ -2135,9 +2319,11 @@ public class ValidationReportService {
           };
     }
 
-    // Endpoint coverage — linear 15 pts; missing evidence gets neutral midpoint credit, not a
-    // full N/A award. Unknown evidence must not inflate the public/shared score.
-    total += ValidationReportScorePolicy.rubricEndpointPoints(endpointCoveragePercent);
+    // Endpoint coverage — linear 15 pts when HTTP applies. A known non-HTTP surface removes this
+    // dimension from both numerator and denominator; it earns neither a penalty nor fake credit.
+    if (endpointCoverageApplicable) {
+      total += ValidationReportScorePolicy.rubricEndpointPoints(endpointCoveragePercent);
+    }
 
     // Critical-issue damper — 10 minus 1 per critical, floored at 0
     total += Math.max(0, 10 - Math.max(0, unfixedCriticalCount));
@@ -2145,7 +2331,8 @@ public class ValidationReportService {
     // Code quality — 10 pts if the reviewer ran at all (anything except REVIEW_FAILED)
     if (!"REVIEW_FAILED".equals(reviewerVerdictName)) total += 10;
 
-    return Math.max(0, Math.min(100, total));
+    int possible = endpointCoverageApplicable ? 100 : 85;
+    return Math.max(0, Math.min(100, (int) Math.round(total * 100.0 / possible)));
   }
 
   /**

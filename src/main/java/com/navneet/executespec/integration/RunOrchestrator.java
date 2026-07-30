@@ -2120,6 +2120,7 @@ public class RunOrchestrator implements RunControlPort {
         terminate(runId, "FAILED", INTERNAL_ERROR_REASON, INTERNAL_ERROR_REASON, startedAt);
         return;
       }
+      brownfieldHttpContractGuard.assertCompatibleIfPresent(runId);
       persistenceWriter.applyExecutionResultToTasks(runId, execResult);
       op = runOperationLifecycle.completeAndClear(op);
       // Phase 2 delta: tokens spent by the executor (all worker tasks).
@@ -2658,7 +2659,8 @@ public class RunOrchestrator implements RunControlPort {
         return;
       }
       log.error("RunOrchestrator run={} unexpected failure", runId, unexpected);
-      terminate(runId, "FAILED", INTERNAL_ERROR_REASON, INTERNAL_ERROR_REASON, startedAt);
+      var failure = RunFailureDiagnostic.from(unexpected, INTERNAL_ERROR_REASON);
+      terminate(runId, "FAILED", failure.code(), failure.reason(), startedAt);
     } finally {
       runOperationLifecycle.closeQuietly(runId, op);
       perky.stop(runId);
@@ -3786,10 +3788,7 @@ public class RunOrchestrator implements RunControlPort {
         continuationActionSource(decision));
 
     var task = taskRow.get();
-    String previousStatus = task.getStatus();
-    Instant previousStartedAt = task.getStartedAt();
-    Instant previousCompletedAt = task.getCompletedAt();
-    Long previousDurationMs = task.getDurationMs();
+    var previousTaskState = automaticCorrectionLifecycle.snapshotTask(task);
     task.setStatus("PENDING");
     task.setStartedAt(null);
     task.setCompletedAt(null);
@@ -3901,11 +3900,9 @@ public class RunOrchestrator implements RunControlPort {
             correctionCheckpoint,
             correctionEvidenceCheckpoint,
             correctionDiff,
-            previousStatus,
-            previousStartedAt,
-            previousCompletedAt,
-            previousDurationMs,
-            acceptance);
+            previousTaskState,
+            acceptance,
+            reviewAssessment.attemptValidation());
         broadcaster.emit(
             runId,
             RunEvent.log(
@@ -3929,6 +3926,17 @@ public class RunOrchestrator implements RunControlPort {
           plan,
           correctionCheckpoint,
           reviewAssessment.workspaceGeneration());
+      if (automaticCorrectionLifecycle.rollbackIfEvidenceRegressed(
+          runId,
+          targetTaskId,
+          targetTaskKey,
+          correctionCheckpoint,
+          correctionEvidenceCheckpoint,
+          correctionDiff,
+          previousTaskState)) {
+        return Optional.empty();
+      }
+      var delta = automaticCorrectionLifecycle.captureValidationDelta(correctionEvidenceCheckpoint);
       CorrectionWorkspaceTransaction.Accepted generations =
           automaticCorrectionLifecycle.accept(correctionCheckpoint);
       persistenceWriter.applyExecutionResultToTasks(runId, rerunResult);
@@ -3941,7 +3949,7 @@ public class RunOrchestrator implements RunControlPort {
           generations.beforeGeneration(),
           generations.afterGeneration(),
           correctionDiff,
-          true,
+          delta,
           true);
       if (postValidationOperation != null) {
         runOperationLifecycle.complete(postValidationOperation);
@@ -3969,12 +3977,7 @@ public class RunOrchestrator implements RunControlPort {
           runId,
           RunEvent.log(
               runId, targetTaskId, "Post-review continuation action failed: " + ex.getMessage()));
-      automaticCorrectionLifecycle.restoreTask(
-          targetTaskKey,
-          previousStatus,
-          previousStartedAt,
-          previousCompletedAt,
-          previousDurationMs);
+      automaticCorrectionLifecycle.restoreTask(targetTaskKey, previousTaskState);
       return Optional.empty();
     }
   }
@@ -4299,10 +4302,7 @@ public class RunOrchestrator implements RunControlPort {
     return violated ? new StatusAndReason("PARTIAL", "ARCHITECTURE_INVARIANT_VIOLATION") : base;
   }
 
-  /**
-   * The multi-repo workspace summary + language-parity block moved to {@link RunContextComposer}
-   * (god-class split inc-3b); {@code languageConventionHint} moved to {@link RunPipelineSupport}.
-   */
+  /** Multi-repo context moved to {@link RunContextComposer} and {@link RunPipelineSupport}. */
 
   /**
    * The classify → outline → expand planning phases ({@code runClassifierShadow} / {@code

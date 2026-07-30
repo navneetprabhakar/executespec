@@ -34,4 +34,32 @@ class ValidationReportScoreProjectionTest {
     assertThat(ValidationReportScoreProjection.effectiveScore(73, "{broken", objectMapper))
         .isEqualTo(73);
   }
+
+  @Test
+  void llmOnlyZeroAssessmentCannotTurnAPositiveHeadlineIntoZero() {
+    String advisoryZero =
+        """
+        {
+          "specAdherenceScore": 0,
+          "missingRequirements": ["The bounded LLM sample did not find the requested behavior"]
+        }
+        """;
+
+    assertThat(ValidationReportScoreProjection.effectiveScore(92, advisoryZero, objectMapper))
+        .isEqualTo(1);
+  }
+
+  @Test
+  void projectionPreservesAnExistingDeterministicZero() {
+    String advisoryGap =
+        """
+        {
+          "specAdherenceScore": 88,
+          "partialRequirements": ["A requirement needs review"]
+        }
+        """;
+
+    assertThat(ValidationReportScoreProjection.effectiveScore(0, advisoryGap, objectMapper))
+        .isZero();
+  }
 }

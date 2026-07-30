@@ -53,5 +53,9 @@ class WorkspaceTestRunnerTest {
     assertEquals(1, result.getTotalTests());
     assertEquals(1, result.getFailed());
     assertTrue(result.isExecutionProven());
+    assertEquals(
+        com.navneet.executespec.testgen.model.TestExecutionSummary.EvidenceScope
+            .WORKSPACE_TEST_SUITE,
+        result.getEvidenceScope());
   }
 }

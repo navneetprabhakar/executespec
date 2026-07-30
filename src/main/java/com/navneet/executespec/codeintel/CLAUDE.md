@@ -22,6 +22,8 @@ promoted result identity. A partial unique index permits only one active job per
 compatible requests reuse that job; an actor/branch/provider/model mismatch is a typed 409 rather
 than silently sharing authority or provider spend. Atomic claims use the database clock and carry
 owner, expiry, and a monotonically increasing fencing token.
+The architecture-job API DTO exposes `attemptCount` and `deadlineAt` alongside phase/status so web
+clients can show retry and deadline truth without inferring it from polling duration.
 `NEEDS_CONFIRMATION` is a server admission barrier for every client: ordinary submit returns the
 same terminal job and cannot create new spend. Only
 `POST .../architecture/jobs/{jobId}/confirm-retry` by the original requester resets that same

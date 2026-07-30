@@ -65,6 +65,8 @@ class ProjectArchitectureJobControllerTest {
         .hasPath("/api/projects/project-1/architecture/jobs/" + job.id());
     assertThat(response.getBody()).isNotNull();
     assertThat(response.getBody().id()).isEqualTo(job.id());
+    assertThat(response.getBody().attemptCount()).isEqualTo(job.attemptCount());
+    assertThat(response.getBody().deadlineAt()).isEqualTo(job.deadlineAt());
     assertThat(
             List.of(ProjectArchitectureController.ArchitectureJobDto.class.getRecordComponents())
                 .stream()

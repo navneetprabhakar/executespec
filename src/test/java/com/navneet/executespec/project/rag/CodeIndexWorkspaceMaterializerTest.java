@@ -1,6 +1,7 @@
 package com.navneet.executespec.project.rag;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.awaitility.Awaitility.await;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doAnswer;
@@ -10,13 +11,16 @@ import static org.mockito.Mockito.when;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicReference;
 
 import com.navneet.executespec.harness.WorkspaceInitService;
 import com.navneet.executespec.project.entity.ProjectRepo;
 
+import org.junit.jupiter.api.RepeatedTest;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.mockito.Mockito;
@@ -41,7 +45,7 @@ class CodeIndexWorkspaceMaterializerTest {
             anyString(), Mockito.eq("https://github.com/acme/public.git"), isNull(), isNull());
   }
 
-  @Test
+  @RepeatedTest(20)
   void concurrentRequestsShareOneCloneFlight() throws Exception {
     WorkspaceInitService init = fixtureInit();
     ProjectRepo repository = repository("b".repeat(40));
@@ -62,7 +66,19 @@ class CodeIndexWorkspaceMaterializerTest {
     try (var pool = Executors.newFixedThreadPool(2)) {
       var first = pool.submit(() -> materializer.materialize("project-1", repository, null, null));
       cloneEntered.await();
-      var second = pool.submit(() -> materializer.materialize("project-1", repository, null, null));
+      AtomicReference<Thread> secondThread = new AtomicReference<>();
+      var second =
+          pool.submit(
+              () -> {
+                secondThread.set(Thread.currentThread());
+                return materializer.materialize("project-1", repository, null, null);
+              });
+      await()
+          .atMost(Duration.ofSeconds(2))
+          .until(
+              () ->
+                  secondThread.get() != null
+                      && secondThread.get().getState() == Thread.State.WAITING);
       releaseClone.countDown();
 
       assertThat(first.get()).isEqualTo(second.get());

@@ -64,9 +64,11 @@ export type ScmPushResult = {
   succeeded: number;
   failed: number;
   code: string;
+  blockingGate: string | null;
   publicationEligible: boolean;
   retryable: boolean;
   retryGuidance: string;
+  remediation: string | null;
 };
 
 export const pushToScm = (runId: string) =>

@@ -69,9 +69,11 @@ public class ScmPushService {
       int succeeded,
       int failed,
       String code,
+      String blockingGate,
       boolean publicationEligible,
       boolean retryable,
-      String retryGuidance) {
+      String retryGuidance,
+      String remediation) {
 
     public static PushResult pushed(String provider, String prUrl, String message) {
       return new PushResult(
@@ -83,12 +85,24 @@ public class ScmPushService {
           1,
           0,
           "SCM_PUSHED",
+          null,
           true,
           false,
-          "");
+          "",
+          null);
     }
 
     public static PushResult failed(String message, String provider) {
+      return failed(
+          "SCM_PUSH_FAILED",
+          "SCM_REMOTE_OPERATION",
+          message,
+          provider,
+          "Correct the reported SCM failure, then retry the push.");
+    }
+
+    public static PushResult failed(
+        String code, String blockingGate, String message, String provider, String remediation) {
       return new PushResult(
           "FAILED",
           provider == null ? "" : provider,
@@ -97,24 +111,32 @@ public class ScmPushService {
           1,
           0,
           1,
-          "SCM_PUSH_FAILED",
+          code,
+          blockingGate,
           true,
           true,
-          "Correct the reported SCM failure, then retry the push.");
+          remediation,
+          remediation);
     }
 
     public static PushResult blocked(
-        String code, String message, String provider, boolean retryable, String retryGuidance) {
-      return blocked(code, message, provider, false, retryable, retryGuidance);
+        String code,
+        String blockingGate,
+        String message,
+        String provider,
+        boolean retryable,
+        String remediation) {
+      return blocked(code, blockingGate, message, provider, false, retryable, remediation);
     }
 
     private static PushResult blocked(
         String code,
+        String blockingGate,
         String message,
         String provider,
         boolean publicationEligible,
         boolean retryable,
-        String retryGuidance) {
+        String remediation) {
       return new PushResult(
           "FAILED",
           provider == null ? "" : provider,
@@ -124,9 +146,11 @@ public class ScmPushService {
           0,
           0,
           code,
+          blockingGate,
           publicationEligible,
           retryable,
-          retryGuidance);
+          remediation,
+          remediation);
     }
 
     public static PushResult noConfiguration(String provider, String message) {
@@ -139,8 +163,10 @@ public class ScmPushService {
           0,
           0,
           "SCM_CONFIGURATION_REQUIRED",
+          "SCM_CONFIGURATION",
           false,
           true,
+          "Configure the repository provider and credentials, then retry the push.",
           "Configure the repository provider and credentials, then retry the push.");
     }
 
@@ -155,8 +181,10 @@ public class ScmPushService {
           succeeded,
           failed,
           "SCM_PUSH_PARTIAL",
+          "MULTI_REPO_PUBLICATION",
           true,
           true,
+          "Review the failed repository outcomes, correct them, then retry the push.",
           "Review the failed repository outcomes, correct them, then retry the push.");
     }
 
@@ -170,8 +198,10 @@ public class ScmPushService {
           0,
           0,
           "SCM_NO_CHANGES",
+          "WORKSPACE_DIFF",
           true,
           false,
+          "Create or restore a workspace change before attempting another push.",
           "Create or restore a workspace change before attempting another push.");
     }
   }
@@ -247,7 +277,15 @@ public class ScmPushService {
    * run's creator, then delegates.
    */
   public PushResult push(PipelineRun run) {
-    if (run == null) return PushResult.failed("missing run", "");
+    if (run == null) {
+      return PushResult.blocked(
+          "SCM_RUN_MISSING",
+          "RUN_IDENTITY",
+          "The run is missing",
+          "",
+          false,
+          "Reload the run or start a new run before publishing.");
+    }
     AppUser scmUser =
         run.getCreatedByUserId() != null
             ? appUserRepository.findById(run.getCreatedByUserId()).orElse(null)
@@ -267,6 +305,7 @@ public class ScmPushService {
           ineligible.getMessage());
       return PushResult.blocked(
           ineligible.code(),
+          ineligible.eligibility().blockingGate(),
           ineligible.getMessage(),
           run.getScmProvider(),
           false,
@@ -297,6 +336,7 @@ public class ScmPushService {
               "Push blocked [" + incompatible.code() + "]: " + incompatible.getMessage()));
       return PushResult.blocked(
           incompatible.code(),
+          "PROTECTED_CONTRACTS",
           incompatible.getMessage(),
           run.getScmProvider(),
           false,
@@ -307,6 +347,7 @@ public class ScmPushService {
       log.warn("[{}] SCM publication blocked: {}", run.getRunId(), decision.error());
       return PushResult.blocked(
           decision.code(),
+          "SCM_PROVIDER_ROUTE",
           decision.error(),
           decision.provider(),
           decision.retryable(),
@@ -477,6 +518,7 @@ public class ScmPushService {
       return PushResult.noConfiguration("BITBUCKET", "Bitbucket repository is not configured");
     }
 
+    String blockingGate = "WORKSPACE_SAFETY";
     try {
       // Audit 2026-05-12 review item P #78: GitHub path resolves branch name via
       // resolveBranchName(project, run) which honours Project.branchNamingPattern;
@@ -492,6 +534,7 @@ public class ScmPushService {
           expectedRemoteShaFor(run.getRunId(), workspace + "/" + repoSlug, branchName);
 
       publicationGuard.assertGitWorkspaceSafe(run.getRunId());
+      blockingGate = "GIT_PUSH";
       gitTool.pushToBranchBitbucket(
           run.getRunId(), cloneUrl, username, appPassword, branchName, expectedRemoteSha);
 
@@ -499,6 +542,7 @@ public class ScmPushService {
           StringUtils.hasText(run.getRunTitle()) ? run.getRunTitle() : "ExecuteSpec changes";
       String body =
           StringUtils.hasText(run.getRunSummary()) ? run.getRunSummary() : run.getUserRequest();
+      blockingGate = "PR_CREATION";
       String prUrl =
           bitbucketRepoService.createPullRequest(
               workspace, repoSlug, branchName, title, body, username, appPassword);
@@ -513,10 +557,40 @@ public class ScmPushService {
             RunEvent.log(run.getRunId(), "scm", "Bitbucket pull request created: " + prUrl));
         return PushResult.pushed("BITBUCKET", prUrl, "Bitbucket pull request created");
       }
-      return PushResult.failed("Bitbucket pull request was not created", "BITBUCKET");
+      return PushResult.failed(
+          "SCM_PR_CREATION_FAILED",
+          "PR_CREATION",
+          "Bitbucket pull request was not created",
+          "BITBUCKET",
+          "Check Bitbucket pull-request permissions and branch policy, then retry.");
     } catch (Exception e) {
       log.warn("[{}] Bitbucket push failed: {}", run.getRunId(), e.getMessage());
-      return PushResult.failed("Bitbucket push failed: " + safeMessage(e), "BITBUCKET");
+      String code =
+          "PR_CREATION".equals(blockingGate)
+              ? "SCM_PR_CREATION_FAILED"
+              : "GIT_PUSH".equals(blockingGate) ? "SCM_GIT_PUSH_FAILED" : "SCM_WORKSPACE_UNSAFE";
+      String remediation =
+          "PR_CREATION".equals(blockingGate)
+              ? "Check Bitbucket pull-request permissions and branch policy, then retry."
+              : "GIT_PUSH".equals(blockingGate)
+                  ? "Check Bitbucket Git credentials, remote branch policy, and connectivity, then"
+                      + " retry."
+                  : "Restore a safe, current workspace before publishing.";
+      if ("WORKSPACE_SAFETY".equals(blockingGate)) {
+        return PushResult.blocked(
+            code,
+            blockingGate,
+            "Bitbucket publication failed: " + safeMessage(e),
+            "BITBUCKET",
+            false,
+            remediation);
+      }
+      return PushResult.failed(
+          code,
+          blockingGate,
+          "Bitbucket publication failed: " + safeMessage(e),
+          "BITBUCKET",
+          remediation);
     }
   }
 
@@ -585,8 +659,13 @@ public class ScmPushService {
           "[{}] SCM publication refused — unsupported repository mode {}",
           run.getRunId(),
           unknown.raw());
-      return PushResult.failed(
-          "Unsupported repository mode on run — publication refused", "GITHUB");
+      return PushResult.blocked(
+          "SCM_REPOSITORY_MODE_UNSUPPORTED",
+          "REPOSITORY_IDENTITY",
+          "Unsupported repository mode on run — publication refused",
+          "GITHUB",
+          false,
+          "Select NEW, EXISTING, or NONE and retry the publication request.");
     }
     if (repoMode == RepoMode.NONE) {
       return PushResult.noConfiguration("GITHUB", "Run has no attached repository");
@@ -611,122 +690,228 @@ public class ScmPushService {
       publicationGuard.assertGitWorkspaceSafe(run.getRunId());
     } catch (Exception unsafe) {
       log.warn("[{}] SCM publication rejected: {}", run.getRunId(), unsafe.getMessage());
-      return PushResult.failed(unsafe.getMessage(), "GITHUB");
+      return PushResult.blocked(
+          "SCM_WORKSPACE_UNSAFE",
+          "WORKSPACE_SAFETY",
+          unsafe.getMessage(),
+          "GITHUB",
+          false,
+          "Restore a safe, current workspace before publishing.");
     }
 
     String remote = repoUrl;
-    // RR-900 — direct publication force-pushes the default branch, so it is permitted ONLY for a
-    // repository this invocation just created (and which is therefore empty). A NEW-mode run
-    // pointed at a pre-existing repository falls through to the branch + PR path.
-    boolean createdThisInvocation = false;
-    if (repoMode == RepoMode.NEW && (repoUrl == null || repoUrl.isBlank())) {
-      log.info("Creating new GitHub repo for run {} (owner={})", run.getRunId(), owner);
-      remote = gitHubRepoService.createRepo(run.getUserRequest(), null, "private", pat, owner);
-      if (remote != null) {
-        createdThisInvocation = true;
-        PipelineRun freshRun = stateStore.findRun(run.getRunId()).orElse(run);
-        freshRun.setRepoUrl(remote);
-        stateStore.save(freshRun);
-        run.setRepoUrl(remote);
-        log.info("Created GitHub repo: {}", remote);
-      }
-    }
-
-    if (remote == null || remote.isBlank()) {
-      log.warn("No remote URL available — skipping push for run {}", run.getRunId());
-      return PushResult.failed("GitHub repository could not be resolved", "GITHUB");
-    }
-
-    log.info("Pushing workspace to GitHub: {}", remote);
-
-    if (!createdThisInvocation) {
-      // Pilot R5 — project settings may override branch naming / target branch / reviewers.
-      Project project =
-          run.getProjectId() != null
-              ? projectRepository.findById(run.getProjectId()).orElse(null)
-              : null;
-      String branchName = resolveBranchName(project, run);
-      String expectedRemoteSha =
-          expectedRemoteShaFor(run.getRunId(), repoFullNameFromUrl(remote), branchName);
-      GitToolResult result =
-          gitTool.pushToBranch(run.getRunId(), remote, pat, branchName, expectedRemoteSha);
-      if (!result.isOk()) {
-        log.warn("GitHub branch push failed for run {}: {}", run.getRunId(), result.value());
-        return PushResult.failed("GitHub branch push failed: " + result.value(), "GITHUB");
-      }
-      String targetBranch =
-          (project != null && StringUtils.hasText(project.getTargetBranch()))
-              ? project.getTargetBranch()
-              : gitHubRepoService.getDefaultBranch(remote, pat);
-      String prTitle = run.getRunTitle() != null ? run.getRunTitle() : "ExecuteSpec changes";
-      String prBody = run.getRunSummary() != null ? run.getRunSummary() : run.getUserRequest();
-      // RR-146 — an existing PR for this head is NOT a failure. Only a typed FAILED outcome may
-      // authorize deleting the branch we just pushed.
-      GitHubRepoService.PullRequestCreation creation =
-          gitHubRepoService.createPullRequestDetailed(
-              remote, branchName, targetBranch, prTitle, prBody, pat);
-      String prUrl = creation.prUrl();
-      if (creation.prExists() && prUrl != null) {
-        PipelineRun freshRun = stateStore.findRun(run.getRunId()).orElse(run);
-        freshRun.setGithubPrUrl(prUrl);
-        freshRun.setScmPrUrl(prUrl);
-        freshRun.setScmProvider("GITHUB");
-        stateStore.save(freshRun);
-        run.setGithubPrUrl(prUrl);
-        run.setScmPrUrl(prUrl);
-        run.setScmProvider("GITHUB");
-        log.info("Created PR for run {}: {}", run.getRunId(), prUrl);
-        broadcaster.emit(
-            run.getRunId(), RunEvent.log(run.getRunId(), "scm", "Pull request created: " + prUrl));
-
-        // Persist a PullRequestRecord so the UI can show multi-PR status
-        // and the GitHub webhook can flip it to MERGED/CLOSED later.
-        String repoFullName = repoFullNameFromUrl(remote);
-        pullRequestRecordService.recordCreated(
-            run.getRunId(), null, repoFullName, prUrl, branchName, targetBranch);
-
-        // Request default reviewers from project settings (best-effort).
-        List<String> reviewers = parseReviewers(project);
-        if (!reviewers.isEmpty()) {
-          Integer prNumber =
-              com.navneet.executespec.project.pr.PullRequestRecordService.extractPrNumber(prUrl);
-          if (prNumber != null) {
-            gitHubRepoService.requestReviewers(remote, prNumber, reviewers, pat);
-          }
+    String branchName = null;
+    String blockingGate = "REPOSITORY_RESOLUTION";
+    boolean branchPushed = false;
+    boolean pullRequestEstablished = false;
+    boolean orphanCleanupEnqueued = false;
+    try {
+      // RR-900 — direct publication force-pushes the default branch, so it is permitted ONLY for a
+      // repository this invocation just created (and which is therefore empty). A NEW-mode run
+      // pointed at a pre-existing repository falls through to the branch + PR path.
+      boolean createdThisInvocation = false;
+      if (repoMode == RepoMode.NEW && (repoUrl == null || repoUrl.isBlank())) {
+        blockingGate = "REPOSITORY_CREATION";
+        log.info("Creating new GitHub repo for run {} (owner={})", run.getRunId(), owner);
+        remote = gitHubRepoService.createRepo(run.getUserRequest(), null, "private", pat, owner);
+        if (remote != null) {
+          createdThisInvocation = true;
+          blockingGate = "REPOSITORY_PERSISTENCE";
+          PipelineRun freshRun = stateStore.findRun(run.getRunId()).orElse(run);
+          freshRun.setRepoUrl(remote);
+          stateStore.save(freshRun);
+          run.setRepoUrl(remote);
+          log.info("Created GitHub repo: {}", remote);
         }
-        gitHubRepoService.updateRepoDescription(remote, run.getUserRequest(), pat);
-        return PushResult.pushed(
+      }
+
+      if (remote == null || remote.isBlank()) {
+        log.warn("No remote URL available — skipping push for run {}", run.getRunId());
+        return PushResult.failed(
+            "SCM_REPOSITORY_UNRESOLVED",
+            "REPOSITORY_RESOLUTION",
+            "GitHub repository could not be resolved",
             "GITHUB",
-            prUrl,
-            creation.outcome() == GitHubRepoService.PullRequestCreation.Outcome.ALREADY_EXISTS
-                ? "Existing GitHub pull request updated"
-                : "GitHub pull request created");
-      } else if (creation.prExists()) {
-        // ALREADY_EXISTS but the discovery lookup could not be answered. A pull request is open on
-        // this branch, so cleanup is forbidden; we simply cannot report its URL.
-        log.info(
-            "[{}] Pull request already exists for branch {} — URL unresolved, no cleanup enqueued",
-            run.getRunId(),
-            branchName);
-        gitHubRepoService.updateRepoDescription(remote, run.getUserRequest(), pat);
-        return PushResult.pushed("GITHUB", "", "Branch pushed to an existing GitHub pull request");
+            "Reconnect or select the GitHub repository, then retry.");
+      }
+
+      log.info("Pushing workspace to GitHub: {}", remote);
+
+      if (!createdThisInvocation) {
+        // Pilot R5 — project settings may override branch naming / target branch / reviewers.
+        Project project =
+            run.getProjectId() != null
+                ? projectRepository.findById(run.getProjectId()).orElse(null)
+                : null;
+        branchName = resolveBranchName(project, run);
+        String expectedRemoteSha =
+            expectedRemoteShaFor(run.getRunId(), repoFullNameFromUrl(remote), branchName);
+        blockingGate = "GIT_PUSH";
+        GitToolResult result =
+            gitTool.pushToBranch(run.getRunId(), remote, pat, branchName, expectedRemoteSha);
+        if (!result.isOk()) {
+          log.warn("GitHub branch push failed for run {}: {}", run.getRunId(), result.value());
+          return PushResult.failed(
+              "SCM_GIT_PUSH_FAILED",
+              "GIT_PUSH",
+              "GitHub branch push failed: " + result.value(),
+              "GITHUB",
+              "Check GitHub Git credentials, remote branch policy, and connectivity, then retry.");
+        }
+        branchPushed = true;
+        blockingGate = "DEFAULT_BRANCH_RESOLUTION";
+        String targetBranch =
+            (project != null && StringUtils.hasText(project.getTargetBranch()))
+                ? project.getTargetBranch()
+                : gitHubRepoService.getDefaultBranch(remote, pat);
+        String prTitle = run.getRunTitle() != null ? run.getRunTitle() : "ExecuteSpec changes";
+        String prBody = run.getRunSummary() != null ? run.getRunSummary() : run.getUserRequest();
+        // RR-146 — an existing PR for this head is NOT a failure. Only a typed FAILED outcome may
+        // authorize deleting the branch we just pushed.
+        blockingGate = "PR_CREATION";
+        GitHubRepoService.PullRequestCreation creation =
+            gitHubRepoService.createPullRequestDetailed(
+                remote, branchName, targetBranch, prTitle, prBody, pat);
+        String prUrl = creation.prUrl();
+        if (creation.prExists() && prUrl != null) {
+          pullRequestEstablished = true;
+          blockingGate = "PR_STATE_PERSISTENCE";
+          PipelineRun freshRun = stateStore.findRun(run.getRunId()).orElse(run);
+          freshRun.setGithubPrUrl(prUrl);
+          freshRun.setScmPrUrl(prUrl);
+          freshRun.setScmProvider("GITHUB");
+          stateStore.save(freshRun);
+          run.setGithubPrUrl(prUrl);
+          run.setScmPrUrl(prUrl);
+          run.setScmProvider("GITHUB");
+          log.info("Created PR for run {}: {}", run.getRunId(), prUrl);
+          broadcaster.emit(
+              run.getRunId(),
+              RunEvent.log(run.getRunId(), "scm", "Pull request created: " + prUrl));
+
+          // Persist a PullRequestRecord so the UI can show multi-PR status
+          // and the GitHub webhook can flip it to MERGED/CLOSED later.
+          blockingGate = "PR_RECORD_PERSISTENCE";
+          String repoFullName = repoFullNameFromUrl(remote);
+          pullRequestRecordService.recordCreated(
+              run.getRunId(), null, repoFullName, prUrl, branchName, targetBranch);
+
+          // Request default reviewers from project settings (best-effort).
+          List<String> reviewers = parseReviewers(project);
+          if (!reviewers.isEmpty()) {
+            Integer prNumber =
+                com.navneet.executespec.project.pr.PullRequestRecordService.extractPrNumber(prUrl);
+            if (prNumber != null) {
+              blockingGate = "REVIEWER_REQUEST";
+              gitHubRepoService.requestReviewers(remote, prNumber, reviewers, pat);
+            }
+          }
+          blockingGate = "REPOSITORY_DESCRIPTION";
+          gitHubRepoService.updateRepoDescription(remote, run.getUserRequest(), pat);
+          return PushResult.pushed(
+              "GITHUB",
+              prUrl,
+              creation.outcome() == GitHubRepoService.PullRequestCreation.Outcome.ALREADY_EXISTS
+                  ? "Existing GitHub pull request updated"
+                  : "GitHub pull request created");
+        } else if (creation.prExists()) {
+          pullRequestEstablished = true;
+          // ALREADY_EXISTS but the discovery lookup could not be answered. A pull request is open
+          // on
+          // this branch, so cleanup is forbidden; we simply cannot report its URL.
+          log.info(
+              "[{}] Pull request already exists for branch {} — URL unresolved, no cleanup"
+                  + " enqueued",
+              run.getRunId(),
+              branchName);
+          blockingGate = "REPOSITORY_DESCRIPTION";
+          gitHubRepoService.updateRepoDescription(remote, run.getUserRequest(), pat);
+          return PushResult.pushed(
+              "GITHUB", "", "Branch pushed to an existing GitHub pull request");
+        } else {
+          // RL-2026-05-041 (audit #16) — the branch pushed but PR creation definitively failed:
+          // it's
+          // now an orphan. Enqueue the saga compensation to delete it (PAT resolved from the run
+          // owner at execution time — not stored in the payload). RR-146: reached only for a typed
+          // FAILED outcome, never for "a pull request already exists".
+          enqueueOrphanBranchCleanup(run.getRunId(), repoFullNameFromUrl(remote), branchName);
+          orphanCleanupEnqueued = true;
+          blockingGate = "REPOSITORY_DESCRIPTION";
+          gitHubRepoService.updateRepoDescription(remote, run.getUserRequest(), pat);
+          return PushResult.failed(
+              "SCM_PR_CREATION_FAILED",
+              "PR_CREATION",
+              "GitHub branch pushed but pull request creation failed",
+              "GITHUB",
+              "Check GitHub pull-request permissions and branch policy, then retry.");
+        }
       } else {
-        // RL-2026-05-041 (audit #16) — the branch pushed but PR creation definitively failed: it's
-        // now an orphan. Enqueue the saga compensation to delete it (PAT resolved from the run
-        // owner at execution time — not stored in the payload). RR-146: reached only for a typed
-        // FAILED outcome, never for "a pull request already exists".
+        blockingGate = "GIT_PUSH";
+        GitToolResult result = gitTool.pushToRemote(run.getRunId(), remote, pat);
+        if (!result.isOk()) {
+          log.warn("GitHub push failed for run {}: {}", run.getRunId(), result.value());
+          return PushResult.failed(
+              "SCM_GIT_PUSH_FAILED",
+              "GIT_PUSH",
+              "GitHub push failed: " + result.value(),
+              "GITHUB",
+              "Check GitHub Git credentials, remote branch policy, and connectivity, then retry.");
+        }
+        return PushResult.pushed("GITHUB", "", "GitHub changes pushed");
+      }
+    } catch (Exception failure) {
+      if (branchPushed && !pullRequestEstablished && !orphanCleanupEnqueued && branchName != null) {
         enqueueOrphanBranchCleanup(run.getRunId(), repoFullNameFromUrl(remote), branchName);
-        gitHubRepoService.updateRepoDescription(remote, run.getUserRequest(), pat);
-        return PushResult.failed("GitHub branch pushed but pull request creation failed", "GITHUB");
       }
-    } else {
-      GitToolResult result = gitTool.pushToRemote(run.getRunId(), remote, pat);
-      if (!result.isOk()) {
-        log.warn("GitHub push failed for run {}: {}", run.getRunId(), result.value());
-        return PushResult.failed("GitHub push failed: " + result.value(), "GITHUB");
-      }
-      return PushResult.pushed("GITHUB", "", "GitHub changes pushed");
+      log.warn(
+          "[{}] GitHub publication failed at stage {}: {}",
+          run.getRunId(),
+          blockingGate,
+          safeMessage(failure));
+      return githubStageFailure(blockingGate);
     }
+  }
+
+  private static PushResult githubStageFailure(String blockingGate) {
+    String code =
+        switch (blockingGate) {
+          case "REPOSITORY_CREATION" -> "SCM_REPOSITORY_CREATION_FAILED";
+          case "REPOSITORY_PERSISTENCE" -> "SCM_REPOSITORY_PERSISTENCE_FAILED";
+          case "DEFAULT_BRANCH_RESOLUTION" -> "SCM_DEFAULT_BRANCH_FAILED";
+          case "GIT_PUSH" -> "SCM_GIT_PUSH_FAILED";
+          case "PR_CREATION" -> "SCM_PR_CREATION_FAILED";
+          case "PR_STATE_PERSISTENCE", "PR_RECORD_PERSISTENCE" -> "SCM_PR_PERSISTENCE_FAILED";
+          case "REVIEWER_REQUEST" -> "SCM_REVIEWER_REQUEST_FAILED";
+          case "REPOSITORY_DESCRIPTION" -> "SCM_REPOSITORY_DESCRIPTION_FAILED";
+          default -> "SCM_REPOSITORY_UNRESOLVED";
+        };
+    String remediation =
+        switch (blockingGate) {
+          case "REPOSITORY_CREATION" ->
+              "Check GitHub repository-creation permission and organization policy, then retry.";
+          case "REPOSITORY_PERSISTENCE" ->
+              "The repository may exist remotely; reconcile the run repository URL before"
+                  + " retrying.";
+          case "DEFAULT_BRANCH_RESOLUTION" ->
+              "Check repository access and default-branch configuration, then retry.";
+          case "GIT_PUSH" ->
+              "Check GitHub Git credentials, remote branch policy, and connectivity, then retry.";
+          case "PR_CREATION" ->
+              "Check GitHub pull-request permissions and branch policy, then retry.";
+          case "PR_STATE_PERSISTENCE", "PR_RECORD_PERSISTENCE" ->
+              "The pull request may already exist; refresh SCM state before retrying publication.";
+          case "REVIEWER_REQUEST" ->
+              "The pull request exists; correct reviewer access or project reviewer settings.";
+          case "REPOSITORY_DESCRIPTION" ->
+              "The Git publication may have succeeded; retry repository metadata synchronization.";
+          default -> "Reconnect or select the GitHub repository, then retry.";
+        };
+    return PushResult.failed(
+        code,
+        blockingGate,
+        "GitHub publication failed during " + blockingGate,
+        "GITHUB",
+        remediation);
   }
 
   private static String safeMessage(Exception e) {
@@ -1031,7 +1216,12 @@ public class ScmPushService {
       return PushResult.pushed("GITHUB", representativePr, "GitHub pull requests created");
     }
     if (failed > 0) {
-      return PushResult.failed("No GitHub pull requests were created", "GITHUB");
+      return PushResult.failed(
+          "SCM_MULTI_REPO_PUBLICATION_FAILED",
+          "MULTI_REPO_PUBLICATION",
+          "No GitHub pull requests were created",
+          "GITHUB",
+          "Review each repository failure, correct credentials or branch policy, then retry.");
     }
     return PushResult.noChanges(
         "GITHUB", "No repository changes to push", attempted == 0 ? clean : attempted);

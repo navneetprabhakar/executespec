@@ -240,10 +240,44 @@ class RunLifecycleServiceContinuationApprovalTest {
                     .workspaceGeneration("b".repeat(64))
                     .status("COMPLETE")
                     .build()));
+    // The real correction admission persists before returning. Mirror that contract so the
+    // lifecycle's non-regression comparison reads the fresh report instead of manufacturing a
+    // null post-correction delta from a bare Mockito default.
+    when(correctionValidationAdmission.regenerateAndAssert(
+            any(), any(), any(), any(), any(), any()))
+        .thenAnswer(
+            invocation -> {
+              ValidationReport fresh = correctionValidationReport();
+              when(validationReportRepository.findByRunId(RUN_ID)).thenReturn(Optional.of(fresh));
+              return fresh;
+            });
     when(correctionWorkspaceTransaction.accept(correctionCheckpoint))
         .thenReturn(
             new CorrectionWorkspaceTransaction.Accepted(
                 correctionCheckpoint.generation(), "b".repeat(64)));
+  }
+
+  private static ValidationReport correctionValidationReport() {
+    return ValidationReport.builder()
+        .id("correction-validation-1")
+        .runId(RUN_ID)
+        .workspaceGeneration("b".repeat(64))
+        .status("COMPLETE")
+        .pipelineResult(com.navneet.executespec.report.entity.PipelineResult.PASSED)
+        .finalBuildPassed(true)
+        .buildExitCode(0)
+        .testsPassed(5)
+        .testsTotal(5)
+        .testExecutionVerified(true)
+        .testEvidenceScope("WORKSPACE_TEST_SUITE")
+        .testCommand("./mvnw test")
+        .testWorkingDirectory("/tmp/executespec-test-repository")
+        .testExitCode(0)
+        .workflowConfigEvidenceJson("{\"status\":\"NOT_APPLICABLE\",\"files\":[],\"reason\":null}")
+        .reviewerVerdict("CLEAN")
+        .verifiedScore(75)
+        .rubricScore(75)
+        .build();
   }
 
   @Test
