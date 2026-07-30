@@ -177,6 +177,13 @@ execution:
       enabled: true
     max-reruns-per-task: 1
 
+worker:
+  # Optional JVM-local safety stops. They are best-effort because RunCostTracker is in memory and
+  # restart recovery does not hydrate it from durable run_step_usage yet. Terminal-Bench is exempt
+  # from these defaults; an explicit request cap still applies. -1 disables each stop.
+  best-effort-max-task-total-tokens: -1
+  best-effort-max-task-cost-usd: -1
+
 terminal-bench:
   # Internal TB 2.1 runs use Harbor agent timeout 1500s. Keep the ExecuteSpec worker
   # below that outer cap while leaving a 90s buffer for the terminal finalizer.

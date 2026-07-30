@@ -139,6 +139,12 @@ public class WorkerAgent {
   @Value("${execution.continuation.parallel-read-tools-enabled:true}")
   private boolean parallelReadToolsEnabled = true;
 
+  @Value("${worker.best-effort-max-task-total-tokens:-1}")
+  private long bestEffortMaxTaskTotalTokens = -1L;
+
+  @Value("${worker.best-effort-max-task-cost-usd:-1}")
+  private double bestEffortMaxTaskCostUsd = -1.0;
+
   /**
    * Bug #2 fix — check budget every N iterations, not just at task boundaries.
    *
@@ -301,6 +307,14 @@ public class WorkerAgent {
   public WorkerResult run(
       WorkerTaskRequest req, com.navneet.executespec.context.SavedContext resumeFrom) {
     long start = System.currentTimeMillis();
+    WorkerTaskRequest effectiveRequest =
+        WorkerTaskRequestControls.withRuntimeDefaults(
+            req, start, bestEffortMaxTaskTotalTokens, bestEffortMaxTaskCostUsd);
+    return runInternal(effectiveRequest, resumeFrom, start);
+  }
+
+  private WorkerResult runInternal(
+      WorkerTaskRequest req, com.navneet.executespec.context.SavedContext resumeFrom, long start) {
     int maxIter =
         (req.maxIterations() == null || req.maxIterations() <= 0)
             ? DEFAULT_MAX_ITER
@@ -388,6 +402,8 @@ public class WorkerAgent {
     // v2: consecutive failures per signature (a success on the same signature clears its streak).
     final WorkerFailureStreaks failureStreaks = new WorkerFailureStreaks();
     final WorkerMutationChurnGuard mutationChurn = new WorkerMutationChurnGuard();
+    final WorkerMutationEpochWatchdog mutationEpochWatchdog =
+        terminalTaskMode ? null : new WorkerMutationEpochWatchdog();
     int textOnlyForcedRetries = 0;
     boolean forceToolChoiceNextCall = false;
     // task 9 — context-overflow recovery attempts used (compactNow, then hard-trim, then ERROR).
@@ -489,11 +505,7 @@ public class WorkerAgent {
     // itself if cost blows past it mid-task. Null cap = no enforcement.
     final String runId = req.context().runId();
     Optional<PipelineRun> runRow = pipelineRunRepository.findById(runId);
-    // RR-1562 — the effective ceiling is the TIGHTER of the run-row hard cap and the per-solve
-    // EngineBudget.dollarCap (each unbounded when null); previously only the run-row cap was read.
-    final Double hardCapUsd =
-        WorkerAgentSupport.minNullableCap(
-            runRow.map(r -> r.getHardCapUsd()).orElse(null), req.dollarCap());
+    final Double hardCapUsd = runRow.map(PipelineRun::getHardCapUsd).orElse(null);
     final boolean patchNoEditNudgeOn =
         !terminalTaskMode && runRow.map(r -> RunMode.isPatch(r.getRunMode())).orElse(false);
 
@@ -570,61 +582,27 @@ public class WorkerAgent {
             wallClockMillisCap,
             totalWriteCalls);
         recordTerminal(WorkerResult.Outcome.WALL_CLOCK_EXCEEDED, req, iter);
-        return WorkerResult.builder()
-            .outcome(WorkerResult.Outcome.WALL_CLOCK_EXCEEDED)
-            .iterations(iter)
-            .toolCallsDispatched(toolsDispatched)
-            .finalAssistantText(lastText)
-            .repeatedAssistantTextCount(maxRepeatedAssistantTextCount)
-            .toolCallLog(toolLog)
-            .totalLatencyMs(System.currentTimeMillis() - start)
-            .build();
+        return WorkerAgentSupport.wallClockExceededResult(
+            iter, toolsDispatched, lastText, maxRepeatedAssistantTextCount, toolLog, start);
       }
-      // RR-255 (2026-07-20) — the hard cap is now evaluated on EVERY iteration, before the next
-      // provider call is issued. The previous `iter == 1 || iter % 3 == 0` sampling meant the
-      // worker could issue up to two further full provider calls after the authorized ceiling had
-      // already been crossed, and the over-cap salvage call below deliberately spent one or two
-      // more. A cap the code knowingly spends past is not a cap.
-      if (hardCapUsd != null && hardCapUsd > 0) {
-        double spent = costTracker.snapshot(runId).costUsd();
-        if (spent >= hardCapUsd) {
-          log.warn(
-              "WorkerAgent BUDGET_EXCEEDED run={} task={} iter={} spent=${} cap=${} totalWrites={}",
-              runId,
-              req.context().taskId(),
-              iter,
-              String.format("%.4f", spent),
-              String.format("%.4f", hardCapUsd),
-              totalWriteCalls);
-          // RR-255 — the Lever-B salvage call that used to fire here is REMOVED. It made one (and,
-          // through forced-tool-choice fallback, potentially two) additional physical provider
-          // attempts AFTER the code had observed that spend authorization was exhausted, and the
-          // source called that "$0.10-0.50 acceptable" over-cap spend. Converting an empty patch
-          // into a best-guess patch is a quality lever, not a spending authorization; a run that
-          // previously salvaged past the cap now terminates BUDGET_EXCEEDED with whatever it has.
-          // The iteration-limit salvage path is untouched, because that path has not exhausted its
-          // dollar budget.
-          recordTerminal(WorkerResult.Outcome.BUDGET_EXCEEDED, req, iter);
-          // P3.1 (GA-readiness, 2026-05-06) — return outcome=BUDGET_EXCEEDED so the executor
-          // sees the budget signal directly. Previously this path called errorResult(...) which
-          // hardcoded Outcome.ERROR; metrics recorded BUDGET_EXCEEDED but the WorkerResult
-          // outcome read as ERROR — so SequentialExecutor's budget-aware branches couldn't
-          // distinguish a router crash from a cost-cap stop.
-          return WorkerResult.builder()
-              .outcome(WorkerResult.Outcome.BUDGET_EXCEEDED)
-              .iterations(iter)
-              .toolCallsDispatched(toolsDispatched)
-              .finalAssistantText(
-                  "hard cap $"
-                      + String.format("%.2f", hardCapUsd)
-                      + " exceeded mid-task (spent $"
-                      + String.format("%.2f", spent)
-                      + ")")
-              .repeatedAssistantTextCount(maxRepeatedAssistantTextCount)
-              .toolCallLog(toolLog)
-              .totalLatencyMs(System.currentTimeMillis() - start)
-              .build();
-        }
+      WorkerLiveBudgetGuard.Violation budgetViolation =
+          WorkerLiveBudgetGuard.evaluate(
+              req, hardCapUsd, costTracker, req.workerStartedAtEpochMs());
+      if (budgetViolation != null) {
+        log.warn(
+            "WorkerAgent BUDGET_EXCEEDED run={} task={} iter={} reason={}",
+            runId,
+            req.context().taskId(),
+            iter,
+            budgetViolation.message());
+        recordTerminal(WorkerResult.Outcome.BUDGET_EXCEEDED, req, iter);
+        return WorkerAgentSupport.budgetExceededResult(
+            iter,
+            toolsDispatched,
+            budgetViolation.message(),
+            maxRepeatedAssistantTextCount,
+            toolLog,
+            start);
       }
 
       List<org.springframework.ai.tool.ToolCallback> workerTools = boundWorkerTools(req);
@@ -1318,23 +1296,23 @@ public class WorkerAgent {
         String envelope =
             parallelReads.containsKey(safeId(tc.id()))
                 ? parallelReads.get(safeId(tc.id()))
-                : dispatchOne(tc, req, isImmediatelyPriorToolCall);
+                : dispatchOne(tc, req, WorkerDispatchMode.normal(isImmediatelyPriorToolCall));
         if (isWriteTool(tc.name()) && isOkEnvelope(envelope)) {
           successfulEditsThisIter++;
           String mutationPath = mutationTarget(tc.name(), tc.arguments());
           mutationChurn.recordMutation(mutationPath);
+          if (mutationEpochWatchdog != null) mutationEpochWatchdog.recordMutation();
           completionPolicy.recordWrite(mutationPath);
         }
-        // RR-259 — a progress-class call counts only when it succeeded.
-        // A build tool reports a transport-success Ok envelope even when the child exits non-zero.
-        // Treating that as progress lets a reviewer reset the watchdog forever by repeating the
-        // same red build. Only an exit-zero build is progress; writes/moves/deletes keep their
-        // normal successful-envelope semantics. Terminal shell progress remains separately scoped
-        // by WorkerToolPolicy.
+        WorkerMutationEpochWatchdog.Observation epochObservation =
+            mutationEpochWatchdog == null
+                ? new WorkerMutationEpochWatchdog.Observation(false, true)
+                : mutationEpochWatchdog.observe(tc.name(), envelope, callSignature(tc));
         if (isProgressTool(tc.name(), terminalTaskMode)
             && isOkEnvelope(envelope)
             && !isFailureEnvelope(envelope)
-            && (!isBuildTool(tc.name()) || isSuccessfulBuildEnvelope(envelope))) {
+            && (!isBuildTool(tc.name()) || isSuccessfulBuildEnvelope(envelope))
+            && epochObservation.progressAllowed()) {
           successfulProgressThisIter = true;
         }
         if (terminalVerifierCommand(tc.name(), commandFromArgs(tc.arguments()))
@@ -1402,6 +1380,9 @@ public class WorkerAgent {
           boolean novel = seenCallSignatures.add(callSig);
           if (novel
               && !isFailureEnvelope(envelope)
+              && !(epochObservation.verificationTool()
+                  && mutationEpochWatchdog != null
+                  && mutationEpochWatchdog.hasMutationEpoch())
               && (totalWriteCalls == 0 || !isShellTool(tc.name()))) {
             successfulNoveltyThisIter = true;
           }
@@ -1435,6 +1416,13 @@ public class WorkerAgent {
             .toolCallLog(toolLog)
             .totalLatencyMs(System.currentTimeMillis() - start)
             .build();
+      }
+
+      if (mutationEpochWatchdog != null
+          && mutationEpochWatchdog.forceAfterIteration(successfulEditsThisIter > 0, history)) {
+        recordTerminal(WorkerResult.Outcome.COMPLETED_BY_STAGNATION, req, iter);
+        return WorkerAgentSupport.mutationEpochStoppedResult(
+            iter, toolsDispatched, maxRepeatedAssistantTextCount, toolLog, start);
       }
 
       // Progress signal (RL-2026-05-005)
@@ -1787,6 +1775,11 @@ public class WorkerAgent {
       long start,
       List<ToolCallback> tools,
       String toolChoice) {
+    if (WorkerLiveBudgetGuard.taskViolation(req, costTracker, req.workerStartedAtEpochMs())
+        != null) {
+      log.info("WorkerAgent SALVAGE refused: live task budget exhausted");
+      return null;
+    }
     java.util.OptionalInt callTimeout = deadlineTimeoutSeconds(req);
     if (callTimeout.isEmpty()) {
       log.info("WorkerAgent SALVAGE refused: absolute deadline shutdown reserve reached");
@@ -1849,7 +1842,7 @@ public class WorkerAgent {
       if (isWriteTool(tc.name())) {
         // Salvage path only ever dispatches write/edit (both in ToolOutputCompactor.SKIP_TOOLS),
         // so the isLast flag is don't-care; pass false for symmetry with the main loop.
-        String env = dispatchOne(tc, req, false);
+        String env = dispatchOne(tc, req, WorkerDispatchMode.NORMAL);
         toolLog.add(
             "SALVAGE "
                 + tc.name()
@@ -1972,6 +1965,11 @@ public class WorkerAgent {
       int iter,
       List<ToolCallback> tools,
       String toolChoice) {
+    if (WorkerLiveBudgetGuard.finalizerViolation(req, costTracker, req.workerStartedAtEpochMs())
+        != null) {
+      log.info("WorkerAgent TERMINAL_FINALIZER refused: live task budget exhausted");
+      return null;
+    }
     java.util.OptionalInt callTimeout = deadlineTimeoutSeconds(req);
     if (callTimeout.isEmpty()) {
       log.info("WorkerAgent TERMINAL_FINALIZER refused: shutdown reserve reached");
@@ -2046,7 +2044,7 @@ public class WorkerAgent {
             .build();
       }
       if (isWriteTool(tc.name()) || isShellTool(tc.name())) {
-        String env = dispatchOne(tc, req, false);
+        String env = dispatchOne(tc, req, WorkerDispatchMode.FINALIZER);
         boolean ok = isOkEnvelope(env);
         toolLog.add("TERMINAL_FINALIZER " + tc.name() + " -> " + (ok ? "OK" : "ERR"));
         if (ok) {
@@ -2207,8 +2205,8 @@ public class WorkerAgent {
     try {
       for (int i = 0; i < calls.size(); i++) {
         AssistantMessage.ToolCall tc = calls.get(i);
-        boolean isLast = (i == last);
-        exec.submit(() -> out.put(safeId(tc.id()), dispatchOne(tc, req, isLast)));
+        WorkerDispatchMode mode = WorkerDispatchMode.normal(i == last);
+        exec.submit(() -> out.put(safeId(tc.id()), dispatchOne(tc, req, mode)));
       }
       exec.shutdown();
       if (!exec.awaitTermination(120, java.util.concurrent.TimeUnit.SECONDS)) {
@@ -2253,7 +2251,7 @@ public class WorkerAgent {
     return isOkEnvelope(envelope) ? "ok" : "err";
   }
 
-  private static boolean isOkEnvelope(String envelope) {
+  static boolean isOkEnvelope(String envelope) {
     return envelope != null && envelope.startsWith("{\"ok\":true");
   }
 
@@ -2292,8 +2290,11 @@ public class WorkerAgent {
         .build();
   }
 
-  private String dispatchOne(
-      AssistantMessage.ToolCall tc, WorkerTaskRequest req, boolean isImmediatelyPriorToolCall) {
+  String dispatchOne(AssistantMessage.ToolCall tc, WorkerTaskRequest req, WorkerDispatchMode mode) {
+    // Finalizer mode relaxes only wall-clock expiry; cost and token ceilings remain enforced.
+    String budgetViolation =
+        WorkerLiveBudgetGuard.guard(req, costTracker, req.workerStartedAtEpochMs(), mode);
+    if (budgetViolation != null) return errEnvelope("BUDGET_EXCEEDED", budgetViolation);
     // Belt-and-suspenders: even if the model somehow tries to invoke a denied
     // tool by name (e.g. cached tool list, hand-crafted payload), refuse at
     // dispatch time with a clear error envelope so the model can self-correct.
@@ -2350,7 +2351,7 @@ public class WorkerAgent {
           // to the pre-extraction path until the flag is flipped). Error envelopes are short by
           // construction; never compacted.
         case ToolResult.Ok ok ->
-            okEnvelope(maybeCompact(tc.name(), ok.content(), isImmediatelyPriorToolCall, req));
+            okEnvelope(maybeCompact(tc.name(), ok.content(), mode.immediatelyPrior(), req));
         case ToolResult.Err err -> errEnvelope(err.kind().name(), err.message());
       };
     } catch (Exception unexpected) {
@@ -2369,6 +2370,9 @@ public class WorkerAgent {
    * in common space, not a TB fork. Returns the same {@code {ok,content}} envelope shape.
    */
   private String dispatchToolDirect(WorkerTaskRequest req, String toolName, String argsJson) {
+    String budgetViolation =
+        WorkerLiveBudgetGuard.taskViolation(req, costTracker, req.workerStartedAtEpochMs());
+    if (budgetViolation != null) return errEnvelope("BUDGET_EXCEEDED", budgetViolation);
     ExecutionContext ctx = req.context();
     if (toolRegistry.isRemoteRun(ctx)) {
       // RR-591 — pass the task's IMMUTABLE absolute deadline (the no-deadline overload let a remote
@@ -3174,6 +3178,8 @@ own line and nothing else. Otherwise list ONLY the real gaps, most important fir
    */
   private String runCriticPass(WorkerTaskRequest req, List<String> paths) {
     try {
+      if (WorkerLiveBudgetGuard.taskViolation(req, costTracker, req.workerStartedAtEpochMs())
+          != null) return null;
       java.util.OptionalInt callTimeout = deadlineTimeoutSeconds(req);
       if (callTimeout.isEmpty()) return null;
       String deliverable =
@@ -3182,6 +3188,8 @@ own line and nothing else. Otherwise list ONLY the real gaps, most important fir
               objectMapper,
               toolRegistry.isRemoteRun(req.context()),
               paths);
+      if (WorkerLiveBudgetGuard.taskViolation(req, costTracker, req.workerStartedAtEpochMs())
+          != null) return null;
       String userMsg =
           PromptTrustBoundary.wrap("CRITIC_TASK", req.userPrompt())
               + "\n\n"
