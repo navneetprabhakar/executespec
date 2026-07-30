@@ -47,6 +47,28 @@ class ProjectChatToolLoopGuardTest {
     assertTrue(ProjectChatService.registerToolCallsAndDetectRepeat(counts, List.of(first)));
   }
 
+  @Test
+  void boundedRepositorySourceReadsAreRepeatGuardedByExactRange() {
+    Map<String, Integer> counts = new HashMap<>();
+    AssistantMessage.ToolCall firstRange =
+        new AssistantMessage.ToolCall(
+            "1",
+            "function",
+            "read_repo_file_range",
+            "{\"filePath\":\"src/App.java\",\"startLine\":20,\"endLine\":40}");
+    AssistantMessage.ToolCall differentRange =
+        new AssistantMessage.ToolCall(
+            "2",
+            "function",
+            "read_repo_file_range",
+            "{\"filePath\":\"src/App.java\",\"startLine\":41,\"endLine\":60}");
+
+    assertFalse(ProjectChatService.registerToolCallsAndDetectRepeat(counts, List.of(firstRange)));
+    assertFalse(
+        ProjectChatService.registerToolCallsAndDetectRepeat(counts, List.of(differentRange)));
+    assertTrue(ProjectChatService.registerToolCallsAndDetectRepeat(counts, List.of(firstRange)));
+  }
+
   private static ToolCallback tool(String name) {
     ToolDefinition definition =
         DefaultToolDefinition.builder()

@@ -21,7 +21,9 @@ turns separately from runs.
   proposal or rejection until the client performs an explicit confirmed action. When WEB streaming
   calls `SpecChatService` with the read-only allow-list, its system prompt must not advertise legacy
   direct run-control tools; web run creation stays on the structured `create_cloud_run` proposal and
-  confirmation path.
+  confirmation path. The allow-list includes both `search_repo_files` and its bounded,
+  revision-pinned `read_repo_file_range` companion; filtering the latter leaves the Web Agent able
+  to find a line but unable to inspect the surrounding method or signature.
 - `create_cloud_run` is emitted only for `CODE_RUN_REQUIRED` decisions whose policy allows the Run
   API. Missing project/repository context and read-only permission mode return explanation-only
   `IMPLEMENTATION_PROPOSAL` decisions with no confirmation card. That blocked state is now a typed
