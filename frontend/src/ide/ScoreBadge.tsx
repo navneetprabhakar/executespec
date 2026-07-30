@@ -10,7 +10,15 @@ export type ScoreBadgeProps = {
    * as a green quality claim. Run-detail callers can pass the fetched ledger
    * once it is available.
    */
-  verificationLedger?: readonly {source?: string; confidence?: string}[] | null;
+  verificationLedger?:
+    | readonly {
+        id?: string;
+        source?: string;
+        confidence?: string;
+        summary?: string;
+        artifact?: string;
+      }[]
+    | null;
   compact?: boolean;
 };
 
@@ -25,6 +33,15 @@ export function scoreTrustLabel(
   return 'review evidence';
 }
 
+export function scoreZeroCause(
+  score: number,
+  verificationLedger?: readonly {id?: string; summary?: string; artifact?: string}[] | null,
+): string | null {
+  if (score !== 0) return null;
+  const cause = verificationLedger?.find((item) => item.id === 'score-zero-cause');
+  return cause?.summary?.trim() || null;
+}
+
 /**
  * Shared score rendering for compact run lists. A score without its ledger is
  * an internal summary, not independently verified correctness; keep the
@@ -33,14 +50,19 @@ export function scoreTrustLabel(
 export function ScoreBadge({score, verificationLedger, compact = false}: ScoreBadgeProps) {
   const hasLedger = !!verificationLedger?.length;
   const trust = scoreTrustLabel(verificationLedger);
+  const zeroCause = scoreZeroCause(score, verificationLedger);
   const label = hasLedger
-    ? `${score} / 100`
+    ? zeroCause && !compact
+      ? `${score} / 100 · ${zeroCause}`
+      : `${score} / 100`
     : compact
       ? `${score} · unverified`
       : `${score} / 100 · unverified`;
-  const title = hasLedger
-    ? 'Internal score; open the result Evidence tab to inspect the verification ledger.'
-    : 'Internal score only. Verification evidence is not loaded in this run list.';
+  const title = zeroCause
+    ? `Internal score is zero because: ${zeroCause}`
+    : hasLedger
+      ? 'Internal score; open the result Evidence tab to inspect the verification ledger.'
+      : 'Internal score only. Verification evidence is not loaded in this run list.';
   return (
     <span title={title} aria-label={`${score} out of 100, ${trust}`}>
       <IdeBadge kind={hasLedger ? scoreKind(score) : 'warn'}>{label}</IdeBadge>

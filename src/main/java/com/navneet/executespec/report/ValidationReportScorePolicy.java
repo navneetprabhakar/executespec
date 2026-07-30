@@ -20,8 +20,13 @@ final class ValidationReportScorePolicy {
   static int capForAdmittedSpecGaps(
       int score, int specAdherenceScore, int incompleteRequirements, int unknownRequirements) {
     int capped = Math.max(0, Math.min(100, score));
+    // AccuracyReport is LLM-produced over a bounded evidence sample. Its numeric assessment may
+    // lower confidence, but it is not a deterministic gate and therefore must not turn a positive
+    // evidence-backed score into the reserved value zero. Preserve an already-deterministic zero;
+    // otherwise floor the advisory cap at one.
     if (incompleteRequirements > 0 || unknownRequirements > 0) {
-      capped = Math.min(capped, Math.max(0, Math.min(100, specAdherenceScore)));
+      int advisoryCap = Math.max(1, Math.min(100, specAdherenceScore));
+      capped = Math.min(capped, advisoryCap);
     }
     if (unknownRequirements > 0) {
       capped = Math.min(capped, UNVERIFIED_REQUIREMENTS_SCORE_CAP);

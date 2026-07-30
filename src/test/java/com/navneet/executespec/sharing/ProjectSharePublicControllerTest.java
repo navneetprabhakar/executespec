@@ -156,6 +156,38 @@ class ProjectSharePublicControllerTest {
   }
 
   @Test
+  void shared_validation_report_rejects_stale_evidence() {
+    ProjectShareLink link =
+        ProjectShareLink.builder()
+            .id(UUID.randomUUID())
+            .projectId("p-1")
+            .token("tok-stale-report")
+            .surface(ProjectShareLink.Surface.VALIDATION_REPORT)
+            .scopeId("run-stale")
+            .createdByUserId("u-1")
+            .createdAt(Instant.now())
+            .build();
+    when(linkService.resolveActive(eq("tok-stale-report"), any())).thenReturn(link);
+    when(reportRepo.findByRunId("run-stale"))
+        .thenReturn(
+            Optional.of(
+                ValidationReport.builder()
+                    .id("vr-stale")
+                    .runId("run-stale")
+                    .status("STALE")
+                    .pipelineResult(PipelineResult.PASSED)
+                    .verifiedScore(100)
+                    .build()));
+
+    ResponseStatusException error =
+        assertThrows(
+            ResponseStatusException.class,
+            () -> controller.sharedReport("tok-stale-report", request));
+
+    assertEquals(404, error.getStatusCode().value());
+  }
+
+  @Test
   void shared_project_returns_public_project_snapshot_and_records_view() {
     Instant created = Instant.parse("2026-06-01T10:15:30Z");
     Instant updated = Instant.parse("2026-06-02T10:15:30Z");

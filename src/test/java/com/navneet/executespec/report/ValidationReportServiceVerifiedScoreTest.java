@@ -75,6 +75,22 @@ class ValidationReportServiceVerifiedScoreTest {
   }
 
   @Test
+  void missingBuildEvidenceIsUnknownRatherThanAZeroGate() {
+    // Missing build evidence is neutral/unknown on the legacy rollback formula. It can damp
+    // confidence, but it is not the explicit deterministic false required for score zero.
+    int score = svc.computeVerifiedScore(null, 10, 10, "CLEAN", 0, 100);
+    assertEquals(50, score);
+  }
+
+  @Test
+  void llmOnlyEndpointZeroCannotCreateHeadlineZero() {
+    // Endpoint coverage is LLM-assisted. A zero assessment may reduce the legacy product but must
+    // not claim the reserved deterministic zero when build and concrete tests passed.
+    int score = svc.computeVerifiedScore(true, 10, 10, "UNRESOLVED_ISSUES", 0, 0);
+    assertEquals(1, score);
+  }
+
+  @Test
   void build_failure_collapses_to_zero_even_with_passing_tests_and_endpoints() {
     // 0 * 1 * 1 * 1 * 1 → 0. No combination of other-axis perfection rescues a build fail.
     int score = svc.computeVerifiedScore(false, 100, 100, "CLEAN", 0, 100);

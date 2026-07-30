@@ -79,6 +79,8 @@ import {
   modelRankingLabel,
   num,
   latestContinuationAction,
+  correctionEvidenceHistory,
+  reportPipelineLabel,
   publicationTrustFacts,
   runArtifactActionAvailability,
   friendlyAiFailureMessage,
@@ -100,6 +102,7 @@ import {
   timelineTiming,
   testResultSummary,
   type Tab,
+  type CorrectionEvidenceAction,
   toLines,
   usd,
   verdictFor,
@@ -110,6 +113,141 @@ function Kv({k, v}: {k: string; v: React.ReactNode}) {
     <div className='ide-kv'>
       <span>{k}</span>
       <span>{v}</span>
+    </div>
+  );
+}
+
+function correctionSnapshotValue(
+  snapshot: NonNullable<CorrectionEvidenceAction['validationDelta']>['before'],
+  key: 'build' | 'tests' | 'workflow' | 'reviewer' | 'contracts' | 'score',
+): string {
+  if (!snapshot) return 'unavailable';
+  if (key === 'build') return snapshot.build?.verdict || 'UNKNOWN';
+  if (key === 'tests') {
+    const tests = snapshot.tests;
+    return tests
+      ? `${tests.verdict || 'UNKNOWN'}${tests.total != null ? ` · ${tests.passed ?? 0}/${tests.total}` : ''}${
+          tests.executionVerified === true ? ' · execution verified' : ''
+        }`
+      : 'UNKNOWN';
+  }
+  if (key === 'workflow') return snapshot.workflow?.status || 'UNKNOWN';
+  if (key === 'reviewer') return snapshot.reviewer?.verdict || 'UNKNOWN';
+  if (key === 'contracts') return snapshot.contracts?.status || 'UNKNOWN';
+  return snapshot.score?.verifiedScore == null
+    ? 'unavailable'
+    : `${snapshot.score.verifiedScore}/100`;
+}
+
+function CorrectionEvidenceCard({
+  action,
+  taskTitle,
+  ordinal,
+  total,
+}: {
+  action: CorrectionEvidenceAction;
+  taskTitle: string;
+  ordinal: number;
+  total: number;
+}) {
+  const status = (action.status || action.code || 'RECORDED').toUpperCase();
+  const failed = ['REJECTED', 'ROLLED_BACK', 'FAILED'].includes(status);
+  const delta = action.validationDelta;
+  const rows = [
+    ['Build', 'build'],
+    ['Tests', 'tests'],
+    ['Workflow/config', 'workflow'],
+    ['Protected contracts', 'contracts'],
+    ['Reviewer', 'reviewer'],
+    ['Verified score', 'score'],
+  ] as const;
+  const patch = action.unifiedPatch?.trim();
+  const patchMeta = action.patchMetadata;
+  return (
+    <div className='ide-card' style={{marginTop: 14}} data-testid='correction-evidence-card'>
+      <div style={{display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap'}}>
+        <div className='ide-h2' style={{margin: 0}}>
+          Correction transaction {ordinal}/{total}
+        </div>
+        <IdeBadge kind={failed ? 'bad' : status === 'ACCEPTED' ? 'ok' : 'warn'}>{status}</IdeBadge>
+        {action.code && <span className='ide-mono'>{action.code}</span>}
+      </div>
+      <div style={{marginTop: 6, color: 'var(--ide-fg-muted)', fontSize: 12}}>
+        Durable task/action order · {taskTitle || 'Untitled task'}
+      </div>
+      {action.reason && (
+        <p style={{margin: '10px 0', color: 'var(--ide-fg-muted)'}}>{action.reason}</p>
+      )}
+      <Kv
+        k='Checkpoint'
+        v={`${action.beforeWorkspaceGeneration?.slice(0, 12) || 'unknown'} → ${
+          action.afterWorkspaceGeneration?.slice(0, 12) || 'unknown'
+        }`}
+      />
+      <Kv
+        k='Invalidated evidence'
+        v={
+          action.evidenceInvalidated === true
+            ? 'Yes — prior evidence was made stale'
+            : 'Not recorded'
+        }
+      />
+      <Kv
+        k='Regenerated validation'
+        v={action.validationRegenerated === true ? 'Yes' : 'No fresh validation report recorded'}
+      />
+      <Kv
+        k='Changed files'
+        v={action.changedFiles?.length ? action.changedFiles.join(', ') : 'Unavailable'}
+      />
+      {delta && (
+        <div style={{marginTop: 14}}>
+          <div style={{fontWeight: 600, marginBottom: 8}}>Validation delta</div>
+          <div style={{display: 'grid', gap: 6}}>
+            {rows.map(([label, key]) => (
+              <div
+                key={key}
+                style={{display: 'grid', gridTemplateColumns: '150px 1fr', gap: 10, fontSize: 12}}
+              >
+                <span style={{color: 'var(--ide-fg-muted)'}}>{label}</span>
+                <span className='ide-mono'>
+                  {correctionSnapshotValue(delta.before, key)} →{' '}
+                  {correctionSnapshotValue(delta.after, key)}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      <details style={{marginTop: 14}}>
+        <summary style={{cursor: 'pointer', fontWeight: 600}}>
+          Correction diff{action.diffDigest ? ` · ${action.diffDigest.slice(0, 12)}` : ''}
+        </summary>
+        <div style={{margin: '8px 0', color: 'var(--ide-fg-muted)', fontSize: 12}}>
+          {patchMeta
+            ? `${patchMeta.capturedBytes ?? 0}/${patchMeta.fullBytes ?? 0} bytes captured${
+                patchMeta.truncated ? ' · truncated' : ''
+              }${patchMeta.redacted ? ' · sensitive paths redacted' : ''}`
+            : 'Patch metadata unavailable'}
+        </div>
+        {patch ? (
+          <pre
+            className='ide-mono'
+            style={{
+              whiteSpace: 'pre-wrap',
+              overflowWrap: 'anywhere',
+              maxHeight: 420,
+              overflow: 'auto',
+            }}
+          >
+            {patch}
+          </pre>
+        ) : (
+          <div style={{color: 'var(--ide-fg-muted)', fontSize: 12}}>
+            Patch content unavailable for this historical correction.
+          </div>
+        )}
+      </details>
     </div>
   );
 }
@@ -662,15 +800,18 @@ export default function IdeRunResult() {
       prUrl?: string;
       message?: string;
       code?: string;
+      blockingGate?: string | null;
       publicationEligible?: boolean;
       retryable?: boolean;
       retryGuidance?: string;
+      remediation?: string | null;
     };
     const status = (res.status || '').toUpperCase();
     const eligibility = res.publicationEligible === false ? 'Publication ineligible' : undefined;
     const retry =
       res.retryable === false && status === 'FAILED' ? 'Direct retry disabled' : undefined;
-    const diagnostic = [eligibility, retry, res.code, res.message, res.retryGuidance]
+    const guidance = res.remediation || res.retryGuidance;
+    const diagnostic = [eligibility, retry, res.blockingGate, res.code, res.message, guidance]
       .filter(Boolean)
       .join(' · ');
     switch (status) {
@@ -1069,6 +1210,7 @@ export default function IdeRunResult() {
         : 'Open the logs and evidence to identify the failing stage.');
   const durableFailureEvidence = terminalFailureEvidence(run);
   const trustFacts = publicationTrustFacts(run, publication);
+  const correctionHistory = correctionEvidenceHistory(run);
   // C2 — tab title carries the run name once loaded.
   useDocumentTitle(run?.runTitle || (run ? `R-${runId.slice(0, 6)}` : null));
 
@@ -1335,7 +1477,7 @@ export default function IdeRunResult() {
                       )
                     }
                   />
-                  <Kv k='Pipeline' v={report?.pipelineResult ?? '—'} />
+                  <Kv k='Pipeline' v={reportPipelineLabel(report)} />
                   {fileCounts.explanation && (
                     <div
                       className='ide-card'
@@ -2685,6 +2827,15 @@ export default function IdeRunResult() {
                 </div>
               ))}
             </div>
+            {correctionHistory.map((entry, index) => (
+              <CorrectionEvidenceCard
+                key={`${entry.taskId}:${entry.actionIndex}`}
+                action={entry.action}
+                taskTitle={entry.taskTitle}
+                ordinal={index + 1}
+                total={correctionHistory.length}
+              />
+            ))}
             {publication && !publication.eligible && (
               <div className='ide-card' role='alert'>
                 <div style={{fontWeight: 600}}>{publication.reason}</div>
@@ -2719,7 +2870,7 @@ export default function IdeRunResult() {
             ) : (
               <>
                 <div className='ide-card'>
-                  <Kv k='Pipeline' v={report.pipelineResult} />
+                  <Kv k='Pipeline' v={reportPipelineLabel(report)} />
                   <Kv k='Files generated' v={report.filesGenerated} />
                   <Kv k='Build breakers' v={report.buildBreakers} />
                   <Kv k='Review failures' v={report.reviewFailures} />

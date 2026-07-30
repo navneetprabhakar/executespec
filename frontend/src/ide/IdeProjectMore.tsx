@@ -2139,7 +2139,10 @@ export function IdeProjectArchitecture() {
       {refreshJob && !refreshJob.terminal && (
         <div className='ide-muted' role='status' style={{marginTop: 8}}>
           Map refresh {refreshJob.status === 'QUEUED' ? 'is queued' : 'is running'} · job{' '}
-          {refreshJob.id.slice(0, 8)}
+          {refreshJob.id.slice(0, 8)} · attempts started {refreshJob.attemptCount ?? 0}
+          {refreshJob.deadlineAt
+            ? ` · deadline ${new Date(refreshJob.deadlineAt).toLocaleString()}`
+            : ''}
         </div>
       )}
       {refreshJob?.status === 'SUCCEEDED' && refreshJob.qualityStatus === 'WARNING' && (

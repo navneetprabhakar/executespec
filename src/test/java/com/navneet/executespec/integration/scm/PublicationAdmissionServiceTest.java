@@ -69,6 +69,23 @@ class PublicationAdmissionServiceTest {
   }
 
   @Test
+  void admitsFreshCorrectionWorkspaceSuiteWithExactCommandEvidence() {
+    ValidationReport report = greenReport();
+    report.setTestEvidenceScope("WORKSPACE_TEST_SUITE");
+    report.setTestCommand("./mvnw test");
+    report.setTestWorkingDirectory("/tmp/executespec-publication-test/" + RUN_ID);
+    report.setTestExitCode(0);
+    report.setTestOutput("Tests run: 2, Failures: 0, Errors: 0");
+    when(reports.findByRunId(RUN_ID)).thenReturn(Optional.of(report));
+
+    assertThat(service.evaluate(run()))
+        .extracting(
+            PublicationAdmissionService.Eligibility::eligible,
+            PublicationAdmissionService.Eligibility::code)
+        .containsExactly(true, "PUBLICATION_ELIGIBLE");
+  }
+
+  @Test
   void staleWorkspaceEvidenceIsBlocked() {
     when(generations.captureGeneration(Path.of("/tmp/executespec-publication-test", RUN_ID)))
         .thenReturn("b".repeat(64));

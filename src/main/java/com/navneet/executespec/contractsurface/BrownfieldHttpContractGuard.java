@@ -137,6 +137,10 @@ public class BrownfieldHttpContractGuard {
         runId, runWorkspace(runId), resolveDurableBreakingChangeAuthorization(runId));
   }
 
+  public void assertCompatibleIfPresent(String runId) {
+    if (hasBaseline(runId)) assertCompatible(runId);
+  }
+
   /**
    * Evaluates the current canonical workspace without updating the durable comparison snapshot.
    *

@@ -16,6 +16,7 @@ import java.util.Optional;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.auth.entity.AppUser;
+import com.navneet.executespec.auth.entity.Project;
 import com.navneet.executespec.auth.repository.AppUserRepository;
 import com.navneet.executespec.auth.repository.ProjectRepository;
 import com.navneet.executespec.config.AgentProperties;
@@ -224,5 +225,97 @@ class ScmPushServiceRepoModeTest {
 
     assertThat(result.status()).isEqualTo("NO_CONFIGURATION");
     verify(gitTool, never()).pushToRemote(anyString(), anyString(), anyString());
+  }
+
+  @Test
+  void repositoryCreationExceptionReturnsStructuredFailure() {
+    PipelineRun run = runWithMode("NEW");
+    run.setRepoUrl(null);
+    when(gitHubRepoService.createRepo(any(), any(), eq("private"), anyString(), any()))
+        .thenThrow(new IllegalStateException("provider detail must not escape"));
+
+    ScmPushService.PushResult result = service.push(run);
+
+    assertThat(result.code()).isEqualTo("SCM_REPOSITORY_CREATION_FAILED");
+    assertThat(result.blockingGate()).isEqualTo("REPOSITORY_CREATION");
+    assertThat(result.message()).doesNotContain("provider detail");
+    verify(gitTool, never()).pushToRemote(anyString(), anyString(), anyString());
+  }
+
+  @Test
+  void defaultBranchFailureAfterPushEnqueuesOrphanCleanupAndReturnsStructuredFailure() {
+    PipelineRun run = runWithMode("EXISTING");
+    when(gitTool.pushToBranch(
+            anyString(), anyString(), anyString(), anyString(), nullable(String.class)))
+        .thenReturn(GitToolResult.ok("pushed"));
+    when(gitHubRepoService.getDefaultBranch(anyString(), anyString()))
+        .thenThrow(new IllegalStateException("branch lookup failed"));
+
+    ScmPushService.PushResult result = service.push(run);
+
+    assertThat(result.code()).isEqualTo("SCM_DEFAULT_BRANCH_FAILED");
+    assertThat(result.blockingGate()).isEqualTo("DEFAULT_BRANCH_RESOLUTION");
+    verify(sideEffectOutbox)
+        .enqueueCompensation(anyString(), eq("COMPENSATE_GITHUB_BRANCH"), any(java.util.Map.class));
+  }
+
+  @Test
+  void pullRequestPersistenceFailureIsStructuredAndNeverDeletesEstablishedPullRequestBranch() {
+    PipelineRun run = preparedExistingRunWithCreatedPullRequest();
+    doThrow(new IllegalStateException("database unavailable"))
+        .when(pullRequestRecordService)
+        .recordCreated(anyString(), any(), anyString(), anyString(), anyString(), anyString());
+
+    ScmPushService.PushResult result = service.push(run);
+
+    assertThat(result.code()).isEqualTo("SCM_PR_PERSISTENCE_FAILED");
+    assertThat(result.blockingGate()).isEqualTo("PR_RECORD_PERSISTENCE");
+    verify(sideEffectOutbox, never())
+        .enqueueCompensation(anyString(), anyString(), any(java.util.Map.class));
+  }
+
+  @Test
+  void reviewerRequestFailureIsStructuredAndKeepsEstablishedPullRequestBranch() {
+    PipelineRun run = preparedExistingRunWithCreatedPullRequest();
+    run.setProjectId("project-1");
+    Project project = Project.builder().id("project-1").defaultReviewers("[\"alice\"]").build();
+    when(projectRepository.findById("project-1")).thenReturn(Optional.of(project));
+    doThrow(new IllegalStateException("reviewer rejected"))
+        .when(gitHubRepoService)
+        .requestReviewers(anyString(), eq(7), eq(List.of("alice")), anyString());
+
+    ScmPushService.PushResult result = service.push(run);
+
+    assertThat(result.code()).isEqualTo("SCM_REVIEWER_REQUEST_FAILED");
+    assertThat(result.blockingGate()).isEqualTo("REVIEWER_REQUEST");
+    verify(sideEffectOutbox, never())
+        .enqueueCompensation(anyString(), anyString(), any(java.util.Map.class));
+  }
+
+  @Test
+  void descriptionFailureIsStructuredAndKeepsEstablishedPullRequestBranch() {
+    PipelineRun run = preparedExistingRunWithCreatedPullRequest();
+    doThrow(new IllegalStateException("description rejected"))
+        .when(gitHubRepoService)
+        .updateRepoDescription(anyString(), any(), anyString());
+
+    ScmPushService.PushResult result = service.push(run);
+
+    assertThat(result.code()).isEqualTo("SCM_REPOSITORY_DESCRIPTION_FAILED");
+    assertThat(result.blockingGate()).isEqualTo("REPOSITORY_DESCRIPTION");
+    verify(sideEffectOutbox, never())
+        .enqueueCompensation(anyString(), anyString(), any(java.util.Map.class));
+  }
+
+  private PipelineRun preparedExistingRunWithCreatedPullRequest() {
+    PipelineRun run = runWithMode("EXISTING");
+    when(gitTool.pushToBranch(
+            anyString(), anyString(), anyString(), anyString(), nullable(String.class)))
+        .thenReturn(GitToolResult.ok("pushed"));
+    when(gitHubRepoService.getDefaultBranch(anyString(), anyString())).thenReturn("main");
+    when(gitHubRepoService.createPullRequestDetailed(
+            anyString(), anyString(), anyString(), any(), any(), anyString()))
+        .thenReturn(GitHubRepoService.PullRequestCreation.created("https://x/pull/7", 7));
+    return run;
   }
 }

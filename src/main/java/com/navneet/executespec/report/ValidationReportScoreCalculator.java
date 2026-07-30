@@ -38,13 +38,39 @@ final class ValidationReportScoreCalculator {
       Integer endpointCoverage,
       boolean gamingGuards,
       BootVerification bootVerification) {
+    return additive(
+        buildPassed,
+        testsPassed,
+        testsTotal,
+        reviewerVerdict,
+        unfixedCriticals,
+        coverageLevel,
+        filesGenerated,
+        endpointCoverage,
+        gamingGuards,
+        bootVerification,
+        true);
+  }
+
+  static int additive(
+      Boolean buildPassed,
+      int testsPassed,
+      int testsTotal,
+      String reviewerVerdict,
+      int unfixedCriticals,
+      String coverageLevel,
+      int filesGenerated,
+      Integer endpointCoverage,
+      boolean gamingGuards,
+      BootVerification bootVerification,
+      boolean endpointCoverageApplicable) {
     if (filesGenerated >= 0 && filesGenerated == 0) return 0;
 
     double weighted = 0;
     double weight = 0;
     if (filesGenerated >= 0) {
       double code = 100;
-      if (gamingGuards) {
+      if (gamingGuards && endpointCoverageApplicable) {
         // RR-1648 — the endpoint tie-in used to fire only when endpoint evidence existed, so any
         // run the accuracy pass classified non-HTTP (or for which it emitted no endpoint block)
         // collected the full 30-point slot at 100 purely for having written files. Absent evidence
@@ -133,7 +159,7 @@ final class ValidationReportScoreCalculator {
     double build =
         bootVerification != null
             ? ValidationReportScorePolicy.bootSlotScore(bootVerification.verdict()) / 100.0
-            : (Boolean.TRUE.equals(buildPassed) ? 1 : 0);
+            : buildPassed == null ? 0.5 : Boolean.TRUE.equals(buildPassed) ? 1 : 0;
     double tests =
         testsTotal <= 0
             ? ValidationReportScorePolicy.testFactorFromCoverageLevel(coverageLevel)
@@ -157,6 +183,17 @@ final class ValidationReportScoreCalculator {
     double criticalDamper = Math.max(.5, 1 - .05 * Math.max(0, unfixedCriticals));
     int raw =
         (int) clamp(Math.round(100 * build * tests * reviewer * endpoint * criticalDamper), 0, 100);
+    // Zero is a reserved assertion: at least one explicitly deterministic execution gate must
+    // have failed. LLM-only endpoint/coverage/reviewer factors may reduce confidence, but cannot
+    // create a zero headline. Missing build evidence is UNKNOWN (neutral 0.5 above), not failure.
+    boolean deterministicZero =
+        Boolean.FALSE.equals(buildPassed)
+            || (bootVerification != null
+                && bootVerification.verdict()
+                    == com.navneet.executespec.deployment.preview.verify.BootHealthEvaluator.Verdict
+                        .BUILD_FAILED)
+            || (testsTotal > 0 && testsPassed <= 0);
+    if (raw == 0 && !deterministicZero) raw = 1;
     // RL-2026-06-026 trust caps applied to the legacy path too (RR-1650). This formula is the
     // documented rollback for `scoring.additive-v2`; without the cap, flipping that flag off also
     // silently removed every "this headline is not credible above N" constraint.
