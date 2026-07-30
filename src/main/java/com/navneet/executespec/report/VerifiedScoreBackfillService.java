@@ -111,6 +111,8 @@ public class VerifiedScoreBackfillService {
         Integer endpointCoverage = endpointCoverageFromAccuracyJson(row.getAccuracyJson());
         String testCoverageLevel = testCoverageLevelFromAccuracyJson(row.getAccuracyJson());
         int unfixedCritical = countUnfixedCriticalFromIssuesJson(row.getIssuesJson());
+        boolean endpointCoverageApplicable =
+            ValidationReportService.endpointCoverageApplicable(row.getRuntimeSurface());
         // RR-1645 — rehydrate the persisted V270 boot verdict exactly like report generation and
         // concrete-test rescoring do. Dropping it here re-scored a run that compiled but booted
         // UNHEALTHY (honest BUILD slot 55) as BUILD=100, upgrading the headline above the run's own
@@ -129,7 +131,8 @@ public class VerifiedScoreBackfillService {
                     testCoverageLevel,
                     row.getFilesGenerated(),
                     ValidationReportService.bootVerification(row),
-                    additiveFormula);
+                    additiveFormula,
+                    endpointCoverageApplicable);
         int recomputedRubric =
             evidenceFailure
                 ? 0
@@ -140,7 +143,8 @@ public class VerifiedScoreBackfillService {
                     row.getReviewerVerdict(),
                     unfixedCritical,
                     endpointCoverage,
-                    testCoverageLevel);
+                    testCoverageLevel,
+                    endpointCoverageApplicable);
 
         // Score generation caps both summaries when the persisted accuracy assessment admits a
         // missing or partial requirement. Backfill must reproduce that final policy step too;

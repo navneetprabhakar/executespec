@@ -889,12 +889,13 @@ export interface ReportIssue {
 export interface ValidationReportData extends WorkspaceGenerationBound {
   id: string;
   runId: string;
+  reportStatus?: 'PENDING' | 'COMPLETE' | 'FAILED' | 'STALE' | string | null;
   filesGenerated: number;
   languages: string[];
-  pipelineResult: 'PASSED' | 'PASSED_WITH_FIXES' | 'NEEDS_ATTENTION' | 'FAILED';
+  pipelineResult: 'PASSED' | 'PASSED_WITH_FIXES' | 'NEEDS_ATTENTION' | 'FAILED' | null;
   issues: ReportIssue[];
   checksPassed: string[];
-  reportMarkdown: string;
+  reportMarkdown: string | null;
   modelUsed: string;
   createdAt: string;
   issuesCaught: number;
@@ -914,9 +915,7 @@ export interface ValidationReportData extends WorkspaceGenerationBound {
   securityScore?: number | null;
   performanceScore?: number | null;
   designComplianceScore?: number | null;
-  /** v2.5.10 (V106) — verified signals from the pipeline itself.
-   *  finalBuildPassed + tests + verdict are the inputs to verifiedScore, which
-   *  anchors the 6 dimensions above when scoring.v2-verified flag is on. */
+  /** V106 pipeline signals input verifiedScore and anchor the six dimensions above. */
   finalBuildPassed?: boolean | null;
   testsPassed?: number | null;
   testsTotal?: number | null;

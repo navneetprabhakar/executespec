@@ -10,6 +10,7 @@ public record ValidationReportDTO(
     String id,
     String runId,
     String workspaceGeneration,
+    String reportStatus,
     int filesGenerated,
     List<String> languages,
     PipelineResult pipelineResult,

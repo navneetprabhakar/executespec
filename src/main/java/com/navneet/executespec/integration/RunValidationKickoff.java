@@ -1,9 +1,7 @@
 package com.navneet.executespec.integration;
 
-import static com.navneet.executespec.integration.RunPipelineSupport.describeReviewerFixes;
 import static com.navneet.executespec.integration.RunPipelineSupport.mapTaskStatusToV1;
 import static com.navneet.executespec.integration.RunPipelineSupport.providerForAccuracy;
-import static com.navneet.executespec.integration.RunPipelineSupport.truncate;
 
 import java.nio.file.Path;
 import java.util.List;
@@ -70,7 +68,35 @@ class RunValidationKickoff {
   java.util.Optional<ValidationReport> generateValidationReport(
       String runId, ExecutionResult execResult, ReviewerResult reviewResult, Plan plan) {
     return generateValidationReport(
-        runId, execResult, reviewResult, plan, java.util.List.of(), null);
+        runId, execResult, reviewResult, plan, java.util.List.of(), null, null);
+  }
+
+  /**
+   * Correction-only validation entrypoint.
+   *
+   * <p>A normal run keeps waiting for independently generated live functional tests. A correction
+   * cannot do that: its reversible checkpoint must be accepted or rolled back before publication.
+   * Execute the repository's real suite synchronously and bind its exact command/counts/provenance
+   * to the already-reviewed workspace generation. Missing, red, stale, or workspace-mutating test
+   * execution fails closed before a report can be published.
+   */
+  java.util.Optional<ValidationReport> generateCorrectionValidationReport(
+      String runId,
+      ExecutionResult execResult,
+      ReviewerResult reviewResult,
+      Plan plan,
+      String reviewedWorkspaceGeneration) {
+    if (reviewedWorkspaceGeneration == null || reviewedWorkspaceGeneration.isBlank()) {
+      return java.util.Optional.empty();
+    }
+    return generateValidationReport(
+        runId,
+        execResult,
+        reviewResult,
+        plan,
+        java.util.List.of(),
+        null,
+        reviewedWorkspaceGeneration);
   }
 
   /**
@@ -84,7 +110,7 @@ class RunValidationKickoff {
       ReviewerResult reviewResult,
       Plan plan,
       java.util.List<com.navneet.executespec.reviewer.model.ReviewIssue> extraIssues) {
-    return generateValidationReport(runId, execResult, reviewResult, plan, extraIssues, null);
+    return generateValidationReport(runId, execResult, reviewResult, plan, extraIssues, null, null);
   }
 
   java.util.Optional<ValidationReport> generateValidationReport(
@@ -94,6 +120,18 @@ class RunValidationKickoff {
       Plan plan,
       java.util.List<com.navneet.executespec.reviewer.model.ReviewIssue> extraIssues,
       String operationPhase) {
+    return generateValidationReport(
+        runId, execResult, reviewResult, plan, extraIssues, operationPhase, null);
+  }
+
+  private java.util.Optional<ValidationReport> generateValidationReport(
+      String runId,
+      ExecutionResult execResult,
+      ReviewerResult reviewResult,
+      Plan plan,
+      java.util.List<com.navneet.executespec.reviewer.model.ReviewIssue> extraIssues,
+      String operationPhase,
+      String correctionWorkspaceGeneration) {
     RunLlmOperationLifecycleService.PhaseLease operation = null;
     try {
       var run = runRepo.findById(runId).orElse(null);
@@ -214,7 +252,20 @@ class RunValidationKickoff {
           new java.util.ArrayList<>();
       com.navneet.executespec.smoketest.WorkspaceTestRunner.DetailedResult workspaceTestEvidence =
           null;
-      if (featureFlagService.isEnabled("scoring.real-test-exec")) {
+      String testsGenerationBefore =
+          correctionWorkspaceGeneration == null
+              ? null
+              : workspaceGenerationService.captureGeneration(workspace);
+      if (correctionWorkspaceGeneration != null
+          && !correctionWorkspaceGeneration.equals(testsGenerationBefore)) {
+        throw new IllegalStateException(
+            "CORRECTION_TEST_GENERATION_MISMATCH: reviewed and pre-test workspace generations"
+                + " differ");
+      }
+      // Correction promotion is a release trust boundary, not a scoring experiment. It must run
+      // the suite even when the ordinary score-enrichment flag is disabled.
+      if (correctionWorkspaceGeneration != null
+          || featureFlagService.isEnabled("scoring.real-test-exec")) {
         try {
           Path testWorkspace =
               Path.of(agentProps.getWorkspace(), runId).toAbsolutePath().normalize();
@@ -223,7 +274,8 @@ class RunValidationKickoff {
           if (workspaceTestEvidence != null
               && (workspaceTestEvidence.summary().getFailed() > 0
                   || workspaceTestEvidence.summary().getErrors() > 0)) {
-            workspaceDiagnosticIssues.add(workspaceTestFailureIssue(workspaceTestEvidence));
+            workspaceDiagnosticIssues.add(
+                ValidationReviewIssueSynthesizer.workspaceTestFailure(workspaceTestEvidence));
           }
         } catch (Exception e) {
           log.warn(
@@ -231,6 +283,17 @@ class RunValidationKickoff {
               runId,
               e.getMessage());
         }
+      }
+
+      com.navneet.executespec.testgen.model.TestExecutionSummary correctionTestSummary = null;
+      if (correctionWorkspaceGeneration != null) {
+        String testsGenerationAfter = workspaceGenerationService.captureGeneration(workspace);
+        correctionTestSummary =
+            admitCorrectionTestEvidence(
+                correctionWorkspaceGeneration,
+                testsGenerationBefore,
+                testsGenerationAfter,
+                workspaceTestEvidence);
       }
 
       // RR-291 — deterministic review evidence (final-build failure + reviewer verdict) that does
@@ -303,9 +366,11 @@ class RunValidationKickoff {
       // separately generated black-box suite will rescore this report when it exercises the real
       // runtime over HTTP. Until then, persist an explicitly unavailable functional-test signal.
       com.navneet.executespec.testgen.model.TestExecutionSummary testSummary =
-          com.navneet.executespec.testgen.model.TestExecutionSummary.unavailable(
-              "functional-tests-pending",
-              "Independent end-to-end/functional tests have not completed");
+          correctionTestSummary != null
+              ? correctionTestSummary
+              : com.navneet.executespec.testgen.model.TestExecutionSummary.unavailable(
+                  "functional-tests-pending",
+                  "Independent end-to-end/functional tests have not completed");
       // RL-2026-05-066 (verifyBoot) — feed a deterministic boot verdict into the BUILD slot. Reads
       // the run-recipe + boots in the hardened sandbox; fail-open (empty → null → compile-only
       // BUILD
@@ -383,6 +448,47 @@ class RunValidationKickoff {
     }
   }
 
+  static com.navneet.executespec.testgen.model.TestExecutionSummary admitCorrectionTestEvidence(
+      String reviewedGeneration,
+      String beforeGeneration,
+      String afterGeneration,
+      com.navneet.executespec.smoketest.WorkspaceTestRunner.DetailedResult evidence) {
+    if (reviewedGeneration == null
+        || !reviewedGeneration.equals(beforeGeneration)
+        || !reviewedGeneration.equals(afterGeneration)) {
+      throw new IllegalStateException(
+          "CORRECTION_TEST_GENERATION_MISMATCH: tests did not execute against the reviewed"
+              + " workspace generation");
+    }
+    if (evidence == null || evidence.summary() == null) {
+      throw new IllegalStateException(
+          "CORRECTION_TESTS_UNAVAILABLE: no deterministic workspace test command completed");
+    }
+    var summary = evidence.summary();
+    if (!Boolean.TRUE.equals(summary.getExecutionVerified())) {
+      throw new IllegalStateException(
+          "CORRECTION_TESTS_UNVERIFIED: workspace test counts lack fresh execution provenance");
+    }
+    if (summary.getEvidenceScope()
+        != com.navneet.executespec.testgen.model.TestExecutionSummary.EvidenceScope
+            .WORKSPACE_TEST_SUITE) {
+      throw new IllegalStateException(
+          "CORRECTION_TEST_SCOPE_INVALID: correction tests must be a workspace suite");
+    }
+    if (summary.getTotalTests() <= 0) {
+      throw new IllegalStateException(
+          "CORRECTION_TESTS_EMPTY: correction validation requires at least one real test");
+    }
+    if (evidence.exitCode() != 0
+        || summary.getFailed() > 0
+        || summary.getErrors() > 0
+        || summary.getPassed() != summary.getTotalTests()) {
+      throw new IllegalStateException(
+          "CORRECTION_TESTS_FAILED: correction validation requires every executed test to pass");
+    }
+    return summary;
+  }
+
   String persistedFailureReason(String runId, String statusReason) {
     return failureReporter.persistedReasonWhenUnavailable(runId, statusReason);
   }
@@ -417,181 +523,11 @@ class RunValidationKickoff {
     return claims;
   }
 
-  private static com.navneet.executespec.reviewer.model.ReviewIssue workspaceTestFailureIssue(
-      com.navneet.executespec.smoketest.WorkspaceTestRunner.DetailedResult result) {
-    var summary = result.summary();
-    String tail = result.outputTail() == null ? "" : result.outputTail().strip();
-    if (tail.length() > 1_200) tail = tail.substring(tail.length() - 1_200);
-    String description =
-        "Workspace test suite executed with "
-            + summary.getFailed()
-            + " failed and "
-            + summary.getErrors()
-            + " errored of "
-            + summary.getTotalTests()
-            + " tests (command: "
-            + result.command()
-            + ")";
-    if (!tail.isBlank()) description += ". Failure output: " + tail;
-    return com.navneet.executespec.reviewer.model.ReviewIssue.builder()
-        .id("SYNTH-TEST-DIAGNOSTIC")
-        .severity(com.navneet.executespec.reviewer.model.IssueSeverity.CRITICAL)
-        .category(com.navneet.executespec.reviewer.model.IssueCategory.LOGIC_ERROR)
-        .description(description)
-        .autoFixed(false)
-        .fixSucceeded(false)
-        .build();
-  }
-
-  /**
-   * Synthesise {@code ReviewIssue}s from the signals V2's reviewer doesn't emit structurally (build
-   * pass/fail, reviewer verdict, accuracy report), so {@code ReviewScoringService}'s quality
-   * dimensions actually move instead of flat-lining at the anchor.
-   *
-   * <p>Severity/category mapping:
-   *
-   * <ul>
-   *   <li>Build failure → CRITICAL × 2 (LOGIC_ERROR + DEPLOYABILITY) → hits code+arch+perf
-   *   <li>Reviewer UNRESOLVED_ISSUES → CRITICAL LOGIC_ERROR
-   *   <li>Reviewer REVIEW_FAILED → MINOR ERROR_HANDLING
-   *   <li>Accuracy missingRequirements → MINOR MISSING_FEATURE advisory (one per item, capped at 5)
-   *   <li>Accuracy partialRequirements → MINOR SPEC_MISMATCH (one per item, capped at 5)
-   *   <li>Accuracy endpointCoverage.missing → MINOR MISSING_ENDPOINT advisory (capped at 5)
-   * </ul>
-   */
+  /** Compatibility seam retained for focused provenance tests. */
   static java.util.List<com.navneet.executespec.reviewer.model.ReviewIssue> synthesiseReviewIssues(
       ReviewerResult reviewResult,
       com.navneet.executespec.report.model.CompileResult compile,
       com.navneet.executespec.reviewer.model.AccuracyReport accuracy) {
-    java.util.List<com.navneet.executespec.reviewer.model.ReviewIssue> out =
-        new java.util.ArrayList<>();
-
-    boolean buildFailed =
-        (compile != null && !compile.passed() && !compile.skipped())
-            || (reviewResult != null && Boolean.FALSE.equals(reviewResult.finalBuildPassed()));
-    if (buildFailed) {
-      out.add(
-          com.navneet.executespec.reviewer.model.ReviewIssue.builder()
-              .id("SYNTH-BUILD-1")
-              .severity(com.navneet.executespec.reviewer.model.IssueSeverity.CRITICAL)
-              .category(com.navneet.executespec.reviewer.model.IssueCategory.LOGIC_ERROR)
-              .description("Final build failed — code does not compile / package as produced")
-              .autoFixed(false)
-              .fixSucceeded(false)
-              .build());
-      out.add(
-          com.navneet.executespec.reviewer.model.ReviewIssue.builder()
-              .id("SYNTH-BUILD-2")
-              .severity(com.navneet.executespec.reviewer.model.IssueSeverity.CRITICAL)
-              .category(com.navneet.executespec.reviewer.model.IssueCategory.DEPLOYABILITY)
-              .description("Build artifacts absent — the run cannot be deployed as-is")
-              .autoFixed(false)
-              .fixSucceeded(false)
-              .build());
-    }
-
-    if (reviewResult != null) {
-      switch (reviewResult.overall()) {
-        case UNRESOLVED_ISSUES ->
-            out.add(
-                com.navneet.executespec.reviewer.model.ReviewIssue.builder()
-                    .id("SYNTH-REV-1")
-                    .severity(com.navneet.executespec.reviewer.model.IssueSeverity.CRITICAL)
-                    .category(com.navneet.executespec.reviewer.model.IssueCategory.LOGIC_ERROR)
-                    .description("Reviewer flagged unresolved issues in wiring/general pass")
-                    .autoFixed(false)
-                    .fixSucceeded(false)
-                    .build());
-        case REVIEW_FAILED ->
-            out.add(
-                com.navneet.executespec.reviewer.model.ReviewIssue.builder()
-                    .id("SYNTH-REV-2")
-                    .severity(com.navneet.executespec.reviewer.model.IssueSeverity.MINOR)
-                    .category(com.navneet.executespec.reviewer.model.IssueCategory.ERROR_HANDLING)
-                    .description("Reviewer agent errored — review did not complete")
-                    .autoFixed(false)
-                    .fixSucceeded(false)
-                    .build());
-        case FIXED_ISSUES -> {
-          // 2026-05-19 — Phase 1 auto-fix surface. Emit an informational issue
-          // with autoFixed=true so the Issues panel reflects that the reviewer
-          // pass actually made edits (and they landed — build is green when
-          // verdict is FIXED_ISSUES). Pre-2026-05-19 these flags were always
-          // false even when the agent had done real work, so the UI made the
-          // pass invisible. countUnfixedCritical filters SYNTH-FIX-* out of the
-          // critical penalty (severity MINOR + autoFixed=true), so this is
-          // visibility-only — doesn't double-count against the score.
-          String summary = describeReviewerFixes(reviewResult);
-          out.add(
-              com.navneet.executespec.reviewer.model.ReviewIssue.builder()
-                  .id("SYNTH-FIX-1")
-                  .severity(com.navneet.executespec.reviewer.model.IssueSeverity.MINOR)
-                  .category(com.navneet.executespec.reviewer.model.IssueCategory.LOGIC_ERROR)
-                  .description(summary)
-                  .autoFixed(true)
-                  .fixSucceeded(true)
-                  .build());
-        }
-        default -> {
-          /* CLEAN — no synthetic */
-        }
-      }
-    }
-
-    if (accuracy != null) {
-      int cap = 5;
-      if (accuracy.getMissingRequirements() != null) {
-        int n = 0;
-        for (String req : accuracy.getMissingRequirements()) {
-          if (n++ >= cap) break;
-          out.add(
-              com.navneet.executespec.reviewer.model.ReviewIssue.builder()
-                  .id("SYNTH-ACC-MISS-" + n)
-                  // AccuracyAssessmentService is model-derived evidence. Keep the finding visible,
-                  // but never let it masquerade as a deterministic release-blocking failure.
-                  .severity(com.navneet.executespec.reviewer.model.IssueSeverity.MINOR)
-                  .category(com.navneet.executespec.reviewer.model.IssueCategory.MISSING_FEATURE)
-                  .description("Spec requirement not implemented: " + truncate(req, 180))
-                  .autoFixed(false)
-                  .fixSucceeded(false)
-                  .build());
-        }
-      }
-      if (accuracy.getPartialRequirements() != null) {
-        int n = 0;
-        for (String req : accuracy.getPartialRequirements()) {
-          if (n++ >= cap) break;
-          out.add(
-              com.navneet.executespec.reviewer.model.ReviewIssue.builder()
-                  .id("SYNTH-ACC-PART-" + n)
-                  .severity(com.navneet.executespec.reviewer.model.IssueSeverity.MINOR)
-                  .category(com.navneet.executespec.reviewer.model.IssueCategory.SPEC_MISMATCH)
-                  .description("Spec requirement only partially implemented: " + truncate(req, 180))
-                  .autoFixed(false)
-                  .fixSucceeded(false)
-                  .build());
-        }
-      }
-      if (accuracy.getEndpointCoverage() != null
-          && accuracy.getEndpointCoverage().getMissing() != null) {
-        int n = 0;
-        for (String ep : accuracy.getEndpointCoverage().getMissing()) {
-          if (n++ >= cap) break;
-          out.add(
-              com.navneet.executespec.reviewer.model.ReviewIssue.builder()
-                  .id("SYNTH-ACC-EP-" + n)
-                  // Endpoint coverage in AccuracyReport is inferred by the LLM from a bounded
-                  // source sample. Deterministic route/contract gates own hard failures.
-                  .severity(com.navneet.executespec.reviewer.model.IssueSeverity.MINOR)
-                  .category(com.navneet.executespec.reviewer.model.IssueCategory.MISSING_ENDPOINT)
-                  .description("Endpoint from spec not implemented: " + truncate(ep, 180))
-                  .autoFixed(false)
-                  .fixSucceeded(false)
-                  .build());
-        }
-      }
-    }
-
-    return out;
+    return ValidationReviewIssueSynthesizer.synthesise(reviewResult, compile, accuracy);
   }
 }

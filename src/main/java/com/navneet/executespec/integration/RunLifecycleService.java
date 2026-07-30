@@ -1475,6 +1475,26 @@ public class RunLifecycleService {
                       postReviewerGeneration);
                   CorrectionResolutionEvidence.ValidationDelta correctionValidationDelta =
                       captureValidationDelta(correctionEvidenceCheckpoint);
+                  CorrectionAcceptancePolicy.Decision comparativeAdmission =
+                      CorrectionAcceptancePolicy.evaluateRegression(correctionValidationDelta);
+                  if (!comparativeAdmission.accepted()) {
+                    correctionWorkspaceTransaction.rollback(correctionCheckpoint);
+                    restoreValidationEvidence(correctionEvidenceCheckpoint);
+                    restoreRejectedCorrection(
+                        runId,
+                        taskBeforeCorrection,
+                        runStatusBeforeCorrection,
+                        runReasonBeforeCorrection,
+                        runCompletedBeforeCorrection,
+                        runReviewBeforeCorrection,
+                        comparativeAdmission.code(),
+                        comparativeAdmission.reason(),
+                        correctionCheckpoint.generation(),
+                        correctionDiff,
+                        correctionValidationDelta);
+                    updateContinuationApprovalStatus(task, override, "REJECTED");
+                    return null;
+                  }
                   CorrectionWorkspaceTransaction.Accepted generations =
                       correctionWorkspaceTransaction.accept(correctionCheckpoint);
                   appendCorrectionResolution(
@@ -2168,7 +2188,7 @@ public class RunLifecycleService {
             .orElse(null);
     if (previous != null) {
       ValidationReport stale = copyReport(previous);
-      stale.setStatus("STALE");
+      AutomaticCorrectionLifecycle.markIndependentEvidenceStale(stale);
       validationReportRepository.saveAndFlush(stale);
     }
     return new ValidationEvidenceCheckpoint(runId, previous, inspectCorrectionContracts(runId));
@@ -2261,7 +2281,7 @@ public class RunLifecycleService {
     taskRepo.saveAndFlush(taskBeforeCorrection);
     appendCorrectionResolution(
         taskBeforeCorrection.getTaskId(),
-        "ROLLED_BACK",
+        "CORRECTION_EXECUTION_FAILED".equals(code) ? "ROLLED_BACK" : "REJECTED",
         code,
         reason,
         generation,

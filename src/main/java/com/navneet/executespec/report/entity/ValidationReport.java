@@ -32,6 +32,10 @@ public class ValidationReport {
   @Column(name = "workspace_generation", length = 64)
   private String workspaceGeneration;
 
+  /** Runtime surface bound at report generation; null only for historical rows. */
+  @Column(name = "runtime_surface", length = 24)
+  private String runtimeSurface;
+
   /** V362 deterministic workflow/config parser evidence, including exact paths and content SHAs. */
   @Column(name = "workflow_config_evidence_json", columnDefinition = "TEXT")
   private String workflowConfigEvidenceJson;

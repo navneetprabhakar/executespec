@@ -31,6 +31,11 @@ class AutomaticCorrectionLifecycleEvidenceTest {
             .status("COMPLETE")
             .workspaceGeneration("a".repeat(64))
             .verifiedScore(91)
+            .finalBuildPassed(true)
+            .testsPassed(4)
+            .testsTotal(4)
+            .testExecutionVerified(true)
+            .reviewerVerdict("CLEAN")
             .build();
     when(reports.findByRunId("run-1")).thenReturn(Optional.of(original));
     AutomaticCorrectionLifecycle lifecycle = lifecycle(reports);
@@ -42,9 +47,20 @@ class AutomaticCorrectionLifecycleEvidenceTest {
     ArgumentCaptor<ValidationReport> saved = ArgumentCaptor.forClass(ValidationReport.class);
     verify(reports, org.mockito.Mockito.times(2)).saveAndFlush(saved.capture());
     assertThat(saved.getAllValues().get(0).getStatus()).isEqualTo("STALE");
+    assertThat(saved.getAllValues().get(0).getWorkspaceGeneration()).isNull();
+    assertThat(saved.getAllValues().get(0).getFinalBuildPassed()).isNull();
+    assertThat(saved.getAllValues().get(0).getTestsTotal()).isNull();
+    assertThat(saved.getAllValues().get(0).getTestExecutionVerified()).isNull();
+    assertThat(saved.getAllValues().get(0).getReviewerVerdict()).isNull();
+    assertThat(saved.getAllValues().get(0).getVerifiedScore()).isNull();
+    assertThat(saved.getAllValues().get(0).getFilesGenerated()).isEqualTo(-1);
+    assertThat(saved.getAllValues().get(0).getAccuracyJson()).isNull();
     assertThat(saved.getAllValues().get(1).getStatus()).isEqualTo("COMPLETE");
     assertThat(saved.getAllValues().get(1).getWorkspaceGeneration()).isEqualTo("a".repeat(64));
     assertThat(saved.getAllValues().get(1).getVerifiedScore()).isEqualTo(91);
+    assertThat(saved.getAllValues().get(1).getFinalBuildPassed()).isTrue();
+    assertThat(saved.getAllValues().get(1).getTestsTotal()).isEqualTo(4);
+    assertThat(saved.getAllValues().get(1).getReviewerVerdict()).isEqualTo("CLEAN");
     assertThat(checkpoint.previous().getStatus()).isEqualTo("COMPLETE");
   }
 

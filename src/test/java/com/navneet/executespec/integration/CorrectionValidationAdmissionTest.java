@@ -44,7 +44,8 @@ class CorrectionValidationAdmissionTest {
     Plan plan = Plan.builder().planTitle("Correction validation").build();
     CorrectionWorkspaceTransaction.Checkpoint checkpoint = checkpoint();
     ValidationReport report = report(PipelineResult.FAILED);
-    when(validationKickoff.generateValidationReport(RUN_ID, execution, review, plan))
+    when(validationKickoff.generateCorrectionValidationReport(
+            RUN_ID, execution, review, plan, GENERATION))
         .thenReturn(Optional.of(report));
     when(workspace.currentGeneration(checkpoint)).thenReturn(GENERATION);
 
@@ -65,7 +66,8 @@ class CorrectionValidationAdmissionTest {
     Plan plan = Plan.builder().planTitle("Correction validation").build();
     CorrectionWorkspaceTransaction.Checkpoint checkpoint = checkpoint();
     ValidationReport report = report(PipelineResult.PASSED);
-    when(validationKickoff.generateValidationReport(RUN_ID, execution, review, plan))
+    when(validationKickoff.generateCorrectionValidationReport(
+            RUN_ID, execution, review, plan, GENERATION))
         .thenReturn(Optional.of(report));
     when(workspace.currentGeneration(checkpoint)).thenReturn(GENERATION);
     when(brownfieldGuard.hasBaseline(RUN_ID)).thenReturn(true);
@@ -77,6 +79,30 @@ class CorrectionValidationAdmissionTest {
     verify(brownfieldGuard).assertCompatible(RUN_ID);
   }
 
+  @Test
+  void completedReportWithoutPersistedCorrectionTestProvenanceIsRejected() {
+    ExecutionResult execution =
+        ExecutionResult.builder().overall(ExecutionResult.Overall.ALL_SUCCESS).build();
+    ReviewerResult review = ReviewerResult.builder().overall(ReviewerResult.Overall.CLEAN).build();
+    Plan plan = Plan.builder().planTitle("Correction validation").build();
+    CorrectionWorkspaceTransaction.Checkpoint checkpoint = checkpoint();
+    ValidationReport report = report(PipelineResult.PASSED);
+    report.setTestExecutionVerified(false);
+    report.setTestCommand(null);
+    when(validationKickoff.generateCorrectionValidationReport(
+            RUN_ID, execution, review, plan, GENERATION))
+        .thenReturn(Optional.of(report));
+    when(workspace.currentGeneration(checkpoint)).thenReturn(GENERATION);
+
+    assertThatThrownBy(
+            () ->
+                admission.regenerateAndAssert(
+                    RUN_ID, execution, review, plan, checkpoint, GENERATION))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("CORRECTION_TEST_EVIDENCE_UNPROVEN");
+    verify(httpRequirementVerifier, never()).assertSatisfied(plan, null, checkpoint);
+  }
+
   private static ValidationReport report(PipelineResult pipelineResult) {
     return ValidationReport.builder()
         .id("report-1")
@@ -84,6 +110,14 @@ class CorrectionValidationAdmissionTest {
         .status("COMPLETE")
         .pipelineResult(pipelineResult)
         .workspaceGeneration(GENERATION)
+        .finalBuildPassed(true)
+        .testsPassed(4)
+        .testsTotal(4)
+        .testExecutionVerified(true)
+        .testEvidenceScope("WORKSPACE_TEST_SUITE")
+        .testCommand("./mvnw test")
+        .testWorkingDirectory("/tmp/correction-validation-test")
+        .testExitCode(0)
         .build();
   }
 

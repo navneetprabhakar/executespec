@@ -66,6 +66,7 @@ class ScmPushResultTest {
     var result =
         ScmPushService.PushResult.blocked(
             "BROWNFIELD_HTTP_CONTRACT_REMOVED",
+            "PROTECTED_CONTRACTS",
             "POST /orders was removed",
             "GITHUB",
             false,
@@ -74,8 +75,25 @@ class ScmPushResultTest {
     assertThat(result.status()).isEqualTo("FAILED");
     assertThat(result.attempted()).isZero();
     assertThat(result.code()).isEqualTo("BROWNFIELD_HTTP_CONTRACT_REMOVED");
+    assertThat(result.blockingGate()).isEqualTo("PROTECTED_CONTRACTS");
     assertThat(result.publicationEligible()).isFalse();
     assertThat(result.retryable()).isFalse();
     assertThat(result.retryGuidance()).contains("explicit approval");
+    assertThat(result.remediation()).contains("explicit approval");
+  }
+
+  @Test
+  void git_and_pull_request_failures_keep_distinct_blocking_gates() {
+    var git =
+        ScmPushService.PushResult.failed(
+            "SCM_GIT_PUSH_FAILED", "GIT_PUSH", "push rejected", "GITHUB", "Fix Git access.");
+    var pr =
+        ScmPushService.PushResult.failed(
+            "SCM_PR_CREATION_FAILED", "PR_CREATION", "PR rejected", "GITHUB", "Fix PR policy.");
+
+    assertThat(git.blockingGate()).isEqualTo("GIT_PUSH");
+    assertThat(git.remediation()).isEqualTo("Fix Git access.");
+    assertThat(pr.blockingGate()).isEqualTo("PR_CREATION");
+    assertThat(pr.remediation()).isEqualTo("Fix PR policy.");
   }
 }

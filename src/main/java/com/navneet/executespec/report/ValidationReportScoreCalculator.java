@@ -38,13 +38,39 @@ final class ValidationReportScoreCalculator {
       Integer endpointCoverage,
       boolean gamingGuards,
       BootVerification bootVerification) {
+    return additive(
+        buildPassed,
+        testsPassed,
+        testsTotal,
+        reviewerVerdict,
+        unfixedCriticals,
+        coverageLevel,
+        filesGenerated,
+        endpointCoverage,
+        gamingGuards,
+        bootVerification,
+        true);
+  }
+
+  static int additive(
+      Boolean buildPassed,
+      int testsPassed,
+      int testsTotal,
+      String reviewerVerdict,
+      int unfixedCriticals,
+      String coverageLevel,
+      int filesGenerated,
+      Integer endpointCoverage,
+      boolean gamingGuards,
+      BootVerification bootVerification,
+      boolean endpointCoverageApplicable) {
     if (filesGenerated >= 0 && filesGenerated == 0) return 0;
 
     double weighted = 0;
     double weight = 0;
     if (filesGenerated >= 0) {
       double code = 100;
-      if (gamingGuards) {
+      if (gamingGuards && endpointCoverageApplicable) {
         // RR-1648 — the endpoint tie-in used to fire only when endpoint evidence existed, so any
         // run the accuracy pass classified non-HTTP (or for which it emitted no endpoint block)
         // collected the full 30-point slot at 100 purely for having written files. Absent evidence
