@@ -41,6 +41,122 @@ public interface AgentTaskRepository extends JpaRepository<AgentTask, String> {
   @Query("SELECT t FROM AgentTask t WHERE t.taskId = :taskId")
   Optional<AgentTask> findByIdForUpdate(@Param("taskId") String taskId);
 
+  /**
+   * Claims one exact continuation proposal before queueing. A concurrent/same-proposal caller
+   * updates zero rows and must interpret the durable receipt status: CLAIMED conflicts while
+   * QUEUED/COMPLETED replays. A different proposal may replace only a terminal prior receipt.
+   */
+  @Modifying(clearAutomatically = true, flushAutomatically = true)
+  @org.springframework.transaction.annotation.Transactional
+  @Query(
+      "UPDATE AgentTask t SET t.continuationApprovalId = :approvalId, "
+          + "t.continuationApprovalProposalDigest = :proposalDigest, "
+          + "t.continuationApprovalStatus = 'CLAIMED', "
+          + "t.continuationApprovalProvider = :provider, "
+          + "t.continuationApprovalModel = :model, "
+          + "t.continuationApprovalAction = :action, "
+          + "t.continuationApprovalPostReview = :postReview, "
+          + "t.continuationApprovalUpdatedAt = CURRENT_TIMESTAMP "
+          + "WHERE t.taskId = :taskId AND t.runId = :runId "
+          + "AND t.continuationDecisionJson = :proposalJson "
+          + "AND (t.continuationApprovalProposalDigest IS NULL "
+          + "OR (t.continuationApprovalProposalDigest <> :proposalDigest "
+          + "AND t.continuationApprovalStatus IN ('COMPLETED', 'REJECTED', 'FAILED')))")
+  int claimContinuationApproval(
+      @Param("taskId") String taskId,
+      @Param("runId") String runId,
+      @Param("proposalJson") String proposalJson,
+      @Param("proposalDigest") String proposalDigest,
+      @Param("approvalId") String approvalId,
+      @Param("provider") String provider,
+      @Param("model") String model,
+      @Param("action") String action,
+      @Param("postReview") boolean postReview);
+
+  @Modifying(clearAutomatically = true, flushAutomatically = true)
+  @org.springframework.transaction.annotation.Transactional
+  @Query(
+      "UPDATE AgentTask t SET t.continuationApprovalStatus = :status, "
+          + "t.continuationApprovalUpdatedAt = CURRENT_TIMESTAMP "
+          + "WHERE t.taskId = :taskId AND t.continuationApprovalId = :approvalId "
+          + "AND t.continuationApprovalProposalDigest = :proposalDigest "
+          + "AND ((:status = 'QUEUED' AND t.continuationApprovalStatus = 'CLAIMED') "
+          + "OR (:status <> 'QUEUED' "
+          + "AND t.continuationApprovalStatus IN ('CLAIMED', 'QUEUED')))")
+  int updateContinuationApprovalStatus(
+      @Param("taskId") String taskId,
+      @Param("approvalId") String approvalId,
+      @Param("proposalDigest") String proposalDigest,
+      @Param("status") String status);
+
+  @Modifying(clearAutomatically = true, flushAutomatically = true)
+  @org.springframework.transaction.annotation.Transactional
+  @Query(
+      "UPDATE AgentTask t SET t.continuationApprovalId = NULL, "
+          + "t.continuationApprovalProposalDigest = NULL, "
+          + "t.continuationApprovalStatus = NULL, "
+          + "t.continuationApprovalProvider = NULL, "
+          + "t.continuationApprovalModel = NULL, "
+          + "t.continuationApprovalAction = NULL, "
+          + "t.continuationApprovalPostReview = NULL, "
+          + "t.continuationApprovalUpdatedAt = NULL "
+          + "WHERE t.taskId = :taskId AND t.continuationApprovalId = :approvalId "
+          + "AND t.continuationApprovalProposalDigest = :proposalDigest "
+          + "AND t.continuationApprovalStatus IN ('CLAIMED', 'QUEUED')")
+  int releaseContinuationApprovalClaim(
+      @Param("taskId") String taskId,
+      @Param("approvalId") String approvalId,
+      @Param("proposalDigest") String proposalDigest);
+
+  List<AgentTask> findByContinuationApprovalStatusAndContinuationApprovalUpdatedAtBefore(
+      String status, Instant staleBefore);
+
+  /**
+   * A CLAIMED receipt has not reached the durable QUEUED boundary, so no worker can have started. A
+   * stale claim is therefore safe to release for an exact idempotent retry.
+   */
+  @Modifying(clearAutomatically = true, flushAutomatically = true)
+  @org.springframework.transaction.annotation.Transactional
+  @Query(
+      "UPDATE AgentTask t SET t.continuationApprovalId = NULL, "
+          + "t.continuationApprovalProposalDigest = NULL, "
+          + "t.continuationApprovalStatus = NULL, "
+          + "t.continuationApprovalProvider = NULL, "
+          + "t.continuationApprovalModel = NULL, "
+          + "t.continuationApprovalAction = NULL, "
+          + "t.continuationApprovalPostReview = NULL, "
+          + "t.continuationApprovalUpdatedAt = NULL "
+          + "WHERE t.taskId = :taskId AND t.continuationApprovalId = :approvalId "
+          + "AND t.continuationApprovalProposalDigest = :proposalDigest "
+          + "AND t.continuationApprovalStatus = 'CLAIMED' "
+          + "AND t.continuationApprovalUpdatedAt < :staleBefore")
+  int releaseStaleClaimedContinuationApproval(
+      @Param("taskId") String taskId,
+      @Param("approvalId") String approvalId,
+      @Param("proposalDigest") String proposalDigest,
+      @Param("staleBefore") Instant staleBefore);
+
+  /**
+   * A stale QUEUED receipt may have entered a mutating worker before the JVM died. It cannot be
+   * replayed safely without a durable workspace checkpoint, so terminalize it fail-closed.
+   */
+  @Modifying(clearAutomatically = true, flushAutomatically = true)
+  @org.springframework.transaction.annotation.Transactional
+  @Query(
+      "UPDATE AgentTask t SET t.continuationApprovalStatus = 'FAILED', "
+          + "t.continuationApprovalUpdatedAt = :now, t.status = 'FAILED', "
+          + "t.completedAt = :now "
+          + "WHERE t.taskId = :taskId AND t.continuationApprovalId = :approvalId "
+          + "AND t.continuationApprovalProposalDigest = :proposalDigest "
+          + "AND t.continuationApprovalStatus = 'QUEUED' "
+          + "AND t.continuationApprovalUpdatedAt < :staleBefore")
+  int failStaleQueuedContinuationApproval(
+      @Param("taskId") String taskId,
+      @Param("approvalId") String approvalId,
+      @Param("proposalDigest") String proposalDigest,
+      @Param("staleBefore") Instant staleBefore,
+      @Param("now") Instant now);
+
   @Modifying(clearAutomatically = true)
   @Query(
       "UPDATE AgentTask t SET t.status = 'LOCKED', t.startedAt = :now "

@@ -28,6 +28,7 @@ class ReviewerAgentRouteTest {
         ReviewerRequest.builder()
             .provider("openrouter")
             .model("glm-5.2")
+            .strictProvider(true)
             .context(new ExecutionContext("run-1", "review", Path.of(".").toAbsolutePath()))
             .build();
 
@@ -44,5 +45,6 @@ class ReviewerAgentRouteTest {
     verify(worker).run(dispatched.capture());
     assertThat(dispatched.getValue().provider()).isEqualTo("openrouter");
     assertThat(dispatched.getValue().model()).isEqualTo("glm-5.2");
+    assertThat(dispatched.getValue().strictProvider()).isTrue();
   }
 }

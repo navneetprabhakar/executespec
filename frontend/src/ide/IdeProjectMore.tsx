@@ -28,6 +28,7 @@ import {
 } from '@/ide/agentChatHistory';
 import {
   architectureFreshnessBadge,
+  confirmUncertainGeneratedDocRetry,
   contractDetectorSummary,
   driftSummaryMessage,
   filterProjectFiles,
@@ -665,6 +666,9 @@ export function IdeProjectCode() {
   const [fixFor, setFixFor] = useState<{category: string; count: number} | null>(null);
   // §3.4 Docs (P1) — doc generation in flight; drives the 3s poll below.
   const [genPending, setGenPending] = useState<PendingGeneratedDocJobs>({});
+  const [docNeedsConfirmation, setDocNeedsConfirmation] = useState<
+    Partial<Record<api.GeneratedDocType, api.GeneratedDocJob>>
+  >({});
   const docJobRouteGen = useRef(0);
 
   // Browse state
@@ -807,13 +811,36 @@ export function IdeProjectCode() {
     setErr('');
     setMsg('');
     try {
-      const job = await api.generateProjectDoc(projectId, t);
+      const admitted = docNeedsConfirmation[t] ?? (await api.generateProjectDoc(projectId, t));
+      const confirmed = await confirmUncertainGeneratedDocRetry(
+        admitted,
+        window.confirm,
+        api.confirmProjectDocRetry,
+      );
+      if (!confirmed) {
+        setMsg('The uncertain document generation was not retried.');
+        return;
+      }
+      const job = confirmed;
+      setDocNeedsConfirmation((current) => {
+        const next = {...current};
+        delete next[t];
+        return next;
+      });
       setMsg(
         `${t.toLowerCase()} doc generation queued with ${job.provider}/${job.model}. You can navigate away safely.`,
       );
       setGenPending((current) => ({
         ...current,
-        [t]: {type: t, jobId: job.id, provider: job.provider, model: job.model},
+        [t]: {
+          type: t,
+          jobId: job.id,
+          provider: job.provider,
+          model: job.model,
+          status: job.status === 'RUNNING' ? 'RUNNING' : 'QUEUED',
+          attemptCount: job.attemptCount,
+          deadlineAt: job.deadlineAt,
+        },
       }));
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : 'Doc generation failed.');
@@ -827,6 +854,7 @@ export function IdeProjectCode() {
     if (!projectId) return;
     const routeGen = ++docJobRouteGen.current;
     setGenPending({});
+    setDocNeedsConfirmation({});
     let cancelled = false;
     void Promise.allSettled([
       api.getLatestProjectDocJob(projectId, 'EXPLANATION'),
@@ -844,10 +872,15 @@ export function IdeProjectCode() {
       // A user can start generation while reload discovery is in flight. Merge rather than
       // overwrite so that the older GET response cannot erase the newly admitted durable job.
       setGenPending((current) => ({...restored.pending, ...current}));
+      setDocNeedsConfirmation(restored.needsConfirmation);
       const active = Object.values(restored.pending);
       if (active.length > 0) {
         setMsg(
           `Resumed status checks for ${active.map((job) => job?.type.toLowerCase()).join(' and ')} document generation.`,
+        );
+      } else if (Object.keys(restored.needsConfirmation).length > 0) {
+        setErr(
+          'A previous document generation has an uncertain provider outcome. Confirm its retry from the Generated docs tab.',
         );
       } else if (restored.failure) {
         setErr(
@@ -878,7 +911,17 @@ export function IdeProjectCode() {
         void api
           .getProjectDocJob(projectId, pending.type, pending.jobId)
           .then(async (job) => {
-            if (job.status === 'SUCCEEDED') {
+            if (job.status === 'QUEUED' || job.status === 'RUNNING') {
+              setGenPending((current) => ({
+                ...current,
+                [pending.type]: {
+                  ...pending,
+                  status: job.status,
+                  attemptCount: job.attemptCount,
+                  deadlineAt: job.deadlineAt,
+                },
+              }));
+            } else if (job.status === 'SUCCEEDED') {
               const row = await api.getProjectDoc(projectId, pending.type);
               if (row) {
                 setDocs((prev) => [...(prev ?? []).filter((d) => d.docType !== pending.type), row]);
@@ -898,6 +941,19 @@ export function IdeProjectCode() {
               setErr(
                 `${job.errorCode || 'GENERATION_FAILED'} · ${
                   job.errorMessage || 'Document generation failed.'
+                }`,
+              );
+            } else if (job.status === 'NEEDS_CONFIRMATION') {
+              setGenPending((current) => {
+                const next = {...current};
+                delete next[pending.type];
+                return next;
+              });
+              setDocNeedsConfirmation((current) => ({...current, [pending.type]: job}));
+              setErr(
+                `${job.errorCode || 'OUTCOME_UNCERTAIN'} · ${
+                  job.errorMessage ||
+                  'Provider execution may have started. Confirm before retrying this document.'
                 }`,
               );
             }
@@ -1328,6 +1384,32 @@ export function IdeProjectCode() {
       {/* ── Docs ── */}
       {sub === 'docs' && (
         <div style={{overflowY: 'auto', minHeight: 0}}>
+          {Object.values(genPending).map(
+            (job) =>
+              job && (
+                <div key={job.jobId} className='ide-card' style={{marginBottom: 8, fontSize: 12}}>
+                  <strong>{job.type}</strong> · {job.status === 'QUEUED' ? 'Queued' : 'Running'} ·
+                  attempts started {job.attemptCount}
+                  <span className='muted'>
+                    {' '}
+                    · deadline {new Date(job.deadlineAt).toLocaleTimeString()}
+                  </span>
+                </div>
+              ),
+          )}
+          {Object.values(docNeedsConfirmation).map(
+            (job) =>
+              job && (
+                <div
+                  key={job.id}
+                  className='ide-card'
+                  style={{marginBottom: 8, fontSize: 12, color: 'var(--ide-yellow)'}}
+                >
+                  <strong>{job.docType}</strong> · Outcome uncertain · {job.provider}/{job.model}.
+                  Confirm retry below before any additional provider work.
+                </div>
+              ),
+          )}
           {docsState.failure ? (
             <LoadError
               failure={docsState.failure}
@@ -1365,7 +1447,13 @@ export function IdeProjectCode() {
                   disabled={busy === `gen-${d.docType}` || !!genPending[d.docType]}
                   onClick={() => genDoc(d.docType)}
                 >
-                  {genPending[d.docType] ? 'Generating…' : 'Regenerate'}
+                  {genPending[d.docType]
+                    ? genPending[d.docType]?.status === 'QUEUED'
+                      ? 'Queued…'
+                      : 'Generating…'
+                    : docNeedsConfirmation[d.docType]
+                      ? 'Confirm retry'
+                      : 'Regenerate'}
                 </button>
               </div>
             ))
@@ -1377,15 +1465,25 @@ export function IdeProjectCode() {
               onClick={() => genDoc('EXPLANATION')}
             >
               {busy === 'gen-EXPLANATION' || genPending.EXPLANATION
-                ? 'Generating…'
-                : 'Generate explanation doc'}
+                ? genPending.EXPLANATION?.status === 'QUEUED'
+                  ? 'Queued…'
+                  : 'Generating…'
+                : docNeedsConfirmation.EXPLANATION
+                  ? 'Confirm explanation retry'
+                  : 'Generate explanation doc'}
             </button>
             <button
               className='ide-btn ghost'
               disabled={busy === 'gen-SETUP' || !!genPending.SETUP}
               onClick={() => genDoc('SETUP')}
             >
-              {busy === 'gen-SETUP' || genPending.SETUP ? 'Generating…' : 'Generate setup doc'}
+              {busy === 'gen-SETUP' || genPending.SETUP
+                ? genPending.SETUP?.status === 'QUEUED'
+                  ? 'Queued…'
+                  : 'Generating…'
+                : docNeedsConfirmation.SETUP
+                  ? 'Confirm setup retry'
+                  : 'Generate setup doc'}
             </button>
           </div>
         </div>

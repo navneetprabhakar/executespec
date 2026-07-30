@@ -12,6 +12,8 @@ import lombok.Builder;
  *
  * @param provider LLM provider for review calls
  * @param model LLM model for review calls
+ * @param strictProvider true when every reviewer model call must stay on the exact approved
+ *     provider/model pair
  * @param context execution context (workspace + ids); the reviewer substitutes its own task IDs for
  *     each review pass
  * @param buildCommand optional build command override — the reviewer runs this after fixes to
@@ -24,6 +26,7 @@ import lombok.Builder;
 public record ReviewerRequest(
     String provider,
     String model,
+    Boolean strictProvider,
     ExecutionContext context,
     String buildCommand,
     Integer maxIterationsPerPass,
@@ -41,6 +44,7 @@ public record ReviewerRequest(
     if (provider == null || provider.isBlank())
       throw new IllegalArgumentException("provider required");
     if (model == null || model.isBlank()) throw new IllegalArgumentException("model required");
+    if (strictProvider == null) strictProvider = false;
     if (context == null) throw new IllegalArgumentException("context required");
     if (skipWiringPass == null) skipWiringPass = false;
     if (brownfield == null) brownfield = false;

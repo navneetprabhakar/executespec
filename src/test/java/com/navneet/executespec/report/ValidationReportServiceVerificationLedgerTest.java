@@ -22,10 +22,15 @@ import com.navneet.executespec.deployment.preview.verify.BootHealthEvaluator.Boo
 import com.navneet.executespec.deployment.preview.verify.BootHealthEvaluator.Verdict;
 import com.navneet.executespec.report.entity.PipelineResult;
 import com.navneet.executespec.report.entity.ValidationReport;
+import com.navneet.executespec.report.model.CommandExecutionEvidence;
 import com.navneet.executespec.report.model.CompileResult;
 import com.navneet.executespec.report.model.ReportInput;
 import com.navneet.executespec.report.model.ReportIssueDTO;
 import com.navneet.executespec.report.model.VerificationEvidenceDTO;
+import com.navneet.executespec.report.model.WorkflowConfigEvidence;
+import com.navneet.executespec.report.model.WorkflowConfigEvidence.FileEvidence;
+import com.navneet.executespec.report.model.WorkflowConfigEvidence.ParseStatus;
+import com.navneet.executespec.report.model.WorkflowConfigEvidence.Status;
 import com.navneet.executespec.scoring.ReviewScoringService;
 import com.navneet.executespec.state.StateStore;
 import com.navneet.executespec.state.entity.PipelineRun;
@@ -374,7 +379,16 @@ class ValidationReportServiceVerificationLedgerTest {
             false,
             null,
             new BootVerification(Verdict.HEALTHY, true, "boots; /health responded 200"),
-            "b".repeat(64));
+            "b".repeat(64),
+            new WorkflowConfigEvidence(
+                Status.PASSED,
+                List.of(
+                    new FileEvidence(
+                        ".github/workflows/ci.yml", "c".repeat(64), ParseStatus.VALID, null)),
+                "All workflow files parsed"),
+            new CommandExecutionEvidence("./mvnw verify", "/workspace/run-1", 0, "BUILD SUCCESS"),
+            new CommandExecutionEvidence(
+                "./mvnw test", "/workspace/run-1", 0, "Tests run: 12, Failures: 0"));
     when(generator.generate(input))
         .thenReturn(new ValidationReportGenerator.LlmReportResult("# Report", "model-a", 0, 0));
     when(reviewScoringService.score(any(), any(), any(), any(), any()))
@@ -404,6 +418,12 @@ class ValidationReportServiceVerificationLedgerTest {
         event.runGoalDecision().goalSummary());
     assertEntry(event.verificationLedger(), "code-delivered", "PASS", "DETERMINISTIC", "HIGH");
     assertEntry(event.verificationLedger(), "build", "PASS", "DETERMINISTIC", "HIGH");
+    assertEntry(
+        event.verificationLedger(),
+        "workflow-config",
+        "PASS",
+        "DETERMINISTIC_CONFIG_PARSER",
+        "HIGH");
     assertEntry(event.verificationLedger(), "boot-verification", "PASS", "DETERMINISTIC", "HIGH");
     assertEntry(
         event.verificationLedger(), "executable-verification", "WARN", "DETERMINISTIC", "HIGH");
@@ -414,6 +434,28 @@ class ValidationReportServiceVerificationLedgerTest {
     assertEquals("BUILD_ONLY", saved.get().getExecutableVerificationStatus());
     assertEquals(null, saved.get().getExecutionFailureStage());
     assertTrue(saved.get().getExecutableEvidenceJson().contains("\"buildPassed\":true"));
+    assertEquals("./mvnw verify", saved.get().getBuildCommand());
+    assertEquals("/workspace/run-1", saved.get().getBuildWorkingDirectory());
+    assertEquals(0, saved.get().getBuildExitCode());
+    assertEquals("BUILD SUCCESS", saved.get().getBuildOutput());
+    assertEquals("./mvnw test", saved.get().getTestCommand());
+    assertEquals("/workspace/run-1", saved.get().getTestWorkingDirectory());
+    assertEquals(0, saved.get().getTestExitCode());
+    assertEquals("Tests run: 12, Failures: 0", saved.get().getTestOutput());
+    VerificationEvidenceDTO workflowRow =
+        event.verificationLedger().stream()
+            .filter(row -> "workflow-config".equals(row.id()))
+            .findFirst()
+            .orElseThrow();
+    assertTrue(workflowRow.summary().contains(".github/workflows/ci.yml@" + "c".repeat(12)));
+    VerificationEvidenceDTO buildRow =
+        event.verificationLedger().stream()
+            .filter(row -> "build".equals(row.id()))
+            .findFirst()
+            .orElseThrow();
+    assertTrue(buildRow.artifact().contains("command=./mvnw verify"));
+    assertTrue(buildRow.artifact().contains("cwd=/workspace/run-1"));
+    assertTrue(buildRow.artifact().contains("exit=0"));
     assertNotNull(run.getRunGoalDonenessJson());
     assertTrue(run.getRunGoalDonenessJson().contains("\"state\":\"UNCERTAIN\""));
     assertTrue(

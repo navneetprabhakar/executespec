@@ -62,6 +62,22 @@ export const forkRun = (
 
 export const getRun = (id: string) => req<RunDetail>(`/runs/${id}`);
 
+/** Read-only result of the exact deterministic gates repeated before SCM push or deployment. */
+export interface PublicationEligibility {
+  eligible: boolean;
+  eligibility: 'ELIGIBLE' | 'BLOCKED';
+  code: string;
+  blockingGate: string | null;
+  reason: string;
+  retryable: boolean;
+  remediation: string | null;
+  evidenceWorkspaceGeneration: string | null;
+  currentWorkspaceGeneration: string | null;
+}
+
+export const getPublicationEligibility = (runId: string) =>
+  req<PublicationEligibility>(`/runs/${runId}/publication-eligibility`);
+
 export const createRun = (body: {
   userRequest: string;
   executionMode?: 'PROTOTYPE' | 'PRODUCTION';
@@ -126,9 +142,10 @@ export interface PlanContractGateRow {
 /**
  * RR-819 — the durable plan-approval contract gate report.
  *
- * `reportJson` is a serialized `PlanContractGateRow[]`. `reportDigest` is the server's SHA-256 over
- * that exact string; approval must echo it back so an acknowledgement collected against one set of
- * contracts cannot be replayed against a different one.
+ * Historical `reportJson` values are serialized `PlanContractGateRow[]`; schema-v1 values are an
+ * envelope retaining those rows plus exact brownfield HTTP route removals. `reportDigest` is the
+ * server's SHA-256 over that exact string; approval must echo it back so an acknowledgement
+ * collected against one set of contracts cannot be replayed against a different one.
  */
 export interface PlanContractGateReport {
   runId?: string | null;

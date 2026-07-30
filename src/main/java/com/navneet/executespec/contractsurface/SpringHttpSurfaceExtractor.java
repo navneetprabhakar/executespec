@@ -6,13 +6,33 @@ import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
+
+import com.github.javaparser.ParseProblemException;
+import com.github.javaparser.StaticJavaParser;
+import com.github.javaparser.ast.CompilationUnit;
+import com.github.javaparser.ast.body.AnnotationDeclaration;
+import com.github.javaparser.ast.body.ClassOrInterfaceDeclaration;
+import com.github.javaparser.ast.body.MethodDeclaration;
+import com.github.javaparser.ast.expr.AnnotationExpr;
+import com.github.javaparser.ast.expr.ArrayInitializerExpr;
+import com.github.javaparser.ast.expr.Expression;
+import com.github.javaparser.ast.expr.FieldAccessExpr;
+import com.github.javaparser.ast.expr.MarkerAnnotationExpr;
+import com.github.javaparser.ast.expr.MemberValuePair;
+import com.github.javaparser.ast.expr.NormalAnnotationExpr;
+import com.github.javaparser.ast.expr.SingleMemberAnnotationExpr;
+import com.github.javaparser.ast.expr.StringLiteralExpr;
+import com.github.javaparser.ast.nodeTypes.NodeWithAnnotations;
 
 import org.springframework.stereotype.Component;
 
@@ -20,28 +40,29 @@ import org.springframework.stereotype.Component;
  * Deterministically inventories Spring MVC HTTP mappings from a source workspace.
  *
  * <p>This extractor is deliberately provider-free. It combines the configured servlet context path,
- * class-level mappings and method-level mappings into canonical method/path rows. It is not a Java
- * compiler; unsupported dynamic annotation expressions are ignored rather than guessed.
+ * class-level mappings and method-level mappings into canonical method/path rows. It intentionally
+ * supports only literal Spring mapping declarations. Dynamic, composed/meta-annotated, malformed,
+ * or otherwise ambiguous mappings fail extraction instead of disappearing from the protected
+ * brownfield baseline.
  */
 @Component
 public class SpringHttpSurfaceExtractor {
 
-  private static final Pattern CLASS_DECLARATION =
-      Pattern.compile("\\b(?:class|interface)\\s+[A-Za-z_$][\\w$]*");
-  private static final Pattern MAPPING =
-      Pattern.compile(
-          "@(Get|Post|Put|Patch|Delete|Request)Mapping\\s*(?:\\((.*?)\\))?", Pattern.DOTALL);
-  private static final Pattern EXPLICIT_PATH =
-      Pattern.compile("\\b(?:value|path)\\s*=\\s*(\\{[^}]*}|\"[^\"]*\"|'[^']*')", Pattern.DOTALL);
-  private static final Pattern QUOTED = Pattern.compile("[\"']([^\"']*)[\"']");
-  private static final Pattern REQUEST_METHOD =
-      Pattern.compile("RequestMethod\\.(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS|TRACE)");
   private static final Pattern PROPERTIES_CONTEXT =
-      Pattern.compile("(?m)^\\s*server\\.servlet\\.context-path\\s*[=:]\\s*([^#\\s]+)");
+      Pattern.compile("(?m)^\\s*server\\.servlet\\.context-path\\s*[=:]\\s*([^#\\r\\n]*)");
   private static final Pattern YAML_CONTEXT =
       Pattern.compile(
           "(?ms)^\\s*server\\s*:\\s*$.*?^\\s+servlet\\s*:\\s*$.*?^\\s+context-path\\s*:\\s*"
               + "([^#\\r\\n]+)");
+  private static final Set<String> HTTP_METHODS =
+      Set.of("GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS", "TRACE");
+  private static final Map<String, String> MAPPING_METHODS =
+      Map.of(
+          "GetMapping", "GET",
+          "PostMapping", "POST",
+          "PutMapping", "PUT",
+          "PatchMapping", "PATCH",
+          "DeleteMapping", "DELETE");
 
   private static final Set<String> EXCLUDED_SEGMENTS =
       Set.of(
@@ -59,140 +80,294 @@ public class SpringHttpSurfaceExtractor {
     if (workspaceRoot == null || !Files.isDirectory(workspaceRoot)) {
       return SurfaceSnapshot.of(List.of());
     }
-    String contextPath = findContextPath(workspaceRoot);
+    List<ParsedSource> sources = parseProductionSources(workspaceRoot);
+    rejectComposedMappings(workspaceRoot, sources);
+    Map<Path, String> contextPaths = new LinkedHashMap<>();
     List<Route> routes = new ArrayList<>();
-    try (Stream<Path> files = Files.walk(workspaceRoot, 12)) {
-      files
-          .filter(Files::isRegularFile)
-          .filter(path -> path.getFileName().toString().endsWith(".java"))
-          .filter(path -> isProductionSource(workspaceRoot, path))
-          .sorted()
-          .forEach(path -> extractFile(workspaceRoot, path, contextPath, routes));
-    } catch (IOException e) {
-      throw new SurfaceExtractionException(
-          "could not inventory Spring HTTP surface: " + e.getMessage(), e);
+    for (ParsedSource source : sources) {
+      Path moduleRoot = moduleRoot(workspaceRoot, source.path());
+      String contextPath =
+          contextPaths.computeIfAbsent(
+              moduleRoot, ignored -> findContextPath(workspaceRoot, moduleRoot));
+      extractCompilationUnit(workspaceRoot, source, contextPath, routes);
     }
     return SurfaceSnapshot.of(routes);
   }
 
-  private void extractFile(Path root, Path file, String contextPath, List<Route> routes) {
-    final String source;
-    try {
-      source = Files.readString(file);
+  private static List<ParsedSource> parseProductionSources(Path root) {
+    List<ParsedSource> sources = new ArrayList<>();
+    try (Stream<Path> files = Files.walk(root, 12)) {
+      for (Path file :
+          files
+              .filter(Files::isRegularFile)
+              .filter(path -> path.getFileName().toString().endsWith(".java"))
+              .filter(path -> isProductionSource(root, path))
+              .sorted()
+              .toList()) {
+        try {
+          sources.add(new ParsedSource(file, StaticJavaParser.parse(Files.readString(file))));
+        } catch (IOException e) {
+          throw new SurfaceExtractionException("could not read " + relative(root, file), e);
+        } catch (ParseProblemException e) {
+          throw new SurfaceExtractionException(
+              "could not parse Spring source " + relative(root, file), e);
+        }
+      }
     } catch (IOException e) {
-      throw new SurfaceExtractionException("could not read " + root.relativize(file), e);
+      throw new SurfaceExtractionException(
+          "could not inventory Spring HTTP surface: " + e.getMessage(), e);
     }
-    Matcher classMatcher = CLASS_DECLARATION.matcher(source);
-    if (!classMatcher.find()) return;
+    return List.copyOf(sources);
+  }
 
-    // Do not search backward for '}' here: annotation array syntax itself contains braces and
-    // would cut off @RequestMapping(path={"/v1", "/v2"}). One production controller per source
-    // file is the supported deterministic subset, so the complete pre-declaration prefix is safe.
-    String classAnnotations = source.substring(0, classMatcher.start());
-    List<String> classPaths = mappingPaths(classAnnotations, true);
-    if (classPaths.isEmpty()) classPaths = List.of("/");
+  private static void rejectComposedMappings(Path root, List<ParsedSource> sources) {
+    for (ParsedSource source : sources) {
+      for (AnnotationDeclaration declaration :
+          source.compilationUnit().findAll(AnnotationDeclaration.class)) {
+        Optional<AnnotationExpr> mapping =
+            declaration.getAnnotations().stream()
+                .filter(SpringHttpSurfaceExtractor::isMappingAnnotation)
+                .findFirst();
+        if (mapping.isPresent()) {
+          throw unsupported(
+              root,
+              source.path(),
+              mapping.get(),
+              "composed/meta-annotated Spring mappings are not supported");
+        }
+      }
+    }
+  }
 
-    Matcher mapping = MAPPING.matcher(source);
-    while (mapping.find()) {
-      if (mapping.start() < classMatcher.start()) continue;
-      int declarationEnd = nextDeclarationBoundary(source, mapping.end());
-      if (declarationEnd < 0) continue;
-      String between = source.substring(mapping.end(), declarationEnd);
-      if (CLASS_DECLARATION.matcher(between).find()) continue;
+  private static void extractCompilationUnit(
+      Path root, ParsedSource source, String contextPath, List<Route> routes) {
+    for (ClassOrInterfaceDeclaration type :
+        source.compilationUnit().findAll(ClassOrInterfaceDeclaration.class)) {
+      rejectUnknownMappingAnnotations(root, source.path(), type);
+      List<AnnotationExpr> classMappings = mappingAnnotations(type);
+      if (classMappings.size() > 1) {
+        throw unsupported(
+            root,
+            source.path(),
+            classMappings.get(1),
+            "multiple class-level mappings are ambiguous");
+      }
+      if (!classMappings.isEmpty() && !"RequestMapping".equals(simpleName(classMappings.get(0)))) {
+        throw unsupported(
+            root,
+            source.path(),
+            classMappings.get(0),
+            "only @RequestMapping is supported at class level");
+      }
+      List<String> classPaths =
+          classMappings.isEmpty()
+              ? List.of("/")
+              : mappingPaths(root, source.path(), classMappings.get(0));
 
-      String annotation = mapping.group();
-      List<String> methods = methods(mapping.group(1), annotation);
-      List<String> methodPaths = mappingPaths(annotation, false);
-      if (methodPaths.isEmpty()) methodPaths = List.of("/");
-      int line =
-          1 + (int) source.substring(0, mapping.start()).chars().filter(c -> c == '\n').count();
-      String sourceLocation = root.relativize(file).toString().replace('\\', '/') + ":" + line;
+      for (MethodDeclaration method : type.getMethods()) {
+        rejectUnknownMappingAnnotations(root, source.path(), method);
+        List<AnnotationExpr> methodMappings = mappingAnnotations(method);
+        if (methodMappings.isEmpty()) continue;
+        if (methodMappings.size() > 1) {
+          throw unsupported(
+              root,
+              source.path(),
+              methodMappings.get(1),
+              "multiple method-level mappings are ambiguous");
+        }
+        AnnotationExpr mapping = methodMappings.get(0);
+        List<String> methods = methods(root, source.path(), mapping);
+        List<String> methodPaths = mappingPaths(root, source.path(), mapping);
+        int line = mapping.getBegin().map(position -> position.line).orElse(1);
+        String sourceLocation = relative(root, source.path()) + ":" + line;
 
-      for (String classPath : classPaths) {
-        for (String methodPath : methodPaths) {
-          String fullPath = join(contextPath, classPath, methodPath);
-          for (String method : methods) {
-            routes.add(new Route(method, fullPath, sourceLocation));
+        for (String classPath : classPaths) {
+          for (String methodPath : methodPaths) {
+            String fullPath = join(contextPath, classPath, methodPath);
+            for (String httpMethod : methods) {
+              routes.add(new Route(httpMethod, fullPath, sourceLocation));
+            }
           }
         }
       }
     }
   }
 
-  private static int nextDeclarationBoundary(String source, int from) {
-    int brace = source.indexOf('{', from);
-    int semicolon = source.indexOf(';', from);
-    if (brace < 0) return semicolon;
-    if (semicolon < 0) return brace;
-    return Math.min(brace, semicolon);
+  private static List<AnnotationExpr> mappingAnnotations(NodeWithAnnotations<?> declaration) {
+    return declaration.getAnnotations().stream()
+        .filter(SpringHttpSurfaceExtractor::isMappingAnnotation)
+        .toList();
   }
 
-  private static List<String> methods(String mappingType, String annotation) {
-    if (!"Request".equals(mappingType)) {
-      return List.of(mappingType.toUpperCase(Locale.ROOT));
+  private static boolean isMappingAnnotation(AnnotationExpr annotation) {
+    String name = simpleName(annotation);
+    return "RequestMapping".equals(name) || MAPPING_METHODS.containsKey(name);
+  }
+
+  private static void rejectUnknownMappingAnnotations(
+      Path root, Path file, NodeWithAnnotations<?> declaration) {
+    declaration.getAnnotations().stream()
+        .filter(annotation -> simpleName(annotation).endsWith("Mapping"))
+        .filter(annotation -> !isMappingAnnotation(annotation))
+        .findFirst()
+        .ifPresent(
+            annotation -> {
+              throw unsupported(
+                  root,
+                  file,
+                  annotation,
+                  "unknown/composed mapping annotation cannot be inventoried");
+            });
+  }
+
+  private static String simpleName(AnnotationExpr annotation) {
+    return annotation.getName().getIdentifier();
+  }
+
+  private static List<String> methods(Path root, Path file, AnnotationExpr annotation) {
+    String name = simpleName(annotation);
+    if (!"RequestMapping".equals(name)) {
+      return List.of(MAPPING_METHODS.get(name));
     }
+    Optional<Expression> expression = member(annotation, "method");
+    if (expression.isEmpty()) return List.of("ANY");
     List<String> methods = new ArrayList<>();
-    Matcher matcher = REQUEST_METHOD.matcher(annotation);
-    while (matcher.find()) methods.add(matcher.group(1));
-    return methods.isEmpty() ? List.of("ANY") : methods.stream().distinct().sorted().toList();
+    for (Expression candidate : arrayElements(expression.get())) {
+      if (!(candidate instanceof FieldAccessExpr field)
+          || !"RequestMethod".equals(field.getScope().toString())
+          || !HTTP_METHODS.contains(field.getNameAsString())) {
+        throw unsupported(
+            root, file, annotation, "dynamic or unsupported RequestMapping method expression");
+      }
+      methods.add(field.getNameAsString());
+    }
+    if (methods.isEmpty()) {
+      throw unsupported(root, file, annotation, "empty RequestMapping method array");
+    }
+    return methods.stream().distinct().sorted().toList();
   }
 
-  private static List<String> mappingPaths(String annotations, boolean classLevel) {
-    Matcher matcher = MAPPING.matcher(annotations);
-    List<String> paths = new ArrayList<>();
-    while (matcher.find()) {
-      if (classLevel && !"Request".equals(matcher.group(1))) continue;
-      String args = matcher.group(2);
-      if (args == null || args.isBlank()) {
-        paths.add("/");
-        continue;
+  private static List<String> mappingPaths(Path root, Path file, AnnotationExpr annotation) {
+    if (annotation instanceof MarkerAnnotationExpr) return List.of("/");
+    Expression expression;
+    if (annotation instanceof SingleMemberAnnotationExpr single) {
+      expression = single.getMemberValue();
+    } else if (annotation instanceof NormalAnnotationExpr normal) {
+      Optional<Expression> value = pairValue(normal, "value");
+      Optional<Expression> path = pairValue(normal, "path");
+      if (value.isPresent() && path.isPresent()) {
+        throw unsupported(root, file, annotation, "mapping declares both value and path");
       }
-      Matcher explicit = EXPLICIT_PATH.matcher(args);
-      String pathExpression = explicit.find() ? explicit.group(1) : leadingPathExpression(args);
-      if (pathExpression == null) continue;
-      Matcher quoted = QUOTED.matcher(pathExpression);
-      while (quoted.find()) paths.add(quoted.group(1));
+      Optional<Expression> selected = value.or(() -> path);
+      if (selected.isEmpty()) return List.of("/");
+      expression = selected.get();
+    } else {
+      throw unsupported(root, file, annotation, "unsupported mapping annotation syntax");
+    }
+    List<String> paths = new ArrayList<>();
+    for (Expression candidate : arrayElements(expression)) {
+      if (!(candidate instanceof StringLiteralExpr literal)) {
+        throw unsupported(root, file, annotation, "dynamic mapping path expression");
+      }
+      paths.add(literal.asString());
+    }
+    if (paths.isEmpty()) {
+      throw unsupported(root, file, annotation, "empty mapping path array");
     }
     return paths.stream().distinct().toList();
   }
 
-  private static String leadingPathExpression(String args) {
-    String stripped = args.stripLeading();
-    if (stripped.startsWith("\"") || stripped.startsWith("'")) {
-      Matcher quoted = QUOTED.matcher(stripped);
-      return quoted.find() ? quoted.group() : null;
-    }
-    if (stripped.startsWith("{")) {
-      int close = stripped.indexOf('}');
-      return close >= 0 ? stripped.substring(0, close + 1) : null;
-    }
-    return null;
+  private static Optional<Expression> member(AnnotationExpr annotation, String name) {
+    if (!(annotation instanceof NormalAnnotationExpr normal)) return Optional.empty();
+    return pairValue(normal, name);
   }
 
-  private static String findContextPath(Path root) {
+  private static Optional<Expression> pairValue(NormalAnnotationExpr annotation, String name) {
+    return annotation.getPairs().stream()
+        .filter(pair -> name.equals(pair.getNameAsString()))
+        .map(MemberValuePair::getValue)
+        .findFirst();
+  }
+
+  private static List<Expression> arrayElements(Expression expression) {
+    if (expression instanceof ArrayInitializerExpr array) {
+      return List.copyOf(array.getValues());
+    }
+    return List.of(expression);
+  }
+
+  private static Path moduleRoot(Path workspaceRoot, Path javaFile) {
+    Path relative = workspaceRoot.relativize(javaFile);
+    for (int i = 0; i + 2 < relative.getNameCount(); i++) {
+      if ("src".equals(relative.getName(i).toString())
+          && "main".equals(relative.getName(i + 1).toString())
+          && "java".equals(relative.getName(i + 2).toString())) {
+        return i == 0 ? workspaceRoot : workspaceRoot.resolve(relative.subpath(0, i));
+      }
+    }
+    return workspaceRoot;
+  }
+
+  private static String findContextPath(Path workspaceRoot, Path moduleRoot) {
     List<Path> candidates = new ArrayList<>();
-    try (Stream<Path> files = Files.walk(root, 10)) {
+    try (Stream<Path> files = Files.walk(moduleRoot, 10)) {
       files
           .filter(Files::isRegularFile)
           .filter(SpringHttpSurfaceExtractor::isApplicationConfiguration)
-          .filter(path -> isProductionSource(root, path))
+          .filter(path -> isProductionSource(moduleRoot, path))
+          .filter(path -> moduleRoot.equals(resourceModuleRoot(workspaceRoot, path)))
           .sorted()
           .forEach(candidates::add);
     } catch (IOException e) {
       throw new SurfaceExtractionException("could not inspect Spring configuration", e);
     }
+    Map<String, Path> configuredPaths = new LinkedHashMap<>();
     for (Path candidate : candidates) {
       try {
         String content = Files.readString(candidate);
         Matcher properties = PROPERTIES_CONTEXT.matcher(content);
-        if (properties.find()) return normalizePath(unquote(properties.group(1).strip()));
+        while (properties.find()) {
+          registerContextPath(workspaceRoot, candidate, properties.group(1), configuredPaths);
+        }
         Matcher yaml = YAML_CONTEXT.matcher(content);
-        if (yaml.find()) return normalizePath(unquote(yaml.group(1).strip()));
+        while (yaml.find()) {
+          registerContextPath(workspaceRoot, candidate, yaml.group(1), configuredPaths);
+        }
       } catch (IOException e) {
-        throw new SurfaceExtractionException("could not read " + root.relativize(candidate), e);
+        throw new SurfaceExtractionException(
+            "could not read " + relative(workspaceRoot, candidate), e);
       }
     }
-    return "/";
+    if (configuredPaths.size() > 1) {
+      throw new SurfaceExtractionException(
+          "ambiguous server.servlet.context-path values for module "
+              + relative(workspaceRoot, moduleRoot)
+              + ": "
+              + configuredPaths.keySet());
+    }
+    return configuredPaths.keySet().stream().findFirst().orElse("/");
+  }
+
+  private static Path resourceModuleRoot(Path workspaceRoot, Path configuration) {
+    Path relative = workspaceRoot.relativize(configuration);
+    for (int i = 0; i + 2 < relative.getNameCount(); i++) {
+      if ("src".equals(relative.getName(i).toString())
+          && "main".equals(relative.getName(i + 1).toString())
+          && "resources".equals(relative.getName(i + 2).toString())) {
+        return i == 0 ? workspaceRoot : workspaceRoot.resolve(relative.subpath(0, i));
+      }
+    }
+    return workspaceRoot;
+  }
+
+  private static void registerContextPath(
+      Path root, Path file, String raw, Map<String, Path> configuredPaths) {
+    String value = unquote(raw.strip());
+    if (value.isBlank() || value.contains("${") || value.contains("#{")) {
+      throw new SurfaceExtractionException(
+          "dynamic or empty server.servlet.context-path in " + relative(root, file));
+    }
+    configuredPaths.putIfAbsent(normalizePath(value), file);
   }
 
   private static boolean isApplicationConfiguration(Path path) {
@@ -237,6 +412,19 @@ public class SpringHttpSurfaceExtractor {
     }
     return value;
   }
+
+  private static String relative(Path root, Path path) {
+    if (root.equals(path)) return ".";
+    return root.relativize(path).toString().replace('\\', '/');
+  }
+
+  private static SurfaceExtractionException unsupported(
+      Path root, Path file, AnnotationExpr annotation, String reason) {
+    int line = annotation.getBegin().map(position -> position.line).orElse(1);
+    return new SurfaceExtractionException(reason + " at " + relative(root, file) + ":" + line);
+  }
+
+  private record ParsedSource(Path path, CompilationUnit compilationUnit) {}
 
   public record Route(String method, String path, String source) {
     public Route {
@@ -298,6 +486,10 @@ public class SpringHttpSurfaceExtractor {
   }
 
   public static final class SurfaceExtractionException extends RuntimeException {
+    public SurfaceExtractionException(String message) {
+      super(message);
+    }
+
     public SurfaceExtractionException(String message, Throwable cause) {
       super(message, cause);
     }

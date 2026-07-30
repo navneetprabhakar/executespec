@@ -106,7 +106,15 @@ export function docStamp(row: api.GeneratedDocRow | null | undefined): string {
 export type PendingGeneratedDocJobs = Partial<
   Record<
     api.GeneratedDocType,
-    {type: api.GeneratedDocType; jobId: string; provider: string; model: string}
+    {
+      type: api.GeneratedDocType;
+      jobId: string;
+      provider: string;
+      model: string;
+      status: 'QUEUED' | 'RUNNING';
+      attemptCount: number;
+      deadlineAt: string;
+    }
   >
 >;
 
@@ -118,8 +126,10 @@ export type PendingGeneratedDocJobs = Partial<
 export function restoreGeneratedDocJobs(jobs: api.GeneratedDocJob[]): {
   pending: PendingGeneratedDocJobs;
   failure: api.GeneratedDocJob | null;
+  needsConfirmation: Partial<Record<api.GeneratedDocType, api.GeneratedDocJob>>;
 } {
   const pending: PendingGeneratedDocJobs = {};
+  const needsConfirmation: Partial<Record<api.GeneratedDocType, api.GeneratedDocJob>> = {};
   for (const job of jobs) {
     if (job.status === 'QUEUED' || job.status === 'RUNNING') {
       pending[job.docType] = {
@@ -127,7 +137,12 @@ export function restoreGeneratedDocJobs(jobs: api.GeneratedDocJob[]): {
         jobId: job.id,
         provider: job.provider,
         model: job.model,
+        status: job.status,
+        attemptCount: job.attemptCount,
+        deadlineAt: job.deadlineAt,
       };
+    } else if (job.status === 'NEEDS_CONFIRMATION') {
+      needsConfirmation[job.docType] = job;
     }
   }
   const failure =
@@ -138,7 +153,28 @@ export function restoreGeneratedDocJobs(jobs: api.GeneratedDocJob[]): {
           new Date(b.completedAt ?? b.createdAt).getTime() -
           new Date(a.completedAt ?? a.createdAt).getTime(),
       )[0] ?? null;
-  return {pending, failure};
+  return {pending, failure, needsConfirmation};
+}
+
+/**
+ * The confirmation decision is deliberately separated from component state so the paid replay
+ * boundary is testable. Normal jobs pass through untouched; uncertain jobs can only continue
+ * through the exact job/type retry callback after an affirmative user decision.
+ */
+export async function confirmUncertainGeneratedDocRetry(
+  job: api.GeneratedDocJob,
+  confirm: (message: string) => boolean,
+  retry: (
+    projectId: string,
+    docType: api.GeneratedDocType,
+    jobId: string,
+  ) => Promise<api.GeneratedDocJob>,
+): Promise<api.GeneratedDocJob | null> {
+  if (job.status !== 'NEEDS_CONFIRMATION') return job;
+  const approved = confirm(
+    `The previous ${job.docType.toLowerCase()} document attempt may have reached ${job.provider}/${job.model} before its outcome became uncertain. Retry that same job and route? This may incur additional usage.`,
+  );
+  return approved ? retry(job.projectId, job.docType, job.id) : null;
 }
 
 export function techDebtCategories(

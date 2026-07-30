@@ -70,6 +70,7 @@ public class ProjectGeneratedDocJobWorker {
 
   void process(ProjectGeneratedDocJobStore.Lease lease) {
     AtomicBoolean leaseLost = new AtomicBoolean();
+    AtomicBoolean providerStarted = new AtomicBoolean();
     ScheduledFuture<?> heartbeat =
         leaseExecutor.scheduleAtFixedRate(
             () -> {
@@ -91,6 +92,15 @@ public class ProjectGeneratedDocJobWorker {
           lease.job().requestedByUserId(),
           provider,
           lease.job().requestedModel(),
+          lease.job().id(),
+          () -> {
+            if (!store.markProviderStarted(lease)) {
+              leaseLost.set(true);
+              throw new IllegalStateException(
+                  "Document provider dispatch lost its durable job fence");
+            }
+            providerStarted.set(true);
+          },
           result -> {
             if (leaseLost.get()
                 || result.getId() == null
@@ -102,7 +112,15 @@ public class ProjectGeneratedDocJobWorker {
           });
     } catch (RuntimeException failure) {
       if (!leaseLost.get()) {
-        store.fail(lease, errorCode(failure), safeMessage(failure));
+        if (providerStarted.get()) {
+          store.needsConfirmation(
+              lease,
+              "OUTCOME_UNCERTAIN",
+              "Provider execution began, but no complete document was durably published. Retry"
+                  + " requires confirmation.");
+        } else {
+          store.fail(lease, errorCode(failure), safeMessage(failure));
+        }
         log.warn(
             "project document job failed job={} project={} code={} errorClass={}",
             lease.job().id(),

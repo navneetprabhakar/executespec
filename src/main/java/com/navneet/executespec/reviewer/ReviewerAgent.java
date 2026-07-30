@@ -619,6 +619,7 @@ public class ReviewerAgent {
         WorkerTaskRequest.builder()
             .provider(reviewerProviderName)
             .model(reviewerModel)
+            .strictProvider(Boolean.TRUE.equals(req.strictProvider()))
             .systemPrompt(systemPrompt)
             .userPrompt(userPrompt)
             .context(passCtx)

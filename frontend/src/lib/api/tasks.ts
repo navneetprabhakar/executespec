@@ -46,8 +46,18 @@ export interface TaskSummary {
         attempt?: number;
         source?: string;
         code?: string;
+        postReview?: boolean;
+        approvalId?: string;
+        proposalVersion?: number;
+        proposalDigest?: string;
+        workerAttempt?: ContinuationAttemptEvidence;
+        reviewerAttempt?: ContinuationAttemptEvidence;
         beforeWorkspaceGeneration?: string;
         afterWorkspaceGeneration?: string;
+        diffDigest?: string;
+        changedFiles?: string[];
+        evidenceInvalidated?: boolean;
+        validationRegenerated?: boolean;
       }[]
     | null;
   objective?: string | null;
@@ -55,6 +65,16 @@ export interface TaskSummary {
   parentTaskId?: string | null;
   subtaskIndex?: number | null;
   subtaskTotal?: number | null;
+}
+
+export interface ContinuationAttemptEvidence {
+  provider?: string;
+  model?: string;
+  attribution?: 'LEDGER' | 'MIXED' | 'UNATTRIBUTED' | string;
+  callIndexFloor?: number;
+  firstCallIndex?: number;
+  lastCallIndex?: number;
+  physicalAttemptIds?: string[];
 }
 
 interface ContinuationPolicy {

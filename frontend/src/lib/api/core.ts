@@ -3,6 +3,7 @@ export * from './transport';
 export type {GoalProofEvidenceReference} from './validationReportTypes';
 
 import type {GoalProofEvidenceReference, WorkspaceGenerationBound} from './validationReportTypes';
+import type {RunEvidenceDetail} from './runEvidence';
 import type {TaskSummary} from './tasks';
 // Billing DTOs moved to the billing domain module, but remain type-re-exported here so existing
 // `@/lib/api/core` consumers keep compiling while the god-file shrinks.
@@ -169,7 +170,7 @@ export interface AgentTokenEntry {
   outputTokens: number;
 }
 
-export interface RunDetail extends RunSummary {
+export interface RunDetail extends RunSummary, RunEvidenceDetail {
   /** Durable caller-selected route contract; effective per-call evidence lives in /cost. */
   requestedProvider?: string | null;
   requestedModel?: string | null;

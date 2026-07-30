@@ -303,6 +303,15 @@ public class ValidationReportService {
               .id(resolveReportId(runId))
               .runId(runId)
               .workspaceGeneration(input.workspaceGeneration())
+              .workflowConfigEvidenceJson(toEvidenceJson(input.workflowConfigEvidence()))
+              .buildCommand(command(input.buildCommandEvidence()))
+              .buildWorkingDirectory(workingDirectory(input.buildCommandEvidence()))
+              .buildExitCode(exitCode(input.buildCommandEvidence()))
+              .buildOutput(boundedOutput(input.buildCommandEvidence()))
+              .testCommand(command(input.testCommandEvidence()))
+              .testWorkingDirectory(workingDirectory(input.testCommandEvidence()))
+              .testExitCode(exitCode(input.testCommandEvidence()))
+              .testOutput(boundedOutput(input.testCommandEvidence()))
               .filesGenerated(filesGenerated)
               .languages(String.join(",", languages))
               .pipelineResult(pipelineResult)
@@ -678,10 +687,7 @@ public class ValidationReportService {
                   ? "Auto-fixed successfully"
                   : "Auto-fix failed after retry with model escalation — unresolved";
         }
-        String source =
-            (ri.getId() != null && ri.getId().startsWith("SYNTH-ACC-"))
-                ? "ACCURACY_LLM"
-                : "REVIEWER_AGENT";
+        String source = issueSource(ri.getId());
         issues.add(
             new ReportIssueDTO(
                 ri.getDescription(), mapSeverity(ri.getSeverity()), fixNote, source, ri.getFile()));
@@ -773,6 +779,16 @@ public class ValidationReportService {
     }
 
     return issues;
+  }
+
+  private static String issueSource(String issueId) {
+    if (issueId == null) return "REVIEWER_AGENT";
+    if (issueId.startsWith("SYNTH-ACC-")) return "ACCURACY_LLM";
+    if (issueId.startsWith("SYNTH-BUILD-")) return "DETERMINISTIC_BUILD";
+    if (issueId.startsWith("SYNTH-TEST-")) return "DETERMINISTIC_TEST";
+    if (issueId.startsWith("SYNTH-STANDARD-")) return "DETERMINISTIC_STANDARD";
+    if (issueId.startsWith("SYNTH-INVARIANT-")) return "DETERMINISTIC_INVARIANT";
+    return "REVIEWER_AGENT";
   }
 
   private String mapSeverity(IssueSeverity severity) {
@@ -879,6 +895,36 @@ public class ValidationReportService {
     return compileResult == null || compileResult.skipped() ? null : compileResult.passed();
   }
 
+  private String toEvidenceJson(Object evidence) {
+    if (evidence == null) return null;
+    try {
+      return objectMapper.writeValueAsString(evidence);
+    } catch (com.fasterxml.jackson.core.JsonProcessingException impossible) {
+      throw new IllegalStateException(
+          "Deterministic validation evidence could not be serialized", impossible);
+    }
+  }
+
+  private static String command(
+      com.navneet.executespec.report.model.CommandExecutionEvidence evidence) {
+    return evidence == null ? null : evidence.command();
+  }
+
+  private static String workingDirectory(
+      com.navneet.executespec.report.model.CommandExecutionEvidence evidence) {
+    return evidence == null ? null : evidence.workingDirectory();
+  }
+
+  private static Integer exitCode(
+      com.navneet.executespec.report.model.CommandExecutionEvidence evidence) {
+    return evidence == null ? null : evidence.exitCode();
+  }
+
+  private static String boundedOutput(
+      com.navneet.executespec.report.model.CommandExecutionEvidence evidence) {
+    return evidence == null ? null : evidence.boundedOutput();
+  }
+
   /**
    * A summary score cannot exceed the assessor's own spec-adherence score once that assessor has
    * identified a concrete missing/partial requirement or could not verify one. UNKNOWN is not a
@@ -912,7 +958,7 @@ public class ValidationReportService {
    * Original heuristic from before R-09. Kept as a private fallback so the existing test surface
    * remains valid for inputs where the run state is absent or LEGACY_UNKNOWN.
    */
-  private PipelineResult computeResultHeuristic(List<ReportIssueDTO> issues, ReportInput input) {
+  PipelineResult computeResultHeuristic(List<ReportIssueDTO> issues, ReportInput input) {
     // Compilation failure is always FAILED
     if (input.compileResult() != null
         && !input.compileResult().passed()
@@ -929,16 +975,29 @@ public class ValidationReportService {
           review.getIssues().stream().allMatch(i -> i.isAutoFixed() && i.isFixSucceeded());
       if (allFixed) return PipelineResult.PASSED_WITH_FIXES;
 
-      // Any unresolved CRITICAL issues → FAILED
+      // Only independently deterministic CRITICAL evidence may hard-fail the report. Reviewer and
+      // accuracy agents are model-derived: their findings remain visible and may cap confidence,
+      // but cannot masquerade as build/test/contract proof.
       boolean hasUnresolvedCritical =
           review.getIssues().stream()
               .filter(i -> i.getSeverity() == IssueSeverity.CRITICAL)
+              .filter(ValidationReportService::isDeterministicHardFailureIssue)
               .anyMatch(i -> !i.isAutoFixed() || !i.isFixSucceeded());
       if (hasUnresolvedCritical) return PipelineResult.FAILED;
     }
 
     // Issues exist but not all resolved (e.g. MINOR unresolved, or test failures)
     return PipelineResult.NEEDS_ATTENTION;
+  }
+
+  static boolean isDeterministicHardFailureIssue(
+      com.navneet.executespec.reviewer.model.ReviewIssue issue) {
+    if (issue == null || issue.getId() == null) return false;
+    String id = issue.getId();
+    return id.startsWith("SYNTH-BUILD-")
+        || id.startsWith("SYNTH-TEST-")
+        || id.startsWith("SYNTH-STANDARD-")
+        || id.startsWith("SYNTH-INVARIANT-");
   }
 
   /**

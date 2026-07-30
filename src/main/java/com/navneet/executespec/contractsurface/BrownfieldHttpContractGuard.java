@@ -5,10 +5,12 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.Comparator;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.config.AgentProperties;
 import com.navneet.executespec.contracts.gate.PlanContractGateReport;
@@ -86,6 +88,14 @@ public class BrownfieldHttpContractGuard {
 
   CompatibilityReport compare(
       String runId, Path workspaceRoot, BreakingChangeAuthorization authorization) {
+    return compare(runId, workspaceRoot, authorization, true);
+  }
+
+  private CompatibilityReport compare(
+      String runId,
+      Path workspaceRoot,
+      BreakingChangeAuthorization authorization,
+      boolean persistEvidence) {
     requireRunAndRoot(runId, workspaceRoot);
     PipelineRun run = requireRun(runId);
     BaselineEnvelope baseline = readDurableBaseline(run);
@@ -107,7 +117,7 @@ public class BrownfieldHttpContractGuard {
             .sorted()
             .toList();
     boolean authorized =
-        !missing.isEmpty() && authorization != null && authorization.allowsRemoval();
+        !missing.isEmpty() && authorization != null && authorization.allowsExactly(missing);
     CompatibilityReport report =
         new CompatibilityReport(
             baseline.snapshot().digest(),
@@ -116,7 +126,9 @@ public class BrownfieldHttpContractGuard {
             added,
             missing.isEmpty() || authorized,
             authorized);
-    persistComparison(run, report);
+    if (persistEvidence) {
+      persistComparison(run, report);
+    }
     return report;
   }
 
@@ -125,11 +137,41 @@ public class BrownfieldHttpContractGuard {
         runId, runWorkspace(runId), resolveDurableBreakingChangeAuthorization(runId));
   }
 
+  /**
+   * Evaluates the current canonical workspace without updating the durable comparison snapshot.
+   *
+   * <p>This is the read-side counterpart to {@link #assertCompatible(String)}. It exists for
+   * publication previews and status polling, where a GET must not rewrite run evidence merely
+   * because a user opened the page. The eventual push/deploy boundary still calls {@code
+   * assertCompatible} and persists the comparison it actually admitted.
+   */
+  public CompatibilityReport inspectCompatibility(String runId) {
+    return compare(
+        runId, runWorkspace(runId), resolveDurableBreakingChangeAuthorization(runId), false);
+  }
+
   public boolean hasBaseline(String runId) {
     return runRepository
         .findById(runId)
         .map(run -> run.getBrownfieldHttpBaselineDigest() != null)
         .orElse(false);
+  }
+
+  /**
+   * Exact immutable route constraints admitted for this run. Planning may consult this read-only
+   * view when producing a route-scoped breaking-change report; it never mutates the baseline.
+   */
+  public Set<RouteKey> protectedRoutes(String runId) {
+    if (runId == null || runId.isBlank()) return Set.of();
+    PipelineRun run = runRepository.findById(runId).orElse(null);
+    if (run == null || run.getBrownfieldHttpBaselineDigest() == null) return Set.of();
+    BaselineEnvelope baseline = readDurableBaseline(run);
+    if (!runId.equals(baseline.runId())) {
+      throw new ContractCompatibilityException(
+          "BROWNFIELD_BASELINE_IDENTITY_MISMATCH",
+          "HTTP contract baseline belongs to a different run");
+    }
+    return baseline.snapshot().keys();
   }
 
   CompatibilityReport assertCompatible(
@@ -209,11 +251,56 @@ public class BrownfieldHttpContractGuard {
           || !receipt.actorUserId().equals(report.getAcknowledgedByUserId())) {
         return BreakingChangeAuthorization.none();
       }
+      Set<RouteKey> authorizedRemovals = exactAuthorizedHttpRemovals(report.getReportJson());
+      if (authorizedRemovals.isEmpty()) {
+        return BreakingChangeAuthorization.none();
+      }
       return BreakingChangeAuthorization.acknowledged(
-          receipt.contractAcknowledgementText(), receipt.contractGateReportDigest());
+          receipt.contractAcknowledgementText(),
+          receipt.contractGateReportDigest(),
+          authorizedRemovals);
     } catch (RuntimeException invalidOrUnavailableEvidence) {
       return BreakingChangeAuthorization.none();
     }
+  }
+
+  /**
+   * Reads the only accepted route-removal authority shape from the digest-bound report bytes.
+   *
+   * <p>A generic contract warning or typed {@code BREAKING} acknowledgement is intentionally
+   * insufficient. The report must name every removed HTTP method/path in the structured {@code
+   * brownfieldHttpRouteRemovals} array. Unknown/malformed rows fail closed; prose and nested
+   * strings are never interpreted as authority.
+   */
+  private Set<RouteKey> exactAuthorizedHttpRemovals(String reportJson) {
+    try {
+      JsonNode root = objectMapper.readTree(reportJson);
+      if (root == null || !root.isObject()) return Set.of();
+      if (root.path("schemaVersion").asInt(-1) != 1) return Set.of();
+      JsonNode removals = root.get("brownfieldHttpRouteRemovals");
+      if (removals == null || !removals.isArray() || removals.isEmpty()) return Set.of();
+      Set<RouteKey> exact = new LinkedHashSet<>();
+      for (JsonNode removal : removals) {
+        if (!removal.isObject()) return Set.of();
+        String method = removal.path("method").asText("");
+        String path = removal.path("path").asText("");
+        if (!isCanonicalHttpMethod(method)
+            || path.isBlank()
+            || !path.startsWith("/")
+            || !path.equals(SpringHttpSurfaceExtractor.normalizePath(path))) {
+          return Set.of();
+        }
+        exact.add(new RouteKey(method, path));
+      }
+      return Set.copyOf(exact);
+    } catch (Exception malformed) {
+      return Set.of();
+    }
+  }
+
+  private static boolean isCanonicalHttpMethod(String method) {
+    return Set.of("GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS", "TRACE", "ANY")
+        .contains(method);
   }
 
   private Path runWorkspace(String runId) {
@@ -322,20 +409,33 @@ public class BrownfieldHttpContractGuard {
    * Explicit seam for the durable plan-gate acknowledgement. A caller must supply both the exact
    * uppercase acknowledgement and its persisted report digest; a boolean alone is insufficient.
    */
-  record BreakingChangeAuthorization(String acknowledgement, String reportDigest) {
+  record BreakingChangeAuthorization(
+      String acknowledgement, String reportDigest, Set<RouteKey> exactRemovals) {
+    BreakingChangeAuthorization {
+      exactRemovals = exactRemovals == null ? Set.of() : Set.copyOf(exactRemovals);
+    }
+
     public static BreakingChangeAuthorization none() {
-      return new BreakingChangeAuthorization(null, null);
+      return new BreakingChangeAuthorization(null, null, Set.of());
     }
 
     public static BreakingChangeAuthorization acknowledged(
         String acknowledgement, String reportDigest) {
-      return new BreakingChangeAuthorization(acknowledgement, reportDigest);
+      return new BreakingChangeAuthorization(acknowledgement, reportDigest, Set.of());
     }
 
-    public boolean allowsRemoval() {
+    public static BreakingChangeAuthorization acknowledged(
+        String acknowledgement, String reportDigest, Set<RouteKey> exactRemovals) {
+      return new BreakingChangeAuthorization(acknowledgement, reportDigest, exactRemovals);
+    }
+
+    public boolean allowsExactly(List<RouteKey> missing) {
       return "BREAKING".equals(acknowledgement)
           && reportDigest != null
-          && reportDigest.matches("(?i)[0-9a-f]{64}");
+          && reportDigest.matches("(?i)[0-9a-f]{64}")
+          && missing != null
+          && !missing.isEmpty()
+          && exactRemovals.equals(Set.copyOf(missing));
     }
   }
 

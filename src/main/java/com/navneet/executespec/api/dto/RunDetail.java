@@ -271,9 +271,40 @@ public class RunDetail {
 
   Integer accuracyScore;
   String reviewerVerdict;
+
+  /** Physical reviewer provider persisted from the reviewer call attribution. */
+  String reviewerProvider;
+
+  /** Physical reviewer model persisted from the reviewer call attribution. */
+  String reviewerEffectiveModel;
+
   Boolean finalBuildPassed;
   Integer testsPassed;
   Integer testsTotal;
+
+  /** True only when the test totals came from an actual executed command. */
+  Boolean testExecutionVerified;
+
+  /** Durable validation lifecycle state; null when no report exists. */
+  String validationEvidenceStatus;
+
+  /** Exact workspace generation to which the validation report is bound. */
+  String evidenceWorkspaceGeneration;
+
+  /** Deterministic workflow/config parser result: PASS/FAILED/NOT_APPLICABLE/UNAVAILABLE. */
+  String workflowConfigStatus;
+
+  /** Human-readable deterministic workflow/config evidence summary. */
+  String workflowConfigReason;
+
+  /** Immutable admitted brownfield HTTP baseline digest, when this is an existing-code run. */
+  String brownfieldHttpBaselineDigest;
+
+  /** Most recently measured workspace HTTP surface digest. */
+  String brownfieldHttpCurrentDigest;
+
+  /** BASELINE/COMPATIBLE/BREAKING, or null when the gate does not apply. */
+  String brownfieldHttpCompatibilityStatus;
 
   /** Present if this run was triggered by an external integration. */
   public record IntegrationSource(String sourceType, String sourceId, String sourceUrl) {}

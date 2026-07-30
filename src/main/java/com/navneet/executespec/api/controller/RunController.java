@@ -24,6 +24,7 @@ import com.navneet.executespec.auth.security.RunVisibilitySpec;
 import com.navneet.executespec.deployment.GcsWorkspaceStore;
 import com.navneet.executespec.deployment.WorkspaceExportService;
 import com.navneet.executespec.deployment.WorkspaceFileService;
+import com.navneet.executespec.integration.scm.PublicationAdmissionService;
 import com.navneet.executespec.integration.scm.ScmPushService;
 import com.navneet.executespec.run.CustomerRunSubmissionService;
 import com.navneet.executespec.state.StateStore;
@@ -59,6 +60,7 @@ public class RunController {
   private final com.navneet.executespec.integration.RunLifecycleService runLifecycleService;
   private final com.navneet.executespec.integration.PlanApprovalService planApprovalService;
   private final ScmPushService scmPushService;
+  private final PublicationAdmissionService publicationAdmissionService;
   private final StateStore stateStore;
   private final RunMapper mapper;
   private final RunRecoveryRepository recoveryRepository;
@@ -274,6 +276,17 @@ public class RunController {
       @PathVariable String runId, @AuthenticationPrincipal AppUserDetails userDetails) {
     PipelineRun run = guard.requireRunAccess(runId, userDetails);
     return ResponseEntity.ok(mapper.toDetail(run, stateStore.getAllTasks(runId)));
+  }
+
+  /**
+   * Read-only preview of the exact deterministic gates that the SCM/deployment mutation boundary
+   * will repeat immediately before publication.
+   */
+  @GetMapping("/{runId}/publication-eligibility")
+  public ResponseEntity<PublicationAdmissionService.Eligibility> getPublicationEligibility(
+      @PathVariable String runId, @AuthenticationPrincipal AppUserDetails userDetails) {
+    PipelineRun run = guard.requireRunAccess(runId, userDetails);
+    return ResponseEntity.ok(publicationAdmissionService.evaluate(run));
   }
 
   /**
@@ -926,7 +939,7 @@ public class RunController {
   }
 
   @PostMapping("/{runId}/push-scm")
-  public ResponseEntity<Map<String, String>> pushToScm(
+  public ResponseEntity<ScmPushResponse> pushToScm(
       @AuthenticationPrincipal AppUserDetails userDetails,
       @PathVariable String runId,
       @RequestParam(required = false) String repoUrl,
@@ -972,20 +985,34 @@ public class RunController {
 
     String resultPrUrl = pushResult.prUrl().isBlank() ? prUrl : pushResult.prUrl();
     return ResponseEntity.ok(
-        Map.ofEntries(
-            Map.entry("status", pushResult.status()),
-            Map.entry("repoUrl", updated.getRepoUrl() != null ? updated.getRepoUrl() : ""),
-            Map.entry("prUrl", resultPrUrl),
-            Map.entry("scmProvider", provider.isBlank() ? pushResult.scmProvider() : provider),
-            Map.entry("message", pushResult.message()),
-            Map.entry("attempted", Integer.toString(pushResult.attempted())),
-            Map.entry("succeeded", Integer.toString(pushResult.succeeded())),
-            Map.entry("failed", Integer.toString(pushResult.failed())),
-            Map.entry("code", pushResult.code()),
-            Map.entry("publicationEligible", Boolean.toString(pushResult.publicationEligible())),
-            Map.entry("retryable", Boolean.toString(pushResult.retryable())),
-            Map.entry("retryGuidance", pushResult.retryGuidance())));
+        new ScmPushResponse(
+            pushResult.status(),
+            updated.getRepoUrl() != null ? updated.getRepoUrl() : "",
+            resultPrUrl,
+            provider.isBlank() ? pushResult.scmProvider() : provider,
+            pushResult.message(),
+            pushResult.attempted(),
+            pushResult.succeeded(),
+            pushResult.failed(),
+            pushResult.code(),
+            pushResult.publicationEligible(),
+            pushResult.retryable(),
+            pushResult.retryGuidance()));
   }
+
+  public record ScmPushResponse(
+      String status,
+      String repoUrl,
+      String prUrl,
+      String scmProvider,
+      String message,
+      int attempted,
+      int succeeded,
+      int failed,
+      String code,
+      boolean publicationEligible,
+      boolean retryable,
+      String retryGuidance) {}
 
   /**
    * Update the project association of an existing run. Send null or empty projectId to un-assign.
@@ -1206,23 +1233,35 @@ public class RunController {
     log.info("POST /api/runs/{}/tasks/{}/continuation/approve", runId, taskId);
     try {
       var approval = runLifecycleService.approveContinuation(runId, taskId);
+      boolean completedReplay =
+          approval.replayed() && "COMPLETED".equals(approval.approvalStatus());
+      String responseStatus =
+          completedReplay ? "already_completed" : approval.replayed() ? "already_queued" : "queued";
       return ResponseEntity.accepted()
           .body(
               Map.of(
                   "status",
-                  "queued",
+                  responseStatus,
                   "runId",
                   runId,
                   "taskId",
                   taskId,
+                  "approvalId",
+                  approval.approvalId(),
                   "provider",
                   approval.provider(),
                   "model",
                   approval.model(),
                   "postReview",
                   approval.postReview(),
+                  "replayed",
+                  approval.replayed(),
                   "message",
-                  "Approved continuation queued — watch the run feed for progress."));
+                  completedReplay
+                      ? "This exact continuation approval already completed."
+                      : approval.replayed()
+                          ? "This exact continuation approval was already queued."
+                          : "Approved continuation queued — watch the run feed for progress."));
     } catch (IllegalArgumentException e) {
       throw new ResponseStatusException(HttpStatus.NOT_FOUND, e.getMessage());
     } catch (IllegalStateException e) {

@@ -1,4 +1,5 @@
 import {describe, expect, it} from 'vitest';
+import type {PublicationEligibility, RunDetail} from '@/lib/api';
 
 import {
   boundedLineDiff,
@@ -40,6 +41,7 @@ import {
   modelRankingLabel,
   matchingContinuationApprovalRecorded,
   num,
+  publicationTrustFacts,
   runArtifactActionAvailability,
   runChatResponseContent,
   friendlyAiFailureMessage,
@@ -57,6 +59,121 @@ import {
   usd,
   verdictFor,
 } from './runResultUtils';
+
+describe('publicationTrustFacts', () => {
+  it('keeps route, executable checks, generations, and eligibility as independent facts', () => {
+    const run = {
+      tasks: [
+        {
+          taskId: 'T1',
+          status: 'COMPLETE',
+          effectiveProvider: 'OPENROUTER',
+          effectiveModel: 'x-ai/grok-4.20',
+          effectiveRouteAttribution: 'LEDGER',
+          continuationActions: [
+            {
+              status: 'APPROVED',
+              provider: 'OPENROUTER',
+              model: 'x-ai/grok-4.20',
+              workerAttempt: {
+                provider: 'OPENROUTER',
+                model: 'x-ai/grok-4.20',
+                attribution: 'LEDGER',
+                physicalAttemptIds: ['worker-attempt'],
+              },
+              reviewerAttempt: {
+                provider: 'OPENROUTER',
+                model: 'x-ai/grok-4.20',
+                attribution: 'LEDGER',
+                physicalAttemptIds: ['reviewer-attempt'],
+              },
+              beforeWorkspaceGeneration: 'a'.repeat(64),
+              afterWorkspaceGeneration: 'b'.repeat(64),
+              diffDigest: 'c'.repeat(64),
+              changedFiles: ['src/todo.ts'],
+              evidenceInvalidated: true,
+              validationRegenerated: true,
+            },
+          ],
+        },
+      ],
+      effectiveProvider: 'OPENROUTER',
+      effectiveModel: 'x-ai/grok-4.20',
+      effectiveRouteAttribution: 'LEDGER',
+      finalBuildPassed: true,
+      testsPassed: 2,
+      testsTotal: 2,
+      testExecutionVerified: true,
+      workflowConfigStatus: 'PASSED',
+      workflowConfigReason: '1 workflow parsed',
+      brownfieldHttpCompatibilityStatus: 'COMPATIBLE',
+      reviewerVerdict: 'CLEAN',
+      reviewerProvider: 'OPENROUTER',
+      reviewerEffectiveModel: 'x-ai/grok-4.20',
+      totalInputTokens: 100,
+      totalOutputTokens: 20,
+      actualCostUsd: 0.25,
+    } as unknown as RunDetail;
+    const publication = {
+      eligible: true,
+      eligibility: 'ELIGIBLE',
+      code: 'PUBLICATION_ELIGIBLE',
+      blockingGate: null,
+      reason: 'all pass',
+      retryable: false,
+      remediation: null,
+      evidenceWorkspaceGeneration: 'b'.repeat(64),
+      currentWorkspaceGeneration: 'b'.repeat(64),
+    } satisfies PublicationEligibility;
+
+    const facts = publicationTrustFacts(run, publication);
+
+    expect(Object.fromEntries(facts.map((fact) => [fact.label, fact.value]))).toMatchObject({
+      'Approved correction route': 'OPENROUTER/x-ai/grok-4.20',
+      'Actual worker route': 'OPENROUTER/x-ai/grok-4.20 (LEDGER · 1 physical attempt)',
+      Build: 'Passed',
+      Tests: '2/2 passed · execution verified',
+      'Workflow/config': 'PASSED · 1 workflow parsed',
+      'Protected contracts': 'COMPATIBLE',
+      'Reviewer result': 'CLEAN',
+      'Reviewer route': 'OPENROUTER/x-ai/grok-4.20 (LEDGER · 1 physical attempt)',
+      Correction: expect.stringContaining(
+        '1 changed: src/todo.ts · diff cccccccccccc · prior evidence invalidated · validation regenerated',
+      ),
+      'Evidence freshness': expect.stringContaining('Fresh'),
+      Publication: 'ELIGIBLE · PUBLICATION_ELIGIBLE',
+    });
+  });
+
+  it('does not let a score or terminal status conceal stale evidence and failed tests', () => {
+    const facts = publicationTrustFacts(
+      {
+        status: 'COMPLETE',
+        verifiedScore: 99,
+        tasks: [],
+        finalBuildPassed: true,
+        testsPassed: 1,
+        testsTotal: 2,
+        testExecutionVerified: true,
+      } as unknown as RunDetail,
+      {
+        eligible: false,
+        eligibility: 'BLOCKED',
+        code: 'PUBLICATION_EVIDENCE_STALE',
+        blockingGate: 'EVIDENCE_FRESHNESS',
+        reason: 'stale',
+        retryable: true,
+        remediation: 'regenerate',
+        evidenceWorkspaceGeneration: 'a'.repeat(64),
+        currentWorkspaceGeneration: 'b'.repeat(64),
+      },
+    );
+
+    expect(facts.find((fact) => fact.label === 'Tests')).toMatchObject({kind: 'bad'});
+    expect(facts.find((fact) => fact.label === 'Evidence freshness')).toMatchObject({kind: 'bad'});
+    expect(facts.find((fact) => fact.label === 'Publication')).toMatchObject({kind: 'bad'});
+  });
+});
 
 describe('runArtifactActionAvailability', () => {
   it('blocks every artifact action when planning failed before producing evidence', () => {

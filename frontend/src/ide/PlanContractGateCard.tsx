@@ -7,7 +7,12 @@
 // confirmation box would be theatre.
 import type {PlanContractGateRow} from '@/lib/api';
 import {IdeBadge} from '@/ide/IdeKit';
-import {REQUIRED_ACK_TEXT, gateHeadline, isAckSatisfied} from '@/ide/planContractGate';
+import {
+  REQUIRED_ACK_TEXT,
+  gateHeadline,
+  isAckSatisfied,
+  type BrownfieldHttpRouteRemoval,
+} from '@/ide/planContractGate';
 
 function Row({row}: {row: PlanContractGateRow}) {
   const consumers = (row.declaredConsumers ?? []).filter(Boolean);
@@ -57,11 +62,13 @@ function Row({row}: {row: PlanContractGateRow}) {
  */
 export function PlanContractGateCard({
   rows,
+  brownfieldHttpRouteRemovals,
   typed,
   onTypedChange,
   disabled,
 }: {
   rows: PlanContractGateRow[];
+  brownfieldHttpRouteRemovals: BrownfieldHttpRouteRemoval[];
   typed: string;
   onTypedChange: (value: string) => void;
   disabled?: boolean;
@@ -79,12 +86,33 @@ export function PlanContractGateCard({
         <IdeBadge kind='bad'>Acknowledgement required</IdeBadge>
       </div>
       <div style={{fontSize: 12.5, lineHeight: 1.6, color: 'var(--ide-fg-muted)'}}>
-        {gateHeadline(rows)} Approving starts work that will change these contracts. Review what
-        breaks before you acknowledge.
+        {rows.length > 0 && `${gateHeadline(rows)} `}
+        {brownfieldHttpRouteRemovals.length > 0 &&
+          `This plan explicitly removes ${brownfieldHttpRouteRemovals.length} protected HTTP ${
+            brownfieldHttpRouteRemovals.length === 1 ? 'route' : 'routes'
+          }. `}
+        Approving starts work that can break existing callers. Review the exact change before you
+        acknowledge.
       </div>
 
       {rows.map((row, i) => (
         <Row key={row.contractId || row.detectedPath || i} row={row} />
+      ))}
+
+      {brownfieldHttpRouteRemovals.map((route) => (
+        <div
+          key={`${route.method}:${route.path}`}
+          className='ide-mono'
+          style={{
+            borderTop: '1px solid var(--ide-border)',
+            paddingTop: 10,
+            marginTop: 10,
+            color: 'var(--ide-red)',
+            fontSize: 12.5,
+          }}
+        >
+          Remove {route.method} {route.path}
+        </div>
       ))}
 
       <label
@@ -96,7 +124,7 @@ export function PlanContractGateCard({
         }}
       >
         Type <strong className='ide-mono'>{REQUIRED_ACK_TEXT}</strong> to confirm you understand
-        these consumers will break:
+        this may break existing callers:
         <input
           className='ide-input ide-mono'
           style={{marginTop: 6, width: '100%'}}

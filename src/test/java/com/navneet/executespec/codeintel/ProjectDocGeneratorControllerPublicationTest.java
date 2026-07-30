@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.time.Instant;
@@ -52,6 +53,7 @@ class ProjectDocGeneratorControllerPublicationTest {
             null,
             null,
             null,
+            null,
             Instant.now(),
             null,
             null);
@@ -66,6 +68,51 @@ class ProjectDocGeneratorControllerPublicationTest {
         .endsWith("/docs/EXPLANATION/jobs/" + jobId);
     assertThat(response.getBody().provider()).isEqualTo("ANTHROPIC");
     assertThat(response.getBody().model()).isEqualTo("claude-sonnet-4-6");
+  }
+
+  @Test
+  void uncertainRetryRequiresWriteAuthorityAndReturnsAcceptedSameJob() {
+    ProjectDocGeneratorService service = mock(ProjectDocGeneratorService.class);
+    ProjectGeneratedDocJobService jobs = mock(ProjectGeneratedDocJobService.class);
+    ProjectAccessGuard guard = mock(ProjectAccessGuard.class);
+    AppUserDetails principal = mock(AppUserDetails.class);
+    AppUser user = mock(AppUser.class);
+    when(principal.getUser()).thenReturn(user);
+    when(user.getId()).thenReturn("user-1");
+    UUID jobId = UUID.randomUUID();
+    var queued =
+        new ProjectGeneratedDocJobStore.Job(
+            jobId,
+            "project-1",
+            "org-1",
+            "user-1",
+            "EXPLANATION",
+            "ANTHROPIC",
+            "claude-sonnet-4-6",
+            ProjectGeneratedDocJobStore.Status.QUEUED,
+            0,
+            Instant.now(),
+            Instant.now().plusSeconds(1800),
+            null,
+            1,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            Instant.now(),
+            null,
+            null);
+    when(jobs.confirmRetry("project-1", DocType.EXPLANATION, jobId, "user-1")).thenReturn(queued);
+    ProjectDocGeneratorController controller =
+        new ProjectDocGeneratorController(service, jobs, guard);
+
+    var response = controller.confirmRetry("project-1", "EXPLANATION", jobId, principal);
+
+    assertThat(response.getStatusCode().value()).isEqualTo(202);
+    assertThat(response.getBody().id()).isEqualTo(jobId);
+    verify(guard).assertCanWrite("project-1", principal);
   }
 
   @Test

@@ -183,6 +183,6 @@ class DeploymentP1RemediationTest {
       DeploymentRepository repo, CloudRunClient cloudRun) {
     return new DeploymentService(
         null, null, repo, null, null, null, cloudRun, null, null, null, null, null, null, null,
-        null, null);
+        null, null, null);
   }
 }

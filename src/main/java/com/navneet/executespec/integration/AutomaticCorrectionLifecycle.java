@@ -10,13 +10,20 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.navneet.executespec.config.featureflag.FeatureFlagService;
+import com.navneet.executespec.contractsurface.BrownfieldHttpContractGuard;
+import com.navneet.executespec.harness.ExecutionResult;
 import com.navneet.executespec.lint.LintPass;
+import com.navneet.executespec.report.ValidationReportRepository;
+import com.navneet.executespec.report.entity.ValidationReport;
+import com.navneet.executespec.report.model.WorkflowConfigEvidence;
+import com.navneet.executespec.reviewer.ReviewerResult;
 import com.navneet.executespec.router.ModelProviderScore;
 import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
 import com.navneet.executespec.state.entity.AgentTask;
 import com.navneet.executespec.state.repository.AgentTaskRepository;
 
+import org.springframework.beans.BeanUtils;
 import org.springframework.stereotype.Component;
 
 import lombok.RequiredArgsConstructor;
@@ -41,6 +48,9 @@ public class AutomaticCorrectionLifecycle {
   private final FeatureFlagService featureFlagService;
   private final LintPass lintPass;
   private final SseBroadcaster broadcaster;
+  private final WorkflowConfigEvidenceInspector workflowConfigEvidenceInspector;
+  private final ValidationReportRepository validationReportRepository;
+  private final BrownfieldHttpContractGuard brownfieldHttpContractGuard;
 
   public CorrectionWorkspaceTransaction.Checkpoint begin(Path workspaceRoot) {
     return workspaceTransaction.begin(workspaceRoot);
@@ -51,9 +61,159 @@ public class AutomaticCorrectionLifecycle {
     return workspaceTransaction.accept(checkpoint);
   }
 
+  public String currentGeneration(CorrectionWorkspaceTransaction.Checkpoint checkpoint) {
+    return workspaceTransaction.currentGeneration(checkpoint);
+  }
+
+  public CorrectionWorkspaceTransaction.DiffEvidence diffEvidence(
+      CorrectionWorkspaceTransaction.Checkpoint checkpoint) {
+    return workspaceTransaction.diffEvidence(checkpoint);
+  }
+
   public void rollback(CorrectionWorkspaceTransaction.Checkpoint checkpoint) {
     workspaceTransaction.rollback(checkpoint);
   }
+
+  public WorkflowConfigEvidence inspectWorkflowConfig(Path workspaceRoot) {
+    return workflowConfigEvidenceInspector.inspect(workspaceRoot);
+  }
+
+  public ReviewAssessment assessReadOnlyReview(
+      String runId,
+      String targetTaskId,
+      Path workspaceRoot,
+      CorrectionWorkspaceTransaction.Checkpoint checkpoint,
+      String preReviewerGeneration,
+      ExecutionResult execution,
+      ReviewerResult review) {
+    String postReviewerGeneration = currentGeneration(checkpoint);
+    if (!preReviewerGeneration.equals(postReviewerGeneration)) {
+      throw new IllegalStateException(
+          "CORRECTION_REVIEWER_MUTATED_WORKSPACE: read-only reviewer changed the correction"
+              + " generation");
+    }
+    if (brownfieldHttpContractGuard.hasBaseline(runId)) {
+      brownfieldHttpContractGuard.assertCompatible(runId);
+    }
+    CorrectionWorkspaceTransaction.DiffEvidence diff = diffEvidence(checkpoint);
+    CorrectionAcceptancePolicy.Decision decision =
+        CorrectionAcceptancePolicy.evaluate(
+            targetTaskId,
+            execution,
+            review,
+            inspectWorkflowConfig(workspaceRoot),
+            checkpoint.generation(),
+            postReviewerGeneration);
+    return new ReviewAssessment(postReviewerGeneration, diff, decision);
+  }
+
+  public void rollbackFailedAttempt(
+      String taskKey,
+      CorrectionWorkspaceTransaction.Checkpoint checkpoint,
+      EvidenceCheckpoint evidenceCheckpoint,
+      CorrectionWorkspaceTransaction.DiffEvidence knownDiff,
+      Exception failure) {
+    try {
+      CorrectionWorkspaceTransaction.DiffEvidence diff = knownDiff;
+      if (diff == null) {
+        try {
+          diff = diffEvidence(checkpoint);
+        } catch (RuntimeException diffFailure) {
+          failure.addSuppressed(diffFailure);
+        }
+      }
+      rollback(checkpoint);
+      restoreEvidence(evidenceCheckpoint);
+      recordResolution(
+          taskKey,
+          "ROLLED_BACK",
+          "CORRECTION_EXECUTION_FAILED",
+          failure.getMessage(),
+          checkpoint.generation(),
+          checkpoint.generation(),
+          diff,
+          true,
+          false);
+    } catch (RuntimeException rollbackFailure) {
+      rollbackFailure.addSuppressed(failure);
+      throw new IllegalStateException(
+          "Automatic correction failed and its workspace checkpoint could not be restored",
+          rollbackFailure);
+    }
+  }
+
+  public void rollbackRejectedAttempt(
+      String taskKey,
+      CorrectionWorkspaceTransaction.Checkpoint checkpoint,
+      EvidenceCheckpoint evidenceCheckpoint,
+      CorrectionWorkspaceTransaction.DiffEvidence diff,
+      String previousStatus,
+      java.time.Instant previousStartedAt,
+      java.time.Instant previousCompletedAt,
+      Long previousDurationMs,
+      CorrectionAcceptancePolicy.Decision rejection) {
+    rollback(checkpoint);
+    restoreEvidence(evidenceCheckpoint);
+    restoreTask(
+        taskKey, previousStatus, previousStartedAt, previousCompletedAt, previousDurationMs);
+    recordResolution(
+        taskKey,
+        "ROLLED_BACK",
+        rejection.code(),
+        rejection.reason(),
+        checkpoint.generation(),
+        checkpoint.generation(),
+        diff,
+        true,
+        false);
+  }
+
+  /**
+   * Marks all previously published validation facts stale before a correction worker can mutate the
+   * workspace. The detached copy is the durable rollback checkpoint if the correction is not
+   * promoted.
+   */
+  public EvidenceCheckpoint invalidateEvidence(String runId) {
+    ValidationReport previous =
+        validationReportRepository
+            .findByRunId(runId)
+            .map(AutomaticCorrectionLifecycle::copy)
+            .orElse(null);
+    if (previous != null) {
+      ValidationReport stale = copy(previous);
+      stale.setStatus("STALE");
+      validationReportRepository.saveAndFlush(stale);
+    }
+    return new EvidenceCheckpoint(runId, previous);
+  }
+
+  /** Restores the exact validation row that existed before the correction attempt. */
+  public void restoreEvidence(EvidenceCheckpoint checkpoint) {
+    if (checkpoint == null || checkpoint.runId() == null) {
+      return;
+    }
+    if (checkpoint.previous() != null) {
+      validationReportRepository.saveAndFlush(copy(checkpoint.previous()));
+      return;
+    }
+    validationReportRepository
+        .findByRunId(checkpoint.runId())
+        .ifPresent(validationReportRepository::delete);
+    validationReportRepository.flush();
+  }
+
+  private static ValidationReport copy(ValidationReport source) {
+    ValidationReport target = new ValidationReport();
+    BeanUtils.copyProperties(source, target);
+    return target;
+  }
+
+  public record EvidenceCheckpoint(String runId, ValidationReport previous) {}
+
+  public record ReviewAssessment(
+      String workspaceGeneration,
+      CorrectionWorkspaceTransaction.DiffEvidence diff,
+      CorrectionAcceptancePolicy.Decision decision) {}
 
   static boolean sameRoute(
       ModelProviderScore candidate, String dispatchedProvider, String dispatchedModel) {
@@ -129,6 +289,20 @@ public class AutomaticCorrectionLifecycle {
       String reason,
       String beforeGeneration,
       String afterGeneration) {
+    recordResolution(
+        taskKey, status, code, reason, beforeGeneration, afterGeneration, null, false, false);
+  }
+
+  public void recordResolution(
+      String taskKey,
+      String status,
+      String code,
+      String reason,
+      String beforeGeneration,
+      String afterGeneration,
+      CorrectionWorkspaceTransaction.DiffEvidence diffEvidence,
+      boolean evidenceInvalidated,
+      boolean validationRegenerated) {
     if (taskKey == null || taskKey.isBlank()) {
       return;
     }
@@ -145,6 +319,13 @@ public class AutomaticCorrectionLifecycle {
       resolution.put("reason", reason == null ? "" : truncate(reason, 500));
       resolution.put("beforeWorkspaceGeneration", beforeGeneration);
       resolution.put("afterWorkspaceGeneration", afterGeneration);
+      if (diffEvidence != null) {
+        resolution.put("diffDigest", diffEvidence.diffDigest());
+        ArrayNode changedFiles = resolution.putArray("changedFiles");
+        diffEvidence.changedFiles().forEach(changedFiles::add);
+      }
+      resolution.put("evidenceInvalidated", evidenceInvalidated);
+      resolution.put("validationRegenerated", validationRegenerated);
       resolution.put("attempt", actions.size());
       task.setContinuationActionsJson(objectMapper.writeValueAsString(actions));
       taskRepository.saveAndFlush(task);

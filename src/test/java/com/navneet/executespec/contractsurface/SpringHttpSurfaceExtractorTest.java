@@ -1,6 +1,7 @@
 package com.navneet.executespec.contractsurface;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -93,6 +94,156 @@ class SpringHttpSurfaceExtractorTest {
     assertThat(extractor.extract(workspace).routes())
         .extracting(route -> route.method() + " " + route.path())
         .containsExactly("ANY /root/v1", "DELETE /root/v1/items/{id}");
+  }
+
+  @Test
+  void inventoriesMultipleControllersInOneSourceAgainstTheirOwnClassMappings() throws Exception {
+    write(
+        "src/main/java/example/Controllers.java",
+        """
+        package example;
+
+        @RestController
+        @RequestMapping("/orders")
+        class OrderController {
+          @GetMapping("/{id}")
+          Object get() { return null; }
+        }
+
+        @RestController
+        @RequestMapping("/customers")
+        class CustomerController {
+          @PostMapping
+          Object create() { return null; }
+        }
+        """);
+
+    assertThat(extractor.extract(workspace).routes())
+        .extracting(route -> route.method() + " " + route.path())
+        .containsExactly("GET /orders/{id}", "POST /customers");
+  }
+
+  @Test
+  void resolvesContextPathPerModuleWithoutLeakingFirstRepositoryConfiguration() throws Exception {
+    write(
+        "repos/catalog/src/main/resources/application.yml",
+        """
+        server:
+          servlet:
+            context-path: /catalog
+        """);
+    write(
+        "repos/catalog/src/main/java/example/CatalogController.java",
+        """
+        @RestController
+        @RequestMapping("/items")
+        class CatalogController {
+          @GetMapping
+          Object list() { return null; }
+        }
+        """);
+    write(
+        "repos/checkout/src/main/resources/application.properties",
+        "server.servlet.context-path=/checkout\n");
+    write(
+        "repos/checkout/src/main/java/example/CheckoutController.java",
+        """
+        @RestController
+        class CheckoutController {
+          @PostMapping("/orders")
+          Object create() { return null; }
+        }
+        """);
+
+    assertThat(extractor.extract(workspace).routes())
+        .extracting(route -> route.method() + " " + route.path())
+        .containsExactly("GET /catalog/items", "POST /checkout/orders");
+  }
+
+  @Test
+  void failsClosedForDynamicMappingPathInsteadOfSilentlyDroppingRoute() throws Exception {
+    write(
+        "src/main/java/example/DynamicController.java",
+        """
+        @RestController
+        @RequestMapping(ApiPaths.ROOT)
+        class DynamicController {
+          @GetMapping(ApiPaths.ITEMS + "/{id}")
+          Object get() { return null; }
+        }
+        """);
+
+    assertThatThrownBy(() -> extractor.extract(workspace))
+        .isInstanceOf(SpringHttpSurfaceExtractor.SurfaceExtractionException.class)
+        .hasMessageContaining("dynamic mapping path expression")
+        .hasMessageContaining("DynamicController.java:2");
+  }
+
+  @Test
+  void failsClosedForComposedMetaMapping() throws Exception {
+    write(
+        "src/main/java/example/ComposedController.java",
+        """
+        @Target(ElementType.METHOD)
+        @Retention(RetentionPolicy.RUNTIME)
+        @GetMapping("/health")
+        @interface HealthEndpoint {}
+
+        @RestController
+        class ComposedController {
+          @HealthEndpoint
+          Object health() { return null; }
+        }
+        """);
+
+    assertThatThrownBy(() -> extractor.extract(workspace))
+        .isInstanceOf(SpringHttpSurfaceExtractor.SurfaceExtractionException.class)
+        .hasMessageContaining("composed/meta-annotated Spring mappings are not supported")
+        .hasMessageContaining("ComposedController.java:3");
+  }
+
+  @Test
+  void failsClosedForUnknownMappingAnnotationUsage() throws Exception {
+    write(
+        "src/main/java/example/ExternalMappingController.java",
+        """
+        @RestController
+        class ExternalMappingController {
+          @ExternalReadMapping("/health")
+          Object health() { return null; }
+        }
+        """);
+
+    assertThatThrownBy(() -> extractor.extract(workspace))
+        .isInstanceOf(SpringHttpSurfaceExtractor.SurfaceExtractionException.class)
+        .hasMessageContaining("unknown/composed mapping annotation cannot be inventoried");
+  }
+
+  @Test
+  void failsClosedWhenModuleProfilesDeclareDifferentContextPaths() throws Exception {
+    write(
+        "service/src/main/resources/application.yml",
+        """
+        server:
+          servlet:
+            context-path: /service
+        """);
+    write(
+        "service/src/main/resources/application-dev.properties",
+        "server.servlet.context-path=/service-dev\n");
+    write(
+        "service/src/main/java/example/Controller.java",
+        """
+        @RestController
+        class Controller {
+          @GetMapping("/health")
+          Object health() { return null; }
+        }
+        """);
+
+    assertThatThrownBy(() -> extractor.extract(workspace))
+        .isInstanceOf(SpringHttpSurfaceExtractor.SurfaceExtractionException.class)
+        .hasMessageContaining("ambiguous server.servlet.context-path values for module service");
   }
 
   private void write(String relative, String content) throws Exception {

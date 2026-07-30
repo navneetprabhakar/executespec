@@ -2,7 +2,10 @@ package com.navneet.executespec.contractsurface;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.nio.file.Files;
@@ -14,6 +17,7 @@ import com.navneet.executespec.contracts.gate.PlanContractGateReport;
 import com.navneet.executespec.contracts.gate.PlanContractGateReportRepository;
 import com.navneet.executespec.contractsurface.BrownfieldHttpContractGuard.BreakingChangeAuthorization;
 import com.navneet.executespec.contractsurface.BrownfieldHttpContractGuard.ContractCompatibilityException;
+import com.navneet.executespec.contractsurface.SpringHttpSurfaceExtractor.RouteKey;
 import com.navneet.executespec.harness.entity.GateRecord;
 import com.navneet.executespec.harness.repository.GateRepository;
 import com.navneet.executespec.integration.DecisionEvidenceV1;
@@ -69,6 +73,19 @@ class BrownfieldHttpContractGuardTest {
   }
 
   @Test
+  void preserveExistingEndpointResolvesToExactImmutableRouteConstraint() throws Exception {
+    bindRun("run-preserve");
+    writeController("/casino-game");
+
+    var baseline = guard.captureBaselineIfAbsent("run-preserve", workspace);
+
+    assertThat(baseline.snapshot().keys())
+        .containsExactly(new RouteKey("POST", "/simulation/casino-game"));
+    assertThat(baseline.snapshot().digest()).matches("[0-9a-f]{64}");
+    assertThat(baseline.runId()).isEqualTo("run-preserve");
+  }
+
+  @Test
   void preservingOriginalAsAliasPasses() throws Exception {
     bindRun("run-2");
     writeController("/casino-game");
@@ -90,6 +107,20 @@ class BrownfieldHttpContractGuardTest {
     assertThat(report.added())
         .extracting(route -> route.method() + " " + route.path())
         .containsExactly("POST /simulation/api/casino-game");
+  }
+
+  @Test
+  void readOnlyInspectionDoesNotRewriteDurableComparisonEvidence() throws Exception {
+    String runId = workspace.getFileName().toString();
+    bindRun(runId);
+    writeController("/casino-game");
+    guard.captureBaselineIfAbsent(runId, workspace);
+    clearInvocations(runRepository);
+
+    var report = guard.inspectCompatibility(runId);
+
+    assertThat(report.compatible()).isTrue();
+    verify(runRepository, never()).save(org.mockito.ArgumentMatchers.any());
   }
 
   @Test
@@ -133,7 +164,10 @@ class BrownfieldHttpContractGuardTest {
         guard.assertCompatible(
             "run-4",
             workspace,
-            BreakingChangeAuthorization.acknowledged("BREAKING", "a".repeat(64)));
+            BreakingChangeAuthorization.acknowledged(
+                "BREAKING",
+                "a".repeat(64),
+                java.util.Set.of(new RouteKey("POST", "/simulation/casino-game"))));
 
     assertThat(report.compatible()).isTrue();
     assertThat(report.breakingRemovalAuthorized()).isTrue();
@@ -153,6 +187,43 @@ class BrownfieldHttpContractGuardTest {
 
     assertThat(report.compatible()).isTrue();
     assertThat(report.breakingRemovalAuthorized()).isTrue();
+  }
+
+  @Test
+  void acknowledgementForUnrelatedContractCannotAuthorizeEndpointRemoval() throws Exception {
+    String runId = workspace.getFileName().toString();
+    bindRun(runId);
+    writeController("/casino-game");
+    guard.captureBaselineIfAbsent(runId, workspace);
+    writeController("/api/casino-game");
+    bindBreakingApproval(
+        runId,
+        "BREAKING",
+        """
+        {"schemaVersion":1,"brownfieldHttpRouteRemovals":[
+          {"method":"DELETE","path":"/simulation/unrelated"}
+        ]}
+        """);
+
+    assertThatThrownBy(() -> guard.assertCompatible(runId))
+        .isInstanceOf(ContractCompatibilityException.class)
+        .extracting(error -> ((ContractCompatibilityException) error).code())
+        .isEqualTo("BROWNFIELD_HTTP_CONTRACT_REMOVED");
+  }
+
+  @Test
+  void genericBreakingReportCannotAuthorizeEndpointRemoval() throws Exception {
+    String runId = workspace.getFileName().toString();
+    bindRun(runId);
+    writeController("/casino-game");
+    guard.captureBaselineIfAbsent(runId, workspace);
+    writeController("/api/casino-game");
+    bindBreakingApproval(runId, "BREAKING", "{\"breaking\":true}");
+
+    assertThatThrownBy(() -> guard.assertCompatible(runId))
+        .isInstanceOf(ContractCompatibilityException.class)
+        .extracting(error -> ((ContractCompatibilityException) error).code())
+        .isEqualTo("BROWNFIELD_HTTP_CONTRACT_REMOVED");
   }
 
   @Test
@@ -236,7 +307,18 @@ class BrownfieldHttpContractGuardTest {
   }
 
   private GateRecord bindBreakingApproval(String runId, String persistedAcknowledgement) {
-    String reportJson = "{\"breaking\":true}";
+    return bindBreakingApproval(
+        runId,
+        persistedAcknowledgement,
+        """
+        {"schemaVersion":1,"brownfieldHttpRouteRemovals":[
+          {"method":"POST","path":"/simulation/casino-game"}
+        ]}
+        """);
+  }
+
+  private GateRecord bindBreakingApproval(
+      String runId, String persistedAcknowledgement, String reportJson) {
     String reportDigest = DecisionEvidenceV1.sha256(reportJson);
     DecisionEvidenceV1 evidence = breakingApprovalEvidence(runId, reportDigest);
     String evidenceJson = evidence.canonicalJson();
