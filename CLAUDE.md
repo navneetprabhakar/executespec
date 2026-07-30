@@ -1308,7 +1308,7 @@ preview-render single-flight; V307 adds run sandbox lifecycle; **V308** retypes
 `contract_version.inline_content` from jsonb to text (RR-1629 — inline contract bodies are not always
 valid JSON, so the jsonb column rejected legitimate content); **V309** gives `file_lock` a run-scoped
 composite `(run_id, file_path)` identity (RR-1544 — the prior key let one run's lock collide with
-another's). The current source head is V365; the older V299-V309 statements above describe prior source tuples.
+another's). The current source head is V366; the older V299-V309 statements above describe prior source tuples.
 
 **V310–V317 are RESERVED** by the in-flight audit-remediation fix wave (one per lane: billing, auth,
 tool, path-containment, preview/deploy, execution-gate, spend-quota, scoring). Do not allocate from

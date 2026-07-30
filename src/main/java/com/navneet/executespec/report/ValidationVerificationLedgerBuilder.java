@@ -79,9 +79,11 @@ final class ValidationVerificationLedgerBuilder {
   }
 
   private final ObjectMapper objectMapper;
+  private final ValidationReportScoreZeroEvidenceBuilder scoreZeroEvidenceBuilder;
 
   ValidationVerificationLedgerBuilder(ObjectMapper objectMapper) {
     this.objectMapper = objectMapper;
+    this.scoreZeroEvidenceBuilder = new ValidationReportScoreZeroEvidenceBuilder(objectMapper);
   }
 
   List<VerificationEvidenceDTO> build(ValidationReport entity, List<ReportIssueDTO> issues) {
@@ -354,7 +356,8 @@ final class ValidationVerificationLedgerBuilder {
               null));
     }
 
-    VerificationEvidenceDTO zeroCause = scoreZeroCause(entity, effectiveVerifiedScore);
+    VerificationEvidenceDTO zeroCause =
+        scoreZeroEvidenceBuilder.build(entity, effectiveVerifiedScore);
     if (zeroCause != null) {
       out.add(zeroCause);
     }
@@ -412,105 +415,11 @@ final class ValidationVerificationLedgerBuilder {
             effectiveVerifiedScore == null ? null : 100));
 
     return out.stream()
-        .map(evidence -> bindWorkspaceGeneration(evidence, entity.getWorkspaceGeneration()))
+        .map(
+            evidence ->
+                ValidationReportScoreZeroEvidenceBuilder.bindWorkspaceGeneration(
+                    evidence, entity.getWorkspaceGeneration()))
         .toList();
-  }
-
-  /**
-   * Explains a zero headline only from generation-bound deterministic facts.
-   *
-   * <p>Older rows may contain a zero produced by a retired formula or an LLM-derived cap. Those
-   * rows must remain visibly unattributed: inferring a cause from a nearby warning would turn
-   * correlation into false deterministic provenance.
-   */
-  private VerificationEvidenceDTO scoreZeroCause(
-      ValidationReport entity, Integer effectiveVerifiedScore) {
-    if (effectiveVerifiedScore == null || effectiveVerifiedScore != 0) {
-      return null;
-    }
-    ValidationReportScoreZeroCause.Evidence persisted = parseScoreZeroCause(entity);
-    if (persisted == null || persisted.causes().isEmpty()) {
-      return evidence(
-          "score-zero-cause",
-          "Score-zero cause",
-          "SCORE",
-          "UNKNOWN",
-          "INTERNAL_FORMULA",
-          "LOW",
-          "A zero headline must be bound to an explicit deterministic scoring gate.",
-          "Deterministic cause unavailable for this historical or unattributed zero; no cause was"
-              + " inferred from LLM or unbound evidence.",
-          "validation_report.verified_score",
-          0,
-          100);
-    }
-
-    List<String> reasons =
-        persisted.causes().stream().map(ValidationReportScoreZeroCause.Cause::reason).toList();
-    List<String> artifacts =
-        persisted.causes().stream().map(ValidationReportScoreZeroCause.Cause::artifact).toList();
-
-    return evidence(
-        "score-zero-cause",
-        "Score-zero cause",
-        "SCORE",
-        "FAIL",
-        "DETERMINISTIC",
-        "HIGH",
-        "The zero headline is caused by an explicit deterministic scoring gate.",
-        "verifiedScore=0 because " + String.join("; ", reasons) + ".",
-        String.join("; ", artifacts),
-        0,
-        100);
-  }
-
-  private ValidationReportScoreZeroCause.Evidence parseScoreZeroCause(ValidationReport entity) {
-    String json = entity.getScoreZeroCauseJson();
-    if (json == null || json.isBlank()) return null;
-    try {
-      ValidationReportScoreZeroCause.Evidence evidence =
-          objectMapper.readValue(json, ValidationReportScoreZeroCause.Evidence.class);
-      if (evidence.schemaVersion() != ValidationReportScoreZeroCause.SCHEMA_VERSION
-          || !("ADDITIVE_V2".equals(evidence.formula())
-              || "MULTIPLICATIVE_LEGACY".equals(evidence.formula()))
-          || evidence.causes().isEmpty()
-          || evidence.causes().size() > 4) {
-        return null;
-      }
-      for (ValidationReportScoreZeroCause.Cause cause : evidence.causes()) {
-        if (cause == null
-            || !("CODE_DELIVERED".equals(cause.gate())
-                || "BUILD".equals(cause.gate())
-                || "BOOT_BUILD".equals(cause.gate())
-                || "TESTS".equals(cause.gate()))
-            || cause.artifact() == null
-            || cause.artifact().isBlank()
-            || cause.reason() == null
-            || cause.reason().isBlank()) {
-          return null;
-        }
-      }
-      return evidence;
-    } catch (Exception malformed) {
-      return null;
-    }
-  }
-
-  private static VerificationEvidenceDTO bindWorkspaceGeneration(
-      VerificationEvidenceDTO evidence, String workspaceGeneration) {
-    return new VerificationEvidenceDTO(
-        evidence.id(),
-        evidence.label(),
-        evidence.category(),
-        evidence.status(),
-        evidence.source(),
-        evidence.confidence(),
-        workspaceGeneration,
-        evidence.claim(),
-        evidence.summary(),
-        evidence.artifact(),
-        evidence.observed(),
-        evidence.total());
   }
 
   private static String commandArtifact(
