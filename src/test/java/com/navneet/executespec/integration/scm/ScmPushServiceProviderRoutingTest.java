@@ -50,6 +50,12 @@ class ScmPushServiceProviderRoutingTest {
   @Mock private PullRequestRecordRepository pullRequestRecordRepository;
   @Mock private ProjectRepoRepository projectRepoRepository;
   @Mock private ArtifactPublicationGuard publicationGuard;
+
+  @Mock
+  private com.navneet.executespec.contractsurface.BrownfieldHttpContractGuard
+      brownfieldHttpContractGuard;
+
+  @Mock private PublicationAdmissionService publicationAdmissionService;
   @Mock private SideEffectOutbox sideEffectOutbox;
 
   @InjectMocks private ScmPushService service;

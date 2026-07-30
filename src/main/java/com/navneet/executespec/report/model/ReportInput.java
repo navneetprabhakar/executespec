@@ -28,7 +28,13 @@ public record ReportInput(
      * was captured for the run (default — the flag is OFF) — the BUILD scoring slot then falls back
      * to the compile-only signal, so reports are byte-identical until verifyBoot is enabled.
      */
-    BootVerification bootVerification) {
+    BootVerification bootVerification,
+    /**
+     * SHA-256 of the canonical Git workspace generation after deterministic validation completed.
+     * Null is retained only for compatibility tests and historical generation paths; production
+     * run-end validation supplies this value.
+     */
+    String workspaceGeneration) {
   /** Backward-compatible constructor for call sites that don't have test data. */
   public ReportInput(
       PipelineRun run,
@@ -36,7 +42,8 @@ public record ReportInput(
       ReviewReport review,
       CompileResult compileResult,
       List<AgentTask> tasks) {
-    this(run, workerReports, review, compileResult, tasks, null, List.of(), false, null, null);
+    this(
+        run, workerReports, review, compileResult, tasks, null, List.of(), false, null, null, null);
   }
 
   /** Constructor with test data but no afterImprovements flag. */
@@ -57,6 +64,7 @@ public record ReportInput(
         testSummary,
         testResults,
         false,
+        null,
         null,
         null);
   }
@@ -81,6 +89,33 @@ public record ReportInput(
         testResults,
         false,
         null,
-        bootVerification);
+        bootVerification,
+        null);
+  }
+
+  /** Compatibility constructor retaining the pre-V361 full input shape. */
+  public ReportInput(
+      PipelineRun run,
+      List<WorkerReport> workerReports,
+      ReviewReport review,
+      CompileResult compileResult,
+      List<AgentTask> tasks,
+      TestExecutionSummary testSummary,
+      List<TestResult> testResults,
+      boolean generatedAfterImprovements,
+      String previewUrl,
+      BootVerification bootVerification) {
+    this(
+        run,
+        workerReports,
+        review,
+        compileResult,
+        tasks,
+        testSummary,
+        testResults,
+        generatedAfterImprovements,
+        previewUrl,
+        bootVerification,
+        null);
   }
 }

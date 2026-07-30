@@ -390,7 +390,26 @@ final class ValidationVerificationLedgerBuilder {
             effectiveVerifiedScore,
             effectiveVerifiedScore == null ? null : 100));
 
-    return List.copyOf(out);
+    return out.stream()
+        .map(evidence -> bindWorkspaceGeneration(evidence, entity.getWorkspaceGeneration()))
+        .toList();
+  }
+
+  private static VerificationEvidenceDTO bindWorkspaceGeneration(
+      VerificationEvidenceDTO evidence, String workspaceGeneration) {
+    return new VerificationEvidenceDTO(
+        evidence.id(),
+        evidence.label(),
+        evidence.category(),
+        evidence.status(),
+        evidence.source(),
+        evidence.confidence(),
+        workspaceGeneration,
+        evidence.claim(),
+        evidence.summary(),
+        evidence.artifact(),
+        evidence.observed(),
+        evidence.total());
   }
 
   private VerificationEvidenceDTO evidence(
@@ -406,7 +425,18 @@ final class ValidationVerificationLedgerBuilder {
       Integer observed,
       Integer total) {
     return new VerificationEvidenceDTO(
-        id, label, category, status, source, confidence, claim, summary, artifact, observed, total);
+        id,
+        label,
+        category,
+        status,
+        source,
+        confidence,
+        null,
+        claim,
+        summary,
+        artifact,
+        observed,
+        total);
   }
 
   private String reviewerStatus(String reviewerVerdict) {

@@ -77,7 +77,7 @@ source run's host tenant while assigning the current actor as payer on BUILD ite
 server-internal finding PATCH submission resolve its active host project and active actor before
 dedupe or dispatch.
 
-The current deployment candidate advances the migration source head to V359. V354 adds
+The current deployment candidate advances the migration source head to V361. V354 adds
 rollout-gated operation-fenced provider-attempt admission; its default remains
 `EXECUTESPEC_LLM_OPERATION_ADMISSION_MODE=LEGACY`, so this deployment does not activate the new
 admission path. V355 adds bounded oldest-first recovery for stale streamed agent turns and never
@@ -88,7 +88,14 @@ documents durable asynchronous jobs with exact-route admission, fenced publicati
 status, and bounded terminal-job retention. V359 gives each immutable GitHub check-run/head-SHA
 failure a unique database claim before CI autofix submission, binds the canonical PATCH run in the
 next fenced transaction, and permits a later delivery to retry after a fenced failed submission or
-an expired claim with no discoverable run.
+an expired claim with no discoverable run. V360 persists a run-bound canonical Spring HTTP surface
+at brownfield admission and blocks route removal after workers, corrections, validation, and
+immediately before publication unless an exact durable `BREAKING` gate receipt authorizes it. V361
+binds every new validation report and ledger entry to a canonical Git-tree workspace generation.
+Approved corrections now execute against a reversible Git-tree checkpoint, receive a read-only
+final review, and roll back when build, tests, protected contracts, or reviewer evidence regress.
+SCM publication and permanent deployment reject stale/unbound evidence, unverified tests, failed
+builds, and approved-route mismatches before any external side effect.
 RequirementIR also remains `LEGACY`.
 
 ## Versions
@@ -98,7 +105,7 @@ RequirementIR also remains `LEGACY`.
 | Project           | `2.0.0`             | [`VERSION`](VERSION), [`Version`](Version), [`pom.xml`](pom.xml) `<version>` |
 | Spring Boot       | `3.5.14`            | [`pom.xml`](pom.xml) `<parent>` (bumped from `3.3.0` by Dependabot #132, 2026-05-16) |
 | Spring AI         | `1.1.6`             | [`pom.xml`](pom.xml) `<spring-ai.version>` (BOM import)                |
-| Flyway head       | `V359`              | V357 adds task-route evidence; V358 adds durable project-document jobs; V359 adds CI-failure delivery claims; next V360 |
+| Flyway head       | `V361`              | V360 adds brownfield HTTP-contract evidence; V361 adds validation workspace generations; next V362 |
 | Frontend          | `2.0.0`             | [`frontend/package.json`](frontend/package.json) `"version"`           |
 
 `VERSION` and `Version` are kept identical by hand; the project's own conventions reference `Version` as the source of truth. The frontend ships under the same release stamp as the backend.
@@ -126,7 +133,7 @@ ownership must be aligned explicitly before rollout.
 | Framework           | Spring Boot 3.5.14 (Web, Data JPA, Security, OAuth2 client, Mail, Thymeleaf, Actuator, AOP, Validation, Retry, Data Redis) | [`pom.xml`](pom.xml) deps 1, 5, 14–20, 30, 36–39, 60 |
 | LLM SDK             | Spring AI 1.1.6 starters for Anthropic, OpenAI, Google GenAI                        | [`pom.xml`](pom.xml) deps 2–4                                                    |
 | LLM auto-config     | Provider auto-configurations disabled in favor of manual `AgentModelConfig` beans   | [`src/main/java/com/navneet/executespec/ExecutespecApplication.java`](src/main/java/com/navneet/executespec/ExecutespecApplication.java) |
-| Database            | PostgreSQL (Cloud SQL in prod), Flyway migrations head V359                         | [`pom.xml`](pom.xml) deps 6–8, `src/main/resources/db/migration/`                 |
+| Database            | PostgreSQL (Cloud SQL in prod), Flyway migrations head V361                         | [`pom.xml`](pom.xml) deps 6–8, `src/main/resources/db/migration/`                 |
 | Cache / lock        | Redis (Lettuce), ShedLock 7.7.0                                                     | [`pom.xml`](pom.xml) deps 30–32                                                  |
 | Auth                | JJWT 0.13.0 + Spring Security OAuth2 client (Google, GitHub)                        | [`pom.xml`](pom.xml) deps 14–18                                                  |
 | Billing             | Stripe 32.1.0, Razorpay (HMAC), invoice PDFs via OpenPDF 2.0.3 + flying-saucer 9.4.0 | [`pom.xml`](pom.xml) deps 21–22, 56; HMAC via commons-codec 1.22.0 (dep 35)     |

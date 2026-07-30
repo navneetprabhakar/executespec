@@ -1,5 +1,11 @@
 # `state/` — Run state management
 
+V360 adds brownfield HTTP-surface JSON/digest fields to `pipeline_run`; admission writes bind the
+canonical route set to the run. V361 adds nullable-for-legacy
+`validation_report.workspace_generation`; every newly generated report must persist a lowercase
+SHA-256 canonical Git-tree generation and propagate it to every verification-ledger row. Null means
+historical/unbound, never current.
+
 > Last reviewed: 2026-07-28 (backend `13ead3f40`; deterministic backend/PostgreSQL gates green).
 
 Persistence layer for pipeline runs, tasks, and all mutable state.

@@ -434,6 +434,32 @@ class SequentialExecutorSoftCompletionTest {
   // 2: Single-task + iter-limit + writes + smoke pass → COMPLETE+warning
 
   @Test
+  void approvedContinuationUsesExactRouteAndStrictProviderForOnlyTargetAttempt() {
+    stubTaskRow();
+    when(worker.run(any(WorkerTaskRequest.class), any())).thenReturn(workerCompleted(1));
+    when(buildProjectTool.execute(any(), any())).thenReturn(new ToolResult.Ok("exit=0\nbuild ok"));
+
+    SequentialExecutor executor = newExecutor();
+    ExecutionResult result =
+        executor.execute(
+            req(singleTaskPlan(), true),
+            new SequentialExecutor.ResumeRequest(
+                "run-soft_T1",
+                "openrouter",
+                "x-ai/grok-4.20",
+                RunContinuationDecision.CHANGE_PROVIDER,
+                "a".repeat(64)));
+
+    ArgumentCaptor<WorkerTaskRequest> request = ArgumentCaptor.forClass(WorkerTaskRequest.class);
+    verify(worker).run(request.capture(), any());
+    assertEquals("openrouter", request.getValue().provider());
+    assertEquals("x-ai/grok-4.20", request.getValue().model());
+    assertEquals(true, request.getValue().strictProvider());
+    assertEquals("openrouter", result.perTask().get(0).dispatchedProvider());
+    assertEquals("x-ai/grok-4.20", result.perTask().get(0).dispatchedModel());
+  }
+
+  @Test
   void singletask_iter_limit_with_writes_smoke_pass_is_COMPLETE() {
     stubTaskRow();
     when(worker.run(any(WorkerTaskRequest.class), any())).thenReturn(workerHitIterLimit(3));

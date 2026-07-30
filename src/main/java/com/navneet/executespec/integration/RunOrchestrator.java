@@ -19,10 +19,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.atomic.AtomicReference;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.navneet.executespec.agent.Classification;
 import com.navneet.executespec.agent.OutlinePlannerAgent;
 import com.navneet.executespec.agent.Plan;
@@ -233,6 +230,13 @@ public class RunOrchestrator implements RunControlPort {
   private final com.navneet.executespec.contracts.gate.PlanContractGateService planContractGate;
 
   private final RunPublicationFence publicationFence;
+
+  /** Deterministic pre/post Spring HTTP compatibility gate for brownfield runs. */
+  private final com.navneet.executespec.contractsurface.BrownfieldHttpContractGuard
+      brownfieldHttpContractGuard;
+
+  /** Reversible workspace and durable-ledger lifecycle for automatic correction attempts. */
+  private final AutomaticCorrectionLifecycle automaticCorrectionLifecycle;
 
   /** Audit r5 (#5, 2026-05-06) — staged-PR-before-push mode. */
   private final com.navneet.executespec.run.RunSkipPushFlag runSkipPushFlag;
@@ -2311,6 +2315,9 @@ public class RunOrchestrator implements RunControlPort {
         execResult = result.execResult();
         reviewResult = result.reviewResult();
       }
+      if (brownfieldHttpContractGuard.hasBaseline(runId)) {
+        brownfieldHttpContractGuard.assertCompatible(runId);
+      }
 
       // 3b. Enterprise enforcement (project runs only) — make the formerly
       // "decorative" engines real (RL-2026-05-037). StandardsRunner persists
@@ -3672,7 +3679,7 @@ public class RunOrchestrator implements RunControlPort {
     ModelProviderScore candidate = decision.selectedCandidate().orElse(null);
     if (candidate == null
         || action.targetTask() == null
-        || sameProviderModel(
+        || AutomaticCorrectionLifecycle.sameRoute(
             candidate,
             action.targetTask().dispatchedProvider(),
             action.targetTask().dispatchedModel())) {
@@ -3687,6 +3694,25 @@ public class RunOrchestrator implements RunControlPort {
           "RunOrchestrator run={} post-review continuation skipped: task row not found {}",
           runId,
           targetTaskKey);
+      return Optional.empty();
+    }
+
+    final CorrectionWorkspaceTransaction.Checkpoint correctionCheckpoint;
+    try {
+      correctionCheckpoint = automaticCorrectionLifecycle.begin(rootCtx.workspaceRoot());
+    } catch (RuntimeException checkpointFailure) {
+      log.error(
+          "RunOrchestrator run={} automatic correction refused — workspace checkpoint failed: {}",
+          runId,
+          checkpointFailure.getMessage(),
+          checkpointFailure);
+      broadcaster.emit(
+          runId,
+          RunEvent.log(
+              runId,
+              targetTaskId,
+              "Automatic correction refused: the current workspace could not be checkpointed"
+                  + " safely."));
       return Optional.empty();
     }
 
@@ -3742,7 +3768,16 @@ public class RunOrchestrator implements RunControlPort {
             limitData.used(),
             limitData.max()));
     broadcaster.emit(runId, RunEvent.log(runId, targetTaskId, summary));
-    appendPostReviewContinuationAction(taskRow.get(), decision, candidate, limitData, reason);
+    automaticCorrectionLifecycle.recordExecuted(
+        taskRow.get(),
+        decision.decision().name(),
+        candidate.provider(),
+        candidate.model(),
+        reason,
+        limitData.limitName(),
+        limitData.used(),
+        limitData.max(),
+        continuationActionSource(decision));
 
     var task = taskRow.get();
     String previousStatus = task.getStatus();
@@ -3777,8 +3812,15 @@ public class RunOrchestrator implements RunControlPort {
                   .workspaceSummary(
                       contextComposer.buildMultiRepoSummary(projectId, selectedRepoIds))
                   .build(),
-              new SequentialExecutor.ResumeRequest(targetTaskKey));
-      persistenceWriter.applyExecutionResultToTasks(runId, rerunResult);
+              new SequentialExecutor.ResumeRequest(
+                  targetTaskKey,
+                  candidate.provider(),
+                  candidate.model(),
+                  decision.decision(),
+                  DecisionEvidenceV1.sha256(objectMapper.valueToTree(decision).toString())));
+      if (brownfieldHttpContractGuard.hasBaseline(runId)) {
+        brownfieldHttpContractGuard.assertCompatible(runId);
+      }
       RunCostTracker.Snapshot afterPostReviewExec = costTracker.snapshot(runId);
       long workerIn = afterPostReviewExec.inputTokens() - beforePostReviewAction.inputTokens();
       long workerOut = afterPostReviewExec.outputTokens() - beforePostReviewAction.outputTokens();
@@ -3790,7 +3832,7 @@ public class RunOrchestrator implements RunControlPort {
           candidate.provider().toUpperCase(Locale.ROOT),
           candidate.model());
 
-      maybeRunLintAutofix(runId, rootCtx.workspaceRoot());
+      automaticCorrectionLifecycle.runLintAutofix(runId, rootCtx.workspaceRoot());
 
       ProviderModel reviewerRoute =
           reviewerRouteFor(candidate.provider(), candidate.model(), rerunResult);
@@ -3810,11 +3852,11 @@ public class RunOrchestrator implements RunControlPort {
                         RunReviewerScope.repoRoots(projectRepoService, projectId, selectedRepoIds))
                     .approvedNewFiles(RunReviewerScope.approvedNewFiles(plan))
                     .allowBuildManifestCreation(false)
+                    .readOnly(true)
                     .originalGoal(
                         runRepo.findById(runId).map(PipelineRun::getUserRequest).orElse(null))
                     .requirements(plan.requirements())
                     .build());
-        persistenceWriter.persistReview(runId, rerunReviewResult);
         RunCostTracker.Snapshot afterRerunReview = costTracker.snapshot(runId);
         long reviewerIn = afterRerunReview.inputTokens() - afterPostReviewExec.inputTokens();
         long reviewerOut = afterRerunReview.outputTokens() - afterPostReviewExec.outputTokens();
@@ -3832,14 +3874,72 @@ public class RunOrchestrator implements RunControlPort {
             runId,
             ex);
         rerunReviewResult = reviewerFailedResult(ex);
-        persistenceWriter.persistReviewFailure(runId, ex);
       }
+      CorrectionAcceptancePolicy.Decision acceptance =
+          CorrectionAcceptancePolicy.evaluate(targetTaskId, rerunResult, rerunReviewResult);
+      if (!acceptance.accepted()) {
+        automaticCorrectionLifecycle.rollback(correctionCheckpoint);
+        automaticCorrectionLifecycle.restoreTask(
+            targetTaskKey,
+            previousStatus,
+            previousStartedAt,
+            previousCompletedAt,
+            previousDurationMs);
+        automaticCorrectionLifecycle.recordResolution(
+            targetTaskKey,
+            "ROLLED_BACK",
+            acceptance.code(),
+            acceptance.reason(),
+            correctionCheckpoint.generation(),
+            correctionCheckpoint.generation());
+        broadcaster.emit(
+            runId,
+            RunEvent.log(
+                runId,
+                targetTaskId,
+                "Automatic correction rolled back: "
+                    + acceptance.code()
+                    + " — "
+                    + acceptance.reason()));
+        if (postValidationOperation != null) {
+          runOperationLifecycle.terminateOneShot(
+              postValidationOperation, "POST_VALIDATION_CORRECTION_ROLLED_BACK");
+          postValidationOperation = null;
+        }
+        return Optional.empty();
+      }
+      CorrectionWorkspaceTransaction.Accepted generations =
+          automaticCorrectionLifecycle.accept(correctionCheckpoint);
+      persistenceWriter.applyExecutionResultToTasks(runId, rerunResult);
+      persistenceWriter.persistReview(runId, rerunReviewResult);
+      automaticCorrectionLifecycle.recordResolution(
+          targetTaskKey,
+          "ACCEPTED",
+          acceptance.code(),
+          acceptance.reason(),
+          generations.beforeGeneration(),
+          generations.afterGeneration());
       if (postValidationOperation != null) {
         runOperationLifecycle.complete(postValidationOperation);
         postValidationOperation = null;
       }
       return Optional.of(new PostReviewContinuationResult(rerunResult, rerunReviewResult));
     } catch (Exception ex) {
+      try {
+        automaticCorrectionLifecycle.rollback(correctionCheckpoint);
+        automaticCorrectionLifecycle.recordResolution(
+            targetTaskKey,
+            "ROLLED_BACK",
+            "CORRECTION_EXECUTION_FAILED",
+            ex.getMessage(),
+            correctionCheckpoint.generation(),
+            correctionCheckpoint.generation());
+      } catch (RuntimeException rollbackFailure) {
+        rollbackFailure.addSuppressed(ex);
+        throw new IllegalStateException(
+            "Automatic correction failed and its workspace checkpoint could not be restored",
+            rollbackFailure);
+      }
       if (postValidationOperation != null) {
         try {
           runOperationLifecycle.terminateOneShot(
@@ -3858,7 +3958,7 @@ public class RunOrchestrator implements RunControlPort {
           runId,
           RunEvent.log(
               runId, targetTaskId, "Post-review continuation action failed: " + ex.getMessage()));
-      restoreTaskTerminalState(
+      automaticCorrectionLifecycle.restoreTask(
           targetTaskKey,
           previousStatus,
           previousStartedAt,
@@ -3872,16 +3972,7 @@ public class RunOrchestrator implements RunControlPort {
       ExecutionResult execResult, ReviewerResult reviewResult) {}
 
   static ReviewerResult reviewerFailedResult(Exception ex) {
-    String message =
-        ex == null || ex.getMessage() == null || ex.getMessage().isBlank()
-            ? "reviewer failed"
-            : ex.getMessage();
-    return ReviewerResult.builder()
-        .overall(ReviewerResult.Overall.REVIEW_FAILED)
-        .generalPassSummary("Reviewer failed: " + truncate(message, 500))
-        .finalBuildPassed(false)
-        .finalBuildOutput(truncate(message, 2000))
-        .build();
+    return PostReviewQualityPolicy.reviewerFailedResult(ex);
   }
 
   static boolean actionablePostReviewContinuationDecision(GoalContinuationPolicyDecision decision) {
@@ -3898,15 +3989,6 @@ public class RunOrchestrator implements RunControlPort {
               STOP_WASTE_GUARD ->
           false;
     };
-  }
-
-  private static boolean sameProviderModel(
-      ModelProviderScore candidate, String dispatchedProvider, String dispatchedModel) {
-    return candidate != null
-        && candidate
-            .provider()
-            .equalsIgnoreCase(dispatchedProvider == null ? "" : dispatchedProvider)
-        && candidate.model().equalsIgnoreCase(dispatchedModel == null ? "" : dispatchedModel);
   }
 
   static String fullTaskKey(String runId, String taskId) {
@@ -3953,103 +4035,10 @@ public class RunOrchestrator implements RunControlPort {
     return new ContinuationLimitData("postReview", 1, 1);
   }
 
-  private void appendPostReviewContinuationAction(
-      com.navneet.executespec.state.entity.AgentTask task,
-      GoalContinuationPolicyDecision decision,
-      ModelProviderScore candidate,
-      ContinuationLimitData limitData,
-      String reason) {
-    if (task == null || decision == null || candidate == null || limitData == null) {
-      return;
-    }
-    try {
-      ArrayNode actions = readContinuationActions(task.getContinuationActionsJson());
-      ObjectNode action = actions.addObject();
-      action.put("status", "EXECUTED");
-      action.put("decision", decision.decision().name());
-      action.put("provider", candidate.provider());
-      action.put("model", candidate.model());
-      action.put("reason", reason == null ? "" : reason);
-      action.put("limitName", limitData.limitName());
-      action.put("usedLimit", limitData.used());
-      action.put("maxLimit", limitData.max());
-      action.put("source", continuationActionSource(decision));
-      action.put("attempt", actions.size());
-      task.setContinuationActionsJson(objectMapper.writeValueAsString(actions));
-      taskRepo.saveAndFlush(task);
-    } catch (Exception ex) {
-      log.warn(
-          "post-review continuation: failed to append action history for task {}: {}",
-          task.getTaskId(),
-          ex.getMessage(),
-          ex);
-    }
-  }
-
   private static String continuationActionSource(GoalContinuationPolicyDecision decision) {
     Object source =
         decision == null || decision.policy() == null ? null : decision.policy().get("source");
     return source == null || source.toString().isBlank() ? "POST_REVIEW" : source.toString();
-  }
-
-  private ArrayNode readContinuationActions(String json)
-      throws com.fasterxml.jackson.core.JsonProcessingException {
-    if (json == null || json.isBlank()) {
-      return objectMapper.createArrayNode();
-    }
-    JsonNode parsed = objectMapper.readTree(json);
-    if (parsed != null && parsed.isArray()) {
-      ArrayNode copy = objectMapper.createArrayNode();
-      parsed.forEach(copy::add);
-      return copy;
-    }
-    return objectMapper.createArrayNode();
-  }
-
-  private void maybeRunLintAutofix(String runId, Path workspaceRoot) {
-    if (!featureFlagService.isEnabled("lint.autofix.enabled")) {
-      return;
-    }
-    try {
-      com.navneet.executespec.lint.LintPass.LintReport lintReport =
-          lintPass.run(runId, workspaceRoot);
-      if (lintReport.changedAnything()) {
-        log.info(
-            "RunOrchestrator run={} post-review lint auto-fix: {}", runId, lintReport.summary());
-        broadcaster.emit(runId, RunEvent.lintAutofixApplied(runId, lintReport.summary()));
-      } else if (!lintReport.skipped()) {
-        log.debug("RunOrchestrator run={} post-review lint auto-fix: no changes", runId);
-      }
-    } catch (Exception e) {
-      log.warn(
-          "RunOrchestrator run={} post-review lint auto-fix failed (continuing): {}",
-          runId,
-          e.getMessage());
-    }
-  }
-
-  private void restoreTaskTerminalState(
-      String taskKey, String status, Instant startedAt, Instant completedAt, Long durationMs) {
-    if (taskKey == null || taskKey.isBlank()) {
-      return;
-    }
-    try {
-      taskRepo
-          .findById(taskKey)
-          .ifPresent(
-              task -> {
-                task.setStatus(status);
-                task.setStartedAt(startedAt);
-                task.setCompletedAt(completedAt);
-                task.setDurationMs(durationMs);
-                taskRepo.save(task);
-              });
-    } catch (RuntimeException ex) {
-      log.warn(
-          "post-review continuation: failed to restore task state for {}: {}",
-          taskKey,
-          ex.getMessage());
-    }
   }
 
   record ContinuationUsage(int providerSwitches, int modelStepUps, int modelStepDowns) {}

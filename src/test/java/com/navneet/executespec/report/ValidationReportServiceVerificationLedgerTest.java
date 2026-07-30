@@ -57,6 +57,7 @@ class ValidationReportServiceVerificationLedgerTest {
         ValidationReport.builder()
             .id("vr-1")
             .runId("run-1")
+            .workspaceGeneration("a".repeat(64))
             .filesGenerated(4)
             .pipelineResult(PipelineResult.PASSED)
             .finalBuildPassed(true)
@@ -99,6 +100,9 @@ class ValidationReportServiceVerificationLedgerTest {
     VerificationEvidenceDTO score = find(ledger, "score-summary");
     assertEquals("INTERNAL_FORMULA", score.source());
     assertTrue(score.summary().contains("Treat this as a summary, not independent proof."));
+    assertTrue(
+        ledger.stream().allMatch(row -> "a".repeat(64).equals(row.workspaceGeneration())),
+        "every evidence row must inherit the persisted report generation");
   }
 
   @Test
@@ -369,7 +373,8 @@ class ValidationReportServiceVerificationLedgerTest {
             List.of(),
             false,
             null,
-            new BootVerification(Verdict.HEALTHY, true, "boots; /health responded 200"));
+            new BootVerification(Verdict.HEALTHY, true, "boots; /health responded 200"),
+            "b".repeat(64));
     when(generator.generate(input))
         .thenReturn(new ValidationReportGenerator.LlmReportResult("# Report", "model-a", 0, 0));
     when(reviewScoringService.score(any(), any(), any(), any(), any()))
@@ -386,6 +391,11 @@ class ValidationReportServiceVerificationLedgerTest {
         assertInstanceOf(ValidationReportEvidenceEvent.class, events.get(0));
     assertEquals("run-1", event.runId());
     assertEquals(saved.get().getId(), event.reportId());
+    assertEquals("b".repeat(64), saved.get().getWorkspaceGeneration());
+    assertEquals("b".repeat(64), event.workspaceGeneration());
+    assertTrue(
+        event.verificationLedger().stream()
+            .allMatch(row -> "b".repeat(64).equals(row.workspaceGeneration())));
     assertEquals(saved.get().getVerifiedScore(), event.verifiedScore());
     assertNotNull(event.runGoalDecision());
     assertEquals("UNCERTAIN", event.runGoalDecision().state().name());

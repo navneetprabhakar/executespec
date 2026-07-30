@@ -14,6 +14,7 @@ import com.navneet.executespec.auth.repository.TierConfigRepository;
 import com.navneet.executespec.auth.service.TierEnforcementService;
 import com.navneet.executespec.config.AgentProperties;
 import com.navneet.executespec.deployment.strategy.DeploymentStrategy;
+import com.navneet.executespec.integration.scm.PublicationAdmissionService;
 import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
 import com.navneet.executespec.state.StateStore;
@@ -53,6 +54,7 @@ public class DeploymentService {
   private final WorkspaceRestoreService workspaceRestoreService;
   private final TierEnforcementService tierEnforcementService;
   private final TierConfigRepository tierConfigRepo;
+  private final PublicationAdmissionService publicationAdmissionService;
 
   @PostConstruct
   public void validatePrerequisites() {
@@ -169,6 +171,7 @@ public class DeploymentService {
 
     // Resolve workspace path
     Path workspacePath = resolveWorkspace(runId);
+    publicationAdmissionService.assertEligible(run);
 
     // Detect strategy + generate Dockerfile (or use existing)
     DeploymentStrategy strategy;

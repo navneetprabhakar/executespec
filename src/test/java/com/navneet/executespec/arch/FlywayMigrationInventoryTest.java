@@ -53,9 +53,11 @@ class FlywayMigrationInventoryTest {
     // adds the ordered partial index used for bounded stale agent-turn recovery, bringing the exact
     // inventory to 341. V356 adds agent-session archive/transcript integrity, V357 persists task
     // route explanations, V358 adds durable generated-document jobs, and V359 adds first-writer-
-    // wins CI-failure delivery claims, bringing the exact inventory to 345.
-    assertThat(migrations).hasSize(345);
-    assertThat(migrations.getLast().version()).isEqualTo("359");
+    // wins CI-failure delivery claims, bringing the exact inventory to 345. V360 persists
+    // brownfield HTTP-contract evidence, and V361 binds validation evidence to an exact workspace
+    // generation, bringing the exact inventory to 347.
+    assertThat(migrations).hasSize(347);
+    assertThat(migrations.getLast().version()).isEqualTo("361");
 
     assertThat(migrations.stream().map(MigrationFile::version)).doesNotHaveDuplicates();
     assertThat(migrations.stream().map(MigrationFile::fileName))

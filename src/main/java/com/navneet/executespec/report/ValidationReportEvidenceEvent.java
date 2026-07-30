@@ -11,6 +11,7 @@ import com.navneet.executespec.report.model.VerificationEvidenceDTO;
 public record ValidationReportEvidenceEvent(
     String runId,
     String reportId,
+    String workspaceGeneration,
     Integer verifiedScore,
     Integer rubricScore,
     PipelineResult pipelineResult,
@@ -40,6 +41,7 @@ public record ValidationReportEvidenceEvent(
     this(
         runId,
         reportId,
+        null,
         verifiedScore,
         rubricScore,
         pipelineResult,
@@ -60,6 +62,7 @@ public record ValidationReportEvidenceEvent(
     return new ValidationReportEvidenceEvent(
         report == null ? null : report.getRunId(),
         report == null ? null : report.getId(),
+        report == null ? null : report.getWorkspaceGeneration(),
         report == null ? null : report.getVerifiedScore(),
         report == null ? null : report.getRubricScore(),
         report == null ? null : report.getPipelineResult(),

@@ -972,15 +972,19 @@ public class RunController {
 
     String resultPrUrl = pushResult.prUrl().isBlank() ? prUrl : pushResult.prUrl();
     return ResponseEntity.ok(
-        Map.of(
-            "status", pushResult.status(),
-            "repoUrl", updated.getRepoUrl() != null ? updated.getRepoUrl() : "",
-            "prUrl", resultPrUrl,
-            "scmProvider", provider.isBlank() ? pushResult.scmProvider() : provider,
-            "message", pushResult.message(),
-            "attempted", Integer.toString(pushResult.attempted()),
-            "succeeded", Integer.toString(pushResult.succeeded()),
-            "failed", Integer.toString(pushResult.failed())));
+        Map.ofEntries(
+            Map.entry("status", pushResult.status()),
+            Map.entry("repoUrl", updated.getRepoUrl() != null ? updated.getRepoUrl() : ""),
+            Map.entry("prUrl", resultPrUrl),
+            Map.entry("scmProvider", provider.isBlank() ? pushResult.scmProvider() : provider),
+            Map.entry("message", pushResult.message()),
+            Map.entry("attempted", Integer.toString(pushResult.attempted())),
+            Map.entry("succeeded", Integer.toString(pushResult.succeeded())),
+            Map.entry("failed", Integer.toString(pushResult.failed())),
+            Map.entry("code", pushResult.code()),
+            Map.entry("publicationEligible", Boolean.toString(pushResult.publicationEligible())),
+            Map.entry("retryable", Boolean.toString(pushResult.retryable())),
+            Map.entry("retryGuidance", pushResult.retryGuidance())));
   }
 
   /**

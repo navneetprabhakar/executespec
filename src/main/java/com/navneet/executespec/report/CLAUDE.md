@@ -26,6 +26,11 @@ invalid reports are excluded and counted separately.
 
 ## Evidence contract
 
+- V361 persists `validation_report.workspace_generation`, the SHA-256 of the canonical Git trees
+  measured after deterministic run-end checks. Every reconstructed `VerificationEvidenceDTO`
+  inherits that exact value, as do authenticated/shared report DTOs and durable agent-session
+  evidence events. Historical nulls remain visibly unbound; no read path may substitute the current
+  workspace or otherwise guess a generation.
 - V270 persists `boot_verdict`, `boot_healthy`, and `boot_reason` whenever the final deterministic
   preview verifier supplied a `BootVerification`. Concrete-test rescoring AND the SUPER_ADMIN
   `VerifiedScoreBackfillService` rehydrate that signal through the shared
@@ -130,3 +135,5 @@ invalid reports are excluded and counted separately.
 - `V294__retire_legacy_validation_report_bearers.sql` hashes and clears historical plaintext
   bearers, bounds their compatibility lifetime, and installs a rolling-deploy trigger that
   normalizes any write from an older application node before commit.
+- `V361__validation_workspace_generation.sql` adds the nullable, format-constrained workspace
+  generation binding. Null is reserved for pre-V361/unbound evidence.

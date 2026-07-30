@@ -5,6 +5,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.nullable;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -18,6 +19,7 @@ import com.navneet.executespec.auth.entity.AppUser;
 import com.navneet.executespec.auth.repository.AppUserRepository;
 import com.navneet.executespec.auth.repository.ProjectRepository;
 import com.navneet.executespec.config.AgentProperties;
+import com.navneet.executespec.contractsurface.BrownfieldHttpContractGuard;
 import com.navneet.executespec.project.pr.PullRequestRecordRepository;
 import com.navneet.executespec.project.pr.PullRequestRecordService;
 import com.navneet.executespec.project.repository.ProjectRepoRepository;
@@ -62,6 +64,8 @@ class ScmPushServiceRepoModeTest {
   @Mock private PullRequestRecordRepository pullRequestRecordRepository;
   @Mock private ProjectRepoRepository projectRepoRepository;
   @Mock private ArtifactPublicationGuard publicationGuard;
+  @Mock private BrownfieldHttpContractGuard brownfieldHttpContractGuard;
+  @Mock private PublicationAdmissionService publicationAdmissionService;
   @Mock private SideEffectOutbox sideEffectOutbox;
 
   @Mock
@@ -71,6 +75,31 @@ class ScmPushServiceRepoModeTest {
   @org.mockito.Spy private ObjectMapper objectMapper = new ObjectMapper();
 
   @InjectMocks private ScmPushService service;
+
+  @Test
+  void existingRepoContractFailureStopsBeforeAnyScmSideEffect() {
+    PipelineRun run = runWithMode("EXISTING");
+    doThrow(
+            new BrownfieldHttpContractGuard.ContractCompatibilityException(
+                "BROWNFIELD_HTTP_CONTRACT_REMOVED",
+                "Publication blocked because POST /simulation/casino-game was removed"))
+        .when(brownfieldHttpContractGuard)
+        .assertCompatible(run.getRunId());
+
+    ScmPushService.PushResult result = service.push(run);
+
+    assertThat(result.status()).isEqualTo("FAILED");
+    assertThat(result.code()).isEqualTo("BROWNFIELD_HTTP_CONTRACT_REMOVED");
+    assertThat(result.publicationEligible()).isFalse();
+    assertThat(result.retryable()).isFalse();
+    assertThat(result.message()).contains("POST /simulation/casino-game");
+    assertThat(result.retryGuidance()).contains("Restore").contains("breaking-change approval");
+    assertThat(result.attempted()).isZero();
+    verify(gitTool, never())
+        .pushToBranch(anyString(), anyString(), anyString(), anyString(), nullable(String.class));
+    verify(gitTool, never()).pushToRemote(anyString(), anyString(), anyString());
+    verify(gitHubRepoService, never()).createRepo(any(), any(), anyString(), anyString(), any());
+  }
 
   private PipelineRun runWithMode(String repoMode) {
     // RR-1668 — no cloned-branch snapshot in these single-repo mode tests, so the push takes the

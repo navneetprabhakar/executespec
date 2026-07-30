@@ -191,7 +191,8 @@ public class BuildCommandResolver {
   private Optional<BuildCommand> inferFromFramework(Path workspaceRoot) {
     // Order matters: more-specific markers checked first.
     if (exists(workspaceRoot, "pom.xml")) {
-      return Optional.of(build("mvn -q -DskipTests compile", 300, "inferred:maven"));
+      String wrapper = exists(workspaceRoot, "mvnw") ? "./mvnw" : "mvn";
+      return Optional.of(build(wrapper + " -q -DskipTests compile", 300, "inferred:maven"));
     }
     if (exists(workspaceRoot, "build.gradle") || exists(workspaceRoot, "build.gradle.kts")) {
       String wrapper = exists(workspaceRoot, "gradlew") ? "./gradlew" : "gradle";

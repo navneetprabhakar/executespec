@@ -1,5 +1,13 @@
 # `harness/` — V2 pipeline orchestration
 
+Approved continuation resumes carry an exact target task, provider, model, action, and
+schema-versioned proposal digest. `SequentialExecutor` applies the strict provider/model override
+only to that target, bypasses tier/adaptive/cross-model routing, and verifies physical
+provider-call evidence before persistence. Fresh and crash-recovered runs without such approval
+retain normal matrix routing. `ExecutorResumeRequest` owns exact resume identity/route validation;
+`PlanTaskMetadata` owns the compact dependency/file views used by wave scheduling so the executor
+does not absorb those policies.
+
 Recovery fencing: `SequentialExecutor` snapshots each task's `recovery_attempt` generation before
 dispatch. Task status, goal/continuation evidence, and action-history persistence use a pessimistic
 row lock while takeover uses its atomic generation CAS, so a stale worker cannot overwrite the
