@@ -210,6 +210,31 @@ class SequentialExecutorTierConfigTest {
   }
 
   @Test
+  void freshOpenRouterRunStillUsesStandardWorkhorseMatrixResolution() throws Exception {
+    ModelResolver resolver = mock(ModelResolver.class);
+    lenient()
+        .when(resolver.resolve("WorkerAgent", LlmProvider.OPENROUTER, AgentTier.WORKHORSE))
+        .thenReturn(
+            ResolvedModel.builder()
+                .requestedProvider(LlmProvider.OPENROUTER)
+                .actualProvider(LlmProvider.OPENROUTER)
+                .agentTier(AgentTier.WORKHORSE)
+                .model("openrouter/matrix-workhorse")
+                .build());
+
+    Cfg c =
+        invoke(
+            newExecutor(resolver),
+            PlannedTask.Complexity.MEDIUM,
+            "openrouter",
+            "caller-supplied-model",
+            false);
+
+    assertEquals("openrouter", c.provider);
+    assertEquals("openrouter/matrix-workhorse", c.model);
+  }
+
+  @Test
   void low_worker_start_tier_can_optInto_lightweight() throws Exception {
     SequentialExecutor exec = newExecutorWithTierResolvingModel();
     ReflectionTestUtils.setField(exec, "lowComplexityWorkerStartTier", "LIGHTWEIGHT");

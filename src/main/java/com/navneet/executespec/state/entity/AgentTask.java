@@ -168,6 +168,36 @@ public class AgentTask {
   @Column(name = "continuation_actions_json", columnDefinition = "TEXT")
   private String continuationActionsJson;
 
+  /**
+   * V364 — durable idempotency receipt for the continuation proposal currently admitted for this
+   * task. The proposal digest is over the exact persisted proposal bytes plus schema version; the
+   * repository claims it with one conditional UPDATE before any retry is queued or provider spend
+   * can start.
+   */
+  @Column(name = "continuation_approval_id", length = 36)
+  private String continuationApprovalId;
+
+  @Column(name = "continuation_approval_proposal_digest", length = 64)
+  private String continuationApprovalProposalDigest;
+
+  @Column(name = "continuation_approval_status", length = 24)
+  private String continuationApprovalStatus;
+
+  @Column(name = "continuation_approval_provider", length = 40)
+  private String continuationApprovalProvider;
+
+  @Column(name = "continuation_approval_model", length = 128)
+  private String continuationApprovalModel;
+
+  @Column(name = "continuation_approval_action", length = 40)
+  private String continuationApprovalAction;
+
+  @Column(name = "continuation_approval_post_review")
+  private Boolean continuationApprovalPostReview;
+
+  @Column(name = "continuation_approval_updated_at")
+  private Instant continuationApprovalUpdatedAt;
+
   @Column(name = "tenant_id", nullable = false)
   @Builder.Default
   private String tenantId = "default";

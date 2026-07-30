@@ -325,6 +325,7 @@ class ValidationReportGoalProofEvaluatorTest {
         status,
         source,
         "HIGH",
+        "a".repeat(64),
         label + " claim",
         label + " summary",
         "artifact",

@@ -26,4 +26,21 @@ class ProjectGeneratedDocJobMigrationContractTest {
         .contains("UPDATE OF project_id, org_id, doc_type, result_doc_id, result_doc_version")
         .contains("project_generated_doc_job project/org mismatch");
   }
+
+  @Test
+  void forwardMigrationPinsUncertainOutcomeAndConfirmedRetryReceipt() throws Exception {
+    String sql =
+        Files.readString(
+            Path.of(
+                "src/main/resources/db/migration/"
+                    + "V363__confirm_uncertain_project_document_retries.sql"));
+
+    assertThat(sql)
+        .contains("ALTER COLUMN status TYPE VARCHAR(32)")
+        .contains("ADD COLUMN provider_started_at TIMESTAMPTZ")
+        .contains("'NEEDS_CONFIRMATION'")
+        .contains("WHERE status IN ('QUEUED','RUNNING','NEEDS_CONFIRMATION')")
+        .contains("CREATE TABLE project_generated_doc_job_retry_confirmation")
+        .contains("confirmed_by_user_id VARCHAR(255) NOT NULL REFERENCES app_user(id)");
+  }
 }

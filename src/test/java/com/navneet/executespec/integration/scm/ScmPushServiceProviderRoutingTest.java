@@ -50,6 +50,12 @@ class ScmPushServiceProviderRoutingTest {
   @Mock private PullRequestRecordRepository pullRequestRecordRepository;
   @Mock private ProjectRepoRepository projectRepoRepository;
   @Mock private ArtifactPublicationGuard publicationGuard;
+
+  @Mock
+  private com.navneet.executespec.contractsurface.BrownfieldHttpContractGuard
+      brownfieldHttpContractGuard;
+
+  @Mock private PublicationAdmissionService publicationAdmissionService;
   @Mock private SideEffectOutbox sideEffectOutbox;
 
   @InjectMocks private ScmPushService service;
@@ -86,6 +92,10 @@ class ScmPushServiceProviderRoutingTest {
 
     assertThat(result.status()).isEqualTo("FAILED");
     assertThat(result.message()).contains("multiple SCM credentials");
+    assertThat(result.code()).isEqualTo("SCM_LEGACY_ROUTE_AMBIGUOUS");
+    assertThat(result.publicationEligible()).isFalse();
+    assertThat(result.attempted()).isZero();
+    assertThat(result.retryable()).isFalse();
     verifyNoInteractions(bitbucketRepoService, gitHubRepoService, gitTool);
   }
 
@@ -106,6 +116,9 @@ class ScmPushServiceProviderRoutingTest {
     assertThat(result.status()).isEqualTo("FAILED");
     assertThat(result.scmProvider()).isEqualTo("BITBUCKET");
     assertThat(result.message()).contains("not supported on this release");
+    assertThat(result.code()).isEqualTo("SCM_BITBUCKET_PROJECT_PUBLICATION_UNSUPPORTED");
+    assertThat(result.publicationEligible()).isFalse();
+    assertThat(result.attempted()).isZero();
     verifyNoInteractions(bitbucketRepoService, gitHubRepoService, gitTool);
   }
 

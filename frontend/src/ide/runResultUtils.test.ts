@@ -1,4 +1,5 @@
 import {describe, expect, it} from 'vitest';
+import type {PublicationEligibility, RunDetail} from '@/lib/api';
 
 import {
   boundedLineDiff,
@@ -40,6 +41,7 @@ import {
   modelRankingLabel,
   matchingContinuationApprovalRecorded,
   num,
+  publicationTrustFacts,
   runArtifactActionAvailability,
   runChatResponseContent,
   friendlyAiFailureMessage,
@@ -57,6 +59,121 @@ import {
   usd,
   verdictFor,
 } from './runResultUtils';
+
+describe('publicationTrustFacts', () => {
+  it('keeps route, executable checks, generations, and eligibility as independent facts', () => {
+    const run = {
+      tasks: [
+        {
+          taskId: 'T1',
+          status: 'COMPLETE',
+          effectiveProvider: 'OPENROUTER',
+          effectiveModel: 'x-ai/grok-4.20',
+          effectiveRouteAttribution: 'LEDGER',
+          continuationActions: [
+            {
+              status: 'APPROVED',
+              provider: 'OPENROUTER',
+              model: 'x-ai/grok-4.20',
+              workerAttempt: {
+                provider: 'OPENROUTER',
+                model: 'x-ai/grok-4.20',
+                attribution: 'LEDGER',
+                physicalAttemptIds: ['worker-attempt'],
+              },
+              reviewerAttempt: {
+                provider: 'OPENROUTER',
+                model: 'x-ai/grok-4.20',
+                attribution: 'LEDGER',
+                physicalAttemptIds: ['reviewer-attempt'],
+              },
+              beforeWorkspaceGeneration: 'a'.repeat(64),
+              afterWorkspaceGeneration: 'b'.repeat(64),
+              diffDigest: 'c'.repeat(64),
+              changedFiles: ['src/todo.ts'],
+              evidenceInvalidated: true,
+              validationRegenerated: true,
+            },
+          ],
+        },
+      ],
+      effectiveProvider: 'OPENROUTER',
+      effectiveModel: 'x-ai/grok-4.20',
+      effectiveRouteAttribution: 'LEDGER',
+      finalBuildPassed: true,
+      testsPassed: 2,
+      testsTotal: 2,
+      testExecutionVerified: true,
+      workflowConfigStatus: 'PASSED',
+      workflowConfigReason: '1 workflow parsed',
+      brownfieldHttpCompatibilityStatus: 'COMPATIBLE',
+      reviewerVerdict: 'CLEAN',
+      reviewerProvider: 'OPENROUTER',
+      reviewerEffectiveModel: 'x-ai/grok-4.20',
+      totalInputTokens: 100,
+      totalOutputTokens: 20,
+      actualCostUsd: 0.25,
+    } as unknown as RunDetail;
+    const publication = {
+      eligible: true,
+      eligibility: 'ELIGIBLE',
+      code: 'PUBLICATION_ELIGIBLE',
+      blockingGate: null,
+      reason: 'all pass',
+      retryable: false,
+      remediation: null,
+      evidenceWorkspaceGeneration: 'b'.repeat(64),
+      currentWorkspaceGeneration: 'b'.repeat(64),
+    } satisfies PublicationEligibility;
+
+    const facts = publicationTrustFacts(run, publication);
+
+    expect(Object.fromEntries(facts.map((fact) => [fact.label, fact.value]))).toMatchObject({
+      'Approved correction route': 'OPENROUTER/x-ai/grok-4.20',
+      'Actual worker route': 'OPENROUTER/x-ai/grok-4.20 (LEDGER · 1 physical attempt)',
+      Build: 'Passed',
+      Tests: '2/2 passed · execution verified',
+      'Workflow/config': 'PASSED · 1 workflow parsed',
+      'Protected contracts': 'COMPATIBLE',
+      'Reviewer result': 'CLEAN',
+      'Reviewer route': 'OPENROUTER/x-ai/grok-4.20 (LEDGER · 1 physical attempt)',
+      Correction: expect.stringContaining(
+        '1 changed: src/todo.ts · diff cccccccccccc · prior evidence invalidated · validation regenerated',
+      ),
+      'Evidence freshness': expect.stringContaining('Fresh'),
+      Publication: 'ELIGIBLE · PUBLICATION_ELIGIBLE',
+    });
+  });
+
+  it('does not let a score or terminal status conceal stale evidence and failed tests', () => {
+    const facts = publicationTrustFacts(
+      {
+        status: 'COMPLETE',
+        verifiedScore: 99,
+        tasks: [],
+        finalBuildPassed: true,
+        testsPassed: 1,
+        testsTotal: 2,
+        testExecutionVerified: true,
+      } as unknown as RunDetail,
+      {
+        eligible: false,
+        eligibility: 'BLOCKED',
+        code: 'PUBLICATION_EVIDENCE_STALE',
+        blockingGate: 'EVIDENCE_FRESHNESS',
+        reason: 'stale',
+        retryable: true,
+        remediation: 'regenerate',
+        evidenceWorkspaceGeneration: 'a'.repeat(64),
+        currentWorkspaceGeneration: 'b'.repeat(64),
+      },
+    );
+
+    expect(facts.find((fact) => fact.label === 'Tests')).toMatchObject({kind: 'bad'});
+    expect(facts.find((fact) => fact.label === 'Evidence freshness')).toMatchObject({kind: 'bad'});
+    expect(facts.find((fact) => fact.label === 'Publication')).toMatchObject({kind: 'bad'});
+  });
+});
 
 describe('runArtifactActionAvailability', () => {
   it('blocks every artifact action when planning failed before producing evidence', () => {
@@ -522,6 +639,36 @@ describe('runResultUtils', () => {
     ]);
   });
 
+  it('surfaces a rolled-back correction independently of task completion', () => {
+    const task: api.TaskSummary = {
+      taskId: 'T1',
+      title: 'Correct final build',
+      status: 'COMPLETE',
+      assignedModel: 'gpt-5.4',
+      inputTokens: 0,
+      outputTokens: 0,
+      durationMs: 0,
+      branchName: null,
+      startedAt: null,
+      completedAt: null,
+      readmeUpdated: false,
+      continuationActions: [
+        {
+          status: 'ROLLED_BACK',
+          decision: 'CORRECTION_RESOLUTION',
+          code: 'CORRECTION_FINAL_BUILD_UNPROVEN',
+          reason: 'Correction did not prove a passing final build',
+          beforeWorkspaceGeneration: 'same-generation',
+          afterWorkspaceGeneration: 'same-generation',
+        },
+      ],
+    };
+
+    expect(latestContinuationAction(task)).toBe(
+      'Correction rolled back · CORRECTION_FINAL_BUILD_UNPROVEN · Correction did not prove a passing final build',
+    );
+  });
+
   it('keeps model ranking copy user-facing instead of leaking policy internals', () => {
     const policy: NonNullable<NonNullable<api.TaskSummary['continuationDecision']>['policy']> = {
       source: 'POST_REVIEW',
@@ -789,7 +936,7 @@ describe('runResultUtils', () => {
       title: 'Reviewer is still resolving this run.',
       body: 'At least one worker step already needs attention. Check Steps and Activity Log before assuming the reviewer is simply slow.',
       facts: [
-        '1/2 steps complete',
+        '1/2 worker tasks executed · final verification is separate',
         '1 step need attention',
         'validation report not ready',
         'latest: Reviewer · fix-build · failed · sandbox denied python',
@@ -810,7 +957,12 @@ describe('runResultUtils', () => {
     ).toEqual({
       title: 'Validation evidence is still being assembled.',
       body: 'The run has moved past worker execution, but the final report or measured proof is not ready yet. Check Activity Log for the last validation event and Evidence once the report appears.',
-      facts: ['1/1 steps complete', 'reviewer CLEAN', 'final build passed', '3/3 tests passed'],
+      facts: [
+        '1/1 worker tasks executed · final verification is separate',
+        'reviewer CLEAN',
+        'final build passed',
+        '3/3 tests passed',
+      ],
       primaryTab: 'Logs',
     });
     expect(runPhaseDiagnosis({status: 'COMPLETE'})).toBeNull();

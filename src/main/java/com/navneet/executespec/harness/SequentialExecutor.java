@@ -747,6 +747,8 @@ to boot — skip it for those.""";
           if (resume != null) {
             ResumeAction action =
                 resolveResumeAction(runId, task.id(), resume, req.runContext().workspaceRoot());
+            ProviderModelOverride approvedRoute =
+                providerModelOverrideFor(resume, runId, task.id());
             switch (action.kind()) {
               case SKIP_TERMINAL -> {
                 log.info(
@@ -760,11 +762,16 @@ to boot — skip it for those.""";
                     "Executor RESUME task={} from snapshot iter={}",
                     task.id(),
                     action.snapshot() == null ? "n/a" : action.snapshot().iteration());
-                outcome = executeOne(task, plan, req, isFinalTask, action.snapshot(), runJournal);
+                outcome =
+                    executeOne(
+                        task, plan, req, isFinalTask, action.snapshot(), approvedRoute, runJournal);
               }
               case RUN_FRESH ->
-                  outcome = executeOne(task, plan, req, isFinalTask, null, runJournal);
-              default -> outcome = executeOne(task, plan, req, isFinalTask, null, runJournal);
+                  outcome =
+                      executeOne(task, plan, req, isFinalTask, null, approvedRoute, runJournal);
+              default ->
+                  outcome =
+                      executeOne(task, plan, req, isFinalTask, null, approvedRoute, runJournal);
             }
           } else {
             outcome = executeOne(task, plan, req, isFinalTask, null, runJournal);
@@ -967,7 +974,10 @@ to boot — skip it for those.""";
     }
     TaskWaveScheduler.BoundedResult schedule =
         TaskWaveScheduler.scheduleBounded(
-            taskIds(plan), dependsOnByTask(plan), touchesFilesByTask(plan), maxParallelTasks());
+            PlanTaskMetadata.taskIds(plan),
+            PlanTaskMetadata.dependencies(plan),
+            PlanTaskMetadata.touchedFiles(plan),
+            maxParallelTasks());
     int maxWaveWidth = schedule.waves().stream().mapToInt(List::size).max().orElse(0);
     boolean parallelEligible = schedule.waves().stream().anyMatch(wave -> wave.size() > 1);
     Map<String, Object> data = new LinkedHashMap<>();
@@ -1002,37 +1012,29 @@ to boot — skip it for those.""";
     broadcaster.emit(runId, RunEvent.log(runId, null, summary));
   }
 
-  private static List<String> taskIds(Plan plan) {
-    return plan.tasks().stream().map(PlannedTask::id).toList();
-  }
-
-  private static Map<String, List<String>> dependsOnByTask(Plan plan) {
-    Map<String, List<String>> dependsOn = new LinkedHashMap<>();
-    for (PlannedTask task : plan.tasks()) {
-      dependsOn.put(task.id(), task.dependsOn());
+  /** Resume target and optional exact approved continuation route. */
+  public static final class ResumeRequest extends ExecutorResumeRequest {
+    public ResumeRequest(String targetTaskId) {
+      this(targetTaskId, null, null, null, null);
     }
-    return dependsOn;
-  }
 
-  private static Map<String, List<String>> touchesFilesByTask(Plan plan) {
-    Map<String, List<String>> touchesFiles = new LinkedHashMap<>();
-    for (PlannedTask task : plan.tasks()) {
-      touchesFiles.put(task.id(), task.touchesFiles());
+    public ResumeRequest(
+        String targetTaskId,
+        String approvedProvider,
+        String approvedModel,
+        RunContinuationDecision approvedAction,
+        String approvedProposalDigest) {
+      super(targetTaskId, approvedProvider, approvedModel, approvedAction, approvedProposalDigest);
     }
-    return touchesFiles;
   }
 
-  /**
-   * Encapsulates the resume target — passed to {@link #execute(ExecutionRequest, ResumeRequest)}.
-   */
-  public record ResumeRequest(
-      /**
-       * Task id to resume from. Tasks before this id are treated as terminal (assumed already
-       * finished pre-crash); tasks at this id are resumed (with snapshot if available); tasks after
-       * are run fresh. May be null — in which case the executor walks the plan and resumes the
-       * first task whose persisted DB status is non-terminal.
-       */
-      String targetTaskId) {}
+  private static ProviderModelOverride providerModelOverrideFor(
+      ResumeRequest resume, String runId, String logicalTaskId) {
+    return resume.approvedRouteTargets(runId, logicalTaskId)
+        ? new ProviderModelOverride(
+            resume.approvedProvider(), resume.approvedModel(), resume.approvedAction())
+        : null;
+  }
 
   /** Result of the per-task resume decision in the loop above. */
   private record ResumeAction(
@@ -1610,7 +1612,7 @@ to boot — skip it for those.""";
       continuationProviderSwitchesPerRun.put(
           runId, new AtomicInteger(req.initialProviderSwitchesUsed()));
     }
-    String targetTaskId = resumeTargetShortTaskId(runId, resume);
+    String targetTaskId = resume == null ? null : resume.shortTargetTaskId(runId);
     if (targetTaskId != null && !targetTaskId.isBlank()) {
       if (req.initialModelStepUpsUsed() > 0) {
         continuationModelStepUpsPerTask.put(
@@ -1654,17 +1656,6 @@ to boot — skip it for those.""";
       continuationProviderSwitchesPerRun.putIfAbsent(
           runId, new AtomicInteger(consumed.providerSwitches()));
     }
-  }
-
-  private static String resumeTargetShortTaskId(String runId, ResumeRequest resume) {
-    if (resume == null || resume.targetTaskId() == null || resume.targetTaskId().isBlank()) {
-      return null;
-    }
-    String target = resume.targetTaskId();
-    String prefix = runId != null && runId.length() >= 8 ? runId.substring(0, 8) + "_" : "";
-    return !prefix.isBlank() && target.startsWith(prefix)
-        ? target.substring(prefix.length())
-        : target;
   }
 
   private int providerSwitchesUsed(String runId) {
@@ -2031,6 +2022,10 @@ to boot — skip it for those.""";
             .stagnationForceAfter(cfg.stagnationForceAfter)
             .wallClockSeconds(cfg.wallClockSeconds)
             .forceToolChoiceOnSalvage(cfg.forceToolChoiceOnSalvage)
+            // A human-approved continuation is an exact dispatch contract, not a fresh routing
+            // preference. Disable cross-provider/model failover for that target attempt. Ordinary
+            // fresh runs and crash resumes retain their existing failover behaviour.
+            .strictProvider(providerModelOverride != null)
             // VBC verify-before-complete (RL-2026-06-…, V235, default OFF) — server-RUN the
             // project's tests at completeTask and refuse if red. Gated to the FINAL task (mirrors
             // the smoke gate at executeOne's multiTask check) so an intermediate task isn't blocked

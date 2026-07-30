@@ -51,4 +51,34 @@ class TestCommandResolverTest {
         .contains("cd backend && python3 -m pytest -q")
         .contains("cd frontend && npm test --silent");
   }
+
+  @Test
+  void prefersMavenWrapperWhenPresent(@TempDir Path workspace) throws Exception {
+    Files.writeString(workspace.resolve("pom.xml"), "<project/>");
+    Files.writeString(workspace.resolve("mvnw"), "#!/bin/sh\n");
+    workspace.resolve("mvnw").toFile().setExecutable(true);
+
+    var command = new TestCommandResolver().resolve(workspace).orElseThrow();
+
+    assertThat(command.command()).isEqualTo("./mvnw -q test");
+    assertThat(command.framework()).isEqualTo(TestCommandResolver.Framework.SUREFIRE);
+  }
+
+  @Test
+  void fallsBackToSystemMavenWhenWrapperIsNotExecutable(@TempDir Path workspace) throws Exception {
+    Files.writeString(workspace.resolve("pom.xml"), "<project/>");
+    Files.writeString(workspace.resolve("mvnw"), "#!/bin/sh\n");
+    workspace.resolve("mvnw").toFile().setExecutable(false);
+
+    assertThat(new TestCommandResolver().resolve(workspace).orElseThrow().command())
+        .isEqualTo("mvn -q test");
+  }
+
+  @Test
+  void fallsBackToSystemMavenWithoutWrapper(@TempDir Path workspace) throws Exception {
+    Files.writeString(workspace.resolve("pom.xml"), "<project/>");
+
+    assertThat(new TestCommandResolver().resolve(workspace).orElseThrow().command())
+        .isEqualTo("mvn -q test");
+  }
 }

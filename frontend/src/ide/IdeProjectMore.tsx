@@ -28,14 +28,17 @@ import {
 } from '@/ide/agentChatHistory';
 import {
   architectureFreshnessBadge,
+  confirmUncertainGeneratedDocRetry,
   contractDetectorSummary,
   driftSummaryMessage,
   filterProjectFiles,
   invariantViolationCounts,
   looksLikeArtifact,
+  restoreGeneratedDocJobs,
   summarizeDriftResults,
   techDebtCategories,
   uiBound,
+  type PendingGeneratedDocJobs,
 } from '@/ide/projectMoreUtils';
 import {boundedLineDiff} from '@/ide/runResultUtils';
 import {
@@ -662,12 +665,11 @@ export function IdeProjectCode() {
   // C8 — tech-debt autofix dispatch awaiting confirmation.
   const [fixFor, setFixFor] = useState<{category: string; count: number} | null>(null);
   // §3.4 Docs (P1) — doc generation in flight; drives the 3s poll below.
-  const [genPending, setGenPending] = useState<{
-    type: api.GeneratedDocType;
-    jobId: string;
-    provider: string;
-    model: string;
-  } | null>(null);
+  const [genPending, setGenPending] = useState<PendingGeneratedDocJobs>({});
+  const [docNeedsConfirmation, setDocNeedsConfirmation] = useState<
+    Partial<Record<api.GeneratedDocType, api.GeneratedDocJob>>
+  >({});
+  const docJobRouteGen = useRef(0);
 
   // Browse state
   const [repoId, setRepoId] = useState('');
@@ -809,11 +811,37 @@ export function IdeProjectCode() {
     setErr('');
     setMsg('');
     try {
-      const job = await api.generateProjectDoc(projectId, t);
+      const admitted = docNeedsConfirmation[t] ?? (await api.generateProjectDoc(projectId, t));
+      const confirmed = await confirmUncertainGeneratedDocRetry(
+        admitted,
+        window.confirm,
+        api.confirmProjectDocRetry,
+      );
+      if (!confirmed) {
+        setMsg('The uncertain document generation was not retried.');
+        return;
+      }
+      const job = confirmed;
+      setDocNeedsConfirmation((current) => {
+        const next = {...current};
+        delete next[t];
+        return next;
+      });
       setMsg(
         `${t.toLowerCase()} doc generation queued with ${job.provider}/${job.model}. You can navigate away safely.`,
       );
-      setGenPending({type: t, jobId: job.id, provider: job.provider, model: job.model});
+      setGenPending((current) => ({
+        ...current,
+        [t]: {
+          type: t,
+          jobId: job.id,
+          provider: job.provider,
+          model: job.model,
+          status: job.status === 'RUNNING' ? 'RUNNING' : 'QUEUED',
+          attemptCount: job.attemptCount,
+          deadlineAt: job.deadlineAt,
+        },
+      }));
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : 'Doc generation failed.');
     } finally {
@@ -823,66 +851,117 @@ export function IdeProjectCode() {
 
   // Restore an active durable job after navigation/reload.
   useEffect(() => {
-    if (!projectId || genPending) return;
+    if (!projectId) return;
+    const routeGen = ++docJobRouteGen.current;
+    setGenPending({});
+    setDocNeedsConfirmation({});
     let cancelled = false;
     void Promise.allSettled([
       api.getLatestProjectDocJob(projectId, 'EXPLANATION'),
       api.getLatestProjectDocJob(projectId, 'SETUP'),
     ]).then((results) => {
-      if (cancelled) return;
+      if (cancelled || routeGen !== docJobRouteGen.current) return;
       const jobs = results
         .filter(
           (result): result is PromiseFulfilledResult<api.GeneratedDocJob | null> =>
             result.status === 'fulfilled',
         )
-        .map((result) => result.value);
-      const active = jobs.find((job) => job && !job.terminal);
-      if (active) {
-        setGenPending({
-          type: active.docType,
-          jobId: active.id,
-          provider: active.provider,
-          model: active.model,
-        });
+        .map((result) => result.value)
+        .filter((job): job is api.GeneratedDocJob => job !== null);
+      const restored = restoreGeneratedDocJobs(jobs);
+      // A user can start generation while reload discovery is in flight. Merge rather than
+      // overwrite so that the older GET response cannot erase the newly admitted durable job.
+      setGenPending((current) => ({...restored.pending, ...current}));
+      setDocNeedsConfirmation(restored.needsConfirmation);
+      const active = Object.values(restored.pending);
+      if (active.length > 0) {
         setMsg(
-          `${active.docType.toLowerCase()} doc generation is ${active.status.toLowerCase()} with ${active.provider}/${active.model}.`,
+          `Resumed status checks for ${active.map((job) => job?.type.toLowerCase()).join(' and ')} document generation.`,
         );
+      } else if (Object.keys(restored.needsConfirmation).length > 0) {
+        setErr(
+          'A previous document generation has an uncertain provider outcome. Confirm its retry from the Generated docs tab.',
+        );
+      } else if (restored.failure) {
+        setErr(
+          `${restored.failure.errorCode || 'GENERATION_FAILED'} · ${
+            restored.failure.errorMessage || 'Document generation failed.'
+          }`,
+        );
+      } else if (results.some((result) => result.status === 'rejected')) {
+        setErr('Could not restore document generation status. Reload to retry.');
       }
     });
     return () => {
       cancelled = true;
+      if (routeGen === docJobRouteGen.current) docJobRouteGen.current += 1;
     };
-  }, [genPending, projectId]);
+  }, [projectId]);
 
-  // Poll the durable job rather than guessing completion from a changed document row.
+  // Poll every independently runnable durable job rather than losing one overlapping doc type or
+  // guessing completion from a changed document row.
   useEffect(() => {
-    if (!genPending || !projectId) return;
+    const pendingJobs = Object.values(genPending).filter(
+      (job): job is NonNullable<typeof job> => job != null,
+    );
+    if (pendingJobs.length === 0 || !projectId) return;
     const id = window.setInterval(() => {
       if (document.hidden) return;
-      void api
-        .getProjectDocJob(projectId, genPending.type, genPending.jobId)
-        .then(async (job) => {
-          setErr('');
-          if (job.status === 'SUCCEEDED') {
-            const row = await api.getProjectDoc(projectId, genPending.type);
-            if (row) {
-              setDocs((prev) => [
-                ...(prev ?? []).filter((d) => d.docType !== genPending.type),
-                row,
-              ]);
+      for (const pending of pendingJobs) {
+        void api
+          .getProjectDocJob(projectId, pending.type, pending.jobId)
+          .then(async (job) => {
+            if (job.status === 'QUEUED' || job.status === 'RUNNING') {
+              setGenPending((current) => ({
+                ...current,
+                [pending.type]: {
+                  ...pending,
+                  status: job.status,
+                  attemptCount: job.attemptCount,
+                  deadlineAt: job.deadlineAt,
+                },
+              }));
+            } else if (job.status === 'SUCCEEDED') {
+              const row = await api.getProjectDoc(projectId, pending.type);
+              if (row) {
+                setDocs((prev) => [...(prev ?? []).filter((d) => d.docType !== pending.type), row]);
+              }
+              setGenPending((current) => {
+                const next = {...current};
+                delete next[pending.type];
+                return next;
+              });
+              setMsg(`${pending.type} doc generated.`);
+            } else if (job.status === 'FAILED') {
+              setGenPending((current) => {
+                const next = {...current};
+                delete next[pending.type];
+                return next;
+              });
+              setErr(
+                `${job.errorCode || 'GENERATION_FAILED'} · ${
+                  job.errorMessage || 'Document generation failed.'
+                }`,
+              );
+            } else if (job.status === 'NEEDS_CONFIRMATION') {
+              setGenPending((current) => {
+                const next = {...current};
+                delete next[pending.type];
+                return next;
+              });
+              setDocNeedsConfirmation((current) => ({...current, [pending.type]: job}));
+              setErr(
+                `${job.errorCode || 'OUTCOME_UNCERTAIN'} · ${
+                  job.errorMessage ||
+                  'Provider execution may have started. Confirm before retrying this document.'
+                }`,
+              );
             }
-            setGenPending(null);
-            setMsg(`${genPending.type} doc generated.`);
-          } else if (job.status === 'FAILED') {
-            setGenPending(null);
-            setErr(
-              `${job.errorCode || 'GENERATION_FAILED'} · ${job.errorMessage || 'Document generation failed.'}`,
-            );
-          }
-        })
-        .catch((e: unknown) => {
-          setErr(e instanceof Error ? e.message : 'Could not refresh document job status.');
-        });
+          })
+          .catch((e: unknown) => {
+            setErr(e instanceof Error ? e.message : 'Could not refresh document job status.');
+          });
+      }
     }, 3000);
     return () => window.clearInterval(id);
   }, [genPending, projectId, setDocs]);
@@ -1305,6 +1384,32 @@ export function IdeProjectCode() {
       {/* ── Docs ── */}
       {sub === 'docs' && (
         <div style={{overflowY: 'auto', minHeight: 0}}>
+          {Object.values(genPending).map(
+            (job) =>
+              job && (
+                <div key={job.jobId} className='ide-card' style={{marginBottom: 8, fontSize: 12}}>
+                  <strong>{job.type}</strong> · {job.status === 'QUEUED' ? 'Queued' : 'Running'} ·
+                  attempts started {job.attemptCount}
+                  <span className='muted'>
+                    {' '}
+                    · deadline {new Date(job.deadlineAt).toLocaleTimeString()}
+                  </span>
+                </div>
+              ),
+          )}
+          {Object.values(docNeedsConfirmation).map(
+            (job) =>
+              job && (
+                <div
+                  key={job.id}
+                  className='ide-card'
+                  style={{marginBottom: 8, fontSize: 12, color: 'var(--ide-yellow)'}}
+                >
+                  <strong>{job.docType}</strong> · Outcome uncertain · {job.provider}/{job.model}.
+                  Confirm retry below before any additional provider work.
+                </div>
+              ),
+          )}
           {docsState.failure ? (
             <LoadError
               failure={docsState.failure}
@@ -1339,10 +1444,16 @@ export function IdeProjectCode() {
                 <button
                   className='ide-btn ghost'
                   style={{padding: '4px 10px'}}
-                  disabled={busy === `gen-${d.docType}` || genPending?.type === d.docType}
+                  disabled={busy === `gen-${d.docType}` || !!genPending[d.docType]}
                   onClick={() => genDoc(d.docType)}
                 >
-                  {genPending?.type === d.docType ? 'Generating…' : 'Regenerate'}
+                  {genPending[d.docType]
+                    ? genPending[d.docType]?.status === 'QUEUED'
+                      ? 'Queued…'
+                      : 'Generating…'
+                    : docNeedsConfirmation[d.docType]
+                      ? 'Confirm retry'
+                      : 'Regenerate'}
                 </button>
               </div>
             ))
@@ -1350,21 +1461,29 @@ export function IdeProjectCode() {
           <div style={{display: 'flex', gap: 8, marginTop: 8}}>
             <button
               className='ide-btn ghost'
-              disabled={busy === 'gen-EXPLANATION' || genPending?.type === 'EXPLANATION'}
+              disabled={busy === 'gen-EXPLANATION' || !!genPending.EXPLANATION}
               onClick={() => genDoc('EXPLANATION')}
             >
-              {busy === 'gen-EXPLANATION' || genPending?.type === 'EXPLANATION'
-                ? 'Generating…'
-                : 'Generate explanation doc'}
+              {busy === 'gen-EXPLANATION' || genPending.EXPLANATION
+                ? genPending.EXPLANATION?.status === 'QUEUED'
+                  ? 'Queued…'
+                  : 'Generating…'
+                : docNeedsConfirmation.EXPLANATION
+                  ? 'Confirm explanation retry'
+                  : 'Generate explanation doc'}
             </button>
             <button
               className='ide-btn ghost'
-              disabled={busy === 'gen-SETUP' || genPending?.type === 'SETUP'}
+              disabled={busy === 'gen-SETUP' || !!genPending.SETUP}
               onClick={() => genDoc('SETUP')}
             >
-              {busy === 'gen-SETUP' || genPending?.type === 'SETUP'
-                ? 'Generating…'
-                : 'Generate setup doc'}
+              {busy === 'gen-SETUP' || genPending.SETUP
+                ? genPending.SETUP?.status === 'QUEUED'
+                  ? 'Queued…'
+                  : 'Generating…'
+                : docNeedsConfirmation.SETUP
+                  ? 'Confirm setup retry'
+                  : 'Generate setup doc'}
             </button>
           </div>
         </div>

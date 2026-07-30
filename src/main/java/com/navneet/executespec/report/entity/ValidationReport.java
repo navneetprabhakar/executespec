@@ -22,6 +22,41 @@ public class ValidationReport {
   @Column(name = "run_id", nullable = false)
   private String runId;
 
+  /**
+   * SHA-256 of the canonical Git tree generation measured by this report. Null only for historical
+   * rows that predate V361; null must never be presented as a current-workspace binding.
+   */
+  @Column(name = "workspace_generation", length = 64)
+  private String workspaceGeneration;
+
+  /** V362 deterministic workflow/config parser evidence, including exact paths and content SHAs. */
+  @Column(name = "workflow_config_evidence_json", columnDefinition = "TEXT")
+  private String workflowConfigEvidenceJson;
+
+  @Column(name = "build_command", columnDefinition = "TEXT")
+  private String buildCommand;
+
+  @Column(name = "build_working_directory", columnDefinition = "TEXT")
+  private String buildWorkingDirectory;
+
+  @Column(name = "build_exit_code")
+  private Integer buildExitCode;
+
+  @Column(name = "build_output", columnDefinition = "TEXT")
+  private String buildOutput;
+
+  @Column(name = "test_command", columnDefinition = "TEXT")
+  private String testCommand;
+
+  @Column(name = "test_working_directory", columnDefinition = "TEXT")
+  private String testWorkingDirectory;
+
+  @Column(name = "test_exit_code")
+  private Integer testExitCode;
+
+  @Column(name = "test_output", columnDefinition = "TEXT")
+  private String testOutput;
+
   @Column(name = "files_generated", nullable = false)
   @Builder.Default
   private int filesGenerated = 0;

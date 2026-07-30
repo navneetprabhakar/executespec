@@ -42,7 +42,8 @@ class WorkspaceInitServiceIterationCopyTest {
             properties,
             mock(WorkspaceRestoreService.class),
             snapshots,
-            mock(VendoredPathGuard.class));
+            mock(VendoredPathGuard.class),
+            mock(com.navneet.executespec.contractsurface.BrownfieldHttpContractGuard.class));
 
     service.copyFromRunRequired("source-run", "child-run");
 

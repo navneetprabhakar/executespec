@@ -49,6 +49,24 @@ describe('planContractGate report parsing (RR-819)', () => {
     expect(parseGateRows(JSON.stringify(ROWS))[0].contractName).toBe('Orders API');
   });
 
+  it('retains registered-contract rows from schema-v1 route-removal reports', () => {
+    const reportJson = JSON.stringify({
+      schemaVersion: 1,
+      rows: ROWS,
+      brownfieldHttpRouteRemovals: [{method: 'POST', path: '/simulation/casino-game'}],
+    });
+
+    expect(parseGateRows(reportJson)).toEqual(ROWS);
+    expect(
+      toGateView(
+        'run-a',
+        gatedReport({
+          reportJson,
+        }),
+      )?.brownfieldHttpRouteRemovals,
+    ).toEqual([{method: 'POST', path: '/simulation/casino-game'}]);
+  });
+
   it('degrades to no rows rather than throwing on an unreadable report body', () => {
     expect(parseGateRows('not json')).toEqual([]);
     expect(parseGateRows('{"not":"an array"}')).toEqual([]);

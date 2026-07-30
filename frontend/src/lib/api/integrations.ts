@@ -54,8 +54,23 @@ export const pushToGitHub = (runId: string, repoMode = 'NEW') =>
   });
 
 /** SCM-agnostic push — routes to the user's configured SCM provider (GitHub or Bitbucket). */
+export type ScmPushResult = {
+  status: string;
+  repoUrl: string;
+  prUrl: string;
+  scmProvider: string;
+  message: string;
+  attempted: number;
+  succeeded: number;
+  failed: number;
+  code: string;
+  publicationEligible: boolean;
+  retryable: boolean;
+  retryGuidance: string;
+};
+
 export const pushToScm = (runId: string) =>
-  req<{status: string; repoUrl: string}>(`/runs/${runId}/push-scm`, {method: 'POST'});
+  req<ScmPushResult>(`/runs/${runId}/push-scm`, {method: 'POST'});
 
 /**
  * Saves the user's GitHub PAT and owner (username or org).

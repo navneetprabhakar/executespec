@@ -3,6 +3,8 @@ package com.navneet.executespec.integration;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
@@ -17,13 +19,18 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.navneet.executespec.agent.Plan;
 import com.navneet.executespec.agent.RunKeyContextStore;
 import com.navneet.executespec.config.AgentProperties;
+import com.navneet.executespec.cost.EffectiveRouteProjection;
 import com.navneet.executespec.cost.RunCostTracker;
+import com.navneet.executespec.cost.RunEffectiveRouteService;
 import com.navneet.executespec.cost.RunTokenAttributor;
 import com.navneet.executespec.deployment.WorkspaceRestoreService;
 import com.navneet.executespec.execution.model.RunContinuationDecision;
@@ -37,8 +44,10 @@ import com.navneet.executespec.harness.ExecutionRequest;
 import com.navneet.executespec.harness.ExecutionResult;
 import com.navneet.executespec.harness.GateStore;
 import com.navneet.executespec.harness.SequentialExecutor;
+import com.navneet.executespec.harness.TaskOutcome;
 import com.navneet.executespec.observability.Metrics;
 import com.navneet.executespec.report.ValidationReportRepository;
+import com.navneet.executespec.report.entity.ValidationReport;
 import com.navneet.executespec.reviewer.ReviewerAgent;
 import com.navneet.executespec.reviewer.ReviewerResult;
 import com.navneet.executespec.router.ModelResolver;
@@ -76,6 +85,7 @@ class RunLifecycleServiceContinuationApprovalTest {
   private final ReviewerAgent reviewer = mock(ReviewerAgent.class);
   private final RunCostTracker costTracker = mock(RunCostTracker.class);
   private final RunTokenAttributor tokenAttributor = mock(RunTokenAttributor.class);
+  private final RunEffectiveRouteService effectiveRoutes = mock(RunEffectiveRouteService.class);
   private final RunKeyContextStore keyContextStore = mock(RunKeyContextStore.class);
   private final WorkspaceRestoreService workspaceRestoreService =
       mock(WorkspaceRestoreService.class);
@@ -97,6 +107,22 @@ class RunLifecycleServiceContinuationApprovalTest {
           runRepo,
           llmExecutionPolicyFactory,
           new LlmExecutionOperationCoordinator(operationService));
+  private final com.navneet.executespec.contractsurface.BrownfieldHttpContractGuard
+      brownfieldHttpContractGuard =
+          mock(com.navneet.executespec.contractsurface.BrownfieldHttpContractGuard.class);
+  private final CorrectionWorkspaceTransaction correctionWorkspaceTransaction =
+      mock(CorrectionWorkspaceTransaction.class);
+  private final WorkflowConfigEvidenceInspector workflowConfigEvidenceInspector =
+      mock(WorkflowConfigEvidenceInspector.class);
+  private final ApprovedContinuationRouteAdmissionService approvedRouteAdmission =
+      mock(ApprovedContinuationRouteAdmissionService.class);
+  private final CorrectionValidationAdmission correctionValidationAdmission =
+      mock(CorrectionValidationAdmission.class);
+  private final CorrectionWorkspaceTransaction.Checkpoint correctionCheckpoint =
+      new CorrectionWorkspaceTransaction.Checkpoint(
+          java.util.List.of(
+              new CorrectionWorkspaceTransaction.RepositoryCheckpoint(
+                  Path.of("/tmp/executespec-test-repository"), "head", "tree")));
 
   private RunLifecycleService service;
 
@@ -135,7 +161,13 @@ class RunLifecycleServiceContinuationApprovalTest {
             llmExecutionPolicyFactory,
             planGateDecisionService,
             planGateResumeStore,
-            runOperationLifecycle);
+            runOperationLifecycle,
+            effectiveRoutes,
+            brownfieldHttpContractGuard,
+            correctionWorkspaceTransaction,
+            workflowConfigEvidenceInspector,
+            approvedRouteAdmission,
+            correctionValidationAdmission);
     LlmExecutionReference reference =
         new LlmExecutionReference(
             "llmctx-continuation-test", LlmExecutionScope.customer("test-org"));
@@ -152,6 +184,66 @@ class RunLifecycleServiceContinuationApprovalTest {
                     UUID.randomUUID()));
     when(operationService.complete(any(), anyString())).thenReturn(true);
     when(operationService.fail(any(), anyString(), any())).thenReturn(true);
+    when(taskRepo.claimContinuationApproval(
+            anyString(),
+            anyString(),
+            anyString(),
+            anyString(),
+            anyString(),
+            anyString(),
+            anyString(),
+            anyString(),
+            anyBoolean()))
+        .thenReturn(1);
+    when(taskRepo.updateContinuationApprovalStatus(
+            anyString(), anyString(), anyString(), anyString()))
+        .thenReturn(1);
+    when(taskRepo.releaseContinuationApprovalClaim(anyString(), anyString(), anyString()))
+        .thenReturn(1);
+    when(effectiveRoutes.captureAttemptFence(anyString(), anyString(), anyLong()))
+        .thenAnswer(
+            invocation ->
+                new RunEffectiveRouteService.AttemptFence(
+                    invocation.getArgument(0),
+                    invocation.getArgument(1),
+                    invocation.getArgument(2),
+                    java.util.Set.of()));
+    when(effectiveRoutes.captureReviewerAttemptFence(anyString(), anyLong()))
+        .thenAnswer(
+            invocation ->
+                new RunEffectiveRouteService.ReviewerAttemptFence(
+                    invocation.getArgument(0), invocation.getArgument(1), java.util.Set.of()));
+    when(effectiveRoutes.successfulTaskAttemptAfter(any()))
+        .thenAnswer(invocation -> currentApprovalAttempt());
+    when(effectiveRoutes.successfulReviewerAttemptAfter(any()))
+        .thenAnswer(invocation -> currentApprovalAttempt());
+    when(reviewer.review(any()))
+        .thenReturn(
+            ReviewerResult.builder()
+                .overall(ReviewerResult.Overall.CLEAN)
+                .finalBuildPassed(true)
+                .finalTestsPassed(1)
+                .finalTestsTotal(1)
+                .workspaceQuiescent(true)
+                .build());
+    when(correctionWorkspaceTransaction.begin(any())).thenReturn(correctionCheckpoint);
+    when(correctionWorkspaceTransaction.currentGeneration(correctionCheckpoint))
+        .thenReturn("b".repeat(64));
+    when(workflowConfigEvidenceInspector.inspect(any()))
+        .thenReturn(com.navneet.executespec.report.model.WorkflowConfigEvidence.notApplicable());
+    when(validationKickoff.generateValidationReport(any(), any(), any(), any()))
+        .thenReturn(
+            Optional.of(
+                ValidationReport.builder()
+                    .id("validation-1")
+                    .runId(RUN_ID)
+                    .workspaceGeneration("b".repeat(64))
+                    .status("COMPLETE")
+                    .build()));
+    when(correctionWorkspaceTransaction.accept(correctionCheckpoint))
+        .thenReturn(
+            new CorrectionWorkspaceTransaction.Accepted(
+                correctionCheckpoint.generation(), "b".repeat(64)));
   }
 
   @Test
@@ -229,6 +321,8 @@ class RunLifecycleServiceContinuationApprovalTest {
             .localExecutionRequested(true)
             .build();
     when(runRepo.findById(RUN_ID)).thenReturn(Optional.of(run));
+    when(taskRepo.findById(TASK_KEY))
+        .thenReturn(Optional.of(AgentTask.builder().taskId(TASK_KEY).runId(RUN_ID).build()));
 
     assertThatThrownBy(() -> service.retryTask(RUN_ID, TASK_ID))
         .isInstanceOf(IllegalStateException.class)
@@ -317,7 +411,7 @@ class RunLifecycleServiceContinuationApprovalTest {
     org.mockito.Mockito.doNothing().when(executorService).execute(runnable.capture());
     when(contextComposer.buildMultiRepoSummary(any(), any())).thenReturn("workspace");
     when(executor.execute(any(ExecutionRequest.class), any(SequentialExecutor.ResumeRequest.class)))
-        .thenReturn(ExecutionResult.builder().overall(ExecutionResult.Overall.ALL_SUCCESS).build());
+        .thenReturn(approvedResult("openai", "gpt-5.4"));
 
     RunLifecycleService.ContinuationApproval approval =
         service.approveContinuation(RUN_ID, TASK_ID);
@@ -327,7 +421,9 @@ class RunLifecycleServiceContinuationApprovalTest {
     assertThat(approval.model()).isEqualTo("gpt-5.4");
     assertThat(approval.proposedAction()).isEqualTo(RunContinuationDecision.CHANGE_PROVIDER);
     ArgumentCaptor<ExecutionRequest> request = ArgumentCaptor.forClass(ExecutionRequest.class);
-    verify(executor).execute(request.capture(), any(SequentialExecutor.ResumeRequest.class));
+    ArgumentCaptor<SequentialExecutor.ResumeRequest> resume =
+        ArgumentCaptor.forClass(SequentialExecutor.ResumeRequest.class);
+    verify(executor).execute(request.capture(), resume.capture());
     assertThat(request.getValue().provider()).isEqualTo("openai");
     assertThat(request.getValue().model()).isEqualTo("gpt-5.4");
     assertThat(request.getValue().userConfirmedExpensiveContinuation()).isTrue();
@@ -335,6 +431,14 @@ class RunLifecycleServiceContinuationApprovalTest {
         .isEqualTo(RunContinuationDecision.CHANGE_PROVIDER);
     assertThat(request.getValue().userConfirmedContinuationProvider()).isEqualTo("openai");
     assertThat(request.getValue().userConfirmedContinuationModel()).isEqualTo("gpt-5.4");
+    assertThat(resume.getValue().targetTaskId()).isEqualTo(TASK_KEY);
+    assertThat(resume.getValue().approvedProvider()).isEqualTo("openai");
+    assertThat(resume.getValue().approvedModel()).isEqualTo("gpt-5.4");
+    assertThat(resume.getValue().approvedAction())
+        .isEqualTo(RunContinuationDecision.CHANGE_PROVIDER);
+    assertThat(resume.getValue().approvedProposalDigest()).isEqualTo(approval.proposalDigest());
+    assertThat(approval.proposalVersion()).isEqualTo(1);
+    assertThat(approval.proposalDigest()).hasSize(64);
     assertThat(request.getValue().runContext().llmExecutionContextId())
         .isEqualTo("llmctx-continuation-test");
     assertThat(request.getValue().runContext().llmExecutionOperationAuthority()).isNotNull();
@@ -345,6 +449,166 @@ class RunLifecycleServiceContinuationApprovalTest {
         task, RunContinuationDecision.CHANGE_PROVIDER, "openai", "gpt-5.4");
     assertApprovedContinuationEvent(RunContinuationDecision.CHANGE_PROVIDER, "openai", "gpt-5.4");
     verify(controlPort).terminate(eq(RUN_ID), eq("COMPLETE"), any(), any(), any());
+  }
+
+  @Test
+  void duplicateExactApprovalReplaysReceiptWithoutSecondQueue() throws Exception {
+    Files.createDirectories(tempDir.resolve(RUN_ID));
+    PipelineRun run = retryableRun();
+    AgentTask task = approvalTask("TASK_BOUNDARY");
+    when(runRepo.findById(RUN_ID)).thenReturn(Optional.of(run));
+    when(taskRepo.findById(TASK_KEY)).thenReturn(Optional.of(task));
+    org.mockito.Mockito.doNothing().when(executorService).execute(any(Runnable.class));
+
+    RunLifecycleService.ContinuationApproval first = service.approveContinuation(RUN_ID, TASK_ID);
+    RunLifecycleService.ContinuationApproval replay = service.approveContinuation(RUN_ID, TASK_ID);
+
+    assertThat(first.replayed()).isFalse();
+    assertThat(replay.replayed()).isTrue();
+    assertThat(replay.approvalId()).isEqualTo(first.approvalId());
+    assertThat(replay.proposalDigest()).isEqualTo(first.proposalDigest());
+    verify(executorService).execute(any(Runnable.class));
+    verify(taskRepo)
+        .claimContinuationApproval(
+            eq(TASK_KEY),
+            eq(RUN_ID),
+            anyString(),
+            eq(first.proposalDigest()),
+            eq(first.approvalId()),
+            eq(first.provider()),
+            eq(first.model()),
+            eq(first.proposedAction().name()),
+            eq(first.postReview()));
+  }
+
+  @Test
+  void completedExactApprovalReplaysAsCompletedWithoutSecondQueue() throws Exception {
+    Files.createDirectories(tempDir.resolve(RUN_ID));
+    PipelineRun run = retryableRun();
+    AgentTask task = approvalTask("TASK_BOUNDARY");
+    when(runRepo.findById(RUN_ID)).thenReturn(Optional.of(run));
+    when(taskRepo.findById(TASK_KEY)).thenReturn(Optional.of(task));
+    org.mockito.Mockito.doNothing().when(executorService).execute(any(Runnable.class));
+
+    RunLifecycleService.ContinuationApproval first = service.approveContinuation(RUN_ID, TASK_ID);
+    task.setContinuationApprovalStatus("COMPLETED");
+    RunLifecycleService.ContinuationApproval replay = service.approveContinuation(RUN_ID, TASK_ID);
+
+    assertThat(replay.replayed()).isTrue();
+    assertThat(replay.approvalId()).isEqualTo(first.approvalId());
+    assertThat(replay.approvalStatus()).isEqualTo("COMPLETED");
+    verify(executorService).execute(any(Runnable.class));
+  }
+
+  @Test
+  void failedExactApprovalRequiresNewProposalInsteadOfClaimingReplay() throws Exception {
+    Files.createDirectories(tempDir.resolve(RUN_ID));
+    PipelineRun run = retryableRun();
+    AgentTask task = approvalTask("TASK_BOUNDARY");
+    when(runRepo.findById(RUN_ID)).thenReturn(Optional.of(run));
+    when(taskRepo.findById(TASK_KEY)).thenReturn(Optional.of(task));
+    org.mockito.Mockito.doNothing().when(executorService).execute(any(Runnable.class));
+
+    service.approveContinuation(RUN_ID, TASK_ID);
+    task.setContinuationApprovalStatus("FAILED");
+
+    assertThatThrownBy(() -> service.approveContinuation(RUN_ID, TASK_ID))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("submit a new continuation proposal");
+    verify(executorService).execute(any(Runnable.class));
+  }
+
+  @Test
+  void concurrentExactApprovalConflictsWhileFirstClaimIsStillBeingQueued() throws Exception {
+    Files.createDirectories(tempDir.resolve(RUN_ID));
+    PipelineRun run = retryableRun();
+    AgentTask task = approvalTask("TASK_BOUNDARY");
+    when(runRepo.findById(RUN_ID)).thenReturn(Optional.of(run));
+    when(taskRepo.findById(TASK_KEY)).thenReturn(Optional.of(task));
+    org.mockito.Mockito.doNothing().when(executorService).execute(any(Runnable.class));
+    java.util.concurrent.CountDownLatch queueStatusStarted =
+        new java.util.concurrent.CountDownLatch(1);
+    java.util.concurrent.CountDownLatch allowQueueStatus =
+        new java.util.concurrent.CountDownLatch(1);
+    when(taskRepo.updateContinuationApprovalStatus(
+            anyString(), anyString(), anyString(), eq("QUEUED")))
+        .thenAnswer(
+            invocation -> {
+              queueStatusStarted.countDown();
+              assertThat(allowQueueStatus.await(5, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+              return 1;
+            });
+
+    try (ExecutorService callers = Executors.newFixedThreadPool(2)) {
+      CompletableFuture<RunLifecycleService.ContinuationApproval> first =
+          CompletableFuture.supplyAsync(
+              () -> service.approveContinuation(RUN_ID, TASK_ID), callers);
+      assertThat(queueStatusStarted.await(5, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+      assertThatThrownBy(() -> service.approveContinuation(RUN_ID, TASK_ID))
+          .isInstanceOf(IllegalStateException.class)
+          .hasMessageContaining("still being admitted");
+      allowQueueStatus.countDown();
+      assertThat(first.join().approvalStatus()).isEqualTo("QUEUED");
+    }
+    verify(executorService).execute(any(Runnable.class));
+  }
+
+  @Test
+  void durableQueueStatusPrecedesExecutorSubmission() throws Exception {
+    Files.createDirectories(tempDir.resolve(RUN_ID));
+    PipelineRun run = retryableRun();
+    AgentTask task = approvalTask("TASK_BOUNDARY");
+    when(runRepo.findById(RUN_ID)).thenReturn(Optional.of(run));
+    when(taskRepo.findById(TASK_KEY)).thenReturn(Optional.of(task));
+    org.mockito.Mockito.doAnswer(
+            invocation -> {
+              assertThat(task.getContinuationApprovalStatus()).isEqualTo("QUEUED");
+              return null;
+            })
+        .when(executorService)
+        .execute(any(Runnable.class));
+
+    RunLifecycleService.ContinuationApproval approval =
+        service.approveContinuation(RUN_ID, TASK_ID);
+
+    assertThat(approval.approvalStatus()).isEqualTo("QUEUED");
+    verify(executorService).execute(any(Runnable.class));
+  }
+
+  @Test
+  void differentActiveProposalConflictsWithoutQueueOrSpend() throws Exception {
+    Files.createDirectories(tempDir.resolve(RUN_ID));
+    PipelineRun run = retryableRun();
+    AgentTask task = approvalTask("TASK_BOUNDARY");
+    task.setContinuationApprovalId("approval-other");
+    task.setContinuationApprovalProposalDigest("f".repeat(64));
+    task.setContinuationApprovalStatus("QUEUED");
+    task.setContinuationApprovalProvider("openai");
+    task.setContinuationApprovalModel("gpt-5.4");
+    task.setContinuationApprovalAction("CHANGE_PROVIDER");
+    task.setContinuationApprovalPostReview(false);
+    when(runRepo.findById(RUN_ID)).thenReturn(Optional.of(run));
+    when(taskRepo.findById(TASK_KEY)).thenReturn(Optional.of(task));
+    when(taskRepo.claimContinuationApproval(
+            anyString(),
+            anyString(),
+            anyString(),
+            anyString(),
+            anyString(),
+            anyString(),
+            anyString(),
+            anyString(),
+            anyBoolean()))
+        .thenReturn(0);
+
+    assertThatThrownBy(() -> service.approveContinuation(RUN_ID, TASK_ID))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("different continuation proposal");
+
+    verify(executorService, never()).execute(any(Runnable.class));
+    verify(executor, never()).execute(any(), any());
+    verify(tokenAttributor, never())
+        .attributeWorkerAdditionalTask(any(), any(), anyLong(), anyLong(), any(), any());
   }
 
   @Test
@@ -392,7 +656,7 @@ class RunLifecycleServiceContinuationApprovalTest {
     org.mockito.Mockito.doNothing().when(executorService).execute(runnable.capture());
     when(contextComposer.buildMultiRepoSummary(any(), any())).thenReturn("workspace");
     when(executor.execute(any(ExecutionRequest.class), any(SequentialExecutor.ResumeRequest.class)))
-        .thenReturn(ExecutionResult.builder().overall(ExecutionResult.Overall.ALL_SUCCESS).build());
+        .thenReturn(approvedResult("anthropic", "claude-sonnet-4-6"));
 
     RunLifecycleService.ContinuationApproval approval =
         service.approveContinuation(RUN_ID, TASK_ID);
@@ -472,7 +736,7 @@ class RunLifecycleServiceContinuationApprovalTest {
     org.mockito.Mockito.doNothing().when(executorService).execute(runnable.capture());
     when(contextComposer.buildMultiRepoSummary(any(), any())).thenReturn("workspace");
     when(executor.execute(any(ExecutionRequest.class), any(SequentialExecutor.ResumeRequest.class)))
-        .thenReturn(ExecutionResult.builder().overall(ExecutionResult.Overall.ALL_SUCCESS).build());
+        .thenReturn(approvedResult("anthropic", "claude-sonnet-4-6"));
 
     service.approveContinuation(RUN_ID, TASK_ID);
     runnable.getValue().run();
@@ -527,12 +791,14 @@ class RunLifecycleServiceContinuationApprovalTest {
                 }
                 """)
             .build();
-    ExecutionResult retryResult =
-        ExecutionResult.builder().overall(ExecutionResult.Overall.ALL_SUCCESS).build();
+    ExecutionResult retryResult = approvedResult("openai", "gpt-5.4");
     ReviewerResult reviewResult =
         ReviewerResult.builder()
             .overall(ReviewerResult.Overall.CLEAN)
             .finalBuildPassed(true)
+            .finalTestsPassed(5)
+            .finalTestsTotal(5)
+            .workspaceQuiescent(true)
             .build();
 
     when(taskRepo.findById(TASK_KEY)).thenReturn(Optional.of(task));
@@ -548,6 +814,21 @@ class RunLifecycleServiceContinuationApprovalTest {
             new RunCostTracker.Snapshot(100, 20, 0, 0, 0.10, 1),
             new RunCostTracker.Snapshot(250, 60, 0, 0, 0.30, 2),
             new RunCostTracker.Snapshot(310, 80, 0, 0, 0.45, 3));
+    com.navneet.executespec.cost.RunEffectiveRouteService routes =
+        mock(com.navneet.executespec.cost.RunEffectiveRouteService.class);
+    var routeFence =
+        new com.navneet.executespec.cost.RunEffectiveRouteService.AttemptFence(
+            RUN_ID, TASK_ID, 1, java.util.Set.of("prior-attempt"));
+    org.springframework.test.util.ReflectionTestUtils.setField(service, "effectiveRoutes", routes);
+    when(routes.captureAttemptFence(RUN_ID, TASK_ID, 1)).thenReturn(routeFence);
+    when(routes.successfulTaskAttemptAfter(routeFence))
+        .thenReturn(attemptEvidence("openai", "gpt-5.4", "worker-approved"));
+    var reviewerFence =
+        new com.navneet.executespec.cost.RunEffectiveRouteService.ReviewerAttemptFence(
+            RUN_ID, 2, java.util.Set.of("reviewer-prior"));
+    when(routes.captureReviewerAttemptFence(RUN_ID, 2)).thenReturn(reviewerFence);
+    when(routes.successfulReviewerAttemptAfter(reviewerFence))
+        .thenReturn(attemptEvidence("openai", "gpt-5.4", "reviewer-approved"));
 
     RunLifecycleService.ContinuationApproval approval =
         service.approveContinuation(RUN_ID, TASK_ID);
@@ -561,20 +842,272 @@ class RunLifecycleServiceContinuationApprovalTest {
     verify(persistenceWriter).updateStatus(RUN_ID, "REVIEWING");
     verify(tokenAttributor)
         .attributeWorkerAdditionalTask(RUN_ID, TASK_KEY, 150, 40, "OPENAI", "gpt-5.4");
-    verify(reviewer).review(any());
+    ArgumentCaptor<com.navneet.executespec.reviewer.ReviewerRequest> reviewerRequest =
+        ArgumentCaptor.forClass(com.navneet.executespec.reviewer.ReviewerRequest.class);
+    verify(reviewer).review(reviewerRequest.capture());
+    assertThat(reviewerRequest.getValue().provider()).isEqualTo("openai");
+    assertThat(reviewerRequest.getValue().model()).isEqualTo("gpt-5.4");
+    assertThat(reviewerRequest.getValue().strictProvider()).isTrue();
+    assertThat(reviewerRequest.getValue().readOnly()).isTrue();
+    JsonNode approvedAction = objectMapper.readTree(task.getContinuationActionsJson()).get(0);
+    assertThat(approvedAction.path("postReview").asBoolean()).isTrue();
     verify(persistenceWriter).persistReview(RUN_ID, reviewResult);
     verify(tokenAttributor)
-        .attributePhaseAdditional(
-            RUN_ID, RunTokenAttributor.Phase.REVIEWER, 60, 20, "OPENAI", "gpt-5.4");
-    verify(validationKickoff)
-        .generateValidationReport(RUN_ID, retryResult, reviewResult, request.getValue().plan());
+        .attributeReviewerAdditionalFromAttempt(
+            eq(RUN_ID),
+            eq(60L),
+            eq(20L),
+            org.mockito.ArgumentMatchers.argThat(
+                evidence -> evidence.physicalAttemptIds().contains("reviewer-approved")));
+    verify(correctionValidationAdmission)
+        .assertPreReview(eq(RUN_ID), eq(request.getValue().plan()), isNull(), any(Path.class));
+    verify(correctionValidationAdmission)
+        .regenerateAndAssert(
+            eq(RUN_ID),
+            eq(retryResult),
+            eq(reviewResult),
+            eq(request.getValue().plan()),
+            eq(correctionCheckpoint),
+            eq("b".repeat(64)));
     verify(controlPort).terminate(eq(RUN_ID), eq("COMPLETE"), any(), any(), any());
+  }
+
+  @Test
+  void missingDeterministicRouteRollsBackBeforeReviewerOrValidationSpend() throws Exception {
+    Files.createDirectories(tempDir.resolve(RUN_ID));
+    PipelineRun run =
+        PipelineRun.builder()
+            .runId(RUN_ID)
+            .status("PARTIAL")
+            .userRequest("Preserve POST /simulation/casino-game")
+            .planJson(
+                """
+                {
+                  "planTitle": "Retry plan",
+                  "tasks": [{"id": "T1", "title": "Restore route", "description": ""}]
+                }
+                """)
+            .build();
+    AgentTask task = approvalTask("POST_REVIEW");
+    when(taskRepo.findById(TASK_KEY)).thenReturn(Optional.of(task));
+    when(runRepo.findById(RUN_ID)).thenReturn(Optional.of(run));
+    when(contextComposer.buildMultiRepoSummary(any(), any())).thenReturn("workspace");
+    when(executor.execute(any(ExecutionRequest.class), any(SequentialExecutor.ResumeRequest.class)))
+        .thenReturn(approvedResult("openrouter", "x-ai/grok-4.20"));
+    when(costTracker.snapshot(RUN_ID))
+        .thenReturn(
+            new RunCostTracker.Snapshot(100, 20, 0, 0, 0.10, 1),
+            new RunCostTracker.Snapshot(250, 60, 0, 0, 0.30, 2));
+    when(effectiveRoutes.successfulTaskAttemptAfter(any()))
+        .thenReturn(attemptEvidence("openrouter", "x-ai/grok-4.20", "worker-approved"));
+    org.mockito.Mockito.doThrow(new IllegalStateException("DETERMINISTIC_HTTP_REQUIREMENT_MISSING"))
+        .when(correctionValidationAdmission)
+        .assertPreReview(
+            eq(RUN_ID),
+            any(Plan.class),
+            eq("Preserve POST /simulation/casino-game"),
+            any(Path.class));
+    ArgumentCaptor<Runnable> runnable = ArgumentCaptor.forClass(Runnable.class);
+    org.mockito.Mockito.doNothing().when(executorService).execute(runnable.capture());
+
+    service.approveContinuation(RUN_ID, TASK_ID);
+    runnable.getValue().run();
+
+    verify(correctionWorkspaceTransaction).rollback(correctionCheckpoint);
+    verify(reviewer, never()).review(any());
+    verify(validationKickoff, never()).generateValidationReport(any(), any(), any(), any());
+    verify(correctionValidationAdmission, never())
+        .regenerateAndAssert(any(), any(), any(), any(), any(), any());
+  }
+
+  @Test
+  void unavailableApprovedRouteStopsBeforeQueueProviderSpendOrFallback() throws Exception {
+    Files.createDirectories(tempDir.resolve(RUN_ID));
+    PipelineRun run =
+        PipelineRun.builder()
+            .runId(RUN_ID)
+            .status("PARTIAL")
+            .createdByUserId("user-1")
+            .planJson(
+                """
+                {
+                  "planTitle": "Retry plan",
+                  "tasks": [{"id": "T1", "title": "Fix build", "description": ""}]
+                }
+                """)
+            .build();
+    AgentTask task = approvalTask("TASK_BOUNDARY");
+    when(taskRepo.findById(TASK_KEY)).thenReturn(Optional.of(task));
+    when(runRepo.findById(RUN_ID)).thenReturn(Optional.of(run));
+    org.mockito.Mockito.doThrow(new IllegalStateException("provider key unavailable"))
+        .when(approvedRouteAdmission)
+        .assertAvailable(run, "openrouter", "x-ai/grok-4.20");
+
+    assertThatThrownBy(() -> service.approveContinuation(RUN_ID, TASK_ID))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("provider key unavailable");
+
+    verify(executorService, never()).execute(any(Runnable.class));
+    verify(executor, never()).execute(any(), any());
+    verify(reviewer, never()).review(any());
+    verify(tokenAttributor, never())
+        .attributeWorkerAdditionalTask(any(), any(), anyLong(), anyLong(), any(), any());
+    verify(taskRepo, never()).save(any());
+  }
+
+  @Test
+  void changedProposalAfterApprovalFailsBeforeExecutorDispatch() throws Exception {
+    Files.createDirectories(tempDir.resolve(RUN_ID));
+    PipelineRun run =
+        PipelineRun.builder()
+            .runId(RUN_ID)
+            .status("PARTIAL")
+            .createdByUserId("user-1")
+            .planJson(
+                """
+                {
+                  "planTitle": "Retry plan",
+                  "tasks": [{"id": "T1", "title": "Fix build", "description": ""}]
+                }
+                """)
+            .build();
+    AgentTask task = approvalTask("TASK_BOUNDARY");
+    when(taskRepo.findById(TASK_KEY)).thenReturn(Optional.of(task));
+    when(runRepo.findById(RUN_ID)).thenReturn(Optional.of(run));
+    ArgumentCaptor<Runnable> runnable = ArgumentCaptor.forClass(Runnable.class);
+    org.mockito.Mockito.doNothing().when(executorService).execute(runnable.capture());
+
+    service.approveContinuation(RUN_ID, TASK_ID);
+    task.setContinuationDecisionJson(
+        task.getContinuationDecisionJson().replace("x-ai/grok-4.20", "deepseek-v4-pro"));
+    runnable.getValue().run();
+
+    verify(executor, never()).execute(any(), any());
+    verify(reviewer, never()).review(any());
+    verify(tokenAttributor, never())
+        .attributeWorkerAdditionalTask(any(), any(), anyLong(), anyLong(), any(), any());
+  }
+
+  @Test
+  void physicalRouteMismatchPreventsAttributionReviewerAndAttestation() throws Exception {
+    Files.createDirectories(tempDir.resolve(RUN_ID));
+    PipelineRun run =
+        PipelineRun.builder()
+            .runId(RUN_ID)
+            .status("PARTIAL")
+            .createdByUserId("user-1")
+            .planJson(
+                """
+                {
+                  "planTitle": "Retry plan",
+                  "tasks": [{"id": "T1", "title": "Fix review", "description": ""}]
+                }
+                """)
+            .build();
+    AgentTask task = approvalTask("POST_REVIEW");
+    when(taskRepo.findById(TASK_KEY)).thenReturn(Optional.of(task));
+    when(runRepo.findById(RUN_ID)).thenReturn(Optional.of(run));
+    when(contextComposer.buildMultiRepoSummary(any(), any())).thenReturn("workspace");
+    when(executor.execute(any(ExecutionRequest.class), any(SequentialExecutor.ResumeRequest.class)))
+        .thenReturn(approvedResult("openrouter", "x-ai/grok-4.20"));
+    ArgumentCaptor<Runnable> runnable = ArgumentCaptor.forClass(Runnable.class);
+    org.mockito.Mockito.doNothing().when(executorService).execute(runnable.capture());
+
+    com.navneet.executespec.cost.RunEffectiveRouteService routes =
+        mock(com.navneet.executespec.cost.RunEffectiveRouteService.class);
+    var routeFence =
+        new com.navneet.executespec.cost.RunEffectiveRouteService.AttemptFence(
+            RUN_ID, TASK_ID, 0, java.util.Set.of("prior-grok-attempt"));
+    org.springframework.test.util.ReflectionTestUtils.setField(service, "effectiveRoutes", routes);
+    when(routes.captureAttemptFence(RUN_ID, TASK_ID, 0)).thenReturn(routeFence);
+    when(routes.successfulTaskAttemptAfter(routeFence))
+        .thenReturn(attemptEvidence("openrouter", "deepseek-v4-pro", "worker-wrong"));
+
+    service.approveContinuation(RUN_ID, TASK_ID);
+    runnable.getValue().run();
+
+    verify(correctionWorkspaceTransaction).rollback(correctionCheckpoint);
+    verify(tokenAttributor, never())
+        .attributeWorkerAdditionalTask(any(), any(), anyLong(), anyLong(), any(), any());
+    verify(reviewer, never()).review(any());
+    verify(validationKickoff, never()).generateValidationReport(any(), any(), any(), any());
+    verify(persistenceWriter, never()).persistReview(any(), any());
+  }
+
+  @Test
+  void reviewerWorkspaceGenerationMismatchRollsBackAndPreventsValidation() throws Exception {
+    Files.createDirectories(tempDir.resolve(RUN_ID));
+    PipelineRun run =
+        PipelineRun.builder()
+            .runId(RUN_ID)
+            .status("PARTIAL")
+            .planJson(
+                """
+                {
+                  "planTitle": "Retry plan",
+                  "buildCommand": "mvn test",
+                  "tasks": [{"id": "T1", "title": "Fix review", "description": ""}]
+                }
+                """)
+            .build();
+    AgentTask task = approvalTask("POST_REVIEW");
+    when(taskRepo.findById(TASK_KEY)).thenReturn(Optional.of(task));
+    when(runRepo.findById(RUN_ID)).thenReturn(Optional.of(run));
+    when(contextComposer.buildMultiRepoSummary(any(), any())).thenReturn("workspace");
+    when(executor.execute(any(ExecutionRequest.class), any(SequentialExecutor.ResumeRequest.class)))
+        .thenReturn(approvedResult("openrouter", "x-ai/grok-4.20"));
+    when(reviewer.review(any()))
+        .thenReturn(
+            ReviewerResult.builder()
+                .overall(ReviewerResult.Overall.CLEAN)
+                .finalBuildPassed(true)
+                .finalTestsPassed(5)
+                .finalTestsTotal(5)
+                .workspaceQuiescent(true)
+                .build());
+    when(correctionWorkspaceTransaction.currentGeneration(correctionCheckpoint))
+        .thenReturn("b".repeat(64), "c".repeat(64));
+    when(costTracker.snapshot(RUN_ID))
+        .thenReturn(
+            new RunCostTracker.Snapshot(100, 20, 0, 0, 0.10, 1),
+            new RunCostTracker.Snapshot(250, 60, 0, 0, 0.30, 2),
+            new RunCostTracker.Snapshot(310, 80, 0, 0, 0.45, 3));
+    com.navneet.executespec.cost.RunEffectiveRouteService routes =
+        mock(com.navneet.executespec.cost.RunEffectiveRouteService.class);
+    var routeFence =
+        new com.navneet.executespec.cost.RunEffectiveRouteService.AttemptFence(
+            RUN_ID, TASK_ID, 1, java.util.Set.of());
+    org.springframework.test.util.ReflectionTestUtils.setField(service, "effectiveRoutes", routes);
+    when(routes.captureAttemptFence(RUN_ID, TASK_ID, 1)).thenReturn(routeFence);
+    when(routes.successfulTaskAttemptAfter(routeFence))
+        .thenReturn(attemptEvidence("openrouter", "x-ai/grok-4.20", "worker-approved"));
+    var reviewerFence =
+        new com.navneet.executespec.cost.RunEffectiveRouteService.ReviewerAttemptFence(
+            RUN_ID, 2, java.util.Set.of());
+    when(routes.captureReviewerAttemptFence(RUN_ID, 2)).thenReturn(reviewerFence);
+    when(routes.successfulReviewerAttemptAfter(reviewerFence))
+        .thenReturn(attemptEvidence("openrouter", "x-ai/grok-4.20", "reviewer-approved"));
+    ArgumentCaptor<Runnable> runnable = ArgumentCaptor.forClass(Runnable.class);
+    org.mockito.Mockito.doNothing().when(executorService).execute(runnable.capture());
+
+    service.approveContinuation(RUN_ID, TASK_ID);
+    runnable.getValue().run();
+
+    verify(correctionWorkspaceTransaction).rollback(correctionCheckpoint);
+    verify(validationKickoff, never()).generateValidationReport(any(), any(), any(), any());
+    verify(persistenceWriter, never()).persistReview(any(), any());
   }
 
   @Test
   void postValidationReportProposalUsesHeavyApprovalPath() {
     assertThat(RunLifecycleService.heavyContinuationApprovalSource("POST_VALIDATION_REPORT"))
         .isTrue();
+  }
+
+  @Test
+  void routeFenceUsesSameLogicalTaskIdentityForPrefixedAndUnprefixedTargets() {
+    assertThat(RunLifecycleService.logicalTaskId(RUN_ID, TASK_ID)).isEqualTo(TASK_ID);
+    assertThat(RunLifecycleService.logicalTaskId(RUN_ID, TASK_KEY)).isEqualTo(TASK_ID);
   }
 
   @Test
@@ -693,12 +1226,14 @@ class RunLifecycleServiceContinuationApprovalTest {
       throws Exception {
     JsonNode actions = objectMapper.readTree(task.getContinuationActionsJson());
     assertThat(actions.isArray()).isTrue();
-    assertThat(actions).hasSize(1);
+    assertThat(actions.size()).isGreaterThanOrEqualTo(1);
     JsonNode action = actions.get(0);
     assertThat(action.path("status").asText()).isEqualTo("APPROVED");
     assertThat(action.path("decision").asText()).isEqualTo(decision.name());
     assertThat(action.path("provider").asText()).isEqualTo(provider);
     assertThat(action.path("model").asText()).isEqualTo(model);
+    assertThat(action.path("postReview").asBoolean()).isFalse();
+    assertThat(action.path("proposalDigest").asText()).matches("[0-9a-f]{64}");
     assertThat(action.path("limitName").asText()).isEqualTo("userApproval");
     assertThat(action.path("attempt").asInt()).isEqualTo(1);
   }
@@ -717,5 +1252,99 @@ class RunLifecycleServiceContinuationApprovalTest {
               assertThat(e.data()).containsEntry("selectedModel", model);
               assertThat(e.data()).containsEntry("limitName", "userApproval");
             });
+  }
+
+  private static com.navneet.executespec.cost.RunEffectiveRouteService.AttemptRouteEvidence
+      attemptEvidence(String provider, String model, String physicalAttemptId) {
+    return new com.navneet.executespec.cost.RunEffectiveRouteService.AttemptRouteEvidence(
+        new com.navneet.executespec.cost.EffectiveRouteProjection(
+            provider,
+            model,
+            com.navneet.executespec.cost.EffectiveRouteProjection.Attribution.LEDGER),
+        java.util.List.of(physicalAttemptId),
+        1,
+        1);
+  }
+
+  private static ExecutionResult approvedResult(String provider, String model) {
+    return ExecutionResult.builder()
+        .overall(ExecutionResult.Overall.ALL_SUCCESS)
+        .perTask(
+            java.util.List.of(
+                TaskOutcome.builder()
+                    .taskId(TASK_ID)
+                    .status(TaskOutcome.Status.SUCCESS)
+                    .smokeTestPassed(true)
+                    .dispatchedProvider(provider)
+                    .dispatchedModel(model)
+                    .build()))
+        .build();
+  }
+
+  private static com.navneet.executespec.cost.RunEffectiveRouteService.AttemptRouteEvidence
+      attemptEvidence(String provider, String model, String... physicalAttemptIds) {
+    return new com.navneet.executespec.cost.RunEffectiveRouteService.AttemptRouteEvidence(
+        new com.navneet.executespec.cost.EffectiveRouteProjection(
+            provider,
+            model,
+            com.navneet.executespec.cost.EffectiveRouteProjection.Attribution.LEDGER),
+        java.util.List.of(physicalAttemptIds),
+        3,
+        3);
+  }
+
+  private static AgentTask approvalTask(String source) {
+    return AgentTask.builder()
+        .taskId(TASK_KEY)
+        .runId(RUN_ID)
+        .status("PARTIAL")
+        .continuationDecisionJson(
+            """
+            {
+              "schemaVersion": 1,
+              "decision": "STOP_BLOCKED",
+              "source": "%s",
+              "selectedCandidate": {
+                "provider": "openrouter",
+                "model": "x-ai/grok-4.20"
+              },
+              "policy": {
+                "source": "%s",
+                "requireConfirmationBeforeExpensiveContinuation": true,
+                "proposedAction": "CHANGE_PROVIDER"
+              }
+            }
+            """
+                .formatted(source, source))
+        .build();
+  }
+
+  private static PipelineRun retryableRun() {
+    return PipelineRun.builder()
+        .runId(RUN_ID)
+        .status("PARTIAL")
+        .planJson(
+            """
+            {
+              "planTitle": "Retry plan",
+              "planSummary": "",
+              "tasks": [{"id": "T1", "title": "Fix build", "description": ""}]
+            }
+            """)
+        .aiProvider("anthropic")
+        .workerModel("claude-haiku-4-5-20251001")
+        .build();
+  }
+
+  private RunEffectiveRouteService.AttemptRouteEvidence currentApprovalAttempt() {
+    AgentTask current = taskRepo.findById(TASK_KEY).orElseThrow();
+    return new RunEffectiveRouteService.AttemptRouteEvidence(
+        new EffectiveRouteProjection(
+            current.getContinuationApprovalProvider(),
+            current.getContinuationApprovalModel(),
+            EffectiveRouteProjection.Attribution.LEDGER),
+        java.util.List.of("approved-attempt"),
+        1,
+        1);
   }
 }

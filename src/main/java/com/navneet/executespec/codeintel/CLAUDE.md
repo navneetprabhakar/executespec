@@ -83,6 +83,21 @@ rolls publication back instead of exposing a document from a failed job. Result 
 result version survives as audit evidence; terminal jobs are retained for 30 days. Customer-facing
 failure messages are bounded and secret-safe.
 
+V363 makes provider-outcome ambiguity fail closed. Immediately before the first provider-bearing
+call, the worker must persist `provider_started_at` under the live lease/fencing token; losing that
+write prevents dispatch. A failure or expired worker after that fence becomes
+`NEEDS_CONFIRMATION`, not an ordinary retryable failure. Ordinary POST admission returns the same
+barrier job, so reloads and duplicate clicks cannot silently create more model spend. Only
+The migration first widens `project_generated_doc_job.status` to `VARCHAR(32)` so the durable
+barrier is representable on PostgreSQL rather than failing during the recovery sweep. Only
+`POST .../docs/{type}/jobs/{jobId}/confirm-retry` by the original requester resets that same job
+identity to QUEUED while preserving its exact provider/model and appending an immutable
+`project_generated_doc_job_retry_confirmation` receipt. Pre-dispatch readiness failures remain
+FAILED, and the UI independently restores both document types, renders QUEUED versus RUNNING, and
+requires a spend warning confirmation before replaying an uncertain attempt. The durable
+document-operation deadline remains 30 minutes; it is returned with attempt/provider-start evidence
+on every job response instead of being represented by the browser's generic request timeout.
+
 `ProjectDocGeneratorService` generates `EXPLANATION` and `SETUP` documents only through
 `ProjectDocValidatedGeneration`, whose bounded two-attempt loop uses
 `LlmRouter.callTextStrict` on the exact resolved route and rejects truncated, unsafe, or

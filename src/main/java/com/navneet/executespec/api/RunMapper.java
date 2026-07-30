@@ -245,129 +245,123 @@ public class RunMapper {
     // Validation report scoring snapshot — mirrored into RunDetail so UI doesn't
     // need a second request for the headline verifiedScore / accuracyScore.
     ValidationReport report = validationReportRepository.findByRunId(r.getRunId()).orElse(null);
-
     // C1 (G4) — DERIVED effective route. Read from the physical-attempt ledger rather than stored,
     // so it can never drift from the usage facts it summarises.
     EffectiveRouteProjection effectiveRoute = runEffectiveRouteService.forRun(r.getRunId());
     String displayStatus = displayRunStatus(r.getStatus(), tasks);
 
-    return RunDetail.builder()
-        .runId(r.getRunId())
-        .status(displayStatus)
-        .userRequest(r.getUserRequest())
-        .currentGate(r.getCurrentGate())
-        .queuePosition(r.getQueuePosition())
-        .plannerModel(r.getPlannerModel())
-        .workerModel(r.getWorkerModel())
-        .reviewerModel(r.getReviewerModel())
-        .totalInputTokens(r.getTotalInputTokens())
-        .totalOutputTokens(r.getTotalOutputTokens())
-        .startedAt(r.getStartedAt())
-        .completedAt(r.getCompletedAt())
-        .repoUrl(r.getRepoUrl())
-        .repoMode(r.getRepoMode())
-        .failureReason(displayRunFailureReason(r.getFailureReason(), r.getStatus(), displayStatus))
-        .statusReason(
-            displayRunStatusReason(
-                r.getStatusReason(), r.getFailureReason(), r.getStatus(), displayStatus))
-        .planJson(r.getPlanJson())
-        .reviewJson(r.getReviewJson())
-        .runGoalDoneness(parseJson(r.getRunGoalDonenessJson(), "runGoalDoneness", r.getRunId()))
-        .tasks(
-            tasks.stream()
-                // RR-1446 — order by the persisted planner-intent index first so the approval gate
-                // shows the planner's sequence; status is a decoration-only tiebreaker (and the
-                // sole ordering for legacy rows that predate plan_index, which sort last).
-                .sorted(TASK_DISPLAY_ORDER)
-                .map(this::toTaskSummary)
-                .toList())
-        .integrationSource(integrationSource)
-        // Tier 8: compile / API spec / preview
-        .hasFrontend(r.isHasFrontend())
-        .hasApiSpec(r.isHasApiSpec())
-        .previewStatus(r.getPreviewStatus())
-        .keySource(r.getKeySource())
-        .actualCostUsd(r.getActualCostUsd())
-        .costEstimateLow(r.getCostEstimateLow())
-        .costEstimateHigh(r.getCostEstimateHigh())
-        .creditsCharged(r.getCreditsCharged())
-        .aiCreditsCharged(managedAiUsageEventRepository.sumAiCreditsChargedByRunId(r.getRunId()))
-        .userCostCapUsd(r.getUserCostCap())
-        .hardCapUsd(r.getHardCapUsd())
-        // v2.6.2-track — hierarchical-planner phase breakdown.
-        .planStrategy(r.getPlanStrategy())
-        .classifierReasoning(r.getClassifierReasoning())
-        .classifierCostUsd(r.getClassifierCostUsd())
-        .classifierInputTokens(r.getClassifierInputTokens())
-        .classifierOutputTokens(r.getClassifierOutputTokens())
-        .outlineCostUsd(r.getOutlineCostUsd())
-        .outlineInputTokens(r.getOutlineInputTokens())
-        .outlineOutputTokens(r.getOutlineOutputTokens())
-        .expansionCostUsd(r.getExpansionCostUsd())
-        .expansionInputTokens(r.getExpansionInputTokens())
-        .expansionOutputTokens(r.getExpansionOutputTokens())
-        .coherenceCostUsd(r.getCoherenceCostUsd())
-        .coherenceInputTokens(r.getCoherenceInputTokens())
-        .coherenceOutputTokens(r.getCoherenceOutputTokens())
-        .techStack(r.getTechStack())
-        // V169-companion (2026-05-02) — projectId on the wire so V3 "Open run"
-        // can route to /projects/{id}/runs/{runId}. Was missing → frontend
-        // dropped to the /runs/{id} fallback → v2 dispatcher redirected to a
-        // default project (wrong project entirely).
-        .projectId(r.getProjectId())
-        .projectName(resolveProjectName(r.getProjectId()))
-        .createdByName(resolveCreatorName(r.getCreatedByUserId()))
-        .agentTokens(buildAgentTokens(r))
-        .applySuggestionCount(r.getApplySuggestionCount())
-        .runTitle(r.getRunTitle())
-        .runSummary(r.getRunSummary())
-        .executionMode(r.getExecutionMode())
-        .githubPrUrl(r.getGithubPrUrl())
-        .scmPrUrl(r.getScmPrUrl())
-        .scmProvider(r.getScmProvider())
-        .assessmentResult(r.getAssessmentResult())
-        .figmaUrl(r.getFigmaUrl())
-        .codemapFileCount(codemap != null ? codemap.getFileCount() : null)
-        .codemapRouteCount(codemap != null ? codemap.getRouteCount() : null)
-        .codemapInputTokens(codemap != null ? codemap.getInputTokens() : null)
-        .codemapOutputTokens(codemap != null ? codemap.getOutputTokens() : null)
-        .archivedAt(r.getArchivedAt())
-        .approvedExecutionMode(r.getApprovedExecutionMode())
-        .batchCredits(r.getBatchCredits())
-        .batchAvailable(r.getBatchAvailable())
-        .creditSavings(r.getCreditSavings())
-        .batchProgressCompleted(r.getBatchProgressCompleted())
-        .batchProgressTotal(r.getBatchProgressTotal())
-        .aiProvider(r.getAiProvider())
-        .requestedProvider(r.getRequestedProvider())
-        .requestedModel(r.getRequestedModel())
-        .routingMode(r.getRoutingMode())
-        .routePinned(r.isRoutePinned())
-        .effectiveProvider(effectiveRoute.provider())
-        .effectiveModel(effectiveRoute.model())
-        .effectiveRouteAttribution(effectiveRoute.attribution().name())
-        .routeDiverged(
-            effectiveRoute.divergesFromRequestedRoute(
-                r.getRequestedProvider(), r.getRequestedModel()))
-        .harnessVersion(r.getHarnessVersion())
-        .runMode(r.getRunMode())
-        .triggeredByFinding(r.getTriggeredByFinding())
-        .isRetry(r.getSourceRunId() != null)
-        .sourceRunId(r.getSourceRunId())
-        .runRetryCount(r.getRunRetryCount())
-        // Validation status/phase tracking retired with V1 BackgroundValidationService.
-        // V2 runs expose validation state through the validation report itself.
-        .validationStatus(null)
-        .validationPhase(null)
-        .verifiedScore(
-            displayVerifiedScore(
-                ValidationReportScoreProjection.effectiveVerifiedScore(report, objectMapper),
-                displayStatus))
-        .accuracyScore(report != null ? report.getAccuracyScore() : null)
-        .reviewerVerdict(report != null ? report.getReviewerVerdict() : null)
-        .finalBuildPassed(report != null ? report.getFinalBuildPassed() : null)
-        .testsPassed(report != null ? report.getTestsPassed() : null)
-        .testsTotal(report != null ? report.getTestsTotal() : null)
+    RunDetail.RunDetailBuilder builder =
+        RunDetail.builder()
+            .runId(r.getRunId())
+            .status(displayStatus)
+            .userRequest(r.getUserRequest())
+            .currentGate(r.getCurrentGate())
+            .queuePosition(r.getQueuePosition())
+            .plannerModel(r.getPlannerModel())
+            .workerModel(r.getWorkerModel())
+            .reviewerModel(r.getReviewerModel())
+            .totalInputTokens(r.getTotalInputTokens())
+            .totalOutputTokens(r.getTotalOutputTokens())
+            .startedAt(r.getStartedAt())
+            .completedAt(r.getCompletedAt())
+            .repoUrl(r.getRepoUrl())
+            .repoMode(r.getRepoMode())
+            .failureReason(
+                displayRunFailureReason(r.getFailureReason(), r.getStatus(), displayStatus))
+            .statusReason(
+                displayRunStatusReason(
+                    r.getStatusReason(), r.getFailureReason(), r.getStatus(), displayStatus))
+            .planJson(r.getPlanJson())
+            .reviewJson(r.getReviewJson())
+            .runGoalDoneness(parseJson(r.getRunGoalDonenessJson(), "runGoalDoneness", r.getRunId()))
+            .tasks(
+                tasks.stream()
+                    // RR-1446 — order by the persisted planner-intent index first so the approval
+                    // gate
+                    // shows the planner's sequence; status is a decoration-only tiebreaker (and the
+                    // sole ordering for legacy rows that predate plan_index, which sort last).
+                    .sorted(TASK_DISPLAY_ORDER)
+                    .map(this::toTaskSummary)
+                    .toList())
+            .integrationSource(integrationSource)
+            // Tier 8: compile / API spec / preview
+            .hasFrontend(r.isHasFrontend())
+            .hasApiSpec(r.isHasApiSpec())
+            .previewStatus(r.getPreviewStatus())
+            .keySource(r.getKeySource())
+            .actualCostUsd(r.getActualCostUsd())
+            .costEstimateLow(r.getCostEstimateLow())
+            .costEstimateHigh(r.getCostEstimateHigh())
+            .creditsCharged(r.getCreditsCharged())
+            .aiCreditsCharged(
+                managedAiUsageEventRepository.sumAiCreditsChargedByRunId(r.getRunId()))
+            .userCostCapUsd(r.getUserCostCap())
+            .hardCapUsd(r.getHardCapUsd())
+            // v2.6.2-track — hierarchical-planner phase breakdown.
+            .planStrategy(r.getPlanStrategy())
+            .classifierReasoning(r.getClassifierReasoning())
+            .classifierCostUsd(r.getClassifierCostUsd())
+            .classifierInputTokens(r.getClassifierInputTokens())
+            .classifierOutputTokens(r.getClassifierOutputTokens())
+            .outlineCostUsd(r.getOutlineCostUsd())
+            .outlineInputTokens(r.getOutlineInputTokens())
+            .outlineOutputTokens(r.getOutlineOutputTokens())
+            .expansionCostUsd(r.getExpansionCostUsd())
+            .expansionInputTokens(r.getExpansionInputTokens())
+            .expansionOutputTokens(r.getExpansionOutputTokens())
+            .coherenceCostUsd(r.getCoherenceCostUsd())
+            .coherenceInputTokens(r.getCoherenceInputTokens())
+            .coherenceOutputTokens(r.getCoherenceOutputTokens())
+            .techStack(r.getTechStack())
+            // V169-companion (2026-05-02) — projectId on the wire so V3 "Open run"
+            // can route to /projects/{id}/runs/{runId}. Was missing → frontend
+            // dropped to the /runs/{id} fallback → v2 dispatcher redirected to a
+            // default project (wrong project entirely).
+            .projectId(r.getProjectId())
+            .projectName(resolveProjectName(r.getProjectId()))
+            .createdByName(resolveCreatorName(r.getCreatedByUserId()))
+            .agentTokens(buildAgentTokens(r))
+            .applySuggestionCount(r.getApplySuggestionCount())
+            .runTitle(r.getRunTitle())
+            .runSummary(r.getRunSummary())
+            .executionMode(r.getExecutionMode())
+            .githubPrUrl(r.getGithubPrUrl())
+            .scmPrUrl(r.getScmPrUrl())
+            .scmProvider(r.getScmProvider())
+            .assessmentResult(r.getAssessmentResult())
+            .figmaUrl(r.getFigmaUrl())
+            .codemapFileCount(codemap != null ? codemap.getFileCount() : null)
+            .codemapRouteCount(codemap != null ? codemap.getRouteCount() : null)
+            .codemapInputTokens(codemap != null ? codemap.getInputTokens() : null)
+            .codemapOutputTokens(codemap != null ? codemap.getOutputTokens() : null)
+            .archivedAt(r.getArchivedAt())
+            .approvedExecutionMode(r.getApprovedExecutionMode())
+            .batchCredits(r.getBatchCredits())
+            .batchAvailable(r.getBatchAvailable())
+            .creditSavings(r.getCreditSavings())
+            .batchProgressCompleted(r.getBatchProgressCompleted())
+            .batchProgressTotal(r.getBatchProgressTotal())
+            .aiProvider(r.getAiProvider())
+            .requestedProvider(r.getRequestedProvider())
+            .requestedModel(r.getRequestedModel())
+            .routingMode(r.getRoutingMode())
+            .routePinned(r.isRoutePinned())
+            .harnessVersion(r.getHarnessVersion())
+            .runMode(r.getRunMode())
+            .triggeredByFinding(r.getTriggeredByFinding())
+            .isRetry(r.getSourceRunId() != null)
+            .sourceRunId(r.getSourceRunId())
+            .runRetryCount(r.getRunRetryCount())
+            // Validation status/phase tracking retired with V1 BackgroundValidationService.
+            // V2 runs expose validation state through the validation report itself.
+            .validationStatus(null)
+            .validationPhase(null)
+            .verifiedScore(
+                displayVerifiedScore(
+                    ValidationReportScoreProjection.effectiveVerifiedScore(report, objectMapper),
+                    displayStatus))
+            .accuracyScore(report != null ? report.getAccuracyScore() : null);
+    return RunDetailEvidenceProjection.apply(builder, r, report, effectiveRoute, objectMapper)
         .build();
   }
 

@@ -9,3 +9,8 @@ export interface GoalProofEvidenceReference {
   observed?: number | null;
   total?: number | null;
 }
+
+/** Binds report evidence to the exact canonical Git tree it measured. */
+export interface WorkspaceGenerationBound {
+  workspaceGeneration?: string | null;
+}

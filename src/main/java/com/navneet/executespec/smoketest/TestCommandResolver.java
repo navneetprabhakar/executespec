@@ -88,7 +88,8 @@ public class TestCommandResolver {
 
     if (exists(workspaceRoot, "pom.xml")) {
       // -q keeps output small; surefire still prints the "Tests run:" summary we parse.
-      return Optional.of(new TestCommand("mvn -q test", 600, Framework.SUREFIRE, "maven"));
+      String wrapper = executable(workspaceRoot, "mvnw") ? "./mvnw" : "mvn";
+      return Optional.of(new TestCommand(wrapper + " -q test", 600, Framework.SUREFIRE, "maven"));
     }
     if (exists(workspaceRoot, "build.gradle") || exists(workspaceRoot, "build.gradle.kts")) {
       String wrapper = exists(workspaceRoot, "gradlew") ? "./gradlew" : "gradle";
@@ -143,6 +144,15 @@ public class TestCommandResolver {
     try {
       return Files.exists(dir.resolve(name));
     } catch (Exception e) {
+      return false;
+    }
+  }
+
+  private static boolean executable(Path dir, String name) {
+    try {
+      Path candidate = dir.resolve(name);
+      return Files.isRegularFile(candidate) && Files.isExecutable(candidate);
+    } catch (RuntimeException ignored) {
       return false;
     }
   }

@@ -6,6 +6,7 @@ import java.util.List;
 import com.navneet.executespec.report.entity.PipelineResult;
 
 public record ValidationReportShareDTO(
+    String workspaceGeneration,
     int filesGenerated,
     List<String> languages,
     PipelineResult pipelineResult,

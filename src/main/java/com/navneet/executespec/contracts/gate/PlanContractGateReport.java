@@ -48,7 +48,10 @@ public class PlanContractGateReport {
   @Column(name = "report_digest", nullable = false, length = 64)
   private String reportDigest;
 
-  /** True when at least one intended contract change has a declared consumer in this project. */
+  /**
+   * True when an intended registered-contract change has a declared consumer or the admitted plan
+   * explicitly removes an exact protected brownfield HTTP route.
+   */
   @Column(name = "requires_typed_ack", nullable = false)
   private boolean requiresTypedAck;
 

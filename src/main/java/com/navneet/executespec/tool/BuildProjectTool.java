@@ -124,6 +124,8 @@ public class BuildProjectTool implements Tool {
       return ToolResult.ok(
           "command="
               + bc.command()
+              + "\ncwd="
+              + ctx.workspaceRoot().toAbsolutePath().normalize()
               + "\nsource=preflight (skipped mvn invocation — pom is broken)"
               + "\nexit=1\noutput:\n"
               + msg);
@@ -207,7 +209,8 @@ public class BuildProjectTool implements Tool {
                     ctx,
                     bc,
                     sandboxed.exitCode(),
-                    SandboxCommandRoutingService.combinedOutput(sandboxed)));
+                    SandboxCommandRoutingService.combinedOutput(sandboxed),
+                    SandboxCommandRoutingService.CONTAINER_WORKDIR));
         case TIMED_OUT ->
             ToolResult.err(
                 ToolResult.ErrorKind.TIMEOUT,
@@ -270,7 +273,11 @@ public class BuildProjectTool implements Tool {
       String output = outcome.output();
       int exit = outcome.exitCode();
       // Return Ok regardless of exit code — the LLM/harness reads exit and decides.
-      return ToolResult.ok(buildSummary(ctx, bc, exit, output));
+      String executionDirectory =
+          containerId == null
+              ? ctx.workspaceRoot().toAbsolutePath().normalize().toString()
+              : workdir;
+      return ToolResult.ok(buildSummary(ctx, bc, exit, output, executionDirectory));
     } catch (IOException ioe) {
       log.warn("buildProject IO error command={}", bc.command(), ioe);
       return ToolResult.err(ToolResult.ErrorKind.IO_ERROR, ioe.getMessage());
@@ -288,10 +295,13 @@ public class BuildProjectTool implements Tool {
    * <p>Output budget (#6): the full build log is persisted to disk and the worker gets a preview
    * plus a {@code readFile} path, so a long compiler/Maven failure is not lost to truncation.
    */
-  private String buildSummary(ExecutionContext ctx, BuildCommand bc, int exit, String output) {
+  private String buildSummary(
+      ExecutionContext ctx, BuildCommand bc, int exit, String output, String executionDirectory) {
     boolean noOp = "fallback:no-op".equals(bc.sourceDescription());
     return "command="
         + bc.command()
+        + "\ncwd="
+        + executionDirectory
         + "\nsource="
         + bc.sourceDescription()
         + "\nsmokeSignal="

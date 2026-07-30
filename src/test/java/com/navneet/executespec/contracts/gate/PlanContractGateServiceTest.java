@@ -14,21 +14,26 @@ import static org.mockito.Mockito.when;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.agent.Plan;
 import com.navneet.executespec.agent.PlannedTask;
+import com.navneet.executespec.agent.RequirementSpec;
 import com.navneet.executespec.contracts.ContractConsumer;
 import com.navneet.executespec.contracts.ContractConsumerRepository;
 import com.navneet.executespec.contracts.ContractRegistry;
 import com.navneet.executespec.contracts.ContractRegistryRepository;
+import com.navneet.executespec.contractsurface.BrownfieldHttpContractGuard;
+import com.navneet.executespec.contractsurface.SpringHttpSurfaceExtractor.RouteKey;
 import com.navneet.executespec.project.entity.ProjectRepo;
 import com.navneet.executespec.project.repository.ProjectRepoRepository;
 import com.navneet.executespec.project.service.ProjectRepoService;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.core.annotation.AnnotatedElementUtils;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -50,6 +55,7 @@ class PlanContractGateServiceTest {
   private ContractConsumerRepository consumerRepo;
   private ProjectRepoRepository projectRepoRepo;
   private PlanContractGateReportRepository gateRepo;
+  private BrownfieldHttpContractGuard brownfieldHttpContractGuard;
   private PlanContractGateService service;
 
   @BeforeEach
@@ -59,6 +65,7 @@ class PlanContractGateServiceTest {
     consumerRepo = mock(ContractConsumerRepository.class);
     projectRepoRepo = mock(ProjectRepoRepository.class);
     gateRepo = mock(PlanContractGateReportRepository.class);
+    brownfieldHttpContractGuard = mock(BrownfieldHttpContractGuard.class);
     service =
         new PlanContractGateService(
             projectRepoService,
@@ -66,7 +73,8 @@ class PlanContractGateServiceTest {
             consumerRepo,
             projectRepoRepo,
             gateRepo,
-            new ObjectMapper());
+            new ObjectMapper(),
+            brownfieldHttpContractGuard);
   }
 
   private static Plan planTouching(String... files) {
@@ -78,6 +86,23 @@ class PlanContractGateServiceTest {
                     .id("T1")
                     .title("change the api")
                     .touchesFiles(List.of(files))
+                    .build()))
+        .build();
+  }
+
+  private static Plan planWithRequirement(String requirement) {
+    return Plan.builder()
+        .planTitle("brownfield change")
+        .requirements(
+            List.of(
+                new RequirementSpec("R1", requirement, RequirementSpec.RequirementKind.FUNCTIONAL)))
+        .tasks(
+            List.of(
+                PlannedTask.builder()
+                    .id("T1")
+                    .title("implement admitted change")
+                    .description(requirement)
+                    .touchesFiles(List.of("src/main/java/example/CasinoController.java"))
                     .build()))
         .build();
   }
@@ -159,6 +184,114 @@ class PlanContractGateServiceTest {
             "run-1", PROJECT_ID, planTouching("src/main/java/Foo.java"), List.of(REPO_ID));
 
     assertTrue(report.isEmpty());
+    verify(gateRepo, never()).save(any());
+  }
+
+  @Test
+  void exactExplicitBaselineRemovalIsPersistedAndCanBeAcknowledged() throws Exception {
+    withContract("api/openapi.yaml", false);
+    when(brownfieldHttpContractGuard.hasBaseline("run-1")).thenReturn(true);
+    when(brownfieldHttpContractGuard.protectedRoutes("run-1"))
+        .thenReturn(Set.of(new RouteKey("POST", "/simulation/casino-game")));
+
+    var composed =
+        service.composeAndPersist(
+            "run-1",
+            PROJECT_ID,
+            planWithRequirement("Remove the existing HTTP endpoint POST /simulation/casino-game."),
+            List.of(REPO_ID));
+
+    assertTrue(composed.isPresent());
+    assertTrue(composed.get().requiresTypedAck());
+    assertEquals(
+        List.of(new PlanContractGateService.HttpRouteRemoval("POST", "/simulation/casino-game")),
+        composed.get().brownfieldHttpRouteRemovals());
+
+    ArgumentCaptor<PlanContractGateReport> persisted =
+        ArgumentCaptor.forClass(PlanContractGateReport.class);
+    verify(gateRepo).save(persisted.capture());
+    var json = new ObjectMapper().readTree(persisted.getValue().getReportJson());
+    assertEquals(1, json.path("schemaVersion").asInt());
+    assertEquals(
+        "/simulation/casino-game",
+        json.path("brownfieldHttpRouteRemovals").get(0).path("path").asText());
+
+    when(gateRepo.findById("run-1")).thenReturn(Optional.of(persisted.getValue()));
+    when(gateRepo.claimAcknowledgement(
+            eq("run-1"),
+            eq(persisted.getValue().getReportDigest()),
+            eq("user-1"),
+            eq("BREAKING"),
+            any(Instant.class)))
+        .thenReturn(1);
+    assertEquals(
+        PlanContractGateService.AckOutcome.ACKNOWLEDGED,
+        service.acknowledge("run-1", "BREAKING", persisted.getValue().getReportDigest(), "user-1"));
+  }
+
+  @Test
+  void standaloneBrownfieldPlanCanEmitExactRouteRemovalWithoutProjectRegistry() {
+    when(brownfieldHttpContractGuard.hasBaseline("run-standalone")).thenReturn(true);
+    when(brownfieldHttpContractGuard.protectedRoutes("run-standalone"))
+        .thenReturn(Set.of(new RouteKey("DELETE", "/legacy/items/{id}")));
+
+    var report =
+        service.composeAndPersist(
+            "run-standalone",
+            null,
+            planWithRequirement("Retire HTTP route DELETE /legacy/items/{id}."),
+            List.of());
+
+    assertTrue(report.isPresent());
+    assertTrue(report.get().requiresTypedAck());
+    assertEquals(
+        List.of(new PlanContractGateService.HttpRouteRemoval("DELETE", "/legacy/items/{id}")),
+        report.get().brownfieldHttpRouteRemovals());
+  }
+
+  @Test
+  void preserveExistingEndpointNeverBecomesRemovalAuthority() {
+    withContract("api/openapi.yaml", false);
+    when(brownfieldHttpContractGuard.hasBaseline("run-1")).thenReturn(true);
+    when(brownfieldHttpContractGuard.protectedRoutes("run-1"))
+        .thenReturn(Set.of(new RouteKey("POST", "/simulation/casino-game")));
+
+    var report =
+        service.composeAndPersist(
+            "run-1",
+            PROJECT_ID,
+            planWithRequirement(
+                "Preserve the existing endpoint POST /simulation/casino-game; do not remove POST"
+                    + " /simulation/casino-game."),
+            List.of(REPO_ID));
+
+    assertTrue(report.isEmpty());
+    verify(gateRepo, never()).save(any());
+  }
+
+  @Test
+  void unrelatedExactOrGenericBreakingIntentEmitsNoRouteAuthority() {
+    withContract("api/openapi.yaml", false);
+    when(brownfieldHttpContractGuard.hasBaseline("run-1")).thenReturn(true);
+    when(brownfieldHttpContractGuard.protectedRoutes("run-1"))
+        .thenReturn(Set.of(new RouteKey("POST", "/simulation/casino-game")));
+
+    assertTrue(
+        service
+            .composeAndPersist(
+                "run-1",
+                PROJECT_ID,
+                planWithRequirement("Remove DELETE /simulation/unrelated."),
+                List.of(REPO_ID))
+            .isEmpty());
+    assertTrue(
+        service
+            .composeAndPersist(
+                "run-1",
+                PROJECT_ID,
+                planWithRequirement("Make a breaking API change after review."),
+                List.of(REPO_ID))
+            .isEmpty());
     verify(gateRepo, never()).save(any());
   }
 

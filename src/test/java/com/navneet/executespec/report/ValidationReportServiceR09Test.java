@@ -8,6 +8,10 @@ import java.util.List;
 import com.navneet.executespec.config.featureflag.FeatureFlagService;
 import com.navneet.executespec.report.entity.PipelineResult;
 import com.navneet.executespec.report.model.ReportInput;
+import com.navneet.executespec.report.model.ReportIssueDTO;
+import com.navneet.executespec.reviewer.model.IssueSeverity;
+import com.navneet.executespec.reviewer.model.ReviewIssue;
+import com.navneet.executespec.reviewer.model.ReviewReport;
 import com.navneet.executespec.state.entity.PipelineRun;
 
 import org.junit.jupiter.api.Test;
@@ -153,5 +157,53 @@ class ValidationReportServiceR09Test {
     PipelineResult result =
         svc.reconcileForTest(PipelineResult.PASSED, inputWith("SOME_NEW_REASON"));
     assertEquals(PipelineResult.PASSED, result);
+  }
+
+  @Test
+  void adversarialLlmReviewerCriticalCannotHardFailPipelineResult() {
+    ReviewReport review = new ReviewReport();
+    review.setIssues(
+        List.of(
+            ReviewIssue.builder()
+                .id("REV-HALLUCINATED-1")
+                .severity(IssueSeverity.CRITICAL)
+                .description("Model claims a required endpoint is missing")
+                .build()));
+    ReportInput input = new ReportInput(null, List.of(), review, null, List.of());
+
+    PipelineResult result =
+        svc.computeResultHeuristic(
+            List.of(
+                new ReportIssueDTO(
+                    "Model claims a required endpoint is missing",
+                    "WOULD_CAUSE_BUG",
+                    null,
+                    "REVIEWER_AGENT",
+                    null)),
+            input);
+
+    assertEquals(PipelineResult.NEEDS_ATTENTION, result);
+  }
+
+  @Test
+  void deterministicBuildCriticalStillHardFailsPipelineResult() {
+    ReviewReport review = new ReviewReport();
+    review.setIssues(
+        List.of(
+            ReviewIssue.builder()
+                .id("SYNTH-BUILD-1")
+                .severity(IssueSeverity.CRITICAL)
+                .description("Final build failed")
+                .build()));
+    ReportInput input = new ReportInput(null, List.of(), review, null, List.of());
+
+    PipelineResult result =
+        svc.computeResultHeuristic(
+            List.of(
+                new ReportIssueDTO(
+                    "Final build failed", "WOULD_BREAK_BUILD", null, "DETERMINISTIC_BUILD", null)),
+            input);
+
+    assertEquals(PipelineResult.FAILED, result);
   }
 }

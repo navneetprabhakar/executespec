@@ -11,6 +11,7 @@ import static org.mockito.Mockito.when;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
+import com.navneet.executespec.contractsurface.BrownfieldHttpContractGuard;
 import com.navneet.executespec.harness.WorkspaceInitService;
 
 import org.junit.jupiter.api.Test;
@@ -35,7 +36,9 @@ class StandaloneExistingWorkspaceAdmissionTest {
         .cloneFromRepo("run-1", "https://github.com/acme/public-repo", null);
 
     StandaloneExistingWorkspaceAdmission.Admission admission =
-        new StandaloneExistingWorkspaceAdmission(workspaceInit)
+        new StandaloneExistingWorkspaceAdmission(
+                workspaceInit,
+                mock(com.navneet.executespec.contractsurface.BrownfieldHttpContractGuard.class))
             .prepareInitial(
                 "run-1",
                 null,
@@ -58,7 +61,9 @@ class StandaloneExistingWorkspaceAdmissionTest {
         .cloneFromRepo("run-1", "https://github.com/acme/repo", null);
 
     StandaloneExistingWorkspaceAdmission.Admission admission =
-        new StandaloneExistingWorkspaceAdmission(workspaceInit)
+        new StandaloneExistingWorkspaceAdmission(
+                workspaceInit,
+                mock(com.navneet.executespec.contractsurface.BrownfieldHttpContractGuard.class))
             .prepareInitial(
                 "run-1", null, null, false, "EXISTING", "https://github.com/acme/repo", null);
 
@@ -80,7 +85,9 @@ class StandaloneExistingWorkspaceAdmissionTest {
         .cloneFromRepo("run-1", "https://github.com/acme/empty", null);
 
     StandaloneExistingWorkspaceAdmission.Admission admission =
-        new StandaloneExistingWorkspaceAdmission(workspaceInit)
+        new StandaloneExistingWorkspaceAdmission(
+                workspaceInit,
+                mock(com.navneet.executespec.contractsurface.BrownfieldHttpContractGuard.class))
             .prepareInitial(
                 "run-1", null, null, false, "EXISTING", "https://github.com/acme/empty", null);
 
@@ -91,9 +98,11 @@ class StandaloneExistingWorkspaceAdmissionTest {
   @Test
   void sourceRunIterationCopiesParentAndNeverClones() throws Exception {
     WorkspaceInitService workspaceInit = mock(WorkspaceInitService.class);
+    BrownfieldHttpContractGuard contractGuard = mock(BrownfieldHttpContractGuard.class);
+    when(workspaceInit.runWorkspacePath("child")).thenReturn(workspace);
 
     StandaloneExistingWorkspaceAdmission.Admission admission =
-        new StandaloneExistingWorkspaceAdmission(workspaceInit)
+        new StandaloneExistingWorkspaceAdmission(workspaceInit, contractGuard)
             .prepareInitial(
                 "child",
                 null,
@@ -105,7 +114,9 @@ class StandaloneExistingWorkspaceAdmissionTest {
 
     assertThat(admission.admitted()).isTrue();
     verify(workspaceInit).copyFromRunRequired("parent", "child");
-    verifyNoMoreInteractions(workspaceInit);
+    verify(workspaceInit).runWorkspacePath("child");
+    verify(contractGuard).captureBaselineIfAbsent("child", workspace);
+    verifyNoMoreInteractions(workspaceInit, contractGuard);
   }
 
   @Test
@@ -113,7 +124,9 @@ class StandaloneExistingWorkspaceAdmissionTest {
     WorkspaceInitService workspaceInit = mock(WorkspaceInitService.class);
 
     StandaloneExistingWorkspaceAdmission.Admission admission =
-        new StandaloneExistingWorkspaceAdmission(workspaceInit)
+        new StandaloneExistingWorkspaceAdmission(
+                workspaceInit,
+                mock(com.navneet.executespec.contractsurface.BrownfieldHttpContractGuard.class))
             .prepareInitial(
                 "run-1", null, null, true, "EXISTING", "https://github.com/acme/repo", "secret");
 
