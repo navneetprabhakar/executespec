@@ -119,6 +119,21 @@ class AgentSessionCreationService {
     return sessionRepo.save(session);
   }
 
+  AgentSession updateConversationRoute(
+      AgentSession session, String provider, String model, AppUserDetails user) {
+    String requestedProvider = AgentText.blankToNull(provider);
+    String requestedModel = AgentText.blankToNull(model);
+    modelAccessService.assertModelAllowed(user.getUser().getId(), requestedModel);
+    String effectiveProvider =
+        requestedProvider == null
+            ? aiProviderPreferenceService.preferredProvider(user)
+            : aiProviderPreferenceService.updatePreferredProvider(user, requestedProvider);
+    session.setDefaultProvider(effectiveProvider);
+    session.setDefaultModel(requestedModel);
+    session.setUpdatedAt(Instant.now());
+    return sessionRepo.save(session);
+  }
+
   private static String normalize(String value, String fallback) {
     String v = AgentText.blankToNull(value);
     return v == null ? fallback : v.trim().toUpperCase(Locale.ROOT);

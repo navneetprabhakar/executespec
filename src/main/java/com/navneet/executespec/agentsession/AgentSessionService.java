@@ -9,6 +9,8 @@ import com.navneet.executespec.agentsession.dto.AgentSessionDtos.ActionRecordRes
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.ActionResultRequest;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.AgentEventReplayResponse;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.AgentSessionResponse;
+import com.navneet.executespec.agentsession.dto.AgentSessionDtos.AgentSessionRouteRequest;
+import com.navneet.executespec.agentsession.dto.AgentSessionDtos.AgentTurnPage;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.AgentTurnResponse;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.CapabilityTool;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.ContextResolveRequest;
@@ -61,13 +63,29 @@ public class AgentSessionService {
   }
 
   public List<AgentSessionResponse> listSessions(AppUserDetails user, int limit) {
+    return listSessions(user, limit, true);
+  }
+
+  public List<AgentSessionResponse> listSessions(
+      AppUserDetails user, int limit, boolean includeArchived) {
     requireOrg(user);
-    return sessionReadService.listSessions(user, limit);
+    return sessionReadService.listSessions(user, limit, includeArchived);
   }
 
   public AgentSessionResponse getSession(String sessionId, AppUserDetails user) {
     requireOrg(user);
     return sessionReadService.getSession(sessionId, user);
+  }
+
+  @Transactional
+  public AgentSessionResponse updateConversationRoute(
+      String sessionId, AgentSessionRouteRequest request, AppUserDetails user) {
+    AgentSession session = requireActiveSessionForUpdate(sessionId, user);
+    AgentSessionRouteRequest route =
+        request == null ? new AgentSessionRouteRequest(null, null) : request;
+    return sessionReadService.toResponse(
+        sessionCreationService.updateConversationRoute(
+            session, route.provider(), route.model(), user));
   }
 
   public List<AgentActionEvent> listEvents(String sessionId, AppUserDetails user) {
@@ -91,6 +109,12 @@ public class AgentSessionService {
     return sessionReadService.listTurns(sessionId, beforeTurnId, limit, user);
   }
 
+  public AgentTurnPage turnPage(
+      String sessionId, String beforeTurnId, int limit, AppUserDetails user) {
+    requireOrg(user);
+    return sessionReadService.turnPage(sessionId, beforeTurnId, limit, user);
+  }
+
   public List<CapabilityTool> capabilities(AppUserDetails user, String surface) {
     requireOrg(user);
     return actionCatalog.capabilities(surface, user.getUser().getTier());
@@ -99,7 +123,7 @@ public class AgentSessionService {
   @Transactional
   public ActionPlanResponse planAction(
       String sessionId, ActionPlanRequest request, AppUserDetails user) {
-    AgentSession session = requireSession(sessionId, user);
+    AgentSession session = requireActiveSessionForUpdate(sessionId, user);
     ActionPlanRequest req =
         request == null ? new ActionPlanRequest("", null, null, null, null) : request;
     var planned =
@@ -122,7 +146,7 @@ public class AgentSessionService {
     if (request == null || request.sessionId() == null || request.sessionId().isBlank()) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "sessionId is required");
     }
-    AgentSession session = requireSession(request.sessionId(), user);
+    AgentSession session = requireActiveSessionForUpdate(request.sessionId(), user);
     return orchestratorTurnService.orchestrate(session, request, user);
   }
 
@@ -143,34 +167,34 @@ public class AgentSessionService {
       throw new ResponseStatusException(
           HttpStatus.BAD_REQUEST, "sessionId and turnId are required");
     }
-    AgentSession session = requireSession(request.sessionId(), user);
+    AgentSession session = requireActiveSessionForUpdate(request.sessionId(), user);
     return runConfirmationService.confirm(session, request, user, patAuthenticated);
   }
 
   @Transactional
   public ActionRecordResponse recordActionEvent(
       String sessionId, String actionId, ActionEventRequest request, AppUserDetails user) {
-    AgentSession session = requireSession(sessionId, user);
+    AgentSession session = requireActiveSessionForUpdate(sessionId, user);
     return actionLifecycleService.recordEvent(session, actionId, request);
   }
 
   @Transactional
   public ActionRecordResponse recordActionResult(
       String sessionId, String actionId, ActionResultRequest request, AppUserDetails user) {
-    AgentSession session = requireSession(sessionId, user);
+    AgentSession session = requireActiveSessionForUpdate(sessionId, user);
     return actionLifecycleService.recordResult(session, actionId, request);
   }
 
   @Transactional
   public TurnResponse recordTurn(String sessionId, TurnRequest request, AppUserDetails user) {
-    AgentSession session = requireSession(sessionId, user);
+    AgentSession session = requireActiveSessionForUpdate(sessionId, user);
     return recordedTurnService.record(session, sessionId, request, user);
   }
 
   @Transactional
   public StreamTurnContext beginStreamTurn(
       String sessionId, StreamTurnRequest request, AppUserDetails user) {
-    AgentSession session = requireSession(sessionId, user);
+    AgentSession session = requireActiveSessionForUpdate(sessionId, user);
     return streamTurnStarter.begin(session, sessionId, request, user);
   }
 
@@ -230,9 +254,19 @@ public class AgentSessionService {
     return gateReadService.get(runId, user);
   }
 
-  private AgentSession requireSession(String sessionId, AppUserDetails user) {
+  private AgentSession requireActiveSessionForUpdate(String sessionId, AppUserDetails user) {
     requireOrg(user);
-    return sessionReadService.requireSession(sessionId, user);
+    // Serialize every durable mutation with archive(). Both paths lock the same session row before
+    // inspecting ACTIVE, so stale writers cannot commit new turns/events after archive.
+    return requireActive(sessionReadService.requireSessionForUpdate(sessionId, user));
+  }
+
+  private AgentSession requireActive(AgentSession session) {
+    if (!"ACTIVE".equals(session.getStatus())) {
+      throw new ResponseStatusException(
+          HttpStatus.CONFLICT, "session is " + session.getStatus().toLowerCase());
+    }
+    return session;
   }
 
   private String requireOrg(AppUserDetails user) {

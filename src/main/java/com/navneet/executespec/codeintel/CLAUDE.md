@@ -75,6 +75,14 @@ transitions are short database writes.
 
 ## Generated project documents
 
+V358 routes generation through `project_generated_doc_job`: POST returns `202`, the UI restores and
+polls the durable job, and a leased worker executes the exact provider/model resolved at admission.
+The document row and `SUCCEEDED` job transition share the publisher transaction, so a lost lease
+rolls publication back instead of exposing a document from a failed job. Result references use
+`ON DELETE SET NULL` so normal document-version retention remains possible while the immutable
+result version survives as audit evidence; terminal jobs are retained for 30 days. Customer-facing
+failure messages are bounded and secret-safe.
+
 `ProjectDocGeneratorService` generates `EXPLANATION` and `SETUP` documents only through
 `ProjectDocValidatedGeneration`, whose bounded two-attempt loop uses
 `LlmRouter.callTextStrict` on the exact resolved route and rejects truncated, unsafe, or

@@ -117,6 +117,8 @@ public class ImplementerExecutionService {
         provider == null || provider.isBlank() ? session.getDefaultProvider() : provider;
     String effectiveModel = model == null || model.isBlank() ? session.getDefaultModel() : model;
     modelAccessService.assertModelAllowed(String.valueOf(user.getUser().getId()), effectiveModel);
+    modelAccessService.assertProviderAllowed(
+        String.valueOf(user.getUser().getId()), effectiveProvider);
     modelAccessService.assertProviderModelPair(effectiveProvider, effectiveModel);
     int rounds = Math.max(1, Math.min(MAX_ROUNDS, maxRounds <= 0 ? MAX_ROUNDS : maxRounds));
     String turnId = UUID.randomUUID().toString();

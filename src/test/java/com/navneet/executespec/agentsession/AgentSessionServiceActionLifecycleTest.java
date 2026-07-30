@@ -5,6 +5,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.util.List;
@@ -14,6 +15,7 @@ import java.util.Optional;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.ActionPlanRequest;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.ActionResultRequest;
+import com.navneet.executespec.agentsession.dto.AgentSessionDtos.AgentSessionRouteRequest;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.ClientCapabilities;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.OrchestratorClientCapabilities;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.OrchestratorMode;
@@ -130,6 +132,7 @@ class AgentSessionServiceActionLifecycleTest {
         .thenAnswer(inv -> inv.getArgument(0));
     lenient().when(sessionRepo.save(any(AgentSession.class))).thenAnswer(inv -> inv.getArgument(0));
     lenient().when(sessionRepo.findById("s1")).thenReturn(Optional.of(session()));
+    lenient().when(sessionRepo.findByIdForUpdate("s1")).thenReturn(Optional.of(session()));
     lenient().when(turnRepo.findById(any())).thenReturn(Optional.empty());
   }
 
@@ -164,6 +167,26 @@ class AgentSessionServiceActionLifecycleTest {
     assertThat(saved.getValue().getRunId()).isEqualTo("run-1");
     assertThat(saved.getValue().getProjectId()).isEqualTo("p1");
     assertThat(saved.getValue().getClientSurface()).isEqualTo("WEB");
+  }
+
+  @Test
+  void updateConversationRoutePersistsWithoutCreatingARunPin() {
+    when(aiProviderPreferenceService.updatePreferredProvider(any(), eq("OPENAI")))
+        .thenReturn("OPENAI");
+
+    var response =
+        service.updateConversationRoute(
+            "s1", new AgentSessionRouteRequest("OPENAI", "gpt-5.4"), user());
+
+    verify(sessionRepo).findByIdForUpdate("s1");
+    verify(modelAccessService).assertModelAllowed("u1", "gpt-5.4");
+    var saved = ArgumentCaptor.forClass(AgentSession.class);
+    verify(sessionRepo).save(saved.capture());
+    assertThat(saved.getValue().getDefaultProvider()).isEqualTo("OPENAI");
+    assertThat(saved.getValue().getDefaultModel()).isEqualTo("gpt-5.4");
+    assertThat(response.defaultProvider()).isEqualTo("OPENAI");
+    assertThat(response.defaultModel()).isEqualTo("gpt-5.4");
+    verifyNoInteractions(runSubmissionGate);
   }
 
   @Test
@@ -280,6 +303,7 @@ class AgentSessionServiceActionLifecycleTest {
                 null),
             user());
 
+    verify(sessionRepo).findByIdForUpdate("s1");
     assertThat(ctx.decision().route()).isEqualTo("READ_ONLY_CODE_HELP");
     assertThat(ctx.decision().policy().runApiAllowed()).isFalse();
 

@@ -136,6 +136,7 @@ export type AgentAction =
   | {type: 'session:created'; session: api.AgentSessionResponse}
   | {type: 'session:select'; sessionId: string | null}
   | {type: 'turns:set'; turns: api.AgentTurnResponse[]}
+  | {type: 'turns:prepend'; turns: api.AgentTurnResponse[]}
   | {type: 'events:set'; events: StreamTimelineItem[]}
   | {type: 'events:append'; events: StreamTimelineItem[]}
   | {type: 'events:hydrate'; events: api.AgentActionEvent[]; append?: boolean}
@@ -222,6 +223,13 @@ export function agentReducer(state: AgentState, action: AgentAction): AgentState
       };
     case 'turns:set':
       return {...state, turns: action.turns};
+    case 'turns:prepend': {
+      const incoming = new Set(action.turns.map((turn) => turn.turnId));
+      return {
+        ...state,
+        turns: [...action.turns, ...state.turns.filter((t) => !incoming.has(t.turnId))],
+      };
+    }
     case 'events:set':
       return {...state, streamEvents: action.events};
     case 'events:append': {

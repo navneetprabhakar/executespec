@@ -20,6 +20,7 @@ export type NewAgentSessionRequest = {
   /** Client UUID used as the session id and idempotency key. */
   requestId: string;
   scope: AgentSessionScope;
+  conversationRoute?: {provider?: string | null; model?: string | null};
 };
 
 function mintId(): string {
@@ -30,8 +31,11 @@ function mintId(): string {
   return `agent-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
 }
 
-export function newAgentSessionRequest(scope: AgentSessionScope = {}): NewAgentSessionRequest {
-  return {requestId: mintId(), scope};
+export function newAgentSessionRequest(
+  scope: AgentSessionScope = {},
+  conversationRoute?: NewAgentSessionRequest['conversationRoute'],
+): NewAgentSessionRequest {
+  return {requestId: mintId(), scope, conversationRoute};
 }
 
 /**
@@ -44,6 +48,8 @@ export function createCanonicalAgentSession(
   return api.createAgentSession({
     ...webAgentSessionRequest(request.scope),
     id: request.requestId,
+    defaultProvider: request.conversationRoute?.provider ?? null,
+    defaultModel: request.conversationRoute?.model ?? null,
   });
 }
 

@@ -7,6 +7,8 @@ import static org.mockito.Mockito.when;
 
 import java.util.List;
 
+import com.navneet.executespec.cost.EffectiveRouteProjection;
+import com.navneet.executespec.cost.RunEffectiveRouteService;
 import com.navneet.executespec.harness.TaskOutcome;
 
 import org.junit.jupiter.api.Test;
@@ -33,6 +35,56 @@ class TaskOutcomeMetricServiceTest {
     assertThat(metric.getModelName()).isEqualTo("claude-sonnet-4-6");
     assertThat(metric.isValidationPassed()).isTrue();
     assertThat(metric.getActualOutputTokens()).isEqualTo(700);
+  }
+
+  @Test
+  void attributesNewQualityEvidenceToThePhysicalLedgerRoute() {
+    ModelTaskMetricRepository repository = mock(ModelTaskMetricRepository.class);
+    RunEffectiveRouteService effectiveRoutes = mock(RunEffectiveRouteService.class);
+    when(repository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+    when(effectiveRoutes.forTask("run-1", "T1"))
+        .thenReturn(
+            new EffectiveRouteProjection(
+                "openai", "gpt-5.4", EffectiveRouteProjection.Attribution.LEDGER));
+    var outcome =
+        TaskOutcome.builder()
+            .taskId("T1")
+            .status(TaskOutcome.Status.SUCCESS)
+            .smokeTestPassed(true)
+            .dispatchedProvider("anthropic")
+            .dispatchedModel("claude-sonnet-5")
+            .build();
+
+    var metric =
+        new TaskOutcomeMetricService(repository, effectiveRoutes)
+            .record("run-1", "BUG_FIX", "HIGH", "java", 1, outcome, 700, 4000, 8);
+
+    assertThat(metric.getProvider()).isEqualTo("openai");
+    assertThat(metric.getModelName()).isEqualTo("gpt-5.4");
+  }
+
+  @Test
+  void mixedPhysicalRoutesAreNotMisattributedToTheRequestedModel() {
+    ModelTaskMetricRepository repository = mock(ModelTaskMetricRepository.class);
+    RunEffectiveRouteService effectiveRoutes = mock(RunEffectiveRouteService.class);
+    when(effectiveRoutes.forTask("run-1", "T1"))
+        .thenReturn(
+            new EffectiveRouteProjection(null, null, EffectiveRouteProjection.Attribution.MIXED));
+    var outcome =
+        TaskOutcome.builder()
+            .taskId("T1")
+            .status(TaskOutcome.Status.SUCCESS)
+            .smokeTestPassed(true)
+            .dispatchedProvider("anthropic")
+            .dispatchedModel("claude-sonnet-5")
+            .build();
+
+    var metric =
+        new TaskOutcomeMetricService(repository, effectiveRoutes)
+            .record("run-1", "BUG_FIX", "HIGH", "java", 1, outcome, 700, 4000, 8);
+
+    assertThat(metric).isNull();
+    org.mockito.Mockito.verify(repository, org.mockito.Mockito.never()).save(any());
   }
 
   @Test

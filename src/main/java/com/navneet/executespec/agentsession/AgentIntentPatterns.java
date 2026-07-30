@@ -163,6 +163,7 @@ final class AgentIntentPatterns {
             "change",
             "refactor",
             "debug",
+            "build",
             "create",
             "make")
         || containsAny(

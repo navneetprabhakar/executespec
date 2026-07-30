@@ -94,7 +94,7 @@ export const validateAiKey = (
 /**
  * Saves org-wide AI provider API keys (ORG_ADMIN only). A blank value leaves that
  * provider's key unchanged, so the settings panel can save one provider at a time
- * without wiping the others. OpenRouter is rejected (403) on non-ENTERPRISE orgs.
+ * without wiping the others. Provider-key tier entitlements are enforced server-side.
  */
 export const updateOrgAiKeySettings = (
   anthropicApiKey: string,

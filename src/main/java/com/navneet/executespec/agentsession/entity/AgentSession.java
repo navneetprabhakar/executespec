@@ -71,6 +71,15 @@ public class AgentSession {
   @Builder.Default
   private String approvalPolicy = "PLAN";
 
+  @Column(name = "archived_at")
+  private Instant archivedAt;
+
+  @Column(name = "archived_by_user_id", length = 64)
+  private String archivedByUserId;
+
+  @Column(name = "archive_reason", length = 240)
+  private String archiveReason;
+
   @Column(name = "created_at", nullable = false)
   @Builder.Default
   private Instant createdAt = Instant.now();

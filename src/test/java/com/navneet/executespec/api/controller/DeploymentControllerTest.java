@@ -12,6 +12,8 @@ import com.navneet.executespec.api.dto.DeployRequest;
 import com.navneet.executespec.auth.entity.AppUser;
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.auth.security.RunAccessGuard;
+import com.navneet.executespec.auth.service.TierPermissionService;
+import com.navneet.executespec.auth.service.TierPermissionService.TierPermissions;
 import com.navneet.executespec.config.OperationalReleasePolicy;
 import com.navneet.executespec.deployment.DeploymentService;
 import com.navneet.executespec.state.entity.Deployment;
@@ -24,6 +26,7 @@ class DeploymentControllerTest {
   private final DeploymentRepository deploymentRepo = mock(DeploymentRepository.class);
   private final RunAccessGuard guard = mock(RunAccessGuard.class);
   private final DeploymentService deploymentService = mock(DeploymentService.class);
+  private final TierPermissionService tierPermissionService = mock(TierPermissionService.class);
   private final OperationalReleasePolicy releasePolicy = mock(OperationalReleasePolicy.class);
   private final DeploymentController controller =
       new DeploymentController(
@@ -37,7 +40,7 @@ class DeploymentControllerTest {
           null,
           null,
           null,
-          null,
+          tierPermissionService,
           releasePolicy);
 
   @Test
@@ -65,6 +68,24 @@ class DeploymentControllerTest {
   }
 
   @Test
+  void deployTreatsOmittedRepoModeAsDirectWorkspaceDeployment() {
+    when(releasePolicy.deploymentCreationEnabled()).thenReturn(true);
+    when(tierPermissionService.getPermissions("user-1")).thenReturn(permissions(true));
+    Deployment deployment = deployment("dep-1", Deployment.DeployStatus.PENDING);
+    when(deploymentService.deploy(
+            "run-1", com.navneet.executespec.state.entity.RunRepo.RepoMode.NONE, null, null))
+        .thenReturn(deployment);
+
+    var response =
+        controller.deploy(
+            new DeployRequest("run-1", null, null, null), principal("user-1", "org-a", "USER"));
+
+    assertThat(response.getStatusCode().value()).isEqualTo(202);
+    verify(deploymentService)
+        .deploy("run-1", com.navneet.executespec.state.entity.RunRepo.RepoMode.NONE, null, null);
+  }
+
+  @Test
   void listWithoutRunIdUsesCallerOrgForNonSuperAdmin() {
     when(deploymentRepo.findByOrgIdOrderByCreatedAtDesc("org-a"))
         .thenReturn(List.of(deployment("dep-1", Deployment.DeployStatus.LIVE)));
@@ -74,6 +95,22 @@ class DeploymentControllerTest {
     assertThat(summaries).hasSize(1);
     verify(deploymentRepo).findByOrgIdOrderByCreatedAtDesc("org-a");
     verify(deploymentRepo, never()).findAll();
+  }
+
+  @Test
+  void runScopedListUsesRunReadAuthorizationAndNeverRequiresOrgWideListing() {
+    AppUserDetails principal = principal("user-1", "org-a", "USER");
+    when(deploymentRepo.findByRunIdOrderByCreatedAtDesc("run-1"))
+        .thenReturn(List.of(deployment("dep-1", Deployment.DeployStatus.DEPLOYING)));
+
+    var summaries = controller.list("run-1", principal);
+
+    assertThat(summaries).hasSize(1);
+    verify(guard).requireRunAccess("run-1", principal);
+    verify(deploymentRepo).findByRunIdOrderByCreatedAtDesc("run-1");
+    verify(deploymentRepo, never()).findAll();
+    verify(deploymentRepo, never())
+        .findByOrgIdOrderByCreatedAtDesc(org.mockito.ArgumentMatchers.anyString());
   }
 
   @Test
@@ -130,5 +167,39 @@ class DeploymentControllerTest {
             .status("ACTIVE")
             .build();
     return new AppUserDetails(user, null);
+  }
+
+  private static TierPermissions permissions(boolean canDeploy) {
+    return new TierPermissions(
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        canDeploy,
+        1,
+        "UNLIMITED",
+        0L,
+        true,
+        "test");
   }
 }

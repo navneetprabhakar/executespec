@@ -63,6 +63,20 @@ export interface AgentSessionResponse {
   latestLinkedRunPrUrl: string | null;
   createdAt: string;
   updatedAt: string;
+  archivedAt?: string | null;
+  archivedByUserId?: string | null;
+  archiveReason?: string | null;
+}
+
+export interface AgentSessionLifecycleResponse {
+  sessionId: string;
+  state: string;
+  alreadyArchived: boolean;
+  archivedAt: string | null;
+  archivedByUserId: string | null;
+  archiveReason: string | null;
+  preservedTurns: number;
+  preservedEvents: number;
 }
 
 export interface AgentTurnResponse {
@@ -84,6 +98,20 @@ export interface AgentTurnResponse {
   costUsd: number;
   status: string;
   createdAt: string;
+  assistantCharCount?: number | null;
+  assistantByteCount?: number | null;
+  assistantLineCount?: number | null;
+  assistantSha256?: string | null;
+}
+
+export interface AgentTurnPageResponse {
+  turns: AgentTurnResponse[];
+  totalTurns: number;
+  hasMore: boolean;
+  nextBeforeTurnId: string | null;
+  sessionState: string;
+  archived: boolean;
+  archivedAt: string | null;
 }
 
 export interface AgentActionDescriptor {
@@ -313,6 +341,22 @@ export const listAgentSessions = (limit = 20) =>
 export const getAgentSession = (sessionId: string) =>
   req<AgentSessionResponse>(`/agent/sessions/${encodeURIComponent(sessionId)}`);
 
+/** Persists conversation-only routing; generated-code run routing remains independent. */
+export const updateAgentSessionRoute = (
+  sessionId: string,
+  body: {provider?: string | null; model?: string | null},
+) =>
+  req<AgentSessionResponse>(`/agent/sessions/${encodeURIComponent(sessionId)}/route`, {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  });
+
+/** Closes the conversation shell. Server-side retention/archive policy remains authoritative. */
+export const closeAgentSession = (sessionId: string) =>
+  req<AgentSessionLifecycleResponse>(`/agent/sessions/${encodeURIComponent(sessionId)}/close`, {
+    method: 'POST',
+  });
+
 /** Destructively clears the durable server transcript while retaining the session shell. */
 export const clearAgentSessionHistory = (sessionId: string) =>
   req<{sessionId: string; turnsDeleted: number; eventsDeleted: number; clearedAt: string}>(
@@ -329,6 +373,18 @@ export const listAgentTurns = (
   if (options.before) params.set('before', options.before);
   return req<AgentTurnResponse[]>(
     `/agent/sessions/${encodeURIComponent(sessionId)}/turns?${params.toString()}`,
+  );
+};
+
+export const listAgentTurnPage = (
+  sessionId: string,
+  options: {limit?: number; before?: string | null} = {},
+) => {
+  const params = new URLSearchParams();
+  params.set('limit', String(options.limit ?? 50));
+  if (options.before) params.set('before', options.before);
+  return req<AgentTurnPageResponse>(
+    `/agent/sessions/${encodeURIComponent(sessionId)}/turns/page?${params.toString()}`,
   );
 };
 

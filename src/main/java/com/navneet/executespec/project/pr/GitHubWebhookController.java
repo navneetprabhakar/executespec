@@ -186,6 +186,9 @@ public class GitHubWebhookController {
     }
     String repoFullName = textOrNull(root.path("repository"), "full_name");
     String headBranch = textOrNull(cr.path("check_suite"), "head_branch");
+    String checkRunId = cr.path("id").isIntegralNumber() ? cr.path("id").asText() : null;
+    String headSha = textOrNull(cr, "head_sha");
+    if (headSha == null) headSha = textOrNull(cr.path("check_suite"), "head_sha");
     String htmlUrl = textOrNull(cr, "html_url");
     JsonNode output = cr.path("output");
     String summary = textOrNull(output, "summary");
@@ -193,7 +196,9 @@ public class GitHubWebhookController {
     if (summary == null) summary = "";
     summary = summary + (summary.isBlank() ? "" : "\n\n") + "Conclusion: " + conclusion;
 
-    var result = ciAutoFixService.onCheckRunFailed(repoFullName, headBranch, summary, htmlUrl);
+    var result =
+        ciAutoFixService.onCheckRunFailed(
+            repoFullName, headBranch, summary, htmlUrl, checkRunId, headSha);
     if (result.dispatched()) {
       log.info(
           "[ci-auto-fix] dispatched run {} for {} (branch {}) — auto-fix attempt active",

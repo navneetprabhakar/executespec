@@ -135,6 +135,9 @@ class AgentStreamTurnStarter {
         session.setDefaultModel(null);
       }
     }
+    if (modelAccessService != null) {
+      modelAccessService.assertProviderAllowed(user.getUser().getId(), effectiveProvider);
+    }
     if (effectiveProvider != null) {
       session.setDefaultProvider(effectiveProvider);
     }

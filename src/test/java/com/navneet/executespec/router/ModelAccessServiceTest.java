@@ -40,6 +40,7 @@ class ModelAccessServiceTest {
   @BeforeEach
   void setUp() {
     when(modelRegistry.freeTierModels()).thenReturn(List.of(FREE_MODEL));
+    when(modelRegistry.freeTierProvider()).thenReturn("deepseek");
     when(modelRegistry.canonicalize(anyString())).thenAnswer(inv -> inv.getArgument(0));
     when(modelRegistry.providerFor(FREE_MODEL)).thenReturn("deepseek");
     when(modelRegistry.providerFor(PREMIUM_MODEL)).thenReturn("anthropic");
@@ -112,6 +113,17 @@ class ModelAccessServiceTest {
     assertDoesNotThrow(() -> service.assertModelAllowed("free-user", ""));
     assertDoesNotThrow(() -> service.assertModelAllowed("free-user", null));
     assertDoesNotThrow(() -> service.assertModelAllowed("pro-user", PREMIUM_MODEL));
+  }
+
+  @Test
+  void freeTierProviderOnlyRouteCannotBypassModelLock() {
+    assertDoesNotThrow(() -> service.assertProviderAllowed("free-user", "deepseek"));
+    ResponseStatusException ex =
+        assertThrows(
+            ResponseStatusException.class,
+            () -> service.assertProviderAllowed("free-user", "openrouter"));
+    assertEquals(403, ex.getStatusCode().value());
+    assertDoesNotThrow(() -> service.assertProviderAllowed("pro-user", "openrouter"));
   }
 
   @Test

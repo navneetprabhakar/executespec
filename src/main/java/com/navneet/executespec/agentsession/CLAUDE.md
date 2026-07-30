@@ -31,6 +31,10 @@ turns separately from runs.
   and a turn replayed from `agent_turn.proposed_action_json` keeps the same contract after reload.
   The context is nullable for rows persisted before it existed; clients must treat absent context
   as unknown, never as confirmable.
+  Imperative code-generation vocabulary includes `build`; the exact request “i want to build a
+  simple web ui todo app” must therefore become a cloud-run proposal with project context, or the
+  typed project-selection blocker without it, never an inline model answer that can end at the
+  conversation output limit.
   Write authority is part of that context: `InterpretIntentRequest.projectWriteAuthorized` carries
   the caller's resolved project write authority into routing, and an explicit `false` returns
   `AgentActionContext.writeScopeRequired()` with `runApiAllowed=false` so a `PROJECT_VIEWER` never
@@ -71,6 +75,20 @@ turns separately from runs.
 - `DELETE /api/agent/sessions/{sessionId}/history` is the canonical explicit transcript reset for
   Web, CLI, and VS Code. It verifies session ownership, deletes durable events and turns while
   retaining the session shell and immutable usage ledger, and is idempotent when repeated.
+- `POST /api/agent/sessions/{sessionId}/archive` (alias `/close`) is the non-destructive
+  conversation terminal lifecycle. It locks and tenant-authorizes the session, is idempotent after
+  `ARCHIVED`, rejects closure while a `STREAMING` turn, client-owed local-hands result, or active
+  single-writer reservation exists, and preserves turns, action evidence, usage, and run links.
+  Session lists include archived rows by default (or accept `includeArchived=false`), while
+  `/turns/page` returns `totalTurns`, `hasMore`, `nextBeforeTurnId`, and lifecycle metadata.
+  Archive and every durable mutation admission serialize on the same pessimistically locked
+  session row, preventing a turn, action event/result, confirmation, or recorded message from
+  committing against a stale `ACTIVE` read after archive. Subagent parent mutations take that same
+  parent lock; archive rejects active READY/RUNNING children, and a child cannot complete while it
+  still owns active descendants.
+- `PUT /api/agent/sessions/{sessionId}/route` persists the conversation provider/model after
+  entitlement validation. These values route chat replies only and are deliberately excluded from
+  generated-run confirmation unless a client sends explicit execution-route fields.
 - Canonical child-agent control is exposed under `POST /api/agent/sessions/{parentSessionId}/subagents`
   (bounded read-only role-contract execution), `POST /api/agent/sessions/{parentSessionId}/subagents/eligibility`
   (side-effect-free deterministic parent-coordinator decision),
@@ -228,12 +246,13 @@ turns separately from runs.
 | ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `OrchestratorController.java`              | Primary structured `/api/orchestrator/turn` endpoint for route/policy decisions plus explicit `/turn/confirm` for confirmed cloud-run submissions.                                                                  |
 | `OrchestratorService.java`                 | Stable controller-to-service facade for structured turn decisions and explicit confirmed run submission; delegates persistence to `AgentSessionService` and keeps run creation behind `AgentRunSubmissionGate`.     |
-| `AgentRunSubmissionGate.java`              | The only agent-session path allowed to create a new cloud run from a stored `CODE_RUN_REQUIRED` decision. It delegates BUILD admission to `CustomerRunSubmissionService`, including canonical project write authority, exact `selectedRepoIds`, idempotency, spend/key gates, and host-project org ownership. Local execution still fails closed because confirmation cannot bind a `localInstallationId`; clients must use normal local-run admission. Confirmed cloud submissions can carry `lowComplexityWorkerStartTier` so LOW tasks can start cheap without using a route-pinning model override. |
+| `AgentRunSubmissionGate.java`              | The only agent-session path allowed to create a new cloud run from a stored `CODE_RUN_REQUIRED` decision. It delegates BUILD admission to `CustomerRunSubmissionService`, including canonical project write authority, exact `selectedRepoIds`, idempotency, spend/key gates, and host-project org ownership. Session chat provider/model defaults never become run pins; only explicit confirmation route fields may pin a run, otherwise org-matrix/per-task routing applies. Local execution still fails closed because confirmation cannot bind a `localInstallationId`; clients must use normal local-run admission. Confirmed cloud submissions can carry `lowComplexityWorkerStartTier` so LOW tasks can start cheap without using a route-pinning model override. |
 | `AgentActionArguments.java`                | Package-local typed-action argument helper shared by confirmed run submission and confirmation write guards.                                                                                                        |
-| `AgentSessionController.java`              | REST surface under `/api/agent`: sessions, streaming + recorded turns, action catalog, context resolution, gate decision cards.                                                                                     |
+| `AgentSessionController.java`              | REST surface under `/api/agent`: sessions, non-destructive archive/close, cursor-metadata transcript pages, streaming + recorded turns, action catalog, context resolution, gate decision cards.                    |
+| `AgentSessionLifecycleService.java`        | Tenant-authorized, row-locked, idempotent `ACTIVE -> ARCHIVED` lifecycle. Rejects active streaming/local-tool/writer work and appends immutable closure evidence without deleting transcript/run/usage state.       |
 | `AgentSessionHistoryService.java`          | Ownership-checked, transactional transcript reset used by the cross-surface `/sessions/{id}/history` DELETE contract; preserves session identity and usage audit rows.                                         |
 | `AgentSessionService.java`                 | Session access checks, high-level orchestration, and API-facing service delegation.                                                                                                                                 |
-| `AgentSessionReadService.java`             | Reads agent sessions, session events, and turn transcripts with ownership checks, capped pagination, DTO mapping, stored trace hydration, and latest linked-run summary hydration for reloadable operator UIs.       |
+| `AgentSessionReadService.java`             | Reads active/archived sessions, session events, and turn transcripts with ownership checks, explicit cursor/completeness metadata, DTO mapping, stored trace hydration, and latest linked-run summary hydration.     |
 | `AgentSessionCreationService.java`         | Creates or reuses agent sessions with requested-id idempotency, project/run-scope validation, provider preference resolution, model access checks, and normalized session defaults.                                 |
 | `AgentOrchestratorTurnService.java`        | Creates structured orchestrator turns: idempotent replay, request policy downgrade, project read check, turn persistence, trace event append, and session title/timestamp update.                                   |
 | `AgentRunConfirmationService.java`         | Wraps confirmed cloud-run submission from stored orchestrator decisions: validates turn ownership, rejects non-run routes, enforces project write access, links turns to runs, and appends submission trace events. It preserves provider/model/cost-cap and non-pinning LOW-start confirmation fields. |
@@ -256,8 +275,9 @@ turns separately from runs.
 | `AgentTurnReadModel.java`                  | Hydrates reloadable turn DTOs and idempotent orchestrator replay responses from stored trace events.                                                                                                                |
 | `AgentTurnRecorder.java`                   | Creates initial `AgentTurn` rows with consistent sequence, transcript fields, proposed-action JSON, and status.                                                                                                     |
 | `AgentStreamTurnStarter.java`              | Starts streaming turns: route decision, initial turn row, provider preference update, title update, and `STREAM_STARTED` trace event.                                                                               |
-| `AgentStreamTurnLifecycle.java`            | Persists stream terminal states: completion usage ledger rows, failure events, and disconnect cancellation behavior. Disconnects retain a capped partial assistant summary plus any latest usage snapshot in the turn row, usage ledger, and `STREAM_DISCONNECTED` event. |
-| `AgentStreamTurnRunner.java`               | Executes one SSE streaming turn after start: emits ack/route/proposal/token/tool/done frames, binds read-only tools, handles decision-only routes, and records completion/failure/disconnect. Stream failures send an SSE `error` frame and close normally instead of rethrowing into Spring's JSON error renderer after `text/event-stream` is committed; provider credential failures are normalized into provider-key recovery copy instead of exposing raw upstream JSON/request ids. Client disconnects pass the accumulated bounded text to the lifecycle so replay retains partial progress. |
+| `AgentStreamTurnLifecycle.java`            | Persists exact, uncapped assistant text plus UTF-8 byte/character/line/SHA-256 integrity metadata for completion, failure, and disconnect terminal states; usage and terminal action evidence remain separate. |
+| `AgentStreamTurnRunner.java`               | Executes one SSE streaming turn after start and accumulates the complete assistant response for durable persistence. `TURN_TEXT` action evidence keeps a 16,000-character preview with explicit truncation, original size/line count, and full-content SHA-256 metadata. |
+| `AgentTranscriptContent.java`              | Shared exact-content metadata and bounded event-preview contract; the PostgreSQL `agent_turn.assistant_summary` TEXT row remains authoritative. |
 | `AgentTurnOperationLifecycle.java`         | Owns the fenced complete/fail/cancel transitions for the durable LLM operation claimed by one streamed agent turn. |
 | `AgentTurnRecoveryService.java`            | Bounded oldest-first recovery for stale persisted `STREAMING` turns: records outcome uncertainty, never replays transport, and reconciles the matching operation cancellation under transactional locks. |
 | `AgentTurnRecoveryScheduler.java`          | Runs stale-turn reconciliation at startup and on a bounded schedule; clamps the stale threshold beyond the maximum transport/reclaim horizon. |
@@ -300,6 +320,9 @@ turns separately from runs.
 - `V265__dedupe_local_hands_restart_events.sql` deduplicates historical
   `LOCAL_HANDS_WORKER_RESTARTED` transitions and adds a partial first-writer-wins index, so two
   JVMs observing the same stale worker cannot publish competing restart handoff records.
+- `V356__agent_session_archive_and_transcript_integrity.sql` adds full-response integrity metadata
+  to `agent_turn`, archive actor/timestamp/reason fields to `agent_session`, and lifecycle lookup
+  indexes. Existing `assistant_summary` TEXT remains the complete authoritative response.
 
 ## Tests
 
@@ -384,8 +407,14 @@ turns separately from runs.
   orchestrator, and managed-AI routes plus action-lifecycle schemas are represented in
   `executespec-docs/backend/reference/openapi.yaml`.
 - `AgentSessionReadServiceTest` pins active-session pagination, latest linked-run summary
-  hydration for session rows, owned-session loading, missing/forbidden session rejection, event
-  listing, bounded turn pagination, and stored trace hydration.
+  hydration for session rows, archived-session inclusion/lifecycle metadata, owned-session loading,
+  missing/forbidden session rejection, event listing, explicit turn-page continuation metadata,
+  invalid-cursor rejection, and stored trace hydration.
+- `AgentTranscriptDurabilityTest` pins exact complete/readback character, UTF-8 byte, line-count,
+  and SHA-256 preservation at 50/125/150/250/500 lines plus responses above 60KB, while keeping
+  action-event previews explicitly bounded.
+- `AgentSessionLifecycleServiceTest` pins tenant authorization, idempotent archive evidence,
+  transcript/run preservation, and rejection of active stream/local-tool/writer work.
 - `AgentSessionCreationServiceTest` pins requested-id idempotency, ownership rejection, run-scoped
   project resolution, provider preference update, model gate calls, and run/project mismatch
   rejection.

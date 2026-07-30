@@ -48,7 +48,7 @@ class SubagentProtocolServiceTest {
   @Test
   void spawnRejectsParentTurnFromAnotherSessionBeforePersistingAnything() {
     AgentSession parent = parent("parent", "ACTIVE");
-    when(sessions.findById("parent")).thenReturn(Optional.of(parent));
+    when(sessions.findByIdForUpdate("parent")).thenReturn(Optional.of(parent));
     when(turns.existsByIdAndSessionId("foreign-turn", "parent")).thenReturn(false);
 
     assertThatThrownBy(
@@ -174,7 +174,7 @@ class SubagentProtocolServiceTest {
   @Test
   void spawnPersistsBoundedChildAndBidirectionalLinks() throws Exception {
     AgentSession parent = parent("parent", "ACTIVE");
-    when(sessions.findById("parent")).thenReturn(Optional.of(parent));
+    when(sessions.findByIdForUpdate("parent")).thenReturn(Optional.of(parent));
     when(events.findBySessionIdAndTypeOrderByCreatedAtAsc(
             "parent", SubagentProtocolService.EVENT_CHILD_CREATED))
         .thenReturn(List.of());
@@ -193,6 +193,10 @@ class SubagentProtocolServiceTest {
     assertThat(handle.role()).isEqualTo(Role.SCOUT);
     ArgumentCaptor<AgentSession> child = ArgumentCaptor.forClass(AgentSession.class);
     verify(sessions).save(child.capture());
+    var admissionOrder = org.mockito.Mockito.inOrder(sessions, events);
+    admissionOrder.verify(sessions).findByIdForUpdate("parent");
+    admissionOrder.verify(sessions).save(any(AgentSession.class));
+    admissionOrder.verify(events, org.mockito.Mockito.times(2)).save(any(AgentActionEvent.class));
     assertThat(child.getValue().getClientSurface()).isEqualTo("SUBAGENT");
     assertThat(child.getValue().getProjectId()).isEqualTo("project");
     ArgumentCaptor<AgentActionEvent> persisted = ArgumentCaptor.forClass(AgentActionEvent.class);
@@ -216,7 +220,7 @@ class SubagentProtocolServiceTest {
   @Test
   void coordinatorReservationRecordsAcceptedEventWithActualChildId() throws Exception {
     AgentSession parent = parent("parent", "ACTIVE");
-    when(sessions.findById("parent")).thenReturn(Optional.of(parent));
+    when(sessions.findByIdForUpdate("parent")).thenReturn(Optional.of(parent));
     when(events.findBySessionIdAndTypeOrderByCreatedAtAsc(
             "parent", SubagentProtocolService.EVENT_CHILD_CREATED))
         .thenReturn(List.of());
@@ -239,6 +243,24 @@ class SubagentProtocolServiceTest {
             .findFirst()
             .orElseThrow();
     assertThat(accepted.getPayloadJson()).contains(handle.childSessionId());
+    verify(sessions, org.mockito.Mockito.atLeastOnce()).findByIdForUpdate("parent");
+  }
+
+  @Test
+  void activeChildDetectionReadsDurableParentLinks() throws Exception {
+    AgentSession child = parent("child", "RUNNING");
+    var metadata =
+        new SubagentProtocolService.ChildMetadata("parent", "turn", Role.SCOUT, "scan", 1, 3, 0.2);
+    var link = new SubagentProtocolService.ParentLink("child", metadata);
+    when(events.findBySessionIdAndTypeOrderByCreatedAtAsc(
+            "parent", SubagentProtocolService.EVENT_CHILD_SPAWNED))
+        .thenReturn(List.of(event("parent", "spawn", "action", link)));
+    when(sessions.findById("child")).thenReturn(Optional.of(child));
+
+    assertThat(service.hasActiveChildren("parent")).isTrue();
+
+    child.setStatus("COMPLETED");
+    assertThat(service.hasActiveChildren("parent")).isFalse();
   }
 
   @Test
@@ -291,7 +313,7 @@ class SubagentProtocolServiceTest {
     AgentSession parent = parent("nested", "RUNNING");
     var metadata =
         new SubagentProtocolService.ChildMetadata("root", null, Role.SCOUT, "nested", 2, 4, 0.4);
-    when(sessions.findById("nested")).thenReturn(Optional.of(parent));
+    when(sessions.findByIdForUpdate("nested")).thenReturn(Optional.of(parent));
     when(events.findBySessionIdAndTypeOrderByCreatedAtAsc(
             "nested", SubagentProtocolService.EVENT_CHILD_CREATED))
         .thenReturn(
@@ -321,7 +343,7 @@ class SubagentProtocolServiceTest {
     AgentSession child = parent(childId, "READY");
     var metadata =
         new SubagentProtocolService.ChildMetadata("parent", null, Role.SCOUT, "scan", 1, 3, 0.2);
-    when(sessions.findById("parent")).thenReturn(Optional.of(parent));
+    when(sessions.findByIdForUpdate("parent")).thenReturn(Optional.of(parent));
     when(sessions.findById(childId)).thenReturn(Optional.of(child));
     when(events.findBySessionIdAndTypeOrderByCreatedAtAsc(
             childId, SubagentProtocolService.EVENT_CHILD_CREATED))
@@ -359,7 +381,7 @@ class SubagentProtocolServiceTest {
   @Test
   void spawnEnforcesBudgetAcrossTheEntireDescendantTree() throws Exception {
     AgentSession parent = parent("parent", "ACTIVE");
-    when(sessions.findById("parent")).thenReturn(Optional.of(parent));
+    when(sessions.findByIdForUpdate("parent")).thenReturn(Optional.of(parent));
     when(events.findBySessionIdAndTypeOrderByCreatedAtAsc(
             "parent", SubagentProtocolService.EVENT_CHILD_CREATED))
         .thenReturn(List.of());
@@ -422,9 +444,11 @@ class SubagentProtocolServiceTest {
 
   @Test
   void startClaimsChildWithRowLockBeforePublishingStartedEvents() throws Exception {
+    AgentSession parent = parent("parent", "ACTIVE");
     AgentSession child = parent("child", "READY");
     var metadata =
         new SubagentProtocolService.ChildMetadata("parent", "turn", Role.SCOUT, "scan", 1, 2, 0.25);
+    when(sessions.findByIdForUpdate("parent")).thenReturn(Optional.of(parent));
     when(sessions.findByIdForUpdate("child")).thenReturn(Optional.of(child));
     when(sessions.findById("child")).thenReturn(Optional.of(child));
     when(events.findBySessionIdAndTypeOrderByCreatedAtAsc(
@@ -488,10 +512,13 @@ class SubagentProtocolServiceTest {
 
   @Test
   void verifierCompletionRequiresEvidenceAndPersistsHotHandoff() throws Exception {
+    AgentSession parent = parent("parent", "ACTIVE");
     AgentSession child = parent("child", "RUNNING");
     var metadata =
         new SubagentProtocolService.ChildMetadata(
             "parent", "turn", Role.VERIFIER, "verify", 1, 3, 0.5);
+    when(sessions.findByIdForUpdate("parent")).thenReturn(Optional.of(parent));
+    when(sessions.findByIdForUpdate("child")).thenReturn(Optional.of(child));
     when(sessions.findById("child")).thenReturn(Optional.of(child));
     when(events.findBySessionIdAndTypeOrderByCreatedAtAsc(
             "child", SubagentProtocolService.EVENT_CHILD_CREATED))
@@ -547,10 +574,12 @@ class SubagentProtocolServiceTest {
 
   @Test
   void completionCannotBypassExplicitStart() throws Exception {
+    AgentSession parent = parent("parent", "ACTIVE");
     AgentSession child = parent("child", "READY");
     var metadata =
         new SubagentProtocolService.ChildMetadata("parent", "turn", Role.SCOUT, "scan", 1, 3, 0.5);
-    when(sessions.findById("child")).thenReturn(Optional.of(child));
+    when(sessions.findByIdForUpdate("parent")).thenReturn(Optional.of(parent));
+    when(sessions.findByIdForUpdate("child")).thenReturn(Optional.of(child));
     when(events.findBySessionIdAndTypeOrderByCreatedAtAsc(
             "child", SubagentProtocolService.EVENT_CHILD_CREATED))
         .thenReturn(List.of(event("child", SubagentProtocolService.EVENT_CHILD_CREATED, metadata)));

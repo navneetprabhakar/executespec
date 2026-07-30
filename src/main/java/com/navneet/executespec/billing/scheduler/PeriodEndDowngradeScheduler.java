@@ -104,8 +104,19 @@ public class PeriodEndDowngradeScheduler {
             .findById(sub.getOrgId())
             .ifPresent(
                 org -> {
+                  boolean changed = false;
                   if (!"FREE".equals(org.getTier())) {
                     org.setTier("FREE");
+                    changed = true;
+                  }
+                  // A retained OWN_KEYS/HYBRID mode would keep customer credentials dispatchable
+                  // after the BYOK entitlement ends. Repair historical stale FREE rows too; stored
+                  // secrets remain recoverable if the customer upgrades again.
+                  if (!"SYSTEM".equals(org.getKeySourceMode())) {
+                    org.setKeySourceMode("SYSTEM");
+                    changed = true;
+                  }
+                  if (changed) {
                     orgRepo.save(org);
                     log.info("[PeriodEndDowngrade] Downgraded org {} to FREE", org.getName());
                   }

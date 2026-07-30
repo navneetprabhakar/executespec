@@ -56,6 +56,23 @@ import {
   req,
 } from './core';
 
+export interface GeneratedDocJob {
+  id: string;
+  projectId: string;
+  docType: GeneratedDocType;
+  status: 'QUEUED' | 'RUNNING' | 'SUCCEEDED' | 'FAILED';
+  terminal: boolean;
+  provider: string;
+  model: string;
+  resultDocId: string | null;
+  resultDocVersion: number | null;
+  errorCode: string | null;
+  errorMessage: string | null;
+  createdAt: string;
+  startedAt: string | null;
+  completedAt: string | null;
+}
+
 export const getProjectSlackChannels = (projectId: string) =>
   req<ProjectSlackChannelDto[]>(`/integrations/slack/projects/${projectId}/channels`);
 
@@ -570,10 +587,17 @@ export const getProjectSummary = (projectId: string) =>
   req<{content: string}>(`/projects/${projectId}/summary`);
 
 export const generateProjectDoc = (projectId: string, docType: GeneratedDocType) =>
-  req<GeneratedDocRow>(`/projects/${projectId}/docs/${docType}/generate`, {
-    method: 'POST',
-    timeoutMs: 3 * 60_000,
-  });
+  req<GeneratedDocJob>(`/projects/${projectId}/docs/${docType}/generate`, {method: 'POST'});
+
+export const getProjectDocJob = (projectId: string, docType: GeneratedDocType, jobId: string) =>
+  req<GeneratedDocJob>(`/projects/${projectId}/docs/${docType}/jobs/${jobId}`);
+
+export const getLatestProjectDocJob = async (
+  projectId: string,
+  docType: GeneratedDocType,
+): Promise<GeneratedDocJob | null> =>
+  (await req<GeneratedDocJob | undefined>(`/projects/${projectId}/docs/${docType}/jobs/latest`)) ??
+  null;
 
 /**
  * Returns null (204) when the doc hasn't been generated yet. Callers should

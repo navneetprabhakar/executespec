@@ -92,9 +92,7 @@ public class Org {
   @lombok.ToString.Exclude
   private String geminiApiKey;
 
-  /**
-   * OpenRouter API key (Enterprise gateway). Org-level only; set by org admins, ENTERPRISE tier.
-   */
+  /** OpenRouter API key (BYOK gateway). Org-level only; set by org admins on BYOK-capable tiers. */
   @Convert(converter = EncryptedValueConverter.class)
   @Column(name = "open_router_api_key")
   @lombok.ToString.Exclude
