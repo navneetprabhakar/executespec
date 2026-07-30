@@ -4,6 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -39,12 +41,15 @@ import com.navneet.executespec.state.repository.PipelineRunRepository;
 import com.navneet.executespec.tool.SearchFilesTool;
 import com.navneet.executespec.tool.ToolResult;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.ai.tool.ToolCallback;
+import org.springframework.ai.tool.definition.DefaultToolDefinition;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -65,6 +70,8 @@ class ProjectChatToolsSecurityTest {
   @Mock TechDebtService techDebtService;
   @Mock WorkspaceInitService workspaceInitService;
   @Mock CodeIndexWorkspaceMaterializer codeIndexWorkspaceMaterializer;
+  @Mock ProjectRepositorySourceReadTools repositorySourceReadTools;
+  @Mock ToolCallback repositorySourceReadCallback;
   @Mock SearchFilesTool searchFilesTool;
   @Mock CodeIndexingService codeIndexingService;
   @Mock CodeChunkStore codeChunkStore;
@@ -75,6 +82,20 @@ class ProjectChatToolsSecurityTest {
   @Spy ObjectMapper json = new ObjectMapper();
 
   @InjectMocks ProjectChatTools tools;
+
+  @BeforeEach
+  void bindBoundedSourceReadTool() {
+    lenient()
+        .when(repositorySourceReadCallback.getToolDefinition())
+        .thenReturn(
+            DefaultToolDefinition.builder()
+                .name("read_repo_file_range")
+                .description("test")
+                .inputSchema("{\"type\":\"object\"}")
+                .build());
+    lenient().when(repositorySourceReadTools.bind(any())).thenReturn(repositorySourceReadCallback);
+    lenient().when(repositorySourceReadCallback.call(any())).thenReturn("{\"ok\":true}");
+  }
 
   @Test
   void modelBindingExcludesSpendAndMutationToolsWithoutConfirmationProtocol() {
@@ -88,7 +109,33 @@ class ProjectChatToolsSecurityTest {
             "run_code_review",
             "search_code",
             "search_project_docs")
-        .contains("list_repos", "search_repo_files");
+        .contains("list_repos", "search_repo_files", "read_repo_file_range");
+  }
+
+  @Test
+  void boundedSourceReadReauthorizesAtTheCallbackBoundary() {
+    AppUserDetails principal = principal();
+    ResponseStatusException denied =
+        new ResponseStatusException(HttpStatus.FORBIDDEN, "viewer denied");
+    doThrow(denied).when(projectAccessGuard).assertCanRead("project-1", principal);
+    var read =
+        tools.bind(new ProjectChatTools.ToolContext("project-1", principal, null)).stream()
+            .filter(tool -> "read_repo_file_range".equals(tool.getToolDefinition().name()))
+            .findFirst()
+            .orElseThrow();
+
+    assertThatThrownBy(() -> read.call("{}")).isSameAs(denied);
+    verify(repositorySourceReadCallback, never()).call(any());
+    verify(chatSecurityAuditService)
+        .record(
+            "CHAT_TOOL_DENIED",
+            "project-1",
+            "project-1",
+            principal,
+            "read_repo_file_range",
+            com.navneet.executespec.specchat.ChatToolPolicy.Capability.PROJECT_READ,
+            "DENIED",
+            null);
   }
 
   @Test

@@ -8,6 +8,11 @@ scans, and child-agent spend use their explicit structured endpoints/proposals i
 For project-scoped lexical reads, `SpecChatService` and `ProjectChatTools` derive the correct
 GitHub or Bitbucket credential from the authenticated server-side principal; browser clients never
 send or select a repository credential in the model request.
+`read_repo_file_range` is explicitly `PROJECT_READ` and is model-bound beside
+`search_repo_files`. It can only read a required, bounded inclusive range from a repository linked
+to the active project and materialized at the server-authoritative revision. Callback invocation
+rechecks project read authority before source selection; path traversal, absolute paths, symlinks,
+Git metadata, oversized sources/results, and credential-like paths/content fail closed.
 
 The legacy write callbacks retained in `ProjectChatActionTools` remain filtered out of model-bound
 tool sets. Their plan APPROVE/REJECT implementation routes through `PlanApprovalService` and the

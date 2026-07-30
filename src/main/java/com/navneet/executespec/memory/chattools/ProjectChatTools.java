@@ -100,6 +100,7 @@ public class ProjectChatTools {
   private final TechDebtService techDebtService;
   private final WorkspaceInitService workspaceInitService;
   private final CodeIndexWorkspaceMaterializer codeIndexWorkspaceMaterializer;
+  private final ProjectRepositorySourceReadTools repositorySourceReadTools;
   private final SearchFilesTool searchFilesTool;
   private final CodeIndexingService codeIndexingService;
   private final CodeChunkStore codeChunkStore;
@@ -148,6 +149,7 @@ public class ProjectChatTools {
             readGeneratedDoc(ctx),
             searchProjectDocs(ctx),
             searchRepoFiles(ctx),
+            repositorySourceReadTools.bind(ctx),
             searchCode(ctx),
             getTechDebtSummary(ctx));
     // The project-chat protocol has no scoped, expiring, single-use confirmation token. Until it
@@ -656,9 +658,11 @@ public class ProjectChatTools {
                 "Regex content search over the ACTUAL SOURCE of a linked repo. Clones the repo on"
                     + " demand (cached per synced SHA) and greps it, returning file:line matches"
                     + " with a total count. Use this for EXACT identifiers, strings, API names, or"
-                    + " call sites — it is literal/lexical. Complementary to search_code (semantic,"
-                    + " concept-level) and search_project_docs (uploaded docs). If the project"
-                    + " links more than one repo, pass repoFullName. Read-only.")
+                    + " call sites — it is literal/lexical. Follow a useful hit with"
+                    + " read_repo_file_range to inspect its bounded method/signature context."
+                    + " Complementary to search_code (semantic, concept-level) and"
+                    + " search_project_docs (uploaded docs). If the project links more than one"
+                    + " repo, pass repoFullName. Read-only.")
             .inputSchema(
                 """
 {

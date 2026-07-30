@@ -59,6 +59,14 @@ reads share one atomic materialization, partial clones are replaced, and failure
 source codes instead of being misreported as credential errors. GitHub PATs and Bitbucket
 username/app-password credentials are selected from the authenticated principal per SCM provider;
 one provider's secret is never sent to the other.
+`ProjectRepositorySourceReadTools.read_repo_file_range` is the pure-read companion to lexical
+search: it expands an exact `file:line` hit into a required inclusive line range (maximum 200 lines)
+from the same canonical materialization. Project-linked repository selection is repeated inside the
+tool, while `ProjectChatTools.authorize` repeats `assertCanRead` at invocation. The reader accepts
+only safe repository-relative POSIX paths, rejects `.git`, symlink components, credential-like
+paths/content, files over 5 MiB, and source content over 20k characters (leaving metadata headroom
+beneath the 24k serialized-envelope ceiling and returning a resumable `nextStartLine` when the
+content budget is reached). It never exposes a host path.
 
 ## Explicit confirmed actions (V292)
 

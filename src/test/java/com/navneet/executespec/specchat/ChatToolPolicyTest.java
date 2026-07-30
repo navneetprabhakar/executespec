@@ -15,6 +15,8 @@ class ChatToolPolicyTest {
   void explicitlyClassifiesReadAnalyseSpendAndWriteTools() {
     assertThat(ChatToolPolicy.capability("list_repos"))
         .isEqualTo(ChatToolPolicy.Capability.PROJECT_READ);
+    assertThat(ChatToolPolicy.capability("read_repo_file_range"))
+        .isEqualTo(ChatToolPolicy.Capability.PROJECT_READ);
     assertThat(ChatToolPolicy.capability("search_code"))
         .isEqualTo(ChatToolPolicy.Capability.PROJECT_ANALYSE);
     assertThat(ChatToolPolicy.capability("submit_run"))

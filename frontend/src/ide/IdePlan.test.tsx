@@ -321,6 +321,7 @@ describe('IdePlan approval gate identity (RR-1459)', () => {
   it('starts a new-run handoff instead of calling the unsupported edit-plan endpoint', async () => {
     api.getRun.mockResolvedValue({
       ...runDetail('run-a', '{"tasks":["a"]}', 3),
+      projectId: 'project-1',
       userRequest: 'Build an inventory API without authentication.',
     });
     await render();
@@ -341,6 +342,8 @@ describe('IdePlan approval gate identity (RR-1459)', () => {
 
     const handoff = JSON.parse(sessionStorage.getItem('signal:pending-spec') || '{}');
     expect(handoff.source).toBe('plan-revision');
+    expect(handoff.projectId).toBe('project-1');
+    expect(handoff.scope).toBe('PROJECT');
     expect(handoff.spec).toContain('Build an inventory API without authentication.');
     expect(handoff.spec).toContain('Remove invented authentication tests.');
     expect(text()).toContain('Compose revised run');
