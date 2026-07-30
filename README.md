@@ -506,6 +506,17 @@ The long-form documentation now lives in the central docs repo — see [`DOCS.md
 The REST API contract is maintained in the central docs repository at
 [`backend/reference/openapi.yaml`](../executespec-docs/backend/reference/openapi.yaml).
 
+## Worker safety ceilings
+
+Workers stop authorizing provider/tool turns after configured live task ceilings are observed. The
+per-solve dollar cap is task-scoped. `worker.best-effort-max-task-cost-usd` and
+`worker.best-effort-max-task-total-tokens` optionally stop task spend and input+output tokens in the
+current JVM; both default to `-1` (disabled), and Terminal-Bench is exempt from these defaults.
+These are safety stops, not durable authorization boundaries: restart recovery does not yet hydrate
+`RunCostTracker` from `run_step_usage`. A successful build/test/shell check counts as progress
+once after a workspace mutation, but repeated verification against unchanged files cannot keep a
+worker alive indefinitely.
+
 ## Required environment variables
 
 Copy [`.env.template`](.env.template) to `.env` and fill in values. Names below match the template verbatim.

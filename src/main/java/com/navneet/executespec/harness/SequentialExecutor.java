@@ -2045,6 +2045,7 @@ to boot — skip it for those.""";
             .autoVerify(
                 featureFlagService != null
                     && featureFlagService.isEnabled("worker.auto-verify.enabled"))
+            .workerStartedAtEpochMs(taskStart)
             .build();
     // Resume-aware dispatch — when resumeFrom is non-null, the worker rebuilds history from the
     // saved snapshot and resumes the iteration loop from snapshot.iteration() + 1. Snapshots
@@ -2385,35 +2386,37 @@ to boot — skip it for those.""";
     // and re-reading every file. Existing snapshot save happens every 5 iters inside
     // WorkerAgent; this just wires the LOAD on the retry path. Flag-gated default OFF (V221).
     WorkerTaskRequest retryReq =
-        WorkerTaskRequest.builder()
-            .provider(cfg.provider)
-            .model(cfg.model)
-            .systemPrompt(systemPrompt)
-            .userPrompt(retryPrompt)
-            .context(taskCtx)
-            .maxIterations(retryMaxIter)
-            .temperature(0.0)
-            .maxTokensPerCall(cfg.maxTokens)
-            .stagnationWarnAfter(cfg.stagnationWarnAfter)
-            .stagnationForceAfter(cfg.stagnationForceAfter)
-            .wallClockSeconds(retryWallClock)
-            .requireBuildVerification(true)
-            .forceToolChoiceOnSalvage(cfg.forceToolChoiceOnSalvage)
-            // Preserve the server-owned worker controls across the smoke retry. A retry is a
-            // continuation of the same task, not a fresh flag-off execution.
-            .criticPass(
-                featureFlagService != null
-                    && featureFlagService.isEnabled("worker.critic-pass.enabled"))
-            .verifyBeforeComplete(
-                featureFlagService != null
-                    && featureFlagService.isEnabled("worker.verify-before-complete.enabled"))
-            .progressV2(
-                featureFlagService != null
-                    && featureFlagService.isEnabled("worker.progress-v2.enabled"))
-            .autoVerify(
-                featureFlagService != null
-                    && featureFlagService.isEnabled("worker.auto-verify.enabled"))
-            .build();
+        com.navneet.executespec.engine.WorkerTaskRequestControls.preserveAcrossRetry(
+            workerReq,
+            WorkerTaskRequest.builder()
+                .provider(cfg.provider)
+                .model(cfg.model)
+                .systemPrompt(systemPrompt)
+                .userPrompt(retryPrompt)
+                .context(taskCtx)
+                .maxIterations(retryMaxIter)
+                .temperature(0.0)
+                .maxTokensPerCall(cfg.maxTokens)
+                .stagnationWarnAfter(cfg.stagnationWarnAfter)
+                .stagnationForceAfter(cfg.stagnationForceAfter)
+                .wallClockSeconds(retryWallClock)
+                .requireBuildVerification(true)
+                .forceToolChoiceOnSalvage(cfg.forceToolChoiceOnSalvage)
+                // Preserve the server-owned worker controls across the smoke retry. A retry is a
+                // continuation of the same task, not a fresh flag-off execution.
+                .criticPass(
+                    featureFlagService != null
+                        && featureFlagService.isEnabled("worker.critic-pass.enabled"))
+                .verifyBeforeComplete(
+                    featureFlagService != null
+                        && featureFlagService.isEnabled("worker.verify-before-complete.enabled"))
+                .progressV2(
+                    featureFlagService != null
+                        && featureFlagService.isEnabled("worker.progress-v2.enabled"))
+                .autoVerify(
+                    featureFlagService != null
+                        && featureFlagService.isEnabled("worker.auto-verify.enabled"))
+                .build());
     WorkerResult retry;
     if (featureFlagService != null && featureFlagService.isEnabled(FLAG_RETRY_CONTEXT_RETENTION)) {
       java.util.Optional<com.navneet.executespec.context.SavedContext> snapshot =
@@ -2577,34 +2580,36 @@ to boot — skip it for those.""";
           task.id());
       String retry2Prompt = composeUserPrompt(task, retrySmoke.output(), workerEvidence);
       WorkerTaskRequest retry2Request =
-          WorkerTaskRequest.builder()
-              .provider(cfg.provider)
-              .model(cfg.model)
-              .systemPrompt(systemPrompt)
-              .userPrompt(retry2Prompt)
-              .context(taskCtx)
-              .maxIterations(
-                  req.maxIterationsPerTask() != null ? req.maxIterationsPerTask() : cfg.maxIter)
-              .temperature(0.0)
-              .maxTokensPerCall(cfg.maxTokens)
-              .stagnationWarnAfter(cfg.stagnationWarnAfter)
-              .stagnationForceAfter(cfg.stagnationForceAfter)
-              .wallClockSeconds(cfg.wallClockSeconds)
-              .requireBuildVerification(true)
-              .forceToolChoiceOnSalvage(cfg.forceToolChoiceOnSalvage)
-              .criticPass(
-                  featureFlagService != null
-                      && featureFlagService.isEnabled("worker.critic-pass.enabled"))
-              .verifyBeforeComplete(
-                  featureFlagService != null
-                      && featureFlagService.isEnabled("worker.verify-before-complete.enabled"))
-              .progressV2(
-                  featureFlagService != null
-                      && featureFlagService.isEnabled("worker.progress-v2.enabled"))
-              .autoVerify(
-                  featureFlagService != null
-                      && featureFlagService.isEnabled("worker.auto-verify.enabled"))
-              .build();
+          com.navneet.executespec.engine.WorkerTaskRequestControls.preserveAcrossRetry(
+              workerReq,
+              WorkerTaskRequest.builder()
+                  .provider(cfg.provider)
+                  .model(cfg.model)
+                  .systemPrompt(systemPrompt)
+                  .userPrompt(retry2Prompt)
+                  .context(taskCtx)
+                  .maxIterations(
+                      req.maxIterationsPerTask() != null ? req.maxIterationsPerTask() : cfg.maxIter)
+                  .temperature(0.0)
+                  .maxTokensPerCall(cfg.maxTokens)
+                  .stagnationWarnAfter(cfg.stagnationWarnAfter)
+                  .stagnationForceAfter(cfg.stagnationForceAfter)
+                  .wallClockSeconds(cfg.wallClockSeconds)
+                  .requireBuildVerification(true)
+                  .forceToolChoiceOnSalvage(cfg.forceToolChoiceOnSalvage)
+                  .criticPass(
+                      featureFlagService != null
+                          && featureFlagService.isEnabled("worker.critic-pass.enabled"))
+                  .verifyBeforeComplete(
+                      featureFlagService != null
+                          && featureFlagService.isEnabled("worker.verify-before-complete.enabled"))
+                  .progressV2(
+                      featureFlagService != null
+                          && featureFlagService.isEnabled("worker.progress-v2.enabled"))
+                  .autoVerify(
+                      featureFlagService != null
+                          && featureFlagService.isEnabled("worker.auto-verify.enabled"))
+                  .build());
       WorkerResult retry2 =
           runWorkerWithCancellationFence(runId, task.id(), () -> worker.run(retry2Request));
       int totalToolCalls2 = totalToolCalls + retry2.toolCallsDispatched();

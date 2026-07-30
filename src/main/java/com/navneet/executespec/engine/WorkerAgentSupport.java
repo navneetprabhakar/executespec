@@ -14,6 +14,59 @@ import com.navneet.executespec.tool.ToolCapabilities;
  */
 final class WorkerAgentSupport {
 
+  static WorkerResult budgetExceededResult(
+      int iter,
+      int toolsDispatched,
+      String message,
+      int repeatedAssistantTextCount,
+      java.util.List<String> toolLog,
+      long start) {
+    return WorkerResult.builder()
+        .outcome(WorkerResult.Outcome.BUDGET_EXCEEDED)
+        .iterations(iter)
+        .toolCallsDispatched(toolsDispatched)
+        .finalAssistantText(message)
+        .repeatedAssistantTextCount(repeatedAssistantTextCount)
+        .toolCallLog(toolLog)
+        .totalLatencyMs(System.currentTimeMillis() - start)
+        .build();
+  }
+
+  static WorkerResult mutationEpochStoppedResult(
+      int iter,
+      int toolsDispatched,
+      int repeatedAssistantTextCount,
+      java.util.List<String> toolLog,
+      long start) {
+    return WorkerResult.builder()
+        .outcome(WorkerResult.Outcome.COMPLETED_BY_STAGNATION)
+        .iterations(iter)
+        .toolCallsDispatched(toolsDispatched)
+        .finalAssistantText("Verification repeated without a new workspace mutation")
+        .repeatedAssistantTextCount(repeatedAssistantTextCount)
+        .toolCallLog(toolLog)
+        .totalLatencyMs(System.currentTimeMillis() - start)
+        .build();
+  }
+
+  static WorkerResult wallClockExceededResult(
+      int iter,
+      int toolsDispatched,
+      String lastText,
+      int repeatedAssistantTextCount,
+      java.util.List<String> toolLog,
+      long start) {
+    return WorkerResult.builder()
+        .outcome(WorkerResult.Outcome.WALL_CLOCK_EXCEEDED)
+        .iterations(iter)
+        .toolCallsDispatched(toolsDispatched)
+        .finalAssistantText(lastText)
+        .repeatedAssistantTextCount(repeatedAssistantTextCount)
+        .toolCallLog(toolLog)
+        .totalLatencyMs(System.currentTimeMillis() - start)
+        .build();
+  }
+
   private WorkerAgentSupport() {}
 
   /** Dispatches a {@code shell} tool call (local or remote) and returns its envelope, or null. */
