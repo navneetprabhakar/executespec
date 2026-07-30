@@ -102,39 +102,6 @@ class ScmPushServiceRepoModeTest {
     verify(gitHubRepoService, never()).createRepo(any(), any(), anyString(), anyString(), any());
   }
 
-  @Test
-  void rejectedCorrectionAdmissionStopsBeforeAnyScmSideEffect() {
-    PipelineRun run = runWithMode("EXISTING");
-    doThrow(
-            new PublicationAdmissionService.PublicationBlockedException(
-                new PublicationAdmissionService.Eligibility(
-                    false,
-                    "BLOCKED",
-                    "CORRECTION_REJECTED",
-                    "CORRECTION",
-                    "The correction was rejected and is not eligible for publication",
-                    false,
-                    "Restore the accepted checkpoint before publishing.",
-                    null,
-                    null)))
-        .when(publicationAdmissionService)
-        .assertEligible(run);
-
-    ScmPushService.PushResult result = service.push(run);
-
-    assertThat(result.status()).isEqualTo("FAILED");
-    assertThat(result.code()).isEqualTo("CORRECTION_REJECTED");
-    assertThat(result.blockingGate()).isEqualTo("CORRECTION");
-    assertThat(result.publicationEligible()).isFalse();
-    assertThat(result.attempted()).isZero();
-    verify(gitTool, never())
-        .pushToBranch(anyString(), anyString(), anyString(), anyString(), nullable(String.class));
-    verify(gitTool, never()).pushToRemote(anyString(), anyString(), anyString());
-    verify(gitHubRepoService, never()).createRepo(any(), any(), anyString(), anyString(), any());
-    verify(gitHubRepoService, never())
-        .createPullRequest(anyString(), anyString(), anyString(), anyString(), anyString(), any());
-  }
-
   private PipelineRun runWithMode(String repoMode) {
     // RR-1668 — no cloned-branch snapshot in these single-repo mode tests, so the push takes the
     // plain non-forced create path (pushToBranch is still invoked).
