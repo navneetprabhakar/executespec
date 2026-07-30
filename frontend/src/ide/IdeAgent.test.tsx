@@ -1503,6 +1503,36 @@ describe('IdeAgent', () => {
     });
   });
 
+  it('does not reclassify a completed turn when the post-turn refresh fails', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    api.streamAgentTurn.mockImplementation(async (_sessionId, _body, handlers) => {
+      handlers.onToken?.({delta: 'Completed response'});
+      handlers.onDone?.({session_id: 's1', turn_id: 't2', turn_count: 2});
+    });
+
+    ({host, root} = await renderAgent('/agent'));
+    api.listAgentSessions.mockRejectedValueOnce(new Error('refresh broke'));
+    const textarea = host.querySelector('textarea');
+    if (!textarea) throw new Error('Agent composer textarea was not rendered.');
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+      setter?.call(textarea, 'Complete this turn');
+      textarea.dispatchEvent(new Event('input', {bubbles: true}));
+    });
+    const send = [...host.querySelectorAll<HTMLButtonElement>('button')].find(
+      (button) => button.getAttribute('aria-label') === 'Send',
+    );
+    if (!send) throw new Error('Send button was not rendered.');
+
+    await act(async () => send.click());
+    await flush();
+
+    expect(warn).toHaveBeenCalledWith('Completed agent turn refresh failed', expect.any(Error));
+    expect(host.textContent).not.toContain('refresh broke');
+    expect(host.textContent).not.toContain('Agent turn failed');
+    expect(textarea.disabled).toBe(false);
+  });
+
   it('offers Refresh after proposal confirmation fails without replaying the mutation', async () => {
     api.getProjectRepos.mockResolvedValue([
       {

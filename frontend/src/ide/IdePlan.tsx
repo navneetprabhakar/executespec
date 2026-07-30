@@ -397,7 +397,11 @@ export default function IdePlan() {
       projectId: revising.projectId,
       spec: `${original}\n\nPlan revision requirements:\n${feedback.trim()}`,
     });
-    navigate(revising.projectId ? `/projects/${revising.projectId}?compose=1` : '/compose');
+    // The canonical Start composer consumes the structured handoff, including project identity.
+    // Navigating to /projects/:id?compose=1 was ineffective: the project route only honours
+    // location.state.compose, redirected projects with work history to Pulse, and never consumed
+    // the revision spec. Always use the actual handoff-aware composer.
+    navigate('/compose');
   }
 
   const status = (run?.status || '').toUpperCase();

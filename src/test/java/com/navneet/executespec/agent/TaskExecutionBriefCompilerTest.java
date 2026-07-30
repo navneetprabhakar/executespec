@@ -20,6 +20,57 @@ class TaskExecutionBriefCompilerTest {
   }
 
   @Test
+  void executableCompilationRejectsAnApiPrefixAddedToAnExactSourceRoute() {
+    Plan mutated =
+        Plan.builder()
+            .tasks(
+                List.of(
+                    PlannedTask.builder()
+                        .id("T1")
+                        .title("Implement health and game routes")
+                        .description("Implement GET /api/system/health and GET /api/casino-game.")
+                        .touchesFiles(List.of("backend/routes/system.java"))
+                        .build()))
+            .build();
+
+    assertThatThrownBy(
+            () ->
+                TaskExecutionBriefCompiler.compileExecutable(
+                    mutated,
+                    "Implement GET /system/health and GET /casino-game exactly. Do not add an"
+                        + " /api prefix."))
+        .isInstanceOf(TaskExecutionBriefCompiler.ExecutablePlanContractException.class)
+        .hasMessageContaining("SOURCE_HTTP_ROUTE_NAMESPACE_CHANGED")
+        .hasMessageContaining("GET /system/health")
+        .hasMessageContaining("GET /api/system/health")
+        .hasMessageContaining("GET /casino-game")
+        .hasMessageContaining("GET /api/casino-game");
+  }
+
+  @Test
+  void executableCompilationAcceptsExactRootAndApiNamespaces() {
+    Plan exact =
+        Plan.builder()
+            .tasks(
+                List.of(
+                    PlannedTask.builder()
+                        .id("T1")
+                        .title("Implement exact routes")
+                        .description("Implement GET /casino-game and GET /api/system/health.")
+                        .touchesFiles(List.of("backend/routes/system.java"))
+                        .build()))
+            .build();
+
+    Plan compiled =
+        TaskExecutionBriefCompiler.compileExecutable(
+            exact, "Implement GET /casino-game and GET /api/system/health exactly.");
+
+    assertThat(compiled.tasks().getFirst().description())
+        .contains("GET /casino-game", "GET /api/system/health")
+        .doesNotContain("/api/api/");
+  }
+
+  @Test
   void preservesValidatedImplementationGuidanceWithAuthoritativeStructuredFields() {
     PlannedTask task =
         PlannedTask.builder()

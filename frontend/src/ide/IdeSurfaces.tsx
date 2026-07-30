@@ -418,7 +418,17 @@ export function IdeCompose() {
   // legacy bare-string form so a handoff written by an older bundle is honoured.
   useEffect(() => {
     const pending = consumeSpecHandoff();
-    if (pending) setSpec(pending.spec);
+    if (pending) {
+      setSpec(pending.spec);
+      // Structured handoffs deliberately carry their project scope. Consuming only the text made
+      // a Plan Review revision look global and dropped its linked-repository boundary.
+      if (pending.projectId) {
+        setProjectId(pending.projectId);
+        setProjectRepos([]);
+        setSelectedRepoIds([]);
+        setRepoDiscovery({projectId: pending.projectId, status: 'loading', error: null});
+      }
+    }
   }, []);
 
   useEffect(() => {
