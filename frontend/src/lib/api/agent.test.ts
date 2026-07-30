@@ -210,6 +210,73 @@ describe('agent API SSE helpers', () => {
     });
   });
 
+  it('accepts a transport reset after the authoritative done frame', async () => {
+    localStorage.setItem('access_token', 'test-token');
+    const encoder = new TextEncoder();
+    let reads = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        const response = new Response(null, {status: 200});
+        Object.defineProperty(response, 'body', {
+          value: {
+            getReader: () => ({
+              read: async () => {
+                if (reads++ === 0) {
+                  return {
+                    value: encoder.encode(
+                      'event: done\ndata: {"session_id":"s1","turn_id":"t1","turn_count":1}\n\n',
+                    ),
+                    done: false,
+                  };
+                }
+                throw new Error('proxy reset');
+              },
+            }),
+          },
+        });
+        return response;
+      }),
+    );
+
+    await expect(streamAgentTurn('s1', {message: 'hello'})).resolves.toBeUndefined();
+  });
+
+  it('rejects a transport reset before a terminal frame', async () => {
+    localStorage.setItem('access_token', 'test-token');
+    const encoder = new TextEncoder();
+    let reads = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        const response = new Response(null, {status: 200});
+        Object.defineProperty(response, 'body', {
+          value: {
+            getReader: () => ({
+              read: async () => {
+                if (reads++ === 0) {
+                  return {
+                    value: encoder.encode(
+                      'event: ack\ndata: {"session_id":"s1","turn_id":"t1"}\n\n',
+                    ),
+                    done: false,
+                  };
+                }
+                throw new Error('proxy reset');
+              },
+            }),
+          },
+        });
+        return response;
+      }),
+    );
+
+    await expect(streamAgentTurn('s1', {message: 'hello'})).rejects.toMatchObject({
+      status: 0,
+      message: expect.stringContaining('disconnected before the turn completed'),
+    });
+  });
+
   it('RR-1344 — throws on a terminal error frame instead of resolving as success', async () => {
     localStorage.setItem('access_token', 'test-token');
     const encoder = new TextEncoder();

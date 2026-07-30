@@ -20,11 +20,18 @@ public final class TaskExecutionBriefCompiler {
 
   /** Normalize, validate, and compile the final worker-visible plan or fail closed. */
   public static Plan compileExecutable(Plan plan) {
+    return compileExecutable(plan, null);
+  }
+
+  /** Normalize and compile while preserving exact HTTP operations from the user's source spec. */
+  public static Plan compileExecutable(Plan plan, String originalRequest) {
     if (plan == null || plan.tasks() == null || plan.tasks().isEmpty()) {
       throw contractFailure("planner returned an empty executable plan");
     }
     Plan compiled = compile(TaskExpanderAgent.normalizeFinalPlan(plan));
     List<String> violations = TaskExpanderAgent.finalPlanContractViolations(compiled);
+    violations = new ArrayList<>(violations);
+    violations.addAll(PlanSourceHttpRouteGate.violations(originalRequest, compiled));
     if (!violations.isEmpty()) throw contractFailure(String.join("; ", violations));
     return compiled;
   }

@@ -232,8 +232,16 @@ export async function streamAgentTurn(
   // can offer their normal retry/reload path. `error` is terminal because the server has already
   // persisted the failure; transport EOF without either terminal event is not.
   let reading = true;
+  let readFailure: unknown = null;
   while (reading) {
-    const {value, done} = await reader.read();
+    let chunk: ReadableStreamReadResult<Uint8Array>;
+    try {
+      chunk = await reader.read();
+    } catch (error) {
+      readFailure = error;
+      break;
+    }
+    const {value, done} = chunk;
     buffer += decoder.decode(value ?? new Uint8Array(), {stream: !done});
     let split = buffer.search(/\r?\n\r?\n/);
     while (split >= 0) {
@@ -250,6 +258,17 @@ export async function streamAgentTurn(
   // catch/recovery runs and it never falls through to a success/"done" path.
   if (terminalError.value) {
     throw new ApiError(502, terminalError.value.message || 'The agent turn failed on the server.');
+  }
+  // A proxy may reset the transport immediately after forwarding the authoritative `done`
+  // frame. The persisted terminal event wins over that later read failure. Before `done`, the
+  // same failure is genuinely ambiguous and must reject so callers replay durable state.
+  if (readFailure && terminalEventSeen) return;
+  if (readFailure) {
+    const reason = readFailure instanceof Error ? readFailure.message : 'unknown';
+    throw new ApiError(
+      0,
+      `Agent stream disconnected before the turn completed (${reason}). Refresh the conversation and retry.`,
+    );
   }
   if (!terminalEventSeen && !signal?.aborted) {
     throw new ApiError(

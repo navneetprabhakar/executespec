@@ -903,8 +903,14 @@ export default function IdeAgent() {
         },
         abort.signal,
       );
+      // The terminal stream event is authoritative for turn success. A later list/gate refresh is
+      // best-effort UI synchronization and must not reclassify a completed turn as failed.
+      try {
+        await refreshAfterMutation(session.id);
+      } catch (refreshError) {
+        console.warn('Completed agent turn refresh failed', refreshError);
+      }
       dispatch({type: 'stream:done'});
-      await refreshAfterMutation(session.id);
     } catch (e) {
       // A POST-SSE response can end after the server has persisted the turn (for
       // example when a proxy drops the body after the final tool result). Reset

@@ -15,6 +15,16 @@ snapshot is not a restorable filesystem image. Projects remain the canonical dur
 context: the agent can select an existing project or hand off to the normal Projects creation flow
 and return with that project selected. Closing a Web Agent workspace archives its conversation
 after active work is clear; it does not delete the linked project.
+Within a selected project, exact repository search is paired with a read-only bounded source-range
+tool: the agent can expand a `file:line` match into up to 200 lines of method/signature context from
+the linked repository's revision-pinned clone. Reads are project-authorized, repository-relative,
+symlink-contained, and exclude Git metadata and credential-like paths/content.
+Plan Review's “Start revised run” uses the canonical Start composer and restores both the revised
+request and its project/repository scope; it no longer falls through the project landing redirect.
+Exact HTTP paths in a submitted request retain their namespace through planning: `/route` and
+`/api/route` are distinct producer contracts, and an added or removed `/api` prefix is rejected
+before approval or code-generation spend. Web Agent streaming also treats a parsed terminal `done`
+as authoritative when a proxy resets the connection immediately afterward.
 
 The BUILD planner preserves exact behavioral clauses, keeps focused maintained tests with the
 production task they verify, and bounds task breadth to avoid one runaway worker context. Workers

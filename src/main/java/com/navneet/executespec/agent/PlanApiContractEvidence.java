@@ -253,6 +253,18 @@ final class PlanApiContractEvidence {
     return normalized.isBlank() || normalized.equals("/") ? "/api" : "/api" + normalized;
   }
 
+  /** Canonical route identity that deliberately retains the public namespace. */
+  static String canonicalIdentityPath(String raw) {
+    String path = safe(raw).trim().toLowerCase(Locale.ROOT);
+    int query = path.indexOf('?');
+    if (query >= 0) path = path.substring(0, query);
+    path = path.replaceAll("//+", "/").replaceAll("/+$", "");
+    path = path.replaceAll("/:([a-z_][a-z0-9_]*)", "/{$1}");
+    path = path.replaceAll("\\{[a-z_][a-z0-9_]*}", "{id}");
+    if (!path.startsWith("/")) path = "/" + path;
+    return path.isBlank() ? "/" : path;
+  }
+
   static boolean related(ApiEvidence left, ApiEvidence right) {
     if (left.path().equals(right.path())) return true;
     int shared = overlap(left.domainTokens(), right.domainTokens());

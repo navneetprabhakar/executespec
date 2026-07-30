@@ -1991,7 +1991,7 @@ public class RunOrchestrator implements RunControlPort {
           return;
         }
         try {
-          plan = TaskExecutionBriefCompiler.compileExecutable(plan);
+          plan = TaskExecutionBriefCompiler.compileExecutable(plan, userRequest);
         } catch (RuntimeException executablePlanInternalEx) {
           boolean contractRejection =
               PlannerFailureDiagnostic.isExecutableContractRejection(executablePlanInternalEx);
