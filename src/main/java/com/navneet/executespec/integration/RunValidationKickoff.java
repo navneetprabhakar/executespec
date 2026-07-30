@@ -65,6 +65,7 @@ class RunValidationKickoff {
   private final WorkflowConfigEvidenceInspector workflowConfigEvidenceInspector;
   private final DeterministicHttpRequirementVerifier deterministicHttpRequirementVerifier;
   private final BrownfieldHttpContractGuard brownfieldHttpContractGuard;
+  private final RunValidationFailureReporter failureReporter;
 
   java.util.Optional<ValidationReport> generateValidationReport(
       String runId, ExecutionResult execResult, ReviewerResult reviewResult, Plan plan) {
@@ -363,6 +364,9 @@ class RunValidationKickoff {
           operation = null;
         }
       }
+      if (savedReport.isPresent()) {
+        failureReporter.clear(runId);
+      }
       log.info("RunOrchestrator run={} validation report generated", runId);
       return savedReport;
     } catch (Exception e) {
@@ -373,9 +377,14 @@ class RunValidationKickoff {
           e.addSuppressed(terminalFailure);
         }
       }
+      failureReporter.report(runId, e, operationPhase);
       log.warn("RunOrchestrator run={} validation report failed: {}", runId, e.getMessage(), e);
       return java.util.Optional.empty();
     }
+  }
+
+  String persistedFailureReason(String runId, String statusReason) {
+    return failureReporter.persistedReasonWhenUnavailable(runId, statusReason);
   }
 
   private static List<WorkerReport> workerProvenanceClaims(ExecutionResult result) {

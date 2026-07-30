@@ -3232,6 +3232,8 @@ public class RunOrchestrator implements RunControlPort {
     // overwrite a user CANCELLED state after the cancel endpoint has already emitted its terminal
     // event. Once this claim succeeds, cancel() observes a terminal status and returns false;
     // when cancellation wins, the claim returns zero and this method must preserve that status.
+    String persistedValidationFailure =
+        validationKickoff.persistedFailureReason(runId, statusReason);
     int terminalClaim =
         statusReason == null && !"FAILED".equals(finalStatus)
             ? runRepo.claimTerminalTransitionPreservingReasons(runId, finalStatus, Instant.now())
@@ -3239,7 +3241,7 @@ public class RunOrchestrator implements RunControlPort {
                 runId,
                 finalStatus,
                 statusReason,
-                "FAILED".equals(finalStatus) ? note : null,
+                "FAILED".equals(finalStatus) ? note : persistedValidationFailure,
                 Instant.now());
     runRepo
         .findById(runId)

@@ -126,7 +126,8 @@ public class ProjectGeneratedDocJobWorker {
             lease.job().id(),
             lease.job().projectId(),
             errorCode(failure),
-            failure.getClass().getSimpleName());
+            failure.getClass().getSimpleName(),
+            failure);
       }
     } finally {
       heartbeat.cancel(false);

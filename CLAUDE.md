@@ -37,7 +37,18 @@ workflow/config plus exact build/test command evidence. SCM publication and perm
 require that generation to remain current plus explicit passing build and execution-verified tests.
 Generated-document retries with ambiguous provider outcomes require explicit confirmation rather
 than risking duplicate spend; V363 widens the job status column before adding
-`NEEDS_CONFIRMATION`.
+`NEEDS_CONFIRMATION`. Anthropic text responses are assembled across every returned generation, and
+new generated-document rows are flushed before the same transaction binds the durable job result,
+so multi-block output is not misclassified as empty and PostgreSQL never observes a dangling result
+foreign key.
+
+Run-end validation failures remain publication-blocking and now persist a bounded
+`VALIDATION_FAILED[code]: reason` diagnostic plus a typed `VALIDATION_FAILED` SSE event; terminal
+`VALIDATION_REPORT_UNAVAILABLE` no longer erases the failing deterministic gate; diagnostics are
+secret-redacted before persistence or SSE publication. Project-run previews resolve an exact
+single linked checkout beneath `repos/<name>` with symlink containment, then copy it into an
+isolated build context so generated Docker/Compose files cannot dirty validation-bound source;
+legacy zero-snapshot runs stage the root workspace and multi-repository previews fail explicitly.
 
 ### V2 pipeline (the only execution path)
 
@@ -437,6 +448,12 @@ Project memory (`memory/`): every completed project-scoped run appends a digest 
 Codemap generation fails closed when the source inventory cannot be read. An SCM outage, credential failure or rate limit must not be persisted as a valid empty codemap/architecture input.
 
 Project chat (`memory/ProjectChatService`): compaction (summarise older N messages, keep last 6 verbatim) + reset + per-bubble copy + branch override on launch. Async-dispatched apply-suggestion uses a dedicated `applyExecutor` (4 threads) so the worker loop does not burn a Tomcat handler thread. `memory/chattools/ProjectChatTools` retains the complete implementation library, but every chat model receives only pure `PROJECT_READ` callbacks: repo/run/PR/memory/architecture reads, generated-document reads, tech-debt summaries, and exact repository search. Semantic code/document search is classified as paid analysis and is not model-bound until it has its own scoped protocol. Explicit architecture generation, document generation, and Code Review use the separate V292 confirmation endpoints below. Architecture, memory, and admitted reference context are auto-injected; repository SYMBOL matching remains deterministic Java/TypeScript/Python heuristics rather than a language-aware call graph. Every paid project/spec/agent chat turn resolves an immutable `ProjectChatPolicy` with actor/tenant/role/capability/provider/model/key-source/budget/confirmation/trust/audit evidence plus an exact V282 reference; its guard revalidates before every model round and tool invocation, and `PROJECT_VIEWER` cannot spend.
+Exact project-chat repository search uses `CodeIndexWorkspaceIdentity` plus
+`CodeIndexWorkspaceMaterializer`: project/repository/full-revision identities are single-flight,
+cloned into a temporary directory, revision-pinned, and atomically published. Poisoned partial
+clones are replaced, source failures remain structured, and the clone-only path creates no
+pipeline-run evidence. Project-scoped Web Agent turns derive provider-specific GitHub or Bitbucket
+credentials from the authenticated server-side principal and never cross-send them.
 
 **V292 Project Chat confirmations:** the model loop remains read-only. Web and CLI/OpenTUI expose explicit human actions for `REGENERATE_ARCHITECTURE`, `GENERATE_PROJECT_DOC`, and `RUN_CODE_REVIEW`; these are not model-generated proposals. `GET /api/projects/{id}/chat/info` supplies the org-override-aware model for each action. Issue/consume binds actor, host org, project, action, exact provider/model, canonical target and hard budget into a hashed, expiring one-shot grant; the plaintext bearer is returned once and held in client memory only. Confirmed execution pins that exact route with no adaptive switch or failover, including async Code Review, attributes usage to the initiating actor while resolving the host project's credential subject, and returns 503 if the route cannot be honored. Shared action caps are architecture **1,000,000 tokens / $10 / 64 provider calls**, generated doc **200,000 / $3 / 2**, and code review **300,000 / $5 / 2**. V292 also makes `activity_audit` append-only in PostgreSQL and serializes hash-chain appends with a transaction advisory lock.
 
@@ -1038,7 +1055,11 @@ REST submits, forks and agent submissions always take the human gate. `POST /api
 inherits `executionMode` (the PRODUCTION/PROTOTYPE governance axis) instead of
 `approvedExecutionMode` (the REALTIME/BATCH scheduling axis) — the confusion meant every fork
 persisted "REALTIME", failed the exact-`PRODUCTION` gate test, and executed unapproved; forks also
-preserve the source run's exact repository selection and its (now durable, V315) `tdd_mode`.
+preserve the source run's exact repository selection and its (now durable, V315) `tdd_mode`. The
+optional fork body accepts `aiProvider`; changing provider clears the inherited planner-model pin
+so provider retries reuse the persisted project/repository scope without carrying an incompatible
+model identifier across providers. Forks also retain the customer's durable no-auto-push intent and
+explicit cost ceiling.
 `POST /api/runs/{id}/approve` accepts an optional `planFingerprint` (SHA-256 of the persisted plan
 JSON) and rejects a mismatch with 409, because `creditsConfirmed` is a price check, not a plan
 identity. V348 records omission as absent/null rather than a successful match; supplied values must
