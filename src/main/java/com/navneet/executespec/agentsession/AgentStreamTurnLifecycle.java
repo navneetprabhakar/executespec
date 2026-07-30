@@ -42,7 +42,8 @@ class AgentStreamTurnLifecycle {
     if (!"STREAMING".equals(turn.getStatus())) {
       return;
     }
-    turn.setAssistantSummary(AgentText.firstNonBlank(assistantSummary, turn.getAssistantSummary()));
+    setAssistantContent(
+        turn, AgentText.firstNonBlank(assistantSummary, turn.getAssistantSummary()));
     turn.setInputTokens(cost == null ? 0 : cost.inputTokens());
     turn.setOutputTokens(cost == null ? 0 : cost.outputTokens());
     turn.setReasoningTokens(cost == null ? 0 : cost.reasoningTokens());
@@ -80,8 +81,8 @@ class AgentStreamTurnLifecycle {
                 return;
               }
               turn.setStatus("ERROR");
-              turn.setAssistantSummary(
-                  AgentText.firstNonBlank(message, turn.getAssistantSummary()));
+              setAssistantContent(
+                  turn, AgentText.firstNonBlank(message, turn.getAssistantSummary()));
               if (cost != null) {
                 turn.setInputTokens(cost.inputTokens());
                 turn.setOutputTokens(cost.outputTokens());
@@ -144,16 +145,17 @@ class AgentStreamTurnLifecycle {
       AgentSessionService.StreamTurnContext ctx,
       String partialSummary,
       RunCostTracker.Snapshot cost) {
-    String boundedPartial = boundPartialSummary(partialSummary);
+    String exactPartial = blankToNull(partialSummary);
     turnRepo
         .findById(ctx.turnId())
         .ifPresent(
             turn -> {
               if ("STREAMING".equals(turn.getStatus())) {
                 turn.setStatus("CANCELLED");
-                turn.setAssistantSummary(
+                setAssistantContent(
+                    turn,
                     AgentText.firstNonBlank(
-                        boundedPartial == null ? "Stream disconnected." : boundedPartial,
+                        exactPartial == null ? "Stream disconnected." : exactPartial,
                         turn.getAssistantSummary()));
                 if (cost != null) {
                   turn.setInputTokens(cost.inputTokens());
@@ -169,8 +171,10 @@ class AgentStreamTurnLifecycle {
             });
     Map<String, Object> payload = new LinkedHashMap<>();
     payload.put("message", "client disconnected");
-    payload.put("partial", boundedPartial != null);
-    if (boundedPartial != null) payload.put("partialSummary", boundedPartial);
+    payload.put("partial", exactPartial != null);
+    if (exactPartial != null) {
+      payload.put("partialSummary", AgentTranscriptContent.eventPreview(exactPartial));
+    }
     if (cost != null) {
       payload.put("inputTokens", cost.inputTokens());
       payload.put("outputTokens", cost.outputTokens());
@@ -181,9 +185,16 @@ class AgentStreamTurnLifecycle {
     eventRecorder.append(ctx.sessionId(), ctx.turnId(), "STREAM_DISCONNECTED", payload);
   }
 
-  private static String boundPartialSummary(String value) {
-    if (value == null || value.isBlank()) return null;
-    int maxChars = 16_000;
-    return value.length() <= maxChars ? value : value.substring(0, maxChars);
+  static void setAssistantContent(AgentTurn turn, String content) {
+    turn.setAssistantSummary(content);
+    AgentTranscriptContent.Metadata metadata = AgentTranscriptContent.metadata(content);
+    turn.setAssistantCharCount(metadata.chars());
+    turn.setAssistantByteCount(metadata.bytes());
+    turn.setAssistantLineCount(metadata.lines());
+    turn.setAssistantSha256(metadata.sha256());
+  }
+
+  private static String blankToNull(String value) {
+    return value == null || value.isBlank() ? null : value;
   }
 }

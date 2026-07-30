@@ -73,6 +73,26 @@ class AgentSessionReadServiceTest {
   }
 
   @Test
+  void listCanIncludeArchivedSessionsWithLifecycleMetadata() {
+    AgentSession archived = session("archived", "u1");
+    archived.setStatus("ARCHIVED");
+    archived.setArchivedAt(java.time.Instant.parse("2026-07-29T01:02:03Z"));
+    archived.setArchivedByUserId("u1");
+    archived.setArchiveReason("finished");
+    when(sessionRepo.findByUserIdAndStatusInOrderByUpdatedAtDesc(
+            eq("u1"), eq(List.of("ACTIVE", "ARCHIVED")), any(Pageable.class)))
+        .thenReturn(List.of(archived));
+    when(turnRepo.findLatestLinkedRunTurnsBySessionIds(List.of("archived"))).thenReturn(List.of());
+
+    var sessions = service.listSessions(user(), 25, true);
+
+    assertThat(sessions).hasSize(1);
+    assertThat(sessions.getFirst().status()).isEqualTo("ARCHIVED");
+    assertThat(sessions.getFirst().archivedByUserId()).isEqualTo("u1");
+    assertThat(sessions.getFirst().archiveReason()).isEqualTo("finished");
+  }
+
+  @Test
   void listsLatestLinkedRunSummaryForSessionRows() {
     when(sessionRepo.findByUserIdAndStatusOrderByUpdatedAtDesc(
             eq("u1"), eq("ACTIVE"), any(Pageable.class)))
@@ -357,6 +377,36 @@ class AgentSessionReadServiceTest {
     assertThat(turns).extracting("turnId").containsExactly("t2", "t3");
     assertThat(turns.get(0).route()).isEqualTo("PLAN_ONLY");
     assertThat(turns.get(1).route()).isEqualTo("READ_ONLY_CODE_HELP");
+  }
+
+  @Test
+  void turnPageReportsArchivedLifecycleAndExplicitContinuationCursor() {
+    AgentSession archived = session("s1", "u1");
+    archived.setStatus("ARCHIVED");
+    archived.setArchivedAt(java.time.Instant.parse("2026-07-29T01:02:03Z"));
+    when(sessionRepo.findById("s1")).thenReturn(Optional.of(archived));
+    when(turnRepo.findBySessionIdOrderBySequenceDesc(eq("s1"), any(Pageable.class)))
+        .thenReturn(List.of(turn("t4", 4, "fourth"), turn("t3", 3, "third")));
+    when(turnRepo.countBySessionId("s1")).thenReturn(4L);
+
+    var page = service.turnPage("s1", null, 2, user());
+
+    assertThat(page.turns()).extracting("turnId").containsExactly("t3", "t4");
+    assertThat(page.totalTurns()).isEqualTo(4);
+    assertThat(page.hasMore()).isTrue();
+    assertThat(page.nextBeforeTurnId()).isEqualTo("t3");
+    assertThat(page.sessionState()).isEqualTo("ARCHIVED");
+    assertThat(page.archived()).isTrue();
+  }
+
+  @Test
+  void invalidTurnCursorFailsInsteadOfSilentlyReturningLatestPage() {
+    when(sessionRepo.findById("s1")).thenReturn(Optional.of(session("s1", "u1")));
+    when(turnRepo.findById("not-in-session")).thenReturn(Optional.empty());
+
+    assertThatThrownBy(() -> service.turnPage("s1", "not-in-session", 50, user()))
+        .isInstanceOf(ResponseStatusException.class)
+        .hasMessageContaining("turn cursor is not in this session");
   }
 
   private static AgentSession session(String id, String userId) {

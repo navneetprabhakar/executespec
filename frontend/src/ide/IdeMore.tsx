@@ -1,5 +1,5 @@
-import {useEffect, useMemo, useState} from 'react';
-import {Link, useNavigate} from 'react-router-dom';
+import {useCallback, useEffect, useMemo, useState} from 'react';
+import {Link, useNavigate, useSearchParams} from 'react-router-dom';
 import * as api from '@/lib/api';
 import {useAuthStore, selectNormalizedTier, selectIsSuperAdmin} from '@/stores/useAuthStore';
 import {useUiStore} from '@/stores/useUiStore';
@@ -18,6 +18,7 @@ import {
   developerRows,
   filterRuns,
   isLiveStatus,
+  isDeploymentTerminal,
   limitRows,
   notificationChannelLabel,
   notificationPreferenceLabel,
@@ -778,6 +779,8 @@ export function IdeAccount() {
 // Permanent Cloud Run deployments promoted from runs; the deploy itself is
 // initiated from a run's result page ("Deploy to Cloud Run").
 export function IdeDeployments() {
+  const [searchParams] = useSearchParams();
+  const runId = searchParams.get('runId') || undefined;
   const [items, setItems] = useState<api.DeploymentSummary[] | null>(null);
   const [busy, setBusy] = useState('');
   const [msg, setMsg] = useState('');
@@ -793,9 +796,9 @@ export function IdeDeployments() {
     confirmLabel: string;
   } | null>(null);
 
-  function load() {
+  const load = useCallback(() => {
     api
-      .getDeployments()
+      .getDeployments(runId)
       .then((d) => {
         setLoadErr('');
         setItems(d);
@@ -806,11 +809,19 @@ export function IdeDeployments() {
         );
         setItems([]);
       });
-  }
+  }, [runId]);
   useEffect(() => {
     load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [load]);
+
+  // Deployment creation is asynchronous. Keep the customer on a run-scoped endpoint (read access
+  // is sufficient) and refresh while any row can still advance; org-wide history remains an admin
+  // view. This makes "Track deployment" a live contract instead of a one-time snapshot.
+  useEffect(() => {
+    if (!items?.some((item) => !isDeploymentTerminal(item.status))) return;
+    const id = window.setInterval(load, 5_000);
+    return () => window.clearInterval(id);
+  }, [items, load]);
 
   async function act(key: string, fn: () => Promise<unknown>) {
     setBusy(key);
@@ -830,7 +841,9 @@ export function IdeDeployments() {
     <div className='ide-pane'>
       <h1 className='ide-h1'>Deployments</h1>
       <div className='ide-sub'>
-        Permanent Cloud Run services promoted from completed work. Deploy from a result page.
+        {runId
+          ? 'Tracking permanent Cloud Run services for this work. Status refreshes while provisioning.'
+          : 'Permanent Cloud Run services promoted from completed work. Deploy from a result page.'}
       </div>
       <GcpCredentialPanel variant='ide' />
       {msg && (
@@ -841,7 +854,12 @@ export function IdeDeployments() {
       {items === null ? (
         <IdeLoader label='Loading deployments…' />
       ) : loadErr ? (
-        <div className='ide-empty'>Could not load deployments. {loadErr}</div>
+        <div className='ide-empty'>
+          Could not load deployments. {loadErr}{' '}
+          <button className='ide-btn ghost' type='button' onClick={load}>
+            Retry
+          </button>
+        </div>
       ) : items.length === 0 ? (
         <div className='ide-empty'>No permanent deployments yet.</div>
       ) : (

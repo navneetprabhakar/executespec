@@ -820,6 +820,8 @@ function IdeProjectRunsInner() {
   const [runsFailure, setRunsFailure] = useState<LoadFailure | null>(null);
   const [filter, setFilter] = useState<RunFilter>('all');
   const [prs, setPrs] = useState<Array<Record<string, unknown>> | null>(null);
+  const [prsFailure, setPrsFailure] = useState<LoadFailure | null>(null);
+  const [prsNonce, setPrsNonce] = useState(0);
   const [linkedRepos, setLinkedRepos] = useState<ProjectRepoLink[]>([]);
   const [prBusy, setPrBusy] = useState<string | null>(null);
   // C8 — credit-spending dispatch awaiting confirmation (PR-card "Autofix review").
@@ -864,15 +866,16 @@ function IdeProjectRunsInner() {
         .then((d) => {
           if (cancelled) return;
           setPrs(openPrsFromDashboard(d));
+          setPrsFailure(null);
         })
-        .catch(() => {
-          if (!cancelled) setPrs([]);
+        .catch((e: unknown) => {
+          if (!cancelled) setPrsFailure(toLoadFailure(e));
         });
     }
     return () => {
       cancelled = true;
     };
-  }, [projectId, sub, prs]);
+  }, [projectId, sub, prs, prsNonce]);
 
   // PR review admission is repository-id based. Resolve the dashboard's display-only
   // repoFullName through the project's linked repo rows before rendering a paid review action.
@@ -1168,7 +1171,16 @@ function IdeProjectRunsInner() {
               {prBusy === 'refresh' ? 'Refreshing…' : 'Refresh PRs'}
             </button>
           </div>
-          {prs === null ? (
+          {prsFailure ? (
+            <LoadError
+              failure={prsFailure}
+              what='pull requests'
+              onRetry={() => {
+                setPrs(null);
+                setPrsNonce((n) => n + 1);
+              }}
+            />
+          ) : prs === null ? (
             <IdeLoader label='Loading pull requests…' />
           ) : prs.length === 0 ? (
             <div className='ide-empty'>

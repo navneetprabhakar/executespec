@@ -117,7 +117,7 @@ public class ExecutionPipelineSubmissionService {
                       null,
                       false,
                       new RunOrchestrator.SubmitPolicy(
-                          null, false, execution.getOrgId(), actor.getUser().getOrgId())));
+                          null, false, execution.getOrgId(), actor.getUser().getOrgId(), null)));
     } catch (RuntimeException submissionFailure) {
       // Any exception escaping submitRun occurs before it returns the registered async future. If
       // the initial row was already persisted, fence it now so a same-process retry cannot mistake

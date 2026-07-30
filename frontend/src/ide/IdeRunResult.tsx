@@ -1499,7 +1499,11 @@ export default function IdeRunResult() {
                     onConfirm: () =>
                       action(
                         'deploy',
-                        () => api.createDeployment({runId}),
+                        async () => {
+                          const deployment = await api.createDeployment({runId});
+                          navigate(`/deployments?runId=${encodeURIComponent(runId)}`);
+                          return deployment;
+                        },
                         (r) =>
                           `Deployed: ${(r as {serviceUrl?: string})?.serviceUrl || 'provisioning'}`,
                       ),
@@ -2123,6 +2127,20 @@ export default function IdeRunResult() {
                       <div style={{fontSize: 12, color: 'var(--ide-fg-muted)', marginTop: 6}}>
                         {safeSummary}
                       </div>
+                      <div
+                        className='ide-mono'
+                        style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 4}}
+                      >
+                        {(t.complexity || 'complexity pending').toUpperCase()} ·{' '}
+                        {t.routingTaskCategory || 'category pending'} ·{' '}
+                        {t.routingTier || 'tier pending'} ·{' '}
+                        {t.effectiveRouteAttribution === 'LEDGER'
+                          ? `${(t.effectiveProvider || 'unknown').toLowerCase()}/${t.effectiveModel || 'unknown'}`
+                          : t.effectiveRouteAttribution === 'MIXED'
+                            ? 'multiple effective routes'
+                            : `${(t.provider || 'unknown').toLowerCase()}/${t.model || t.assignedModel || 'unknown'} (requested)`}
+                        {t.routeDiverged ? ' · changed during execution' : ''}
+                      </div>
                       {continuationSummary && (
                         <div style={{fontSize: 11, color: 'var(--ide-amber)', marginTop: 4}}>
                           {continuationSummary}
@@ -2150,9 +2168,22 @@ export default function IdeRunResult() {
                           </div>
                         )}
                         <div className='ide-mono'>
-                          Route: {(t.provider || 'unknown').toLowerCase()} ·{' '}
-                          {t.model || t.assignedModel || 'unknown'} ·{' '}
-                          {num(t.inputTokens + t.outputTokens)} tokens
+                          Requested route: {(t.provider || 'unknown').toLowerCase()} ·{' '}
+                          {t.model || t.assignedModel || 'unknown'}
+                        </div>
+                        <div className='ide-mono'>
+                          Effective route:{' '}
+                          {t.effectiveRouteAttribution === 'LEDGER'
+                            ? `${(t.effectiveProvider || 'unknown').toLowerCase()} · ${t.effectiveModel || 'unknown'}`
+                            : t.effectiveRouteAttribution === 'MIXED'
+                              ? 'multiple provider/model routes'
+                              : 'not yet attributed'}{' '}
+                          · {num(t.inputTokens + t.outputTokens)} tokens
+                        </div>
+                        <div>
+                          Routing policy: {t.routingTier || 'pending'} ·{' '}
+                          {t.routingTaskCategory || 'category pending'} ·{' '}
+                          {t.routingSource || 'source pending'}
                         </div>
                         {goalLine && <div>{goalLine}</div>}
                         {approvalReason && (

@@ -11,7 +11,10 @@ import com.navneet.executespec.agentsession.dto.AgentSessionDtos.ActionRecordRes
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.ActionResultRequest;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.AgentActionDescriptor;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.AgentEventReplayResponse;
+import com.navneet.executespec.agentsession.dto.AgentSessionDtos.AgentSessionLifecycleResponse;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.AgentSessionResponse;
+import com.navneet.executespec.agentsession.dto.AgentSessionDtos.AgentSessionRouteRequest;
+import com.navneet.executespec.agentsession.dto.AgentSessionDtos.AgentTurnPage;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.AgentTurnResponse;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.AttachmentResponse;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.CapabilityTool;
@@ -40,6 +43,7 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -62,6 +66,7 @@ public class AgentSessionController {
   private final SubagentExecutionService subagentExecutionService;
   private final ImplementerMutationService implementerMutationService;
   private final ImplementerExecutionService implementerExecutionService;
+  private final AgentSessionLifecycleService lifecycleService;
 
   public AgentSessionController(
       AgentSessionService sessionService,
@@ -77,6 +82,7 @@ public class AgentSessionController {
         subagentExecutionService,
         null,
         null,
+        null,
         null);
   }
 
@@ -89,7 +95,8 @@ public class AgentSessionController {
       SubagentExecutionService subagentExecutionService,
       AgentSessionHistoryService historyService,
       ImplementerMutationService implementerMutationService,
-      ImplementerExecutionService implementerExecutionService) {
+      ImplementerExecutionService implementerExecutionService,
+      AgentSessionLifecycleService lifecycleService) {
     this.sessionService = sessionService;
     this.actionCatalog = actionCatalog;
     this.streamTurnRunner = streamTurnRunner;
@@ -98,6 +105,7 @@ public class AgentSessionController {
     this.historyService = historyService;
     this.implementerMutationService = implementerMutationService;
     this.implementerExecutionService = implementerExecutionService;
+    this.lifecycleService = lifecycleService;
   }
 
   @GetMapping("/actions")
@@ -307,8 +315,10 @@ public class AgentSessionController {
 
   @GetMapping("/sessions")
   public List<AgentSessionResponse> sessions(
-      @AuthenticationPrincipal AppUserDetails user, @RequestParam(defaultValue = "20") int limit) {
-    return sessionService.listSessions(user, limit);
+      @AuthenticationPrincipal AppUserDetails user,
+      @RequestParam(defaultValue = "20") int limit,
+      @RequestParam(defaultValue = "true") boolean includeArchived) {
+    return sessionService.listSessions(user, limit, includeArchived);
   }
 
   @GetMapping("/sessions/{sessionId}")
@@ -316,6 +326,29 @@ public class AgentSessionController {
       @AuthenticationPrincipal AppUserDetails user, @PathVariable String sessionId) {
     return sessionService.getSession(sessionId, user);
   }
+
+  /** Persist conversation-only routing defaults. Generated-code runs keep independent routing. */
+  @PutMapping("/sessions/{sessionId}/route")
+  public AgentSessionResponse updateSessionRoute(
+      @AuthenticationPrincipal AppUserDetails user,
+      @PathVariable String sessionId,
+      @RequestBody AgentSessionRouteRequest request) {
+    return sessionService.updateConversationRoute(sessionId, request, user);
+  }
+
+  /** Non-destructively close/archive a durable conversation. Repeated calls are idempotent. */
+  @PostMapping({"/sessions/{sessionId}/archive", "/sessions/{sessionId}/close"})
+  public AgentSessionLifecycleResponse archiveSession(
+      @AuthenticationPrincipal AppUserDetails user,
+      @PathVariable String sessionId,
+      @RequestBody(required = false) ArchiveSessionRequest request) {
+    if (lifecycleService == null) {
+      throw new IllegalStateException("agent session lifecycle service unavailable");
+    }
+    return lifecycleService.archive(sessionId, request == null ? null : request.reason(), user);
+  }
+
+  record ArchiveSessionRequest(String reason) {}
 
   /** Clear the durable server transcript while retaining the session identity and usage ledger. */
   @org.springframework.web.bind.annotation.DeleteMapping("/sessions/{sessionId}/history")
@@ -351,6 +384,16 @@ public class AgentSessionController {
       @RequestParam(defaultValue = "50") int limit,
       @RequestParam(required = false) String before) {
     return sessionService.listTurns(sessionId, before, limit, user);
+  }
+
+  /** Cursor page with explicit lifecycle, completeness, and continuation metadata. */
+  @GetMapping("/sessions/{sessionId}/turns/page")
+  public AgentTurnPage sessionTurnPage(
+      @AuthenticationPrincipal AppUserDetails user,
+      @PathVariable String sessionId,
+      @RequestParam(defaultValue = "50") int limit,
+      @RequestParam(required = false) String before) {
+    return sessionService.turnPage(sessionId, before, limit, user);
   }
 
   @PostMapping("/v2/sessions/{sessionId}/actions/plan")

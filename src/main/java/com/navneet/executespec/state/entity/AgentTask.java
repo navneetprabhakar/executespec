@@ -87,6 +87,18 @@ public class AgentTask {
   @Column(name = "effective_route_attribution", length = 24)
   private String effectiveRouteAttribution;
 
+  /** V357 — worker tier resolved when this task was dispatched; never inferred on replay. */
+  @Column(name = "routing_tier", length = 24)
+  private String routingTier;
+
+  /** V357 — semantic task category used by routing and continuation policy. */
+  @Column(name = "routing_task_category", length = 48)
+  private String routingTaskCategory;
+
+  /** V357 — durable explanation of which authority selected the requested task route. */
+  @Column(name = "routing_source", length = 48)
+  private String routingSource;
+
   // Tier 5 fields — stuck detection & recovery
   @Column(name = "last_activity_at")
   private Instant lastActivityAt;

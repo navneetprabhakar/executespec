@@ -1,5 +1,5 @@
 import {type UIEvent, useCallback, useEffect, useMemo, useReducer, useRef, useState} from 'react';
-import {useNavigate, useParams} from 'react-router-dom';
+import {useLocation, useNavigate, useParams, useSearchParams} from 'react-router-dom';
 import * as api from '@/lib/api';
 import {
   actionFromTurn,
@@ -18,6 +18,7 @@ import {
   type CloudRunRepoChoice,
   type CloudRunRepoSelection,
 } from '@/ide/agentPanels';
+import {AgentProjectContext} from '@/ide/AgentProjectContext';
 import {agentSessionMatchesScope, selectScopedAgentSession} from '@/ide/agentSession';
 import {
   cloudRunBlockingCopy,
@@ -39,6 +40,8 @@ import {eligibleAgentProviderCatalog, exactModelMatchesProvider} from '@/ide/age
 import {repoDisplayName, repoIdFor} from '@/signal/lib/runUtils';
 import {repoSupports} from '@/ide/projectRepoUi';
 import {friendlyAiFailureMessage} from '@/ide/runResultUtils';
+import {ConfirmModal} from '@/signal/components/Modal';
+import {consumeAgentProjectHandoff, createAgentProjectHandoff} from '@/ide/agentProjectHandoff';
 
 interface RepoBoundaryState {
   actionKey: string | null;
@@ -66,7 +69,9 @@ const EMPTY_REPO_BOUNDARY: RepoBoundaryState = {
 
 export default function IdeAgent() {
   const navigate = useNavigate();
+  const location = useLocation();
   const {projectId, runId} = useParams();
+  const [searchParams] = useSearchParams();
   const [state, dispatch] = useReducer(agentReducer, initialAgentState);
   const abortRef = useRef<AbortController | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
@@ -81,17 +86,52 @@ export default function IdeAgent() {
   const [repoBoundaryReload, setRepoBoundaryReload] = useState(0);
   const [errorRecovery, setErrorRecovery] = useState<AgentErrorRecovery | null>(null);
   const [recovering, setRecovering] = useState(false);
+  const [projects, setProjects] = useState<api.ProjectDto[]>([]);
+  const [projectsLoading, setProjectsLoading] = useState(true);
+  const [projectsError, setProjectsError] = useState<string | null>(null);
+  const [projectQuery, setProjectQuery] = useState('');
+  const [projectReload, setProjectReload] = useState(0);
+  const [hasEarlierTurns, setHasEarlierTurns] = useState(false);
+  const [loadingEarlierTurns, setLoadingEarlierTurns] = useState(false);
+  const [earlierTurnsError, setEarlierTurnsError] = useState<string | null>(null);
+  const [closeTarget, setCloseTarget] = useState<api.AgentSessionResponse | null>(null);
+  const [closingSession, setClosingSession] = useState(false);
   // Isolation is a server capability, never a client-side assumption. Until the
   // capability request explicitly proves it is enabled, describe this surface
   // as the policy-guarded remote workspace it actually is.
   const [remoteSandboxEnabled, setRemoteSandboxEnabled] = useState(false);
   const providerReadiness = useProviderReadiness();
   const eventCursorRef = useRef(0);
+  const handoffHandledRef = useRef<string | null>(null);
   const overlayFocusRef = useRef<HTMLElement | null>(null);
   const stickToBottom = useRef(true);
   const liveRun = useAgentRunStream(state.activeRun);
   const runDetail = liveRun.detail;
   const runCost = liveRun.costUsd;
+
+  useEffect(() => {
+    let cancelled = false;
+    setProjectsLoading(true);
+    setProjectsError(null);
+    void api
+      .getProjects()
+      .then((rows) => {
+        if (!cancelled) setProjects(rows);
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) {
+          setProjectsError(
+            error instanceof Error ? error.message : 'Projects could not be loaded.',
+          );
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setProjectsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectReload]);
 
   useEffect(() => {
     if (typeof api.getRuntimeClientCapabilities !== 'function') return;
@@ -351,8 +391,34 @@ export default function IdeAgent() {
 
   const loadTurns = useCallback(
     async (sessionId: string) => {
-      const rows = await api.listAgentTurns(sessionId, {limit: 50});
+      let rows: api.AgentTurnResponse[];
+      let hasMore: boolean;
+      let loadPage:
+        | ((id: string, options: {limit: number}) => Promise<api.AgentTurnPageResponse>)
+        | undefined;
+      try {
+        loadPage = (
+          api as {
+            listAgentTurnPage?: (
+              id: string,
+              options: {limit: number},
+            ) => Promise<api.AgentTurnPageResponse>;
+          }
+        ).listAgentTurnPage;
+      } catch {
+        // Reduced legacy test clients can throw while reading a missing namespace export.
+      }
+      if (typeof loadPage === 'function') {
+        const page = await loadPage(sessionId, {limit: 100});
+        rows = page.turns;
+        hasMore = page.hasMore;
+      } else {
+        rows = await api.listAgentTurns(sessionId, {limit: 100});
+        hasMore = rows.length === 100;
+      }
       dispatch({type: 'turns:set', turns: rows});
+      setHasEarlierTurns(hasMore);
+      setEarlierTurnsError(null);
       try {
         if (typeof api.replayAgentEvents === 'function') {
           const replay = await replayAllEvents(sessionId);
@@ -371,10 +437,81 @@ export default function IdeAgent() {
   );
 
   const loadSessions = useCallback(async () => {
-    const items = await api.listAgentSessions(25);
+    const items = await api.listAgentSessions(100);
     dispatch({type: 'sessions:set', sessions: items});
     return items;
   }, []);
+
+  const persistConversationRoute = async (provider: string, model: string) => {
+    if (!selected || selected.status !== 'ACTIVE') return;
+    const previousProvider = selectedProvider;
+    const previousModel = selectedModel;
+    setSelectedProvider(provider);
+    setSelectedModel(model);
+    try {
+      await api.updateAgentSessionRoute(selected.id, {
+        provider: provider || null,
+        model: model || null,
+      });
+      await loadSessions();
+    } catch (error) {
+      setSelectedProvider(previousProvider);
+      setSelectedModel(previousModel);
+      dispatch({
+        type: 'error',
+        error:
+          error instanceof Error
+            ? error.message
+            : 'Conversation model preference could not be saved.',
+      });
+    }
+  };
+
+  const loadEarlierTurns = useCallback(async () => {
+    const sessionId = state.selectedId;
+    const before = state.turns[0]?.turnId;
+    if (!sessionId || !before || loadingEarlierTurns) return;
+    setLoadingEarlierTurns(true);
+    setEarlierTurnsError(null);
+    try {
+      let rows: api.AgentTurnResponse[];
+      let hasMore: boolean;
+      let loadPage:
+        | ((
+            id: string,
+            options: {limit: number; before: string},
+          ) => Promise<api.AgentTurnPageResponse>)
+        | undefined;
+      try {
+        loadPage = (
+          api as {
+            listAgentTurnPage?: (
+              id: string,
+              options: {limit: number; before: string},
+            ) => Promise<api.AgentTurnPageResponse>;
+          }
+        ).listAgentTurnPage;
+      } catch {
+        // Reduced legacy test clients can throw while reading a missing namespace export.
+      }
+      if (typeof loadPage === 'function') {
+        const page = await loadPage(sessionId, {limit: 100, before});
+        rows = page.turns;
+        hasMore = page.hasMore;
+      } else {
+        rows = await api.listAgentTurns(sessionId, {limit: 100, before});
+        hasMore = rows.length === 100;
+      }
+      dispatch({type: 'turns:prepend', turns: rows});
+      setHasEarlierTurns(hasMore);
+    } catch (error) {
+      setEarlierTurnsError(
+        error instanceof Error ? error.message : 'Earlier messages could not be loaded.',
+      );
+    } finally {
+      setLoadingEarlierTurns(false);
+    }
+  }, [loadingEarlierTurns, state.selectedId, state.turns]);
 
   const loadManagedAi = useCallback(async () => {
     try {
@@ -415,7 +552,7 @@ export default function IdeAgent() {
       }
       const [sessionRows, gateRows, capabilityRows, managedAi, modelCatalog, userModels] =
         await Promise.all([
-          api.listAgentSessions(25),
+          api.listAgentSessions(100),
           api.listAgentGates(12),
           api.listAgentCapabilities('WEB'),
           api.getManagedAiBalance().catch(() => null),
@@ -472,6 +609,8 @@ export default function IdeAgent() {
   useEffect(() => {
     if (!state.selectedId) {
       dispatch({type: 'turns:set', turns: []});
+      setHasEarlierTurns(false);
+      setEarlierTurnsError(null);
       return;
     }
     void loadTurns(state.selectedId).catch((e) =>
@@ -525,6 +664,38 @@ export default function IdeAgent() {
     [dispatch],
   );
 
+  useEffect(() => {
+    const handoffId = searchParams.get('agentProjectHandoff');
+    if (!projectId || !handoffId) return;
+    if (handoffHandledRef.current === handoffId) return;
+    handoffHandledRef.current = handoffId;
+    const handoff = consumeAgentProjectHandoff(handoffId);
+    if (!handoff) {
+      dispatch({type: 'error', error: 'The project handoff expired. Start again from the agent.'});
+      navigate(`/projects/${projectId}/agent`, {replace: true});
+      return;
+    }
+    dispatch({type: 'input:set', input: handoff.draft});
+    void createSessionForRequest(
+      newAgentSessionRequest({projectId}, {provider: handoff.provider, model: handoff.model}),
+    )
+      .then(() => navigate(`/projects/${projectId}/agent`, {replace: true}))
+      .catch((error: unknown) => {
+        dispatch({
+          type: 'error',
+          error:
+            error instanceof Error ? error.message : 'Project conversation could not be linked.',
+        });
+      });
+  }, [createSessionForRequest, navigate, projectId, searchParams]);
+
+  useEffect(() => {
+    const draft = (location.state as {agentDraft?: unknown} | null)?.agentDraft;
+    if (typeof draft !== 'string') return;
+    dispatch({type: 'input:set', input: draft});
+    navigate(`${location.pathname}${location.search}`, {replace: true, state: null});
+  }, [location.pathname, location.search, location.state, navigate]);
+
   async function createSession() {
     return createSessionForRequest(newAgentSessionRequest(scope));
   }
@@ -534,7 +705,10 @@ export default function IdeAgent() {
   // initial loading. Without this boundary a rejected promise only hits the
   // console and leaves the operator with a button that appears to do nothing.
   async function startNewSession() {
-    const request = newAgentSessionRequest(scope);
+    const request = newAgentSessionRequest(scope, {
+      provider: selectedProvider,
+      model: selectedModel,
+    });
     try {
       await createSessionForRequest(request);
     } catch (e) {
@@ -572,7 +746,7 @@ export default function IdeAgent() {
   }, [fulfilRequest]);
 
   async function ensureSession() {
-    if (selected) return selected;
+    if (selected?.status === 'ACTIVE') return selected;
     return createSession();
   }
 
@@ -893,6 +1067,14 @@ export default function IdeAgent() {
     !!runDetail &&
     !isTerminalRunStatus(runDetail.status) &&
     runDetail.status !== 'AWAITING_APPROVAL';
+  const executionContextLocked =
+    (runDetail != null && !isTerminalRunStatus(runDetail.status)) ||
+    state.status === 'streaming' ||
+    state.status === 'toolRunning' ||
+    state.status === 'runStreaming';
+  const projectContextDisabledReason = executionContextLocked
+    ? 'Project context cannot change while this conversation has an active execution.'
+    : null;
   // The run card owns the active run across every phase; drop it from the inline
   // gate list so a just-submitted run isn't shown twice while it waits for approval.
   const inlineGates = state.gates.filter((g) => g.runId !== state.activeRun);
@@ -902,7 +1084,12 @@ export default function IdeAgent() {
     pendingGateCount: inlineGates.length,
     runActive,
   });
-  const scopeLabel = runId ? `Run ${runId.slice(0, 8)}` : projectId ? 'Project' : null;
+  const currentProject = projects.find((project) => project.id === projectId) ?? null;
+  const scopeLabel = runId
+    ? `Run ${runId.slice(0, 8)}`
+    : projectId
+      ? currentProject?.name || 'Project'
+      : null;
   const runCard = runDetail;
   const onChatScroll = (e: UIEvent<HTMLDivElement>) => {
     const el = e.currentTarget;
@@ -915,6 +1102,62 @@ export default function IdeAgent() {
     stickToBottom.current = true;
     setHasNewActivity(false);
     endRef.current?.scrollIntoView({behavior: 'smooth', block: 'end'});
+  };
+
+  const switchProjectContext = async (targetProjectId: string | null) => {
+    if (projectContextDisabledReason) return;
+    try {
+      const nextScope = targetProjectId ? {projectId: targetProjectId} : {};
+      await createSessionForRequest(
+        newAgentSessionRequest(nextScope, {
+          provider: selectedProvider,
+          model: selectedModel,
+        }),
+      );
+      navigate(targetProjectId ? `/projects/${targetProjectId}/agent` : '/agent', {
+        state: {agentDraft: state.input},
+      });
+    } catch (error) {
+      dispatch({
+        type: 'error',
+        error: error instanceof Error ? error.message : 'Project context could not be changed.',
+      });
+    }
+  };
+
+  const openCanonicalProjectCreation = () => {
+    if (projectContextDisabledReason) return;
+    const handoff = createAgentProjectHandoff({
+      sourceSessionId: state.selectedId,
+      draft: state.input,
+      provider: selectedProvider || null,
+      model: selectedModel || null,
+      returnPath: projectId ? `/projects/${projectId}/agent` : '/agent',
+    });
+    navigate(`/projects?agentProjectHandoff=${encodeURIComponent(handoff.id)}`);
+  };
+
+  const confirmCloseSession = async () => {
+    if (!closeTarget) return;
+    setClosingSession(true);
+    try {
+      await api.closeAgentSession(closeTarget.id);
+      const remaining = (await loadSessions()).filter((session) => session.id !== closeTarget.id);
+      if (state.selectedId === closeTarget.id) {
+        dispatch({
+          type: 'session:select',
+          sessionId: selectScopedAgentSession(remaining, scope)?.id ?? null,
+        });
+      }
+      setCloseTarget(null);
+    } catch (error) {
+      dispatch({
+        type: 'error',
+        error: error instanceof Error ? error.message : 'Conversation could not be closed.',
+      });
+    } finally {
+      setClosingSession(false);
+    }
   };
 
   return (
@@ -946,15 +1189,13 @@ export default function IdeAgent() {
         selectedProvider={selectedProvider}
         selectedModel={selectedModel}
         onProviderChange={(provider) => {
-          setSelectedProvider(provider);
           // Provider choice means provider-default routing. Exact model choice is separate and
           // must never leak from the previously selected provider.
-          setSelectedModel('');
+          void persistConversationRoute(provider, '');
         }}
         onModelChange={(model) => {
-          setSelectedModel(model);
           const owner = availableModels.find((p) => p.models.some((m) => m.id === model));
-          if (owner) setSelectedProvider(owner.id);
+          void persistConversationRoute(owner?.id ?? selectedProvider, model);
         }}
       />
 
@@ -990,6 +1231,23 @@ export default function IdeAgent() {
         </div>
       )}
 
+      {!runId && (
+        <AgentProjectContext
+          currentProject={currentProject}
+          linkedProjectId={projectId}
+          projects={projects}
+          query={projectQuery}
+          loading={projectsLoading}
+          error={projectsError}
+          disabledReason={projectContextDisabledReason}
+          onQueryChange={setProjectQuery}
+          onSelect={(project) => void switchProjectContext(project.id)}
+          onUnlink={() => void switchProjectContext(null)}
+          onCreate={openCanonicalProjectCreation}
+          onRetry={() => setProjectReload((value) => value + 1)}
+        />
+      )}
+
       <AgentChatsDrawer
         open={chatsOpen}
         sessions={state.sessions}
@@ -1016,6 +1274,9 @@ export default function IdeAgent() {
           setChatsOpen(false);
           navigate(`/plan/${id}`);
         }}
+        onCloseSession={setCloseTarget}
+        closeDisabledReason={projectContextDisabledReason}
+        sessionLimitReached={state.sessions.length === 100}
         onClose={() => setChatsOpen(false)}
         remoteSandboxEnabled={remoteSandboxEnabled}
       />
@@ -1056,6 +1317,23 @@ export default function IdeAgent() {
         onOpenGate={(id) => navigate(`/plan/${id}`)}
         onOpenRun={(path) => navigate(path)}
         onStopRun={() => void stopRun()}
+        hasEarlierTurns={hasEarlierTurns}
+        loadingEarlierTurns={loadingEarlierTurns}
+        earlierTurnsError={earlierTurnsError}
+        onLoadEarlierTurns={() => void loadEarlierTurns()}
+      />
+
+      <ConfirmModal
+        open={closeTarget != null}
+        title='Close conversation?'
+        body='This archives the conversation on the server. Messages and run links may remain subject to retention policy; its filesystem is not restorable.'
+        confirmLabel='Close conversation'
+        danger
+        busy={closingSession}
+        onConfirm={confirmCloseSession}
+        onClose={() => {
+          if (!closingSession) setCloseTarget(null);
+        }}
       />
     </div>
   );

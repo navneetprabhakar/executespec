@@ -9,6 +9,7 @@ import java.util.stream.Collectors;
 
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.AgentEventReplayResponse;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.AgentSessionResponse;
+import com.navneet.executespec.agentsession.dto.AgentSessionDtos.AgentTurnPage;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.AgentTurnResponse;
 import com.navneet.executespec.agentsession.dto.AgentSessionDtos.SessionSnapshot;
 import com.navneet.executespec.agentsession.entity.AgentActionEvent;
@@ -42,18 +43,24 @@ class AgentSessionReadService {
   private final PipelineRunRepository pipelineRunRepo;
 
   List<AgentSessionResponse> listSessions(AppUserDetails user, int limit) {
+    return listSessions(user, limit, false);
+  }
+
+  List<AgentSessionResponse> listSessions(AppUserDetails user, int limit, boolean includeArchived) {
     int capped = Math.max(1, Math.min(100, limit));
     String userOrgId = user.getUser().getOrgId();
     // RR-1025 — the base query is (user, status) only, so after an org move/revocation a user could
     // still list prior-org session titles/status/PR URLs. Restrict the result to the caller's
     // current effective tenant before any linked-run projection is loaded.
     List<AgentSession> sessions =
-        sessionRepo
-            .findByUserIdAndStatusOrderByUpdatedAtDesc(
-                user.getUser().getId(), "ACTIVE", PageRequest.of(0, capped))
-            .stream()
-            .filter(session -> belongsToTenant(session, userOrgId))
-            .toList();
+        (includeArchived
+                ? sessionRepo.findByUserIdAndStatusInOrderByUpdatedAtDesc(
+                    user.getUser().getId(),
+                    List.of("ACTIVE", "ARCHIVED"),
+                    PageRequest.of(0, capped))
+                : sessionRepo.findByUserIdAndStatusOrderByUpdatedAtDesc(
+                    user.getUser().getId(), "ACTIVE", PageRequest.of(0, capped)))
+            .stream().filter(session -> belongsToTenant(session, userOrgId)).toList();
     Map<String, PipelineRun> latestRuns = latestLinkedRunsBySessionId(sessions);
     return sessions.stream()
         .map(session -> toResponse(session, latestRuns.get(session.getId())))
@@ -181,24 +188,56 @@ class AgentSessionReadService {
               .findById(beforeTurnId)
               .filter(turn -> sessionId.equals(turn.getSessionId()))
               .map(AgentTurn::getSequence)
-              .orElse(null);
+              .orElseThrow(
+                  () ->
+                      new ResponseStatusException(
+                          HttpStatus.BAD_REQUEST, "turn cursor is not in this session"));
       turns =
-          beforeSequence == null
-              ? turnRepo.findBySessionIdOrderBySequenceDesc(sessionId, PageRequest.of(0, capped))
-              : turnRepo.findBySessionIdAndSequenceLessThanOrderBySequenceDesc(
-                  sessionId, beforeSequence, PageRequest.of(0, capped));
+          turnRepo.findBySessionIdAndSequenceLessThanOrderBySequenceDesc(
+              sessionId, beforeSequence, PageRequest.of(0, capped));
     } else {
       turns = turnRepo.findBySessionIdOrderBySequenceDesc(sessionId, PageRequest.of(0, capped));
     }
     return turns.reversed().stream().map(turnReadModel::toResponse).toList();
   }
 
+  AgentTurnPage turnPage(String sessionId, String beforeTurnId, int limit, AppUserDetails user) {
+    AgentSession session = requireSession(sessionId, user);
+    List<AgentTurnResponse> turns = listTurns(sessionId, beforeTurnId, limit, user);
+    long total = turnRepo.countBySessionId(sessionId);
+    String nextBeforeTurnId = turns.isEmpty() ? null : turns.getFirst().turnId();
+    int oldestSequence =
+        turns.isEmpty() ? 0 : turns.stream().mapToInt(AgentTurnResponse::sequence).min().orElse(0);
+    boolean hasMore = oldestSequence > 1;
+    return new AgentTurnPage(
+        turns,
+        total,
+        hasMore,
+        hasMore ? nextBeforeTurnId : null,
+        session.getStatus(),
+        "ARCHIVED".equals(session.getStatus()),
+        session.getArchivedAt());
+  }
+
   AgentSession requireSession(String sessionId, AppUserDetails user) {
-    AgentSession session =
+    return authorize(
         sessionRepo
             .findById(sessionId)
             .orElseThrow(
-                () -> new ResponseStatusException(HttpStatus.NOT_FOUND, "session not found"));
+                () -> new ResponseStatusException(HttpStatus.NOT_FOUND, "session not found")),
+        user);
+  }
+
+  AgentSession requireSessionForUpdate(String sessionId, AppUserDetails user) {
+    return authorize(
+        sessionRepo
+            .findByIdForUpdate(sessionId)
+            .orElseThrow(
+                () -> new ResponseStatusException(HttpStatus.NOT_FOUND, "session not found")),
+        user);
+  }
+
+  private AgentSession authorize(AgentSession session, AppUserDetails user) {
     if (!user.getUser().getId().equals(session.getUserId())) {
       throw new ResponseStatusException(HttpStatus.FORBIDDEN, "forbidden");
     }
@@ -249,7 +288,10 @@ class AgentSessionReadService {
         latestRun == null ? null : latestRun.getCompletedAt(),
         prUrl,
         s.getCreatedAt(),
-        s.getUpdatedAt());
+        s.getUpdatedAt(),
+        s.getArchivedAt(),
+        s.getArchivedByUserId(),
+        s.getArchiveReason());
   }
 
   private Map<String, PipelineRun> latestLinkedRunsBySessionId(List<AgentSession> sessions) {

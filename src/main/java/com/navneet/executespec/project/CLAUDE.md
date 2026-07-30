@@ -1,5 +1,21 @@
 # Project source and linking package
 
+## CI failure autofix delivery admission (V359)
+
+`project/pr/CiFailureAutoFixService` derives one immutable finding key from the persisted PR id,
+GitHub check-run id, and head SHA. Before calling `FindingPatchSubmitter`, it acquires
+`ci_failure_delivery_claim` under the existing pessimistic PR-row transaction. The finding key is a
+database primary key, so concurrent webhook redeliveries have one admission winner across JVMs.
+The initial `pipeline_run` insert receives the same `triggered_by_finding` through
+`RunOrchestrator.SubmitPolicy`; there is no post-submit stamping gap. A successful or reused PATCH
+run transitions the exact claim token to DISPATCHED and binds its run id in a separate committed
+transaction. The CLAIMED row and its PR-attempt reservation commit before asynchronous submission,
+so provider work never starts under an uncommitted webhook transaction. A caught submission
+failure transitions that token to FAILED and releases the reservation. FAILED claims, plus expired
+CLAIMED claims with no discoverable run, may be atomically reclaimed. Expired claims first search
+the atomically stamped run marker and bind that run instead of creating a duplicate. Pre-V359
+terminal runs are reconciled through their existing marker before any new PATCH submission.
+
 ## Project Chat confirmed actions (V292)
 
 `project_chat_confirmation` stores only a token digest and canonical secret-free action scope.

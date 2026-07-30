@@ -44,6 +44,18 @@ public class AgentTurn {
   @Column(name = "assistant_summary", columnDefinition = "TEXT")
   private String assistantSummary;
 
+  @Column(name = "assistant_char_count")
+  private Integer assistantCharCount;
+
+  @Column(name = "assistant_byte_count")
+  private Integer assistantByteCount;
+
+  @Column(name = "assistant_line_count")
+  private Integer assistantLineCount;
+
+  @Column(name = "assistant_sha256", length = 64)
+  private String assistantSha256;
+
   @Column(name = "intent_type", nullable = false, length = 48)
   private String intentType;
 

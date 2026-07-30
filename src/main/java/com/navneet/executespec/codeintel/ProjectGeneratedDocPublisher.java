@@ -2,6 +2,7 @@ package com.navneet.executespec.codeintel;
 
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.Consumer;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
 
@@ -44,6 +45,13 @@ final class ProjectGeneratedDocPublisher {
 
   ProjectGeneratedDoc publish(
       ProjectGeneratedDoc candidate, Predicate<ProjectGeneratedDoc> reusableDocument) {
+    return publish(candidate, reusableDocument, ignored -> {});
+  }
+
+  ProjectGeneratedDoc publish(
+      ProjectGeneratedDoc candidate,
+      Predicate<ProjectGeneratedDoc> reusableDocument,
+      Consumer<ProjectGeneratedDoc> publicationFence) {
     Supplier<ProjectGeneratedDoc> persistence =
         () -> {
           projectRepo
@@ -73,7 +81,10 @@ final class ProjectGeneratedDocPublisher {
                           candidate.getSourceShasFingerprint())
                       .filter(doc -> doc.getContent() != null && !doc.getContent().isBlank())
                       .filter(reusableDocument);
-          if (alreadyPersisted.isPresent()) return alreadyPersisted.get();
+          if (alreadyPersisted.isPresent()) {
+            publicationFence.accept(alreadyPersisted.get());
+            return alreadyPersisted.get();
+          }
 
           int nextVersion =
               docRepo
@@ -83,11 +94,29 @@ final class ProjectGeneratedDocPublisher {
                   .orElse(1);
           candidate.setVersion(nextVersion);
           ProjectGeneratedDoc saved = docRepo.save(candidate);
+          publicationFence.accept(saved);
           versionRetention.pruneGeneratedDoc(candidate.getProjectId(), candidate.getDocType());
           return saved;
         };
     return transactionTemplate == null
         ? persistence.get()
         : transactionTemplate.execute(status -> persistence.get());
+  }
+
+  ProjectGeneratedDoc publishValidated(
+      ProjectGeneratedDoc candidate,
+      java.util.Set<String> sourceRepositories,
+      String codemapEvidence,
+      Consumer<ProjectGeneratedDoc> publicationFence) {
+    return publish(
+        candidate,
+        existing ->
+            ProjectGeneratedDocValidator.validate(
+                    existing.getDocType(),
+                    existing.getContent(),
+                    sourceRepositories,
+                    codemapEvidence)
+                .isEmpty(),
+        publicationFence);
   }
 }

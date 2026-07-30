@@ -450,9 +450,7 @@ public class AgentStreamTurnRunner {
   }
 
   private static Map<String, Object> boundedTextPayload(String text) {
-    final int maxChars = 16_000;
-    boolean truncated = text.length() > maxChars;
-    return Map.of("text", truncated ? text.substring(0, maxChars) : text, "truncated", truncated);
+    return AgentTranscriptContent.eventPreview(text);
   }
 
   private static String userFacingStreamError(Throwable error, String provider) {
@@ -507,12 +505,9 @@ public class AgentStreamTurnRunner {
     private final AgentSessionService sessionService;
     private final AgentSessionService.StreamTurnContext ctx;
     private final AgentEventRecorder eventRecorder;
-    // RR-492 — a single bounded streaming buffer. The prior code also appended every full delta to
-    // an unbounded List<String> and joined it as the persisted completion summary, so the 16k audit
-    // bound did not protect the actual completion path. This buffer is both the audit text and the
-    // persisted summary.
+    // The complete provider response is the durable turn body. Only the replay event preview is
+    // bounded; conflating those two concerns silently lost large generated files after reload.
     private final StringBuilder text = new StringBuilder();
-    private boolean textTruncated;
 
     private AccumulatingSink(
         SseEmitter emitter,
@@ -528,10 +523,7 @@ public class AgentStreamTurnRunner {
     @Override
     public void token(String delta) {
       String safeDelta = delta == null ? "" : delta;
-      final int maxChars = 16_000;
-      int remaining = maxChars - text.length();
-      if (remaining > 0) text.append(safeDelta, 0, Math.min(remaining, safeDelta.length()));
-      if (safeDelta.length() > Math.max(remaining, 0)) textTruncated = true;
+      text.append(safeDelta);
       send(emitter, "token", Map.of("delta", safeDelta));
     }
 
@@ -565,10 +557,10 @@ public class AgentStreamTurnRunner {
 
     @Override
     public void done(int turnCount, RunCostTracker.Snapshot cost) {
-      // RR-492 — persist the bounded buffer, never an unbounded join of every delta.
+      // Persist the exact accumulated response; PostgreSQL TEXT is the authoritative transcript.
       sessionService.completeStreamTurn(ctx, text.toString(), cost);
       if (text.length() > 0) {
-        record("TURN_TEXT", Map.of("text", text.toString(), "truncated", textTruncated));
+        record("TURN_TEXT", AgentTranscriptContent.eventPreview(text.toString()));
       }
       Map<String, Object> data = new LinkedHashMap<>();
       data.put("session_id", ctx.sessionId());

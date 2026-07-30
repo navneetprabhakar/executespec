@@ -29,7 +29,6 @@ import {
 import {
   architectureFreshnessBadge,
   contractDetectorSummary,
-  docStamp,
   driftSummaryMessage,
   filterProjectFiles,
   invariantViolationCounts,
@@ -665,7 +664,9 @@ export function IdeProjectCode() {
   // §3.4 Docs (P1) — doc generation in flight; drives the 3s poll below.
   const [genPending, setGenPending] = useState<{
     type: api.GeneratedDocType;
-    baseline: string;
+    jobId: string;
+    provider: string;
+    model: string;
   } | null>(null);
 
   // Browse state
@@ -808,17 +809,11 @@ export function IdeProjectCode() {
     setErr('');
     setMsg('');
     try {
-      // Stamp the current row BEFORE dispatch so the poll below can detect the
-      // fresh generation landing (the row has no status field).
-      const baseline = docStamp((docs || []).find((d) => d.docType === t));
-      await api.generateProjectDoc(projectId, t);
-      setMsg(`${t.toLowerCase()} doc regeneration started.`);
-      setGenPending({type: t, baseline});
-      const [e, s] = await Promise.all([
-        api.getProjectDoc(projectId, 'EXPLANATION').catch(() => null),
-        api.getProjectDoc(projectId, 'SETUP').catch(() => null),
-      ]);
-      setDocs([e, s].filter(Boolean) as api.GeneratedDocRow[]);
+      const job = await api.generateProjectDoc(projectId, t);
+      setMsg(
+        `${t.toLowerCase()} doc generation queued with ${job.provider}/${job.model}. You can navigate away safely.`,
+      );
+      setGenPending({type: t, jobId: job.id, provider: job.provider, model: job.model});
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : 'Doc generation failed.');
     } finally {
@@ -826,32 +821,67 @@ export function IdeProjectCode() {
     }
   }
 
-  // §3.4 Docs (P1) — generation is async and previously never polled, so
-  // "regeneration started" could sit forever. Poll the doc every 3s (max 60)
-  // until a fresh version lands; skipped while the tab is hidden, cleared on
-  // terminal/unmount.
+  // Restore an active durable job after navigation/reload.
+  useEffect(() => {
+    if (!projectId || genPending) return;
+    let cancelled = false;
+    void Promise.allSettled([
+      api.getLatestProjectDocJob(projectId, 'EXPLANATION'),
+      api.getLatestProjectDocJob(projectId, 'SETUP'),
+    ]).then((results) => {
+      if (cancelled) return;
+      const jobs = results
+        .filter(
+          (result): result is PromiseFulfilledResult<api.GeneratedDocJob | null> =>
+            result.status === 'fulfilled',
+        )
+        .map((result) => result.value);
+      const active = jobs.find((job) => job && !job.terminal);
+      if (active) {
+        setGenPending({
+          type: active.docType,
+          jobId: active.id,
+          provider: active.provider,
+          model: active.model,
+        });
+        setMsg(
+          `${active.docType.toLowerCase()} doc generation is ${active.status.toLowerCase()} with ${active.provider}/${active.model}.`,
+        );
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [genPending, projectId]);
+
+  // Poll the durable job rather than guessing completion from a changed document row.
   useEffect(() => {
     if (!genPending || !projectId) return;
-    let polls = 0;
     const id = window.setInterval(() => {
       if (document.hidden) return;
-      polls += 1;
-      if (polls > 60) {
-        setGenPending(null);
-        setMsg('Doc generation is taking longer than expected — check back shortly.');
-        return;
-      }
       void api
-        .getProjectDoc(projectId, genPending.type)
-        .then((row) => {
-          if (row && docStamp(row) !== genPending.baseline) {
-            setDocs((prev) => [...(prev ?? []).filter((d) => d.docType !== genPending.type), row]);
+        .getProjectDocJob(projectId, genPending.type, genPending.jobId)
+        .then(async (job) => {
+          setErr('');
+          if (job.status === 'SUCCEEDED') {
+            const row = await api.getProjectDoc(projectId, genPending.type);
+            if (row) {
+              setDocs((prev) => [
+                ...(prev ?? []).filter((d) => d.docType !== genPending.type),
+                row,
+              ]);
+            }
             setGenPending(null);
             setMsg(`${genPending.type} doc generated.`);
+          } else if (job.status === 'FAILED') {
+            setGenPending(null);
+            setErr(
+              `${job.errorCode || 'GENERATION_FAILED'} · ${job.errorMessage || 'Document generation failed.'}`,
+            );
           }
         })
-        .catch(() => {
-          // Transient poll failure — keep polling until the cap.
+        .catch((e: unknown) => {
+          setErr(e instanceof Error ? e.message : 'Could not refresh document job status.');
         });
     }, 3000);
     return () => window.clearInterval(id);

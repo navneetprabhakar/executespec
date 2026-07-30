@@ -1,6 +1,6 @@
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
-import {analyzeForDeploy, confirmDeploy, getDeployments} from './deploy';
+import {analyzeForDeploy, confirmDeploy, createDeployment, getDeployments} from './deploy';
 
 describe('deployment API contract', () => {
   beforeEach(() => {
@@ -27,6 +27,30 @@ describe('deployment API contract', () => {
         headers: expect.objectContaining({Authorization: 'Bearer test-token'}),
       }),
     );
+  });
+
+  it('scopes deployment collection requests to a run for non-admin tracking', async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(new Response(JSON.stringify([]), {status: 200}));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(getDeployments('run/with spaces')).resolves.toEqual([]);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/deployments?runId=run%2Fwith%20spaces');
+  });
+
+  it('sends the direct-workspace repo mode when promoting a run', async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(new Response(JSON.stringify({id: 'deployment-1'}), {status: 202}));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await createDeployment({runId: 'run-1'});
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/deployments');
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
+      method: 'POST',
+      body: JSON.stringify({repoMode: 'NONE', runId: 'run-1'}),
+    });
   });
 
   it('encodes the run id for deployment analysis', async () => {

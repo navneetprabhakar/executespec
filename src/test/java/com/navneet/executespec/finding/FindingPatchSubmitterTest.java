@@ -73,7 +73,7 @@ class FindingPatchSubmitterTest {
     RunOrchestrator.SubmitPolicy policy = invocation.getArgument(24);
     assertThat(policy.tenantOrgId()).isEqualTo("host-org");
     assertThat(policy.billingOrgId()).isEqualTo("actor-org");
-    assertThat(submitted.getTriggeredByFinding()).isEqualTo(type.name() + ":finding-1");
+    assertThat(policy.triggeredByFinding()).isEqualTo(type.name() + ":finding-1");
   }
 
   @Test
