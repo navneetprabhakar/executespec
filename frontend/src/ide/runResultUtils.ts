@@ -27,6 +27,24 @@ export interface PublicationTrustFact {
   kind: 'ok' | 'warn' | 'bad' | 'neutral';
 }
 
+export type CorrectionEvidenceAction = NonNullable<
+  NonNullable<api.TaskSummary['continuationActions']>[number]
+>;
+
+export function latestCorrectionEvidence(
+  run: Pick<api.RunDetail, 'tasks'> | null | undefined,
+): CorrectionEvidenceAction | null {
+  const corrections = (run?.tasks || [])
+    .flatMap((task) => task.continuationActions || [])
+    .filter(
+      (action) =>
+        action.beforeWorkspaceGeneration ||
+        action.afterWorkspaceGeneration ||
+        (action.code || '').toUpperCase().includes('CORRECTION'),
+    );
+  return corrections.length > 0 ? corrections[corrections.length - 1] : null;
+}
+
 /**
  * Independent trust facts for the publication boundary. No score is used as a proxy for any row:
  * an eligible score cannot hide missing tests, a stale generation, or a route mismatch.
@@ -80,16 +98,7 @@ export function publicationTrustFacts(
     } · ${attempt?.physicalAttemptIds?.length || 0} physical attempt${
       attempt?.physicalAttemptIds?.length === 1 ? '' : 's'
     })`;
-  const correctionActions = tasks
-    .flatMap((task) => task.continuationActions || [])
-    .filter(
-      (action) =>
-        action.beforeWorkspaceGeneration ||
-        action.afterWorkspaceGeneration ||
-        (action.code || '').toUpperCase().includes('CORRECTION'),
-    );
-  const correction =
-    correctionActions.length > 0 ? correctionActions[correctionActions.length - 1] : undefined;
+  const correction = latestCorrectionEvidence(run) || undefined;
   const generationFresh =
     publication?.evidenceWorkspaceGeneration != null &&
     publication.currentWorkspaceGeneration != null &&

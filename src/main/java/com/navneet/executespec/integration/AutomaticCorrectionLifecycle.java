@@ -1,7 +1,5 @@
 package com.navneet.executespec.integration;
 
-import static com.navneet.executespec.integration.RunPipelineSupport.truncate;
-
 import java.nio.file.Path;
 import java.time.Instant;
 
@@ -92,19 +90,27 @@ public class AutomaticCorrectionLifecycle {
           "CORRECTION_REVIEWER_MUTATED_WORKSPACE: read-only reviewer changed the correction"
               + " generation");
     }
-    if (brownfieldHttpContractGuard.hasBaseline(runId)) {
-      brownfieldHttpContractGuard.assertCompatible(runId);
-    }
+    CorrectionResolutionEvidence.ContractValidation contracts =
+        brownfieldHttpContractGuard.hasBaseline(runId)
+            ? CorrectionResolutionEvidence.contracts(
+                brownfieldHttpContractGuard.assertCompatible(runId))
+            : CorrectionResolutionEvidence.ContractValidation.notApplicable();
     CorrectionWorkspaceTransaction.DiffEvidence diff = diffEvidence(checkpoint);
+    WorkflowConfigEvidence workflow = inspectWorkflowConfig(workspaceRoot);
     CorrectionAcceptancePolicy.Decision decision =
         CorrectionAcceptancePolicy.evaluate(
             targetTaskId,
             execution,
             review,
-            inspectWorkflowConfig(workspaceRoot),
+            workflow,
             checkpoint.generation(),
             postReviewerGeneration);
-    return new ReviewAssessment(postReviewerGeneration, diff, decision);
+    return new ReviewAssessment(
+        postReviewerGeneration,
+        diff,
+        decision,
+        CorrectionResolutionEvidence.attemptSnapshot(
+            postReviewerGeneration, execution, review, workflow, contracts));
   }
 
   public void rollbackFailedAttempt(
@@ -122,6 +128,21 @@ public class AutomaticCorrectionLifecycle {
           failure.addSuppressed(diffFailure);
         }
       }
+      String failedGeneration;
+      try {
+        failedGeneration = currentGeneration(checkpoint);
+      } catch (RuntimeException generationFailure) {
+        failure.addSuppressed(generationFailure);
+        failedGeneration = checkpoint.generation();
+      }
+      CorrectionResolutionEvidence.ValidationDelta validationDelta =
+          captureValidationDelta(
+              evidenceCheckpoint,
+              CorrectionResolutionEvidence.failedAttemptSnapshot(
+                  failedGeneration,
+                  failure.getMessage(),
+                  inspectContracts(
+                      evidenceCheckpoint == null ? null : evidenceCheckpoint.runId())));
       rollback(checkpoint);
       restoreEvidence(evidenceCheckpoint);
       recordResolution(
@@ -132,8 +153,8 @@ public class AutomaticCorrectionLifecycle {
           checkpoint.generation(),
           checkpoint.generation(),
           diff,
-          true,
-          false);
+          validationDelta,
+          true);
     } catch (RuntimeException rollbackFailure) {
       rollbackFailure.addSuppressed(failure);
       throw new IllegalStateException(
@@ -151,7 +172,10 @@ public class AutomaticCorrectionLifecycle {
       java.time.Instant previousStartedAt,
       java.time.Instant previousCompletedAt,
       Long previousDurationMs,
-      CorrectionAcceptancePolicy.Decision rejection) {
+      CorrectionAcceptancePolicy.Decision rejection,
+      CorrectionResolutionEvidence.ValidationSnapshot attemptValidation) {
+    CorrectionResolutionEvidence.ValidationDelta validationDelta =
+        captureValidationDelta(evidenceCheckpoint, attemptValidation);
     rollback(checkpoint);
     restoreEvidence(evidenceCheckpoint);
     restoreTask(
@@ -164,8 +188,8 @@ public class AutomaticCorrectionLifecycle {
         checkpoint.generation(),
         checkpoint.generation(),
         diff,
-        true,
-        false);
+        validationDelta,
+        true);
   }
 
   /**
@@ -184,7 +208,7 @@ public class AutomaticCorrectionLifecycle {
       stale.setStatus("STALE");
       validationReportRepository.saveAndFlush(stale);
     }
-    return new EvidenceCheckpoint(runId, previous);
+    return new EvidenceCheckpoint(runId, previous, inspectContracts(runId));
   }
 
   /** Restores the exact validation row that existed before the correction attempt. */
@@ -208,12 +232,62 @@ public class AutomaticCorrectionLifecycle {
     return target;
   }
 
-  public record EvidenceCheckpoint(String runId, ValidationReport previous) {}
+  public record EvidenceCheckpoint(
+      String runId,
+      ValidationReport previous,
+      CorrectionResolutionEvidence.ContractValidation contractsBefore) {
+    public EvidenceCheckpoint(String runId, ValidationReport previous) {
+      this(runId, previous, CorrectionResolutionEvidence.ContractValidation.unknown());
+    }
+  }
+
+  /** Captures regenerated attempt evidence before rollback restores the prior report. */
+  public CorrectionResolutionEvidence.ValidationDelta captureValidationDelta(
+      EvidenceCheckpoint checkpoint) {
+    return captureValidationDelta(checkpoint, null);
+  }
+
+  public CorrectionResolutionEvidence.ValidationDelta captureValidationDelta(
+      EvidenceCheckpoint checkpoint,
+      CorrectionResolutionEvidence.ValidationSnapshot fallbackAfter) {
+    if (checkpoint == null || checkpoint.runId() == null) return null;
+    CorrectionResolutionEvidence.ValidationSnapshot before =
+        CorrectionResolutionEvidence.snapshot(
+            objectMapper, checkpoint.previous(), checkpoint.contractsBefore());
+    ValidationReport current =
+        validationReportRepository.findByRunId(checkpoint.runId()).orElse(null);
+    CorrectionResolutionEvidence.ValidationSnapshot after =
+        current == null || "STALE".equalsIgnoreCase(current.getStatus())
+            ? fallbackAfter
+            : CorrectionResolutionEvidence.snapshot(
+                objectMapper, current, inspectContracts(checkpoint.runId()));
+    return after == null ? null : CorrectionResolutionEvidence.delta(before, after);
+  }
+
+  private CorrectionResolutionEvidence.ContractValidation inspectContracts(String runId) {
+    if (runId == null || runId.isBlank()) {
+      return CorrectionResolutionEvidence.ContractValidation.unknown();
+    }
+    if (!brownfieldHttpContractGuard.hasBaseline(runId)) {
+      return CorrectionResolutionEvidence.ContractValidation.notApplicable();
+    }
+    try {
+      return CorrectionResolutionEvidence.contracts(
+          brownfieldHttpContractGuard.inspectCompatibility(runId));
+    } catch (RuntimeException unavailable) {
+      log.warn(
+          "automatic correction: could not snapshot protected contracts for run {}: {}",
+          runId,
+          unavailable.getMessage());
+      return CorrectionResolutionEvidence.ContractValidation.unknown();
+    }
+  }
 
   public record ReviewAssessment(
       String workspaceGeneration,
       CorrectionWorkspaceTransaction.DiffEvidence diff,
-      CorrectionAcceptancePolicy.Decision decision) {}
+      CorrectionAcceptancePolicy.Decision decision,
+      CorrectionResolutionEvidence.ValidationSnapshot attemptValidation) {}
 
   static boolean sameRoute(
       ModelProviderScore candidate, String dispatchedProvider, String dispatchedModel) {
@@ -290,7 +364,7 @@ public class AutomaticCorrectionLifecycle {
       String beforeGeneration,
       String afterGeneration) {
     recordResolution(
-        taskKey, status, code, reason, beforeGeneration, afterGeneration, null, false, false);
+        taskKey, status, code, reason, beforeGeneration, afterGeneration, null, null, false);
   }
 
   public void recordResolution(
@@ -301,8 +375,8 @@ public class AutomaticCorrectionLifecycle {
       String beforeGeneration,
       String afterGeneration,
       CorrectionWorkspaceTransaction.DiffEvidence diffEvidence,
-      boolean evidenceInvalidated,
-      boolean validationRegenerated) {
+      CorrectionResolutionEvidence.ValidationDelta validationDelta,
+      boolean evidenceInvalidated) {
     if (taskKey == null || taskKey.isBlank()) {
       return;
     }
@@ -312,21 +386,17 @@ public class AutomaticCorrectionLifecycle {
         return;
       }
       ArrayNode actions = readActions(task.getContinuationActionsJson());
-      ObjectNode resolution = actions.addObject();
-      resolution.put("status", status);
-      resolution.put("decision", "CORRECTION_RESOLUTION");
-      resolution.put("code", code == null ? "CORRECTION_UNKNOWN" : code);
-      resolution.put("reason", reason == null ? "" : truncate(reason, 500));
-      resolution.put("beforeWorkspaceGeneration", beforeGeneration);
-      resolution.put("afterWorkspaceGeneration", afterGeneration);
-      if (diffEvidence != null) {
-        resolution.put("diffDigest", diffEvidence.diffDigest());
-        ArrayNode changedFiles = resolution.putArray("changedFiles");
-        diffEvidence.changedFiles().forEach(changedFiles::add);
-      }
-      resolution.put("evidenceInvalidated", evidenceInvalidated);
-      resolution.put("validationRegenerated", validationRegenerated);
-      resolution.put("attempt", actions.size());
+      CorrectionResolutionEvidence.append(
+          objectMapper,
+          actions,
+          status,
+          code,
+          reason,
+          beforeGeneration,
+          afterGeneration,
+          diffEvidence,
+          validationDelta,
+          evidenceInvalidated);
       task.setContinuationActionsJson(objectMapper.writeValueAsString(actions));
       taskRepository.saveAndFlush(task);
     } catch (Exception persistenceFailure) {

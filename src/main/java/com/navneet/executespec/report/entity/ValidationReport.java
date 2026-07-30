@@ -4,6 +4,9 @@ import java.time.Instant;
 
 import jakarta.persistence.*;
 
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
+
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -189,13 +192,21 @@ public class ValidationReport {
   private String reviewerVerdict;
 
   /**
-   * 0-100 deterministic score derived from final_build_passed + tests_passed/tests_total +
-   * reviewer_verdict - unfixed_critical_penalty. Primary display when the {@code
-   * scoring.v2-verified} feature flag is on; accuracy_score remains available as secondary
-   * "estimated requirement coverage".
+   * 0-100 internal verification summary produced by the active additive or legacy score policy. LLM
+   * judgments may tighten a positive score but cannot create zero; a zero is reserved for an exact
+   * deterministic gate persisted in {@link #scoreZeroCauseJson}.
    */
   @Column(name = "verified_score")
   private Integer verifiedScore;
+
+  /**
+   * V366 — schema-versioned deterministic cause captured at score-generation time when {@link
+   * #verifiedScore} is zero. Null for nonzero and historical/unattributed rows; readers must never
+   * reverse-infer a cause from nearby evidence.
+   */
+  @JdbcTypeCode(SqlTypes.JSON)
+  @Column(name = "score_zero_cause_json", columnDefinition = "jsonb")
+  private String scoreZeroCauseJson;
 
   /**
    * V194 / PR-E Phase A (2026-05-13) — additive rubric companion to {@link #verifiedScore}. 0-100

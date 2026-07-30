@@ -252,6 +252,148 @@ class ValidationReportServiceVerificationLedgerTest {
   }
 
   @Test
+  void ledgerBindsZeroToTheExactDeterministicGate() {
+    ValidationReport report =
+        ValidationReport.builder()
+            .id("vr-zero-bound")
+            .runId("run-zero-bound")
+            .workspaceGeneration("d".repeat(64))
+            .filesGenerated(0)
+            .pipelineResult(PipelineResult.FAILED)
+            .verifiedScore(0)
+            .scoreZeroCauseJson(
+                zeroCauseJson(
+                    "ADDITIVE_V2",
+                    "CODE_DELIVERED",
+                    "validation_report.files_generated",
+                    "No approved product-code diff was captured."))
+            .build();
+
+    VerificationEvidenceDTO cause =
+        find(svc.buildVerificationLedger(report, List.of()), "score-zero-cause");
+
+    assertEquals("FAIL", cause.status());
+    assertEquals("DETERMINISTIC", cause.source());
+    assertEquals("HIGH", cause.confidence());
+    assertTrue(cause.summary().contains("No approved product-code diff was captured"));
+    assertEquals("validation_report.files_generated", cause.artifact());
+    assertEquals("d".repeat(64), cause.workspaceGeneration());
+  }
+
+  @Test
+  void ledgerDoesNotInventACauseForHistoricalOrLlmAttributedZero() {
+    ValidationReport report =
+        ValidationReport.builder()
+            .id("vr-zero-unattributed")
+            .runId("run-zero-unattributed")
+            .workspaceGeneration("f".repeat(64))
+            .filesGenerated(4)
+            .pipelineResult(PipelineResult.NEEDS_ATTENTION)
+            // A nearby deterministic failure must not be claimed as causal when the historical
+            // LLM cap itself could have produced this zero.
+            .finalBuildPassed(false)
+            .testsPassed(4)
+            .testsTotal(4)
+            .reviewerVerdict("CLEAN")
+            .verifiedScore(0)
+            .accuracyJson(
+                """
+                {
+                  "specAdherenceScore": 0,
+                  "missingRequirements": ["LLM-only finding"]
+                }
+                """)
+            .build();
+
+    VerificationEvidenceDTO cause =
+        find(svc.buildVerificationLedger(report, List.of()), "score-zero-cause");
+
+    assertEquals("UNKNOWN", cause.status());
+    assertEquals("INTERNAL_FORMULA", cause.source());
+    assertEquals("LOW", cause.confidence());
+    assertTrue(cause.summary().contains("Deterministic cause unavailable"));
+    assertTrue(cause.summary().contains("no cause was inferred from LLM"));
+  }
+
+  @Test
+  void ledgerUsesOnlyProvenTestExecutionAsAZeroCause() {
+    ValidationReport proven =
+        ValidationReport.builder()
+            .id("vr-zero-tests")
+            .runId("run-zero-tests")
+            .workspaceGeneration("e".repeat(64))
+            .filesGenerated(2)
+            .pipelineResult(PipelineResult.FAILED)
+            .finalBuildPassed(true)
+            .testsPassed(0)
+            .testsTotal(5)
+            .testExecutionVerified(true)
+            .verifiedScore(0)
+            .scoreZeroCauseJson(
+                zeroCauseJson(
+                    "MULTIPLICATIVE_LEGACY",
+                    "TESTS",
+                    "validation_report.tests_passed/tests_total/test_execution_verified",
+                    "The concrete test execution passed 0/5."))
+            .build();
+
+    VerificationEvidenceDTO provenCause =
+        find(svc.buildVerificationLedger(proven, List.of()), "score-zero-cause");
+    assertEquals("DETERMINISTIC", provenCause.source());
+    assertTrue(provenCause.summary().contains("concrete test execution passed 0/5"));
+
+    proven.setTestExecutionVerified(false);
+    proven.setScoreZeroCauseJson(null);
+    VerificationEvidenceDTO unprovenCause =
+        find(svc.buildVerificationLedger(proven, List.of()), "score-zero-cause");
+    assertEquals("UNKNOWN", unprovenCause.status());
+    assertTrue(unprovenCause.summary().contains("cause unavailable"));
+  }
+
+  @Test
+  void ledgerRejectsMalformedOrUnsupportedPersistedZeroCause() {
+    ValidationReport report =
+        ValidationReport.builder()
+            .id("vr-zero-malformed")
+            .runId("run-zero-malformed")
+            .filesGenerated(0)
+            .finalBuildPassed(false)
+            .verifiedScore(0)
+            .scoreZeroCauseJson("{not-json")
+            .build();
+
+    assertEquals(
+        "UNKNOWN",
+        find(svc.buildVerificationLedger(report, List.of()), "score-zero-cause").status());
+    report.setScoreZeroCauseJson(
+        zeroCauseJson("ADDITIVE_V2", "MADE_UP", "validation_report.files_generated", "Invented."));
+    assertEquals(
+        "UNKNOWN",
+        find(svc.buildVerificationLedger(report, List.of()), "score-zero-cause").status());
+  }
+
+  @Test
+  void ledgerTreatsLegacyUnknownFileCountAsUnattributed() {
+    ValidationReport report =
+        ValidationReport.builder()
+            .id("vr-zero-unknown-files")
+            .runId("run-zero-unknown-files")
+            .workspaceGeneration("9".repeat(64))
+            .filesGenerated(-1)
+            .pipelineResult(PipelineResult.FAILED)
+            .verifiedScore(0)
+            .build();
+
+    VerificationEvidenceDTO cause =
+        find(svc.buildVerificationLedger(report, List.of()), "score-zero-cause");
+
+    assertEquals("UNKNOWN", cause.status());
+    assertTrue(cause.summary().contains("cause unavailable"));
+    assertEquals(
+        "UNKNOWN", find(svc.buildVerificationLedger(report, List.of()), "code-delivered").status());
+  }
+
+  @Test
   void ledger_explains_trust_cap() {
     ValidationReport report =
         ValidationReport.builder()
@@ -639,5 +781,13 @@ class ValidationReportServiceVerificationLedgerTest {
         ledger.stream().filter(e -> id.equals(e.id())).findFirst().orElse(null);
     assertNotNull(entry, "missing ledger entry " + id);
     return entry;
+  }
+
+  private static String zeroCauseJson(String formula, String gate, String artifact, String reason) {
+    return """
+{"schemaVersion":1,"formula":"%s","causes":[{"gate":"%s","artifact":"%s","reason":"%s"}]}
+"""
+        .formatted(formula, gate, artifact, reason)
+        .trim();
   }
 }

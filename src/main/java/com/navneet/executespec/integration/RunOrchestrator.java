@@ -3905,7 +3905,8 @@ public class RunOrchestrator implements RunControlPort {
             previousStartedAt,
             previousCompletedAt,
             previousDurationMs,
-            acceptance);
+            acceptance,
+            reviewAssessment.attemptValidation());
         broadcaster.emit(
             runId,
             RunEvent.log(
@@ -3929,6 +3930,8 @@ public class RunOrchestrator implements RunControlPort {
           plan,
           correctionCheckpoint,
           reviewAssessment.workspaceGeneration());
+      CorrectionResolutionEvidence.ValidationDelta correctionValidationDelta =
+          automaticCorrectionLifecycle.captureValidationDelta(correctionEvidenceCheckpoint);
       CorrectionWorkspaceTransaction.Accepted generations =
           automaticCorrectionLifecycle.accept(correctionCheckpoint);
       persistenceWriter.applyExecutionResultToTasks(runId, rerunResult);
@@ -3941,7 +3944,7 @@ public class RunOrchestrator implements RunControlPort {
           generations.beforeGeneration(),
           generations.afterGeneration(),
           correctionDiff,
-          true,
+          correctionValidationDelta,
           true);
       if (postValidationOperation != null) {
         runOperationLifecycle.complete(postValidationOperation);

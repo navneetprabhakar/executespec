@@ -56,6 +56,9 @@ export interface TaskSummary {
         afterWorkspaceGeneration?: string;
         diffDigest?: string;
         changedFiles?: string[];
+        unifiedPatch?: string;
+        patchMetadata?: CorrectionPatchMetadata;
+        validationDelta?: CorrectionValidationDelta;
         evidenceInvalidated?: boolean;
         validationRegenerated?: boolean;
       }[]
@@ -65,6 +68,48 @@ export interface TaskSummary {
   parentTaskId?: string | null;
   subtaskIndex?: number | null;
   subtaskTotal?: number | null;
+}
+
+export interface CorrectionPatchMetadata {
+  capturedBytes?: number;
+  fullBytes?: number;
+  maxBytes?: number;
+  truncated?: boolean;
+  redacted?: boolean;
+}
+
+export interface CorrectionValidationDelta {
+  before?: CorrectionValidationSnapshot | null;
+  after?: CorrectionValidationSnapshot | null;
+  verifiedScoreDelta?: number | null;
+  rubricScoreDelta?: number | null;
+}
+
+export interface CorrectionValidationSnapshot {
+  status?: string | null;
+  workspaceGeneration?: string | null;
+  build?: {verdict?: string | null; passed?: boolean | null; exitCode?: number | null} | null;
+  tests?: {
+    verdict?: string | null;
+    passed?: number | null;
+    total?: number | null;
+    executionVerified?: boolean | null;
+    evidenceScope?: string | null;
+    exitCode?: number | null;
+  } | null;
+  workflow?: {status?: string | null; fileCount?: number; reason?: string | null} | null;
+  reviewer?: {verdict?: string | null} | null;
+  contracts?: {
+    status?: string | null;
+    baselineDigest?: string | null;
+    currentDigest?: string | null;
+    missingCount?: number;
+    addedCount?: number;
+  } | null;
+  score?: {verifiedScore?: number | null; rubricScore?: number | null} | null;
+  pipelineResult?: string | null;
+  executableVerificationStatus?: string | null;
+  executionFailureStage?: string | null;
 }
 
 export interface ContinuationAttemptEvidence {
