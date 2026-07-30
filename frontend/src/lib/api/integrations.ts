@@ -60,12 +60,12 @@ export type ScmPushResult = {
   prUrl: string;
   scmProvider: string;
   message: string;
-  attempted: string;
-  succeeded: string;
-  failed: string;
+  attempted: number;
+  succeeded: number;
+  failed: number;
   code: string;
-  publicationEligible: string;
-  retryable: string;
+  publicationEligible: boolean;
+  retryable: boolean;
   retryGuidance: string;
 };
 

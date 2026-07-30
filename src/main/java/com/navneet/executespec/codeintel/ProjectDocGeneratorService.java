@@ -2,10 +2,7 @@ package com.navneet.executespec.codeintel;
 
 import java.util.List;
 import java.util.Optional;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionException;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.function.Supplier;
+import java.util.UUID;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.agent.LlmRouter;
@@ -73,8 +70,8 @@ public class ProjectDocGeneratorService {
   private final GeneratedSecretScanner secretScanner;
   private final ProjectDocSourceBundleBuilder sourceBundleBuilder;
   private final ProjectGeneratedDocPublisher publisher;
-  private final ConcurrentHashMap<GenerationKey, CompletableFuture<ProjectGeneratedDoc>> inFlight =
-      new ConcurrentHashMap<>();
+  private final ProjectDocSingleFlight<GenerationKey, ProjectGeneratedDoc> singleFlight =
+      new ProjectDocSingleFlight<>();
 
   /** v2.6.4 — compute USD cost from tokens × pricing matrix for the dashboard rollup. */
   private final com.navneet.executespec.cost.RunCostTracker costTracker;
@@ -94,7 +91,8 @@ public class ProjectDocGeneratorService {
       LlmProvider provider,
       String model,
       String actor,
-      String authorityContextId) {}
+      String authorityContextId,
+      String durableJobId) {}
 
   record SourceSection(String heading, String content) {}
 
@@ -283,6 +281,8 @@ public class ProjectDocGeneratorService {
         provider,
         confirmedActionReference,
         null,
+        null,
+        () -> {},
         ignored -> {});
   }
 
@@ -292,9 +292,19 @@ public class ProjectDocGeneratorService {
       String generatedByUser,
       LlmProvider provider,
       String exactModel,
+      UUID durableJobId,
+      Runnable providerDispatchFence,
       java.util.function.Consumer<ProjectGeneratedDoc> publicationFence) {
     return generate(
-        projectId, docType, generatedByUser, provider, null, exactModel, publicationFence);
+        projectId,
+        docType,
+        generatedByUser,
+        provider,
+        null,
+        exactModel,
+        durableJobId == null ? null : durableJobId.toString(),
+        providerDispatchFence,
+        publicationFence);
   }
 
   private ProjectGeneratedDoc generate(
@@ -304,6 +314,8 @@ public class ProjectDocGeneratorService {
       LlmProvider provider,
       LlmExecutionReference confirmedActionReference,
       String exactModelOverride,
+      String durableJobId,
+      Runnable providerDispatchFence,
       java.util.function.Consumer<ProjectGeneratedDoc> publicationFence) {
     Project project =
         projectRepo
@@ -371,8 +383,9 @@ public class ProjectDocGeneratorService {
             resolved.getActualProvider(),
             exactModel,
             generatedByUser,
-            confirmedActionReference == null ? null : confirmedActionReference.contextId());
-    return singleFlight(
+            confirmedActionReference == null ? null : confirmedActionReference.contextId(),
+            durableJobId);
+    return singleFlight.execute(
         generationKey,
         () ->
             generateOnce(
@@ -389,6 +402,7 @@ public class ProjectDocGeneratorService {
                 sourceFingerprint,
                 sourceRepositories,
                 codemapEvidence,
+                providerDispatchFence,
                 publicationFence));
   }
 
@@ -406,6 +420,7 @@ public class ProjectDocGeneratorService {
       String sourceFingerprint,
       java.util.Set<String> sourceRepositories,
       String codemapEvidence,
+      Runnable providerDispatchFence,
       java.util.function.Consumer<ProjectGeneratedDoc> publicationFence) {
     String projectId = project.getId();
     List<Message> initialMessages =
@@ -442,7 +457,8 @@ public class ProjectDocGeneratorService {
             executionReference,
             initialMessages,
             sourceRepositories,
-            codemapEvidence);
+            codemapEvidence,
+            providerDispatchFence);
     String content = generation.content();
     int inTok = generation.inputTokens();
     int outTok = generation.outputTokens();
@@ -482,35 +498,6 @@ public class ProjectDocGeneratorService {
         outTok,
         exactModel);
     return doc;
-  }
-
-  private ProjectGeneratedDoc singleFlight(
-      GenerationKey key, Supplier<ProjectGeneratedDoc> generation) {
-    CompletableFuture<ProjectGeneratedDoc> mine = new CompletableFuture<>();
-    CompletableFuture<ProjectGeneratedDoc> active = inFlight.putIfAbsent(key, mine);
-    if (active != null) {
-      try {
-        return active.join();
-      } catch (CompletionException e) {
-        throw rethrow(e.getCause());
-      }
-    }
-    try {
-      ProjectGeneratedDoc generated = generation.get();
-      mine.complete(generated);
-      return generated;
-    } catch (Throwable failure) {
-      mine.completeExceptionally(failure);
-      throw rethrow(failure);
-    } finally {
-      inFlight.remove(key, mine);
-    }
-  }
-
-  private static RuntimeException rethrow(Throwable failure) {
-    return failure instanceof RuntimeException runtime
-        ? runtime
-        : new IllegalStateException("Project document generation failed", failure);
   }
 
   /**

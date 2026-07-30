@@ -581,6 +581,7 @@ export default function IdePlan() {
           {gateRequiresAck && gate && (
             <PlanContractGateCard
               rows={gate.rows}
+              brownfieldHttpRouteRemovals={gate.brownfieldHttpRouteRemovals}
               typed={breakingAck}
               onTypedChange={setBreakingAck}
               disabled={busy !== ''}

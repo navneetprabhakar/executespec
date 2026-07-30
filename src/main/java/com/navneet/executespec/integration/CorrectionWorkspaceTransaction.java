@@ -88,6 +88,45 @@ public class CorrectionWorkspaceTransaction {
     return new Accepted(checkpoint.generation(), generation);
   }
 
+  /**
+   * Produces deterministic, bounded visibility evidence for the correction without exposing patch
+   * content or changing the index.
+   */
+  public DiffEvidence diffEvidence(Checkpoint checkpoint) {
+    Objects.requireNonNull(checkpoint, "checkpoint");
+    List<String> changedFiles = new ArrayList<>();
+    List<String> contentAddressedTreePairs = new ArrayList<>();
+    for (int i = 0; i < checkpoint.repositories().size(); i++) {
+      RepositoryCheckpoint repository = checkpoint.repositories().get(i);
+      assertHeadUnchanged(repository);
+      String currentTree = writeTree(repository.repository());
+      contentAddressedTreePairs.add(i + "\t" + repository.tree() + "\t" + currentTree);
+      String output =
+          git(
+              repository.repository(),
+              "diff",
+              "--name-status",
+              "--no-renames",
+              repository.tree(),
+              currentTree);
+      if (output.isBlank()) {
+        continue;
+      }
+      for (String row : output.lines().limit(500).toList()) {
+        String[] columns = row.trim().split("\\t");
+        String path = columns.length == 0 ? row.trim() : columns[columns.length - 1];
+        changedFiles.add(i + ":" + path);
+      }
+    }
+    // Git tree object ids are content-addressed over every path, mode and blob. Hashing the exact
+    // before/after tree pair therefore distinguishes two corrections that touch the same filenames
+    // with different bytes without retaining or truncating sensitive patch content.
+    String canonical = String.join("\n", contentAddressedTreePairs);
+    return new DiffEvidence(
+        List.copyOf(changedFiles),
+        org.apache.commons.codec.digest.DigestUtils.sha256Hex(canonical));
+  }
+
   /** Restores every repository to the exact pre-correction tree and original {@code HEAD}. */
   public void rollback(Checkpoint checkpoint) {
     Objects.requireNonNull(checkpoint, "checkpoint");
@@ -280,6 +319,12 @@ public class CorrectionWorkspaceTransaction {
   }
 
   public record Accepted(String beforeGeneration, String afterGeneration) {}
+
+  public record DiffEvidence(List<String> changedFiles, String diffDigest) {
+    public DiffEvidence {
+      changedFiles = changedFiles == null ? List.of() : List.copyOf(changedFiles);
+    }
+  }
 
   public record RepositoryCheckpoint(Path repository, String head, String tree) {}
 

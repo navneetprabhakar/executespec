@@ -2,6 +2,7 @@ package com.navneet.executespec.integration;
 
 import com.navneet.executespec.harness.ExecutionResult;
 import com.navneet.executespec.harness.TaskOutcome;
+import com.navneet.executespec.report.model.WorkflowConfigEvidence;
 import com.navneet.executespec.reviewer.ReviewerResult;
 
 /**
@@ -18,6 +19,25 @@ final class CorrectionAcceptancePolicy {
 
   static Decision evaluate(
       String targetTaskId, ExecutionResult execution, ReviewerResult reviewerResult) {
+    return evaluate(
+        targetTaskId, execution, reviewerResult, WorkflowConfigEvidence.notApplicable());
+  }
+
+  static Decision evaluate(
+      String targetTaskId,
+      ExecutionResult execution,
+      ReviewerResult reviewerResult,
+      WorkflowConfigEvidence workflowConfigEvidence) {
+    return evaluate(targetTaskId, execution, reviewerResult, workflowConfigEvidence, null, null);
+  }
+
+  static Decision evaluate(
+      String targetTaskId,
+      ExecutionResult execution,
+      ReviewerResult reviewerResult,
+      WorkflowConfigEvidence workflowConfigEvidence,
+      String beforeWorkspaceGeneration,
+      String afterWorkspaceGeneration) {
     if (execution == null) {
       return Decision.reject("CORRECTION_EXECUTION_MISSING", "Correction produced no execution");
     }
@@ -67,13 +87,33 @@ final class CorrectionAcceptancePolicy {
       return Decision.reject(
           "CORRECTION_FINAL_TESTS_FAILED", "Correction left the final concrete test suite red");
     }
-    if (reviewerResult.finalTestsTotal() != null
-        && reviewerResult.finalTestsTotal() > 0
-        && (reviewerResult.finalTestsPassed() == null
-            || reviewerResult.finalTestsPassed() < reviewerResult.finalTestsTotal())) {
+    if (reviewerResult.finalTestsTotal() == null || reviewerResult.finalTestsTotal() <= 0) {
+      return Decision.reject(
+          "CORRECTION_FINAL_TESTS_UNPROVEN", "Correction did not execute a real final test suite");
+    }
+    if (reviewerResult.finalTestsPassed() == null
+        || reviewerResult.finalTestsPassed() < reviewerResult.finalTestsTotal()) {
       return Decision.reject(
           "CORRECTION_FINAL_TESTS_UNPROVEN",
           "Correction did not prove every executed final test passed");
+    }
+    if (workflowConfigEvidence == null
+        || workflowConfigEvidence.status() == WorkflowConfigEvidence.Status.UNAVAILABLE) {
+      return Decision.reject(
+          "CORRECTION_WORKFLOW_EVIDENCE_UNAVAILABLE",
+          "Correction did not produce deterministic workflow/config evidence");
+    }
+    if (workflowConfigEvidence.status() == WorkflowConfigEvidence.Status.FAILED) {
+      return Decision.reject(
+          "CORRECTION_WORKFLOW_CONFIG_INVALID",
+          workflowConfigEvidence.reason() == null
+              ? "Correction left invalid workflow/config files"
+              : workflowConfigEvidence.reason());
+    }
+    if (beforeWorkspaceGeneration != null
+        && beforeWorkspaceGeneration.equals(afterWorkspaceGeneration)) {
+      return Decision.reject(
+          "CORRECTION_NO_CHANGE", "Correction produced no workspace content change");
     }
     return new Decision(true, "CORRECTION_ACCEPTED", "Correction passed every promotion gate");
   }

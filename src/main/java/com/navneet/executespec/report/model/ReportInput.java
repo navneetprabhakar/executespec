@@ -34,7 +34,10 @@ public record ReportInput(
      * Null is retained only for compatibility tests and historical generation paths; production
      * run-end validation supplies this value.
      */
-    String workspaceGeneration) {
+    String workspaceGeneration,
+    WorkflowConfigEvidence workflowConfigEvidence,
+    CommandExecutionEvidence buildCommandEvidence,
+    CommandExecutionEvidence testCommandEvidence) {
   /** Backward-compatible constructor for call sites that don't have test data. */
   public ReportInput(
       PipelineRun run,
@@ -43,7 +46,20 @@ public record ReportInput(
       CompileResult compileResult,
       List<AgentTask> tasks) {
     this(
-        run, workerReports, review, compileResult, tasks, null, List.of(), false, null, null, null);
+        run,
+        workerReports,
+        review,
+        compileResult,
+        tasks,
+        null,
+        List.of(),
+        false,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null);
   }
 
   /** Constructor with test data but no afterImprovements flag. */
@@ -64,6 +80,9 @@ public record ReportInput(
         testSummary,
         testResults,
         false,
+        null,
+        null,
+        null,
         null,
         null,
         null);
@@ -90,6 +109,9 @@ public record ReportInput(
         false,
         null,
         bootVerification,
+        null,
+        null,
+        null,
         null);
   }
 
@@ -116,6 +138,39 @@ public record ReportInput(
         generatedAfterImprovements,
         previewUrl,
         bootVerification,
+        null,
+        null,
+        null,
+        null);
+  }
+
+  /** Compatibility constructor retaining the V361 workspace-generation input shape. */
+  public ReportInput(
+      PipelineRun run,
+      List<WorkerReport> workerReports,
+      ReviewReport review,
+      CompileResult compileResult,
+      List<AgentTask> tasks,
+      TestExecutionSummary testSummary,
+      List<TestResult> testResults,
+      boolean generatedAfterImprovements,
+      String previewUrl,
+      BootVerification bootVerification,
+      String workspaceGeneration) {
+    this(
+        run,
+        workerReports,
+        review,
+        compileResult,
+        tasks,
+        testSummary,
+        testResults,
+        generatedAfterImprovements,
+        previewUrl,
+        bootVerification,
+        workspaceGeneration,
+        null,
+        null,
         null);
   }
 }

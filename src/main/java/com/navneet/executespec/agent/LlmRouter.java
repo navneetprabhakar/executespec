@@ -555,7 +555,7 @@ public class LlmRouter {
             keys,
             source);
     if (authorization.modelChanged()) {
-      if (routePolicy.exactLock()) {
+      if (routePolicy.exactLock() || request.strictProvider()) {
         throw new IllegalStateException(
             "Exact run route cannot be changed by managed-AI policy: " + authorization.reason());
       }

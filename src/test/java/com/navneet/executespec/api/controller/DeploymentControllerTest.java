@@ -15,7 +15,9 @@ import com.navneet.executespec.auth.security.RunAccessGuard;
 import com.navneet.executespec.auth.service.TierPermissionService;
 import com.navneet.executespec.auth.service.TierPermissionService.TierPermissions;
 import com.navneet.executespec.config.OperationalReleasePolicy;
+import com.navneet.executespec.contractsurface.BrownfieldHttpContractGuard.ContractCompatibilityException;
 import com.navneet.executespec.deployment.DeploymentService;
+import com.navneet.executespec.integration.scm.PublicationAdmissionService;
 import com.navneet.executespec.state.entity.Deployment;
 import com.navneet.executespec.state.repository.DeploymentRepository;
 
@@ -83,6 +85,75 @@ class DeploymentControllerTest {
     assertThat(response.getStatusCode().value()).isEqualTo(202);
     verify(deploymentService)
         .deploy("run-1", com.navneet.executespec.state.entity.RunRepo.RepoMode.NONE, null, null);
+  }
+
+  @Test
+  void contractCompatibilityFailureHasStableActionablePublicationResponse() {
+    ContractCompatibilityException blocked =
+        new ContractCompatibilityException(
+            "BROWNFIELD_HTTP_CONTRACT_REMOVED",
+            "Publication blocked because POST /simulation/casino-game was removed");
+
+    var response = controller.onContractCompatibilityBlocked(blocked);
+
+    assertThat(response.getStatusCode().value()).isEqualTo(409);
+    assertThat(response.getBody())
+        .containsEntry("error", "publication_blocked")
+        .containsEntry("errorCode", "BROWNFIELD_HTTP_CONTRACT_REMOVED")
+        .containsEntry("eligibility", "BLOCKED")
+        .containsEntry("blockingGate", "PROTECTED_CONTRACTS")
+        .containsEntry("retryable", false);
+    assertThat(response.getBody().get("reason").toString())
+        .contains("POST /simulation/casino-game");
+    assertThat(response.getBody().get("remediation").toString())
+        .contains("Restore")
+        .contains("route-scoped BREAKING approval");
+  }
+
+  @Test
+  void stalePublicationEvidenceSurvivesIllegalStateCatchWithStructuredRetryResponse()
+      throws Exception {
+    when(releasePolicy.deploymentCreationEnabled()).thenReturn(true);
+    when(tierPermissionService.getPermissions("user-1")).thenReturn(permissions(true));
+    PublicationAdmissionService.Eligibility eligibility =
+        new PublicationAdmissionService.Eligibility(
+            false,
+            "BLOCKED",
+            "PUBLICATION_EVIDENCE_STALE",
+            "EVIDENCE_FRESHNESS",
+            "Validation belongs to an older workspace generation",
+            true,
+            "Regenerate validation evidence on the current workspace before retrying deployment.",
+            "a".repeat(64),
+            "b".repeat(64));
+    PublicationAdmissionService.PublicationBlockedException blocked =
+        publicationBlocked(eligibility);
+    when(deploymentService.deploy(
+            "run-1", com.navneet.executespec.state.entity.RunRepo.RepoMode.NONE, null, null))
+        .thenThrow(blocked);
+
+    org.assertj.core.api.Assertions.assertThatThrownBy(
+            () ->
+                controller.deploy(
+                    new DeployRequest("run-1", "NONE", null, null),
+                    principal("user-1", "org-a", "USER")))
+        .isSameAs(blocked);
+
+    var response = controller.onPublicationAdmissionBlocked(blocked);
+
+    assertThat(response.getStatusCode().value()).isEqualTo(409);
+    assertThat(response.getBody())
+        .containsEntry("error", "publication_blocked")
+        .containsEntry("errorCode", "PUBLICATION_EVIDENCE_STALE")
+        .containsEntry("eligibility", "BLOCKED")
+        .containsEntry("blockingGate", "EVIDENCE_FRESHNESS")
+        .containsEntry("retryable", true)
+        .containsEntry("reason", "Validation belongs to an older workspace generation")
+        .containsEntry(
+            "remediation",
+            "Regenerate validation evidence on the current workspace before retrying deployment.")
+        .containsEntry("evidenceWorkspaceGeneration", "a".repeat(64))
+        .containsEntry("currentWorkspaceGeneration", "b".repeat(64));
   }
 
   @Test
@@ -154,6 +225,15 @@ class DeploymentControllerTest {
         .createdAt("2026-06-10T00:00:00Z")
         .ttlExpiresAt("2026-06-10T01:00:00Z")
         .build();
+  }
+
+  private static PublicationAdmissionService.PublicationBlockedException publicationBlocked(
+      PublicationAdmissionService.Eligibility eligibility) throws Exception {
+    var constructor =
+        PublicationAdmissionService.PublicationBlockedException.class.getDeclaredConstructor(
+            PublicationAdmissionService.Eligibility.class);
+    constructor.setAccessible(true);
+    return constructor.newInstance(eligibility);
   }
 
   private static AppUserDetails principal(String userId, String orgId, String globalRole) {

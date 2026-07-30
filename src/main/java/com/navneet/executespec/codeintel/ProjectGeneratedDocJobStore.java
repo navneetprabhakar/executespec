@@ -24,10 +24,11 @@ public class ProjectGeneratedDocJobStore {
     QUEUED,
     RUNNING,
     SUCCEEDED,
-    FAILED;
+    FAILED,
+    NEEDS_CONFIRMATION;
 
     public boolean terminal() {
-      return this == SUCCEEDED || this == FAILED;
+      return this == SUCCEEDED || this == FAILED || this == NEEDS_CONFIRMATION;
     }
   }
 
@@ -46,6 +47,7 @@ public class ProjectGeneratedDocJobStore {
       String leaseOwner,
       long leaseToken,
       Instant leaseExpiresAt,
+      Instant providerStartedAt,
       UUID resultDocId,
       Integer resultDocVersion,
       String errorCode,
@@ -69,6 +71,10 @@ public class ProjectGeneratedDocJobStore {
       String model,
       Duration deadline) {
     jdbc.queryForObject("SELECT id FROM project WHERE id=? FOR UPDATE", String.class, projectId);
+    Optional<Job> latest = latest(projectId, docType);
+    if (latest.isPresent() && latest.get().status() == Status.NEEDS_CONFIRMATION) {
+      return latest.get();
+    }
     jdbc.update(
         """
         INSERT INTO project_generated_doc_job
@@ -171,6 +177,21 @@ public class ProjectGeneratedDocJobStore {
         == 1;
   }
 
+  /** Durable pre-dispatch fence. The provider call must not begin unless this write succeeds. */
+  public boolean markProviderStarted(Lease lease) {
+    return jdbc.update(
+            """
+            UPDATE project_generated_doc_job
+            SET provider_started_at=COALESCE(provider_started_at, clock_timestamp())
+            WHERE id=? AND status='RUNNING' AND lease_owner=? AND lease_token=?
+              AND lease_expires_at>clock_timestamp() AND deadline_at>clock_timestamp()
+            """,
+            lease.job().id(),
+            lease.owner(),
+            lease.token())
+        == 1;
+  }
+
   public boolean complete(Lease lease, UUID docId, int version) {
     return jdbc.update(
             """
@@ -204,26 +225,91 @@ public class ProjectGeneratedDocJobStore {
         == 1;
   }
 
-  public int sweepExpired() {
+  public boolean needsConfirmation(Lease lease, String code, String message) {
     return jdbc.update(
+            """
+            UPDATE project_generated_doc_job SET status='NEEDS_CONFIRMATION',
+              completed_at=clock_timestamp(), lease_owner=NULL, lease_expires_at=NULL,
+              error_code=?, error_message=?
+            WHERE id=? AND status='RUNNING' AND lease_owner=? AND lease_token=?
+              AND provider_started_at IS NOT NULL
+            """,
+            bounded(code, 96),
+            bounded(message, 512),
+            lease.job().id(),
+            lease.owner(),
+            lease.token())
+        == 1;
+  }
+
+  /** Explicit requester confirmation reuses the same durable identity and exact route. */
+  @Transactional
+  public boolean confirmRetry(
+      UUID id, String projectId, String docType, String confirmingUserId, Duration deadline) {
+    jdbc.queryForObject("SELECT id FROM project WHERE id=? FOR UPDATE", String.class, projectId);
+    int confirmed =
+        jdbc.update(
+            """
+            UPDATE project_generated_doc_job SET status='QUEUED', attempt_count=0,
+              next_attempt_at=clock_timestamp(),
+              deadline_at=clock_timestamp() + (? * INTERVAL '1 millisecond'),
+              provider_started_at=NULL, result_doc_id=NULL, result_doc_version=NULL,
+              error_code=NULL, error_message=NULL, started_at=NULL, completed_at=NULL
+            WHERE id=? AND project_id=? AND doc_type=? AND status='NEEDS_CONFIRMATION'
+              AND requested_by_user_id=?
+            """,
+            deadline.toMillis(),
+            id,
+            projectId,
+            docType,
+            confirmingUserId);
+    if (confirmed != 1) return false;
+    jdbc.update(
         """
-        UPDATE project_generated_doc_job SET status='FAILED',
-          completed_at=clock_timestamp(), lease_owner=NULL, lease_expires_at=NULL,
-          error_code=CASE WHEN deadline_at<=clock_timestamp()
-            THEN 'DEADLINE_EXCEEDED' ELSE 'WORKER_LEASE_EXPIRED' END,
-          error_message=CASE WHEN deadline_at<=clock_timestamp()
-            THEN 'Document generation exceeded its durable deadline.'
-            ELSE 'Document generation worker stopped before publishing a result.' END
-        WHERE (status='QUEUED' AND deadline_at<=clock_timestamp())
-           OR (status='RUNNING' AND lease_expires_at<=clock_timestamp())
-        """);
+        INSERT INTO project_generated_doc_job_retry_confirmation
+          (id, job_id, project_id, confirmed_by_user_id)
+        VALUES (?, ?, ?, ?)
+        """,
+        UUID.randomUUID(),
+        id,
+        projectId,
+        confirmingUserId);
+    return true;
+  }
+
+  public int sweepExpired() {
+    int uncertain =
+        jdbc.update(
+            """
+UPDATE project_generated_doc_job SET status='NEEDS_CONFIRMATION',
+  completed_at=clock_timestamp(), lease_owner=NULL, lease_expires_at=NULL,
+  error_code='OUTCOME_UNCERTAIN',
+  error_message='The worker stopped after provider execution began; retry requires confirmation.'
+WHERE status='RUNNING' AND lease_expires_at<=clock_timestamp()
+  AND provider_started_at IS NOT NULL
+""");
+    int failed =
+        jdbc.update(
+            """
+            UPDATE project_generated_doc_job SET status='FAILED',
+              completed_at=clock_timestamp(), lease_owner=NULL, lease_expires_at=NULL,
+              error_code=CASE WHEN deadline_at<=clock_timestamp()
+                THEN 'DEADLINE_EXCEEDED' ELSE 'WORKER_LEASE_EXPIRED' END,
+              error_message=CASE WHEN deadline_at<=clock_timestamp()
+                THEN 'Document generation exceeded its durable deadline.'
+                ELSE 'Document generation worker stopped before publishing a result.' END
+            WHERE (status='QUEUED' AND deadline_at<=clock_timestamp())
+               OR (status='RUNNING' AND lease_expires_at<=clock_timestamp()
+                   AND provider_started_at IS NULL)
+            """);
+    return uncertain + failed;
   }
 
   public int deleteTerminalOlderThan(Duration age) {
     return jdbc.update(
         """
         DELETE FROM project_generated_doc_job
-        WHERE status IN ('SUCCEEDED','FAILED')
+        WHERE status IN ('SUCCEEDED','FAILED','NEEDS_CONFIRMATION')
           AND completed_at < clock_timestamp() - (? * INTERVAL '1 millisecond')
         """,
         age.toMillis());
@@ -249,6 +335,7 @@ public class ProjectGeneratedDocJobStore {
         rs.getString("lease_owner"),
         rs.getLong("lease_token"),
         instant(rs, "lease_expires_at"),
+        instant(rs, "provider_started_at"),
         rs.getObject("result_doc_id", UUID.class),
         (Integer) rs.getObject("result_doc_version"),
         rs.getString("error_code"),

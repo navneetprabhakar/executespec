@@ -160,6 +160,52 @@ public class RunTokenAttributor {
   }
 
   /**
+   * Attributes an approved correction reviewer pass from its fence-specific physical attempts.
+   *
+   * <p>Unlike the general phase method, this path never falls back to the requested route and never
+   * reads the run-wide reviewer projection: both could describe an older reviewer when the
+   * correction intentionally changed model.
+   */
+  public void attributeReviewerAdditionalFromAttempt(
+      String runId,
+      long inTok,
+      long outTok,
+      RunEffectiveRouteService.AttemptRouteEvidence attempt) {
+    if (attempt == null
+        || attempt.route().attribution() != EffectiveRouteProjection.Attribution.LEDGER
+        || attempt.physicalAttemptIds().isEmpty()) {
+      throw new IllegalStateException(
+          "Approved reviewer attribution requires fence-specific physical attempt evidence");
+    }
+    int persistedIn = RunCostTracker.saturatedInt(inTok);
+    int persistedOut = RunCostTracker.saturatedInt(outTok);
+    String actualProvider = attempt.route().provider().toUpperCase(java.util.Locale.ROOT);
+    String actualModel = attempt.route().model();
+    runRepo
+        .findById(runId)
+        .ifPresent(
+            r -> {
+              r.setReviewerInputTokens(
+                  saturatingAdd(safe(r.getReviewerInputTokens()), persistedIn));
+              r.setReviewerOutputTokens(
+                  saturatingAdd(safe(r.getReviewerOutputTokens()), persistedOut));
+              r.setReviewerProvider(actualProvider);
+              r.setReviewerActualModel(actualModel);
+              runRepo.save(r);
+            });
+    if (inTok > 0 || outTok > 0) {
+      try {
+        runRepo.addTokens(runId, persistedIn, persistedOut);
+      } catch (Exception e) {
+        log.warn(
+            "attributeReviewerAdditionalFromAttempt addTokens failed run={}: {}",
+            runId,
+            e.getMessage());
+      }
+    }
+  }
+
+  /**
    * Distribute worker-phase tokens (executor aggregate) across per-task rows so the task-level
    * token columns are populated. Real per-task snapshots come from {@link
    * RunCostTracker#snapshotTask}; any residual (tool-only retries that never hit the LLM) is

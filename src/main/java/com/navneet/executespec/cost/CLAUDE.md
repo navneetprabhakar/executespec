@@ -27,6 +27,14 @@
   `forReviewer(runId)`, and `latestSuccessfulForTask(runId, taskId)` for the physical route that
   produced a continuation decision's terminal observation. Consumed by `RunTokenAttributor`,
   continuation policy, and `api/RunMapper`. Do not re-derive an effective route anywhere else.
+- Approved-continuation verification uses `captureAttemptFence(...)` immediately before the retry
+  and fence-specific worker/reviewer projections after it. The APPROVED continuation action stores
+  its approval id, action, proposal digest plus `workerAttempt` / `reviewerAttempt` provider, model,
+  call-index boundary, and physical-attempt ids. Publication cross-checks the immutable approval
+  columns and rehydrates every stored id from canonical
+  `run_step_usage`; missing, mixed, cross-run, or mismatched evidence fails closed. It never uses
+  the whole-task or whole-reviewer projection, so old DeepSeek history plus an approved Grok
+  correction remains exactly attributable instead of becoming falsely MIXED.
 - **Which layer carries which route (C1, 2026-07-19).** REQUESTED / tier-resolved:
   `TaskOutcome.dispatchedProvider`/`dispatchedModel`, `agent_task.provider`/`model`,
   `pipeline_run.requested_provider`/`requested_model`/`worker_model`, `RunDetail.requestedProvider`/

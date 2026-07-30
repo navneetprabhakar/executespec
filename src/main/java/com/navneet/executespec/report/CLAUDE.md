@@ -31,6 +31,12 @@ invalid reports are excluded and counted separately.
   inherits that exact value, as do authenticated/shared report DTOs and durable agent-session
   evidence events. Historical nulls remain visibly unbound; no read path may substitute the current
   workspace or otherwise guess a generation.
+- V362 persists bounded build/test command, working-directory, exit-code, and output evidence plus
+  deterministic GitHub Actions workflow parser evidence. Workflow rows carry stable repository
+  paths and content SHA-256 digests; this proves syntax/provenance only, never semantic satisfaction
+  of an arbitrary natural-language deployment requirement.
+- Reviewer/accuracy findings remain advisory evidence even when model output labels them CRITICAL.
+  Only deterministic compiler/build/test/standards/invariant failures may hard-fail the report.
 - V270 persists `boot_verdict`, `boot_healthy`, and `boot_reason` whenever the final deterministic
   preview verifier supplied a `BootVerification`. Concrete-test rescoring AND the SUPER_ADMIN
   `VerifiedScoreBackfillService` rehydrate that signal through the shared
@@ -137,3 +143,5 @@ invalid reports are excluded and counted separately.
   normalizes any write from an older application node before commit.
 - `V361__validation_workspace_generation.sql` adds the nullable, format-constrained workspace
   generation binding. Null is reserved for pre-V361/unbound evidence.
+- `V362__persist_validation_command_and_workflow_evidence.sql` adds reloadable command execution and
+  workflow-parser evidence. Historical rows remain nullable and therefore visibly unmeasured.

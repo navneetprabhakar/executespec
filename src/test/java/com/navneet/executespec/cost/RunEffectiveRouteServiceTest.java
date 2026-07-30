@@ -77,6 +77,90 @@ class RunEffectiveRouteServiceTest {
     assertThat(projection.model()).isEqualTo("glm-5.2");
   }
 
+  @Test
+  void attemptFenceRejectsPriorSuccessfulRouteAndProjectsOnlyNewCallIndexes() {
+    RunStepUsage prior = attemptedRow("prior", "openrouter", "x-ai/grok-4.20", "SUCCESS", 7);
+    RunStepUsage current = attemptedRow("current", "openrouter", "deepseek-v4-pro", "SUCCESS", 8);
+    when(repository.findByRunIdAndTaskIdOrderByCreatedAtAsc("run-1", "T1"))
+        .thenReturn(List.of(prior), List.of(prior, current));
+
+    RunEffectiveRouteService.AttemptFence fence = service.captureAttemptFence("run-1", "T1", 7);
+    EffectiveRouteProjection projection = service.successfulForTaskAfter(fence);
+
+    assertThat(fence.priorAttemptIds()).containsExactly("prior");
+    assertThat(projection.attribution()).isEqualTo(EffectiveRouteProjection.Attribution.LEDGER);
+    assertThat(projection.provider()).isEqualTo("openrouter");
+    assertThat(projection.model()).isEqualTo("deepseek-v4-pro");
+  }
+
+  @Test
+  void attemptFenceIsUnattributedWhenNoNewSuccessfulProviderCallExists() {
+    RunStepUsage prior = attemptedRow("prior", "openrouter", "x-ai/grok-4.20", "SUCCESS", 7);
+    when(repository.findByRunIdAndTaskIdOrderByCreatedAtAsc("run-1", "T1"))
+        .thenReturn(List.of(prior));
+
+    RunEffectiveRouteService.AttemptFence fence = service.captureAttemptFence("run-1", "T1", 7);
+    EffectiveRouteProjection projection = service.successfulForTaskAfter(fence);
+
+    assertThat(projection).isEqualTo(EffectiveRouteProjection.UNATTRIBUTED);
+  }
+
+  @Test
+  void reviewerFenceIgnoresOldDeepSeekHistoryAndAttestsOnlyNewGrokAttempts() {
+    RunStepUsage oldReviewer =
+        attemptedRow(
+            "review-old",
+            "__root__-reviewer-general",
+            "ReviewerAgent",
+            "openrouter",
+            "deepseek-v4-pro",
+            "SUCCESS",
+            5);
+    RunStepUsage newReviewer =
+        attemptedRow(
+            "review-new",
+            "__root__-reviewer-general",
+            "ReviewerAgent",
+            "openrouter",
+            "x-ai/grok-4.20",
+            "SUCCESS",
+            9);
+    when(repository.findByRunIdOrderByCreatedAtAsc("run-1"))
+        .thenReturn(List.of(oldReviewer), List.of(oldReviewer, newReviewer));
+
+    RunEffectiveRouteService.ReviewerAttemptFence fence =
+        service.captureReviewerAttemptFence("run-1", 5);
+    RunEffectiveRouteService.AttemptRouteEvidence evidence =
+        service.successfulReviewerAttemptAfter(fence);
+
+    assertThat(fence.priorAttemptIds()).containsExactly("review-old");
+    assertThat(evidence.isExact("openrouter", "x-ai/grok-4.20")).isTrue();
+    assertThat(evidence.physicalAttemptIds()).containsExactly("review-new");
+    assertThat(evidence.firstCallIndex()).isEqualTo(9);
+    assertThat(evidence.lastCallIndex()).isEqualTo(9);
+  }
+
+  @Test
+  void persistedAttemptIdsMustAllRehydrateFromTheSameCanonicalRunLedger() {
+    RunStepUsage worker =
+        attemptedRow(
+            "worker-new", "T1", "WorkerAgent", "openrouter", "x-ai/grok-4.20", "SUCCESS", 8);
+    when(repository.findByRunIdAndPhysicalAttemptIdIn(
+            "run-1", java.util.Set.of("worker-new", "missing")))
+        .thenReturn(List.of(worker));
+
+    assertThat(service.forPhysicalAttempts("run-1", List.of("worker-new", "missing")))
+        .isEqualTo(RunEffectiveRouteService.AttemptRouteEvidence.UNATTRIBUTED);
+
+    when(repository.findByRunIdAndPhysicalAttemptIdIn("run-1", java.util.Set.of("worker-new")))
+        .thenReturn(List.of(worker));
+    assertThat(
+            service
+                .forPhysicalAttempts("run-1", List.of("worker-new"))
+                .isExact("openrouter", "x-ai/grok-4.20"))
+        .isTrue();
+  }
+
   private static RunStepUsage row(
       String taskId, String agentRole, String provider, String model, String status) {
     return RunStepUsage.builder()
@@ -87,6 +171,32 @@ class RunEffectiveRouteServiceTest {
         .provider(provider)
         .model(model)
         .attemptStatus(status)
+        .build();
+  }
+
+  private static RunStepUsage attemptedRow(
+      String physicalAttemptId, String provider, String model, String status, long callIndex) {
+    return attemptedRow(physicalAttemptId, "T1", "WorkerAgent", provider, model, status, callIndex);
+  }
+
+  private static RunStepUsage attemptedRow(
+      String physicalAttemptId,
+      String taskId,
+      String agentRole,
+      String provider,
+      String model,
+      String status,
+      long callIndex) {
+    return RunStepUsage.builder()
+        .id(physicalAttemptId)
+        .physicalAttemptId(physicalAttemptId)
+        .runId("run-1")
+        .taskId(taskId)
+        .agentRole(agentRole)
+        .provider(provider)
+        .model(model)
+        .attemptStatus(status)
+        .callIndex(callIndex)
         .build();
   }
 }

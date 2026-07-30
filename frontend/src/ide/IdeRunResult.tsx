@@ -78,6 +78,7 @@ import {
   modelRankingLabel,
   num,
   latestContinuationAction,
+  publicationTrustFacts,
   runArtifactActionAvailability,
   friendlyAiFailureMessage,
   runChatResponseContent,
@@ -121,6 +122,8 @@ export default function IdeRunResult() {
   const [run, setRun] = useState<api.RunDetail | null>(null);
   const [costEvidence, setCostEvidence] = useState<api.RunCostEvidence | null>(null);
   const [report, setReport] = useState<api.ValidationReportData | null>(null);
+  const [publication, setPublication] = useState<api.PublicationEligibility | null>(null);
+  const [publicationFailure, setPublicationFailure] = useState<LoadFailure | null>(null);
   // The validation report is produced after the executor's task-boundary decision and can carry
   // stronger final proof. Prefer it so Steps does not keep saying "Keep working" while Evidence
   // already says the completed run is proven.
@@ -229,6 +232,23 @@ export default function IdeRunResult() {
       });
   }
 
+  function reloadPublicationEligibility() {
+    if (!runId) return;
+    const gen = loadGen.current;
+    api
+      .getPublicationEligibility(runId)
+      .then((result) => {
+        if (gen !== loadGen.current) return;
+        setPublication(result);
+        setPublicationFailure(null);
+      })
+      .catch((e: unknown) => {
+        if (gen !== loadGen.current) return;
+        setPublication(null);
+        setPublicationFailure(toLoadFailure(e));
+      });
+  }
+
   useEffect(() => {
     if (!runId) return;
     const gen = ++loadGen.current;
@@ -243,6 +263,8 @@ export default function IdeRunResult() {
     setCostEvidenceFailure(null);
     setReport(null);
     setReportFailure(null);
+    setPublication(null);
+    setPublicationFailure(null);
     setTests(null);
     setTestsFailure(null);
     setTestPlan(null);
@@ -282,6 +304,7 @@ export default function IdeRunResult() {
         if (gen === loadGen.current) setLoading(false);
       });
     reloadReport();
+    reloadPublicationEligibility();
     api
       .getFilesWithStatus(runId)
       .then((entries) => {
@@ -569,6 +592,7 @@ export default function IdeRunResult() {
       // Keep the last-known run; the action already surfaced any failure message.
     }
     reloadReport();
+    reloadPublicationEligibility();
     if (tab === 'Tests') {
       try {
         const t = await api.getTestReport(runId);
@@ -637,14 +661,14 @@ export default function IdeRunResult() {
       prUrl?: string;
       message?: string;
       code?: string;
-      publicationEligible?: string;
-      retryable?: string;
+      publicationEligible?: boolean;
+      retryable?: boolean;
       retryGuidance?: string;
     };
     const status = (res.status || '').toUpperCase();
-    const eligibility = res.publicationEligible === 'false' ? 'Publication ineligible' : undefined;
+    const eligibility = res.publicationEligible === false ? 'Publication ineligible' : undefined;
     const retry =
-      res.retryable === 'false' && status === 'FAILED' ? 'Direct retry disabled' : undefined;
+      res.retryable === false && status === 'FAILED' ? 'Direct retry disabled' : undefined;
     const diagnostic = [eligibility, retry, res.code, res.message, res.retryGuidance]
       .filter(Boolean)
       .join(' · ');
@@ -1046,6 +1070,7 @@ export default function IdeRunResult() {
         ? `${issues.length} validation issue${issues.length === 1 ? '' : 's'} found.`
         : 'Open the logs and evidence to identify the failing stage.');
   const durableFailureEvidence = terminalFailureEvidence(run);
+  const trustFacts = publicationTrustFacts(run, publication);
   // C2 — tab title carries the run name once loaded.
   useDocumentTitle(run?.runTitle || (run ? `R-${runId.slice(0, 6)}` : null));
 
@@ -2610,6 +2635,64 @@ export default function IdeRunResult() {
                 </button>
               )}
             </h1>
+            <div className='ide-h2'>Publication trust boundary</div>
+            {publicationFailure && (
+              <LoadError
+                failure={publicationFailure}
+                what='publication eligibility'
+                onRetry={reloadPublicationEligibility}
+              />
+            )}
+            <div className='ide-card' style={{padding: 0}}>
+              {trustFacts.map((fact, index) => (
+                <div
+                  key={fact.label}
+                  style={{
+                    padding: '10px 16px',
+                    borderBottom:
+                      index < trustFacts.length - 1 ? '1px solid var(--ide-border)' : 'none',
+                    display: 'grid',
+                    gridTemplateColumns: 'minmax(150px, 0.35fr) minmax(0, 1fr)',
+                    gap: 12,
+                    alignItems: 'start',
+                  }}
+                >
+                  <span style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}>{fact.label}</span>
+                  <div style={{display: 'flex', alignItems: 'flex-start', gap: 8, minWidth: 0}}>
+                    <IdeBadge kind={fact.kind === 'neutral' ? 'warn' : fact.kind}>
+                      {fact.kind === 'ok'
+                        ? 'PASS'
+                        : fact.kind === 'bad'
+                          ? 'BLOCK'
+                          : fact.kind === 'warn'
+                            ? 'UNKNOWN'
+                            : 'INFO'}
+                    </IdeBadge>
+                    <span
+                      className='ide-mono'
+                      style={{fontSize: 11, overflowWrap: 'anywhere', lineHeight: 1.5}}
+                    >
+                      {fact.value}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+            {publication && !publication.eligible && (
+              <div className='ide-card' role='alert'>
+                <div style={{fontWeight: 600}}>{publication.reason}</div>
+                {publication.remediation && (
+                  <div style={{fontSize: 12, color: 'var(--ide-fg-muted)', marginTop: 6}}>
+                    {publication.remediation}
+                  </div>
+                )}
+                <div className='ide-mono' style={{fontSize: 11, marginTop: 6}}>
+                  {publication.retryable
+                    ? 'Safe to retry after remediation'
+                    : 'Direct retry blocked'}
+                </div>
+              </div>
+            )}
             {reportFailure ? (
               <LoadError failure={reportFailure} what='evidence report' onRetry={reloadReport} />
             ) : !report ? (

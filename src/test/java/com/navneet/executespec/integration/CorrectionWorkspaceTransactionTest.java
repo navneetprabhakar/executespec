@@ -53,6 +53,36 @@ class CorrectionWorkspaceTransactionTest {
   }
 
   @Test
+  void correctionDiffEvidenceIsDeterministicAndNamesChangedFiles() throws Exception {
+    Path repository = repository("diff-evidence");
+    var checkpoint = transaction.begin(repository);
+    Files.writeString(repository.resolve("tracked.txt"), "corrected\n");
+    Files.writeString(repository.resolve("added.txt"), "new\n");
+
+    var first = transaction.diffEvidence(checkpoint);
+    var second = transaction.diffEvidence(checkpoint);
+
+    assertThat(first).isEqualTo(second);
+    assertThat(first.changedFiles()).containsExactly("0:added.txt", "0:tracked.txt");
+    assertThat(first.diffDigest()).hasSize(64);
+  }
+
+  @Test
+  void correctionDiffDigestChangesWhenSamePathsContainDifferentBytes() throws Exception {
+    Path repository = repository("diff-content-evidence");
+    var checkpoint = transaction.begin(repository);
+
+    Files.writeString(repository.resolve("tracked.txt"), "first correction\n");
+    var first = transaction.diffEvidence(checkpoint);
+    Files.writeString(repository.resolve("tracked.txt"), "second correction\n");
+    var second = transaction.diffEvidence(checkpoint);
+
+    assertThat(first.changedFiles()).containsExactly("0:tracked.txt");
+    assertThat(second.changedFiles()).containsExactly("0:tracked.txt");
+    assertThat(second.diffDigest()).isNotEqualTo(first.diffDigest());
+  }
+
+  @Test
   void refusesToDestroyPreStagedCallerState() throws Exception {
     Path repository = repository("staged");
     Files.writeString(repository.resolve("tracked.txt"), "staged state\n");

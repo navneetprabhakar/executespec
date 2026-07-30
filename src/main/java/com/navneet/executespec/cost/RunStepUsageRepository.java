@@ -61,6 +61,12 @@ public interface RunStepUsageRepository extends JpaRepository<RunStepUsage, Stri
    */
   List<RunStepUsage> findByRunIdAndTaskIdOrderByCreatedAtAsc(String runId, String taskId);
 
+  /**
+   * Resolves a bounded persisted approval-attestation set back to the canonical physical ledger.
+   */
+  List<RunStepUsage> findByRunIdAndPhysicalAttemptIdIn(
+      String runId, java.util.Collection<String> physicalAttemptIds);
+
   long countByLlmExecutionContextId(String llmExecutionContextId);
 
   @Query(

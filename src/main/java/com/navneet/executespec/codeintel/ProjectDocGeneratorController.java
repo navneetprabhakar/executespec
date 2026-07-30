@@ -18,8 +18,8 @@ import org.springframework.web.server.ResponseStatusException;
 import lombok.RequiredArgsConstructor;
 
 /**
- * REST surface for {@link ProjectDocGeneratorService}. Two doc types (EXPLANATION, SETUP), three
- * operations per type (generate, get, download).
+ * REST surface for {@link ProjectDocGeneratorService}. Two doc types (EXPLANATION, SETUP), durable
+ * generation/job reads, explicit uncertain-outcome retry confirmation, display, and download.
  */
 @RestController
 @RequiredArgsConstructor
@@ -65,6 +65,9 @@ public class ProjectDocGeneratorController {
       Integer resultDocVersion,
       String errorCode,
       String errorMessage,
+      int attemptCount,
+      Instant deadlineAt,
+      Instant providerStartedAt,
       Instant createdAt,
       Instant startedAt,
       Instant completedAt) {
@@ -81,6 +84,9 @@ public class ProjectDocGeneratorController {
           job.resultDocVersion(),
           job.errorCode(),
           job.errorMessage(),
+          job.attemptCount(),
+          job.deadlineAt(),
+          job.providerStartedAt(),
           job.createdAt(),
           job.startedAt(),
           job.completedAt());
@@ -131,6 +137,22 @@ public class ProjectDocGeneratorController {
     return jobs.latest(projectId, type)
         .map(job -> ResponseEntity.ok(GeneratedDocJobDto.from(job)))
         .orElseGet(() -> ResponseEntity.noContent().build());
+  }
+
+  @PostMapping("/api/projects/{projectId}/docs/{docType}/jobs/{jobId}/confirm-retry")
+  public ResponseEntity<GeneratedDocJobDto> confirmRetry(
+      @PathVariable String projectId,
+      @PathVariable String docType,
+      @PathVariable UUID jobId,
+      @AuthenticationPrincipal AppUserDetails userDetails) {
+    projectAccessGuard.assertCanWrite(projectId, userDetails);
+    DocType type = parseType(docType);
+    if (userDetails == null || userDetails.getUser() == null) {
+      throw new ResponseStatusException(HttpStatus.UNAUTHORIZED);
+    }
+    ProjectGeneratedDocJobStore.Job job =
+        jobs.confirmRetry(projectId, type, jobId, userDetails.getUser().getId());
+    return ResponseEntity.accepted().body(GeneratedDocJobDto.from(job));
   }
 
   @GetMapping("/api/projects/{projectId}/docs/{docType}")

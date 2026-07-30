@@ -19,24 +19,68 @@ export interface PlanContractGateView {
   digest: string;
   requiresTypedAck: boolean;
   rows: PlanContractGateRow[];
+  brownfieldHttpRouteRemovals: BrownfieldHttpRouteRemoval[];
+}
+
+export interface BrownfieldHttpRouteRemoval {
+  method: string;
+  path: string;
+}
+
+interface ParsedGateReport {
+  rows: PlanContractGateRow[];
+  brownfieldHttpRouteRemovals: BrownfieldHttpRouteRemoval[];
+}
+
+function parseGateReport(reportJson?: string | null): ParsedGateReport {
+  const empty: ParsedGateReport = {rows: [], brownfieldHttpRouteRemovals: []};
+  if (!reportJson || !reportJson.trim()) return empty;
+  try {
+    const parsed: unknown = JSON.parse(reportJson);
+    if (Array.isArray(parsed)) {
+      return {
+        rows: parsed.filter((row): row is PlanContractGateRow => !!row && typeof row === 'object'),
+        brownfieldHttpRouteRemovals: [],
+      };
+    }
+    if (!parsed || typeof parsed !== 'object') return empty;
+    const envelope = parsed as {
+      schemaVersion?: unknown;
+      rows?: unknown;
+      brownfieldHttpRouteRemovals?: unknown;
+    };
+    if (envelope.schemaVersion !== 1 || !Array.isArray(envelope.rows)) return empty;
+    const rows = envelope.rows.filter(
+      (row): row is PlanContractGateRow => !!row && typeof row === 'object',
+    );
+    const removals = Array.isArray(envelope.brownfieldHttpRouteRemovals)
+      ? envelope.brownfieldHttpRouteRemovals.filter(
+          (entry): entry is BrownfieldHttpRouteRemoval =>
+            !!entry &&
+            typeof entry === 'object' &&
+            'method' in entry &&
+            typeof entry.method === 'string' &&
+            'path' in entry &&
+            typeof entry.path === 'string',
+        )
+      : [];
+    return {rows, brownfieldHttpRouteRemovals: removals};
+  } catch {
+    return empty;
+  }
 }
 
 /**
- * Parse the server's `reportJson` (a serialized `PlanContractGateRow[]`).
+ * Parse the server's `reportJson`. Historical reports are a serialized
+ * `PlanContractGateRow[]`; schema v1 reports retain those rows under `rows` and separately bind
+ * exact brownfield HTTP removals.
  *
  * Fails to an empty list rather than throwing: a report we cannot read must not crash the approval
  * page. It still gates — `requiresTypedAck` is a separate server-supplied field — so an unreadable
  * body degrades to "acknowledge with less detail", never to "approve with no friction".
  */
 export function parseGateRows(reportJson?: string | null): PlanContractGateRow[] {
-  if (!reportJson || !reportJson.trim()) return [];
-  try {
-    const parsed: unknown = JSON.parse(reportJson);
-    if (!Array.isArray(parsed)) return [];
-    return parsed.filter((row): row is PlanContractGateRow => !!row && typeof row === 'object');
-  } catch {
-    return [];
-  }
+  return parseGateReport(reportJson).rows;
 }
 
 /**
@@ -56,11 +100,13 @@ export function toGateView(
   if (!digest) return null;
   // The server echoes the run id on the row; when present it must match the route exactly.
   if (report.runId && report.runId !== runId) return null;
+  const parsed = parseGateReport(report.reportJson);
   return {
     runId,
     digest,
     requiresTypedAck: report.requiresTypedAck === true,
-    rows: parseGateRows(report.reportJson),
+    rows: parsed.rows,
+    brownfieldHttpRouteRemovals: parsed.brownfieldHttpRouteRemovals,
   };
 }
 

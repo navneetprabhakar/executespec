@@ -1,6 +1,7 @@
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
 import {
+  confirmProjectDocRetry,
   generateProjectDoc,
   createRepo,
   createProjectExport,
@@ -50,6 +51,28 @@ describe('project API', () => {
 
     await expect(generateProjectDoc('project-1', 'EXPLANATION')).resolves.toMatchObject(job);
     expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/projects/project-1/docs/EXPLANATION/generate');
+  });
+
+  it('confirms an uncertain document retry through the same durable job identity', async () => {
+    const job = {
+      id: 'doc-job-1',
+      projectId: 'project-1',
+      docType: 'EXPLANATION',
+      status: 'QUEUED',
+      terminal: false,
+    };
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(new Response(JSON.stringify(job), {status: 202}));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(
+      confirmProjectDocRetry('project-1', 'EXPLANATION', 'doc-job-1'),
+    ).resolves.toMatchObject(job);
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/projects/project-1/docs/EXPLANATION/jobs/doc-job-1/confirm-retry',
+      expect.objectContaining({method: 'POST'}),
+    );
   });
 
   it('uses durable job endpoints for latest state, per-repo admission, and confirmed retry', async () => {
