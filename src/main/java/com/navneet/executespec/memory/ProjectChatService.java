@@ -369,6 +369,7 @@ public class ProjectChatService {
           "get_latest_architecture",
           "get_tech_debt_summary",
           "search_repo_files",
+          "read_repo_file_range",
           "search_code",
           "search_project_docs");
 
