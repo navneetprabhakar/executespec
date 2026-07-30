@@ -12,6 +12,7 @@ export interface RunArtifactActionAvailability {
   codeZip: boolean;
   shareReport: boolean;
   workspaceReason: string;
+  publicationReason: string;
   reportReason: string;
 }
 
@@ -290,12 +291,15 @@ export function runArtifactActionAvailability(input: {
   changedWorkspaceFiles: number;
   hasExecutionEvidence: boolean;
   hasValidationReport: boolean;
+  publication?: api.PublicationEligibility | null;
+  publicationCheckFailed?: boolean;
 }): RunArtifactActionAvailability {
   const status = (input.status || '').toUpperCase();
   const terminal = ['COMPLETE', 'COMPLETED', 'PARTIAL', 'FAILED'].includes(status);
   const hasProducedWorkspace =
     terminal && input.hasExecutionEvidence && input.changedWorkspaceFiles > 0;
   const hasReport = terminal && input.hasValidationReport;
+  const publicationEligible = input.publication?.eligible === true;
   const workspaceReason = !terminal
     ? 'This action becomes available after the run finishes.'
     : !input.hasExecutionEvidence
@@ -308,15 +312,24 @@ export function runArtifactActionAvailability(input: {
     : !input.hasValidationReport
       ? 'No validation report was produced for this run.'
       : '';
+  const publicationReason = input.publicationCheckFailed
+    ? 'Publication eligibility could not be verified. Retry the eligibility check before publishing.'
+    : input.publication == null
+      ? 'Checking publication eligibility…'
+      : input.publication.eligible
+        ? ''
+        : input.publication.reason;
   return {
-    push: hasProducedWorkspace,
+    push: hasProducedWorkspace && publicationEligible,
     revertWorkspace: hasProducedWorkspace,
     preview: hasProducedWorkspace,
-    deploy: hasProducedWorkspace,
+    deploy:
+      hasProducedWorkspace && ['COMPLETE', 'COMPLETED'].includes(status) && publicationEligible,
     reportPdf: hasReport,
     codeZip: hasProducedWorkspace,
     shareReport: hasReport,
     workspaceReason,
+    publicationReason,
     reportReason,
   };
 }
@@ -990,12 +1003,14 @@ export function testRerunState({
   status,
   hasTestPlan,
   hasTests,
+  hasProducedWorkspace = false,
 }: {
   status?: string | null;
   hasTestPlan: boolean;
   hasTests: boolean;
+  hasProducedWorkspace?: boolean;
 }): {canRerunTests: boolean; emptyMessage: string} {
-  const canRerunTests = hasTestPlan || hasTests;
+  const canRerunTests = hasTestPlan || hasTests || hasProducedWorkspace;
   if (canRerunTests) {
     return {canRerunTests, emptyMessage: 'No test report yet.'};
   }

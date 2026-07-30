@@ -14,6 +14,26 @@ import org.junit.jupiter.api.Test;
 class RunEventContractTest {
 
   @Test
+  void validationFailureCarriesTypedBlockingDiagnostic() {
+    RunEvent event =
+        RunEvent.validationFailed(
+            "run-1",
+            null,
+            "DETERMINISTIC_HTTP_REQUIREMENT_MISSING",
+            "required HTTP route is absent: POST /items",
+            "validation");
+
+    assertEquals("VALIDATION_FAILED", event.type());
+    assertEquals(
+        "DETERMINISTIC_HTTP_REQUIREMENT_MISSING: required HTTP route is absent: POST /items",
+        event.payload());
+    assertEquals("DETERMINISTIC_HTTP_REQUIREMENT_MISSING", event.data().get("code"));
+    assertEquals("required HTTP route is absent: POST /items", event.data().get("reason"));
+    assertEquals("validation", event.data().get("phase"));
+    assertEquals(true, event.data().get("publicationBlocked"));
+  }
+
+  @Test
   void legacyConstructorKeepsPayloadAndAddsEmptyTypedData() {
     RunEvent event = RunEvent.log("run-1", "task-1", "hello");
 

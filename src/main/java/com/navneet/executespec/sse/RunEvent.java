@@ -523,6 +523,25 @@ public record RunEvent(
     return new RunEvent("VALIDATION_FAILED", runId, taskId, summary, Instant.now());
   }
 
+  /** Typed run-level validation failure; the legacy payload retains the same readable summary. */
+  public static RunEvent validationFailed(
+      String runId, String taskId, String code, String reason, String phase) {
+    String summary = code + ": " + reason;
+    return withData(
+        "VALIDATION_FAILED",
+        runId,
+        taskId,
+        summary,
+        "code",
+        code,
+        "reason",
+        reason,
+        "phase",
+        phase,
+        "publicationBlocked",
+        true);
+  }
+
   public static RunEvent modelEscalated(
       String runId, String taskId, String fromModel, String toModel) {
     return new RunEvent("MODEL_ESCALATED", runId, taskId, fromModel + "|" + toModel, Instant.now());

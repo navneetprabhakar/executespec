@@ -659,7 +659,7 @@ claim in a tool result — never invent a runId, score, or status.""";
           tools,
           projectChatTools.bind(
               new com.navneet.executespec.memory.chattools.ProjectChatTools.ToolContext(
-                  projectId, user, null)));
+                  projectId, user, callerGithubCredential(user), orgId)));
     }
     if (allowedToolNames != null) {
       tools =
@@ -701,6 +701,12 @@ claim in a tool result — never invent a runId, score, or status.""";
             parentTurnId,
             turnGuard);
     sink.done(rounds, snapshotDelta(before, safeSnapshot(contextRunId)));
+  }
+
+  static String callerGithubCredential(AppUserDetails user) {
+    if (user == null || user.getUser() == null) return null;
+    String credential = user.getUser().getGithubPat();
+    return credential == null || credential.isBlank() ? null : credential;
   }
 
   private static String durableTurnIdentity(

@@ -163,7 +163,7 @@ class ProjectDocGeneratorServiceCacheHitTest {
     // ModelResolver should also not be called — we never even resolved a model.
     verify(modelResolver, never()).resolve(any(), any());
     // No new doc saved.
-    verify(docRepo, never()).save(any(ProjectGeneratedDoc.class));
+    verify(docRepo, never()).saveAndFlush(any(ProjectGeneratedDoc.class));
   }
 
   @Test
@@ -237,7 +237,7 @@ class ProjectDocGeneratorServiceCacheHitTest {
             org.mockito.ArgumentMatchers.nullable(Integer.class),
             any(LlmExecutionReference.class)))
         .thenReturn(textResponse(validDoc(DocType.EXPLANATION, "Regenerated"), "stop"));
-    when(docRepo.save(any(ProjectGeneratedDoc.class)))
+    when(docRepo.saveAndFlush(any(ProjectGeneratedDoc.class)))
         .thenAnswer(invocation -> invocation.getArgument(0));
 
     ProjectGeneratedDoc result =
@@ -248,6 +248,47 @@ class ProjectDocGeneratorServiceCacheHitTest {
         .isEqualTo(validDoc(DocType.EXPLANATION, "Regenerated"))
         .doesNotContain("invokes");
     verify(llmRouter)
+        .callTextStrict(
+            anyString(),
+            anyString(),
+            anyList(),
+            anyString(),
+            anyString(),
+            anyString(),
+            org.mockito.ArgumentMatchers.nullable(Integer.class),
+            any(LlmExecutionReference.class));
+  }
+
+  @Test
+  void anthropicMultiGenerationResponsePublishesAllTextWithoutCorrectiveRetry() {
+    wireCacheMiss();
+    String expected = validDoc(DocType.EXPLANATION, "Generated across content blocks");
+    when(llmRouter.callTextStrict(
+            anyString(),
+            anyString(),
+            anyList(),
+            anyString(),
+            anyString(),
+            anyString(),
+            org.mockito.ArgumentMatchers.nullable(Integer.class),
+            any(LlmExecutionReference.class)))
+        .thenReturn(
+            new ChatResponse(
+                List.of(
+                    new Generation(
+                        new AssistantMessage(""),
+                        ChatGenerationMetadata.builder().finishReason("STOP").build()),
+                    new Generation(
+                        new AssistantMessage(expected),
+                        ChatGenerationMetadata.builder().finishReason("STOP").build()))));
+    when(docRepo.saveAndFlush(any(ProjectGeneratedDoc.class)))
+        .thenAnswer(invocation -> invocation.getArgument(0));
+
+    ProjectGeneratedDoc result =
+        svc.generate("p-1", DocType.EXPLANATION, "actor-1", LlmProvider.ANTHROPIC);
+
+    assertThat(result.getContent()).isEqualTo(expected);
+    verify(llmRouter, org.mockito.Mockito.times(1))
         .callTextStrict(
             anyString(),
             anyString(),
@@ -475,7 +516,7 @@ class ProjectDocGeneratorServiceCacheHitTest {
                             .build()))));
     when(docRepo.findFirstByProjectIdAndDocTypeOrderByVersionDesc("p-1", DocType.EXPLANATION))
         .thenReturn(Optional.empty());
-    when(docRepo.save(any(ProjectGeneratedDoc.class)))
+    when(docRepo.saveAndFlush(any(ProjectGeneratedDoc.class)))
         .thenAnswer(invocation -> invocation.getArgument(0));
 
     ProjectGeneratedDoc generated =
@@ -520,7 +561,7 @@ class ProjectDocGeneratorServiceCacheHitTest {
         .isInstanceOf(ProjectDocGeneratorService.IncompleteGenerationException.class)
         .hasMessageContaining("no document was saved");
 
-    verify(docRepo, never()).save(any(ProjectGeneratedDoc.class));
+    verify(docRepo, never()).saveAndFlush(any(ProjectGeneratedDoc.class));
     verify(workspace, never()).writeRawFile(anyString(), anyString(), anyString());
   }
 
@@ -554,7 +595,7 @@ class ProjectDocGeneratorServiceCacheHitTest {
               }
               return textResponse(validDoc(DocType.EXPLANATION, "Generated once"), "stop");
             });
-    when(docRepo.save(any(ProjectGeneratedDoc.class)))
+    when(docRepo.saveAndFlush(any(ProjectGeneratedDoc.class)))
         .thenAnswer(invocation -> invocation.getArgument(0));
 
     try (var executor = Executors.newFixedThreadPool(2)) {
@@ -585,7 +626,7 @@ class ProjectDocGeneratorServiceCacheHitTest {
             anyString(),
             org.mockito.ArgumentMatchers.nullable(Integer.class),
             any(LlmExecutionReference.class));
-    verify(docRepo, org.mockito.Mockito.times(1)).save(any(ProjectGeneratedDoc.class));
+    verify(docRepo, org.mockito.Mockito.times(1)).saveAndFlush(any(ProjectGeneratedDoc.class));
     verify(projectRepo, org.mockito.Mockito.times(1)).findByIdForQuotaUpdate("p-1");
   }
 
@@ -611,7 +652,7 @@ class ProjectDocGeneratorServiceCacheHitTest {
               }
               return textResponse(validDoc(DocType.EXPLANATION, "Independently generated"), "stop");
             });
-    when(docRepo.save(any(ProjectGeneratedDoc.class)))
+    when(docRepo.saveAndFlush(any(ProjectGeneratedDoc.class)))
         .thenAnswer(invocation -> invocation.getArgument(0));
     LlmExecutionReference authorityA =
         new LlmExecutionReference("confirmed-action-a", LlmExecutionScope.customer("org-1"));
@@ -664,7 +705,7 @@ class ProjectDocGeneratorServiceCacheHitTest {
         .thenReturn(
             textResponse("# Cut", "length"),
             textResponse(validDoc(DocType.SETUP, "Complete"), "stop"));
-    when(docRepo.save(any(ProjectGeneratedDoc.class)))
+    when(docRepo.saveAndFlush(any(ProjectGeneratedDoc.class)))
         .thenAnswer(invocation -> invocation.getArgument(0));
 
     org.assertj.core.api.Assertions.assertThatThrownBy(
@@ -710,7 +751,7 @@ class ProjectDocGeneratorServiceCacheHitTest {
         .isInstanceOf(ProjectDocGeneratorService.StaleSourceException.class)
         .hasMessageContaining("no document was saved");
 
-    verify(docRepo, never()).save(any(ProjectGeneratedDoc.class));
+    verify(docRepo, never()).saveAndFlush(any(ProjectGeneratedDoc.class));
     verify(workspace, never()).writeRawFile(anyString(), anyString(), anyString());
   }
 
@@ -733,7 +774,7 @@ class ProjectDocGeneratorServiceCacheHitTest {
             () -> svc.generate("p-1", DocType.SETUP, "actor-1", LlmProvider.ANTHROPIC))
         .isInstanceOf(ProjectDocGeneratorService.UnsafeGeneratedDocumentException.class);
 
-    verify(docRepo, never()).save(any(ProjectGeneratedDoc.class));
+    verify(docRepo, never()).saveAndFlush(any(ProjectGeneratedDoc.class));
     verify(workspace, never()).writeRawFile(anyString(), anyString(), anyString());
   }
 
@@ -755,7 +796,7 @@ class ProjectDocGeneratorServiceCacheHitTest {
         .thenReturn(
             textResponse(missingArchitecture, "stop"),
             textResponse(validDoc(DocType.EXPLANATION, "Corrected"), "stop"));
-    when(docRepo.save(any(ProjectGeneratedDoc.class)))
+    when(docRepo.saveAndFlush(any(ProjectGeneratedDoc.class)))
         .thenAnswer(invocation -> invocation.getArgument(0));
 
     ProjectGeneratedDoc generated =
@@ -797,7 +838,7 @@ class ProjectDocGeneratorServiceCacheHitTest {
             "## Key data flows",
             "## Where to contribute")
         .contains("Do not rename, delete, merge, reorder, or demote any of these headings");
-    verify(docRepo, org.mockito.Mockito.times(1)).save(any(ProjectGeneratedDoc.class));
+    verify(docRepo, org.mockito.Mockito.times(1)).saveAndFlush(any(ProjectGeneratedDoc.class));
     verify(workspace, org.mockito.Mockito.times(1))
         .writeRawFile(
             org.mockito.ArgumentMatchers.eq("p-1"),
@@ -836,7 +877,7 @@ class ProjectDocGeneratorServiceCacheHitTest {
             org.mockito.ArgumentMatchers.nullable(Integer.class),
             any(LlmExecutionReference.class)))
         .thenReturn(textResponse(unsupported, "stop"));
-    when(docRepo.save(any(ProjectGeneratedDoc.class)))
+    when(docRepo.saveAndFlush(any(ProjectGeneratedDoc.class)))
         .thenAnswer(invocation -> invocation.getArgument(0));
 
     ProjectGeneratedDoc generated =
@@ -893,7 +934,7 @@ class ProjectDocGeneratorServiceCacheHitTest {
             anyString(),
             org.mockito.ArgumentMatchers.nullable(Integer.class),
             any(LlmExecutionReference.class));
-    verify(docRepo, never()).save(any(ProjectGeneratedDoc.class));
+    verify(docRepo, never()).saveAndFlush(any(ProjectGeneratedDoc.class));
     verify(workspace, never()).writeRawFile(anyString(), anyString(), anyString());
   }
 
@@ -915,7 +956,7 @@ class ProjectDocGeneratorServiceCacheHitTest {
             () -> svc.generate("p-1", DocType.EXPLANATION, "actor-1", LlmProvider.ANTHROPIC))
         .isInstanceOf(ProjectDocGeneratorService.ProviderNonCompleteGenerationException.class);
 
-    verify(docRepo, never()).save(any(ProjectGeneratedDoc.class));
+    verify(docRepo, never()).saveAndFlush(any(ProjectGeneratedDoc.class));
     verify(workspace, never()).writeRawFile(anyString(), anyString(), anyString());
   }
 
@@ -945,7 +986,7 @@ class ProjectDocGeneratorServiceCacheHitTest {
             () -> svc.generate("p-1", DocType.EXPLANATION, "actor-1", LlmProvider.ANTHROPIC))
         .isInstanceOf(ProjectDocGeneratorService.ProviderNonCompleteGenerationException.class);
 
-    verify(docRepo, never()).save(any(ProjectGeneratedDoc.class));
+    verify(docRepo, never()).saveAndFlush(any(ProjectGeneratedDoc.class));
     verify(workspace, never()).writeRawFile(anyString(), anyString(), anyString());
   }
 

@@ -2,12 +2,14 @@ package com.navneet.executespec.memory.chattools;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import java.nio.file.Path;
 import java.util.List;
 import java.util.UUID;
 
@@ -22,6 +24,7 @@ import com.navneet.executespec.project.entity.ProjectRepo;
 import com.navneet.executespec.project.entity.ProjectRepoLink;
 import com.navneet.executespec.project.pr.PullRequestRecordRepository;
 import com.navneet.executespec.project.rag.CodeChunkStore;
+import com.navneet.executespec.project.rag.CodeIndexWorkspaceMaterializer;
 import com.navneet.executespec.project.rag.CodeIndexingService;
 import com.navneet.executespec.project.rag.EmbeddingService;
 import com.navneet.executespec.project.rag.RetrievalService;
@@ -34,6 +37,7 @@ import com.navneet.executespec.security.ContextSanitizer;
 import com.navneet.executespec.specchat.ChatSecurityAuditService;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
 import com.navneet.executespec.tool.SearchFilesTool;
+import com.navneet.executespec.tool.ToolResult;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -60,6 +64,7 @@ class ProjectChatToolsSecurityTest {
   @Mock RetrievalService retrievalService;
   @Mock TechDebtService techDebtService;
   @Mock WorkspaceInitService workspaceInitService;
+  @Mock CodeIndexWorkspaceMaterializer codeIndexWorkspaceMaterializer;
   @Mock SearchFilesTool searchFilesTool;
   @Mock CodeIndexingService codeIndexingService;
   @Mock CodeChunkStore codeChunkStore;
@@ -233,6 +238,107 @@ class ProjectChatToolsSecurityTest {
                 .map(tool -> tool.getToolDefinition().name()))
         .doesNotContain("search_code", "search_project_docs");
     verifyNoInteractions(codeIndexingService, embeddingService, codeChunkStore);
+  }
+
+  @Test
+  void lexicalSearchUsesCanonicalMaterializerAndCallerCredential() {
+    AppUserDetails principal = principal();
+    UUID repoId = UUID.randomUUID();
+    ProjectRepo linked =
+        ProjectRepo.builder()
+            .id(repoId)
+            .githubRepoFullName("acme/private")
+            .lastSyncedSha("a".repeat(40))
+            .build();
+    when(linkRepo.findByProjectId("project-1"))
+        .thenReturn(
+            List.of(ProjectRepoLink.builder().projectId("project-1").repoId(repoId).build()));
+    when(repoRepo.findById(repoId)).thenReturn(java.util.Optional.of(linked));
+    when(codeIndexWorkspaceMaterializer.materialize(
+            "project-1", linked, null, "caller-private-pat"))
+        .thenReturn(Path.of("/tmp/canonical-project-repo"));
+    when(searchFilesTool.execute(any(), any())).thenReturn(new ToolResult.Ok("Controller.java:12"));
+    var searchRepoFiles =
+        tools
+            .bind(new ProjectChatTools.ToolContext("project-1", principal, "caller-private-pat"))
+            .stream()
+            .filter(tool -> "search_repo_files".equals(tool.getToolDefinition().name()))
+            .findFirst()
+            .orElseThrow();
+
+    String result = searchRepoFiles.call("{\"pattern\":\"Controller\"}");
+
+    assertThat(result).contains("\"ok\":true", "Controller.java:12");
+    verify(codeIndexWorkspaceMaterializer)
+        .materialize("project-1", linked, null, "caller-private-pat");
+  }
+
+  @Test
+  void bitbucketLexicalSearchNeverSendsGithubPatToBitbucket() {
+    var user =
+        com.navneet.executespec.auth.entity.AppUser.builder()
+            .id("user-1")
+            .email("user@example.com")
+            .globalRole("USER")
+            .status("ACTIVE")
+            .bitbucketUsername("bb-user")
+            .bitbucketAppPassword("bb-secret")
+            .build();
+    AppUserDetails principal = new AppUserDetails(user, null);
+    UUID repoId = UUID.randomUUID();
+    ProjectRepo linked =
+        ProjectRepo.builder()
+            .id(repoId)
+            .githubRepoFullName("team/private")
+            .scmProvider("BITBUCKET")
+            .lastSyncedSha("a".repeat(40))
+            .build();
+    when(linkRepo.findByProjectId("project-1"))
+        .thenReturn(
+            List.of(ProjectRepoLink.builder().projectId("project-1").repoId(repoId).build()));
+    when(repoRepo.findById(repoId)).thenReturn(java.util.Optional.of(linked));
+    when(codeIndexWorkspaceMaterializer.materialize("project-1", linked, "bb-user", "bb-secret"))
+        .thenReturn(Path.of("/tmp/canonical-bitbucket-repo"));
+    when(searchFilesTool.execute(any(), any())).thenReturn(new ToolResult.Ok("App.java:1"));
+    var searchRepoFiles =
+        tools
+            .bind(new ProjectChatTools.ToolContext("project-1", principal, "github-secret"))
+            .stream()
+            .filter(tool -> "search_repo_files".equals(tool.getToolDefinition().name()))
+            .findFirst()
+            .orElseThrow();
+
+    assertThat(searchRepoFiles.call("{\"pattern\":\"App\"}")).contains("\"ok\":true");
+    verify(codeIndexWorkspaceMaterializer).materialize("project-1", linked, "bb-user", "bb-secret");
+  }
+
+  @Test
+  void lexicalMaterializationFailureReturnsStructuredCodeInsteadOfCredentialGuess() {
+    AppUserDetails principal = principal();
+    UUID repoId = UUID.randomUUID();
+    ProjectRepo linked =
+        ProjectRepo.builder()
+            .id(repoId)
+            .githubRepoFullName("acme/public")
+            .lastSyncedSha("a".repeat(40))
+            .build();
+    when(linkRepo.findByProjectId("project-1"))
+        .thenReturn(
+            List.of(ProjectRepoLink.builder().projectId("project-1").repoId(repoId).build()));
+    when(repoRepo.findById(repoId)).thenReturn(java.util.Optional.of(linked));
+    when(codeIndexWorkspaceMaterializer.materialize("project-1", linked, null, null))
+        .thenThrow(
+            new CodeIndexWorkspaceMaterializer.MaterializationException(
+                CodeIndexWorkspaceMaterializer.Code.SOURCE_CLONE_INCOMPLETE));
+    var searchRepoFiles =
+        tools.bind(new ProjectChatTools.ToolContext("project-1", principal, null)).stream()
+            .filter(tool -> "search_repo_files".equals(tool.getToolDefinition().name()))
+            .findFirst()
+            .orElseThrow();
+
+    assertThat(searchRepoFiles.call("{\"pattern\":\"Controller\"}"))
+        .contains("SOURCE_CLONE_INCOMPLETE", "repository source is unavailable")
+        .doesNotContain("check repository access and credentials");
   }
 
   @Test
