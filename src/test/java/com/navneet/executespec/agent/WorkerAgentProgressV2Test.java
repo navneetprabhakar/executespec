@@ -359,6 +359,79 @@ class WorkerAgentProgressV2Test {
   }
 
   @Test
+  void greenBuildsCannotResetProgressForeverAfterOneMutation() {
+    Tool write =
+        successfulTool(
+            "writeFile",
+            """
+{"type":"object","required":["path","content"],"properties":{"path":{"type":"string"},"content":{"type":"string"}}}
+""",
+            "wrote file");
+    Tool build = successfulTool("buildProject", "{\"type\":\"object\"}", "build passed\nexit=0\n");
+    List<ChatResponse> seq = new ArrayList<>();
+    seq.add(responseWithCalls(toolCall("writeFile", "{\"path\":\"app.py\",\"content\":\"x\"}")));
+    for (int i = 0; i < 8; i++) {
+      seq.add(responseWithCalls(toolCall("buildProject", "{}")));
+    }
+
+    WorkerResult result = newWorker(seq, List.of(write, build)).run(req(false, 2, 6));
+
+    assertEquals(WorkerResult.Outcome.COMPLETED_BY_STAGNATION, result.outcome());
+    assertEquals(8, result.iterations());
+  }
+
+  @Test
+  void highThresholdWorkerStopsVerificationLoopEightTurnsAfterMutationAtIteration18() {
+    Tool read = successfulTool("readFile", "{\"type\":\"object\"}", "source");
+    Tool write =
+        successfulTool(
+            "writeFile",
+            """
+{"type":"object","required":["path","content"],"properties":{"path":{"type":"string"},"content":{"type":"string"}}}
+""",
+            "wrote file");
+    Tool build = successfulTool("buildProject", "{\"type\":\"object\"}", "build passed\nexit=0\n");
+    List<ChatResponse> seq = new ArrayList<>();
+    for (int i = 1; i <= 17; i++) {
+      seq.add(responseWithCalls(toolCall("readFile", "{\"path\":\"src/F" + i + "\"}")));
+    }
+    seq.add(responseWithCalls(toolCall("writeFile", "{\"path\":\"app.py\",\"content\":\"x\"}")));
+    for (int i = 0; i < 12; i++) {
+      seq.add(responseWithCalls(toolCall("buildProject", "{}")));
+    }
+
+    WorkerResult result = newWorker(seq, List.of(read, write, build)).run(req(false, 24, 40));
+
+    assertEquals(WorkerResult.Outcome.COMPLETED_BY_STAGNATION, result.outcome());
+    assertEquals(26, result.iterations());
+    assertThat(result.iterations()).isLessThan(30);
+  }
+
+  @Test
+  void uniqueInvestigativeReadsAfterMutationDoNotTriggerVerificationWatchdog() {
+    Tool write =
+        successfulTool(
+            "writeFile",
+            """
+{"type":"object","required":["path","content"],"properties":{"path":{"type":"string"},"content":{"type":"string"}}}
+""",
+            "wrote file");
+    Tool read = successfulTool("readFile", "{\"type\":\"object\"}", "source");
+    List<ChatResponse> seq = new ArrayList<>();
+    seq.add(responseWithCalls(toolCall("writeFile", "{\"path\":\"app.py\",\"content\":\"x\"}")));
+    for (int i = 1; i <= 8; i++) {
+      seq.add(responseWithCalls(toolCall("readFile", "{\"path\":\"src/File" + i + "\"}")));
+    }
+    seq.add(responseWithCalls(toolCall("completeTask", "{\"summary\":\"done\"}")));
+    seq.add(responseWithCalls(toolCall("completeTask", "{\"summary\":\"done\"}")));
+
+    WorkerResult result = newWorker(seq, List.of(write, read)).run(req(false, 24, 40));
+
+    assertEquals(WorkerResult.Outcome.COMPLETED, result.outcome());
+    assertEquals(11, result.iterations());
+  }
+
+  @Test
   void v2_forces_on_repeated_identical_failure() {
     // The SAME failing call five times (streak == PROGRESS_V2_REPEAT_FAILURE_FORCE_AT) — a true
     // loop — must terminate even with v1 thresholds disabled (warn/force = maxIter, as the
