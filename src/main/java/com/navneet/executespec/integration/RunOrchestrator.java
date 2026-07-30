@@ -3930,8 +3930,7 @@ public class RunOrchestrator implements RunControlPort {
           plan,
           correctionCheckpoint,
           reviewAssessment.workspaceGeneration());
-      CorrectionResolutionEvidence.ValidationDelta correctionValidationDelta =
-          automaticCorrectionLifecycle.captureValidationDelta(correctionEvidenceCheckpoint);
+      var delta = automaticCorrectionLifecycle.captureValidationDelta(correctionEvidenceCheckpoint);
       CorrectionWorkspaceTransaction.Accepted generations =
           automaticCorrectionLifecycle.accept(correctionCheckpoint);
       persistenceWriter.applyExecutionResultToTasks(runId, rerunResult);
@@ -3944,7 +3943,7 @@ public class RunOrchestrator implements RunControlPort {
           generations.beforeGeneration(),
           generations.afterGeneration(),
           correctionDiff,
-          correctionValidationDelta,
+          delta,
           true);
       if (postValidationOperation != null) {
         runOperationLifecycle.complete(postValidationOperation);
@@ -4302,10 +4301,7 @@ public class RunOrchestrator implements RunControlPort {
     return violated ? new StatusAndReason("PARTIAL", "ARCHITECTURE_INVARIANT_VIOLATION") : base;
   }
 
-  /**
-   * The multi-repo workspace summary + language-parity block moved to {@link RunContextComposer}
-   * (god-class split inc-3b); {@code languageConventionHint} moved to {@link RunPipelineSupport}.
-   */
+  /** Multi-repo context moved to {@link RunContextComposer} and {@link RunPipelineSupport}. */
 
   /**
    * The classify → outline → expand planning phases ({@code runClassifierShadow} / {@code
