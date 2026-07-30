@@ -1,5 +1,6 @@
 package com.navneet.executespec.agent;
 
+import static com.navneet.executespec.agent.PlanApiContractEvidence.canonicalIdentityPath;
 import static com.navneet.executespec.agent.PlanApiContractEvidence.displayPath;
 import static com.navneet.executespec.agent.PlanApiContractEvidence.extract;
 import static com.navneet.executespec.agent.PlanApiContractEvidence.normalizedPath;
@@ -90,9 +91,9 @@ final class PlanApiRouteIdentityContract {
       for (ApiEvidence operation : extract(task)) {
         exactCandidates
             .computeIfAbsent(
-                exactKey(operation.method(), operation.path()), ignored -> new LinkedHashSet<>())
+                exactKey(operation.method(), operation.rawPath()), ignored -> new LinkedHashSet<>())
             .add(authoritativeRoute(operation));
-        String actionKey = logicalActionKey(operation);
+        String actionKey = logicalActionKey(operation.method(), operation.rawPath());
         if (actionKey != null)
           actionCandidates.computeIfAbsent(actionKey, ignored -> new ArrayList<>()).add(operation);
       }
@@ -103,7 +104,9 @@ final class PlanApiRouteIdentityContract {
     actionCandidates.forEach(
         (key, candidates) -> {
           Set<String> identities = new LinkedHashSet<>();
-          for (ApiEvidence candidate : candidates) identities.add(candidate.path());
+          for (ApiEvidence candidate : candidates) {
+            identities.add(canonicalIdentityPath(candidate.rawPath()));
+          }
           if (identities.size() == 1) actions.put(key, authoritativeRoute(candidates.getFirst()));
         });
     return new Authorities(Map.copyOf(exact), Map.copyOf(actions));
@@ -123,7 +126,7 @@ final class PlanApiRouteIdentityContract {
       String route = query < 0 ? path : path.substring(0, query);
       String suffix = query < 0 ? "" : path.substring(query);
       String method = matcher.group(1).toUpperCase(Locale.ROOT);
-      String normalized = normalizedPath(route);
+      String normalized = canonicalIdentityPath(route);
       String authoritative = authorities.exact().get(exactKey(method, normalized));
       if (authoritative == null) {
         String actionKey = logicalActionKey(method, normalized);
@@ -189,12 +192,12 @@ final class PlanApiRouteIdentityContract {
    * action. Collection/item reads are complementary and are intentionally not grouped here.
    */
   private static String logicalActionKey(ApiEvidence evidence) {
-    return logicalActionKey(evidence.method(), evidence.path());
+    return logicalActionKey(evidence.method(), evidence.rawPath());
   }
 
   private static String logicalActionKey(String method, String rawPath) {
     if (method.equals("GET")) return null;
-    String path = normalizedPath(rawPath);
+    String path = canonicalIdentityPath(rawPath);
     String[] segments = path.split("/");
     if (segments.length < 3) return null;
     String action = segments[segments.length - 1];
@@ -207,14 +210,14 @@ final class PlanApiRouteIdentityContract {
   }
 
   private static String exactKey(String method, String path) {
-    return method + "\u0000" + normalizedPath(path);
+    return method + "\u0000" + canonicalIdentityPath(path);
   }
 
   private static String authoritativeRoute(ApiEvidence evidence) {
     String raw = safe(evidence.rawPath());
     int query = raw.indexOf('?');
     if (query >= 0) raw = raw.substring(0, query);
-    return raw.startsWith("/api") ? raw : displayPath(evidence.path());
+    return raw.isBlank() ? displayPath(evidence.path()) : raw;
   }
 
   private static int parameterCount(String path) {

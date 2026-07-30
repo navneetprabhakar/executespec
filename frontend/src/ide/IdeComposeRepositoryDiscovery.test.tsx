@@ -84,6 +84,50 @@ afterEach(() => {
 });
 
 describe('IdeCompose repository discovery', () => {
+  it('restores project identity and repository scope from a Plan Review handoff', async () => {
+    sessionStorage.setItem(
+      'signal:pending-spec',
+      JSON.stringify({
+        schemaVersion: 1,
+        handoffId: 'revision-1',
+        spec: 'Preserve the exact /system/health endpoint.',
+        projectId: 'project-1',
+        repoId: null,
+        scope: 'PROJECT',
+        source: 'plan-revision',
+        createdAt: '2026-07-30T00:00:00.000Z',
+      }),
+    );
+    api.getProjectRepos.mockResolvedValue([
+      {
+        repoId: 'repo-1',
+        repo: {
+          id: 'repo-1',
+          githubRepoFullName: 'acme/orders',
+          scmProvider: 'GITHUB',
+          sourceCapabilities: ['CLOUD_RUN'],
+        },
+      },
+    ]);
+
+    await act(async () => {
+      root.render(
+        <MemoryRouter>
+          <IdeCompose />
+        </MemoryRouter>,
+      );
+    });
+
+    await vi.waitFor(() => {
+      expect(api.getProjectRepos).toHaveBeenCalledWith('project-1');
+      expect(host.textContent).toContain('acme/orders');
+    });
+    expect(host.querySelector<HTMLTextAreaElement>('textarea')?.value).toBe(
+      'Preserve the exact /system/health endpoint.',
+    );
+    expect(sessionStorage.getItem('signal:pending-spec')).toBeNull();
+  });
+
   it('disables desktop plan creation when the selected provider cannot dispatch', async () => {
     readiness.byProvider = new Map([
       ['ANTHROPIC', {provider: 'ANTHROPIC', state: 'UNAVAILABLE', dispatchable: false}],

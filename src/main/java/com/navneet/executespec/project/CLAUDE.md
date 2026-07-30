@@ -180,6 +180,11 @@ bypassed with a raw user id.
   readiness is absent or partial. FastContext is not referenced by this production path. Code-index
   materializations are isolated by project + repository + the full source revision digest; the
   project-scoped lease can no longer race another project's lease against a shared checkout.
+- Project Agent range expansion reuses that exact materialization through
+  `memory/chattools/ProjectRepositorySourceReadTools`: `read_repo_file_range` is a pure
+  `PROJECT_READ` callback capped at 200 inclusive lines / 24k characters and refuses any source
+  path that is unlinked, absolute, traversal-bearing, symlinked, Git metadata, credential-like, or
+  over 5 MiB. This is lexical evidence context, not semantic or relationship analysis.
 - The explicit refresh endpoint may return HTTP 202 with `status=UNAVAILABLE` when the governed
   embedding route cannot run. Web reads the response status (`QUEUED | UNAVAILABLE | PARTIAL |
   READY`) and fixed reason instead of translating every accepted response into “queued”; current
