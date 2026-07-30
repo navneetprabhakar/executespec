@@ -244,10 +244,11 @@ public class ValidationReportService {
       // (testCoverageLevel=GOOD/COMPREHENSIVE means "coverage matches what spec implied").
       String testCoverageLevel =
           accuracyReport != null ? accuracyReport.getTestCoverageLevel() : null;
+      boolean additiveFormula = additiveScoreEnabled();
       int verifiedScore =
           evidenceFailure != null
               ? 0
-              : computeVerifiedScore(
+              : computeVerifiedScoreForFormula(
                   finalBuildPassed,
                   testsPassedCount,
                   testsTotalCount,
@@ -256,9 +257,25 @@ public class ValidationReportService {
                   endpointCoveragePercent,
                   testCoverageLevel,
                   filesGenerated,
-                  input.bootVerification());
+                  input.bootVerification(),
+                  additiveFormula);
       verifiedScore = capScoreAtAdmittedSpecGaps(verifiedScore, accuracyReport);
       verifiedScore = capScoreWithoutIndependentFunctionalProof(verifiedScore, ts);
+      ValidationReportScoreZeroCause.Evidence scoreZeroCause =
+          ValidationReportScoreZeroCause.derive(
+              verifiedScore,
+              additiveFormula,
+              filesGenerated,
+              finalBuildPassed,
+              testsPassedCount,
+              testsTotalCount,
+              ts == null ? null : ts.getExecutionVerified(),
+              input.bootVerification());
+      if (verifiedScore == 0 && scoreZeroCause == null) {
+        verifiedScore = 1;
+      }
+      String scoreZeroCauseJson =
+          ValidationReportScoreZeroCause.toJson(objectMapper, scoreZeroCause);
 
       // PR-E Phase A (2026-05-13) — additive rubric companion. Fixes the verifiedScore=0
       // cliff where any single zero factor (failed build, REVIEW_FAILED) collapses the entire
@@ -342,6 +359,7 @@ public class ValidationReportService {
                   ts == null || ts.getEvidenceScope() == null ? null : ts.getEvidenceScope().name())
               .reviewerVerdict(reviewerVerdict)
               .verifiedScore(verifiedScore)
+              .scoreZeroCauseJson(scoreZeroCauseJson)
               .rubricScore(rubricScore)
               .bootVerdict(
                   input.bootVerification() == null
@@ -522,34 +540,57 @@ public class ValidationReportService {
     report.setExecutableEvidenceJson(executableVerification.evidenceJson());
     // Keep the existing six-dimension test axis in sync for callers that still render it.
     report.setTestCoverageScore(deriveConcreteTestCoverageScore(total, passed));
-    report.setVerifiedScore(
-        capScoreWithoutIndependentFunctionalProof(
-            capScoreAtAdmittedSpecGaps(
-                computeVerifiedScore(
-                    report.getFinalBuildPassed(),
-                    passed,
-                    total,
-                    report.getReviewerVerdict(),
-                    criticals,
-                    accuracy.endpointCoverage(),
-                    concreteCoverageLevel,
-                    report.getFilesGenerated(),
-                    bootVerification(report)),
-                persistedAccuracy),
-            summary));
+    boolean additiveFormula = additiveScoreEnabled();
+    String evidenceFailure = scoreEvidenceFailure(report);
+    int rescoredVerified =
+        evidenceFailure != null
+            ? 0
+            : capScoreWithoutIndependentFunctionalProof(
+                capScoreAtAdmittedSpecGaps(
+                    computeVerifiedScoreForFormula(
+                        report.getFinalBuildPassed(),
+                        passed,
+                        total,
+                        report.getReviewerVerdict(),
+                        criticals,
+                        accuracy.endpointCoverage(),
+                        concreteCoverageLevel,
+                        report.getFilesGenerated(),
+                        bootVerification(report),
+                        additiveFormula),
+                    persistedAccuracy),
+                summary);
+    ValidationReportScoreZeroCause.Evidence scoreZeroCause =
+        ValidationReportScoreZeroCause.derive(
+            rescoredVerified,
+            additiveFormula,
+            report.getFilesGenerated(),
+            report.getFinalBuildPassed(),
+            passed,
+            total,
+            provenTestExecution ? Boolean.TRUE : Boolean.FALSE,
+            bootVerification(report));
+    if (rescoredVerified == 0 && scoreZeroCause == null) {
+      rescoredVerified = 1;
+    }
+    report.setVerifiedScore(rescoredVerified);
+    report.setScoreZeroCauseJson(
+        ValidationReportScoreZeroCause.toJson(objectMapper, scoreZeroCause));
     report.setRubricScore(
-        capScoreWithoutIndependentFunctionalProof(
-            capScoreAtAdmittedSpecGaps(
-                computeRubricScore(
-                    report.getFinalBuildPassed(),
-                    passed,
-                    total,
-                    report.getReviewerVerdict(),
-                    criticals,
-                    accuracy.endpointCoverage(),
-                    concreteCoverageLevel),
-                persistedAccuracy),
-            summary));
+        evidenceFailure != null
+            ? 0
+            : capScoreWithoutIndependentFunctionalProof(
+                capScoreAtAdmittedSpecGaps(
+                    computeRubricScore(
+                        report.getFinalBuildPassed(),
+                        passed,
+                        total,
+                        report.getReviewerVerdict(),
+                        criticals,
+                        accuracy.endpointCoverage(),
+                        concreteCoverageLevel),
+                    persistedAccuracy),
+                summary));
 
     ValidationReport saved = repository.save(report);
     List<VerificationEvidenceDTO> ledger = buildVerificationLedger(saved, issues);
@@ -926,9 +967,10 @@ public class ValidationReportService {
   }
 
   /**
-   * A summary score cannot exceed the assessor's own spec-adherence score once that assessor has
-   * identified a concrete missing/partial requirement or could not verify one. UNKNOWN is not a
-   * defect, but it also cannot support a headline score above the assessor's bounded confidence.
+   * A summary score is confidence-capped once the assessor identifies a missing/partial requirement
+   * or cannot verify one. UNKNOWN is not a defect, but it cannot support a passing headline. The
+   * LLM assessment remains advisory: its numeric zero cannot manufacture the deterministic zero
+   * reserved by {@link ValidationReportScorePolicy#capForAdmittedSpecGaps}.
    */
   static int capScoreAtAdmittedSpecGaps(int score, AccuracyReport accuracy) {
     if (accuracy == null) return score;
@@ -1496,9 +1538,35 @@ public class ValidationReportService {
       String testCoverageLevel,
       int filesGenerated,
       BootVerification bootVerification) {
-    boolean additive =
-        featureFlagService == null || featureFlagService.isEnabled(FLAG_ADDITIVE_SCORE);
-    if (!additive) {
+    return computeVerifiedScoreForFormula(
+        finalBuildPassed,
+        testsPassed,
+        testsTotal,
+        reviewerVerdictName,
+        unfixedCriticalCount,
+        endpointCoveragePercent,
+        testCoverageLevel,
+        filesGenerated,
+        bootVerification,
+        additiveScoreEnabled());
+  }
+
+  boolean additiveScoreEnabled() {
+    return featureFlagService == null || featureFlagService.isEnabled(FLAG_ADDITIVE_SCORE);
+  }
+
+  int computeVerifiedScoreForFormula(
+      Boolean finalBuildPassed,
+      int testsPassed,
+      int testsTotal,
+      String reviewerVerdictName,
+      int unfixedCriticalCount,
+      Integer endpointCoveragePercent,
+      String testCoverageLevel,
+      int filesGenerated,
+      BootVerification bootVerification,
+      boolean additiveFormula) {
+    if (!additiveFormula) {
       return computeVerifiedScoreMultiplicative(
           finalBuildPassed,
           testsPassed,

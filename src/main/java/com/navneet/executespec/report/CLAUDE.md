@@ -83,8 +83,12 @@ invalid reports are excluded and counted separately.
   Run-level goal proof does not treat an `UNKNOWN` optional row (notably endpoint coverage for a
   STATIC_WEB/CLI/LIBRARY deliverable) as unfinished work; measured WARN/FAIL optional evidence still
   keeps the proof uncertain, and missing spec-adherence evidence remains explicitly unproven.
-- No approved product diff, deterministic zero spec adherence with named missing requirements, or
-  zero required-endpoint coverage forces both headline scores to zero and `pipelineResult=FAILED`.
+- No approved product diff is the deterministic delivery hard floor and forces both headline
+  scores to zero plus `pipelineResult=FAILED`. LLM-produced spec-adherence, endpoint-coverage and
+  coverage-quality findings remain advisory confidence inputs: they may warn or cap a positive
+  headline no lower than 1, but cannot create a zero. Every zero report carries a typed
+  `score-zero-cause` ledger row bound to exact deterministic artifacts; historical or unbound
+  zeros state that the cause is unavailable rather than inferring one.
 - Fresh workspace suites remain customer-visible deterministic test evidence, explicitly labelled
   `workspace suite only`; they cannot certify deployed journeys and cap both verified/rubric
   headlines at 75. The independently generated black-box suite exercises the live preview/runtime
@@ -97,9 +101,10 @@ invalid reports are excluded and counted separately.
   of the guarded range (75), not the full slot, and a missing or unrecognised test-coverage
   judgment caps the TESTS slot at 85 rather than falling through to an uncapped 100.
 - The legacy multiplicative scorer (`scoring.additive-v2` off) is a supported rollback path and
-  applies the same RL-2026-06-026 trust caps as the additive scorer. Its neutral factor for an
-  unmeasured endpoint signal is intentional — the shape has no denominator to drop a slot from —
-  and is safe only because the trust cap constrains the result.
+  applies the same RL-2026-06-026 trust caps as the additive scorer. Missing build evidence and an
+  unmeasured endpoint signal are neutral UNKNOWN factors rather than failure; any raw zero caused
+  only by LLM-derived factors is lifted to 1, while explicit deterministic build/boot/test failures
+  may still produce zero.
 - `reviewer/AccuracyAssessmentService` receives test files through a separate bounded evidence lane
   (six files / 30K characters). Production-file inference still excludes tests, but the LLM coverage
   judgment must inspect real test content rather than infer `NONE` from an intentionally test-free
@@ -145,3 +150,6 @@ invalid reports are excluded and counted separately.
   generation binding. Null is reserved for pre-V361/unbound evidence.
 - `V362__persist_validation_command_and_workflow_evidence.sql` adds reloadable command execution and
   workflow-parser evidence. Historical rows remain nullable and therefore visibly unmeasured.
+- `V366__persist_score_zero_cause.sql` adds nullable `score_zero_cause_json`. New zero headlines
+  persist their exact generation-time deterministic cause; historical and nonzero rows stay null,
+  and readers must not reverse-infer causality from adjacent report fields.

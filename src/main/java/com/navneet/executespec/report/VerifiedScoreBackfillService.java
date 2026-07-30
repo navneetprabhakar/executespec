@@ -99,6 +99,7 @@ public class VerifiedScoreBackfillService {
     int skipped = 0;
     int errors = 0;
     List<ScoreChange> changes = new java.util.ArrayList<>();
+    boolean additiveFormula = scoreService.additiveScoreEnabled();
 
     for (ValidationReport row : rows) {
       try {
@@ -114,26 +115,32 @@ public class VerifiedScoreBackfillService {
         // concrete-test rescoring do. Dropping it here re-scored a run that compiled but booted
         // UNHEALTHY (honest BUILD slot 55) as BUILD=100, upgrading the headline above the run's own
         // recorded evidence, and dropped the BUILD slot entirely when finalBuildPassed was null.
+        boolean evidenceFailure = row.getFilesGenerated() == 0;
         int recomputedVerified =
-            scoreService.computeVerifiedScore(
-                row.getFinalBuildPassed(),
-                row.getTestsPassed() == null ? 0 : row.getTestsPassed(),
-                row.getTestsTotal() == null ? 0 : row.getTestsTotal(),
-                row.getReviewerVerdict(),
-                unfixedCritical,
-                endpointCoverage,
-                testCoverageLevel,
-                row.getFilesGenerated(),
-                ValidationReportService.bootVerification(row));
+            evidenceFailure
+                ? 0
+                : scoreService.computeVerifiedScoreForFormula(
+                    row.getFinalBuildPassed(),
+                    row.getTestsPassed() == null ? 0 : row.getTestsPassed(),
+                    row.getTestsTotal() == null ? 0 : row.getTestsTotal(),
+                    row.getReviewerVerdict(),
+                    unfixedCritical,
+                    endpointCoverage,
+                    testCoverageLevel,
+                    row.getFilesGenerated(),
+                    ValidationReportService.bootVerification(row),
+                    additiveFormula);
         int recomputedRubric =
-            scoreService.computeRubricScore(
-                row.getFinalBuildPassed(),
-                row.getTestsPassed() == null ? 0 : row.getTestsPassed(),
-                row.getTestsTotal() == null ? 0 : row.getTestsTotal(),
-                row.getReviewerVerdict(),
-                unfixedCritical,
-                endpointCoverage,
-                testCoverageLevel);
+            evidenceFailure
+                ? 0
+                : scoreService.computeRubricScore(
+                    row.getFinalBuildPassed(),
+                    row.getTestsPassed() == null ? 0 : row.getTestsPassed(),
+                    row.getTestsTotal() == null ? 0 : row.getTestsTotal(),
+                    row.getReviewerVerdict(),
+                    unfixedCritical,
+                    endpointCoverage,
+                    testCoverageLevel);
 
         // Score generation caps both summaries when the persisted accuracy assessment admits a
         // missing or partial requirement. Backfill must reproduce that final policy step too;
@@ -144,11 +151,27 @@ public class VerifiedScoreBackfillService {
         recomputedRubric =
             capScoreAtAdmittedSpecGapsFromAccuracyJson(recomputedRubric, row.getAccuracyJson());
 
+        ValidationReportScoreZeroCause.Evidence scoreZeroCause =
+            ValidationReportScoreZeroCause.derive(
+                recomputedVerified,
+                additiveFormula,
+                row.getFilesGenerated(),
+                row.getFinalBuildPassed(),
+                row.getTestsPassed() == null ? 0 : row.getTestsPassed(),
+                row.getTestsTotal() == null ? 0 : row.getTestsTotal(),
+                row.getTestExecutionVerified(),
+                ValidationReportService.bootVerification(row));
+        if (recomputedVerified == 0 && scoreZeroCause == null) {
+          recomputedVerified = 1;
+        }
+        String recomputedZeroCause = ValidationReportScoreZeroCause.toJson(MAPPER, scoreZeroCause);
+
         Integer existingVerified = row.getVerifiedScore();
         Integer existingRubric = row.getRubricScore();
         boolean same =
             java.util.Objects.equals(existingVerified, recomputedVerified)
-                && java.util.Objects.equals(existingRubric, recomputedRubric);
+                && java.util.Objects.equals(existingRubric, recomputedRubric)
+                && java.util.Objects.equals(row.getScoreZeroCauseJson(), recomputedZeroCause);
         if (same) {
           unchanged++;
           continue;
@@ -167,6 +190,7 @@ public class VerifiedScoreBackfillService {
         if (!dryRun) {
           row.setVerifiedScore(recomputedVerified);
           row.setRubricScore(recomputedRubric);
+          row.setScoreZeroCauseJson(recomputedZeroCause);
           reportRepo.save(row);
         }
         updated++;
@@ -300,7 +324,10 @@ public class VerifiedScoreBackfillService {
       int policyCap = missing ? 69 : partial ? 79 : 89;
       JsonNode adherence = root.path("specAdherenceScore");
       if (adherence.canConvertToInt()) {
-        policyCap = Math.min(policyCap, Math.max(0, Math.min(100, adherence.asInt())));
+        // Historical LLM assessments may report zero. They can cap confidence, but zero is
+        // reserved for explicit deterministic scoring failures and must not be manufactured by a
+        // backfill replaying advisory evidence.
+        policyCap = Math.min(policyCap, Math.max(1, Math.min(100, adherence.asInt())));
       }
       return Math.min(score, policyCap);
     } catch (IOException ex) {

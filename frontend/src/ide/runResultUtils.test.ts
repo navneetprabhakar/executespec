@@ -30,6 +30,7 @@ import {
   isTestExecutionTerminal,
   lineDiff,
   latestContinuationAction,
+  latestCorrectionEvidence,
   logIcon,
   logLabel,
   logMeta,
@@ -172,6 +173,44 @@ describe('publicationTrustFacts', () => {
     expect(facts.find((fact) => fact.label === 'Tests')).toMatchObject({kind: 'bad'});
     expect(facts.find((fact) => fact.label === 'Evidence freshness')).toMatchObject({kind: 'bad'});
     expect(facts.find((fact) => fact.label === 'Publication')).toMatchObject({kind: 'bad'});
+  });
+});
+
+describe('latestCorrectionEvidence', () => {
+  it('returns the latest durable correction with patch and validation delta intact', () => {
+    const run = {
+      tasks: [
+        {
+          continuationActions: [
+            {decision: 'CORRECTION_RESOLUTION', code: 'CORRECTION_REJECTED'},
+            {
+              decision: 'CORRECTION_RESOLUTION',
+              code: 'CORRECTION_ACCEPTED',
+              beforeWorkspaceGeneration: 'before',
+              afterWorkspaceGeneration: 'after',
+              unifiedPatch: 'diff --git a/App.java b/App.java',
+              patchMetadata: {capturedBytes: 34, fullBytes: 34, truncated: false},
+              validationDelta: {
+                before: {build: {verdict: 'PASSED'}},
+                after: {build: {verdict: 'PASSED'}},
+                verifiedScoreDelta: 4,
+              },
+            },
+          ],
+        },
+      ],
+    } as unknown as RunDetail;
+
+    expect(latestCorrectionEvidence(run)).toMatchObject({
+      code: 'CORRECTION_ACCEPTED',
+      unifiedPatch: 'diff --git a/App.java b/App.java',
+      patchMetadata: {fullBytes: 34, truncated: false},
+      validationDelta: {verifiedScoreDelta: 4},
+    });
+  });
+
+  it('does not invent correction evidence for an untouched run', () => {
+    expect(latestCorrectionEvidence({tasks: []} as unknown as RunDetail)).toBeNull();
   });
 });
 

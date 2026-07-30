@@ -57,10 +57,10 @@ class FlywayMigrationInventoryTest {
     // brownfield HTTP-contract evidence, and V361 binds validation evidence to an exact workspace
     // generation, bringing the exact inventory to 347. V362 persists deterministic workflow and
     // command execution evidence; V363 confirmation-fences uncertain generated-document retries,
-    // V364 atomically fences exact continuation approvals, and V365 adds the bounded stale-receipt
-    // recovery timestamp/index, bringing the exact inventory to 351.
-    assertThat(migrations).hasSize(351);
-    assertThat(migrations.getLast().version()).isEqualTo("365");
+    // V365 adds bounded stale-receipt recovery; V366 persists exact score-zero causality, bringing
+    // the exact inventory to 352.
+    assertThat(migrations).hasSize(352);
+    assertThat(migrations.getLast().version()).isEqualTo("366");
 
     assertThat(migrations.stream().map(MigrationFile::version)).doesNotHaveDuplicates();
     assertThat(migrations.stream().map(MigrationFile::fileName))

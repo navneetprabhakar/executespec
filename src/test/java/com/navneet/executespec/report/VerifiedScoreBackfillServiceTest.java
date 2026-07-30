@@ -66,6 +66,50 @@ class VerifiedScoreBackfillServiceTest {
   }
 
   @Test
+  void backfillPersistsExactCauseForAnExistingNoDiffZero() {
+    ValidationReportRepository repo = mock(ValidationReportRepository.class);
+    ValidationReport row =
+        ValidationReport.builder()
+            .id("vr-zero")
+            .runId("run-zero")
+            .filesGenerated(0)
+            .finalBuildPassed(false)
+            .testsPassed(0)
+            .testsTotal(3)
+            .testExecutionVerified(true)
+            .reviewerVerdict("REVIEW_FAILED")
+            .verifiedScore(0)
+            .rubricScore(0)
+            .issuesJson("[]")
+            .build();
+    when(repo.findByRunId("run-zero")).thenReturn(Optional.of(row));
+
+    VerifiedScoreBackfillService.BackfillResult result =
+        new VerifiedScoreBackfillService(repo, scoringService())
+            .backfill(new VerifiedScoreBackfillService.BackfillRequest("run-zero", null, false));
+
+    assertThat(result.updated()).isEqualTo(1);
+    assertThat(row.getVerifiedScore()).isZero();
+    assertThat(row.getScoreZeroCauseJson()).contains("CODE_DELIVERED");
+    assertThat(row.getScoreZeroCauseJson()).doesNotContain("TESTS", "BUILD");
+    verify(repo).save(row);
+  }
+
+  @Test
+  void backfillClearsStaleCauseWhenRecomputedScoreIsPositive() {
+    ValidationReportRepository repo = mock(ValidationReportRepository.class);
+    ValidationReport row = backfillableRow();
+    row.setScoreZeroCauseJson("{\"schemaVersion\":1,\"formula\":\"ADDITIVE_V2\",\"causes\":[]}");
+    when(repo.findByRunId("run-1")).thenReturn(Optional.of(row));
+
+    new VerifiedScoreBackfillService(repo, scoringService())
+        .backfill(new VerifiedScoreBackfillService.BackfillRequest("run-1", null, false));
+
+    assertThat(row.getScoreZeroCauseJson()).isNull();
+    verify(repo).save(row);
+  }
+
+  @Test
   void backfill_appliesCurrentTrustCaps() {
     ValidationReportRepository repo = mock(ValidationReportRepository.class);
     ValidationReport row =
@@ -167,6 +211,22 @@ class VerifiedScoreBackfillServiceTest {
             VerifiedScoreBackfillService.capScoreAtAdmittedSpecGapsFromAccuracyJson(
                 94, accuracyJson))
         .isEqualTo(89);
+  }
+
+  @Test
+  void backfillLlmOnlyZeroCannotCreateHeadlineZero() {
+    String accuracyJson =
+        """
+        {
+          "specAdherenceScore": 0,
+          "missingRequirements": ["The bounded LLM sample did not find the behavior"]
+        }
+        """;
+
+    assertThat(
+            VerifiedScoreBackfillService.capScoreAtAdmittedSpecGapsFromAccuracyJson(
+                94, accuracyJson))
+        .isEqualTo(1);
   }
 
   /**

@@ -65,6 +65,48 @@ class CorrectionWorkspaceTransactionTest {
     assertThat(first).isEqualTo(second);
     assertThat(first.changedFiles()).containsExactly("0:added.txt", "0:tracked.txt");
     assertThat(first.diffDigest()).hasSize(64);
+    assertThat(first.unifiedPatch())
+        .contains("### repository 0", "--- a/tracked.txt", "+++ b/tracked.txt", "+corrected");
+    assertThat(first.patchCapturedBytes()).isPositive();
+    assertThat(first.patchFullBytes()).isEqualTo(first.patchCapturedBytes());
+    assertThat(first.patchTruncated()).isFalse();
+    assertThat(first.patchRedacted()).isFalse();
+  }
+
+  @Test
+  void correctionPatchIsBoundedWhileFullTreeDigestCoversBytesPastTheBoundary() throws Exception {
+    Path repository = repository("bounded-diff");
+    var checkpoint = transaction.begin(repository);
+    String common = "x".repeat(CorrectionWorkspaceTransaction.MAX_PATCH_BYTES + 8_192);
+
+    Files.writeString(repository.resolve("tracked.txt"), common + "first-tail\n");
+    var first = transaction.diffEvidence(checkpoint);
+    Files.writeString(repository.resolve("tracked.txt"), common + "second-tail\n");
+    var second = transaction.diffEvidence(checkpoint);
+
+    assertThat(first.patchCapturedBytes())
+        .isLessThanOrEqualTo(CorrectionWorkspaceTransaction.MAX_PATCH_BYTES);
+    assertThat(first.patchFullBytes()).isGreaterThan(first.patchCapturedBytes());
+    assertThat(first.patchTruncated()).isTrue();
+    assertThat(first.unifiedPatch()).doesNotContain("first-tail");
+    assertThat(second.unifiedPatch()).doesNotContain("second-tail");
+    assertThat(second.diffDigest()).isNotEqualTo(first.diffDigest());
+  }
+
+  @Test
+  void correctionPatchRedactsSensitivePathsAndDoesNotInlineBinaryBytes() throws Exception {
+    Path repository = repository("safe-diff");
+    var checkpoint = transaction.begin(repository);
+    Files.writeString(repository.resolve(".env"), "API_TOKEN=must-not-leak\n");
+    Files.write(repository.resolve("image.bin"), new byte[] {0, 1, 2, 3, 4});
+
+    var evidence = transaction.diffEvidence(checkpoint);
+
+    assertThat(evidence.changedFiles()).contains("0:[REDACTED_SENSITIVE_PATH]", "0:image.bin");
+    assertThat(evidence.patchRedacted()).isTrue();
+    assertThat(evidence.unifiedPatch())
+        .doesNotContain("must-not-leak", ".env")
+        .contains("Binary files");
   }
 
   @Test

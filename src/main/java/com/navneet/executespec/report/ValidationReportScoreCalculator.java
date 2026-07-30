@@ -133,7 +133,7 @@ final class ValidationReportScoreCalculator {
     double build =
         bootVerification != null
             ? ValidationReportScorePolicy.bootSlotScore(bootVerification.verdict()) / 100.0
-            : (Boolean.TRUE.equals(buildPassed) ? 1 : 0);
+            : buildPassed == null ? 0.5 : Boolean.TRUE.equals(buildPassed) ? 1 : 0;
     double tests =
         testsTotal <= 0
             ? ValidationReportScorePolicy.testFactorFromCoverageLevel(coverageLevel)
@@ -157,6 +157,17 @@ final class ValidationReportScoreCalculator {
     double criticalDamper = Math.max(.5, 1 - .05 * Math.max(0, unfixedCriticals));
     int raw =
         (int) clamp(Math.round(100 * build * tests * reviewer * endpoint * criticalDamper), 0, 100);
+    // Zero is a reserved assertion: at least one explicitly deterministic execution gate must
+    // have failed. LLM-only endpoint/coverage/reviewer factors may reduce confidence, but cannot
+    // create a zero headline. Missing build evidence is UNKNOWN (neutral 0.5 above), not failure.
+    boolean deterministicZero =
+        Boolean.FALSE.equals(buildPassed)
+            || (bootVerification != null
+                && bootVerification.verdict()
+                    == com.navneet.executespec.deployment.preview.verify.BootHealthEvaluator.Verdict
+                        .BUILD_FAILED)
+            || (testsTotal > 0 && testsPassed <= 0);
+    if (raw == 0 && !deterministicZero) raw = 1;
     // RL-2026-06-026 trust caps applied to the legacy path too (RR-1650). This formula is the
     // documented rollback for `scoring.additive-v2`; without the cap, flipping that flag off also
     // silently removed every "this headline is not credible above N" constraint.
