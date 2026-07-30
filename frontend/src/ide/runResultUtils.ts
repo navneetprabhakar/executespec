@@ -447,7 +447,23 @@ export function continuationApprovalReason(t: api.TaskSummary): string | null {
 export function latestContinuationAction(t: api.TaskSummary): string | null {
   const actions = t.continuationActions || [];
   const action = actions.length > 0 ? actions[actions.length - 1] : null;
-  if (!action?.decision || !action?.provider || !action?.model) return null;
+  if (!action?.decision) return null;
+  if (action.decision === 'CORRECTION_RESOLUTION') {
+    const status = (action.status || 'UNKNOWN').replace(/_/g, ' ').toLowerCase();
+    const generationChanged =
+      action.beforeWorkspaceGeneration &&
+      action.afterWorkspaceGeneration &&
+      action.beforeWorkspaceGeneration !== action.afterWorkspaceGeneration;
+    return [
+      `Correction ${status}`,
+      action.code,
+      action.reason,
+      generationChanged ? 'new workspace evidence required' : null,
+    ]
+      .filter(Boolean)
+      .join(' · ');
+  }
+  if (!action.provider || !action.model) return null;
   const rawStatus = (action.status || '').toUpperCase();
   const status =
     rawStatus === 'SKIPPED' ? 'Skipped' : rawStatus === 'APPROVED' ? 'Approved' : 'Used';
@@ -904,7 +920,11 @@ export function runPhaseDiagnosis({
     ['RUNNING', 'WORKING', 'IN_PROGRESS'].includes((t.status || '').toUpperCase()),
   ).length;
   const facts: string[] = [];
-  if (taskList.length > 0) facts.push(`${completeTasks}/${taskList.length} steps complete`);
+  if (taskList.length > 0) {
+    facts.push(
+      `${completeTasks}/${taskList.length} worker tasks executed · final verification is separate`,
+    );
+  }
   if (runningTasks > 0)
     facts.push(`${runningTasks} step${runningTasks === 1 ? '' : 's'} still active`);
   if (blockedTasks > 0)

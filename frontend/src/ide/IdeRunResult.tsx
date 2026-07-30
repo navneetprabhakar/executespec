@@ -631,23 +631,44 @@ export default function IdeRunResult() {
   // empty diff, total failure and partial multi-repo failure. Map the logical status to honest copy;
   // only a real success claims a PR is opening.
   function pushOutcomeMessage(r: unknown): string {
-    const res = (r ?? {}) as {status?: string; repoUrl?: string};
+    const res = (r ?? {}) as {
+      status?: string;
+      repoUrl?: string;
+      prUrl?: string;
+      message?: string;
+      code?: string;
+      publicationEligible?: string;
+      retryable?: string;
+      retryGuidance?: string;
+    };
     const status = (res.status || '').toUpperCase();
+    const eligibility = res.publicationEligible === 'false' ? 'Publication ineligible' : undefined;
+    const retry =
+      res.retryable === 'false' && status === 'FAILED' ? 'Direct retry disabled' : undefined;
+    const diagnostic = [eligibility, retry, res.code, res.message, res.retryGuidance]
+      .filter(Boolean)
+      .join(' · ');
     switch (status) {
       case 'SUCCESS':
       case 'OK':
       case 'PUSHED':
-        return res.repoUrl ? `Pushed — PR opening at ${res.repoUrl}` : 'Pushed — PR opening.';
+        return res.prUrl ? `Pushed — PR opening at ${res.prUrl}` : 'Pushed successfully.';
       case 'NO_CHANGES':
-        return 'Nothing to push — the workspace has no changes.';
+        return diagnostic || 'Nothing to push — the workspace has no changes.';
       case 'NO_CONFIGURATION':
-        return 'No repository provider is configured for this run — connect one under Integrations first.';
+        return (
+          diagnostic ||
+          'No repository provider is configured for this run — connect one under Integrations first.'
+        );
       case 'PARTIAL':
-        return 'Partial push — some repositories failed. Check the PR tab for per-repo status.';
+        return (
+          diagnostic ||
+          'Partial push — some repositories failed. Check the PR tab for per-repo status.'
+        );
       case 'FAILED':
-        return 'Push failed — no pull request was opened.';
+        return diagnostic || 'Push failed — no pull request was opened.';
       default:
-        return status ? `Push result: ${status}` : 'Push complete.';
+        return diagnostic || (status ? `Push result: ${status}` : 'Push complete.');
     }
   }
 
