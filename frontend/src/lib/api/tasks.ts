@@ -45,6 +45,9 @@ export interface TaskSummary {
         maxLimit?: number;
         attempt?: number;
         source?: string;
+        code?: string;
+        beforeWorkspaceGeneration?: string;
+        afterWorkspaceGeneration?: string;
       }[]
     | null;
   objective?: string | null;

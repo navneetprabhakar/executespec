@@ -103,6 +103,44 @@ export function docStamp(row: api.GeneratedDocRow | null | undefined): string {
   return row ? `${row.version}·${row.generatedAt}` : '';
 }
 
+export type PendingGeneratedDocJobs = Partial<
+  Record<
+    api.GeneratedDocType,
+    {type: api.GeneratedDocType; jobId: string; provider: string; model: string}
+  >
+>;
+
+/**
+ * Reconstruct the reload-visible generated-document state for both independently runnable doc
+ * types. A single pending slot loses one job when EXPLANATION and SETUP overlap, while ignoring
+ * terminal failures makes a durable backend failure disappear after navigation.
+ */
+export function restoreGeneratedDocJobs(jobs: api.GeneratedDocJob[]): {
+  pending: PendingGeneratedDocJobs;
+  failure: api.GeneratedDocJob | null;
+} {
+  const pending: PendingGeneratedDocJobs = {};
+  for (const job of jobs) {
+    if (job.status === 'QUEUED' || job.status === 'RUNNING') {
+      pending[job.docType] = {
+        type: job.docType,
+        jobId: job.id,
+        provider: job.provider,
+        model: job.model,
+      };
+    }
+  }
+  const failure =
+    jobs
+      .filter((job) => job.status === 'FAILED')
+      .sort(
+        (a, b) =>
+          new Date(b.completedAt ?? b.createdAt).getTime() -
+          new Date(a.completedAt ?? a.createdAt).getTime(),
+      )[0] ?? null;
+  return {pending, failure};
+}
+
 export function techDebtCategories(
   debt: api.TechDebtReport | null | undefined,
 ): Array<{name: string; count: number}> {
