@@ -64,6 +64,7 @@ class AgentValidationReportEventBridgeTest {
                     "PASS",
                     "DETERMINISTIC",
                     "HIGH",
+                    "a".repeat(64),
                     "Build passed",
                     "Final build passed.",
                     "validation_report.final_build_passed",

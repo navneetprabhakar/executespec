@@ -60,6 +60,7 @@ class RunValidationKickoff {
   private final com.navneet.executespec.deployment.preview.verify.PreviewVerifier previewVerifier;
   private final com.navneet.executespec.config.featureflag.FeatureFlagService featureFlagService;
   private final RunLlmOperationLifecycleService operationLifecycle;
+  private final CorrectionWorkspaceTransaction workspaceGenerationService;
 
   java.util.Optional<ValidationReport> generateValidationReport(
       String runId, ExecutionResult execResult, ReviewerResult reviewResult, Plan plan) {
@@ -185,17 +186,15 @@ class RunValidationKickoff {
       // the accuracy assessment (RR-291): the assessor must be given the deterministic build +
       // reviewer findings, never told "code passed review" while the reviewer failed.
       CompileResult compile =
-          (reviewResult != null
-                  && reviewResult.finalBuildPassed() != null
-                  && reviewResult.finalBuildPassed())
-              ? CompileResult.passed(1)
-              : CompileResult.failed(
-                  1,
-                  reviewResult == null
-                      ? "n/a"
-                      : (reviewResult.finalBuildOutput() == null
+          reviewResult == null || reviewResult.finalBuildPassed() == null
+              ? CompileResult.skip()
+              : Boolean.TRUE.equals(reviewResult.finalBuildPassed())
+                  ? CompileResult.passed(1)
+                  : CompileResult.failed(
+                      1,
+                      reviewResult.finalBuildOutput() == null
                           ? ""
-                          : reviewResult.finalBuildOutput()));
+                          : reviewResult.finalBuildOutput());
 
       // Run worker-authored tests before the LLM accuracy assessment. A passing generated suite
       // is not independent product-quality proof, so it still cannot populate the verified TESTS
@@ -317,7 +316,17 @@ class RunValidationKickoff {
       }
       ReportInput input =
           new ReportInput(
-              run, workerReports, review, compile, tasks, testSummary, List.of(), bootVerification);
+              run,
+              workerReports,
+              review,
+              compile,
+              tasks,
+              testSummary,
+              List.of(),
+              false,
+              null,
+              bootVerification,
+              workspaceGenerationService.captureGeneration(workspace));
       // RL-2026-05-041 (audit #19 + E#37) — the old OPENAI→ANTHROPIC reroute (which mutated
       // run.aiProvider in-memory around this call) is removed. ValidationReportGenerator runs
       // through LlmRouter.callText, which dispatches OpenAI via
@@ -422,16 +431,15 @@ class RunValidationKickoff {
    *   <li>Build failure → CRITICAL × 2 (LOGIC_ERROR + DEPLOYABILITY) → hits code+arch+perf
    *   <li>Reviewer UNRESOLVED_ISSUES → CRITICAL LOGIC_ERROR
    *   <li>Reviewer REVIEW_FAILED → MINOR ERROR_HANDLING
-   *   <li>Accuracy missingRequirements → CRITICAL MISSING_FEATURE (one per item, capped at 5)
+   *   <li>Accuracy missingRequirements → MINOR MISSING_FEATURE advisory (one per item, capped at 5)
    *   <li>Accuracy partialRequirements → MINOR SPEC_MISMATCH (one per item, capped at 5)
-   *   <li>Accuracy endpointCoverage.missing → CRITICAL MISSING_ENDPOINT (capped at 5)
+   *   <li>Accuracy endpointCoverage.missing → MINOR MISSING_ENDPOINT advisory (capped at 5)
    * </ul>
    */
-  private static java.util.List<com.navneet.executespec.reviewer.model.ReviewIssue>
-      synthesiseReviewIssues(
-          ReviewerResult reviewResult,
-          com.navneet.executespec.report.model.CompileResult compile,
-          com.navneet.executespec.reviewer.model.AccuracyReport accuracy) {
+  static java.util.List<com.navneet.executespec.reviewer.model.ReviewIssue> synthesiseReviewIssues(
+      ReviewerResult reviewResult,
+      com.navneet.executespec.report.model.CompileResult compile,
+      com.navneet.executespec.reviewer.model.AccuracyReport accuracy) {
     java.util.List<com.navneet.executespec.reviewer.model.ReviewIssue> out =
         new java.util.ArrayList<>();
 
@@ -516,7 +524,9 @@ class RunValidationKickoff {
           out.add(
               com.navneet.executespec.reviewer.model.ReviewIssue.builder()
                   .id("SYNTH-ACC-MISS-" + n)
-                  .severity(com.navneet.executespec.reviewer.model.IssueSeverity.CRITICAL)
+                  // AccuracyAssessmentService is model-derived evidence. Keep the finding visible,
+                  // but never let it masquerade as a deterministic release-blocking failure.
+                  .severity(com.navneet.executespec.reviewer.model.IssueSeverity.MINOR)
                   .category(com.navneet.executespec.reviewer.model.IssueCategory.MISSING_FEATURE)
                   .description("Spec requirement not implemented: " + truncate(req, 180))
                   .autoFixed(false)
@@ -547,7 +557,9 @@ class RunValidationKickoff {
           out.add(
               com.navneet.executespec.reviewer.model.ReviewIssue.builder()
                   .id("SYNTH-ACC-EP-" + n)
-                  .severity(com.navneet.executespec.reviewer.model.IssueSeverity.CRITICAL)
+                  // Endpoint coverage in AccuracyReport is inferred by the LLM from a bounded
+                  // source sample. Deterministic route/contract gates own hard failures.
+                  .severity(com.navneet.executespec.reviewer.model.IssueSeverity.MINOR)
                   .category(com.navneet.executespec.reviewer.model.IssueCategory.MISSING_ENDPOINT)
                   .description("Endpoint from spec not implemented: " + truncate(ep, 180))
                   .autoFixed(false)

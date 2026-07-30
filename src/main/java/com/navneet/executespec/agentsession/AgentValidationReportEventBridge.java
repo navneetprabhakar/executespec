@@ -51,6 +51,7 @@ class AgentValidationReportEventBridge {
     Map<String, Object> payload = new LinkedHashMap<>();
     put(payload, "runId", event.runId());
     put(payload, "reportId", event.reportId());
+    put(payload, "workspaceGeneration", event.workspaceGeneration());
     put(payload, "verifiedScore", event.verifiedScore());
     put(payload, "rubricScore", event.rubricScore());
     put(

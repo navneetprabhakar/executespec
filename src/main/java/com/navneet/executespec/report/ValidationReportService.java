@@ -224,17 +224,16 @@ public class ValidationReportService {
       // scoring.v2-verified flag is on, and always persist alongside the
       // legacy columns so the UI can show both and toggling the flag on
       // later is instant.
-      Boolean finalBuildPassed =
-          input.compileResult() != null ? input.compileResult().passed() : null;
+      Boolean finalBuildPassed = finalBuildPassed(input.compileResult());
       TestExecutionSummary ts = input.testSummary();
       int testsPassedCount = ts != null ? ts.getPassed() : 0;
       int testsTotalCount = ts != null ? ts.getTotalTests() : 0;
       String reviewerVerdict =
           mapVerdictToV2Name(input.review() != null ? input.review().getVerdict() : null);
       int unfixedCritical = countUnfixedCritical(input);
-      // P1.2 — feed deterministic endpoint coverage into the verifiedScore. Pulled from the
-      // accuracy report's endpointCoverage block when present (this field is a deterministic
-      // count, not LLM-graded — see AccuracyAssessmentService SYSTEM_PROMPT lines 124–128).
+      // P1.2 — feed the LLM-assisted endpoint coverage into the confidence score. This signal may
+      // tighten/cap a score, but scoreEvidenceFailure must never promote it to deterministic
+      // release-blocking evidence.
       Integer endpointCoveragePercent =
           (accuracyReport != null && accuracyReport.getEndpointCoverage() != null)
               ? accuracyReport.getEndpointCoverage().getCoveragePercent()
@@ -303,6 +302,7 @@ public class ValidationReportService {
           ValidationReport.builder()
               .id(resolveReportId(runId))
               .runId(runId)
+              .workspaceGeneration(input.workspaceGeneration())
               .filesGenerated(filesGenerated)
               .languages(String.join(",", languages))
               .pipelineResult(pipelineResult)
@@ -866,22 +866,17 @@ public class ValidationReportService {
     if (productFilesChanged <= 0) {
       return "No approved product-code diff was proven against the admitted Git baseline.";
     }
-    if (accuracy == null) return null;
-    boolean hasDeterministicMissingRequirements =
-        accuracy.getMissingRequirements() != null && !accuracy.getMissingRequirements().isEmpty();
-    if (accuracy.getSpecAdherenceScore() == 0 && hasDeterministicMissingRequirements) {
-      return "Spec adherence is zero and required product behavior is deterministically missing.";
-    }
-    AccuracyReport.EndpointCoverage endpoints = accuracy.getEndpointCoverage();
-    if (endpoints != null
-        && endpoints.getRequired() != null
-        && !endpoints.getRequired().isEmpty()
-        && endpoints.getCoveragePercent() == 0
-        && endpoints.getMissing() != null
-        && !endpoints.getMissing().isEmpty()) {
-      return "Required runtime surface has zero deterministic endpoint coverage.";
-    }
+    // AccuracyReport is produced by an LLM over a bounded evidence sample. Its requirement and
+    // endpoint findings may cap confidence and remain visible as advisory issues, but cannot be
+    // promoted into deterministic provenance failures. Hard contract failures must come from an
+    // independently executed deterministic lane.
     return null;
+  }
+
+  /** Three-valued build provenance: absent/skipped is unavailable, never an implicit pass. */
+  static Boolean finalBuildPassed(
+      com.navneet.executespec.report.model.CompileResult compileResult) {
+    return compileResult == null || compileResult.skipped() ? null : compileResult.passed();
   }
 
   /**
@@ -1033,6 +1028,7 @@ public class ValidationReportService {
     return new ValidationReportDTO(
         entity.getId(),
         entity.getRunId(),
+        entity.getWorkspaceGeneration(),
         entity.getFilesGenerated(),
         languages,
         entity.getPipelineResult(),
@@ -1135,6 +1131,7 @@ public class ValidationReportService {
             : List.of();
 
     return new ValidationReportShareDTO(
+        entity.getWorkspaceGeneration(),
         entity.getFilesGenerated(),
         languages,
         entity.getPipelineResult(),
@@ -1332,13 +1329,13 @@ public class ValidationReportService {
    * P1.2 (GA-readiness, 2026-05-06) — overload with explicit endpoint-coverage signal so the
    * headline verifiedScore can credit a run for delivering every spec endpoint, independent of the
    * reviewer's text verdict. {@code endpointCoveragePercent} is taken straight from {@code
-   * accuracyReport.endpointCoverage.coveragePercent} when present (it's a deterministic count of
-   * implemented vs required endpoints, NOT an LLM-graded number).
+   * accuracyReport.endpointCoverage.coveragePercent} when present. It remains LLM-assisted
+   * confidence evidence over a bounded file sample, not deterministic runtime proof.
    *
    * <p>Bonus: +10 when {@code endpointCoveragePercent >= 95}. Closes the audit-flagged scenario on
    * run {@code 0444c95f} where {@code endpointCoverage.coveragePercent=100} but the headline
    * verifiedScore only saw {@code finalBuildPassed} + {@code FIXED_ISSUES} and missed the
-   * deterministic delivery signal entirely.
+   * endpoint-confidence signal entirely.
    *
    * <p>Final clamp at 100 means a perfect run (build pass + all tests + CLEAN + 100% endpoints)
    * yields exactly 100. The 5×{@code unfixedCritical} penalty stays — but {@link
@@ -1917,8 +1914,8 @@ public class ValidationReportService {
     // every concrete pipeline signal was healthy (build PASSED, reviewer
     // CLEAN/FIXED_ISSUES, no real unfixed criticals).
     //
-    // The reviewer's wiring pass IS the deterministic check on endpoint
-    // correctness — it walks the route tables of every supported
+    // The reviewer's wiring pass is the broader LLM-assisted check on endpoint
+    // correctness — it inspects the route tables of supported
     // framework (Spring component-scan, Express routers, FastAPI route
     // decorators, etc.). When the reviewer's verdict is CLEAN or
     // FIXED_ISSUES, trust THAT signal over the LLM's read-budget-limited

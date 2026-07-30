@@ -37,6 +37,7 @@ import com.navneet.executespec.harness.ExecutionRequest;
 import com.navneet.executespec.harness.ExecutionResult;
 import com.navneet.executespec.harness.GateStore;
 import com.navneet.executespec.harness.SequentialExecutor;
+import com.navneet.executespec.harness.TaskOutcome;
 import com.navneet.executespec.observability.Metrics;
 import com.navneet.executespec.report.ValidationReportRepository;
 import com.navneet.executespec.reviewer.ReviewerAgent;
@@ -97,6 +98,16 @@ class RunLifecycleServiceContinuationApprovalTest {
           runRepo,
           llmExecutionPolicyFactory,
           new LlmExecutionOperationCoordinator(operationService));
+  private final com.navneet.executespec.contractsurface.BrownfieldHttpContractGuard
+      brownfieldHttpContractGuard =
+          mock(com.navneet.executespec.contractsurface.BrownfieldHttpContractGuard.class);
+  private final CorrectionWorkspaceTransaction correctionWorkspaceTransaction =
+      mock(CorrectionWorkspaceTransaction.class);
+  private final CorrectionWorkspaceTransaction.Checkpoint correctionCheckpoint =
+      new CorrectionWorkspaceTransaction.Checkpoint(
+          java.util.List.of(
+              new CorrectionWorkspaceTransaction.RepositoryCheckpoint(
+                  Path.of("/tmp/executespec-test-repository"), "head", "tree")));
 
   private RunLifecycleService service;
 
@@ -135,7 +146,10 @@ class RunLifecycleServiceContinuationApprovalTest {
             llmExecutionPolicyFactory,
             planGateDecisionService,
             planGateResumeStore,
-            runOperationLifecycle);
+            runOperationLifecycle,
+            null,
+            brownfieldHttpContractGuard,
+            correctionWorkspaceTransaction);
     LlmExecutionReference reference =
         new LlmExecutionReference(
             "llmctx-continuation-test", LlmExecutionScope.customer("test-org"));
@@ -152,6 +166,11 @@ class RunLifecycleServiceContinuationApprovalTest {
                     UUID.randomUUID()));
     when(operationService.complete(any(), anyString())).thenReturn(true);
     when(operationService.fail(any(), anyString(), any())).thenReturn(true);
+    when(correctionWorkspaceTransaction.begin(any())).thenReturn(correctionCheckpoint);
+    when(correctionWorkspaceTransaction.accept(correctionCheckpoint))
+        .thenReturn(
+            new CorrectionWorkspaceTransaction.Accepted(
+                correctionCheckpoint.generation(), "b".repeat(64)));
   }
 
   @Test
@@ -317,7 +336,7 @@ class RunLifecycleServiceContinuationApprovalTest {
     org.mockito.Mockito.doNothing().when(executorService).execute(runnable.capture());
     when(contextComposer.buildMultiRepoSummary(any(), any())).thenReturn("workspace");
     when(executor.execute(any(ExecutionRequest.class), any(SequentialExecutor.ResumeRequest.class)))
-        .thenReturn(ExecutionResult.builder().overall(ExecutionResult.Overall.ALL_SUCCESS).build());
+        .thenReturn(approvedResult("openai", "gpt-5.4"));
 
     RunLifecycleService.ContinuationApproval approval =
         service.approveContinuation(RUN_ID, TASK_ID);
@@ -327,7 +346,9 @@ class RunLifecycleServiceContinuationApprovalTest {
     assertThat(approval.model()).isEqualTo("gpt-5.4");
     assertThat(approval.proposedAction()).isEqualTo(RunContinuationDecision.CHANGE_PROVIDER);
     ArgumentCaptor<ExecutionRequest> request = ArgumentCaptor.forClass(ExecutionRequest.class);
-    verify(executor).execute(request.capture(), any(SequentialExecutor.ResumeRequest.class));
+    ArgumentCaptor<SequentialExecutor.ResumeRequest> resume =
+        ArgumentCaptor.forClass(SequentialExecutor.ResumeRequest.class);
+    verify(executor).execute(request.capture(), resume.capture());
     assertThat(request.getValue().provider()).isEqualTo("openai");
     assertThat(request.getValue().model()).isEqualTo("gpt-5.4");
     assertThat(request.getValue().userConfirmedExpensiveContinuation()).isTrue();
@@ -335,6 +356,14 @@ class RunLifecycleServiceContinuationApprovalTest {
         .isEqualTo(RunContinuationDecision.CHANGE_PROVIDER);
     assertThat(request.getValue().userConfirmedContinuationProvider()).isEqualTo("openai");
     assertThat(request.getValue().userConfirmedContinuationModel()).isEqualTo("gpt-5.4");
+    assertThat(resume.getValue().targetTaskId()).isEqualTo(TASK_KEY);
+    assertThat(resume.getValue().approvedProvider()).isEqualTo("openai");
+    assertThat(resume.getValue().approvedModel()).isEqualTo("gpt-5.4");
+    assertThat(resume.getValue().approvedAction())
+        .isEqualTo(RunContinuationDecision.CHANGE_PROVIDER);
+    assertThat(resume.getValue().approvedProposalDigest()).isEqualTo(approval.proposalDigest());
+    assertThat(approval.proposalVersion()).isEqualTo(1);
+    assertThat(approval.proposalDigest()).hasSize(64);
     assertThat(request.getValue().runContext().llmExecutionContextId())
         .isEqualTo("llmctx-continuation-test");
     assertThat(request.getValue().runContext().llmExecutionOperationAuthority()).isNotNull();
@@ -392,7 +421,7 @@ class RunLifecycleServiceContinuationApprovalTest {
     org.mockito.Mockito.doNothing().when(executorService).execute(runnable.capture());
     when(contextComposer.buildMultiRepoSummary(any(), any())).thenReturn("workspace");
     when(executor.execute(any(ExecutionRequest.class), any(SequentialExecutor.ResumeRequest.class)))
-        .thenReturn(ExecutionResult.builder().overall(ExecutionResult.Overall.ALL_SUCCESS).build());
+        .thenReturn(approvedResult("anthropic", "claude-sonnet-4-6"));
 
     RunLifecycleService.ContinuationApproval approval =
         service.approveContinuation(RUN_ID, TASK_ID);
@@ -472,7 +501,7 @@ class RunLifecycleServiceContinuationApprovalTest {
     org.mockito.Mockito.doNothing().when(executorService).execute(runnable.capture());
     when(contextComposer.buildMultiRepoSummary(any(), any())).thenReturn("workspace");
     when(executor.execute(any(ExecutionRequest.class), any(SequentialExecutor.ResumeRequest.class)))
-        .thenReturn(ExecutionResult.builder().overall(ExecutionResult.Overall.ALL_SUCCESS).build());
+        .thenReturn(approvedResult("anthropic", "claude-sonnet-4-6"));
 
     service.approveContinuation(RUN_ID, TASK_ID);
     runnable.getValue().run();
@@ -527,8 +556,7 @@ class RunLifecycleServiceContinuationApprovalTest {
                 }
                 """)
             .build();
-    ExecutionResult retryResult =
-        ExecutionResult.builder().overall(ExecutionResult.Overall.ALL_SUCCESS).build();
+    ExecutionResult retryResult = approvedResult("openai", "gpt-5.4");
     ReviewerResult reviewResult =
         ReviewerResult.builder()
             .overall(ReviewerResult.Overall.CLEAN)
@@ -717,5 +745,20 @@ class RunLifecycleServiceContinuationApprovalTest {
               assertThat(e.data()).containsEntry("selectedModel", model);
               assertThat(e.data()).containsEntry("limitName", "userApproval");
             });
+  }
+
+  private static ExecutionResult approvedResult(String provider, String model) {
+    return ExecutionResult.builder()
+        .overall(ExecutionResult.Overall.ALL_SUCCESS)
+        .perTask(
+            java.util.List.of(
+                TaskOutcome.builder()
+                    .taskId(TASK_ID)
+                    .status(TaskOutcome.Status.SUCCESS)
+                    .smokeTestPassed(true)
+                    .dispatchedProvider(provider)
+                    .dispatchedModel(model)
+                    .build()))
+        .build();
   }
 }

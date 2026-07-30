@@ -1,5 +1,10 @@
 # `deployment/` — Preview + deploy
 
+Permanent deployment is publication, not preview. `PublicationAdmissionService` runs after
+workspace restoration and before strategy generation or cloud side effects. It requires a current
+V361 workspace-generation binding, explicit passing final build, execution-verified all-green
+tests, and exact requested/physical route parity for user-approved continuations.
+
 > Last reviewed: 2026-07-17 (2.0.0 enterprise hardening).
 
 Triple-mode preview system (Docker Compose for local, VM for dev, Cloud Run for prod), permanent Cloud Run deployment for 9 languages, workspace management with GCS archiving, and GitHub integration.

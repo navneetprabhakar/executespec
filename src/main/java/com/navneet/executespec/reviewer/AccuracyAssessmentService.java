@@ -23,6 +23,9 @@ import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.stereotype.Service;
+import org.yaml.snakeyaml.LoaderOptions;
+import org.yaml.snakeyaml.Yaml;
+import org.yaml.snakeyaml.constructor.SafeConstructor;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -304,6 +307,7 @@ SCORE COMPUTATION GUIDANCE:
       String fileTree = getFileTree(runId);
       String keyFileSnippets = buildKeyFileSnippets(runId, fileTree);
       String testFileSnippets = buildTestFileSnippets(runId, fileTree);
+      String configFileSnippets = buildConfigFileSnippets(runId, fileTree);
       String issuesSummary = buildIssuesSummary(issues);
       String userMessage =
           buildAssessmentPrompt(
@@ -312,6 +316,7 @@ SCORE COMPUTATION GUIDANCE:
               fileTree,
               keyFileSnippets,
               testFileSnippets,
+              configFileSnippets,
               issuesSummary);
 
       List<Message> messages = new ArrayList<>();
@@ -402,6 +407,7 @@ SCORE COMPUTATION GUIDANCE:
       // UNKNOWN is only valid for absent evidence. Some model responses put a positively observed
       // defect in unknownRequirements (for example, "release accepts no idempotency key"). Repair
       // that contradiction deterministically so an admitted hard gap cannot retain an A grade.
+      removeInventedEndpointCoverage(originalGoal, requirements, report);
       AccuracyReportTruthPolicy.enforceConsistency(report);
       AccuracyReportTruthPolicy.enforceDeterministicFailures(report, issues);
 
@@ -545,6 +551,7 @@ SCORE COMPUTATION GUIDANCE:
       String fileTree,
       String keyFileSnippets,
       String testFileSnippets,
+      String configFileSnippets,
       String issuesSummary) {
     String filesSection =
         keyFileSnippets.isBlank()
@@ -552,6 +559,10 @@ SCORE COMPUTATION GUIDANCE:
             : keyFileSnippets;
     String testsSection =
         testFileSnippets.isBlank() ? "(no readable test files available)" : testFileSnippets;
+    String configSection =
+        configFileSnippets.isBlank()
+            ? "(no readable workflow/config files available)"
+            : configFileSnippets;
     String requirementLedger = renderRequirementLedger(requirements);
     return String.format(
         """
@@ -568,6 +579,9 @@ SCORE COMPUTATION GUIDANCE:
 %s
 
 === TEST FILES (actual test code — use this to grade testCoverageLevel) ===
+%s
+
+=== WORKFLOW AND CONFIG FILES (actual bounded config evidence) ===
 %s
 
 === REVIEW ISSUES FOUND (critical and minor issues identified in code review) ===
@@ -587,7 +601,13 @@ Based on the specification, file tree, source files, and review issues above:
 
 Return your assessment as a JSON object. No markdown fences. No explanation outside the JSON.
 """,
-        originalGoal, requirementLedger, fileTree, filesSection, testsSection, issuesSummary);
+        originalGoal,
+        requirementLedger,
+        fileTree,
+        filesSection,
+        testsSection,
+        configSection,
+        issuesSummary);
   }
 
   String renderRequirementLedger(List<RequirementSpec> requirements) {
@@ -749,6 +769,45 @@ Return your assessment as a JSON object. No markdown fences. No explanation outs
     return sb.toString();
   }
 
+  /**
+   * Reads workflow and configuration evidence through an independent budget. CI/CD requirements
+   * must not lose their only evidence because controller/service source files consumed the source
+   * budget. YAML is parsed with SnakeYAML's safe constructor and bounded loader options before its
+   * raw, truncated content is shown to the assessor; malformed YAML is labelled rather than
+   * silently treated as a valid workflow.
+   */
+  private String buildConfigFileSnippets(String runId, String fileTree) {
+    List<String> candidates = inferConfigEvidencePaths(fileTree);
+    if (candidates.isEmpty()) return "";
+
+    StringBuilder sb = new StringBuilder();
+    int totalChars = 0;
+    for (String path : candidates) {
+      if (totalChars >= CONFIG_SNIPPETS_CHAR_CAP) break;
+      try {
+        String content = fileSystemTool.readFile(runId, path);
+        if (content == null || content.isBlank() || isReadErrorMessage(content)) continue;
+        String yamlProblem = isYaml(path) ? safeYamlProblem(content) : null;
+        String snip = truncateForSnippet(content);
+        int remaining = CONFIG_SNIPPETS_CHAR_CAP - totalChars;
+        if (snip.length() > remaining) snip = snip.substring(0, remaining);
+        sb.append("### ").append(path).append("\n");
+        if (yamlProblem != null) {
+          sb.append("[INVALID YAML: ").append(yamlProblem).append("]\n");
+        }
+        sb.append("```\n").append(snip).append("\n```\n\n");
+        totalChars += snip.length();
+      } catch (Exception e) {
+        log.debug(
+            "[AccuracyAssessment] Could not read config file {} for run {}: {}",
+            path,
+            runId,
+            e.getMessage());
+      }
+    }
+    return sb.toString();
+  }
+
   /** Per-file content cap. Was 2,500; bumped 2026-05-06 to give multi-endpoint routers headroom. */
   static final int PER_FILE_CHAR_CAP = 10_000;
 
@@ -775,6 +834,12 @@ Return your assessment as a JSON object. No markdown fences. No explanation outs
 
   /** Maximum test files included in one assessment. */
   static final int TEST_FILE_CAP = 6;
+
+  /** Independent bounded config/workflow lane. */
+  static final int CONFIG_SNIPPETS_CHAR_CAP = 30_000;
+
+  /** Maximum workflow/config files included in one assessment. */
+  static final int CONFIG_FILE_CAP = 8;
 
   /**
    * Truncate a file's content for snippet inclusion. Files ≤ {@link #PER_FILE_CHAR_CAP} are
@@ -931,6 +996,95 @@ Return your assessment as a JSON object. No markdown fences. No explanation outs
         .sorted(java.util.Comparator.comparingInt(String::length).thenComparing(s -> s))
         .limit(TEST_FILE_CAP)
         .toList();
+  }
+
+  /**
+   * Selects workflow/config evidence independently from production and test source. Exclusions are
+   * path-segment based: {@code build.yml} and {@code test.yml} are valid workflow filenames, while
+   * {@code build/generated.yml} and {@code target/checks.yml} remain excluded.
+   */
+  private List<String> inferConfigEvidencePaths(String fileTree) {
+    if (fileTree == null || fileTree.isBlank()) return List.of();
+    java.util.regex.Pattern excludedTree =
+        java.util.regex.Pattern.compile(
+            "(?i)(?:^|/)(?:__pycache__|venv|\\.venv|node_modules|target|build|dist|"
+                + "\\.next|\\.gradle|coverage|bower_components|vendor|\\.idea|\\.vscode|"
+                + "\\.pytest_cache|\\.mypy_cache|\\.tox|\\.nyc_output)(?:/|$)");
+    java.util.regex.Pattern configName =
+        java.util.regex.Pattern.compile(
+            "(?i)(?:^|/)(?:Dockerfile(?:\\.[^/]+)?|compose[^/]*\\.ya?ml|"
+                + "[^/]+\\.(?:ya?ml|json|toml|properties|xml))$");
+
+    return fileTree
+        .lines()
+        .map(String::trim)
+        .map(l -> l.replaceAll("^[\\[DIR\\]│├└\\s─]+", "").trim())
+        .filter(l -> !l.isBlank())
+        .filter(l -> configName.matcher(l).find())
+        .filter(l -> !excludedTree.matcher(l).find())
+        .sorted(
+            java.util.Comparator.comparingInt(AccuracyAssessmentService::configEvidencePriority)
+                .thenComparingInt(String::length)
+                .thenComparing(s -> s))
+        .limit(CONFIG_FILE_CAP)
+        .toList();
+  }
+
+  private static int configEvidencePriority(String path) {
+    String lower = path.toLowerCase(java.util.Locale.ROOT);
+    if (lower.matches(".*(?:^|/)\\.github/workflows/[^/]+\\.ya?ml$")) return 0;
+    if (lower.matches(".*(?:^|/)(?:workflows?|ci|actions?|deploy(?:ment)?s?)(?:/|\\.).*")) return 1;
+    if (lower.matches(".*(?:^|/)(?:dockerfile|compose[^/]*\\.ya?ml)$")) return 2;
+    return 3;
+  }
+
+  private static boolean isYaml(String path) {
+    String lower = path.toLowerCase(java.util.Locale.ROOT);
+    return lower.endsWith(".yml") || lower.endsWith(".yaml");
+  }
+
+  /**
+   * Returns null for valid YAML, otherwise a bounded diagnostic. SafeConstructor rejects arbitrary
+   * Java tags; loader bounds prevent alias expansion, excessive nesting, and oversized documents.
+   */
+  static String safeYamlProblem(String content) {
+    try {
+      LoaderOptions options = new LoaderOptions();
+      options.setAllowDuplicateKeys(false);
+      options.setMaxAliasesForCollections(20);
+      options.setNestingDepthLimit(50);
+      options.setCodePointLimit(CONFIG_SNIPPETS_CHAR_CAP);
+      new Yaml(new SafeConstructor(options)).load(content);
+      return null;
+    } catch (RuntimeException ex) {
+      String message = ex.getMessage();
+      if (message == null || message.isBlank()) return ex.getClass().getSimpleName();
+      String singleLine = message.replaceAll("\\s+", " ").trim();
+      return singleLine.length() <= 180 ? singleLine : singleLine.substring(0, 180) + "...";
+    }
+  }
+
+  private static final java.util.regex.Pattern EXPLICIT_HTTP_ENDPOINT =
+      java.util.regex.Pattern.compile(
+          "(?i)\\b(?:GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\\s+/" + "[A-Za-z0-9_{}:*?&=./~-]*");
+
+  /**
+   * EndpointCoverage is LLM output. A workflow/CI-only spec has no endpoint denominator, so remove
+   * an invented endpoint block unless the admitted goal or requirement ledger contains an explicit
+   * HTTP method + path contract.
+   */
+  static void removeInventedEndpointCoverage(
+      String originalGoal, List<RequirementSpec> requirements, AccuracyReport report) {
+    if (report == null || report.getEndpointCoverage() == null) return;
+    StringBuilder admitted = new StringBuilder(originalGoal == null ? "" : originalGoal);
+    if (requirements != null) {
+      requirements.stream()
+          .filter(r -> r != null && r.text() != null)
+          .forEach(r -> admitted.append('\n').append(r.text()));
+    }
+    if (!EXPLICIT_HTTP_ENDPOINT.matcher(admitted).find()) {
+      report.setEndpointCoverage(null);
+    }
   }
 
   /**

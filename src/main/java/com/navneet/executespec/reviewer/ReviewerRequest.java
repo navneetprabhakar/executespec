@@ -32,6 +32,8 @@ public record ReviewerRequest(
     List<String> allowedRepoRoots,
     List<String> approvedNewFiles,
     Boolean allowBuildManifestCreation,
+    /** True for a final correction attestation that must not mutate the reviewed workspace. */
+    Boolean readOnly,
     String originalGoal,
     List<RequirementSpec> requirements) {
 
@@ -45,6 +47,7 @@ public record ReviewerRequest(
     if (allowedRepoRoots == null) allowedRepoRoots = List.of();
     if (approvedNewFiles == null) approvedNewFiles = List.of();
     if (allowBuildManifestCreation == null) allowBuildManifestCreation = false;
+    if (readOnly == null) readOnly = false;
     if (requirements == null) requirements = List.of();
   }
 }

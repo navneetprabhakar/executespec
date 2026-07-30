@@ -22,6 +22,13 @@ public class ValidationReport {
   @Column(name = "run_id", nullable = false)
   private String runId;
 
+  /**
+   * SHA-256 of the canonical Git tree generation measured by this report. Null only for historical
+   * rows that predate V361; null must never be presented as a current-workspace binding.
+   */
+  @Column(name = "workspace_generation", length = 64)
+  private String workspaceGeneration;
+
   @Column(name = "files_generated", nullable = false)
   @Builder.Default
   private int filesGenerated = 0;

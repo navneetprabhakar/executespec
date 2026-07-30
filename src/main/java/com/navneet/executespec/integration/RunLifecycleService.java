@@ -22,7 +22,9 @@ import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.config.AgentProperties;
 import com.navneet.executespec.config.OperationalReleasePolicy;
 import com.navneet.executespec.config.featureflag.FeatureFlagService;
+import com.navneet.executespec.cost.EffectiveRouteProjection;
 import com.navneet.executespec.cost.RunCostTracker;
+import com.navneet.executespec.cost.RunEffectiveRouteService;
 import com.navneet.executespec.cost.RunTokenAttributor;
 import com.navneet.executespec.deployment.WorkspaceRestoreService;
 import com.navneet.executespec.execution.model.RunContinuationDecision;
@@ -142,6 +144,9 @@ public class RunLifecycleService {
         null,
         null,
         null,
+        null,
+        null,
+        null,
         null);
   }
 
@@ -189,6 +194,10 @@ public class RunLifecycleService {
   private final PlanGateDecisionService planGateDecisionService;
   private final PlanGateResumeStore planGateResumeStore;
   private final RunLlmOperationLifecycleService runOperationLifecycle;
+  private final RunEffectiveRouteService effectiveRoutes;
+  private final com.navneet.executespec.contractsurface.BrownfieldHttpContractGuard
+      brownfieldHttpContractGuard;
+  private final CorrectionWorkspaceTransaction correctionWorkspaceTransaction;
 
   public enum PlanApprovalOutcome {
     RESUME_QUEUED,
@@ -1104,7 +1113,9 @@ public class RunLifecycleService {
             approval.model(),
             approval.proposedAction(),
             approval.benchmarkPriorRequired(),
-            approval.postReview()));
+            approval.postReview(),
+            approval.proposalVersion(),
+            approval.proposalDigest()));
     return approval;
   }
 
@@ -1132,6 +1143,14 @@ public class RunLifecycleService {
     }
 
     var task = findTask(runId, taskId);
+    final com.navneet.executespec.state.entity.AgentTask taskBeforeCorrection =
+        override != null && override.postReview()
+            ? objectMapper.convertValue(task, com.navneet.executespec.state.entity.AgentTask.class)
+            : null;
+    final String runStatusBeforeCorrection = run.getStatus();
+    final String runReasonBeforeCorrection = run.getStatusReason();
+    final Instant runCompletedBeforeCorrection = run.getCompletedAt();
+    final String runReviewBeforeCorrection = run.getReviewJson();
     // RR-1564: snapshot the run's already-consumed continuation ledger BEFORE the approved retry is
     // appended, so the seeded escalation counters accumulate prior usage instead of resetting to a
     // constant 1 on every human approval.
@@ -1162,6 +1181,9 @@ public class RunLifecycleService {
         override == null
             ? (run.isRoutePinned() ? run.getRequestedModel() : run.getWorkerModel())
             : override.model();
+    if (override != null) {
+      validateApprovedContinuationRoute(override.provider(), override.model());
+    }
     ExecutionContext retryBaseContext = durableRunRootContext(runId, workspace);
     RunLlmOperationLifecycleService.PhaseLease retryLease =
         requireRunOperationLifecycle()
@@ -1181,7 +1203,7 @@ public class RunLifecycleService {
     taskRepo.save(task);
     broadcaster.emit(runId, RunEvent.taskStatus(runId, taskId, "PENDING"));
 
-    String prevRunStatus = run.getStatus();
+    String prevRunStatus = runStatusBeforeCorrection;
     run.setStatus("WORKING");
     run.setCompletedAt(null);
     runRepo.save(run);
@@ -1196,7 +1218,11 @@ public class RunLifecycleService {
     FutureTask<Void> future =
         new FutureTask<>(
             () -> {
+              CorrectionWorkspaceTransaction.Checkpoint correctionCheckpoint = null;
               try {
+                if (override != null) {
+                  assertContinuationProposalUnchanged(runId, taskId, override);
+                }
                 PipelineRun row = runRepo.findById(runId).orElse(null);
                 String provider =
                     row == null || row.getAiProvider() == null ? "anthropic" : row.getAiProvider();
@@ -1226,6 +1252,10 @@ public class RunLifecycleService {
                 }
 
                 ExecutionContext rootCtx = retryOperation.get().context();
+                if (!localRun && override != null && override.postReview()) {
+                  correctionCheckpoint =
+                      correctionWorkspaceTransaction.begin(rootCtx.workspaceRoot());
+                }
                 List<UUID> selectedRepoIds =
                     row == null ? List.of() : deserializeRepoIds(row.getSelectedRepoIds());
                 RunCostTracker.Snapshot beforeRetry = costTracker.snapshot(runId);
@@ -1261,8 +1291,20 @@ public class RunLifecycleService {
                                     row == null ? null : row.getProjectId(), selectedRepoIds))
                             .build(),
                         new com.navneet.executespec.harness.SequentialExecutor.ResumeRequest(
-                            fullTargetTaskId));
-                persistenceWriter.applyExecutionResultToTasks(runId, result);
+                            fullTargetTaskId,
+                            override == null ? null : override.provider(),
+                            override == null ? null : override.model(),
+                            override == null ? null : override.proposedAction(),
+                            override == null ? null : override.proposalDigest()));
+                if (override != null
+                    && override.postReview()
+                    && brownfieldHttpContractGuard.hasBaseline(runId)) {
+                  brownfieldHttpContractGuard.assertCompatible(runId);
+                }
+                if (override != null) {
+                  assertApprovedContinuationRoute(
+                      runId, fullTargetTaskId, override.provider(), override.model(), result);
+                }
                 requireRunOperationLifecycle().complete(retryOperation.getAndSet(null));
                 RunCostTracker.Snapshot afterRetry = costTracker.snapshot(runId);
                 tokenAttributor.attributeWorkerAdditionalTask(
@@ -1278,15 +1320,46 @@ public class RunLifecycleService {
                         ? runReviewerAfterApprovedPostReviewContinuation(
                             runId, plan, rootCtx, provider, model, result, afterRetry)
                         : null;
-                if (!localRun && override != null && override.postReview()) {
-                  try {
-                    validationKickoff.generateValidationReport(runId, result, reviewResult, plan);
-                  } catch (Exception e) {
-                    log.warn(
-                        "approved post-review continuation validation failed run={}: {}",
+                if (correctionCheckpoint != null) {
+                  CorrectionAcceptancePolicy.Decision acceptance =
+                      CorrectionAcceptancePolicy.evaluate(taskId, result, reviewResult);
+                  if (!acceptance.accepted()) {
+                    correctionWorkspaceTransaction.rollback(correctionCheckpoint);
+                    restoreRejectedCorrection(
                         runId,
-                        e.getMessage());
+                        taskBeforeCorrection,
+                        runStatusBeforeCorrection,
+                        runReasonBeforeCorrection,
+                        runCompletedBeforeCorrection,
+                        runReviewBeforeCorrection,
+                        acceptance.code(),
+                        acceptance.reason(),
+                        correctionCheckpoint.generation());
+                    broadcaster.emit(
+                        runId,
+                        RunEvent.log(
+                            runId,
+                            taskId,
+                            "Approved correction rolled back: "
+                                + acceptance.code()
+                                + " — "
+                                + acceptance.reason()));
+                    return null;
                   }
+                  validationKickoff.generateValidationReport(runId, result, reviewResult, plan);
+                  CorrectionWorkspaceTransaction.Accepted generations =
+                      correctionWorkspaceTransaction.accept(correctionCheckpoint);
+                  appendCorrectionResolution(
+                      fullTargetTaskId,
+                      "ACCEPTED",
+                      acceptance.code(),
+                      acceptance.reason(),
+                      generations.beforeGeneration(),
+                      generations.afterGeneration());
+                }
+                persistenceWriter.applyExecutionResultToTasks(runId, result);
+                if (reviewResult != null) {
+                  persistenceWriter.persistReview(runId, reviewResult);
                 }
 
                 // A local-hands retry never produced server-verified evidence: no server smoke, no
@@ -1305,6 +1378,30 @@ public class RunLifecycleService {
                         + terminal.reason(),
                     null);
               } catch (Exception e) {
+                if (correctionCheckpoint != null) {
+                  try {
+                    correctionWorkspaceTransaction.rollback(correctionCheckpoint);
+                    restoreRejectedCorrection(
+                        runId,
+                        taskBeforeCorrection,
+                        runStatusBeforeCorrection,
+                        runReasonBeforeCorrection,
+                        runCompletedBeforeCorrection,
+                        runReviewBeforeCorrection,
+                        "CORRECTION_EXECUTION_FAILED",
+                        e.getMessage(),
+                        correctionCheckpoint.generation());
+                    log.warn(
+                        "Approved correction failed and was rolled back run={} task={}: {}",
+                        runId,
+                        taskId,
+                        e.getMessage());
+                    return null;
+                  } catch (RuntimeException rollbackFailure) {
+                    rollbackFailure.addSuppressed(e);
+                    e = rollbackFailure;
+                  }
+                }
                 log.error(
                     "RunOrchestrator retryTask dispatch failed run={} task={}", runId, taskId, e);
                 controlPort.terminate(
@@ -1367,11 +1464,11 @@ public class RunLifecycleService {
                   .context(reviewOperation.context())
                   .buildCommand(plan.buildCommand())
                   .skipWiringPass(false)
+                  .readOnly(true)
                   .originalGoal(
                       runRepo.findById(runId).map(PipelineRun::getUserRequest).orElse(null))
                   .requirements(plan.requirements())
                   .build());
-      persistenceWriter.persistReview(runId, reviewResult);
       requireRunOperationLifecycle().complete(reviewOperation);
       reviewOperation = null;
       RunCostTracker.Snapshot afterReview = costTracker.snapshot(runId);
@@ -1386,7 +1483,6 @@ public class RunLifecycleService {
     } catch (Exception e) {
       log.warn(
           "approved post-review continuation reviewer failed run={}: {}", runId, e.getMessage());
-      persistenceWriter.persistReviewFailure(runId, e);
       requireRunOperationLifecycle().fail(reviewOperation, "REVIEW_FAILED");
       reviewOperation = null;
       return RunOrchestrator.reviewerFailedResult(e);
@@ -1394,6 +1490,65 @@ public class RunLifecycleService {
       if (runOperationLifecycle != null) {
         runOperationLifecycle.closeQuietly(runId, reviewOperation);
       }
+    }
+  }
+
+  /**
+   * A continuation approval is an exact route contract. Check both the executor's requested route
+   * and, when the physical-attempt ledger is available, the latest provider response before any
+   * attribution or reviewer attestation can describe the retry as approved work.
+   */
+  private void assertApprovedContinuationRoute(
+      String runId,
+      String targetTaskId,
+      String approvedProvider,
+      String approvedModel,
+      ExecutionResult result) {
+    String logicalTaskId =
+        targetTaskId != null
+                && runId != null
+                && runId.length() >= 8
+                && targetTaskId.startsWith(runId.substring(0, 8) + "_")
+            ? targetTaskId.substring(9)
+            : targetTaskId;
+    var target =
+        result == null
+            ? null
+            : result.perTask().stream()
+                .filter(outcome -> Objects.equals(logicalTaskId, outcome.taskId()))
+                .findFirst()
+                .orElse(null);
+    if (target == null
+        || !approvedProvider.equalsIgnoreCase(target.dispatchedProvider())
+        || !approvedModel.equals(target.dispatchedModel())) {
+      throw new IllegalStateException(
+          "Approved continuation route mismatch before attribution/review: expected "
+              + approvedProvider
+              + "/"
+              + approvedModel
+              + " but executor dispatched "
+              + (target == null
+                  ? "no target outcome"
+                  : target.dispatchedProvider() + "/" + target.dispatchedModel()));
+    }
+    if (effectiveRoutes == null) {
+      return;
+    }
+    EffectiveRouteProjection physical =
+        effectiveRoutes.latestSuccessfulForTask(runId, logicalTaskId);
+    if (physical.attribution() != EffectiveRouteProjection.Attribution.LEDGER
+        || physical.divergesFrom(approvedProvider, approvedModel)) {
+      throw new IllegalStateException(
+          "Approved continuation physical route mismatch before attribution/review: expected "
+              + approvedProvider
+              + "/"
+              + approvedModel
+              + " but ledger recorded "
+              + physical.attribution()
+              + " "
+              + physical.provider()
+              + "/"
+              + physical.model());
     }
   }
 
@@ -1474,12 +1629,15 @@ public class RunLifecycleService {
         throw new IllegalStateException(
             "Continuation approval requires a proposed provider and model.");
       }
+      int proposalVersion = root.path("schemaVersion").asInt(1);
       return new ContinuationApproval(
           provider,
           model,
           proposedAction,
           benchmarkPriorRequired,
-          heavyContinuationApprovalSource(source));
+          heavyContinuationApprovalSource(source),
+          proposalVersion,
+          continuationProposalDigest(proposalVersion, json));
     } catch (IllegalStateException e) {
       throw e;
     } catch (Exception e) {
@@ -1490,6 +1648,56 @@ public class RunLifecycleService {
   static boolean heavyContinuationApprovalSource(String source) {
     return "POST_REVIEW".equalsIgnoreCase(source)
         || "POST_VALIDATION_REPORT".equalsIgnoreCase(source);
+  }
+
+  private void assertContinuationProposalUnchanged(
+      String runId, String taskId, RetryProviderOverride override) {
+    AgentTask current = findTask(runId, taskId);
+    String currentJson = current.getContinuationDecisionJson();
+    String currentDigest = continuationProposalDigest(override.proposalVersion(), currentJson);
+    if (!override.proposalDigest().equals(currentDigest)) {
+      throw new IllegalStateException(
+          "Approved continuation proposal changed before dispatch; submit a new approval.");
+    }
+  }
+
+  private void validateApprovedContinuationRoute(String provider, String model) {
+    if (provider == null || provider.isBlank() || model == null || model.isBlank()) {
+      throw new IllegalStateException(
+          "Approved continuation route requires an exact provider and model.");
+    }
+    if (modelRegistry == null) {
+      return;
+    }
+    LlmProvider requested;
+    try {
+      requested = LlmProvider.valueOf(provider.trim().toUpperCase(java.util.Locale.ROOT));
+    } catch (IllegalArgumentException invalidProvider) {
+      throw new IllegalStateException(
+          "Approved continuation provider is not registered: " + provider);
+    }
+    String canonicalModel = modelRegistry.canonicalize(model);
+    String owner = modelRegistry.providerFor(canonicalModel);
+    if (owner == null
+        || !com.navneet.executespec.router.ModelAccessService.canRouteModel(
+            requested, canonicalModel, owner)) {
+      throw new IllegalStateException(
+          "Approved continuation route is not dispatchable: " + provider + "/" + model);
+    }
+  }
+
+  private static String continuationProposalDigest(int version, String json) {
+    if (json == null || json.isBlank()) {
+      throw new IllegalStateException("Continuation proposal is missing.");
+    }
+    try {
+      byte[] bytes =
+          java.security.MessageDigest.getInstance("SHA-256")
+              .digest((version + "\n" + json).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+      return java.util.HexFormat.of().formatHex(bytes);
+    } catch (java.security.NoSuchAlgorithmException impossible) {
+      throw new IllegalStateException("SHA-256 is unavailable", impossible);
+    }
   }
 
   private void appendApprovedContinuationAction(
@@ -1540,6 +1748,78 @@ public class RunLifecycleService {
           task.getTaskId(),
           ex.getMessage(),
           ex);
+    }
+  }
+
+  private void restoreRejectedCorrection(
+      String runId,
+      com.navneet.executespec.state.entity.AgentTask taskBeforeCorrection,
+      String runStatus,
+      String runReason,
+      Instant runCompletedAt,
+      String reviewJson,
+      String code,
+      String reason,
+      String generation) {
+    if (taskBeforeCorrection == null) {
+      throw new IllegalStateException("Rejected correction has no durable task checkpoint");
+    }
+    String currentActions =
+        taskRepo
+            .findById(taskBeforeCorrection.getTaskId())
+            .map(com.navneet.executespec.state.entity.AgentTask::getContinuationActionsJson)
+            .orElse(taskBeforeCorrection.getContinuationActionsJson());
+    taskBeforeCorrection.setContinuationActionsJson(currentActions);
+    taskRepo.saveAndFlush(taskBeforeCorrection);
+    appendCorrectionResolution(
+        taskBeforeCorrection.getTaskId(), "ROLLED_BACK", code, reason, generation, generation);
+
+    PipelineRun current =
+        runRepo
+            .findById(runId)
+            .orElseThrow(() -> new IllegalStateException("Run disappeared during correction"));
+    current.setStatus(runStatus);
+    current.setStatusReason(runReason);
+    current.setCompletedAt(runCompletedAt);
+    current.setReviewJson(reviewJson);
+    runRepo.saveAndFlush(current);
+    broadcaster.emit(runId, RunEvent.runStatus(runId, runStatus));
+    broadcaster.emit(
+        runId,
+        RunEvent.taskStatus(
+            runId, taskBeforeCorrection.getTaskId(), taskBeforeCorrection.getStatus()));
+  }
+
+  private void appendCorrectionResolution(
+      String taskKey,
+      String status,
+      String code,
+      String reason,
+      String beforeGeneration,
+      String afterGeneration) {
+    var task =
+        taskRepo
+            .findById(taskKey)
+            .orElseThrow(
+                () -> new IllegalStateException("Correction task disappeared: " + taskKey));
+    try {
+      ArrayNode actions = readContinuationActions(task.getContinuationActionsJson());
+      ObjectNode resolution = actions.addObject();
+      resolution.put("status", status);
+      resolution.put("decision", "CORRECTION_RESOLUTION");
+      resolution.put("code", code == null ? "CORRECTION_UNKNOWN" : code);
+      resolution.put(
+          "reason",
+          reason == null || reason.length() <= 500
+              ? (reason == null ? "" : reason)
+              : reason.substring(0, 500));
+      resolution.put("beforeWorkspaceGeneration", beforeGeneration);
+      resolution.put("afterWorkspaceGeneration", afterGeneration);
+      resolution.put("attempt", actions.size());
+      task.setContinuationActionsJson(objectMapper.writeValueAsString(actions));
+      taskRepo.saveAndFlush(task);
+    } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+      throw new IllegalStateException("Could not persist correction resolution", e);
     }
   }
 
@@ -1703,14 +1983,28 @@ public class RunLifecycleService {
       String model,
       RunContinuationDecision proposedAction,
       boolean benchmarkPriorRequired,
-      boolean postReview) {}
+      boolean postReview,
+      int proposalVersion,
+      String proposalDigest) {
+    /** Compatibility shape used by deterministic continuation fixtures that do not dispatch. */
+    public ContinuationApproval(
+        String provider,
+        String model,
+        RunContinuationDecision proposedAction,
+        boolean benchmarkPriorRequired,
+        boolean postReview) {
+      this(provider, model, proposedAction, benchmarkPriorRequired, postReview, 1, "0".repeat(64));
+    }
+  }
 
   private record RetryProviderOverride(
       String provider,
       String model,
       RunContinuationDecision proposedAction,
       boolean benchmarkPriorRequired,
-      boolean postReview) {}
+      boolean postReview,
+      int proposalVersion,
+      String proposalDigest) {}
 
   private record ContinuationUsage(int providerSwitches, int modelStepUps, int modelStepDowns) {
     static ContinuationUsage none() {

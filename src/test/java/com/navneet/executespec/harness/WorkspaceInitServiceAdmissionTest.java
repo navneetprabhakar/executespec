@@ -120,6 +120,7 @@ class WorkspaceInitServiceAdmissionTest {
         properties,
         mock(WorkspaceRestoreService.class),
         mock(RunRepoSnapshotRepository.class),
-        mock(VendoredPathGuard.class));
+        mock(VendoredPathGuard.class),
+        mock(com.navneet.executespec.contractsurface.BrownfieldHttpContractGuard.class));
   }
 }
