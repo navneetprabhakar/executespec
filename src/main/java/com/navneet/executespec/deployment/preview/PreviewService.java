@@ -99,6 +99,7 @@ public class PreviewService {
   private final ObjectProvider<
           com.navneet.executespec.deployment.preview.engine.PreviewEngineHandoff>
       engineHandoffProvider;
+  private final PreviewWorkspaceResolver workspaceResolver;
 
   /** runId → preview-engine preview id, set when we hand off through the engine. */
   private final ConcurrentHashMap<String, String> enginePreviewIds = new ConcurrentHashMap<>();
@@ -164,7 +165,8 @@ public class PreviewService {
           testPreviewCoordinatorProvider,
       ObjectProvider<PreviewDeploymentService> vmPreviewServiceProvider,
       ObjectProvider<com.navneet.executespec.deployment.preview.engine.PreviewEngineHandoff>
-          engineHandoffProvider) {
+          engineHandoffProvider,
+      PreviewWorkspaceResolver workspaceResolver) {
     this.dockerfileGen = dockerfileGen;
     this.databaseDetector = databaseDetector;
     this.envVarDetector = envVarDetector;
@@ -185,6 +187,7 @@ public class PreviewService {
     this.testPreviewCoordinatorProvider = testPreviewCoordinatorProvider;
     this.vmPreviewServiceProvider = vmPreviewServiceProvider;
     this.engineHandoffProvider = engineHandoffProvider;
+    this.workspaceResolver = workspaceResolver;
   }
 
   PreviewService(
@@ -222,7 +225,8 @@ public class PreviewService {
         emptyProvider(),
         emptyProvider(),
         emptyProvider(),
-        emptyProvider());
+        emptyProvider(),
+        null);
   }
 
   private static <T> ObjectProvider<T> emptyProvider() {
@@ -273,9 +277,19 @@ public class PreviewService {
     return engineHandoffProvider.getIfAvailable();
   }
 
+  private Path resolvePreviewWorkspace(String runId) {
+    Path restoredRunRoot = restoreService.ensureWorkspaceAvailable(runId);
+    // The package-private compatibility constructor is used only by focused legacy tests. The
+    // production @Autowired constructor requires this resolver as a normal bean so a wiring error
+    // cannot silently reintroduce the run-root build-context bug.
+    return workspaceResolver == null
+        ? restoredRunRoot
+        : workspaceResolver.resolve(runId, restoredRunRoot);
+  }
+
   /** Analyze workspace for database and env var requirements (pre-start step). */
   public PreviewAnalysis analyze(String runId) {
-    Path workspace = restoreService.ensureWorkspaceAvailable(runId);
+    Path workspace = resolvePreviewWorkspace(runId);
     DatabaseType dbType = databaseDetector.detect(workspace);
     List<EnvVarDetector.DetectedEnvVar> envVars = envVarDetector.detect(workspace);
 
@@ -396,7 +410,7 @@ public class PreviewService {
         stateStore.saveRun(run);
 
         // Detect project type (restore from GCS if needed)
-        workspace = restoreService.ensureWorkspaceAvailable(runId);
+        workspace = resolvePreviewWorkspace(runId);
         type = dockerfileGen.detect(workspace);
         if (type == null) {
           throw new PreviewException("Unsupported project type — could not detect build system.");

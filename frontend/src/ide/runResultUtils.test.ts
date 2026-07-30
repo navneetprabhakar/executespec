@@ -197,11 +197,12 @@ describe('runArtifactActionAvailability', () => {
       codeZip: false,
       shareReport: false,
       workspaceReason: 'This run stopped before execution and produced no code changes.',
+      publicationReason: 'Checking publication eligibility…',
       reportReason: 'No validation report was produced for this run.',
     });
   });
 
-  it('allows workspace actions after execution while withholding missing report actions', () => {
+  it('allows local workspace actions while withholding publication without eligibility', () => {
     const availability = runArtifactActionAvailability({
       status: 'FAILED',
       changedWorkspaceFiles: 3,
@@ -210,10 +211,10 @@ describe('runArtifactActionAvailability', () => {
     });
 
     expect(availability).toMatchObject({
-      push: true,
+      push: false,
       revertWorkspace: true,
       preview: true,
-      deploy: true,
+      deploy: false,
       codeZip: true,
       reportPdf: false,
       shareReport: false,
@@ -226,6 +227,17 @@ describe('runArtifactActionAvailability', () => {
       changedWorkspaceFiles: 4,
       hasExecutionEvidence: true,
       hasValidationReport: true,
+      publication: {
+        eligible: true,
+        eligibility: 'ELIGIBLE',
+        code: 'PUBLICATION_ELIGIBLE',
+        blockingGate: null,
+        reason: 'eligible',
+        retryable: false,
+        remediation: null,
+        evidenceWorkspaceGeneration: 'a'.repeat(64),
+        currentWorkspaceGeneration: 'a'.repeat(64),
+      },
     });
 
     expect(
@@ -903,6 +915,14 @@ describe('runResultUtils', () => {
       canRerunTests: true,
       emptyMessage: 'No test report yet.',
     });
+    expect(
+      testRerunState({
+        status: 'PARTIAL',
+        hasTestPlan: false,
+        hasTests: false,
+        hasProducedWorkspace: true,
+      }),
+    ).toEqual({canRerunTests: true, emptyMessage: 'No test report yet.'});
   });
 
   it('recognizes only terminal manual test execution states', () => {

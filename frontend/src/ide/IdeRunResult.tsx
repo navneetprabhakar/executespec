@@ -31,6 +31,7 @@ import {
 } from '@/ide/runCostLedger';
 import {providerIsDispatchable} from '@/ide/providerReadiness';
 import {useProviderReadiness} from '@/ide/useProviderReadiness';
+import {retryRunWithProvider} from '@/ide/providerRetry';
 import {useAuthStore, selectIsSuperAdmin} from '@/stores/useAuthStore';
 import {
   IdeBadge,
@@ -714,13 +715,7 @@ export default function IdeRunResult() {
     if (!run) return;
     action(
       'reprovider',
-      () =>
-        api.createRun({
-          userRequest: run.userRequest || '',
-          aiProvider: p,
-          executionMode: 'PRODUCTION',
-          projectId: run.projectId || undefined,
-        }),
+      () => retryRunWithProvider(api.forkRun, runId, p),
       (r) => {
         const id = (r as {runId?: string})?.runId;
         if (id) navigate(`/live/${id}`);
@@ -1047,12 +1042,15 @@ export default function IdeRunResult() {
     changedWorkspaceFiles: producedWorkspaceFileCount,
     hasExecutionEvidence,
     hasValidationReport: report != null,
+    publication,
+    publicationCheckFailed: publicationFailure != null,
   });
   const hasCostEvidence = hasRunCostEvidence(run);
   const {canRerunTests, emptyMessage: noCodeTestMessage} = testRerunState({
     status: run?.status,
     hasTestPlan: Boolean(testPlan),
     hasTests: Boolean(tests),
+    hasProducedWorkspace: artifactActions.codeZip,
   });
   const phaseDiagnosis = runPhaseDiagnosis({
     status: run?.status,
@@ -1455,7 +1453,12 @@ export default function IdeRunResult() {
                 ) : artifactActions.push ? (
                   <button
                     className='ide-btn'
-                    disabled={busy === 'push'}
+                    disabled={busy === 'push' || !artifactActions.push}
+                    title={
+                      !artifactActions.push
+                        ? artifactActions.publicationReason || artifactActions.workspaceReason
+                        : undefined
+                    }
                     onClick={() =>
                       action('push', () => api.pushToScm(runId), pushOutcomeMessage, reloadRun)
                     }
@@ -1536,7 +1539,11 @@ export default function IdeRunResult() {
               <button
                 className='ide-btn ghost'
                 disabled={busy === 'deploy' || !artifactActions.deploy}
-                title={!artifactActions.deploy ? artifactActions.workspaceReason : undefined}
+                title={
+                  !artifactActions.deploy
+                    ? artifactActions.publicationReason || artifactActions.workspaceReason
+                    : undefined
+                }
                 onClick={() =>
                   setConfirm({
                     title: 'Deploy to Cloud Run',
@@ -3202,12 +3209,16 @@ export default function IdeRunResult() {
                 <div style={{marginBottom: 10, color: 'var(--ide-fg-muted)'}}>
                   {artifactActions.push
                     ? 'No pull request yet. Push the generated changes when you are ready to open one. Pushing requires a connected repository provider under Integrations.'
-                    : `No pull request can be opened. ${artifactActions.workspaceReason}`}
+                    : `No pull request can be opened. ${artifactActions.publicationReason || artifactActions.workspaceReason}`}
                 </div>
                 <button
                   className='ide-btn'
                   disabled={busy === 'push' || !artifactActions.push}
-                  title={!artifactActions.push ? artifactActions.workspaceReason : undefined}
+                  title={
+                    !artifactActions.push
+                      ? artifactActions.publicationReason || artifactActions.workspaceReason
+                      : undefined
+                  }
                   onClick={() =>
                     action('push', () => api.pushToScm(runId), pushOutcomeMessage, reloadRun)
                   }

@@ -31,6 +31,8 @@ import com.navneet.executespec.project.pr.PullRequestRecord;
 import com.navneet.executespec.project.pr.PullRequestRecordRepository;
 import com.navneet.executespec.project.rag.CodeChunkStore;
 import com.navneet.executespec.project.rag.CodeIndexStateStore;
+import com.navneet.executespec.project.rag.CodeIndexWorkspaceIdentity;
+import com.navneet.executespec.project.rag.CodeIndexWorkspaceMaterializer;
 import com.navneet.executespec.project.rag.CodeIndexingService;
 import com.navneet.executespec.project.rag.EmbeddingService;
 import com.navneet.executespec.project.rag.RetrievalService;
@@ -97,6 +99,7 @@ public class ProjectChatTools {
   private final RetrievalService retrievalService;
   private final TechDebtService techDebtService;
   private final WorkspaceInitService workspaceInitService;
+  private final CodeIndexWorkspaceMaterializer codeIndexWorkspaceMaterializer;
   private final SearchFilesTool searchFilesTool;
   private final CodeIndexingService codeIndexingService;
   private final CodeChunkStore codeChunkStore;
@@ -687,28 +690,30 @@ public class ProjectChatTools {
           if (fullName == null || fullName.isBlank()) {
             return errorEnvelope("linked repo has no GitHub full name; cannot clone.");
           }
-          // Cache the clone per (repo, synced SHA): repeated searches reuse it (cloneFromRepo is
-          // idempotent), and a project re-sync (new lastSyncedSha) busts the cache → fresh clone.
-          String sha = target.getLastSyncedSha();
-          String shaKey =
-              sha != null && !sha.isBlank() ? sha.substring(0, Math.min(12, sha.length())) : "head";
-          String cloneWsId = "projchat-" + target.getId() + "-" + shaKey;
-          String cloneUrl = "https://github.com/" + fullName + ".git";
 
           Path clonePath;
           try {
-            workspaceInitService.cloneFromRepo(cloneWsId, cloneUrl, ctx.callerPat());
-            clonePath = workspaceInitService.runWorkspacePath(cloneWsId);
-          } catch (Exception e) {
+            boolean bitbucket = "BITBUCKET".equalsIgnoreCase(target.getScmProvider());
+            AppUser caller = ctx.principal() == null ? null : ctx.principal().getUser();
+            String username = bitbucket && caller != null ? caller.getBitbucketUsername() : null;
+            String secret =
+                bitbucket && caller != null ? caller.getBitbucketAppPassword() : ctx.callerPat();
+            clonePath =
+                codeIndexWorkspaceMaterializer.materialize(
+                    ctx.projectId(), target, username, secret);
+          } catch (CodeIndexWorkspaceMaterializer.MaterializationException e) {
             log.warn(
-                "Project chat source clone failed for {}: {}",
-                fullName,
-                contextSanitizer.sanitizeException(e));
-            return errorEnvelope(
-                "could not clone " + fullName + " (check repository access and credentials)");
+                "Project chat source materialization failed for {} code={}", fullName, e.code());
+            ObjectNode error = errorEnvelope("repository source is unavailable for lexical search");
+            error.put("code", e.code().name());
+            return error;
           }
 
-          ExecutionContext execCtx = new ExecutionContext(cloneWsId, "search", clonePath);
+          ExecutionContext execCtx =
+              new ExecutionContext(
+                  CodeIndexWorkspaceIdentity.workspaceId(ctx.projectId(), target),
+                  "search",
+                  clonePath);
           ToolResult result = searchFilesTool.execute(args, execCtx);
           ObjectNode out = json.createObjectNode();
           if (result instanceof ToolResult.Ok ok) {

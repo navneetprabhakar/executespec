@@ -5,6 +5,9 @@ tool must be explicitly classified in `ChatToolPolicy` as `PROJECT_READ`, `PROJE
 `SPEND_AI`, or `WRITE_REPO`; unknown names fail closed as `WRITE_REPO`. Model loops currently bind
 `PROJECT_READ` only. Run submission, plan decisions, cancellation, project generation, code-review
 scans, and child-agent spend use their explicit structured endpoints/proposals instead.
+For project-scoped lexical reads, `SpecChatService` and `ProjectChatTools` derive the correct
+GitHub or Bitbucket credential from the authenticated server-side principal; browser clients never
+send or select a repository credential in the model request.
 
 The legacy write callbacks retained in `ProjectChatActionTools` remain filtered out of model-bound
 tool sets. Their plan APPROVE/REJECT implementation routes through `PlanApprovalService` and the

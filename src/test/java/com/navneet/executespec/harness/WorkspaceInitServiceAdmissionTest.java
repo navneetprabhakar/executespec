@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verifyNoInteractions;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -111,6 +112,45 @@ class WorkspaceInitServiceAdmissionTest {
     // contained), so only the traversal cases must throw.
     assertThrows(SecurityException.class, () -> service.runWorkspacePath("../escape"));
     assertThrows(SecurityException.class, () -> service.runWorkspacePath("a/../../etc"));
+  }
+
+  @Test
+  void readOnlyRepositoryCloneDoesNotRequireOrCreatePipelineRunEvidence() throws Exception {
+    Path source = workspace.resolve("source");
+    Files.createDirectories(source);
+    run(source, "git", "init", "-b", "main");
+    Files.writeString(source.resolve("App.java"), "class App {}\n");
+    run(source, "git", "add", "App.java");
+    run(
+        source,
+        "git",
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@example.com",
+        "commit",
+        "-m",
+        "seed");
+    var baseline = mock(com.navneet.executespec.contractsurface.BrownfieldHttpContractGuard.class);
+    AgentProperties properties = new AgentProperties();
+    properties.setWorkspace(workspace.resolve("runs").toString());
+    WorkspaceInitService service =
+        new WorkspaceInitService(
+            properties,
+            mock(WorkspaceRestoreService.class),
+            mock(RunRepoSnapshotRepository.class),
+            mock(VendoredPathGuard.class),
+            baseline);
+
+    service.cloneReadOnlyRepository("project-source", source.toString(), null, null);
+
+    assertTrue(Files.exists(service.runWorkspacePath("project-source").resolve("App.java")));
+    verifyNoInteractions(baseline);
+  }
+
+  private static void run(Path directory, String... command) throws Exception {
+    Process process = new ProcessBuilder(command).directory(directory.toFile()).start();
+    assertEquals(0, process.waitFor(), new String(process.getErrorStream().readAllBytes()));
   }
 
   private WorkspaceInitService service() {
