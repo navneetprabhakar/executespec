@@ -6,6 +6,7 @@ import java.nio.file.Path;
 import java.util.Locale;
 import java.util.Set;
 
+import com.navneet.executespec.contractsurface.BrownfieldHttpContractGuard;
 import com.navneet.executespec.harness.WorkspaceInitService;
 
 import org.springframework.stereotype.Component;
@@ -33,6 +34,7 @@ public class StandaloneExistingWorkspaceAdmission {
       Set.of(".git", ".agent-context", "build", "dist", "node_modules", "target");
 
   private final WorkspaceInitService workspaceInit;
+  private final BrownfieldHttpContractGuard brownfieldHttpContractGuard;
 
   Admission prepareInitial(
       String runId,
@@ -45,6 +47,8 @@ public class StandaloneExistingWorkspaceAdmission {
       throws Exception {
     if (sourceRunId != null) {
       workspaceInit.copyFromRunRequired(sourceRunId, runId);
+      brownfieldHttpContractGuard.captureBaselineIfAbsent(
+          runId, workspaceInit.runWorkspacePath(runId));
       return Admission.admitted(0);
     }
     if (!required(projectId, null, true, localRun, repoMode)) {

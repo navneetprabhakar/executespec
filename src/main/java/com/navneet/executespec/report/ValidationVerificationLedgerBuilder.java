@@ -116,9 +116,17 @@ final class ValidationVerificationLedgerBuilder {
             build == null
                 ? "No final build signal was stored for this report."
                 : build ? "Final build passed." : "Final build failed.",
-            "validation_report.final_build_passed",
+            commandArtifact(
+                entity.getBuildCommand(),
+                entity.getBuildWorkingDirectory(),
+                entity.getBuildExitCode(),
+                "validation_report.build_output"),
             build == null ? null : build ? 1 : 0,
             build == null ? null : 1));
+
+    out.add(
+        WorkflowVerificationEvidenceMapper.from(
+            entity.getWorkflowConfigEvidenceJson(), objectMapper));
 
     if (entity.getBootVerdict() != null) {
       String verdict = entity.getBootVerdict();
@@ -215,7 +223,11 @@ final class ValidationVerificationLedgerBuilder {
                     + (functionalTestCountsProven(entity)
                         ? " (functional)."
                         : countsProven ? " (workspace suite only)." : " (counts unverified)."),
-            "validation_report.tests_passed/tests_total",
+            commandArtifact(
+                entity.getTestCommand(),
+                entity.getTestWorkingDirectory(),
+                entity.getTestExitCode(),
+                "validation_report.test_output"),
             total <= 0 ? null : passed,
             total <= 0 ? null : total));
 
@@ -390,7 +402,41 @@ final class ValidationVerificationLedgerBuilder {
             effectiveVerifiedScore,
             effectiveVerifiedScore == null ? null : 100));
 
-    return List.copyOf(out);
+    return out.stream()
+        .map(evidence -> bindWorkspaceGeneration(evidence, entity.getWorkspaceGeneration()))
+        .toList();
+  }
+
+  private static VerificationEvidenceDTO bindWorkspaceGeneration(
+      VerificationEvidenceDTO evidence, String workspaceGeneration) {
+    return new VerificationEvidenceDTO(
+        evidence.id(),
+        evidence.label(),
+        evidence.category(),
+        evidence.status(),
+        evidence.source(),
+        evidence.confidence(),
+        workspaceGeneration,
+        evidence.claim(),
+        evidence.summary(),
+        evidence.artifact(),
+        evidence.observed(),
+        evidence.total());
+  }
+
+  private static String commandArtifact(
+      String command, String workingDirectory, Integer exitCode, String outputArtifact) {
+    if (command == null || command.isBlank()) {
+      return outputArtifact;
+    }
+    return "command="
+        + command
+        + " · cwd="
+        + (workingDirectory == null ? "unknown" : workingDirectory)
+        + " · exit="
+        + (exitCode == null ? "unknown" : exitCode)
+        + " · output="
+        + outputArtifact;
   }
 
   private VerificationEvidenceDTO evidence(
@@ -406,7 +452,18 @@ final class ValidationVerificationLedgerBuilder {
       Integer observed,
       Integer total) {
     return new VerificationEvidenceDTO(
-        id, label, category, status, source, confidence, claim, summary, artifact, observed, total);
+        id,
+        label,
+        category,
+        status,
+        source,
+        confidence,
+        null,
+        claim,
+        summary,
+        artifact,
+        observed,
+        total);
   }
 
   private String reviewerStatus(String reviewerVerdict) {

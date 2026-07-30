@@ -191,7 +191,8 @@ public class BuildCommandResolver {
   private Optional<BuildCommand> inferFromFramework(Path workspaceRoot) {
     // Order matters: more-specific markers checked first.
     if (exists(workspaceRoot, "pom.xml")) {
-      return Optional.of(build("mvn -q -DskipTests compile", 300, "inferred:maven"));
+      String wrapper = executable(workspaceRoot, "mvnw") ? "./mvnw" : "mvn";
+      return Optional.of(build(wrapper + " -q -DskipTests compile", 300, "inferred:maven"));
     }
     if (exists(workspaceRoot, "build.gradle") || exists(workspaceRoot, "build.gradle.kts")) {
       String wrapper = exists(workspaceRoot, "gradlew") ? "./gradlew" : "gradle";
@@ -237,6 +238,15 @@ public class BuildCommandResolver {
       return Optional.of(build("python3 -m compileall -q .", 60, "inferred:python-loose"));
     }
     return Optional.empty();
+  }
+
+  private static boolean executable(Path dir, String name) {
+    try {
+      Path candidate = dir.resolve(name);
+      return Files.isRegularFile(candidate) && Files.isExecutable(candidate);
+    } catch (RuntimeException ignored) {
+      return false;
+    }
   }
 
   /**

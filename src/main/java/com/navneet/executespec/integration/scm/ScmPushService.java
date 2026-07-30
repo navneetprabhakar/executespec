@@ -11,6 +11,7 @@ import com.navneet.executespec.auth.entity.Project;
 import com.navneet.executespec.auth.repository.AppUserRepository;
 import com.navneet.executespec.auth.repository.ProjectRepository;
 import com.navneet.executespec.config.AgentProperties;
+import com.navneet.executespec.contractsurface.BrownfieldHttpContractGuard;
 import com.navneet.executespec.project.entity.ProjectRepo;
 import com.navneet.executespec.project.pr.PullRequestRecord;
 import com.navneet.executespec.project.pr.PullRequestRecordRepository;
@@ -51,7 +52,14 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class ScmPushService {
 
-  /** Explicit result for the canonical {@code /push-scm} contract. */
+  /**
+   * Explicit result for the canonical {@code /push-scm} contract.
+   *
+   * <p>{@code publicationEligible} reports whether admission/trust checks passed; it does not claim
+   * that the remote push succeeded. {@code retryable} means retrying after the accompanying
+   * guidance can make progress. {@code code} is stable for clients; {@code message} remains
+   * human-readable detail.
+   */
   public record PushResult(
       String status,
       String scmProvider,
@@ -59,29 +67,112 @@ public class ScmPushService {
       String message,
       int attempted,
       int succeeded,
-      int failed) {
+      int failed,
+      String code,
+      boolean publicationEligible,
+      boolean retryable,
+      String retryGuidance) {
 
     public static PushResult pushed(String provider, String prUrl, String message) {
-      return new PushResult("PUSHED", provider, prUrl == null ? "" : prUrl, message, 1, 1, 0);
+      return new PushResult(
+          "PUSHED",
+          provider,
+          prUrl == null ? "" : prUrl,
+          message,
+          1,
+          1,
+          0,
+          "SCM_PUSHED",
+          true,
+          false,
+          "");
     }
 
     public static PushResult failed(String message, String provider) {
-      return new PushResult("FAILED", provider == null ? "" : provider, "", message, 1, 0, 1);
+      return new PushResult(
+          "FAILED",
+          provider == null ? "" : provider,
+          "",
+          message,
+          1,
+          0,
+          1,
+          "SCM_PUSH_FAILED",
+          true,
+          true,
+          "Correct the reported SCM failure, then retry the push.");
+    }
+
+    public static PushResult blocked(
+        String code, String message, String provider, boolean retryable, String retryGuidance) {
+      return blocked(code, message, provider, false, retryable, retryGuidance);
+    }
+
+    private static PushResult blocked(
+        String code,
+        String message,
+        String provider,
+        boolean publicationEligible,
+        boolean retryable,
+        String retryGuidance) {
+      return new PushResult(
+          "FAILED",
+          provider == null ? "" : provider,
+          "",
+          message,
+          0,
+          0,
+          0,
+          code,
+          publicationEligible,
+          retryable,
+          retryGuidance);
     }
 
     public static PushResult noConfiguration(String provider, String message) {
       return new PushResult(
-          "NO_CONFIGURATION", provider == null ? "" : provider, "", message, 0, 0, 0);
+          "NO_CONFIGURATION",
+          provider == null ? "" : provider,
+          "",
+          message,
+          0,
+          0,
+          0,
+          "SCM_CONFIGURATION_REQUIRED",
+          false,
+          true,
+          "Configure the repository provider and credentials, then retry the push.");
     }
 
     public static PushResult partial(
         String provider, String prUrl, String message, int attempted, int succeeded, int failed) {
       return new PushResult(
-          "PARTIAL", provider, prUrl == null ? "" : prUrl, message, attempted, succeeded, failed);
+          "PARTIAL",
+          provider,
+          prUrl == null ? "" : prUrl,
+          message,
+          attempted,
+          succeeded,
+          failed,
+          "SCM_PUSH_PARTIAL",
+          true,
+          true,
+          "Review the failed repository outcomes, correct them, then retry the push.");
     }
 
     public static PushResult noChanges(String provider, String message, int attempted) {
-      return new PushResult("NO_CHANGES", provider, "", message, attempted, 0, 0);
+      return new PushResult(
+          "NO_CHANGES",
+          provider,
+          "",
+          message,
+          attempted,
+          0,
+          0,
+          "SCM_NO_CHANGES",
+          true,
+          false,
+          "Create or restore a workspace change before attempting another push.");
     }
   }
 
@@ -98,6 +189,8 @@ public class ScmPushService {
   private final ProjectRepoRepository projectRepoRepository;
   private final ObjectMapper objectMapper;
   private final ArtifactPublicationGuard publicationGuard;
+  private final BrownfieldHttpContractGuard brownfieldHttpContractGuard;
+  private final PublicationAdmissionService publicationAdmissionService;
   // RL-2026-05-041 (audit #16) — enqueue orphan-branch cleanup when a push succeeds but PR fails.
   private final com.navneet.executespec.saga.SideEffectOutbox sideEffectOutbox;
   // RR-1668 — per-run cloned-branch SHA snapshots, used to pin --force-with-lease on the push.
@@ -164,10 +257,60 @@ public class ScmPushService {
 
   /** Dispatch to the durable source provider; credentials only authorize that provider. */
   private PushResult pushIfConfigured(PipelineRun run, AppUser user) {
+    try {
+      publicationAdmissionService.assertEligible(run);
+    } catch (PublicationAdmissionService.PublicationBlockedException ineligible) {
+      log.warn(
+          "[{}] SCM publication blocked by {}: {}",
+          run.getRunId(),
+          ineligible.code(),
+          ineligible.getMessage());
+      return PushResult.blocked(
+          ineligible.code(),
+          ineligible.getMessage(),
+          run.getScmProvider(),
+          false,
+          "Regenerate validation on the current workspace and resolve the named deterministic gate"
+              + " before retrying.");
+    }
+    try {
+      // Final fail-closed brownfield compatibility check. This runs before provider/credential
+      // resolution and therefore before any branch, commit, push, or PR side effect.
+      // Worker-authored
+      // tests cannot override a removed admitted route.
+      boolean brownfield =
+          "EXISTING".equalsIgnoreCase(String.valueOf(run.getRepoMode()))
+              || StringUtils.hasText(run.getSelectedRepoIds())
+              || brownfieldHttpContractGuard.hasBaseline(run.getRunId());
+      if (brownfield) brownfieldHttpContractGuard.assertCompatible(run.getRunId());
+    } catch (BrownfieldHttpContractGuard.ContractCompatibilityException incompatible) {
+      log.warn(
+          "[{}] SCM publication blocked by {}: {}",
+          run.getRunId(),
+          incompatible.code(),
+          incompatible.getMessage());
+      broadcaster.emit(
+          run.getRunId(),
+          RunEvent.log(
+              run.getRunId(),
+              "scm",
+              "Push blocked [" + incompatible.code() + "]: " + incompatible.getMessage()));
+      return PushResult.blocked(
+          incompatible.code(),
+          incompatible.getMessage(),
+          run.getScmProvider(),
+          false,
+          contractRetryGuidance(incompatible.code()));
+    }
     ProviderDecision decision = resolveProviderDecision(run, user);
     if (decision.error() != null) {
       log.warn("[{}] SCM publication blocked: {}", run.getRunId(), decision.error());
-      return PushResult.failed(decision.error(), decision.provider());
+      return PushResult.blocked(
+          decision.code(),
+          decision.error(),
+          decision.provider(),
+          decision.retryable(),
+          decision.retryGuidance());
     }
     if (ScmProvider.BITBUCKET.name().equals(decision.provider())) {
       hydrateBitbucketCredentials(run, user);
@@ -176,13 +319,32 @@ public class ScmPushService {
     return pushToGitHubIfConfigured(run, user);
   }
 
-  private record ProviderDecision(String provider, String error) {
+  private static String contractRetryGuidance(String code) {
+    return switch (code) {
+      case "BROWNFIELD_HTTP_CONTRACT_REMOVED" ->
+          "Restore the removed HTTP route, or obtain an explicit breaking-change approval bound to"
+              + " this run before publishing.";
+      case "BROWNFIELD_BASELINE_MISSING",
+              "BROWNFIELD_BASELINE_INVALID",
+              "BROWNFIELD_BASELINE_DIGEST_MISMATCH",
+              "BROWNFIELD_BASELINE_IDENTITY_MISMATCH" ->
+          "Do not retry publication. Restore the admitted brownfield contract evidence or restart"
+              + " from a newly admitted workspace.";
+      default ->
+          "Resolve the brownfield contract evidence failure before attempting publication again.";
+    };
+  }
+
+  private record ProviderDecision(
+      String provider, String code, String error, boolean retryable, String retryGuidance) {
     static ProviderDecision route(ScmProvider provider) {
-      return new ProviderDecision(provider.name(), null);
+      return new ProviderDecision(provider.name(), null, null, false, "");
     }
 
-    static ProviderDecision blocked(String provider, String error) {
-      return new ProviderDecision(provider == null ? "" : provider, error);
+    static ProviderDecision blocked(
+        String provider, String code, String error, boolean retryable, String retryGuidance) {
+      return new ProviderDecision(
+          provider == null ? "" : provider, code, error, retryable, retryGuidance);
     }
   }
 
@@ -190,11 +352,21 @@ public class ScmPushService {
     List<java.util.UUID> selectedIds = parseRepoIds(run.getSelectedRepoIds());
     if (StringUtils.hasText(run.getSelectedRepoIds())) {
       if (selectedIds.isEmpty()) {
-        return ProviderDecision.blocked("", "Selected repository identity is invalid");
+        return ProviderDecision.blocked(
+            "",
+            "SCM_REPOSITORY_IDENTITY_INVALID",
+            "Selected repository identity is invalid",
+            false,
+            "Return to the repository picker and submit a new run with a valid repository.");
       }
       List<ProjectRepo> selectedRepos = projectRepoRepository.findAllById(selectedIds);
       if (selectedRepos.size() != selectedIds.size()) {
-        return ProviderDecision.blocked("", "Selected repository identity is incomplete");
+        return ProviderDecision.blocked(
+            "",
+            "SCM_REPOSITORY_IDENTITY_INCOMPLETE",
+            "Selected repository identity is incomplete",
+            true,
+            "Restore the missing project repository link, then retry publication.");
       }
       Set<ScmProvider> providers =
           selectedRepos.stream()
@@ -202,13 +374,21 @@ public class ScmPushService {
               .map(ScmProvider::require)
               .collect(Collectors.toSet());
       if (providers.size() != 1) {
-        return ProviderDecision.blocked("", "Mixed-provider SCM publication is not supported");
+        return ProviderDecision.blocked(
+            "",
+            "SCM_MIXED_PROVIDERS_UNSUPPORTED",
+            "Mixed-provider SCM publication is not supported",
+            false,
+            "Select repositories from one SCM provider in a new run.");
       }
       ScmProvider selectedProvider = providers.iterator().next();
       if (selectedProvider == ScmProvider.BITBUCKET) {
         return ProviderDecision.blocked(
             ScmProvider.BITBUCKET.name(),
-            "Bitbucket project publication is not supported on this release");
+            "SCM_BITBUCKET_PROJECT_PUBLICATION_UNSUPPORTED",
+            "Bitbucket project publication is not supported on this release",
+            false,
+            "Use a supported GitHub project repository for this release.");
       }
       return ProviderDecision.route(selectedProvider);
     }
@@ -218,7 +398,12 @@ public class ScmPushService {
         return ProviderDecision.route(
             ScmProvider.valueOf(run.getScmProvider().trim().toUpperCase(Locale.ROOT)));
       } catch (IllegalArgumentException unknown) {
-        return ProviderDecision.blocked("", "Unsupported SCM provider on run");
+        return ProviderDecision.blocked(
+            "",
+            "SCM_PROVIDER_UNSUPPORTED",
+            "Unsupported SCM provider on run",
+            false,
+            "Submit a new run with a supported SCM provider.");
       }
     }
 
@@ -237,7 +422,11 @@ public class ScmPushService {
     boolean githubConfigured = StringUtils.hasText(resolvePat(run, user));
     if (bitbucketConfigured && githubConfigured) {
       return ProviderDecision.blocked(
-          "", "Legacy run has multiple SCM credentials and no durable provider route");
+          "",
+          "SCM_LEGACY_ROUTE_AMBIGUOUS",
+          "Legacy run has multiple SCM credentials and no durable provider route",
+          false,
+          "Do not retry this legacy run; submit a new run with an explicit SCM provider.");
     }
     return ProviderDecision.route(bitbucketConfigured ? ScmProvider.BITBUCKET : ScmProvider.GITHUB);
   }

@@ -51,6 +51,7 @@ class ValidationReportControllerShareTest {
     String secret = "sk-ant-" + "A1".repeat(20);
     ValidationReportShareDTO report =
         new ValidationReportShareDTO(
+            "a".repeat(64),
             1,
             List.of("Java"),
             PipelineResult.PASSED,

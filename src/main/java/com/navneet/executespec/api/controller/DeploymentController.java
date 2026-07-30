@@ -1,6 +1,7 @@
 package com.navneet.executespec.api.controller;
 
 import java.nio.file.Path;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -12,6 +13,7 @@ import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.auth.security.RunAccessGuard;
 import com.navneet.executespec.auth.service.TierPermissionService;
 import com.navneet.executespec.config.OperationalReleasePolicy;
+import com.navneet.executespec.contractsurface.BrownfieldHttpContractGuard.ContractCompatibilityException;
 import com.navneet.executespec.deployment.DeploymentService;
 import com.navneet.executespec.deployment.WorkspaceRestoreService;
 import com.navneet.executespec.deployment.analyzer.DeploymentAnalyzer;
@@ -20,6 +22,7 @@ import com.navneet.executespec.deployment.analyzer.DeploymentPath;
 import com.navneet.executespec.deployment.analyzer.InfrastructureManifest;
 import com.navneet.executespec.deployment.credential.CredentialService;
 import com.navneet.executespec.deployment.engine.DeployEngineOrchestrator;
+import com.navneet.executespec.integration.scm.PublicationAdmissionService;
 import com.navneet.executespec.state.StateStore;
 import com.navneet.executespec.state.entity.Deployment;
 import com.navneet.executespec.state.entity.PipelineRun;
@@ -90,12 +93,85 @@ public class DeploymentController {
       Deployment d =
           deploymentService.deploy(request.runId(), mode, request.repoUrl(), request.repoName());
       return ResponseEntity.accepted().body(DeploymentSummary.from(d));
+    } catch (PublicationAdmissionService.PublicationBlockedException blocked) {
+      // PublicationBlockedException is an IllegalStateException. Preserve the typed deterministic
+      // gate so the exception handler can return actionable deployment diagnostics instead of the
+      // generic 400 emitted for ordinary deployment state errors.
+      throw blocked;
     } catch (IllegalStateException e) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage());
     } catch (IllegalArgumentException e) {
       throw new ResponseStatusException(
           HttpStatus.BAD_REQUEST,
           "Invalid repoMode: " + request.repoMode() + ". Must be NEW, EXISTING, or NONE.");
+    }
+  }
+
+  /**
+   * Non-contract publication gates (for example stale validation evidence) are client-correctable
+   * conflicts. Preserve the complete admission result rather than collapsing it into the generic
+   * deployment state error.
+   */
+  @ExceptionHandler(PublicationAdmissionService.PublicationBlockedException.class)
+  public ResponseEntity<Map<String, Object>> onPublicationAdmissionBlocked(
+      PublicationAdmissionService.PublicationBlockedException blocked) {
+    PublicationAdmissionService.Eligibility eligibility = blocked.eligibility();
+    Map<String, Object> body = new LinkedHashMap<>();
+    body.put("status", HttpStatus.CONFLICT.value());
+    body.put("error", "publication_blocked");
+    body.put("errorCode", eligibility.code());
+    body.put("eligibility", eligibility.eligibility());
+    body.put("blockingGate", eligibility.blockingGate());
+    body.put("message", eligibility.reason());
+    body.put("reason", eligibility.reason());
+    body.put("retryable", eligibility.retryable());
+    putIfPresent(body, "remediation", eligibility.remediation());
+    putIfPresent(body, "evidenceWorkspaceGeneration", eligibility.evidenceWorkspaceGeneration());
+    putIfPresent(body, "currentWorkspaceGeneration", eligibility.currentWorkspaceGeneration());
+    return ResponseEntity.status(HttpStatus.CONFLICT).body(body);
+  }
+
+  /**
+   * Brownfield compatibility is a client-correctable publication conflict, never an opaque server
+   * error. Keep the deterministic contract code and remediation visible to web/CLI callers.
+   */
+  @ExceptionHandler(ContractCompatibilityException.class)
+  public ResponseEntity<Map<String, Object>> onContractCompatibilityBlocked(
+      ContractCompatibilityException blocked) {
+    return ResponseEntity.status(HttpStatus.CONFLICT)
+        .body(
+            Map.of(
+                "status", HttpStatus.CONFLICT.value(),
+                "error", "publication_blocked",
+                "errorCode", blocked.code(),
+                "eligibility", "BLOCKED",
+                "blockingGate", "PROTECTED_CONTRACTS",
+                "message", blocked.getMessage(),
+                "reason", blocked.getMessage(),
+                "retryable", false,
+                "remediation", contractRemediation(blocked.code())));
+  }
+
+  private static String contractRemediation(String code) {
+    return switch (code) {
+      case "BROWNFIELD_HTTP_CONTRACT_REMOVED" ->
+          "Restore every removed HTTP route, or obtain a new exact route-scoped BREAKING approval"
+              + " before retrying deployment.";
+      case "BROWNFIELD_BASELINE_MISSING",
+              "BROWNFIELD_BASELINE_INVALID",
+              "BROWNFIELD_BASELINE_DIGEST_MISMATCH",
+              "BROWNFIELD_BASELINE_IDENTITY_MISMATCH" ->
+          "Do not retry this workspace. Restart from a newly admitted brownfield workspace with"
+              + " durable baseline evidence.";
+      default ->
+          "Resolve the protected-contract evidence failure, regenerate validation, and retry"
+              + " deployment.";
+    };
+  }
+
+  private static void putIfPresent(Map<String, Object> body, String key, String value) {
+    if (value != null && !value.isBlank()) {
+      body.put(key, value);
     }
   }
 

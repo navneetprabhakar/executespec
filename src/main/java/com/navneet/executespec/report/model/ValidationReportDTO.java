@@ -9,6 +9,7 @@ import com.navneet.executespec.report.entity.PipelineResult;
 public record ValidationReportDTO(
     String id,
     String runId,
+    String workspaceGeneration,
     int filesGenerated,
     List<String> languages,
     PipelineResult pipelineResult,

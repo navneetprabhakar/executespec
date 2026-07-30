@@ -879,6 +879,35 @@ class LlmRouterTest {
   }
 
   @Test
+  void strictApprovedOpenRouterGrokRetriesNeverSubstituteDeepSeek() {
+    build();
+    configureWireProviderUrls();
+    ReflectionTestUtils.setField(router, "openRouterApiKey", "openrouter-key");
+    when(flags.isEnabled(LlmRouter.FAILOVER_FLAG)).thenReturn(true);
+    when(registry.fallbackChainFor("grok-4.20", "openrouter"))
+        .thenReturn(
+            List.of(
+                new String[] {"openrouter", "deepseek-v4-pro"},
+                new String[] {"deepseek", "deepseek-v4-pro-native"}));
+    when(openai.call(any())).thenThrow(new RuntimeException("503 service unavailable"));
+
+    assertThatThrownBy(
+            () ->
+                router.call(
+                    req("openrouter", "grok-4.20").toBuilder().strictProvider(true).build()))
+        .isInstanceOf(RuntimeException.class)
+        .hasMessageContaining("503 service unavailable");
+
+    ArgumentCaptor<OpenAiNativeToolClient.OpenAiToolCallRequest> wire =
+        ArgumentCaptor.forClass(OpenAiNativeToolClient.OpenAiToolCallRequest.class);
+    verify(openai, times(4)).call(wire.capture());
+    assertThat(wire.getAllValues())
+        .extracting(OpenAiNativeToolClient.OpenAiToolCallRequest::model)
+        .containsOnly("x-ai/grok-4.20");
+    verify(registry, never()).fallbackChainFor(anyString(), anyString());
+  }
+
+  @Test
   void enforcedAdmissionRejectsMissingAuthorityBeforeAnyProviderOrLegacyReservation() {
     build();
     ReflectionTestUtils.setField(
@@ -1427,6 +1456,28 @@ class LlmRouterTest {
                 "Managed AI tier lock: FREE routes to deepseek-v4-flash-native"));
 
     assertThatThrownBy(() -> subject.call(req("deepseek", "deepseek-v4-pro-native")))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("Exact run route cannot be changed by managed-AI policy");
+    verify(openai, never()).call(any());
+  }
+
+  @Test
+  void strictApprovedRouteRejectsManagedAiGrokToDeepSeekSubstitution() {
+    LlmRouter subject = build();
+    when(managedAiUsageService.authorizeCall(
+            anyString(), anyString(), anyString(), any(), any(), any()))
+        .thenReturn(
+            new ManagedAiUsageService.CallAuthorization(
+                "openrouter",
+                "deepseek-v4-pro",
+                ManagedAiUsageService.FULL,
+                true,
+                "Managed AI policy selected DeepSeek"));
+
+    assertThatThrownBy(
+            () ->
+                subject.call(
+                    req("openrouter", "grok-4.20").toBuilder().strictProvider(true).build()))
         .isInstanceOf(IllegalStateException.class)
         .hasMessageContaining("Exact run route cannot be changed by managed-AI policy");
     verify(openai, never()).call(any());

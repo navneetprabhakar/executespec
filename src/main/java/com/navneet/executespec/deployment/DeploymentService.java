@@ -13,7 +13,9 @@ import com.navneet.executespec.auth.entity.TierConfig;
 import com.navneet.executespec.auth.repository.TierConfigRepository;
 import com.navneet.executespec.auth.service.TierEnforcementService;
 import com.navneet.executespec.config.AgentProperties;
+import com.navneet.executespec.contractsurface.BrownfieldHttpContractGuard;
 import com.navneet.executespec.deployment.strategy.DeploymentStrategy;
+import com.navneet.executespec.integration.scm.PublicationAdmissionService;
 import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
 import com.navneet.executespec.state.StateStore;
@@ -25,6 +27,7 @@ import com.navneet.executespec.state.repository.DeploymentRepository;
 import com.navneet.executespec.state.repository.RunRepoRepository;
 
 import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
 
 import io.micrometer.context.ContextSnapshotFactory;
 import io.micrometer.core.instrument.Counter;
@@ -53,6 +56,8 @@ public class DeploymentService {
   private final WorkspaceRestoreService workspaceRestoreService;
   private final TierEnforcementService tierEnforcementService;
   private final TierConfigRepository tierConfigRepo;
+  private final PublicationAdmissionService publicationAdmissionService;
+  private final BrownfieldHttpContractGuard brownfieldHttpContractGuard;
 
   @PostConstruct
   public void validatePrerequisites() {
@@ -169,6 +174,18 @@ public class DeploymentService {
 
     // Resolve workspace path
     Path workspacePath = resolveWorkspace(runId);
+    publicationAdmissionService.assertEligible(run);
+    // Permanent deployment is publication. Re-run the protected-contract comparison after
+    // workspace restore and before Dockerfile generation, persistence, registry or Cloud Run side
+    // effects. This mirrors the SCM boundary and prevents green worker-authored tests from
+    // deploying a replacement-only brownfield route.
+    boolean brownfield =
+        "EXISTING".equalsIgnoreCase(String.valueOf(run.getRepoMode()))
+            || StringUtils.hasText(run.getSelectedRepoIds())
+            || brownfieldHttpContractGuard.hasBaseline(runId);
+    if (brownfield) {
+      brownfieldHttpContractGuard.assertCompatible(runId);
+    }
 
     // Detect strategy + generate Dockerfile (or use existing)
     DeploymentStrategy strategy;

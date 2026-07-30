@@ -17,6 +17,8 @@ import com.navneet.executespec.cost.RunEffectiveRouteService;
 import com.navneet.executespec.cost.RunStepUsage;
 import com.navneet.executespec.cost.RunStepUsageRepository;
 import com.navneet.executespec.report.ValidationReportRepository;
+import com.navneet.executespec.report.entity.ValidationReport;
+import com.navneet.executespec.state.entity.AgentTask;
 import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.IntegrationRunRepository;
 import com.navneet.executespec.testgen.repository.TestPlanRepository;
@@ -138,6 +140,42 @@ class RunDetailEffectiveRouteTest {
   }
 
   @Test
+  void continuationActionsExposeFenceSpecificApprovedWorkerAndReviewerAttempts() {
+    AgentTask task =
+        AgentTask.builder()
+            .taskId(RUN_ID.substring(0, 8) + "_T1")
+            .runId(RUN_ID)
+            .continuationActionsJson(
+                """
+                [{
+                  "status":"APPROVED",
+                  "proposalDigest":"%s",
+                  "workerAttempt":{
+                    "provider":"openrouter",
+                    "model":"x-ai/grok-4.20",
+                    "physicalAttemptIds":["worker-attempt"]
+                  },
+                  "reviewerAttempt":{
+                    "provider":"openrouter",
+                    "model":"x-ai/grok-4.20",
+                    "physicalAttemptIds":["reviewer-attempt"]
+                  }
+                }]
+                """
+                    .formatted("a".repeat(64)))
+            .build();
+
+    RunDetail detail = mapper().toDetail(run("openrouter", null), List.of(task));
+    var action = detail.getTasks().getFirst().continuationActions().get(0);
+
+    assertThat(action.path("proposalDigest").asText()).isEqualTo("a".repeat(64));
+    assertThat(action.path("workerAttempt").path("physicalAttemptIds").get(0).asText())
+        .isEqualTo("worker-attempt");
+    assertThat(action.path("reviewerAttempt").path("physicalAttemptIds").get(0).asText())
+        .isEqualTo("reviewer-attempt");
+  }
+
+  @Test
   void preservesRequestedCapSeparatelyWhenPlanningFailedBeforeHardCapDerivation() {
     when(usageRepository.findByRunIdOrderByCreatedAtAsc(RUN_ID)).thenReturn(List.of());
     PipelineRun failedDuringPlanning = run("deepseek", null);
@@ -177,5 +215,47 @@ class RunDetailEffectiveRouteTest {
     RunDetail detail = mapper().toDetail(unavailable, List.of());
 
     assertThat(detail.getStatusReason()).isEqualTo("PLANNER_UNAVAILABLE");
+  }
+
+  @Test
+  void exposesIndependentReviewerValidationWorkflowAndBrownfieldFacts() {
+    RunMapper mapper = mapper();
+    ValidationReport report =
+        ValidationReport.builder()
+            .runId(RUN_ID)
+            .status("COMPLETE")
+            .workspaceGeneration("a".repeat(64))
+            .finalBuildPassed(true)
+            .testExecutionVerified(true)
+            .testsPassed(4)
+            .testsTotal(4)
+            .reviewerVerdict("CLEAN")
+            .workflowConfigEvidenceJson(
+                """
+                {"status":"PASSED","files":[],"reason":"workflow syntax valid"}
+                """)
+            .build();
+    when(validationReportRepository.findByRunId(RUN_ID)).thenReturn(Optional.of(report));
+    when(usageRepository.findByRunIdOrderByCreatedAtAsc(RUN_ID))
+        .thenReturn(List.of(success("openrouter", "x-ai/grok-4.20")));
+    PipelineRun run = run("openrouter", "x-ai/grok-4.20");
+    run.setReviewerProvider("openrouter");
+    run.setReviewerActualModel("x-ai/grok-4.20");
+    run.setBrownfieldHttpBaselineDigest("b".repeat(64));
+    run.setBrownfieldHttpCurrentDigest("c".repeat(64));
+    run.setBrownfieldHttpCompatibilityStatus("COMPATIBLE");
+
+    RunDetail detail = mapper.toDetail(run, List.of());
+
+    assertThat(detail.getReviewerProvider()).isEqualTo("openrouter");
+    assertThat(detail.getReviewerEffectiveModel()).isEqualTo("x-ai/grok-4.20");
+    assertThat(detail.getValidationEvidenceStatus()).isEqualTo("COMPLETE");
+    assertThat(detail.getEvidenceWorkspaceGeneration()).isEqualTo("a".repeat(64));
+    assertThat(detail.getTestExecutionVerified()).isTrue();
+    assertThat(detail.getWorkflowConfigStatus()).isEqualTo("PASSED");
+    assertThat(detail.getWorkflowConfigReason()).isEqualTo("workflow syntax valid");
+    assertThat(detail.getBrownfieldHttpBaselineDigest()).isEqualTo("b".repeat(64));
+    assertThat(detail.getBrownfieldHttpCurrentDigest()).isEqualTo("c".repeat(64));
+    assertThat(detail.getBrownfieldHttpCompatibilityStatus()).isEqualTo("COMPATIBLE");
   }
 }

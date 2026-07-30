@@ -606,6 +606,28 @@ public class PipelineRun {
   @org.hibernate.annotations.JdbcTypeCode(org.hibernate.type.SqlTypes.JSON)
   private String selectedRepoIds;
 
+  /** V360 — canonical admitted Spring HTTP surface, durably bound before brownfield mutation. */
+  @Column(name = "brownfield_http_baseline_digest", length = 64)
+  private String brownfieldHttpBaselineDigest;
+
+  /** V360 — baseline route/source envelope; DB-authoritative across workspace restoration. */
+  @Column(name = "brownfield_http_baseline_json", columnDefinition = "jsonb")
+  @org.hibernate.annotations.JdbcTypeCode(org.hibernate.type.SqlTypes.JSON)
+  private String brownfieldHttpBaselineJson;
+
+  /** V360 — digest of the most recently checked workspace HTTP surface. */
+  @Column(name = "brownfield_http_current_digest", length = 64)
+  private String brownfieldHttpCurrentDigest;
+
+  /** V360 — BASELINE, COMPATIBLE, or BREAKING for the latest deterministic comparison. */
+  @Column(name = "brownfield_http_compatibility_status", length = 16)
+  private String brownfieldHttpCompatibilityStatus;
+
+  /** V360 — missing/added route evidence from the latest deterministic comparison. */
+  @Column(name = "brownfield_http_compatibility_json", columnDefinition = "jsonb")
+  @org.hibernate.annotations.JdbcTypeCode(org.hibernate.type.SqlTypes.JSON)
+  private String brownfieldHttpCompatibilityJson;
+
   // V168 — Pause / resume (2026-05-02)
 
   /**

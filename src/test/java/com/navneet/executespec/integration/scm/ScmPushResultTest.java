@@ -16,6 +16,9 @@ class ScmPushResultTest {
     assertThat(result.prUrl()).endsWith("/pull/1");
     assertThat(result.succeeded()).isOne();
     assertThat(result.failed()).isZero();
+    assertThat(result.code()).isEqualTo("SCM_PUSHED");
+    assertThat(result.publicationEligible()).isTrue();
+    assertThat(result.retryable()).isFalse();
   }
 
   @Test
@@ -27,6 +30,10 @@ class ScmPushResultTest {
     assertThat(result.prUrl()).isEmpty();
     assertThat(result.attempted()).isZero();
     assertThat(result.message()).contains("PAT");
+    assertThat(result.code()).isEqualTo("SCM_CONFIGURATION_REQUIRED");
+    assertThat(result.publicationEligible()).isFalse();
+    assertThat(result.retryable()).isTrue();
+    assertThat(result.retryGuidance()).contains("credentials");
   }
 
   @Test
@@ -39,6 +46,8 @@ class ScmPushResultTest {
     assertThat(result.attempted()).isEqualTo(3);
     assertThat(result.succeeded()).isEqualTo(2);
     assertThat(result.failed()).isOne();
+    assertThat(result.code()).isEqualTo("SCM_PUSH_PARTIAL");
+    assertThat(result.retryable()).isTrue();
   }
 
   @Test
@@ -47,5 +56,26 @@ class ScmPushResultTest {
 
     assertThat(result.status()).isEqualTo("NO_CHANGES");
     assertThat(result.status()).isNotEqualTo("PUSHED");
+    assertThat(result.code()).isEqualTo("SCM_NO_CHANGES");
+    assertThat(result.publicationEligible()).isTrue();
+    assertThat(result.retryable()).isFalse();
+  }
+
+  @Test
+  void policy_block_reports_stable_code_and_non_retryable_remediation() {
+    var result =
+        ScmPushService.PushResult.blocked(
+            "BROWNFIELD_HTTP_CONTRACT_REMOVED",
+            "POST /orders was removed",
+            "GITHUB",
+            false,
+            "Restore the route or obtain explicit approval.");
+
+    assertThat(result.status()).isEqualTo("FAILED");
+    assertThat(result.attempted()).isZero();
+    assertThat(result.code()).isEqualTo("BROWNFIELD_HTTP_CONTRACT_REMOVED");
+    assertThat(result.publicationEligible()).isFalse();
+    assertThat(result.retryable()).isFalse();
+    assertThat(result.retryGuidance()).contains("explicit approval");
   }
 }

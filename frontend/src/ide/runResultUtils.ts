@@ -20,6 +20,245 @@ export interface TerminalFailureEvidence {
   detail: string;
 }
 
+export interface PublicationTrustFact {
+  label: string;
+  value: string;
+  kind: 'ok' | 'warn' | 'bad' | 'neutral';
+}
+
+/**
+ * Independent trust facts for the publication boundary. No score is used as a proxy for any row:
+ * an eligible score cannot hide missing tests, a stale generation, or a route mismatch.
+ */
+export function publicationTrustFacts(
+  run: api.RunDetail | null,
+  publication?: api.PublicationEligibility | null,
+): PublicationTrustFact[] {
+  if (!run) return [];
+  const tasks = run.tasks || [];
+  const completed = tasks.filter((task) => (task.status || '').toUpperCase() === 'COMPLETE').length;
+  const actualRoutes = [
+    ...new Set(
+      tasks
+        .filter((task) => task.effectiveProvider || task.effectiveModel)
+        .map(
+          (task) =>
+            `${task.effectiveProvider || 'unknown'}/${task.effectiveModel || 'unknown'} (${task.effectiveRouteAttribution || 'UNATTRIBUTED'})`,
+        ),
+    ),
+  ];
+  const approvedActions = tasks.flatMap((task) =>
+    (task.continuationActions || []).filter(
+      (action) => (action.status || '').toUpperCase() === 'APPROVED',
+    ),
+  );
+  const approvedRoutes = [
+    ...new Set(
+      approvedActions.map(
+        (action) => `${action.provider || 'unknown'}/${action.model || 'unknown'}`,
+      ),
+    ),
+  ];
+  const exactAttempt = (
+    action: (typeof approvedActions)[number],
+    attempt: (typeof approvedActions)[number]['workerAttempt'],
+  ) =>
+    attempt?.attribution === 'LEDGER' &&
+    attempt.provider?.toLowerCase() === action.provider?.toLowerCase() &&
+    attempt.model === action.model &&
+    (attempt.physicalAttemptIds?.length || 0) > 0;
+  const workerAttemptsExact =
+    approvedActions.length > 0 &&
+    approvedActions.every((action) => exactAttempt(action, action.workerAttempt));
+  const reviewerAttemptsExact =
+    approvedActions.length > 0 &&
+    approvedActions.every((action) => exactAttempt(action, action.reviewerAttempt));
+  const attemptSummary = (attempt: (typeof approvedActions)[number]['workerAttempt']): string =>
+    `${attempt?.provider || 'unattributed'}/${attempt?.model || 'unattributed'} (${
+      attempt?.attribution || 'UNATTRIBUTED'
+    } · ${attempt?.physicalAttemptIds?.length || 0} physical attempt${
+      attempt?.physicalAttemptIds?.length === 1 ? '' : 's'
+    })`;
+  const correctionActions = tasks
+    .flatMap((task) => task.continuationActions || [])
+    .filter(
+      (action) =>
+        action.beforeWorkspaceGeneration ||
+        action.afterWorkspaceGeneration ||
+        (action.code || '').toUpperCase().includes('CORRECTION'),
+    );
+  const correction =
+    correctionActions.length > 0 ? correctionActions[correctionActions.length - 1] : undefined;
+  const generationFresh =
+    publication?.evidenceWorkspaceGeneration != null &&
+    publication.currentWorkspaceGeneration != null &&
+    publication.evidenceWorkspaceGeneration === publication.currentWorkspaceGeneration;
+
+  const facts: PublicationTrustFact[] = [
+    {
+      label: 'Tasks executed',
+      value: `${completed}/${tasks.length}`,
+      kind: tasks.length > 0 && completed === tasks.length ? 'ok' : 'warn',
+    },
+    {
+      label: 'Approved correction route',
+      value: approvedRoutes.length ? approvedRoutes.join(', ') : 'No approved continuation',
+      kind: approvedRoutes.length ? 'neutral' : 'neutral',
+    },
+    {
+      label: 'Actual worker route',
+      value:
+        approvedActions.length > 0
+          ? approvedActions.map((action) => attemptSummary(action.workerAttempt)).join(', ')
+          : actualRoutes.length > 0
+            ? actualRoutes.join(', ')
+            : `${run.effectiveProvider || 'unattributed'}/${run.effectiveModel || 'unattributed'} (${run.effectiveRouteAttribution || 'UNATTRIBUTED'})`,
+      kind:
+        approvedActions.length > 0
+          ? workerAttemptsExact
+            ? 'ok'
+            : 'bad'
+          : run.routeDiverged === true ||
+              tasks.some(
+                (task) => task.routeDiverged === true || task.effectiveRouteAttribution === 'MIXED',
+              )
+            ? 'bad'
+            : 'neutral',
+    },
+    {
+      label: 'Build',
+      value:
+        run.finalBuildPassed === true
+          ? 'Passed'
+          : run.finalBuildPassed === false
+            ? 'Failed'
+            : 'Unmeasured',
+      kind: run.finalBuildPassed === true ? 'ok' : run.finalBuildPassed === false ? 'bad' : 'warn',
+    },
+    {
+      label: 'Tests',
+      value:
+        run.testsTotal != null
+          ? `${run.testsPassed ?? 0}/${run.testsTotal} passed · ${
+              run.testExecutionVerified ? 'execution verified' : 'not execution verified'
+            }`
+          : 'Unmeasured',
+      kind:
+        run.testExecutionVerified && (run.testsTotal ?? 0) > 0 && run.testsPassed === run.testsTotal
+          ? 'ok'
+          : run.testsTotal != null && (run.testsPassed ?? 0) < run.testsTotal
+            ? 'bad'
+            : 'warn',
+    },
+    {
+      label: 'Workflow/config',
+      value: [run.workflowConfigStatus || 'Unmeasured', run.workflowConfigReason]
+        .filter(Boolean)
+        .join(' · '),
+      kind:
+        run.workflowConfigStatus === 'PASSED' || run.workflowConfigStatus === 'NOT_APPLICABLE'
+          ? 'ok'
+          : run.workflowConfigStatus === 'FAILED'
+            ? 'bad'
+            : 'warn',
+    },
+    {
+      label: 'Protected contracts',
+      value: run.brownfieldHttpCompatibilityStatus || 'Not applicable or unmeasured',
+      kind:
+        run.brownfieldHttpCompatibilityStatus === 'COMPATIBLE' ||
+        run.brownfieldHttpCompatibilityStatus === 'BASELINE'
+          ? 'ok'
+          : run.brownfieldHttpCompatibilityStatus === 'BREAKING'
+            ? 'bad'
+            : 'neutral',
+    },
+    {
+      label: 'Reviewer result',
+      value: run.reviewerVerdict || 'Unmeasured',
+      kind:
+        run.reviewerVerdict === 'CLEAN' || run.reviewerVerdict === 'FIXED_ISSUES'
+          ? 'ok'
+          : run.reviewerVerdict === 'UNRESOLVED_ISSUES' || run.reviewerVerdict === 'REVIEW_FAILED'
+            ? 'bad'
+            : 'warn',
+    },
+    {
+      label: 'Reviewer route',
+      value:
+        approvedActions.length > 0
+          ? approvedActions.map((action) => attemptSummary(action.reviewerAttempt)).join(', ')
+          : `${run.reviewerProvider || 'unattributed'}/${
+              run.reviewerEffectiveModel || 'unattributed'
+            }`,
+      kind:
+        approvedActions.length > 0
+          ? reviewerAttemptsExact
+            ? 'ok'
+            : 'bad'
+          : run.reviewerProvider && run.reviewerEffectiveModel
+            ? 'neutral'
+            : 'warn',
+    },
+    {
+      label: 'Correction',
+      value: correction
+        ? [
+            correction.status || correction.code || 'Recorded',
+            `${correction.beforeWorkspaceGeneration?.slice(0, 12) || 'unknown'} → ${
+              correction.afterWorkspaceGeneration?.slice(0, 12) || 'unknown'
+            }`,
+            correction.changedFiles?.length
+              ? `${correction.changedFiles.length} changed: ${correction.changedFiles.join(', ')}`
+              : 'changed files unreported',
+            correction.diffDigest ? `diff ${correction.diffDigest.slice(0, 12)}` : null,
+            correction.evidenceInvalidated === true ? 'prior evidence invalidated' : null,
+            correction.validationRegenerated === true ? 'validation regenerated' : null,
+          ]
+            .filter(Boolean)
+            .join(' · ')
+        : 'No correction transaction',
+      kind:
+        correction &&
+        ['REJECTED', 'ROLLED_BACK', 'FAILED'].includes((correction.status || '').toUpperCase())
+          ? 'bad'
+          : correction
+            ? 'neutral'
+            : 'neutral',
+    },
+    {
+      label: 'Evidence freshness',
+      value:
+        publication?.evidenceWorkspaceGeneration && publication.currentWorkspaceGeneration
+          ? `${generationFresh ? 'Fresh' : 'Stale'} · evidence ${publication.evidenceWorkspaceGeneration.slice(
+              0,
+              12,
+            )} · current ${publication.currentWorkspaceGeneration.slice(0, 12)}`
+          : run.evidenceWorkspaceGeneration
+            ? `Evidence ${run.evidenceWorkspaceGeneration.slice(0, 12)} · current generation unavailable`
+            : 'Unbound',
+      kind: generationFresh ? 'ok' : publication ? 'bad' : 'warn',
+    },
+    {
+      label: 'Publication',
+      value: publication
+        ? `${publication.eligibility} · ${publication.code}${
+            publication.blockingGate ? ` · ${publication.blockingGate}` : ''
+          }`
+        : 'Eligibility unavailable',
+      kind: publication?.eligible ? 'ok' : publication ? 'bad' : 'warn',
+    },
+    {
+      label: 'Usage',
+      value: `${run.totalInputTokens ?? 0} input · ${run.totalOutputTokens ?? 0} output · ${
+        run.actualCostUsd == null ? 'cost unavailable' : `$${run.actualCostUsd.toFixed(4)}`
+      }`,
+      kind: 'neutral',
+    },
+  ];
+  return facts;
+}
+
 /**
  * Reloadable terminal evidence comes only from the durable run row. In particular, a planner
  * rejection has no task rows or validation report, so those surfaces must render this evidence
@@ -447,7 +686,23 @@ export function continuationApprovalReason(t: api.TaskSummary): string | null {
 export function latestContinuationAction(t: api.TaskSummary): string | null {
   const actions = t.continuationActions || [];
   const action = actions.length > 0 ? actions[actions.length - 1] : null;
-  if (!action?.decision || !action?.provider || !action?.model) return null;
+  if (!action?.decision) return null;
+  if (action.decision === 'CORRECTION_RESOLUTION') {
+    const status = (action.status || 'UNKNOWN').replace(/_/g, ' ').toLowerCase();
+    const generationChanged =
+      action.beforeWorkspaceGeneration &&
+      action.afterWorkspaceGeneration &&
+      action.beforeWorkspaceGeneration !== action.afterWorkspaceGeneration;
+    return [
+      `Correction ${status}`,
+      action.code,
+      action.reason,
+      generationChanged ? 'new workspace evidence required' : null,
+    ]
+      .filter(Boolean)
+      .join(' · ');
+  }
+  if (!action.provider || !action.model) return null;
   const rawStatus = (action.status || '').toUpperCase();
   const status =
     rawStatus === 'SKIPPED' ? 'Skipped' : rawStatus === 'APPROVED' ? 'Approved' : 'Used';
@@ -904,7 +1159,11 @@ export function runPhaseDiagnosis({
     ['RUNNING', 'WORKING', 'IN_PROGRESS'].includes((t.status || '').toUpperCase()),
   ).length;
   const facts: string[] = [];
-  if (taskList.length > 0) facts.push(`${completeTasks}/${taskList.length} steps complete`);
+  if (taskList.length > 0) {
+    facts.push(
+      `${completeTasks}/${taskList.length} worker tasks executed · final verification is separate`,
+    );
+  }
   if (runningTasks > 0)
     facts.push(`${runningTasks} step${runningTasks === 1 ? '' : 's'} still active`);
   if (blockedTasks > 0)

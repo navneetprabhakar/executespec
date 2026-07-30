@@ -308,29 +308,31 @@ public class ReviewerAgent {
     // when no matching files exist or the formatter isn't on PATH. Runs
     // BEFORE the final build so its (possibly reformatted) output is what
     // buildProject verifies. Tracking telemetry on PostEditFormatter.Result.
-    try {
-      PostEditFormatter.Result formatResult =
-          postEditFormatter.run(req.context().workspaceRoot(), req.context().runId());
-      if (formatResult.filesReformatted() > 0) {
-        log.info(
-            "ReviewerAgent run={} post-edit formatter reformatted ~{} file(s) via {}",
-            req.context().runId(),
-            formatResult.filesReformatted(),
-            formatResult.formattersRun());
-      }
-      if (!formatResult.errors().isEmpty()) {
+    if (!Boolean.TRUE.equals(req.readOnly())) {
+      try {
+        PostEditFormatter.Result formatResult =
+            postEditFormatter.run(req.context().workspaceRoot(), req.context().runId());
+        if (formatResult.filesReformatted() > 0) {
+          log.info(
+              "ReviewerAgent run={} post-edit formatter reformatted ~{} file(s) via {}",
+              req.context().runId(),
+              formatResult.filesReformatted(),
+              formatResult.formattersRun());
+        }
+        if (!formatResult.errors().isEmpty()) {
+          log.warn(
+              "ReviewerAgent run={} post-edit formatter had {} non-fatal error(s): {}",
+              req.context().runId(),
+              formatResult.errors().size(),
+              formatResult.errors());
+        }
+      } catch (Exception e) {
+        // Never abort the run on a formatter error — final build still runs.
         log.warn(
-            "ReviewerAgent run={} post-edit formatter had {} non-fatal error(s): {}",
+            "ReviewerAgent run={} post-edit formatter pass threw (continuing): {}",
             req.context().runId(),
-            formatResult.errors().size(),
-            formatResult.errors());
+            e.getMessage());
       }
-    } catch (Exception e) {
-      // Never abort the run on a formatter error — final build still runs.
-      log.warn(
-          "ReviewerAgent run={} post-edit formatter pass threw (continuing): {}",
-          req.context().runId(),
-          e.getMessage());
     }
 
     ObjectNode buildArgs = objectMapper.createObjectNode();
@@ -363,7 +365,8 @@ public class ReviewerAgent {
     // Gate: build red + we have meaningful build-output text + flag on.
     // We never run the pass on a clean build — there's nothing to fix.
     boolean thirdPassEnabled =
-        featureFlagService == null || featureFlagService.isEnabled(FLAG_THIRD_PASS);
+        !Boolean.TRUE.equals(req.readOnly())
+            && (featureFlagService == null || featureFlagService.isEnabled(FLAG_THIRD_PASS));
     WorkerResult fixBuild = null;
     if (!buildPassed && thirdPassEnabled && buildOutput != null && !buildOutput.isBlank()) {
       log.info(
@@ -433,7 +436,7 @@ public class ReviewerAgent {
                 .filter(d -> d.summary().getTotalTests() > 0)
                 .filter(d -> d.summary().getFailed() > 0 || d.summary().getErrors() > 0);
         concreteTestsRed = red.isPresent();
-        if (red.isPresent()) {
+        if (red.isPresent() && !Boolean.TRUE.equals(req.readOnly())) {
           var d = red.get();
           log.info(
               "ReviewerAgent run={} fix-tests pass START — {} failed / {} errored of {}",
@@ -616,6 +619,7 @@ public class ReviewerAgent {
         WorkerTaskRequest.builder()
             .provider(reviewerProviderName)
             .model(reviewerModel)
+            .strictProvider(Boolean.TRUE.equals(req.strictProvider()))
             .systemPrompt(systemPrompt)
             .userPrompt(userPrompt)
             .context(passCtx)
@@ -632,7 +636,7 @@ public class ReviewerAgent {
             // Reviewer prompts promise a smaller sandbox than the generic worker. Enforce that
             // contract in the actual model-visible schemas: no shell/runTests/move/delete tools,
             // and the wiring pass cannot create unrelated files.
-            .allowedToolNames(reviewerToolNames(taskIdSuffix))
+            .allowedToolNames(reviewerToolNames(taskIdSuffix, Boolean.TRUE.equals(req.readOnly())))
             // A clean wiring pass is a bounded evidence sweep, not another open-ended worker run.
             // Nudge after three read-only turns so the model builds and returns its verdict instead
             // of repeatedly rediscovering the same tree. Keep four recovery turns after the nudge
@@ -656,11 +660,14 @@ public class ReviewerAgent {
   }
 
   static java.util.Set<String> reviewerToolNames(String taskIdSuffix) {
+    return reviewerToolNames(taskIdSuffix, false);
+  }
+
+  static java.util.Set<String> reviewerToolNames(String taskIdSuffix, boolean readOnly) {
     java.util.LinkedHashSet<String> tools =
         new java.util.LinkedHashSet<>(
             java.util.List.of(
                 "readFile",
-                "editFile",
                 "listFiles",
                 "searchFiles",
                 "gitStatus",
@@ -668,7 +675,10 @@ public class ReviewerAgent {
                 "buildProject",
                 "completeTask",
                 "glob"));
-    if (!"reviewer-wiring".equals(taskIdSuffix)) tools.add("writeFile");
+    if (!readOnly) {
+      tools.add("editFile");
+      if (!"reviewer-wiring".equals(taskIdSuffix)) tools.add("writeFile");
+    }
     return java.util.Set.copyOf(tools);
   }
 
@@ -684,6 +694,15 @@ public class ReviewerAgent {
   static String composeReviewerUserPrompt(ReviewerRequest req, String preBuildError) {
     String contractEvidence = reviewerContractEvidence(req);
     String prefix = contractEvidence.isBlank() ? "" : contractEvidence + "\n\n";
+    if (req != null && Boolean.TRUE.equals(req.readOnly())) {
+      return prefix
+          + """
+This is a READ-ONLY FINAL ATTESTATION after a correction attempt.
+Inspect the resulting diff and run buildProject. Do not edit, create, move, format, or
+delete files. Report every unresolved contract, build, test, or wiring defect in the
+completeTask summary. A failing build is evidence to reject the correction; it is not authority to repair it during this pass.
+""";
+    }
     if (preBuildError == null || preBuildError.isBlank()) {
       return prefix
           + "Begin your review now. Use the tools to inspect, fix, build, and then call"

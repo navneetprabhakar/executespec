@@ -1,9 +1,9 @@
-// Typed API contract definitions. Runtime transport is re-exported here to preserve the stable
-// `@/lib/api/core` import surface for existing API modules.
+// Typed API definitions; runtime transport remains re-exported for stable `@/lib/api/core` imports.
 export * from './transport';
 export type {GoalProofEvidenceReference} from './validationReportTypes';
 
-import type {GoalProofEvidenceReference} from './validationReportTypes';
+import type {GoalProofEvidenceReference, WorkspaceGenerationBound} from './validationReportTypes';
+import type {RunEvidenceDetail} from './runEvidence';
 import type {TaskSummary} from './tasks';
 // Billing DTOs moved to the billing domain module, but remain type-re-exported here so existing
 // `@/lib/api/core` consumers keep compiling while the god-file shrinks.
@@ -170,7 +170,7 @@ export interface AgentTokenEntry {
   outputTokens: number;
 }
 
-export interface RunDetail extends RunSummary {
+export interface RunDetail extends RunSummary, RunEvidenceDetail {
   /** Durable caller-selected route contract; effective per-call evidence lives in /cost. */
   requestedProvider?: string | null;
   requestedModel?: string | null;
@@ -886,7 +886,7 @@ export interface ReportIssue {
   filePath: string | null;
 }
 
-export interface ValidationReportData {
+export interface ValidationReportData extends WorkspaceGenerationBound {
   id: string;
   runId: string;
   filesGenerated: number;
@@ -931,7 +931,7 @@ export interface ValidationReportData {
   goalProofReferences?: GoalProofEvidenceReference[];
 }
 
-export interface VerificationEvidence {
+export interface VerificationEvidence extends WorkspaceGenerationBound {
   id: string;
   label: string;
   category: string;
@@ -945,7 +945,7 @@ export interface VerificationEvidence {
   total?: number | null;
 }
 
-export interface SharedReportData {
+export interface SharedReportData extends WorkspaceGenerationBound {
   filesGenerated: number;
   languages: string[];
   pipelineResult: 'PASSED' | 'PASSED_WITH_FIXES' | 'NEEDS_ATTENTION' | 'FAILED';

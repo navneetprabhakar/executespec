@@ -62,4 +62,34 @@ class BuildCommandResolverJavaTest {
     assertThat(resolved.timeoutSeconds()).isEqualTo(120);
     assertThat(resolved.sourceDescription()).isEqualTo("inferred:java-loose");
   }
+
+  @Test
+  void prefersMavenWrapperWhenPresent() throws Exception {
+    Files.writeString(workspace.resolve("pom.xml"), "<project/>");
+    Files.writeString(workspace.resolve("mvnw"), "#!/bin/sh\n");
+    workspace.resolve("mvnw").toFile().setExecutable(true);
+
+    BuildCommand resolved = new BuildCommandResolver().resolve(workspace, null);
+
+    assertThat(resolved.command()).isEqualTo("./mvnw -q -DskipTests compile");
+    assertThat(resolved.sourceDescription()).isEqualTo("inferred:maven");
+  }
+
+  @Test
+  void fallsBackToSystemMavenWhenWrapperIsNotExecutable() throws Exception {
+    Files.writeString(workspace.resolve("pom.xml"), "<project/>");
+    Files.writeString(workspace.resolve("mvnw"), "#!/bin/sh\n");
+    workspace.resolve("mvnw").toFile().setExecutable(false);
+
+    assertThat(new BuildCommandResolver().resolve(workspace, null).command())
+        .isEqualTo("mvn -q -DskipTests compile");
+  }
+
+  @Test
+  void fallsBackToSystemMavenWithoutWrapper() throws Exception {
+    Files.writeString(workspace.resolve("pom.xml"), "<project/>");
+
+    assertThat(new BuildCommandResolver().resolve(workspace, null).command())
+        .isEqualTo("mvn -q -DskipTests compile");
+  }
 }

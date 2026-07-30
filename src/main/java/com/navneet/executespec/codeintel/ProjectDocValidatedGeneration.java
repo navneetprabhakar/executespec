@@ -39,11 +39,13 @@ final class ProjectDocValidatedGeneration {
       LlmExecutionReference executionReference,
       List<Message> initialMessages,
       Set<String> sourceRepositories,
-      String codemapEvidence) {
+      String codemapEvidence,
+      Runnable providerDispatchFence) {
     List<Message> messages = initialMessages;
     long totalInputTokens = 0;
     long totalOutputTokens = 0;
     for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      providerDispatchFence.run();
       ChatResponse response =
           llmRouter.callTextStrict(
               resolved.providerName(),

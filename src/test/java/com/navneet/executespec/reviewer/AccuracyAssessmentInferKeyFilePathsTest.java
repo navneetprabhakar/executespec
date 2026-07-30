@@ -36,6 +36,7 @@ class AccuracyAssessmentInferKeyFilePathsTest {
   private AccuracyAssessmentService svc;
   private Method inferKeyFilePaths;
   private Method inferTestFilePaths;
+  private Method inferConfigEvidencePaths;
 
   @BeforeEach
   void setUp() throws Exception {
@@ -52,6 +53,9 @@ class AccuracyAssessmentInferKeyFilePathsTest {
     inferTestFilePaths =
         AccuracyAssessmentService.class.getDeclaredMethod("inferTestFilePaths", String.class);
     inferTestFilePaths.setAccessible(true);
+    inferConfigEvidencePaths =
+        AccuracyAssessmentService.class.getDeclaredMethod("inferConfigEvidencePaths", String.class);
+    inferConfigEvidencePaths.setAccessible(true);
   }
 
   @SuppressWarnings("unchecked")
@@ -62,6 +66,11 @@ class AccuracyAssessmentInferKeyFilePathsTest {
   @SuppressWarnings("unchecked")
   private List<String> inferTests(String fileTree) throws Exception {
     return (List<String>) inferTestFilePaths.invoke(svc, fileTree);
+  }
+
+  @SuppressWarnings("unchecked")
+  private List<String> inferConfigs(String fileTree) throws Exception {
+    return (List<String>) inferConfigEvidencePaths.invoke(svc, fileTree);
   }
 
   @Test
@@ -92,6 +101,41 @@ class AccuracyAssessmentInferKeyFilePathsTest {
     for (int i = 0; i < 12; i++) tree.append("tests/test_case_").append(i).append(".py\n");
 
     assertThat(inferTests(tree.toString())).hasSize(AccuracyAssessmentService.TEST_FILE_CAP);
+  }
+
+  @Test
+  void workflowEvidenceSelectsBuildAndTestYamlButExcludesGeneratedDirectories() throws Exception {
+    String tree =
+        String.join(
+            "\n",
+            ".github/workflows/build.yml",
+            ".github/workflows/test.yaml",
+            ".github/workflows/deploy.yml",
+            "target/workflows/release.yml",
+            "build/generated.yml",
+            "dist/copied.yaml",
+            "src/main/resources/application.yml");
+
+    assertThat(inferConfigs(tree))
+        .contains(
+            ".github/workflows/build.yml",
+            ".github/workflows/test.yaml",
+            ".github/workflows/deploy.yml",
+            "src/main/resources/application.yml")
+        .doesNotContain("target/workflows/release.yml", "build/generated.yml", "dist/copied.yaml");
+  }
+
+  @Test
+  void workflowEvidenceIsPrioritisedAndBoundedIndependently() throws Exception {
+    StringBuilder tree = new StringBuilder();
+    for (int i = 0; i < 12; i++) tree.append("config/option-").append(i).append(".json\n");
+    tree.append(".github/workflows/build.yml\n");
+    tree.append(".github/workflows/test.yml\n");
+
+    List<String> selected = inferConfigs(tree.toString());
+    assertThat(selected).hasSize(AccuracyAssessmentService.CONFIG_FILE_CAP);
+    assertThat(selected.subList(0, 2))
+        .containsExactlyInAnyOrder(".github/workflows/build.yml", ".github/workflows/test.yml");
   }
 
   @Test

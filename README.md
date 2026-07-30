@@ -77,7 +77,7 @@ source run's host tenant while assigning the current actor as payer on BUILD ite
 server-internal finding PATCH submission resolve its active host project and active actor before
 dedupe or dispatch.
 
-The current deployment candidate advances the migration source head to V359. V354 adds
+The current deployment candidate advances the migration source head to V365. V354 adds
 rollout-gated operation-fenced provider-attempt admission; its default remains
 `EXECUTESPEC_LLM_OPERATION_ADMISSION_MODE=LEGACY`, so this deployment does not activate the new
 admission path. V355 adds bounded oldest-first recovery for stale streamed agent turns and never
@@ -88,7 +88,39 @@ documents durable asynchronous jobs with exact-route admission, fenced publicati
 status, and bounded terminal-job retention. V359 gives each immutable GitHub check-run/head-SHA
 failure a unique database claim before CI autofix submission, binds the canonical PATCH run in the
 next fenced transaction, and permits a later delivery to retry after a fenced failed submission or
-an expired claim with no discoverable run.
+an expired claim with no discoverable run. V360 persists a run-bound canonical Spring HTTP surface
+at brownfield admission and blocks route removal after workers, corrections, validation, and
+immediately before publication unless an exact durable `BREAKING` gate receipt authorizes it. V361
+binds every new validation report and ledger entry to a canonical Git-tree workspace generation.
+V362 persists deterministic workflow/config evidence and the exact build/test commands, working
+directories, exit codes, and bounded outputs used for validation. V363 requires explicit
+confirmation before retrying a generated-document job whose provider outcome is uncertain.
+The forward migration widens the durable status column before admitting the longer
+`NEEDS_CONFIRMATION` state, so PostgreSQL recovery writes cannot fail after provider execution.
+V364 claims each exact continuation proposal with one durable approval id before queueing; an
+in-flight duplicate conflicts, while queued/completed duplicates replay that receipt and cannot
+queue or spend twice. Because task-boundary, post-review, and post-validation approvals all execute
+a code-mutating worker, every server-side approved continuation now uses the same reversible
+checkpoint, stale-evidence invalidation, exact approved-route fencing, read-only final review,
+deterministic validation, and accept-or-rollback lifecycle.
+Exact HTTP requirements and the admitted brownfield surface are checked before the read-only
+reviewer spends tokens, then checked again inside the final-validation chokepoint used by normal,
+crash-recovery, retry-validation, and re-review paths.
+V365 timestamps every continuation-approval transition. A stale pre-queue claim is safely released;
+a stale queued correction without a fresh run heartbeat fails closed, invalidates publication
+evidence, and requires a fresh run instead of guessing whether mutation or provider spend occurred.
+Approved corrections now execute against a reversible Git-tree checkpoint, invalidate earlier
+evidence before mutation, reject no-op/testless output, fence reviewer and validation evidence to
+one generation, and roll back both workspace and durable validation state when any deterministic
+gate regresses. Their durable resolution records before/after generations, changed paths and a diff
+digest.
+SCM publication and permanent deployment reject stale/unbound evidence, unverified tests, failed
+builds, and approved-route mismatches before any external side effect. The read-only
+`GET /api/runs/{id}/publication-eligibility` contract previews those same deterministic gates
+without rewriting comparison evidence; the run Evidence tab renders route, build, test,
+workflow/config, protected-contract, reviewer result, physical reviewer route, correction
+generations/diff/invalidation, freshness, and publication facts independently rather than treating
+the internal score as publication proof.
 RequirementIR also remains `LEGACY`.
 
 ## Versions
@@ -98,7 +130,7 @@ RequirementIR also remains `LEGACY`.
 | Project           | `2.0.0`             | [`VERSION`](VERSION), [`Version`](Version), [`pom.xml`](pom.xml) `<version>` |
 | Spring Boot       | `3.5.14`            | [`pom.xml`](pom.xml) `<parent>` (bumped from `3.3.0` by Dependabot #132, 2026-05-16) |
 | Spring AI         | `1.1.6`             | [`pom.xml`](pom.xml) `<spring-ai.version>` (BOM import)                |
-| Flyway head       | `V359`              | V357 adds task-route evidence; V358 adds durable project-document jobs; V359 adds CI-failure delivery claims; next V360 |
+| Flyway head       | `V365`              | V364 fences exact approvals; V365 bounds stale-receipt recovery; next V366 |
 | Frontend          | `2.0.0`             | [`frontend/package.json`](frontend/package.json) `"version"`           |
 
 `VERSION` and `Version` are kept identical by hand; the project's own conventions reference `Version` as the source of truth. The frontend ships under the same release stamp as the backend.
@@ -126,7 +158,7 @@ ownership must be aligned explicitly before rollout.
 | Framework           | Spring Boot 3.5.14 (Web, Data JPA, Security, OAuth2 client, Mail, Thymeleaf, Actuator, AOP, Validation, Retry, Data Redis) | [`pom.xml`](pom.xml) deps 1, 5, 14–20, 30, 36–39, 60 |
 | LLM SDK             | Spring AI 1.1.6 starters for Anthropic, OpenAI, Google GenAI                        | [`pom.xml`](pom.xml) deps 2–4                                                    |
 | LLM auto-config     | Provider auto-configurations disabled in favor of manual `AgentModelConfig` beans   | [`src/main/java/com/navneet/executespec/ExecutespecApplication.java`](src/main/java/com/navneet/executespec/ExecutespecApplication.java) |
-| Database            | PostgreSQL (Cloud SQL in prod), Flyway migrations head V359                         | [`pom.xml`](pom.xml) deps 6–8, `src/main/resources/db/migration/`                 |
+| Database            | PostgreSQL (Cloud SQL in prod), Flyway migrations head V365                         | [`pom.xml`](pom.xml) deps 6–8, `src/main/resources/db/migration/`                 |
 | Cache / lock        | Redis (Lettuce), ShedLock 7.7.0                                                     | [`pom.xml`](pom.xml) deps 30–32                                                  |
 | Auth                | JJWT 0.13.0 + Spring Security OAuth2 client (Google, GitHub)                        | [`pom.xml`](pom.xml) deps 14–18                                                  |
 | Billing             | Stripe 32.1.0, Razorpay (HMAC), invoice PDFs via OpenPDF 2.0.3 + flying-saucer 9.4.0 | [`pom.xml`](pom.xml) deps 21–22, 56; HMAC via commons-codec 1.22.0 (dep 35)     |
@@ -181,7 +213,7 @@ Gemini 3.5 Flash/3.5 Flash-Lite, native DeepSeek V4, and the surviving Fireworks
 │   └── ... (78 package roots total under com.navneet.executespec)
 ├── src/main/resources/
 │   ├── application.yml           Single source of truth for model matrix, provider routes, pricing, failover
-│   ├── db/migration/             Flyway V*.sql (head V355; next V356; 341 source files; immutable post-apply)
+│   ├── db/migration/             Flyway V*.sql (head V365; next V366; 351 source files; immutable post-apply)
 │   ├── prompts/                  External LLM prompts (assembled by PromptAssembler)
 │   └── static/                   Vite build output served by Spring Boot
 ├── src/test/java/                Unit + ArchUnit guard tests (e.g. AccessGuardCoverageTest)

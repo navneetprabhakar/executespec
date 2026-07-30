@@ -434,6 +434,67 @@ class SequentialExecutorSoftCompletionTest {
   // 2: Single-task + iter-limit + writes + smoke pass → COMPLETE+warning
 
   @Test
+  void approvedContinuationUsesExactRouteAndStrictProviderForOnlyTargetAttempt() {
+    stubTaskRow();
+    when(worker.run(any(WorkerTaskRequest.class), any())).thenReturn(workerCompleted(1));
+    when(buildProjectTool.execute(any(), any())).thenReturn(new ToolResult.Ok("exit=0\nbuild ok"));
+    com.navneet.executespec.router.InitialRoutingService initialRouting =
+        mock(com.navneet.executespec.router.InitialRoutingService.class);
+    when(featureFlagService.isEnabled(SequentialExecutor.FLAG_INITIAL_ROUTING)).thenReturn(true);
+
+    SequentialExecutor executor = newExecutor();
+    ReflectionTestUtils.setField(executor, "initialRoutingService", initialRouting);
+    ExecutionResult result =
+        executor.execute(
+            req(singleTaskPlan(), true),
+            new SequentialExecutor.ResumeRequest(
+                "run-soft_T1",
+                "openrouter",
+                "x-ai/grok-4.20",
+                RunContinuationDecision.CHANGE_PROVIDER,
+                "a".repeat(64)));
+
+    ArgumentCaptor<WorkerTaskRequest> request = ArgumentCaptor.forClass(WorkerTaskRequest.class);
+    verify(worker).run(request.capture(), any());
+    assertEquals("openrouter", request.getValue().provider());
+    assertEquals("x-ai/grok-4.20", request.getValue().model());
+    assertEquals(true, request.getValue().strictProvider());
+    assertEquals("openrouter", result.perTask().get(0).dispatchedProvider());
+    assertEquals("x-ai/grok-4.20", result.perTask().get(0).dispatchedModel());
+    verify(initialRouting, never()).decide(any(), any(), any());
+  }
+
+  @Test
+  void approvedContinuationOverrideAppliesOnlyToItsTargetInMultiTaskResume() {
+    stubTaskRow();
+    when(worker.run(any(WorkerTaskRequest.class), any()))
+        .thenReturn(workerCompleted(1), workerCompleted(1));
+    when(buildProjectTool.execute(any(), any())).thenReturn(new ToolResult.Ok("exit=0\nbuild ok"));
+
+    SequentialExecutor executor = newExecutor();
+    ExecutionResult result =
+        executor.execute(
+            req(multiTaskPlan(), true),
+            new SequentialExecutor.ResumeRequest(
+                "run-soft_T1",
+                "openrouter",
+                "x-ai/grok-4.20",
+                RunContinuationDecision.CHANGE_PROVIDER,
+                "a".repeat(64)));
+
+    ArgumentCaptor<WorkerTaskRequest> requests = ArgumentCaptor.forClass(WorkerTaskRequest.class);
+    verify(worker, times(2)).run(requests.capture(), any());
+    assertEquals("openrouter", requests.getAllValues().get(0).provider());
+    assertEquals("x-ai/grok-4.20", requests.getAllValues().get(0).model());
+    assertTrue(requests.getAllValues().get(0).strictProvider());
+    assertEquals("anthropic", requests.getAllValues().get(1).provider());
+    assertEquals("claude-haiku-4-5-20251001", requests.getAllValues().get(1).model());
+    assertFalse(requests.getAllValues().get(1).strictProvider());
+    assertEquals("openrouter", result.perTask().get(0).dispatchedProvider());
+    assertEquals("anthropic", result.perTask().get(1).dispatchedProvider());
+  }
+
+  @Test
   void singletask_iter_limit_with_writes_smoke_pass_is_COMPLETE() {
     stubTaskRow();
     when(worker.run(any(WorkerTaskRequest.class), any())).thenReturn(workerHitIterLimit(3));

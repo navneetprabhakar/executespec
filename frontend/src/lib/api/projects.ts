@@ -60,7 +60,7 @@ export interface GeneratedDocJob {
   id: string;
   projectId: string;
   docType: GeneratedDocType;
-  status: 'QUEUED' | 'RUNNING' | 'SUCCEEDED' | 'FAILED';
+  status: 'QUEUED' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'NEEDS_CONFIRMATION';
   terminal: boolean;
   provider: string;
   model: string;
@@ -68,6 +68,9 @@ export interface GeneratedDocJob {
   resultDocVersion: number | null;
   errorCode: string | null;
   errorMessage: string | null;
+  attemptCount: number;
+  deadlineAt: string;
+  providerStartedAt: string | null;
   createdAt: string;
   startedAt: string | null;
   completedAt: string | null;
@@ -598,6 +601,16 @@ export const getLatestProjectDocJob = async (
 ): Promise<GeneratedDocJob | null> =>
   (await req<GeneratedDocJob | undefined>(`/projects/${projectId}/docs/${docType}/jobs/latest`)) ??
   null;
+
+/** Explicitly confirms replay after provider execution had an uncertain durable outcome. */
+export const confirmProjectDocRetry = (
+  projectId: string,
+  docType: GeneratedDocType,
+  jobId: string,
+) =>
+  req<GeneratedDocJob>(`/projects/${projectId}/docs/${docType}/jobs/${jobId}/confirm-retry`, {
+    method: 'POST',
+  });
 
 /**
  * Returns null (204) when the doc hasn't been generated yet. Callers should

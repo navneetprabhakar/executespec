@@ -80,4 +80,17 @@ public class ProjectGeneratedDocJobService {
   public Optional<ProjectGeneratedDocJobStore.Job> latest(String projectId, DocType docType) {
     return store.latest(projectId, docType.name());
   }
+
+  public ProjectGeneratedDocJobStore.Job confirmRetry(
+      String projectId, DocType docType, UUID jobId, String confirmingUserId) {
+    ProjectGeneratedDocJobStore.Job current = get(projectId, jobId);
+    if (!current.docType().equals(docType.name())
+        || current.status() != ProjectGeneratedDocJobStore.Status.NEEDS_CONFIRMATION
+        || !store.confirmRetry(jobId, projectId, docType.name(), confirmingUserId, DEADLINE)) {
+      throw new ResponseStatusException(
+          HttpStatus.CONFLICT,
+          "Document generation is not waiting for confirmation from its original requester");
+    }
+    return get(projectId, jobId);
+  }
 }

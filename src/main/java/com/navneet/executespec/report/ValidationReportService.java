@@ -224,17 +224,16 @@ public class ValidationReportService {
       // scoring.v2-verified flag is on, and always persist alongside the
       // legacy columns so the UI can show both and toggling the flag on
       // later is instant.
-      Boolean finalBuildPassed =
-          input.compileResult() != null ? input.compileResult().passed() : null;
+      Boolean finalBuildPassed = finalBuildPassed(input.compileResult());
       TestExecutionSummary ts = input.testSummary();
       int testsPassedCount = ts != null ? ts.getPassed() : 0;
       int testsTotalCount = ts != null ? ts.getTotalTests() : 0;
       String reviewerVerdict =
           mapVerdictToV2Name(input.review() != null ? input.review().getVerdict() : null);
       int unfixedCritical = countUnfixedCritical(input);
-      // P1.2 — feed deterministic endpoint coverage into the verifiedScore. Pulled from the
-      // accuracy report's endpointCoverage block when present (this field is a deterministic
-      // count, not LLM-graded — see AccuracyAssessmentService SYSTEM_PROMPT lines 124–128).
+      // P1.2 — feed the LLM-assisted endpoint coverage into the confidence score. This signal may
+      // tighten/cap a score, but scoreEvidenceFailure must never promote it to deterministic
+      // release-blocking evidence.
       Integer endpointCoveragePercent =
           (accuracyReport != null && accuracyReport.getEndpointCoverage() != null)
               ? accuracyReport.getEndpointCoverage().getCoveragePercent()
@@ -303,6 +302,16 @@ public class ValidationReportService {
           ValidationReport.builder()
               .id(resolveReportId(runId))
               .runId(runId)
+              .workspaceGeneration(input.workspaceGeneration())
+              .workflowConfigEvidenceJson(toEvidenceJson(input.workflowConfigEvidence()))
+              .buildCommand(command(input.buildCommandEvidence()))
+              .buildWorkingDirectory(workingDirectory(input.buildCommandEvidence()))
+              .buildExitCode(exitCode(input.buildCommandEvidence()))
+              .buildOutput(boundedOutput(input.buildCommandEvidence()))
+              .testCommand(command(input.testCommandEvidence()))
+              .testWorkingDirectory(workingDirectory(input.testCommandEvidence()))
+              .testExitCode(exitCode(input.testCommandEvidence()))
+              .testOutput(boundedOutput(input.testCommandEvidence()))
               .filesGenerated(filesGenerated)
               .languages(String.join(",", languages))
               .pipelineResult(pipelineResult)
@@ -678,10 +687,7 @@ public class ValidationReportService {
                   ? "Auto-fixed successfully"
                   : "Auto-fix failed after retry with model escalation — unresolved";
         }
-        String source =
-            (ri.getId() != null && ri.getId().startsWith("SYNTH-ACC-"))
-                ? "ACCURACY_LLM"
-                : "REVIEWER_AGENT";
+        String source = issueSource(ri.getId());
         issues.add(
             new ReportIssueDTO(
                 ri.getDescription(), mapSeverity(ri.getSeverity()), fixNote, source, ri.getFile()));
@@ -775,6 +781,16 @@ public class ValidationReportService {
     return issues;
   }
 
+  private static String issueSource(String issueId) {
+    if (issueId == null) return "REVIEWER_AGENT";
+    if (issueId.startsWith("SYNTH-ACC-")) return "ACCURACY_LLM";
+    if (issueId.startsWith("SYNTH-BUILD-")) return "DETERMINISTIC_BUILD";
+    if (issueId.startsWith("SYNTH-TEST-")) return "DETERMINISTIC_TEST";
+    if (issueId.startsWith("SYNTH-STANDARD-")) return "DETERMINISTIC_STANDARD";
+    if (issueId.startsWith("SYNTH-INVARIANT-")) return "DETERMINISTIC_INVARIANT";
+    return "REVIEWER_AGENT";
+  }
+
   private String mapSeverity(IssueSeverity severity) {
     if (severity == null) return "WOULD_FAIL_REVIEW";
     return switch (severity) {
@@ -866,22 +882,47 @@ public class ValidationReportService {
     if (productFilesChanged <= 0) {
       return "No approved product-code diff was proven against the admitted Git baseline.";
     }
-    if (accuracy == null) return null;
-    boolean hasDeterministicMissingRequirements =
-        accuracy.getMissingRequirements() != null && !accuracy.getMissingRequirements().isEmpty();
-    if (accuracy.getSpecAdherenceScore() == 0 && hasDeterministicMissingRequirements) {
-      return "Spec adherence is zero and required product behavior is deterministically missing.";
-    }
-    AccuracyReport.EndpointCoverage endpoints = accuracy.getEndpointCoverage();
-    if (endpoints != null
-        && endpoints.getRequired() != null
-        && !endpoints.getRequired().isEmpty()
-        && endpoints.getCoveragePercent() == 0
-        && endpoints.getMissing() != null
-        && !endpoints.getMissing().isEmpty()) {
-      return "Required runtime surface has zero deterministic endpoint coverage.";
-    }
+    // AccuracyReport is produced by an LLM over a bounded evidence sample. Its requirement and
+    // endpoint findings may cap confidence and remain visible as advisory issues, but cannot be
+    // promoted into deterministic provenance failures. Hard contract failures must come from an
+    // independently executed deterministic lane.
     return null;
+  }
+
+  /** Three-valued build provenance: absent/skipped is unavailable, never an implicit pass. */
+  static Boolean finalBuildPassed(
+      com.navneet.executespec.report.model.CompileResult compileResult) {
+    return compileResult == null || compileResult.skipped() ? null : compileResult.passed();
+  }
+
+  private String toEvidenceJson(Object evidence) {
+    if (evidence == null) return null;
+    try {
+      return objectMapper.writeValueAsString(evidence);
+    } catch (com.fasterxml.jackson.core.JsonProcessingException impossible) {
+      throw new IllegalStateException(
+          "Deterministic validation evidence could not be serialized", impossible);
+    }
+  }
+
+  private static String command(
+      com.navneet.executespec.report.model.CommandExecutionEvidence evidence) {
+    return evidence == null ? null : evidence.command();
+  }
+
+  private static String workingDirectory(
+      com.navneet.executespec.report.model.CommandExecutionEvidence evidence) {
+    return evidence == null ? null : evidence.workingDirectory();
+  }
+
+  private static Integer exitCode(
+      com.navneet.executespec.report.model.CommandExecutionEvidence evidence) {
+    return evidence == null ? null : evidence.exitCode();
+  }
+
+  private static String boundedOutput(
+      com.navneet.executespec.report.model.CommandExecutionEvidence evidence) {
+    return evidence == null ? null : evidence.boundedOutput();
   }
 
   /**
@@ -917,7 +958,7 @@ public class ValidationReportService {
    * Original heuristic from before R-09. Kept as a private fallback so the existing test surface
    * remains valid for inputs where the run state is absent or LEGACY_UNKNOWN.
    */
-  private PipelineResult computeResultHeuristic(List<ReportIssueDTO> issues, ReportInput input) {
+  PipelineResult computeResultHeuristic(List<ReportIssueDTO> issues, ReportInput input) {
     // Compilation failure is always FAILED
     if (input.compileResult() != null
         && !input.compileResult().passed()
@@ -934,16 +975,29 @@ public class ValidationReportService {
           review.getIssues().stream().allMatch(i -> i.isAutoFixed() && i.isFixSucceeded());
       if (allFixed) return PipelineResult.PASSED_WITH_FIXES;
 
-      // Any unresolved CRITICAL issues → FAILED
+      // Only independently deterministic CRITICAL evidence may hard-fail the report. Reviewer and
+      // accuracy agents are model-derived: their findings remain visible and may cap confidence,
+      // but cannot masquerade as build/test/contract proof.
       boolean hasUnresolvedCritical =
           review.getIssues().stream()
               .filter(i -> i.getSeverity() == IssueSeverity.CRITICAL)
+              .filter(ValidationReportService::isDeterministicHardFailureIssue)
               .anyMatch(i -> !i.isAutoFixed() || !i.isFixSucceeded());
       if (hasUnresolvedCritical) return PipelineResult.FAILED;
     }
 
     // Issues exist but not all resolved (e.g. MINOR unresolved, or test failures)
     return PipelineResult.NEEDS_ATTENTION;
+  }
+
+  static boolean isDeterministicHardFailureIssue(
+      com.navneet.executespec.reviewer.model.ReviewIssue issue) {
+    if (issue == null || issue.getId() == null) return false;
+    String id = issue.getId();
+    return id.startsWith("SYNTH-BUILD-")
+        || id.startsWith("SYNTH-TEST-")
+        || id.startsWith("SYNTH-STANDARD-")
+        || id.startsWith("SYNTH-INVARIANT-");
   }
 
   /**
@@ -1033,6 +1087,7 @@ public class ValidationReportService {
     return new ValidationReportDTO(
         entity.getId(),
         entity.getRunId(),
+        entity.getWorkspaceGeneration(),
         entity.getFilesGenerated(),
         languages,
         entity.getPipelineResult(),
@@ -1135,6 +1190,7 @@ public class ValidationReportService {
             : List.of();
 
     return new ValidationReportShareDTO(
+        entity.getWorkspaceGeneration(),
         entity.getFilesGenerated(),
         languages,
         entity.getPipelineResult(),
@@ -1332,13 +1388,13 @@ public class ValidationReportService {
    * P1.2 (GA-readiness, 2026-05-06) — overload with explicit endpoint-coverage signal so the
    * headline verifiedScore can credit a run for delivering every spec endpoint, independent of the
    * reviewer's text verdict. {@code endpointCoveragePercent} is taken straight from {@code
-   * accuracyReport.endpointCoverage.coveragePercent} when present (it's a deterministic count of
-   * implemented vs required endpoints, NOT an LLM-graded number).
+   * accuracyReport.endpointCoverage.coveragePercent} when present. It remains LLM-assisted
+   * confidence evidence over a bounded file sample, not deterministic runtime proof.
    *
    * <p>Bonus: +10 when {@code endpointCoveragePercent >= 95}. Closes the audit-flagged scenario on
    * run {@code 0444c95f} where {@code endpointCoverage.coveragePercent=100} but the headline
    * verifiedScore only saw {@code finalBuildPassed} + {@code FIXED_ISSUES} and missed the
-   * deterministic delivery signal entirely.
+   * endpoint-confidence signal entirely.
    *
    * <p>Final clamp at 100 means a perfect run (build pass + all tests + CLEAN + 100% endpoints)
    * yields exactly 100. The 5×{@code unfixedCritical} penalty stays — but {@link
@@ -1917,8 +1973,8 @@ public class ValidationReportService {
     // every concrete pipeline signal was healthy (build PASSED, reviewer
     // CLEAN/FIXED_ISSUES, no real unfixed criticals).
     //
-    // The reviewer's wiring pass IS the deterministic check on endpoint
-    // correctness — it walks the route tables of every supported
+    // The reviewer's wiring pass is the broader LLM-assisted check on endpoint
+    // correctness — it inspects the route tables of supported
     // framework (Spring component-scan, Express routers, FastAPI route
     // decorators, etc.). When the reviewer's verdict is CLEAN or
     // FIXED_ISSUES, trust THAT signal over the LLM's read-budget-limited

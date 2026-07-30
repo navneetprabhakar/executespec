@@ -2,6 +2,7 @@ package com.navneet.executespec.codeintel;
 
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
 import java.time.Instant;
@@ -38,8 +39,10 @@ class ProjectGeneratedDocJobWorkerTest {
               .build();
       doAnswer(
               invocation -> {
+                Runnable providerFence = invocation.getArgument(6);
+                providerFence.run();
                 @SuppressWarnings("unchecked")
-                java.util.function.Consumer<ProjectGeneratedDoc> fence = invocation.getArgument(5);
+                java.util.function.Consumer<ProjectGeneratedDoc> fence = invocation.getArgument(7);
                 fence.accept(result);
                 return result;
               })
@@ -50,7 +53,10 @@ class ProjectGeneratedDocJobWorkerTest {
               org.mockito.ArgumentMatchers.eq("user-1"),
               org.mockito.ArgumentMatchers.eq(com.navneet.executespec.router.LlmProvider.ANTHROPIC),
               org.mockito.ArgumentMatchers.eq("claude-sonnet-4-6"),
+              org.mockito.ArgumentMatchers.eq(lease.job().id()),
+              org.mockito.ArgumentMatchers.any(),
               org.mockito.ArgumentMatchers.any());
+      org.mockito.Mockito.when(store.markProviderStarted(lease)).thenReturn(true);
       org.mockito.Mockito.when(store.complete(lease, resultId, 4)).thenReturn(true);
 
       worker.process(lease);
@@ -81,6 +87,8 @@ class ProjectGeneratedDocJobWorkerTest {
                   org.mockito.ArgumentMatchers.eq(
                       com.navneet.executespec.router.LlmProvider.ANTHROPIC),
                   org.mockito.ArgumentMatchers.eq("claude-sonnet-4-6"),
+                  org.mockito.ArgumentMatchers.eq(lease.job().id()),
+                  org.mockito.ArgumentMatchers.any(),
                   org.mockito.ArgumentMatchers.any()))
           .thenThrow(new IllegalStateException("project has no architecture doc yet"));
 
@@ -91,6 +99,54 @@ class ProjectGeneratedDocJobWorkerTest {
               lease,
               "ILLEGALSTATEEXCEPTION",
               "Document generation could not be completed. Check project readiness and retry.");
+    } finally {
+      leaseExecutor.shutdownNow();
+      executor.shutdown();
+    }
+  }
+
+  @Test
+  void uncertainFailureAfterProviderDispatchRequiresExplicitRetryConfirmation() {
+    ProjectGeneratedDocJobStore store = mock(ProjectGeneratedDocJobStore.class);
+    ProjectDocGeneratorService generator = mock(ProjectDocGeneratorService.class);
+    ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+    executor.initialize();
+    var leaseExecutor = Executors.newSingleThreadScheduledExecutor();
+    try {
+      ProjectGeneratedDocJobWorker worker =
+          new ProjectGeneratedDocJobWorker(store, generator, executor, leaseExecutor);
+      var lease = lease("ANTHROPIC", "claude-sonnet-4-6");
+      org.mockito.Mockito.when(store.markProviderStarted(lease)).thenReturn(true);
+      doAnswer(
+              invocation -> {
+                Runnable providerFence = invocation.getArgument(6);
+                providerFence.run();
+                throw new IllegalStateException("connection reset after request write");
+              })
+          .when(generator)
+          .generateExactForJob(
+              org.mockito.ArgumentMatchers.eq("project-1"),
+              org.mockito.ArgumentMatchers.eq(DocType.EXPLANATION),
+              org.mockito.ArgumentMatchers.eq("user-1"),
+              org.mockito.ArgumentMatchers.eq(com.navneet.executespec.router.LlmProvider.ANTHROPIC),
+              org.mockito.ArgumentMatchers.eq("claude-sonnet-4-6"),
+              org.mockito.ArgumentMatchers.eq(lease.job().id()),
+              org.mockito.ArgumentMatchers.any(),
+              org.mockito.ArgumentMatchers.any());
+
+      worker.process(lease);
+
+      verify(store)
+          .needsConfirmation(
+              lease,
+              "OUTCOME_UNCERTAIN",
+              "Provider execution began, but no complete document was durably published. Retry"
+                  + " requires confirmation.");
+      verify(store, never())
+          .fail(
+              org.mockito.ArgumentMatchers.any(),
+              org.mockito.ArgumentMatchers.anyString(),
+              org.mockito.ArgumentMatchers.anyString());
     } finally {
       leaseExecutor.shutdownNow();
       executor.shutdown();
@@ -115,6 +171,7 @@ class ProjectGeneratedDocJobWorkerTest {
             "worker",
             1,
             Instant.now().plusSeconds(300),
+            null,
             null,
             null,
             null,

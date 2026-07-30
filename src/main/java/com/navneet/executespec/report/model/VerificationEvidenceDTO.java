@@ -14,6 +14,7 @@ public record VerificationEvidenceDTO(
     String status,
     String source,
     String confidence,
+    String workspaceGeneration,
     String claim,
     String summary,
     String artifact,

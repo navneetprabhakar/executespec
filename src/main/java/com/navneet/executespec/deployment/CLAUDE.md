@@ -1,5 +1,17 @@
 # `deployment/` — Preview + deploy
 
+Permanent deployment is publication, not preview. `PublicationAdmissionService` runs after
+workspace restoration and before strategy generation or cloud side effects. It requires a current
+V361 workspace-generation binding, explicit passing final build, execution-verified all-green
+tests, and exact parity between each user-approved continuation route and its fenced physical
+worker/reviewer attempts.
+For brownfield runs, `DeploymentService` then re-runs `BrownfieldHttpContractGuard` after workspace
+restoration and before Dockerfile generation, deployment persistence, Artifact Registry, or Cloud
+Run side effects. SCM and permanent deployment therefore share the same fail-closed compatibility
+boundary. `DeploymentController` maps a compatibility rejection to HTTP 409 with
+`errorCode`, `blockingGate=PROTECTED_CONTRACTS`, reason, retryability, and safe remediation; it must
+not fall through to the opaque global 500 envelope.
+
 > Last reviewed: 2026-07-17 (2.0.0 enterprise hardening).
 
 Triple-mode preview system (Docker Compose for local, VM for dev, Cloud Run for prod), permanent Cloud Run deployment for 9 languages, workspace management with GCS archiving, and GitHub integration.

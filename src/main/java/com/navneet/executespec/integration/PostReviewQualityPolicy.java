@@ -1,5 +1,7 @@
 package com.navneet.executespec.integration;
 
+import static com.navneet.executespec.integration.RunPipelineSupport.truncate;
+
 import java.util.List;
 
 import com.navneet.executespec.execution.model.GoalDonenessDecision;
@@ -12,6 +14,19 @@ import com.navneet.executespec.reviewer.ReviewerResult;
 final class PostReviewQualityPolicy {
 
   private PostReviewQualityPolicy() {}
+
+  static ReviewerResult reviewerFailedResult(Exception ex) {
+    String message =
+        ex == null || ex.getMessage() == null || ex.getMessage().isBlank()
+            ? "reviewer failed"
+            : ex.getMessage();
+    return ReviewerResult.builder()
+        .overall(ReviewerResult.Overall.REVIEW_FAILED)
+        .generalPassSummary("Reviewer failed: " + truncate(message, 500))
+        .finalBuildPassed(false)
+        .finalBuildOutput(truncate(message, 2000))
+        .build();
+  }
 
   static boolean reviewerQualityFailed(ReviewerResult reviewResult, boolean reviewerErrored) {
     // A reviewer exception/timeout is unavailable verification, not measured evidence that a

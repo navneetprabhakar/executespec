@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.UUID;
 
 import com.navneet.executespec.config.AgentProperties;
+import com.navneet.executespec.contractsurface.BrownfieldHttpContractGuard;
 import com.navneet.executespec.deployment.WorkspaceRestoreService;
 import com.navneet.executespec.security.SafeWorkspacePath;
 
@@ -31,6 +32,7 @@ public class WorkspaceInitService {
   private final WorkspaceRestoreService restoreService;
   private final com.navneet.executespec.state.repository.RunRepoSnapshotRepository snapshotRepo;
   private final VendoredPathGuard vendoredPathGuard;
+  private final BrownfieldHttpContractGuard brownfieldHttpContractGuard;
 
   /**
    * Exclusions written into every greenfield run workspace. {@code .agent-context/} is the internal
@@ -172,14 +174,14 @@ public class WorkspaceInitService {
       throws Exception {
     Path workspace = runWorkspacePath(runId);
     if (Files.isDirectory(workspace.resolve(".git"))) {
+      brownfieldHttpContractGuard.captureBaselineIfAbsent(runId, workspace);
       log.debug("Workspace for run {} already cloned: {}", runId, workspace);
       return;
     }
     Files.createDirectories(workspace.getParent());
 
     log.info("Cloning {} into workspace for run {}", repoUrl, runId);
-    // Credential-gate 2026-07-17: the PAT rides the child environment via GitProcessAuth — never
-    // argv, never the persisted origin URL (the workspace .git/config stays token-free).
+    // Credential-gate: authentication stays in the child environment, never argv or origin URL.
     runGitStrictAuthWithUsername(
         workspace.getParent(), username, secret, "clone", repoUrl, workspace.toString());
 
@@ -193,6 +195,7 @@ public class WorkspaceInitService {
     // RR-1546 — keep ExecuteSpec's internal .agent-context/ evidence out of the customer's tree
     // without mutating their tracked .gitignore.
     excludeAgentContextInClone(workspace);
+    brownfieldHttpContractGuard.captureBaselineIfAbsent(runId, workspace);
     log.info("Cloned workspace ready for run {}", runId);
   }
 
@@ -313,6 +316,7 @@ public class WorkspaceInitService {
         targetRunId,
         sourceRunId,
         trackedFiles.size());
+    brownfieldHttpContractGuard.captureBaselineIfAbsent(targetRunId, target);
   }
 
   /** Fail-closed, Git-tracked-only initialization for iteration workspaces. */
@@ -369,6 +373,7 @@ public class WorkspaceInitService {
       vendoredPathGuard.augmentGitignore(target);
       excludeAgentContextInClone(target); // RR-1546
     }
+    brownfieldHttpContractGuard.captureBaselineIfAbsent(runId, workspace);
   }
 
   /**

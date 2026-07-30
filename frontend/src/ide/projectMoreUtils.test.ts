@@ -1,4 +1,4 @@
-import {describe, expect, it} from 'vitest';
+import {describe, expect, it, vi} from 'vitest';
 
 import {
   actorLabel,
@@ -7,6 +7,7 @@ import {
   canManageMembership,
   canManageProjectSharing,
   canManageShareLinks,
+  confirmUncertainGeneratedDocRetry,
   contractDetectorSummary,
   docStamp,
   driftSummaryMessage,
@@ -16,6 +17,7 @@ import {
   looksLikeArtifact,
   memberDisplayName,
   parseArchDoc,
+  restoreGeneratedDocJobs,
   summarizeDriftResults,
   techDebtCategories,
 } from './projectMoreUtils';
@@ -101,6 +103,176 @@ describe('projectMoreUtils', () => {
         generatedAt: '2026-06-20T05:50:00Z',
       } as api.GeneratedDocRow),
     ).toBe('3·2026-06-20T05:50:00Z');
+  });
+
+  it('restores both independently running document jobs after reload', () => {
+    const explanation: api.GeneratedDocJob = {
+      id: 'job-explanation',
+      projectId: 'project-1',
+      docType: 'EXPLANATION',
+      status: 'RUNNING',
+      terminal: false,
+      provider: 'ANTHROPIC',
+      model: 'claude-sonnet-4-6',
+      resultDocId: null,
+      resultDocVersion: null,
+      errorCode: null,
+      errorMessage: null,
+      attemptCount: 1,
+      deadlineAt: '2026-07-30T10:30:00Z',
+      providerStartedAt: '2026-07-30T10:00:02Z',
+      createdAt: '2026-07-30T10:00:00Z',
+      startedAt: '2026-07-30T10:00:01Z',
+      completedAt: null,
+    };
+    const setup: api.GeneratedDocJob = {
+      id: 'job-setup',
+      projectId: 'project-1',
+      docType: 'SETUP',
+      status: 'QUEUED',
+      terminal: false,
+      provider: 'OPENAI',
+      model: 'gpt-5.4',
+      resultDocId: null,
+      resultDocVersion: null,
+      errorCode: null,
+      errorMessage: null,
+      attemptCount: 0,
+      deadlineAt: '2026-07-30T10:31:00Z',
+      providerStartedAt: null,
+      createdAt: '2026-07-30T10:01:00Z',
+      startedAt: null,
+      completedAt: null,
+    };
+
+    expect(restoreGeneratedDocJobs([explanation, setup])).toEqual({
+      pending: {
+        EXPLANATION: {
+          type: 'EXPLANATION',
+          jobId: 'job-explanation',
+          provider: 'ANTHROPIC',
+          model: 'claude-sonnet-4-6',
+          status: 'RUNNING',
+          attemptCount: 1,
+          deadlineAt: '2026-07-30T10:30:00Z',
+        },
+        SETUP: {
+          type: 'SETUP',
+          jobId: 'job-setup',
+          provider: 'OPENAI',
+          model: 'gpt-5.4',
+          status: 'QUEUED',
+          attemptCount: 0,
+          deadlineAt: '2026-07-30T10:31:00Z',
+        },
+      },
+      failure: null,
+      needsConfirmation: {},
+    });
+  });
+
+  it('restores the latest durable document failure for actionable reload diagnostics', () => {
+    const older: api.GeneratedDocJob = {
+      id: 'old',
+      projectId: 'project-1',
+      docType: 'EXPLANATION',
+      status: 'FAILED',
+      terminal: true,
+      provider: 'ANTHROPIC',
+      model: 'claude-sonnet-4-6',
+      resultDocId: null,
+      resultDocVersion: null,
+      errorCode: 'INVALID_GENERATED_DOCUMENT',
+      errorMessage: 'Generated document was incomplete.',
+      attemptCount: 1,
+      deadlineAt: '2026-07-30T09:30:00Z',
+      providerStartedAt: '2026-07-30T09:00:02Z',
+      createdAt: '2026-07-30T09:00:00Z',
+      startedAt: '2026-07-30T09:00:01Z',
+      completedAt: '2026-07-30T09:01:00Z',
+    };
+    const newer: api.GeneratedDocJob = {
+      id: 'new',
+      projectId: 'project-1',
+      docType: 'SETUP',
+      status: 'FAILED',
+      terminal: true,
+      provider: 'OPENAI',
+      model: 'gpt-5.4',
+      resultDocId: null,
+      resultDocVersion: null,
+      errorCode: 'DEADLINE_EXCEEDED',
+      errorMessage: 'Document generation exceeded its durable deadline.',
+      attemptCount: 1,
+      deadlineAt: '2026-07-30T10:30:00Z',
+      providerStartedAt: null,
+      createdAt: '2026-07-30T10:00:00Z',
+      startedAt: '2026-07-30T10:00:01Z',
+      completedAt: '2026-07-30T10:30:00Z',
+    };
+
+    expect(restoreGeneratedDocJobs([older, newer]).failure).toBe(newer);
+  });
+
+  it('restores uncertain provider outcomes as an explicit confirmation barrier', () => {
+    const uncertain: api.GeneratedDocJob = {
+      id: 'uncertain',
+      projectId: 'project-1',
+      docType: 'EXPLANATION',
+      status: 'NEEDS_CONFIRMATION',
+      terminal: true,
+      provider: 'OPENAI',
+      model: 'gpt-5.4',
+      resultDocId: null,
+      resultDocVersion: null,
+      errorCode: 'OUTCOME_UNCERTAIN',
+      errorMessage: 'Provider execution may have started.',
+      attemptCount: 1,
+      deadlineAt: '2026-07-30T10:30:00Z',
+      providerStartedAt: '2026-07-30T10:00:02Z',
+      createdAt: '2026-07-30T10:00:00Z',
+      startedAt: '2026-07-30T10:00:01Z',
+      completedAt: '2026-07-30T10:05:00Z',
+    };
+
+    expect(restoreGeneratedDocJobs([uncertain])).toEqual({
+      pending: {},
+      failure: null,
+      needsConfirmation: {EXPLANATION: uncertain},
+    });
+  });
+
+  it('replays an uncertain document only after explicit confirmation using the same identity', async () => {
+    const uncertain: api.GeneratedDocJob = {
+      id: 'uncertain',
+      projectId: 'project-1',
+      docType: 'SETUP',
+      status: 'NEEDS_CONFIRMATION',
+      terminal: true,
+      provider: 'ANTHROPIC',
+      model: 'claude-sonnet-4-6',
+      resultDocId: null,
+      resultDocVersion: null,
+      errorCode: 'OUTCOME_UNCERTAIN',
+      errorMessage: 'Retry requires confirmation.',
+      attemptCount: 1,
+      deadlineAt: '2026-07-30T10:30:00Z',
+      providerStartedAt: '2026-07-30T10:00:02Z',
+      createdAt: '2026-07-30T10:00:00Z',
+      startedAt: '2026-07-30T10:00:01Z',
+      completedAt: '2026-07-30T10:05:00Z',
+    };
+    const retry = vi.fn(async () => ({...uncertain, status: 'QUEUED' as const, terminal: false}));
+
+    await expect(confirmUncertainGeneratedDocRetry(uncertain, () => false, retry)).resolves.toBe(
+      null,
+    );
+    expect(retry).not.toHaveBeenCalled();
+
+    await expect(
+      confirmUncertainGeneratedDocRetry(uncertain, () => true, retry),
+    ).resolves.toMatchObject({id: 'uncertain', status: 'QUEUED'});
+    expect(retry).toHaveBeenCalledWith('project-1', 'SETUP', 'uncertain');
   });
 
   it('sorts tech-debt categories by descending count', () => {
