@@ -11,6 +11,7 @@ import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.AgentTaskRepository;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
@@ -19,7 +20,6 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 /**
@@ -52,12 +52,35 @@ import lombok.extern.slf4j.Slf4j;
  * remains authoritative for legacy runs until the deprecation-removal plan lands.
  */
 @Component
-@RequiredArgsConstructor
 @Slf4j
 public class StartupRunResumer {
 
-  /** Compatibility constructor for focused recovery tests that predate correction transactions. */
+  /**
+   * Spring-selected production constructor. With two constructors on the class, exactly one must
+   * carry {@code @Autowired} or context startup fails with "No default constructor found" (the same
+   * pattern {@code RemoteToolDispatcher} and {@code LocalProjectSourceService} pin).
+   */
+  @Autowired
   public StartupRunResumer(
+      PipelineRunRepository runRepo,
+      AgentTaskRepository taskRepo,
+      SseBroadcaster broadcaster,
+      com.navneet.executespec.integration.DurableCorrectionLifecycle durableCorrectionLifecycle,
+      org.springframework.beans.factory.ObjectProvider<
+              com.navneet.executespec.integration.RunLifecycleService>
+          runLifecycleServiceProvider) {
+    this.runRepo = runRepo;
+    this.taskRepo = taskRepo;
+    this.broadcaster = broadcaster;
+    this.durableCorrectionLifecycle = durableCorrectionLifecycle;
+    this.runLifecycleServiceProvider = runLifecycleServiceProvider;
+  }
+
+  /**
+   * Compatibility constructor for focused recovery tests that predate correction transactions.
+   * Package-private so Spring can never select it during application startup.
+   */
+  StartupRunResumer(
       PipelineRunRepository runRepo,
       AgentTaskRepository taskRepo,
       SseBroadcaster broadcaster,

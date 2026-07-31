@@ -18,8 +18,12 @@ the pre-correction validation and task evidence snapshots. A heartbeated databas
 a same-workspace OS file lock serialize correction, recovery, SCM publication, and deployment;
 each correction tool dispatch rechecks the exact attempt lease. Startup/scheduled recovery restores
 and proves all three; `RECOVERY_FAILED` remains an admission and publication fence.
+V370 retypes V369's five digest columns from `CHAR(64)` (bpchar) to `VARCHAR(64)`: Hibernate
+schema-validation rejects bpchar against the entity's `@Column(length = 64)` mapping, which
+crash-looped the dev deployment on boot. Values are exact 64-char hex digests, so the in-place
+type conversion is content-preserving and the V369 CHECK constraints remain valid.
 
-> Last reviewed: 2026-07-31 against the V369 worktree contract.
+> Last reviewed: 2026-07-31 against the V370 worktree contract.
 
 Persistence layer for pipeline runs, tasks, and all mutable state.
 
@@ -75,10 +79,15 @@ Persistence layer for pipeline runs, tasks, and all mutable state.
   run, exact repository HEAD/tree references, task/evidence snapshots, accepted/rolled-back
   generations, a DB lease plus local file-lock workspace authority, and a persistent fail-closed
   recovery state.
+- **V370 correction-attempt digest retype:** converts V369's `before_generation`,
+  `after_generation`, `evidence_workspace_generation`, `evidence_snapshot_digest`, and
+  `proposal_digest` from `CHAR(64)` to `VARCHAR(64)` so Hibernate schema-validation matches the
+  `CorrectionAttempt` mapping; the bpchar mismatch crash-looped the 2026-07-31 dev deploy. Pinned
+  by `DurableCorrectionMigrationContractTest`.
 - **V347 atomic plan-gate open:** `PipelineRunRepository.findByIdForPlanGateOpen()` takes the pessimistic run-row lock that serializes the gate row, WAITING continuation outbox, and `PLANNING -> AWAITING_APPROVAL` transition in one transaction.
 - **V348 atomic plan-gate decision + leased handoff:** `PlanGateDecisionService` supersedes the older `claimApprovalResume()` compatibility query as the production approval/cancellation boundary. It locks run → gate → outbox → optional contract report → RequirementIR/policy rows and persists a byte-stable APPROVE/REJECT/CANCEL receipt plus canonical request fingerprint with the state transition. The receipt cross-binds provider/mode/fixed-six-decimal `estimateHighUsd`/separate nullable `hardCapUsd`/credits/payer/continuation/report and exact typed-ack fields. New acknowledgements persist uppercase `BREAKING`; complete pre-V348 tuples remain byte-exact and are semantically checked case-insensitively after trimming, with REJECT/CANCEL recorded as `NOT_EVALUATED`. Missing legacy client plan fingerprints remain absent with a null match result; supplied values must match and ENFORCED approval requires one. APPROVE creates `APPROVAL_RESUMING` + READY; REJECT/CANCEL create coherent `CANCELLED` states. `PlanGateResumeStore` owns fenced READY/PROCESSING leases, preflights identity before workspace restore, and repeats the fence while committing `APPROVAL_RESUMING → WORKING` with outbox `PROCESSING → COMPLETED`; COMPLETED means durable WORKING handoff. Startup and scheduled recovery read only this outbox for APPROVAL_RESUMING. Direct child evidence deletion is rejected while parent-run cascade is retained; the report→run FK is `NOT VALID` for historical orphans but enforced on new rows.
 - **V349 payer/tenant gate correction:** the immutable plan-gate payer organization may differ from the host-project run tenant for an external collaborator; all other V348 coherence checks remain.
-- **V350 execution identity split (committed at `13ead3f40`; deterministic verification green at that checkpoint):** adds and backfills `pipeline_run.billing_org_id`, adds and backfills CUSTOMER `llm_execution_context.credential_org_id`, and requires CUSTOMER contexts to retain the credential organization. Separate PostgreSQL triggers reject later payer/credential-org updates, while application admission and dispatch guards independently enforce the same immutable binding. The current worktree head is V369, next V370, with 355 source files; `requirement.ir.gate.mode` remains LEGACY.
+- **V350 execution identity split (committed at `13ead3f40`; deterministic verification green at that checkpoint):** adds and backfills `pipeline_run.billing_org_id`, adds and backfills CUSTOMER `llm_execution_context.credential_org_id`, and requires CUSTOMER contexts to retain the credential organization. Separate PostgreSQL triggers reject later payer/credential-org updates, while application admission and dispatch guards independently enforce the same immutable binding. The current worktree head is V370, next V371, with 356 source files; `requirement.ir.gate.mode` remains LEGACY.
 
 - V1–V44: Core schema through report improvements
 - V45: Widened `plan_version` columns (VARCHAR(255) for IDs, VARCHAR(64) for source)
