@@ -49,12 +49,23 @@ class MigratedSchemaBootSmokeTest {
           .withUsername("test")
           .withPassword("test");
 
+  /**
+   * The context boot starts a Redis message-listener container, so the smoke must not silently
+   * depend on a developer-machine Redis: CI runners have Docker but no local Redis.
+   */
+  @Container
+  @SuppressWarnings("resource")
+  static final org.testcontainers.containers.GenericContainer<?> REDIS =
+      new org.testcontainers.containers.GenericContainer<>("redis:7-alpine").withExposedPorts(6379);
+
   @DynamicPropertySource
   static void configureDataSource(DynamicPropertyRegistry registry) {
     registry.add("spring.datasource.url", POSTGRES::getJdbcUrl);
     registry.add("spring.datasource.username", POSTGRES::getUsername);
     registry.add("spring.datasource.password", POSTGRES::getPassword);
     registry.add("spring.datasource.driver-class-name", () -> "org.postgresql.Driver");
+    registry.add("spring.data.redis.host", REDIS::getHost);
+    registry.add("spring.data.redis.port", () -> REDIS.getMappedPort(6379));
     // The guarded behavior: Hibernate must VALIDATE the migrated schema exactly like prod/dev.
     registry.add("spring.jpa.hibernate.ddl-auto", () -> "validate");
     registry.add("spring.ai.anthropic.api-key", () -> "test-key-not-used");
