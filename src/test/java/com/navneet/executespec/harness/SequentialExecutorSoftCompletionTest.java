@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.atLeastOnce;
@@ -12,6 +13,7 @@ import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -438,11 +440,12 @@ class SequentialExecutorSoftCompletionTest {
     stubTaskRow();
     when(worker.run(any(WorkerTaskRequest.class), any())).thenReturn(workerCompleted(1));
     when(buildProjectTool.execute(any(), any())).thenReturn(new ToolResult.Ok("exit=0\nbuild ok"));
+    when(availableProviderResolver.resolve("run-soft")).thenReturn(Set.of(LlmProvider.OPENROUTER));
     com.navneet.executespec.router.InitialRoutingService initialRouting =
         mock(com.navneet.executespec.router.InitialRoutingService.class);
     when(featureFlagService.isEnabled(SequentialExecutor.FLAG_INITIAL_ROUTING)).thenReturn(true);
 
-    SequentialExecutor executor = newExecutor();
+    SequentialExecutor executor = spy(newExecutor());
     ReflectionTestUtils.setField(executor, "initialRoutingService", initialRouting);
     ExecutionResult result =
         executor.execute(
@@ -450,18 +453,20 @@ class SequentialExecutorSoftCompletionTest {
             new SequentialExecutor.ResumeRequest(
                 "run-soft_T1",
                 "openrouter",
-                "x-ai/grok-4.20",
+                "grok-4.20",
                 RunContinuationDecision.CHANGE_PROVIDER,
                 "a".repeat(64)));
 
     ArgumentCaptor<WorkerTaskRequest> request = ArgumentCaptor.forClass(WorkerTaskRequest.class);
     verify(worker).run(request.capture(), any());
     assertEquals("openrouter", request.getValue().provider());
-    assertEquals("x-ai/grok-4.20", request.getValue().model());
+    assertEquals("grok-4.20", request.getValue().model());
     assertEquals(true, request.getValue().strictProvider());
     assertEquals("openrouter", result.perTask().get(0).dispatchedProvider());
-    assertEquals("x-ai/grok-4.20", result.perTask().get(0).dispatchedModel());
+    assertEquals("grok-4.20", result.perTask().get(0).dispatchedModel());
+    verify(executor, never()).initialRouteFor(any(), any(), any(), any(), anyBoolean());
     verify(initialRouting, never()).decide(any(), any(), any());
+    verify(modelResolver, never()).resolve(anyString(), any());
   }
 
   @Test
@@ -470,6 +475,7 @@ class SequentialExecutorSoftCompletionTest {
     when(worker.run(any(WorkerTaskRequest.class), any()))
         .thenReturn(workerCompleted(1), workerCompleted(1));
     when(buildProjectTool.execute(any(), any())).thenReturn(new ToolResult.Ok("exit=0\nbuild ok"));
+    when(availableProviderResolver.resolve("run-soft")).thenReturn(Set.of(LlmProvider.OPENROUTER));
 
     SequentialExecutor executor = newExecutor();
     ExecutionResult result =
@@ -478,20 +484,49 @@ class SequentialExecutorSoftCompletionTest {
             new SequentialExecutor.ResumeRequest(
                 "run-soft_T1",
                 "openrouter",
-                "x-ai/grok-4.20",
+                "grok-4.20",
                 RunContinuationDecision.CHANGE_PROVIDER,
                 "a".repeat(64)));
 
     ArgumentCaptor<WorkerTaskRequest> requests = ArgumentCaptor.forClass(WorkerTaskRequest.class);
     verify(worker, times(2)).run(requests.capture(), any());
     assertEquals("openrouter", requests.getAllValues().get(0).provider());
-    assertEquals("x-ai/grok-4.20", requests.getAllValues().get(0).model());
+    assertEquals("grok-4.20", requests.getAllValues().get(0).model());
     assertTrue(requests.getAllValues().get(0).strictProvider());
     assertEquals("anthropic", requests.getAllValues().get(1).provider());
     assertEquals("claude-haiku-4-5-20251001", requests.getAllValues().get(1).model());
     assertFalse(requests.getAllValues().get(1).strictProvider());
     assertEquals("openrouter", result.perTask().get(0).dispatchedProvider());
     assertEquals("anthropic", result.perTask().get(1).dispatchedProvider());
+  }
+
+  @Test
+  void unavailableApprovedContinuationFailsBeforeRoutingOrProviderSpend() {
+    stubTaskRow();
+    when(availableProviderResolver.resolve("run-soft")).thenReturn(Set.of());
+    com.navneet.executespec.router.InitialRoutingService initialRouting =
+        mock(com.navneet.executespec.router.InitialRoutingService.class);
+    when(featureFlagService.isEnabled(SequentialExecutor.FLAG_INITIAL_ROUTING)).thenReturn(true);
+
+    SequentialExecutor executor = spy(newExecutor());
+    ReflectionTestUtils.setField(executor, "initialRoutingService", initialRouting);
+    ExecutionResult result =
+        executor.execute(
+            req(singleTaskPlan(), true),
+            new SequentialExecutor.ResumeRequest(
+                "run-soft_T1",
+                "openrouter",
+                "grok-4.20",
+                RunContinuationDecision.CHANGE_PROVIDER,
+                "a".repeat(64)));
+
+    assertEquals(TaskOutcome.Status.WORKER_FAILED, result.perTask().get(0).status());
+    assertEquals(0, result.perTask().get(0).toolCallsDispatched());
+    verify(worker, never()).run(any(WorkerTaskRequest.class), any());
+    verify(buildProjectTool, never()).execute(any(), any());
+    verify(executor, never()).initialRouteFor(any(), any(), any(), any(), anyBoolean());
+    verify(initialRouting, never()).decide(any(), any(), any());
+    verify(modelResolver, never()).resolve(anyString(), any());
   }
 
   @Test
@@ -1195,7 +1230,8 @@ class SequentialExecutorSoftCompletionTest {
                 mock(ModelMatrixProperties.ProviderModels.class),
                 "openai",
                 mock(ModelMatrixProperties.ProviderModels.class)));
-    when(availableProviderResolver.resolve(anyString())).thenReturn(Set.of(LlmProvider.ANTHROPIC));
+    when(availableProviderResolver.resolve(anyString()))
+        .thenReturn(Set.of(LlmProvider.ANTHROPIC, LlmProvider.OPENAI));
     GoalContinuationAdvisor advisor = mock(GoalContinuationAdvisor.class);
     when(advisor.advise(any()))
         .thenReturn(
@@ -1237,7 +1273,7 @@ class SequentialExecutorSoftCompletionTest {
     assertEquals(0, request.modelStepUpsUsed());
     assertEquals(0, request.modelStepDownsUsed());
     assertEquals(Boolean.TRUE, request.providerAvailability().get("anthropic"));
-    assertEquals(Boolean.FALSE, request.providerAvailability().get("openai"));
+    assertEquals(Boolean.TRUE, request.providerAvailability().get("openai"));
     GoalContinuationAdvisorRequest rerunRequest = requestCaptor.getAllValues().get(1);
     assertEquals("openai", rerunRequest.currentProvider());
     assertEquals("gpt-5.4", rerunRequest.currentModel());
@@ -1285,6 +1321,8 @@ class SequentialExecutorSoftCompletionTest {
   @Test
   void continuation_decision_honors_per_run_benchmark_prior_override() {
     stubTaskRow();
+    when(availableProviderResolver.resolve("run-soft"))
+        .thenReturn(Set.of(LlmProvider.ANTHROPIC, LlmProvider.OPENAI));
     when(worker.run(any(WorkerTaskRequest.class), any()))
         .thenReturn(workerCompleted(2), workerCompleted(1));
     when(buildProjectTool.execute(any(), any()))
@@ -1872,6 +1910,8 @@ class SequentialExecutorSoftCompletionTest {
   @Test
   void continuation_acting_reruns_once_with_selected_candidate_by_default() {
     stubTaskRow();
+    when(availableProviderResolver.resolve("run-soft"))
+        .thenReturn(Set.of(LlmProvider.ANTHROPIC, LlmProvider.OPENAI));
     when(worker.run(any(WorkerTaskRequest.class), any()))
         .thenReturn(workerCompleted(2), workerCompleted(1));
     when(worker.run(any(WorkerTaskRequest.class))).thenReturn(workerCompleted(1));
@@ -2015,6 +2055,8 @@ class SequentialExecutorSoftCompletionTest {
   @Test
   void continuation_acting_consumes_run_level_provider_switch_limit() {
     stubTaskRow();
+    when(availableProviderResolver.resolve("run-soft"))
+        .thenReturn(Set.of(LlmProvider.ANTHROPIC, LlmProvider.OPENAI));
     when(worker.run(any(WorkerTaskRequest.class), any()))
         .thenReturn(workerHitIterLimit(0), workerCompleted(1), workerHitIterLimit(0));
     GoalContinuationAdvisor advisor = mock(GoalContinuationAdvisor.class);

@@ -2,6 +2,7 @@ package com.navneet.executespec.integration;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Optional;
 
@@ -15,10 +16,25 @@ import com.navneet.executespec.report.entity.PipelineResult;
 import com.navneet.executespec.report.entity.ValidationReport;
 import com.navneet.executespec.reviewer.ReviewerResult;
 import com.navneet.executespec.router.ModelProviderScore;
+import com.navneet.executespec.tool.ExecutionContext;
 
 import org.junit.jupiter.api.Test;
 
 class RunOrchestratorReviewerRouteTest {
+
+  @Test
+  void initialBuildReviewerIsReadOnlyDiagnosis() {
+    var request =
+        InitialReviewerRequestPolicy.builder()
+            .provider("openrouter")
+            .model("grok-4.20")
+            .context(
+                new ExecutionContext(
+                    "run-1", "initial-review", Path.of(".").toAbsolutePath().normalize()))
+            .build();
+
+    assertThat(request.readOnly()).isTrue();
+  }
 
   /**
    * Reviewer infrastructure failure is unavailable evidence, not a reason to spend on a different
