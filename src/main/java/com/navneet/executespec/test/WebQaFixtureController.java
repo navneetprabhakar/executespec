@@ -12,7 +12,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
-import com.navneet.executespec.agentsession.entity.AgentActionEvent;
 import com.navneet.executespec.agentsession.entity.AgentSession;
 import com.navneet.executespec.agentsession.entity.AgentTurn;
 import com.navneet.executespec.agentsession.repository.AgentActionEventRepository;
@@ -67,14 +66,8 @@ import lombok.RequiredArgsConstructor;
 @PreAuthorize("hasRole('SUPER_ADMIN')")
 public class WebQaFixtureController {
 
-  private static final String PREFIX = "web-qa-";
+  static final String PREFIX = "web-qa-";
   private static final String PROVIDER_READINESS_MARKER = "web-qa-disabled-provider-key";
-
-  /**
-   * First line of every fixture-authored architecture version. Cleanup deletes exactly the docs
-   * carrying this marker, so real generated architecture content is never touched.
-   */
-  private static final String ARCHITECTURE_FIXTURE_MARKER = "<!-- web-qa-architecture-fixture -->";
 
   private final PipelineRunRepository runRepository;
   private final GateRepository gateRepository;
@@ -90,9 +83,8 @@ public class WebQaFixtureController {
   private final SseBroadcaster sseBroadcaster;
   private final FeatureFlagService featureFlagService;
   private final Environment environment;
+  private final WebQaProjectEvidenceFixtures projectEvidenceFixtures;
   private final com.navneet.executespec.project.security.ProjectAccessGuard projectAccessGuard;
-  private final com.navneet.executespec.codeintel.repository.ProjectArchitectureDocRepository
-      architectureDocRepository;
 
   @org.springframework.beans.factory.annotation.Value("${executespec.live-llm.enabled:true}")
   private boolean liveLlmEnabled;
@@ -126,52 +118,13 @@ public class WebQaFixtureController {
               user.setDeepSeekApiKey(PROVIDER_READINESS_MARKER);
               userRepository.save(user);
             });
-    String sessionId = PREFIX + UUID.randomUUID();
-    AgentSession session =
-        sessionRepository.save(
-            AgentSession.builder()
-                .id(sessionId)
-                .orgId(orgId)
-                .userId(userId)
-                .clientSurface("WEB")
-                .title("Release QA agent evidence")
-                .status("ACTIVE")
-                .defaultExecutionMode("REMOTE")
-                .approvalPolicy("MANUAL")
-                .createdAt(Instant.now())
-                .updatedAt(Instant.now())
-                .build());
-    AgentTurn turn =
-        turnRepository.save(
-            AgentTurn.builder()
-                .id(PREFIX + "turn-" + UUID.randomUUID())
-                .sessionId(sessionId)
-                .orgId(orgId)
-                .userId(userId)
-                .sequence(1)
-                .userMessage("Implement the release QA fixture")
-                .assistantSummary("Fixture action is ready for approval.")
-                .intentType("CODE_RUN_REQUIRED")
-                .intentConfidence(1.0)
-                .actionType("create_cloud_run")
-                .proposedActionJson(
-                    "{\"action\":\"create_cloud_run\",\"requiresConfirmation\":true}")
-                .status("OK")
-                .build());
-    eventRepository.save(
-        AgentActionEvent.builder()
-            .id(PREFIX + "event-" + UUID.randomUUID())
-            .sessionId(sessionId)
-            .turnId(turn.getId())
-            .actionId(PREFIX + "action")
-            .type("GOAL_DECISION")
-            .payloadJson("{\"status\":\"READY\",\"summary\":\"Fixture evidence is ready\"}")
-            .createdAt(Instant.now())
-            .build());
-
+    WebQaProjectEvidenceFixtures.SessionEvidence sessionEvidence =
+        projectEvidenceFixtures.seedAgentSessionEvidence(userId, orgId);
+    String sessionId = sessionEvidence.sessionId();
+    AgentTurn turn = sessionEvidence.turn();
     PipelineRun success =
         createRun(userId, orgId, "COMPLETE", "CLEAN_COMPLETION", "Release QA success", true);
-    seedCorrectionEvidenceTask(success.getRunId());
+    projectEvidenceFixtures.seedCorrectionEvidenceTask(success.getRunId());
     PipelineRun failed =
         createRun(userId, orgId, "FAILED", "FINAL_BUILD_FAILED", "Release QA recovery", false);
     PipelineRun gate =
@@ -206,20 +159,9 @@ public class WebQaFixtureController {
   }
 
   /**
-   * Advance only a fixture-owned plan-gate row for provider-free screen captures. EXECUTING maps to
-   * the V2 pipeline's persisted WORKING state. Neither transition starts a worker, provider, quota,
-   * PR, or background job. Restart recovery is deliberately not simulated here because real
-   * recovery must run the fenced reviewer and validation lifecycle rather than manufacture a
-   * terminal status from fixture state. The endpoint is intentionally local/dev + SUPER_ADMIN only
-   * with a strict prefix and transition order so it cannot mutate customer runs.
-   */
-  /**
-   * Seed exactly two deterministic architecture versions for a fixture-created project so the
-   * Compare History browser walkthrough can assert a rendered CONTENT diff rather than a mere
-   * "changed" marker. Both docs carry {@link #ARCHITECTURE_FIXTURE_MARKER} as their first line and
-   * empty {@code generated_from_shas} maps, so the diff endpoint performs no GitHub calls and
-   * cleanup can remove exactly these rows. Project write authority is asserted through the
-   * canonical guard; the endpoint never touches real generated architecture content.
+   * Seed two deterministic architecture versions for a fixture-created project (Compare History
+   * content-diff walkthrough). Safety-profile admission stays here; the seeding itself lives in
+   * {@link WebQaProjectEvidenceFixtures}.
    */
   @PostMapping("/projects/{projectId}/architecture-versions")
   @Transactional(rollbackFor = Exception.class)
@@ -235,48 +177,21 @@ public class WebQaFixtureController {
               + " disabled");
     }
     projectAccessGuard.assertCanWrite(projectId, principal);
-    int nextVersion =
-        architectureDocRepository.findByProjectIdOrderByVersionDesc(projectId).stream()
-            .findFirst()
-            .map(doc -> doc.getVersion() + 1)
-            .orElse(1);
-    String baseContent =
-        ARCHITECTURE_FIXTURE_MARKER
-            + "\n# System map\n\n## Services\n\n- checkout-service — owns cart and order flow\n"
-            + "- inventory-service — owns stock levels\n";
-    com.navneet.executespec.codeintel.entity.ProjectArchitectureDoc from =
-        architectureDocRepository.save(
-            com.navneet.executespec.codeintel.entity.ProjectArchitectureDoc.builder()
-                .projectId(projectId)
-                .version(nextVersion)
-                .content(baseContent)
-                .generatedFromShas("{}")
-                .generatedFromBranches("{}")
-                .generatedAt(Instant.now().minusSeconds(60))
-                .build());
-    com.navneet.executespec.codeintel.entity.ProjectArchitectureDoc to =
-        architectureDocRepository.save(
-            com.navneet.executespec.codeintel.entity.ProjectArchitectureDoc.builder()
-                .projectId(projectId)
-                .version(nextVersion + 1)
-                .content(
-                    baseContent
-                        + "- notification-service — NEW dispatches order confirmation emails\n")
-                .generatedFromShas("{}")
-                .generatedFromBranches("{}")
-                .generatedAt(Instant.now())
-                .build());
-    return Map.of(
-        "fromVersion",
-        from.getVersion(),
-        "toVersion",
-        to.getVersion(),
-        "addedLine",
-        "notification-service — NEW dispatches order confirmation emails",
-        "safety",
-        safety);
+    var response =
+        new java.util.LinkedHashMap<String, Object>(
+            projectEvidenceFixtures.seedArchitectureVersions(principal, projectId));
+    response.put("safety", safety);
+    return response;
   }
 
+  /**
+   * Advance only a fixture-owned plan-gate row for provider-free screen captures. EXECUTING maps to
+   * the V2 pipeline's persisted WORKING state. Neither transition starts a worker, provider, quota,
+   * PR, or background job. Restart recovery is deliberately not simulated here because real
+   * recovery must run the fenced reviewer and validation lifecycle rather than manufacture a
+   * terminal status from fixture state. The endpoint is intentionally local/dev + SUPER_ADMIN only
+   * with a strict prefix and transition order so it cannot mutate customer runs.
+   */
   @PostMapping("/{runId}/advance")
   public AdvanceResponse advance(
       @PathVariable String runId,
@@ -410,18 +325,11 @@ public class WebQaFixtureController {
                 userRepository.save(user);
               });
     }
-    // Remove exactly the fixture-authored architecture versions (marker-scoped) so a fixture run
-    // can never leave synthetic content behind for a real project view.
-    List<com.navneet.executespec.codeintel.entity.ProjectArchitectureDoc> fixtureDocs =
-        architectureDocRepository.findAll().stream()
-            .filter(doc -> doc.getContent() != null)
-            .filter(doc -> doc.getContent().startsWith(ARCHITECTURE_FIXTURE_MARKER))
-            .toList();
-    architectureDocRepository.deleteAll(fixtureDocs);
+    int deletedArchitectureVersions = projectEvidenceFixtures.deleteArchitectureFixtures();
     return Map.of(
         "deletedRuns", runs.size(),
         "deletedAgentSessions", sessions.size(),
-        "deletedArchitectureVersions", fixtureDocs.size(),
+        "deletedArchitectureVersions", deletedArchitectureVersions,
         "safety", safetyEvidence());
   }
 
@@ -468,60 +376,6 @@ public class WebQaFixtureController {
     } catch (java.security.NoSuchAlgorithmException impossible) {
       throw new IllegalStateException("SHA-256 is unavailable", impossible);
     }
-  }
-
-  /**
-   * Attach one deterministic ACCEPTED correction transaction to the success run so the Evidence
-   * tab's correction card renders from durable {@code continuation_actions_json} exactly as it
-   * would for a real checkpointed correction. The JSON is the same passthrough shape {@code
-   * RunMapper} delivers to {@code TaskSummary.continuationActions}; no correction_attempt row,
-   * provider call, or score evidence is created.
-   */
-  private void seedCorrectionEvidenceTask(String runId) {
-    String beforeGeneration = "a".repeat(64);
-    String afterGeneration = "b".repeat(64);
-    String continuationActionsJson =
-        """
-[{"status":"EXECUTED","decision":"CORRECTION","provider":"fixture","model":"fixture",
-  "reason":"Fixture correction accepted after checkpointed retry",
-  "source":"POST_VALIDATION_REPORT","code":"CORRECTION_ACCEPTED",
-  "approvalId":"web-qa-approval-1","proposalVersion":1,
-  "proposalDigest":"%s",
-  "beforeWorkspaceGeneration":"%s","afterWorkspaceGeneration":"%s",
-  "diffDigest":"%s","changedFiles":["src/app.ts"],
-  "unifiedPatch":"--- a/src/app.ts\\n+++ b/src/app.ts\\n@@ -1 +1 @@\\n-export const status = 'failed';\\n+export const status = 'complete';\\n",
-  "patchMetadata":{"capturedBytes":118,"fullBytes":118},
-  "validationDelta":{
-    "before":{"status":"STALE","workspaceGeneration":"%s",
-      "build":{"verdict":"FAILED","passed":false,"exitCode":1},
-      "tests":{"verdict":"FAILED","passed":0,"total":2,"executionVerified":true}},
-    "after":{"status":"COMPLETE","workspaceGeneration":"%s",
-      "build":{"verdict":"PASSED","passed":true,"exitCode":0},
-      "tests":{"verdict":"PASSED","passed":2,"total":2,"executionVerified":true}}},
-  "evidenceInvalidated":true,"validationRegenerated":true}]
-"""
-            .formatted(
-                "c".repeat(64),
-                beforeGeneration,
-                afterGeneration,
-                "d".repeat(64),
-                beforeGeneration,
-                afterGeneration);
-    taskRepository.save(
-        AgentTask.builder()
-            .taskId(runId + "-correction-task")
-            .runId(runId)
-            .title("Repair failing build via checkpointed correction")
-            .complexity("LOW")
-            .status("COMPLETE")
-            .taskJson("{\"id\":\"fixture-correction-task\"}")
-            .completionNotes("Correction accepted; evidence regenerated")
-            .provider("fixture")
-            .model("fixture")
-            .continuationActionsJson(continuationActionsJson)
-            .startedAt(Instant.now().minusSeconds(20))
-            .completedAt(Instant.now())
-            .build());
   }
 
   // Package-visible for the regression test that ensures visual fixtures remain score-neutral.
