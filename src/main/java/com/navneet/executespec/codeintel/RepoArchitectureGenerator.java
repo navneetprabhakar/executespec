@@ -201,7 +201,11 @@ public class RepoArchitectureGenerator {
         inTok,
         outTok,
         resolved.getModel());
-    return new Result(text.trim(), inTok, outTok, resolved.getModel());
+    return new Result(
+        DeterministicArchitectureEvidence.appendFromCodemap(text.trim(), codeMapMarkdown),
+        inTok,
+        outTok,
+        resolved.getModel());
   }
 
   static void requireCompleteTermination(ChatResponse response, String operation) {

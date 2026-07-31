@@ -32,6 +32,9 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class GitHubRepoService {
 
+  private static final Duration WEBHOOK_CONNECT_TIMEOUT = Duration.ofSeconds(5);
+  private static final Duration WEBHOOK_REQUEST_TIMEOUT = Duration.ofSeconds(20);
+
   @Value("${agent.github.default-owner:owner}")
   private String defaultOwner;
 
@@ -394,27 +397,83 @@ public class GitHubRepoService {
   /** GitHub compare API file entry — status is one of added/modified/removed/renamed. */
   public record ChangedFile(String filename, String status, int additions, int deletions) {}
 
+  /** Actionable, secret-free result for one GitHub webhook installation attempt. */
+  public record WebhookInstallResult(
+      boolean installed,
+      String eligibilityState,
+      String blockingGate,
+      String errorCode,
+      String reason,
+      String remediation,
+      boolean retryable,
+      Integer upstreamStatus) {
+
+    public static WebhookInstallResult success() {
+      return new WebhookInstallResult(true, "ELIGIBLE", null, null, null, null, false, 201);
+    }
+
+    public static WebhookInstallResult blocked(
+        String gate, String code, String reason, String remediation) {
+      return new WebhookInstallResult(
+          false, "BLOCKED", gate, code, reason, remediation, false, null);
+    }
+
+    public static WebhookInstallResult rejected(
+        String gate,
+        String code,
+        String reason,
+        String remediation,
+        boolean retryable,
+        Integer upstreamStatus) {
+      return new WebhookInstallResult(
+          false, "REJECTED", gate, code, reason, remediation, retryable, upstreamStatus);
+    }
+  }
+
+  /** Compatibility wrapper for existing background auto-provisioning. */
   public boolean installWebhook(String repoFullName, String overridePat) {
+    return installWebhookDetailed(repoFullName, overridePat).installed();
+  }
+
+  public WebhookInstallResult installWebhookDetailed(String repoFullName, String overridePat) {
     if (webhookCallbackUrl == null
         || webhookCallbackUrl.isBlank()
         || webhookSecret == null
         || webhookSecret.isBlank()) {
       log.debug("[GitHubRepoService] Webhook auto-provision disabled — callback/secret not set");
-      return false;
+      return WebhookInstallResult.blocked(
+          "SERVER_WEBHOOK_CONFIGURATION",
+          "WEBHOOK_CONFIGURATION_UNAVAILABLE",
+          "Webhook installation is not configured in this ExecuteSpec environment.",
+          "Ask an operator to configure the GitHub webhook callback URL and signing secret, then"
+              + " retry.");
     }
     String effectivePat = overridePat;
-    if (effectivePat == null || effectivePat.isBlank()) return false;
-    if (repoFullName == null || !repoFullName.contains("/")) return false;
+    if (effectivePat == null || effectivePat.isBlank()) {
+      return WebhookInstallResult.blocked(
+          "CALLER_GITHUB_CREDENTIAL",
+          "GITHUB_PAT_REQUIRED",
+          "A GitHub personal access token is required to install this repository webhook.",
+          "Add a GitHub PAT with repository webhook administration permission, then retry.");
+    }
+    if (repoFullName == null || !repoFullName.matches("[^/\\s]+/[^/\\s]+")) {
+      return WebhookInstallResult.blocked(
+          "SOURCE_IDENTITY",
+          "GITHUB_REPOSITORY_IDENTITY_INVALID",
+          "The linked repository does not have a valid GitHub owner/name identity.",
+          "Re-sync or relink the repository before installing its webhook.");
+    }
 
     String body =
         """
 {"name":"web","active":true,"events":["pull_request"],"config":{"url":"%s","content_type":"json","secret":"%s","insecure_ssl":"0"}}"""
             .formatted(webhookCallbackUrl, webhookSecret.replace("\"", "\\\""));
     try {
-      HttpClient client = HttpClient.newHttpClient();
+      HttpClient client = HttpClient.newBuilder().connectTimeout(WEBHOOK_CONNECT_TIMEOUT).build();
       HttpRequest request =
           HttpRequest.newBuilder()
               .uri(URI.create("https://api.github.com/repos/" + repoFullName + "/hooks"))
+              .timeout(WEBHOOK_REQUEST_TIMEOUT)
               .header("Authorization", "Bearer " + effectivePat)
               .header("Accept", "application/vnd.github+json")
               .header("Content-Type", "application/json")
@@ -423,26 +482,92 @@ public class GitHubRepoService {
       HttpResponse<String> res = client.send(request, HttpResponse.BodyHandlers.ofString());
       if (res.statusCode() == 201) {
         log.info("[GitHubRepoService] Installed PR webhook on {}", repoFullName);
-        return true;
+        return WebhookInstallResult.success();
       }
       // 422 = duplicate hook (already installed) — treat as success so the repo flag flips.
       if (res.statusCode() == 422 && res.body() != null && res.body().contains("already exists")) {
         log.info(
             "[GitHubRepoService] PR webhook already exists on {} — treating as installed",
             repoFullName);
-        return true;
+        return new WebhookInstallResult(
+            true, "ALREADY_INSTALLED", null, null, null, null, false, 422);
       }
       log.warn(
           "[GitHubRepoService] Webhook install on {} returned {}: {}",
           repoFullName,
           res.statusCode(),
           res.body());
-      return false;
+      return upstreamWebhookFailure(res.statusCode());
+    } catch (InterruptedException interrupted) {
+      Thread.currentThread().interrupt();
+      log.warn("[GitHubRepoService] Webhook install on {} was interrupted", repoFullName);
+      return WebhookInstallResult.rejected(
+          "GITHUB_API",
+          "GITHUB_WEBHOOK_INSTALL_INTERRUPTED",
+          "Webhook installation was interrupted before GitHub completed the request.",
+          "Retry the installation when no repository operation is being cancelled.",
+          true,
+          null);
     } catch (Exception e) {
       log.warn(
-          "[GitHubRepoService] Webhook install on {} failed: {}", repoFullName, e.getMessage());
-      return false;
+          "[GitHubRepoService] Webhook install on {} failed: {}",
+          repoFullName,
+          e.getClass().getSimpleName());
+      return WebhookInstallResult.rejected(
+          "GITHUB_API",
+          "GITHUB_WEBHOOK_API_UNAVAILABLE",
+          "GitHub could not be reached while installing the webhook.",
+          "Retry after GitHub connectivity is restored.",
+          true,
+          null);
     }
+  }
+
+  private static WebhookInstallResult upstreamWebhookFailure(int status) {
+    return switch (status) {
+      case 401 ->
+          WebhookInstallResult.rejected(
+              "CALLER_GITHUB_CREDENTIAL",
+              "GITHUB_PAT_INVALID",
+              "GitHub rejected the personal access token.",
+              "Replace the expired or invalid GitHub PAT, then retry.",
+              false,
+              status);
+      case 403 ->
+          WebhookInstallResult.rejected(
+              "GITHUB_WEBHOOK_PERMISSION",
+              "GITHUB_WEBHOOK_PERMISSION_DENIED",
+              "GitHub denied permission to administer webhooks for this repository.",
+              "Grant the PAT repository administration/webhook permission and confirm the user has"
+                  + " admin access, then retry.",
+              false,
+              status);
+      case 404 ->
+          WebhookInstallResult.rejected(
+              "SOURCE_ACCESS",
+              "GITHUB_REPOSITORY_NOT_ACCESSIBLE",
+              "GitHub could not find this repository for the supplied account.",
+              "Confirm the repository still exists and the PAT can access it, then re-sync and"
+                  + " retry.",
+              false,
+              status);
+      case 429 ->
+          WebhookInstallResult.rejected(
+              "GITHUB_RATE_LIMIT",
+              "GITHUB_RATE_LIMITED",
+              "GitHub rate-limited the webhook installation request.",
+              "Wait for the GitHub rate limit to reset, then retry.",
+              true,
+              status);
+      default ->
+          WebhookInstallResult.rejected(
+              "GITHUB_API",
+              "GITHUB_WEBHOOK_INSTALL_REJECTED",
+              "GitHub rejected the webhook installation request.",
+              "Check repository administration access and GitHub service status, then retry.",
+              status >= 500,
+              status);
+    };
   }
 
   /**

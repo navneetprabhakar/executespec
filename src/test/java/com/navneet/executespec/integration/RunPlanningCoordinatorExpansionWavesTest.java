@@ -136,7 +136,20 @@ class RunPlanningCoordinatorExpansionWavesTest {
     ObjectMapper mapper = new ObjectMapper();
     RunPlanningCoordinator coordinator =
         new RunPlanningCoordinator(
-            repository, mapper, null, null, null, null, null, null, null, null, null, null, null);
+            repository,
+            mapper,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null);
     Plan candidate =
         Plan.builder()
             .planTitle("Rejected normalized candidate")

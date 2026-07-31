@@ -584,7 +584,17 @@ export const listProjectInvariantViolations = (projectId: string) =>
 
 // v2.5.2 — install a PR webhook on a repo the user linked (rather than created).
 export const installRepoWebhook = (repoId: string) =>
-  req<{installed: boolean; reason?: string}>(`/repos/${repoId}/webhook`, {method: 'POST'});
+  req<{
+    installed: boolean;
+    eligibilityState: 'ELIGIBLE' | 'ALREADY_INSTALLED' | 'BLOCKED' | 'REJECTED';
+    blockingGate?: string;
+    errorCode?: string;
+    reason?: string;
+    message?: string;
+    remediation?: string;
+    retryable: boolean;
+    upstreamStatus?: number;
+  }>(`/repos/${repoId}/webhook`, {method: 'POST'});
 
 export const getProjectSummary = (projectId: string) =>
   req<{content: string}>(`/projects/${projectId}/summary`);

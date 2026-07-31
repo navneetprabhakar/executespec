@@ -24,6 +24,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
+import com.navneet.executespec.executioncontext.LlmExecutionContextException;
 import com.navneet.executespec.executioncontext.LlmExecutionOperationAuthority;
 import com.navneet.executespec.harness.WorkspaceInitService;
 import com.navneet.executespec.project.entity.ProjectRepo;
@@ -166,6 +167,41 @@ class CodeIndexingServiceTest {
             eq("PROJECT_REPOSITORY"),
             eq(EmbeddingOperationIdentity.codeIndex(repo.getId(), repo.getLastSyncedSha())),
             eq("member-1"),
+            any(),
+            nullable(LlmExecutionOperationAuthority.class));
+  }
+
+  @Test
+  void executionContextConflictHasAStableActionableFailureCode(@TempDir Path root)
+      throws Exception {
+    Files.writeString(root.resolve("A.java"), "class A {}\n");
+    when(ws.runWorkspacePath(anyString())).thenReturn(root);
+    EmbeddingOperationRoot operationRoot = mock(EmbeddingOperationRoot.class);
+    when(operationRoot.claim(any(), eq(lease.owner()), any(), eq(true)))
+        .thenThrow(LlmExecutionContextException.idempotencyConflict());
+    CodeIndexingService service =
+        new CodeIndexingService(
+            ws,
+            chunker,
+            embedder,
+            chunks,
+            states,
+            new com.navneet.executespec.security.GeneratedSecretScanner(),
+            operationRoot,
+            4000);
+
+    var result = service.indexRepo("proj-1", repo, null, null, "member-1");
+
+    assertThat(result.outcome()).isEqualTo(CodeIndexingService.Outcome.FAILED);
+    verify(states).fail(lease, "EXECUTION_CONTEXT_IDEMPOTENCY_CONFLICT");
+    verify(embedder, never())
+        .embedForProject(
+            anyString(),
+            anyList(),
+            anyString(),
+            anyString(),
+            anyString(),
+            nullable(String.class),
             any(),
             nullable(LlmExecutionOperationAuthority.class));
   }

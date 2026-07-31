@@ -20,6 +20,7 @@ import java.util.PriorityQueue;
 import java.util.Set;
 import java.util.UUID;
 
+import com.navneet.executespec.executioncontext.LlmExecutionContextException;
 import com.navneet.executespec.harness.WorkspaceInitService;
 import com.navneet.executespec.project.entity.ProjectRepo;
 import com.navneet.executespec.project.rag.CodeChunkStore.LeaseLostException;
@@ -570,6 +571,16 @@ public class CodeIndexingService {
       terminateOperation(operation, "CODE_INDEX_LEASE_LOST", "Code-index lease was lost");
       log.info("code index lease lost project={} repo={}", projectId, repo.getId());
       return new IndexResult(Outcome.LEASE_LOST, readiness(projectId, repo));
+    } catch (LlmExecutionContextException contextFailure) {
+      String code = "EXECUTION_CONTEXT_" + contextFailure.reason().name();
+      terminateOperation(operation, "CODE_INDEX_" + code, "Code-index admission did not complete");
+      stateStore.fail(lease, code);
+      log.warn(
+          "code index execution-context admission failed project={} repo={} reason={}",
+          projectId,
+          repo.getId(),
+          contextFailure.reason());
+      return new IndexResult(Outcome.FAILED, readiness(projectId, repo));
     } catch (Exception failure) {
       terminateOperation(operation, "CODE_INDEX_FAILED", "Code indexing did not complete");
       stateStore.fail(lease, "INDEX_FAILED_" + failureType(failure));

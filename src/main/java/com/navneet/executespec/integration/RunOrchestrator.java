@@ -27,7 +27,6 @@ import com.navneet.executespec.agent.PlanStrategy;
 import com.navneet.executespec.agent.PlanStrategyCircuitBreaker;
 import com.navneet.executespec.agent.PlannerRequest;
 import com.navneet.executespec.agent.SpecClassifier;
-import com.navneet.executespec.agent.TaskExecutionBriefCompiler;
 import com.navneet.executespec.assessment.FeatureAssessmentService;
 import com.navneet.executespec.auth.repository.AppUserRepository;
 import com.navneet.executespec.billing.config.ManagedAiProperties;
@@ -1763,6 +1762,7 @@ public class RunOrchestrator implements RunControlPort {
         }
 
         perky.start(runId, "PLANNING");
+        PlannerRequest plannerReq;
         try {
           Classification autoClassification = SpecClassifier.classify(userRequest);
           log.info(
@@ -1897,7 +1897,7 @@ public class RunOrchestrator implements RunControlPort {
               }
             }
           }
-          PlannerRequest plannerReq =
+          plannerReq =
               PlannerRequest.builder()
                   .spec(userRequest)
                   .classification(autoClassification)
@@ -1990,24 +1990,26 @@ public class RunOrchestrator implements RunControlPort {
           terminate(runId, "FAILED", INTERNAL_ERROR_REASON, INTERNAL_ERROR_REASON, startedAt);
           return;
         }
-        try {
-          plan = TaskExecutionBriefCompiler.compileExecutable(plan, userRequest);
-        } catch (RuntimeException executablePlanInternalEx) {
-          boolean contractRejection =
-              PlannerFailureDiagnostic.isExecutableContractRejection(executablePlanInternalEx);
-          if (contractRejection) planningCoordinator.persistRejectedPlanDiagnostic(runId, plan);
-          log.error(
-              "V2 run={} executable plan compiler {}",
+        var stabilizedPlan =
+            planningCoordinator.stabilizeExecutablePlanOutcome(
+                runId,
+                plan,
+                plannerReq,
+                rootCtx,
+                PlannerRecoveryRouteSelector.Policy.runAuthorized(
+                    routePinned,
+                    requireContinuationConfirmation,
+                    requireContinuationBenchmarkPrior));
+        if (stabilizedPlan.failure() != null) {
+          terminate(
               runId,
-              contractRejection ? "rejected its contract" : "failed internally",
-              executablePlanInternalEx);
-          failPlannerUnavailable(
-              runId,
-              startedAt,
-              "compile a safe executable task contract",
-              contractRejection ? executablePlanInternalEx : null);
+              "FAILED",
+              stabilizedPlan.statusReason(),
+              stabilizedPlan.failureReason(),
+              startedAt);
           return;
         }
+        plan = stabilizedPlan.plan();
         boolean needsApproval = !skipApproval && "PRODUCTION".equalsIgnoreCase(executionMode);
         var gatePreparation =
             planGateCoordinator.prepare(needsApproval, runId, runRow.getUserRequest(), plan);
@@ -2019,10 +2021,8 @@ public class RunOrchestrator implements RunControlPort {
         PlannerPhaseAttribution.apply(
             runRepo, tokenAttributor, runId, afterPlan, afterClassifier, upperProvider, model);
         persistenceWriter.raiseUsageFloor(runId, afterPlan);
-        // 1b. Plan approval gate (PRODUCTION only)
-        // PROTOTYPE runs + integration-triggered runs (skipApproval=true) bypass the gate. A
-        // PRODUCTION run persists everything required for continuation and returns immediately, so
-        // AWAITING_APPROVAL consumes no PipelineExecutorPool worker.
+        // PRODUCTION persists continuation and parks without consuming a pool worker; prototype
+        // and integration-triggered runs bypass this gate.
         if (needsApproval) {
           perky.stop(runId);
           // RR-819 — compose the contract gate BEFORE the run parks at the gate, so the approver is

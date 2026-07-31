@@ -123,10 +123,25 @@ class ProjectArchitectureServiceFingerprintTest {
   }
 
   @Test
-  void providerGeneratedRepoArchitecture_isReusable() {
+  void legacyProviderGeneratedRepoArchitectureWithoutDeterministicSurface_isNotReusable() {
     RepoArchitectureDoc generated =
         RepoArchitectureDoc.builder()
             .content("# repo — Architecture\n\n## High-Level Design\nGrounded content")
+            .modelUsed("deepseek-chat")
+            .build();
+
+    assertThat(ProjectArchitectureService.isReusableRepoArchitecture(generated)).isFalse();
+  }
+
+  @Test
+  void providerGeneratedRepoArchitectureWithCurrentDeterministicSurface_isReusable() {
+    RepoArchitectureDoc generated =
+        RepoArchitectureDoc.builder()
+            .content(
+                "# repo — Architecture\n\n"
+                    + DeterministicArchitectureEvidence.HTTP_BEGIN
+                    + "\n- Status: `AVAILABLE`\n"
+                    + DeterministicArchitectureEvidence.HTTP_END)
             .modelUsed("deepseek-chat")
             .build();
 
@@ -144,10 +159,24 @@ class ProjectArchitectureServiceFingerprintTest {
   }
 
   @Test
-  void providerGeneratedCombinedArchitecture_isReusable() {
+  void legacyProviderGeneratedCombinedArchitectureWithoutDeterministicSurface_isNotReusable() {
     ProjectArchitectureDoc generated =
         ProjectArchitectureDoc.builder()
             .content("# TicTacToe — Combined architecture\n\n## Overview\nGrounded content")
+            .build();
+
+    assertThat(ProjectArchitectureService.isReusableProjectArchitecture(generated)).isFalse();
+  }
+
+  @Test
+  void providerGeneratedCombinedArchitectureWithCurrentDeterministicSurface_isReusable() {
+    ProjectArchitectureDoc generated =
+        ProjectArchitectureDoc.builder()
+            .content(
+                "# Combined\n\n"
+                    + DeterministicArchitectureEvidence.HTTP_BEGIN
+                    + "\n- Status: `AVAILABLE`\n"
+                    + DeterministicArchitectureEvidence.HTTP_END)
             .build();
 
     assertThat(ProjectArchitectureService.isReusableProjectArchitecture(generated)).isTrue();

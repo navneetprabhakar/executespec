@@ -28,6 +28,18 @@ final class CoherencePlannerProtocol {
       ToolCallback patchPlan,
       String stepId,
       int maxTokens) {
+    return call(router, messages, resolved, context, patchPlan, stepId, maxTokens, false);
+  }
+
+  static ChatResponse call(
+      LlmRouter router,
+      List<Message> messages,
+      ResolvedModel resolved,
+      ExecutionContext context,
+      ToolCallback patchPlan,
+      String stepId,
+      int maxTokens,
+      boolean strictProvider) {
     return router.call(
         LlmRequest.builder()
             .provider(resolved.providerName())
@@ -40,6 +52,7 @@ final class CoherencePlannerProtocol {
             .maxTokens(maxTokens)
             .toolChoice("required")
             .toolsOverride(List.of(patchPlan))
+            .strictProvider(strictProvider)
             .build());
   }
 
@@ -52,6 +65,7 @@ final class CoherencePlannerProtocol {
       ToolCallback patchPlan,
       String failure,
       int maxTokens,
+      boolean strictProvider,
       java.util.function.BiFunction<Plan, String, CoherencePlannerAgent.PatchResult> applyPatches) {
     messages.add(
         new UserMessage(
@@ -70,7 +84,8 @@ final class CoherencePlannerProtocol {
               context,
               patchPlan,
               "planner.coherence.protocol-repair",
-              maxTokens);
+              maxTokens,
+              strictProvider);
       AssistantMessage.ToolCall repairedCall = findPatchCall(response);
       if (repairedCall == null) return failed(plan, "patchPlan tool was not called after repair");
       return applyPatches.apply(plan, repairedCall.arguments());

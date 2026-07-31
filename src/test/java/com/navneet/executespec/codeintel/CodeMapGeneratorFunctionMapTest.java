@@ -13,6 +13,7 @@ import static org.mockito.Mockito.when;
 import java.util.List;
 import java.util.Map;
 
+import com.navneet.executespec.contractsurface.SpringHttpSurfaceExtractor;
 import com.navneet.executespec.repo.GitHubRepoService;
 
 import org.junit.jupiter.api.Test;
@@ -213,7 +214,11 @@ class CodeMapGeneratorFunctionMapTest {
     GitHubRepoService gh = mock(GitHubRepoService.class);
     @SuppressWarnings("unchecked")
     ObjectProvider<FilePurposeSummaryService> nullSummaryProvider = mock(ObjectProvider.class);
-    CodeMapGenerator gen = new CodeMapGenerator(gh, nullSummaryProvider);
+    CodeMapGenerator gen =
+        new CodeMapGenerator(
+            gh,
+            new SpringHttpArchitectureEvidenceRenderer(gh, new SpringHttpSurfaceExtractor()),
+            nullSummaryProvider);
 
     List<String> files =
         List.of(
@@ -261,7 +266,11 @@ class CodeMapGeneratorFunctionMapTest {
     GitHubRepoService gh = mock(GitHubRepoService.class);
     @SuppressWarnings("unchecked")
     ObjectProvider<FilePurposeSummaryService> nullSummaryProvider = mock(ObjectProvider.class);
-    CodeMapGenerator gen = new CodeMapGenerator(gh, nullSummaryProvider);
+    CodeMapGenerator gen =
+        new CodeMapGenerator(
+            gh,
+            new SpringHttpArchitectureEvidenceRenderer(gh, new SpringHttpSurfaceExtractor()),
+            nullSummaryProvider);
 
     // 60 service files — extractor should cap at MAX_FUNCTION_FILES (40).
     List<String> files =
@@ -281,7 +290,11 @@ class CodeMapGeneratorFunctionMapTest {
     GitHubRepoService gh = mock(GitHubRepoService.class);
     @SuppressWarnings("unchecked")
     ObjectProvider<FilePurposeSummaryService> nullSummaryProvider = mock(ObjectProvider.class);
-    CodeMapGenerator gen = new CodeMapGenerator(gh, nullSummaryProvider);
+    CodeMapGenerator gen =
+        new CodeMapGenerator(
+            gh,
+            new SpringHttpArchitectureEvidenceRenderer(gh, new SpringHttpSurfaceExtractor()),
+            nullSummaryProvider);
 
     StringBuilder content = new StringBuilder();
     for (int i = 0; i < 50; i++) {
@@ -310,7 +323,11 @@ class CodeMapGeneratorFunctionMapTest {
     GitHubRepoService gh = mock(GitHubRepoService.class);
     @SuppressWarnings("unchecked")
     ObjectProvider<FilePurposeSummaryService> nullSummaryProvider = mock(ObjectProvider.class);
-    CodeMapGenerator gen = new CodeMapGenerator(gh, nullSummaryProvider);
+    CodeMapGenerator gen =
+        new CodeMapGenerator(
+            gh,
+            new SpringHttpArchitectureEvidenceRenderer(gh, new SpringHttpSurfaceExtractor()),
+            nullSummaryProvider);
 
     when(gh.listRepoFilesResult(any(), any(), any()))
         .thenReturn(
@@ -331,13 +348,81 @@ class CodeMapGeneratorFunctionMapTest {
   }
 
   @Test
+  void generatePinsExactSpringRouteAndConfigurationEvidenceToSourceRevision() {
+    GitHubRepoService gh = mock(GitHubRepoService.class);
+    @SuppressWarnings("unchecked")
+    ObjectProvider<FilePurposeSummaryService> nullSummaryProvider = mock(ObjectProvider.class);
+    CodeMapGenerator gen =
+        new CodeMapGenerator(
+            gh,
+            new SpringHttpArchitectureEvidenceRenderer(gh, new SpringHttpSurfaceExtractor()),
+            nullSummaryProvider);
+    String controller = "src/main/java/example/SimulationController.java";
+    String config = "src/main/resources/application.properties";
+    when(gh.listRepoFilesResult(any(), eq("deadbeef"), any()))
+        .thenReturn(GitHubRepoService.RepoFileListResult.success(List.of(controller, config)));
+    lenient()
+        .when(gh.readRepoFile(any(), eq(controller), eq("deadbeef"), any()))
+        .thenReturn(
+            GitHubRepoService.RepoFileResult.success(
+                """
+                @RestController
+                class SimulationController {
+                  @PostMapping("/casino-game")
+                  Object simulate() { return null; }
+                }
+                """));
+    lenient()
+        .when(gh.readRepoFile(any(), eq(config), eq("deadbeef"), any()))
+        .thenReturn(
+            GitHubRepoService.RepoFileResult.success("server.servlet.context-path=/simulation\n"));
+
+    String markdown = gen.generate("owner/repo", "deadbeef", "pat");
+
+    assertTrue(markdown.contains("Source revision: `deadbeef`"));
+    assertTrue(markdown.contains("Status: `AVAILABLE`"));
+    assertTrue(markdown.contains("`POST /simulation/casino-game`"));
+    assertTrue(markdown.contains("`server.servlet.context-path=/simulation`"));
+    assertTrue(markdown.contains("`src/main/resources/application.properties:1`"));
+    assertTrue(markdown.contains("`src/main/java/example/SimulationController.java:3`"));
+  }
+
+  @Test
+  void generateMarksSpringSurfaceUnavailableWhenAnyPinnedSourceReadFails() {
+    GitHubRepoService gh = mock(GitHubRepoService.class);
+    @SuppressWarnings("unchecked")
+    ObjectProvider<FilePurposeSummaryService> nullSummaryProvider = mock(ObjectProvider.class);
+    CodeMapGenerator gen =
+        new CodeMapGenerator(
+            gh,
+            new SpringHttpArchitectureEvidenceRenderer(gh, new SpringHttpSurfaceExtractor()),
+            nullSummaryProvider);
+    String controller = "src/main/java/example/SimulationController.java";
+    when(gh.listRepoFilesResult(any(), eq("deadbeef"), any()))
+        .thenReturn(GitHubRepoService.RepoFileListResult.success(List.of(controller)));
+    lenient()
+        .when(gh.readRepoFile(any(), eq(controller), eq("deadbeef"), any()))
+        .thenReturn(GitHubRepoService.RepoFileResult.failed("GITHUB_CONTENTS_HTTP_ERROR", 503));
+
+    String markdown = gen.generate("owner/repo", "deadbeef", "pat");
+
+    assertTrue(markdown.contains("Status: `UNAVAILABLE`"));
+    assertTrue(markdown.contains("Reason: `GITHUB_CONTENTS_HTTP_ERROR`"));
+    assertFalse(markdown.contains("POST /"));
+  }
+
+  @Test
   void generate_omits_functions_section_when_zero_matches() {
     // No interesting source files → no Functions section. The header + Top-level layout still
     // render so the generator's other contracts are unbroken.
     GitHubRepoService gh = mock(GitHubRepoService.class);
     @SuppressWarnings("unchecked")
     ObjectProvider<FilePurposeSummaryService> nullSummaryProvider = mock(ObjectProvider.class);
-    CodeMapGenerator gen = new CodeMapGenerator(gh, nullSummaryProvider);
+    CodeMapGenerator gen =
+        new CodeMapGenerator(
+            gh,
+            new SpringHttpArchitectureEvidenceRenderer(gh, new SpringHttpSurfaceExtractor()),
+            nullSummaryProvider);
 
     when(gh.listRepoFilesResult(any(), any(), any()))
         .thenReturn(
@@ -356,7 +441,11 @@ class CodeMapGeneratorFunctionMapTest {
     GitHubRepoService gh = mock(GitHubRepoService.class);
     @SuppressWarnings("unchecked")
     ObjectProvider<FilePurposeSummaryService> nullSummaryProvider = mock(ObjectProvider.class);
-    CodeMapGenerator gen = new CodeMapGenerator(gh, nullSummaryProvider);
+    CodeMapGenerator gen =
+        new CodeMapGenerator(
+            gh,
+            new SpringHttpArchitectureEvidenceRenderer(gh, new SpringHttpSurfaceExtractor()),
+            nullSummaryProvider);
     when(gh.listRepoFilesResult(any(), any(), any()))
         .thenThrow(new RuntimeException("upstream body must not become a valid empty codemap"));
 
@@ -373,7 +462,11 @@ class CodeMapGeneratorFunctionMapTest {
     GitHubRepoService gh = mock(GitHubRepoService.class);
     @SuppressWarnings("unchecked")
     ObjectProvider<FilePurposeSummaryService> nullSummaryProvider = mock(ObjectProvider.class);
-    CodeMapGenerator gen = new CodeMapGenerator(gh, nullSummaryProvider);
+    CodeMapGenerator gen =
+        new CodeMapGenerator(
+            gh,
+            new SpringHttpArchitectureEvidenceRenderer(gh, new SpringHttpSurfaceExtractor()),
+            nullSummaryProvider);
     when(gh.listRepoFilesResult(any(), any(), any()))
         .thenReturn(GitHubRepoService.RepoFileListResult.failed("MISSING_GITHUB_PAT", null));
 
@@ -392,7 +485,11 @@ class CodeMapGeneratorFunctionMapTest {
     GitHubRepoService gh = mock(GitHubRepoService.class);
     @SuppressWarnings("unchecked")
     ObjectProvider<FilePurposeSummaryService> nullSummaryProvider = mock(ObjectProvider.class);
-    CodeMapGenerator gen = new CodeMapGenerator(gh, nullSummaryProvider);
+    CodeMapGenerator gen =
+        new CodeMapGenerator(
+            gh,
+            new SpringHttpArchitectureEvidenceRenderer(gh, new SpringHttpSurfaceExtractor()),
+            nullSummaryProvider);
     when(gh.listRepoFilesResult(any(), any(), any()))
         .thenReturn(
             GitHubRepoService.RepoFileListResult.success(
@@ -410,7 +507,11 @@ class CodeMapGeneratorFunctionMapTest {
     GitHubRepoService gh = mock(GitHubRepoService.class);
     @SuppressWarnings("unchecked")
     ObjectProvider<FilePurposeSummaryService> nullSummaryProvider = mock(ObjectProvider.class);
-    CodeMapGenerator gen = new CodeMapGenerator(gh, nullSummaryProvider);
+    CodeMapGenerator gen =
+        new CodeMapGenerator(
+            gh,
+            new SpringHttpArchitectureEvidenceRenderer(gh, new SpringHttpSurfaceExtractor()),
+            nullSummaryProvider);
     when(gh.getBranchHeadSha(any(), any(), any())).thenReturn(null);
 
     assertThrows(
@@ -425,7 +526,11 @@ class CodeMapGeneratorFunctionMapTest {
     GitHubRepoService gh = mock(GitHubRepoService.class);
     @SuppressWarnings("unchecked")
     ObjectProvider<FilePurposeSummaryService> nullSummaryProvider = mock(ObjectProvider.class);
-    CodeMapGenerator gen = new CodeMapGenerator(gh, nullSummaryProvider);
+    CodeMapGenerator gen =
+        new CodeMapGenerator(
+            gh,
+            new SpringHttpArchitectureEvidenceRenderer(gh, new SpringHttpSurfaceExtractor()),
+            nullSummaryProvider);
     when(gh.getBranchHeadSha(any(), any(), any())).thenReturn("abc123sha");
     when(gh.listRepoFilesResult(any(), eq("abc123sha"), any()))
         .thenReturn(GitHubRepoService.RepoFileListResult.success(List.of("README.md")));

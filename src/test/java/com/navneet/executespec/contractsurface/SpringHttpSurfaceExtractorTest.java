@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -66,6 +67,38 @@ class SpringHttpSurfaceExtractorTest {
     assertThat(snapshot.digest()).matches("[0-9a-f]{64}");
     assertThat(snapshot.routes())
         .allMatch(route -> route.source().contains("CasinoController.java:"));
+    assertThat(snapshot.configurationSources())
+        .extracting(source -> source.value() + " " + source.source())
+        .containsExactly("/simulation src/main/resources/application.yml:3");
+    assertThat(snapshot.schemaVersion()).isEqualTo(2);
+  }
+
+  @Test
+  void immutableSourceSnapshotPreservesExactRouteAndConfigurationProvenance() {
+    var snapshot =
+        extractor.extract(
+            Map.of(
+                "src/main/resources/application.properties",
+                "spring.application.name=casino\nserver.servlet.context-path=/simulation\n",
+                "src/main/java/example/SimulationController.java",
+                """
+                package example;
+                @RestController
+                class SimulationController {
+                  @PostMapping("/casino-game")
+                  Object simulate() { return null; }
+                }
+                """));
+
+    assertThat(snapshot.routes())
+        .extracting(route -> route.method() + " " + route.path() + " " + route.source())
+        .containsExactly(
+            "POST /simulation/casino-game src/main/java/example/SimulationController.java:4");
+    assertThat(snapshot.configurationSources())
+        .extracting(source -> source.property() + "=" + source.value() + " " + source.source())
+        .containsExactly(
+            "server.servlet.context-path=/simulation"
+                + " src/main/resources/application.properties:2");
   }
 
   @Test

@@ -11,6 +11,8 @@ import java.util.Set;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.router.LlmProvider;
+import com.navneet.executespec.router.ModelResolver;
+import com.navneet.executespec.router.ResolvedModel;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -28,6 +30,12 @@ public final class PlannerOutputUtils {
   private static final Logger log = LoggerFactory.getLogger(PlannerOutputUtils.class);
 
   private PlannerOutputUtils() {}
+
+  public static ResolvedModel resolveConfiguredRoute(
+      ModelResolver modelResolver, PlannerRequest request) {
+    return modelResolver.resolve(
+        "OutlinePlannerAgent", resolveProviderForTitle(request.provider()));
+  }
 
   // Plan parsing
 

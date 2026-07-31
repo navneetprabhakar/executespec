@@ -41,6 +41,31 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class ProjectRepoController {
 
+  public record WebhookInstallResponse(
+      boolean installed,
+      String eligibilityState,
+      String blockingGate,
+      String errorCode,
+      String reason,
+      String message,
+      String remediation,
+      boolean retryable,
+      Integer upstreamStatus) {
+
+    static WebhookInstallResponse from(GitHubRepoService.WebhookInstallResult result) {
+      return new WebhookInstallResponse(
+          result.installed(),
+          result.eligibilityState(),
+          result.blockingGate(),
+          result.errorCode(),
+          result.reason(),
+          result.reason(),
+          result.remediation(),
+          result.retryable(),
+          result.upstreamStatus());
+    }
+  }
+
   private final ProjectRepoService service;
   private final LocalProjectSourceService localProjectSourceService;
   private final GitHubRepoService gitHub;
@@ -124,12 +149,12 @@ public class ProjectRepoController {
   }
 
   /**
-   * v2.5.2 — install the PR webhook on this repo using the caller's PAT. Returns {@code {installed:
-   * true}} on success or {@code {installed: false, reason}} when install failed (no PAT admin,
-   * network, etc.).
+   * Install the PR webhook using the caller's PAT. Success and failure both use the structured
+   * admission contract; failures identify the exact server/PAT/access/upstream gate and a safe
+   * remediation instead of collapsing every condition into a generic gateway error.
    */
   @PostMapping("/api/repos/{repoId}/webhook")
-  public ResponseEntity<java.util.Map<String, Object>> installRepoWebhook(
+  public ResponseEntity<WebhookInstallResponse> installRepoWebhook(
       @AuthenticationPrincipal AppUserDetails userDetails, @PathVariable UUID repoId) {
     // Installing a webhook mutates both GitHub and shared source state.
     service.loadRepoForWrite(
@@ -138,23 +163,28 @@ public class ProjectRepoController {
         userDetails.getUser().getOrgId(),
         isOrgAdmin(userDetails));
     var u = userDetails.getUser();
-    boolean ok =
+    GitHubRepoService.WebhookInstallResult result =
         service.installWebhook(
             repoId, u.getGithubPat(), u.getId(), u.getOrgId(), isOrgAdmin(userDetails));
-    if (ok) {
-      return ResponseEntity.ok(java.util.Map.of("installed", true));
+    WebhookInstallResponse response = WebhookInstallResponse.from(result);
+    if (result.installed()) {
+      return ResponseEntity.ok(response);
     }
-    // Upstream (GitHub API) rejected — typically missing `admin:repo_hook` scope or
-    // the repo is archived. 502 communicates "we talked to upstream and it said no"
-    // so API consumers don't treat this as success. Closes adversarial-test-report
-    // Finding 9.
-    return ResponseEntity.status(org.springframework.http.HttpStatus.BAD_GATEWAY)
-        .body(
-            java.util.Map.of(
-                "installed",
-                false,
-                "reason",
-                "GitHub API rejected webhook install — check PAT has admin:repo_hook"));
+    return ResponseEntity.status(webhookFailureStatus(result)).body(response);
+  }
+
+  private static HttpStatus webhookFailureStatus(GitHubRepoService.WebhookInstallResult result) {
+    if ("WEBHOOK_CONFIGURATION_UNAVAILABLE".equals(result.errorCode())) {
+      return HttpStatus.SERVICE_UNAVAILABLE;
+    }
+    if ("GITHUB_RATE_LIMITED".equals(result.errorCode())) return HttpStatus.TOO_MANY_REQUESTS;
+    if ("GITHUB_REPOSITORY_NOT_ACCESSIBLE".equals(result.errorCode())) {
+      return HttpStatus.NOT_FOUND;
+    }
+    if (result.upstreamStatus() != null && result.upstreamStatus() >= 500) {
+      return HttpStatus.BAD_GATEWAY;
+    }
+    return HttpStatus.UNPROCESSABLE_ENTITY;
   }
 
   @DeleteMapping("/api/repos/{repoId}")

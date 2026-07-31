@@ -20,6 +20,35 @@ class TaskExecutionBriefCompilerTest {
   }
 
   @Test
+  void executableCompilationAlwaysRejectsOmittedFullPlanRequirementOwnership() {
+    Plan omitted =
+        Plan.builder()
+            .requirements(
+                List.of(
+                    new RequirementSpec(
+                        "R1", "Implement the service", RequirementSpec.RequirementKind.FUNCTIONAL),
+                    new RequirementSpec(
+                        "R7", "Preserve the endpoint", RequirementSpec.RequirementKind.FUNCTIONAL),
+                    new RequirementSpec(
+                        "R9", "Add CI", RequirementSpec.RequirementKind.FUNCTIONAL)))
+            .tasks(
+                List.of(
+                    PlannedTask.builder()
+                        .id("T1")
+                        .title("Implement service")
+                        .description("Implement the service")
+                        .meetsRequirements(List.of("R1"))
+                        .build()))
+            .build();
+
+    assertThatThrownBy(() -> TaskExecutionBriefCompiler.compileExecutable(omitted))
+        .isInstanceOf(TaskExecutionBriefCompiler.ExecutablePlanContractException.class)
+        .hasMessageContaining("Requirements not covered by any task")
+        .hasMessageContaining("R7")
+        .hasMessageContaining("R9");
+  }
+
+  @Test
   void executableCompilationRejectsAnApiPrefixAddedToAnExactSourceRoute() {
     Plan mutated =
         Plan.builder()
@@ -51,12 +80,19 @@ class TaskExecutionBriefCompilerTest {
   void executableCompilationAcceptsExactRootAndApiNamespaces() {
     Plan exact =
         Plan.builder()
+            .requirements(
+                List.of(
+                    new RequirementSpec(
+                        "R1",
+                        "Implement the exact routes",
+                        RequirementSpec.RequirementKind.FUNCTIONAL)))
             .tasks(
                 List.of(
                     PlannedTask.builder()
                         .id("T1")
                         .title("Implement exact routes")
                         .description("Implement GET /casino-game and GET /api/system/health.")
+                        .meetsRequirements(List.of("R1"))
                         .touchesFiles(List.of("backend/routes/system.java"))
                         .build()))
             .build();
