@@ -485,9 +485,18 @@ public class LlmRouter {
    * failover) and makes customer runs survive transient upstream errors. This is public because
    * durable logical-call budgets must reserve the exact same physical-attempt envelope.
    */
-  public static final int TRANSIENT_RETRY_MAX_ATTEMPTS = 4;
+  public static final int TRANSIENT_RETRY_MAX_ATTEMPTS = 6;
 
-  private static final long TRANSIENT_RETRY_BASE_MS = 2000L;
+  /**
+   * Accuracy-over-latency spacing (2026-08-01, TB 2.1 campaign): one initial call plus five retries
+   * at 5s/15s/25s/45s/65s. The old 2s/4s/8s ladder re-hit a still-pressured provider fast enough to
+   * exhaust the envelope inside one throttling window; wider gaps trade wall clock for a materially
+   * higher chance the transient clears before the envelope is spent.
+   */
+  private static final long[] TRANSIENT_RETRY_BACKOFF_MS = {
+    5_000L, 15_000L, 25_000L, 45_000L, 65_000L
+  };
+
   private static final Duration DEFAULT_TRANSPORT_TIMEOUT = Duration.ofSeconds(120);
   private static final Duration ANTHROPIC_TRANSPORT_TIMEOUT = Duration.ofSeconds(300);
   private static final Duration TRANSPORT_SAFETY_MARGIN = Duration.ofSeconds(15);
@@ -782,7 +791,9 @@ public class LlmRouter {
             contextSanitizer.sanitizeException(e));
         lastError = e;
         if (attempt < TRANSIENT_RETRY_MAX_ATTEMPTS && isTransientError(e)) {
-          long backoffMs = TRANSIENT_RETRY_BASE_MS * (1L << (attempt - 1));
+          long backoffMs =
+              TRANSIENT_RETRY_BACKOFF_MS[
+                  Math.min(attempt - 1, TRANSIENT_RETRY_BACKOFF_MS.length - 1)];
           log.warn(
               "LlmRouter transient error on {} — retrying in {}ms", request.provider(), backoffMs);
           backoffSleep(backoffMs);
