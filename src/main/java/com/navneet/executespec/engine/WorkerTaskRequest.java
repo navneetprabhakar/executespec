@@ -170,6 +170,9 @@ import lombok.Builder;
  *     is unbounded. It is best-effort because restart recovery does not hydrate RunCostTracker.
  * @param workerStartedAtEpochMs start timestamp used by nested provider/tool guards to enforce the
  *     task wall-clock ceiling between ordinary iteration boundaries.
+ * @param zeroWriteSalvageAllowed whether a zero-write attempt may make the final unverified
+ *     best-guess edit. Recovery attempts over an already-mutated shared workspace set this false:
+ *     "zero writes in this attempt" does not mean "empty patch for the run".
  */
 @Builder(toBuilder = true)
 public record WorkerTaskRequest(
@@ -202,7 +205,8 @@ public record WorkerTaskRequest(
     Long shutdownReserveMs,
     Double dollarCap,
     Long taskTotalTokenCap,
-    Long workerStartedAtEpochMs) {
+    Long workerStartedAtEpochMs,
+    Boolean zeroWriteSalvageAllowed) {
 
   public WorkerTaskRequest {
     if (provider == null || provider.isBlank())
@@ -211,5 +215,9 @@ public record WorkerTaskRequest(
     if (userPrompt == null || userPrompt.isBlank())
       throw new IllegalArgumentException("userPrompt required");
     if (context == null) throw new IllegalArgumentException("context required");
+  }
+
+  public boolean zeroWriteSalvageEnabled() {
+    return !Boolean.FALSE.equals(zeroWriteSalvageAllowed);
   }
 }
