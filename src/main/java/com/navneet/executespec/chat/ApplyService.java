@@ -5,6 +5,7 @@ import java.util.List;
 
 import com.navneet.executespec.agent.PromptTrustBoundary;
 import com.navneet.executespec.config.AgentProperties;
+import com.navneet.executespec.config.featureflag.FeatureFlagService;
 import com.navneet.executespec.engine.WorkerAgent;
 import com.navneet.executespec.engine.WorkerResult;
 import com.navneet.executespec.engine.WorkerTaskRequest;
@@ -63,6 +64,8 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 public class ApplyService {
 
+  static final String TRANSACTIONAL_APPLY_FLAG = "correction.transactional-apply.enabled";
+
   /** Base iter cap — single-repo / scratch-workspace applies. */
   static final int APPLY_BASE_ITER_CAP = 90;
 
@@ -70,6 +73,7 @@ public class ApplyService {
   static final int APPLY_PROJECT_MULTIPLIER = 2;
 
   private final PipelineRunRepository runRepo;
+  private final FeatureFlagService featureFlagService;
   private final WorkerAgent worker;
   private final ModelResolver modelResolver;
   private final AgentProperties agentProps;
@@ -91,6 +95,19 @@ public class ApplyService {
   public ApplyResult apply(String runId, String suggestion, String source) {
     if (suggestion == null || suggestion.isBlank()) {
       throw new IllegalArgumentException("suggestion is required");
+    }
+    // This legacy path mutates the terminal run workspace and immediately publishes it without
+    // the reversible checkpoint -> evidence invalidation -> deterministic gates -> read-only
+    // review -> acceptance lifecycle used by automatic continuation. Keep it fail-closed until
+    // Apply itself is routed through that exact lifecycle. A feature-flag row is seeded OFF so an
+    // operator cannot accidentally enable an unknown flag; enabling it is an explicit rollout
+    // decision after the transactional Apply contract and its E2E evidence exist.
+    if (!featureFlagService.isEnabled(TRANSACTIONAL_APPLY_FLAG)) {
+      throw new IllegalStateException(
+          "CORRECTION_TRANSACTIONAL_APPLY_DISABLED: Apply to Run is temporarily unavailable"
+              + " because this mutation path cannot yet prove checkpointed rollback, fresh"
+              + " deterministic validation, and publication eligibility. Start a gated"
+              + " correction run instead.");
     }
     PipelineRun run =
         runRepo

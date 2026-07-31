@@ -33,6 +33,7 @@ import lombok.extern.slf4j.Slf4j;
 public class CodeMapGenerator {
 
   private final GitHubRepoService github;
+  private final SpringHttpArchitectureEvidenceRenderer springHttpEvidence;
 
   /**
    * PR-N2 (2026-05-14) — optional LLM-summary path. Flag-gated via {@code
@@ -44,9 +45,6 @@ public class CodeMapGenerator {
   private final org.springframework.beans.factory.ObjectProvider<FilePurposeSummaryService>
       purposeSummaryProvider;
 
-  private static final Pattern SPRING_ROUTE =
-      Pattern.compile(
-          "@(?:Get|Post|Put|Delete|Patch|Request)Mapping\\s*\\(\\s*(?:value\\s*=\\s*)?\"([^\"]+)\"");
   private static final Pattern EXPRESS_ROUTE =
       Pattern.compile(
           "(?:app|router)\\.(?:get|post|put|delete|patch)\\s*\\(\\s*['\"]([^'\"]+)['\"]");
@@ -102,6 +100,10 @@ public class CodeMapGenerator {
               + "generated|gen|\\.next|\\.nuxt|\\.svelte-kit)(?:/|$)|"
               + "\\.(?:test|spec|d|min|bundle|generated)\\.(?:[a-z]+)$",
           Pattern.CASE_INSENSITIVE);
+
+  static boolean isSkippedPath(String path) {
+    return SKIP_PATH.matcher(path).find();
+  }
 
   public record Result(String markdown, String sha) {}
 
@@ -206,6 +208,9 @@ public class CodeMapGenerator {
       md.append("\n");
     }
 
+    md.append(
+        springHttpEvidence.render(repoFullName, defaultBranch, files, pat, inventory.truncated()));
+
     // Routes — scan a small set of likely files; full-text scan would be too expensive.
     List<String> routes = scanRoutes(repoFullName, defaultBranch, files, pat);
     if (!routes.isEmpty()) {
@@ -309,7 +314,9 @@ public class CodeMapGenerator {
                 return;
               }
               if (content == null || content.isBlank()) return;
-              extract(SPRING_ROUTE, content, out);
+              // Spring routes are intentionally excluded from this heuristic lane. The
+              // deterministic surface block above is the only Spring method/path authority; when
+              // it is UNAVAILABLE, a context-free regex fragment must not reappear as a route.
               extract(EXPRESS_ROUTE, content, out);
               extract(FASTAPI_ROUTE, content, out);
             });

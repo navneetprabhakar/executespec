@@ -1222,14 +1222,24 @@ public class RunLifecycleService {
     if (retryAdmission.replayed()) {
       return retryAdmission;
     }
-    ExecutionContext retryBaseContext = durableRunRootContext(runId, workspace);
+    ExecutionContext retryBaseContext;
+    try {
+      retryBaseContext = durableRunRootContext(runId, workspace);
+    } catch (RuntimeException contextFailure) {
+      // The exact approval CAS above is already durable. A policy/context reconstruction failure
+      // happens before an operation lease, provider call, or workspace mutation, so retaining
+      // CLAIMED would strand the user until the four-hour stale sweeper runs. Release only this
+      // approval id+proposal digest and let the unchanged proposal be retried immediately.
+      releaseContinuationApprovalClaimPreservingFailure(task, override, contextFailure);
+      throw contextFailure;
+    }
     RunLlmOperationLifecycleService.PhaseLease retryLease;
     try {
       retryLease =
           requireRunOperationLifecycle()
               .beginExecutionRetry(retryBaseContext, runId, retryProvider, retryModel);
     } catch (RuntimeException admissionFailure) {
-      releaseContinuationApprovalClaim(task, override);
+      releaseContinuationApprovalClaimPreservingFailure(task, override, admissionFailure);
       throw admissionFailure;
     }
 
@@ -1639,7 +1649,7 @@ public class RunLifecycleService {
           runStatusBeforeCorrection,
           runReasonBeforeCorrection,
           runCompletedBeforeCorrection);
-      releaseContinuationApprovalClaim(task, override);
+      releaseContinuationApprovalClaimPreservingFailure(task, override, dispatchFailure);
       throw dispatchFailure;
     }
     return override == null
@@ -2007,8 +2017,17 @@ public class RunLifecycleService {
     if (task == null || override == null) {
       return;
     }
-    taskRepo.releaseContinuationApprovalClaim(
-        task.getTaskId(), override.approvalId(), override.proposalDigest());
+    int released =
+        taskRepo.releaseContinuationApprovalClaim(
+            task.getTaskId(), override.approvalId(), override.proposalDigest());
+    if (released != 1) {
+      throw new IllegalStateException(
+          "CONTINUATION_APPROVAL_CLAIM_RELEASE_FAILED: expected one exact claimed/queued receipt"
+              + " for task "
+              + task.getTaskId()
+              + " but released "
+              + released);
+    }
     task.setContinuationApprovalId(null);
     task.setContinuationApprovalProposalDigest(null);
     task.setContinuationApprovalStatus(null);
@@ -2016,6 +2035,20 @@ public class RunLifecycleService {
     task.setContinuationApprovalModel(null);
     task.setContinuationApprovalAction(null);
     task.setContinuationApprovalPostReview(null);
+  }
+
+  private void releaseContinuationApprovalClaimPreservingFailure(
+      AgentTask task, RetryProviderOverride override, RuntimeException originalFailure) {
+    try {
+      releaseContinuationApprovalClaim(task, override);
+    } catch (RuntimeException releaseFailure) {
+      originalFailure.addSuppressed(releaseFailure);
+      log.error(
+          "Continuation approval claim release failed after pre-queue failure task={} approval={}",
+          task == null ? "-" : task.getTaskId(),
+          override == null ? "-" : override.approvalId(),
+          releaseFailure);
+    }
   }
 
   private void restoreRetryAdmissionState(

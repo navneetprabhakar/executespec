@@ -10,6 +10,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.agent.Classification;
 import com.navneet.executespec.agent.ClassificationResult;
 import com.navneet.executespec.agent.CoherencePlannerAgent;
+import com.navneet.executespec.agent.ExactPlannerRouteAttestation;
 import com.navneet.executespec.agent.OutlinePlannerAgent;
 import com.navneet.executespec.agent.Plan;
 import com.navneet.executespec.agent.PlanExpansionDependencyEnricher;
@@ -68,6 +69,7 @@ class RunPlanningCoordinator {
   private final TaskExpanderAgent taskExpander;
   private final CoherencePlannerAgent coherencePlanner;
   private final PipelineExecutorPool pool;
+  private final PlannerRecoveryRouteSelector plannerRecoveryRouteSelector;
 
   /**
    * Deterministic, zero-LLM repository orientation shared by the planner and worker paths. The
@@ -488,7 +490,7 @@ class RunPlanningCoordinator {
       if (!patchResult.validated()) {
         throw new IllegalStateException(patchResult.validationFailure());
       }
-      Plan normalizedFinalPlan = normalizeAndCompileFinalPlan(patchResult.patchedPlan());
+      Plan normalizedFinalPlan = TaskExpanderAgent.normalizeFinalPlan(patchResult.patchedPlan());
       rejectedCandidate = normalizedFinalPlan;
       patchResult =
           new CoherencePlannerAgent.PatchResult(
@@ -514,38 +516,15 @@ class RunPlanningCoordinator {
                 patchResult.validationFailure());
       }
       if (!finalPlanViolations.isEmpty()) {
+        // All strategy shapes converge on stabilizeExecutablePlan before the gate. Keep provider
+        // repair there so LARGE cannot spend one repair here and a second repair at the shared
+        // boundary, and so SMALL/MEDIUM/SINGLE_SHOT receive the identical fail-closed lifecycle.
         log.warn(
-            "V2 run={} final contract validation still has {} violation(s) after bounded"
-                + " deterministic stabilization; invoking one provider repair: {}",
+            "V2 run={} assembled LARGE plan has {} executable-contract violation(s); deferring to"
+                + " shared exact-route stabilization: {}",
             runId,
             finalPlanViolations.size(),
             boundedRepairTriggerSummary(finalPlanViolations, contextSanitizer));
-        CoherencePlannerAgent.PatchResult repairResult =
-            coherencePlanner.repairContractViolations(
-                normalizedFinalPlan,
-                effectiveReq,
-                rootCtx.child("_coherence_contract_repair_"),
-                finalPlanViolations);
-        if (!repairResult.validated()) {
-          throw new IllegalStateException(repairResult.validationFailure());
-        }
-        normalizedFinalPlan = normalizeAndCompileFinalPlan(repairResult.patchedPlan());
-        rejectedCandidate = normalizedFinalPlan;
-        finalPlanViolations = TaskExpanderAgent.finalPlanContractViolations(normalizedFinalPlan);
-        if (!finalPlanViolations.isEmpty()) {
-          throw new IllegalStateException(
-              "assembled plan still violates executable contracts after one targeted repair: "
-                  + String.join("; ", finalPlanViolations));
-        }
-        List<String> combinedSummaries = new ArrayList<>(patchResult.patchSummaries());
-        combinedSummaries.addAll(repairResult.patchSummaries());
-        patchResult =
-            new CoherencePlannerAgent.PatchResult(
-                normalizedFinalPlan,
-                patchResult.patchesApplied() + repairResult.patchesApplied(),
-                List.copyOf(combinedSummaries),
-                true,
-                null);
       }
     } catch (Exception coherenceEx) {
       persistRejectedPlanDiagnostic(runId, rejectedCandidate);
@@ -601,14 +580,253 @@ class RunPlanningCoordinator {
   record DeterministicFinalPlanPass(
       Plan plan, List<String> violations, boolean stabilizationAttempted) {}
 
+  record ExecutablePlanOutcome(
+      Plan plan,
+      RuntimeException failure,
+      PlannerRecoveryPolicyBlockedException policyBlock,
+      boolean contractRejection,
+      String statusReason,
+      String failureReason) {
+    static ExecutablePlanOutcome accepted(Plan plan) {
+      return new ExecutablePlanOutcome(plan, null, null, false, null, null);
+    }
+  }
+
+  ExecutablePlanOutcome stabilizeExecutablePlanOutcome(
+      String runId,
+      Plan candidate,
+      PlannerRequest request,
+      ExecutionContext rootContext,
+      PlannerRecoveryRouteSelector.Policy policy) {
+    try {
+      return ExecutablePlanOutcome.accepted(
+          stabilizeExecutablePlan(runId, candidate, request, rootContext, policy));
+    } catch (PlannerRecoveryPolicyBlockedException blocked) {
+      return new ExecutablePlanOutcome(
+          null,
+          blocked,
+          blocked,
+          true,
+          "PLANNER_RECOVERY_POLICY_BLOCKED",
+          blocked.code() + ": " + blocked.getMessage());
+    } catch (RuntimeException failure) {
+      boolean contractRejection = PlannerFailureDiagnostic.isExecutableContractRejection(failure);
+      if (contractRejection) persistRejectedPlanDiagnostic(runId, candidate);
+      log.error(
+          "V2 run={} executable plan compiler {}",
+          runId,
+          contractRejection ? "rejected its contract" : "failed internally",
+          failure);
+      String genericReason = "planning could not compile a safe executable task contract";
+      return new ExecutablePlanOutcome(
+          null,
+          failure,
+          null,
+          contractRejection,
+          "PLANNER_UNAVAILABLE",
+          contractRejection
+              ? PlannerFailureDiagnostic.describe(failure, genericReason, contextSanitizer)
+              : genericReason);
+    }
+  }
+
   static DeterministicFinalPlanPass stabilizeFinalPlanBeforeProviderRepair(
       Plan plan, List<String> currentViolations) {
     if (currentViolations == null || currentViolations.isEmpty()) {
       return new DeterministicFinalPlanPass(plan, List.of(), false);
     }
-    Plan stabilized = normalizeAndCompileFinalPlan(plan);
-    return new DeterministicFinalPlanPass(
-        stabilized, TaskExpanderAgent.finalPlanContractViolations(stabilized), true);
+    Plan stabilized = TaskExpanderAgent.normalizeFinalPlan(plan);
+    try {
+      stabilized = TaskExecutionBriefCompiler.compile(stabilized);
+      return new DeterministicFinalPlanPass(
+          stabilized, TaskExpanderAgent.finalPlanContractViolations(stabilized), true);
+    } catch (TaskExecutionBriefCompiler.ExecutablePlanContractException contractFailure) {
+      List<String> violations =
+          new ArrayList<>(TaskExpanderAgent.finalPlanContractViolations(stabilized));
+      violations.add(contractFailure.getMessage());
+      return new DeterministicFinalPlanPass(
+          stabilized, List.copyOf(new java.util.LinkedHashSet<>(violations)), true);
+    }
+  }
+
+  /**
+   * Shared pre-gate executable-plan lifecycle for every planning strategy.
+   *
+   * <p>First compile is deterministic. A rejected provider-produced contract receives exactly one
+   * targeted repair on the run-bound OutlinePlanner provider/model with cross-provider failover
+   * disabled. A second rejection may spend at most one alternative quality-ranked route from the
+   * effective PLANNING matrix when the immutable run policy permits it. In today's one-cell-per-
+   * provider matrix that normally means a provider change; a same-provider model step-up exists
+   * only when the effective matrix exposes a distinct exact route. Exact pins, confirmation
+   * requirements, benchmark policy, and provider availability remain hard bounds.
+   */
+  Plan stabilizeExecutablePlan(
+      String runId,
+      Plan candidate,
+      PlannerRequest req,
+      ExecutionContext rootCtx,
+      PlannerRecoveryRouteSelector.Policy recoveryPolicy) {
+    Plan normalized = TaskExpanderAgent.normalizeFinalPlan(candidate);
+    try {
+      return TaskExecutionBriefCompiler.compileExecutable(normalized, req.spec());
+    } catch (TaskExecutionBriefCompiler.ExecutablePlanContractException firstRejection) {
+      persistRejectedPlanDiagnostic(runId, normalized);
+      List<String> violations =
+          new ArrayList<>(TaskExpanderAgent.finalPlanContractViolations(normalized));
+      violations.add(firstRejection.getMessage());
+      violations = List.copyOf(new java.util.LinkedHashSet<>(violations));
+
+      com.navneet.executespec.router.ResolvedModel exactRoute;
+      try {
+        exactRoute = outlinePlanner.resolveConfiguredRoute(req);
+      } catch (RuntimeException routeFailure) {
+        throw new PlannerRecoveryPolicyBlockedException(
+            PlannerRecoveryPolicyBlockedException.Code.EXACT_REPAIR_ROUTE_UNAVAILABLE,
+            "planner recovery policy blocked: exact configured repair route unavailable",
+            routeFailure);
+      }
+      log.warn(
+          "V2 run={} executable plan rejected; invoking one strict same-route repair on {}/{}: {}",
+          runId,
+          exactRoute.providerName(),
+          exactRoute.getModel(),
+          boundedRepairTriggerSummary(violations, contextSanitizer));
+
+      CoherencePlannerAgent.PatchResult repaired;
+      try {
+        repaired =
+            coherencePlanner.repairContractViolationsExact(
+                normalized,
+                req,
+                rootCtx.child("_final_plan_contract_repair_"),
+                violations,
+                exactRoute);
+      } catch (ExactPlannerRouteAttestation.MismatchException mismatch) {
+        throw physicalRouteMismatch(mismatch);
+      }
+      if (!repaired.validated()) {
+        persistRejectedPlanDiagnostic(runId, repaired.patchedPlan());
+        return attemptEscalatedPlannerRepair(
+            runId,
+            normalized,
+            req,
+            rootCtx,
+            recoveryPolicy,
+            exactRoute,
+            violations,
+            "same-route repair failed: " + repaired.validationFailure(),
+            firstRejection);
+      }
+
+      Plan repairedCandidate = TaskExpanderAgent.normalizeFinalPlan(repaired.patchedPlan());
+      try {
+        return TaskExecutionBriefCompiler.compileExecutable(repairedCandidate, req.spec());
+      } catch (TaskExecutionBriefCompiler.ExecutablePlanContractException exhausted) {
+        persistRejectedPlanDiagnostic(runId, repairedCandidate);
+        List<String> remaining =
+            new ArrayList<>(TaskExpanderAgent.finalPlanContractViolations(repairedCandidate));
+        remaining.add(exhausted.getMessage());
+        remaining = List.copyOf(new java.util.LinkedHashSet<>(remaining));
+        return attemptEscalatedPlannerRepair(
+            runId,
+            repairedCandidate,
+            req,
+            rootCtx,
+            recoveryPolicy,
+            exactRoute,
+            remaining,
+            "same-route repair remained deterministically invalid",
+            exhausted);
+      }
+    }
+  }
+
+  private Plan attemptEscalatedPlannerRepair(
+      String runId,
+      Plan candidate,
+      PlannerRequest req,
+      ExecutionContext rootCtx,
+      PlannerRecoveryRouteSelector.Policy recoveryPolicy,
+      com.navneet.executespec.router.ResolvedModel currentRoute,
+      List<String> violations,
+      String trigger,
+      Throwable priorFailure) {
+    PlannerRecoveryRouteSelector.Selection selection =
+        plannerRecoveryRouteSelector.select(runId, currentRoute, recoveryPolicy);
+    if (!selection.selected()) {
+      throw new PlannerRecoveryPolicyBlockedException(
+          blockedCode(selection.blockReason()),
+          "planner recovery policy blocked: "
+              + selection.blockReason()
+              + " ("
+              + String.join("; ", selection.reasons())
+              + ")",
+          priorFailure);
+    }
+
+    var escalatedRoute = selection.route();
+    log.warn(
+        "V2 run={} {} — executing one authorized strict planner escalation on {}/{}",
+        runId,
+        trigger,
+        escalatedRoute.providerName(),
+        escalatedRoute.getModel());
+    CoherencePlannerAgent.PatchResult escalated;
+    try {
+      escalated =
+          coherencePlanner.repairContractViolationsExact(
+              candidate,
+              req,
+              rootCtx.child("_final_plan_contract_escalation_"),
+              violations,
+              escalatedRoute);
+    } catch (ExactPlannerRouteAttestation.MismatchException mismatch) {
+      throw physicalRouteMismatch(mismatch);
+    }
+    if (!escalated.validated()) {
+      persistRejectedPlanDiagnostic(runId, escalated.patchedPlan());
+      throw new PlannerRecoveryPolicyBlockedException(
+          PlannerRecoveryPolicyBlockedException.Code.NO_QUALITY_STEP_UP,
+          "planner recovery policy blocked: authorized planner escalation failed ("
+              + escalated.validationFailure()
+              + ")",
+          priorFailure);
+    }
+    Plan escalatedCandidate = TaskExpanderAgent.normalizeFinalPlan(escalated.patchedPlan());
+    try {
+      return TaskExecutionBriefCompiler.compileExecutable(escalatedCandidate, req.spec());
+    } catch (TaskExecutionBriefCompiler.ExecutablePlanContractException finalRejection) {
+      persistRejectedPlanDiagnostic(runId, escalatedCandidate);
+      throw new PlannerRecoveryPolicyBlockedException(
+          PlannerRecoveryPolicyBlockedException.Code.NO_QUALITY_STEP_UP,
+          "planner recovery policy blocked: bounded planner escalation was exhausted and the plan"
+              + " remains deterministically invalid",
+          finalRejection);
+    }
+  }
+
+  private static PlannerRecoveryPolicyBlockedException physicalRouteMismatch(
+      ExactPlannerRouteAttestation.MismatchException mismatch) {
+    return new PlannerRecoveryPolicyBlockedException(
+        PlannerRecoveryPolicyBlockedException.Code.PHYSICAL_ROUTE_MISMATCH,
+        "planner recovery policy blocked: " + mismatch.getMessage(),
+        mismatch);
+  }
+
+  private static PlannerRecoveryPolicyBlockedException.Code blockedCode(
+      PlannerRecoveryRouteSelector.BlockReason reason) {
+    return switch (reason) {
+      case ROUTE_PINNED -> PlannerRecoveryPolicyBlockedException.Code.ROUTE_PINNED;
+      case CONFIRMATION_REQUIRED ->
+          PlannerRecoveryPolicyBlockedException.Code.CONFIRMATION_REQUIRED;
+      case NO_AVAILABLE_MATRIX_ROUTE ->
+          PlannerRecoveryPolicyBlockedException.Code.NO_AVAILABLE_MATRIX_ROUTE;
+      case BENCHMARK_EVIDENCE_REQUIRED ->
+          PlannerRecoveryPolicyBlockedException.Code.BENCHMARK_EVIDENCE_REQUIRED;
+      case NO_QUALITY_STEP_UP -> PlannerRecoveryPolicyBlockedException.Code.NO_QUALITY_STEP_UP;
+      case ESCALATION_LIMIT_EXHAUSTED ->
+          PlannerRecoveryPolicyBlockedException.Code.ESCALATION_LIMIT_EXHAUSTED;
+    };
   }
 
   private static Plan normalizeAndCompileFinalPlan(Plan plan) {

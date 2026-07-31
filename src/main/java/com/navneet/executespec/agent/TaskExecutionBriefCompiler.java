@@ -31,6 +31,10 @@ public final class TaskExecutionBriefCompiler {
     Plan compiled = compile(TaskExpanderAgent.normalizeFinalPlan(plan));
     List<String> violations = TaskExpanderAgent.finalPlanContractViolations(compiled);
     violations = new ArrayList<>(violations);
+    // Requirement ownership is execution authority, not a rollout-gated quality heuristic. Keep
+    // it at the shared final compiler so SMALL/MEDIUM/LARGE/SINGLE_SHOT all enter the same bounded
+    // repair/escalation lifecycle and no strategy can spend an earlier duplicate repair.
+    violations.addAll(PlannerOutputUtils.validateRequirementCoverage(compiled));
     violations.addAll(PlanSourceHttpRouteGate.violations(originalRequest, compiled));
     if (!violations.isEmpty()) throw contractFailure(String.join("; ", violations));
     return compiled;

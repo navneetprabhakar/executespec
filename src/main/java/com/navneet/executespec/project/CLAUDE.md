@@ -112,6 +112,13 @@ for existing rows, and adds scoped unique/indexed local identities and lease loo
   metadata and installing a GitHub webhook require ORG_ADMIN for ORG-scoped repos and the owner for
   USER-scoped repos. The service repeats this check before any SCM credential lookup, provider call,
   or persistence even when a controller has already admitted the request.
+- Manual GitHub webhook installation returns a secret-free structured admission result rather than
+  collapsing server configuration, missing/invalid PAT, repository access, GitHub permission,
+  rate-limit, and upstream outage failures into one 502. The response carries eligibility state,
+  blocking gate, error code, actionable reason/remediation, retryability, and safe upstream status;
+  the `message` alias ensures the shared web transport presents the real reason instead of its
+  generic status fallback. The outbound GitHub call is bounded by a 5-second connect deadline and
+  20-second request deadline, safely inside the web transport's 30-second request deadline.
 - Repository topology and HEAD evidence have an explicit cache-invalidation boundary.
   `ProjectSourceFreshnessInvalidator` deletes the exact repo-scoped Workspace Health origin-SHA key
   and the exact linked project staleness keys after sync, after-commit link/unlink/create+link, and
@@ -202,6 +209,10 @@ bypassed with a raw user id.
   allow-list authorize an OpenAI embedding key. OWN_KEYS still cannot fall through to a platform
   key; when no authorized OpenAI capability exists, readiness is honestly lexical-only and an old
   READY state is dynamically exposed as STALE.
+- Embedding execution-context idempotency is actor-scoped through an opaque hash in the v2 policy
+  epoch. The immutable context records the initiating member for usage attribution, so a different
+  authorized project member refreshing the same repository/SHA must receive a separate context
+  rather than hitting `IDEMPOTENCY_CONFLICT` before inventory and reporting 0/0 files.
 
 ## System Map UI evidence states
 

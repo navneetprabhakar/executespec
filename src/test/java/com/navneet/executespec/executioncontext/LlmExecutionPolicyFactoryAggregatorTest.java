@@ -493,6 +493,87 @@ class LlmExecutionPolicyFactoryAggregatorTest {
     assertSelectedProviderLock(captured.policy());
   }
 
+  @Test
+  void projectEmbeddingIdempotencyNamespaceIncludesInitiatingActor() {
+    LlmExecutionContextService contexts = mock(LlmExecutionContextService.class);
+    ProjectRepository projects = mock(ProjectRepository.class);
+    OrgRepository orgs = mock(OrgRepository.class);
+    ApiKeyResolver keys = mock(ApiKeyResolver.class);
+    ModelRegistry registry = mock(ModelRegistry.class);
+    Project project =
+        Project.builder()
+            .id("project-1")
+            .orgId("org-1")
+            .createdBy("owner-1")
+            .aiProvider(LlmProvider.ANTHROPIC)
+            .build();
+    Org org =
+        Org.builder()
+            .id("org-1")
+            .tier("ENTERPRISE")
+            .keySourceMode("OWN_KEYS")
+            .enabledProviders("openai")
+            .build();
+    when(projects.findById("project-1")).thenReturn(java.util.Optional.of(project));
+    when(orgs.findById("org-1")).thenReturn(java.util.Optional.of(org));
+    when(keys.resolveWithProvenance("owner-1"))
+        .thenReturn(
+            new ApiKeyResolver.CredentialResolution(
+                new ResolvedKeys(
+                    null, "openai-secret", null, null, null, null, "OWN_KEYS", Set.of("openai")),
+                "org-1",
+                Map.of("openai", ApiKeyResolver.CredentialOrigin.ORG)));
+    when(registry.allModels()).thenReturn(Map.of());
+    LlmExecutionContext saved = mock(LlmExecutionContext.class);
+    when(saved.getId()).thenReturn("context-1");
+    when(contexts.create(any())).thenReturn(saved);
+    LlmExecutionPolicyFactory factory =
+        new LlmExecutionPolicyFactory(
+            contexts,
+            mock(PipelineRunRepository.class),
+            mock(AgentSessionRepository.class),
+            projects,
+            orgs,
+            keys,
+            registry);
+
+    factory.forProjectEmbedding(
+        "project-1",
+        "ProjectCodeEmbedding",
+        "PROJECT_REPOSITORY",
+        "repo:sha",
+        "repo:sha",
+        "openai",
+        "member-a");
+    factory.forProjectEmbedding(
+        "project-1",
+        "ProjectCodeEmbedding",
+        "PROJECT_REPOSITORY",
+        "repo:sha",
+        "repo:sha",
+        "openai",
+        "member-b");
+    factory.forProjectEmbedding(
+        "project-1",
+        "ProjectCodeEmbedding",
+        "PROJECT_REPOSITORY",
+        "repo:sha",
+        "repo:sha",
+        "openai",
+        "member-a");
+
+    ArgumentCaptor<LlmExecutionContextCreateRequest> request =
+        ArgumentCaptor.forClass(LlmExecutionContextCreateRequest.class);
+    verify(contexts, times(3)).create(request.capture());
+    List<LlmExecutionContextCreateRequest> requests = request.getAllValues();
+    assertThat(requests.get(0).sourceId()).isEqualTo(requests.get(1).sourceId());
+    assertThat(requests.get(0).idempotencyKey()).isNotEqualTo(requests.get(1).idempotencyKey());
+    assertThat(requests.get(0).idempotencyKey()).isEqualTo(requests.get(2).idempotencyKey());
+    assertThat(requests.get(0).idempotencyKey())
+        .startsWith("embedding-route-v2:openai:")
+        .doesNotContain("member-a");
+  }
+
   private static void assertSelectedProviderLock(LlmPolicySnapshot policy) {
     assertThat(policy.keySourceMode()).isEqualTo(LlmPolicySnapshot.KeySourceMode.OWN_KEYS);
     assertThat(policy.requestedProvider()).isEqualTo("deepseek");

@@ -6,7 +6,11 @@ import static org.mockito.Mockito.mock;
 import java.util.List;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.navneet.executespec.cost.EffectiveRouteProjection;
+import com.navneet.executespec.router.AgentTier;
+import com.navneet.executespec.router.LlmProvider;
 import com.navneet.executespec.router.ModelResolver;
+import com.navneet.executespec.router.ResolvedModel;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -20,7 +24,8 @@ class CoherencePlannerPatchSafetyTest {
 
   private final ObjectMapper mapper = new ObjectMapper();
   private final CoherencePlannerAgent agent =
-      new CoherencePlannerAgent(mock(LlmRouter.class), mapper, mock(ModelResolver.class), null);
+      new CoherencePlannerAgent(
+          mock(LlmRouter.class), mapper, mock(ModelResolver.class), null, null);
 
   private Plan planWith(String... files) {
     PlannedTask task =
@@ -50,6 +55,34 @@ class CoherencePlannerPatchSafetyTest {
                 new CoherencePlannerAgent.PatchResult(
                     plan, 0, List.of(), false, "fatal contract conflicts: schema mismatch")))
         .isFalse();
+  }
+
+  @Test
+  void exactPlannerRepairRequiresMatchingPhysicalLedgerRoute() {
+    ResolvedModel requested =
+        ResolvedModel.builder()
+            .actualProvider(LlmProvider.OPENROUTER)
+            .model("deepseek-v4-pro")
+            .agentTier(AgentTier.PLANNING)
+            .build();
+
+    assertThat(
+            ExactPlannerRouteAttestation.mismatch(
+                requested,
+                new EffectiveRouteProjection(
+                    "openrouter", "deepseek-v4-pro", EffectiveRouteProjection.Attribution.LEDGER)))
+        .isNull();
+    assertThat(
+            ExactPlannerRouteAttestation.mismatch(
+                requested,
+                new EffectiveRouteProjection(
+                    "openrouter", "grok-4.20", EffectiveRouteProjection.Attribution.LEDGER)))
+        .contains("route mismatch")
+        .contains("deepseek-v4-pro")
+        .contains("grok-4.20");
+    assertThat(
+            ExactPlannerRouteAttestation.mismatch(requested, EffectiveRouteProjection.UNATTRIBUTED))
+        .contains("no single physical-route attestation");
   }
 
   @Test

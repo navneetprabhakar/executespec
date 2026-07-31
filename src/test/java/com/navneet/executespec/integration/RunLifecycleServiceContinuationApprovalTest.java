@@ -588,6 +588,51 @@ class RunLifecycleServiceContinuationApprovalTest {
   }
 
   @Test
+  void contextReconstructionFailureReleasesExactClaimBeforeAnySpendOrMutation() throws Exception {
+    Files.createDirectories(tempDir.resolve(RUN_ID));
+    PipelineRun run = retryableRun();
+    AgentTask task = approvalTask("TASK_BOUNDARY");
+    when(runRepo.findById(RUN_ID)).thenReturn(Optional.of(run));
+    when(taskRepo.findById(TASK_KEY)).thenReturn(Optional.of(task));
+    when(llmExecutionPolicyFactory.forRun(RUN_ID))
+        .thenThrow(new IllegalStateException("persisted execution context unavailable"));
+
+    assertThatThrownBy(() -> service.approveContinuation(RUN_ID, TASK_ID))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("persisted execution context unavailable");
+
+    verify(taskRepo).releaseContinuationApprovalClaim(eq(TASK_KEY), anyString(), anyString());
+    verify(executorService, never()).execute(any(Runnable.class));
+    verify(executor, never()).execute(any(), any(SequentialExecutor.ResumeRequest.class));
+  }
+
+  @Test
+  void contextFailureReportsDurableClaimReleaseFailureInsteadOfPretendingRetryIsSafe()
+      throws Exception {
+    Files.createDirectories(tempDir.resolve(RUN_ID));
+    PipelineRun run = retryableRun();
+    AgentTask task = approvalTask("TASK_BOUNDARY");
+    when(runRepo.findById(RUN_ID)).thenReturn(Optional.of(run));
+    when(taskRepo.findById(TASK_KEY)).thenReturn(Optional.of(task));
+    when(llmExecutionPolicyFactory.forRun(RUN_ID))
+        .thenThrow(new IllegalStateException("persisted execution context unavailable"));
+    when(taskRepo.releaseContinuationApprovalClaim(anyString(), anyString(), anyString()))
+        .thenReturn(0);
+
+    IllegalStateException thrown =
+        org.junit.jupiter.api.Assertions.assertThrows(
+            IllegalStateException.class, () -> service.approveContinuation(RUN_ID, TASK_ID));
+
+    assertThat(thrown.getMessage()).contains("persisted execution context unavailable");
+    assertThat(thrown.getSuppressed()).hasSize(1);
+    assertThat(thrown.getSuppressed()[0].getMessage())
+        .contains("CONTINUATION_APPROVAL_CLAIM_RELEASE_FAILED")
+        .contains("released 0");
+    verify(executorService, never()).execute(any(Runnable.class));
+    verify(executor, never()).execute(any(), any(SequentialExecutor.ResumeRequest.class));
+  }
+
+  @Test
   void durableQueueStatusPrecedesExecutorSubmission() throws Exception {
     Files.createDirectories(tempDir.resolve(RUN_ID));
     PipelineRun run = retryableRun();
