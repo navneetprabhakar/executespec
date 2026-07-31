@@ -107,6 +107,50 @@ class ExecutionOrchestratorTerminalStatusTest {
   }
 
   @Test
+  void finalPrFailureEmitsFailedOnlyAfterWinningDurableTerminalTransition() {
+    ExecutionRun run = withStatus("EXECUTING");
+    when(runRepo.findById("exec-1")).thenReturn(Optional.of(run));
+    when(runRepo.save(any(ExecutionRun.class))).thenAnswer(inv -> inv.getArgument(0));
+
+    orchestrator.settleFinalPrFailure("exec-1", blockedFinalPr());
+
+    assertThat(run.getStatus()).isEqualTo("FAILED");
+    assertThat(run.getFailureReason()).contains("PUBLICATION_TESTS_UNPROVEN");
+    verify(broadcaster)
+        .emit(
+            eq("exec:exec-1"),
+            argThat(
+                event ->
+                    "EXEC_FAILED".equals(event.type())
+                        && event.taskId() != null
+                        && event.taskId().contains("TESTS")));
+  }
+
+  @Test
+  void finalPrFailureDoesNotEmitFailedWhenAbortAlreadyOwnsTerminalState() {
+    ExecutionRun run = withStatus("ABORTED");
+    when(runRepo.findById("exec-1")).thenReturn(Optional.of(run));
+    when(runRepo.save(any(ExecutionRun.class))).thenAnswer(inv -> inv.getArgument(0));
+
+    orchestrator.settleFinalPrFailure("exec-1", blockedFinalPr());
+
+    assertThat(run.getStatus()).isEqualTo("ABORTED");
+    verifyNoInteractions(broadcaster);
+  }
+
+  private static ExecutionBranchService.FinalPrResult blockedFinalPr() {
+    return new ExecutionBranchService.FinalPrResult(
+        false,
+        null,
+        "PUBLICATION_TESTS_UNPROVEN",
+        "TESTS",
+        "Tests were not verified",
+        true,
+        "Run tests and regenerate evidence.",
+        "pipeline-1");
+  }
+
+  @Test
   void conflictThenSuccess_returnsTrueAfterRetry() {
     // Each findById returns a *fresh* EXECUTING ExecutionRun — mirrors the
     // real refetch contract. Without this, the impl's in-place setStatus

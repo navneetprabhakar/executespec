@@ -72,6 +72,8 @@ class ProjectChatToolsSecurityTest {
   @Mock CodeIndexWorkspaceMaterializer codeIndexWorkspaceMaterializer;
   @Mock ProjectRepositorySourceReadTools repositorySourceReadTools;
   @Mock ToolCallback repositorySourceReadCallback;
+  @Mock ProjectHttpSurfaceReadTool httpSurfaceReadTool;
+  @Mock ToolCallback httpSurfaceReadCallback;
   @Mock SearchFilesTool searchFilesTool;
   @Mock CodeIndexingService codeIndexingService;
   @Mock CodeChunkStore codeChunkStore;
@@ -95,6 +97,16 @@ class ProjectChatToolsSecurityTest {
                 .build());
     lenient().when(repositorySourceReadTools.bind(any())).thenReturn(repositorySourceReadCallback);
     lenient().when(repositorySourceReadCallback.call(any())).thenReturn("{\"ok\":true}");
+    lenient()
+        .when(httpSurfaceReadCallback.getToolDefinition())
+        .thenReturn(
+            DefaultToolDefinition.builder()
+                .name("list_public_http_surface")
+                .description("test")
+                .inputSchema("{\"type\":\"object\"}")
+                .build());
+    lenient().when(httpSurfaceReadTool.bind(any())).thenReturn(httpSurfaceReadCallback);
+    lenient().when(httpSurfaceReadCallback.call(any())).thenReturn("{\"ok\":true}");
   }
 
   @Test
@@ -109,7 +121,8 @@ class ProjectChatToolsSecurityTest {
             "run_code_review",
             "search_code",
             "search_project_docs")
-        .contains("list_repos", "search_repo_files", "read_repo_file_range");
+        .contains(
+            "list_repos", "search_repo_files", "read_repo_file_range", "list_public_http_surface");
   }
 
   @Test

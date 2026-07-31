@@ -34,6 +34,32 @@ class PipelineRunTerminalClaimIntegrationTest extends PostgresIntegrationBase {
   }
 
   @Test
+  void deterministicHttpValidationFailureDurablyTransitionsToFailedWithExactCode() {
+    String runId = "terminal-validation-" + UUID.randomUUID();
+    String code = "DETERMINISTIC_HTTP_REQUIREMENT_MISSING";
+    runRepository.save(
+        PipelineRun.builder()
+            .runId(runId)
+            .status("REVIEWING")
+            .failureReason("VALIDATION_FAILED[" + code + "]: POST /items is absent")
+            .build());
+
+    int claimed =
+        runRepository.claimTerminalTransitionWithReasons(
+            runId,
+            RunValidationKickoff.unavailableValidationTerminalStatus(code),
+            code,
+            "VALIDATION_FAILED[" + code + "]: POST /items is absent",
+            Instant.now());
+
+    assertThat(claimed).isEqualTo(1);
+    PipelineRun persisted = runRepository.findById(runId).orElseThrow();
+    assertThat(persisted.getStatus()).isEqualTo("FAILED");
+    assertThat(persisted.getStatusReason()).isEqualTo(code);
+    assertThat(persisted.getFailureReason()).contains("POST /items is absent");
+  }
+
+  @Test
   void cancellationWinsAgainstLateTerminalClaim() {
     String runId = "terminal-cancel-" + UUID.randomUUID();
     runRepository.save(PipelineRun.builder().runId(runId).status("REVIEWING").build());

@@ -76,6 +76,7 @@ public final class ChatToolPolicy {
           Map.entry("get_project_memory", Capability.PROJECT_READ),
           Map.entry("get_latest_architecture", Capability.PROJECT_READ),
           Map.entry("search_repo_files", Capability.PROJECT_READ),
+          Map.entry("list_public_http_surface", Capability.PROJECT_READ),
           Map.entry("read_repo_file_range", Capability.PROJECT_READ),
           // Semantic search may lazily build/query an embedding index, so it is paid analysis.
           Map.entry("search_code", Capability.PROJECT_ANALYSE),

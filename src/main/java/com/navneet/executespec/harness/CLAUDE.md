@@ -2,9 +2,11 @@
 
 Approved continuation resumes carry an exact target task, provider, model, action, and
 schema-versioned proposal digest. `SequentialExecutor` applies the strict provider/model override
-only to that target, bypasses tier/adaptive/cross-model routing, and verifies physical
-provider-call evidence before persistence. Fresh and crash-recovered runs without such approval
-retain normal matrix routing. `ExecutorResumeRequest` owns exact resume identity/route validation;
+only to that target. The exact path uses a mechanical budget-only config and never invokes initial
+routing, tier/model resolution, adaptive routing, or cross-model failover; unavailable approved
+providers fail closed before `WorkerAgent` can enter the provider boundary. It also verifies
+physical provider-call evidence before persistence. Fresh and crash-recovered runs without such
+approval retain normal matrix routing. `ExecutorResumeRequest` owns exact resume identity/route validation;
 `PlanTaskMetadata` owns the compact dependency/file views used by wave scheduling so the executor
 does not absorb those policies.
 

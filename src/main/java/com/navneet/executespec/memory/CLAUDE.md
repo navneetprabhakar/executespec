@@ -68,6 +68,13 @@ paths/content, files over 5 MiB, and source content over 20k characters (leaving
 beneath the 24k serialized-envelope ceiling and returning a resumable `nextStartLine` when the
 content budget is reached). It never exposes a host path.
 
+`ProjectHttpSurfaceReadTool.list_public_http_surface` is the deterministic Spring companion for
+endpoint questions. It materializes the same authorized linked revision, then delegates to
+`SpringHttpSurfaceExtractor` so `server.servlet.context-path`, class mappings, and method mappings
+are combined into exact method/path/source rows. The model must prefer this tool over manually
+inferring public routes from controller annotations; multi-repository projects require an exact
+linked `owner/repo` selection.
+
 ## Explicit confirmed actions (V292)
 
 Paid/mutating project actions are still absent from the model's callback registry. Web and

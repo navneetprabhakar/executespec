@@ -20,9 +20,29 @@ class RunValidationFailureReporter {
   private final PipelineRunRepository runRepo;
   private final SseBroadcaster broadcaster;
   private final ContextSanitizer contextSanitizer;
+  private final java.util.concurrent.ConcurrentMap<String, String> currentAttemptCodes =
+      new java.util.concurrent.ConcurrentHashMap<>();
+
+  void beginAttempt(String runId) {
+    currentAttemptCodes.remove(runId);
+    clear(runId);
+  }
 
   void report(String runId, Throwable failure, String operationPhase) {
     ValidationFailureDiagnostic diagnostic = diagnostic(failure, contextSanitizer);
+    record(runId, diagnostic, operationPhase, failure);
+  }
+
+  void reportUnavailable(String runId, String code, String reason, String operationPhase) {
+    record(runId, new ValidationFailureDiagnostic(code, reason), operationPhase, null);
+  }
+
+  private void record(
+      String runId,
+      ValidationFailureDiagnostic diagnostic,
+      String operationPhase,
+      Throwable originatingFailure) {
+    currentAttemptCodes.put(runId, diagnostic.code());
     persist(runId, diagnostic);
     try {
       broadcaster.emit(
@@ -34,7 +54,7 @@ class RunValidationFailureReporter {
               diagnostic.reason(),
               operationPhase == null ? "validation" : operationPhase));
     } catch (RuntimeException eventFailure) {
-      failure.addSuppressed(eventFailure);
+      if (originatingFailure != null) originatingFailure.addSuppressed(eventFailure);
       log.warn(
           "RunOrchestrator run={} validation failure event could not be emitted: {}",
           runId,
@@ -43,6 +63,7 @@ class RunValidationFailureReporter {
   }
 
   void clear(String runId) {
+    currentAttemptCodes.remove(runId);
     try {
       runRepo
           .findById(runId)
@@ -64,12 +85,18 @@ class RunValidationFailureReporter {
   }
 
   String persistedReasonWhenUnavailable(String runId, String statusReason) {
-    if (!"VALIDATION_REPORT_UNAVAILABLE".equals(statusReason)) return null;
+    if (!"VALIDATION_REPORT_UNAVAILABLE".equals(statusReason)
+        && !isTerminalDeterministicFailure(statusReason)) return null;
     return runRepo
         .findById(runId)
         .map(run -> run.getFailureReason())
         .filter(reason -> reason != null && reason.startsWith("VALIDATION_FAILED["))
         .orElse(null);
+  }
+
+  String persistedDeterministicFailureCode(String runId) {
+    String currentCode = currentAttemptCodes.remove(runId);
+    return isTerminalDeterministicFailure(currentCode) ? currentCode : null;
   }
 
   private void persist(String runId, ValidationFailureDiagnostic diagnostic) {
@@ -88,6 +115,11 @@ class RunValidationFailureReporter {
           diagnostic.code(),
           persistenceFailure);
     }
+  }
+
+  private static boolean isTerminalDeterministicFailure(String code) {
+    return code != null
+        && (code.startsWith("DETERMINISTIC_HTTP_") || code.startsWith("BROWNFIELD_"));
   }
 
   static ValidationFailureDiagnostic diagnostic(Throwable failure, ContextSanitizer sanitizer) {

@@ -82,6 +82,14 @@ export function correctionEvidenceHistory(
   );
 }
 
+export function correctionEvidenceInvalidationLabel(
+  evidenceInvalidated: boolean | undefined,
+): string {
+  if (evidenceInvalidated === true) return 'Yes — prior evidence was made stale';
+  if (evidenceInvalidated === false) return 'No — prior evidence was explicitly retained';
+  return 'Not recorded';
+}
+
 /**
  * Independent trust facts for the publication boundary. No score is used as a proxy for any row:
  * an eligible score cannot hide missing tests, a stale generation, or a route mismatch.
@@ -148,7 +156,11 @@ export function publicationTrustFacts(
           ? `${action.changedFiles.length} changed: ${action.changedFiles.join(', ')}`
           : 'changed files unreported',
         action.diffDigest ? `diff ${action.diffDigest.slice(0, 12)}` : null,
-        action.evidenceInvalidated === true ? 'prior evidence invalidated' : null,
+        action.evidenceInvalidated === true
+          ? 'prior evidence invalidated'
+          : action.evidenceInvalidated === false
+            ? 'prior evidence explicitly retained'
+            : null,
         action.validationRegenerated === true ? 'validation regenerated' : null,
       ]
         .filter(Boolean)

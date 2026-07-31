@@ -136,6 +136,7 @@ class RunValidationKickoff {
     try {
       var run = runRepo.findById(runId).orElse(null);
       if (run == null) return java.util.Optional.empty();
+      failureReporter.beginAttempt(runId);
       var tasks = taskRepo.findByRunId(runId);
 
       // Resolve the baseline-to-final Git change set. The previous implementation walked the
@@ -431,6 +432,12 @@ class RunValidationKickoff {
       }
       if (savedReport.isPresent()) {
         failureReporter.clear(runId);
+      } else {
+        failureReporter.reportUnavailable(
+            runId,
+            "VALIDATION_RESULT_NOT_PERSISTED",
+            "Validation completed without a durable report",
+            operationPhase);
       }
       log.info("RunOrchestrator run={} validation report generated", runId);
       return savedReport;
@@ -491,6 +498,16 @@ class RunValidationKickoff {
 
   String persistedFailureReason(String runId, String statusReason) {
     return failureReporter.persistedReasonWhenUnavailable(runId, statusReason);
+  }
+
+  String persistedDeterministicFailureCode(String runId) {
+    return failureReporter.persistedDeterministicFailureCode(runId);
+  }
+
+  static String unavailableValidationTerminalStatus(String deterministicFailureCode) {
+    return deterministicFailureCode == null || deterministicFailureCode.isBlank()
+        ? "PARTIAL"
+        : "FAILED";
   }
 
   private static List<WorkerReport> workerProvenanceClaims(ExecutionResult result) {

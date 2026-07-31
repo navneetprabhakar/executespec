@@ -855,8 +855,11 @@ class RunLifecycleServiceContinuationApprovalTest {
             RUN_ID, TASK_ID, 1, java.util.Set.of("prior-attempt"));
     org.springframework.test.util.ReflectionTestUtils.setField(service, "effectiveRoutes", routes);
     when(routes.captureAttemptFence(RUN_ID, TASK_ID, 1)).thenReturn(routeFence);
+    // Use a distinct String instance so the assertion below proves attribution receives the
+    // provider-call ledger value, not the equal requested model string decoded from the proposal.
+    String physicalWorkerModel = new String("gpt-5.4");
     when(routes.successfulTaskAttemptAfter(routeFence))
-        .thenReturn(attemptEvidence("openai", "gpt-5.4", "worker-approved"));
+        .thenReturn(attemptEvidence("openai", physicalWorkerModel, "worker-approved"));
     var reviewerFence =
         new com.navneet.executespec.cost.RunEffectiveRouteService.ReviewerAttemptFence(
             RUN_ID, 2, java.util.Set.of("reviewer-prior"));
@@ -874,8 +877,16 @@ class RunLifecycleServiceContinuationApprovalTest {
     assertThat(request.getValue().provider()).isEqualTo("openai");
     assertThat(request.getValue().model()).isEqualTo("gpt-5.4");
     verify(persistenceWriter).updateStatus(RUN_ID, "REVIEWING");
+    ArgumentCaptor<String> attributedWorkerModel = ArgumentCaptor.forClass(String.class);
     verify(tokenAttributor)
-        .attributeWorkerAdditionalTask(RUN_ID, TASK_KEY, 150, 40, "OPENAI", "gpt-5.4");
+        .attributeWorkerAdditionalTask(
+            eq(RUN_ID),
+            eq(TASK_KEY),
+            eq(150L),
+            eq(40L),
+            eq("OPENAI"),
+            attributedWorkerModel.capture());
+    assertThat(attributedWorkerModel.getValue()).isSameAs(physicalWorkerModel);
     ArgumentCaptor<com.navneet.executespec.reviewer.ReviewerRequest> reviewerRequest =
         ArgumentCaptor.forClass(com.navneet.executespec.reviewer.ReviewerRequest.class);
     verify(reviewer).review(reviewerRequest.capture());
