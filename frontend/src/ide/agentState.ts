@@ -185,16 +185,23 @@ export function agentReducer(state: AgentState, action: AgentAction): AgentState
   switch (action.type) {
     case 'load:start':
       return {...state, status: 'loadingSession', error: null};
-    case 'load:success':
+    case 'load:success': {
+      // A preserved selection can be newer than the fetched list snapshot (created after the
+      // fetch started). Keep its row visible in the drawer instead of silently dropping it.
+      const selectedRow =
+        action.selectedId && !action.sessions.some((s) => s.id === action.selectedId)
+          ? (state.sessions.find((s) => s.id === action.selectedId) ?? null)
+          : null;
       return {
         ...state,
         status: 'idle',
-        sessions: action.sessions,
+        sessions: selectedRow ? [selectedRow, ...action.sessions] : action.sessions,
         gates: action.gates,
         capabilities: action.capabilities,
         selectedId: action.selectedId,
         error: null,
       };
+    }
     case 'load:error':
       return {...state, status: 'error', error: action.error};
     case 'sessions:set':

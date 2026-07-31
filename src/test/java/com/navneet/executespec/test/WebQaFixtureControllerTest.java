@@ -101,7 +101,11 @@ class WebQaFixtureControllerTest {
             users,
             mock(SseBroadcaster.class),
             featureFlags(),
-            webQaEnvironment());
+            webQaEnvironment(),
+            mock(com.navneet.executespec.project.security.ProjectAccessGuard.class),
+            mock(
+                com.navneet.executespec.codeintel.repository.ProjectArchitectureDocRepository
+                    .class));
 
     Map<String, Object> result = controller.cleanup(new AppUserDetails(user, null));
 
@@ -247,7 +251,11 @@ class WebQaFixtureControllerTest {
             mock(AppUserRepository.class),
             mock(SseBroadcaster.class),
             featureFlags(),
-            webQaEnvironment());
+            webQaEnvironment(),
+            mock(com.navneet.executespec.project.security.ProjectAccessGuard.class),
+            mock(
+                com.navneet.executespec.codeintel.repository.ProjectArchitectureDocRepository
+                    .class));
 
     PipelineRun run =
         controller.createRun("user-1", "org-1", "COMPLETE", "CLEAN_COMPLETION", "fixture", true);
@@ -281,7 +289,11 @@ class WebQaFixtureControllerTest {
             mock(AppUserRepository.class),
             mock(SseBroadcaster.class),
             featureFlags(),
-            webQaEnvironment());
+            webQaEnvironment(),
+            mock(com.navneet.executespec.project.security.ProjectAccessGuard.class),
+            mock(
+                com.navneet.executespec.codeintel.repository.ProjectArchitectureDocRepository
+                    .class));
 
     controller.createLegacyPlanGate("web-qa-gate");
 
@@ -332,7 +344,11 @@ class WebQaFixtureControllerTest {
             mock(AppUserRepository.class),
             mock(SseBroadcaster.class),
             featureFlags(),
-            unsafe);
+            unsafe,
+            mock(com.navneet.executespec.project.security.ProjectAccessGuard.class),
+            mock(
+                com.navneet.executespec.codeintel.repository.ProjectArchitectureDocRepository
+                    .class));
     assertThat(sharedProfileController.safetyEvidence().safe()).isFalse();
   }
 
@@ -357,7 +373,11 @@ class WebQaFixtureControllerTest {
             mock(AppUserRepository.class),
             mock(SseBroadcaster.class),
             featureFlags(),
-            unsafe);
+            unsafe,
+            mock(com.navneet.executespec.project.security.ProjectAccessGuard.class),
+            mock(
+                com.navneet.executespec.codeintel.repository.ProjectArchitectureDocRepository
+                    .class));
 
     assertThatThrownBy(() -> controller.seed(user()))
         .isInstanceOf(ResponseStatusException.class)
@@ -399,7 +419,9 @@ class WebQaFixtureControllerTest {
         mock(AppUserRepository.class),
         mock(SseBroadcaster.class),
         featureFlags(),
-        webQaEnvironment());
+        webQaEnvironment(),
+        mock(com.navneet.executespec.project.security.ProjectAccessGuard.class),
+        mock(com.navneet.executespec.codeintel.repository.ProjectArchitectureDocRepository.class));
   }
 
   private static FeatureFlagService featureFlags() {
