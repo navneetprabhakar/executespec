@@ -84,6 +84,12 @@ class ValidationReportServiceVerificationLedgerTest {
                   "specAdherenceScore": 88,
                   "overallAccuracyGrade": "B",
                   "testCoverageLevel": "PARTIAL",
+                  "specEvidenceStatus": "CITED",
+                  "specEvidenceLocations": ["src/App.tsx:10-30"],
+                  "endpointEvidenceStatus": "CITED",
+                  "endpointEvidenceLocations": ["src/App.tsx:10-30"],
+                  "testEvidenceStatus": "CITED",
+                  "testEvidenceLocations": ["src/App.test.tsx:5-18"],
                   "endpointCoverage": {"coveragePercent": 75}
                 }
                 """)
@@ -139,6 +145,8 @@ class ValidationReportServiceVerificationLedgerTest {
                 {
                   "specAdherenceScore": 89,
                   "overallAccuracyGrade": "B",
+                  "specEvidenceStatus": "CITED",
+                  "specEvidenceLocations": ["src/AuthService.java:20-42"],
                   "unknownRequirements": [
                     "Could not verify that caller identity comes from an authenticated principal"
                   ]
@@ -174,6 +182,59 @@ class ValidationReportServiceVerificationLedgerTest {
                         && "LLM_ASSESSMENT".equals(reference.source())));
     assertEquals(84, dto.verifiedScore());
     assertEquals("WARN", find(dto.verificationLedger(), "score-summary").status());
+  }
+
+  @Test
+  void uncitedModelAssessmentCannotPresentPassOrFailAsSourceBackedEvidence() {
+    ValidationReport report =
+        ValidationReport.builder()
+            .id("vr-uncited")
+            .runId("run-uncited")
+            .runtimeSurface("HTTP")
+            .accuracyJson(
+                """
+                {
+                  "specAdherenceScore": 100,
+                  "testCoverageLevel": "COMPREHENSIVE",
+                  "evidenceStatus": "UNCITED",
+                  "evidenceLocations": [],
+                  "endpointCoverage": {"coveragePercent": 100}
+                }
+                """)
+            .build();
+
+    List<VerificationEvidenceDTO> ledger = svc.buildVerificationLedger(report, List.of());
+
+    assertEntry(ledger, "spec-adherence", "UNKNOWN", "LLM_ASSESSMENT", "LOW");
+    assertEntry(ledger, "endpoint-coverage", "UNKNOWN", "LLM_ASSISTED_COUNT", "MEDIUM");
+    assertEntry(ledger, "test-coverage-judgment", "UNKNOWN", "LLM_ASSESSMENT", "LOW");
+    assertTrue(find(ledger, "spec-adherence").artifact().startsWith("UNAVAILABLE:"));
+  }
+
+  @Test
+  void citationForOneDimensionCannotAuthenticateTheOtherDimensions() {
+    ValidationReport report =
+        ValidationReport.builder()
+            .runtimeSurface("HTTP")
+            .accuracyJson(
+                """
+                {
+                  "specAdherenceScore": 100,
+                  "specEvidenceStatus": "CITED",
+                  "specEvidenceLocations": ["src/App.java:1-5"],
+                  "endpointCoverage": {"coveragePercent": 100},
+                  "testCoverageLevel": "COMPREHENSIVE",
+                  "endpointEvidenceStatus": "UNCITED",
+                  "testEvidenceStatus": "UNCITED"
+                }
+                """)
+            .build();
+
+    List<VerificationEvidenceDTO> ledger = svc.buildVerificationLedger(report, List.of());
+
+    assertEntry(ledger, "spec-adherence", "PASS", "LLM_ASSESSMENT", "LOW");
+    assertEntry(ledger, "endpoint-coverage", "UNKNOWN", "LLM_ASSISTED_COUNT", "MEDIUM");
+    assertEntry(ledger, "test-coverage-judgment", "UNKNOWN", "LLM_ASSESSMENT", "LOW");
   }
 
   @Test

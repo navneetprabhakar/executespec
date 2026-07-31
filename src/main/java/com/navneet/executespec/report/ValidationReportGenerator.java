@@ -326,29 +326,39 @@ public class ValidationReportGenerator {
 
     sb.append("\n## Accuracy Assessment\n");
     sb.append(
-        "- **Spec Adherence Score:** %d/100 (Grade: %s)\n"
-            .formatted(
-                acc.getSpecAdherenceScore(),
-                acc.getOverallAccuracyGrade() != null ? acc.getOverallAccuracyGrade() : "?"));
-    if (acc.getGradingNotes() != null && !acc.getGradingNotes().isBlank()) {
+        acc.hasCitedSpecEvidence()
+            ? "- **Spec Adherence Score:** %d/100 (Grade: %s)\n"
+                .formatted(
+                    acc.getSpecAdherenceScore(),
+                    acc.getOverallAccuracyGrade() != null ? acc.getOverallAccuracyGrade() : "?")
+            : "- **Spec Adherence Score:** UNKNOWN (uncited model estimate retained only as"
+                + " informational data)\n");
+    if (acc.hasCitedSpecEvidence()
+        && acc.getGradingNotes() != null
+        && !acc.getGradingNotes().isBlank()) {
       sb.append("- **Summary:** %s\n".formatted(acc.getGradingNotes()));
     }
     sb.append(
         "- **Schema Accuracy:** %s\n"
-            .formatted(acc.getSchemaAccuracy() != null ? acc.getSchemaAccuracy() : "UNKNOWN"));
+            .formatted(
+                acc.hasCitedSpecEvidence() && acc.getSchemaAccuracy() != null
+                    ? acc.getSchemaAccuracy()
+                    : "UNKNOWN"));
     sb.append(
         "- **Test Coverage Level:** %s\n"
             .formatted(
-                acc.getTestCoverageLevel() != null ? acc.getTestCoverageLevel() : "UNKNOWN"));
+                acc.hasCitedTestEvidence() && acc.getTestCoverageLevel() != null
+                    ? acc.getTestCoverageLevel()
+                    : "UNKNOWN"));
     sb.append(
         "- **Non-Functional Coverage:** %s\n"
             .formatted(
-                acc.getNonFunctionalCoverage() != null
+                acc.hasCitedSpecEvidence() && acc.getNonFunctionalCoverage() != null
                     ? acc.getNonFunctionalCoverage()
                     : "UNKNOWN"));
 
     // Endpoint coverage
-    if (acc.getEndpointCoverage() != null) {
+    if (acc.hasCitedEndpointEvidence() && acc.getEndpointCoverage() != null) {
       var ep = acc.getEndpointCoverage();
       sb.append("\n### Endpoint Coverage: %d%%\n".formatted(ep.getCoveragePercent()));
       if (ep.getImplemented() != null && !ep.getImplemented().isEmpty()) {
@@ -366,13 +376,17 @@ public class ValidationReportGenerator {
     }
 
     // Missing requirements
-    if (acc.getMissingRequirements() != null && !acc.getMissingRequirements().isEmpty()) {
+    if (acc.hasCitedSpecEvidence()
+        && acc.getMissingRequirements() != null
+        && !acc.getMissingRequirements().isEmpty()) {
       sb.append("\n### Missing Requirements\n");
       acc.getMissingRequirements().forEach(r -> sb.append("- %s\n".formatted(r)));
     }
 
     // Partial requirements
-    if (acc.getPartialRequirements() != null && !acc.getPartialRequirements().isEmpty()) {
+    if (acc.hasCitedSpecEvidence()
+        && acc.getPartialRequirements() != null
+        && !acc.getPartialRequirements().isEmpty()) {
       sb.append("\n### Partial Requirements\n");
       acc.getPartialRequirements().forEach(r -> sb.append("- %s\n".formatted(r)));
     }

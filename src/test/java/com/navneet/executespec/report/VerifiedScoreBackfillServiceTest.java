@@ -66,6 +66,25 @@ class VerifiedScoreBackfillServiceTest {
   }
 
   @Test
+  void backfillCannotRemoveTheLiveFunctionalProofCeiling() {
+    ValidationReportRepository repo = mock(ValidationReportRepository.class);
+    ValidationReport row = backfillableRow();
+    row.setRunId("run-workspace-only");
+    row.setTestEvidenceScope("WORKSPACE_TEST_SUITE");
+    when(repo.findByRunId("run-workspace-only")).thenReturn(Optional.of(row));
+
+    VerifiedScoreBackfillService.BackfillResult result =
+        new VerifiedScoreBackfillService(repo, scoringService())
+            .backfill(
+                new VerifiedScoreBackfillService.BackfillRequest("run-workspace-only", null, true));
+
+    assertThat(result.changes()).hasSize(1);
+    assertThat(result.changes().getFirst().newVerifiedScore()).isEqualTo(75);
+    assertThat(result.changes().getFirst().newRubricScore()).isEqualTo(75);
+    verify(repo, never()).save(any());
+  }
+
+  @Test
   void backfillOmitsEndpointDimensionForPersistedCliRuntime() {
     ValidationReportRepository repo = mock(ValidationReportRepository.class);
     ValidationReport row = backfillableRow();
@@ -73,6 +92,10 @@ class VerifiedScoreBackfillServiceTest {
     row.setAccuracyJson(
         """
         {
+          "testEvidenceStatus": "CITED",
+          "testEvidenceLocations": ["src/AppTest.java:1-10"],
+          "endpointEvidenceStatus": "CITED",
+          "endpointEvidenceLocations": ["src/App.java:1-5"],
           "testCoverageLevel": "GOOD",
           "endpointCoverage": {"coveragePercent": 0}
         }
@@ -152,6 +175,10 @@ class VerifiedScoreBackfillServiceTest {
             .accuracyJson(
                 """
                 {
+                  "testEvidenceStatus": "CITED",
+                  "testEvidenceLocations": ["src/AppTest.java:1-10"],
+                  "endpointEvidenceStatus": "CITED",
+                  "endpointEvidenceLocations": ["src/App.java:1-5"],
                   "testCoverageLevel": "GOOD",
                   "endpointCoverage": {"coveragePercent": 100}
                 }
@@ -183,6 +210,12 @@ class VerifiedScoreBackfillServiceTest {
         """
         {
           "specAdherenceScore": 83,
+          "specEvidenceStatus": "CITED",
+          "specEvidenceLocations": ["src/App.java:1-5"],
+          "endpointEvidenceStatus": "CITED",
+          "endpointEvidenceLocations": ["src/App.java:6-10"],
+          "testEvidenceStatus": "CITED",
+          "testEvidenceLocations": ["src/AppTest.java:1-10"],
           "testCoverageLevel": "GOOD",
           "endpointCoverage": {"coveragePercent": 100},
           "missingRequirements": [],
@@ -208,6 +241,8 @@ class VerifiedScoreBackfillServiceTest {
         """
         {
           "specAdherenceScore": 96,
+          "specEvidenceStatus": "CITED",
+          "specEvidenceLocations": ["src/App.java:1-5"],
           "missingRequirements": ["Required startup wiring is absent"],
           "partialRequirements": []
         }
@@ -225,6 +260,8 @@ class VerifiedScoreBackfillServiceTest {
         """
         {
           "specAdherenceScore": 96,
+          "specEvidenceStatus": "CITED",
+          "specEvidenceLocations": ["src/App.java:1-5"],
           "missingRequirements": [],
           "partialRequirements": [],
           "unknownRequirements": ["Could not inspect deployment evidence"]
@@ -243,6 +280,8 @@ class VerifiedScoreBackfillServiceTest {
         """
         {
           "specAdherenceScore": 0,
+          "specEvidenceStatus": "CITED",
+          "specEvidenceLocations": ["src/App.java:1-5"],
           "missingRequirements": ["The bounded LLM sample did not find the behavior"]
         }
         """;
@@ -410,13 +449,17 @@ class VerifiedScoreBackfillServiceTest {
 
   @Test
   void endpointCoverage_present_returnsValue() {
-    String json = "{\"endpointCoverage\":{\"coveragePercent\":100}}";
+    String json =
+        "{\"endpointEvidenceStatus\":\"CITED\",\"endpointEvidenceLocations\":[\"src/A.java:1\"],"
+            + "\"endpointCoverage\":{\"coveragePercent\":100}}";
     assertThat(VerifiedScoreBackfillService.endpointCoverageFromAccuracyJson(json)).isEqualTo(100);
   }
 
   @Test
   void endpointCoverage_intermediate_returnsValue() {
-    String json = "{\"endpointCoverage\":{\"coveragePercent\":73}}";
+    String json =
+        "{\"endpointEvidenceStatus\":\"CITED\",\"endpointEvidenceLocations\":[\"src/A.java:1\"],"
+            + "\"endpointCoverage\":{\"coveragePercent\":73}}";
     assertThat(VerifiedScoreBackfillService.endpointCoverageFromAccuracyJson(json)).isEqualTo(73);
   }
 
@@ -427,9 +470,34 @@ class VerifiedScoreBackfillServiceTest {
 
   @Test
   void testCoverageLevel_extractsUppercaseLevel() {
-    String json = "{\"testCoverageLevel\":\"partial\"}";
+    String json =
+        "{\"testEvidenceStatus\":\"CITED\",\"testEvidenceLocations\":[\"src/ATest.java:1\"],"
+            + "\"testCoverageLevel\":\"partial\"}";
     assertThat(VerifiedScoreBackfillService.testCoverageLevelFromAccuracyJson(json))
         .isEqualTo("PARTIAL");
+  }
+
+  @Test
+  void uncitedAccuracyDimensionsCannotChangeBackfilledScores() {
+    String json =
+        """
+        {
+          "specAdherenceScore": 5,
+          "missingRequirements": ["unverified"],
+          "endpointCoverage": {"coveragePercent": 100},
+          "testCoverageLevel": "COMPREHENSIVE",
+          "specEvidenceStatus": "UNCITED",
+          "endpointEvidenceStatus": "UNCITED",
+          "testEvidenceStatus": "UNCITED"
+        }
+        """;
+
+    assertThat(VerifiedScoreBackfillService.capScoreAtAdmittedSpecGapsFromAccuracyJson(91, json))
+        .isEqualTo(91);
+    assertThat(VerifiedScoreBackfillService.endpointCoverageFromAccuracyJson(json)).isNull();
+    assertThat(VerifiedScoreBackfillService.testCoverageLevelFromAccuracyJson(json)).isNull();
+    assertThat(VerifiedScoreBackfillService.testCoverageJudgmentAdmissibleFromAccuracyJson(json))
+        .isFalse();
   }
 
   private static ValidationReport backfillableRow() {
@@ -441,6 +509,8 @@ class VerifiedScoreBackfillServiceTest {
         .finalBuildPassed(true)
         .testsPassed(1)
         .testsTotal(1)
+        .testExecutionVerified(true)
+        .testEvidenceScope("LIVE_PREVIEW_FUNCTIONAL")
         .reviewerVerdict("CLEAN")
         .verifiedScore(10)
         .rubricScore(20)
@@ -448,6 +518,10 @@ class VerifiedScoreBackfillServiceTest {
         .accuracyJson(
             """
             {
+              "testEvidenceStatus": "CITED",
+              "testEvidenceLocations": ["src/AppTest.java:1-10"],
+              "endpointEvidenceStatus": "CITED",
+              "endpointEvidenceLocations": ["src/App.java:1-5"],
               "testCoverageLevel": "GOOD",
               "endpointCoverage": {"coveragePercent": 100}
             }

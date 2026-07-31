@@ -174,61 +174,80 @@ public class DeploymentService {
 
     // Resolve workspace path
     Path workspacePath = resolveWorkspace(runId);
-    publicationAdmissionService.assertEligible(run);
-    // Permanent deployment is publication. Re-run the protected-contract comparison after
-    // workspace restore and before Dockerfile generation, persistence, registry or Cloud Run side
-    // effects. This mirrors the SCM boundary and prevents green worker-authored tests from
-    // deploying a replacement-only brownfield route.
-    boolean brownfield =
-        "EXISTING".equalsIgnoreCase(String.valueOf(run.getRepoMode()))
-            || StringUtils.hasText(run.getSelectedRepoIds())
-            || brownfieldHttpContractGuard.hasBaseline(runId);
-    if (brownfield) {
-      brownfieldHttpContractGuard.assertCompatible(runId);
-    }
-
-    // Detect strategy + generate Dockerfile (or use existing)
-    DeploymentStrategy strategy;
+    PublicationAdmissionService.Admission publicationAdmission =
+        publicationAdmissionService.assertEligible(run);
+    boolean publicationLeaseHandedOff = false;
     try {
-      strategy = dockerfileGenerator.detectAndGenerate(workspacePath);
-    } catch (Exception e) {
-      return createFailed(runId, "Strategy detection failed: " + e.getMessage());
-    }
+      // Permanent deployment is publication. Re-run the protected-contract comparison after
+      // workspace restore and before Dockerfile generation, persistence, registry or Cloud Run side
+      // effects. This mirrors the SCM boundary and prevents green worker-authored tests from
+      // deploying a replacement-only brownfield route.
+      boolean brownfield =
+          "EXISTING".equalsIgnoreCase(String.valueOf(run.getRepoMode()))
+              || StringUtils.hasText(run.getSelectedRepoIds())
+              || brownfieldHttpContractGuard.hasBaseline(runId);
+      if (brownfield) {
+        brownfieldHttpContractGuard.assertCompatible(runId);
+      }
 
-    // Determine version number and service name
-    int versionNum = deploymentRepo.countByRunId(runId) + 1;
-    String runId8 = runId.substring(0, 8);
-    String versionTag = runId8 + "-v" + versionNum;
-    String serviceName = "demo-" + runId8;
-
-    // Create deployment record (PENDING)
-    Deployment deployment =
-        Deployment.create(
+      // Detect strategy + generate Dockerfile (or use existing)
+      DeploymentStrategy strategy;
+      try {
+        strategy = dockerfileGenerator.detectAndGenerate(workspacePath);
+      } catch (Exception e) {
+        return createFailed(runId, "Strategy detection failed: " + e.getMessage());
+      }
+      try {
+        publicationAdmissionService.assertWorkspaceGenerationUnchanged(run, publicationAdmission);
+      } catch (RuntimeException stalePreparation) {
+        return createFailed(
             runId,
-            versionTag,
-            strategy.type(),
-            artifactRegistry.fullImageUri(versionTag),
-            serviceName,
-            props.gcpProject(),
-            props.gcpRegion(),
-            props.ttlDays());
-    deployment.setDockerfilePath(workspacePath.resolve("Dockerfile").toString());
-    deploymentRepo.save(deployment);
+            "Publication preparation changed the admitted workspace: "
+                + stalePreparation.getMessage());
+      }
 
-    // SSE: deployment started
-    sseBroadcaster.emit(runId, RunEvent.deployStarted(runId, versionTag, strategy.type().name()));
+      // Determine version number and service name
+      int versionNum = deploymentRepo.countByRunId(runId) + 1;
+      String runId8 = runId.substring(0, 8);
+      String versionTag = runId8 + "-v" + versionNum;
+      String serviceName = "demo-" + runId8;
 
-    // Run async pipeline on virtual thread with context propagation for tracing
-    var snapshot = ContextSnapshotFactory.builder().build().captureAll();
-    Thread.ofVirtual()
-        .name("deploy-" + runId.substring(0, 8))
-        .start(
-            snapshot.wrap(
-                () ->
-                    executeDeployPipeline(
-                        deployment, run, workspacePath, repoMode, repoUrl, repoName)));
+      // Create deployment record (PENDING)
+      Deployment deployment =
+          Deployment.create(
+              runId,
+              versionTag,
+              strategy.type(),
+              artifactRegistry.fullImageUri(versionTag),
+              serviceName,
+              props.gcpProject(),
+              props.gcpRegion(),
+              props.ttlDays());
+      deployment.setDockerfilePath(workspacePath.resolve("Dockerfile").toString());
+      deploymentRepo.save(deployment);
 
-    return deployment;
+      // SSE: deployment started
+      sseBroadcaster.emit(runId, RunEvent.deployStarted(runId, versionTag, strategy.type().name()));
+
+      // Run async pipeline on virtual thread with context propagation for tracing
+      var snapshot = ContextSnapshotFactory.builder().build().captureAll();
+      Thread.ofVirtual()
+          .name("deploy-" + runId.substring(0, 8))
+          .start(
+              snapshot.wrap(
+                  () -> {
+                    try (publicationAdmission) {
+                      publicationAdmission.assertOwned();
+                      executeDeployPipeline(
+                          deployment, run, workspacePath, repoMode, repoUrl, repoName);
+                    }
+                  }));
+      publicationLeaseHandedOff = true;
+
+      return deployment;
+    } finally {
+      if (!publicationLeaseHandedOff) publicationAdmission.close();
+    }
   }
 
   private void executeDeployPipeline(

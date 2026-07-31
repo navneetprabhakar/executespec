@@ -16,7 +16,7 @@ class ValidationEndpointCoverageEvidenceTest {
             .workspaceGeneration("a".repeat(64))
             .build();
 
-    var evidence = ValidationEndpointCoverageEvidence.build(report, 100);
+    var evidence = ValidationEndpointCoverageEvidence.build(report, 100, false, "unused");
 
     assertThat(evidence.status()).isEqualTo("N/A");
     assertThat(evidence.source()).isEqualTo("NOT_APPLICABLE");
@@ -28,7 +28,8 @@ class ValidationEndpointCoverageEvidenceTest {
   @Test
   void nullRuntimeSurfaceRemainsHistoricalUnknownRatherThanNotApplicable() {
     var evidence =
-        ValidationEndpointCoverageEvidence.build(ValidationReport.builder().build(), null);
+        ValidationEndpointCoverageEvidence.build(
+            ValidationReport.builder().build(), null, false, "citation unavailable");
 
     assertThat(evidence.status()).isEqualTo("UNKNOWN");
     assertThat(evidence.source()).isEqualTo("LLM_ASSISTED_COUNT");
@@ -39,8 +40,16 @@ class ValidationEndpointCoverageEvidenceTest {
   void httpCoverageRetainsPassWarnFailThresholds() {
     var report = ValidationReport.builder().runtimeSurface("HTTP").build();
 
-    assertThat(ValidationEndpointCoverageEvidence.build(report, 95).status()).isEqualTo("PASS");
-    assertThat(ValidationEndpointCoverageEvidence.build(report, 70).status()).isEqualTo("WARN");
-    assertThat(ValidationEndpointCoverageEvidence.build(report, 69).status()).isEqualTo("FAIL");
+    assertThat(ValidationEndpointCoverageEvidence.build(report, 95, true, "src/A.java:10").status())
+        .isEqualTo("PASS");
+    assertThat(ValidationEndpointCoverageEvidence.build(report, 70, true, "src/A.java:10").status())
+        .isEqualTo("WARN");
+    assertThat(ValidationEndpointCoverageEvidence.build(report, 69, true, "src/A.java:10").status())
+        .isEqualTo("FAIL");
+    assertThat(
+            ValidationEndpointCoverageEvidence.build(
+                    report, 100, false, "UNAVAILABLE: no validated citation")
+                .status())
+        .isEqualTo("UNKNOWN");
   }
 }

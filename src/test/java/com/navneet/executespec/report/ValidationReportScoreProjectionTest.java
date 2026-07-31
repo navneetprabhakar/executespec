@@ -20,6 +20,8 @@ class ValidationReportScoreProjectionTest {
                 """
                 {
                   "specAdherenceScore": 100,
+                  "specEvidenceStatus": "CITED",
+                  "specEvidenceLocations": ["src/App.java:1-5"],
                   "unknownRequirements": ["Runtime acceptance was not verified"]
                 }
                 """)
@@ -41,6 +43,8 @@ class ValidationReportScoreProjectionTest {
         """
         {
           "specAdherenceScore": 0,
+          "specEvidenceStatus": "CITED",
+          "specEvidenceLocations": ["src/App.java:1-5"],
           "missingRequirements": ["The bounded LLM sample did not find the requested behavior"]
         }
         """;

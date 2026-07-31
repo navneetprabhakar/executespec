@@ -60,9 +60,10 @@ class FlywayMigrationInventoryTest {
     // V364 atomically fences continuation approvals, V365 adds bounded stale-receipt recovery;
     // V366 persists exact score-zero causality; V367 binds validation reports to runtime-surface
     // applicability; V368 force-disables legacy Apply-to-Run until transactional correction is
-    // proven, bringing the exact inventory to 354.
-    assertThat(migrations).hasSize(354);
-    assertThat(migrations.getLast().version()).isEqualTo("368");
+    // proven; V369 persists the crash-recoverable correction transaction, bringing the exact
+    // inventory to 355.
+    assertThat(migrations).hasSize(355);
+    assertThat(migrations.getLast().version()).isEqualTo("369");
 
     assertThat(migrations.stream().map(MigrationFile::version)).doesNotHaveDuplicates();
     assertThat(migrations.stream().map(MigrationFile::fileName))

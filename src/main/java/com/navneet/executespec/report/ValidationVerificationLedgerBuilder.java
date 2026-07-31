@@ -3,7 +3,6 @@ package com.navneet.executespec.report;
 import java.util.ArrayList;
 import java.util.List;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.report.entity.ValidationReport;
 import com.navneet.executespec.report.model.ReportIssueDTO;
@@ -269,29 +268,34 @@ final class ValidationVerificationLedgerBuilder {
             blockingIssues,
             null));
 
-    AccuracyFacts accuracy = parseAccuracyFacts(entity.getAccuracyJson());
+    ValidationAccuracyFacts accuracy =
+        ValidationAccuracyFacts.parse(objectMapper, entity.getAccuracyJson());
     Integer effectiveVerifiedScore =
         entity.getVerifiedScore() == null
             ? null
-            : ValidationReportScorePolicy.capForAdmittedSpecGaps(
-                entity.getVerifiedScore(),
-                accuracy.score() == null ? 0 : accuracy.score(),
-                accuracy.incompleteRequirements(),
-                accuracy.unknownRequirements());
+            : accuracy.specCited()
+                ? ValidationReportScorePolicy.capForAdmittedSpecGaps(
+                    entity.getVerifiedScore(),
+                    accuracy.score() == null ? 0 : accuracy.score(),
+                    accuracy.incompleteRequirements(),
+                    accuracy.unknownRequirements())
+                : entity.getVerifiedScore();
     Integer effectiveRubricScore =
         entity.getRubricScore() == null
             ? null
-            : ValidationReportScorePolicy.capForAdmittedSpecGaps(
-                entity.getRubricScore(),
-                accuracy.score() == null ? 0 : accuracy.score(),
-                accuracy.incompleteRequirements(),
-                accuracy.unknownRequirements());
+            : accuracy.specCited()
+                ? ValidationReportScorePolicy.capForAdmittedSpecGaps(
+                    entity.getRubricScore(),
+                    accuracy.score() == null ? 0 : accuracy.score(),
+                    accuracy.incompleteRequirements(),
+                    accuracy.unknownRequirements())
+                : entity.getRubricScore();
     out.add(
         evidence(
             "spec-adherence",
             "Spec adherence",
             "SPEC",
-            accuracy.score() == null
+            accuracy.score() == null || !accuracy.specCited()
                 ? "UNKNOWN"
                 : accuracy.unknownRequirements() > 0
                     ? "WARN"
@@ -309,11 +313,16 @@ final class ValidationVerificationLedgerBuilder {
                         ? "; " + accuracy.unknownRequirements() + " requirement(s) unverified"
                         : "")
                     + ".",
-            "validation_report.accuracy_json",
+            accuracy.specArtifact("validation_report.accuracy_json"),
             accuracy.score(),
             accuracy.score() == null ? null : 100));
 
-    out.add(ValidationEndpointCoverageEvidence.build(entity, accuracy.endpointCoverage()));
+    out.add(
+        ValidationEndpointCoverageEvidence.build(
+            entity,
+            accuracy.endpointCoverage(),
+            accuracy.endpointCited(),
+            accuracy.endpointArtifact("validation_report.accuracy_json.endpointCoverage")));
 
     if (accuracy.testCoverageLevel() != null) {
       String level = accuracy.testCoverageLevel();
@@ -322,17 +331,19 @@ final class ValidationVerificationLedgerBuilder {
               "test-coverage-judgment",
               "Test coverage judgment",
               "TESTS",
-              switch (level.toUpperCase()) {
-                case "GOOD", "COMPREHENSIVE" -> "PASS";
-                case "PARTIAL" -> "WARN";
-                case "NONE" -> "FAIL";
-                default -> "UNKNOWN";
-              },
+              !accuracy.testCited()
+                  ? "UNKNOWN"
+                  : switch (level.toUpperCase()) {
+                    case "GOOD", "COMPREHENSIVE" -> "PASS";
+                    case "PARTIAL" -> "WARN";
+                    case "NONE" -> "FAIL";
+                    default -> "UNKNOWN";
+                  },
               "LLM_ASSESSMENT",
               "LOW",
               "Test coverage matches what the spec implied should be tested.",
               "LLM test coverage judgment: " + level + ".",
-              "validation_report.accuracy_json.testCoverageLevel",
+              accuracy.testArtifact("validation_report.accuracy_json.testCoverageLevel"),
               null,
               null));
     }
@@ -351,7 +362,7 @@ final class ValidationVerificationLedgerBuilder {
             total,
             entity.getReviewerVerdict(),
             countUnfixedCriticalIssues(issues),
-            accuracy.testCoverageLevel());
+            accuracy.testCited() ? accuracy.testCoverageLevel() : null);
     if (trustCap.cap() < 100) {
       out.add(
           evidence(
@@ -476,45 +487,6 @@ final class ValidationVerificationLedgerBuilder {
       count++;
     }
     return count;
-  }
-
-  record AccuracyFacts(
-      Integer score,
-      String grade,
-      Integer endpointCoverage,
-      String testCoverageLevel,
-      int incompleteRequirements,
-      int unknownRequirements) {}
-
-  AccuracyFacts parseAccuracyFacts(String accuracyJson) {
-    if (accuracyJson == null || accuracyJson.isBlank()) {
-      return new AccuracyFacts(null, null, null, null, 0, 0);
-    }
-    try {
-      JsonNode root = objectMapper.readTree(accuracyJson);
-      Integer score =
-          root.hasNonNull("specAdherenceScore") ? root.get("specAdherenceScore").asInt() : null;
-      String grade =
-          root.hasNonNull("overallAccuracyGrade")
-              ? root.get("overallAccuracyGrade").asText()
-              : null;
-      JsonNode endpoint = root.path("endpointCoverage");
-      Integer endpointCoverage =
-          endpoint.hasNonNull("coveragePercent") ? endpoint.get("coveragePercent").asInt() : null;
-      String testCoverage =
-          root.hasNonNull("testCoverageLevel") ? root.get("testCoverageLevel").asText() : null;
-      JsonNode unknown = root.path("unknownRequirements");
-      int unknownCount = unknown.isArray() ? unknown.size() : 0;
-      JsonNode missing = root.path("missingRequirements");
-      JsonNode partial = root.path("partialRequirements");
-      int incompleteCount =
-          (missing.isArray() ? missing.size() : 0) + (partial.isArray() ? partial.size() : 0);
-      return new AccuracyFacts(
-          score, grade, endpointCoverage, testCoverage, incompleteCount, unknownCount);
-    } catch (Exception e) {
-      log.warn("Failed to parse accuracy facts for verification ledger: {}", e.getMessage());
-      return new AccuracyFacts(null, null, null, null, 0, 0);
-    }
   }
 
   record TrustCap(int score, int cap, String reason) {}

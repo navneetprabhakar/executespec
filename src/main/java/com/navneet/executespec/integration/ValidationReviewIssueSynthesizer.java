@@ -105,19 +105,21 @@ final class ValidationReviewIssueSynthesizer {
 
   private static void addAccuracyIssues(List<ReviewIssue> out, AccuracyReport accuracy) {
     if (accuracy == null) return;
-    addBounded(
-        out,
-        accuracy.getMissingRequirements(),
-        "SYNTH-ACC-MISS-",
-        IssueCategory.MISSING_FEATURE,
-        "Spec requirement not implemented: ");
-    addBounded(
-        out,
-        accuracy.getPartialRequirements(),
-        "SYNTH-ACC-PART-",
-        IssueCategory.SPEC_MISMATCH,
-        "Spec requirement only partially implemented: ");
-    if (accuracy.getEndpointCoverage() != null) {
+    if (accuracy.hasCitedSpecEvidence()) {
+      addBounded(
+          out,
+          accuracy.getMissingRequirements(),
+          "SYNTH-ACC-MISS-",
+          IssueCategory.MISSING_FEATURE,
+          "Spec requirement not implemented: ");
+      addBounded(
+          out,
+          accuracy.getPartialRequirements(),
+          "SYNTH-ACC-PART-",
+          IssueCategory.SPEC_MISMATCH,
+          "Spec requirement only partially implemented: ");
+    }
+    if (accuracy.hasCitedEndpointEvidence() && accuracy.getEndpointCoverage() != null) {
       addBounded(
           out,
           accuracy.getEndpointCoverage().getMissing(),

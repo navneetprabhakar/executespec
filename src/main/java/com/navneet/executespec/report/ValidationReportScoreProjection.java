@@ -53,6 +53,7 @@ public final class ValidationReportScoreProjection {
     }
     try {
       AccuracyReport accuracy = objectMapper.readValue(accuracyJson, AccuracyReport.class);
+      if (!accuracy.hasCitedSpecEvidence()) return persistedScore;
       return ValidationReportScorePolicy.capForAdmittedSpecGaps(
           persistedScore,
           accuracy.getSpecAdherenceScore(),

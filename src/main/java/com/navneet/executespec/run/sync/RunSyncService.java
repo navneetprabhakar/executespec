@@ -8,6 +8,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 
 import com.navneet.executespec.harness.WorkspaceInitService;
+import com.navneet.executespec.integration.RunWorkspaceAuthorityService;
 
 import org.springframework.stereotype.Service;
 
@@ -54,6 +55,7 @@ public class RunSyncService {
 
   private final WorkspaceInitService workspaceInit;
   private final com.navneet.executespec.state.repository.RunRepoSnapshotRepository snapshotRepo;
+  private final RunWorkspaceAuthorityService workspaceAuthorities;
 
   public record SyncOutcome(int reposSynced, List<String> details) {}
 
@@ -93,6 +95,12 @@ public class RunSyncService {
    * <p>Safe only on terminal runs — API layer enforces that invariant.
    */
   public SyncOutcome syncToOriginalCommit(String runId, GitCredential credential) {
+    return withWorkspaceMutationAuthority(
+        runId, authority -> syncToOriginalCommitOwned(runId, credential, authority));
+  }
+
+  private SyncOutcome syncToOriginalCommitOwned(
+      String runId, GitCredential credential, RunWorkspaceAuthorityService.Lease authority) {
     Path runRoot = workspaceInit.runWorkspacePath(runId);
     if (!Files.isDirectory(runRoot)) {
       throw new IllegalStateException("Run workspace not found: " + runRoot);
@@ -134,7 +142,9 @@ public class RunSyncService {
         // RR-1554: the fetch must succeed before the reset. Previously a failed fetch still fell
         // through to `git reset --hard <sha>`, hard-resetting the workspace — discarding state —
         // while the response reported failure.
+        authority.assertOwned();
         runGit(repoRoot, credential, "fetch", "origin");
+        authority.assertOwned();
         runGit(repoRoot, credential, "reset", "--hard", sha, "--");
         synced++;
         details.add(shortName + " <- " + sha.substring(0, 7) + " (original)");
@@ -152,6 +162,15 @@ public class RunSyncService {
       // Defence in depth — the controller rejects this with 400 before we are called.
       throw new IllegalArgumentException("Invalid branch name");
     }
+    return withWorkspaceMutationAuthority(
+        runId, authority -> syncOwned(runId, branchOverride, credential, authority));
+  }
+
+  private SyncOutcome syncOwned(
+      String runId,
+      String branchOverride,
+      GitCredential credential,
+      RunWorkspaceAuthorityService.Lease authority) {
     Path runRoot = workspaceInit.runWorkspacePath(runId);
     if (!Files.isDirectory(runRoot)) {
       throw new IllegalStateException("Run workspace not found: " + runRoot);
@@ -166,7 +185,9 @@ public class RunSyncService {
               ? branchOverride
               : detectDefaultBranch(repoRoot);
       try {
+        authority.assertOwned();
         runGit(repoRoot, credential, "fetch", "origin", "--", branch);
+        authority.assertOwned();
         runGit(repoRoot, credential, "reset", "--hard", "origin/" + branch, "--");
         synced++;
         details.add(name + " <- origin/" + branch);
@@ -177,6 +198,16 @@ public class RunSyncService {
       }
     }
     return new SyncOutcome(synced, details);
+  }
+
+  private SyncOutcome withWorkspaceMutationAuthority(
+      String runId,
+      java.util.function.Function<RunWorkspaceAuthorityService.Lease, SyncOutcome> operation) {
+    try (RunWorkspaceAuthorityService.Lease authority =
+        workspaceAuthorities.acquire(runId, RunWorkspaceAuthorityService.Authority.PUBLICATION)) {
+      authority.assertOwned();
+      return operation.apply(authority);
+    }
   }
 
   /**
