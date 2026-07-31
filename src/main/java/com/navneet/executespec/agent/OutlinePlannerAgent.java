@@ -199,7 +199,7 @@ public class OutlinePlannerAgent {
     log.info(
         "OutlinePlanner SINGLE_SHOT synthesise (LIGHTWEIGHT title call only): spec={}chars",
         req.spec() == null ? 0 : req.spec().length());
-    LlmProvider provider = resolveProviderForTitle(req.provider());
+    LlmProvider provider = PlannerOutputUtils.resolveProviderForTitle(req.provider());
     String runId = req.context() != null ? req.context().runId() : null;
     String summarized = titleSummarizer.summarize(req.spec(), provider, runId, req.context());
     String title =
@@ -370,8 +370,7 @@ public class OutlinePlannerAgent {
     List<Message> messages = List.of(new SystemMessage(systemPrompt), new UserMessage(userMsg));
 
     ToolCallback submitOutline = buildSubmitOutlineCallback(mode);
-    LlmProvider plannerProvider = resolveProviderForTitle(req.provider());
-    ResolvedModel resolved = modelResolver.resolve("OutlinePlannerAgent", plannerProvider);
+    ResolvedModel resolved = PlannerOutputUtils.resolveConfiguredRoute(modelResolver, req);
     String plannerModel = resolved.getModel();
     String plannerProviderName = resolved.providerName();
 
@@ -530,6 +529,10 @@ public class OutlinePlannerAgent {
     };
   }
 
+  public ResolvedModel resolveConfiguredRoute(PlannerRequest req) {
+    return PlannerOutputUtils.resolveConfiguredRoute(modelResolver, req);
+  }
+
   private String loadPrompt(String path) {
     try {
       String rel = path.startsWith("prompts/") ? path.substring("prompts/".length()) : path;
@@ -591,10 +594,5 @@ public class OutlinePlannerAgent {
            Separate test tasks are allowed only for a genuinely independent cross-cutting suite
            (for example, whole-system concurrency or browser E2E) that spans multiple features.
            """;
-  }
-
-  /** Delegates to {@link PlannerOutputUtils#resolveProviderForTitle}. */
-  private static LlmProvider resolveProviderForTitle(String provider) {
-    return PlannerOutputUtils.resolveProviderForTitle(provider);
   }
 }

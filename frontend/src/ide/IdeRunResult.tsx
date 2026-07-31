@@ -1313,6 +1313,16 @@ export default function IdeRunResult() {
         })}
       </div>
 
+      {msg && (
+        <div
+          className='ide-card'
+          role='status'
+          style={{margin: '8px 12px 0', color: 'var(--ide-blue)', flex: '0 0 auto'}}
+        >
+          {msg}
+        </div>
+      )}
+
       <div style={{flex: 1, minHeight: 0, position: 'relative', overflow: 'hidden'}}>
         {/* ── Overview ── */}
         {tab === 'Overview' && (
@@ -1341,12 +1351,6 @@ export default function IdeRunResult() {
                 </span>
               )}
             </div>
-
-            {msg && (
-              <div className='ide-card' style={{marginBottom: 12, color: 'var(--ide-blue)'}}>
-                {msg}
-              </div>
-            )}
 
             {failedTerminal && (
               <div className='ide-recovery-card'>
@@ -3329,11 +3333,6 @@ export default function IdeRunResult() {
         {tab === 'PR' && (
           <div className='ide-pane' style={{position: 'absolute', inset: 0, overflowY: 'auto'}}>
             <h1 className='ide-h1'>Pull request</h1>
-            {msg && (
-              <div className='ide-card' style={{marginBottom: 12, color: 'var(--ide-blue)'}}>
-                {msg}
-              </div>
-            )}
             {/* RR-762 — consume the provider-neutral SCM PR URL (scmPrUrl || githubPrUrl) and label
                 by the actual provider, so Bitbucket/provider-neutral runs are not shown as having no
                 PR and prompted to configure GitHub. */}
@@ -3703,11 +3702,6 @@ export default function IdeRunResult() {
               Ask the agent about its decisions, or describe a change and start a fresh iteration
               from this work&apos;s codebase.
             </div>
-            {msg && (
-              <div className='ide-card' style={{marginBottom: 12, color: 'var(--ide-blue)'}}>
-                {msg}
-              </div>
-            )}
             <div
               style={{
                 flex: 1,

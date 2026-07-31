@@ -301,7 +301,10 @@ public class ProjectArchitectureService {
                 .filter(cm -> source.revision().equals(cm.getGeneratedFromSha()))
                 .orElse(null);
         String codeMapContent;
-        if (latest != null && latest.getContent() != null && !latest.getContent().isBlank()) {
+        if (latest != null
+            && latest.getContent() != null
+            && !latest.getContent().isBlank()
+            && DeterministicArchitectureEvidence.hasCurrentHttpEvidence(latest.getContent())) {
           codeMapContent = latest.getContent();
         } else {
           CodeMapGenerator.Result generated =
@@ -698,7 +701,8 @@ public class ProjectArchitectureService {
 
     if (latest.isPresent() && currentSha != null) {
       String generatedSha = latest.get().getGeneratedFromSha();
-      if (currentSha.equals(generatedSha)) {
+      if (currentSha.equals(generatedSha)
+          && DeterministicArchitectureEvidence.hasCurrentHttpEvidence(latest.get().getContent())) {
         log.info(
             "[{}] codemap for {} up-to-date @ sha={} — reusing v{}",
             projectId,
@@ -712,8 +716,13 @@ public class ProjectArchitectureService {
       // generatedFromSha and regenerates (→ publish → HEAD moves → regen → …). If the ONLY change
       // since this codemap was generated is under .executespec/, the source is unchanged — reuse +
       // advance the stored SHA so subsequent syncs short-circuit on the equality check above.
-      if (gitHub.diffConfinedTo(
-          repo.getGithubRepoFullName(), generatedSha, currentSha, ".executespec/", patOverride)) {
+      if (DeterministicArchitectureEvidence.hasCurrentHttpEvidence(latest.get().getContent())
+          && gitHub.diffConfinedTo(
+              repo.getGithubRepoFullName(),
+              generatedSha,
+              currentSha,
+              ".executespec/",
+              patOverride)) {
         log.info(
             "[{}] codemap for {} unchanged except .executespec/ ({} → {}) — reusing v{}, advancing"
                 + " SHA",
@@ -845,7 +854,8 @@ public class ProjectArchitectureService {
     return model != null
         && !model.isBlank()
         && !"fallback".equalsIgnoreCase(model)
-        && !doc.getContent().contains("LLM generation failed");
+        && !doc.getContent().contains("LLM generation failed")
+        && DeterministicArchitectureEvidence.hasCurrentHttpEvidence(doc.getContent());
   }
 
   static String fallbackRepoArchitectureMarkdown(String repoFullName, String codeMap) {
@@ -860,7 +870,8 @@ public class ProjectArchitectureService {
     if (doc == null || doc.getContent() == null || doc.getContent().isBlank()) return false;
     String content = doc.getContent();
     return !content.startsWith("# Project architecture (deterministic)")
-        && !content.contains("LLM generation failed");
+        && !content.contains("LLM generation failed")
+        && DeterministicArchitectureEvidence.hasCurrentHttpEvidence(content);
   }
 
   /**

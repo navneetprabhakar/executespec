@@ -9,6 +9,7 @@ import java.util.UUID;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.navneet.executespec.cost.RunEffectiveRouteService;
 import com.navneet.executespec.router.AgentTier;
 import com.navneet.executespec.router.LlmProvider;
 import com.navneet.executespec.router.ModelResolver;
@@ -42,6 +43,7 @@ public class CoherencePlannerAgent {
   private final ObjectMapper objectMapper;
   private final ModelResolver modelResolver;
   private final PromptAssembler promptAssembler;
+  private final RunEffectiveRouteService effectiveRouteService;
 
   private static final String PROMPT_PATH = "prompts/coherence-planner.md";
   private static final int COHERENCE_MAX_TOKENS = 4_096;
@@ -64,11 +66,16 @@ public class CoherencePlannerAgent {
    * hierarchical planning must fail closed rather than execute an unvalidated assembled plan.
    */
   public PatchResult patchIfNeeded(Plan plan, PlannerRequest req, ExecutionContext context) {
-    return patchIfNeeded(plan, req, context, List.of());
+    return patchIfNeeded(plan, req, context, List.of(), null, false);
   }
 
   private PatchResult patchIfNeeded(
-      Plan plan, PlannerRequest req, ExecutionContext context, List<String> contractViolations) {
+      Plan plan,
+      PlannerRequest req,
+      ExecutionContext context,
+      List<String> contractViolations,
+      ResolvedModel exactRoute,
+      boolean strictProvider) {
     if (plan == null || plan.tasks() == null || plan.tasks().isEmpty()) {
       return new PatchResult(plan, 0, List.of());
     }
@@ -104,12 +111,14 @@ public class CoherencePlannerAgent {
 
     ToolCallback patchPlan = buildPatchPlanCallback();
     LlmProvider provider = resolveProvider(req.provider());
-    ResolvedModel resolved;
-    try {
-      resolved = modelResolver.resolve("CoherencePlannerAgent", provider, AgentTier.LIGHTWEIGHT);
-    } catch (Exception e) {
-      log.warn("CoherencePlanner model resolve failed — skipping pass: {}", e.getMessage());
-      return failed(planWithSafetyContracts, "model resolution failed");
+    ResolvedModel resolved = exactRoute;
+    if (resolved == null) {
+      try {
+        resolved = modelResolver.resolve("CoherencePlannerAgent", provider, AgentTier.LIGHTWEIGHT);
+      } catch (Exception e) {
+        log.warn("CoherencePlanner model resolve failed — skipping pass: {}", e.getMessage());
+        return failed(planWithSafetyContracts, "model resolution failed");
+      }
     }
 
     log.info(
@@ -131,7 +140,8 @@ public class CoherencePlannerAgent {
               context,
               patchPlan,
               "planner.coherence",
-              COHERENCE_MAX_TOKENS);
+              COHERENCE_MAX_TOKENS,
+              strictProvider);
     } catch (Exception e) {
       log.warn("CoherencePlanner LLM call failed — using unpatched plan: {}", e.getMessage());
       return failed(planWithSafetyContracts, "LLM call failed");
@@ -149,6 +159,7 @@ public class CoherencePlannerAgent {
           patchPlan,
           "tool was not called",
           COHERENCE_REPAIR_MAX_TOKENS,
+          strictProvider,
           this::applyPatches);
     }
 
@@ -167,6 +178,7 @@ public class CoherencePlannerAgent {
               patchPlan,
               modelResult.validationFailure(),
               COHERENCE_REPAIR_MAX_TOKENS,
+              strictProvider,
               this::applyPatches);
     }
     if (!modelResult.validated()) return modelResult;
@@ -218,7 +230,40 @@ public class CoherencePlannerAgent {
     if (contractViolations == null || contractViolations.isEmpty()) {
       return new PatchResult(plan, 0, List.of());
     }
-    return patchIfNeeded(plan, req, context, contractViolations);
+    return patchIfNeeded(plan, req, context, contractViolations, null, false);
+  }
+
+  /**
+   * One bounded contract repair on an exact provider/model route.
+   *
+   * <p>This is the pre-gate recovery foundation. It deliberately bypasses the coherence agent's
+   * LIGHTWEIGHT tier lookup and disables cross-provider failover; LlmRouter may still retry the
+   * same physical provider/model for transient transport failures.
+   */
+  public PatchResult repairContractViolationsExact(
+      Plan plan,
+      PlannerRequest req,
+      ExecutionContext context,
+      List<String> contractViolations,
+      ResolvedModel exactRoute) {
+    if (contractViolations == null || contractViolations.isEmpty()) {
+      return new PatchResult(plan, 0, List.of());
+    }
+    if (exactRoute == null
+        || exactRoute.getActualProvider() == null
+        || exactRoute.getModel() == null
+        || exactRoute.getModel().isBlank()) {
+      return failed(plan, "exact planner repair route unavailable");
+    }
+    RunEffectiveRouteService.AttemptFence fence =
+        effectiveRouteService == null
+            ? null
+            : effectiveRouteService.captureAttemptFence(context.runId(), context.taskId(), 0L);
+    PatchResult result = patchIfNeeded(plan, req, context, contractViolations, exactRoute, true);
+    if (effectiveRouteService == null) return result;
+    ExactPlannerRouteAttestation.verify(
+        exactRoute, effectiveRouteService.successfulForTaskAfter(fence));
+    return result;
   }
 
   private PatchResult applyPatches(Plan plan, String argsJson) {

@@ -797,18 +797,19 @@ public class ProjectRepoService {
    * "already exists" path is treated as success.
    */
   @Transactional
-  public boolean installWebhook(
+  public GitHubRepoService.WebhookInstallResult installWebhook(
       UUID repoId, String pat, String callerUserId, String callerOrgId, boolean isOrgAdmin) {
     ProjectRepo repo = loadRepoForWrite(repoId, callerUserId, callerOrgId, isOrgAdmin);
     requireScmSource(repo, "install a webhook");
     requireCapability(repo, ScmCapability.WEBHOOK, "install webhooks");
-    boolean ok = gitHub.installWebhook(repo.getGithubRepoFullName(), pat);
-    if (ok) {
+    GitHubRepoService.WebhookInstallResult result =
+        gitHub.installWebhookDetailed(repo.getGithubRepoFullName(), pat);
+    if (result.installed()) {
       repo.setWebhookInstalled(true);
       repo.setUpdatedAt(Instant.now());
       repoRepo.save(repo);
     }
-    return ok;
+    return result;
   }
 
   /**

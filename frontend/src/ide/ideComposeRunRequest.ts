@@ -28,10 +28,12 @@ export function buildIdeComposeRunRequest(
   if (input.selectedRepoIds.length > 0) body.selectedRepoIds = input.selectedRepoIds;
   if (input.costCap > 0) body.userCostCap = input.costCap;
   if (input.tddMode) body.tddMode = true;
-  if (input.confirmModelUpgrades) body.requireConfirmationBeforeExpensiveContinuation = true;
-  if (input.requireBenchmarkedUpgrades) {
-    body.requireBenchmarkPriorForAutomaticContinuation = true;
-  }
+  // These are run authority, not hints. Always send the user's explicit choice so an unchecked
+  // control cannot silently inherit a stricter server default (the deployed default currently
+  // requires benchmark evidence). Planner recovery happens before the plan gate, so omission is
+  // observably different from false.
+  body.requireConfirmationBeforeExpensiveContinuation = input.confirmModelUpgrades;
+  body.requireBenchmarkPriorForAutomaticContinuation = input.requireBenchmarkedUpgrades;
   if (input.startLowTasksOnCheapTier) {
     body.lowComplexityWorkerStartTier = 'LIGHTWEIGHT';
   }

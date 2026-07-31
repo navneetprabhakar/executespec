@@ -74,7 +74,8 @@ public class ProjectHttpSurfaceReadTool {
     }
 
     try {
-      SpringHttpSurfaceExtractor.SurfaceSnapshot surface = extractor.extract(root);
+      com.navneet.executespec.contractsurface.SpringHttpSurfaceSnapshot surface =
+          extractor.extract(root);
       ObjectNode out = json.createObjectNode();
       out.put("ok", true);
       out.put("repo", repository.getGithubRepoFullName());

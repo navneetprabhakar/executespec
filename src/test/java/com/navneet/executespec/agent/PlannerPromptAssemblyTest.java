@@ -23,7 +23,7 @@ class PlannerPromptAssemblyTest {
   void coherencePlannerUsesCanonicalPromptAssembler() {
     PromptAssembler assembler = mock(PromptAssembler.class);
     when(assembler.assemble("coherence-planner.md")).thenReturn("assembled coherence prompt");
-    CoherencePlannerAgent agent = new CoherencePlannerAgent(null, null, null, assembler);
+    CoherencePlannerAgent agent = new CoherencePlannerAgent(null, null, null, assembler, null);
 
     assertThat(agent.loadPrompt()).isEqualTo("assembled coherence prompt");
     verify(assembler).assemble("coherence-planner.md");

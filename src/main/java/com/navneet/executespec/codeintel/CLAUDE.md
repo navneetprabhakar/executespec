@@ -4,6 +4,20 @@
 repository architecture documents, and the combined architecture document remain source evidence;
 provider-generated prose is never stronger than the cited repository snapshot.
 
+`CodeMapGenerator` delegates the bounded exact-SHA evidence lane to
+`SpringHttpArchitectureEvidenceRenderer`, which renders a versioned block from
+`SpringHttpSurfaceExtractor` output. The block
+contains the canonical method + externally reachable path, controller source location, explicit
+`server.servlet.context-path` configuration provenance, schema version, and digest. A truncated
+inventory, bounded-source limit, failed source read, or unsupported mapping is rendered explicitly
+as `UNAVAILABLE`; downstream generators must not infer routes from it. Legacy same-SHA codemaps and
+architecture documents without the current block are not cache-reusable.
+
+`RepoArchitectureGenerator` appends that exact trusted block after the provider response, replacing
+any provider-emitted lookalike marker. `ArchitectureDocGenerator` similarly appends every
+repository's exact post-LLM block to the combined map. These deterministic appendices are the
+authoritative HTTP surface; surrounding model prose remains explanatory only.
+
 ## Durable system-map refresh (V353)
 
 The web console uses `POST /api/projects/{id}/architecture/generate-async` and polls
