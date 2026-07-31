@@ -16,6 +16,8 @@ class ValidationReportSpecGapScoreCapTest {
         AccuracyReport.builder()
             .specAdherenceScore(79)
             .partialRequirements(List.of("Release idempotency is not implemented"))
+            .specEvidenceStatus("CITED")
+            .specEvidenceLocations(List.of("src/App.java:1-5"))
             .build();
 
     assertEquals(79, ValidationReportService.capScoreAtAdmittedSpecGaps(97, accuracy));
@@ -27,6 +29,8 @@ class ValidationReportSpecGapScoreCapTest {
         AccuracyReport.builder()
             .specAdherenceScore(70)
             .unknownRequirements(List.of("Middleware was not included in the evidence"))
+            .specEvidenceStatus("CITED")
+            .specEvidenceLocations(List.of("src/App.java:1-5"))
             .build();
 
     assertEquals(70, ValidationReportService.capScoreAtAdmittedSpecGaps(97, accuracy));
@@ -38,8 +42,22 @@ class ValidationReportSpecGapScoreCapTest {
         AccuracyReport.builder()
             .specAdherenceScore(100)
             .unknownRequirements(List.of("Authentication boundary was not verified"))
+            .specEvidenceStatus("CITED")
+            .specEvidenceLocations(List.of("src/App.java:1-5"))
             .build();
 
     assertEquals(84, ValidationReportService.capScoreAtAdmittedSpecGaps(97, accuracy));
+  }
+
+  @Test
+  void uncitedSpecClaimsCannotChangeTheHeadlineScore() {
+    AccuracyReport accuracy =
+        AccuracyReport.builder()
+            .specAdherenceScore(5)
+            .missingRequirements(List.of("Unverified model claim"))
+            .specEvidenceStatus("UNCITED")
+            .build();
+
+    assertEquals(97, ValidationReportService.capScoreAtAdmittedSpecGaps(97, accuracy));
   }
 }

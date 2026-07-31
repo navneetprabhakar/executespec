@@ -295,8 +295,10 @@ public class ScmPushService {
 
   /** Dispatch to the durable source provider; credentials only authorize that provider. */
   private PushResult pushIfConfigured(PipelineRun run, AppUser user) {
-    try {
-      publicationAdmissionService.assertEligible(run);
+    try (PublicationAdmissionService.Admission admission =
+        publicationAdmissionService.assertEligible(run)) {
+      admission.assertOwned();
+      return pushAdmitted(run, user);
     } catch (PublicationAdmissionService.PublicationBlockedException ineligible) {
       log.warn(
           "[{}] SCM publication blocked by {}: {}",
@@ -312,6 +314,9 @@ public class ScmPushService {
           "Regenerate validation on the current workspace and resolve the named deterministic gate"
               + " before retrying.");
     }
+  }
+
+  private PushResult pushAdmitted(PipelineRun run, AppUser user) {
     try {
       // Final fail-closed brownfield compatibility check. This runs before provider/credential
       // resolution and therefore before any branch, commit, push, or PR side effect.
@@ -1534,8 +1539,9 @@ public class ScmPushService {
     // merely a local chat mutation. Run the same freshness/build/test/workflow/exact-route
     // admission used by the canonical push/PR and deployment paths before credential lookup or
     // any Git/SCM operation.
+    PublicationAdmissionService.Admission admission;
     try {
-      publicationAdmissionService.assertEligible(run);
+      admission = publicationAdmissionService.assertEligible(run);
     } catch (PublicationAdmissionService.PublicationBlockedException ineligible) {
       PublicationAdmissionService.Eligibility eligibility = ineligible.eligibility();
       log.warn(
@@ -1550,182 +1556,185 @@ public class ScmPushService {
           eligibility.retryable(),
           eligibility.remediation());
     }
+    try (admission) {
+      admission.assertOwned();
 
-    // Persist the exact protected-contract comparison admitted at the mutation boundary. The
-    // read-only compatibility evaluation inside PublicationAdmissionService is necessary for
-    // eligibility previews, but cannot replace this final fail-closed evidence write.
-    try {
-      boolean brownfield =
-          "EXISTING".equalsIgnoreCase(String.valueOf(run.getRepoMode()))
-              || StringUtils.hasText(run.getSelectedRepoIds())
-              || brownfieldHttpContractGuard.hasBaseline(run.getRunId());
-      if (brownfield) brownfieldHttpContractGuard.assertCompatible(run.getRunId());
-    } catch (BrownfieldHttpContractGuard.ContractCompatibilityException incompatible) {
-      log.warn(
-          "[{}] apply publication blocked by {}: {}",
-          run.getRunId(),
-          incompatible.code(),
-          incompatible.getMessage());
-      return ApplyPushResult.blocked(
-          incompatible.code(),
-          "PROTECTED_CONTRACTS",
-          incompatible.getMessage(),
-          false,
-          contractRetryGuidance(incompatible.code()));
-    }
-
-    AppUser user =
-        run.getCreatedByUserId() != null
-            ? appUserRepository.findById(run.getCreatedByUserId()).orElse(null)
-            : null;
-    String pat = user != null ? user.getGithubPat() : null;
-    if (!StringUtils.hasText(pat)) {
-      return ApplyPushResult.blocked(
-          "SCM_APPLY_CREDENTIAL_MISSING",
-          "AUTHENTICATION",
-          "The run owner has no GitHub credential",
-          true,
-          "Connect GitHub or add a valid personal access token, then retry Apply to Run.");
-    }
-
-    List<java.util.UUID> repoIds = parseRepoIds(run.getSelectedRepoIds());
-
-    // Multi-repo path — each linked repo has its own clone under repos/<name>/.
-    if (!repoIds.isEmpty()) {
-      Project project =
-          run.getProjectId() != null
-              ? projectRepository.findById(run.getProjectId()).orElse(null)
-              : null;
-      String fallbackBranch = resolveBranchName(project, run);
-
-      // Index existing PR records for this run so we can prefer their headBranch.
-      java.util.Map<String, String> repoToBranch = new java.util.HashMap<>();
-      for (PullRequestRecord rec :
-          pullRequestRecordRepository.findByRunIdOrderByCreatedAtAsc(run.getRunId())) {
-        if (rec.getStatus() == PullRequestRecord.Status.MERGED
-            || rec.getStatus() == PullRequestRecord.Status.CLOSED) continue;
-        if (rec.getRepoFullName() != null && rec.getHeadBranch() != null) {
-          repoToBranch.put(rec.getRepoFullName(), rec.getHeadBranch());
-        }
+      // Persist the exact protected-contract comparison admitted at the mutation boundary. The
+      // read-only compatibility evaluation inside PublicationAdmissionService is necessary for
+      // eligibility previews, but cannot replace this final fail-closed evidence write.
+      try {
+        boolean brownfield =
+            "EXISTING".equalsIgnoreCase(String.valueOf(run.getRepoMode()))
+                || StringUtils.hasText(run.getSelectedRepoIds())
+                || brownfieldHttpContractGuard.hasBaseline(run.getRunId());
+        if (brownfield) brownfieldHttpContractGuard.assertCompatible(run.getRunId());
+      } catch (BrownfieldHttpContractGuard.ContractCompatibilityException incompatible) {
+        log.warn(
+            "[{}] apply publication blocked by {}: {}",
+            run.getRunId(),
+            incompatible.code(),
+            incompatible.getMessage());
+        return ApplyPushResult.blocked(
+            incompatible.code(),
+            "PROTECTED_CONTRACTS",
+            incompatible.getMessage(),
+            false,
+            contractRetryGuidance(incompatible.code()));
       }
 
-      List<ApplyRepoOutcome> outcomes = new java.util.ArrayList<>();
-      for (java.util.UUID id : repoIds) {
-        ProjectRepo repo = projectRepoRepository.findById(id).orElse(null);
-        if (repo == null) {
-          outcomes.add(
-              ApplyRepoOutcome.blocked(
-                  "repository-id:" + id,
-                  fallbackBranch,
-                  "Selected repository could not be resolved",
-                  "SCM_APPLY_REPOSITORY_NOT_FOUND",
-                  "REPOSITORY_RESOLUTION",
-                  true,
-                  "Refresh the project repository links, then retry Apply to Run."));
-          continue;
-        }
-        String repoFullName = repo.getGithubRepoFullName();
-        String subPath = "repos/" + lastPathSegment(repoFullName);
-        String remote = "https://github.com/" + repoFullName;
-        String branchName = repoToBranch.getOrDefault(repoFullName, fallbackBranch);
+      AppUser user =
+          run.getCreatedByUserId() != null
+              ? appUserRepository.findById(run.getCreatedByUserId()).orElse(null)
+              : null;
+      String pat = user != null ? user.getGithubPat() : null;
+      if (!StringUtils.hasText(pat)) {
+        return ApplyPushResult.blocked(
+            "SCM_APPLY_CREDENTIAL_MISSING",
+            "AUTHENTICATION",
+            "The run owner has no GitHub credential",
+            true,
+            "Connect GitHub or add a valid personal access token, then retry Apply to Run.");
+      }
 
-        try {
-          publicationGuard.assertGitWorkspaceSafe(run.getRunId(), subPath);
-        } catch (Exception unsafe) {
+      List<java.util.UUID> repoIds = parseRepoIds(run.getSelectedRepoIds());
+
+      // Multi-repo path — each linked repo has its own clone under repos/<name>/.
+      if (!repoIds.isEmpty()) {
+        Project project =
+            run.getProjectId() != null
+                ? projectRepository.findById(run.getProjectId()).orElse(null)
+                : null;
+        String fallbackBranch = resolveBranchName(project, run);
+
+        // Index existing PR records for this run so we can prefer their headBranch.
+        java.util.Map<String, String> repoToBranch = new java.util.HashMap<>();
+        for (PullRequestRecord rec :
+            pullRequestRecordRepository.findByRunIdOrderByCreatedAtAsc(run.getRunId())) {
+          if (rec.getStatus() == PullRequestRecord.Status.MERGED
+              || rec.getStatus() == PullRequestRecord.Status.CLOSED) continue;
+          if (rec.getRepoFullName() != null && rec.getHeadBranch() != null) {
+            repoToBranch.put(rec.getRepoFullName(), rec.getHeadBranch());
+          }
+        }
+
+        List<ApplyRepoOutcome> outcomes = new java.util.ArrayList<>();
+        for (java.util.UUID id : repoIds) {
+          ProjectRepo repo = projectRepoRepository.findById(id).orElse(null);
+          if (repo == null) {
+            outcomes.add(
+                ApplyRepoOutcome.blocked(
+                    "repository-id:" + id,
+                    fallbackBranch,
+                    "Selected repository could not be resolved",
+                    "SCM_APPLY_REPOSITORY_NOT_FOUND",
+                    "REPOSITORY_RESOLUTION",
+                    true,
+                    "Refresh the project repository links, then retry Apply to Run."));
+            continue;
+          }
+          String repoFullName = repo.getGithubRepoFullName();
+          String subPath = "repos/" + lastPathSegment(repoFullName);
+          String remote = "https://github.com/" + repoFullName;
+          String branchName = repoToBranch.getOrDefault(repoFullName, fallbackBranch);
+
+          try {
+            publicationGuard.assertGitWorkspaceSafe(run.getRunId(), subPath);
+          } catch (Exception unsafe) {
+            outcomes.add(
+                ApplyRepoOutcome.blocked(
+                    repoFullName,
+                    branchName,
+                    unsafe.getMessage(),
+                    "SCM_APPLY_WORKSPACE_UNSAFE",
+                    "WORKSPACE_SAFETY",
+                    false,
+                    "Remove the blocked artifact or repair the workspace, regenerate validation,"
+                        + " then retry Apply to Run."));
+            continue;
+          }
+
+          GitToolResult res =
+              gitTool.pushToExistingBranch(
+                  run.getRunId(), subPath, remote, pat, branchName, commitMessage);
+          boolean ok = res.isOk();
+          boolean clean = ok && "CLEAN".equals(res.value());
           outcomes.add(
+              ok
+                  ? new ApplyRepoOutcome(repoFullName, branchName, true, clean, res.value())
+                  : ApplyRepoOutcome.blocked(
+                      repoFullName,
+                      branchName,
+                      res.value(),
+                      "SCM_APPLY_GIT_PUSH_FAILED",
+                      "GIT_PUSH",
+                      true,
+                      "Resolve authentication, branch protection, or non-fast-forward conflicts,"
+                          + " then retry Apply to Run."));
+          if (!ok) {
+            log.warn(
+                "[{}] apply push failed for {} on branch {}: {}",
+                run.getRunId(),
+                repoFullName,
+                branchName,
+                res.value());
+          }
+        }
+        return ApplyPushResult.multiRepo(outcomes);
+      }
+
+      // Single-repo path — workspace root IS the repo (cloned from run.repoUrl).
+      if (StringUtils.hasText(run.getRepoUrl())) {
+        String branch = "executespec/" + run.getRunId().substring(0, 8);
+        // Prefer existing PR branch when available.
+        for (PullRequestRecord rec :
+            pullRequestRecordRepository.findByRunIdOrderByCreatedAtAsc(run.getRunId())) {
+          if (rec.getStatus() == PullRequestRecord.Status.MERGED
+              || rec.getStatus() == PullRequestRecord.Status.CLOSED) continue;
+          if (StringUtils.hasText(rec.getHeadBranch())) {
+            branch = rec.getHeadBranch();
+            break;
+          }
+        }
+        try {
+          publicationGuard.assertGitWorkspaceSafe(run.getRunId());
+        } catch (Exception unsafe) {
+          return ApplyPushResult.singleRepo(
               ApplyRepoOutcome.blocked(
-                  repoFullName,
-                  branchName,
+                  repoFullNameFromUrl(run.getRepoUrl()),
+                  branch,
                   unsafe.getMessage(),
                   "SCM_APPLY_WORKSPACE_UNSAFE",
                   "WORKSPACE_SAFETY",
                   false,
-                  "Remove the blocked artifact or repair the workspace, regenerate validation,"
-                      + " then retry Apply to Run."));
-          continue;
+                  "Remove the blocked artifact or repair the workspace, regenerate validation, then"
+                      + " retry Apply to Run."));
         }
-
         GitToolResult res =
             gitTool.pushToExistingBranch(
-                run.getRunId(), subPath, remote, pat, branchName, commitMessage);
-        boolean ok = res.isOk();
-        boolean clean = ok && "CLEAN".equals(res.value());
-        outcomes.add(
-            ok
-                ? new ApplyRepoOutcome(repoFullName, branchName, true, clean, res.value())
+                run.getRunId(), ".", run.getRepoUrl(), pat, branch, commitMessage);
+        String repoName = repoFullNameFromUrl(run.getRepoUrl());
+        ApplyRepoOutcome outcome =
+            res.isOk()
+                ? new ApplyRepoOutcome(
+                    repoName, branch, true, "CLEAN".equals(res.value()), res.value())
                 : ApplyRepoOutcome.blocked(
-                    repoFullName,
-                    branchName,
+                    repoName,
+                    branch,
                     res.value(),
                     "SCM_APPLY_GIT_PUSH_FAILED",
                     "GIT_PUSH",
                     true,
-                    "Resolve authentication, branch protection, or non-fast-forward conflicts,"
-                        + " then retry Apply to Run."));
-        if (!ok) {
-          log.warn(
-              "[{}] apply push failed for {} on branch {}: {}",
-              run.getRunId(),
-              repoFullName,
-              branchName,
-              res.value());
-        }
+                    "Resolve authentication, branch protection, or non-fast-forward conflicts, then"
+                        + " retry Apply to Run.");
+        return ApplyPushResult.singleRepo(outcome);
       }
-      return ApplyPushResult.multiRepo(outcomes);
-    }
 
-    // Single-repo path — workspace root IS the repo (cloned from run.repoUrl).
-    if (StringUtils.hasText(run.getRepoUrl())) {
-      String branch = "executespec/" + run.getRunId().substring(0, 8);
-      // Prefer existing PR branch when available.
-      for (PullRequestRecord rec :
-          pullRequestRecordRepository.findByRunIdOrderByCreatedAtAsc(run.getRunId())) {
-        if (rec.getStatus() == PullRequestRecord.Status.MERGED
-            || rec.getStatus() == PullRequestRecord.Status.CLOSED) continue;
-        if (StringUtils.hasText(rec.getHeadBranch())) {
-          branch = rec.getHeadBranch();
-          break;
-        }
-      }
-      try {
-        publicationGuard.assertGitWorkspaceSafe(run.getRunId());
-      } catch (Exception unsafe) {
-        return ApplyPushResult.singleRepo(
-            ApplyRepoOutcome.blocked(
-                repoFullNameFromUrl(run.getRepoUrl()),
-                branch,
-                unsafe.getMessage(),
-                "SCM_APPLY_WORKSPACE_UNSAFE",
-                "WORKSPACE_SAFETY",
-                false,
-                "Remove the blocked artifact or repair the workspace, regenerate validation, then"
-                    + " retry Apply to Run."));
-      }
-      GitToolResult res =
-          gitTool.pushToExistingBranch(
-              run.getRunId(), ".", run.getRepoUrl(), pat, branch, commitMessage);
-      String repoName = repoFullNameFromUrl(run.getRepoUrl());
-      ApplyRepoOutcome outcome =
-          res.isOk()
-              ? new ApplyRepoOutcome(
-                  repoName, branch, true, "CLEAN".equals(res.value()), res.value())
-              : ApplyRepoOutcome.blocked(
-                  repoName,
-                  branch,
-                  res.value(),
-                  "SCM_APPLY_GIT_PUSH_FAILED",
-                  "GIT_PUSH",
-                  true,
-                  "Resolve authentication, branch protection, or non-fast-forward conflicts, then"
-                      + " retry Apply to Run.");
-      return ApplyPushResult.singleRepo(outcome);
+      return ApplyPushResult.blocked(
+          "SCM_APPLY_REPOSITORY_MISSING",
+          "REPOSITORY_RESOLUTION",
+          "No publishable repository is configured for this run",
+          false,
+          "Link a repository and start a repository-backed run before using Apply to Run.");
     }
-
-    return ApplyPushResult.blocked(
-        "SCM_APPLY_REPOSITORY_MISSING",
-        "REPOSITORY_RESOLUTION",
-        "No publishable repository is configured for this run",
-        false,
-        "Link a repository and start a repository-backed run before using Apply to Run.");
   }
 }

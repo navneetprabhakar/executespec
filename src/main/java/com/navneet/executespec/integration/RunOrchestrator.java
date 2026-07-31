@@ -3692,7 +3692,6 @@ public class RunOrchestrator implements RunControlPort {
             action.targetTask().dispatchedModel())) {
       return Optional.empty();
     }
-
     String targetTaskId = action.targetTask().taskId();
     String targetTaskKey = fullTaskKey(runId, targetTaskId);
     var taskRow = taskRepo.findById(targetTaskKey);
@@ -3703,11 +3702,11 @@ public class RunOrchestrator implements RunControlPort {
           targetTaskKey);
       return Optional.empty();
     }
-
     final CorrectionWorkspaceTransaction.Checkpoint correctionCheckpoint;
     final AutomaticCorrectionLifecycle.EvidenceCheckpoint correctionEvidenceCheckpoint;
     try {
-      correctionCheckpoint = automaticCorrectionLifecycle.begin(rootCtx.workspaceRoot());
+      correctionCheckpoint =
+          automaticCorrectionLifecycle.begin(runId, targetTaskKey, rootCtx.workspaceRoot());
       correctionEvidenceCheckpoint = automaticCorrectionLifecycle.invalidateEvidence(runId);
     } catch (RuntimeException checkpointFailure) {
       log.error(
@@ -3798,27 +3797,25 @@ public class RunOrchestrator implements RunControlPort {
 
     CorrectionWorkspaceTransaction.DiffEvidence correctionDiff = null;
     try {
+      ExecutionRequest correctionRequest =
+          AutomaticCorrectionExecutionRequestFactory.create(
+              plan,
+              candidate,
+              rootCtx,
+              confirmationRequired,
+              benchmarkPriorRequired,
+              seededUsage.providerSwitches(),
+              seededUsage.modelStepUps(),
+              seededUsage.modelStepDowns(),
+              runRepo.findById(runId).map(PipelineRun::getUserRequest).orElse(null),
+              designBlock,
+              projectId,
+              contextComposer.buildMultiRepoSummary(projectId, selectedRepoIds));
       ExecutionResult rerunResult =
-          executor.execute(
-              ExecutionRequest.builder()
-                  .plan(plan)
-                  .provider(candidate.provider())
-                  .model(candidate.model())
-                  .runContext(rootCtx)
-                  .maxIterationsPerTask(null)
-                  .enableSmokeTests(true)
-                  .requireConfirmationBeforeExpensiveContinuation(confirmationRequired)
-                  .requireBenchmarkPriorForAutomaticContinuation(benchmarkPriorRequired)
-                  .initialProviderSwitchesUsed(seededUsage.providerSwitches())
-                  .initialModelStepUpsUsed(seededUsage.modelStepUps())
-                  .initialModelStepDownsUsed(seededUsage.modelStepDowns())
-                  .originalGoal(
-                      runRepo.findById(runId).map(PipelineRun::getUserRequest).orElse(null))
-                  .designBlock(designBlock)
-                  .projectId(projectId)
-                  .workspaceSummary(
-                      contextComposer.buildMultiRepoSummary(projectId, selectedRepoIds))
-                  .build(),
+          automaticCorrectionLifecycle.executeWithToolFence(
+              correctionCheckpoint,
+              executor,
+              correctionRequest,
               new SequentialExecutor.ResumeRequest(
                   targetTaskKey,
                   candidate.provider(),
@@ -3839,6 +3836,7 @@ public class RunOrchestrator implements RunControlPort {
           candidate.provider().toUpperCase(Locale.ROOT),
           candidate.model());
 
+      automaticCorrectionLifecycle.assertAuthority(correctionCheckpoint);
       automaticCorrectionLifecycle.runLintAutofix(runId, rootCtx.workspaceRoot());
 
       String preReviewerGeneration =
@@ -3920,6 +3918,7 @@ public class RunOrchestrator implements RunControlPort {
         }
         return Optional.empty();
       }
+      automaticCorrectionLifecycle.assertAuthority(correctionCheckpoint);
       correctionValidationAdmission.regenerateAndAssert(
           runId,
           rerunResult,
@@ -3939,7 +3938,7 @@ public class RunOrchestrator implements RunControlPort {
       }
       var delta = automaticCorrectionLifecycle.captureValidationDelta(correctionEvidenceCheckpoint);
       CorrectionWorkspaceTransaction.Accepted generations =
-          automaticCorrectionLifecycle.accept(correctionCheckpoint);
+          automaticCorrectionLifecycle.previewAcceptance(correctionCheckpoint);
       persistenceWriter.applyExecutionResultToTasks(runId, rerunResult);
       persistenceWriter.persistReview(runId, rerunReviewResult);
       automaticCorrectionLifecycle.recordResolution(
@@ -3952,6 +3951,7 @@ public class RunOrchestrator implements RunControlPort {
           correctionDiff,
           delta,
           true);
+      automaticCorrectionLifecycle.accept(correctionCheckpoint);
       if (postValidationOperation != null) {
         runOperationLifecycle.complete(postValidationOperation);
         postValidationOperation = null;

@@ -76,6 +76,46 @@ public class AccuracyReport {
   @Builder.Default private List<String> unknownRequirements = List.of();
 
   /**
+   * Workspace-relative source/test locations that were deterministically re-read after the model
+   * returned them. Entries use {@code path:start-end}; unvalidated model citations are discarded.
+   */
+  @Builder.Default private List<String> evidenceLocations = List.of();
+
+  /** {@code CITED}, {@code UNCITED}, or {@code UNAVAILABLE}; never inferred by clients. */
+  private String evidenceStatus;
+
+  /** Validated source locations supporting requirement-adherence claims only. */
+  @Builder.Default private List<String> specEvidenceLocations = List.of();
+
+  /** Validated source locations supporting endpoint-coverage claims only. */
+  @Builder.Default private List<String> endpointEvidenceLocations = List.of();
+
+  /** Validated source/test locations supporting the test-coverage judgment only. */
+  @Builder.Default private List<String> testEvidenceLocations = List.of();
+
+  private String specEvidenceStatus;
+  private String endpointEvidenceStatus;
+  private String testEvidenceStatus;
+
+  public boolean hasCitedSpecEvidence() {
+    return "CITED".equalsIgnoreCase(specEvidenceStatus)
+        && specEvidenceLocations != null
+        && !specEvidenceLocations.isEmpty();
+  }
+
+  public boolean hasCitedEndpointEvidence() {
+    return "CITED".equalsIgnoreCase(endpointEvidenceStatus)
+        && endpointEvidenceLocations != null
+        && !endpointEvidenceLocations.isEmpty();
+  }
+
+  public boolean hasCitedTestEvidence() {
+    return "CITED".equalsIgnoreCase(testEvidenceStatus)
+        && testEvidenceLocations != null
+        && !testEvidenceLocations.isEmpty();
+  }
+
+  /**
    * API endpoint coverage breakdown (populated for API-type projects). Null for non-API projects
    * (static sites, CLI tools, etc.)
    */

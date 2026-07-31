@@ -1,5 +1,6 @@
 package com.navneet.executespec.tool;
 
+import java.io.BufferedReader;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -181,15 +182,21 @@ public class FileSystemTool {
   public String readFileRange(String runId, String path, int startLine, int endLine) {
     try {
       Path resolved = safeResolve(runId, path);
-      List<String> allLines = Files.readAllLines(resolved);
-      int totalLines = allLines.size();
-
-      // Clamp to valid range
       int start = Math.max(1, startLine);
-      int end = Math.min(totalLines, endLine);
+      int requestedEnd = Math.max(start, endLine);
+      int totalLines = 0;
+      List<String> selected = new java.util.ArrayList<>();
+      try (BufferedReader reader = Files.newBufferedReader(resolved)) {
+        String line;
+        while ((line = reader.readLine()) != null) {
+          totalLines++;
+          if (totalLines >= start && totalLines <= requestedEnd) selected.add(line);
+        }
+      }
       if (start > totalLines) {
         return "File has only " + totalLines + " lines (requested start=" + startLine + ")";
       }
+      int end = Math.min(totalLines, requestedEnd);
 
       StringBuilder sb = new StringBuilder();
       sb.append("[Lines ")
@@ -199,8 +206,8 @@ public class FileSystemTool {
           .append(" of ")
           .append(totalLines)
           .append("]\n");
-      for (int i = start - 1; i < end; i++) {
-        sb.append(String.format("%4d | %s%n", i + 1, allLines.get(i)));
+      for (int i = 0; i < selected.size(); i++) {
+        sb.append(String.format("%4d | %s%n", start + i, selected.get(i)));
       }
       return sb.toString();
     } catch (SecurityException e) {

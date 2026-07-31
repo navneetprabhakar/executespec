@@ -194,6 +194,150 @@ class SpringHttpSurfaceExtractorTest {
   }
 
   @Test
+  void inventoriesDeepMultiRepositoryControllerWithoutDepthTruncation() throws Exception {
+    String module = "repos/customer-app/services/edge/apps/api/modules/casino";
+    write(
+        module + "/src/main/resources/application.yml",
+        """
+        server:
+          servlet:
+            context-path: /simulation
+        """);
+    write(
+        module
+            + "/src/main/java/com/acme/platform/simulation/http/controller/CasinoController.java",
+        """
+        package com.acme.platform.simulation.http.controller;
+
+        @RestController
+        class CasinoController {
+          @PostMapping("/casino-game")
+          Object simulate() { return null; }
+        }
+        """);
+
+    assertThat(extractor.extract(workspace).routes())
+        .extracting(route -> route.method() + " " + route.path() + " " + route.source())
+        .containsExactly(
+            "POST /simulation/casino-game "
+                + module
+                + "/src/main/java/com/acme/platform/simulation/http/controller/"
+                + "CasinoController.java:5");
+  }
+
+  @Test
+  void skipsBuildVendorAndGitTreesBeforeApplyingTraversalBudgets() throws Exception {
+    write(
+        "src/main/java/example/Controller.java",
+        """
+        @RestController
+        class Controller {
+          @GetMapping("/health")
+          Object health() { return null; }
+        }
+        """);
+    write("target/deep/Broken.java", "not valid java");
+    write("build/deep/Broken.java", "not valid java");
+    write("dist/deep/Broken.java", "not valid java");
+    write("vendor/deep/Broken.java", "not valid java");
+    write(".git/objects/Broken.java", "not valid java");
+
+    var snapshot =
+        extractor.extract(
+            workspace, new SpringContractSourceInventory.TraversalLimits(16, 1, 1024));
+
+    assertThat(snapshot.routes())
+        .extracting(route -> route.method() + " " + route.path())
+        .containsExactly("GET /health");
+  }
+
+  @Test
+  void inventoriesProductionControllerUnderGeneratedNamedPath() throws Exception {
+    write(
+        "repos/generated/src/main/java/example/GeneratedController.java",
+        """
+        @RestController
+        class GeneratedController {
+          @GetMapping("/generated-health")
+          Object health() { return null; }
+        }
+        """);
+
+    assertThat(extractor.extract(workspace).routes())
+        .extracting(route -> route.method() + " " + route.path())
+        .containsExactly("GET /generated-health");
+  }
+
+  @Test
+  void failsClosedWhenEmptyDirectoryTraversalExceedsEntryBudget() throws Exception {
+    Files.createDirectories(workspace.resolve("one/two/three"));
+
+    assertThatThrownBy(
+            () ->
+                extractor.extract(
+                    workspace, new SpringContractSourceInventory.TraversalLimits(2, 1, 1024)))
+        .isInstanceOf(SpringHttpSurfaceExtractor.SurfaceExtractionException.class)
+        .hasMessageContaining("visited-entry budget exceeded (3 > 2)")
+        .hasMessageContaining("one/two");
+  }
+
+  @Test
+  void rejectsSymlinkInsteadOfSilentlyOmittingLinkedController() throws Exception {
+    write(
+        "target/LinkedController.java",
+        """
+        @RestController
+        class LinkedController {
+          @GetMapping("/linked")
+          Object linked() { return null; }
+        }
+        """);
+    Path link = workspace.resolve("src/main/java/example/LinkedController.java");
+    Files.createDirectories(link.getParent());
+    Files.createSymbolicLink(link, workspace.resolve("target/LinkedController.java"));
+
+    assertThatThrownBy(() -> extractor.extract(workspace))
+        .isInstanceOf(SpringHttpSurfaceExtractor.SurfaceExtractionException.class)
+        .hasMessageContaining("symbolic link cannot be admitted")
+        .hasMessageContaining("src/main/java/example/LinkedController.java");
+  }
+
+  @Test
+  void failsClosedWhenSourceFileBudgetIsExceeded() throws Exception {
+    write("src/main/java/example/First.java", "class First {}");
+    write("src/main/java/example/Second.java", "class Second {}");
+
+    assertThatThrownBy(
+            () ->
+                extractor.extract(
+                    workspace, new SpringContractSourceInventory.TraversalLimits(10, 1, 1024)))
+        .isInstanceOf(SpringHttpSurfaceExtractor.SurfaceExtractionException.class)
+        .hasMessageContaining("source-file budget exceeded (2 > 1)")
+        .hasMessageContaining("src/main/java/example/");
+  }
+
+  @Test
+  void boundedReadFailsClosedWhenSourceExceedsRemainingByteBudget() throws Exception {
+    write(
+        "src/main/java/example/Controller.java",
+        """
+        @RestController
+        class Controller {
+          @GetMapping("/health")
+          Object health() { return null; }
+        }
+        """);
+
+    assertThatThrownBy(
+            () ->
+                extractor.extract(
+                    workspace, new SpringContractSourceInventory.TraversalLimits(10, 10, 16)))
+        .isInstanceOf(SpringHttpSurfaceExtractor.SurfaceExtractionException.class)
+        .hasMessageContaining("source-byte budget exceeded")
+        .hasMessageContaining("src/main/java/example/Controller.java");
+  }
+
+  @Test
   void failsClosedForDynamicMappingPathInsteadOfSilentlyDroppingRoute() throws Exception {
     write(
         "src/main/java/example/DynamicController.java",

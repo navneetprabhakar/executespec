@@ -39,6 +39,11 @@ invalid reports are excluded and counted separately.
   of an arbitrary natural-language deployment requirement.
 - Reviewer/accuracy findings remain advisory evidence even when model output labels them CRITICAL.
   Only deterministic compiler/build/test/standards/invariant failures may hard-fail the report.
+- Accuracy-assessment source citations are model-proposed but deterministically re-read through
+  `AccuracyEvidenceCitationPolicy` before persistence. Only canonical workspace-relative
+  `path:start-end` locations with an exact readable line range survive in `accuracy_json`.
+  Uncited spec, endpoint, and test-coverage judgments remain `UNKNOWN` with an explicit
+  `UNAVAILABLE` artifact; a model score alone cannot present a source-backed PASS or FAIL.
 - V270 persists `boot_verdict`, `boot_healthy`, and `boot_reason` whenever the final deterministic
   preview verifier supplied a `BootVerification`. Concrete-test rescoring AND the SUPER_ADMIN
   `VerifiedScoreBackfillService` rehydrate that signal through the shared

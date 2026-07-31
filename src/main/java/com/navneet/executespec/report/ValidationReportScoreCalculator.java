@@ -64,6 +64,34 @@ final class ValidationReportScoreCalculator {
       boolean gamingGuards,
       BootVerification bootVerification,
       boolean endpointCoverageApplicable) {
+    return additive(
+        buildPassed,
+        testsPassed,
+        testsTotal,
+        reviewerVerdict,
+        unfixedCriticals,
+        coverageLevel,
+        filesGenerated,
+        endpointCoverage,
+        gamingGuards,
+        bootVerification,
+        endpointCoverageApplicable,
+        true);
+  }
+
+  static int additive(
+      Boolean buildPassed,
+      int testsPassed,
+      int testsTotal,
+      String reviewerVerdict,
+      int unfixedCriticals,
+      String coverageLevel,
+      int filesGenerated,
+      Integer endpointCoverage,
+      boolean gamingGuards,
+      BootVerification bootVerification,
+      boolean endpointCoverageApplicable,
+      boolean testCoverageJudgmentAdmissible) {
     if (filesGenerated >= 0 && filesGenerated == 0) return 0;
 
     double weighted = 0;
@@ -93,7 +121,7 @@ final class ValidationReportScoreCalculator {
     }
     if (testsTotal > 0) {
       double tests = 100 * clamp((double) testsPassed / Math.max(1, testsTotal), 0, 1);
-      if (gamingGuards) {
+      if (gamingGuards && testCoverageJudgmentAdmissible) {
         // RR-1648 — an unknown / unrecognised coverage judgment used to fall through to an
         // uncapped 100, so an always-passing trivial suite scored full marks whenever the LLM
         // failed to emit a level it recognised. Only an explicit GOOD/COMPREHENSIVE judgment

@@ -178,7 +178,9 @@ public class ReviewScoringService {
    * didn't populate).
    */
   private static int resolveAnchor(AccuracyReport accuracy, List<ReviewIssue> issues) {
-    if (accuracy != null && accuracy.getSpecAdherenceScore() > 0) {
+    if (accuracy != null
+        && accuracy.hasCitedSpecEvidence()
+        && accuracy.getSpecAdherenceScore() > 0) {
       return accuracy.getSpecAdherenceScore();
     }
     int critical = 0, minor = 0;
@@ -227,7 +229,9 @@ public class ReviewScoringService {
   }
 
   private static int llmCoverageLevel(AccuracyReport accuracy) {
-    if (accuracy == null || accuracy.getTestCoverageLevel() == null) return 40;
+    if (accuracy == null
+        || !accuracy.hasCitedTestEvidence()
+        || accuracy.getTestCoverageLevel() == null) return 40;
     // A6 (audit 2026-05-29) — AccuracyAssessmentService now grades against the
     // NONE / PARTIAL / GOOD / COMPREHENSIVE bands. GOOD + PARTIAL had no case and fell through to
     // the 40 default, under-scoring the dashboard test-coverage signal for honest runs (a GOOD run

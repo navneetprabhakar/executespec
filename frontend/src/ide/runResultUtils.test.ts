@@ -132,6 +132,7 @@ describe('publicationTrustFacts', () => {
     const facts = publicationTrustFacts(run, publication);
 
     expect(Object.fromEntries(facts.map((fact) => [fact.label, fact.value]))).toMatchObject({
+      'Tasks terminal': '1/1 terminal · 1/1 completed',
       'Approved correction route': 'OPENROUTER/x-ai/grok-4.20',
       'Actual worker route': 'OPENROUTER/x-ai/grok-4.20 (LEDGER · 1 physical attempt)',
       Build: 'Passed',
@@ -175,6 +176,36 @@ describe('publicationTrustFacts', () => {
     expect(facts.find((fact) => fact.label === 'Tests')).toMatchObject({kind: 'bad'});
     expect(facts.find((fact) => fact.label === 'Evidence freshness')).toMatchObject({kind: 'bad'});
     expect(facts.find((fact) => fact.label === 'Publication')).toMatchObject({kind: 'bad'});
+  });
+
+  it('reports terminal task state without claiming failed, partial, or blocked work executed', () => {
+    const facts = publicationTrustFacts({
+      tasks: [
+        {taskId: 'T1', status: 'FAILED'},
+        {taskId: 'T2', status: 'PARTIAL'},
+        {taskId: 'T3', status: 'BLOCKED'},
+        {taskId: 'T4', status: 'PENDING'},
+      ],
+    } as unknown as RunDetail);
+
+    expect(facts.find((fact) => fact.label === 'Tasks terminal')).toMatchObject({
+      value: '3/4 terminal · 0/4 completed',
+      kind: 'bad',
+    });
+  });
+
+  it('never renders an all-blocked task set as green execution evidence', () => {
+    const facts = publicationTrustFacts({
+      tasks: [
+        {taskId: 'T1', status: 'BLOCKED'},
+        {taskId: 'T2', status: 'BLOCKED'},
+      ],
+    } as unknown as RunDetail);
+
+    expect(facts.find((fact) => fact.label === 'Tasks terminal')).toMatchObject({
+      value: '2/2 terminal · 0/2 completed',
+      kind: 'bad',
+    });
   });
 });
 

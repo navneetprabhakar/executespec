@@ -93,6 +93,9 @@ OUTPUT FORMAT (strict JSON, no markdown fences):
   "missingRequirements": ["<requirement text>", ...],
   "partialRequirements": ["<requirement text that exists but is incomplete>", ...],
   "unknownRequirements": ["<requirement text where you have no evidence either way>", ...],
+  "specEvidenceLocations": ["<workspace-relative-production-or-test-path>:<start>-<end>", ...],
+  "endpointEvidenceLocations": ["<workspace-relative-source-path>:<start>-<end>", ...],
+  "testEvidenceLocations": ["<workspace-relative-test-path>:<start>-<end>", ...],
   "endpointCoverage": {
     "required": ["<METHOD /path>", ...],
     "implemented": ["<METHOD /path>", ...],
@@ -256,6 +259,11 @@ SCORE COMPUTATION GUIDANCE:
   A green command is execution evidence only. It does not upgrade copied-logic or
   requirement-bypassing tests into coverage.
 - Return valid JSON. Do not wrap in markdown fences.
+- specEvidenceLocations must cite the readable production or test lines supporting the requirement
+  classifications. endpointEvidenceLocations must independently cite implemented/missing endpoint
+  claims. testEvidenceLocations must independently cite the tests supporting testCoverageLevel.
+  Never reuse one dimension's citation as proof for another dimension. Do not cite a file you did
+  not receive. The server re-reads and validates every location; invalid citations are discarded.
 """;
 
   /**
@@ -410,6 +418,7 @@ SCORE COMPUTATION GUIDANCE:
       removeInventedEndpointCoverage(originalGoal, requirements, report);
       AccuracyReportTruthPolicy.enforceConsistency(report);
       AccuracyReportTruthPolicy.enforceDeterministicFailures(report, issues);
+      AccuracyEvidenceCitationPolicy.validate(fileSystemTool, runId, report);
 
       log.info(
           "[AccuracyAssessment] Complete for run {}: {} ({}/100) — {} missing, {} partial,"

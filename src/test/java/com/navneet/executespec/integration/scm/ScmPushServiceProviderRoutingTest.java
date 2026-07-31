@@ -62,6 +62,15 @@ class ScmPushServiceProviderRoutingTest {
 
   @org.mockito.Spy private ObjectMapper objectMapper = new ObjectMapper();
 
+  @org.junit.jupiter.api.BeforeEach
+  void admitPublicationByDefault() {
+    org.mockito.Mockito.lenient()
+        .when(publicationAdmissionService.assertEligible(any(PipelineRun.class)))
+        .thenAnswer(
+            ignored ->
+                new PublicationAdmissionService.Admission("a".repeat(64), "PUBLICATION_ELIGIBLE"));
+  }
+
   @Test
   void explicitGitHubRouteWinsWhenUserAlsoHasBitbucketCredentials() {
     AppUser user = dualCredentialUser();
