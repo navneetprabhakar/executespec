@@ -1,6 +1,5 @@
 package com.navneet.executespec.harness;
 
-import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -1032,7 +1031,7 @@ to boot — skip it for those.""";
       ResumeRequest resume, String runId, String logicalTaskId) {
     return resume.approvedRouteTargets(runId, logicalTaskId)
         ? new ProviderModelOverride(
-            resume.approvedProvider(), resume.approvedModel(), resume.approvedAction())
+            resume.approvedProvider(), resume.approvedModel(), resume.approvedAction(), null)
         : null;
   }
 
@@ -1292,20 +1291,22 @@ to boot — skip it for those.""";
       return outcome;
     }
 
-    // Preserve the worker's latest investigation when handing the same task to a different
-    // provider/model. The workspace is shared, but starting with a fresh conversation makes the
-    // replacement model repeat repository exploration and can undo the value of the escalation.
-    // ContextStore is best-effort; a missing/expired snapshot still falls back to a fresh attempt.
-    com.navneet.executespec.context.SavedContext handoff = loadContinuationSnapshot(req, task);
+    // A different provider/model gets the current workspace plus a compact deterministic dossier,
+    // never the previous model's full transcript. Replaying that transcript across models grows
+    // every subsequent prompt and anchors the replacement model to the failed reasoning path.
+    String recoveryNote =
+        ProviderHandoffDossier.read(req.runContext().workspaceRoot(), runId, task.id())
+            .map(ProviderHandoffDossier::recoveryNote)
+            .orElse(null);
     TaskOutcome rerun =
         executeOne(
             task,
             plan,
             req,
             isFinalTask,
-            handoff,
+            null,
             new ProviderModelOverride(
-                candidate.provider(), candidate.model(), decision.decision()));
+                candidate.provider(), candidate.model(), decision.decision(), recoveryNote));
     return mergeContinuationAttempt(outcome, rerun, decision, candidate);
   }
 
@@ -1326,78 +1327,6 @@ to boot — skip it for those.""";
             : new TaskStatusPersistenceService(taskRepo, costTracker);
     return persistence.reopenForContinuation(
         runId, taskIdShort, taskRecoveryAttemptByTask.get(key));
-  }
-
-  /**
-   * Load the latest bounded worker snapshot for a model/provider continuation handoff.
-   *
-   * <p>The snapshot key is derived from the same run/task context used by {@link WorkerAgent};
-   * keeping this lookup in one seam makes the handoff behavior testable and keeps Redis failures
-   * non-fatal, matching the normal retry/resume policy.
-   */
-  com.navneet.executespec.context.SavedContext loadContinuationSnapshot(
-      ExecutionRequest req, PlannedTask task) {
-    if (contextStore == null || req == null || req.runContext() == null || task == null) {
-      return null;
-    }
-    var context =
-        new com.navneet.executespec.tool.ExecutionContext(
-            req.runContext().runId(), task.id(), req.runContext().workspaceRoot());
-    java.nio.file.Path evidenceBundle =
-        context
-            .workspaceRoot()
-            .resolve(".agent-context")
-            .resolve(com.navneet.executespec.context.ContextEvidenceBundleWriter.FILE_NAME);
-    if (Files.exists(evidenceBundle)) {
-      // Context-agent evidence is optional during an in-flight run, but when a bundle exists it
-      // must be current before a provider handoff reuses the snapshot. A stale bundle means the
-      // workspace changed after the evidence was captured; restart with the fresh task prompt.
-      ObjectMapper mapper = objectMapper == null ? new ObjectMapper() : objectMapper;
-      if (new com.navneet.executespec.context.ContextEvidenceBundleWriter(mapper)
-          .readCurrent(context.workspaceRoot(), context.runId())
-          .isEmpty()) {
-        log.info(
-            "Continuation handoff evidence bundle stale run={} task={} — starting fresh",
-            context.runId(),
-            context.taskId());
-        return null;
-      }
-    }
-    try {
-      var snapshot = contextStore.load(context).orElse(null);
-      if (snapshot != null) {
-        var dossier =
-            ProviderHandoffDossier.read(context.workspaceRoot(), context.runId(), context.taskId());
-        if (dossier.isPresent()) {
-          var history = new ArrayList<>(snapshot.history());
-          history.add(
-              new org.springframework.ai.chat.messages.UserMessage(
-                  ProviderHandoffDossier.recoveryNote(dossier.get())));
-          snapshot =
-              com.navneet.executespec.context.SavedContext.builder()
-                  .runId(snapshot.runId())
-                  .taskId(snapshot.taskId())
-                  .iteration(snapshot.iteration())
-                  .history(history)
-                  .savedAt(snapshot.savedAt())
-                  .sizeBytes(snapshot.sizeBytes())
-                  .build();
-        }
-        log.info(
-            "Continuation handoff run={} task={} resumes snapshot iter={}",
-            context.runId(),
-            context.taskId(),
-            snapshot.iteration());
-      }
-      return snapshot;
-    } catch (RuntimeException e) {
-      log.warn(
-          "Continuation handoff snapshot unavailable run={} task={}: {}",
-          context.runId(),
-          context.taskId(),
-          e.getMessage());
-      return null;
-    }
   }
 
   private boolean actionableContinuationDecision(GoalContinuationPolicyDecision decision) {
@@ -1954,6 +1883,11 @@ to boot — skip it for those.""";
             req.plan(),
             req.originalGoal());
     String userPrompt = composeUserPrompt(task, null, workerEvidence);
+    if (providerModelOverride != null
+        && providerModelOverride.recoveryNote() != null
+        && !providerModelOverride.recoveryNote().isBlank()) {
+      userPrompt = userPrompt + "\n\n" + providerModelOverride.recoveryNote();
+    }
 
     String runId = req.runContext().runId();
     throwIfCancellationRequested(runId, task.id());
@@ -2047,6 +1981,7 @@ to boot — skip it for those.""";
             // preference. Disable cross-provider/model failover for that target attempt. Ordinary
             // fresh runs and crash resumes retain their existing failover behaviour.
             .strictProvider(providerModelOverride != null)
+            .mutationChurnForceAfter(maxEditChurn())
             // VBC verify-before-complete (RL-2026-06-…, V235, default OFF) — server-RUN the
             // project's tests at completeTask and refuse if red. Gated to the FINAL task (mirrors
             // the smoke gate at executeOne's multiTask check) so an intermediate task isn't blocked
@@ -2437,6 +2372,7 @@ to boot — skip it for those.""";
                 .autoVerify(
                     featureFlagService != null
                         && featureFlagService.isEnabled("worker.auto-verify.enabled"))
+                .mutationChurnForceAfter(maxEditChurn())
                 .build());
     WorkerResult retry;
     if (featureFlagService != null && featureFlagService.isEnabled(FLAG_RETRY_CONTEXT_RETENTION)) {
@@ -2630,6 +2566,7 @@ to boot — skip it for those.""";
                   .autoVerify(
                       featureFlagService != null
                           && featureFlagService.isEnabled("worker.auto-verify.enabled"))
+                  .mutationChurnForceAfter(maxEditChurn())
                   .build());
       WorkerResult retry2 =
           runWorkerWithCancellationFence(runId, task.id(), () -> worker.run(retry2Request));
@@ -4100,7 +4037,7 @@ to boot — skip it for those.""";
   }
 
   private record ProviderModelOverride(
-      String provider, String model, RunContinuationDecision decision) {}
+      String provider, String model, RunContinuationDecision decision, String recoveryNote) {}
 
   private record GoalTaskDecision(
       GoalDonenessDecision doneness, GoalContinuationPolicyDecision continuation) {}
