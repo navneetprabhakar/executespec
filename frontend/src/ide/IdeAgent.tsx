@@ -105,6 +105,9 @@ export default function IdeAgent() {
   const handoffHandledRef = useRef<string | null>(null);
   const overlayFocusRef = useRef<HTMLElement | null>(null);
   const stickToBottom = useRef(true);
+  // Read at load-resolution time so an in-flight background reload cannot clobber a selection
+  // the operator made (or a session they created) after the load's list snapshot was fetched.
+  const selectedIdRef = useRef<string | null>(null);
   const liveRun = useAgentRunStream(state.activeRun);
   const runDetail = liveRun.detail;
   const runCost = liveRun.costUsd;
@@ -560,8 +563,11 @@ export default function IdeAgent() {
           userModelsPromise,
         ]);
       setAvailableModels(eligibleAgentProviderCatalog(modelCatalog.providers ?? [], userModels));
+      // An explicit existing selection always survives a background reload: the fetched list
+      // snapshot may predate a conversation the operator just created or switched to, and the
+      // scoped auto-pick must never snap them back to an older ACTIVE session.
       const scoped = selectScopedAgentSession(sessionRows, scope);
-      const selectedId = scoped?.id ?? null;
+      const selectedId = selectedIdRef.current ?? scoped?.id ?? null;
       dispatch({
         type: 'load:success',
         sessions: sessionRows,
@@ -605,6 +611,10 @@ export default function IdeAgent() {
     document.addEventListener('visibilitychange', onVisibilityChange);
     return () => document.removeEventListener('visibilitychange', onVisibilityChange);
   }, [load, state.status]);
+
+  useEffect(() => {
+    selectedIdRef.current = state.selectedId;
+  }, [state.selectedId]);
 
   useEffect(() => {
     if (!state.selectedId) {
