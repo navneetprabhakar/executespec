@@ -26,6 +26,7 @@ public final class WorkerTaskRequestControls {
         .dollarCap(primary.dollarCap())
         .workerStartedAtEpochMs(primary.workerStartedAtEpochMs())
         .strictProvider(primary.strictProvider())
+        .zeroWriteSalvageAllowed(primary.zeroWriteSalvageAllowed())
         .build();
   }
 
