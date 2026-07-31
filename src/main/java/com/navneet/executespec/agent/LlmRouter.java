@@ -461,6 +461,14 @@ public class LlmRouter {
   @Value("${spring.ai.deepseek.read-timeout-seconds:300}")
   private int deepSeekReadTimeoutSeconds = 300;
 
+  /**
+   * Fireworks long agentic tool turns (500K-token GLM contexts) routinely exceed the generic 120s
+   * OpenAI-wire window; the provider keeps generating and bills the discarded completion while the
+   * client cancels at exactly 120s. Same window as native DeepSeek.
+   */
+  @Value("${spring.ai.fireworks.read-timeout-seconds:300}")
+  private int fireworksReadTimeoutSeconds = 300;
+
   // 2026-06-09 — Fireworks AI: OpenAI-wire-compatible US-hosted fast inference for the Chinese open
   // models. Same plumbing as DeepSeek (per-call base-URL). System fallback key; org BYOK via
   // RunKeyContext.keyFor("fireworks").
@@ -1150,6 +1158,9 @@ public class LlmRouter {
     if ("deepseek".equalsIgnoreCase(request.provider())) {
       return Duration.ofSeconds(Math.max(1, deepSeekReadTimeoutSeconds));
     }
+    if ("fireworks".equalsIgnoreCase(request.provider())) {
+      return Duration.ofSeconds(Math.max(1, fireworksReadTimeoutSeconds));
+    }
     return DEFAULT_TRANSPORT_TIMEOUT;
   }
 
@@ -1720,7 +1731,10 @@ public class LlmRouter {
             .maxCompletionTokens(r.maxTokens())
             .toolChoice(r.toolChoice())
             .apiKey(key)
-            .readTimeoutSeconds(admittedReadTimeoutSeconds(r, transportDeadline))
+            .readTimeoutSeconds(
+                transportDeadline == null && r.readTimeoutSeconds() == null
+                    ? fireworksReadTimeoutSeconds
+                    : admittedReadTimeoutSeconds(r, transportDeadline))
             .baseUrl(fireworksBaseUrl)
             .build());
   }

@@ -127,11 +127,14 @@ spring:
       base-url: https://api.deepseek.com
       api-key: ${DEEPSEEK_API_KEY:}
       # Native thinking/tool responses can be slow; this applies only to callDeepSeek.
-      # OpenAI, OpenRouter, and Fireworks retain the shared 120s OpenAI-wire default.
+      # OpenAI and OpenRouter retain the shared 120s OpenAI-wire default.
       read-timeout-seconds: ${DEEPSEEK_READ_TIMEOUT_SECONDS:300}
     fireworks:
       base-url: https://api.fireworks.ai/inference/v1
       api-key: ${FIREWORKS_API_KEY:}
+      # Long agentic GLM tool turns exceed the generic 120s window; the provider bills the
+      # completion the client would otherwise cancel at exactly 120s. Applies only to callFireworks.
+      read-timeout-seconds: ${FIREWORKS_READ_TIMEOUT_SECONDS:300}
 
 execution:
   continuation:
