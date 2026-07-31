@@ -17,6 +17,8 @@ class ChatToolPolicyTest {
         .isEqualTo(ChatToolPolicy.Capability.PROJECT_READ);
     assertThat(ChatToolPolicy.capability("read_repo_file_range"))
         .isEqualTo(ChatToolPolicy.Capability.PROJECT_READ);
+    assertThat(ChatToolPolicy.capability("list_public_http_surface"))
+        .isEqualTo(ChatToolPolicy.Capability.PROJECT_READ);
     assertThat(ChatToolPolicy.capability("search_code"))
         .isEqualTo(ChatToolPolicy.Capability.PROJECT_ANALYSE);
     assertThat(ChatToolPolicy.capability("submit_run"))

@@ -21,6 +21,7 @@ final class AgentStreamTurnSupport {
         "get_project_memory",
         "get_latest_architecture",
         "search_repo_files",
+        "list_public_http_surface",
         "read_repo_file_range",
         "search_code",
         "get_latest_code_review",

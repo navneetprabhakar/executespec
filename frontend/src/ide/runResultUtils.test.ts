@@ -31,6 +31,7 @@ import {
   lineDiff,
   latestContinuationAction,
   correctionEvidenceHistory,
+  correctionEvidenceInvalidationLabel,
   reportPipelineLabel,
   logIcon,
   logLabel,
@@ -178,6 +179,14 @@ describe('publicationTrustFacts', () => {
 });
 
 describe('correctionEvidenceHistory', () => {
+  it('distinguishes explicit evidence retention from missing correction evidence', () => {
+    expect(correctionEvidenceInvalidationLabel(true)).toBe('Yes — prior evidence was made stale');
+    expect(correctionEvidenceInvalidationLabel(false)).toBe(
+      'No — prior evidence was explicitly retained',
+    );
+    expect(correctionEvidenceInvalidationLabel(undefined)).toBe('Not recorded');
+  });
+
   it('keeps every correction visible in stable task/action order', () => {
     const run = {
       tasks: [

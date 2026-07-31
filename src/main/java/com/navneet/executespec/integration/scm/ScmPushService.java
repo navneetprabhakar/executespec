@@ -1375,18 +1375,63 @@ public class ScmPushService {
    * @param perRepo per-repo outcomes when {@code mode == MULTI_REPO} or single-element list when
    *     {@code SINGLE_REPO}
    */
-  public record ApplyPushResult(String mode, String skippedReason, List<ApplyRepoOutcome> perRepo) {
+  public record ApplyPushResult(
+      String mode,
+      String skippedReason,
+      List<ApplyRepoOutcome> perRepo,
+      String code,
+      String blockingGate,
+      boolean publicationEligible,
+      boolean retryable,
+      String remediation) {
 
     public static ApplyPushResult skipped(String reason) {
-      return new ApplyPushResult("SKIPPED", reason, List.of());
+      return new ApplyPushResult(
+          "SKIPPED",
+          reason,
+          List.of(),
+          "SCM_APPLY_SKIPPED",
+          "SCM_CONFIGURATION",
+          false,
+          true,
+          "Correct the reported configuration problem, then retry the apply push.");
+    }
+
+    /**
+     * Fail-closed publication result. Mode remains {@code SKIPPED} for compatibility with the
+     * existing apply summary renderer, while the additive fields preserve the exact gate, stable
+     * code, eligibility state, retry policy, and remediation for structured clients.
+     */
+    public static ApplyPushResult blocked(
+        String code, String blockingGate, String reason, boolean retryable, String remediation) {
+      String actionableReason =
+          StringUtils.hasText(remediation) ? reason + " — " + remediation : reason;
+      return new ApplyPushResult(
+          "SKIPPED",
+          actionableReason,
+          List.of(),
+          code,
+          blockingGate,
+          false,
+          retryable,
+          remediation);
     }
 
     public static ApplyPushResult multiRepo(List<ApplyRepoOutcome> outcomes) {
-      return new ApplyPushResult("MULTI_REPO", null, outcomes);
+      return new ApplyPushResult(
+          "MULTI_REPO", null, outcomes, "SCM_APPLY_PUSH_ATTEMPTED", null, true, false, null);
     }
 
     public static ApplyPushResult singleRepo(ApplyRepoOutcome outcome) {
-      return new ApplyPushResult("SINGLE_REPO", null, List.of(outcome));
+      return new ApplyPushResult(
+          "SINGLE_REPO",
+          null,
+          List.of(outcome),
+          "SCM_APPLY_PUSH_ATTEMPTED",
+          null,
+          true,
+          false,
+          null);
     }
   }
 
@@ -1411,6 +1456,50 @@ public class ScmPushService {
   public ApplyPushResult pushApplyChanges(PipelineRun run, String commitMessage) {
     if (run == null || run.getRunId() == null) {
       return ApplyPushResult.skipped("missing run");
+    }
+
+    // Apply-to-run writes to an existing PR branch and is therefore a publication boundary, not
+    // merely a local chat mutation. Run the same freshness/build/test/workflow/exact-route
+    // admission used by the canonical push/PR and deployment paths before credential lookup or
+    // any Git/SCM operation.
+    try {
+      publicationAdmissionService.assertEligible(run);
+    } catch (PublicationAdmissionService.PublicationBlockedException ineligible) {
+      PublicationAdmissionService.Eligibility eligibility = ineligible.eligibility();
+      log.warn(
+          "[{}] apply publication blocked by {}: {}",
+          run.getRunId(),
+          ineligible.code(),
+          ineligible.getMessage());
+      return ApplyPushResult.blocked(
+          ineligible.code(),
+          eligibility.blockingGate(),
+          ineligible.getMessage(),
+          eligibility.retryable(),
+          eligibility.remediation());
+    }
+
+    // Persist the exact protected-contract comparison admitted at the mutation boundary. The
+    // read-only compatibility evaluation inside PublicationAdmissionService is necessary for
+    // eligibility previews, but cannot replace this final fail-closed evidence write.
+    try {
+      boolean brownfield =
+          "EXISTING".equalsIgnoreCase(String.valueOf(run.getRepoMode()))
+              || StringUtils.hasText(run.getSelectedRepoIds())
+              || brownfieldHttpContractGuard.hasBaseline(run.getRunId());
+      if (brownfield) brownfieldHttpContractGuard.assertCompatible(run.getRunId());
+    } catch (BrownfieldHttpContractGuard.ContractCompatibilityException incompatible) {
+      log.warn(
+          "[{}] apply publication blocked by {}: {}",
+          run.getRunId(),
+          incompatible.code(),
+          incompatible.getMessage());
+      return ApplyPushResult.blocked(
+          incompatible.code(),
+          "PROTECTED_CONTRACTS",
+          incompatible.getMessage(),
+          false,
+          contractRetryGuidance(incompatible.code()));
     }
 
     AppUser user =

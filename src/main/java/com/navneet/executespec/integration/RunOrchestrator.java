@@ -2252,7 +2252,7 @@ public class RunOrchestrator implements RunControlPort {
         }
         reviewResult =
             reviewer.review(
-                ReviewerRequest.builder()
+                InitialReviewerRequestPolicy.builder()
                     .provider(reviewerRoute.provider())
                     .model(reviewerRoute.model())
                     .context(reviewRootCtx)

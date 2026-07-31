@@ -22,8 +22,10 @@ turns separately from runs.
   calls `SpecChatService` with the read-only allow-list, its system prompt must not advertise legacy
   direct run-control tools; web run creation stays on the structured `create_cloud_run` proposal and
   confirmation path. The allow-list includes both `search_repo_files` and its bounded,
-  revision-pinned `read_repo_file_range` companion; filtering the latter leaves the Web Agent able
-  to find a line but unable to inspect the surrounding method or signature.
+  revision-pinned `read_repo_file_range` companion, plus deterministic
+  `list_public_http_surface` for exact Spring routes including the servlet context path; filtering
+  these leaves the Web Agent able to find annotations but unable to inspect their surrounding code
+  or report the real public endpoint.
 - `create_cloud_run` is emitted only for `CODE_RUN_REQUIRED` decisions whose policy allows the Run
   API. Missing project/repository context and read-only permission mode return explanation-only
   `IMPLEMENTATION_PROPOSAL` decisions with no confirmation card. That blocked state is now a typed
