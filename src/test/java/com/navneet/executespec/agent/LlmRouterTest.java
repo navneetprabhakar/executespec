@@ -900,7 +900,7 @@ class LlmRouterTest {
 
     ArgumentCaptor<OpenAiNativeToolClient.OpenAiToolCallRequest> wire =
         ArgumentCaptor.forClass(OpenAiNativeToolClient.OpenAiToolCallRequest.class);
-    verify(openai, times(4)).call(wire.capture());
+    verify(openai, times(LlmRouter.TRANSIENT_RETRY_MAX_ATTEMPTS)).call(wire.capture());
     assertThat(wire.getAllValues())
         .extracting(OpenAiNativeToolClient.OpenAiToolCallRequest::model)
         .containsOnly("x-ai/grok-4.20");
@@ -1112,7 +1112,7 @@ class LlmRouterTest {
     assertThat(router.call(req)).isNotNull();
     verify(registry).fallbackChainFor("gpt-x", "openai");
     verify(gemini, times(1)).callAudited(any(), any());
-    verify(stepUsageRecorder, times(4))
+    verify(stepUsageRecorder, times(LlmRouter.TRANSIENT_RETRY_MAX_ATTEMPTS))
         .recordFailure(
             argThat(request -> "OutlinePlannerAgent".equals(request.agentRole())),
             eq("openai"),
@@ -1230,8 +1230,8 @@ class LlmRouterTest {
             });
 
     assertThat(router.call(req("deepseek", "deepseek-v4-pro-native"))).isNotNull();
-    assertThat(nativeFailures).hasValue(4);
-    verify(openai, times(4))
+    assertThat(nativeFailures).hasValue(LlmRouter.TRANSIENT_RETRY_MAX_ATTEMPTS);
+    verify(openai, times(LlmRouter.TRANSIENT_RETRY_MAX_ATTEMPTS))
         .call(
             argThat(
                 request ->
@@ -1312,6 +1312,7 @@ class LlmRouterTest {
 
     ArgumentCaptor<OpenAiNativeToolClient.OpenAiToolCallRequest> calls =
         ArgumentCaptor.forClass(OpenAiNativeToolClient.OpenAiToolCallRequest.class);
+    // 4 = one successful call per wire route above, NOT the retry envelope.
     verify(openai, times(4)).call(calls.capture());
     assertThat(calls.getAllValues())
         .allSatisfy(request -> assertThat(request.readTimeoutSeconds()).isEqualTo(77));
