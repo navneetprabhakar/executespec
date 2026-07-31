@@ -401,7 +401,9 @@ public class WorkerAgent {
     final java.util.Set<String> seenCallSignatures = new java.util.HashSet<>();
     // v2: consecutive failures per signature (a success on the same signature clears its streak).
     final WorkerFailureStreaks failureStreaks = new WorkerFailureStreaks();
-    final WorkerMutationChurnGuard mutationChurn = new WorkerMutationChurnGuard();
+    final WorkerMutationChurnGuard mutationChurn =
+        new WorkerMutationChurnGuard(
+            req.mutationChurnForceAfter() == null ? 0 : req.mutationChurnForceAfter());
     final WorkerMutationEpochWatchdog mutationEpochWatchdog =
         terminalTaskMode ? null : new WorkerMutationEpochWatchdog();
     int textOnlyForcedRetries = 0;
@@ -1401,7 +1403,13 @@ public class WorkerAgent {
 
       WorkerMutationChurnGuard.Decision churnDecision =
           mutationChurn.evaluate(
-              progressV2 && !terminalTaskMode, req.context().runId(), req.context().taskId(), iter);
+              !terminalTaskMode
+                  && (progressV2
+                      || (req.mutationChurnForceAfter() != null
+                          && req.mutationChurnForceAfter() > 0)),
+              req.context().runId(),
+              req.context().taskId(),
+              iter);
       if (churnDecision == WorkerMutationChurnGuard.Decision.NUDGE) {
         history.add(new UserMessage(WorkerMutationChurnGuard.nudgeMessage()));
       } else if (churnDecision == WorkerMutationChurnGuard.Decision.FORCE) {
@@ -2754,15 +2762,12 @@ public class WorkerAgent {
   /**
    * progress-v2 — did this tool envelope represent a FAILED attempt? Two shapes exist: error
    * envelopes ({@code {"ok":false...}}) and ok-envelopes carrying a non-zero process exit (shell /
-   * buildProject / runTests embed {@code exit=N} or {@code "exit_code": N}). Only the envelope head
-   * is inspected — large outputs spill to disk and the verdict is always in the head.
+   * buildProject / runTests embed {@code exit=N} or {@code "exit_code": N}). Transport failure is
+   * read from the envelope head; the last process-exit marker is authoritative because command
+   * output may quote an earlier failure before reporting the final exit.
    */
   public static boolean isFailureEnvelope(String envelope) {
-    if (envelope == null || envelope.isEmpty()) return false;
-    String head = envelope.length() > 400 ? envelope.substring(0, 400) : envelope;
-    if (head.startsWith("{\"ok\":false")) return true;
-    java.util.regex.Matcher m = FAILURE_EXIT_PATTERN.matcher(head);
-    return m.find() && !"0".equals(m.group(1));
+    return WorkerProcessExitEvidence.failed(envelope);
   }
 
   /**
@@ -2789,13 +2794,8 @@ public class WorkerAgent {
   static boolean envelopeProvesExitZero(String toolName, String envelope) {
     if (envelope == null || !envelope.startsWith("{\"ok\":true")) return false;
     if (isBuildTool(toolName)) return isSuccessfulBuildEnvelope(envelope);
-    String head = envelope.length() > 400 ? envelope.substring(0, 400) : envelope;
-    java.util.regex.Matcher m = FAILURE_EXIT_PATTERN.matcher(head);
-    return m.find() && "0".equals(m.group(1));
+    return WorkerProcessExitEvidence.provesExitZero(envelope);
   }
-
-  private static final java.util.regex.Pattern FAILURE_EXIT_PATTERN =
-      java.util.regex.Pattern.compile("\\bexit(?:_code)?[\"=:\\s\\\\]+(-?\\d+)");
 
   static String progressNudgeMessage(int totalWriteCalls, boolean terminalTaskMode) {
     if (terminalTaskMode) {
