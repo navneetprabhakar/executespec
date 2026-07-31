@@ -30,11 +30,16 @@
 - Approved-continuation verification uses `captureAttemptFence(...)` immediately before the retry
   and fence-specific worker/reviewer projections after it. The APPROVED continuation action stores
   its approval id, action, proposal digest plus `workerAttempt` / `reviewerAttempt` provider, model,
-  call-index boundary, and physical-attempt ids. Publication cross-checks the immutable approval
-  columns and rehydrates every stored id from canonical
-  `run_step_usage`; missing, mixed, cross-run, or mismatched evidence fails closed. It never uses
-  the whole-task or whole-reviewer projection, so old DeepSeek history plus an approved Grok
-  correction remains exactly attributable instead of becoming falsely MIXED.
+  call-index boundary, and physical-attempt ids. Publication walks tasks by stable task id and every
+  APPROVED row by append order, cross-checks the latest immutable approval columns, and rehydrates
+  every stored id from canonical `run_step_usage`; missing legacy identity, duplicate approval or
+  proposal identity, reused physical-attempt ids, mixed/cross-run routes, or any earlier/later
+  mismatch fails closed. A rejected/rolled-back approval is omitted from physical attestation only
+  when its later `CORRECTION_RESOLUTION` row is bound to the same approval id/proposal digest and
+  records equal before/after workspace generations plus evidence invalidation. Unbound legacy
+  resolutions cannot suppress the gate. Publication never uses the whole-task or whole-reviewer
+  projection, so old DeepSeek history plus an approved Grok correction remains exactly attributable
+  instead of becoming falsely MIXED.
 - **Which layer carries which route (C1, 2026-07-19).** REQUESTED / tier-resolved:
   `TaskOutcome.dispatchedProvider`/`dispatchedModel`, `agent_task.provider`/`model`,
   `pipeline_run.requested_provider`/`requested_model`/`worker_model`, `RunDetail.requestedProvider`/

@@ -27,6 +27,8 @@ class CorrectionResolutionEvidenceTest {
         "ACCEPTED",
         "CORRECTION_ACCEPTED",
         "accepted",
+        "11111111-1111-1111-1111-111111111111",
+        "c".repeat(64),
         before.workspaceGeneration(),
         after.workspaceGeneration(),
         new CorrectionWorkspaceTransaction.DiffEvidence(
@@ -41,6 +43,9 @@ class CorrectionResolutionEvidenceTest {
         true);
 
     var resolution = actions.get(0);
+    assertThat(resolution.path("approvalId").asText())
+        .isEqualTo("11111111-1111-1111-1111-111111111111");
+    assertThat(resolution.path("proposalDigest").asText()).isEqualTo("c".repeat(64));
     assertThat(resolution.path("unifiedPatch").asText()).contains("src/App.java");
     assertThat(resolution.path("patchMetadata").path("fullBytes").asLong()).isEqualTo(41L);
     assertThat(resolution.path("patchMetadata").path("truncated").asBoolean()).isTrue();

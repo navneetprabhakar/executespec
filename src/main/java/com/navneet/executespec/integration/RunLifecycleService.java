@@ -150,6 +150,7 @@ public class RunLifecycleService {
         null,
         null,
         null,
+        null,
         null);
   }
 
@@ -201,6 +202,7 @@ public class RunLifecycleService {
   private final com.navneet.executespec.contractsurface.BrownfieldHttpContractGuard
       brownfieldHttpContractGuard;
   private final CorrectionWorkspaceTransaction correctionWorkspaceTransaction;
+  private final DurableCorrectionLifecycle durableCorrectionLifecycle;
   private final WorkflowConfigEvidenceInspector workflowConfigEvidenceInspector;
   private final ApprovedContinuationRouteAdmissionService approvedRouteAdmission;
   private final CorrectionValidationAdmission correctionValidationAdmission;
@@ -1272,6 +1274,9 @@ public class RunLifecycleService {
     FutureTask<Void> future =
         new FutureTask<>(
             () -> {
+              DurableCorrectionLifecycle.Prepared durableCorrection = null;
+              String acceptedCorrectionGeneration = null;
+              boolean approvalCompletionCommitted = false;
               CorrectionWorkspaceTransaction.Checkpoint correctionCheckpoint = null;
               ValidationEvidenceCheckpoint correctionEvidenceCheckpoint = null;
               CorrectionWorkspaceTransaction.DiffEvidence correctionDiff = null;
@@ -1309,9 +1314,17 @@ public class RunLifecycleService {
 
                 ExecutionContext rootCtx = retryOperation.get().context();
                 if (!localRun && override != null) {
-                  correctionCheckpoint =
-                      correctionWorkspaceTransaction.begin(rootCtx.workspaceRoot());
+                  durableCorrection =
+                      durableCorrectionLifecycle.prepare(
+                          runId,
+                          fullTargetTaskId,
+                          rootCtx.workspaceRoot(),
+                          AutomaticCorrectionLifecycle.snapshotTask(taskBeforeCorrection),
+                          override.approvalId(),
+                          override.proposalDigest());
+                  correctionCheckpoint = durableCorrection.checkpoint();
                   correctionEvidenceCheckpoint = invalidateValidationEvidence(runId);
+                  durableCorrectionLifecycle.markMutating(durableCorrection);
                 }
                 List<UUID> selectedRepoIds =
                     row == null ? List.of() : deserializeRepoIds(row.getSelectedRepoIds());
@@ -1325,42 +1338,53 @@ public class RunLifecycleService {
                             logicalTargetTaskId,
                             beforeRetry == null ? 0L : beforeRetry.calls());
 
+                RunWorkspaceAuthorityService.Lease correctionToolLease =
+                    durableCorrection == null ? null : durableCorrection.authority();
+                String correctionProvider = provider;
+                String correctionModel = model;
+                ExecutionContext correctionRootCtx = rootCtx;
                 ExecutionResult result =
-                    executor.execute(
-                        ExecutionRequest.builder()
-                            .plan(plan)
-                            .provider(provider)
-                            .model(model)
-                            .runContext(rootCtx)
-                            .maxIterationsPerTask(null)
-                            .enableSmokeTests(!localRun)
-                            .localHandsMode(localRun)
-                            .routePinned(row != null && row.isRoutePinned())
-                            .userConfirmedExpensiveContinuation(override != null)
-                            .userConfirmedContinuationAction(
-                                override == null ? null : override.proposedAction())
-                            .userConfirmedContinuationProvider(
-                                override == null ? null : override.provider())
-                            .userConfirmedContinuationModel(
-                                override == null ? null : override.model())
-                            .requireBenchmarkPriorForAutomaticContinuation(
-                                override == null ? null : override.benchmarkPriorRequired())
-                            .initialProviderSwitchesUsed(approvedUsage.providerSwitches())
-                            .initialModelStepUpsUsed(approvedUsage.modelStepUps())
-                            .initialModelStepDownsUsed(approvedUsage.modelStepDowns())
-                            .originalGoal(row == null ? null : row.getUserRequest())
-                            .designBlock(null)
-                            .projectId(row == null ? null : row.getProjectId())
-                            .workspaceSummary(
-                                contextComposer.buildMultiRepoSummary(
-                                    row == null ? null : row.getProjectId(), selectedRepoIds))
-                            .build(),
-                        new com.navneet.executespec.harness.SequentialExecutor.ResumeRequest(
-                            fullTargetTaskId,
-                            override == null ? null : override.provider(),
-                            override == null ? null : override.model(),
-                            override == null ? null : override.proposedAction(),
-                            override == null ? null : override.proposalDigest()));
+                    RunWorkspaceAuthorityService.withCorrectionToolLease(
+                        correctionToolLease,
+                        () ->
+                            executor.execute(
+                                ExecutionRequest.builder()
+                                    .plan(plan)
+                                    .provider(correctionProvider)
+                                    .model(correctionModel)
+                                    .runContext(correctionRootCtx)
+                                    .maxIterationsPerTask(null)
+                                    .enableSmokeTests(!localRun)
+                                    .localHandsMode(localRun)
+                                    .routePinned(row != null && row.isRoutePinned())
+                                    .userConfirmedExpensiveContinuation(override != null)
+                                    .userConfirmedContinuationAction(
+                                        override == null ? null : override.proposedAction())
+                                    .userConfirmedContinuationProvider(
+                                        override == null ? null : override.provider())
+                                    .userConfirmedContinuationModel(
+                                        override == null ? null : override.model())
+                                    .requireBenchmarkPriorForAutomaticContinuation(
+                                        override == null ? null : override.benchmarkPriorRequired())
+                                    .initialProviderSwitchesUsed(approvedUsage.providerSwitches())
+                                    .initialModelStepUpsUsed(approvedUsage.modelStepUps())
+                                    .initialModelStepDownsUsed(approvedUsage.modelStepDowns())
+                                    .originalGoal(row == null ? null : row.getUserRequest())
+                                    .designBlock(null)
+                                    .projectId(row == null ? null : row.getProjectId())
+                                    .workspaceSummary(
+                                        contextComposer.buildMultiRepoSummary(
+                                            row == null ? null : row.getProjectId(),
+                                            selectedRepoIds))
+                                    .build(),
+                                new com.navneet.executespec.harness.SequentialExecutor
+                                    .ResumeRequest(
+                                    fullTargetTaskId,
+                                    override == null ? null : override.provider(),
+                                    override == null ? null : override.model(),
+                                    override == null ? null : override.proposedAction(),
+                                    override == null ? null : override.proposalDigest())));
+                if (durableCorrection != null) durableCorrection.authority().assertOwned();
                 if (override != null && brownfieldHttpContractGuard.hasBaseline(runId)) {
                   brownfieldHttpContractGuard.assertCompatible(runId);
                 }
@@ -1404,7 +1428,7 @@ public class RunLifecycleService {
                 String preReviewerGeneration =
                     correctionCheckpoint == null
                         ? null
-                        : correctionWorkspaceTransaction.currentGeneration(correctionCheckpoint);
+                        : fencedCorrectionGeneration(durableCorrection, correctionCheckpoint);
                 if (correctionCheckpoint != null) {
                   correctionValidationAdmission.assertPreReview(
                       runId,
@@ -1429,7 +1453,7 @@ public class RunLifecycleService {
                 }
                 if (correctionCheckpoint != null) {
                   String postReviewerGeneration =
-                      correctionWorkspaceTransaction.currentGeneration(correctionCheckpoint);
+                      fencedCorrectionGeneration(durableCorrection, correctionCheckpoint);
                   if (!preReviewerGeneration.equals(postReviewerGeneration)) {
                     throw new IllegalStateException(
                         "CORRECTION_REVIEWER_MUTATED_WORKSPACE: read-only reviewer changed the"
@@ -1438,8 +1462,7 @@ public class RunLifecycleService {
                   if (brownfieldHttpContractGuard.hasBaseline(runId)) {
                     brownfieldHttpContractGuard.assertCompatible(runId);
                   }
-                  correctionDiff =
-                      correctionWorkspaceTransaction.diffEvidence(correctionCheckpoint);
+                  correctionDiff = fencedCorrectionDiff(durableCorrection, correctionCheckpoint);
                   com.navneet.executespec.report.model.WorkflowConfigEvidence correctionWorkflow =
                       workflowConfigEvidenceInspector.inspect(rootCtx.workspaceRoot());
                   CorrectionAcceptancePolicy.Decision acceptance =
@@ -1460,7 +1483,9 @@ public class RunLifecycleService {
                             inspectCorrectionContracts(runId));
                     CorrectionResolutionEvidence.ValidationDelta correctionValidationDelta =
                         captureValidationDelta(correctionEvidenceCheckpoint, attemptValidation);
-                    correctionWorkspaceTransaction.rollback(correctionCheckpoint);
+                    durableCorrection.authority().assertOwned();
+                    correctionWorkspaceTransaction.rollback(
+                        correctionCheckpoint, durableCorrection.authority()::assertOwned);
                     restoreValidationEvidence(correctionEvidenceCheckpoint);
                     restoreRejectedCorrection(
                         runId,
@@ -1473,7 +1498,10 @@ public class RunLifecycleService {
                         acceptance.reason(),
                         correctionCheckpoint.generation(),
                         correctionDiff,
-                        correctionValidationDelta);
+                        correctionValidationDelta,
+                        override);
+                    updateContinuationApprovalStatus(task, override, "REJECTED");
+                    durableCorrectionLifecycle.rolledBack(durableCorrection);
                     broadcaster.emit(
                         runId,
                         RunEvent.log(
@@ -1483,9 +1511,9 @@ public class RunLifecycleService {
                                 + acceptance.code()
                                 + " — "
                                 + acceptance.reason()));
-                    updateContinuationApprovalStatus(task, override, "REJECTED");
                     return null;
                   }
+                  durableCorrection.authority().assertOwned();
                   correctionValidationAdmission.regenerateAndAssert(
                       runId,
                       result,
@@ -1498,7 +1526,9 @@ public class RunLifecycleService {
                   CorrectionAcceptancePolicy.Decision comparativeAdmission =
                       CorrectionAcceptancePolicy.evaluateRegression(correctionValidationDelta);
                   if (!comparativeAdmission.accepted()) {
-                    correctionWorkspaceTransaction.rollback(correctionCheckpoint);
+                    durableCorrection.authority().assertOwned();
+                    correctionWorkspaceTransaction.rollback(
+                        correctionCheckpoint, durableCorrection.authority()::assertOwned);
                     restoreValidationEvidence(correctionEvidenceCheckpoint);
                     restoreRejectedCorrection(
                         runId,
@@ -1511,10 +1541,13 @@ public class RunLifecycleService {
                         comparativeAdmission.reason(),
                         correctionCheckpoint.generation(),
                         correctionDiff,
-                        correctionValidationDelta);
+                        correctionValidationDelta,
+                        override);
                     updateContinuationApprovalStatus(task, override, "REJECTED");
+                    durableCorrectionLifecycle.rolledBack(durableCorrection);
                     return null;
                   }
+                  durableCorrection.authority().assertOwned();
                   CorrectionWorkspaceTransaction.Accepted generations =
                       correctionWorkspaceTransaction.accept(correctionCheckpoint);
                   appendCorrectionResolution(
@@ -1522,17 +1555,18 @@ public class RunLifecycleService {
                       "ACCEPTED",
                       acceptance.code(),
                       acceptance.reason(),
+                      override,
                       generations.beforeGeneration(),
                       generations.afterGeneration(),
                       correctionDiff,
                       correctionValidationDelta,
                       true);
+                  acceptedCorrectionGeneration = generations.afterGeneration();
                 }
                 persistenceWriter.applyExecutionResultToTasks(runId, result);
                 if (reviewResult != null) {
                   persistenceWriter.persistReview(runId, reviewResult);
                 }
-
                 // A local-hands retry never produced server-verified evidence: no server smoke, no
                 // reviewer, no validation. It terminalizes exactly like the original local run.
                 var terminal =
@@ -1549,13 +1583,29 @@ public class RunLifecycleService {
                         + terminal.reason(),
                     null);
                 updateContinuationApprovalStatus(task, override, "COMPLETED");
+                approvalCompletionCommitted = override != null;
+                if (durableCorrection != null && acceptedCorrectionGeneration != null) {
+                  durableCorrectionLifecycle.accept(
+                      durableCorrection, acceptedCorrectionGeneration);
+                }
               } catch (Exception e) {
+                if (approvalCompletionCommitted && durableCorrection != null) {
+                  // The immutable receipt is the commit decision. Never roll back its accepted
+                  // workspace after a later durable-attempt CAS failure; recovery will prove the
+                  // fresh validation generation and finish the ACCEPTED transition.
+                  log.error(
+                      "Approved correction commit requires durable recovery run={} task={}",
+                      runId,
+                      taskId,
+                      e);
+                  return null;
+                }
                 if (correctionCheckpoint != null) {
                   try {
                     if (correctionDiff == null) {
                       try {
                         correctionDiff =
-                            correctionWorkspaceTransaction.diffEvidence(correctionCheckpoint);
+                            fencedCorrectionDiff(durableCorrection, correctionCheckpoint);
                       } catch (RuntimeException diffFailure) {
                         e.addSuppressed(diffFailure);
                       }
@@ -1563,7 +1613,7 @@ public class RunLifecycleService {
                     String failedGeneration;
                     try {
                       failedGeneration =
-                          correctionWorkspaceTransaction.currentGeneration(correctionCheckpoint);
+                          fencedCorrectionGeneration(durableCorrection, correctionCheckpoint);
                     } catch (RuntimeException generationFailure) {
                       e.addSuppressed(generationFailure);
                       failedGeneration = correctionCheckpoint.generation();
@@ -1575,7 +1625,9 @@ public class RunLifecycleService {
                                 failedGeneration,
                                 e.getMessage(),
                                 inspectCorrectionContracts(runId)));
-                    correctionWorkspaceTransaction.rollback(correctionCheckpoint);
+                    durableCorrection.authority().assertOwned();
+                    correctionWorkspaceTransaction.rollback(
+                        correctionCheckpoint, durableCorrection.authority()::assertOwned);
                     restoreValidationEvidence(correctionEvidenceCheckpoint);
                     restoreRejectedCorrection(
                         runId,
@@ -1588,13 +1640,15 @@ public class RunLifecycleService {
                         e.getMessage(),
                         correctionCheckpoint.generation(),
                         correctionDiff,
-                        correctionValidationDelta);
+                        correctionValidationDelta,
+                        override);
+                    updateContinuationApprovalStatus(task, override, "REJECTED");
+                    durableCorrectionLifecycle.rolledBack(durableCorrection);
                     log.warn(
                         "Approved correction failed and was rolled back run={} task={}: {}",
                         runId,
                         taskId,
                         e.getMessage());
-                    updateContinuationApprovalStatus(task, override, "REJECTED");
                     return null;
                   } catch (RuntimeException rollbackFailure) {
                     rollbackFailure.addSuppressed(e);
@@ -1611,6 +1665,12 @@ public class RunLifecycleService {
                     null);
                 updateContinuationApprovalStatus(task, override, "FAILED");
               } finally {
+                // Resolution paths close this idempotently. If rollback/proof failed before the
+                // durable terminal CAS, release the heartbeat so the unresolved attempt can be
+                // claimed by recovery instead of remaining live-owned by a finished executor.
+                if (durableCorrection != null) {
+                  durableCorrection.authority().close();
+                }
                 if (runOperationLifecycle != null) {
                   runOperationLifecycle.closeQuietly(runId, retryOperation.getAndSet(null));
                 }
@@ -2010,7 +2070,26 @@ public class RunLifecycleService {
             task.getTaskId(), override.approvalId(), override.proposalDigest(), status);
     if (updated == 1) {
       task.setContinuationApprovalStatus(status);
+      return;
     }
+    throw new IllegalStateException(
+        "CONTINUATION_APPROVAL_STATUS_CAS_FAILED: " + status + " updated " + updated + " rows");
+  }
+
+  private String fencedCorrectionGeneration(
+      DurableCorrectionLifecycle.Prepared prepared,
+      CorrectionWorkspaceTransaction.Checkpoint checkpoint) {
+    prepared.authority().assertOwned();
+    return correctionWorkspaceTransaction.currentGeneration(
+        checkpoint, prepared.authority()::assertOwned);
+  }
+
+  private CorrectionWorkspaceTransaction.DiffEvidence fencedCorrectionDiff(
+      DurableCorrectionLifecycle.Prepared prepared,
+      CorrectionWorkspaceTransaction.Checkpoint checkpoint) {
+    prepared.authority().assertOwned();
+    return correctionWorkspaceTransaction.diffEvidence(
+        checkpoint, prepared.authority()::assertOwned);
   }
 
   private void releaseContinuationApprovalClaim(AgentTask task, RetryProviderOverride override) {
@@ -2311,22 +2390,32 @@ public class RunLifecycleService {
       String reason,
       String generation,
       CorrectionWorkspaceTransaction.DiffEvidence diffEvidence,
-      CorrectionResolutionEvidence.ValidationDelta validationDelta) {
+      CorrectionResolutionEvidence.ValidationDelta validationDelta,
+      RetryProviderOverride override) {
     if (taskBeforeCorrection == null) {
       throw new IllegalStateException("Rejected correction has no durable task checkpoint");
     }
-    String currentActions =
-        taskRepo
-            .findById(taskBeforeCorrection.getTaskId())
-            .map(com.navneet.executespec.state.entity.AgentTask::getContinuationActionsJson)
-            .orElse(taskBeforeCorrection.getContinuationActionsJson());
-    taskBeforeCorrection.setContinuationActionsJson(currentActions);
-    taskRepo.saveAndFlush(taskBeforeCorrection);
+    com.navneet.executespec.state.entity.AgentTask currentTask =
+        taskRepo.findById(taskBeforeCorrection.getTaskId()).orElse(null);
+    if (currentTask == null) {
+      throw new IllegalStateException("Rejected correction task disappeared");
+    }
+    AutomaticCorrectionLifecycle.TaskState previous =
+        AutomaticCorrectionLifecycle.snapshotTask(taskBeforeCorrection);
+    currentTask.setStatus(previous.status());
+    currentTask.setStartedAt(previous.startedAt());
+    currentTask.setCompletedAt(previous.completedAt());
+    currentTask.setDurationMs(previous.durationMs());
+    CorrectionStateSnapshots.restoreTaskEvidence(currentTask, previous);
+    // Token/cost counters and append-only action history remain on currentTask. Its immutable
+    // continuationApproval* receipt also remains intact so the exact REJECTED CAS below succeeds.
+    taskRepo.saveAndFlush(currentTask);
     appendCorrectionResolution(
         taskBeforeCorrection.getTaskId(),
         "CORRECTION_EXECUTION_FAILED".equals(code) ? "ROLLED_BACK" : "REJECTED",
         code,
         reason,
+        override,
         generation,
         generation,
         diffEvidence,
@@ -2354,17 +2443,7 @@ public class RunLifecycleService {
       String status,
       String code,
       String reason,
-      String beforeGeneration,
-      String afterGeneration) {
-    appendCorrectionResolution(
-        taskKey, status, code, reason, beforeGeneration, afterGeneration, null, null, false);
-  }
-
-  private void appendCorrectionResolution(
-      String taskKey,
-      String status,
-      String code,
-      String reason,
+      RetryProviderOverride override,
       String beforeGeneration,
       String afterGeneration,
       CorrectionWorkspaceTransaction.DiffEvidence diffEvidence,
@@ -2383,6 +2462,8 @@ public class RunLifecycleService {
           status,
           code,
           reason,
+          override == null ? null : override.approvalId(),
+          override == null ? null : override.proposalDigest(),
           beforeGeneration,
           afterGeneration,
           diffEvidence,

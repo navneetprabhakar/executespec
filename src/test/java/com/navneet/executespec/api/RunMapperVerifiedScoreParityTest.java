@@ -36,7 +36,9 @@ class RunMapperVerifiedScoreParityTest {
         "specAdherenceScore": 100,
         "missingRequirements": [],
         "partialRequirements": [],
-        "unknownRequirements": ["Test execution was not independently verified"]
+        "unknownRequirements": ["Test execution was not independently verified"],
+        "specEvidenceStatus": "CITED",
+        "specEvidenceLocations": ["src/main/java/example/Todo.java:1"]
       }
       """;
 

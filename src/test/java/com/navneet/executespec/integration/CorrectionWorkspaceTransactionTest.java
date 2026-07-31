@@ -154,6 +154,32 @@ class CorrectionWorkspaceTransactionTest {
     assertThat(checkpoint.repositories()).hasSize(2);
   }
 
+  @Test
+  void fencedRollbackStopsBeforeNextGitMutationWhenAuthorityIsLost() throws Exception {
+    Path repository = repository("fenced-rollback");
+    var checkpoint = transaction.begin(repository);
+    Files.writeString(repository.resolve("tracked.txt"), "correction still owned elsewhere\n");
+    java.util.concurrent.atomic.AtomicInteger fences =
+        new java.util.concurrent.atomic.AtomicInteger();
+
+    assertThatThrownBy(
+            () ->
+                transaction.rollback(
+                    checkpoint,
+                    () -> {
+                      if (fences.incrementAndGet() == 3) {
+                        throw new IllegalStateException("lease lost");
+                      }
+                    }))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("restore one or more");
+
+    assertThat(Files.readString(repository.resolve("tracked.txt")))
+        .isEqualTo("correction still owned elsewhere\n");
+    transaction.rollback(checkpoint);
+    assertThat(Files.readString(repository.resolve("tracked.txt"))).isEqualTo("baseline\n");
+  }
+
   private Path repository(String name) throws Exception {
     return repository(tempDir, name);
   }

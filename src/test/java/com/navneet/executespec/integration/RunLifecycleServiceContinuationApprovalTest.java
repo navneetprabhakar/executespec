@@ -118,6 +118,8 @@ class RunLifecycleServiceContinuationApprovalTest {
       mock(ApprovedContinuationRouteAdmissionService.class);
   private final CorrectionValidationAdmission correctionValidationAdmission =
       mock(CorrectionValidationAdmission.class);
+  private final DurableCorrectionLifecycle durableCorrectionLifecycle =
+      mock(DurableCorrectionLifecycle.class);
   private final CorrectionWorkspaceTransaction.Checkpoint correctionCheckpoint =
       new CorrectionWorkspaceTransaction.Checkpoint(
           java.util.List.of(
@@ -131,6 +133,12 @@ class RunLifecycleServiceContinuationApprovalTest {
     agentProps.setWorkspace(tempDir.toString());
     when(pool.executor()).thenReturn(executorService);
     when(costTracker.snapshot(any())).thenReturn(new RunCostTracker.Snapshot(0, 0, 0, 0, 0.0, 0));
+    when(durableCorrectionLifecycle.prepare(any(), any(), any(), any(), any(), any()))
+        .thenReturn(
+            new DurableCorrectionLifecycle.Prepared(
+                UUID.fromString("33333333-3333-3333-3333-333333333333"),
+                correctionCheckpoint,
+                mock(RunWorkspaceAuthorityService.Lease.class)));
     service =
         new RunLifecycleService(
             runRepo,
@@ -165,6 +173,7 @@ class RunLifecycleServiceContinuationApprovalTest {
             effectiveRoutes,
             brownfieldHttpContractGuard,
             correctionWorkspaceTransaction,
+            durableCorrectionLifecycle,
             workflowConfigEvidenceInspector,
             approvedRouteAdmission,
             correctionValidationAdmission);
@@ -227,7 +236,8 @@ class RunLifecycleServiceContinuationApprovalTest {
                 .workspaceQuiescent(true)
                 .build());
     when(correctionWorkspaceTransaction.begin(any())).thenReturn(correctionCheckpoint);
-    when(correctionWorkspaceTransaction.currentGeneration(correctionCheckpoint))
+    when(correctionWorkspaceTransaction.currentGeneration(
+            eq(correctionCheckpoint), any(Runnable.class)))
         .thenReturn("b".repeat(64));
     when(workflowConfigEvidenceInspector.inspect(any()))
         .thenReturn(com.navneet.executespec.report.model.WorkflowConfigEvidence.notApplicable());
@@ -1003,7 +1013,7 @@ class RunLifecycleServiceContinuationApprovalTest {
     service.approveContinuation(RUN_ID, TASK_ID);
     runnable.getValue().run();
 
-    verify(correctionWorkspaceTransaction).rollback(correctionCheckpoint);
+    verify(correctionWorkspaceTransaction).rollback(eq(correctionCheckpoint), any(Runnable.class));
     verify(reviewer, never()).review(any());
     verify(validationKickoff, never()).generateValidationReport(any(), any(), any(), any());
     verify(correctionValidationAdmission, never())
@@ -1116,7 +1126,7 @@ class RunLifecycleServiceContinuationApprovalTest {
     service.approveContinuation(RUN_ID, TASK_ID);
     runnable.getValue().run();
 
-    verify(correctionWorkspaceTransaction).rollback(correctionCheckpoint);
+    verify(correctionWorkspaceTransaction).rollback(eq(correctionCheckpoint), any(Runnable.class));
     verify(tokenAttributor, never())
         .attributeWorkerAdditionalTask(any(), any(), anyLong(), anyLong(), any(), any());
     verify(reviewer, never()).review(any());
@@ -1155,7 +1165,8 @@ class RunLifecycleServiceContinuationApprovalTest {
                 .finalTestsTotal(5)
                 .workspaceQuiescent(true)
                 .build());
-    when(correctionWorkspaceTransaction.currentGeneration(correctionCheckpoint))
+    when(correctionWorkspaceTransaction.currentGeneration(
+            eq(correctionCheckpoint), any(Runnable.class)))
         .thenReturn("b".repeat(64), "c".repeat(64));
     when(costTracker.snapshot(RUN_ID))
         .thenReturn(
@@ -1183,8 +1194,61 @@ class RunLifecycleServiceContinuationApprovalTest {
     service.approveContinuation(RUN_ID, TASK_ID);
     runnable.getValue().run();
 
-    verify(correctionWorkspaceTransaction).rollback(correctionCheckpoint);
+    verify(correctionWorkspaceTransaction).rollback(eq(correctionCheckpoint), any(Runnable.class));
     verify(validationKickoff, never()).generateValidationReport(any(), any(), any(), any());
+    verify(persistenceWriter, never()).persistReview(any(), any());
+  }
+
+  @Test
+  void reviewerPhysicalRouteMismatchRollsBackWithoutReviewerAttributionOrValidation()
+      throws Exception {
+    Files.createDirectories(tempDir.resolve(RUN_ID));
+    PipelineRun run =
+        PipelineRun.builder()
+            .runId(RUN_ID)
+            .status("PARTIAL")
+            .planJson(
+                """
+                {
+                  "planTitle": "Retry plan",
+                  "buildCommand": "mvn test",
+                  "tasks": [{"id": "T1", "title": "Fix review", "description": ""}]
+                }
+                """)
+            .build();
+    AgentTask task = approvalTask("POST_REVIEW");
+    when(taskRepo.findById(TASK_KEY)).thenReturn(Optional.of(task));
+    when(runRepo.findById(RUN_ID)).thenReturn(Optional.of(run));
+    when(contextComposer.buildMultiRepoSummary(any(), any())).thenReturn("workspace");
+    when(executor.execute(any(ExecutionRequest.class), any(SequentialExecutor.ResumeRequest.class)))
+        .thenReturn(approvedResult("openrouter", "x-ai/grok-4.20"));
+    when(costTracker.snapshot(RUN_ID))
+        .thenReturn(
+            new RunCostTracker.Snapshot(100, 20, 0, 0, 0.10, 1),
+            new RunCostTracker.Snapshot(250, 60, 0, 0, 0.30, 2),
+            new RunCostTracker.Snapshot(310, 80, 0, 0, 0.45, 3));
+    var workerFence =
+        new RunEffectiveRouteService.AttemptFence(RUN_ID, TASK_ID, 1, java.util.Set.of());
+    when(effectiveRoutes.captureAttemptFence(RUN_ID, TASK_ID, 1)).thenReturn(workerFence);
+    when(effectiveRoutes.successfulTaskAttemptAfter(workerFence))
+        .thenReturn(attemptEvidence("openrouter", "x-ai/grok-4.20", "worker-approved"));
+    var reviewerFence =
+        new RunEffectiveRouteService.ReviewerAttemptFence(RUN_ID, 2, java.util.Set.of());
+    when(effectiveRoutes.captureReviewerAttemptFence(RUN_ID, 2)).thenReturn(reviewerFence);
+    when(effectiveRoutes.successfulReviewerAttemptAfter(reviewerFence))
+        .thenReturn(attemptEvidence("openrouter", "deepseek-v4-pro", "reviewer-wrong"));
+    ArgumentCaptor<Runnable> runnable = ArgumentCaptor.forClass(Runnable.class);
+    org.mockito.Mockito.doNothing().when(executorService).execute(runnable.capture());
+
+    service.approveContinuation(RUN_ID, TASK_ID);
+    runnable.getValue().run();
+
+    verify(correctionWorkspaceTransaction).rollback(eq(correctionCheckpoint), any(Runnable.class));
+    verify(reviewer).review(any());
+    verify(tokenAttributor, never())
+        .attributeReviewerAdditionalFromAttempt(any(), anyLong(), anyLong(), any());
+    verify(correctionValidationAdmission, never())
+        .regenerateAndAssert(any(), any(), any(), any(), any(), any());
     verify(persistenceWriter, never()).persistReview(any(), any());
   }
 

@@ -74,6 +74,15 @@ class ScmPushServiceExistingPullRequestTest {
 
   @InjectMocks private ScmPushService service;
 
+  @org.junit.jupiter.api.BeforeEach
+  void admitPublicationByDefault() {
+    org.mockito.Mockito.lenient()
+        .when(publicationAdmissionService.assertEligible(any(PipelineRun.class)))
+        .thenAnswer(
+            ignored ->
+                new PublicationAdmissionService.Admission("a".repeat(64), "PUBLICATION_ELIGIBLE"));
+  }
+
   private PipelineRun existingRepoRun() {
     AppUser user = new AppUser();
     user.setId("user-1");

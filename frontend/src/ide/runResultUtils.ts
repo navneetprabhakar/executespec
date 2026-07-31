@@ -100,7 +100,17 @@ export function publicationTrustFacts(
 ): PublicationTrustFact[] {
   if (!run) return [];
   const tasks = run.tasks || [];
-  const completed = tasks.filter((task) => (task.status || '').toUpperCase() === 'COMPLETE').length;
+  const completed = tasks.filter((task) =>
+    ['COMPLETE', 'DONE'].includes((task.status || '').toUpperCase()),
+  ).length;
+  const terminal = tasks.filter((task) =>
+    ['COMPLETE', 'DONE', 'FAILED', 'PARTIAL', 'BLOCKED', 'CANCELLED', 'SKIPPED'].includes(
+      (task.status || '').toUpperCase(),
+    ),
+  ).length;
+  const failedOrBlocked = tasks.filter((task) =>
+    ['FAILED', 'BLOCKED', 'CANCELLED'].includes((task.status || '').toUpperCase()),
+  ).length;
   const actualRoutes = [
     ...new Set(
       tasks
@@ -178,9 +188,14 @@ export function publicationTrustFacts(
 
   const facts: PublicationTrustFact[] = [
     {
-      label: 'Tasks executed',
-      value: `${completed}/${tasks.length}`,
-      kind: tasks.length > 0 && completed === tasks.length ? 'ok' : 'warn',
+      label: 'Tasks terminal',
+      value: `${terminal}/${tasks.length} terminal · ${completed}/${tasks.length} completed`,
+      kind:
+        tasks.length > 0 && completed === tasks.length
+          ? 'ok'
+          : failedOrBlocked > 0
+            ? 'bad'
+            : 'warn',
     },
     {
       label: 'Approved correction route',

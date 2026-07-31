@@ -71,8 +71,9 @@ class RejectedCorrectionScmPublicationTest {
     git(workspace, "commit", "-q", "-m", "accepted checkpoint");
 
     CorrectionWorkspaceTransaction transaction = new CorrectionWorkspaceTransaction();
-    CorrectionWorkspaceTransaction.Checkpoint workspaceCheckpoint = transaction.begin(workspace);
-    String acceptedGeneration = workspaceCheckpoint.generation();
+    CorrectionWorkspaceTransaction.Checkpoint seededWorkspaceCheckpoint =
+        transaction.begin(workspace);
+    String acceptedGeneration = seededWorkspaceCheckpoint.generation();
 
     ValidationReport original = greenReport(acceptedGeneration);
     ValidationReport rejected = rejectedReport(null);
@@ -95,6 +96,15 @@ class RejectedCorrectionScmPublicationTest {
 
     BrownfieldHttpContractGuard brownfieldGuard = mock(BrownfieldHttpContractGuard.class);
     when(brownfieldGuard.hasBaseline(RUN_ID)).thenReturn(false);
+    DurableCorrectionLifecycle durableCorrections = mock(DurableCorrectionLifecycle.class);
+    RunWorkspaceAuthorityService.Lease correctionLease =
+        mock(RunWorkspaceAuthorityService.Lease.class);
+    when(durableCorrections.prepare(RUN_ID, TASK_KEY, workspace))
+        .thenReturn(
+            new DurableCorrectionLifecycle.Prepared(
+                java.util.UUID.fromString("33333333-3333-3333-3333-333333333333"),
+                seededWorkspaceCheckpoint,
+                correctionLease));
     AutomaticCorrectionLifecycle lifecycle =
         new AutomaticCorrectionLifecycle(
             transaction,
@@ -105,7 +115,10 @@ class RejectedCorrectionScmPublicationTest {
             mock(SseBroadcaster.class),
             mock(WorkflowConfigEvidenceInspector.class),
             reports,
-            brownfieldGuard);
+            brownfieldGuard,
+            durableCorrections);
+    CorrectionWorkspaceTransaction.Checkpoint workspaceCheckpoint =
+        lifecycle.begin(RUN_ID, TASK_KEY, workspace);
 
     AutomaticCorrectionLifecycle.TaskState previousTask = lifecycle.snapshotTask(task);
     AutomaticCorrectionLifecycle.EvidenceCheckpoint evidenceCheckpoint =
@@ -164,7 +177,9 @@ class RejectedCorrectionScmPublicationTest {
             properties,
             new ObjectMapper(),
             brownfieldGuard,
-            mock(RunEffectiveRouteService.class));
+            mock(RunEffectiveRouteService.class),
+            mock(DurableCorrectionLifecycle.class),
+            mock(RunWorkspaceAuthorityService.class));
 
     GitTool gitTool = mock(GitTool.class);
     when(gitTool.pushToBranch(

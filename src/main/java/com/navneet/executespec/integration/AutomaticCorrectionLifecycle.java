@@ -3,13 +3,14 @@ package com.navneet.executespec.integration;
 import java.nio.file.Path;
 import java.time.Instant;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.navneet.executespec.config.featureflag.FeatureFlagService;
 import com.navneet.executespec.contractsurface.BrownfieldHttpContractGuard;
+import com.navneet.executespec.harness.ExecutionRequest;
 import com.navneet.executespec.harness.ExecutionResult;
+import com.navneet.executespec.harness.SequentialExecutor;
 import com.navneet.executespec.lint.LintPass;
 import com.navneet.executespec.report.ValidationReportRepository;
 import com.navneet.executespec.report.entity.ValidationReport;
@@ -21,7 +22,6 @@ import com.navneet.executespec.sse.SseBroadcaster;
 import com.navneet.executespec.state.entity.AgentTask;
 import com.navneet.executespec.state.repository.AgentTaskRepository;
 
-import org.springframework.beans.BeanUtils;
 import org.springframework.stereotype.Component;
 
 import lombok.RequiredArgsConstructor;
@@ -49,27 +49,112 @@ public class AutomaticCorrectionLifecycle {
   private final WorkflowConfigEvidenceInspector workflowConfigEvidenceInspector;
   private final ValidationReportRepository validationReportRepository;
   private final BrownfieldHttpContractGuard brownfieldHttpContractGuard;
+  private final DurableCorrectionLifecycle durableCorrectionLifecycle;
+  private final java.util.concurrent.ConcurrentMap<
+          CorrectionWorkspaceTransaction.Checkpoint, DurableCorrectionLifecycle.Prepared>
+      durableAttempts = new java.util.concurrent.ConcurrentHashMap<>();
 
   public CorrectionWorkspaceTransaction.Checkpoint begin(Path workspaceRoot) {
     return workspaceTransaction.begin(workspaceRoot);
   }
 
+  public CorrectionWorkspaceTransaction.Checkpoint begin(
+      String runId, String taskId, Path workspaceRoot) {
+    DurableCorrectionLifecycle.Prepared prepared =
+        durableCorrectionLifecycle.prepare(runId, taskId, workspaceRoot);
+    durableCorrectionLifecycle.markMutating(prepared);
+    durableAttempts.put(prepared.checkpoint(), prepared);
+    return prepared.checkpoint();
+  }
+
   public CorrectionWorkspaceTransaction.Accepted accept(
       CorrectionWorkspaceTransaction.Checkpoint checkpoint) {
-    return workspaceTransaction.accept(checkpoint);
+    DurableCorrectionLifecycle.Prepared prepared = requirePrepared(checkpoint);
+    try {
+      prepared.authority().assertOwned();
+      CorrectionWorkspaceTransaction.Accepted accepted = workspaceTransaction.accept(checkpoint);
+      durableAttempts.remove(checkpoint, prepared);
+      durableCorrectionLifecycle.accept(prepared, accepted.afterGeneration());
+      return accepted;
+    } catch (RuntimeException failure) {
+      prepared.authority().close();
+      throw failure;
+    }
+  }
+
+  /** Computes the candidate generations without resolving the durable attempt. */
+  public CorrectionWorkspaceTransaction.Accepted previewAcceptance(
+      CorrectionWorkspaceTransaction.Checkpoint checkpoint) {
+    DurableCorrectionLifecycle.Prepared prepared = assertPreparedAuthority(checkpoint);
+    try {
+      return workspaceTransaction.accept(checkpoint);
+    } catch (RuntimeException failure) {
+      prepared.authority().close();
+      throw failure;
+    }
+  }
+
+  /** Runs a correction worker with the exact durable lease bound to every tool-dispatch thread. */
+  public <T> T withToolFence(
+      CorrectionWorkspaceTransaction.Checkpoint checkpoint, java.util.function.Supplier<T> work) {
+    DurableCorrectionLifecycle.Prepared prepared = requirePrepared(checkpoint);
+    return RunWorkspaceAuthorityService.withCorrectionToolLease(prepared.authority(), work);
+  }
+
+  public ExecutionResult executeWithToolFence(
+      CorrectionWorkspaceTransaction.Checkpoint checkpoint,
+      SequentialExecutor executor,
+      ExecutionRequest request,
+      SequentialExecutor.ResumeRequest resume) {
+    return withToolFence(checkpoint, () -> executor.execute(request, resume));
   }
 
   public String currentGeneration(CorrectionWorkspaceTransaction.Checkpoint checkpoint) {
-    return workspaceTransaction.currentGeneration(checkpoint);
+    DurableCorrectionLifecycle.Prepared prepared = assertPreparedAuthority(checkpoint);
+    return workspaceTransaction.currentGeneration(
+        prepared.checkpoint(), prepared.authority()::assertOwned);
   }
 
   public CorrectionWorkspaceTransaction.DiffEvidence diffEvidence(
       CorrectionWorkspaceTransaction.Checkpoint checkpoint) {
-    return workspaceTransaction.diffEvidence(checkpoint);
+    DurableCorrectionLifecycle.Prepared prepared = assertPreparedAuthority(checkpoint);
+    return workspaceTransaction.diffEvidence(
+        prepared.checkpoint(), prepared.authority()::assertOwned);
   }
 
   public void rollback(CorrectionWorkspaceTransaction.Checkpoint checkpoint) {
-    workspaceTransaction.rollback(checkpoint);
+    DurableCorrectionLifecycle.Prepared prepared = assertPreparedAuthority(checkpoint);
+    try {
+      workspaceTransaction.rollback(checkpoint, prepared.authority()::assertOwned);
+    } catch (RuntimeException failure) {
+      prepared.authority().close();
+      throw failure;
+    }
+  }
+
+  public void assertAuthority(CorrectionWorkspaceTransaction.Checkpoint checkpoint) {
+    assertPreparedAuthority(checkpoint);
+  }
+
+  private DurableCorrectionLifecycle.Prepared assertPreparedAuthority(
+      CorrectionWorkspaceTransaction.Checkpoint checkpoint) {
+    DurableCorrectionLifecycle.Prepared prepared = requirePrepared(checkpoint);
+    try {
+      prepared.authority().assertOwned();
+      return prepared;
+    } catch (RuntimeException failure) {
+      prepared.authority().close();
+      throw failure;
+    }
+  }
+
+  private DurableCorrectionLifecycle.Prepared requirePrepared(
+      CorrectionWorkspaceTransaction.Checkpoint checkpoint) {
+    DurableCorrectionLifecycle.Prepared prepared = durableAttempts.get(checkpoint);
+    if (prepared == null) {
+      throw new IllegalStateException("CORRECTION_DURABLE_ATTEMPT_MISSING");
+    }
+    return prepared;
   }
 
   public WorkflowConfigEvidence inspectWorkflowConfig(Path workspaceRoot) {
@@ -155,7 +240,9 @@ public class AutomaticCorrectionLifecycle {
           diff,
           validationDelta,
           true);
+      markDurableRolledBack(checkpoint);
     } catch (RuntimeException rollbackFailure) {
+      releaseForRecovery(checkpoint);
       rollbackFailure.addSuppressed(failure);
       throw new IllegalStateException(
           "Automatic correction failed and its workspace checkpoint could not be restored",
@@ -171,21 +258,27 @@ public class AutomaticCorrectionLifecycle {
       TaskState previous,
       CorrectionAcceptancePolicy.Decision rejection,
       CorrectionResolutionEvidence.ValidationSnapshot attemptValidation) {
-    CorrectionResolutionEvidence.ValidationDelta validationDelta =
-        captureValidationDelta(evidenceCheckpoint, attemptValidation);
-    rollback(checkpoint);
-    restoreEvidence(evidenceCheckpoint);
-    restoreTask(taskKey, previous);
-    recordResolution(
-        taskKey,
-        "REJECTED",
-        rejection.code(),
-        rejection.reason(),
-        checkpoint.generation(),
-        checkpoint.generation(),
-        diff,
-        validationDelta,
-        true);
+    try {
+      CorrectionResolutionEvidence.ValidationDelta validationDelta =
+          captureValidationDelta(evidenceCheckpoint, attemptValidation);
+      rollback(checkpoint);
+      restoreEvidence(evidenceCheckpoint);
+      restoreTask(taskKey, previous);
+      recordResolution(
+          taskKey,
+          "REJECTED",
+          rejection.code(),
+          rejection.reason(),
+          checkpoint.generation(),
+          checkpoint.generation(),
+          diff,
+          validationDelta,
+          true);
+      markDurableRolledBack(checkpoint);
+    } catch (RuntimeException failure) {
+      releaseForRecovery(checkpoint);
+      throw failure;
+    }
   }
 
   public boolean rollbackIfEvidenceRegressed(
@@ -226,11 +319,11 @@ public class AutomaticCorrectionLifecycle {
     ValidationReport previous =
         validationReportRepository
             .findByRunId(runId)
-            .map(AutomaticCorrectionLifecycle::copy)
+            .map(CorrectionStateSnapshots::copyValidationReport)
             .orElse(null);
     if (previous != null) {
-      ValidationReport stale = copy(previous);
-      markIndependentEvidenceStale(stale);
+      ValidationReport stale = CorrectionStateSnapshots.copyValidationReport(previous);
+      CorrectionStateSnapshots.markIndependentEvidenceStale(stale);
       validationReportRepository.saveAndFlush(stale);
     }
     return new EvidenceCheckpoint(runId, previous, inspectContracts(runId));
@@ -242,7 +335,8 @@ public class AutomaticCorrectionLifecycle {
       return;
     }
     if (checkpoint.previous() != null) {
-      validationReportRepository.saveAndFlush(copy(checkpoint.previous()));
+      validationReportRepository.saveAndFlush(
+          CorrectionStateSnapshots.copyValidationReport(checkpoint.previous()));
       return;
     }
     validationReportRepository
@@ -251,53 +345,8 @@ public class AutomaticCorrectionLifecycle {
     validationReportRepository.flush();
   }
 
-  private static ValidationReport copy(ValidationReport source) {
-    ValidationReport target = new ValidationReport();
-    BeanUtils.copyProperties(source, target);
-    return target;
-  }
-
   static void markIndependentEvidenceStale(ValidationReport report) {
-    report.setStatus("STALE");
-    report.setWorkspaceGeneration(null);
-    report.setFinalBuildPassed(null);
-    report.setBuildCommand(null);
-    report.setBuildWorkingDirectory(null);
-    report.setBuildExitCode(null);
-    report.setBuildOutput(null);
-    report.setTestsPassed(null);
-    report.setTestsTotal(null);
-    report.setTestExecutionVerified(null);
-    report.setTestEvidenceScope(null);
-    report.setTestCommand(null);
-    report.setTestWorkingDirectory(null);
-    report.setTestExitCode(null);
-    report.setTestOutput(null);
-    report.setReviewerVerdict(null);
-    report.setWorkflowConfigEvidenceJson(null);
-    report.setFilesGenerated(-1);
-    report.setChecksPassed("");
-    report.setIssuesJson("[]");
-    report.setReportMarkdown(null);
-    report.setAccuracyScore(null);
-    report.setAccuracyGrade(null);
-    report.setAccuracyJson(null);
-    report.setCodeQualityScore(null);
-    report.setTestCoverageScore(null);
-    report.setArchitectureScore(null);
-    report.setSecurityScore(null);
-    report.setPerformanceScore(null);
-    report.setDesignComplianceScore(null);
-    report.setBootVerdict("STALE");
-    report.setBootHealthy(null);
-    report.setBootReason(null);
-    report.setExecutableTestsRun(null);
-    report.setExecutableTestsPassed(null);
-    report.setExecutableVerificationStatus("STALE");
-    report.setExecutableEvidenceJson(null);
-    report.setVerifiedScore(null);
-    report.setRubricScore(null);
-    report.setScoreZeroCauseJson(null);
+    CorrectionStateSnapshots.markIndependentEvidenceStale(report);
   }
 
   public record EvidenceCheckpoint(
@@ -401,7 +450,8 @@ public class AutomaticCorrectionLifecycle {
       return;
     }
     try {
-      ArrayNode actions = readActions(task.getContinuationActionsJson());
+      ArrayNode actions =
+          CorrectionActionJson.read(objectMapper, task.getContinuationActionsJson());
       ObjectNode action = actions.addObject();
       action.put("status", "EXECUTED");
       action.put("decision", decision);
@@ -453,7 +503,8 @@ public class AutomaticCorrectionLifecycle {
       if (task == null) {
         return;
       }
-      ArrayNode actions = readActions(task.getContinuationActionsJson());
+      ArrayNode actions =
+          CorrectionActionJson.read(objectMapper, task.getContinuationActionsJson());
       CorrectionResolutionEvidence.append(
           objectMapper,
           actions,
@@ -473,9 +524,8 @@ public class AutomaticCorrectionLifecycle {
     }
   }
 
-  public TaskState snapshotTask(AgentTask task) {
-    return new TaskState(
-        task.getStatus(), task.getStartedAt(), task.getCompletedAt(), task.getDurationMs());
+  public static TaskState snapshotTask(AgentTask task) {
+    return CorrectionStateSnapshots.snapshotTask(task);
   }
 
   public void restoreTask(String taskKey, TaskState state) {
@@ -491,6 +541,7 @@ public class AutomaticCorrectionLifecycle {
                 task.setStartedAt(state.startedAt());
                 task.setCompletedAt(state.completedAt());
                 task.setDurationMs(state.durationMs());
+                CorrectionStateSnapshots.restoreTaskEvidence(task, state);
                 taskRepository.save(task);
               });
     } catch (RuntimeException ex) {
@@ -501,19 +552,42 @@ public class AutomaticCorrectionLifecycle {
     }
   }
 
-  public record TaskState(String status, Instant startedAt, Instant completedAt, Long durationMs) {}
+  public record TaskState(
+      String status,
+      Instant startedAt,
+      Instant completedAt,
+      Long durationMs,
+      String assignedModel,
+      String lastLlmFailure,
+      Instant lastActivityAt,
+      Instant stuckDetectedAt,
+      Integer recoveryAttempt,
+      String workerReportJson,
+      String completionNotes,
+      String provider,
+      String model,
+      String effectiveProvider,
+      String effectiveModel,
+      String effectiveRouteAttribution,
+      String routingTier,
+      String routingTaskCategory,
+      String routingSource,
+      String currentProvider,
+      String currentModel,
+      Boolean readmeUpdated,
+      String failureDiagnosticJson,
+      String goalDonenessJson,
+      String continuationDecisionJson) {}
 
-  private ArrayNode readActions(String json)
-      throws com.fasterxml.jackson.core.JsonProcessingException {
-    if (json == null || json.isBlank()) {
-      return objectMapper.createArrayNode();
+  private void markDurableRolledBack(CorrectionWorkspaceTransaction.Checkpoint checkpoint) {
+    DurableCorrectionLifecycle.Prepared prepared = durableAttempts.remove(checkpoint);
+    if (prepared != null) {
+      durableCorrectionLifecycle.rolledBack(prepared);
     }
-    JsonNode parsed = objectMapper.readTree(json);
-    if (parsed != null && parsed.isArray()) {
-      ArrayNode copy = objectMapper.createArrayNode();
-      parsed.forEach(copy::add);
-      return copy;
-    }
-    return objectMapper.createArrayNode();
+  }
+
+  private void releaseForRecovery(CorrectionWorkspaceTransaction.Checkpoint checkpoint) {
+    DurableCorrectionLifecycle.Prepared prepared = durableAttempts.remove(checkpoint);
+    if (prepared != null) prepared.authority().close();
   }
 }

@@ -2214,7 +2214,7 @@ public class WorkerAgent {
       for (int i = 0; i < calls.size(); i++) {
         AssistantMessage.ToolCall tc = calls.get(i);
         WorkerDispatchMode mode = WorkerDispatchMode.normal(i == last);
-        exec.submit(() -> out.put(safeId(tc.id()), dispatchOne(tc, req, mode)));
+        WorkerCorrectionToolFence.submitRead(exec, this, out, tc, req, mode);
       }
       exec.shutdown();
       if (!exec.awaitTermination(120, java.util.concurrent.TimeUnit.SECONDS)) {
@@ -2300,8 +2300,7 @@ public class WorkerAgent {
 
   String dispatchOne(AssistantMessage.ToolCall tc, WorkerTaskRequest req, WorkerDispatchMode mode) {
     // Finalizer mode relaxes only wall-clock expiry; cost and token ceilings remain enforced.
-    String budgetViolation =
-        WorkerLiveBudgetGuard.guard(req, costTracker, req.workerStartedAtEpochMs(), mode);
+    String budgetViolation = WorkerCorrectionToolFence.guardDispatch(req, costTracker, mode);
     if (budgetViolation != null) return errEnvelope("BUDGET_EXCEEDED", budgetViolation);
     // Belt-and-suspenders: even if the model somehow tries to invoke a denied
     // tool by name (e.g. cached tool list, hand-crafted payload), refuse at
@@ -2378,6 +2377,7 @@ public class WorkerAgent {
    * in common space, not a TB fork. Returns the same {@code {ok,content}} envelope shape.
    */
   private String dispatchToolDirect(WorkerTaskRequest req, String toolName, String argsJson) {
+    WorkerCorrectionToolFence.assertDispatch(req.context());
     String budgetViolation =
         WorkerLiveBudgetGuard.taskViolation(req, costTracker, req.workerStartedAtEpochMs());
     if (budgetViolation != null) return errEnvelope("BUDGET_EXCEEDED", budgetViolation);

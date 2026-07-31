@@ -2,7 +2,11 @@ package com.navneet.executespec.integration.scm;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.nio.file.Path;
@@ -10,6 +14,8 @@ import java.util.List;
 import java.util.Optional;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.navneet.executespec.config.AgentProperties;
 import com.navneet.executespec.contractsurface.BrownfieldHttpContractGuard;
 import com.navneet.executespec.contractsurface.BrownfieldHttpContractGuard.CompatibilityReport;
@@ -18,6 +24,8 @@ import com.navneet.executespec.contractsurface.SpringHttpSurfaceExtractor.RouteK
 import com.navneet.executespec.cost.EffectiveRouteProjection;
 import com.navneet.executespec.cost.RunEffectiveRouteService;
 import com.navneet.executespec.integration.CorrectionWorkspaceTransaction;
+import com.navneet.executespec.integration.DurableCorrectionLifecycle;
+import com.navneet.executespec.integration.RunWorkspaceAuthorityService;
 import com.navneet.executespec.report.ValidationReportRepository;
 import com.navneet.executespec.report.entity.PipelineResult;
 import com.navneet.executespec.report.entity.ValidationReport;
@@ -27,6 +35,7 @@ import com.navneet.executespec.state.repository.AgentTaskRepository;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.InOrder;
 
 class PublicationAdmissionServiceTest {
 
@@ -34,6 +43,7 @@ class PublicationAdmissionServiceTest {
   private static final String TASK_KEY = RUN_ID.substring(0, 8) + "_T1";
   private static final String GENERATION = "a".repeat(64);
   private static final String APPROVAL_ID = "11111111-1111-1111-1111-111111111111";
+  private static final String SECOND_APPROVAL_ID = "22222222-2222-2222-2222-222222222222";
 
   private final ValidationReportRepository reports = mock(ValidationReportRepository.class);
   private final AgentTaskRepository tasks = mock(AgentTaskRepository.class);
@@ -43,6 +53,12 @@ class PublicationAdmissionServiceTest {
   private final BrownfieldHttpContractGuard brownfieldGuard =
       mock(BrownfieldHttpContractGuard.class);
   private final RunEffectiveRouteService effectiveRoutes = mock(RunEffectiveRouteService.class);
+  private final DurableCorrectionLifecycle durableCorrections =
+      mock(DurableCorrectionLifecycle.class);
+  private final RunWorkspaceAuthorityService workspaceAuthorities =
+      mock(RunWorkspaceAuthorityService.class);
+  private final RunWorkspaceAuthorityService.Lease publicationLease =
+      mock(RunWorkspaceAuthorityService.Lease.class);
   private final PublicationAdmissionService service =
       new PublicationAdmissionService(
           reports,
@@ -51,11 +67,15 @@ class PublicationAdmissionServiceTest {
           properties,
           new ObjectMapper(),
           brownfieldGuard,
-          effectiveRoutes);
+          effectiveRoutes,
+          durableCorrections,
+          workspaceAuthorities);
 
   @BeforeEach
   void setUp() {
     properties.setWorkspace("/tmp/executespec-publication-test");
+    when(workspaceAuthorities.acquire(RUN_ID, RunWorkspaceAuthorityService.Authority.PUBLICATION))
+        .thenReturn(publicationLease);
     when(reports.findByRunId(RUN_ID)).thenReturn(Optional.of(greenReport()));
     when(generations.captureGeneration(Path.of("/tmp/executespec-publication-test", RUN_ID)))
         .thenReturn(GENERATION);
@@ -66,6 +86,18 @@ class PublicationAdmissionServiceTest {
   @Test
   void admitsFreshBuildAndVerifiedTests() {
     assertThat(service.assertEligible(run()).workspaceGeneration()).isEqualTo(GENERATION);
+  }
+
+  @Test
+  void unresolvedCorrectionBlocksBeforeWorkspaceOrEvidenceInspection() {
+    org.mockito.Mockito.doThrow(new IllegalStateException("PREPARED"))
+        .when(durableCorrections)
+        .assertNoUnresolvedAttempt(RUN_ID);
+
+    assertBlocked("CORRECTION_ATTEMPT_UNRESOLVED");
+
+    verify(generations, never()).captureGeneration(any(Path.class));
+    verify(reports, never()).findByRunId(RUN_ID);
   }
 
   @Test
@@ -196,6 +228,33 @@ class PublicationAdmissionServiceTest {
   }
 
   @Test
+  void durableApprovalIdentityWithoutAppendOnlyActionEvidenceFailsClosed() {
+    AgentTask task = AgentTask.builder().taskId(TASK_KEY).runId(RUN_ID).build();
+    bindApprovalIdentity(task, "a".repeat(64), false);
+    task.setContinuationActionsJson(null);
+    when(tasks.findByRunId(RUN_ID)).thenReturn(List.of(task));
+
+    assertBlocked("PUBLICATION_ROUTE_EVIDENCE_INVALID");
+    verify(effectiveRoutes, never()).forTaskPhysicalAttempts(any(), any(), any());
+  }
+
+  @Test
+  void publicationPreparationMustPreserveAdmittedWorkspaceGeneration() {
+    PublicationAdmissionService.Admission admission = service.assertEligible(run());
+    when(generations.captureGeneration(Path.of("/tmp/executespec-publication-test", RUN_ID)))
+        .thenReturn("b".repeat(64));
+
+    assertThatThrownBy(() -> service.assertWorkspaceGenerationUnchanged(run(), admission))
+        .isInstanceOf(PublicationAdmissionService.PublicationBlockedException.class)
+        .satisfies(
+            failure ->
+                assertThat(
+                        ((PublicationAdmissionService.PublicationBlockedException) failure).code())
+                    .isEqualTo("PUBLICATION_EVIDENCE_STALE"));
+    verify(publicationLease).assertOwned();
+  }
+
+  @Test
   void postReviewApprovalMustMatchPhysicalReviewerRoute() {
     AgentTask task =
         AgentTask.builder()
@@ -252,6 +311,147 @@ class PublicationAdmissionServiceTest {
         .thenReturn(exactAttempt("openrouter", "x-ai/grok-4.20", 6, 6, "reviewer-new"));
     PublicationAdmissionService.Eligibility eligible = service.evaluate(run());
     assertThat(eligible.eligible()).as(eligible.toString()).isTrue();
+  }
+
+  @Test
+  void everyApprovedActionIsAttestedInDurableOrder() {
+    AgentTask task = taskWithTwoApprovedActions();
+    when(tasks.findByRunId(RUN_ID)).thenReturn(List.of(task));
+    when(effectiveRoutes.forTaskPhysicalAttempts(RUN_ID, "T1", List.of("worker-earlier")))
+        .thenReturn(exactAttempt("openrouter", "x-ai/grok-4.20", 2, 2, "worker-earlier"));
+    when(effectiveRoutes.forReviewerPhysicalAttempts(RUN_ID, List.of("reviewer-earlier")))
+        .thenReturn(exactAttempt("openrouter", "x-ai/grok-4.20", 3, 3, "reviewer-earlier"));
+    when(effectiveRoutes.forTaskPhysicalAttempts(RUN_ID, "T1", List.of("worker-latest")))
+        .thenReturn(exactAttempt("anthropic", "claude-sonnet-4-6", 4, 4, "worker-latest"));
+    when(effectiveRoutes.forReviewerPhysicalAttempts(RUN_ID, List.of("reviewer-latest")))
+        .thenReturn(exactAttempt("anthropic", "claude-sonnet-4-6", 5, 5, "reviewer-latest"));
+
+    assertThat(service.assertEligible(run()).code()).isEqualTo("PUBLICATION_ELIGIBLE");
+
+    InOrder durableOrder = inOrder(effectiveRoutes);
+    durableOrder
+        .verify(effectiveRoutes)
+        .forTaskPhysicalAttempts(RUN_ID, "T1", List.of("worker-earlier"));
+    durableOrder
+        .verify(effectiveRoutes)
+        .forReviewerPhysicalAttempts(RUN_ID, List.of("reviewer-earlier"));
+    durableOrder
+        .verify(effectiveRoutes)
+        .forTaskPhysicalAttempts(RUN_ID, "T1", List.of("worker-latest"));
+    durableOrder
+        .verify(effectiveRoutes)
+        .forReviewerPhysicalAttempts(RUN_ID, List.of("reviewer-latest"));
+  }
+
+  @Test
+  void earlierApprovedActionMismatchBlocksBeforeLaterMatchingAction() {
+    AgentTask task = taskWithTwoApprovedActions();
+    when(tasks.findByRunId(RUN_ID)).thenReturn(List.of(task));
+    when(effectiveRoutes.forTaskPhysicalAttempts(RUN_ID, "T1", List.of("worker-earlier")))
+        .thenReturn(exactAttempt("openrouter", "deepseek-v4-pro", 2, 2, "worker-earlier"));
+    when(effectiveRoutes.forTaskPhysicalAttempts(RUN_ID, "T1", List.of("worker-latest")))
+        .thenReturn(exactAttempt("anthropic", "claude-sonnet-4-6", 4, 4, "worker-latest"));
+
+    assertBlocked("PUBLICATION_APPROVED_ROUTE_MISMATCH");
+
+    verify(effectiveRoutes, never())
+        .forTaskPhysicalAttempts(RUN_ID, "T1", List.of("worker-latest"));
+  }
+
+  @Test
+  void rejectedEarlierApprovalWithExactRollbackProofDoesNotPoisonLaterAcceptedCorrection()
+      throws Exception {
+    AgentTask task = taskWithTwoApprovedActions();
+    ObjectMapper mapper = new ObjectMapper();
+    ArrayNode actions = (ArrayNode) mapper.readTree(task.getContinuationActionsJson());
+    ObjectNode resolution = mapper.createObjectNode();
+    resolution.put("status", "REJECTED");
+    resolution.put("decision", "CORRECTION_RESOLUTION");
+    resolution.put("approvalId", APPROVAL_ID);
+    resolution.put("proposalDigest", "c".repeat(64));
+    resolution.put("beforeWorkspaceGeneration", GENERATION);
+    resolution.put("afterWorkspaceGeneration", GENERATION);
+    resolution.put("evidenceInvalidated", true);
+    actions.insert(1, resolution);
+    task.setContinuationActionsJson(mapper.writeValueAsString(actions));
+    when(tasks.findByRunId(RUN_ID)).thenReturn(List.of(task));
+    when(effectiveRoutes.forTaskPhysicalAttempts(RUN_ID, "T1", List.of("worker-latest")))
+        .thenReturn(exactAttempt("anthropic", "claude-sonnet-4-6", 4, 4, "worker-latest"));
+    when(effectiveRoutes.forReviewerPhysicalAttempts(RUN_ID, List.of("reviewer-latest")))
+        .thenReturn(exactAttempt("anthropic", "claude-sonnet-4-6", 5, 5, "reviewer-latest"));
+
+    assertThat(service.assertEligible(run()).code()).isEqualTo("PUBLICATION_ELIGIBLE");
+
+    verify(effectiveRoutes, never())
+        .forTaskPhysicalAttempts(RUN_ID, "T1", List.of("worker-earlier"));
+  }
+
+  @Test
+  void rejectedApprovalStillReservesItsPhysicalAttemptIdentities() throws Exception {
+    AgentTask task = taskWithTwoApprovedActions();
+    ObjectMapper mapper = new ObjectMapper();
+    ArrayNode actions = (ArrayNode) mapper.readTree(task.getContinuationActionsJson());
+    ObjectNode resolution = mapper.createObjectNode();
+    resolution.put("status", "ROLLED_BACK");
+    resolution.put("decision", "CORRECTION_RESOLUTION");
+    resolution.put("approvalId", APPROVAL_ID);
+    resolution.put("proposalDigest", "c".repeat(64));
+    resolution.put("beforeWorkspaceGeneration", GENERATION);
+    resolution.put("afterWorkspaceGeneration", GENERATION);
+    resolution.put("evidenceInvalidated", true);
+    actions.insert(1, resolution);
+    task.setContinuationActionsJson(
+        mapper.writeValueAsString(actions).replace("worker-latest", "worker-earlier"));
+    when(tasks.findByRunId(RUN_ID)).thenReturn(List.of(task));
+
+    assertBlocked("PUBLICATION_ROUTE_EVIDENCE_INVALID");
+
+    verify(effectiveRoutes, never())
+        .forTaskPhysicalAttempts(RUN_ID, "T1", List.of("worker-latest"));
+  }
+
+  @Test
+  void earlierLegacyApprovalWithoutIdentityBlocksEvenWhenLatestReceiptIsValid() {
+    AgentTask task = taskWithTwoApprovedActions();
+    task.setContinuationActionsJson(
+        task.getContinuationActionsJson().replace("\"approvalId\":\"" + APPROVAL_ID + "\",", ""));
+    when(tasks.findByRunId(RUN_ID)).thenReturn(List.of(task));
+
+    assertBlocked("PUBLICATION_ROUTE_EVIDENCE_INVALID");
+
+    verify(effectiveRoutes, never())
+        .forTaskPhysicalAttempts(RUN_ID, "T1", List.of("worker-latest"));
+  }
+
+  @Test
+  void approvedActionsCannotReusePhysicalAttemptIdentity() {
+    AgentTask task = taskWithTwoApprovedActions();
+    task.setContinuationActionsJson(
+        task.getContinuationActionsJson().replace("worker-latest", "worker-earlier"));
+    when(tasks.findByRunId(RUN_ID)).thenReturn(List.of(task));
+    when(effectiveRoutes.forTaskPhysicalAttempts(RUN_ID, "T1", List.of("worker-earlier")))
+        .thenReturn(exactAttempt("openrouter", "x-ai/grok-4.20", 2, 2, "worker-earlier"));
+    when(effectiveRoutes.forReviewerPhysicalAttempts(RUN_ID, List.of("reviewer-earlier")))
+        .thenReturn(exactAttempt("openrouter", "x-ai/grok-4.20", 3, 3, "reviewer-earlier"));
+
+    assertBlocked("PUBLICATION_ROUTE_EVIDENCE_INVALID");
+  }
+
+  @Test
+  void approvedActionsCannotDuplicateApprovalOrProposalIdentity() {
+    AgentTask duplicateApproval = taskWithTwoApprovedActions();
+    duplicateApproval.setContinuationActionsJson(
+        duplicateApproval.getContinuationActionsJson().replace(SECOND_APPROVAL_ID, APPROVAL_ID));
+    when(tasks.findByRunId(RUN_ID)).thenReturn(List.of(duplicateApproval));
+
+    assertBlocked("PUBLICATION_ROUTE_EVIDENCE_INVALID");
+
+    AgentTask duplicateProposal = taskWithTwoApprovedActions();
+    duplicateProposal.setContinuationActionsJson(
+        duplicateProposal.getContinuationActionsJson().replace("d".repeat(64), "c".repeat(64)));
+    when(tasks.findByRunId(RUN_ID)).thenReturn(List.of(duplicateProposal));
+
+    assertBlocked("PUBLICATION_ROUTE_EVIDENCE_INVALID");
   }
 
   @Test
@@ -353,13 +553,103 @@ class PublicationAdmissionServiceTest {
 
   private static void bindApprovalIdentity(
       AgentTask task, String proposalDigest, boolean postReview) {
-    task.setContinuationApprovalId(APPROVAL_ID);
+    bindApprovalIdentity(
+        task,
+        APPROVAL_ID,
+        proposalDigest,
+        "openrouter",
+        "x-ai/grok-4.20",
+        "CHANGE_PROVIDER",
+        postReview);
+  }
+
+  private static void bindApprovalIdentity(
+      AgentTask task,
+      String approvalId,
+      String proposalDigest,
+      String provider,
+      String model,
+      String action,
+      boolean postReview) {
+    task.setContinuationApprovalId(approvalId);
     task.setContinuationApprovalProposalDigest(proposalDigest);
     task.setContinuationApprovalStatus("COMPLETED");
-    task.setContinuationApprovalProvider("openrouter");
-    task.setContinuationApprovalModel("x-ai/grok-4.20");
-    task.setContinuationApprovalAction("CHANGE_PROVIDER");
+    task.setContinuationApprovalProvider(provider);
+    task.setContinuationApprovalModel(model);
+    task.setContinuationApprovalAction(action);
     task.setContinuationApprovalPostReview(postReview);
+  }
+
+  private static AgentTask taskWithTwoApprovedActions() {
+    AgentTask task =
+        AgentTask.builder()
+            .taskId(TASK_KEY)
+            .runId(RUN_ID)
+            .continuationActionsJson(
+                """
+                [{
+                  "status":"APPROVED",
+                  "decision":"CHANGE_PROVIDER",
+                  "provider":"openrouter",
+                  "model":"x-ai/grok-4.20",
+                  "approvalId":"%s",
+                  "proposalDigest":"%s",
+                  "workerAttempt":{
+                    "provider":"openrouter",
+                    "model":"x-ai/grok-4.20",
+                    "attribution":"LEDGER",
+                    "callIndexFloor":1,
+                    "firstCallIndex":2,
+                    "lastCallIndex":2,
+                    "physicalAttemptIds":["worker-earlier"]
+                  },
+                  "reviewerAttempt":{
+                    "provider":"openrouter",
+                    "model":"x-ai/grok-4.20",
+                    "attribution":"LEDGER",
+                    "callIndexFloor":2,
+                    "firstCallIndex":3,
+                    "lastCallIndex":3,
+                    "physicalAttemptIds":["reviewer-earlier"]
+                  }
+                },{
+                  "status":"APPROVED",
+                  "decision":"STEP_UP_MODEL",
+                  "provider":"anthropic",
+                  "model":"claude-sonnet-4-6",
+                  "approvalId":"%s",
+                  "proposalDigest":"%s",
+                  "workerAttempt":{
+                    "provider":"anthropic",
+                    "model":"claude-sonnet-4-6",
+                    "attribution":"LEDGER",
+                    "callIndexFloor":3,
+                    "firstCallIndex":4,
+                    "lastCallIndex":4,
+                    "physicalAttemptIds":["worker-latest"]
+                  },
+                  "reviewerAttempt":{
+                    "provider":"anthropic",
+                    "model":"claude-sonnet-4-6",
+                    "attribution":"LEDGER",
+                    "callIndexFloor":4,
+                    "firstCallIndex":5,
+                    "lastCallIndex":5,
+                    "physicalAttemptIds":["reviewer-latest"]
+                  }
+                }]
+                """
+                    .formatted(APPROVAL_ID, "c".repeat(64), SECOND_APPROVAL_ID, "d".repeat(64)))
+            .build();
+    bindApprovalIdentity(
+        task,
+        SECOND_APPROVAL_ID,
+        "d".repeat(64),
+        "anthropic",
+        "claude-sonnet-4-6",
+        "STEP_UP_MODEL",
+        false);
+    return task;
   }
 
   private static RunEffectiveRouteService.AttemptRouteEvidence exactAttempt(

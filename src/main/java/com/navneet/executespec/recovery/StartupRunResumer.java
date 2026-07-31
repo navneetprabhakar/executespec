@@ -56,6 +56,17 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class StartupRunResumer {
 
+  /** Compatibility constructor for focused recovery tests that predate correction transactions. */
+  public StartupRunResumer(
+      PipelineRunRepository runRepo,
+      AgentTaskRepository taskRepo,
+      SseBroadcaster broadcaster,
+      org.springframework.beans.factory.ObjectProvider<
+              com.navneet.executespec.integration.RunLifecycleService>
+          runLifecycleServiceProvider) {
+    this(runRepo, taskRepo, broadcaster, null, runLifecycleServiceProvider);
+  }
+
   /** Statuses that indicate a run was in-flight when the JVM died. */
   private static final List<String> RESUMABLE_STATUSES =
       List.of("PLANNING", "WORKING", "REVIEWING");
@@ -77,6 +88,8 @@ public class StartupRunResumer {
   private final PipelineRunRepository runRepo;
   private final AgentTaskRepository taskRepo;
   private final SseBroadcaster broadcaster;
+  private final com.navneet.executespec.integration.DurableCorrectionLifecycle
+      durableCorrectionLifecycle;
   private final AtomicBoolean scanInProgress = new AtomicBoolean();
 
   @Value("${agent.recovery.auto-resume-on-startup:false}")
@@ -181,6 +194,21 @@ public class StartupRunResumer {
     Instant cutoff = Instant.now().minus(STALE_CUTOFF);
     for (PipelineRun run : candidates) {
       String status = run.getStatus();
+      try {
+        // A crashed correction owns the workspace. Restore and prove its before-generation and
+        // evidence snapshot before generic run replay is allowed to spend again.
+        if (durableCorrectionLifecycle != null) {
+          durableCorrectionLifecycle.recoverRunOrThrow(run.getRunId());
+        }
+      } catch (RuntimeException correctionRecoveryFailure) {
+        markFailed(
+            run,
+            status,
+            "Incomplete correction could not be rolled back safely: "
+                + correctionRecoveryFailure.getMessage());
+        failedInterrupted++;
+        continue;
+      }
       int attempts = run.getResumeAttempts() == null ? 0 : run.getResumeAttempts();
       if (attempts >= MAX_RESUME_ATTEMPTS) {
         markFailed(

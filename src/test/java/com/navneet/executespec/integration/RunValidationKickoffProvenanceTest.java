@@ -17,6 +17,10 @@ class RunValidationKickoffProvenanceTest {
     AccuracyReport accuracy =
         AccuracyReport.builder()
             .missingRequirements(List.of("Add the requested workflow"))
+            .specEvidenceStatus("CITED")
+            .specEvidenceLocations(List.of("src/App.java:1-5"))
+            .endpointEvidenceStatus("CITED")
+            .endpointEvidenceLocations(List.of("src/App.java:6-10"))
             .endpointCoverage(
                 AccuracyReport.EndpointCoverage.builder()
                     .required(List.of("POST /invented"))
@@ -30,6 +34,23 @@ class RunValidationKickoffProvenanceTest {
     assertThat(issues)
         .filteredOn(issue -> issue.getId().startsWith("SYNTH-ACC-"))
         .allMatch(issue -> issue.getSeverity() == IssueSeverity.MINOR);
+  }
+
+  @Test
+  void uncitedAccuracyGapsRemainUnknownAndDoNotCreateIssues() {
+    AccuracyReport accuracy =
+        AccuracyReport.builder()
+            .missingRequirements(List.of("Unverified missing requirement"))
+            .endpointCoverage(
+                AccuracyReport.EndpointCoverage.builder()
+                    .missing(List.of("POST /unverified"))
+                    .build())
+            .specEvidenceStatus("UNCITED")
+            .endpointEvidenceStatus("UNCITED")
+            .build();
+
+    assertThat(RunValidationKickoff.synthesiseReviewIssues(null, CompileResult.skip(), accuracy))
+        .isEmpty();
   }
 
   @Test
