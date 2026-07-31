@@ -1635,7 +1635,7 @@ public class WorkerAgent {
         // file edit beats empty patch." If salvage produces an edit, the smoke gate
         // downstream decides final task status (PASS → COMPLETE, FAIL → retry / PARTIAL).
         // If salvage fails too, fall through to the original COMPLETED_BY_STAGNATION return.
-        if (totalWriteCalls == 0) {
+        if (totalWriteCalls == 0 && req.zeroWriteSalvageEnabled()) {
           try {
             WorkerResult salvage = runSalvageCall(req, history, toolsDispatched, toolLog, start);
             if (salvage != null) {
@@ -1687,7 +1687,7 @@ public class WorkerAgent {
     // writeFile/editFile call now") and runs with reduced maxIter=2 (the salvage call itself +
     // one iter for tool dispatch). Even a wrong-file edit produces SOMETHING in the diff —
     // empty diff is automatic failure on the SWE-bench evaluator.
-    if (totalWriteCalls == 0) {
+    if (totalWriteCalls == 0 && req.zeroWriteSalvageEnabled()) {
       try {
         WorkerResult salvage = runSalvageCall(req, history, toolsDispatched, toolLog, start);
         if (salvage != null) return salvage;

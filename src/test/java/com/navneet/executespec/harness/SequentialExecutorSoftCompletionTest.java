@@ -2,6 +2,7 @@ package com.navneet.executespec.harness;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -1256,7 +1257,17 @@ class SequentialExecutorSoftCompletionTest {
             + persistenceEventOrder);
     assertEquals("openai", result.perTask().get(0).dispatchedProvider());
     assertEquals("gpt-5.4", result.perTask().get(0).dispatchedModel());
-    verify(worker, times(2)).run(any(WorkerTaskRequest.class), any());
+    ArgumentCaptor<WorkerTaskRequest> workerRequestCaptor =
+        ArgumentCaptor.forClass(WorkerTaskRequest.class);
+    verify(worker, times(2)).run(workerRequestCaptor.capture(), any());
+    assertNotEquals(
+        Boolean.FALSE,
+        workerRequestCaptor.getAllValues().get(0).zeroWriteSalvageAllowed(),
+        "the primary attempt keeps legacy empty-patch salvage");
+    assertEquals(
+        Boolean.FALSE,
+        workerRequestCaptor.getAllValues().get(1).zeroWriteSalvageAllowed(),
+        "a shared-workspace continuation must not invent a zero-write salvage edit");
     ArgumentCaptor<GoalContinuationAdvisorRequest> requestCaptor =
         ArgumentCaptor.forClass(GoalContinuationAdvisorRequest.class);
     verify(advisor, times(2)).advise(requestCaptor.capture());

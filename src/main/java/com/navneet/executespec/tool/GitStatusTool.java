@@ -1,6 +1,8 @@
 package com.navneet.executespec.tool;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
 
 import com.fasterxml.jackson.databind.JsonNode;
 
@@ -8,7 +10,7 @@ import org.springframework.stereotype.Component;
 
 import lombok.extern.slf4j.Slf4j;
 
-/** V2 gitStatus tool. Returns {@code git status --short} output for the run's workspace. */
+/** V2 gitStatus tool. Returns {@code git status --short} for every repository in the workspace. */
 @Component
 @Slf4j
 public class GitStatusTool implements Tool {
@@ -37,13 +39,25 @@ public class GitStatusTool implements Tool {
   @Override
   public ToolResult execute(JsonNode args, ExecutionContext ctx) {
     try {
-      GitInvoker.GitResult r = GitInvoker.run(ctx.workspaceRoot(), "status", "--short");
-      if (r.exitCode() != 0) {
-        return ToolResult.err(
-            ToolResult.ErrorKind.IO_ERROR,
-            "git status failed (exit=" + r.exitCode() + "): " + r.output());
+      List<String> sections = new ArrayList<>();
+      for (GitWorkspaceView.Repository repository :
+          GitWorkspaceView.repositories(ctx.workspaceRoot())) {
+        GitInvoker.GitResult r = GitInvoker.run(repository.root(), "status", "--short");
+        if (r.exitCode() != 0) {
+          return ToolResult.err(
+              ToolResult.ErrorKind.IO_ERROR,
+              "git status failed in "
+                  + repository.workspacePrefix()
+                  + " (exit="
+                  + r.exitCode()
+                  + "): "
+                  + r.output());
+        }
+        if (!r.output().isBlank()) {
+          sections.add(GitWorkspaceView.section(repository, r.output().stripTrailing()));
+        }
       }
-      return ToolResult.ok(r.output().isBlank() ? "(clean)" : r.output());
+      return ToolResult.ok(sections.isEmpty() ? "(clean)" : String.join("\n", sections));
     } catch (IOException ioe) {
       log.warn("gitStatus error", ioe);
       return ToolResult.err(ToolResult.ErrorKind.IO_ERROR, ioe.getMessage());
