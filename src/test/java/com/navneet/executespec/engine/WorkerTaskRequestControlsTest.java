@@ -49,6 +49,7 @@ class WorkerTaskRequestControlsTest {
         request(1_000L, 2.0, false).toBuilder()
             .workerStartedAtEpochMs(456L)
             .strictProvider(true)
+            .zeroWriteSalvageAllowed(false)
             .build();
 
     WorkerTaskRequest retry =
@@ -58,6 +59,16 @@ class WorkerTaskRequestControlsTest {
     assertThat(retry.dollarCap()).isEqualTo(2.0);
     assertThat(retry.workerStartedAtEpochMs()).isEqualTo(456L);
     assertThat(retry.strictProvider()).isTrue();
+    assertThat(retry.zeroWriteSalvageAllowed()).isFalse();
+  }
+
+  @Test
+  void recoveryCanDisableZeroWriteBestGuessSalvage() {
+    WorkerTaskRequest ordinary = request(null, null, false);
+    WorkerTaskRequest recovery = ordinary.toBuilder().zeroWriteSalvageAllowed(false).build();
+
+    assertThat(ordinary.zeroWriteSalvageEnabled()).isTrue();
+    assertThat(recovery.zeroWriteSalvageEnabled()).isFalse();
   }
 
   private static WorkerTaskRequest request(Long tokens, Double cost, boolean terminal) {

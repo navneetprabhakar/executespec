@@ -1,6 +1,8 @@
 package com.navneet.executespec.tool;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
 
 import com.fasterxml.jackson.databind.JsonNode;
 
@@ -56,22 +58,38 @@ public class GitDiffTool implements Tool {
   public ToolResult execute(JsonNode args, ExecutionContext ctx) {
     try {
       String path = args.hasNonNull("path") ? args.get("path").asText("").trim() : "";
-      GitInvoker.GitResult r;
-      if (path.isEmpty()) {
-        r = GitInvoker.run(ctx.workspaceRoot(), "diff", "HEAD");
-      } else {
+      if (!path.isEmpty()) {
         // PathSafety keeps the pathspec inside the workspace (defence-in-depth; git would
         // also refuse, but with a confusing error).
         PathSafety.safeResolve(ctx.workspaceRoot(), path);
-        r = GitInvoker.run(ctx.workspaceRoot(), "diff", "HEAD", "--", path);
       }
-      if (r.exitCode() != 0) {
-        return ToolResult.err(
-            ToolResult.ErrorKind.IO_ERROR,
-            "git diff failed (exit=" + r.exitCode() + "): " + r.output());
+      List<GitWorkspaceView.Repository> repositories =
+          GitWorkspaceView.repositories(ctx.workspaceRoot());
+      List<String> sections = new ArrayList<>();
+      for (GitWorkspaceView.Repository repository : repositories) {
+        String repositoryPath = GitWorkspaceView.repositoryRelativePath(repository, path);
+        if (repositoryPath == null && repositories.size() == 1) repositoryPath = path;
+        if (repositoryPath == null) continue;
+        GitInvoker.GitResult r =
+            repositoryPath.isEmpty()
+                ? GitInvoker.run(repository.root(), "diff", "HEAD")
+                : GitInvoker.run(repository.root(), "diff", "HEAD", "--", repositoryPath);
+        if (r.exitCode() != 0) {
+          return ToolResult.err(
+              ToolResult.ErrorKind.IO_ERROR,
+              "git diff failed in "
+                  + repository.workspacePrefix()
+                  + " (exit="
+                  + r.exitCode()
+                  + "): "
+                  + r.output());
+        }
+        if (!r.output().isBlank()) {
+          sections.add(GitWorkspaceView.section(repository, r.output().stripTrailing()));
+        }
       }
-      String out = r.output();
-      if (out.isBlank()) return ToolResult.ok("(no changes)");
+      if (sections.isEmpty()) return ToolResult.ok("(no changes)");
+      String out = String.join("\n", sections);
       // T3: budget instead of amputate — inline preview + full spill with readFile path.
       return ToolResult.ok(ToolOutput.budget(ctx, "gitDiff", out, ToolOutput.DEFAULT_INLINE_CAP));
     } catch (IOException ioe) {

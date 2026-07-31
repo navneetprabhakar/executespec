@@ -1977,10 +1977,10 @@ to boot — skip it for those.""";
             .stagnationForceAfter(cfg.stagnationForceAfter)
             .wallClockSeconds(cfg.wallClockSeconds)
             .forceToolChoiceOnSalvage(cfg.forceToolChoiceOnSalvage)
-            // A human-approved continuation is an exact dispatch contract, not a fresh routing
-            // preference. Disable cross-provider/model failover for that target attempt. Ordinary
-            // fresh runs and crash resumes retain their existing failover behaviour.
+            // A continuation is an exact dispatch contract: disable cross-route failover for that
+            // target attempt. Ordinary fresh runs and crash resumes retain existing failover.
             .strictProvider(providerModelOverride != null)
+            .zeroWriteSalvageAllowed(providerModelOverride == null)
             .mutationChurnForceAfter(maxEditChurn())
             // VBC verify-before-complete (RL-2026-06-…, V235, default OFF) — server-RUN the
             // project's tests at completeTask and refuse if red. Gated to the FINAL task (mirrors
