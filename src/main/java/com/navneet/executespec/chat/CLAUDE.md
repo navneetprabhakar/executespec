@@ -60,3 +60,9 @@ answer.
 The line-ceiling remediation extracted `ChatHistoryCodec` and `RunChatTurnExecutor` without
 changing the chat API, durable execution-context budgets, model route, or tool authority. Do not
 put storage or provider-turn responsibility back into the orchestration service.
+
+`ApplyService` publishes correction edits only through `ScmPushService.pushApplyChanges`. Its
+aggregate and each `ApplyRepoOutcome` retain a stable code, blocking gate, retryability, and
+remediation. Mixed multi-repository results are `SCM_APPLY_PUSH_PARTIAL`; all-failed results are
+`SCM_APPLY_PUSH_FAILED`. Neither shape may claim publication eligibility merely because Git was
+attempted.

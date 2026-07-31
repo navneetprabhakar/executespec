@@ -76,7 +76,9 @@ class RunValidationKickoffBrownfieldTest {
         .isEqualTo(
             "VALIDATION_FAILED[BROWNFIELD_HTTP_CONTRACT_REMOVED]: Publication blocked because"
                 + " existing HTTP contracts were removed: POST /simulation/casino-game");
-    verify(runRepo).save(run);
+    assertThat(kickoff.persistedDeterministicFailureCode(run.getRunId()))
+        .isEqualTo("BROWNFIELD_HTTP_CONTRACT_REMOVED");
+    verify(runRepo, org.mockito.Mockito.atLeastOnce()).save(run);
     org.mockito.ArgumentCaptor<RunEvent> event =
         org.mockito.ArgumentCaptor.forClass(RunEvent.class);
     verify(broadcaster).emit(org.mockito.ArgumentMatchers.eq(run.getRunId()), event.capture());
@@ -89,6 +91,66 @@ class RunValidationKickoffBrownfieldTest {
                 + " /simulation/casino-game")
         .containsEntry("phase", "validation")
         .containsEntry("publicationBlocked", true);
+    verify(validation, never())
+        .generateAndPersist(
+            org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.any());
+  }
+
+  @Test
+  void missingDeterministicHttpRequirementPersistsTerminalCodeBeforeReportPersistence() {
+    PipelineRunRepository runRepo = mock(PipelineRunRepository.class);
+    ValidationReportService validation = mock(ValidationReportService.class);
+    DeterministicHttpRequirementVerifier verifier =
+        mock(DeterministicHttpRequirementVerifier.class);
+    AgentProperties properties = new AgentProperties();
+    properties.setWorkspace(tempDir.toString());
+    PipelineRun run =
+        PipelineRun.builder()
+            .runId("run-http-requirement-validation")
+            .status("WORKING")
+            .userRequest("Implement POST /items")
+            .build();
+    when(runRepo.findById(run.getRunId())).thenReturn(Optional.of(run));
+    org.mockito.Mockito.doThrow(
+            new IllegalStateException(
+                "DETERMINISTIC_HTTP_REQUIREMENT_MISSING: required HTTP routes are absent: POST"
+                    + " /items"))
+        .when(verifier)
+        .assertSatisfied(
+            org.mockito.ArgumentMatchers.isNull(),
+            org.mockito.ArgumentMatchers.eq(run.getUserRequest()),
+            org.mockito.ArgumentMatchers.any(Path.class));
+
+    RunValidationKickoff kickoff =
+        new RunValidationKickoff(
+            runRepo,
+            mock(AgentTaskRepository.class),
+            properties,
+            mock(ModelResolver.class),
+            mock(AccuracyAssessmentService.class),
+            validation,
+            mock(RunChangeEvidenceService.class),
+            mock(com.navneet.executespec.smoketest.WorkspaceTestRunner.class),
+            mock(com.navneet.executespec.deployment.preview.verify.PreviewVerifier.class),
+            mock(com.navneet.executespec.config.featureflag.FeatureFlagService.class),
+            mock(RunLlmOperationLifecycleService.class),
+            mock(CorrectionWorkspaceTransaction.class),
+            mock(WorkflowConfigEvidenceInspector.class),
+            verifier,
+            mock(BrownfieldHttpContractGuard.class),
+            new RunValidationFailureReporter(
+                runRepo, mock(SseBroadcaster.class), new ContextSanitizer()));
+
+    assertThat(kickoff.generateValidationReport(run.getRunId(), null, null, null)).isEmpty();
+    String failureCode = kickoff.persistedDeterministicFailureCode(run.getRunId());
+    assertThat(failureCode).isEqualTo("DETERMINISTIC_HTTP_REQUIREMENT_MISSING");
+    assertThat(RunValidationKickoff.unavailableValidationTerminalStatus(failureCode))
+        .isEqualTo("FAILED");
+    assertThat(run.getFailureReason())
+        .isEqualTo(
+            "VALIDATION_FAILED[DETERMINISTIC_HTTP_REQUIREMENT_MISSING]: required HTTP routes are"
+                + " absent: POST /items");
+    verify(runRepo, org.mockito.Mockito.atLeastOnce()).save(run);
     verify(validation, never())
         .generateAndPersist(
             org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.any());
@@ -128,5 +190,33 @@ class RunValidationKickoffBrownfieldTest {
             runRepo, mock(SseBroadcaster.class), new ContextSanitizer());
     assertThat(reporter.persistedReasonWhenUnavailable("run-1", "VALIDATION_REPORT_UNAVAILABLE"))
         .isNull();
+  }
+
+  @Test
+  void newValidationAttemptCannotReusePriorDeterministicFailureCode() {
+    PipelineRunRepository runRepo = mock(PipelineRunRepository.class);
+    PipelineRun run =
+        PipelineRun.builder()
+            .runId("run-stale")
+            .failureReason(
+                "VALIDATION_FAILED[DETERMINISTIC_HTTP_REQUIREMENT_MISSING]: old missing route")
+            .build();
+    when(runRepo.findById("run-stale")).thenReturn(Optional.of(run));
+    RunValidationFailureReporter reporter =
+        new RunValidationFailureReporter(
+            runRepo, mock(SseBroadcaster.class), new ContextSanitizer());
+
+    reporter.beginAttempt("run-stale");
+    reporter.reportUnavailable(
+        "run-stale",
+        "VALIDATION_RESULT_NOT_PERSISTED",
+        "Validation completed without a durable report",
+        "validation");
+
+    assertThat(reporter.persistedDeterministicFailureCode("run-stale")).isNull();
+    assertThat(run.getFailureReason())
+        .isEqualTo(
+            "VALIDATION_FAILED[VALIDATION_RESULT_NOT_PERSISTED]: Validation completed without a"
+                + " durable report");
   }
 }

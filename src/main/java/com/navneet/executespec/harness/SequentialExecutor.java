@@ -1879,27 +1879,40 @@ to boot — skip it for those.""";
         providerModelOverride == null ? req.model() : providerModelOverride.model();
     String initialRequestedProvider = requestedProvider;
     String initialRequestedModel = requestedModel;
-    InitialRoutingDecision initialRoute =
-        initialRouteFor(
-            task,
-            req,
-            requestedProvider,
-            requestedModel,
-            providerModelOverride == null && resumeFrom == null);
-    emitInitialRoutingDecision(
-        req.runContext().runId(),
-        task.id(),
-        initialRequestedProvider,
-        initialRequestedModel,
-        initialRoute);
-    requestedProvider = initialRoute.provider();
-    requestedModel = initialRoute.model();
-    if (initialRoute.changed()) {
-      log.info(
-          "Executor task={} initial route changed {} -> {} (observed evidence)",
+    InitialRoutingDecision initialRoute = null;
+    if (providerModelOverride == null) {
+      initialRoute =
+          initialRouteFor(task, req, requestedProvider, requestedModel, resumeFrom == null);
+      emitInitialRoutingDecision(
+          req.runContext().runId(),
           task.id(),
-          providerModelOverride == null ? req.provider() + "/" + req.model() : "override",
-          initialRoute.routeLabel());
+          initialRequestedProvider,
+          initialRequestedModel,
+          initialRoute);
+      requestedProvider = initialRoute.provider();
+      requestedModel = initialRoute.model();
+      if (initialRoute.changed()) {
+        log.info(
+            "Executor task={} initial route changed {} -> {} (observed evidence)",
+            task.id(),
+            req.provider() + "/" + req.model(),
+            initialRoute.routeLabel());
+      }
+    } else {
+      var admission =
+          ExactContinuationRoutePolicy.admit(
+              availableProviderResolver,
+              req.runContext().runId(),
+              providerModelOverride.provider(),
+              providerModelOverride.model());
+      if (!admission.allowed()) {
+        String runId = req.runContext().runId();
+        log.warn("Executor task={} {}", task.id(), admission.reason());
+        persistTaskStatus(runId, task.id(), "FAILED", admission.reason());
+        broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "FAILED"));
+        broadcaster.emit(runId, RunEvent.log(runId, task.id(), admission.reason()));
+        return ExactContinuationRoutePolicy.failureOutcome(task, taskStart);
+      }
     }
 
     String refDocs = fetchReferenceDocs(req.projectId(), task);
@@ -1949,19 +1962,27 @@ to boot — skip it for those.""";
     broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "WORKING"));
     broadcaster.emit(runId, RunEvent.log(runId, task.id(), "Starting task: " + task.title()));
     TierConfig cfg =
-        tierConfigFor(
-            task.complexity(),
-            requestedProvider,
-            requestedModel,
-            req.projectId() != null,
-            req.lowComplexityWorkerStartTier());
-    if (initialRoute.changed()) {
+        providerModelOverride == null
+            ? tierConfigFor(
+                task.complexity(),
+                requestedProvider,
+                requestedModel,
+                req.projectId() != null,
+                req.lowComplexityWorkerStartTier())
+            : ExactContinuationRoutePolicy.tierConfig(
+                task.complexity(),
+                providerModelOverride.provider(),
+                providerModelOverride.model(),
+                req.projectId() != null,
+                lowComplexityWorkerStartTier(req.lowComplexityWorkerStartTier()),
+                capabilityStagnationThresholds(
+                    providerModelOverride.provider(), providerModelOverride.model()),
+                featureFlagService != null
+                    && featureFlagService.isEnabled(FLAG_SALVAGE_FORCE_TOOL));
+    if (initialRoute != null && initialRoute.changed()) {
       // ModelResolver normally resolves the tier's YAML model. An evidence-backed initial
       // decision is already a concrete provider/model candidate, so preserve both halves of it.
       cfg = cfg.withProviderModel(initialRoute.provider(), initialRoute.model());
-    }
-    if (providerModelOverride != null) {
-      cfg = cfg.withProviderModel(providerModelOverride.provider(), providerModelOverride.model());
     }
     TaskRoutePersistence.persist(
         taskRepo,
@@ -4078,66 +4099,13 @@ to boot — skip it for those.""";
     return List.copyOf(risks);
   }
 
-  /**
-   * Updates {@code AgentTask.status} in the DB mid-run so the UI's polled task list reflects live
-   * progress (not just the terminal snapshot written by {@code
-   * RunOrchestrator.applyExecutionResultToTasks}). Uses the same prefixed-key convention as the
-   * orchestrator — first 8 chars of runId plus the planner-assigned task id.
-   */
-  /**
-   * Per-task tuning: tier-resolved model + iteration / max-token caps driven by the planner's
-   * complexity tag.
-   *
-   * <ul>
-   *   <li>LOW → WORKHORSE model (flagship; RL-2026-06-052 decouple), LOW caps: 60 iters, 4096 max
-   *       tokens
-   *   <li>MEDIUM → WORKHORSE tier, 120 iters, 8192 max tokens
-   *   <li>HIGH → PLANNING tier, 180 iters, 16384 max tokens
-   * </ul>
-   *
-   * <p>When {@link ModelResolver} / provider conversion fails (e.g. user-supplied provider doesn't
-   * match any enum value), we fall back to the run-level provider+model so the executor never
-   * crashes on a planner edge case.
-   */
-  /**
-   * Per-task tuning carrier. {@code stagnationWarnAfter} / {@code stagnationForceAfter} are
-   * complexity-aware overrides forwarded into {@link WorkerTaskRequest} so the stagnation guard
-   * fires at thresholds proportional to the task's expected exploration depth. Calibrated
-   * 2026-05-08 against ProgramBench cmatrix anthropic run 9b37b099 — HIGH and MEDIUM tasks both
-   * stagnated at the static 12-iter cap before the worker could write substantive source. The new
-   * HIGH cap (24 warn / 40 force) is enough for legitimate reverse-engineering patterns: read
-   * README + man page + binary --help/--version + plan + write.
-   */
-  private record TierConfig(
-      String provider,
-      String model,
-      AgentTier tier,
-      int maxIter,
-      int maxTokens,
-      int stagnationWarnAfter,
-      int stagnationForceAfter,
-      int wallClockSeconds,
-      boolean forceToolChoiceOnSalvage) {
-    TierConfig withProviderModel(String provider, String model) {
-      return new TierConfig(
-          provider,
-          model,
-          tier,
-          maxIter,
-          maxTokens,
-          stagnationWarnAfter,
-          stagnationForceAfter,
-          wallClockSeconds,
-          forceToolChoiceOnSalvage);
-    }
-  }
-
   private record ProviderModelOverride(
       String provider, String model, RunContinuationDecision decision) {}
 
   private record GoalTaskDecision(
       GoalDonenessDecision doneness, GoalContinuationPolicyDecision continuation) {}
 
+  /** Resolves the normal tier-routed task model and mechanical worker budget. */
   private TierConfig tierConfigFor(
       PlannedTask.Complexity complexity, String runProvider, String runModel, boolean projectRun) {
     return tierConfigFor(complexity, runProvider, runModel, projectRun, null);

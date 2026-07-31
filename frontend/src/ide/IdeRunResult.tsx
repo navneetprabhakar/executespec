@@ -80,6 +80,7 @@ import {
   num,
   latestContinuationAction,
   correctionEvidenceHistory,
+  correctionEvidenceInvalidationLabel,
   reportPipelineLabel,
   publicationTrustFacts,
   runArtifactActionAvailability,
@@ -186,11 +187,7 @@ function CorrectionEvidenceCard({
       />
       <Kv
         k='Invalidated evidence'
-        v={
-          action.evidenceInvalidated === true
-            ? 'Yes — prior evidence was made stale'
-            : 'Not recorded'
-        }
+        v={correctionEvidenceInvalidationLabel(action.evidenceInvalidated)}
       />
       <Kv
         k='Regenerated validation'

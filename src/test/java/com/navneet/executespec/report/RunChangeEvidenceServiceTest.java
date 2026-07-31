@@ -159,9 +159,18 @@ class RunChangeEvidenceServiceTest {
   private static void git(Path dir, String... args) throws Exception {
     java.util.List<String> command = new java.util.ArrayList<>();
     command.add("git");
+    // A large test commit can trigger background auto-maintenance on Linux. JUnit may then race
+    // that child while deleting @TempDir and fail after every assertion has passed. Keep repository
+    // maintenance synchronous and out of this fixture; the test exercises evidence, not Git GC.
+    command.addAll(List.of("-c", "gc.auto=0", "-c", "maintenance.auto=false"));
     command.addAll(List.of(args));
-    Process process = new ProcessBuilder(command).directory(dir.toFile()).start();
+    Process process =
+        new ProcessBuilder(command).directory(dir.toFile()).redirectErrorStream(true).start();
+    byte[] output;
+    try (var stream = process.getInputStream()) {
+      output = stream.readAllBytes();
+    }
     int exit = process.waitFor();
-    if (exit != 0) throw new AssertionError(new String(process.getErrorStream().readAllBytes()));
+    if (exit != 0) throw new AssertionError(new String(output));
   }
 }

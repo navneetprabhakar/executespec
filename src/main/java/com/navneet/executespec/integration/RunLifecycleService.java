@@ -1373,13 +1373,23 @@ public class RunLifecycleService {
                 }
                 requireRunOperationLifecycle().complete(retryOperation.getAndSet(null));
                 RunCostTracker.Snapshot afterRetry = costTracker.snapshot(runId);
+                // An approved continuation is attributed from the same fenced physical-attempt
+                // evidence that admitted it. Requested provider/model strings are only a fallback
+                // for ordinary, non-approved retries; they must never become the accounting source
+                // for a human-approved exact route.
+                String attributedWorkerProvider =
+                    approvedWorkerAttempt == null
+                        ? provider
+                        : approvedWorkerAttempt.route().provider();
+                String attributedWorkerModel =
+                    approvedWorkerAttempt == null ? model : approvedWorkerAttempt.route().model();
                 tokenAttributor.attributeWorkerAdditionalTask(
                     runId,
                     fullTargetTaskId,
                     afterRetry.inputTokens() - beforeRetry.inputTokens(),
                     afterRetry.outputTokens() - beforeRetry.outputTokens(),
-                    provider.toUpperCase(),
-                    model);
+                    attributedWorkerProvider.toUpperCase(java.util.Locale.ROOT),
+                    attributedWorkerModel);
 
                 String preReviewerGeneration =
                     correctionCheckpoint == null

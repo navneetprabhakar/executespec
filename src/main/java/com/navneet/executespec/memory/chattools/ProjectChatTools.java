@@ -101,6 +101,7 @@ public class ProjectChatTools {
   private final WorkspaceInitService workspaceInitService;
   private final CodeIndexWorkspaceMaterializer codeIndexWorkspaceMaterializer;
   private final ProjectRepositorySourceReadTools repositorySourceReadTools;
+  private final ProjectHttpSurfaceReadTool httpSurfaceReadTool;
   private final SearchFilesTool searchFilesTool;
   private final CodeIndexingService codeIndexingService;
   private final CodeChunkStore codeChunkStore;
@@ -148,6 +149,7 @@ public class ProjectChatTools {
             listProjectDocuments(ctx),
             readGeneratedDoc(ctx),
             searchProjectDocs(ctx),
+            httpSurfaceReadTool.bind(ctx),
             searchRepoFiles(ctx),
             repositorySourceReadTools.bind(ctx),
             searchCode(ctx),

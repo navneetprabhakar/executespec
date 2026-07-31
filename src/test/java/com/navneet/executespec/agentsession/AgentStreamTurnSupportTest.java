@@ -19,6 +19,7 @@ class AgentStreamTurnSupportTest {
             "list_recent_runs",
             "get_run_report",
             "search_repo_files",
+            "list_public_http_surface",
             "read_repo_file_range",
             "search_code",
             "get_tech_debt_summary")
