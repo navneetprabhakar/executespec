@@ -1105,23 +1105,47 @@ public class ExecutionOrchestrator {
           solutionRepo.findWithRepoMappingsByExecutionRun_IdOrderBySequenceNumberAsc(
               executionRunId);
       Set<UUID> distinctRepos = new LinkedHashSet<>();
+      Set<String> backingPipelineRunIds = new LinkedHashSet<>();
+      if (run.getPipelineRunId() != null && !run.getPipelineRunId().isBlank()) {
+        backingPipelineRunIds.add(run.getPipelineRunId());
+      }
       for (ExecutionSolution s : solutionsWithRepos) {
+        if (s.getPipelineRunId() != null && !s.getPipelineRunId().isBlank()) {
+          backingPipelineRunIds.add(s.getPipelineRunId());
+        }
         if (s.getRepoMappings() == null) continue;
         for (ExecutionSolutionRepo m : s.getRepoMappings()) {
           if (m.getRepoId() != null) distinctRepos.add(m.getRepoId());
         }
       }
       for (UUID repoId : distinctRepos) {
-        projectRepoRepo
-            .findById(repoId)
-            .ifPresent(
-                pr ->
-                    branchService.createFinalPr(
-                        pr.getGithubRepoFullName(),
-                        pr.getId(),
-                        executionRunId,
-                        buildReportMarkdown(run, all),
-                        githubPat));
+        var projectRepo = projectRepoRepo.findById(repoId).orElse(null);
+        if (projectRepo == null) {
+          settleFinalPrFailure(
+              executionRunId,
+              new ExecutionBranchService.FinalPrResult(
+                  false,
+                  null,
+                  "EXECUTION_FINAL_PR_REPOSITORY_NOT_FOUND",
+                  "REPOSITORY_RESOLUTION",
+                  "The execution repository mapping no longer exists",
+                  false,
+                  "Restore the project repository mapping before retrying publication.",
+                  null));
+          return;
+        }
+        ExecutionBranchService.FinalPrResult result =
+            branchService.createFinalPr(
+                projectRepo.getGithubRepoFullName(),
+                projectRepo.getId(),
+                executionRunId,
+                List.copyOf(backingPipelineRunIds),
+                buildReportMarkdown(run, all),
+                githubPat);
+        if (!result.created()) {
+          settleFinalPrFailure(executionRunId, result);
+          return;
+        }
         emit(run.getId(), ExecutionEventTypes.EXEC_FINAL_PR_CREATED, repoId.toString());
       }
     } else {
@@ -1155,6 +1179,38 @@ public class ExecutionOrchestrator {
             ? ExecutionEventTypes.EXEC_COMPLETE
             : ExecutionEventTypes.EXEC_FAILED,
         null);
+  }
+
+  void settleFinalPrFailure(String executionRunId, ExecutionBranchService.FinalPrResult result) {
+    String diagnostic =
+        "FINAL_PR_BLOCKED["
+            + result.code()
+            + "]["
+            + result.blockingGate()
+            + "]: "
+            + result.message()
+            + (result.pipelineRunId() == null ? "" : "; pipelineRunId=" + result.pipelineRunId())
+            + (result.remediation() == null ? "" : "; remediation=" + result.remediation());
+    java.util.concurrent.atomic.AtomicBoolean transitioned =
+        new java.util.concurrent.atomic.AtomicBoolean(false);
+    boolean persisted =
+        runCas.casUpdate(
+            executionRunId,
+            current -> {
+              transitioned.set(false);
+              if (!LAUNCH_TERMINAL.contains(current.getStatus())) {
+                current.setStatus("FAILED");
+                current.setFailureReason(truncate(diagnostic, 3900));
+                transitioned.set(true);
+              }
+            });
+    if (persisted && transitioned.get()) {
+      emit(executionRunId, ExecutionEventTypes.EXEC_FAILED, truncate(diagnostic, 3900));
+    } else {
+      log.warn(
+          "Final-PR failure for exec {} did not win terminal ownership; no FAILED event emitted",
+          executionRunId);
+    }
   }
 
   /**

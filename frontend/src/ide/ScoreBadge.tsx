@@ -42,6 +42,28 @@ export function scoreZeroCause(
   return cause?.summary?.trim() || null;
 }
 
+export function shouldSuppressUnexplainedZero(
+  score: number,
+  verificationLedger?: readonly {id?: string}[] | null,
+): boolean {
+  return score === 0 && !verificationLedger?.length;
+}
+
+export function scoreDisplayLabel(
+  score: number,
+  verificationLedger?: readonly {id?: string; summary?: string; artifact?: string}[] | null,
+  compact = false,
+): string {
+  if (shouldSuppressUnexplainedZero(score, verificationLedger)) {
+    return compact ? 'Score unavailable' : 'Score unavailable · open result';
+  }
+  const zeroCause = scoreZeroCause(score, verificationLedger);
+  if (verificationLedger?.length) {
+    return zeroCause && !compact ? `${score} / 100 · ${zeroCause}` : `${score} / 100`;
+  }
+  return compact ? `${score} · unverified` : `${score} / 100 · unverified`;
+}
+
 /**
  * Shared score rendering for compact run lists. A score without its ledger is
  * an internal summary, not independently verified correctness; keep the
@@ -51,20 +73,24 @@ export function ScoreBadge({score, verificationLedger, compact = false}: ScoreBa
   const hasLedger = !!verificationLedger?.length;
   const trust = scoreTrustLabel(verificationLedger);
   const zeroCause = scoreZeroCause(score, verificationLedger);
-  const label = hasLedger
-    ? zeroCause && !compact
-      ? `${score} / 100 · ${zeroCause}`
-      : `${score} / 100`
-    : compact
-      ? `${score} · unverified`
-      : `${score} / 100 · unverified`;
-  const title = zeroCause
-    ? `Internal score is zero because: ${zeroCause}`
-    : hasLedger
-      ? 'Internal score; open the result Evidence tab to inspect the verification ledger.'
-      : 'Internal score only. Verification evidence is not loaded in this run list.';
+  const unexplainedZero = shouldSuppressUnexplainedZero(score, verificationLedger);
+  const label = scoreDisplayLabel(score, verificationLedger, compact);
+  const title = unexplainedZero
+    ? 'The list response does not include the causal evidence required to explain a zero score.'
+    : zeroCause
+      ? `Internal score is zero because: ${zeroCause}`
+      : hasLedger
+        ? 'Internal score; open the result Evidence tab to inspect the verification ledger.'
+        : 'Internal score only. Verification evidence is not loaded in this run list.';
   return (
-    <span title={title} aria-label={`${score} out of 100, ${trust}`}>
+    <span
+      title={title}
+      aria-label={
+        unexplainedZero
+          ? 'Score unavailable until evidence is loaded'
+          : `${score} out of 100, ${trust}`
+      }
+    >
       <IdeBadge kind={hasLedger ? scoreKind(score) : 'warn'}>{label}</IdeBadge>
     </span>
   );
