@@ -19,7 +19,9 @@ class FireworksModelMapperTest {
     // 2026-07-24 — exact account-visible Fireworks serverless coding subset.
     assertThat(FireworksModelMapper.toSlug("glm-5.2-fw"))
         .isEqualTo("accounts/fireworks/models/glm-5p2");
-    assertThat(FireworksModelMapper.allowList()).hasSize(4);
+    assertThat(FireworksModelMapper.toSlug("glm-5.2-fast-fw"))
+        .isEqualTo("accounts/fireworks/routers/glm-5p2-fast");
+    assertThat(FireworksModelMapper.allowList()).hasSize(5);
   }
 
   @Test
