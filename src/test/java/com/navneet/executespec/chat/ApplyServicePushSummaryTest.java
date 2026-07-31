@@ -27,6 +27,23 @@ class ApplyServicePushSummaryTest {
   }
 
   @Test
+  void missingCredential_retains_machine_diagnostic_in_compatibility_skipped_mode() {
+    var result =
+        ScmPushService.ApplyPushResult.blocked(
+            "SCM_APPLY_CREDENTIAL_MISSING",
+            "AUTHENTICATION",
+            "The run owner has no GitHub credential",
+            true,
+            "Connect GitHub, then retry.");
+
+    assertThat(result.mode()).isEqualTo("SKIPPED");
+    assertThat(result.code()).isEqualTo("SCM_APPLY_CREDENTIAL_MISSING");
+    assertThat(result.blockingGate()).isEqualTo("AUTHENTICATION");
+    assertThat(result.retryable()).isTrue();
+    assertThat(result.remediation()).contains("Connect GitHub");
+  }
+
+  @Test
   void single_repo_clean_renders_clean_message() {
     var outcome =
         new ScmPushService.ApplyRepoOutcome("o/r", "executespec/abc", true, true, "CLEAN");
@@ -60,10 +77,63 @@ class ApplyServicePushSummaryTest {
     var failed =
         new ScmPushService.ApplyRepoOutcome(
             "o/mobile", "executespec/x", false, false, "push failed: auth");
-    String s =
-        ApplyService.summarizePushResult(
-            ScmPushService.ApplyPushResult.multiRepo(List.of(pushed, clean, failed)));
+    ScmPushService.ApplyPushResult result =
+        ScmPushService.ApplyPushResult.multiRepo(List.of(pushed, clean, failed));
+    String s = ApplyService.summarizePushResult(result);
     assertThat(s).contains("1 pushed").contains("1 clean").contains("1 failed").contains("3 repos");
+    assertThat(result.code()).isEqualTo("SCM_APPLY_PUSH_PARTIAL");
+    assertThat(result.blockingGate()).isEqualTo("GIT_PUSH");
+    assertThat(result.publicationEligible()).isFalse();
+    assertThat(result.retryable()).isTrue();
+    assertThat(failed.code()).isEqualTo("SCM_APPLY_PUSH_FAILED");
+    assertThat(failed.blockingGate()).isEqualTo("GIT_PUSH");
+    assertThat(failed.remediation()).isNotBlank();
+  }
+
+  @Test
+  void all_failed_is_not_reported_as_an_attempted_or_eligible_push() {
+    var failed =
+        new ScmPushService.ApplyRepoOutcome(
+            "o/api", "executespec/x", false, false, "push failed: auth");
+
+    var result = ScmPushService.ApplyPushResult.multiRepo(List.of(failed));
+
+    assertThat(result.code()).isEqualTo("SCM_APPLY_PUSH_FAILED");
+    assertThat(result.publicationEligible()).isFalse();
+    assertThat(result.retryable()).isTrue();
+  }
+
+  @Test
+  void aggregateGateReflectsWorkspaceSafetyAndMixedFailureClasses() {
+    var workspaceFailure =
+        new ScmPushService.ApplyRepoOutcome(
+            "o/api",
+            "executespec/x",
+            false,
+            false,
+            "secret found",
+            "SCM_APPLY_WORKSPACE_UNSAFE",
+            "WORKSPACE_SAFETY",
+            false,
+            "Remove the secret.");
+    var pushFailure =
+        new ScmPushService.ApplyRepoOutcome(
+            "o/web",
+            "executespec/x",
+            false,
+            false,
+            "push rejected",
+            "SCM_APPLY_GIT_PUSH_FAILED",
+            "GIT_PUSH",
+            true,
+            "Resolve the push failure.");
+
+    assertThat(ScmPushService.ApplyPushResult.multiRepo(List.of(workspaceFailure)).blockingGate())
+        .isEqualTo("WORKSPACE_SAFETY");
+    assertThat(
+            ScmPushService.ApplyPushResult.multiRepo(List.of(workspaceFailure, pushFailure))
+                .blockingGate())
+        .isEqualTo("MULTIPLE");
   }
 
   @Test

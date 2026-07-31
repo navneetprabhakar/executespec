@@ -3236,6 +3236,7 @@ public class RunOrchestrator implements RunControlPort {
     // when cancellation wins, the claim returns zero and this method must preserve that status.
     String persistedValidationFailure =
         validationKickoff.persistedFailureReason(runId, statusReason);
+    if (persistedValidationFailure != null) note = persistedValidationFailure;
     int terminalClaim =
         statusReason == null && !"FAILED".equals(finalStatus)
             ? runRepo.claimTerminalTransitionPreservingReasons(runId, finalStatus, Instant.now())
@@ -3521,14 +3522,6 @@ public class RunOrchestrator implements RunControlPort {
     return Optional.of(new PostReviewContinuation(task, decision));
   }
 
-  /**
-   * RR-826 remainder — an absent final validation report and a low-scoring one are different facts
-   * and must not share a status reason. {@code VALIDATION_REPORT_LOW_QUALITY} says "we measured the
-   * output and it was poor"; stamping it when no report exists at all tells the customer something
-   * the system never established. {@code VALIDATION_REPORT_UNAVAILABLE} says what is true: the
-   * deterministic verification artifact was not produced, so the run is not verified either way.
-   * Both are non-success; neither is silently swallowed.
-   */
   private StatusAndReason applyFinalVerificationStatus(
       String runId, ValidationReport report, StatusAndReason current) {
     var verification =
@@ -3537,7 +3530,15 @@ public class RunOrchestrator implements RunControlPort {
         switch (verification) {
           case PASSED -> current;
           case LOW_QUALITY -> new StatusAndReason("PARTIAL", "VALIDATION_REPORT_LOW_QUALITY");
-          case UNAVAILABLE -> new StatusAndReason("PARTIAL", "VALIDATION_REPORT_UNAVAILABLE");
+          case UNAVAILABLE -> {
+            String deterministicFailure =
+                validationKickoff.persistedDeterministicFailureCode(runId);
+            yield new StatusAndReason(
+                RunValidationKickoff.unavailableValidationTerminalStatus(deterministicFailure),
+                deterministicFailure == null
+                    ? "VALIDATION_REPORT_UNAVAILABLE"
+                    : deterministicFailure);
+          }
         };
     if (next != current) {
       stampRunStatusReason(runId, next);

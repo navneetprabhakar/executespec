@@ -24,3 +24,11 @@ detached `PipelineRun` or recreate project/repository/provider policy locally.
 
 Do not describe this as exactly-once provider/tool execution. It fences approved-solution identity
 and terminal observation; ordinary WORKING side effects retain their existing recovery semantics.
+
+## Final PR publication admission
+
+`ExecutionBranchService.createFinalPr` is a publication boundary. It must receive every current
+backing `PipelineRun` identity for the launch, load each durable row, and pass each row through
+`PublicationAdmissionService` before calling GitHub. A missing backing identity/row or one failed
+admission returns a structured `FinalPrResult` and performs no Git operation. The orchestrator
+persists that diagnostic as a terminal launch failure and emits no `EXEC_FINAL_PR_CREATED` event.

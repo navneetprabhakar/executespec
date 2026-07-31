@@ -16,7 +16,13 @@ Spec-driven AI coding platform. Customer submits a spec in natural language → 
 **Correction/publication trust boundary (V360–V364):** approved continuation retries bind the exact
 run/task/action/provider/model/proposal digest and apply a strict override only to the target task;
 the approved action route and its exact fenced physical worker/reviewer attempts are checked before
-review, attribution, and publication.
+review, attribution, and publication. Approved worker usage is attributed from that fenced physical
+attempt evidence, never by replaying the requested provider/model strings.
+Execution View final-PR publication admits every current backing pipeline run through the same
+canonical publication gate before Git. Apply-to-Run exposes exact aggregate and per-repository SCM
+diagnostics, and deterministic HTTP/contract verification failures terminate as `FAILED` with their
+machine code. Run-list surfaces suppress an unexplained numeric zero until causal ledger evidence
+is loaded.
 V364 claims the exact persisted proposal with one durable conditional update, so a duplicate while
 CLAIMED conflicts, while QUEUED/COMPLETED duplicates replay one receipt without queueing or spending
 twice. Every server-side
