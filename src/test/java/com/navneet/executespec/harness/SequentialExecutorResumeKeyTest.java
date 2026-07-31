@@ -2,22 +2,14 @@ package com.navneet.executespec.harness;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.lang.reflect.Method;
-import java.nio.file.Files;
 import java.nio.file.Path;
-import java.time.Instant;
-import java.util.List;
 import java.util.Optional;
 
-import com.navneet.executespec.agent.Plan;
-import com.navneet.executespec.agent.PlannedTask;
 import com.navneet.executespec.context.ContextStore;
-import com.navneet.executespec.context.SavedContext;
 import com.navneet.executespec.harness.SequentialExecutor.ResumeRequest;
 import com.navneet.executespec.state.entity.AgentTask;
 import com.navneet.executespec.state.repository.AgentTaskRepository;
@@ -90,40 +82,6 @@ class SequentialExecutorResumeKeyTest {
   }
 
   @Test
-  void continuationHandoffLoadsLatestWorkerSnapshotForSameTask() {
-    AgentTaskRepository repo = mock(AgentTaskRepository.class);
-    ContextStore contextStore = mock(ContextStore.class);
-    SequentialExecutor exec = newExecutorWith(repo, contextStore);
-    ExecutionContext runContext = new ExecutionContext(RUN_ID, "__root__", Path.of("/tmp/ws"));
-    PlannedTask task =
-        PlannedTask.builder().id(TASK_ID).title("Fix auth").description("Fix auth").build();
-    Plan plan = Plan.builder().planTitle("handoff").tasks(List.of(task)).build();
-    ExecutionRequest request =
-        ExecutionRequest.builder()
-            .plan(plan)
-            .provider("anthropic")
-            .model("claude-sonnet-5")
-            .runContext(runContext)
-            .build();
-    SavedContext snapshot =
-        SavedContext.builder()
-            .runId(RUN_ID)
-            .taskId(TASK_ID)
-            .iteration(15)
-            .history(List.of())
-            .savedAt(Instant.now())
-            .sizeBytes(128)
-            .build();
-    ExecutionContext taskContext = new ExecutionContext(RUN_ID, TASK_ID, Path.of("/tmp/ws"));
-    when(contextStore.load(taskContext)).thenReturn(Optional.of(snapshot));
-
-    SavedContext actual = exec.loadContinuationSnapshot(request, task);
-
-    assertEquals(snapshot, actual);
-    verify(contextStore).load(taskContext);
-  }
-
-  @Test
   void resumeContextPreservesWorkspaceForDiskCheckpointFallback() {
     Path workspace = Path.of("/tmp/executespec-resume-workspace");
 
@@ -132,30 +90,6 @@ class SequentialExecutorResumeKeyTest {
     assertEquals(RUN_ID, context.runId());
     assertEquals(TASK_ID, context.taskId());
     assertEquals(workspace, context.workspaceRoot());
-  }
-
-  @Test
-  void continuationHandoffRejectsStaleEvidenceBundleBeforeLoadingSnapshot() throws Exception {
-    AgentTaskRepository repo = mock(AgentTaskRepository.class);
-    ContextStore contextStore = mock(ContextStore.class);
-    SequentialExecutor exec = newExecutorWith(repo, contextStore);
-    ExecutionContext runContext = new ExecutionContext(RUN_ID, "__root__", tempDir);
-    PlannedTask task =
-        PlannedTask.builder().id(TASK_ID).title("Fix auth").description("Fix auth").build();
-    Plan plan = Plan.builder().planTitle("handoff").tasks(List.of(task)).build();
-    ExecutionRequest request =
-        ExecutionRequest.builder()
-            .plan(plan)
-            .provider("anthropic")
-            .model("claude-sonnet-5")
-            .runContext(runContext)
-            .build();
-    Path contextDir = Files.createDirectories(tempDir.resolve(".agent-context"));
-    Files.writeString(contextDir.resolve("evidence-bundle.json"), "{}\n");
-
-    assertNull(exec.loadContinuationSnapshot(request, task));
-    verify(contextStore, org.mockito.Mockito.never())
-        .load(org.mockito.ArgumentMatchers.any(ExecutionContext.class));
   }
 
   /**

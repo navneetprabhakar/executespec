@@ -39,6 +39,17 @@ class WorkerAgentTerminalVerifierPassTest {
   }
 
   @Test
+  void shellExitZeroAfterLongOutputRemainsVerificationEvidence() {
+    String envelope =
+        "{\"ok\":true,\"content\":\""
+            + "x".repeat(1200)
+            + " reported exit=1 earlier\\nexit=0\\n\"}";
+
+    assertThat(WorkerAgent.envelopeProvesExitZero("shell", envelope)).isTrue();
+    assertThat(WorkerAgent.isFailureEnvelope(envelope)).isFalse();
+  }
+
+  @Test
   void terminalVerifierCommandRejectsExplorationAndTrivialSmokeCommands() {
     assertThat(WorkerAgent.terminalVerifierCommand("shell", "ls -la /app")).isFalse();
     assertThat(WorkerAgent.terminalVerifierCommand("shell", "ls -la /tests/")).isFalse();

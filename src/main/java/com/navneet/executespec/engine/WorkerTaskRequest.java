@@ -154,6 +154,9 @@ import lombok.Builder;
  * @param strictProvider operator/evaluation route pin. When true, this worker pass must not enter
  *     the router's YAML failover chain; an explicit handoff harness may start a second pass on an
  *     allow-listed fallback instead. Null/false preserves normal routing.
+ * @param mutationChurnForceAfter maximum successful mutations to one exact path without a passing
+ *     maintained build/test before the worker stops. Null/non-positive uses the engine default;
+ *     BUILD orchestration supplies the configured run-level continuation limit.
  * @param absoluteDeadlineEpochMs optional absolute wall-clock deadline shared by the worker,
  *     provider calls, remote tools, terminal finalizer, and benchmark adapter. Unlike the legacy
  *     relative wall-clock cap, time spent queueing before the worker starts is included.
@@ -194,6 +197,7 @@ public record WorkerTaskRequest(
     Boolean progressV2,
     Boolean autoVerify,
     Boolean strictProvider,
+    Integer mutationChurnForceAfter,
     Long absoluteDeadlineEpochMs,
     Long shutdownReserveMs,
     Double dollarCap,
