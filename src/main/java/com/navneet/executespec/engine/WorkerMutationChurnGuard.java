@@ -27,8 +27,19 @@ final class WorkerMutationChurnGuard {
   }
 
   private final Map<String, Integer> countsSinceVerification = new HashMap<>();
+  private final int forceAt;
+  private final int nudgeAt;
   private int worst;
   private boolean nudged;
+
+  WorkerMutationChurnGuard() {
+    this(FORCE_AT);
+  }
+
+  WorkerMutationChurnGuard(int forceAt) {
+    this.forceAt = forceAt > 0 ? forceAt : FORCE_AT;
+    this.nudgeAt = Math.min(NUDGE_AT, Math.max(1, this.forceAt - 1));
+  }
 
   void recordMutation(String target) {
     if (target == null || target.isBlank()) return;
@@ -38,21 +49,22 @@ final class WorkerMutationChurnGuard {
   void recordPassingVerification() {
     countsSinceVerification.clear();
     worst = 0;
+    nudged = false;
   }
 
   Decision evaluate(boolean enabled, String runId, String taskId, int iteration) {
     if (!enabled) return Decision.NONE;
-    if (worst >= FORCE_AT) {
+    if (worst >= forceAt) {
       log.warn(
           "WorkerAgent MUTATION_CHURN_FORCE run={} task={} iter={} count={} threshold={}",
           runId,
           taskId,
           iteration,
           worst,
-          FORCE_AT);
+          forceAt);
       return Decision.FORCE;
     }
-    if (!nudged && worst >= NUDGE_AT) {
+    if (!nudged && worst >= nudgeAt) {
       nudged = true;
       log.warn(
           "WorkerAgent MUTATION_CHURN_NUDGE run={} task={} iter={} count={} threshold={}",
@@ -60,7 +72,7 @@ final class WorkerMutationChurnGuard {
           taskId,
           iteration,
           worst,
-          NUDGE_AT);
+          nudgeAt);
       return Decision.NUDGE;
     }
     return Decision.NONE;

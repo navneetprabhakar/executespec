@@ -149,6 +149,29 @@ class WorkerAgentProgressV2Test {
         .build();
   }
 
+  @Test
+  void configuredMutationChurnStopsEvenWhenProgressV2IsOff() {
+    Tool write =
+        successfulTool("writeFile", "{\"type\":\"object\"}", "{\"path\":\"src/App.java\"}");
+    WorkerAgent worker =
+        newWorker(
+            List.of(
+                responseWithCalls(
+                    toolCall("writeFile", "{\"path\":\"src/App.java\",\"content\":\"a\"}")),
+                responseWithCalls(
+                    toolCall("writeFile", "{\"path\":\"src/App.java\",\"content\":\"b\"}")),
+                responseWithCalls(
+                    toolCall("writeFile", "{\"path\":\"src/App.java\",\"content\":\"c\"}"))),
+            List.of(write));
+
+    WorkerResult result =
+        worker.run(req(false, 30, 30).toBuilder().mutationChurnForceAfter(3).build());
+
+    assertEquals(WorkerResult.Outcome.ITERATION_LIMIT_EXCEEDED, result.outcome());
+    assertEquals(3, result.iterations());
+    assertThat(result.finalAssistantText()).contains("same-path mutation");
+  }
+
   // ---------------------------------------------------------------- text-only stops
 
   @Test

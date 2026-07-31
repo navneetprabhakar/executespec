@@ -1941,11 +1941,22 @@ class SequentialExecutorSoftCompletionTest {
     assertEquals(30, result.perTask().get(0).toolCallsDispatched());
     ArgumentCaptor<WorkerTaskRequest> requestCaptor =
         ArgumentCaptor.forClass(WorkerTaskRequest.class);
-    verify(worker, times(2)).run(requestCaptor.capture(), any());
+    ArgumentCaptor<com.navneet.executespec.context.SavedContext> resumeCaptor =
+        ArgumentCaptor.forClass(com.navneet.executespec.context.SavedContext.class);
+    verify(worker, times(2)).run(requestCaptor.capture(), resumeCaptor.capture());
     assertEquals("anthropic", requestCaptor.getAllValues().get(0).provider());
     assertEquals("claude-haiku-4-5-20251001", requestCaptor.getAllValues().get(0).model());
     assertEquals("openai", requestCaptor.getAllValues().get(1).provider());
     assertEquals("gpt-5.4", requestCaptor.getAllValues().get(1).model());
+    assertEquals(6, requestCaptor.getAllValues().get(1).mutationChurnForceAfter());
+    assertEquals(null, resumeCaptor.getAllValues().get(0));
+    assertEquals(null, resumeCaptor.getAllValues().get(1));
+    assertTrue(
+        requestCaptor
+            .getAllValues()
+            .get(1)
+            .userPrompt()
+            .contains("PROVIDER HANDOFF CONTEXT (durable dossier)"));
     verify(broadcaster)
         .emit(
             anyString(),

@@ -50,7 +50,7 @@ class GodClassLineCeilingTest {
     // Lowered 2026-07-22 (P1 audit-remediation): SequentialExecutor shed the legacy cross-provider
     // retry lane (RR-269) and WorkerAgent extracted helpers into ContinuationEscalationBudget /
     // WorkerAgentSupport. The ratchet only moves DOWN — these are the new measured line counts.
-    ceilings.put("src/main/java/com/navneet/executespec/harness/SequentialExecutor.java", 4788);
+    ceilings.put("src/main/java/com/navneet/executespec/harness/SequentialExecutor.java", 4693);
     ceilings.put("src/main/java/com/navneet/executespec/engine/WorkerAgent.java", 3415);
     ceilings.put("frontend/src/lib/api/core.ts", 1681);
     ceilings.put("frontend/src/ide/agentPanels.tsx", 1682);
