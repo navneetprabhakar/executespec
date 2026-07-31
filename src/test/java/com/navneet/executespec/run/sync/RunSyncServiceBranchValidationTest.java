@@ -2,13 +2,18 @@ package com.navneet.executespec.run.sync;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
 
 import com.navneet.executespec.harness.WorkspaceInitService;
+import com.navneet.executespec.integration.RunWorkspaceAuthorityService;
 import com.navneet.executespec.state.repository.RunRepoSnapshotRepository;
 
 import org.junit.jupiter.api.Test;
@@ -49,8 +54,9 @@ class RunSyncServiceBranchValidationTest {
   @Test
   void theServiceRefusesAnOptionShapedBranchBeforeTouchingTheWorkspace(@TempDir Path tmp) {
     WorkspaceInitService workspaceInit = mock(WorkspaceInitService.class);
+    RunWorkspaceAuthorityService authorities = mock(RunWorkspaceAuthorityService.class);
     RunSyncService service =
-        new RunSyncService(workspaceInit, mock(RunRepoSnapshotRepository.class));
+        new RunSyncService(workspaceInit, mock(RunRepoSnapshotRepository.class), authorities);
     when(workspaceInit.runWorkspacePath("run-1")).thenReturn(tmp.resolve("absent"));
 
     assertThatThrownBy(
@@ -59,6 +65,7 @@ class RunSyncServiceBranchValidationTest {
                     "run-1", "--upload-pack=/bin/false", RunSyncService.GitCredential.NONE))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("Invalid branch");
+    verify(authorities, never()).acquire(anyString(), any());
   }
 
   /**
@@ -70,6 +77,8 @@ class RunSyncServiceBranchValidationTest {
   void aMalformedSnapshotShaIsNeverResetTo(@TempDir Path tmp) throws Exception {
     WorkspaceInitService workspaceInit = mock(WorkspaceInitService.class);
     RunRepoSnapshotRepository snapshots = mock(RunRepoSnapshotRepository.class);
+    RunWorkspaceAuthorityService authorities = mock(RunWorkspaceAuthorityService.class);
+    RunWorkspaceAuthorityService.Lease authority = mock(RunWorkspaceAuthorityService.Lease.class);
     Path runRoot = tmp.resolve("run-2");
     Files.createDirectories(runRoot.resolve("repos").resolve("app").resolve(".git"));
     when(workspaceInit.runWorkspacePath("run-2")).thenReturn(runRoot);
@@ -79,12 +88,16 @@ class RunSyncServiceBranchValidationTest {
     snap.setRepoFullName("acme/app");
     snap.setCommitSha("--exec=touch /tmp/pwn");
     when(snapshots.findByRunId("run-2")).thenReturn(java.util.List.of(snap));
+    when(authorities.acquire("run-2", RunWorkspaceAuthorityService.Authority.PUBLICATION))
+        .thenReturn(authority);
 
-    RunSyncService service = new RunSyncService(workspaceInit, snapshots);
+    RunSyncService service = new RunSyncService(workspaceInit, snapshots, authorities);
     var outcome = service.syncToOriginalCommit("run-2", RunSyncService.GitCredential.NONE);
 
     assertThat(outcome.reposSynced()).isZero();
     assertThat(outcome.details()).singleElement().asString().contains("40-character object id");
+    verify(authority).assertOwned();
+    verify(authority).close();
   }
 
   @Test

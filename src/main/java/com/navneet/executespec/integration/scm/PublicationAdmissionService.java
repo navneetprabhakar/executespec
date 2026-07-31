@@ -1,21 +1,18 @@
 package com.navneet.executespec.integration.scm;
 
 import java.nio.file.Path;
-import java.util.List;
-import java.util.Locale;
-import java.util.Objects;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.config.AgentProperties;
 import com.navneet.executespec.contractsurface.BrownfieldHttpContractGuard;
 import com.navneet.executespec.cost.RunEffectiveRouteService;
 import com.navneet.executespec.integration.CorrectionWorkspaceTransaction;
+import com.navneet.executespec.integration.DurableCorrectionLifecycle;
+import com.navneet.executespec.integration.RunWorkspaceAuthorityService;
 import com.navneet.executespec.report.ValidationReportRepository;
 import com.navneet.executespec.report.entity.PipelineResult;
 import com.navneet.executespec.report.entity.ValidationReport;
 import com.navneet.executespec.report.model.WorkflowConfigEvidence;
-import com.navneet.executespec.state.entity.AgentTask;
 import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.AgentTaskRepository;
 
@@ -41,13 +38,27 @@ public class PublicationAdmissionService {
   private final ObjectMapper objectMapper;
   private final BrownfieldHttpContractGuard brownfieldHttpContractGuard;
   private final RunEffectiveRouteService effectiveRoutes;
+  private final DurableCorrectionLifecycle durableCorrections;
+  private final RunWorkspaceAuthorityService workspaceAuthorities;
 
   public Admission assertEligible(PipelineRun run) {
-    Eligibility eligibility = evaluate(run);
-    if (!eligibility.eligible()) {
+    if (run == null || run.getRunId() == null || run.getRunId().isBlank()) {
+      Eligibility eligibility = evaluate(run);
       throw new PublicationBlockedException(eligibility);
     }
-    return new Admission(eligibility.currentWorkspaceGeneration(), eligibility.code());
+    RunWorkspaceAuthorityService.Lease lease =
+        workspaceAuthorities.acquire(
+            run.getRunId(), RunWorkspaceAuthorityService.Authority.PUBLICATION);
+    try {
+      Eligibility eligibility = evaluate(run);
+      if (!eligibility.eligible()) {
+        throw new PublicationBlockedException(eligibility);
+      }
+      return new Admission(eligibility.currentWorkspaceGeneration(), eligibility.code(), lease);
+    } catch (RuntimeException failure) {
+      lease.close();
+      throw failure;
+    }
   }
 
   /**
@@ -66,6 +77,19 @@ public class PublicationAdmissionService {
           "Publication requires a durable run identity",
           false,
           "Reload the run. If it no longer exists, start a new run.",
+          null,
+          null);
+    }
+    try {
+      durableCorrections.assertNoUnresolvedAttempt(run.getRunId());
+    } catch (RuntimeException unresolved) {
+      return blockedEligibility(
+          "CORRECTION_ATTEMPT_UNRESOLVED",
+          "CORRECTION_RECOVERY",
+          "An incomplete correction still owns this run workspace",
+          false,
+          "Wait for correction recovery. If recovery failed, restore the checkpoint before"
+              + " publication.",
           null,
           null);
     }
@@ -195,7 +219,8 @@ public class PublicationAdmissionService {
           currentGeneration);
     }
     try {
-      verifyApprovedContinuationRoutes(run);
+      new ApprovedContinuationRouteAttestation(taskRepository, objectMapper, effectiveRoutes)
+          .verify(run);
     } catch (PublicationBlockedException mismatch) {
       return blockedEligibility(
           mismatch.code(),
@@ -245,6 +270,34 @@ public class PublicationAdmissionService {
         currentGeneration);
   }
 
+  /** Rechecks that publication preparation did not mutate the admitted workspace. */
+  public void assertWorkspaceGenerationUnchanged(PipelineRun run, Admission admission) {
+    if (admission == null) {
+      throw new PublicationBlockedException(
+          blockedEligibility(
+              "PUBLICATION_ADMISSION_MISSING",
+              "EVIDENCE_FRESHNESS",
+              "Publication admission is missing",
+              true,
+              "Re-run publication admission before preparing deployment artifacts.",
+              null,
+              null));
+    }
+    admission.assertOwned();
+    String current = currentGeneration(run);
+    if (!admission.workspaceGeneration().equals(current)) {
+      throw new PublicationBlockedException(
+          blockedEligibility(
+              "PUBLICATION_EVIDENCE_STALE",
+              "EVIDENCE_FRESHNESS",
+              "Workspace content changed during publication preparation",
+              true,
+              "Regenerate validation on the prepared workspace before publishing it.",
+              admission.workspaceGeneration(),
+              current));
+    }
+  }
+
   private String currentGeneration(PipelineRun run) {
     Path workspace = Path.of(agentProperties.getWorkspace(), run.getRunId());
     return workspaceGenerations.captureGeneration(workspace);
@@ -264,177 +317,6 @@ public class PublicationAdmissionService {
     } catch (Exception malformed) {
       return WorkflowConfigEvidence.unavailable("Persisted workflow/config evidence is malformed");
     }
-  }
-
-  private void verifyApprovedContinuationRoutes(PipelineRun run) {
-    List<AgentTask> tasks = taskRepository.findByRunId(run.getRunId());
-    for (AgentTask task : tasks) {
-      ApprovedRoute approved = latestApprovedRoute(task);
-      if (approved == null) {
-        continue;
-      }
-      boolean approvalIdentityMatches =
-          approved.approvalId().equals(task.getContinuationApprovalId())
-              && approved.proposalDigest().equals(task.getContinuationApprovalProposalDigest())
-              && "COMPLETED".equalsIgnoreCase(task.getContinuationApprovalStatus())
-              && sameProvider(approved.provider(), task.getContinuationApprovalProvider())
-              && approved.model().equals(task.getContinuationApprovalModel())
-              && approved.decision().equals(task.getContinuationApprovalAction())
-              && Objects.equals(approved.postReview(), task.getContinuationApprovalPostReview());
-      if (!approvalIdentityMatches) {
-        throw blocked(
-            "PUBLICATION_ROUTE_EVIDENCE_INVALID",
-            "Approved continuation action does not match the durable approval identity for "
-                + task.getTaskId());
-      }
-      var workerRoute =
-          effectiveRoutes.forTaskPhysicalAttempts(
-              run.getRunId(),
-              logicalTaskId(run.getRunId(), task.getTaskId()),
-              approved.workerAttempt().physicalAttemptIds());
-      if (!approved.workerAttempt().matches(workerRoute, approved.provider(), approved.model())) {
-        throw blocked(
-            "PUBLICATION_APPROVED_ROUTE_MISMATCH",
-            "Approved continuation route "
-                + approved.provider()
-                + "/"
-                + approved.model()
-                + " does not match the fence-specific physical worker attempts for "
-                + task.getTaskId());
-      }
-      if (approved.reviewerAttempt() == null) {
-        throw blocked(
-            "PUBLICATION_APPROVED_REVIEWER_ROUTE_MISMATCH",
-            "Approved continuation is missing fence-specific physical reviewer attempts");
-      }
-      var reviewerRoute =
-          effectiveRoutes.forReviewerPhysicalAttempts(
-              run.getRunId(), approved.reviewerAttempt().physicalAttemptIds());
-      if (!approved
-          .reviewerAttempt()
-          .matches(reviewerRoute, approved.provider(), approved.model())) {
-        throw blocked(
-            "PUBLICATION_APPROVED_REVIEWER_ROUTE_MISMATCH",
-            "Approved continuation route "
-                + approved.provider()
-                + "/"
-                + approved.model()
-                + " does not match its fence-specific physical reviewer attempts");
-      }
-    }
-  }
-
-  private ApprovedRoute latestApprovedRoute(AgentTask task) {
-    String json = task.getContinuationActionsJson();
-    if (json == null || json.isBlank()) {
-      return null;
-    }
-    try {
-      JsonNode actions = objectMapper.readTree(json);
-      if (!actions.isArray()) {
-        throw blocked(
-            "PUBLICATION_ROUTE_EVIDENCE_INVALID",
-            "Continuation route evidence is not a JSON array for " + task.getTaskId());
-      }
-      for (int i = actions.size() - 1; i >= 0; i--) {
-        JsonNode action = actions.get(i);
-        if (!"APPROVED".equalsIgnoreCase(action.path("status").asText())) {
-          continue;
-        }
-        String provider = action.path("provider").asText("");
-        String model = action.path("model").asText("");
-        String decision = action.path("decision").asText("");
-        String approvalId = action.path("approvalId").asText("");
-        String proposalDigest = action.path("proposalDigest").asText("");
-        AttemptIdentity workerAttempt = attemptIdentity(action.path("workerAttempt"));
-        boolean postReview = action.path("postReview").asBoolean(false);
-        AttemptIdentity reviewerAttempt = attemptIdentity(action.path("reviewerAttempt"));
-        if (provider.isBlank()
-            || model.isBlank()
-            || decision.isBlank()
-            || !isUuid(approvalId)
-            || !proposalDigest.matches("[0-9a-f]{64}")
-            || workerAttempt == null
-            || reviewerAttempt == null) {
-          throw blocked(
-              "PUBLICATION_ROUTE_EVIDENCE_INVALID",
-              "Approved continuation route evidence is incomplete for " + task.getTaskId());
-        }
-        return new ApprovedRoute(
-            provider,
-            model,
-            postReview,
-            decision,
-            approvalId,
-            proposalDigest,
-            workerAttempt,
-            reviewerAttempt);
-      }
-      return null;
-    } catch (PublicationBlockedException blocked) {
-      throw blocked;
-    } catch (Exception malformed) {
-      throw blocked(
-          "PUBLICATION_ROUTE_EVIDENCE_INVALID",
-          "Continuation route evidence is malformed for " + task.getTaskId());
-    }
-  }
-
-  private static AttemptIdentity attemptIdentity(JsonNode node) {
-    if (node == null || !node.isObject()) {
-      return null;
-    }
-    String provider = node.path("provider").asText("");
-    String model = node.path("model").asText("");
-    String attribution = node.path("attribution").asText("");
-    long floor = node.path("callIndexFloor").asLong(-1L);
-    long first = node.path("firstCallIndex").asLong(-1L);
-    long last = node.path("lastCallIndex").asLong(-1L);
-    JsonNode idsNode = node.path("physicalAttemptIds");
-    if (provider.isBlank()
-        || model.isBlank()
-        || !"LEDGER".equals(attribution)
-        || floor < 0
-        || first <= floor
-        || last < first
-        || !idsNode.isArray()
-        || idsNode.isEmpty()) {
-      return null;
-    }
-    java.util.LinkedHashSet<String> ids = new java.util.LinkedHashSet<>();
-    for (JsonNode id : idsNode) {
-      if (!id.isTextual() || id.asText().isBlank() || !ids.add(id.asText())) {
-        return null;
-      }
-    }
-    return new AttemptIdentity(provider, model, List.copyOf(ids), floor, first, last);
-  }
-
-  private static boolean isUuid(String value) {
-    try {
-      return value != null && value.equals(java.util.UUID.fromString(value).toString());
-    } catch (IllegalArgumentException invalid) {
-      return false;
-    }
-  }
-
-  private static boolean sameProvider(String expected, String actual) {
-    return expected != null
-        && actual != null
-        && expected.trim().toUpperCase(Locale.ROOT).equals(actual.trim().toUpperCase(Locale.ROOT));
-  }
-
-  private static String logicalTaskId(String runId, String taskId) {
-    if (runId == null || taskId == null || runId.length() < 8) {
-      return taskId;
-    }
-    String prefix = runId.substring(0, 8) + "_";
-    return taskId.startsWith(prefix) ? taskId.substring(prefix.length()) : taskId;
-  }
-
-  private static PublicationBlockedException blocked(String code, String message) {
-    return new PublicationBlockedException(
-        blockedEligibility(code, "PUBLICATION", message, false, null, null, null));
   }
 
   private static Eligibility blockedEligibility(
@@ -457,7 +339,41 @@ public class PublicationAdmissionService {
         currentWorkspaceGeneration);
   }
 
-  public record Admission(String workspaceGeneration, String code) {}
+  public static final class Admission implements AutoCloseable {
+    private final String workspaceGeneration;
+    private final String code;
+    private final RunWorkspaceAuthorityService.Lease lease;
+
+    private Admission(
+        String workspaceGeneration, String code, RunWorkspaceAuthorityService.Lease lease) {
+      this.workspaceGeneration = workspaceGeneration;
+      this.code = code;
+      this.lease = lease;
+    }
+
+    /** Test-fixture constructor; production admission always carries a durable workspace lease. */
+    public Admission(String workspaceGeneration, String code) {
+      this(workspaceGeneration, code, null);
+    }
+
+    public String workspaceGeneration() {
+      return workspaceGeneration;
+    }
+
+    public String code() {
+      return code;
+    }
+
+    /** Re-fences the lease immediately before an irreversible publication side effect. */
+    public void assertOwned() {
+      if (lease != null) lease.assertOwned();
+    }
+
+    @Override
+    public void close() {
+      if (lease != null) lease.close();
+    }
+  }
 
   public record Eligibility(
       boolean eligible,
@@ -486,38 +402,6 @@ public class PublicationAdmissionService {
 
     public Eligibility eligibility() {
       return eligibility;
-    }
-  }
-
-  private record ApprovedRoute(
-      String provider,
-      String model,
-      boolean postReview,
-      String decision,
-      String approvalId,
-      String proposalDigest,
-      AttemptIdentity workerAttempt,
-      AttemptIdentity reviewerAttempt) {}
-
-  private record AttemptIdentity(
-      String provider,
-      String model,
-      List<String> physicalAttemptIds,
-      long callIndexFloor,
-      long firstCallIndex,
-      long lastCallIndex) {
-    boolean matches(
-        RunEffectiveRouteService.AttemptRouteEvidence ledger,
-        String expectedProvider,
-        String expectedModel) {
-      return ledger != null
-          && ledger.isExact(expectedProvider, expectedModel)
-          && sameProvider(expectedProvider, provider)
-          && expectedModel.equals(model)
-          && new java.util.HashSet<>(physicalAttemptIds)
-              .equals(new java.util.HashSet<>(ledger.physicalAttemptIds()))
-          && firstCallIndex == ledger.firstCallIndex()
-          && lastCallIndex == ledger.lastCallIndex();
     }
   }
 }

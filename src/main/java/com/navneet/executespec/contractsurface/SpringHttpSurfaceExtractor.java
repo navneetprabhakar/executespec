@@ -1,6 +1,5 @@
 package com.navneet.executespec.contractsurface;
 
-import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -12,7 +11,6 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import java.util.stream.Stream;
 
 import com.github.javaparser.ParseProblemException;
 import com.github.javaparser.StaticJavaParser;
@@ -30,6 +28,7 @@ import com.github.javaparser.ast.expr.NormalAnnotationExpr;
 import com.github.javaparser.ast.expr.SingleMemberAnnotationExpr;
 import com.github.javaparser.ast.expr.StringLiteralExpr;
 import com.github.javaparser.ast.nodeTypes.NodeWithAnnotations;
+import com.navneet.executespec.contractsurface.SpringContractSourceInventory.SourceFile;
 import com.navneet.executespec.contractsurface.SpringHttpSurfaceSnapshot.ConfigurationSource;
 
 import org.springframework.stereotype.Component;
@@ -62,23 +61,18 @@ public class SpringHttpSurfaceExtractor {
           "PatchMapping", "PATCH",
           "DeleteMapping", "DELETE");
 
-  private static final Set<String> EXCLUDED_SEGMENTS =
-      Set.of(
-          ".git",
-          ".agent-context",
-          "target",
-          "build",
-          "dist",
-          "node_modules",
-          "test",
-          "tests",
-          "generated");
-
   public SpringHttpSurfaceSnapshot extract(Path workspaceRoot) {
+    return extract(workspaceRoot, SpringContractSourceInventory.DEFAULT_LIMITS);
+  }
+
+  SpringHttpSurfaceSnapshot extract(
+      Path workspaceRoot, SpringContractSourceInventory.TraversalLimits limits) {
     if (workspaceRoot == null || !Files.isDirectory(workspaceRoot)) {
       return SpringHttpSurfaceSnapshot.of(List.of(), List.of());
     }
-    List<ParsedSource> sources = parseProductionSources(workspaceRoot);
+    SpringContractSourceInventory.Inventory inventory =
+        SpringContractSourceInventory.scan(workspaceRoot, limits);
+    List<ParsedSource> sources = parseSources(workspaceRoot, inventory.javaSources());
     rejectComposedMappings(workspaceRoot, sources);
     Map<Path, ContextPath> contextPaths = new LinkedHashMap<>();
     List<ConfigurationSource> configurationSources = new ArrayList<>();
@@ -87,7 +81,10 @@ public class SpringHttpSurfaceExtractor {
       Path moduleRoot = moduleRoot(workspaceRoot, source.path());
       ContextPath contextPath =
           contextPaths.computeIfAbsent(
-              moduleRoot, ignored -> findContextPath(workspaceRoot, moduleRoot));
+              moduleRoot,
+              ignored ->
+                  findContextPath(
+                      workspaceRoot, moduleRoot, inventory.applicationConfigurations()));
       configurationSources.addAll(contextPath.sources());
       extractCompilationUnit(workspaceRoot, source, contextPath.value(), routes);
     }
@@ -138,30 +135,18 @@ public class SpringHttpSurfaceExtractor {
     return SpringHttpSurfaceSnapshot.of(routes, configurationSources);
   }
 
-  private static List<ParsedSource> parseProductionSources(Path root) {
-    List<ParsedSource> sources = new ArrayList<>();
-    try (Stream<Path> files = Files.walk(root, 12)) {
-      for (Path file :
-          files
-              .filter(Files::isRegularFile)
-              .filter(path -> path.getFileName().toString().endsWith(".java"))
-              .filter(path -> isProductionSource(root, path))
-              .sorted()
-              .toList()) {
-        try {
-          sources.add(new ParsedSource(file, StaticJavaParser.parse(Files.readString(file))));
-        } catch (IOException e) {
-          throw new SurfaceExtractionException("could not read " + relative(root, file), e);
-        } catch (ParseProblemException e) {
-          throw new SurfaceExtractionException(
-              "could not parse Spring source " + relative(root, file), e);
-        }
+  private static List<ParsedSource> parseSources(Path root, List<SourceFile> javaSources) {
+    List<ParsedSource> parsedSources = new ArrayList<>();
+    for (SourceFile source : javaSources) {
+      try {
+        parsedSources.add(
+            new ParsedSource(source.path(), StaticJavaParser.parse(source.content())));
+      } catch (ParseProblemException failure) {
+        throw new SurfaceExtractionException(
+            "could not parse Spring source " + relative(root, source.path()), failure);
       }
-    } catch (IOException e) {
-      throw new SurfaceExtractionException(
-          "could not inventory Spring HTTP surface: " + e.getMessage(), e);
     }
-    return List.copyOf(sources);
+    return List.copyOf(parsedSources);
   }
 
   private static void rejectComposedMappings(Path root, List<ParsedSource> sources) {
@@ -352,44 +337,33 @@ public class SpringHttpSurfaceExtractor {
     return workspaceRoot;
   }
 
-  private static ContextPath findContextPath(Path workspaceRoot, Path moduleRoot) {
-    List<Path> candidates = new ArrayList<>();
-    try (Stream<Path> files = Files.walk(moduleRoot, 10)) {
-      files
-          .filter(Files::isRegularFile)
-          .filter(SpringHttpSurfaceExtractor::isApplicationConfiguration)
-          .filter(path -> isProductionSource(moduleRoot, path))
-          .filter(path -> moduleRoot.equals(resourceModuleRoot(workspaceRoot, path)))
-          .sorted()
-          .forEach(candidates::add);
-    } catch (IOException e) {
-      throw new SurfaceExtractionException("could not inspect Spring configuration", e);
-    }
+  private static ContextPath findContextPath(
+      Path workspaceRoot, Path moduleRoot, List<SourceFile> applicationConfigurations) {
+    List<SourceFile> candidates =
+        applicationConfigurations.stream()
+            .filter(source -> moduleRoot.equals(resourceModuleRoot(workspaceRoot, source.path())))
+            .sorted()
+            .toList();
     Map<String, ConfigurationSource> configuredPaths = new LinkedHashMap<>();
-    for (Path candidate : candidates) {
-      try {
-        String content = Files.readString(candidate);
-        Matcher properties = PROPERTIES_CONTEXT.matcher(content);
-        while (properties.find()) {
-          registerContextPath(
-              workspaceRoot,
-              candidate,
-              properties.group(1),
-              lineAt(content, properties.start()),
-              configuredPaths);
-        }
-        Matcher yaml = YAML_CONTEXT.matcher(content);
-        while (yaml.find()) {
-          registerContextPath(
-              workspaceRoot,
-              candidate,
-              yaml.group(1),
-              lineAt(content, yaml.start(1)),
-              configuredPaths);
-        }
-      } catch (IOException e) {
-        throw new SurfaceExtractionException(
-            "could not read " + relative(workspaceRoot, candidate), e);
+    for (SourceFile candidate : candidates) {
+      String content = candidate.content();
+      Matcher properties = PROPERTIES_CONTEXT.matcher(content);
+      while (properties.find()) {
+        registerContextPath(
+            workspaceRoot,
+            candidate.path(),
+            properties.group(1),
+            lineAt(content, properties.start()),
+            configuredPaths);
+      }
+      Matcher yaml = YAML_CONTEXT.matcher(content);
+      while (yaml.find()) {
+        registerContextPath(
+            workspaceRoot,
+            candidate.path(),
+            yaml.group(1),
+            lineAt(content, yaml.start(1)),
+            configuredPaths);
       }
     }
     if (configuredPaths.size() > 1) {
@@ -486,27 +460,13 @@ public class SpringHttpSurfaceExtractor {
   }
 
   private static boolean isProductionRelativePath(String rawPath) {
-    Path path = Path.of(rawPath.replace('\\', '/'));
-    for (Path segment : path) {
-      if (EXCLUDED_SEGMENTS.contains(segment.toString().toLowerCase(Locale.ROOT))) return false;
-    }
-    String normalized = rawPath.replace('\\', '/').toLowerCase(Locale.ROOT);
-    return !normalized.contains("/src/test/") && !normalized.startsWith("src/test/");
+    return SpringContractSourceInventory.isProductionRelativePath(rawPath);
   }
 
   private static boolean isApplicationConfiguration(Path path) {
     String name = path.getFileName().toString().toLowerCase(Locale.ROOT);
     return name.startsWith("application")
         && (name.endsWith(".properties") || name.endsWith(".yml") || name.endsWith(".yaml"));
-  }
-
-  private static boolean isProductionSource(Path root, Path path) {
-    Path relative = root.relativize(path);
-    for (Path segment : relative) {
-      if (EXCLUDED_SEGMENTS.contains(segment.toString().toLowerCase(Locale.ROOT))) return false;
-    }
-    String normalized = relative.toString().replace('\\', '/').toLowerCase(Locale.ROOT);
-    return !normalized.contains("/src/test/") && !normalized.startsWith("src/test/");
   }
 
   static String join(String... segments) {

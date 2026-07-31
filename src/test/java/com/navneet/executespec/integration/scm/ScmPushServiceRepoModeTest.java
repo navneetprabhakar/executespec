@@ -77,6 +77,15 @@ class ScmPushServiceRepoModeTest {
 
   @InjectMocks private ScmPushService service;
 
+  @org.junit.jupiter.api.BeforeEach
+  void admitPublicationByDefault() {
+    lenient()
+        .when(publicationAdmissionService.assertEligible(any(PipelineRun.class)))
+        .thenAnswer(
+            ignored ->
+                new PublicationAdmissionService.Admission("a".repeat(64), "PUBLICATION_ELIGIBLE"));
+  }
+
   @Test
   void existingRepoContractFailureStopsBeforeAnyScmSideEffect() {
     PipelineRun run = runWithMode("EXISTING");

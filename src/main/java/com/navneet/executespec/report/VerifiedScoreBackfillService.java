@@ -132,7 +132,8 @@ public class VerifiedScoreBackfillService {
                     row.getFilesGenerated(),
                     ValidationReportService.bootVerification(row),
                     additiveFormula,
-                    endpointCoverageApplicable);
+                    endpointCoverageApplicable,
+                    testCoverageJudgmentAdmissibleFromAccuracyJson(row.getAccuracyJson()));
         int recomputedRubric =
             evidenceFailure
                 ? 0
@@ -154,6 +155,10 @@ public class VerifiedScoreBackfillService {
             capScoreAtAdmittedSpecGapsFromAccuracyJson(recomputedVerified, row.getAccuracyJson());
         recomputedRubric =
             capScoreAtAdmittedSpecGapsFromAccuracyJson(recomputedRubric, row.getAccuracyJson());
+        if (!hasIndependentFunctionalProof(row)) {
+          recomputedVerified = Math.min(recomputedVerified, 75);
+          recomputedRubric = Math.min(recomputedRubric, 75);
+        }
 
         ValidationReportScoreZeroCause.Evidence scoreZeroCause =
             ValidationReportScoreZeroCause.derive(
@@ -288,6 +293,7 @@ public class VerifiedScoreBackfillService {
     if (accuracyJson == null || accuracyJson.isBlank()) return null;
     try {
       JsonNode root = MAPPER.readTree(accuracyJson);
+      if (!dimensionCited(root, "endpointEvidenceStatus", "endpointEvidenceLocations")) return null;
       JsonNode coverage = root.path("endpointCoverage");
       if (coverage.isMissingNode() || coverage.isNull()) return null;
       JsonNode percent = coverage.path("coveragePercent");
@@ -302,6 +308,7 @@ public class VerifiedScoreBackfillService {
     if (accuracyJson == null || accuracyJson.isBlank()) return null;
     try {
       JsonNode root = MAPPER.readTree(accuracyJson);
+      if (!dimensionCited(root, "testEvidenceStatus", "testEvidenceLocations")) return null;
       JsonNode level = root.path("testCoverageLevel");
       if (level.isMissingNode() || level.isNull() || !level.isTextual()) return null;
       String text = level.asText();
@@ -309,6 +316,25 @@ public class VerifiedScoreBackfillService {
     } catch (IOException ex) {
       return null;
     }
+  }
+
+  static boolean testCoverageJudgmentAdmissibleFromAccuracyJson(String accuracyJson) {
+    if (accuracyJson == null || accuracyJson.isBlank()) return true;
+    try {
+      JsonNode root = MAPPER.readTree(accuracyJson);
+      JsonNode level = root.path("testCoverageLevel");
+      if (!level.isTextual() || level.asText().isBlank()) return true;
+      return dimensionCited(root, "testEvidenceStatus", "testEvidenceLocations");
+    } catch (IOException ex) {
+      return true;
+    }
+  }
+
+  private static boolean hasIndependentFunctionalProof(ValidationReport row) {
+    return Boolean.TRUE.equals(row.getTestExecutionVerified())
+        && "LIVE_PREVIEW_FUNCTIONAL".equals(row.getTestEvidenceScope())
+        && row.getTestsTotal() != null
+        && row.getTestsTotal() > 0;
   }
 
   /**
@@ -320,6 +346,7 @@ public class VerifiedScoreBackfillService {
     if (accuracyJson == null || accuracyJson.isBlank()) return score;
     try {
       JsonNode root = MAPPER.readTree(accuracyJson);
+      if (!dimensionCited(root, "specEvidenceStatus", "specEvidenceLocations")) return score;
       boolean missing = nonEmptyArray(root.path("missingRequirements"));
       boolean partial = nonEmptyArray(root.path("partialRequirements"));
       boolean unknown = nonEmptyArray(root.path("unknownRequirements"));
@@ -341,5 +368,10 @@ public class VerifiedScoreBackfillService {
 
   private static boolean nonEmptyArray(JsonNode node) {
     return node.isArray() && !node.isEmpty();
+  }
+
+  private static boolean dimensionCited(JsonNode root, String statusField, String locationsField) {
+    return "CITED".equalsIgnoreCase(root.path(statusField).asText())
+        && nonEmptyArray(root.path(locationsField));
   }
 }

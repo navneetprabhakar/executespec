@@ -28,11 +28,45 @@ final class CorrectionResolutionEvidence {
       CorrectionWorkspaceTransaction.DiffEvidence diff,
       ValidationDelta validationDelta,
       boolean evidenceInvalidated) {
+    return append(
+        objectMapper,
+        actions,
+        status,
+        code,
+        reason,
+        null,
+        null,
+        beforeGeneration,
+        afterGeneration,
+        diff,
+        validationDelta,
+        evidenceInvalidated);
+  }
+
+  static ObjectNode append(
+      ObjectMapper objectMapper,
+      ArrayNode actions,
+      String status,
+      String code,
+      String reason,
+      String approvalId,
+      String proposalDigest,
+      String beforeGeneration,
+      String afterGeneration,
+      CorrectionWorkspaceTransaction.DiffEvidence diff,
+      ValidationDelta validationDelta,
+      boolean evidenceInvalidated) {
     ObjectNode resolution = actions.addObject();
     resolution.put("status", status);
     resolution.put("decision", "CORRECTION_RESOLUTION");
     resolution.put("code", code == null ? "CORRECTION_UNKNOWN" : code);
     resolution.put("reason", bounded(reason));
+    if (approvalId != null && !approvalId.isBlank()) {
+      resolution.put("approvalId", approvalId);
+    }
+    if (proposalDigest != null && !proposalDigest.isBlank()) {
+      resolution.put("proposalDigest", proposalDigest);
+    }
     resolution.put("beforeWorkspaceGeneration", beforeGeneration);
     resolution.put("afterWorkspaceGeneration", afterGeneration);
     if (diff != null) {

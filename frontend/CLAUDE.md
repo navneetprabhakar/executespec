@@ -162,6 +162,10 @@ Documented deviations from Google TypeScript style in [`executespec-docs/backend
   non-positive, or completion-before-start timestamps are unchartable and must be omitted; never let
   `new Date(null)` fabricate an epoch-started multi-million-minute task.
 - `runResultUtils.ts` owns pure verdict, severity, evidence, line-diff, duration/currency, tab-label, event-log formatting helpers, and run-Ask routing classification (`shouldUseRunEvidenceChat`). Keep new run-result formatting behavior there with `runResultUtils.test.ts` instead of growing `IdeRunResult.tsx`.
+- Publication trust facts do not infer execution from terminal status. The status-derived row is
+  labeled "Tasks terminal", shows terminal and clean-completion counts separately, and renders any
+  FAILED/BLOCKED population as bad rather than green. Physical execution claims require separate
+  worker/route evidence.
 - Run-scoped Ask defaults to the read-only run copilot (`POST /api/runs/{id}/chat`) for evidence/status/cost/test/file questions; only explicit mutation/new-work prompts use the broader web agent session so evidence questions do not become fresh `create_cloud_run` proposals.
 - Failed terminal runs explain weak evidence states in-place: Overview distinguishes validation-reported generated files from the Code tab's visible workspace files, Tests disables re-run when there is no test plan/report, and Cost explains zero-token/zero-credit failures as pre-provider/tool setup stops.
 - Run artifact actions are evidence-gated. Push, workspace revert, preview, deploy, and Code ZIP require a terminal run, executor evidence (a started/completed task or final report), and git-derived `ADDED`/`MODIFIED` product files. Bootstrap `.gitignore` / `.gitattributes` files and a clean cloned repository are not generated output or part of the Code count. Report PDF and Share require an actual validation report. Pre-execution failures such as `PLANNER_UNAVAILABLE` therefore expose none of these actions as enabled.

@@ -29,6 +29,9 @@ and terminal observation; ordinary WORKING side effects retain their existing re
 
 `ExecutionBranchService.createFinalPr` is a publication boundary. It must receive every current
 backing `PipelineRun` identity for the launch, load each durable row, and pass each row through
-`PublicationAdmissionService` before calling GitHub. A missing backing identity/row or one failed
-admission returns a structured `FinalPrResult` and performs no Git operation. The orchestrator
+`PublicationAdmissionService` before calling GitHub. Each successful admission keeps its workspace
+authority lease open across final-branch creation and PR publication, rechecks ownership before
+the irreversible SCM call, and closes all leases on success or failure. A missing backing
+identity/row or one failed admission returns a structured `FinalPrResult` and performs no Git
+operation. The orchestrator
 persists that diagnostic as a terminal launch failure and emits no `EXEC_FINAL_PR_CREATED` event.

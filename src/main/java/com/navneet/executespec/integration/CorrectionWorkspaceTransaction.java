@@ -74,12 +74,19 @@ public class CorrectionWorkspaceTransaction {
 
   /** Returns the current content-addressed workspace generation without changing the worktree. */
   public String currentGeneration(Checkpoint checkpoint) {
+    return currentGeneration(checkpoint, () -> {});
+  }
+
+  /** Computes a generation while rechecking exact authority before every Git/index operation. */
+  public String currentGeneration(Checkpoint checkpoint, Runnable authorityFence) {
     Objects.requireNonNull(checkpoint, "checkpoint");
+    Objects.requireNonNull(authorityFence, "authorityFence");
     List<String> trees = new ArrayList<>();
     for (int i = 0; i < checkpoint.repositories().size(); i++) {
       RepositoryCheckpoint repository = checkpoint.repositories().get(i);
+      authorityFence.run();
       assertHeadUnchanged(repository);
-      trees.add(i + "=" + writeTree(repository.repository()));
+      trees.add(i + "=" + writeTree(repository.repository(), authorityFence));
     }
     return org.apache.commons.codec.digest.DigestUtils.sha256Hex(String.join("\n", trees));
   }
@@ -96,7 +103,13 @@ public class CorrectionWorkspaceTransaction {
    * likely credential files and binary payloads.
    */
   public DiffEvidence diffEvidence(Checkpoint checkpoint) {
+    return diffEvidence(checkpoint, () -> {});
+  }
+
+  /** Produces diff evidence while fencing every index mutation and Git subprocess boundary. */
+  public DiffEvidence diffEvidence(Checkpoint checkpoint, Runnable authorityFence) {
     Objects.requireNonNull(checkpoint, "checkpoint");
+    Objects.requireNonNull(authorityFence, "authorityFence");
     List<String> changedFiles = new ArrayList<>();
     List<String> contentAddressedTreePairs = new ArrayList<>();
     ByteArrayOutputStream patch = new ByteArrayOutputStream(MAX_PATCH_BYTES);
@@ -104,9 +117,11 @@ public class CorrectionWorkspaceTransaction {
     boolean patchRedacted = false;
     for (int i = 0; i < checkpoint.repositories().size(); i++) {
       RepositoryCheckpoint repository = checkpoint.repositories().get(i);
+      authorityFence.run();
       assertHeadUnchanged(repository);
-      String currentTree = writeTree(repository.repository());
+      String currentTree = writeTree(repository.repository(), authorityFence);
       contentAddressedTreePairs.add(i + "\t" + repository.tree() + "\t" + currentTree);
+      authorityFence.run();
       String output =
           git(
               repository.repository(),
@@ -145,6 +160,7 @@ public class CorrectionWorkspaceTransaction {
         byte[] header = ("### repository " + i + "\n").getBytes(StandardCharsets.UTF_8);
         fullPatchBytes += header.length;
         appendBounded(patch, header);
+        authorityFence.run();
         BinaryCommandResult patchResult =
             gitBytes(repository.repository(), MAX_PATCH_BYTES, args.toArray(String[]::new));
         fullPatchBytes += patchResult.fullOutputBytes();
@@ -209,12 +225,19 @@ public class CorrectionWorkspaceTransaction {
 
   /** Restores every repository to the exact pre-correction tree and original {@code HEAD}. */
   public void rollback(Checkpoint checkpoint) {
+    rollback(checkpoint, () -> {});
+  }
+
+  /** Restores with an exact authority fence before every repository and Git mutation. */
+  public void rollback(Checkpoint checkpoint, Runnable authorityFence) {
     Objects.requireNonNull(checkpoint, "checkpoint");
+    Objects.requireNonNull(authorityFence, "authorityFence");
     RuntimeException failure = null;
     List<RepositoryCheckpoint> repositories = checkpoint.repositories();
     for (int i = repositories.size() - 1; i >= 0; i--) {
       try {
-        restore(repositories.get(i));
+        authorityFence.run();
+        restore(repositories.get(i), authorityFence);
       } catch (RuntimeException restoreFailure) {
         if (failure == null) {
           failure =
@@ -251,16 +274,44 @@ public class CorrectionWorkspaceTransaction {
   }
 
   private void restore(RepositoryCheckpoint checkpoint) {
+    restore(checkpoint, () -> {});
+  }
+
+  private void restore(RepositoryCheckpoint checkpoint, Runnable authorityFence) {
     Path repository = checkpoint.repository();
+    authorityFence.run();
     assertHeadUnchanged(checkpoint);
+    authorityFence.run();
     git(repository, "reset", "--hard", "--quiet", checkpoint.head());
+    authorityFence.run();
     git(repository, "clean", "-fd", "--quiet");
+    authorityFence.run();
     git(repository, "read-tree", "--reset", "-u", checkpoint.tree());
+    authorityFence.run();
     git(repository, "reset", "--mixed", "--quiet", checkpoint.head());
-    String restored = writeTree(repository);
+    authorityFence.run();
+    String restored = writeTree(repository, authorityFence);
     if (!checkpoint.tree().equals(restored)) {
       throw new IllegalStateException(
           "Correction rollback did not restore the checkpointed workspace tree for " + repository);
+    }
+  }
+
+  private String writeTree(Path repository, Runnable authorityFence) {
+    authorityFence.run();
+    requireCleanIndex(repository);
+    boolean stagedByThisService = false;
+    try {
+      authorityFence.run();
+      git(repository, "add", "-A");
+      stagedByThisService = true;
+      authorityFence.run();
+      return git(repository, "write-tree").trim();
+    } finally {
+      if (stagedByThisService) {
+        authorityFence.run();
+        git(repository, "reset", "--mixed", "--quiet", "HEAD");
+      }
     }
   }
 

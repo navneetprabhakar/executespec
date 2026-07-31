@@ -6,6 +6,15 @@ It supports both a materialized workspace and an immutable map of repository-rel
 bytes. Surface schema v2 includes explicit context-path configuration locations in the digest, so
 remote codemap generation preserves controller and configuration provenance without staging a
 temporary checkout.
+`SpringContractSourceInventory` owns materialized-workspace discovery: it walks the complete tree
+without a depth cutoff, prunes `.git`, vendor, dependency, and conventional build-output trees
+before descent, filters tests only by explicit `src/test`, and enforces visited-entry,
+candidate-file, and candidate-byte budgets. Non-excluded symbolic links are rejected rather than
+silently omitted, and candidate reads allocate at most the remaining byte budget plus one sentinel
+byte used to detect concurrent growth. Generic `test`, `tests`, and `generated` path segments
+remain eligible because they may be repository or production package names. An unreadable path or
+exceeded budget fails extraction; it must never produce a partial baseline that silently omits a
+deep controller.
 `SpringHttpSurfaceSnapshot` owns canonical ordering, route keys and digest construction separately
 from source parsing; provider prose never participates in that digest.
 `BrownfieldHttpContractGuard` stores the admitted surface/digest on `pipeline_run` (V360) and

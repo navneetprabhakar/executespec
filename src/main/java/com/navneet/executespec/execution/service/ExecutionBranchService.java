@@ -121,104 +121,117 @@ public class ExecutionBranchService {
           "Repair the execution-to-pipeline-run linkage before retrying publication.",
           null);
     }
-    for (String pipelineRunId : runIds) {
-      com.navneet.executespec.state.entity.PipelineRun pipelineRun;
-      try {
-        pipelineRun = pipelineRunRepository.findById(pipelineRunId).orElse(null);
-      } catch (RuntimeException unavailable) {
-        return FinalPrResult.blocked(
-            "EXECUTION_FINAL_PR_ADMISSION_UNAVAILABLE",
-            "PUBLICATION_ADMISSION",
-            "Backing pipeline-run evidence could not be loaded",
-            true,
-            "Restore database availability and retry final publication.",
-            pipelineRunId);
-      }
-      if (pipelineRun == null) {
-        return FinalPrResult.blocked(
-            "EXECUTION_FINAL_PR_BACKING_RUN_NOT_FOUND",
-            "RUN",
-            "Backing pipeline run could not be loaded",
-            false,
-            "Restore the missing pipeline-run record before retrying publication.",
-            pipelineRunId);
-      }
-      try {
-        publicationAdmissionService.assertEligible(pipelineRun);
-      } catch (PublicationAdmissionService.PublicationBlockedException blocked) {
-        var eligibility = blocked.eligibility();
-        return FinalPrResult.blocked(
-            blocked.code(),
-            eligibility.blockingGate(),
-            blocked.getMessage(),
-            eligibility.retryable(),
-            eligibility.remediation(),
-            pipelineRunId);
-      } catch (RuntimeException unavailable) {
-        log.warn(
-            "createFinalPr exec={} pipeline={} admission unavailable: {}",
-            executionRunId,
-            pipelineRunId,
-            unavailable.getMessage());
-        return FinalPrResult.blocked(
-            "EXECUTION_FINAL_PR_ADMISSION_UNAVAILABLE",
-            "PUBLICATION_ADMISSION",
-            "Publication admission could not be evaluated",
-            true,
-            "Restore publication-evidence availability and retry. No Git operation was attempted.",
-            pipelineRunId);
-      }
-    }
-    String head = branchName(executionRunId);
-    String title = "Execution " + executionRunId.substring(0, 8) + " — combined solutions";
-    String prUrl;
+    java.util.List<PublicationAdmissionService.Admission> publicationAdmissions =
+        new java.util.ArrayList<>();
     try {
-      prUrl =
-          gitHubRepoService.createPullRequest(
-              "https://github.com/" + repoFullName,
-              head,
-              null,
-              title,
-              reportBody == null ? "" : reportBody,
-              githubPat);
-      if (prUrl == null) {
+      for (String pipelineRunId : runIds) {
+        com.navneet.executespec.state.entity.PipelineRun pipelineRun;
+        try {
+          pipelineRun = pipelineRunRepository.findById(pipelineRunId).orElse(null);
+        } catch (RuntimeException unavailable) {
+          return FinalPrResult.blocked(
+              "EXECUTION_FINAL_PR_ADMISSION_UNAVAILABLE",
+              "PUBLICATION_ADMISSION",
+              "Backing pipeline-run evidence could not be loaded",
+              true,
+              "Restore database availability and retry final publication.",
+              pipelineRunId);
+        }
+        if (pipelineRun == null) {
+          return FinalPrResult.blocked(
+              "EXECUTION_FINAL_PR_BACKING_RUN_NOT_FOUND",
+              "RUN",
+              "Backing pipeline run could not be loaded",
+              false,
+              "Restore the missing pipeline-run record before retrying publication.",
+              pipelineRunId);
+        }
+        try {
+          publicationAdmissions.add(publicationAdmissionService.assertEligible(pipelineRun));
+        } catch (PublicationAdmissionService.PublicationBlockedException blocked) {
+          var eligibility = blocked.eligibility();
+          return FinalPrResult.blocked(
+              blocked.code(),
+              eligibility.blockingGate(),
+              blocked.getMessage(),
+              eligibility.retryable(),
+              eligibility.remediation(),
+              pipelineRunId);
+        } catch (RuntimeException unavailable) {
+          log.warn(
+              "createFinalPr exec={} pipeline={} admission unavailable: {}",
+              executionRunId,
+              pipelineRunId,
+              unavailable.getMessage());
+          return FinalPrResult.blocked(
+              "EXECUTION_FINAL_PR_ADMISSION_UNAVAILABLE",
+              "PUBLICATION_ADMISSION",
+              "Publication admission could not be evaluated",
+              true,
+              "Restore publication-evidence availability and retry. No Git operation was"
+                  + " attempted.",
+              pipelineRunId);
+        }
+      }
+      String head = branchName(executionRunId);
+      String title = "Execution " + executionRunId.substring(0, 8) + " — combined solutions";
+      String prUrl;
+      try {
+        publicationAdmissions.forEach(PublicationAdmissionService.Admission::assertOwned);
+        prUrl =
+            gitHubRepoService.createPullRequest(
+                "https://github.com/" + repoFullName,
+                head,
+                null,
+                title,
+                reportBody == null ? "" : reportBody,
+                githubPat);
+        if (prUrl == null) {
+          return FinalPrResult.blocked(
+              "EXECUTION_FINAL_PR_CREATE_FAILED",
+              "PR_CREATION",
+              "GitHub did not return a pull-request URL",
+              true,
+              "Check repository permissions and branch state, then retry final publication.",
+              null);
+        }
+      } catch (Exception e) {
+        log.warn(
+            "createFinalPr repo={} exec={} failed: {}",
+            repoFullName,
+            executionRunId,
+            e.getMessage());
         return FinalPrResult.blocked(
             "EXECUTION_FINAL_PR_CREATE_FAILED",
             "PR_CREATION",
-            "GitHub did not return a pull-request URL",
+            e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage(),
             true,
-            "Check repository permissions and branch state, then retry final publication.",
+            "Check repository credentials, branch protection, and GitHub availability, then retry.",
             null);
       }
-    } catch (Exception e) {
-      log.warn(
-          "createFinalPr repo={} exec={} failed: {}", repoFullName, executionRunId, e.getMessage());
+      try {
+        PullRequestRecord record =
+            prRecordService.recordCreated(null, repoId, repoFullName, prUrl, head, null);
+        if (record != null) return FinalPrResult.created(record);
+      } catch (RuntimeException persistenceFailure) {
+        log.warn(
+            "createFinalPr repo={} exec={} PR={} record persistence failed: {}",
+            repoFullName,
+            executionRunId,
+            prUrl,
+            persistenceFailure.getMessage());
+      }
       return FinalPrResult.blocked(
-          "EXECUTION_FINAL_PR_CREATE_FAILED",
-          "PR_CREATION",
-          e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage(),
-          true,
-          "Check repository credentials, branch protection, and GitHub availability, then retry.",
+          "EXECUTION_FINAL_PR_RECORD_FAILED",
+          "PR_STATE_PERSISTENCE",
+          "The pull request was created at " + prUrl + " but its durable record was not persisted",
+          false,
+          "Refresh or reconcile pull-request state; do not retry PR creation.",
           null);
+    } finally {
+      publicationAdmissions.stream()
+          .filter(java.util.Objects::nonNull)
+          .forEach(PublicationAdmissionService.Admission::close);
     }
-    try {
-      PullRequestRecord record =
-          prRecordService.recordCreated(null, repoId, repoFullName, prUrl, head, null);
-      if (record != null) return FinalPrResult.created(record);
-    } catch (RuntimeException persistenceFailure) {
-      log.warn(
-          "createFinalPr repo={} exec={} PR={} record persistence failed: {}",
-          repoFullName,
-          executionRunId,
-          prUrl,
-          persistenceFailure.getMessage());
-    }
-    return FinalPrResult.blocked(
-        "EXECUTION_FINAL_PR_RECORD_FAILED",
-        "PR_STATE_PERSISTENCE",
-        "The pull request was created at " + prUrl + " but its durable record was not persisted",
-        false,
-        "Refresh or reconcile pull-request state; do not retry PR creation.",
-        null);
   }
 }

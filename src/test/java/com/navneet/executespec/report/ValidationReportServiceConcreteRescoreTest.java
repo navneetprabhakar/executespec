@@ -48,7 +48,11 @@ class ValidationReportServiceConcreteRescoreTest {
             .accuracyJson(
                 "{\"specAdherenceScore\":90,"
                     + "\"testCoverageLevel\":\"PARTIAL\","
-                    + "\"endpointCoverage\":{\"coveragePercent\":100}}")
+                    + "\"endpointCoverage\":{\"coveragePercent\":100},"
+                    + "\"endpointEvidenceStatus\":\"CITED\","
+                    + "\"endpointEvidenceLocations\":[\"src/main/java/example/Api.java:1\"],"
+                    + "\"testEvidenceStatus\":\"CITED\","
+                    + "\"testEvidenceLocations\":[\"src/test/java/example/ApiTest.java:1\"]}")
             .build();
     when(repository.findByRunId("run-1")).thenReturn(Optional.of(report));
     when(repository.save(any(ValidationReport.class)))

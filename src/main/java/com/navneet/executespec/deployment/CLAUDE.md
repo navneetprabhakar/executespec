@@ -4,7 +4,10 @@ Permanent deployment is publication, not preview. `PublicationAdmissionService` 
 workspace restoration and before strategy generation or cloud side effects. It requires a current
 V361 workspace-generation binding, explicit passing final build, execution-verified all-green
 tests, and exact parity between each user-approved continuation route and its fenced physical
-worker/reviewer attempts.
+worker/reviewer attempts. A successful admission also owns the run's durable publication lease;
+`DeploymentService` hands that exact lease to the virtual deployment thread, rechecks ownership
+before the pipeline starts, and closes it only after the asynchronous pipeline terminates. Any
+synchronous setup failure closes the lease before returning or propagating.
 For brownfield runs, `DeploymentService` then re-runs `BrownfieldHttpContractGuard` after workspace
 restoration and before Dockerfile generation, deployment persistence, Artifact Registry, or Cloud
 Run side effects. SCM and permanent deployment therefore share the same fail-closed compatibility

@@ -190,15 +190,17 @@ public class ValidationReportService {
       String accuracyGrade = null;
       String accuracyJson = null;
       if (accuracyReport != null) {
-        accuracyScore = accuracyReport.getSpecAdherenceScore();
-        accuracyGrade = accuracyReport.getOverallAccuracyGrade();
+        accuracyScore =
+            accuracyReport.hasCitedSpecEvidence() ? accuracyReport.getSpecAdherenceScore() : null;
+        accuracyGrade =
+            accuracyReport.hasCitedSpecEvidence() ? accuracyReport.getOverallAccuracyGrade() : null;
         try {
           accuracyJson = objectMapper.writeValueAsString(accuracyReport);
         } catch (Exception e) {
           log.warn("Failed to serialize AccuracyReport for run={}: {}", runId, e.getMessage());
         }
         // Include accuracy in checks_passed if score is high
-        if (accuracyScore != null && accuracyScore >= 80) {
+        if (accuracyReport.hasCitedSpecEvidence() && accuracyScore != null && accuracyScore >= 80) {
           checksPassed.add("ACCURACY_CHECK");
         }
       }
@@ -239,6 +241,7 @@ public class ValidationReportService {
       Integer endpointCoveragePercent =
           endpointCoverageApplicable
                   && accuracyReport != null
+                  && accuracyReport.hasCitedEndpointEvidence()
                   && accuracyReport.getEndpointCoverage() != null
               ? accuracyReport.getEndpointCoverage().getCoveragePercent()
               : null;
@@ -247,7 +250,9 @@ public class ValidationReportService {
       // mechanically capping at 50 on specs that legitimately needed no tests
       // (testCoverageLevel=GOOD/COMPREHENSIVE means "coverage matches what spec implied").
       String testCoverageLevel =
-          accuracyReport != null ? accuracyReport.getTestCoverageLevel() : null;
+          accuracyReport != null && accuracyReport.hasCitedTestEvidence()
+              ? accuracyReport.getTestCoverageLevel()
+              : null;
       boolean additiveFormula = additiveScoreEnabled();
       int verifiedScore =
           evidenceFailure != null
@@ -263,7 +268,8 @@ public class ValidationReportService {
                   filesGenerated,
                   input.bootVerification(),
                   additiveFormula,
-                  endpointCoverageApplicable);
+                  endpointCoverageApplicable,
+                  testCoverageLevelAdmissible(accuracyReport));
       verifiedScore = capScoreAtAdmittedSpecGaps(verifiedScore, accuracyReport);
       verifiedScore = capScoreWithoutIndependentFunctionalProof(verifiedScore, ts);
       ValidationReportScoreZeroCause.Evidence scoreZeroCause =
@@ -523,12 +529,13 @@ public class ValidationReportService {
     int passed = incomingPassed;
     List<ReportIssueDTO> issues = parseIssues(report.getIssuesJson());
     AccuracyReport persistedAccuracy = parseAccuracyReport(report);
-    ValidationVerificationLedgerBuilder.AccuracyFacts accuracy =
-        verificationLedgerBuilder.parseAccuracyFacts(report.getAccuracyJson());
+    ValidationAccuracyFacts accuracy =
+        ValidationAccuracyFacts.parse(objectMapper, report.getAccuracyJson());
     int criticals = verificationLedgerBuilder.countUnfixedCriticalIssues(issues);
     // A concrete runner returning 0/0 with no prior population is evidence that no tests were
     // executed. Do not fall back to an optimistic LLM coverage label from the original report.
-    String concreteCoverageLevel = total == 0 ? "NONE" : accuracy.testCoverageLevel();
+    String concreteCoverageLevel =
+        total == 0 ? "NONE" : accuracy.testCited() ? accuracy.testCoverageLevel() : null;
 
     report.setTestsTotal(total);
     report.setTestsPassed(passed);
@@ -560,12 +567,13 @@ public class ValidationReportService {
                         total,
                         report.getReviewerVerdict(),
                         criticals,
-                        accuracy.endpointCoverage(),
+                        accuracy.endpointCited() ? accuracy.endpointCoverage() : null,
                         concreteCoverageLevel,
                         report.getFilesGenerated(),
                         bootVerification(report),
                         additiveFormula,
-                        endpointCoverageApplicable(report.getRuntimeSurface())),
+                        endpointCoverageApplicable(report.getRuntimeSurface()),
+                        accuracy.testCoverageLevel() == null || accuracy.testCited()),
                     persistedAccuracy),
                 summary);
     ValidationReportScoreZeroCause.Evidence scoreZeroCause =
@@ -595,7 +603,7 @@ public class ValidationReportService {
                         total,
                         report.getReviewerVerdict(),
                         criticals,
-                        accuracy.endpointCoverage(),
+                        accuracy.endpointCited() ? accuracy.endpointCoverage() : null,
                         concreteCoverageLevel,
                         endpointCoverageApplicable(report.getRuntimeSurface())),
                     persistedAccuracy),
@@ -648,6 +656,15 @@ public class ValidationReportService {
       }
     }
     return accuracy;
+  }
+
+  private static boolean testCoverageLevelAdmissible(AccuracyReport accuracy) {
+    if (accuracy == null
+        || accuracy.getTestCoverageLevel() == null
+        || accuracy.getTestCoverageLevel().isBlank()) {
+      return true;
+    }
+    return accuracy.hasCitedTestEvidence();
   }
 
   private ExecutableVerificationEvidence executableVerification(
@@ -1006,7 +1023,7 @@ public class ValidationReportService {
    * reserved by {@link ValidationReportScorePolicy#capForAdmittedSpecGaps}.
    */
   static int capScoreAtAdmittedSpecGaps(int score, AccuracyReport accuracy) {
-    if (accuracy == null) return score;
+    if (accuracy == null || !accuracy.hasCitedSpecEvidence()) return score;
     return ValidationReportScorePolicy.capForAdmittedSpecGaps(
         score,
         accuracy.getSpecAdherenceScore(),
@@ -1633,6 +1650,34 @@ public class ValidationReportService {
       BootVerification bootVerification,
       boolean additiveFormula,
       boolean endpointCoverageApplicable) {
+    return computeVerifiedScoreForFormula(
+        finalBuildPassed,
+        testsPassed,
+        testsTotal,
+        reviewerVerdictName,
+        unfixedCriticalCount,
+        endpointCoveragePercent,
+        testCoverageLevel,
+        filesGenerated,
+        bootVerification,
+        additiveFormula,
+        endpointCoverageApplicable,
+        true);
+  }
+
+  int computeVerifiedScoreForFormula(
+      Boolean finalBuildPassed,
+      int testsPassed,
+      int testsTotal,
+      String reviewerVerdictName,
+      int unfixedCriticalCount,
+      Integer endpointCoveragePercent,
+      String testCoverageLevel,
+      int filesGenerated,
+      BootVerification bootVerification,
+      boolean additiveFormula,
+      boolean endpointCoverageApplicable,
+      boolean testCoverageJudgmentAdmissible) {
     if (!additiveFormula) {
       return computeVerifiedScoreMultiplicative(
           finalBuildPassed,
@@ -1657,7 +1702,8 @@ public class ValidationReportService {
         endpointCoveragePercent,
         gamingGuards,
         bootVerification,
-        endpointCoverageApplicable);
+        endpointCoverageApplicable,
+        testCoverageJudgmentAdmissible);
   }
 
   /**
@@ -1744,6 +1790,34 @@ public class ValidationReportService {
       boolean gamingGuards,
       BootVerification bootVerification,
       boolean endpointCoverageApplicable) {
+    return computeVerifiedScoreAdditive(
+        finalBuildPassed,
+        testsPassed,
+        testsTotal,
+        reviewerVerdictName,
+        unfixedCriticalCount,
+        testCoverageLevel,
+        filesGenerated,
+        endpointCoveragePercent,
+        gamingGuards,
+        bootVerification,
+        endpointCoverageApplicable,
+        true);
+  }
+
+  int computeVerifiedScoreAdditive(
+      Boolean finalBuildPassed,
+      int testsPassed,
+      int testsTotal,
+      String reviewerVerdictName,
+      int unfixedCriticalCount,
+      String testCoverageLevel,
+      int filesGenerated,
+      Integer endpointCoveragePercent,
+      boolean gamingGuards,
+      BootVerification bootVerification,
+      boolean endpointCoverageApplicable,
+      boolean testCoverageJudgmentAdmissible) {
     return ValidationReportScoreCalculator.additive(
         finalBuildPassed,
         testsPassed,
@@ -1755,7 +1829,8 @@ public class ValidationReportService {
         endpointCoveragePercent,
         gamingGuards,
         bootVerification,
-        endpointCoverageApplicable);
+        endpointCoverageApplicable,
+        testCoverageJudgmentAdmissible);
   }
 
   int computeVerifiedScoreAdditive(
