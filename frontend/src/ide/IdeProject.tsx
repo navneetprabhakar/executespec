@@ -9,6 +9,7 @@ import {LoadError} from '@/ide/LoadError';
 import {toLoadFailure, type LoadFailure} from '@/lib/loadState';
 import {isActiveRunStatus} from '@/lib/runStatus';
 import {explicitLinkedRepoSelection, repoSupports} from '@/ide/projectRepoUi';
+import {buildIdeComposeRunRequest} from '@/ide/ideComposeRunRequest';
 import {
   PRODUCT_PROVIDER_OPTIONS,
   providerIsDispatchable,
@@ -50,6 +51,8 @@ export default function IdeProject() {
   const [spec, setSpec] = useState('');
   const [provider, setProvider] = useState('ANTHROPIC');
   const [mode, setMode] = useState<'PROTOTYPE' | 'PRODUCTION'>('PRODUCTION');
+  const [confirmModelUpgrades, setConfirmModelUpgrades] = useState(false);
+  const [requireBenchmarkedUpgrades, setRequireBenchmarkedUpgrades] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const [loading, setLoading] = useState(true);
@@ -126,16 +129,24 @@ export default function IdeProject() {
     setBusy(true);
     setErr('');
     try {
-      const body: Parameters<typeof api.createRun>[0] = {
-        userRequest: spec.trim(),
-        aiProvider: provider,
-        executionMode: mode,
-        projectId,
-      };
       if (repos.length > 0 && selected.length === 0) {
         throw new Error('Select at least one linked repository before starting work.');
       }
-      if (selected.length) body.selectedRepoIds = selected;
+      const body = buildIdeComposeRunRequest({
+        spec,
+        provider,
+        mode,
+        projectId: projectId ?? null,
+        selectedRepoIds: selected,
+        costCap: 0,
+        tddMode: false,
+        confirmModelUpgrades,
+        requireBenchmarkedUpgrades,
+        startLowTasksOnCheapTier: false,
+        figmaUrl: '',
+        tier,
+        modelName: '',
+      });
       const res = await api.createRun(body);
       // RR-1519 — a PRODUCTION run pauses at AWAITING_APPROVAL, and IdeLive has no plan-gate
       // handling, so sending it to /live stranded the user on a live console for a run that is not
@@ -368,6 +379,36 @@ export default function IdeProject() {
           </select>
         </div>
       </div>
+      <details className='ide-compose-advanced' style={{marginBottom: 14}}>
+        <summary>Recovery policy for this run</summary>
+        <div className='ide-compose-options'>
+          <label
+            style={{display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer'}}
+          >
+            <input
+              type='checkbox'
+              checked={confirmModelUpgrades}
+              onChange={(e) => setConfirmModelUpgrades(e.target.checked)}
+            />
+            Confirm model or provider changes
+          </label>
+          <label
+            style={{display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer'}}
+          >
+            <input
+              type='checkbox'
+              checked={requireBenchmarkedUpgrades}
+              onChange={(e) => setRequireBenchmarkedUpgrades(e.target.checked)}
+            />
+            Require task-relevant benchmark evidence
+          </label>
+          <div style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}>
+            Automatic recovery can use one bounded model or provider change when both controls are
+            off. Enterprise runs remain limited to routes allowed by the organization model matrix.
+            Exact model pins never change route automatically.
+          </div>
+        </div>
+      </details>
       {err && <div style={{color: 'var(--ide-red)', fontSize: 13, marginBottom: 10}}>{err}</div>}
       <button
         className='ide-btn'

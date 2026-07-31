@@ -2,6 +2,12 @@
 
 `SpringHttpSurfaceExtractor` canonicalizes literal Spring servlet context, class mappings, method
 mappings, HTTP method arrays, slash variants, and source locations.
+It supports both a materialized workspace and an immutable map of repository-relative source
+bytes. Surface schema v2 includes explicit context-path configuration locations in the digest, so
+remote codemap generation preserves controller and configuration provenance without staging a
+temporary checkout.
+`SpringHttpSurfaceSnapshot` owns canonical ordering, route keys and digest construction separately
+from source parsing; provider prose never participates in that digest.
 `BrownfieldHttpContractGuard` stores the admitted surface/digest on `pipeline_run` (V360) and
 compares it after workers/corrections and before publication. It is also enforced inside
 `RunValidationKickoff`, so every normal, crash-resume, retry-validation, and re-review entrypoint

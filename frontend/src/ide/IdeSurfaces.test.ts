@@ -3,7 +3,7 @@ import {describe, expect, it} from 'vitest';
 import {buildIdeComposeRunRequest} from './ideComposeRunRequest';
 
 describe('buildIdeComposeRunRequest', () => {
-  it('omits the benchmark-prior override when the guard is unchecked', () => {
+  it('sends explicit run-level recovery authority when guards are unchecked', () => {
     const body = buildIdeComposeRunRequest({
       spec: ' fix the failing login test ',
       provider: 'ANTHROPIC',
@@ -21,7 +21,8 @@ describe('buildIdeComposeRunRequest', () => {
     });
 
     expect(body.userRequest).toBe('fix the failing login test');
-    expect(body.requireBenchmarkPriorForAutomaticContinuation).toBeUndefined();
+    expect(body.requireConfirmationBeforeExpensiveContinuation).toBe(false);
+    expect(body.requireBenchmarkPriorForAutomaticContinuation).toBe(false);
     expect(body.lowComplexityWorkerStartTier).toBeUndefined();
   });
 

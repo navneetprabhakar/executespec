@@ -3,11 +3,8 @@ package com.navneet.executespec.contractsurface;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.security.MessageDigest;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -33,6 +30,7 @@ import com.github.javaparser.ast.expr.NormalAnnotationExpr;
 import com.github.javaparser.ast.expr.SingleMemberAnnotationExpr;
 import com.github.javaparser.ast.expr.StringLiteralExpr;
 import com.github.javaparser.ast.nodeTypes.NodeWithAnnotations;
+import com.navneet.executespec.contractsurface.SpringHttpSurfaceSnapshot.ConfigurationSource;
 
 import org.springframework.stereotype.Component;
 
@@ -76,22 +74,68 @@ public class SpringHttpSurfaceExtractor {
           "tests",
           "generated");
 
-  public SurfaceSnapshot extract(Path workspaceRoot) {
+  public SpringHttpSurfaceSnapshot extract(Path workspaceRoot) {
     if (workspaceRoot == null || !Files.isDirectory(workspaceRoot)) {
-      return SurfaceSnapshot.of(List.of());
+      return SpringHttpSurfaceSnapshot.of(List.of(), List.of());
     }
     List<ParsedSource> sources = parseProductionSources(workspaceRoot);
     rejectComposedMappings(workspaceRoot, sources);
-    Map<Path, String> contextPaths = new LinkedHashMap<>();
+    Map<Path, ContextPath> contextPaths = new LinkedHashMap<>();
+    List<ConfigurationSource> configurationSources = new ArrayList<>();
     List<Route> routes = new ArrayList<>();
     for (ParsedSource source : sources) {
       Path moduleRoot = moduleRoot(workspaceRoot, source.path());
-      String contextPath =
+      ContextPath contextPath =
           contextPaths.computeIfAbsent(
               moduleRoot, ignored -> findContextPath(workspaceRoot, moduleRoot));
-      extractCompilationUnit(workspaceRoot, source, contextPath, routes);
+      configurationSources.addAll(contextPath.sources());
+      extractCompilationUnit(workspaceRoot, source, contextPath.value(), routes);
     }
-    return SurfaceSnapshot.of(routes);
+    return SpringHttpSurfaceSnapshot.of(routes, configurationSources);
+  }
+
+  /**
+   * Extracts the same canonical surface from an immutable, caller-supplied source snapshot.
+   *
+   * <p>The map key is the repository-relative path and the value is the exact file content read at
+   * one source revision. This is the remote-repository companion to {@link #extract(Path)}: it lets
+   * codemap generation reuse the brownfield extractor without writing a temporary checkout or
+   * silently dropping servlet configuration provenance.
+   */
+  public SpringHttpSurfaceSnapshot extract(Map<String, String> sourceSnapshot) {
+    if (sourceSnapshot == null || sourceSnapshot.isEmpty()) {
+      return SpringHttpSurfaceSnapshot.of(List.of(), List.of());
+    }
+    Path root = Path.of("/");
+    List<ParsedSource> sources = new ArrayList<>();
+    sourceSnapshot.entrySet().stream()
+        .filter(entry -> entry.getKey() != null && entry.getKey().endsWith(".java"))
+        .filter(entry -> isProductionRelativePath(entry.getKey()))
+        .sorted(Map.Entry.comparingByKey())
+        .forEach(
+            entry -> {
+              try {
+                sources.add(
+                    new ParsedSource(
+                        root.resolve(entry.getKey()), StaticJavaParser.parse(entry.getValue())));
+              } catch (ParseProblemException failure) {
+                throw new SurfaceExtractionException(
+                    "could not parse Spring source " + entry.getKey(), failure);
+              }
+            });
+    rejectComposedMappings(root, sources);
+    Map<Path, ContextPath> contextPaths = new LinkedHashMap<>();
+    List<ConfigurationSource> configurationSources = new ArrayList<>();
+    List<Route> routes = new ArrayList<>();
+    for (ParsedSource source : sources) {
+      Path moduleRoot = moduleRoot(root, source.path());
+      ContextPath contextPath =
+          contextPaths.computeIfAbsent(
+              moduleRoot, ignored -> findContextPath(root, moduleRoot, sourceSnapshot));
+      configurationSources.addAll(contextPath.sources());
+      extractCompilationUnit(root, source, contextPath.value(), routes);
+    }
+    return SpringHttpSurfaceSnapshot.of(routes, configurationSources);
   }
 
   private static List<ParsedSource> parseProductionSources(Path root) {
@@ -308,7 +352,7 @@ public class SpringHttpSurfaceExtractor {
     return workspaceRoot;
   }
 
-  private static String findContextPath(Path workspaceRoot, Path moduleRoot) {
+  private static ContextPath findContextPath(Path workspaceRoot, Path moduleRoot) {
     List<Path> candidates = new ArrayList<>();
     try (Stream<Path> files = Files.walk(moduleRoot, 10)) {
       files
@@ -321,17 +365,27 @@ public class SpringHttpSurfaceExtractor {
     } catch (IOException e) {
       throw new SurfaceExtractionException("could not inspect Spring configuration", e);
     }
-    Map<String, Path> configuredPaths = new LinkedHashMap<>();
+    Map<String, ConfigurationSource> configuredPaths = new LinkedHashMap<>();
     for (Path candidate : candidates) {
       try {
         String content = Files.readString(candidate);
         Matcher properties = PROPERTIES_CONTEXT.matcher(content);
         while (properties.find()) {
-          registerContextPath(workspaceRoot, candidate, properties.group(1), configuredPaths);
+          registerContextPath(
+              workspaceRoot,
+              candidate,
+              properties.group(1),
+              lineAt(content, properties.start()),
+              configuredPaths);
         }
         Matcher yaml = YAML_CONTEXT.matcher(content);
         while (yaml.find()) {
-          registerContextPath(workspaceRoot, candidate, yaml.group(1), configuredPaths);
+          registerContextPath(
+              workspaceRoot,
+              candidate,
+              yaml.group(1),
+              lineAt(content, yaml.start(1)),
+              configuredPaths);
         }
       } catch (IOException e) {
         throw new SurfaceExtractionException(
@@ -345,7 +399,52 @@ public class SpringHttpSurfaceExtractor {
               + ": "
               + configuredPaths.keySet());
     }
-    return configuredPaths.keySet().stream().findFirst().orElse("/");
+    String value = configuredPaths.keySet().stream().findFirst().orElse("/");
+    return new ContextPath(value, List.copyOf(configuredPaths.values()));
+  }
+
+  private static ContextPath findContextPath(
+      Path workspaceRoot, Path moduleRoot, Map<String, String> sourceSnapshot) {
+    Map<String, ConfigurationSource> configuredPaths = new LinkedHashMap<>();
+    sourceSnapshot.entrySet().stream()
+        .filter(entry -> isApplicationConfiguration(Path.of(entry.getKey())))
+        .filter(entry -> isProductionRelativePath(entry.getKey()))
+        .filter(
+            entry ->
+                moduleRoot.equals(
+                    resourceModuleRoot(workspaceRoot, workspaceRoot.resolve(entry.getKey()))))
+        .sorted(Map.Entry.comparingByKey())
+        .forEach(
+            entry -> {
+              String content = entry.getValue();
+              Matcher properties = PROPERTIES_CONTEXT.matcher(content);
+              while (properties.find()) {
+                registerContextPath(
+                    workspaceRoot,
+                    workspaceRoot.resolve(entry.getKey()),
+                    properties.group(1),
+                    lineAt(content, properties.start()),
+                    configuredPaths);
+              }
+              Matcher yaml = YAML_CONTEXT.matcher(content);
+              while (yaml.find()) {
+                registerContextPath(
+                    workspaceRoot,
+                    workspaceRoot.resolve(entry.getKey()),
+                    yaml.group(1),
+                    lineAt(content, yaml.start(1)),
+                    configuredPaths);
+              }
+            });
+    if (configuredPaths.size() > 1) {
+      throw new SurfaceExtractionException(
+          "ambiguous server.servlet.context-path values for module "
+              + relative(workspaceRoot, moduleRoot)
+              + ": "
+              + configuredPaths.keySet());
+    }
+    String value = configuredPaths.keySet().stream().findFirst().orElse("/");
+    return new ContextPath(value, List.copyOf(configuredPaths.values()));
   }
 
   private static Path resourceModuleRoot(Path workspaceRoot, Path configuration) {
@@ -361,13 +460,38 @@ public class SpringHttpSurfaceExtractor {
   }
 
   private static void registerContextPath(
-      Path root, Path file, String raw, Map<String, Path> configuredPaths) {
+      Path root,
+      Path file,
+      String raw,
+      int line,
+      Map<String, ConfigurationSource> configuredPaths) {
     String value = unquote(raw.strip());
     if (value.isBlank() || value.contains("${") || value.contains("#{")) {
       throw new SurfaceExtractionException(
           "dynamic or empty server.servlet.context-path in " + relative(root, file));
     }
-    configuredPaths.putIfAbsent(normalizePath(value), file);
+    String canonical = normalizePath(value);
+    configuredPaths.putIfAbsent(
+        canonical,
+        new ConfigurationSource(
+            relative(root, file) + ":" + line, "server.servlet.context-path", canonical));
+  }
+
+  private static int lineAt(String content, int offset) {
+    int line = 1;
+    for (int i = 0; i < Math.min(offset, content.length()); i++) {
+      if (content.charAt(i) == '\n') line++;
+    }
+    return line;
+  }
+
+  private static boolean isProductionRelativePath(String rawPath) {
+    Path path = Path.of(rawPath.replace('\\', '/'));
+    for (Path segment : path) {
+      if (EXCLUDED_SEGMENTS.contains(segment.toString().toLowerCase(Locale.ROOT))) return false;
+    }
+    String normalized = rawPath.replace('\\', '/').toLowerCase(Locale.ROOT);
+    return !normalized.contains("/src/test/") && !normalized.startsWith("src/test/");
   }
 
   private static boolean isApplicationConfiguration(Path path) {
@@ -426,6 +550,8 @@ public class SpringHttpSurfaceExtractor {
 
   private record ParsedSource(Path path, CompilationUnit compilationUnit) {}
 
+  private record ContextPath(String value, List<ConfigurationSource> sources) {}
+
   public record Route(String method, String path, String source) {
     public Route {
       method = method == null ? "ANY" : method.toUpperCase(Locale.ROOT);
@@ -448,40 +574,6 @@ public class SpringHttpSurfaceExtractor {
     public int compareTo(RouteKey other) {
       int methodOrder = method.compareTo(other.method);
       return methodOrder != 0 ? methodOrder : path.compareTo(other.path);
-    }
-  }
-
-  public record SurfaceSnapshot(int schemaVersion, List<Route> routes, String digest) {
-    static SurfaceSnapshot of(List<Route> discovered) {
-      List<Route> canonical =
-          discovered.stream()
-              .sorted(
-                  Comparator.comparing(Route::method)
-                      .thenComparing(Route::path)
-                      .thenComparing(Route::source))
-              .distinct()
-              .toList();
-      return new SurfaceSnapshot(1, canonical, sha256(canonical));
-    }
-
-    public Set<RouteKey> keys() {
-      Set<RouteKey> keys = new LinkedHashSet<>();
-      routes.forEach(route -> keys.add(route.key()));
-      return Set.copyOf(keys);
-    }
-
-    private static String sha256(List<Route> routes) {
-      try {
-        MessageDigest digest = MessageDigest.getInstance("SHA-256");
-        for (Route route : routes) {
-          digest.update(
-              (route.method() + "\t" + route.path() + "\t" + route.source() + "\n")
-                  .getBytes(java.nio.charset.StandardCharsets.UTF_8));
-        }
-        return java.util.HexFormat.of().formatHex(digest.digest());
-      } catch (java.security.NoSuchAlgorithmException impossible) {
-        throw new IllegalStateException("SHA-256 unavailable", impossible);
-      }
     }
   }
 

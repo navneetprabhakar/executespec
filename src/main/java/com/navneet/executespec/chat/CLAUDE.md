@@ -61,8 +61,11 @@ The line-ceiling remediation extracted `ChatHistoryCodec` and `RunChatTurnExecut
 changing the chat API, durable execution-context budgets, model route, or tool authority. Do not
 put storage or provider-turn responsibility back into the orchestration service.
 
-`ApplyService` publishes correction edits only through `ScmPushService.pushApplyChanges`. Its
-aggregate and each `ApplyRepoOutcome` retain a stable code, blocking gate, retryability, and
-remediation. Mixed multi-repository results are `SCM_APPLY_PUSH_PARTIAL`; all-failed results are
-`SCM_APPLY_PUSH_FAILED`. Neither shape may claim publication eligibility merely because Git was
-attempted.
+`ApplyService` is fail-closed behind `correction.transactional-apply.enabled`; V368 force-sets that
+platform flag to false even when a stale row was previously true. Do not enable it until Apply uses
+the checkpoint → evidence invalidation → deterministic gates → read-only review → accept/rollback
+lifecycle. The dormant legacy implementation publishes edits only through
+`ScmPushService.pushApplyChanges`; its aggregate and each `ApplyRepoOutcome` retain a stable code,
+blocking gate, retryability, and remediation. Mixed multi-repository results are
+`SCM_APPLY_PUSH_PARTIAL`; all-failed results are `SCM_APPLY_PUSH_FAILED`. Neither shape may claim
+publication eligibility merely because Git was attempted.

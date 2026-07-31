@@ -16,7 +16,6 @@ import com.navneet.executespec.config.AgentProperties;
 import com.navneet.executespec.contracts.gate.PlanContractGateReport;
 import com.navneet.executespec.contracts.gate.PlanContractGateReportRepository;
 import com.navneet.executespec.contractsurface.SpringHttpSurfaceExtractor.RouteKey;
-import com.navneet.executespec.contractsurface.SpringHttpSurfaceExtractor.SurfaceSnapshot;
 import com.navneet.executespec.harness.entity.GateRecord;
 import com.navneet.executespec.harness.repository.GateRepository;
 import com.navneet.executespec.integration.DecisionEvidenceV1;
@@ -58,7 +57,7 @@ public class BrownfieldHttpContractGuard {
       bindDurably(run, existing);
       return existing;
     }
-    SurfaceSnapshot snapshot = extractor.extract(workspaceRoot);
+    SpringHttpSurfaceSnapshot snapshot = extractor.extract(workspaceRoot);
     BaselineEnvelope envelope = new BaselineEnvelope(1, runId, snapshot);
     try {
       Files.createDirectories(snapshotPath.getParent());
@@ -104,7 +103,7 @@ public class BrownfieldHttpContractGuard {
           "BROWNFIELD_BASELINE_IDENTITY_MISMATCH",
           "HTTP contract baseline belongs to a different run");
     }
-    SurfaceSnapshot current = extractor.extract(workspaceRoot);
+    SpringHttpSurfaceSnapshot current = extractor.extract(workspaceRoot);
     Set<RouteKey> currentKeys = current.keys();
     List<RouteKey> missing =
         baseline.snapshot().keys().stream()
@@ -399,7 +398,8 @@ public class BrownfieldHttpContractGuard {
     }
   }
 
-  public record BaselineEnvelope(int schemaVersion, String runId, SurfaceSnapshot snapshot) {}
+  public record BaselineEnvelope(
+      int schemaVersion, String runId, SpringHttpSurfaceSnapshot snapshot) {}
 
   public record CompatibilityReport(
       String baselineDigest,

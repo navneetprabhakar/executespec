@@ -456,14 +456,16 @@ public class LlmExecutionPolicyFactory {
     String normalizedProvider = normalizeProvider(provider);
     ApiKeyResolver.CredentialOrigin origin = current.originFor(normalizedProvider);
     String embeddingPolicyEpoch =
-        "embedding-route-v1:"
+        "embedding-route-v2:"
             + normalizedProvider
             + ":"
             + String.valueOf(org.getKeySourceMode()).toUpperCase(Locale.ROOT)
             + ":"
             + (origin == null ? "PLATFORM_OR_NONE" : origin.name())
             + ":"
-            + Integer.toHexString(String.valueOf(org.getEnabledProviders()).hashCode());
+            + Integer.toHexString(String.valueOf(org.getEnabledProviders()).hashCode())
+            + ":actor:"
+            + stableIdentityComponent(actor);
     return createCustomer(
         LlmExecutionContext.ContextType.EMBEDDING_JOB,
         feature,
@@ -480,6 +482,27 @@ public class LlmExecutionPolicyFactory {
         LlmExecutionBudget.UNBOUNDED,
         embeddingPolicyEpoch,
         null);
+  }
+
+  /**
+   * Embedding contexts retain the initiating actor for truthful usage attribution. The actor must
+   * therefore be part of the idempotency namespace: otherwise a later project member refreshing the
+   * same repository/source tuple collides with the first member's immutable request fingerprint and
+   * fails before any file is inventoried. Keep the durable key opaque rather than persisting a user
+   * identifier in the route-policy label.
+   */
+  private static String stableIdentityComponent(String value) {
+    try {
+      java.security.MessageDigest digest = java.security.MessageDigest.getInstance("SHA-256");
+      return java.util.HexFormat.of()
+          .formatHex(
+              digest.digest(
+                  require(value, "embedding actor")
+                      .getBytes(java.nio.charset.StandardCharsets.UTF_8)))
+          .substring(0, 16);
+    } catch (java.security.NoSuchAlgorithmException impossible) {
+      throw new IllegalStateException("SHA-256 unavailable", impossible);
+    }
   }
 
   public LlmExecutionReference platformInternal(

@@ -215,7 +215,12 @@ public class ArchitectureDocGenerator {
         inTok,
         outTok,
         resolved.getModel());
-    return new Result(text.trim(), inTok, outTok, resolved.getModel());
+    return new Result(
+        DeterministicArchitectureEvidence.appendFromRepoDocs(
+            text.trim(), repoArchDocs, repoFullNames),
+        inTok,
+        outTok,
+        resolved.getModel());
   }
 
   private String buildPayload(
