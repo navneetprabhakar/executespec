@@ -35,6 +35,12 @@ turns separately from runs.
   and a turn replayed from `agent_turn.proposed_action_json` keeps the same contract after reload.
   The context is nullable for rows persisted before it existed; clients must treat absent context
   as unknown, never as confirmable.
+  Interrogative questions ABOUT code are never code changes (P1-3, 2026-08-01): a mutation
+  keyword counts only when at least one clause uses it outside an interrogative-information
+  context, so "which files implement the simulation logic?" routes read-only while polite
+  imperatives ("can you implement …") and mixed messages ("Explain X. Then implement Y") remain
+  confirmation-gated run proposals. The live dev misroute that produced a paid run card for that
+  exact question is pinned in the corpus (`read-0451`).
   Imperative code-generation vocabulary includes `build`; the exact request “i want to build a
   simple web ui todo app” must therefore become a cloud-run proposal with project context, or the
   typed project-selection blocker without it, never an inline model answer that can end at the
@@ -381,7 +387,7 @@ turns separately from runs.
 - `AgentIntentPatternsTest` pins route-vocabulary helpers directly: UUID/short-run-id extraction,
   read-only route precedence, vague-mutation target requirements, local git/shell action detection,
   and unsafe/no-edit phrase separation.
-- `AgentRoutingCorpusTest` loads `src/main/resources/orchestrator/routing-corpus.jsonl`, a 450-row
+- `AgentRoutingCorpusTest` loads `src/main/resources/orchestrator/routing-corpus.jsonl`, a 456-row
   deterministic corpus covering read-only, plan/review, code-change, lifecycle, ambiguous, and
   unsafe prompts. Rows marked `forbidRun` must keep `policy.runApiAllowed=false`, and every
   `CODE_RUN_REQUIRED` decision must require explicit confirmation.

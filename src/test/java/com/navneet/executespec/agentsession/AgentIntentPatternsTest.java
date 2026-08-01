@@ -81,4 +81,48 @@ class AgentIntentPatternsTest {
     return new InterpretIntentRequest(
         "session", "fix this", projectId, repo, new ClientCapabilities(true, true, true, true));
   }
+
+  @org.junit.jupiter.api.Test
+  void interrogativeQuestionsAboutCodeAreNotCodeChanges() {
+    // P1-3 (2026-08-01): this exact live phrasing produced a paid cloud-run proposal on dev.
+    org.assertj.core.api.Assertions.assertThat(
+            AgentIntentPatterns.looksLikeCodeChange(
+                "looking only at the montecarlo repository linked to this project: which files"
+                    + " implement the core simulation logic? name the exact file paths you can"
+                    + " actually see in the repository."))
+        .isFalse();
+    org.assertj.core.api.Assertions.assertThat(
+            AgentIntentPatterns.looksLikeCodeChange("what implements the retry backoff?"))
+        .isFalse();
+    org.assertj.core.api.Assertions.assertThat(
+            AgentIntentPatterns.looksLikeCodeChange("where is the payment webhook added?"))
+        .isFalse();
+    org.assertj.core.api.Assertions.assertThat(
+            AgentIntentPatterns.looksLikeCodeChange("which class creates the jwt tokens?"))
+        .isFalse();
+    // Interrogative questions about code route to the grounded read-only surface, not bare chat.
+    org.assertj.core.api.Assertions.assertThat(
+            AgentIntentPatterns.looksLikeReadOnlyCodeHelp("which files implement the simulation?"))
+        .isTrue();
+  }
+
+  @org.junit.jupiter.api.Test
+  void imperativeAndPoliteMutationRequestsRemainCodeChanges() {
+    org.assertj.core.api.Assertions.assertThat(
+            AgentIntentPatterns.looksLikeCodeChange("can you implement the retry backoff?"))
+        .isTrue();
+    org.assertj.core.api.Assertions.assertThat(
+            AgentIntentPatterns.looksLikeCodeChange(
+                "explain the auth flow. then implement rate limiting on the login endpoint."))
+        .isTrue();
+    org.assertj.core.api.Assertions.assertThat(
+            AgentIntentPatterns.looksLikeCodeChange("i want to build a simple web ui todo app"))
+        .isTrue();
+    org.assertj.core.api.Assertions.assertThat(
+            AgentIntentPatterns.looksLikeCodeChange("add a check that the user is active"))
+        .isTrue();
+    org.assertj.core.api.Assertions.assertThat(
+            AgentIntentPatterns.looksLikeCodeChange("please fix the failing login test"))
+        .isTrue();
+  }
 }
