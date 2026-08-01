@@ -313,6 +313,20 @@ public class AuthService {
       throw new ResponseStatusException(
           HttpStatus.FORBIDDEN,
           "Account suspended. Contact support@executespec.ai if this is unexpected.");
+    } catch (org.springframework.security.authentication.InternalAuthenticationServiceException e) {
+      // P1-5 (2026-08-01): an infrastructure failure while LOADING the account — e.g. an
+      // encrypted credential column that no longer decrypts (key rotation, crypto disabled) —
+      // surfaces here, not as BadCredentialsException. Reporting it as "Invalid credentials"
+      // told users their password was wrong when the platform could not read their row at all.
+      // The cause is logged for operators; the response says the account, not the password.
+      log.error(
+          "Login infrastructure failure while loading account (NOT a bad password): {}",
+          e.getMessage(),
+          e);
+      throw new ResponseStatusException(
+          HttpStatus.SERVICE_UNAVAILABLE,
+          "Your account could not be loaded due to a server-side problem — your password was NOT"
+              + " rejected. Please try again later or contact support@executespec.ai.");
     } catch (Exception e) {
       throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid credentials");
     }
