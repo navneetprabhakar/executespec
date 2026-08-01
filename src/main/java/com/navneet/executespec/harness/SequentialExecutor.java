@@ -371,6 +371,10 @@ to boot — skip it for those.""";
   /** Canonical admitted-baseline product-diff evidence; nullable only in legacy unit tests. */
   private RunChangeEvidenceService runChangeEvidenceService;
 
+  // P1-4: nullable admitted-surface source for worker evidence; bounded test ctors leave it null.
+  private com.navneet.executespec.contractsurface.BrownfieldHttpContractGuard
+      brownfieldHttpContractGuard;
+
   /**
    * Legacy construction seam retained for focused unit tests. Production uses the fully injected
    * constructor below and always supplies {@link TaskStatusPersistenceService}.
@@ -477,7 +481,9 @@ to boot — skip it for those.""";
       com.navneet.executespec.engine.RepoOrientationService repoOrientationService,
       InitialRoutingService initialRoutingService,
       com.navneet.executespec.router.TaskOutcomeMetricService taskOutcomeMetricService,
-      RunChangeEvidenceService runChangeEvidenceService) {
+      RunChangeEvidenceService runChangeEvidenceService,
+      com.navneet.executespec.contractsurface.BrownfieldHttpContractGuard
+          brownfieldHttpContractGuard) {
     this(
         worker,
         buildProjectTool,
@@ -500,6 +506,7 @@ to boot — skip it for those.""";
     this.taskOutcomeMetricService = taskOutcomeMetricService;
     this.initialRoutingService = initialRoutingService;
     this.runChangeEvidenceService = runChangeEvidenceService;
+    this.brownfieldHttpContractGuard = brownfieldHttpContractGuard;
   }
 
   private final ConcurrentMap<String, AtomicInteger> continuationProviderSwitchesPerRun =
@@ -1855,33 +1862,17 @@ to boot — skip it for those.""";
             requestedProvider,
             requestedModel,
             req.localHandsMode());
-    String orientation =
-        (featureFlagService != null
-                && featureFlagService.isEnabled("worker.localization.enabled")
-                && repoOrientationService != null)
-            ? repoOrientationService.orient(
-                taskCtx.workspaceRoot(), task.title() + "\n" + task.description())
-            : "";
-    // task 12 — run-journal injection: plan outline + last few task outcomes, so this task is a
-    // MEMBER OF A RUN rather than an isolated job (naming/placement/interface choices stay
-    // globally coherent). Flag-gated; empty when off or first task.
-    String journalBlock =
-        (featureFlagService != null
-                && featureFlagService.isEnabled("execution.run-journal.enabled")
-                && runJournal != null
-                && !runJournal.isEmpty())
-            ? journalBlock(plan, runJournal)
-            : "";
     String workerEvidence =
-        PromptComposer.composeWorkerEvidence(
+        PromptComposer.assembleWorkerEvidence(
             task,
-            req.designBlock(),
+            req,
             refDocs,
-            req.workspaceSummary(),
-            orientation,
-            journalBlock,
-            req.plan(),
-            req.originalGoal());
+            runJournal,
+            plan,
+            featureFlagService,
+            repoOrientationService,
+            brownfieldHttpContractGuard,
+            taskCtx.workspaceRoot());
     String userPrompt = composeUserPrompt(task, null, workerEvidence);
     if (providerModelOverride != null
         && providerModelOverride.recoveryNote() != null

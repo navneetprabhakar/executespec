@@ -21,10 +21,11 @@ class AgentRoutingCorpusTest {
   void routingCorpusMeetsRequiredBucketsAndForbidRunCases() throws Exception {
     List<OrchestratorRoutingCorpus.Row> rows = OrchestratorRoutingCorpus.load(mapper);
 
-    assertThat(rows).hasSize(450);
-    assertThat(countPrefix(rows, "read-")).isEqualTo(100);
+    // P1-3 (2026-08-01) added 4 interrogative read rows + 2 imperative change rows.
+    assertThat(rows).hasSize(456);
+    assertThat(countPrefix(rows, "read-")).isEqualTo(104);
     assertThat(countPrefix(rows, "plan-review-")).isEqualTo(100);
-    assertThat(countPrefix(rows, "change-")).isEqualTo(100);
+    assertThat(countPrefix(rows, "change-")).isEqualTo(102);
     assertThat(countPrefix(rows, "lifecycle-")).isEqualTo(50);
     assertThat(countPrefix(rows, "ambiguous-")).isEqualTo(50);
     assertThat(countPrefix(rows, "security-")).isEqualTo(50);

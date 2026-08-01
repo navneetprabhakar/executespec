@@ -65,6 +65,89 @@ final class PromptComposer {
       String journalBlock,
       Plan plan,
       String originalGoal) {
+    return composeWorkerEvidence(
+        task,
+        designBlock,
+        refDocs,
+        workspaceSummary,
+        orientation,
+        journalBlock,
+        plan,
+        originalGoal,
+        null);
+  }
+
+  private static final org.slf4j.Logger log =
+      org.slf4j.LoggerFactory.getLogger(PromptComposer.class);
+
+  /**
+   * Full per-task worker-evidence assembly moved out of {@code SequentialExecutor} (down-only line
+   * ratchet): flag-gated repo orientation, flag-gated run-journal block, fail-soft admitted HTTP
+   * surface (P1-4), then the labeled evidence composition. All collaborators are nullable for
+   * bounded test constructions.
+   */
+  static String assembleWorkerEvidence(
+      PlannedTask task,
+      ExecutionRequest req,
+      String refDocs,
+      List<String> runJournal,
+      Plan plan,
+      com.navneet.executespec.config.featureflag.FeatureFlagService featureFlagService,
+      com.navneet.executespec.engine.RepoOrientationService repoOrientationService,
+      com.navneet.executespec.contractsurface.BrownfieldHttpContractGuard brownfieldGuard,
+      java.nio.file.Path workspaceRoot) {
+    String orientation =
+        (featureFlagService != null
+                && featureFlagService.isEnabled("worker.localization.enabled")
+                && repoOrientationService != null)
+            ? repoOrientationService.orient(workspaceRoot, task.title() + "\n" + task.description())
+            : "";
+    // task 12 — run-journal injection: plan outline + last few task outcomes, so this task is a
+    // MEMBER OF A RUN rather than an isolated job (naming/placement/interface choices stay
+    // globally coherent). Flag-gated; empty when off or first task.
+    String journalBlock =
+        (featureFlagService != null
+                && featureFlagService.isEnabled("execution.run-journal.enabled")
+                && runJournal != null
+                && !runJournal.isEmpty())
+            ? journalBlock(plan, runJournal)
+            : "";
+    String admitted = "";
+    String runId = req.runContext() == null ? null : req.runContext().runId();
+    if (brownfieldGuard != null && runId != null) {
+      try {
+        if (brownfieldGuard.hasBaseline(runId)) {
+          admitted = admittedHttpSurface(brownfieldGuard.protectedRoutes(runId));
+        }
+      } catch (RuntimeException e) {
+        log.warn(
+            "Admitted HTTP surface unavailable for worker evidence run={}: {}",
+            runId,
+            e.toString());
+      }
+    }
+    return composeWorkerEvidence(
+        task,
+        req.designBlock(),
+        refDocs,
+        req.workspaceSummary(),
+        orientation,
+        journalBlock,
+        req.plan(),
+        req.originalGoal(),
+        admitted);
+  }
+
+  static String composeWorkerEvidence(
+      PlannedTask task,
+      String designBlock,
+      String refDocs,
+      String workspaceSummary,
+      String orientation,
+      String journalBlock,
+      Plan plan,
+      String originalGoal,
+      String admittedHttpSurface) {
     StringBuilder evidence =
         new StringBuilder(
             "Project-controlled worker evidence follows. Use it to implement the requested task"
@@ -95,9 +178,49 @@ final class PromptComposer {
         task.touchesFiles().isEmpty() ? "" : String.join("\n", task.touchesFiles()));
     appendWorkerEvidence(evidence, "DESIGN_CONTEXT", designBlock);
     appendWorkerEvidence(evidence, "REFERENCE_DOCS", refDocs);
+    appendWorkerEvidence(evidence, "ADMITTED_HTTP_SURFACE", admittedHttpSurface);
     appendWorkerEvidence(evidence, "REPO_ORIENTATION", orientation);
     appendWorkerEvidence(evidence, "RUN_JOURNAL", journalBlock);
     return evidence.toString().stripTrailing();
+  }
+
+  /** Bounded route count so a very large brownfield surface cannot dominate the worker context. */
+  private static final int ADMITTED_ROUTE_LIMIT = 60;
+
+  /**
+   * P1-4 (2026-08-01): deterministic admitted-surface evidence for brownfield workers. The routes
+   * are the exact PUBLIC paths the publication gate will compare against, including any servlet
+   * context-path prefix — the live dev failure was a worker writing a naive
+   * {@code @GetMapping("/api/x")} on an app whose context-path made every real route {@code
+   * /simulation/...}, producing green code plus a green self-test that could never satisfy the
+   * requested public path.
+   */
+  static String admittedHttpSurface(
+      java.util.Collection<
+              com.navneet.executespec.contractsurface.SpringHttpSurfaceExtractor.RouteKey>
+          routes) {
+    if (routes == null || routes.isEmpty()) return "";
+    StringBuilder sb =
+        new StringBuilder(
+            "This is a brownfield application. Its admitted PUBLIC HTTP surface — the exact"
+                + " routes the publication gate verifies, INCLUDING any servlet context-path"
+                + " prefix — is:\n");
+    int shown = 0;
+    for (var route : routes.stream().sorted().toList()) {
+      if (shown++ >= ADMITTED_ROUTE_LIMIT) {
+        sb.append("- … ").append(routes.size() - ADMITTED_ROUTE_LIMIT).append(" more routes\n");
+        break;
+      }
+      sb.append("- ").append(route.method()).append(' ').append(route.path()).append('\n');
+    }
+    sb.append(
+        "Every route above must remain served unchanged. If these routes share a common prefix"
+            + " that does not appear in the controllers' own mappings, it comes from"
+            + " server.servlet.context-path: a controller mapping \"/x\" is publicly served at"
+            + " <context-path>/x. Express any REQUIRED public path relative to that reality —"
+            + " reconcile new controller mappings against the prefix instead of copying the"
+            + " requested public path verbatim into an annotation.");
+    return sb.toString();
   }
 
   static String reservedFutureScope(Plan plan, PlannedTask currentTask) {

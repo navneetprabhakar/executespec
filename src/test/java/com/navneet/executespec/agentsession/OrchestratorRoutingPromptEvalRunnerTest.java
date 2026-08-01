@@ -34,7 +34,8 @@ class OrchestratorRoutingPromptEvalRunnerTest {
             (provider, row) -> new ModelOutput("fake-" + provider, modelJson(row), 3),
             Instant.parse("2026-06-20T00:00:00Z"));
 
-    assertThat(report.results()).hasSize(900);
+    // 456 corpus rows × 2 prompt variants (P1-3 added 6 rows on 2026-08-01).
+    assertThat(report.results()).hasSize(912);
     assertThat(report.summaries()).hasSize(2);
     assertThat(report.markdownReport())
         .contains("# Orchestrator Routing Eval - 2026-06-20T00:00:00Z")
@@ -44,7 +45,7 @@ class OrchestratorRoutingPromptEvalRunnerTest {
                 + " Ambiguous-to-run | Accuracy |")
         .contains("## Failed Rows");
     for (var summary : report.summaries()) {
-      assertThat(summary.total()).isEqualTo(450);
+      assertThat(summary.total()).isEqualTo(456);
       assertThat(summary.schemaFailures()).isZero();
       assertThat(summary.runFalsePositives()).isZero();
       assertThat(summary.dangerousToRun()).isZero();
