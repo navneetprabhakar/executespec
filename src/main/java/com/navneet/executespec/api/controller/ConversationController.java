@@ -59,6 +59,8 @@ public class ConversationController {
 
   private final LlmRouter llmRouter;
   private final ModelRegistry modelRegistry;
+  private final com.navneet.executespec.executioncontext.LlmExecutionPolicyFactory
+      executionPolicyFactory;
 
   @PostMapping
   public ResponseEntity<ConversationResponse> chat(
@@ -111,6 +113,26 @@ public class ConversationController {
     // text seam. Supplying the provider and resolved model explicitly keeps this
     // short-lived conversation from inheriting a different account/run route.
     String model = modelRegistry.lightweightModelFor("anthropic");
+
+    // A1 (2026-08-01): every provider dispatch needs an explicit durable execution context. This
+    // endpoint still used the legacy context-free text seam, so the V282 dispatch guard refused
+    // it and "Improve request" returned HTTP 500 for every user on dev. Spec refinement is
+    // ordinary customer chat, so it takes the actor-attributed chat-turn contract the other chat
+    // surfaces use: usage is metered and BYOK/key policy is honoured rather than spending an
+    // unbounded platform-internal budget.
+    String turnId = java.util.UUID.randomUUID().toString();
+    var executionReference =
+        executionPolicyFactory.forChatTurn(
+            userDetails.getUser().getId(),
+            userDetails.getUser().getOrgId(),
+            null,
+            "conversation.preflight",
+            "conversation-preflight",
+            turnId,
+            "conversation-preflight:" + turnId,
+            "anthropic",
+            model,
+            null);
     // 4096 leaves room for a full consolidated spec on the "Use as spec" turn;
     // clarifying questions stop early so the higher cap costs nothing there.
     var response =
@@ -121,7 +143,9 @@ public class ConversationController {
             "conversation",
             "ConversationController",
             "conversation.preflight",
-            4096);
+            4096,
+            com.navneet.executespec.agent.LlmRequest.PromptCacheStrategy.DEFAULT,
+            executionReference);
 
     String reply = response.getResult().getOutput().getText();
     log.info("Conversation reply: {} chars", reply != null ? reply.length() : 0);
