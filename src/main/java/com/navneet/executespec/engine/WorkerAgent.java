@@ -414,6 +414,7 @@ public class WorkerAgent {
     final WorkerMutationEpochWatchdog mutationEpochWatchdog =
         terminalTaskMode ? null : new WorkerMutationEpochWatchdog();
     int textOnlyForcedRetries = 0;
+    boolean zeroWriteOutputCapRecoveryAttempted = false;
     boolean forceToolChoiceNextCall = false;
     // task 9 — context-overflow recovery attempts used (compactNow, then hard-trim, then ERROR).
     int overflowRecoveries = 0;
@@ -778,6 +779,7 @@ public class WorkerAgent {
         }
       }
       String assistantText = textBuf.toString();
+      boolean outputCapReached = WorkerZeroWriteOutputCapRecovery.reached(resp);
       if (!assistantText.isEmpty()) {
         lastText = assistantText;
         String assistantSignature = assistantText.replaceAll("\\s+", " ").trim();
@@ -819,6 +821,28 @@ public class WorkerAgent {
         // yet, give the model one more iteration to either call completeTask or make the next
         // concrete edit. If we've already spent the nudge, stop with STOPPED_WITHOUT_COMPLETE.
         WorkerCompletionPolicy.appendTextTurn(history, assistantText);
+        if (outputCapReached
+            && totalWriteCalls == 0
+            && req.zeroWriteSalvageEnabled()
+            && !zeroWriteOutputCapRecoveryAttempted) {
+          zeroWriteOutputCapRecoveryAttempted = true;
+          history.add(WorkerZeroWriteOutputCapRecovery.instruction());
+          toolLog.add("OUTPUT_CAP_ZERO_WRITE_RECOVERY -> ATTEMPTED");
+          WorkerResult recovered =
+              salvageAttempt(
+                  req,
+                  history,
+                  toolsDispatched,
+                  toolLog,
+                  start,
+                  salvageTools(req, true),
+                  "required",
+                  WorkerZeroWriteOutputCapRecovery.outputTokens(req.maxTokensPerCall()),
+                  iter,
+                  WorkerZeroWriteOutputCapRecovery.STEP_ID,
+                  WorkerZeroWriteOutputCapRecovery.SUMMARY);
+          if (recovered != null) return recovered;
+        }
         if (terminalVerifiedPass) {
           String summary =
               "terminal verifier-shaped check passed; preserving verified candidate"
@@ -1785,94 +1809,49 @@ public class WorkerAgent {
       long start,
       List<ToolCallback> tools,
       String toolChoice) {
-    if (WorkerLiveBudgetGuard.taskViolation(req, costTracker, req.workerStartedAtEpochMs())
-        != null) {
-      log.info("WorkerAgent SALVAGE refused: live task budget exhausted");
-      return null;
-    }
-    java.util.OptionalInt callTimeout = deadlineTimeoutSeconds(req);
-    if (callTimeout.isEmpty()) {
-      log.info("WorkerAgent SALVAGE refused: absolute deadline shutdown reserve reached");
-      return null;
-    }
-    ChatResponse resp;
-    try {
-      resp =
-          router.call(
-              WorkerLlmRequestFactory.create(
-                  req,
-                  history,
-                  "WorkerAgent",
-                  toolChoice == null ? "worker.salvage-auto" : "worker.salvage-" + toolChoice,
-                  0.0,
-                  req.maxTokensPerCall(),
-                  tools,
-                  toolChoice,
-                  callTimeout.getAsInt()));
-    } catch (Exception e) {
-      log.warn("WorkerAgent SALVAGE router error (toolChoice={}): {}", toolChoice, e.getMessage());
-      return null;
-    }
+    return salvageAttempt(
+        req,
+        history,
+        toolsDispatched,
+        toolLog,
+        start,
+        tools,
+        toolChoice,
+        req.maxTokensPerCall(),
+        maxIterations(req, DEFAULT_MAX_ITER),
+        toolChoice == null ? "worker.salvage-auto" : "worker.salvage-" + toolChoice,
+        "salvage: best-guess edit produced after iter-limit");
+  }
 
-    if (resp == null || resp.getResults() == null || resp.getResults().isEmpty()) return null;
-    AssistantMessage assistant = resp.getResults().get(0).getOutput();
-    List<AssistantMessage.ToolCall> calls = assistant.getToolCalls();
-    if (calls == null || calls.isEmpty()) {
-      log.info("WorkerAgent SALVAGE no tool calls produced — falling through to iter-limit");
-      return null;
-    }
-
-    // Dispatch each tool call from the salvage response. We accept writeFile, editFile, AND
-    // completeTask (the agent admitting it can't guess). Other tools dispatched but ignored
-    // (unlikely to fire at this stage given the prompt).
-    boolean wroteAnything = false;
-    String salvageSummary = null;
-    for (AssistantMessage.ToolCall tc : calls) {
-      if (CompleteTaskTool.NAME.equals(tc.name())) {
-        salvageSummary = "salvage path: " + extractSummary(tc.arguments());
-        log.info("WorkerAgent SALVAGE got completeTask: {}", salvageSummary);
-        recordTerminal(
-            WorkerResult.Outcome.ITERATION_LIMIT_EXCEEDED,
-            req,
-            maxIterations(req, DEFAULT_MAX_ITER));
-        return WorkerResult.builder()
-            .outcome(WorkerResult.Outcome.ITERATION_LIMIT_EXCEEDED)
-            .iterations(maxIterations(req, DEFAULT_MAX_ITER))
-            .toolCallsDispatched(toolsDispatched)
-            .completionSummary(salvageSummary)
-            .toolCallLog(toolLog)
-            .totalLatencyMs(System.currentTimeMillis() - start)
-            .build();
-      }
-      if (isWriteTool(tc.name())) {
-        // Salvage path only ever dispatches write/edit (both in ToolOutputCompactor.SKIP_TOOLS),
-        // so the isLast flag is don't-care; pass false for symmetry with the main loop.
-        String env = dispatchOne(tc, req, WorkerDispatchMode.NORMAL);
-        toolLog.add(
-            "SALVAGE "
-                + tc.name()
-                + " -> "
-                + (env != null && env.startsWith("{\"ok\":true") ? "OK" : "ERR"));
-        if (env != null && env.startsWith("{\"ok\":true")) wroteAnything = true;
-      }
-    }
-
-    if (wroteAnything) {
-      log.info("WorkerAgent SALVAGE produced an edit — returning COMPLETED (unverified)");
-      recordTerminal(WorkerResult.Outcome.COMPLETED, req, maxIterations(req, DEFAULT_MAX_ITER));
-      return WorkerResult.builder()
-          .outcome(WorkerResult.Outcome.COMPLETED)
-          .iterations(maxIterations(req, DEFAULT_MAX_ITER))
-          .toolCallsDispatched(toolsDispatched + calls.size())
-          .completionSummary("salvage: best-guess edit produced after iter-limit")
-          .toolCallLog(toolLog)
-          .totalLatencyMs(System.currentTimeMillis() - start)
-          // RR-260 — this best-guess edit is NOT a verified completion; flag it so the executor
-          // routes it through the smoke gate instead of promoting "file changed" to SUCCESS.
-          .salvagedUnverified(true)
-          .build();
-    }
-    return null;
+  private WorkerResult salvageAttempt(
+      WorkerTaskRequest req,
+      List<Message> history,
+      int toolsDispatched,
+      List<String> toolLog,
+      long start,
+      List<ToolCallback> tools,
+      String toolChoice,
+      Integer maxTokens,
+      int resultIterations,
+      String stepId,
+      String completionSummary) {
+    var config =
+        new WorkerSalvageAttempt.Config(
+            toolChoice, maxTokens, resultIterations, stepId, completionSummary);
+    return WorkerSalvageAttempt.execute(
+        req,
+        history,
+        toolsDispatched,
+        toolLog,
+        start,
+        tools,
+        config,
+        router,
+        costTracker,
+        deadlineTimeoutSeconds(req),
+        call -> dispatchOne(call, req, WorkerDispatchMode.NORMAL),
+        (outcome, iterations) -> recordTerminal(outcome, req, iterations),
+        objectMapper);
   }
 
   /**

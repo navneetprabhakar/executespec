@@ -37,8 +37,13 @@ public class BuildCommandResolver {
               + "(?:\\s*&&\\s*java\\s+[A-Za-z_$][A-Za-z0-9_$.]*)?$");
 
   public BuildCommand resolve(Path workspaceRoot, String plannerDeclaredCommand) {
-    Optional<BuildCommand> fullStack = inferDirectChildBuilds(workspaceRoot);
-    if (fullStack.isPresent()) return fullStack.get();
+    Path normalizedWorkspace = workspaceRoot.toAbsolutePath().normalize();
+    BuildRootDiscovery.Selection selection = BuildRootDiscovery.select(normalizedWorkspace);
+    if (!selection.roots().isEmpty()
+        && !(selection.roots().size() == 1
+            && selection.roots().getFirst().equals(normalizedWorkspace))) {
+      return commandForRoots(normalizedWorkspace, selection.roots());
+    }
 
     if (plannerDeclaredCommand != null && !plannerDeclaredCommand.isBlank()) {
       String cmd = normalizePython(plannerDeclaredCommand.trim());
@@ -54,56 +59,31 @@ public class BuildCommandResolver {
                 + " command={}",
             cmd);
       } else {
-        // Planner commands often assume the workspace IS the project (single-repo
-        // runs). For multi-repo Launches the real project sits under repos/<name>/ —
-        // if the workspace root has no recognisable marker but repos/ does, wrap
-        // the planner command with `cd` so it executes in the right directory.
-        String wrapped = wrapForReposSubdirIfNeeded(workspaceRoot, cmd);
         return BuildCommand.builder()
-            .command(wrapped)
+            .command(cmd)
             .timeoutSeconds(180)
             .sourceDescription("planner-declared")
+            .validationRoots(selection.roots())
             .build();
       }
     }
     // 1) Root markers (single-repo + V1-style runs)
-    Optional<BuildCommand> root = inferFromFramework(workspaceRoot);
-    if (root.isPresent()) return root.get();
-
-    // 2) Multi-repo convention: workspace/<runId>/repos/<name>/. Pick the first
-    //    subdir that has recognisable markers. If multiple repos build under
-    //    different stacks, chain them with &&.
-    Path reposDir = workspaceRoot.resolve("repos");
-    if (Files.isDirectory(reposDir)) {
-      java.util.List<String> parts = new java.util.ArrayList<>();
-      String source = null;
-      try (var stream = Files.list(reposDir)) {
-        for (Path repo : stream.filter(Files::isDirectory).toList()) {
-          Optional<BuildCommand> cmd = inferFromFramework(repo);
-          if (cmd.isEmpty()) continue;
-          // cd into the repo and run its native build.
-          parts.add("(cd " + repo.getFileName() + " && " + cmd.get().command() + ")");
-          if (source == null)
-            source = cmd.get().sourceDescription() + "@repos/" + repo.getFileName();
-        }
-      } catch (java.io.IOException e) {
-        log.warn(
-            "BuildCommandResolver: repos/ scan failed in {}: {}", workspaceRoot, e.getMessage());
-      }
-      if (!parts.isEmpty()) {
-        // The combined command runs from reposDir so the `cd <name>` segments work.
-        String combined = "cd repos && " + String.join(" && ", parts);
-        return BuildCommand.builder()
-            .command(combined)
-            .timeoutSeconds(300)
-            .sourceDescription(source)
-            .build();
-      }
+    Optional<BuildCommand> root = inferFromFramework(normalizedWorkspace);
+    if (root.isPresent()) {
+      BuildCommand command = root.get();
+      return BuildCommand.builder()
+          .command(command.command())
+          .timeoutSeconds(command.timeoutSeconds())
+          .sourceDescription(command.sourceDescription())
+          .validationRoots(selection.roots())
+          .build();
     }
 
     log.warn(
-        "BuildCommandResolver: no framework markers detected in {} or any repos/ subdir, "
-            + "falling back to no-op 'true' (smoke test will always pass)",
+        "BuildCommandResolver: {} in {}; falling back to unavailable no-op",
+        selection.ambiguous()
+            ? "multiple build roots exist but none contains a Git working-tree change"
+            : "no framework markers detected",
         workspaceRoot);
     return BuildCommand.builder()
         .command("true")
@@ -112,80 +92,27 @@ public class BuildCommandResolver {
         .build();
   }
 
-  private Optional<BuildCommand> inferDirectChildBuilds(Path workspaceRoot) {
-    if (workspaceRoot == null || hasAnyMarker(workspaceRoot) || !Files.isDirectory(workspaceRoot)) {
-      return Optional.empty();
-    }
+  private BuildCommand commandForRoots(Path workspaceRoot, java.util.List<Path> roots) {
     java.util.List<String> commands = new java.util.ArrayList<>();
     int timeout = 0;
-    try (var children = Files.list(workspaceRoot)) {
-      for (Path child : children.filter(Files::isDirectory).sorted().toList()) {
-        String name = child.getFileName().toString();
-        if (!name.matches("[A-Za-z0-9._-]+")) continue;
-        Optional<BuildCommand> command = inferFromFramework(child);
-        if (command.isEmpty()) continue;
-        commands.add("(cd " + name + " && " + command.get().command() + ")");
-        timeout += command.get().timeoutSeconds();
-      }
-    } catch (java.io.IOException e) {
-      log.warn(
-          "BuildCommandResolver: direct-child scan failed in {}: {}",
-          workspaceRoot,
-          e.getMessage());
-      return Optional.empty();
+    String firstSource = null;
+    for (Path root : roots) {
+      Optional<BuildCommand> command = inferFromFramework(root);
+      if (command.isEmpty()) continue;
+      String relative = workspaceRoot.relativize(root).toString().replace('\\', '/');
+      commands.add("(cd " + relative + " && " + command.get().command() + ")");
+      timeout += command.get().timeoutSeconds();
+      if (firstSource == null) firstSource = command.get().sourceDescription() + "@" + relative;
     }
-    if (commands.isEmpty()) return Optional.empty();
-    return Optional.of(
-        build(
-            String.join(" && ", commands),
-            Math.min(timeout, 600),
-            commands.size() == 1 ? "inferred:child-root" : "inferred:multi-root"));
-  }
-
-  /**
-   * Planner build commands (e.g. {@code "mvn -q -DskipTests compile"}) assume the workspace root IS
-   * the project. For multi-repo Launches that's false — the project lives at {@code repos/<name>/}.
-   * When the workspace root has no markers but a single {@code repos/*} subdir does, wrap the
-   * planner command with a {@code cd} so it runs in the right directory.
-   *
-   * <p>When multiple repos exist, prepend per-repo {@code cd} segments chained with {@code &&} so
-   * each runs its build. For zero repos under {@code repos/} the command is returned unchanged.
-   */
-  private String wrapForReposSubdirIfNeeded(Path workspaceRoot, String plannerCmd) {
-    // Workspace root already looks like a project — planner command will work as-is.
-    if (hasAnyMarker(workspaceRoot)) return plannerCmd;
-    Path reposDir = workspaceRoot.resolve("repos");
-    if (!Files.isDirectory(reposDir)) return plannerCmd;
-    try (var stream = Files.list(reposDir)) {
-      java.util.List<Path> buildableRepos =
-          stream.filter(Files::isDirectory).filter(this::hasAnyMarker).toList();
-      if (buildableRepos.isEmpty()) return plannerCmd;
-      if (buildableRepos.size() == 1) {
-        return "cd repos/" + buildableRepos.get(0).getFileName() + " && " + plannerCmd;
-      }
-      // Multiple repos — run the planner command in each; the harness reports
-      // non-zero exit if any fails.
-      java.util.List<String> parts = new java.util.ArrayList<>();
-      for (Path repo : buildableRepos) {
-        parts.add("(cd " + repo.getFileName() + " && " + plannerCmd + ")");
-      }
-      return "cd repos && " + String.join(" && ", parts);
-    } catch (java.io.IOException e) {
-      log.warn("wrapForReposSubdirIfNeeded: scan failed in {}: {}", workspaceRoot, e.getMessage());
-      return plannerCmd;
+    if (commands.isEmpty()) {
+      return build("true", 5, "fallback:no-op");
     }
-  }
-
-  private boolean hasAnyMarker(Path dir) {
-    return exists(dir, "pom.xml")
-        || exists(dir, "build.gradle")
-        || exists(dir, "build.gradle.kts")
-        || exists(dir, "Cargo.toml")
-        || exists(dir, "go.mod")
-        || exists(dir, "package.json")
-        || exists(dir, "pyproject.toml")
-        || exists(dir, "setup.py")
-        || exists(dir, "requirements.txt");
+    return BuildCommand.builder()
+        .command(String.join(" && ", commands))
+        .timeoutSeconds(Math.min(timeout, 1200))
+        .sourceDescription(commands.size() == 1 ? firstSource : "inferred:changed-multi-root")
+        .validationRoots(roots)
+        .build();
   }
 
   private Optional<BuildCommand> inferFromFramework(Path workspaceRoot) {
