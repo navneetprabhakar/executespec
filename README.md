@@ -558,7 +558,14 @@ Workers stop authorizing provider/tool turns after configured live task ceilings
 per-solve dollar cap is task-scoped. `worker.best-effort-max-task-cost-usd` and
 `worker.best-effort-max-task-total-tokens` optionally stop task spend and input+output tokens in the
 current JVM; both default to `-1` (disabled), and Terminal-Bench is exempt from these defaults.
-These are safety stops, not durable authorization boundaries: restart recovery does not yet hydrate
+Before a worker provider call, ExecuteSpec also reserves a conservative estimate of the complete
+next call against the run and task cost caps. Admission runs after managed routing and on failover,
+so it prices the effective provider/model rather than an earlier requested route. The estimate
+assumes uncached input with headroom and the requested maximum output; it reduces material one-call
+overshoot but is not an exact invoice guarantee because provider tokenization and cache results
+arrive after the response. Missing model pricing falls back to observed-spend enforcement rather
+than being treated as free. These are
+safety stops, not durable authorization boundaries: restart recovery does not yet hydrate
 `RunCostTracker` from `run_step_usage`. A successful build/test/shell check counts as progress
 once after a workspace mutation, but repeated verification against unchanged files cannot keep a
 worker alive indefinitely.

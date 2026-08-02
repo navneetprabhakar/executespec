@@ -122,14 +122,22 @@ Novel successful read/search/list/diff investigation resets that clock, while ot
 turns pause it; a completion-policy-refused `completeTask` therefore receives one response turn
 instead of being force-stopped. Terminal-Bench retains its separate shell/artifact-finalizer
 contract, including one shutdown-reserve provider-and-tool finalizer after the ordinary wall-clock
-cap while explicit cost/token ceilings still apply. Before another
-provider/tool turn, live task boundaries check task-scoped spend through
+cap while explicit cost/token ceilings still apply. Before another provider turn, the worker checks
+observed spend and carries both ceilings into the router. At the last common pre-transport seam,
+the router reserves a conservative projected cost for the complete next call (uncached input with
+headroom plus the requested maximum output) using the effective managed-AI or failover route.
+Normal, salvage, terminal-finalizer, and critic calls share that admission. Missing route pricing
+falls back to the observed-spend check with an explicit warning rather than becoming a zero-cost
+projection. Live task boundaries also check task-scoped spend through
 `RunCostTracker.snapshotTask`, wall clock, and optional
 `worker.best-effort-max-task-cost-usd` / `worker.best-effort-max-task-total-tokens` (both default
 `-1`, disabled; Terminal-Bench exempt). The cost/token stops are JVM-local diagnostics, not durable
-authorization: restart recovery does not hydrate `RunCostTracker` from `run_step_usage`, and one
-in-flight call may cross a configured stop. The mutation epoch is also in-memory and begins fresh
-after resume; neither mechanism claims a durable cross-JVM fence.
+authorization: restart recovery does not hydrate `RunCostTracker` from `run_step_usage`, and the
+projection cannot guarantee exact billing because provider tokenization/cache outcomes arrive only
+after the response. The mutation epoch is also in-memory and begins fresh after resume; neither
+mechanism claims a durable cross-JVM fence. An `ABORTED` executor persists task/usage evidence and
+terminates before brownfield extraction, lint, or reviewer calls, so a reached ceiling cannot be
+masked by a later validator failure or followed by more LLM spend.
 
 Tools (`tool/`): `readFile`, `writeFile`, `editFile`, `listFiles`, `searchFiles`, `shell`, `gitStatus`, `gitDiff`, `gitCommit`, `buildProject`, `runTests` (patch-mode only), plus `completeTask` for native termination. `gitStatus` and `gitDiff` resolve real Git working trees under `repos/<name>/` for project/multi-repo workspaces and label each result with its workspace-relative repo root; they do not review the outer run workspace as one greenfield `repos/` directory. `ToolRegistry.bindForWorker(ctx)` filters `gitCommit` from worker authority (auto-push happens at run-end via `ScmPushService.pushMultiRepo`). Remote workers advertise canonical capability profiles rather than the complete compatibility catalogue: released CLI local-hands gets 25 schemas and Terminal-Bench gets the 11 schemas its Harbor adapter implements; legacy aliases remain dispatchable for persisted/in-flight calls but are not model-visible.
 
@@ -1344,7 +1352,13 @@ the collaborator's own org. `cost/CostCapValues` is the single validated hard-co
 ±Infinity / out-of-band values are rejected at `StateStore.setUserCostCap` and at the agent
 confirmation gate, closing the `POST /api/orchestrator/turn/confirm` path that could disable the
 worker ceiling. `engine/WorkerAgent` evaluates the hard cap on EVERY iteration and no longer makes
-the deliberate over-cap Lever-B salvage call. `agent/ProviderDispatchAuthorization` is now the real
+the deliberate over-cap Lever-B salvage call. Its normal, salvage, terminal-finalizer, and critic
+requests carry the active ceilings into `LlmRouter`, which performs conservative projected-next-call
+admission after managed routing and again for an exact failover route so a full-history request is
+not knowingly dispatched when that physical route's estimated cost crosses the remaining cap.
+This remains an estimate rather than an exact provider-invoice guarantee; unpriced routes retain
+observed-spend enforcement and log that projection is unavailable.
+`agent/ProviderDispatchAuthorization` is now the real
 production boundary: `LlmRouter` and `project/rag/EmbeddingService` both call it instead of the
 router re-implementing the kill switch inline and the embedding transport having none.
 `executioncontext/LlmExecutionBudgetGate` (V316 `llm_execution_context.reserved_provider_calls`)

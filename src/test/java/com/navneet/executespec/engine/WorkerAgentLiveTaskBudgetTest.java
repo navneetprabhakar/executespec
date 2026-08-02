@@ -3,23 +3,29 @@ package com.navneet.executespec.engine;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.nio.file.Path;
+import java.util.Optional;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.navneet.executespec.agent.LlmRequest;
 import com.navneet.executespec.agent.LlmRouter;
 import com.navneet.executespec.context.ContextStore;
+import com.navneet.executespec.cost.ProjectedCallBudgetExceededException;
 import com.navneet.executespec.cost.RunCostTracker;
 import com.navneet.executespec.observability.Metrics;
 import com.navneet.executespec.sse.SseBroadcaster;
+import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
 import com.navneet.executespec.tool.ExecutionContext;
 import com.navneet.executespec.tool.Tool;
 import com.navneet.executespec.tool.ToolRegistry;
 
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.ai.chat.messages.AssistantMessage;
 
 class WorkerAgentLiveTaskBudgetTest {
@@ -178,6 +184,34 @@ class WorkerAgentLiveTaskBudgetTest {
     verify(router, never()).call(org.mockito.ArgumentMatchers.any());
   }
 
+  @Test
+  void workerMapsPhysicalRouteBudgetAdmissionToBudgetExceeded() {
+    RunCostTracker tracker = mock(RunCostTracker.class);
+    when(tracker.snapshot("run-budget"))
+        .thenReturn(new RunCostTracker.Snapshot(2_000_000, 30_000, 0, 0, 4.80, 56));
+    when(tracker.snapshotTask("run-budget", "T1"))
+        .thenReturn(new RunCostTracker.Snapshot(2_000_000, 30_000, 0, 0, 4.80, 56));
+    PipelineRun row = new PipelineRun();
+    row.setHardCapUsd(5.0);
+    PipelineRunRepository runRepo = mock(PipelineRunRepository.class);
+    when(runRepo.findById("run-budget")).thenReturn(Optional.of(row));
+    LlmRouter router = mock(LlmRouter.class);
+    when(router.call(org.mockito.ArgumentMatchers.any()))
+        .thenThrow(
+            new ProjectedCallBudgetExceededException(
+                "run hard cap $5.00 projected-call reserve would be exceeded"));
+    WorkerAgent agent = worker(tracker, router, mock(ToolRegistry.class), runRepo);
+
+    WorkerResult result =
+        agent.run(request(null, null).toBuilder().maxTokensPerCall(4_096).build());
+
+    assertThat(result.outcome()).isEqualTo(WorkerResult.Outcome.BUDGET_EXCEEDED);
+    assertThat(result.finalAssistantText()).contains("projected-call reserve");
+    ArgumentCaptor<LlmRequest> request = ArgumentCaptor.forClass(LlmRequest.class);
+    verify(router, times(1)).call(request.capture());
+    assertThat(request.getValue().runHardCapUsd()).isEqualTo(5.0);
+  }
+
   private static WorkerTaskRequest request(Long tokenCap, Double dollarCap) {
     return request(tokenCap, dollarCap, null);
   }
@@ -201,6 +235,14 @@ class WorkerAgentLiveTaskBudgetTest {
 
   private static WorkerAgent worker(
       RunCostTracker tracker, LlmRouter router, ToolRegistry registry) {
+    return worker(tracker, router, registry, mock(PipelineRunRepository.class));
+  }
+
+  private static WorkerAgent worker(
+      RunCostTracker tracker,
+      LlmRouter router,
+      ToolRegistry registry,
+      PipelineRunRepository runRepo) {
     return new WorkerAgent(
         router,
         registry,
@@ -208,7 +250,7 @@ class WorkerAgentLiveTaskBudgetTest {
         mock(ContextStore.class),
         mock(Metrics.class),
         tracker,
-        mock(PipelineRunRepository.class),
+        runRepo,
         mock(SseBroadcaster.class),
         null,
         null,

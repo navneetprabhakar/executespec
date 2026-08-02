@@ -10,6 +10,15 @@
   `RunCostTracker.saturatedInt(...)` only at a documented legacy INTEGER entity/DTO boundary.
   Active `RunDetail` reads may monotonically overlay a JVM-owned live snapshot over the persisted
   checkpoint; terminal detail always keeps the stored durable cost.
+- `ProjectedCallCostAdmission` invokes
+  `RunCostTracker.estimateConservativeCallCostUsd(...)` at `LlmRouter`'s last common pre-transport
+  seam. It therefore prices the effective managed-AI or failover provider/model, not the worker's
+  earlier requested route. The estimate is not an invoice fact: it prices input with 25% headroom
+  at the uncached rate (including Anthropic's cache-write multiplier) and reserves the requested
+  maximum output. Missing pricing returns an empty projection; callers retain observed-spend
+  enforcement and must never reinterpret absence as a proven zero-cost call. Normal, salvage,
+  terminal-finalizer, and critic worker requests carry the run/task ceilings through route changes;
+  the default-off provider-backed history/tool compactors remain outside this slice.
 - `run_step_usage` is the canonical physical-provider-attempt ledger. V243 created success-call
   rows; V283 adds durable execution-context, tenant, feature, actual key-source, status/error,
   attempt, latency, and safe provider-usage metadata fields. V293 adds immutable write-ahead
