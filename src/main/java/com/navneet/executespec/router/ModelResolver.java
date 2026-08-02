@@ -194,7 +194,8 @@ public class ModelResolver {
     ModelMatrixProperties.ProviderModels models =
         matrixProps.getProviders().get(provider.name().toLowerCase());
     if (models == null) {
-      throw new IllegalStateException("No model matrix config for provider: " + provider);
+      throw new ModelMatrixConfigurationException(
+          "No model matrix config for provider: " + provider);
     }
     // F3 — a run-scoped per-org override for this (provider, tier) cell wins over the YAML
     // default. Bound by the pipeline at run start (RunModelOverrides); absent for non-pipeline
@@ -203,11 +204,17 @@ public class ModelResolver {
     if (override != null) {
       return override;
     }
-    return switch (tier) {
-      case PLANNING -> models.getPlanning();
-      case WORKHORSE -> models.getWorkhorse();
-      case LIGHTWEIGHT -> models.getLightweight();
-    };
+    String configured =
+        switch (tier) {
+          case PLANNING -> models.getPlanning();
+          case WORKHORSE -> models.getWorkhorse();
+          case LIGHTWEIGHT -> models.getLightweight();
+        };
+    if (configured == null || configured.isBlank()) {
+      throw new ModelMatrixConfigurationException(
+          "No " + tier + " model matrix entry for provider: " + provider);
+    }
+    return configured;
   }
 
   /** Builds a resolved route in one place so all routing branches preserve the same metadata. */

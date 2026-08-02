@@ -2,6 +2,9 @@ package com.navneet.executespec.api;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.util.List;
@@ -9,6 +12,7 @@ import java.util.Optional;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.api.dto.RunDetail;
+import com.navneet.executespec.api.dto.RunSummary;
 import com.navneet.executespec.auth.repository.AppUserRepository;
 import com.navneet.executespec.auth.repository.ProjectRepository;
 import com.navneet.executespec.billing.repository.ManagedAiUsageEventRepository;
@@ -154,6 +158,21 @@ class RunDetailEffectiveRouteTest {
 
     assertThat(mapper().toDetail(active, List.of()).getActualCostUsd()).isEqualTo(0.75);
     assertThat(mapper().toDetail(active, List.of()).getActualCostUsd()).isEqualTo(0.25);
+    verify(runCostTracker, times(2)).liveSnapshot(RUN_ID);
+  }
+
+  @Test
+  void activeSummaryUsesOneLiveSnapshotForItsCostProjection() {
+    PipelineRun active = run("anthropic", null);
+    active.setStatus("WORKING");
+    active.setActualCostUsd(0.25);
+    when(runCostTracker.liveSnapshot(RUN_ID))
+        .thenReturn(Optional.of(new RunCostTracker.Snapshot(0, 0, 0, 0, 0.75, 0)));
+
+    RunSummary summary = mapper().toSummary(active);
+
+    assertThat(summary.actualCostUsd()).isEqualTo(0.75);
+    verify(runCostTracker).liveSnapshot(RUN_ID);
   }
 
   @Test
@@ -164,7 +183,11 @@ class RunDetailEffectiveRouteTest {
     when(runCostTracker.liveSnapshot(RUN_ID))
         .thenReturn(Optional.of(new RunCostTracker.Snapshot(0, 0, 0, 0, 0.90, 0)));
 
-    assertThat(mapper().toDetail(terminal, List.of()).getActualCostUsd()).isEqualTo(0.40);
+    RunDetail detail = mapper().toDetail(terminal, List.of());
+
+    assertThat(detail.getActualCostUsd()).isEqualTo(0.40);
+    assertThat(detail.getTerminalOutcome().impact().actualCostUsd()).isEqualTo(0.40);
+    verify(runCostTracker, never()).liveSnapshot(RUN_ID);
   }
 
   @Test

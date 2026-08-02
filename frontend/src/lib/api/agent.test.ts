@@ -311,6 +311,50 @@ describe('agent API SSE helpers', () => {
     expect(onErrorEvent).toHaveBeenCalledWith({message: 'provider exploded'});
   });
 
+  it('preserves a structured projected-budget error and classifies it as action required', async () => {
+    localStorage.setItem('access_token', 'test-token');
+    const encoder = new TextEncoder();
+    const onErrorEvent = vi.fn();
+    const budgetError = {
+      session_id: 's1',
+      turn_id: 't1',
+      code: 'PROJECTED_CALL_BUDGET_EXCEEDED',
+      category: 'ACTION_REQUIRED',
+      message: 'The next model call would exceed this session budget.',
+      retryable: true,
+      next_action: 'Increase the session cap, then retry.',
+      actual_cost_usd: 0.41,
+      cap_usd: 0.5,
+      projected_call_usd: 0.16,
+    };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(
+            new ReadableStream({
+              start(controller) {
+                controller.enqueue(
+                  encoder.encode(`event: error\ndata: ${JSON.stringify(budgetError)}\n\n`),
+                );
+                controller.close();
+              },
+            }),
+            {status: 200},
+          ),
+      ),
+    );
+
+    await expect(
+      streamAgentTurn('s1', {message: 'continue'}, {onErrorEvent}),
+    ).rejects.toMatchObject({
+      status: 422,
+      message:
+        'The next model call would exceed this session budget. Increase the session cap, then retry.',
+    });
+    expect(onErrorEvent).toHaveBeenCalledWith(budgetError);
+  });
+
   it('confirms a stored cloud-run proposal through the orchestrator endpoint', async () => {
     localStorage.setItem('access_token', 'test-token');
     const fetchMock = vi.fn(async () => {

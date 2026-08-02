@@ -63,6 +63,8 @@ final class PlanDocumentedCommandContractGate {
     Matcher command = commandPattern.matcher(evidence);
     while (command.find()) {
       if (isNegatedCommandMention(evidence, command.start())) continue;
+      if (isIncidentalRunnerListMention(
+          evidence, command.start(), command.start(1), command.group(1))) continue;
       String workingDirectory = workingDirectory(evidence, command.start());
       for (String rawToken : command.group(1).trim().split("\\s+")) {
         String token = cleanToken(rawToken);
@@ -280,5 +282,25 @@ final class PlanDocumentedCommandContractGate {
   private static boolean isNegatedCommandMention(String evidence, int commandStart) {
     String prefix = evidence.substring(Math.max(0, commandStart - 64), commandStart);
     return prefix.matches("(?is).*(?:do not|don't|never|must not)\\s+(?:use|run|invoke)\\s+$");
+  }
+
+  private static boolean isIncidentalRunnerListMention(
+      String evidence, int commandStart, int runnerEnd, String runnerSuffix) {
+    if (evidence == null || runnerSuffix == null) return false;
+    String suffix = runnerSuffix.stripLeading();
+    if (!(suffix.startsWith(",") || suffix.startsWith(")") || suffix.startsWith("]"))) {
+      return false;
+    }
+    int lineStart = evidence.lastIndexOf('\n', commandStart) + 1;
+    String commandPrefix = evidence.substring(lineStart, commandStart);
+    if (commandPrefix.matches("(?is).*\\b(?:run|use|invoke|execute)\\s*(?:\\(\\s*)?$"))
+      return false;
+
+    String listPrefix = evidence.substring(lineStart, runnerEnd);
+    int paren = listPrefix.lastIndexOf('(');
+    int bracket = listPrefix.lastIndexOf('[');
+    if (paren < 0 && bracket < 0) return false;
+    if (paren > bracket) return suffix.indexOf(')') >= 0;
+    return suffix.indexOf(']') >= 0;
   }
 }

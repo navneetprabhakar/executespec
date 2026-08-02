@@ -1,5 +1,5 @@
-import {useCallback, useEffect, useMemo, useState} from 'react';
-import {Link, useNavigate, useSearchParams} from 'react-router-dom';
+import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
+import {Link, useLocation, useNavigate, useSearchParams} from 'react-router-dom';
 import * as api from '@/lib/api';
 import {useAuthStore, selectNormalizedTier, selectIsSuperAdmin} from '@/stores/useAuthStore';
 import {useUiStore} from '@/stores/useUiStore';
@@ -266,6 +266,10 @@ function LinkRows({rows}: {rows: LinkRow[]}) {
 
 export function IdeAccount() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const [searchParams] = useSearchParams();
+  const notificationSectionRequested = searchParams.get('section') === 'notifications';
+  const handledNotificationLocation = useRef<string | null>(null);
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
   const tier = useAuthStore(selectNormalizedTier);
@@ -275,7 +279,7 @@ export function IdeAccount() {
   const [notifPrefs, setNotifPrefs] = useState<api.NotificationPrefRow[] | null>(null);
   const [notifFailure, setNotifFailure] = useState<LoadFailure | null>(null);
   const [notifBusy, setNotifBusy] = useState<string | null>(null);
-  const [notifOpen, setNotifOpen] = useState(false);
+  const [notifOpen, setNotifOpen] = useState(notificationSectionRequested);
   const [exporting, setExporting] = useState(false);
   const [dsarBusy, setDsarBusy] = useState(false);
   const [erasing, setErasing] = useState(false);
@@ -308,6 +312,29 @@ export function IdeAccount() {
       // D4: an empty list renders "No notification events to configure yet."
       .catch((e: unknown) => setNotifFailure(toLoadFailure(e)));
   }, []);
+
+  useEffect(() => {
+    if (!notificationSectionRequested) {
+      handledNotificationLocation.current = null;
+      return;
+    }
+    const navigationKey = `${location.key}:${location.pathname}${location.search}${location.hash}`;
+    if (handledNotificationLocation.current === navigationKey) return;
+    handledNotificationLocation.current = navigationKey;
+    setNotifOpen(true);
+    const frame = window.requestAnimationFrame(() => {
+      const section = document.getElementById('notification-preferences');
+      section?.scrollIntoView({behavior: 'smooth', block: 'start'});
+      section?.focus({preventScroll: true});
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [
+    location.hash,
+    location.key,
+    location.pathname,
+    location.search,
+    notificationSectionRequested,
+  ]);
 
   async function togglePref(eventType: string, channel: 'IN_APP' | 'EMAIL', enabled: boolean) {
     const key = `${eventType}:${channel}`;
@@ -584,6 +611,7 @@ export function IdeAccount() {
       </div>
 
       <button
+        id='notification-preferences'
         type='button'
         className='ide-h2'
         aria-expanded={notifOpen}
@@ -636,34 +664,48 @@ export function IdeAccount() {
                 </span>
                 <button
                   type='button'
+                  aria-label={`${notificationPreferenceLabel(row.eventType)} · ${notificationChannelLabel(row.channel)}`}
                   aria-pressed={row.enabled}
                   disabled={notifBusy === key}
                   onClick={() => togglePref(row.eventType, row.channel, !row.enabled)}
                   style={{
-                    position: 'relative',
-                    width: 38,
-                    height: 20,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    width: 44,
+                    height: 44,
                     flexShrink: 0,
-                    borderRadius: 999,
-                    border: '1px solid var(--ide-border)',
-                    background: row.enabled ? 'var(--ide-accent)' : 'var(--ide-bg-tab-inactive)',
+                    border: 'none',
+                    background: 'transparent',
                     cursor: notifBusy === key ? 'not-allowed' : 'pointer',
                     opacity: notifBusy === key ? 0.5 : 1,
-                    transition: 'background 0.15s',
                   }}
                 >
                   <span
                     style={{
-                      position: 'absolute',
-                      top: 1,
-                      left: row.enabled ? 18 : 1,
-                      width: 16,
-                      height: 16,
-                      borderRadius: '50%',
-                      background: '#fff',
-                      transition: 'left 0.15s',
+                      position: 'relative',
+                      display: 'block',
+                      width: 38,
+                      height: 20,
+                      borderRadius: 999,
+                      border: '1px solid var(--ide-border)',
+                      background: row.enabled ? 'var(--ide-accent)' : 'var(--ide-bg-tab-inactive)',
+                      transition: 'background 0.15s',
                     }}
-                  />
+                  >
+                    <span
+                      style={{
+                        position: 'absolute',
+                        top: 1,
+                        left: row.enabled ? 18 : 1,
+                        width: 16,
+                        height: 16,
+                        borderRadius: '50%',
+                        background: '#fff',
+                        transition: 'left 0.15s',
+                      }}
+                    />
+                  </span>
                 </button>
               </div>
             );

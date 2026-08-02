@@ -18,6 +18,7 @@ import com.navneet.executespec.auth.security.JwtUtil;
 import com.navneet.executespec.auth.service.AuthService;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.mock.web.MockFilterChain;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
@@ -84,6 +85,36 @@ class OAuthSuccessHandlerTest {
   }
 
   @Test
+  void filterAndSuccessHandlerRoundTripProtectedSettingsPathQueryAndHash() throws Exception {
+    OAuthSuccessHandler handler = handler("access-token", "refresh-token");
+    ReflectionTestUtils.setField(handler, "appReturnUrl", "http://localhost:5174/auth/callback");
+    String target = "/settings?section=notifications#notification-preferences";
+    MockHttpServletRequest authorizeRequest =
+        new MockHttpServletRequest("GET", "/api/auth/oauth2/authorize/google");
+    authorizeRequest.setParameter("redirect", target);
+    MockHttpServletResponse authorizeResponse = new MockHttpServletResponse();
+    new OAuthRedirectCookieFilter()
+        .doFilter(authorizeRequest, authorizeResponse, new MockFilterChain());
+    String setCookie = authorizeResponse.getHeader("Set-Cookie");
+    assertThat(setCookie).isNotNull();
+    String encodedCookieValue =
+        setCookie.substring(setCookie.indexOf('=') + 1, setCookie.indexOf(';'));
+
+    MockHttpServletRequest request = new MockHttpServletRequest();
+    request.setCookies(new Cookie(OAuthRedirectCookieFilter.COOKIE, encodedCookieValue));
+    MockHttpServletResponse response = new MockHttpServletResponse();
+
+    handler.onAuthenticationSuccess(request, response, authToken());
+
+    assertThat(response.getRedirectedUrl())
+        .isEqualTo(
+            "http://localhost:5174/auth/callback?oauth=1&redirect="
+                + URLEncoder.encode(target, StandardCharsets.UTF_8));
+    assertThat(response.getHeaders("Set-Cookie"))
+        .anySatisfy(cookie -> assertThat(cookie).contains("Max-Age=0"));
+  }
+
+  @Test
   void unsafeRedirectCookieIsClearedButNotForwarded() throws Exception {
     OAuthSuccessHandler handler = handler("access-token", "refresh-token");
     ReflectionTestUtils.setField(handler, "appReturnUrl", "http://localhost:5174/auth/callback");
@@ -97,6 +128,22 @@ class OAuthSuccessHandlerTest {
     handler.onAuthenticationSuccess(request, response, authToken());
 
     assertThat(response.getRedirectedUrl()).doesNotContain("redirect=");
+    assertThat(response.getHeaders("Set-Cookie"))
+        .anySatisfy(cookie -> assertThat(cookie).contains("Max-Age=0"));
+  }
+
+  @Test
+  void malformedRedirectCookieIsClearedWithoutFailingAuthentication() throws Exception {
+    OAuthSuccessHandler handler = handler("access-token", "refresh-token");
+    ReflectionTestUtils.setField(handler, "appReturnUrl", "http://localhost:5174/auth/callback");
+    MockHttpServletRequest request = new MockHttpServletRequest();
+    request.setCookies(new Cookie(OAuthRedirectCookieFilter.COOKIE, "%not-hex"));
+    MockHttpServletResponse response = new MockHttpServletResponse();
+
+    handler.onAuthenticationSuccess(request, response, authToken());
+
+    assertThat(response.getRedirectedUrl())
+        .isEqualTo("http://localhost:5174/auth/callback?oauth=1");
     assertThat(response.getHeaders("Set-Cookie"))
         .anySatisfy(cookie -> assertThat(cookie).contains("Max-Age=0"));
   }

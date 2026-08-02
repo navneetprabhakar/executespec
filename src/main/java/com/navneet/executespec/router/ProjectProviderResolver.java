@@ -6,7 +6,9 @@ import com.navneet.executespec.auth.entity.Project;
 import com.navneet.executespec.auth.repository.AppUserRepository;
 import com.navneet.executespec.auth.repository.ProjectRepository;
 
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.web.server.ResponseStatusException;
 
 import lombok.RequiredArgsConstructor;
 
@@ -49,24 +51,33 @@ public class ProjectProviderResolver {
 
   private LlmProvider resolveAccountPreference(String userId) {
     if (userId == null || userId.isBlank()) {
-      throw new IllegalStateException("project has no provider and no creator preference subject");
+      throw providerNotConfigured();
     }
     return appUserRepository
         .findById(userId)
         .map(user -> normalize(user.getPreferredAiProvider()))
-        .orElseThrow(() -> new IllegalStateException("project creator not found for routing"));
+        .orElseThrow(ProjectProviderResolver::providerNotConfigured);
   }
 
   private static LlmProvider normalize(String value) {
     if (value == null || value.isBlank()) {
-      throw new IllegalStateException("project provider is unset and account preference is blank");
+      throw providerNotConfigured();
     }
     String normalized = value.trim().toUpperCase(Locale.ROOT);
     if ("GOOGLE".equals(normalized)) normalized = "GEMINI";
     try {
       return LlmProvider.valueOf(normalized);
     } catch (IllegalArgumentException ignored) {
-      throw new IllegalStateException("invalid account provider preference: " + value);
+      throw new ResponseStatusException(
+          HttpStatus.CONFLICT,
+          "PROJECT_PROVIDER_INVALID: Choose a supported AI provider in project or account"
+              + " settings.");
     }
+  }
+
+  private static ResponseStatusException providerNotConfigured() {
+    return new ResponseStatusException(
+        HttpStatus.CONFLICT,
+        "PROJECT_PROVIDER_NOT_CONFIGURED: Choose an AI provider in project or account settings.");
   }
 }

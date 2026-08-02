@@ -108,7 +108,14 @@ export interface AgentStreamDone {
 export interface AgentStreamError {
   session_id?: string;
   turn_id?: string;
+  code?: string;
+  category?: 'ACTION_REQUIRED' | 'PLATFORM_FAILURE';
   message: string;
+  retryable?: boolean;
+  next_action?: string;
+  actual_cost_usd?: number;
+  cap_usd?: number;
+  projected_call_usd?: number;
 }
 
 export interface StreamAgentTurnHandlers {
@@ -257,7 +264,12 @@ export async function streamAgentTurn(
   // RR-1344 — a terminal `error` frame is a failure. Throw so the caller's
   // catch/recovery runs and it never falls through to a success/"done" path.
   if (terminalError.value) {
-    throw new ApiError(502, terminalError.value.message || 'The agent turn failed on the server.');
+    const status = terminalError.value.category === 'ACTION_REQUIRED' ? 422 : 502;
+    const action = terminalError.value.next_action ? ` ${terminalError.value.next_action}` : '';
+    throw new ApiError(
+      status,
+      `${terminalError.value.message || 'The agent turn failed on the server.'}${action}`,
+    );
   }
   // A proxy may reset the transport immediately after forwarding the authoritative `done`
   // frame. The persisted terminal event wins over that later read failure. Before `done`, the

@@ -461,6 +461,7 @@ describe('terminalFailureEvidence', () => {
     ).toEqual({
       title: 'Planning rejection evidence',
       detail: 'Plan validation rejected: T8 misses producer GET /api/products.',
+      kind: 'bad',
     });
   });
 
@@ -474,6 +475,84 @@ describe('terminalFailureEvidence', () => {
     ).toEqual({
       title: 'Planning failure evidence',
       detail: 'planning could not produce a safe executable plan',
+      kind: 'bad',
+    });
+  });
+
+  it('prefers the server-owned outcome and never renders a legacy raw exception', () => {
+    const evidence = terminalFailureEvidence({
+      status: 'FAILED',
+      statusReason: 'INTERNAL_ERROR',
+      failureReason:
+        'RuntimeException: API key secret-value leaked from /Users/example/private/workspace',
+      terminalOutcome: {
+        schemaVersion: 1,
+        code: 'INTERNAL_ERROR',
+        category: 'PLATFORM_FAILURE',
+        customerTitle: 'Run could not complete',
+        customerMessage: 'An internal error stopped this run. Contact support if it repeats.',
+        impact: {
+          actualCostUsd: 0.42,
+          capUsd: 1,
+          codeChanged: null,
+          publication: 'NOT_CREATED',
+          prUrl: null,
+        },
+        retryable: true,
+        nextAction: {type: 'RETRY', label: 'Retry this run', href: '/runs/r1'},
+        supportCode: 'ES-RUN-R1',
+        automationDisposition: 'FAILED',
+        automationExitCode: 1,
+      },
+    });
+
+    expect(evidence).toEqual({
+      title: 'Run could not complete',
+      detail: 'An internal error stopped this run. Contact support if it repeats.',
+      kind: 'bad',
+      nextAction: 'Retry this run',
+      supportCode: 'ES-RUN-R1',
+    });
+    expect(JSON.stringify(evidence)).not.toContain('secret-value');
+    expect(JSON.stringify(evidence)).not.toContain('/Users/example');
+  });
+
+  it('renders cancellation as a neutral user stop rather than a platform failure', () => {
+    const terminalOutcome = {
+      schemaVersion: 1 as const,
+      code: 'USER_CANCELLED',
+      category: 'USER_STOPPED' as const,
+      customerTitle: 'Run cancelled',
+      customerMessage: 'You cancelled this run.',
+      impact: {
+        actualCostUsd: 0.04,
+        capUsd: 1,
+        codeChanged: false,
+        publication: 'NOT_CREATED' as const,
+        prUrl: null,
+      },
+      retryable: true,
+      nextAction: {type: 'START_NEW_RUN', label: 'Start again', href: '/compose'},
+      supportCode: null,
+      automationDisposition: 'STOPPED' as const,
+      automationExitCode: 130,
+    };
+
+    expect(
+      terminalFailureEvidence({
+        status: 'CANCELLED',
+        statusReason: 'Cancelled by user',
+        failureReason: 'legacy failure copy',
+        terminalOutcome,
+      }),
+    ).toMatchObject({
+      title: 'Run cancelled',
+      detail: 'You cancelled this run.',
+      kind: 'neutral',
+    });
+    expect(verdictFor(null, 'CANCELLED', terminalOutcome)).toEqual({
+      label: 'Cancelled',
+      kind: 'warn',
     });
   });
 

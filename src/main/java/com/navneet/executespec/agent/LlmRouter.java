@@ -485,6 +485,7 @@ public class LlmRouter {
   private static final long TRANSIENT_RETRY_BASE_MS = 2000L;
   private static final Duration DEFAULT_TRANSPORT_TIMEOUT = Duration.ofSeconds(120);
   private static final Duration ANTHROPIC_TRANSPORT_TIMEOUT = Duration.ofSeconds(300);
+  private static final int ANTHROPIC_FALLBACK_MAX_TOKENS = 16_000;
   private static final Duration TRANSPORT_SAFETY_MARGIN = Duration.ofSeconds(15);
 
   /**
@@ -1250,6 +1251,13 @@ public class LlmRouter {
 
   private CanonicalDispatchResult callAnthropicInternal(
       LlmRequest r, List<ToolCallback> tools, String apiKey, PhysicalAttemptChain auditContext) {
+    // Anthropic requires max_tokens on every request. Normalize at the provider transport seam so
+    // direct operation-context calls, managed-route substitutions, and Anthropic failover targets
+    // all receive a valid request without rewriting the logical request used by audit/fencing.
+    int configuredMaxTokens =
+        r.maxTokens() != null ? r.maxTokens() : modelRegistry.maxOutputForModel(r.model());
+    int effectiveMaxTokens =
+        configuredMaxTokens > 0 ? configuredMaxTokens : ANTHROPIC_FALLBACK_MAX_TOKENS;
     // Pick the per-customer-key model when BYOK is in play; fall back to
     // the platform singleton otherwise. The cache lookup is keyed by
     // SHA-256(apiKey) so the plaintext never sits in the cache key.
@@ -1275,7 +1283,7 @@ public class LlmRouter {
               r.model(),
               r.messages(),
               tools,
-              r.maxTokens(),
+              effectiveMaxTokens,
               forcedApiKey,
               admittedReadTimeoutSeconds(
                   r, forcedAttempt == null ? null : forcedAttempt.transportDeadline()));
@@ -1335,13 +1343,13 @@ public class LlmRouter {
             .internalToolExecutionEnabled(false);
     if (cache != null) b.cacheOptions(cache);
     if (!dropTemperature) b.temperature(r.temperature());
-    if (r.maxTokens() != null) b.maxTokens(r.maxTokens());
+    b.maxTokens(effectiveMaxTokens);
     projectedCallCostAdmission.admit(r, tools);
     PhysicalDispatch primaryAttempt = prepareAnthropicAttempt(auditContext);
     String primaryApiKey = primaryAttempt == null ? apiKey : primaryAttempt.apiKey();
     AnthropicChatModel model =
         deprecatedTemperatureModel
-            ? modelWithoutDeprecatedDefaults(r.model(), r.maxTokens(), primaryApiKey)
+            ? modelWithoutDeprecatedDefaults(r.model(), effectiveMaxTokens, primaryApiKey)
             : (primaryApiKey != null && !primaryApiKey.isBlank())
                 ? perKeyAnthropicModel(primaryApiKey)
                 : anthropicModelProvider.getIfAvailable();
@@ -1364,7 +1372,7 @@ public class LlmRouter {
       PhysicalDispatch retryAttempt = prepareAnthropicAttempt(auditContext);
       String retryApiKey = retryAttempt == null ? apiKey : retryAttempt.apiKey();
       AnthropicChatModel retryModel =
-          modelWithoutDeprecatedDefaults(r.model(), r.maxTokens(), retryApiKey);
+          modelWithoutDeprecatedDefaults(r.model(), effectiveMaxTokens, retryApiKey);
       if (retryModel != null) model = retryModel;
       var retry =
           AnthropicChatOptions.builder()
@@ -1372,7 +1380,7 @@ public class LlmRouter {
               .toolCallbacks(tools)
               .internalToolExecutionEnabled(false);
       if (cache != null) retry.cacheOptions(cache);
-      if (r.maxTokens() != null) retry.maxTokens(r.maxTokens());
+      retry.maxTokens(effectiveMaxTokens);
       long retryStartedAt = System.currentTimeMillis();
       ChatResponse retryResponse;
       try {

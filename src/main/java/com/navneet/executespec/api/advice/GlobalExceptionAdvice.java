@@ -5,6 +5,8 @@ import java.util.Map;
 import java.util.UUID;
 
 import com.navneet.executespec.agentsession.SubagentBudgetExceededException;
+import com.navneet.executespec.run.sync.RunWorkspaceRestoreFailedException;
+import com.navneet.executespec.run.sync.RunWorkspaceUnavailableException;
 
 import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpStatus;
@@ -135,11 +137,50 @@ public class GlobalExceptionAdvice {
                 "status",
                 422,
                 "error",
-                "subagent-budget-exhausted",
+                "subagent_budget_exhausted",
                 "errorCode",
                 ex.errorCode(),
                 "message",
                 ex.getMessage()));
+  }
+
+  /** An expired run workspace is a stable lifecycle outcome, not an opaque platform exception. */
+  @ExceptionHandler(RunWorkspaceUnavailableException.class)
+  public ResponseEntity<Map<String, Object>> onRunWorkspaceUnavailable(
+      RunWorkspaceUnavailableException ex) {
+    return ResponseEntity.status(HttpStatus.GONE)
+        .body(
+            Map.of(
+                "timestamp",
+                Instant.now().toString(),
+                "status",
+                HttpStatus.GONE.value(),
+                "error",
+                "workspace_unavailable",
+                "errorCode",
+                RunWorkspaceUnavailableException.ERROR_CODE,
+                "message",
+                "The run workspace is no longer available. Start a new run from the current"
+                    + " project revision."));
+  }
+
+  /** A durable archive exists, but a retryable platform/storage fault prevented restoration. */
+  @ExceptionHandler(RunWorkspaceRestoreFailedException.class)
+  public ResponseEntity<Map<String, Object>> onRunWorkspaceRestoreFailed(
+      RunWorkspaceRestoreFailedException ex) {
+    return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+        .body(
+            Map.of(
+                "timestamp",
+                Instant.now().toString(),
+                "status",
+                HttpStatus.SERVICE_UNAVAILABLE.value(),
+                "error",
+                "workspace_restore_failed",
+                "errorCode",
+                RunWorkspaceRestoreFailedException.ERROR_CODE,
+                "message",
+                "The run workspace could not be restored right now. Retry the sync shortly."));
   }
 
   /** Last-chance handler. Any uncaught Throwable becomes a structured 500 with a correlation id. */
