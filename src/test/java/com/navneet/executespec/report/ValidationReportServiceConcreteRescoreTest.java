@@ -217,17 +217,22 @@ class ValidationReportServiceConcreteRescoreTest {
             .rescoreAfterConcreteTests(
                 "run-workspace-suite",
                 TestExecutionSummary.builder()
-                    .totalTests(7)
+                    .totalTests(8)
                     .passed(7)
+                    .skipped(1)
                     .executionVerified(Boolean.TRUE)
                     .evidenceScope(TestExecutionSummary.EvidenceScope.WORKSPACE_TEST_SUITE)
                     .build())
             .orElseThrow();
 
-    assertEquals(7, rescored.getTestsTotal());
+    assertEquals(8, rescored.getTestsTotal());
     assertEquals(7, rescored.getTestsPassed());
+    assertEquals(1, rescored.getTestsSkipped());
     assertEquals(Boolean.TRUE, rescored.getTestExecutionVerified());
     assertEquals("WORKSPACE_TEST_SUITE", rescored.getTestEvidenceScope());
+    assertEquals(Boolean.TRUE, rescored.getExecutableTestsPassed());
+    assertEquals("PASSED", rescored.getExecutableVerificationStatus());
+    assertTrue(rescored.getExecutableEvidenceJson().contains("\"testsSkipped\":1"));
     assertTrue(rescored.getVerifiedScore() <= 75);
     var eventCaptor = org.mockito.ArgumentCaptor.forClass(ValidationReportEvidenceEvent.class);
     verify(events).publishEvent(eventCaptor.capture());
@@ -238,6 +243,7 @@ class ValidationReportServiceConcreteRescoreTest {
             .orElseThrow();
     assertEquals("PASS", tests.status());
     assertEquals("DETERMINISTIC_WORKSPACE_SUITE", tests.source());
+    assertTrue(tests.summary().contains("1 skipped"));
     assertEquals(
         com.navneet.executespec.execution.model.RunContinuationDecision
             .CONTINUE_SAME_MODEL_PROVIDER,

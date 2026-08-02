@@ -1,7 +1,28 @@
 import type * as api from '@/lib/api';
 import type {DiffLine} from '@/ide/IdeKit';
+import {isAwaitingApprovalRunStatus, isLiveRunStatus, isQueuedRunStatus} from '@/lib/runStatus';
 
 export type Verdict = {label: string; kind: 'ok' | 'warn' | 'bad'};
+
+export type RunSurfaceDestination = 'plan' | 'live' | null;
+
+/**
+ * Keeps the terminal result surface honest: plan-gated runs belong on the plan surface and every
+ * active pipeline phase belongs on the live surface. A missing report during these phases is
+ * expected pending evidence, not a terminal report-load failure.
+ */
+export function runSurfaceDestination(status: string | null | undefined): RunSurfaceDestination {
+  const normalized = status?.trim().toUpperCase();
+  if (isAwaitingApprovalRunStatus(normalized)) return 'plan';
+  if (
+    isQueuedRunStatus(normalized) ||
+    isLiveRunStatus(normalized) ||
+    ['GENERATING_REPORT', 'REPORTING'].includes(normalized || '')
+  ) {
+    return 'live';
+  }
+  return null;
+}
 
 export interface RunArtifactActionAvailability {
   push: boolean;
@@ -188,6 +209,15 @@ export function publicationTrustFacts(
     publication?.evidenceWorkspaceGeneration != null &&
     publication.currentWorkspaceGeneration != null &&
     publication.evidenceWorkspaceGeneration === publication.currentWorkspaceGeneration;
+  const testsPassed = run.testsPassed ?? 0;
+  const testsSkipped = run.testsSkipped ?? 0;
+  const testsTotal = run.testsTotal;
+  const testPopulationValid =
+    testsTotal != null &&
+    testsTotal > 0 &&
+    testsPassed > 0 &&
+    testsSkipped >= 0 &&
+    testsPassed + testsSkipped === testsTotal;
 
   const facts: PublicationTrustFact[] = [
     {
@@ -239,14 +269,14 @@ export function publicationTrustFacts(
       label: 'Tests',
       value:
         run.testsTotal != null
-          ? `${run.testsPassed ?? 0}/${run.testsTotal} passed · ${
+          ? `${run.testsPassed ?? 0}/${run.testsTotal} passed · ${run.testsSkipped ?? 0} skipped · ${
               run.testExecutionVerified ? 'execution verified' : 'not execution verified'
             }`
           : 'Unmeasured',
       kind:
-        run.testExecutionVerified && (run.testsTotal ?? 0) > 0 && run.testsPassed === run.testsTotal
+        run.testExecutionVerified && testPopulationValid
           ? 'ok'
-          : run.testsTotal != null && (run.testsPassed ?? 0) < run.testsTotal
+          : run.testsTotal != null
             ? 'bad'
             : 'warn',
     },

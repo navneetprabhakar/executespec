@@ -916,9 +916,9 @@ export interface ValidationReportData extends WorkspaceGenerationBound {
   securityScore?: number | null;
   performanceScore?: number | null;
   designComplianceScore?: number | null;
-  /** V106 pipeline signals input verifiedScore and anchor the six dimensions above. */
   finalBuildPassed?: boolean | null;
   testsPassed?: number | null;
+  testsSkipped?: number | null;
   testsTotal?: number | null;
   reviewerVerdict?: 'CLEAN' | 'FIXED_ISSUES' | 'UNRESOLVED_ISSUES' | 'REVIEW_FAILED' | null;
   verifiedScore?: number | null;

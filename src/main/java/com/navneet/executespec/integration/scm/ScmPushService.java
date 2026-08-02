@@ -75,6 +75,11 @@ public class ScmPushService {
       String retryGuidance,
       String remediation) {
 
+    /** True only when a remote publication actually completed. */
+    public boolean pushed() {
+      return "PUSHED".equals(status) && succeeded > 0 && failed == 0;
+    }
+
     public static PushResult pushed(String provider, String prUrl, String message) {
       return new PushResult(
           "PUSHED",

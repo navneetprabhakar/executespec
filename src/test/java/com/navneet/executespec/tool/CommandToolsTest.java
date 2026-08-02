@@ -494,6 +494,21 @@ class CommandToolsTest {
   }
 
   @Test
+  void readFileCanReturnExactLineEvidenceWithoutChangingTheDefaultByteExactRead() throws Exception {
+    Files.writeString(root.resolve("Measured.java"), "import x.Y;\n\nclass Measured {\n}\n");
+    ReadFileTool tool = readFileTool(new ReadFileStateStore());
+
+    ToolResult plain = tool.execute(json("{\"path\":\"Measured.java\"}"), ctx());
+    ToolResult measured =
+        tool.execute(json("{\"path\":\"Measured.java\",\"includeMetadata\":true}"), ctx());
+
+    assertThat(((ToolResult.Ok) plain).content()).isEqualTo("import x.Y;\n\nclass Measured {\n}\n");
+    assertThat(((ToolResult.Ok) measured).content())
+        .startsWith("[FILE_METADATA path=Measured.java physicalLines=4 nonBlankLines=3 bytes=32]")
+        .endsWith("import x.Y;\n\nclass Measured {\n}\n");
+  }
+
+  @Test
   void shellOutputRedactsSecretShapesBeforeReturningToWorker() {
     Tool tool = new ShellTool(new ShellSandboxPolicy(), null, null);
 

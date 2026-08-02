@@ -34,6 +34,7 @@ final class RunDetailEvidenceProjection {
         .finalBuildPassed(report != null ? report.getFinalBuildPassed() : null)
         .testsPassed(report != null ? report.getTestsPassed() : null)
         .testsTotal(report != null ? report.getTestsTotal() : null)
+        .testsSkipped(report != null ? report.getTestsSkipped() : null)
         .testExecutionVerified(report != null ? report.getTestExecutionVerified() : null)
         .validationEvidenceStatus(report != null ? report.getStatus() : null)
         .evidenceWorkspaceGeneration(report != null ? report.getWorkspaceGeneration() : null)

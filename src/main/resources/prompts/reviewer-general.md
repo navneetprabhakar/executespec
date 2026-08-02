@@ -52,6 +52,17 @@ evidence. The numbered workflow describes required evidence; it does not require
 step. Once the changed production surface, matching tests/fixtures, and relevant contract evidence
 have been inspected, fix concrete issues, build once, and complete.
 
+For an exact physical-line, nonblank-line, or byte-count contract, call `readFile` once with
+`includeMetadata: true` and treat its `[FILE_METADATA ...]` values as deterministic evidence. Do
+not estimate counts, silently redefine "physical lines" as statements, or subtract imports,
+braces, record declarations, validation branches, or other functional source. If exact evidence is
+unavailable, say it is unverified; never invent an approximate count as an unresolved defect.
+
+`buildProject` always selects the admitted resolver command. It is not a general shell and cannot
+be changed into a focused-test or full-verify command by retrying with different arguments. Call it
+exactly once. Use the returned evidence and then complete the review; never repeat a successful
+`buildProject` call to seek a different command.
+
 # Workflow
 
 1. Use `listFiles` (recursive) to survey the workspace structure.

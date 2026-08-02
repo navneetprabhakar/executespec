@@ -86,6 +86,7 @@ import {
   reportPipelineLabel,
   reviewerSignal,
   publicationTrustFacts,
+  runSurfaceDestination,
   runArtifactActionAvailability,
   friendlyAiFailureMessage,
   runChatResponseContent,
@@ -472,19 +473,10 @@ export default function IdeRunResult() {
   // PAUSED + every terminal status stay here (the result page owns resume + the full detail).
   useEffect(() => {
     if (!runId || !run) return;
-    const s = (run.status || '').toUpperCase();
-    if (s === 'AWAITING_APPROVAL') {
+    const destination = runSurfaceDestination(run.status);
+    if (destination === 'plan') {
       navigate(`/plan/${runId}`, {replace: true});
-    } else if (
-      [
-        'CLASSIFYING',
-        'PLANNING',
-        'EXECUTING',
-        'RUNNING',
-        'IN_PROGRESS',
-        'PROVIDER_SWITCHING',
-      ].includes(s)
-    ) {
+    } else if (destination === 'live') {
       navigate(`/live/${runId}`, {replace: true});
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -168,6 +168,14 @@ public class ValidationReport {
   private Integer testsTotal;
 
   /**
+   * Tests the runner reported as skipped/ignored inside {@link #testsTotal}. Kept separate from
+   * passes so a green exit with explicit skips is not misreported as a failed suite.
+   */
+  @Column(name = "tests_skipped", nullable = false)
+  @Builder.Default
+  private Integer testsSkipped = 0;
+
+  /**
    * V317 / RR-1660 — three-valued execution-provenance token for {@link #testsPassed} / {@link
    * #testsTotal}.
    *
