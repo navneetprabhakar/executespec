@@ -79,7 +79,7 @@ public class GitCommitTool implements Tool {
             "git add failed (exit=" + addRes.exitCode() + "): " + addRes.output());
       }
       // 2026-05-02 — defense-in-depth pre-commit guard against vendored paths. The post-clone
-      // .gitignore augmentation in WorkspaceInitService is the primary line of defense; this
+      // .git/info/exclude protection in WorkspaceInitService is the primary line of defense; this
       // catches the rare case where the worker writes a sibling repo or runs a `git init` in a
       // subdir that bypassed the post-clone hook. Run on each git checkout under the
       // workspace root (workspace + every repos/<name>/ subdir).
@@ -91,7 +91,7 @@ public class GitCommitTool implements Tool {
             purged,
             ctx.runId(),
             ctx.taskId());
-        // Re-run `git add -A` so the clean index reflects the augmented .gitignore.
+        // Re-run `git add -A`; clone-local exclusions prevent the purged paths being re-staged.
         GitInvoker.run(ctx.workspaceRoot(), "add", "-A");
       }
       GitInvoker.GitResult commitRes =

@@ -71,7 +71,8 @@ class CorrectionResolutionEvidenceTest {
             "CORRECTION_ATTEMPT",
             "b".repeat(64),
             new CorrectionResolutionEvidence.BuildValidation("FAILED", false, 1),
-            new CorrectionResolutionEvidence.TestValidation("FAILED", 7, 8, true, "WORKSPACE", 1),
+            new CorrectionResolutionEvidence.TestValidation(
+                "FAILED", 7, 8, 0, true, "WORKSPACE", 1),
             new CorrectionResolutionEvidence.WorkflowValidation("FAILED", 1, "invalid yaml"),
             new CorrectionResolutionEvidence.ReviewerValidation("UNRESOLVED_ISSUES"),
             new CorrectionResolutionEvidence.ContractValidation(
@@ -119,7 +120,7 @@ class CorrectionResolutionEvidenceTest {
         generation,
         new CorrectionResolutionEvidence.BuildValidation(build ? "PASSED" : "FAILED", build, 0),
         new CorrectionResolutionEvidence.TestValidation(
-            passed == total ? "PASSED" : "FAILED", passed, total, true, "WORKSPACE", 0),
+            passed == total ? "PASSED" : "FAILED", passed, total, 0, true, "WORKSPACE", 0),
         new CorrectionResolutionEvidence.WorkflowValidation(workflow, 1, null),
         new CorrectionResolutionEvidence.ReviewerValidation(reviewer),
         new CorrectionResolutionEvidence.ContractValidation(contracts, "base", "current", 0, 0),

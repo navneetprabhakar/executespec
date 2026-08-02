@@ -20,6 +20,7 @@ import lombok.Builder;
  *     or null when no concrete suite was executed (RR-273)
  * @param finalTestsTotal concrete workspace tests executed in the FINAL workspace generation, or
  *     null when no concrete suite was executed (RR-273)
+ * @param finalTestsSkipped concrete workspace tests explicitly skipped in that same final suite
  * @param concreteTestsRed true when a concrete suite was known red and was not subsequently proven
  *     green in the final workspace generation. Tighten-only: this forces {@code UNRESOLVED_ISSUES}
  *     so a clean verdict can never be returned over failing or unprovable tests (RR-273)
@@ -41,6 +42,7 @@ public record ReviewerResult(
     String finalBuildOutput,
     Integer finalTestsPassed,
     Integer finalTestsTotal,
+    Integer finalTestsSkipped,
     boolean concreteTestsRed,
     long totalLatencyMs,
     Boolean workspaceQuiescent) {

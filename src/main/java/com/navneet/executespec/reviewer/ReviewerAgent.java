@@ -449,6 +449,7 @@ public class ReviewerAgent {
     // still red, or with code that no longer compiled.
     Integer finalTestsPassed = null;
     Integer finalTestsTotal = null;
+    Integer finalTestsSkipped = null;
     boolean concreteTestsRed = false;
     if (buildPassed && autoVerifyEnabled && workspaceTestRunner != null) {
       try {
@@ -458,6 +459,7 @@ public class ReviewerAgent {
         if (initial.isPresent() && initial.get().summary().getTotalTests() > 0) {
           finalTestsPassed = initial.get().summary().getPassed();
           finalTestsTotal = initial.get().summary().getTotalTests();
+          finalTestsSkipped = initial.get().summary().getSkipped();
         }
         var red =
             initial
@@ -519,6 +521,7 @@ public class ReviewerAgent {
           if (after.isPresent() && after.get().summary().getTotalTests() > 0) {
             finalTestsPassed = after.get().summary().getPassed();
             finalTestsTotal = after.get().summary().getTotalTests();
+            finalTestsSkipped = after.get().summary().getSkipped();
             concreteTestsRed =
                 after.get().summary().getFailed() > 0 || after.get().summary().getErrors() > 0;
           } else {
@@ -588,6 +591,7 @@ public class ReviewerAgent {
         .finalBuildOutput(buildOutput)
         .finalTestsPassed(finalTestsPassed)
         .finalTestsTotal(finalTestsTotal)
+        .finalTestsSkipped(finalTestsSkipped)
         .concreteTestsRed(concreteTestsRed)
         .totalLatencyMs(elapsed)
         .build();
@@ -683,8 +687,14 @@ public class ReviewerAgent {
             req.allowedRepoRoots(),
             req.approvedNewFiles(),
             Boolean.TRUE.equals(req.allowBuildManifestCreation()));
+    java.util.function.Supplier<WorkerResult> pass = () -> worker.run(workerRequest);
     return com.navneet.executespec.tool.ReviewerMutationScope.withPolicy(
-        mutationPolicy, lease, () -> worker.run(workerRequest));
+        mutationPolicy,
+        lease,
+        () ->
+            Boolean.TRUE.equals(req.readOnly())
+                ? com.navneet.executespec.tool.ReviewerMutationScope.withSingleBuildProject(pass)
+                : pass.get());
   }
 
   static java.util.Set<String> reviewerToolNames(String taskIdSuffix) {

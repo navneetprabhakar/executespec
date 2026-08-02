@@ -103,7 +103,7 @@ function SharedProjectSurfaceView({surface}: {surface: api.SharedProjectSurface}
                 {
                   v:
                     surface.report.testsTotal != null
-                      ? `${surface.report.testsPassed ?? 0}/${surface.report.testsTotal}`
+                      ? `${surface.report.testsPassed ?? 0}/${surface.report.testsTotal} passed · ${surface.report.testsSkipped ?? 0} skipped`
                       : '—',
                   l: 'Tests',
                 },

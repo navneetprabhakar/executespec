@@ -17,8 +17,8 @@ import org.junit.jupiter.api.io.TempDir;
  * VendoredPathGuard#VENDORED_DIRS} when present as a path segment, and must NOT trigger on customer
  * files that happen to have those words as substrings (e.g. {@code build.gradle.kts}).
  *
- * <p>Augmentation is also tested end-to-end against a real {@code .gitignore} on a temp dir so the
- * idempotency + comment-marker contract stays solid.
+ * <p>Clone-local exclusion is tested end-to-end so customer history and tracked files remain
+ * byte-for-byte untouched while vendored paths are still ignored.
  */
 class VendoredPathGuardTest {
 
@@ -63,42 +63,49 @@ class VendoredPathGuardTest {
     assertTrue(VendoredPathGuard.isVendored("repos/api/.GRADLE/cache"));
   }
 
-  // augmentGitignore — idempotency + missing-pattern detection
+  // installLocalExcludes — idempotency + missing-pattern detection + history integrity
 
   @Test
-  void augmentGitignore_appendsMissingPatterns(@TempDir Path tmp) throws Exception {
+  void installLocalExcludes_protectsWithoutChangingCustomerGitignore(@TempDir Path tmp)
+      throws Exception {
     Path repoDir = tmp.resolve("repo");
     initBareRepo(repoDir);
     // Python-only ignore — exactly the pplai-api shape from b171fa52.
     Files.writeString(repoDir.resolve(".gitignore"), "__pycache__/\nvenv/\n*.pyc\n.env\n");
 
     VendoredPathGuard guard = new VendoredPathGuard();
-    guard.augmentGitignore(repoDir);
+    guard.installLocalExcludes(repoDir);
 
-    String body = Files.readString(repoDir.resolve(".gitignore"));
+    String body = Files.readString(repoDir.resolve(".git/info/exclude"));
     assertTrue(body.contains("node_modules/"), "node_modules/ should be appended");
     assertTrue(body.contains("dist/"), "dist/ should be appended");
     assertTrue(body.contains(".gradle/"), ".gradle/ should be appended");
     assertTrue(body.contains(">>> ExecuteSpec"), "should mark the appended block");
-    assertTrue(body.contains("__pycache__/"), "existing entries kept");
-    assertTrue(body.contains("venv/"), "existing entries kept");
+    assertFalse(
+        body.lines().anyMatch(line -> line.strip().equals("__pycache__/")),
+        "tracked ignore entries need not be duplicated");
+    assertFalse(
+        body.lines().anyMatch(line -> line.strip().equals("venv/")),
+        "tracked ignore entries need not be duplicated");
+    assertEquals(
+        "__pycache__/\nvenv/\n*.pyc\n.env\n", Files.readString(repoDir.resolve(".gitignore")));
   }
 
   @Test
-  void augmentGitignore_isIdempotent(@TempDir Path tmp) throws Exception {
+  void installLocalExcludes_isIdempotent(@TempDir Path tmp) throws Exception {
     Path repoDir = tmp.resolve("repo");
     initBareRepo(repoDir);
     Files.writeString(repoDir.resolve(".gitignore"), "");
 
     VendoredPathGuard guard = new VendoredPathGuard();
-    guard.augmentGitignore(repoDir);
-    String afterFirst = Files.readString(repoDir.resolve(".gitignore"));
+    guard.installLocalExcludes(repoDir);
+    String afterFirst = Files.readString(repoDir.resolve(".git/info/exclude"));
     long firstNodeModulesCount =
         afterFirst.lines().filter(l -> l.trim().equals("node_modules/")).count();
 
     // Second call — should be a no-op.
-    guard.augmentGitignore(repoDir);
-    String afterSecond = Files.readString(repoDir.resolve(".gitignore"));
+    guard.installLocalExcludes(repoDir);
+    String afterSecond = Files.readString(repoDir.resolve(".git/info/exclude"));
     long secondNodeModulesCount =
         afterSecond.lines().filter(l -> l.trim().equals("node_modules/")).count();
 
@@ -110,7 +117,8 @@ class VendoredPathGuardTest {
   }
 
   @Test
-  void augmentGitignore_skipsWhenAllPatternsAlreadyPresent(@TempDir Path tmp) throws Exception {
+  void installLocalExcludes_skipsWhenCustomerIgnoreAlreadyCoversPatterns(@TempDir Path tmp)
+      throws Exception {
     Path repoDir = tmp.resolve("repo");
     initBareRepo(repoDir);
     // Pre-fill with every pattern.
@@ -118,18 +126,46 @@ class VendoredPathGuardTest {
     for (String dir : VendoredPathGuard.VENDORED_DIRS) sb.append(dir).append("/\n");
     Files.writeString(repoDir.resolve(".gitignore"), sb.toString());
     String before = Files.readString(repoDir.resolve(".gitignore"));
+    String excludeBefore = Files.readString(repoDir.resolve(".git/info/exclude"));
 
     VendoredPathGuard guard = new VendoredPathGuard();
-    guard.augmentGitignore(repoDir);
+    guard.installLocalExcludes(repoDir);
 
     assertEquals(before, Files.readString(repoDir.resolve(".gitignore")));
+    assertEquals(excludeBefore, Files.readString(repoDir.resolve(".git/info/exclude")));
   }
 
   @Test
-  void augmentGitignore_silentlyDropsNonGitDirs(@TempDir Path tmp) throws Exception {
+  void installLocalExcludes_silentlyDropsNonGitDirs(@TempDir Path tmp) throws Exception {
     // No .git/ in tmp — guard should no-op rather than crash.
-    new VendoredPathGuard().augmentGitignore(tmp);
+    new VendoredPathGuard().installLocalExcludes(tmp);
     assertFalse(Files.exists(tmp.resolve(".gitignore")));
+  }
+
+  @Test
+  void installLocalExcludes_leavesRemoteBaseAncestryAndDiffUntouched(@TempDir Path tmp)
+      throws Exception {
+    Path repoDir = tmp.resolve("repo");
+    initBareRepo(repoDir);
+    Files.writeString(repoDir.resolve(".gitignore"), "*.log\n");
+    Files.writeString(repoDir.resolve("README.md"), "customer baseline\n");
+    runCmd(repoDir, "git", "add", "-A");
+    runCmd(repoDir, "git", "commit", "-q", "-m", "customer baseline");
+    String baseHead = capture(repoDir, "git", "rev-parse", "HEAD").trim();
+    runCmd(repoDir, "git", "update-ref", "refs/remotes/origin/main", baseHead);
+
+    new VendoredPathGuard().installLocalExcludes(repoDir);
+
+    assertEquals(baseHead, capture(repoDir, "git", "rev-parse", "HEAD").trim());
+    assertEquals(baseHead, capture(repoDir, "git", "merge-base", "origin/main", "HEAD").trim());
+    assertEquals("", capture(repoDir, "git", "diff", "--name-only", "origin/main..HEAD").trim());
+    assertEquals("", capture(repoDir, "git", "status", "--porcelain").trim());
+    assertEquals("*.log\n", Files.readString(repoDir.resolve(".gitignore")));
+
+    Files.createDirectories(repoDir.resolve("node_modules/pkg"));
+    Files.writeString(repoDir.resolve("node_modules/pkg/index.js"), "vendored\n");
+    runCmd(repoDir, "git", "add", "-A");
+    assertEquals("", capture(repoDir, "git", "diff", "--cached", "--name-only").trim());
   }
 
   // ---------------------------------------------------------------------------------------------
@@ -219,19 +255,16 @@ class VendoredPathGuardTest {
     int purged = new VendoredPathGuard().purgeStagedVendored(repoDir);
     assertTrue(purged > 0, "expected the vendored subtree to be purged");
 
-    // NOTE: augmentGitignore (invoked inside purgeStagedVendored) commits the index, so the app
-    // source moves from "staged" to "tracked". The invariant that matters is the INDEX contents:
-    // the application subtree must survive it, the vendored subtree must not.
-    String tracked = capture(repoDir, "git", "ls-files");
+    String staged = capture(repoDir, "git", "diff", "--cached", "--name-only");
     assertTrue(
-        tracked.contains("frontend/src/App.tsx"),
-        "app source was removed from the index! tracked=" + tracked);
+        staged.contains("frontend/src/App.tsx"),
+        "app source was removed from the index! staged=" + staged);
     assertTrue(
-        tracked.contains("frontend/package.json"),
-        "app source was removed from the index! tracked=" + tracked);
+        staged.contains("frontend/package.json"),
+        "app source was removed from the index! staged=" + staged);
     assertFalse(
-        tracked.contains("frontend/node_modules/"),
-        "vendored content survived in the index! tracked=" + tracked);
+        staged.contains("frontend/node_modules/"),
+        "vendored content survived in the index! staged=" + staged);
 
     // The worktree is untouched either way — this guard never deletes files from disk.
     assertTrue(Files.exists(repoDir.resolve("frontend/src/App.tsx")));

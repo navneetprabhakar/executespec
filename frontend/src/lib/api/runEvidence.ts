@@ -9,6 +9,7 @@ export interface RunEvidenceDetail {
   reviewerEffectiveModel?: string | null;
   finalBuildPassed?: boolean | null;
   testsPassed?: number | null;
+  testsSkipped?: number | null;
   testsTotal?: number | null;
   testExecutionVerified?: boolean | null;
   validationEvidenceStatus?: string | null;

@@ -59,7 +59,6 @@ import com.navneet.executespec.project.service.ProjectRepoService;
 import com.navneet.executespec.report.entity.ValidationReport;
 import com.navneet.executespec.reviewer.PostEditFormatter;
 import com.navneet.executespec.reviewer.ReviewerAgent;
-import com.navneet.executespec.reviewer.ReviewerRequest;
 import com.navneet.executespec.reviewer.ReviewerResult;
 import com.navneet.executespec.router.AvailableProviderResolver;
 import com.navneet.executespec.router.LlmProvider;
@@ -2654,8 +2653,19 @@ public class RunOrchestrator implements RunControlPort {
             PipelineRun fresh = runRepo.findById(runId).orElse(null);
             // RR-1689 — publication authority is bound to the still-current solution attempt.
             if (fresh != null && publicationFence.mayPublish(fresh)) {
-              scmPushService.push(fresh);
-              log.info("V2 run={} auto-pushed to SCM (projectScoped={})", runId, projectId != null);
+              com.navneet.executespec.integration.scm.ScmPushService.PushResult pushResult =
+                  scmPushService.push(fresh);
+              if (pushResult.pushed()) {
+                log.info(
+                    "V2 run={} auto-pushed to SCM (projectScoped={})", runId, projectId != null);
+              } else {
+                log.warn(
+                    "V2 run={} auto-push did not publish status={} code={} gate={}",
+                    runId,
+                    pushResult.status(),
+                    pushResult.code(),
+                    pushResult.blockingGate());
+              }
             }
           } catch (Exception pushEx) {
             log.warn(
@@ -3858,7 +3868,7 @@ public class RunOrchestrator implements RunControlPort {
       try {
         rerunReviewResult =
             reviewer.review(
-                ReviewerRequest.builder()
+                InitialReviewerRequestPolicy.builder()
                     .provider(reviewerRoute.provider())
                     .model(reviewerRoute.model())
                     .strictProvider(true)

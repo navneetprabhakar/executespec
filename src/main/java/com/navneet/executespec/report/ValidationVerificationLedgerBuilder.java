@@ -192,15 +192,19 @@ final class ValidationVerificationLedgerBuilder {
 
     Integer testsPassed = entity.getTestsPassed();
     Integer testsTotal = entity.getTestsTotal();
+    Integer testsSkipped = entity.getTestsSkipped();
     int total = testsTotal == null ? 0 : testsTotal;
     int passed = testsPassed == null ? 0 : testsPassed;
+    int skipped = testsSkipped == null ? 0 : testsSkipped;
     boolean countsProven = total > 0 && testCountsProven(entity);
+    boolean suitePassed =
+        countsProven && passed > 0 && skipped >= 0 && (long) passed + skipped == total;
     out.add(
         evidence(
             "tests",
             "Tests",
             "TESTS",
-            !countsProven ? "UNKNOWN" : passed == total ? "PASS" : passed > 0 ? "WARN" : "FAIL",
+            !countsProven ? "UNKNOWN" : suitePassed ? "PASS" : passed > 0 ? "WARN" : "FAIL",
             countsProven ? testCountSource(entity) : UNPROVEN_TEST_COUNT_SOURCE,
             countsProven ? PROVEN_TEST_COUNT_CONFIDENCE : UNPROVEN_TEST_COUNT_CONFIDENCE,
             total <= 0
@@ -225,6 +229,7 @@ final class ValidationVerificationLedgerBuilder {
                     + "/"
                     + total
                     + " tests passed"
+                    + (skipped > 0 ? "; " + skipped + " skipped" : "")
                     + (functionalTestCountsProven(entity)
                         ? " (functional)."
                         : countsProven ? " (workspace suite only)." : " (counts unverified)."),
@@ -360,6 +365,7 @@ final class ValidationVerificationLedgerBuilder {
             entity.getFinalBuildPassed(),
             passed,
             total,
+            skipped,
             entity.getReviewerVerdict(),
             countUnfixedCriticalIssues(issues),
             accuracy.testCited() ? accuracy.testCoverageLevel() : null);
@@ -499,6 +505,26 @@ final class ValidationVerificationLedgerBuilder {
       String reviewerVerdictName,
       int unfixedCriticalCount,
       String testCoverageLevel) {
+    return trustCap(
+        rawScore,
+        finalBuildPassed,
+        testsPassed,
+        testsTotal,
+        0,
+        reviewerVerdictName,
+        unfixedCriticalCount,
+        testCoverageLevel);
+  }
+
+  TrustCap trustCap(
+      int rawScore,
+      Boolean finalBuildPassed,
+      int testsPassed,
+      int testsTotal,
+      int testsSkipped,
+      String reviewerVerdictName,
+      int unfixedCriticalCount,
+      String testCoverageLevel) {
     int cap = 100;
     List<String> reasons = new ArrayList<>();
 
@@ -523,9 +549,16 @@ final class ValidationVerificationLedgerBuilder {
       reasons.add("final build failed");
     }
 
-    if (testsTotal > 0 && testsPassed < testsTotal) {
+    boolean successfulPopulation =
+        testsPassed > 0 && testsSkipped >= 0 && (long) testsPassed + testsSkipped == testsTotal;
+    if (testsTotal > 0 && !successfulPopulation) {
       cap = Math.min(cap, testsPassed <= 0 ? 70 : 85);
-      reasons.add(testsPassed + "/" + testsTotal + " tests passed");
+      reasons.add(
+          testsPassed
+              + "/"
+              + testsTotal
+              + " tests passed"
+              + (testsSkipped > 0 ? "; " + testsSkipped + " skipped" : ""));
     } else if (testsTotal <= 0) {
       String level = testCoverageLevel == null ? null : testCoverageLevel.toUpperCase();
       if ("NONE".equals(level)) {
