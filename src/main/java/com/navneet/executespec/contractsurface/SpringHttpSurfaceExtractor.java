@@ -12,8 +12,9 @@ import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import com.github.javaparser.JavaParser;
 import com.github.javaparser.ParseProblemException;
-import com.github.javaparser.StaticJavaParser;
+import com.github.javaparser.ParserConfiguration;
 import com.github.javaparser.ast.CompilationUnit;
 import com.github.javaparser.ast.body.AnnotationDeclaration;
 import com.github.javaparser.ast.body.ClassOrInterfaceDeclaration;
@@ -114,7 +115,7 @@ public class SpringHttpSurfaceExtractor {
               try {
                 sources.add(
                     new ParsedSource(
-                        root.resolve(entry.getKey()), StaticJavaParser.parse(entry.getValue())));
+                        root.resolve(entry.getKey()), parseCompilationUnit(entry.getValue())));
               } catch (ParseProblemException failure) {
                 throw new SurfaceExtractionException(
                     "could not parse Spring source " + entry.getKey(), failure);
@@ -139,14 +140,23 @@ public class SpringHttpSurfaceExtractor {
     List<ParsedSource> parsedSources = new ArrayList<>();
     for (SourceFile source : javaSources) {
       try {
-        parsedSources.add(
-            new ParsedSource(source.path(), StaticJavaParser.parse(source.content())));
+        parsedSources.add(new ParsedSource(source.path(), parseCompilationUnit(source.content())));
       } catch (ParseProblemException failure) {
         throw new SurfaceExtractionException(
             "could not parse Spring source " + relative(root, source.path()), failure);
       }
     }
     return List.copyOf(parsedSources);
+  }
+
+  private static CompilationUnit parseCompilationUnit(String source) {
+    ParserConfiguration configuration =
+        new ParserConfiguration().setLanguageLevel(ParserConfiguration.LanguageLevel.JAVA_21);
+    var result = new JavaParser(configuration).parse(source);
+    if (!result.isSuccessful() || result.getResult().isEmpty()) {
+      throw new ParseProblemException(result.getProblems());
+    }
+    return result.getResult().orElseThrow();
   }
 
   private static void rejectComposedMappings(Path root, List<ParsedSource> sources) {

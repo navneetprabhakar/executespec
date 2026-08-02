@@ -278,7 +278,7 @@ public class ContextPlanner {
     return extra;
   }
 
-  static long estimateInputTokens(List<Message> messages, List<ToolCallback> tools) {
+  public static long estimateInputTokens(List<Message> messages, List<ToolCallback> tools) {
     long chars = 0;
     int messageCount = 0;
     if (messages != null) {

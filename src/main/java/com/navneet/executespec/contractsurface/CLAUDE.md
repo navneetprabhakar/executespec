@@ -6,6 +6,10 @@ It supports both a materialized workspace and an immutable map of repository-rel
 bytes. Surface schema v2 includes explicit context-path configuration locations in the digest, so
 remote codemap generation preserves controller and configuration provenance without staging a
 temporary checkout.
+Both extraction paths use an instance-scoped JavaParser configured for Java 21; valid modern Java
+syntax such as records must not collapse a completed worker outcome into a generic pipeline error.
+An actual parse failure remains fail-closed and surfaces as the typed
+`BROWNFIELD_HTTP_SURFACE_UNPARSABLE` diagnostic without leaking workspace paths.
 `SpringContractSourceInventory` owns materialized-workspace discovery: it walks the complete tree
 without a depth cutoff, prunes `.git`, vendor, dependency, and conventional build-output trees
 before descent, filters tests only by explicit `src/test`, and enforces visited-entry,

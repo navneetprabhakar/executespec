@@ -2120,7 +2120,6 @@ public class RunOrchestrator implements RunControlPort {
         terminate(runId, "FAILED", INTERNAL_ERROR_REASON, INTERNAL_ERROR_REASON, startedAt);
         return;
       }
-      brownfieldHttpContractGuard.assertCompatibleIfPresent(runId);
       persistenceWriter.applyExecutionResultToTasks(runId, execResult);
       op = runOperationLifecycle.completeAndClear(op);
       // Phase 2 delta: tokens spent by the executor (all worker tasks).
@@ -2128,6 +2127,19 @@ public class RunOrchestrator implements RunControlPort {
       long workerIn = afterExec.inputTokens() - afterPlan.inputTokens();
       long workerOut = afterExec.outputTokens() - afterPlan.outputTokens();
       tokenAttributor.attributeWorker(runId, execResult, workerIn, workerOut, upperProvider, model);
+
+      if (execResult.overall() == ExecutionResult.Overall.ABORTED) {
+        StatusAndReason aborted = resolveTerminalStatus(execResult, null);
+        terminate(
+            runId,
+            aborted.status(),
+            aborted.reason(),
+            "execution stopped: " + aborted.reason(),
+            startedAt);
+        return;
+      }
+
+      brownfieldHttpContractGuard.assertCompatibleIfPresent(runId);
 
       // 2.5 Code-gen-only stop (benchmark)
       // RL-2026-05-050 — the SWE-bench harness wants the REAL classifier→planner→worker decisioning
@@ -4269,38 +4281,14 @@ public class RunOrchestrator implements RunControlPort {
   static StatusAndReason applyStandardsGateStatus(
       StatusAndReason base,
       java.util.List<com.navneet.executespec.reviewer.model.ReviewIssue> issues) {
-    if (base == null || "FAILED".equals(base.status()) || issues == null) return base;
-    boolean unavailable =
-        issues.stream()
-            .map(com.navneet.executespec.reviewer.model.ReviewIssue::getId)
-            .filter(java.util.Objects::nonNull)
-            .anyMatch(id -> id.startsWith("SYNTH-STANDARD-UNAVAILABLE"));
-    if (unavailable) return new StatusAndReason("PARTIAL", "STANDARDS_ENFORCEMENT_UNAVAILABLE");
-    boolean blocking =
-        issues.stream()
-            .map(com.navneet.executespec.reviewer.model.ReviewIssue::getId)
-            .filter(java.util.Objects::nonNull)
-            .anyMatch(id -> id.startsWith("SYNTH-STANDARD-BLOCKING"));
-    return blocking ? new StatusAndReason("PARTIAL", "STANDARDS_BLOCKING_VIOLATION") : base;
+    return RunTerminalStatusPolicy.applyStandards(base, issues);
   }
 
   /** Configured architecture invariants are hard evidence, not a decorative report. */
   static StatusAndReason applyInvariantGateStatus(
       StatusAndReason base,
       java.util.List<com.navneet.executespec.reviewer.model.ReviewIssue> issues) {
-    if (base == null || "FAILED".equals(base.status()) || issues == null) return base;
-    boolean unavailable =
-        issues.stream()
-            .map(com.navneet.executespec.reviewer.model.ReviewIssue::getId)
-            .filter(java.util.Objects::nonNull)
-            .anyMatch(id -> id.startsWith("SYNTH-INVARIANT-UNAVAILABLE"));
-    if (unavailable) return new StatusAndReason("PARTIAL", "INVARIANT_ENFORCEMENT_UNAVAILABLE");
-    boolean violated =
-        issues.stream()
-            .map(com.navneet.executespec.reviewer.model.ReviewIssue::getId)
-            .filter(java.util.Objects::nonNull)
-            .anyMatch(id -> id.startsWith("SYNTH-INVARIANT-VIOLATION"));
-    return violated ? new StatusAndReason("PARTIAL", "ARCHITECTURE_INVARIANT_VIOLATION") : base;
+    return RunTerminalStatusPolicy.applyInvariants(base, issues);
   }
 
   /** Multi-repo context moved to {@link RunContextComposer} and {@link RunPipelineSupport}. */
