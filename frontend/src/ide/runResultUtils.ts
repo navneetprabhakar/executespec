@@ -447,6 +447,36 @@ export function countProducedWorkspaceFiles(
   ).length;
 }
 
+/**
+ * A completed validation report owns the product-diff count. The workspace-status endpoint is a
+ * broader inventory heuristic and can include deterministic run metadata such as README.md.
+ */
+export function authoritativeProductFileCount(
+  reportedFiles: number | null | undefined,
+  workspaceDeltaCandidates: number,
+): number {
+  return reportedFiles != null && reportedFiles >= 0 ? reportedFiles : workspaceDeltaCandidates;
+}
+
+/** Reviewer verdict is the gate result; severity buckets are only a legacy fallback. */
+export function reviewerSignal(
+  report: Pick<api.ValidationReportData, 'reviewerVerdict' | 'reviewFailures'> | null | undefined,
+): string {
+  if (!report) return '—';
+  switch ((report.reviewerVerdict || '').toUpperCase()) {
+    case 'CLEAN':
+      return 'clean';
+    case 'FIXED_ISSUES':
+      return 'fixed issues';
+    case 'UNRESOLVED_ISSUES':
+      return 'unresolved issues';
+    case 'REVIEW_FAILED':
+      return 'review failed';
+    default:
+      return report.reviewFailures > 0 ? `${report.reviewFailures} unresolved` : 'not measured';
+  }
+}
+
 export function verdictFor(
   score: number | null | undefined,
   status?: string | null,
@@ -1149,15 +1179,16 @@ export function fileCountSummary({
 }): {label: string; title: string; mismatch: boolean; explanation: string | null} {
   const mismatch = reportedFiles != null && reportedFiles !== workspaceFiles;
   const label =
-    reportedFiles != null
-      ? `${reportedFiles} reported${mismatch ? ` · ${workspaceFiles} visible` : ''}`
-      : String(workspaceFiles);
+    reportedFiles != null ? `${reportedFiles} product change(s)` : String(workspaceFiles);
   return {
     label,
-    title: `${workspaceFiles} generated or modified product file(s)`,
+    title:
+      reportedFiles != null
+        ? `${reportedFiles} product file change(s) proven by validation`
+        : `${workspaceFiles} workspace delta candidate(s); validation evidence is not available`,
     mismatch,
     explanation: mismatch
-      ? 'File counts differ because validation reports persisted generation evidence, while this count uses current git-derived product changes and excludes bootstrap metadata.'
+      ? `Validation proves ${reportedFiles} product change(s). The workspace inventory also contains ${workspaceFiles} delta candidate(s), which can include deterministic run metadata.`
       : null,
   };
 }

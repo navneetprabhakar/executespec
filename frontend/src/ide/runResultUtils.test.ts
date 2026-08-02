@@ -2,6 +2,7 @@ import {describe, expect, it} from 'vitest';
 import type {PublicationEligibility, RunDetail, ValidationReportData} from '@/lib/api';
 
 import {
+  authoritativeProductFileCount,
   boundedLineDiff,
   confidenceColor,
   continuationApprovalCandidate,
@@ -33,6 +34,7 @@ import {
   correctionEvidenceHistory,
   correctionEvidenceInvalidationLabel,
   reportPipelineLabel,
+  reviewerSignal,
   logIcon,
   logLabel,
   logMeta,
@@ -62,6 +64,26 @@ import {
   usd,
   verdictFor,
 } from './runResultUtils';
+
+describe('terminal result honesty', () => {
+  it('uses the reviewer verdict before legacy severity counts', () => {
+    expect(reviewerSignal({reviewerVerdict: 'UNRESOLVED_ISSUES', reviewFailures: 0})).toBe(
+      'unresolved issues',
+    );
+    expect(reviewerSignal({reviewerVerdict: 'REVIEW_FAILED', reviewFailures: 0})).toBe(
+      'review failed',
+    );
+    expect(reviewerSignal({reviewerVerdict: 'CLEAN', reviewFailures: 4})).toBe('clean');
+    expect(reviewerSignal({reviewerVerdict: null, reviewFailures: 2})).toBe('2 unresolved');
+  });
+
+  it('uses validation product evidence instead of workspace metadata candidates', () => {
+    expect(authoritativeProductFileCount(0, 1)).toBe(0);
+    expect(authoritativeProductFileCount(3, 1)).toBe(3);
+    expect(authoritativeProductFileCount(null, 2)).toBe(2);
+    expect(authoritativeProductFileCount(-1, 2)).toBe(2);
+  });
+});
 
 describe('publicationTrustFacts', () => {
   it('keeps route, executable checks, generations, and eligibility as independent facts', () => {
@@ -1241,14 +1263,14 @@ describe('runResultUtils', () => {
 
   it('explains validation-reported file counts versus Code-tab workspace files', () => {
     expect(fileCountSummary({reportedFiles: 3, workspaceFiles: 1})).toEqual({
-      label: '3 reported · 1 visible',
-      title: '1 generated or modified product file(s)',
+      label: '3 product change(s)',
+      title: '3 product file change(s) proven by validation',
       mismatch: true,
       explanation:
-        'File counts differ because validation reports persisted generation evidence, while this count uses current git-derived product changes and excludes bootstrap metadata.',
+        'Validation proves 3 product change(s). The workspace inventory also contains 1 delta candidate(s), which can include deterministic run metadata.',
     });
     expect(fileCountSummary({reportedFiles: 2, workspaceFiles: 2})).toMatchObject({
-      label: '2 reported',
+      label: '2 product change(s)',
       mismatch: false,
       explanation: null,
     });

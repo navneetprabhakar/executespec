@@ -60,6 +60,12 @@ arguments must never be claimed as a delivered product path — and now emits `[
 | `WorkerResult.java` | **(Phase 4, moved from `agent/`)** the worker's terminal result + `Outcome` enum. |
 | `WorkerTaskRequest.java` | **(Phase 4, moved from `agent/`)** the worker's input (provider / model / prompts / context / budget / verify flags), including an optional tighten-only `allowedToolNames` profile for bounded specialist passes. |
 
+**2026-08-02 zero-write output-cap recovery:** when a provider returns a tool-less
+`length`/`max_tokens`/`max_output_tokens` finish before any mutation, `WorkerAgent` makes exactly one
+same-route call with only `writeFile`/`editFile`/`completeTask`, required tool choice, and an 8K
+bounded output allowance. It never parses partial assistant text as code. A resulting edit is marked
+`salvagedUnverified`, so build, reviewer, and deterministic validation remain authoritative.
+
 ## Common harness stages on the worker (RL-2026-06)
 
 Common completion/protection stages live IN the shared `WorkerAgent` as **flag/data-activated capabilities** — NOT a Terminal-Bench fork. Each is bounded/fail-open where it can block, and deliverable reads use `dispatchToolDirect` (workspace-agnostic: local `tool.execute()` on the VM workspace, or remote container dispatch). Inert for any consumer that doesn't opt in, so BUILD/PATCH are byte-identical until they do.

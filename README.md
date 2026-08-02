@@ -31,6 +31,17 @@ production task they verify, and bounds task breadth to avoid one runaway worker
 reject disposable root-level smoke scripts as test substitutes and stop repeated same-path rewrite
 loops that do not obtain a passing test/build. Downloadable source archives omit interpreter and
 test-runner caches such as `__pycache__`, `.pytest_cache`, and compiled Python bytecode.
+Stale project architecture refresh runs durably in the background instead of blocking the planner.
+For monorepos, build and test verification discovers nested manifest roots but selects only modules
+with actual Git working-tree changes; ambiguous unscoped modules are reported unavailable rather
+than building unrelated applications. A provider output cap before the first write gets one bounded
+same-route mutation recovery, whose output still has to pass the ordinary build, review, and
+deterministic validation gates.
+
+Terminal run results use the validation report's reviewer verdict and product-file count as the
+customer-facing truth. Bootstrap/workspace metadata remains visible in Explorer but is not labeled
+generated product code. “Run again” preserves the persisted provider/model route; changing provider
+is a separate, explicit paid action that clears an exact model pin.
 
 Terminal server-owned runs can be continued through
 `POST /api/runs/{sourceRunId}/iterate` with `{ "userRequest": "..." }`. The endpoint creates and
