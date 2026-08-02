@@ -58,6 +58,7 @@ import {
 } from '@/ide/AgentRepositoryScope';
 import {ConversationHistoryPager, ConversationHistoryRow} from '@/ide/AgentConversationHistory';
 import {AgentManagedAiBalance} from '@/ide/AgentManagedAiBalance';
+import {executeRunMutation} from '@/lib/runMutationAttempt';
 
 export type {CloudRunRepoChoice, CloudRunRepoSelection} from '@/ide/AgentRepositoryScope';
 
@@ -804,7 +805,7 @@ function SandboxRunCard({
       </div>
       <div className='agent-runcard-mode'>
         {remoteSandboxEnabled ? 'Remote sandbox' : 'Remote server workspace'} · plan-gated ·
-        PR-oriented
+        publication-gated
       </div>
       {streamLabel && (
         <div
@@ -975,7 +976,10 @@ function InlineRunDiff({runId, onOpen}: {runId: string; onOpen: (path: string) =
     setRevertBusy(true);
     setMessage('Creating a reviewable revert run…');
     try {
-      const fork = await api.forkRun(runId, {userRequest: pendingRevert.request});
+      const overrides = {userRequest: pendingRevert.request};
+      const fork = await executeRunMutation(`fork:revert:${runId}`, overrides, (idempotencyKey) =>
+        api.forkRun(runId, overrides, idempotencyKey),
+      );
       setPendingRevert(null);
       onOpen(`/plan/${fork.runId}`);
     } catch (error: unknown) {
@@ -1221,7 +1225,7 @@ function SandboxProposalCard({
         <span>plan first</span>
         <span>no local files touched</span>
         <span>approval before credits</span>
-        <span>PR-oriented result</span>
+        <span>PR when publication gates pass</span>
       </div>
       <div className='agent-card-actions'>
         <button
@@ -1299,7 +1303,7 @@ function GateCard({
         {gate.hardCapUsd != null && <span>cap ${gate.hardCapUsd.toFixed(2)}</span>}
         {gate.provider && <span>{gate.provider}</span>}
         {gateAge(gate) && <span>{gateAge(gate)}</span>}
-        <span>opens a PR</span>
+        <span>PR only after publication gates pass</span>
       </div>
       {gate.creditsRequired == null && (
         <div className='agent-card-sub' role='status'>
@@ -1655,7 +1659,7 @@ export function AgentConversation({
                 {remoteSandboxEnabled ? 'Remote sandbox only' : 'Remote server workspace'}
               </span>
               <span>Plan and cost first</span>
-              <span>Branch, tests, PR, and cap shown before run</span>
+              <span>Branch, tests, publication policy, and cost controls shown before run</span>
               <span>No local files touched</span>
             </div>
           )}

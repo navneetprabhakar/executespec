@@ -147,6 +147,10 @@ Documented deviations from Google TypeScript style in [`executespec-docs/backend
   confirmation predicate, and selection UI; keep this authority out of the proposal card and
   stream lifecycle code.
 - Web agent chat usage is displayed as included conversation usage, not pending AI credits. `IdeAgent.tsx` prepends the current visible token totals and billing boundary to the streamed conversation so cost questions can answer from session facts; run credits remain separate and charge only through the plan-gate approval path.
+- Agent runtime copy must describe only evidence the product can prove: actions/evidence are retained
+  subject to retention policy, BYOK cost caps are optional, and a PR is prepared only after
+  publication gates pass. Do not claim that every event is permanently audited, every run is
+  capped, or every terminal run necessarily opens a PR.
 - **Sandbox correctness contracts (Phase 4, 2026-07-19).** `agentActionPolicy.ts` is the single confirmability predicate (`isConfirmableCloudRun` / `isCloudRunAction` / `cloudRunBlockingReasons` / `cloudRunBlockingCopy` / `requiresProjectSelection`) consumed by BOTH `agentPanels.tsx` rendering and `IdeAgent.tsx` confirmation dispatch — do not reintroduce a bare `action.type === 'create_cloud_run'` check in either place. It honours the backend `AgentTypedAction.actionContext` (`AgentActionContext`) as authoritative, and independently requires a non-blank `arguments.projectId`, so a legacy turn replayed without a context cannot become confirmable by omission. A blocked proposal renders `AgentBlockedActionCard.tsx` instead of a confirm card. `agentSessionActions.ts` is the canonical session-creation action: every entry point (`ConsoleShell` header CTA, `Agent: New remote sandbox` palette command, `IdeAgent` header/empty state) mints one `NewAgentSessionRequest` whose client UUID is sent as `CreateAgentSessionRequest.id`, which the backend treats idempotently — navigation alone is never creation. `ConsoleShell`'s "latest sandbox" command reads `latestLinkedRun*` from `listAgentSessions`, never the global `runs[0]`. `lib/specHandoff.ts` replaces the raw `signal:pending-spec` string with a versioned envelope (`schemaVersion`, `handoffId`, `spec`, `projectId`, `repoId`, `scope`, `source`, `createdAt`) that migrates the legacy bare-string form on read. Covered by `agentActionPolicy.test.ts`, `agentSessionActions.test.ts`, and `specHandoff.test.ts`.
 - `agentArtifacts.ts` extracts generated fenced-code artifacts from assistant messages. `agentPanels.tsx` renders the artifact rail with file identity, copy, download, preview for browser-safe types, a "Draft sandbox request" composer prefill (renamed from "Use in sandbox", which claimed a runtime that does not exist), and a `/cli-login` local-handoff link; keep artifact parsing covered by `agentArtifacts.test.ts` and rendered affordances covered by `IdeAgent.test.tsx`.
 - `lib/api/validationReportTypes.ts` owns the typed final-goal evidence-reference shape shared by
@@ -207,6 +211,18 @@ Documented deviations from Google TypeScript style in [`executespec-docs/backend
 ### Project workbench (`ide/IdeProjects.tsx` + `ide/IdeProject.tsx` + `ide/IdeProjectTabs.tsx` + `ide/IdeProjectMore.tsx` + `ide/IdeProjectSettings.tsx`)
 
 - `IdeProjects` — health cards over the project list; `IdeProject` — the project composer with repo scoping.
+- Enterprise Project Start Work reuses the global Compose `ModelPicker` and
+  `buildIdeComposeRunRequest` exact-route contract. The selected `modelName` is a per-run override,
+  resets when the provider changes, and never mutates the project or organization model matrix.
+- `lib/runMutationAttempt.ts` owns browser caller-attempt identity for run create/fork/iterate.
+  Active Web call sites must execute those mutations through `executeRunMutation` and pass the
+  resulting required `Idempotency-Key` to `lib/api/runs.ts`. Pending keys live in `sessionStorage`
+  (tab-scoped) and survive an ambiguous network/5xx/in-flight response plus same-tab reload; clear
+  them on success or definitive rejection so an intentional repeat creates new work. Storage holds
+  only a SHA-256 digest of canonical request bytes plus key/timestamp metadata—never spec/request
+  text—and removes the known scoped v1 body-bearing row during upgrade. Hashing is asynchronous;
+  callers must await `executeRunMutation`. Keep canonical equivalence, material-change separation,
+  secret absence, and retry classification pinned by `runMutationAttempt.test.ts`.
 - Project sub-tabs (Pulse / Repos / Runs / Code / Chat / Architecture / Setup / Members / Activity / Settings) live across `IdeProjectTabs` + `IdeProjectMore` + `IdeProjectSettings`. `IdeProjectPulse` shows a last-run hero + `ScoreRing` + signal chips + workspace-health rollup and live-polls runs while any is non-terminal.
 - `IdeProjectSettings.tsx` owns `/projects/:id/settings`: settings form, reference-doc upload/delete/polling, project memory compaction, and project archive/delete confirmations. Keep settings-specific route effects there; keep pure projections in `projectSettingsUtils.ts`.
 - `projectMoreUtils.ts` owns pure helpers for project-more routes: assistant artifact detection, generated-doc freshness stamps, tech-debt category sorting, mobile file filtering, architecture markdown section parsing, invariant/contract rollups, and member display/availability helpers. Keep additional project-more formatting/parser helpers there with `projectMoreUtils.test.ts`.

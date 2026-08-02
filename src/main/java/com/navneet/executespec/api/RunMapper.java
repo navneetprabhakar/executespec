@@ -16,8 +16,10 @@ import com.navneet.executespec.billing.repository.ManagedAiUsageEventRepository;
 import com.navneet.executespec.codeintel.entity.RunCodeMap;
 import com.navneet.executespec.codeintel.repository.RunCodeMapRepository;
 import com.navneet.executespec.cost.EffectiveRouteProjection;
+import com.navneet.executespec.cost.RunCostTracker;
 import com.navneet.executespec.cost.RunEffectiveRouteService;
 import com.navneet.executespec.integration.PlannerFailureDiagnostic;
+import com.navneet.executespec.integration.RunPipelineSupport;
 import com.navneet.executespec.report.ValidationReportRepository;
 import com.navneet.executespec.report.ValidationReportScoreProjection;
 import com.navneet.executespec.report.entity.ValidationReport;
@@ -38,7 +40,6 @@ import lombok.extern.slf4j.Slf4j;
 public class RunMapper {
 
   private static final int UNPROVEN_COMPLETION_SCORE_CAP = 84;
-
   private final IntegrationRunRepository integrationRunRepository;
   private final ProjectRepository projectRepository;
   private final AppUserRepository appUserRepository;
@@ -48,6 +49,7 @@ public class RunMapper {
   private final ManagedAiUsageEventRepository managedAiUsageEventRepository;
   private final RunEffectiveRouteService runEffectiveRouteService;
   private final AgentTaskRepository agentTaskRepository;
+  private final RunCostTracker runCostTracker;
   private final ObjectMapper objectMapper;
 
   public RunSummary toSummary(PipelineRun r) {
@@ -162,9 +164,7 @@ public class RunMapper {
         .orElse(null);
   }
 
-  /**
-   * Builds the per-agent (planner/reviewer/compiler/test-gen) token entries for the detail view.
-   */
+  /** Builds the per-agent token entries for the detail view. */
   private List<RunDetail.AgentTokenEntry> buildAgentTokens(PipelineRun r) {
     List<RunDetail.AgentTokenEntry> entries = new java.util.ArrayList<>();
     int pIn = r.getPlannerInputTokens() != null ? r.getPlannerInputTokens() : 0;
@@ -289,7 +289,7 @@ public class RunMapper {
             .hasApiSpec(r.isHasApiSpec())
             .previewStatus(r.getPreviewStatus())
             .keySource(r.getKeySource())
-            .actualCostUsd(r.getActualCostUsd())
+            .actualCostUsd(actualCostForDetail(r))
             .costEstimateLow(r.getCostEstimateLow())
             .costEstimateHigh(r.getCostEstimateHigh())
             .creditsCharged(r.getCreditsCharged())
@@ -366,9 +366,20 @@ public class RunMapper {
   }
 
   /**
-   * Sort order for tasks in the detail view: WORKING first (in-flight), then PENDING/LOCKED
-   * (queued), then PARTIAL/BLOCKED (stalled), then FAILED, and finally COMPLETE at the bottom.
+   * Active detail reads may be ahead of the last persistence checkpoint. Overlay only a JVM-owned
+   * live snapshot, and only monotonically; terminal rows remain durable billing truth.
    */
+  private Double actualCostForDetail(PipelineRun run) {
+    Double stored = run.getActualCostUsd();
+    if (RunPipelineSupport.isTerminal(run.getStatus()) || runCostTracker == null) {
+      return stored;
+    }
+    return runCostTracker
+        .liveSnapshot(run.getRunId())
+        .map(snapshot -> Math.max(stored == null ? 0.0 : stored, snapshot.costUsd()))
+        .orElse(stored);
+  }
+
   /**
    * RR-1446 — task display order for the run detail view and the approval gate. The persisted
    * planner-intent index is the primary key so the human sees the planner's sequence; status is a

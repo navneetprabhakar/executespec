@@ -504,14 +504,21 @@ public class DurableCorrectionLifecycle {
     if (!Integer.valueOf(1).equals(attempt.getSnapshotSchemaVersion())) {
       throw new IllegalStateException("Unsupported correction snapshot schema");
     }
-    if (!attempt.getEvidenceSnapshotDigest().equals(sha256(attempt.getEvidenceSnapshotJson()))) {
-      throw new IllegalStateException("Correction evidence snapshot digest mismatch");
-    }
     try {
       ValidationSnapshotV1 snapshot =
           objectMapper.readValue(attempt.getEvidenceSnapshotJson(), ValidationSnapshotV1.class);
       if (snapshot.schemaVersion() != 1) {
         throw new IllegalStateException("Unsupported correction validation snapshot schema");
+      }
+      // evidence_snapshot_json is PostgreSQL jsonb. jsonb preserves every typed value (including
+      // the byte-exact reportJson string) but is explicitly free to reorder the outer object's
+      // keys. V369 digested the Java record serialization before insertion, so hashing the raw
+      // value read back from jsonb rejects an unchanged checkpoint whenever PostgreSQL returns a
+      // different key order. Re-serialize the typed V1 envelope in its declared record order: this
+      // reproduces the bytes V369 originally digested while still binding every evidence/share
+      // value, and remains compatible with already-persisted unresolved attempts.
+      if (!attempt.getEvidenceSnapshotDigest().equals(sha256(write(snapshot)))) {
+        throw new IllegalStateException("Correction evidence snapshot digest mismatch");
       }
       return snapshot;
     } catch (JsonProcessingException malformed) {

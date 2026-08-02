@@ -1,7 +1,19 @@
-import {describe, expect, it} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
 import type {AuthUser} from './core';
-import {requiresCostCap} from './runs';
+import {createRun, forkRun, iterateRun, requiresCostCap} from './runs';
+
+beforeEach(() => {
+  vi.stubGlobal('localStorage', {
+    getItem: () => null,
+    setItem: () => undefined,
+    removeItem: () => undefined,
+  } satisfies Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>);
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 /** Minimal AuthUser factory — requiresCostCap only reads `tier` + key flags. */
 function user(partial: Partial<AuthUser>): AuthUser {
@@ -42,5 +54,26 @@ describe('requiresCostCap tier stratification (RR-167 / RR-1338)', () => {
   it('treats an anonymous user as FREE-equivalent', () => {
     expect(requiresCostCap(null)).toBe(true);
     expect(requiresCostCap(undefined)).toBe(true);
+  });
+});
+
+describe('run-creating mutation idempotency', () => {
+  it.each([
+    ['create', () => createRun({userRequest: 'build'}, 'create-key')],
+    ['fork', () => forkRun('run-1', {aiProvider: 'OPENAI'}, 'fork-key')],
+    ['iterate', () => iterateRun('run-1', 'continue', 'iterate-key')],
+  ])('sends the caller-owned Idempotency-Key for %s', async (_name, request) => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({runId: 'run-2'}), {
+        status: 202,
+        headers: {'Content-Type': 'application/json'},
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await request();
+
+    const headers = fetchMock.mock.calls[0][1]?.headers as Record<string, string>;
+    expect(headers['Idempotency-Key']).toMatch(/^(create|fork|iterate)-key$/);
   });
 });

@@ -212,6 +212,15 @@ public class RunCostTracker {
     return acc.toSnapshot();
   }
 
+  /**
+   * Returns one coherent snapshot only while this JVM owns the accumulator. Unlike a separate
+   * presence check plus {@link #snapshot}, this cannot observe removal between those two reads.
+   */
+  public java.util.Optional<Snapshot> liveSnapshot(String runId) {
+    Accumulator acc = runId == null ? null : byRun.get(runId);
+    return acc == null ? java.util.Optional.empty() : java.util.Optional.of(acc.toSnapshot());
+  }
+
   /** Per-task snapshot, or zero-init if the tracker never saw task-scoped calls. */
   public Snapshot snapshotTask(String runId, String taskId) {
     if (runId == null || taskId == null) return new Snapshot(0, 0, 0, 0, 0.0, 0);
