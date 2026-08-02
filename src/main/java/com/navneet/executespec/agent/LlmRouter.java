@@ -464,6 +464,14 @@ public class LlmRouter {
   @Value("${spring.ai.deepseek.read-timeout-seconds:300}")
   private int deepSeekReadTimeoutSeconds = 300;
 
+  /**
+   * Fireworks long agentic tool turns (500K-token GLM contexts) routinely exceed the generic 120s
+   * OpenAI-wire window; the provider keeps generating and bills the discarded completion while the
+   * client cancels at exactly 120s. Same window as native DeepSeek.
+   */
+  @Value("${spring.ai.fireworks.read-timeout-seconds:300}")
+  private int fireworksReadTimeoutSeconds = 300;
+
   // 2026-06-09 — Fireworks AI: OpenAI-wire-compatible US-hosted fast inference for the Chinese open
   // models. Same plumbing as DeepSeek (per-call base-URL). System fallback key; org BYOK via
   // RunKeyContext.keyFor("fireworks").
@@ -480,9 +488,18 @@ public class LlmRouter {
    * failover) and makes customer runs survive transient upstream errors. This is public because
    * durable logical-call budgets must reserve the exact same physical-attempt envelope.
    */
-  public static final int TRANSIENT_RETRY_MAX_ATTEMPTS = 4;
+  public static final int TRANSIENT_RETRY_MAX_ATTEMPTS = 6;
 
-  private static final long TRANSIENT_RETRY_BASE_MS = 2000L;
+  /**
+   * Accuracy-over-latency spacing (2026-08-01, TB 2.1 campaign): one initial call plus five retries
+   * at 5s/15s/25s/45s/65s. The old 2s/4s/8s ladder re-hit a still-pressured provider fast enough to
+   * exhaust the envelope inside one throttling window; wider gaps trade wall clock for a materially
+   * higher chance the transient clears before the envelope is spent.
+   */
+  private static final long[] TRANSIENT_RETRY_BACKOFF_MS = {
+    5_000L, 15_000L, 25_000L, 45_000L, 65_000L
+  };
+
   private static final Duration DEFAULT_TRANSPORT_TIMEOUT = Duration.ofSeconds(120);
   private static final Duration ANTHROPIC_TRANSPORT_TIMEOUT = Duration.ofSeconds(300);
   private static final int ANTHROPIC_FALLBACK_MAX_TOKENS = 16_000;
@@ -783,7 +800,9 @@ public class LlmRouter {
             contextSanitizer.sanitizeException(e));
         lastError = e;
         if (attempt < TRANSIENT_RETRY_MAX_ATTEMPTS && isTransientError(e)) {
-          long backoffMs = TRANSIENT_RETRY_BASE_MS * (1L << (attempt - 1));
+          long backoffMs =
+              TRANSIENT_RETRY_BACKOFF_MS[
+                  Math.min(attempt - 1, TRANSIENT_RETRY_BACKOFF_MS.length - 1)];
           log.warn(
               "LlmRouter transient error on {} — retrying in {}ms", request.provider(), backoffMs);
           backoffSleep(backoffMs);
@@ -1162,6 +1181,9 @@ public class LlmRouter {
     if ("anthropic".equalsIgnoreCase(request.provider())) return ANTHROPIC_TRANSPORT_TIMEOUT;
     if ("deepseek".equalsIgnoreCase(request.provider())) {
       return Duration.ofSeconds(Math.max(1, deepSeekReadTimeoutSeconds));
+    }
+    if ("fireworks".equalsIgnoreCase(request.provider())) {
+      return Duration.ofSeconds(Math.max(1, fireworksReadTimeoutSeconds));
     }
     return DEFAULT_TRANSPORT_TIMEOUT;
   }
@@ -1746,7 +1768,10 @@ public class LlmRouter {
             .maxCompletionTokens(r.maxTokens())
             .toolChoice(r.toolChoice())
             .apiKey(key)
-            .readTimeoutSeconds(admittedReadTimeoutSeconds(r, transportDeadline))
+            .readTimeoutSeconds(
+                transportDeadline == null && r.readTimeoutSeconds() == null
+                    ? fireworksReadTimeoutSeconds
+                    : admittedReadTimeoutSeconds(r, transportDeadline))
             .baseUrl(fireworksBaseUrl)
             .build());
   }

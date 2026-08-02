@@ -239,10 +239,12 @@ function RunRow({r, onOpen}: {r: api.BenchmarkRun; onOpen: () => void}) {
       }}
       tabIndex={0}
     >
-      <td style={TD}>
+      <td style={TD} className='ide-benchmark-name-cell'>
         <div style={{display: 'flex', alignItems: 'center', gap: 8, minWidth: 0}}>
           <SuiteChip suite={r.suite} />
-          <span className='ide-benchmark-model'>{r.model}</span>
+          <span className='ide-benchmark-model' title={r.model}>
+            {r.model}
+          </span>
         </div>
         <div style={{marginTop: 4, color: MUTED, fontSize: 12}}>{r.provider}</div>
       </td>

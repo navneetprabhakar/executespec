@@ -268,7 +268,13 @@ public class WorkerAgent {
    * Calibrated 2026-05-08 from cmatrix gemini run 84252898 — task T3 timed out after a 17-min
    * worker phase with 122k input tokens.
    */
-  private static final int WORKER_HTTP_READ_TIMEOUT_SECONDS = 120;
+  // 2026-08-01 TB campaign (benchmark branch only): hardcoded 300 to match the router's
+  // Fireworks/DeepSeek transport window. The worker pins readTimeoutSeconds on every LLM call,
+  // overriding the per-provider window, so 120 here cancelled long GLM Fast turns at exactly 120s
+  // while the provider billed the discarded completion. A consistent hardcoded value cannot
+  // silently regress on a restart the way an env override could. Proper per-provider plumbing
+  // follows the campaign.
+  private static final int WORKER_HTTP_READ_TIMEOUT_SECONDS = 300;
 
   public WorkerResult run(WorkerTaskRequest req) {
     return run(req, null);
