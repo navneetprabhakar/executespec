@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
@@ -15,6 +16,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -38,8 +40,11 @@ import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
+import org.springframework.ai.chat.metadata.ChatGenerationMetadata;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
+import org.springframework.ai.tool.ToolCallback;
+import org.springframework.ai.tool.definition.DefaultToolDefinition;
 
 /**
  * Pins the stagnation guard introduced for the run {@code a076c876} task T2 runaway (2026-05-03).
@@ -64,6 +69,26 @@ class WorkerAgentStagnationTest {
   private static ChatResponse responseWithCalls(AssistantMessage.ToolCall... calls) {
     AssistantMessage msg = AssistantMessage.builder().content("").toolCalls(List.of(calls)).build();
     return new ChatResponse(List.of(new Generation(msg)));
+  }
+
+  private static ChatResponse outputCappedWithoutTools(String text) {
+    AssistantMessage msg = AssistantMessage.builder().content(text).build();
+    return new ChatResponse(
+        List.of(
+            new Generation(msg, ChatGenerationMetadata.builder().finishReason("length").build())));
+  }
+
+  private static ToolCallback callback(String name) {
+    ToolCallback callback = mock(ToolCallback.class);
+    lenient()
+        .when(callback.getToolDefinition())
+        .thenReturn(
+            DefaultToolDefinition.builder()
+                .name(name)
+                .description(name)
+                .inputSchema("{\"type\":\"object\"}")
+                .build());
+    return callback;
   }
 
   /** Fake tool that returns Ok for any input. Used as the registry's stand-in for read/write. */
@@ -545,6 +570,58 @@ class WorkerAgentStagnationTest {
         .maxTokensPerCall(4096)
         .forceToolChoiceOnSalvage(force)
         .build();
+  }
+
+  @Test
+  void outputCapWithZeroWritesGetsOneRestrictedSameRouteRecovery() {
+    Fixture f =
+        newWorker(
+            List.of(
+                responseWithCalls(toolCall("readFile", "{\"path\":\"pom.xml\"}")),
+                outputCappedWithoutTools(
+                    "[Provider terminated with finish_reason=length; tool call(s) suppressed]"),
+                responseWithCalls(
+                    toolCall(
+                        "writeFile",
+                        "{\"path\":\"src/main/java/App.java\",\"content\":\"class App {}\"}"))));
+    List<ToolCallback> advertised =
+        List.of(
+            callback("readFile"),
+            callback("writeFile"),
+            callback("editFile"),
+            callback("completeTask"),
+            callback("shell"));
+    lenient()
+        .when(f.registry.bindForWorker(any(), anyString(), anyString(), nullable(Set.class)))
+        .thenReturn(advertised);
+
+    WorkerTaskRequest request =
+        reqSalvage(30, false, "deepseek").toBuilder()
+            .maxTokensPerCall(4096)
+            .strictProvider(true)
+            .build();
+    WorkerResult result = f.worker.run(request);
+
+    assertEquals(WorkerResult.Outcome.COMPLETED, result.outcome());
+    assertEquals(2, result.iterations(), "the recovery is part of the capped logical iteration");
+    assertTrue(
+        result.salvagedUnverified(), "normal validation must still judge the recovered edit");
+
+    ArgumentCaptor<LlmRequest> cap = ArgumentCaptor.forClass(LlmRequest.class);
+    verify(f.router, atLeastOnce()).call(cap.capture());
+    LlmRequest recovery = cap.getAllValues().get(cap.getAllValues().size() - 1);
+    assertEquals("worker.output-cap-recovery", recovery.stepId());
+    assertEquals("deepseek", recovery.provider());
+    assertEquals("deepseek-v4-flash-native", recovery.model());
+    assertTrue(recovery.strictProvider(), "the exact route fence must survive recovery");
+    assertEquals("required", recovery.toolChoice());
+    assertEquals(8192, recovery.maxTokens());
+    assertEquals(
+        Set.of("writeFile", "editFile", "completeTask"),
+        recovery.toolsOverride().stream()
+            .map(tool -> tool.getToolDefinition().name())
+            .collect(java.util.stream.Collectors.toSet()),
+        "recovery authority is tighten-only: no reads, shell, build, or publication tools");
   }
 
   /**

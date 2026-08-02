@@ -44,16 +44,19 @@ public class TestCommandResolver {
    */
   public Optional<TestCommand> resolve(Path workspaceRoot) {
     if (workspaceRoot == null) return Optional.empty();
+    Path normalizedWorkspace = workspaceRoot.toAbsolutePath().normalize();
 
-    Optional<TestCommand> root =
-        hasProjectManifest(workspaceRoot) ? resolveSingle(workspaceRoot) : Optional.empty();
-    if (root.isPresent()) return root;
+    BuildRootDiscovery.Selection selection = BuildRootDiscovery.select(normalizedWorkspace);
+    if (selection.ambiguous()) return Optional.empty();
+    if (selection.roots().size() == 1 && selection.roots().getFirst().equals(normalizedWorkspace)) {
+      return resolveSingle(normalizedWorkspace);
+    }
 
     List<LocatedCommand> resolvedCommands = new ArrayList<>();
     int timeout = 0;
     try {
-      for (Path child : candidateProjectRoots(workspaceRoot)) {
-        String relative = workspaceRoot.relativize(child).toString();
+      for (Path child : selection.roots()) {
+        String relative = normalizedWorkspace.relativize(child).toString();
         if (!relative.matches("[A-Za-z0-9._/-]+")) continue;
         Optional<TestCommand> resolved = resolveSingle(child);
         if (resolved.isEmpty()) continue;
@@ -63,7 +66,7 @@ public class TestCommandResolver {
     } catch (Exception ignored) {
       return Optional.empty();
     }
-    if (resolvedCommands.isEmpty()) return resolveSingle(workspaceRoot);
+    if (resolvedCommands.isEmpty()) return resolveSingle(normalizedWorkspace);
     if (resolvedCommands.size() == 1) {
       LocatedCommand located = resolvedCommands.getFirst();
       TestCommand command = located.command();
@@ -81,33 +84,6 @@ public class TestCommandResolver {
     return Optional.of(
         new TestCommand(
             String.join(" && ", commands), Math.min(timeout, 1200), Framework.MULTI, "multi-root"));
-  }
-
-  /**
-   * Multi-repo workspaces use {@code repos/<repo>/}. Treat {@code repos} as a grouping directory,
-   * never as a Python project merely because a nested repository contains {@code test_*.py}.
-   */
-  private static List<Path> candidateProjectRoots(Path workspaceRoot) throws java.io.IOException {
-    List<Path> roots = new ArrayList<>();
-    try (var children = Files.list(workspaceRoot)) {
-      for (Path child : children.filter(Files::isDirectory).sorted().toList()) {
-        String name = child.getFileName().toString();
-        if (!name.matches("[A-Za-z0-9._-]+")) continue;
-        if (!"repos".equals(name)) {
-          roots.add(child);
-          continue;
-        }
-        try (var repositories = Files.list(child)) {
-          roots.addAll(
-              repositories
-                  .filter(Files::isDirectory)
-                  .filter(p -> p.getFileName().toString().matches("[A-Za-z0-9._-]+"))
-                  .sorted()
-                  .toList());
-        }
-      }
-    }
-    return roots;
   }
 
   private Optional<TestCommand> resolveSingle(Path workspaceRoot) {
@@ -152,18 +128,6 @@ public class TestCommandResolver {
           new TestCommand(python + " -m pytest -q", 600, Framework.PYTEST, "pytest"));
     }
     return Optional.empty();
-  }
-
-  private static boolean hasProjectManifest(Path root) {
-    return exists(root, "pom.xml")
-        || exists(root, "build.gradle")
-        || exists(root, "build.gradle.kts")
-        || exists(root, "Cargo.toml")
-        || exists(root, "go.mod")
-        || exists(root, "package.json")
-        || exists(root, "pyproject.toml")
-        || exists(root, "setup.py")
-        || exists(root, "requirements.txt");
   }
 
   private static boolean exists(Path dir, String name) {

@@ -113,6 +113,17 @@ provider emits more, the planner gets one bounded coarsening retry that must pre
 requirement and acceptance/setup task; the server fails planning closed if the retry is still
 oversized. It never silently truncates the tail of a plan.
 
+Stale project architecture is advisory planner context and cannot delay run admission: the
+pre-planner boundary admits/reuses the durable refresh job without awaiting provider generation;
+the durable worker owns promotion and staleness-cache invalidation. Build and test inference uses
+bounded manifest discovery plus exact JGit working-tree changes to select only changed nested
+modules; multiple unscoped modules remain honestly unavailable instead of executing unrelated
+builds. A zero-write worker response terminated by the provider output cap receives one same-route,
+restricted mutation recovery and remains unverified until the normal downstream gates. Terminal
+run UI treats the validation report's reviewer verdict and product-file count as authoritative;
+same-route retry preserves the persisted provider/model and route changes are an explicit paid
+action.
+
 Run modes (`pipeline_run.run_mode`): **`BUILD`** (default — the diagram above) and **`PATCH`** (single thin-agent loop against a failing-test spec; skips classifier / planner / reviewer; used by the four autofix surfaces below and the SWE-bench / ProgramBench adapters).
 
 **Worker mutation-epoch watchdog (2026-07-30):** normal workers credit successful
@@ -996,7 +1007,7 @@ requires the consumer repository to be linked to that project before persistence
 | ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Run orchestrator                | [`integration/RunOrchestrator.java`](src/main/java/com/navneet/executespec/integration/RunOrchestrator.java)                                                                                                                                                                      |
 | Correction transaction         | [`integration/AutomaticCorrectionLifecycle.java`](src/main/java/com/navneet/executespec/integration/AutomaticCorrectionLifecycle.java) + `DurableCorrectionLifecycle` + `CorrectionWorkspaceTransaction` + `CorrectionAcceptancePolicy`                                                                          |
-| Pre-planner architecture refresh | [`integration/PrePlannerArchitectureRefreshService.java`](src/main/java/com/navneet/executespec/integration/PrePlannerArchitectureRefreshService.java) — owns stale-map detection, durable V353 admission/await, promoted-result proof, and cache invalidation; the run orchestrator retains only the surrounding fail-soft policy |
+| Pre-planner architecture refresh | [`integration/PrePlannerArchitectureRefreshService.java`](src/main/java/com/navneet/executespec/integration/PrePlannerArchitectureRefreshService.java) — owns stale-map detection and non-blocking durable V353 admission; the durable worker owns generation/promotion/cache invalidation so advisory architecture refresh cannot block planning |
 | Customer BUILD admission        | [`run/CustomerRunSubmissionService.java`](src/main/java/com/navneet/executespec/run/CustomerRunSubmissionService.java) — shared REST, confirmed Web Agent, fork, and unified Execution View admission boundary; exact project/repository scope, provider/key/spend checks, and durable idempotency precede dispatch                                                                 |
 | Plan-gate decision              | [`integration/PlanGateDecisionService.java`](src/main/java/com/navneet/executespec/integration/PlanGateDecisionService.java) + [`integration/PlanGateDecisionEvidence.java`](src/main/java/com/navneet/executespec/integration/PlanGateDecisionEvidence.java) + [`integration/PlanGateDecisionAdmission.java`](src/main/java/com/navneet/executespec/integration/PlanGateDecisionAdmission.java) + [`integration/DecisionEvidenceV1.java`](src/main/java/com/navneet/executespec/integration/DecisionEvidenceV1.java) + [`integration/DecisionRequestBytesV1.java`](src/main/java/com/navneet/executespec/integration/DecisionRequestBytesV1.java) |
 | Plan-gate continuation          | [`integration/PlanGateResumeDispatcher.java`](src/main/java/com/navneet/executespec/integration/PlanGateResumeDispatcher.java) + [`integration/PlanGateResumeStore.java`](src/main/java/com/navneet/executespec/integration/PlanGateResumeStore.java)                                                                                              |
