@@ -741,6 +741,18 @@ model-matrix:
         cached-input-per-1m: 0.21
         output-per-1m: 6.60
       notes: "Fireworks accounts/fireworks/routers/glm-5p2-fast — the Fast serving tier is a ROUTER slug over the same glm-5p2 weights (responses report models/glm-5p2). Pricing from Fireworks Fast SKU page 2026-07-31. Live API smoke 2026-07-31: callable + tool_choice=required verified. Added for the TB 2.1 internal benchmark campaign."
+    deepseek-v4-flash-0731-fw:
+      provider: fireworks
+      chain-tier: CAPABLE
+      quality-class: HIGH
+      context-limit: 262144
+      max-output-tokens: 32768
+      display-label: "DeepSeek V4 Flash 0731 (Fireworks)"
+      pricing:
+        input-per-1m: 0.14
+        cached-input-per-1m: 0.014
+        output-per-1m: 0.28
+      notes: "Fireworks accounts/fireworks/models/deepseek-v4-flash-0731 — the pinned 2026-07-31 re-post-trained Flash build; native DeepSeek exposes only the unversioned deepseek-v4-flash, so this slug is the only way to pin 0731. Vendor claims it beats V4-Pro on agent benchmarks (TB 2.1 82.7 vs 72.1) using an unreleased in-house harness; treated here as an unverified third-party claim. Live API smoke 2026-08-02: callable + tool_choice=required verified."
     devstral-2:
       provider: openrouter
       chain-tier: CAPABLE
