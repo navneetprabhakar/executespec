@@ -230,6 +230,9 @@ public class ValidationReportService {
       TestExecutionSummary ts = input.testSummary();
       int testsPassedCount = ts != null ? ts.getPassed() : 0;
       int testsTotalCount = ts != null ? ts.getTotalTests() : 0;
+      int testsSkippedCount = ts != null ? ts.getSkipped() : 0;
+      int scoredTestsTotalCount =
+          scoredTestTotal(testsTotalCount, testsPassedCount, testsSkippedCount);
       String reviewerVerdict =
           mapVerdictToV2Name(input.review() != null ? input.review().getVerdict() : null);
       int unfixedCritical = countUnfixedCritical(input);
@@ -260,7 +263,7 @@ public class ValidationReportService {
               : computeVerifiedScoreForFormula(
                   finalBuildPassed,
                   testsPassedCount,
-                  testsTotalCount,
+                  scoredTestsTotalCount,
                   reviewerVerdict,
                   unfixedCritical,
                   endpointCoveragePercent,
@@ -279,7 +282,7 @@ public class ValidationReportService {
               filesGenerated,
               finalBuildPassed,
               testsPassedCount,
-              testsTotalCount,
+              scoredTestsTotalCount,
               ts == null ? null : ts.getExecutionVerified(),
               input.bootVerification());
       if (verifiedScore == 0 && scoreZeroCause == null) {
@@ -298,7 +301,7 @@ public class ValidationReportService {
               : computeRubricScore(
                   finalBuildPassed,
                   testsPassedCount,
-                  testsTotalCount,
+                  scoredTestsTotalCount,
                   reviewerVerdict,
                   unfixedCritical,
                   endpointCoveragePercent,
@@ -309,7 +312,12 @@ public class ValidationReportService {
 
       ExecutableVerificationEvidence executableVerification =
           executableVerification(
-              finalBuildPassed, ts != null, testsPassedCount, testsTotalCount, evidenceFailure);
+              finalBuildPassed,
+              ts != null,
+              testsPassedCount,
+              testsTotalCount,
+              testsSkippedCount,
+              evidenceFailure);
 
       boolean verifiedScoreFlag = featureFlagService.isEnabled(FLAG_VERIFIED_SCORE);
 
@@ -365,6 +373,7 @@ public class ValidationReportService {
               .finalBuildPassed(finalBuildPassed)
               .testsPassed(ts != null ? testsPassedCount : null)
               .testsTotal(ts != null ? testsTotalCount : null)
+              .testsSkipped(ts != null ? testsSkippedCount : 0)
               // RR-1660 — carry the producer's execution-provenance token, three-valued. A summary
               // with no signal stays null (unproven), never false.
               .testExecutionVerified(ts == null ? null : ts.getExecutionVerified())
@@ -522,11 +531,14 @@ public class ValidationReportService {
     int incomingTotal = provenTestExecution ? Math.max(0, summary.getTotalTests()) : 0;
     int incomingPassed =
         provenTestExecution ? Math.max(0, Math.min(summary.getPassed(), incomingTotal)) : 0;
+    int incomingSkipped =
+        provenTestExecution ? Math.max(0, Math.min(summary.getSkipped(), incomingTotal)) : 0;
     // Each event is one explicitly scoped population and REPLACES the prior population. Adding
     // workspace and functional counts would let unit tests dilute a failing black-box result.
     // Re-delivery is naturally idempotent because the same scoped counts overwrite the row.
     int total = incomingTotal;
     int passed = incomingPassed;
+    int scoredTotal = scoredTestTotal(total, passed, incomingSkipped);
     List<ReportIssueDTO> issues = parseIssues(report.getIssuesJson());
     AccuracyReport persistedAccuracy = parseAccuracyReport(report);
     ValidationAccuracyFacts accuracy =
@@ -539,6 +551,7 @@ public class ValidationReportService {
 
     report.setTestsTotal(total);
     report.setTestsPassed(passed);
+    report.setTestsSkipped(incomingSkipped);
     report.setTestExecutionVerified(provenTestExecution ? Boolean.TRUE : Boolean.FALSE);
     report.setTestEvidenceScope(
         provenTestExecution && summary.getEvidenceScope() != null
@@ -546,14 +559,19 @@ public class ValidationReportService {
             : TestExecutionSummary.EvidenceScope.UNAVAILABLE.name());
     ExecutableVerificationEvidence executableVerification =
         executableVerification(
-            report.getFinalBuildPassed(), true, passed, total, scoreEvidenceFailure(report));
+            report.getFinalBuildPassed(),
+            true,
+            passed,
+            total,
+            incomingSkipped,
+            scoreEvidenceFailure(report));
     report.setExecutableTestsRun(executableVerification.testsRun());
     report.setExecutableTestsPassed(executableVerification.testsPassed());
     report.setExecutableVerificationStatus(executableVerification.status());
     report.setExecutionFailureStage(executableVerification.failureStage());
     report.setExecutableEvidenceJson(executableVerification.evidenceJson());
     // Keep the existing six-dimension test axis in sync for callers that still render it.
-    report.setTestCoverageScore(deriveConcreteTestCoverageScore(total, passed));
+    report.setTestCoverageScore(deriveConcreteTestCoverageScore(scoredTotal, passed));
     boolean additiveFormula = additiveScoreEnabled();
     String evidenceFailure = scoreEvidenceFailure(report);
     int rescoredVerified =
@@ -564,7 +582,7 @@ public class ValidationReportService {
                     computeVerifiedScoreForFormula(
                         report.getFinalBuildPassed(),
                         passed,
-                        total,
+                        scoredTotal,
                         report.getReviewerVerdict(),
                         criticals,
                         accuracy.endpointCited() ? accuracy.endpointCoverage() : null,
@@ -583,7 +601,7 @@ public class ValidationReportService {
             report.getFilesGenerated(),
             report.getFinalBuildPassed(),
             passed,
-            total,
+            scoredTotal,
             provenTestExecution ? Boolean.TRUE : Boolean.FALSE,
             bootVerification(report));
     if (rescoredVerified == 0 && scoreZeroCause == null) {
@@ -600,7 +618,7 @@ public class ValidationReportService {
                     computeRubricScore(
                         report.getFinalBuildPassed(),
                         passed,
-                        total,
+                        scoredTotal,
                         report.getReviewerVerdict(),
                         criticals,
                         accuracy.endpointCited() ? accuracy.endpointCoverage() : null,
@@ -631,6 +649,14 @@ public class ValidationReportService {
     if (ratio >= 0.60) return 75;
     if (ratio >= 0.30) return 55;
     return 35;
+  }
+
+  /**
+   * Skipped tests are neither passes nor failures, so they are excluded from score denominators.
+   */
+  private static int scoredTestTotal(int total, int passed, int skipped) {
+    if (!TestExecutionTrust.successfulPopulation(passed, skipped, total)) return total;
+    return Math.max(1, total - skipped);
   }
 
   /** Full quality credit requires a provenance-verified independent functional execution. */
@@ -672,9 +698,15 @@ public class ValidationReportService {
       boolean testSummaryPresent,
       int testsPassed,
       int testsTotal,
+      int testsSkipped,
       String provenanceFailure) {
     boolean testsRun = testSummaryPresent && testsTotal > 0;
-    Boolean testsPassedSignal = testsRun ? testsPassed == testsTotal : null;
+    boolean validCounts =
+        testsPassed >= 0 && testsSkipped >= 0 && (long) testsPassed + testsSkipped <= testsTotal;
+    Boolean testsPassedSignal =
+        testsRun
+            ? validCounts && testsPassed > 0 && (long) testsPassed + testsSkipped == testsTotal
+            : null;
     String status;
     String failureStage = null;
     if (provenanceFailure != null) {
@@ -701,6 +733,7 @@ public class ValidationReportService {
     evidence.put("testsRun", testsRun);
     evidence.put("testsPassed", Math.max(0, testsPassed));
     evidence.put("testsTotal", Math.max(0, testsTotal));
+    evidence.put("testsSkipped", Math.max(0, testsSkipped));
     evidence.put("status", status);
     if (failureStage != null) evidence.put("failureStage", failureStage);
     if (provenanceFailure != null) evidence.put("provenanceFailure", provenanceFailure);
@@ -1216,6 +1249,7 @@ public class ValidationReportService {
         reportComplete ? entity.getFinalBuildPassed() : null,
         reportComplete ? entity.getTestsPassed() : null,
         reportComplete ? entity.getTestsTotal() : null,
+        reportComplete ? entity.getTestsSkipped() : null,
         reportComplete ? entity.getReviewerVerdict() : null,
         effectiveVerifiedScore,
         verificationLedger,
@@ -1303,6 +1337,7 @@ public class ValidationReportService {
         entity.getFinalBuildPassed(),
         entity.getTestsPassed(),
         entity.getTestsTotal(),
+        entity.getTestsSkipped(),
         entity.getReviewerVerdict(),
         verificationLedger);
   }

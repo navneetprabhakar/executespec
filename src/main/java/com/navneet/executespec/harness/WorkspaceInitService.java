@@ -190,7 +190,7 @@ public class WorkspaceInitService {
     // 2026-05-02 — same vendored-path guard as cloneMultipleRepos. The legacy single-repo
     // path lands the clone at the workspace root rather than a repos/<name>/ subdir, but the
     // class of bug is identical (committed node_modules/ etc.).
-    vendoredPathGuard.augmentGitignore(workspace);
+    vendoredPathGuard.installLocalExcludes(workspace);
     // RR-1546 — keep ExecuteSpec's internal .agent-context/ evidence out of the customer's tree
     // without mutating their tracked .gitignore.
     excludeAgentContextInClone(workspace);
@@ -366,10 +366,9 @@ public class WorkspaceInitService {
         runGitStrictAuth(reposRoot, pat, "clone", httpsUrl, target.toString());
       }
       persistCloneSnapshot(runId, r, target);
-      // 2026-05-02 — augment .gitignore with vendored-path patterns BEFORE the worker starts
-      // running. Closes the run-b171fa52 class of bug where the worker added Node code to a
-      // Python repo whose .gitignore was Python-only and committed 9605 node_modules/ files.
-      vendoredPathGuard.augmentGitignore(target);
+      // Install non-versioned vendored-path excludes BEFORE the worker starts running. This closes
+      // the run-b171fa52 class without changing customer history or widening a file-scoped PR.
+      vendoredPathGuard.installLocalExcludes(target);
       excludeAgentContextInClone(target); // RR-1546
     }
     brownfieldHttpContractGuard.captureBaselineIfAbsent(runId, workspace);

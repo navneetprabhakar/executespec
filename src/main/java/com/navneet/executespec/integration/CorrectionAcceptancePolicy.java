@@ -91,8 +91,10 @@ final class CorrectionAcceptancePolicy {
       return Decision.reject(
           "CORRECTION_FINAL_TESTS_UNPROVEN", "Correction did not execute a real final test suite");
     }
-    if (reviewerResult.finalTestsPassed() == null
-        || reviewerResult.finalTestsPassed() < reviewerResult.finalTestsTotal()) {
+    if (!com.navneet.executespec.report.TestExecutionTrust.successfulPopulation(
+        reviewerResult.finalTestsPassed(),
+        reviewerResult.finalTestsSkipped(),
+        reviewerResult.finalTestsTotal())) {
       return Decision.reject(
           "CORRECTION_FINAL_TESTS_UNPROVEN",
           "Correction did not prove every executed final test passed");

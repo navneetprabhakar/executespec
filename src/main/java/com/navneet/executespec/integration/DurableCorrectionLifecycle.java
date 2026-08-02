@@ -300,8 +300,10 @@ public class DurableCorrectionLifecycle {
         || !Boolean.TRUE.equals(currentReport.getTestExecutionVerified())
         || currentReport.getTestsTotal() == null
         || currentReport.getTestsTotal() <= 0
-        || !java.util.Objects.equals(
-            currentReport.getTestsPassed(), currentReport.getTestsTotal())) {
+        || !com.navneet.executespec.report.TestExecutionTrust.successfulPopulation(
+            currentReport.getTestsPassed(),
+            currentReport.getTestsSkipped(),
+            currentReport.getTestsTotal())) {
       throw new IllegalStateException(
           "Completed correction approval lacks fresh accepted-generation evidence");
     }

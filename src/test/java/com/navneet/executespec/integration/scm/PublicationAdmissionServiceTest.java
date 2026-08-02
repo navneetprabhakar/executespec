@@ -89,6 +89,28 @@ class PublicationAdmissionServiceTest {
   }
 
   @Test
+  void admitsVerifiedGreenSuiteWithExplicitSkipsWithoutHidingRealFailures() {
+    ValidationReport report = greenReport();
+    report.setTestsPassed(82);
+    report.setTestsSkipped(6);
+    report.setTestsTotal(88);
+    when(reports.findByRunId(RUN_ID)).thenReturn(Optional.of(report));
+
+    assertThat(service.evaluate(run()))
+        .extracting(
+            PublicationAdmissionService.Eligibility::eligible,
+            PublicationAdmissionService.Eligibility::code)
+        .containsExactly(true, "PUBLICATION_ELIGIBLE");
+
+    report.setTestsPassed(81); // 81 pass + 6 skip leaves one real failure/error.
+    assertBlocked("PUBLICATION_TESTS_FAILED");
+
+    report.setTestsPassed(0);
+    report.setTestsSkipped(88);
+    assertBlocked("PUBLICATION_TESTS_UNPROVEN");
+  }
+
+  @Test
   void unresolvedCorrectionBlocksBeforeWorkspaceOrEvidenceInspection() {
     org.mockito.Mockito.doThrow(new IllegalStateException("PREPARED"))
         .when(durableCorrections)
@@ -137,6 +159,21 @@ class PublicationAdmissionServiceTest {
     report.setTestsPassed(1);
     report.setTestsTotal(2);
     assertBlocked("PUBLICATION_TESTS_FAILED");
+  }
+
+  @Test
+  void missingOrUnavailableTestEvidenceScopeIsBlocked() {
+    ValidationReport report = greenReport();
+    report.setTestEvidenceScope(null);
+    when(reports.findByRunId(RUN_ID)).thenReturn(Optional.of(report));
+
+    assertBlocked("PUBLICATION_TESTS_UNPROVEN");
+
+    report.setTestEvidenceScope("UNAVAILABLE");
+    assertBlocked("PUBLICATION_TESTS_UNPROVEN");
+
+    report.setTestEvidenceScope("LIVE_PREVIEW_FUNCTIONAL");
+    assertThat(service.evaluate(run()).eligible()).isTrue();
   }
 
   @Test
@@ -679,6 +716,7 @@ class PublicationAdmissionServiceTest {
         .workspaceGeneration(GENERATION)
         .finalBuildPassed(true)
         .testExecutionVerified(true)
+        .testEvidenceScope("WORKSPACE_TEST_SUITE")
         .testsPassed(2)
         .testsTotal(2)
         .workflowConfigEvidenceJson(

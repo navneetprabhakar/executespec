@@ -29,6 +29,7 @@ import java.util.function.Supplier;
 public final class ReviewerMutationScope {
 
   private static final ThreadLocal<Bound> CURRENT = new ThreadLocal<>();
+  private static final ThreadLocal<AtomicBoolean> SINGLE_BUILD_PROJECT = new ThreadLocal<>();
   private static final Set<String> BUILD_MANIFESTS =
       Set.of(
           "package.json",
@@ -86,6 +87,28 @@ public final class ReviewerMutationScope {
       if (previous == null) CURRENT.remove();
       else CURRENT.set(previous);
     }
+  }
+
+  /**
+   * Bounds a read-only attestation to one resolver-selected build. A reviewer cannot turn {@code
+   * buildProject} into a general test shell by retrying it with different arguments.
+   */
+  public static <T> T withSingleBuildProject(Supplier<T> operation) {
+    AtomicBoolean previous = SINGLE_BUILD_PROJECT.get();
+    SINGLE_BUILD_PROJECT.set(new AtomicBoolean(false));
+    try {
+      return operation.get();
+    } finally {
+      if (previous == null) SINGLE_BUILD_PROJECT.remove();
+      else SINGLE_BUILD_PROJECT.set(previous);
+    }
+  }
+
+  public static String validateBuildProject() {
+    AtomicBoolean consumed = SINGLE_BUILD_PROJECT.get();
+    if (consumed == null || consumed.compareAndSet(false, true)) return null;
+    return "buildProject already executed for this read-only reviewer pass; use the prior result"
+        + " and call completeTask instead of retrying with another command";
   }
 
   /**

@@ -21,8 +21,11 @@ import lombok.extern.slf4j.Slf4j;
  * prove the argument vector, not the behaviour of a running container. The security matrix the plan
  * requires — network denied in practice, host filesystem and Docker socket inaccessible, metadata
  * endpoint unreachable, other tenants' workspaces unreachable, CPU/memory/PID/time bombs actually
- * terminated, and a two-JVM ownership race against live containers — has NOT been executed. Do not
- * enable this runtime, and do not describe it as proven, until it has.
+ * terminated, and a two-JVM ownership race against live containers — is not a deployed automated
+ * gate. The local toolchain validation script now executes the basic non-root/network/socket/host
+ * path/capability/cgroup/noexec matrix, but that does not prove production ownership, cleanup,
+ * dependency-cache readiness, or multi-JVM behavior. Do not enable this runtime, and do not
+ * describe it as proven, until those remaining gates pass against the deployed digest.
  *
  * <p>Container naming is derived from the sandbox id so a restarted JVM reattaches to the same
  * container instead of leaking a second one. Because that name is therefore NOT an ownership proof,

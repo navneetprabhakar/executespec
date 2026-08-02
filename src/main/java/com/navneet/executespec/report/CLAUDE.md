@@ -72,6 +72,14 @@ invalid reports are excluded and counted separately.
   only a `DETERMINISTIC_FUNCTIONAL`/HIGH tests row can satisfy
   `ValidationReportGoalProofEvaluator` and reach `STOP_DONE`. Null/false freshness renders the row
   `UNKNOWN` with `UNVERIFIED_COUNT`; positive stale or unbound counts never render as pass.
+- V371 persists `validation_report.tests_skipped` separately from passed/total. A fresh exit-zero
+  suite with at least one pass and `passed + skipped == total` is green code-level evidence and may
+  satisfy publication admission; all-skipped, malformed, non-zero-exit, failure, and error
+  populations remain blocked. Ordinary run-end validation now persists fresh
+  `WORKSPACE_TEST_SUITE` counts instead of discarding them as functional-tests-pending, while the
+  existing workspace-only score/goal-proof caps remain intact. Skips are excluded from the scoring
+  denominator only for an otherwise successful population; they never turn an all-skipped or
+  failing population into a green one.
 - `RunChangeEvidenceService` requires an admitted run-start baseline. When no `run_repo_snapshot`
   row exists, a Git workspace is accepted only if its history is a single commit — the case where
   the workspace was initialised for this run and `gitCommit` is filtered out of worker authority.

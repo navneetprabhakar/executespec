@@ -11,6 +11,7 @@ import java.nio.file.Path;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.config.featureflag.FeatureFlagService;
+import com.navneet.executespec.sandboxroute.SandboxCommandRoutingService;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -28,13 +29,15 @@ class BackgroundJobToolTest {
   private FeatureFlagService flags;
   private JobRegistry jobs;
   private BackgroundJobTool tool;
+  private SandboxCommandRoutingService sandboxRouting;
   private final ExecutionContext ctx = new ExecutionContext("run-bt", "T1", Path.of("/tmp/ws-bt"));
 
   @BeforeEach
   void setUp() {
     flags = mock(FeatureFlagService.class);
     jobs = mock(JobRegistry.class);
-    tool = new BackgroundJobTool(flags, jobs, new ShellSandboxPolicy());
+    sandboxRouting = mock(SandboxCommandRoutingService.class);
+    tool = new BackgroundJobTool(flags, jobs, new ShellSandboxPolicy(), sandboxRouting);
   }
 
   private JsonNode args(String json) {
@@ -65,6 +68,34 @@ class BackgroundJobToolTest {
     assertThat(tool.enabled()).isFalse();
     when(flags.isEnabled(BackgroundJobTool.FLAG)).thenReturn(true);
     assertThat(tool.enabled()).isTrue();
+  }
+
+  @Test
+  @DisplayName(
+      "strict sandbox routing retains control authority for jobs started before transition")
+  void strictSandboxRoutingRetainsExistingJobControl() {
+    flagOn();
+    when(sandboxRouting.routingEnabled()).thenReturn(true);
+
+    assertThat(tool.enabled()).isTrue();
+    when(jobs.status("job_x")).thenReturn("running (pid=1, elapsed=2s)");
+    ToolResult result = tool.execute(args("{\"action\":\"status\",\"jobId\":\"job_x\"}"), ctx);
+    assertThat(result).isInstanceOf(ToolResult.Ok.class);
+    assertThat(((ToolResult.Ok) result).content()).contains("running");
+  }
+
+  @Test
+  @DisplayName("strict sandbox routing fails closed without launching a host process")
+  void strictSandboxRoutingRefusesHostStart() {
+    flagOn();
+    when(sandboxRouting.routingEnabled()).thenReturn(true);
+
+    ToolResult result = tool.execute(args("{\"action\":\"start\",\"command\":\"echo hi\"}"), ctx);
+
+    assertThat(result).isInstanceOf(ToolResult.Err.class);
+    assertThat(((ToolResult.Err) result).kind()).isEqualTo(ToolResult.ErrorKind.UNAVAILABLE);
+    assertThat(((ToolResult.Err) result).message()).contains("no host process was started");
+    org.mockito.Mockito.verifyNoInteractions(jobs);
   }
 
   @Test

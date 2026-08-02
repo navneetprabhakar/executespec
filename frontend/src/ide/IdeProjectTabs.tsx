@@ -645,7 +645,9 @@ function RunDetailPanel({
     (run as unknown as {githubPrUrl?: string}).githubPrUrl;
   const tasks = run.tasks || [];
   const testsLabel =
-    report?.testsTotal != null ? `${report.testsPassed ?? 0}/${report.testsTotal}` : '—';
+    report?.testsTotal != null
+      ? `${report.testsPassed ?? 0}/${report.testsTotal} passed · ${report.testsSkipped ?? 0} skipped`
+      : '—';
   const filesGenerated =
     report?.filesGenerated ??
     (run as unknown as {filesGenerated?: number | null}).filesGenerated ??

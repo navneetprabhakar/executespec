@@ -39,6 +39,50 @@ class RunValidationKickoffCorrectionTest {
   }
 
   @Test
+  void ordinaryWorkspaceEvidenceIsPersistedWithHonestSkippedCount() {
+    TestExecutionSummary workspaceSummary = summary(88, 82, 0, 0, true);
+    workspaceSummary.setSkipped(6);
+    WorkspaceTestRunner.DetailedResult evidence =
+        new WorkspaceTestRunner.DetailedResult(
+            workspaceSummary,
+            "Tests run: 88, Failures: 0, Errors: 0, Skipped: 6",
+            "./mvnw -q test",
+            0);
+
+    TestExecutionSummary selected = RunValidationKickoff.selectTestSummary(null, evidence);
+
+    assertThat(selected)
+        .extracting(
+            TestExecutionSummary::getPassed,
+            TestExecutionSummary::getSkipped,
+            TestExecutionSummary::getTotalTests,
+            TestExecutionSummary::getExecutionVerified,
+            TestExecutionSummary::getEvidenceScope)
+        .containsExactly(82, 6, 88, true, TestExecutionSummary.EvidenceScope.WORKSPACE_TEST_SUITE);
+  }
+
+  @Test
+  void correctionSuiteAllowsSkipsButStillRequiresOnePassAndNoFailure() {
+    TestExecutionSummary greenWithSkips = summary(88, 82, 0, 0, true);
+    greenWithSkips.setSkipped(6);
+    WorkspaceTestRunner.DetailedResult evidence =
+        new WorkspaceTestRunner.DetailedResult(
+            greenWithSkips, "green with skips", "./mvnw test", 0);
+
+    assertThat(
+            RunValidationKickoff.admitCorrectionTestEvidence(
+                GENERATION, GENERATION, GENERATION, evidence))
+        .isSameAs(greenWithSkips);
+
+    greenWithSkips.setPassed(81);
+    assertThatThrownBy(
+            () ->
+                RunValidationKickoff.admitCorrectionTestEvidence(
+                    GENERATION, GENERATION, GENERATION, evidence))
+        .hasMessageContaining("CORRECTION_TESTS_FAILED");
+  }
+
+  @Test
   void rejectsMissingUnverifiedRedOrGenerationMismatchedProof() {
     assertThatThrownBy(
             () ->

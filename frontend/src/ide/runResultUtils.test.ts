@@ -35,6 +35,7 @@ import {
   correctionEvidenceInvalidationLabel,
   reportPipelineLabel,
   reviewerSignal,
+  runSurfaceDestination,
   logIcon,
   logLabel,
   logMeta,
@@ -64,6 +65,49 @@ import {
   usd,
   verdictFor,
 } from './runResultUtils';
+
+describe('run result surface routing', () => {
+  it.each(['REVIEWING', 'VALIDATING', 'GENERATING_REPORT', 'REPORTING'])(
+    'keeps %s on the live run surface while report evidence is pending',
+    (status) => {
+      expect(runSurfaceDestination(status)).toBe('live');
+    },
+  );
+
+  it.each([
+    'PENDING',
+    'QUEUED',
+    'APPROVAL_RESUMING',
+    'CLASSIFYING',
+    'PLANNING',
+    'WORKING',
+    'EXECUTING',
+    'RUNNING',
+    'IN_PROGRESS',
+    'IN_PROGRESS_BATCH',
+    'CODING',
+    'BUILDING',
+    'COMPILING',
+    'TESTING',
+    'SUBMITTED',
+    'PROVIDER_SWITCHING',
+    'PAUSED',
+    'STUCK',
+  ])('routes active phase %s to the live run surface', (status) => {
+    expect(runSurfaceDestination(status)).toBe('live');
+  });
+
+  it('routes the approval gate to the plan surface', () => {
+    expect(runSurfaceDestination('awaiting_approval')).toBe('plan');
+  });
+
+  it.each([null, undefined, '', 'COMPLETE', 'PARTIAL', 'FAILED', 'CANCELLED'])(
+    'keeps terminal or user-controlled status %s on the result surface',
+    (status) => {
+      expect(runSurfaceDestination(status)).toBeNull();
+    },
+  );
+});
 
 describe('terminal result honesty', () => {
   it('uses the reviewer verdict before legacy severity counts', () => {
@@ -158,7 +202,7 @@ describe('publicationTrustFacts', () => {
       'Approved correction route': 'OPENROUTER/x-ai/grok-4.20',
       'Actual worker route': 'OPENROUTER/x-ai/grok-4.20 (LEDGER · 1 physical attempt)',
       Build: 'Passed',
-      Tests: '2/2 passed · execution verified',
+      Tests: '2/2 passed · 0 skipped · execution verified',
       'Workflow/config': 'PASSED · 1 workflow parsed',
       'Protected contracts': 'COMPATIBLE',
       'Reviewer result': 'CLEAN',
@@ -198,6 +242,36 @@ describe('publicationTrustFacts', () => {
     expect(facts.find((fact) => fact.label === 'Tests')).toMatchObject({kind: 'bad'});
     expect(facts.find((fact) => fact.label === 'Evidence freshness')).toMatchObject({kind: 'bad'});
     expect(facts.find((fact) => fact.label === 'Publication')).toMatchObject({kind: 'bad'});
+  });
+
+  it('treats a verified green suite with explicit skips as passing evidence', () => {
+    const facts = publicationTrustFacts({
+      tasks: [],
+      testsPassed: 82,
+      testsSkipped: 6,
+      testsTotal: 88,
+      testExecutionVerified: true,
+    } as unknown as RunDetail);
+
+    expect(facts.find((fact) => fact.label === 'Tests')).toMatchObject({
+      value: '82/88 passed · 6 skipped · execution verified',
+      kind: 'ok',
+    });
+  });
+
+  it.each([
+    {testsPassed: 82, testsSkipped: 7, testsTotal: 88},
+    {testsPassed: -1, testsSkipped: 0, testsTotal: 88},
+    {testsPassed: 82, testsSkipped: -1, testsTotal: 88},
+    {testsPassed: 0, testsSkipped: 88, testsTotal: 88},
+  ])('treats malformed or all-skipped counts as failed evidence: %o', (counts) => {
+    const facts = publicationTrustFacts({
+      tasks: [],
+      ...counts,
+      testExecutionVerified: true,
+    } as unknown as RunDetail);
+
+    expect(facts.find((fact) => fact.label === 'Tests')).toMatchObject({kind: 'bad'});
   });
 
   it('reports terminal task state without claiming failed, partial, or blocked work executed', () => {
