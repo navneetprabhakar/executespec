@@ -3,6 +3,8 @@ package com.navneet.executespec.tool;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.nio.file.Files;
@@ -145,6 +147,33 @@ class CommandToolsTest {
 
     assertThat(result).isInstanceOf(ToolResult.Ok.class);
     assertThat(((ToolResult.Ok) result).content()).contains("command=printf build-ok", "build-ok");
+  }
+
+  @Test
+  void buildProject_preflightsSelectedNestedMavenRoot() throws Exception {
+    Path nestedRoot = root.resolve("repos/helm/backend-java");
+    Files.createDirectories(nestedRoot);
+    BuildCommandResolver resolver = mock(BuildCommandResolver.class);
+    MavenDependencyValidator validator = mock(MavenDependencyValidator.class);
+    when(validator.validateAll(List.of(nestedRoot)))
+        .thenReturn(new MavenDependencyValidator.ValidationResult(true, List.of(), 0));
+    when(resolver.resolve(eq(root), eq((String) null)))
+        .thenReturn(
+            BuildCommand.builder()
+                .command("printf nested-build-ok")
+                .timeoutSeconds(5)
+                .sourceDescription("inferred:maven@repos/helm/backend-java")
+                .validationRoots(List.of(nestedRoot))
+                .build());
+    BuildProjectTool tool =
+        new BuildProjectTool(resolver, validator, null, null, new ShellSandboxPolicy(), null);
+
+    ToolResult result = tool.execute(JSON.createObjectNode(), ctx());
+
+    assertThat(result).isInstanceOf(ToolResult.Ok.class);
+    assertThat(((ToolResult.Ok) result).content()).contains("nested-build-ok");
+    verify(validator).validateAll(List.of(nestedRoot));
+    verify(validator, never()).validate(root);
   }
 
   @Test

@@ -148,6 +148,21 @@ public class MavenDependencyValidator {
     return new ValidationResult(issues.isEmpty(), issues, scanned);
   }
 
+  /** Validate every selected build root, including Maven modules nested below a repository root. */
+  public ValidationResult validateAll(List<Path> buildRoots) {
+    if (buildRoots == null || buildRoots.isEmpty()) {
+      return new ValidationResult(true, List.of(), 0);
+    }
+    List<DepIssue> issues = new java.util.ArrayList<>();
+    int scanned = 0;
+    for (Path root : buildRoots) {
+      ValidationResult result = validate(root);
+      issues.addAll(result.getMissingDeps());
+      scanned += result.getScannedCount();
+    }
+    return new ValidationResult(issues.isEmpty(), List.copyOf(issues), scanned);
+  }
+
   /**
    * Format a validation failure as a one-screen build-style error message that the worker /
    * reviewer can act on. Mirrors the tone of mvn's own "Could not resolve dependencies" wording so

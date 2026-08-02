@@ -32,7 +32,7 @@ import {
 } from '@/ide/runCostLedger';
 import {providerIsDispatchable} from '@/ide/providerReadiness';
 import {useProviderReadiness} from '@/ide/useProviderReadiness';
-import {retryRunWithProvider} from '@/ide/providerRetry';
+import {retryRunSameRoute, retryRunWithProvider} from '@/ide/providerRetry';
 import {useAuthStore, selectIsSuperAdmin} from '@/stores/useAuthStore';
 import {
   IdeBadge,
@@ -46,6 +46,7 @@ import {
 } from '@/ide/IdeKit';
 import {ScoreBadge} from '@/ide/ScoreBadge';
 import {
+  authoritativeProductFileCount,
   confidenceColor,
   continuationApprovalCandidate,
   continuationApprovalReason,
@@ -83,6 +84,7 @@ import {
   correctionEvidenceHistory,
   correctionEvidenceInvalidationLabel,
   reportPipelineLabel,
+  reviewerSignal,
   publicationTrustFacts,
   runArtifactActionAvailability,
   friendlyAiFailureMessage,
@@ -866,6 +868,22 @@ export default function IdeRunResult() {
     );
   }
 
+  function trySameRoute() {
+    if (!run) return;
+    action(
+      'reroute-same',
+      () =>
+        executeRunMutation(`fork:same-route:${runId}`, {}, (idempotencyKey) =>
+          retryRunSameRoute(api.forkRun, runId, idempotencyKey),
+        ),
+      (r) => {
+        const id = (r as {runId?: string})?.runId;
+        if (id) navigate(`/live/${id}`);
+        return 'Re-run started on the same route.';
+      },
+    );
+  }
+
   function requestHunkRevert(filePath: string, diff: DiffLine[], hunkIndex: number) {
     if (!runId || !diff.length || !run) return;
     const request = hunkRevertRequest(filePath, diff, hunkIndex);
@@ -1187,13 +1205,21 @@ export default function IdeRunResult() {
   const issues = report?.issues ?? [];
   const reportedFiles = report?.filesGenerated ?? null;
   const workspaceFiles = producedWorkspaceFileCount;
+  const productFiles = authoritativeProductFileCount(reportedFiles, workspaceFiles);
   const fileCounts = fileCountSummary({reportedFiles, workspaceFiles});
+  const currentProvider = (run?.requestedProvider || run?.aiProvider || '').toLowerCase();
+  const alternativeProviders = providerReadiness.supported
+    ? providerReadiness.rows
+        .filter((row) => providerIsDispatchable(row))
+        .map((row) => row.provider.toLowerCase())
+        .filter((provider) => provider !== currentProvider)
+    : [];
   const hasExecutionEvidence =
     report != null ||
     Boolean(run?.tasks?.some((task) => task.startedAt != null || task.completedAt != null));
   const artifactActions = runArtifactActionAvailability({
     status: run?.status,
-    changedWorkspaceFiles: producedWorkspaceFileCount,
+    changedWorkspaceFiles: productFiles,
     hasExecutionEvidence,
     hasValidationReport: report != null,
     publication,
@@ -1271,7 +1297,7 @@ export default function IdeRunResult() {
         >
           <span>
             {TAB_LABEL[tab]}
-            {tab === 'Code' && producedWorkspaceFileCount ? ` · ${producedWorkspaceFileCount}` : ''}
+            {tab === 'Code' && productFiles ? ` · ${productFiles}` : ''}
             {tab === 'Tasks' && run?.tasks?.length ? ` · ${run.tasks.length}` : ''}
             {tab === 'Validation' && issues.length ? ` · ${issues.length}` : ''}
           </span>
@@ -1282,7 +1308,7 @@ export default function IdeRunResult() {
             {TABS.map((t) => {
               const badge =
                 t === 'Code'
-                  ? producedWorkspaceFileCount
+                  ? productFiles
                   : t === 'Tasks'
                     ? run?.tasks?.length
                     : t === 'Validation'
@@ -1311,7 +1337,7 @@ export default function IdeRunResult() {
         {TABS.map((t) => {
           const badge =
             t === 'Code'
-              ? producedWorkspaceFileCount
+              ? productFiles
               : t === 'Tasks'
                 ? run?.tasks?.length
                 : t === 'Validation'
@@ -1390,8 +1416,7 @@ export default function IdeRunResult() {
                       {issues.length} evidence issue{issues.length === 1 ? '' : 's'}
                     </span>
                     <span>
-                      {producedWorkspaceFileCount} generated file
-                      {producedWorkspaceFileCount === 1 ? '' : 's'}
+                      {productFiles} product file change{productFiles === 1 ? '' : 's'}
                     </span>
                   </div>
                 </div>
@@ -1477,16 +1502,7 @@ export default function IdeRunResult() {
                     }
                   />
                   <Kv k='Tests' v={testsSignal} />
-                  <Kv
-                    k='Reviewer'
-                    v={
-                      report
-                        ? report.reviewFailures > 0
-                          ? `${report.reviewFailures} unresolved`
-                          : 'clean'
-                        : '—'
-                    }
-                  />
+                  <Kv k='Reviewer' v={reviewerSignal(report)} />
                   <Kv k='Issues' v={issues.length} />
                   <Kv
                     k='Files'
@@ -1774,43 +1790,69 @@ export default function IdeRunResult() {
               >
                 ⌁ Share
               </button>
-              {(providerReadiness.supported
-                ? providerReadiness.rows
-                    .filter((row) => providerIsDispatchable(row))
-                    .map((row) => row.provider.toLowerCase())
-                : ['anthropic', 'openai']
-              )
-                .filter((p) => p !== (run?.aiProvider || '').toLowerCase())
-                .map((p) => (
-                  <button
-                    key={p}
-                    className='ide-btn ghost'
-                    onClick={() =>
-                      // C8 — re-running on another provider dispatches a NEW paid run.
-                      setConfirm({
-                        title: `Re-run with ${providerLabel(p)}`,
-                        body: `This dispatches a new run of the same spec on ${providerLabel(p)}. It consumes credits like any run. Continue?`,
-                        confirmLabel: 'Dispatch run',
-                        onConfirm: () => tryProvider(p.toUpperCase()),
-                      })
-                    }
-                  >
-                    ↻ Try {providerLabel(p)}
-                  </button>
-                ))}
-              {providerReadiness.supported &&
-                !providerReadiness.loading &&
-                providerReadiness.rows.every(
-                  (row) =>
-                    row.provider.toLowerCase() === (run?.aiProvider || '').toLowerCase() ||
-                    !providerIsDispatchable(row),
-                ) && (
-                  <span style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}>
-                    {providerReadiness.error
-                      ? 'Provider readiness unavailable; re-run choices are disabled.'
-                      : 'No other provider is currently ready for dispatch.'}
-                  </span>
-                )}
+              <button
+                className='ide-btn ghost'
+                onClick={() =>
+                  setConfirm({
+                    title: `Run again on ${providerLabel(currentProvider)}`,
+                    body: `This dispatches a new paid run on the same persisted provider/model route${run?.requestedModel ? ` (${run.requestedModel})` : ''}. Continue?`,
+                    confirmLabel: 'Dispatch run',
+                    onConfirm: trySameRoute,
+                  })
+                }
+              >
+                ↻ Run again · {providerLabel(currentProvider)}
+              </button>
+              <details style={{position: 'relative'}}>
+                <summary className='ide-btn ghost' style={{listStyle: 'none', cursor: 'pointer'}}>
+                  Change route…
+                </summary>
+                <div
+                  className='ide-card'
+                  style={{
+                    position: 'absolute',
+                    top: 'calc(100% + 4px)',
+                    right: 0,
+                    zIndex: 60,
+                    minWidth: 280,
+                    padding: 6,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 2,
+                    boxShadow: '0 6px 16px var(--ide-shadow)',
+                  }}
+                >
+                  <div style={{padding: '8px 10px', color: 'var(--ide-fg-muted)', fontSize: 11}}>
+                    {run?.routePinned
+                      ? 'This run used an exact route. Changing provider clears that model pin.'
+                      : 'Changing provider starts a separate paid run.'}
+                  </div>
+                  {alternativeProviders.map((provider) => (
+                    <button
+                      key={provider}
+                      className='ide-btn ghost'
+                      style={{justifyContent: 'flex-start'}}
+                      onClick={() =>
+                        setConfirm({
+                          title: `Change route to ${providerLabel(provider)}`,
+                          body: `This dispatches a new run on ${providerLabel(provider)} and does not preserve the current model pin. It consumes credits like any run. Continue?`,
+                          confirmLabel: 'Change route and dispatch',
+                          onConfirm: () => tryProvider(provider.toUpperCase()),
+                        })
+                      }
+                    >
+                      {providerLabel(provider)}
+                    </button>
+                  ))}
+                  {!providerReadiness.loading && alternativeProviders.length === 0 && (
+                    <div style={{padding: '8px 10px', color: 'var(--ide-fg-muted)', fontSize: 11}}>
+                      {providerReadiness.error
+                        ? 'Provider readiness unavailable; route changes are disabled.'
+                        : 'No other provider is currently ready for dispatch.'}
+                    </div>
+                  )}
+                </div>
+              </details>
               {/* Run management lives in an overflow so the row stays scannable. */}
               <div style={{position: 'relative'}}>
                 <button
@@ -2063,8 +2105,8 @@ export default function IdeRunResult() {
               >
                 <span>
                   Explorer
-                  {producedWorkspaceFileCount
-                    ? ` · ${producedWorkspaceFileCount} generated`
+                  {productFiles
+                    ? ` · ${productFiles} product change${productFiles === 1 ? '' : 's'}`
                     : files.length
                       ? ` · ${files.length} bootstrap/workspace`
                       : ''}
