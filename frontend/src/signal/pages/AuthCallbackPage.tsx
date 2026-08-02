@@ -2,6 +2,7 @@ import {useEffect, useState} from 'react';
 import {useNavigate, useSearchParams} from 'react-router-dom';
 import {authRefreshSession} from '@/lib/api';
 import {useAuthStore} from '@/stores/useAuthStore';
+import {safeInternalRedirect} from './authRedirect';
 
 /**
  * OAuth2 callback page — establishes the session after the backend redirect.
@@ -44,7 +45,7 @@ export default function AuthCallbackPage() {
     // CLI / VS Code `/cli-login` device-authorization flow (the backend OAuthSuccessHandler appends
     // it from the short-lived es_oauth_redirect cookie). Path-only + same-origin nav, so safe.
     const redirectParam = searchParams.get('redirect');
-    const safeRedirect = redirectParam && redirectParam.startsWith('/') ? redirectParam : undefined;
+    const safeRedirect = safeInternalRedirect(redirectParam);
     const stashedSpec = searchParams.get('spec');
     const fallbackUrl = stashedSpec
       ? `/compose?spec=${encodeURIComponent(stashedSpec)}`

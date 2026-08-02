@@ -1174,7 +1174,7 @@ export default function IdeRunResult() {
   ].includes(statusUpper);
   const canResume = statusUpper === 'PAUSED';
   const score = report?.verifiedScore ?? null;
-  const v = verdictFor(score, run?.status);
+  const v = verdictFor(score, run?.status, run?.terminalOutcome);
   const measuredTestsTotal = tests?.totalTests ?? report?.testsTotal ?? null;
   const measuredTestsPassed = tests?.passed ?? report?.testsPassed ?? null;
   const testsEvidence = report?.verificationLedger?.find((row) => row.id === 'tests');
@@ -1214,6 +1214,7 @@ export default function IdeRunResult() {
     eventLog,
   });
   const failureText =
+    run?.terminalOutcome?.customerMessage ||
     run?.failureReason ||
     (run?.statusReason ? humanStatusReason(run.statusReason) : '') ||
     (failedTasks.length > 0
@@ -1361,9 +1362,11 @@ export default function IdeRunResult() {
                 <ScoreBadge score={score} verificationLedger={report?.verificationLedger} />
               )}
               <span style={{flex: 1}} />
-              {run?.statusReason && humanStatusReason(run.statusReason) && (
-                <span style={{color: 'var(--ide-fg-muted)', fontSize: 12}} title={run.statusReason}>
-                  {humanStatusReason(run.statusReason)}
+              {(run?.terminalOutcome?.customerTitle ||
+                (run?.statusReason && humanStatusReason(run.statusReason))) && (
+                <span style={{color: 'var(--ide-fg-muted)', fontSize: 12}}>
+                  {run?.terminalOutcome?.customerTitle ||
+                    humanStatusReason(run?.statusReason || '')}
                 </span>
               )}
             </div>
@@ -1373,9 +1376,10 @@ export default function IdeRunResult() {
                 <div className='ide-recovery-main'>
                   <div className='ide-recovery-kicker'>Recovery path</div>
                   <div className='ide-recovery-title'>
-                    {statusUpper === 'PARTIAL'
-                      ? 'This run completed with unresolved work.'
-                      : 'This run did not reach a clean result.'}
+                    {run?.terminalOutcome?.customerTitle ||
+                      (statusUpper === 'PARTIAL'
+                        ? 'This run completed with unresolved work.'
+                        : 'This run did not reach a clean result.')}
                   </div>
                   <div className='ide-recovery-copy'>{failureText}</div>
                   <div className='ide-recovery-meta'>
@@ -2236,9 +2240,28 @@ export default function IdeRunResult() {
               durableFailureEvidence ? (
                 <div className='ide-card' role='alert'>
                   <div style={{fontWeight: 600}}>{durableFailureEvidence.title}</div>
-                  <div style={{fontSize: 12, color: 'var(--ide-red)', marginTop: 6}}>
+                  <div
+                    style={{
+                      fontSize: 12,
+                      color:
+                        durableFailureEvidence.kind === 'bad'
+                          ? 'var(--ide-red)'
+                          : 'var(--ide-fg-muted)',
+                      marginTop: 6,
+                    }}
+                  >
                     {durableFailureEvidence.detail}
                   </div>
+                  {durableFailureEvidence.nextAction && (
+                    <div style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 8}}>
+                      Next: {durableFailureEvidence.nextAction}
+                    </div>
+                  )}
+                  {durableFailureEvidence.supportCode && (
+                    <div style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 8}}>
+                      Support code: {durableFailureEvidence.supportCode}
+                    </div>
+                  )}
                   <div style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 8}}>
                     Execution did not start, so no worker steps were created.
                   </div>
@@ -2874,9 +2897,28 @@ export default function IdeRunResult() {
               durableFailureEvidence ? (
                 <div className='ide-card' role='alert'>
                   <div style={{fontWeight: 600}}>{durableFailureEvidence.title}</div>
-                  <div style={{fontSize: 12, color: 'var(--ide-red)', marginTop: 6}}>
+                  <div
+                    style={{
+                      fontSize: 12,
+                      color:
+                        durableFailureEvidence.kind === 'bad'
+                          ? 'var(--ide-red)'
+                          : 'var(--ide-fg-muted)',
+                      marginTop: 6,
+                    }}
+                  >
                     {durableFailureEvidence.detail}
                   </div>
+                  {durableFailureEvidence.nextAction && (
+                    <div style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 8}}>
+                      Next: {durableFailureEvidence.nextAction}
+                    </div>
+                  )}
+                  {durableFailureEvidence.supportCode && (
+                    <div style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 8}}>
+                      Support code: {durableFailureEvidence.supportCode}
+                    </div>
+                  )}
                   <div style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 8}}>
                     Validation did not run because execution never reached the worker phase.
                   </div>

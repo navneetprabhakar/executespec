@@ -1,5 +1,11 @@
 # Cost and LLM usage attribution
 
+## Projected-call admission outcome (2026-08-02)
+
+`ProjectedCallBudgetExceededException` retains scope, cap, spend, and projected next-call cost.
+Agent streaming publishes typed `PROJECTED_CALL_BUDGET_EXCEEDED` pre-dispatch evidence with recovery
+guidance rather than an opaque provider/platform error.
+
 ## Canonical contracts
 
 - Managed-credit debit reconciliation compares canonical `key_source=PLATFORM` attempts only with

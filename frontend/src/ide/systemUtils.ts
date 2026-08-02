@@ -74,9 +74,24 @@ export function customerSafeNotificationText(text: string, isSuperAdmin: boolean
 }
 
 export function notificationDotColor(n: api.NotificationItem): string {
-  const severity = (n as unknown as {severity?: string}).severity;
+  const severity = ((n as unknown as {severity?: string}).severity || '').toLowerCase();
   if (severity === 'error') return 'var(--ide-red)';
   if (severity === 'warn') return 'var(--ide-yellow)';
+  const type = notificationType(n).toUpperCase();
+  if (type.includes('PLATFORM_FAILURE') || type.endsWith('_FAILED') || type.includes('_ERROR')) {
+    return 'var(--ide-red)';
+  }
+  if (
+    type.includes('ACTION_REQUIRED') ||
+    type.includes('POLICY_BLOCKED') ||
+    type.includes('WARNING') ||
+    type.includes('PLAN_READY')
+  ) {
+    return 'var(--ide-yellow)';
+  }
+  if (type.includes('USER_STOPPED') || type.endsWith('_CANCELLED')) {
+    return 'var(--ide-fg-muted)';
+  }
   return 'var(--ide-green)';
 }
 

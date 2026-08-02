@@ -1,5 +1,6 @@
 // Barrel — preserves the '@/lib/api' import surface after the god-file split.
 export * from './core';
+export * from './runOutcomeTypes';
 export * from './tasks';
 export * from './runs';
 export * from './models';

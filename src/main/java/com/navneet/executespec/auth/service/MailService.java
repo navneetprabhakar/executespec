@@ -10,6 +10,7 @@ import jakarta.mail.Transport;
 import jakarta.mail.internet.MimeMessage;
 
 import com.google.api.services.gmail.model.Message;
+import com.navneet.executespec.run.outcome.RunTerminalOutcome;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.ByteArrayResource;
@@ -357,7 +358,7 @@ public class MailService {
       String firstName,
       String runId,
       String status,
-      String statusReason,
+      RunTerminalOutcome terminalOutcome,
       String runTitle,
       Double verifiedScore,
       Double costUsd,
@@ -367,7 +368,16 @@ public class MailService {
     ctx.setVariable("firstName", firstName);
     ctx.setVariable("runId", runId);
     ctx.setVariable("status", status);
-    ctx.setVariable("statusReason", statusReason);
+    ctx.setVariable("terminalOutcome", terminalOutcome);
+    ctx.setVariable(
+        "outcomeTitle", terminalOutcome == null ? "Run finished" : terminalOutcome.customerTitle());
+    ctx.setVariable(
+        "outcomeMessage",
+        terminalOutcome == null
+            ? "The run reached a terminal state."
+            : terminalOutcome.customerMessage());
+    ctx.setVariable("nextAction", terminalOutcome == null ? null : terminalOutcome.nextAction());
+    ctx.setVariable("supportCode", terminalOutcome == null ? null : terminalOutcome.supportCode());
     ctx.setVariable("runTitle", runTitle);
     ctx.setVariable("verifiedScore", verifiedScore);
     ctx.setVariable("costUsd", costUsd);
@@ -376,21 +386,28 @@ public class MailService {
     ctx.setVariable("baseUrl", baseUrl);
     // Status-colour mapping for the email's hero band. Mirrors the StatusBadge palette so the
     // visual cue is consistent between the in-app UI and the email.
-    boolean isSuccess = "COMPLETE".equals(status);
-    boolean isPartial = "PARTIAL".equals(status);
-    boolean isFailure = "FAILED".equals(status) || "CANCELLED".equals(status);
+    RunTerminalOutcome.Category category =
+        terminalOutcome == null
+            ? RunTerminalOutcome.Category.PLATFORM_FAILURE
+            : terminalOutcome.category();
+    boolean isSuccess = category == RunTerminalOutcome.Category.SUCCESS;
+    boolean isPartial = category == RunTerminalOutcome.Category.WARNING;
+    boolean isAttention =
+        category == RunTerminalOutcome.Category.ACTION_REQUIRED
+            || category == RunTerminalOutcome.Category.POLICY_BLOCKED;
+    boolean isStopped = category == RunTerminalOutcome.Category.USER_STOPPED;
+    boolean isFailure = category == RunTerminalOutcome.Category.PLATFORM_FAILURE;
     ctx.setVariable("isSuccess", isSuccess);
     ctx.setVariable("isPartial", isPartial);
+    ctx.setVariable("isAttention", isAttention);
+    ctx.setVariable("isStopped", isStopped);
     ctx.setVariable("isFailure", isFailure);
     // Subject line follows GitHub's pattern: "✓ Run complete: <title>" / "✗ Run failed: <title>".
-    String emoji = isSuccess ? "✓" : isPartial ? "⚠" : "✗";
-    String verb =
-        isSuccess
-            ? "complete"
-            : isPartial ? "partially complete" : "FAILED".equals(status) ? "failed" : "cancelled";
+    String emoji = isSuccess ? "✓" : isFailure ? "✗" : isStopped ? "•" : "⚠";
+    String verb = terminalOutcome == null ? "failed" : terminalOutcome.customerTitle();
     String subject =
         emoji
-            + " Run "
+            + " "
             + verb
             + ": "
             + (runTitle != null && !runTitle.isBlank() ? runTitle : runId.substring(0, 8));
