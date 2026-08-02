@@ -26,7 +26,8 @@ class RunMapperCreatorProjectionTest {
     when(users.findNameById("user-1")).thenReturn(Optional.of(name));
 
     RunMapper mapper =
-        new RunMapper(null, null, users, null, null, null, null, null, null, new ObjectMapper());
+        new RunMapper(
+            null, null, users, null, null, null, null, null, null, null, new ObjectMapper());
     PipelineRun run = new PipelineRun();
     run.setRunId("run-1");
     run.setCreatedByUserId("user-1");

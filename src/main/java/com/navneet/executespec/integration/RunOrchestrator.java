@@ -3555,11 +3555,11 @@ public class RunOrchestrator implements RunControlPort {
       boolean benchmarkPriorRequired,
       boolean routePinned) {
     // RR-826 remainder — escalate only on MEASURED low quality. A null report is UNAVAILABLE, not
-    // failed output: re-running the task on a stronger model cannot fix a report generator that
-    // threw, and doing so on every such run converts one persistent bug into recurring provider
-    // spend on every run in the fleet. Stamp the honest reason instead (see
+    // failed output: re-running on a stronger model cannot fix a report generator that threw, and
+    // doing so fleet-wide converts one persistent bug into recurring spend. Stamp the reason (see
     // applyFinalVerificationStatus) and stop.
     if (!postReviewContinuationEnabled
+        || PostReviewQualityPolicy.reviewerProtocolUnavailable(report)
         || PostReviewQualityPolicy.finalVerification(report, postReviewRequiredQualityThreshold)
             != PostReviewQualityPolicy.FinalVerification.LOW_QUALITY) {
       return Optional.empty();

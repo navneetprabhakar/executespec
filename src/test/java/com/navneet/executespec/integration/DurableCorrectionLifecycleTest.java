@@ -5,6 +5,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.nio.file.Files;
@@ -48,7 +51,7 @@ class DurableCorrectionLifecycleTest {
     reports = mock(ValidationReportRepository.class);
     tasks = mock(AgentTaskRepository.class);
     workspaceAuthorities = mock(RunWorkspaceAuthorityService.class);
-    workspaces = new CorrectionWorkspaceTransaction();
+    workspaces = spy(new CorrectionWorkspaceTransaction());
     when(workspaceAuthorities.acquire(anyString(), any())).thenAnswer(i -> lease());
     when(workspaceAuthorities.tryAcquire(anyString(), any())).thenAnswer(i -> Optional.of(lease()));
     when(attempts.saveAndFlush(any()))
@@ -226,6 +229,94 @@ class DurableCorrectionLifecycleTest {
     assertThat(restored.getContinuationApprovalId()).isEqualTo("approval-1");
     assertThat(restored.getContinuationApprovalProposalDigest()).isEqualTo("d".repeat(64));
     assertThat(restored.getContinuationApprovalStatus()).isEqualTo("REJECTED");
+  }
+
+  @Test
+  void rejectedCorrectionSurvivesJsonbKeyReorderingAndRollsBackExactlyOnce() throws Exception {
+    Path repository = repository("rejected-jsonb");
+    ValidationReport original = report("run-jsonb", "report-jsonb", "COMPLETE");
+    original.setVerifiedScore(93);
+    original.setReviewerVerdict("CLEAN");
+    evidence.put("run-jsonb", original);
+    AgentTask task = task("run-jsonb", "run-jsonb:task-1");
+    taskRows.put(task.getTaskId(), task);
+
+    AutomaticCorrectionLifecycle automatic =
+        new AutomaticCorrectionLifecycle(
+            workspaces,
+            tasks,
+            new ObjectMapper().findAndRegisterModules(),
+            mock(com.navneet.executespec.config.featureflag.FeatureFlagService.class),
+            mock(com.navneet.executespec.lint.LintPass.class),
+            mock(com.navneet.executespec.sse.SseBroadcaster.class),
+            mock(WorkflowConfigEvidenceInspector.class),
+            reports,
+            mock(com.navneet.executespec.contractsurface.BrownfieldHttpContractGuard.class),
+            lifecycle);
+
+    CorrectionWorkspaceTransaction.Checkpoint checkpoint =
+        automatic.begin("run-jsonb", task.getTaskId(), repository);
+    CorrectionAttempt durableRow = rows.values().stream().findFirst().orElseThrow();
+    String originalDigest = durableRow.getEvidenceSnapshotDigest();
+    com.fasterxml.jackson.databind.JsonNode stored =
+        new ObjectMapper().readTree(durableRow.getEvidenceSnapshotJson());
+    // PostgreSQL jsonb does not preserve object-key order. Model the shape returned by PostgreSQL
+    // instead of the record declaration order that was hashed before V369 inserted the row.
+    com.fasterxml.jackson.databind.node.ObjectNode reordered =
+        new ObjectMapper().createObjectNode();
+    reordered.set("shareTokenHash", stored.get("shareTokenHash"));
+    reordered.set("reportJson", stored.get("reportJson"));
+    reordered.set("schemaVersion", stored.get("schemaVersion"));
+    reordered.set("legacyShareToken", stored.get("legacyShareToken"));
+    durableRow.setEvidenceSnapshotJson(reordered.toString());
+    assertThat(durableRow.getEvidenceSnapshotDigest()).isEqualTo(originalDigest);
+
+    AutomaticCorrectionLifecycle.EvidenceCheckpoint evidenceCheckpoint =
+        automatic.invalidateEvidence("run-jsonb");
+    Files.writeString(repository.resolve("tracked.txt"), "rejected correction\n");
+    task.setStatus("FAILED");
+    task.setProvider("anthropic");
+    task.setModel("claude-sonnet-4-6");
+
+    automatic.rollbackRejectedAttempt(
+        task.getTaskId(),
+        checkpoint,
+        evidenceCheckpoint,
+        automatic.diffEvidence(checkpoint),
+        AutomaticCorrectionLifecycle.snapshotTask(task("run-jsonb", task.getTaskId())),
+        CorrectionAcceptancePolicy.Decision.reject("UNRESOLVED", "alternate review rejected"),
+        null);
+
+    assertThat(durableRow.getPhase()).isEqualTo("ROLLED_BACK");
+    assertThat(durableRow.getAfterGeneration()).isEqualTo(durableRow.getBeforeGeneration());
+    assertThat(Files.readString(repository.resolve("tracked.txt"))).isEqualTo("baseline\n");
+    assertThat(evidence.get("run-jsonb").getStatus()).isEqualTo("COMPLETE");
+    assertThat(evidence.get("run-jsonb").getVerifiedScore()).isEqualTo(93);
+    assertThat(evidence.get("run-jsonb").getReviewerVerdict()).isEqualTo("CLEAN");
+    verify(workspaces, times(1)).rollback(any(), any(Runnable.class));
+  }
+
+  @Test
+  void canonicalJsonbDigestStillRejectsChangedEvidenceValues() throws Exception {
+    Path repository = repository("tampered-jsonb");
+    evidence.put("run-tampered", report("run-tampered", "report-tampered", "COMPLETE"));
+    AgentTask task = task("run-tampered", "run-tampered:task-1");
+    taskRows.put(task.getTaskId(), task);
+    DurableCorrectionLifecycle.Prepared prepared =
+        lifecycle.prepare("run-tampered", task.getTaskId(), repository);
+    lifecycle.markMutating(prepared);
+    CorrectionAttempt durableRow = rows.get(prepared.attemptId());
+    com.fasterxml.jackson.databind.node.ObjectNode stored =
+        (com.fasterxml.jackson.databind.node.ObjectNode)
+            new ObjectMapper().readTree(durableRow.getEvidenceSnapshotJson());
+    stored.put("reportJson", "{}");
+    durableRow.setEvidenceSnapshotJson(stored.toString());
+    Files.writeString(repository.resolve("tracked.txt"), "rejected correction\n");
+
+    lifecycle.recoverAll();
+
+    assertThat(durableRow.getPhase()).isEqualTo("RECOVERY_FAILED");
+    assertThat(durableRow.getFailureReason()).contains("snapshot digest mismatch");
   }
 
   @Test

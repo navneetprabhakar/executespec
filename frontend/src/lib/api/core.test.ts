@@ -30,18 +30,30 @@ describe('API transport contract', () => {
       .mockResolvedValueOnce(new Response(JSON.stringify({id: 'run-1'}), {status: 200}));
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(req<{id: string}>('/runs/run-1')).resolves.toEqual({id: 'run-1'});
+    await expect(
+      req<{id: string}>('/runs', {
+        method: 'POST',
+        headers: {'Idempotency-Key': 'stable-attempt'},
+        body: JSON.stringify({userRequest: 'build'}),
+      }),
+    ).resolves.toEqual({id: 'run-1'});
 
     expect(fetchMock).toHaveBeenCalledTimes(3);
-    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/runs/run-1');
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/runs');
     expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
       credentials: 'include',
-      headers: expect.objectContaining({Authorization: 'Bearer expired-token'}),
+      headers: expect.objectContaining({
+        Authorization: 'Bearer expired-token',
+        'Idempotency-Key': 'stable-attempt',
+      }),
     });
     expect(fetchMock.mock.calls[1]?.[0]).toBe('/api/auth/refresh');
     expect(fetchMock.mock.calls[1]?.[1]).toMatchObject({method: 'POST', credentials: 'include'});
     expect(fetchMock.mock.calls[2]?.[1]).toMatchObject({
-      headers: expect.objectContaining({Authorization: 'Bearer fresh-token'}),
+      headers: expect.objectContaining({
+        Authorization: 'Bearer fresh-token',
+        'Idempotency-Key': 'stable-attempt',
+      }),
     });
     expect(localStorage.getItem('access_token')).toBe('fresh-token');
   });

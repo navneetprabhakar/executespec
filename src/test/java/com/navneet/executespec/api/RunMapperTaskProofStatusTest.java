@@ -12,7 +12,7 @@ import org.junit.jupiter.api.Test;
 class RunMapperTaskProofStatusTest {
 
   private final RunMapper mapper =
-      new RunMapper(null, null, null, null, null, null, null, null, null, new ObjectMapper());
+      new RunMapper(null, null, null, null, null, null, null, null, null, null, new ObjectMapper());
 
   @Test
   void completeWorkerBoundaryWithUnprovenGoalIsExposedAsPartial() {

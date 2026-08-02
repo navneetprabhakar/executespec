@@ -44,22 +44,25 @@ interface RunStore {
   setActiveRunId: (id: string | null) => void;
   fetchRuns: () => Promise<void>;
   fetchRun: (id: string) => Promise<void>;
-  createRun: (req: {
-    userRequest: string;
-    executionMode?: 'PROTOTYPE' | 'PRODUCTION';
-    skipApproval?: boolean;
-    autoMerge?: boolean;
-    modelName?: string;
-    aiProvider?: string;
-    projectId?: string;
-    repoMode?: string | null;
-    repoUrl?: string | null;
-    selectedRepoIds?: string[];
-    figmaUrl?: string;
-    tddMode?: boolean;
-    /** P3.2 — optional customer "Stop at $X" cost ceiling, USD. */
-    userCostCap?: number;
-  }) => Promise<string>;
+  createRun: (
+    req: {
+      userRequest: string;
+      executionMode?: 'PROTOTYPE' | 'PRODUCTION';
+      skipApproval?: boolean;
+      autoMerge?: boolean;
+      modelName?: string;
+      aiProvider?: string;
+      projectId?: string;
+      repoMode?: string | null;
+      repoUrl?: string | null;
+      selectedRepoIds?: string[];
+      figmaUrl?: string;
+      tddMode?: boolean;
+      /** P3.2 — optional customer "Stop at $X" cost ceiling, USD. */
+      userCostCap?: number;
+    },
+    idempotencyKey: string,
+  ) => Promise<string>;
   cancelRun: (id: string) => Promise<void>;
   archiveRun: (id: string) => Promise<void>;
   approveRun: (
@@ -166,8 +169,8 @@ export const useRunStore = create<RunStore>((set, get) => ({
     }
   },
 
-  createRun: async (req) => {
-    const {runId} = await api.createRun(req);
+  createRun: async (req, idempotencyKey) => {
+    const {runId} = await api.createRun(req, idempotencyKey);
     set({page: 0}); // Go to first page to see the new run
     await get().fetchRuns();
     return runId;

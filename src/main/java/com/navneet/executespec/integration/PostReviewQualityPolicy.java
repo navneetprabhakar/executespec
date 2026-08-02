@@ -67,6 +67,11 @@ final class PostReviewQualityPolicy {
         : FinalVerification.PASSED;
   }
 
+  /** REVIEW_FAILED is unavailable reviewer protocol, never a code-mutation signal. */
+  static boolean reviewerProtocolUnavailable(ValidationReport report) {
+    return report != null && "REVIEW_FAILED".equals(report.getReviewerVerdict());
+  }
+
   /**
    * RR-826 — final verification is {@code PASSED | FAILED | UNAVAILABLE}, and only PASSED may leave
    * a run success-shaped.
