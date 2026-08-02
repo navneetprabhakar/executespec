@@ -373,7 +373,8 @@ class ValidationReportServiceVerificationLedgerTest {
     TestExecutionSummary tests =
         TestExecutionSummary.builder()
             .totalTests(4)
-            .passed(4)
+            .passed(3)
+            .skipped(1)
             .executionVerified(true)
             .evidenceScope(EvidenceScope.LIVE_PREVIEW_FUNCTIONAL)
             .build();
@@ -407,6 +408,10 @@ class ValidationReportServiceVerificationLedgerTest {
     ValidationReport saved = service.generateAndPersist("run-cli-score", input).orElseThrow();
 
     assertEquals("CLI", saved.getRuntimeSurface());
+    assertEquals(3, saved.getTestsPassed());
+    assertEquals(1, saved.getTestsSkipped());
+    assertEquals(4, saved.getTestsTotal());
+    assertEquals(Boolean.TRUE, saved.getExecutableTestsPassed());
     assertEquals(100, saved.getVerifiedScore());
     assertEquals(100, saved.getRubricScore());
     assertEntry(

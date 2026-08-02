@@ -96,38 +96,42 @@ public class ReadFileTool implements Tool {
   @Override
   public String inputSchema() {
     return """
-           {
-             "type": "object",
-             "properties": {
-               "path": {
-                 "type": "string",
-                 "description": "Workspace-relative path to the file"
-               },
-               "startLine": {
-                 "type": "integer",
-                 "description": "Optional 1-indexed first line to include",
-                 "minimum": 1
-               },
-               "endLine": {
-                 "type": "integer",
-                 "description": "Optional 1-indexed last line to include (inclusive)",
-                 "minimum": 1
-               },
-               "offset": {
-                 "type": "integer",
-                 "description": "Legacy alias: skip this many lines (0-indexed)",
-                 "minimum": 0
-               },
-               "limit": {
-                 "type": "integer",
-                 "description": "Legacy alias: maximum lines to return with offset",
-                 "minimum": 1
-               }
-             },
-             "required": ["path"],
-             "additionalProperties": false
-           }
-           """;
+{
+  "type": "object",
+  "properties": {
+    "path": {
+      "type": "string",
+      "description": "Workspace-relative path to the file"
+    },
+    "startLine": {
+      "type": "integer",
+      "description": "Optional 1-indexed first line to include",
+      "minimum": 1
+    },
+    "endLine": {
+      "type": "integer",
+      "description": "Optional 1-indexed last line to include (inclusive)",
+      "minimum": 1
+    },
+    "offset": {
+      "type": "integer",
+      "description": "Legacy alias: skip this many lines (0-indexed)",
+      "minimum": 0
+    },
+    "limit": {
+      "type": "integer",
+      "description": "Legacy alias: maximum lines to return with offset",
+      "minimum": 1
+    },
+    "includeMetadata": {
+      "type": "boolean",
+      "description": "Optional read-only evidence header with exact physical/nonblank line and byte counts. Use for measurable file-size contracts; the header is not file content and must not be copied into edits."
+    }
+  },
+  "required": ["path"],
+  "additionalProperties": false
+}
+""";
   }
 
   @Override
@@ -144,6 +148,7 @@ public class ReadFileTool implements Tool {
     }
     Integer start = args.hasNonNull("startLine") ? args.get("startLine").asInt() : null;
     Integer end = args.hasNonNull("endLine") ? args.get("endLine").asInt() : null;
+    boolean includeMetadata = args.path("includeMetadata").asBoolean(false);
     if (start == null && end == null && (args.hasNonNull("offset") || args.hasNonNull("limit"))) {
       int offset = args.hasNonNull("offset") ? Math.max(0, args.get("offset").asInt()) : 0;
       int limit = args.hasNonNull("limit") ? Math.max(1, args.get("limit").asInt()) : 200;
@@ -179,10 +184,13 @@ public class ReadFileTool implements Tool {
           if (s > lines.length) {
             return ToolResult.ok("(file has " + lines.length + " lines; range starts past EOF)");
           }
+          String selected = String.join("\n", java.util.Arrays.copyOfRange(lines, s - 1, e));
           return safeContentResult(
-              String.join("\n", java.util.Arrays.copyOfRange(lines, s - 1, e)));
+              includeMetadata ? withMetadata(path, content, selected) : selected);
         }
-        return safeContentResult(clampFullRead(content));
+        String selected = clampFullRead(content);
+        return safeContentResult(
+            includeMetadata ? withMetadata(path, content, selected) : selected);
       } catch (IllegalArgumentException iae) {
         return ToolResult.err(ToolResult.ErrorKind.FORBIDDEN, "project file read was rejected");
       } catch (RuntimeException failure) {
@@ -200,14 +208,33 @@ public class ReadFileTool implements Tool {
             ToolResult.ErrorKind.INVALID_ARGS, "path is a directory, not a file: " + path);
       }
       ToolResult result;
+      String selected;
       if (start != null || end != null) {
         int s = start == null ? 1 : start;
         // Range reads are byte-exact and untruncated — this is how the model pages through a file
         // too large to return whole, and the slice it sees is exactly editable via editFile.
-        result = safeContentResult(readRange(resolved, s, end == null ? Integer.MAX_VALUE : end));
+        selected = readRange(resolved, s, end == null ? Integer.MAX_VALUE : end);
       } else {
-        result = safeContentResult(readFullCapped(resolved));
+        selected = readFullCapped(resolved);
       }
+      if (includeMetadata) {
+        long[] counts;
+        try (var lines = Files.lines(resolved, StandardCharsets.UTF_8)) {
+          counts =
+              lines.collect(
+                  () -> new long[2],
+                  (acc, line) -> {
+                    acc[0]++;
+                    if (!line.isBlank()) acc[1]++;
+                  },
+                  (left, right) -> {
+                    left[0] += right[0];
+                    left[1] += right[1];
+                  });
+        }
+        selected = metadataHeader(path, counts[0], counts[1], Files.size(resolved)) + selected;
+      }
+      result = safeContentResult(selected);
       // RR-1024 — record the read (full file content hash) for editFile's read-before-write +
       // staleness gate ONLY when the content was actually returned to the model. A read the secret
       // scanner FORBID (or any error) must not authorize a later full-file edit/overwrite of a file
@@ -236,6 +263,30 @@ public class ReadFileTool implements Tool {
               + ")");
     }
     return ToolResult.ok(content);
+  }
+
+  static String withMetadata(String path, String completeContent, String selectedContent) {
+    long physicalLines = completeContent == null ? 0 : completeContent.lines().count();
+    long nonBlankLines =
+        completeContent == null
+            ? 0
+            : completeContent.lines().filter(line -> !line.isBlank()).count();
+    long bytes =
+        completeContent == null ? 0 : completeContent.getBytes(StandardCharsets.UTF_8).length;
+    return metadataHeader(path, physicalLines, nonBlankLines, bytes) + selectedContent;
+  }
+
+  private static String metadataHeader(
+      String path, long physicalLines, long nonBlankLines, long bytes) {
+    return "[FILE_METADATA path="
+        + path
+        + " physicalLines="
+        + physicalLines
+        + " nonBlankLines="
+        + nonBlankLines
+        + " bytes="
+        + bytes
+        + "]\n[FILE_CONTENT]\n";
   }
 
   /**

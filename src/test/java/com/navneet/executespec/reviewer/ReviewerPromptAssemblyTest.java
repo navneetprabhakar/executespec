@@ -37,4 +37,20 @@ class ReviewerPromptAssemblyTest {
           .contains("Do not infer success");
     }
   }
+
+  @Test
+  void generalReviewerUsesDeterministicFileMeasurementsAndOneBuild() throws Exception {
+    try (var stream =
+        ReviewerPromptAssemblyTest.class
+            .getClassLoader()
+            .getResourceAsStream("prompts/reviewer-general.md")) {
+      assertThat(stream).isNotNull();
+      String prompt = new String(stream.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+
+      assertThat(prompt)
+          .contains("includeMetadata: true")
+          .contains("never invent an approximate count")
+          .contains("never repeat a successful");
+    }
+  }
 }

@@ -163,6 +163,7 @@ public class ProjectSharePublicController {
             report.getFinalBuildPassed(),
             report.getTestsPassed(),
             report.getTestsTotal(),
+            report.getTestsSkipped(),
             null, // recommendation field removed in v2.5.10 — left null for back-compat
             report.getCreatedAt(),
             reportDto.rubricScore(),
@@ -325,6 +326,7 @@ public class ProjectSharePublicController {
       Boolean finalBuildPassed,
       Integer testsPassed,
       Integer testsTotal,
+      Integer testsSkipped,
       String recommendation,
       Instant createdAt,
       Integer rubricScore,

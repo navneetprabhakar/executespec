@@ -159,7 +159,7 @@ class CorrectionAcceptancePolicyTest {
             "b".repeat(64),
             new CorrectionResolutionEvidence.BuildValidation("PASSED", true, 0),
             new CorrectionResolutionEvidence.TestValidation(
-                "UNPROVEN", null, null, false, "UNAVAILABLE", null),
+                "UNPROVEN", null, null, null, false, "UNAVAILABLE", null),
             new CorrectionResolutionEvidence.WorkflowValidation("PASSED", 1, null),
             new CorrectionResolutionEvidence.ReviewerValidation("CLEAN"),
             new CorrectionResolutionEvidence.ContractValidation(
@@ -185,7 +185,7 @@ class CorrectionAcceptancePolicyTest {
         generation.repeat(64),
         new CorrectionResolutionEvidence.BuildValidation("PASSED", true, 0),
         new CorrectionResolutionEvidence.TestValidation(
-            "PASSED", passed, total, true, "WORKSPACE_TEST_SUITE", 0),
+            "PASSED", passed, total, 0, true, "WORKSPACE_TEST_SUITE", 0),
         new CorrectionResolutionEvidence.WorkflowValidation("PASSED", 1, null),
         new CorrectionResolutionEvidence.ReviewerValidation("CLEAN"),
         new CorrectionResolutionEvidence.ContractValidation("COMPATIBLE", "base", "current", 0, 0),

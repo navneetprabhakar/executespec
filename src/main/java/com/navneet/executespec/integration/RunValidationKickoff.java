@@ -362,16 +362,13 @@ class RunValidationKickoff {
       }
       review.setIssues(synthIssues);
 
-      // Worker-authored workspace tests are a repair aid, not independent product-quality proof.
-      // Run them for diagnostics, but never feed their counts into the verified score. The
-      // separately generated black-box suite will rescore this report when it exercises the real
-      // runtime over HTTP. Until then, persist an explicitly unavailable functional-test signal.
+      // A freshly executed workspace suite is deterministic code-level evidence even though it is
+      // not independent end-to-end product proof. Persist its exact pass/fail/error/skip counts and
+      // WORKSPACE_TEST_SUITE scope so publication can distinguish a real green command from tests
+      // that never ran. ValidationReportService keeps the existing workspace-suite score cap; a
+      // later black-box suite still replaces this population rather than being blended into it.
       com.navneet.executespec.testgen.model.TestExecutionSummary testSummary =
-          correctionTestSummary != null
-              ? correctionTestSummary
-              : com.navneet.executespec.testgen.model.TestExecutionSummary.unavailable(
-                  "functional-tests-pending",
-                  "Independent end-to-end/functional tests have not completed");
+          selectTestSummary(correctionTestSummary, workspaceTestEvidence);
       // RL-2026-05-066 (verifyBoot) — feed a deterministic boot verdict into the BUILD slot. Reads
       // the run-recipe + boots in the hardened sandbox; fail-open (empty → null → compile-only
       // BUILD
@@ -489,11 +486,24 @@ class RunValidationKickoff {
     if (evidence.exitCode() != 0
         || summary.getFailed() > 0
         || summary.getErrors() > 0
-        || summary.getPassed() != summary.getTotalTests()) {
+        || summary.getPassed() <= 0
+        || summary.getSkipped() < 0
+        || (long) summary.getPassed() + summary.getSkipped() != summary.getTotalTests()) {
       throw new IllegalStateException(
           "CORRECTION_TESTS_FAILED: correction validation requires every executed test to pass");
     }
     return summary;
+  }
+
+  static com.navneet.executespec.testgen.model.TestExecutionSummary selectTestSummary(
+      com.navneet.executespec.testgen.model.TestExecutionSummary correctionSummary,
+      com.navneet.executespec.smoketest.WorkspaceTestRunner.DetailedResult workspaceEvidence) {
+    if (correctionSummary != null) return correctionSummary;
+    if (workspaceEvidence != null && workspaceEvidence.summary() != null) {
+      return workspaceEvidence.summary();
+    }
+    return com.navneet.executespec.testgen.model.TestExecutionSummary.unavailable(
+        "workspace-tests-unavailable", "No execution-verified workspace test result is available");
   }
 
   String persistedFailureReason(String runId, String statusReason) {

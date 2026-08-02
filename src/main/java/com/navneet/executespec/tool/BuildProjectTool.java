@@ -99,6 +99,10 @@ public class BuildProjectTool implements Tool {
 
   @Override
   public ToolResult execute(JsonNode args, ExecutionContext ctx) {
+    String reviewerLimit = ReviewerMutationScope.validateBuildProject();
+    if (reviewerLimit != null) {
+      return ToolResult.err(ToolResult.ErrorKind.FORBIDDEN, reviewerLimit);
+    }
     String plannerCmd =
         args.hasNonNull("plannerCommand")
             ? args.get("plannerCommand").asText()

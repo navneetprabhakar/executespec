@@ -25,9 +25,10 @@ import lombok.extern.slf4j.Slf4j;
  * <p>Two enforcement points use this guard:
  *
  * <ol>
- *   <li>{@link WorkspaceInitService#cloneMultipleRepos} calls {@link #augmentGitignore} right after
- *       each clone, so the worker starts against a {@code .gitignore} that already covers
- *       node_modules/, venv/, dist/, etc., regardless of what the upstream repo had.
+ *   <li>{@link WorkspaceInitService#cloneMultipleRepos} calls {@link #installLocalExcludes} right
+ *       after each clone, so the worker starts with clone-local protection for node_modules/,
+ *       venv/, dist/, etc., regardless of what the upstream repo had, without changing customer
+ *       history.
  *   <li>{@code GitCommitTool} calls {@link #purgeStagedVendored} between {@code git add -A} and
  *       {@code git commit} as a last-line defense for shell-driven commits the worker might run.
  * </ol>
@@ -86,21 +87,25 @@ public class VendoredPathGuard {
   }
 
   /**
-   * Append any missing {@link #VENDORED_DIRS} entries to {@code <repoDir>/.gitignore}. Idempotent —
-   * existing entries are kept exactly as-is, only missing ones are appended under a clearly marked
-   * {@code # >>> ExecuteSpec} block so the user can spot/revert. Stages and commits the change so
-   * subsequent {@code git add -A} sees the updated ignore patterns.
+   * Installs missing {@link #VENDORED_DIRS} entries in {@code <repoDir>/.git/info/exclude}.
+   * Idempotent and deliberately non-versioned: clone preparation must not add a commit or alter the
+   * customer's tracked {@code .gitignore}, because either would widen a file-scoped run's PR.
+   * Existing customer ignore rules are honoured and not duplicated into the local exclude file.
    *
-   * <p>No-op when none of the patterns are missing.
+   * <p>No-op when the tracked and local ignore files already cover every pattern.
    */
-  public void augmentGitignore(Path repoDir) {
+  public void installLocalExcludes(Path repoDir) {
     if (!Files.isDirectory(repoDir.resolve(".git"))) {
       log.debug("VendoredPathGuard: {} is not a git repo, skipping", repoDir);
       return;
     }
     try {
       Path gitignore = repoDir.resolve(".gitignore");
+      Path infoDir = repoDir.resolve(".git").resolve("info");
+      Files.createDirectories(infoDir);
+      Path exclude = infoDir.resolve("exclude");
       Set<String> existing = readExistingPatterns(gitignore);
+      existing.addAll(readExistingPatterns(exclude));
       List<String> missing = new ArrayList<>();
       for (String dir : VENDORED_DIRS) {
         // Match either "node_modules" or "node_modules/" — gitignore treats both as ignore-the-dir.
@@ -114,45 +119,34 @@ public class VendoredPathGuard {
       }
 
       StringBuilder appendix = new StringBuilder();
-      if (Files.exists(gitignore)) {
-        String body = Files.readString(gitignore);
+      if (Files.exists(exclude)) {
+        String body = Files.readString(exclude);
         if (!body.endsWith("\n")) appendix.append('\n');
       }
       appendix.append(
-          "\n# >>> ExecuteSpec — added missing vendored-path ignores at clone time"
+          "\n# >>> ExecuteSpec — clone-local vendored-path protection"
               + " (see VendoredPathGuard)\n");
       for (String pattern : missing) appendix.append(pattern).append('\n');
       appendix.append("# <<< ExecuteSpec\n");
 
       Files.writeString(
-          gitignore,
+          exclude,
           appendix.toString(),
           java.nio.file.StandardOpenOption.CREATE,
           java.nio.file.StandardOpenOption.APPEND);
 
-      // Commit the augmented .gitignore so it's part of the run's history (not just an
-      // uncommitted local edit). If the repo identity isn't configured we set a local one so
-      // the commit doesn't fail under CI / sandboxed environments.
-      ensureLocalIdentity(repoDir);
-      runGit(repoDir, List.of("add", ".gitignore"), 5);
-      runGit(
-          repoDir,
-          List.of(
-              "commit",
-              "--allow-empty",
-              "-m",
-              "chore(executespec): augment .gitignore with missing vendored-path ignores"),
-          10);
-
       log.info(
-          "VendoredPathGuard: appended {} ignore pattern(s) to {}/.gitignore: {}",
+          "VendoredPathGuard: installed {} clone-local ignore pattern(s) in"
+              + " {}/.git/info/exclude: {}",
           missing.size(),
           repoDir.getFileName(),
           missing);
     } catch (Exception e) {
       // Non-fatal — we tried to be helpful, but don't fail the run because we couldn't.
       log.warn(
-          "VendoredPathGuard: failed to augment .gitignore in {}: {}", repoDir, e.getMessage());
+          "VendoredPathGuard: failed to install clone-local excludes in {}: {}",
+          repoDir,
+          e.getMessage());
     }
   }
 
@@ -207,8 +201,9 @@ public class VendoredPathGuard {
           vendoredRoots.size(),
           vendoredRoots);
 
-      // 1. Make sure .gitignore covers them so the next `git add -A` doesn't re-stage.
-      augmentGitignore(repoDir);
+      // 1. Install clone-local ignores so the next `git add -A` doesn't re-stage them without
+      //    changing the customer's .gitignore or adding an unrelated commit.
+      installLocalExcludes(repoDir);
 
       // 2. Remove from index without touching the worktree. --ignore-unmatch keeps us
       //    idempotent on retries / when a sub-path has already been cleaned by the
@@ -224,12 +219,6 @@ public class VendoredPathGuard {
               segment,
               inner.getMessage());
         }
-      }
-      // Re-stage .gitignore in case augmentGitignore's auto-commit captured it before the rm.
-      try {
-        runGit(repoDir, List.of("add", ".gitignore"), 5);
-      } catch (Exception ignored) {
-        // best-effort
       }
       // 3. One scrub commit so the cleanup is atomic in history.
       // RR-650 — the commit outcome is now part of the result contract. When it fails, the removals
@@ -333,10 +322,10 @@ public class VendoredPathGuard {
    * After {@code git add -A}, scan the staged files for vendored paths. If any are present:
    *
    * <ol>
-   *   <li>Append the missing patterns to {@code .gitignore} (idempotent).
+   *   <li>Install missing patterns in {@code .git/info/exclude} (idempotent and non-versioned).
    *   <li>Run {@code git rm --cached -r --ignore-unmatch <pattern>} for each so they leave the
    *       index without touching the worktree.
-   *   <li>Re-stage {@code .gitignore} and return — caller continues with {@code git commit}.
+   *   <li>Return — caller continues with {@code git commit} containing only requested changes.
    * </ol>
    *
    * <p>Returns the number of vendored paths purged from the index (0 = no-op). Best-effort: any
@@ -372,28 +361,22 @@ public class VendoredPathGuard {
 
       log.warn(
           "VendoredPathGuard: pre-commit guard caught {} vendored path(s) staged in {}: {}"
-              + " — augmenting .gitignore and unstaging",
+              + " — installing clone-local excludes and unstaging",
           vendoredHits.size(),
           repoDir.getFileName(),
           vendoredHits);
 
-      // Augment ignore file BEFORE removing from index, so the next add doesn't re-stage them.
-      augmentGitignore(repoDir);
+      // Install local excludes BEFORE removing from index, so the next add doesn't re-stage them.
+      installLocalExcludes(repoDir);
 
       // Remove from index without touching the worktree. --ignore-unmatch keeps us idempotent
-      // on retries / when the path was already cleaned by augmentGitignore's own commit.
+      // on retries or when the path was already removed from the index.
       for (String hit : vendoredHits) {
         try {
           runGit(repoDir, List.of("rm", "--cached", "-r", "--ignore-unmatch", "--", hit), 30);
         } catch (Exception inner) {
           log.debug("git rm --cached failed for {}: {}", hit, inner.getMessage());
         }
-      }
-      // Re-stage .gitignore in case augmentGitignore's auto-commit didn't fire.
-      try {
-        runGit(repoDir, List.of("add", ".gitignore"), 5);
-      } catch (Exception ignored) {
-        // best-effort
       }
       return vendoredHits.size();
     } catch (Exception e) {
@@ -402,10 +385,10 @@ public class VendoredPathGuard {
     }
   }
 
-  private Set<String> readExistingPatterns(Path gitignore) throws IOException {
+  private Set<String> readExistingPatterns(Path ignoreFile) throws IOException {
     Set<String> out = new LinkedHashSet<>();
-    if (!Files.exists(gitignore)) return out;
-    for (String line : Files.readAllLines(gitignore)) {
+    if (!Files.exists(ignoreFile)) return out;
+    for (String line : Files.readAllLines(ignoreFile)) {
       String trimmed = line.trim();
       if (trimmed.isEmpty() || trimmed.startsWith("#")) continue;
       // Strip leading "/" — equivalent in gitignore semantics for our flat dir patterns.

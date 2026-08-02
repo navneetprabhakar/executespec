@@ -285,6 +285,7 @@ public class RunDetail {
   Boolean finalBuildPassed;
   Integer testsPassed;
   Integer testsTotal;
+  Integer testsSkipped;
 
   /** True only when the test totals came from an actual executed command. */
   Boolean testExecutionVerified;
