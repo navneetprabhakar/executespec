@@ -2,6 +2,7 @@ package com.navneet.executespec.cost;
 
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalDouble;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -709,6 +710,36 @@ public class RunCostTracker {
   }
 
   /**
+   * Conservative pre-dispatch price projection for one provider call.
+   *
+   * <p>This is an estimate, not provider billing certainty: tokenization and cache fate are only
+   * authoritative after the response. The caller supplies a deterministic input-token estimate;
+   * this method adds 25% input headroom, prices every input token at the uncached rate (at the
+   * 1.25x cache-write rate for Anthropic), and reserves the full requested output ceiling. Missing
+   * route pricing returns {@link OptionalDouble#empty()} and must never be interpreted as zero.
+   */
+  public OptionalDouble estimateConservativeCallCostUsd(
+      String provider, String model, long estimatedInputTokens, long maxOutputTokens) {
+    PricingLookup lookup = lookupPricing(provider, model).orElse(null);
+    if (lookup == null) return OptionalDouble.empty();
+    ModelPricing pricing = lookup.pricing();
+    double inputRate = pricing.getInputCostPer1m() == null ? 0.0 : pricing.getInputCostPer1m();
+    double outputRate = pricing.getOutputCostPer1m() == null ? 0.0 : pricing.getOutputCostPer1m();
+    if (inputRate <= 0.0 && outputRate <= 0.0) return OptionalDouble.empty();
+    long inputWithHeadroom = saturatingScale(Math.max(0L, estimatedInputTokens), 1.25);
+    double effectiveInputRate =
+        "anthropic".equalsIgnoreCase(lookup.pricingProvider())
+            ? inputRate * CACHE_WRITE_MULTIPLIER
+            : inputRate;
+    double estimate =
+        (inputWithHeadroom / 1_000_000.0) * effectiveInputRate
+            + (Math.max(0L, maxOutputTokens) / 1_000_000.0) * outputRate;
+    return Double.isFinite(estimate) && estimate > 0.0
+        ? OptionalDouble.of(estimate)
+        : OptionalDouble.empty();
+  }
+
+  /**
    * Resolve per-1M input/output rates for the selected model, falling back to the provider's
    * WORKHORSE-tier default when the model is blank/unpriced. Exposed for the Launch estimate so it
    * can price historical token volume against whichever model the user is about to select.
@@ -785,23 +816,14 @@ public class RunCostTracker {
    */
   private double priceCall(
       String provider, String model, long inTok, long outTok, long cacheWrite, long cacheRead) {
-    String pricingProvider = provider;
-    Optional<ModelPricing> found =
-        pricingRepo.findByIdProviderAndIdModel(providerKey(pricingProvider), model);
-    if (found.isEmpty() && "openrouter".equalsIgnoreCase(provider)) {
-      pricingProvider = ownerProviderFor(model);
-      found = pricingRepo.findByIdProviderAndIdModel(providerKey(pricingProvider), model);
-    }
-    if (found.isEmpty() && "deepseek".equalsIgnoreCase(provider) && model != null) {
-      String nativeModel = model.endsWith("-native") ? model : model + "-native";
-      found = pricingRepo.findByIdProviderAndIdModel(providerKey(provider), nativeModel);
-    }
-    if (found.isEmpty()) {
+    PricingLookup lookup = lookupPricing(provider, model).orElse(null);
+    if (lookup == null) {
       log.debug(
           "RunCostTracker: no pricing for {}/{} — recording tokens without cost", provider, model);
       return 0.0;
     }
-    ModelPricing p = found.get();
+    String pricingProvider = lookup.pricingProvider();
+    ModelPricing p = lookup.pricing();
     double inRate = p.getInputCostPer1m() != null ? p.getInputCostPer1m() : 0;
     double outRate = p.getOutputCostPer1m() != null ? p.getOutputCostPer1m() : 0;
     // Cache-read rate from YAML; falls back to inRate * 0.10 (Anthropic-shape default) when the
@@ -823,6 +845,30 @@ public class RunCostTracker {
     cost += (outTok / 1_000_000.0) * outRate;
     return cost;
   }
+
+  private Optional<PricingLookup> lookupPricing(String provider, String model) {
+    String pricingProvider = provider;
+    Optional<ModelPricing> found =
+        pricingRepo.findByIdProviderAndIdModel(providerKey(pricingProvider), model);
+    if (found.isEmpty() && "openrouter".equalsIgnoreCase(provider)) {
+      pricingProvider = ownerProviderFor(model);
+      found = pricingRepo.findByIdProviderAndIdModel(providerKey(pricingProvider), model);
+    }
+    if (found.isEmpty() && "deepseek".equalsIgnoreCase(provider) && model != null) {
+      String nativeModel = model.endsWith("-native") ? model : model + "-native";
+      found = pricingRepo.findByIdProviderAndIdModel(providerKey(provider), nativeModel);
+    }
+    String resolvedProvider = pricingProvider;
+    return found.map(pricing -> new PricingLookup(resolvedProvider, pricing));
+  }
+
+  private static long saturatingScale(long value, double multiplier) {
+    if (value <= 0) return 0L;
+    double scaled = Math.ceil(value * multiplier);
+    return !Double.isFinite(scaled) || scaled >= Long.MAX_VALUE ? Long.MAX_VALUE : (long) scaled;
+  }
+
+  private record PricingLookup(String pricingProvider, ModelPricing pricing) {}
 
   /**
    * V2-canonical provider key for pricing-table lookup. v2.5.13 renamed enum GOOGLE → GEMINI + YAML

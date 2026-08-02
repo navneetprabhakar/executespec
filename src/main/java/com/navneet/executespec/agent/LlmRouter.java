@@ -17,6 +17,8 @@ import java.util.concurrent.atomic.AtomicReference;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.navneet.executespec.billing.service.ManagedAiUsageService;
+import com.navneet.executespec.cost.ProjectedCallBudgetExceededException;
+import com.navneet.executespec.cost.ProjectedCallCostAdmission;
 import com.navneet.executespec.cost.RunCostTracker;
 import com.navneet.executespec.cost.RunStepUsageRecorder;
 import com.navneet.executespec.executioncontext.LlmExecutionDispatchGuard;
@@ -107,6 +109,7 @@ public class LlmRouter {
   private final GeminiNativeToolClient geminiNativeToolClient;
   private final Metrics metrics;
   private final RunCostTracker costTracker;
+  private final ProjectedCallCostAdmission projectedCallCostAdmission;
   private final RunStepUsageRecorder stepUsageRecorder;
   private final SseBroadcaster broadcaster;
   private final RunKeyContextStore keyContextStore;
@@ -702,6 +705,11 @@ public class LlmRouter {
                 parentAttemptId)
             : null;
     for (int attempt = 1; attempt <= TRANSIENT_RETRY_MAX_ATTEMPTS; attempt++) {
+      // This is the last common seam before every physical chat transport. The request already
+      // carries the managed-AI or failover route, so price that effective provider/model rather
+      // than the worker's earlier requested route. Rechecking each bounded retry also observes any
+      // spend recorded by another in-process call before this attempt starts.
+      projectedCallCostAdmission.admit(request, tools);
       // Audit intent is write-ahead and fail-closed. If this durable append fails, the provider
       // transport is never invoked and no unaccounted Enterprise spend can occur.
       PhysicalDispatch physicalDispatch =
@@ -1077,6 +1085,10 @@ public class LlmRouter {
       try {
         return dispatchWithRetry(
             altRequest, tools, altKey, altSource, keys, operationAdmissionDecision);
+      } catch (ProjectedCallBudgetExceededException budgetExceeded) {
+        // A route that cannot fit the customer's ceiling is not a provider failure. Do not mask it
+        // behind the primary 5xx or walk to another billable transport.
+        throw budgetExceeded;
       } catch (RuntimeException altError) {
         log.warn(
             "LlmRouter failover target {} also failed: {}",
@@ -1251,6 +1263,10 @@ public class LlmRouter {
     // never regress production Anthropic traffic and only runs on an already-failing salvage call.
     if ("required".equals(r.toolChoice())
         && anthropicForcedToolClient.canAttempt(r.messages(), tools, apiKey)) {
+      // The forced-tool seam can return a paid but semantically unusable HTTP 200 and then fall
+      // through to the normal Anthropic transport. Admit each physical request independently so
+      // that first response's newly recorded spend can fence the fallback request.
+      projectedCallCostAdmission.admit(r, tools);
       PhysicalDispatch forcedAttempt = prepareAnthropicAttempt(auditContext);
       String forcedApiKey = forcedAttempt == null ? apiKey : forcedAttempt.apiKey();
       long forcedStartedAt = System.currentTimeMillis();
@@ -1320,6 +1336,7 @@ public class LlmRouter {
     if (cache != null) b.cacheOptions(cache);
     if (!dropTemperature) b.temperature(r.temperature());
     if (r.maxTokens() != null) b.maxTokens(r.maxTokens());
+    projectedCallCostAdmission.admit(r, tools);
     PhysicalDispatch primaryAttempt = prepareAnthropicAttempt(auditContext);
     String primaryApiKey = primaryAttempt == null ? apiKey : primaryAttempt.apiKey();
     AnthropicChatModel model =
@@ -1343,6 +1360,7 @@ public class LlmRouter {
           "Anthropic rejected `temperature` for model={} — retrying without it (will skip on"
               + " subsequent calls this JVM)",
           r.model());
+      projectedCallCostAdmission.admit(r, tools);
       PhysicalDispatch retryAttempt = prepareAnthropicAttempt(auditContext);
       String retryApiKey = retryAttempt == null ? apiKey : retryAttempt.apiKey();
       AnthropicChatModel retryModel =

@@ -147,17 +147,22 @@ class StandaloneExistingWorkspaceAdmissionTest {
   }
 
   @Test
-  void orchestratorChecksBrownfieldCompatibilityImmediatelyAfterWorker() throws Exception {
+  void orchestratorPersistsAndTerminatesAbortedWorkerBeforeBrownfieldCompatibility()
+      throws Exception {
     String source =
         Files.readString(
             Path.of("src/main/java/com/navneet/executespec/integration/RunOrchestrator.java"));
     int worker = source.indexOf("execResult =\n            executor.execute(");
-    int compatibility =
-        source.indexOf("brownfieldHttpContractGuard.assertCompatibleIfPresent(runId);", worker);
     int taskPersistence =
         source.indexOf("persistenceWriter.applyExecutionResultToTasks(runId, execResult);", worker);
+    int abortedTerminal =
+        source.indexOf(
+            "if (execResult.overall() == ExecutionResult.Overall.ABORTED)", taskPersistence);
+    int compatibility =
+        source.indexOf("brownfieldHttpContractGuard.assertCompatibleIfPresent(runId);", worker);
 
     assertThat(worker).isGreaterThan(0);
-    assertThat(compatibility).isGreaterThan(worker).isLessThan(taskPersistence);
+    assertThat(taskPersistence).isGreaterThan(worker).isLessThan(abortedTerminal);
+    assertThat(abortedTerminal).isLessThan(compatibility);
   }
 }

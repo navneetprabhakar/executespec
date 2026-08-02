@@ -140,3 +140,66 @@ describe('useSse — RR-203 required scoped token', () => {
     expect(useSseStore.getState().status).toBe('RECONNECTING');
   });
 });
+
+describe('useSse — terminal stream closure', () => {
+  async function connectedSource(runId: string) {
+    await act(async () => {
+      root.render(createElement(Harness, {runId}));
+      await flushMicrotasks();
+    });
+    const source = FakeEventSource.instances[0];
+    expect(source).toBeDefined();
+    await act(async () => source.onopen?.());
+    return source;
+  }
+
+  it.each([
+    ['RUN_STATUS', 'FAILED'],
+    ['COMPLETE', 'FAILED|BUDGET_EXCEEDED'],
+    ['RUN_STATUS', 'CANCELLED'],
+  ])('closes without reconnecting for %s %s', async (type, payload) => {
+    const source = await connectedSource(`terminal-${type}-${payload}`);
+
+    await act(async () => {
+      source.onmessage?.({
+        data: JSON.stringify({type, payload}),
+        lastEventId: 'terminal-1',
+      } as MessageEvent);
+      source.onerror?.();
+      await vi.advanceTimersByTimeAsync(60_000);
+    });
+
+    expect(source.closed).toBe(true);
+    expect(useSseStore.getState().status).toBe('DISCONNECTED');
+    expect(FakeEventSource.instances).toHaveLength(1);
+  });
+
+  it.each([
+    {
+      label: 'legacy payload',
+      event: {
+        type: 'RUN_DETAIL',
+        payload: JSON.stringify({runId: 'terminal-detail', status: 'PARTIAL'}),
+      },
+    },
+    {
+      label: 'typed data',
+      event: {type: 'RUN_DETAIL', data: {runId: 'terminal-detail', status: 'FAILED'}},
+    },
+  ])('closes on a terminal RUN_DETAIL snapshot in $label', async ({event}) => {
+    const source = await connectedSource('terminal-detail');
+
+    await act(async () => {
+      source.onmessage?.({
+        data: JSON.stringify(event),
+        lastEventId: 'terminal-detail-1',
+      } as MessageEvent);
+      source.onerror?.();
+      await vi.advanceTimersByTimeAsync(60_000);
+    });
+
+    expect(source.closed).toBe(true);
+    expect(useSseStore.getState().status).toBe('DISCONNECTED');
+    expect(FakeEventSource.instances).toHaveLength(1);
+  });
+});
