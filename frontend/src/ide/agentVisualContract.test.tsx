@@ -265,12 +265,15 @@ describe('protected transcript visual contract', () => {
 
     const confirm = Array.from(rendered.querySelectorAll('button')).find((button) =>
       button.textContent?.includes('Create revert plan'),
-    );
+    ) as HTMLButtonElement;
+    expect(confirm).toBeTruthy();
     await act(async () => {
-      confirm?.click();
-      await Promise.resolve();
-      await Promise.resolve();
+      confirm.click();
     });
+    // Revert submission derives its idempotency key through async WebCrypto before invoking the
+    // API. Assert at that observable boundary instead of racing crypto.subtle.digest with a fixed
+    // number of promise microtasks.
+    await vi.waitFor(() => expect(fork).toHaveBeenCalledTimes(1));
     expect(fork).toHaveBeenCalledWith(
       'run-visual-1',
       expect.objectContaining({userRequest: expect.stringContaining('Revert ONLY hunk 1')}),

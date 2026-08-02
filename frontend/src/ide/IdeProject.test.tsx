@@ -149,10 +149,18 @@ describe('IdeProject brownfield compose contract', () => {
     ) as HTMLButtonElement;
     expect(modelTrigger).toBeTruthy();
     await act(async () => modelTrigger.click());
+    await vi.waitFor(() => {
+      expect(
+        Array.from(host.querySelectorAll<HTMLButtonElement>('[role="option"]')).find((option) =>
+          option.textContent?.includes('DeepSeek V4 Pro'),
+        ),
+      ).toBeTruthy();
+    });
     const modelOption = Array.from(
       host.querySelectorAll<HTMLButtonElement>('[role="option"]'),
-    ).find((option) => option.textContent?.includes('DeepSeek V4 Pro'));
-    await act(async () => modelOption?.click());
+    ).find((option) => option.textContent?.includes('DeepSeek V4 Pro')) as HTMLButtonElement;
+    await act(async () => modelOption.click());
+    await vi.waitFor(() => expect(modelTrigger.textContent).toContain('DeepSeek V4 Pro'));
 
     const textarea = host.querySelector('textarea') as HTMLTextAreaElement;
     await act(async () => {
@@ -163,8 +171,12 @@ describe('IdeProject brownfield compose contract', () => {
     const start = Array.from(host.querySelectorAll('button')).find(
       (button) => button.textContent === 'Start work',
     ) as HTMLButtonElement;
+    await vi.waitFor(() => expect(start.disabled).toBe(false));
     await act(async () => start.click());
-    await flush();
+    // Submission first derives the idempotency key through async WebCrypto. Waiting for the
+    // observable API boundary keeps the test deterministic on slower CI runners; draining a fixed
+    // number of promise microtasks can assert before crypto.subtle.digest resolves.
+    await vi.waitFor(() => expect(api.createRun).toHaveBeenCalledTimes(1));
 
     expect(api.createRun).toHaveBeenCalledWith(
       expect.objectContaining({modelName: 'deepseek-v4-pro-native'}),
