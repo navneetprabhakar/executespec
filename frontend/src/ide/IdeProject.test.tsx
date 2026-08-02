@@ -17,12 +17,15 @@ const api = vi.hoisted(() => ({
   getRuns: vi.fn(),
   createRun: vi.fn(),
   getProviderReadiness: vi.fn(),
+  getMyModels: vi.fn(),
 }));
+
+let authTier = 'PRO';
 
 vi.mock('@/lib/api', () => api);
 vi.mock('@/stores/useAuthStore', () => ({
   selectNormalizedTier: (state: {tier: string}) => state.tier,
-  useAuthStore: (selector: (state: {tier: string}) => unknown) => selector({tier: 'PRO'}),
+  useAuthStore: (selector: (state: {tier: string}) => unknown) => selector({tier: authTier}),
 }));
 vi.mock('@/ide/IdeProjectTabs', () => ({ProjectTabs: () => <div>Project navigation</div>}));
 vi.mock('@/signal/components/SpecChat', () => ({SpecChat: () => <div>Spec chat</div>}));
@@ -50,6 +53,16 @@ beforeEach(() => {
     ],
   });
   api.createRun.mockResolvedValue({runId: 'run-1'});
+  api.getMyModels.mockResolvedValue([
+    {
+      id: 'deepseek-v4-pro-native',
+      provider: 'DEEPSEEK',
+      label: 'DeepSeek V4 Pro',
+      minTier: 'ENTERPRISE',
+      available: true,
+    },
+  ]);
+  authTier = 'PRO';
 });
 
 afterEach(() => {
@@ -113,6 +126,7 @@ describe('IdeProject brownfield compose contract', () => {
         selectedRepoIds: ['repo-1'],
         userRequest: 'Fix the failing repository test',
       }),
+      expect.any(String),
     );
     // RR-1519 — the default project composer mode is PRODUCTION, which pauses at AWAITING_APPROVAL,
     // so submission must land on the plan gate, not the live console.
@@ -124,5 +138,37 @@ describe('IdeProject brownfield compose contract', () => {
     await renderProject();
     expect(host.textContent).toContain('Project not found');
     expect(host.textContent).not.toContain('Start work in this project');
+  });
+
+  it('offers Enterprise exact-model selection and sends the pin for this run only', async () => {
+    authTier = 'ENTERPRISE';
+    await renderProject();
+
+    const modelTrigger = host.querySelector(
+      'button[aria-label="Project run model"]',
+    ) as HTMLButtonElement;
+    expect(modelTrigger).toBeTruthy();
+    await act(async () => modelTrigger.click());
+    const modelOption = Array.from(
+      host.querySelectorAll<HTMLButtonElement>('[role="option"]'),
+    ).find((option) => option.textContent?.includes('DeepSeek V4 Pro'));
+    await act(async () => modelOption?.click());
+
+    const textarea = host.querySelector('textarea') as HTMLTextAreaElement;
+    await act(async () => {
+      const setValue = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+      setValue?.call(textarea, 'Add a typed health endpoint');
+      textarea.dispatchEvent(new Event('input', {bubbles: true}));
+    });
+    const start = Array.from(host.querySelectorAll('button')).find(
+      (button) => button.textContent === 'Start work',
+    ) as HTMLButtonElement;
+    await act(async () => start.click());
+    await flush();
+
+    expect(api.createRun).toHaveBeenCalledWith(
+      expect.objectContaining({modelName: 'deepseek-v4-pro-native'}),
+      expect.any(String),
+    );
   });
 });

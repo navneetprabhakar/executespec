@@ -18,6 +18,8 @@ import {
 } from '@/ide/providerReadiness';
 import {useProviderReadiness} from '@/ide/useProviderReadiness';
 import {useAuthStore, selectNormalizedTier} from '@/stores/useAuthStore';
+import {executeRunMutation} from '@/lib/runMutationAttempt';
+import {ModelPicker, type ModelPickerOption} from '@/ide/ModelPicker';
 
 type Repo = Record<string, unknown>;
 // Relative timestamps everywhere (review/11 #8) — absolute locale strings were
@@ -50,6 +52,9 @@ export default function IdeProject() {
   const [runsLoaded, setRunsLoaded] = useState(false);
   const [spec, setSpec] = useState('');
   const [provider, setProvider] = useState('ANTHROPIC');
+  const [modelName, setModelName] = useState('');
+  const [modelLabels, setModelLabels] = useState<Record<string, string>>({});
+  const [modelsByProvider, setModelsByProvider] = useState<Record<string, string[]>>({});
   const [mode, setMode] = useState<'PROTOTYPE' | 'PRODUCTION'>('PRODUCTION');
   const [confirmModelUpgrades, setConfirmModelUpgrades] = useState(false);
   const [requireBenchmarkedUpgrades, setRequireBenchmarkedUpgrades] = useState(false);
@@ -106,6 +111,39 @@ export default function IdeProject() {
     if (tier === 'FREE') setProvider('DEEPSEEK');
   }, [tier]);
 
+  // Reuse the same Enterprise per-run exact-model contract as the global Compose surface. The
+  // selection is never persisted as a project default; it only populates RunRequest.modelName.
+  useEffect(() => {
+    if (tier !== 'ENTERPRISE') {
+      setModelName('');
+      setModelLabels({});
+      setModelsByProvider({});
+      return;
+    }
+    // `/models/me` is the authenticated run-submitter catalog. Unlike the org-admin matrix
+    // endpoint, it is available to Enterprise developers and already applies tier + key/policy
+    // readiness. Org overrides remain an admin concern; the run picker needs allowed exact routes.
+    api
+      .getMyModels()
+      .then((models) => {
+        const available = models.filter((model) => model.available);
+        setModelLabels(Object.fromEntries(available.map((model) => [model.id, model.label])));
+        setModelsByProvider(
+          available.reduce<Record<string, string[]>>((byProvider, model) => {
+            const providerKey = model.provider.toLowerCase();
+            (byProvider[providerKey] ||= []).push(model.id);
+            return byProvider;
+          }, {}),
+        );
+      })
+      .catch(() => {
+        setModelLabels({});
+        setModelsByProvider({});
+      });
+  }, [tier]);
+
+  useEffect(() => setModelName(''), [provider]);
+
   async function submit() {
     if (!spec.trim()) {
       setErr('Describe what to build first.');
@@ -145,9 +183,13 @@ export default function IdeProject() {
         startLowTasksOnCheapTier: false,
         figmaUrl: '',
         tier,
-        modelName: '',
+        modelName,
       });
-      const res = await api.createRun(body);
+      const res = await executeRunMutation(
+        `create:${projectId || 'standalone'}`,
+        body,
+        (idempotencyKey) => api.createRun(body, idempotencyKey),
+      );
       // RR-1519 — a PRODUCTION run pauses at AWAITING_APPROVAL, and IdeLive has no plan-gate
       // handling, so sending it to /live stranded the user on a live console for a run that is not
       // running and shows no approve/reject control. Route PRODUCTION to the plan gate (which owns
@@ -214,6 +256,18 @@ export default function IdeProject() {
     tier === 'FREE'
       ? PRODUCT_PROVIDER_OPTIONS.filter((p) => p.id === 'DEEPSEEK')
       : PRODUCT_PROVIDER_OPTIONS;
+  const modelPickerOptions: ModelPickerOption[] = (() => {
+    const providerModels = modelsByProvider[provider.toLowerCase()] || [];
+    return [
+      {value: '', label: 'Recommended', provider, helper: 'Org / system default'},
+      ...providerModels.map((model) => ({
+        value: model,
+        label: modelLabels[model] || model,
+        provider,
+        helper: model,
+      })),
+    ];
+  })();
 
   return (
     <div className='ide-pane'>
@@ -364,6 +418,22 @@ export default function IdeProject() {
                 : providerReadinessLabel(selectedProviderReadiness)}
           </div>
         </div>
+        {tier === 'ENTERPRISE' && (
+          <div style={{flex: 1, minWidth: 220}} role='group' aria-labelledby='project-model-label'>
+            <div className='ide-h2' id='project-model-label' style={{marginTop: 0}}>
+              Model · Beta
+            </div>
+            <ModelPicker
+              ariaLabel='Project run model'
+              value={modelName}
+              options={modelPickerOptions}
+              onChange={setModelName}
+            />
+            <div style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 4}}>
+              Overrides this run only
+            </div>
+          </div>
+        )}
         <div style={{flex: 1, minWidth: 160}}>
           <div className='ide-h2' style={{marginTop: 0}}>
             Mode

@@ -8,6 +8,8 @@
 
 - `RunCostTracker` is the live in-memory accumulator. Token totals and call counts are `long`; use
   `RunCostTracker.saturatedInt(...)` only at a documented legacy INTEGER entity/DTO boundary.
+  Active `RunDetail` reads may monotonically overlay a JVM-owned live snapshot over the persisted
+  checkpoint; terminal detail always keeps the stored durable cost.
 - `run_step_usage` is the canonical physical-provider-attempt ledger. V243 created success-call
   rows; V283 adds durable execution-context, tenant, feature, actual key-source, status/error,
   attempt, latency, and safe provider-usage metadata fields. V293 adds immutable write-ahead
@@ -16,9 +18,10 @@
   each write their own intent and terminal row.
 - `EffectiveRouteProjection` is the only sanctioned way to answer "which provider/model actually
   served this run". It reads successful `run_step_usage` attempts and returns `LEDGER` (exactly one
-  route), `MIXED` (several — `provider`/`model` stay null by design) or `UNATTRIBUTED` (no
-  successful attempt). It never falls back to the requested route. A caller that collapses `MIXED`
-  to a single provider reintroduces exactly the untruth this projection exists to remove. Consumed
+  route), `MIXED` (several — a same-provider mix keeps the common provider and null model;
+  cross-provider mixing keeps both null) or `UNATTRIBUTED` (no successful attempt). It never falls
+  back to the requested route. Exact-route consumers still require `LEDGER`; a provider-only
+  request may truthfully match a same-provider model mix. Consumed
   by `BenchmarkTrackingService` (V304 attempt attribution) and `BenchmarkGenerationService`
   (`GenerateResult.effectiveProvider`/`effectiveModel`/`routeAttribution`/`routeDiverged`).
 - `RunEffectiveRouteService` is the single read seam over that projection: `forRun(runId)`,

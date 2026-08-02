@@ -33,6 +33,7 @@ import {
 import {ModelPicker, type ModelPickerOption} from '@/ide/ModelPicker';
 import {isProductProvider, productProviderCatalog} from '@/ide/agentModelRouting';
 import {fmtCost} from '@/lib/utils';
+import {executeRunMutation} from '@/lib/runMutationAttempt';
 
 // Relative timestamps everywhere (review/11 #8) — `toLocaleString()` was
 // locale-ambiguous (DD/MM vs MM/DD), carried seconds noise, and clashed with
@@ -790,7 +791,11 @@ export function IdeCompose() {
         tier,
         modelName,
       });
-      const res = await api.createRun(body);
+      const res = await executeRunMutation(
+        `create:${projectId || 'standalone'}`,
+        body,
+        (idempotencyKey) => api.createRun(body, idempotencyKey),
+      );
       navigate(`/plan/${res.runId}`);
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : 'Submit failed.');

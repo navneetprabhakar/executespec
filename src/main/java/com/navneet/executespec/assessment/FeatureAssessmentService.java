@@ -3,6 +3,8 @@ package com.navneet.executespec.assessment;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.agent.LlmRouter;
@@ -43,6 +45,13 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 @Slf4j
 public class FeatureAssessmentService {
+
+  private static final Pattern SCHEMA_CHANGE_PHRASE =
+      Pattern.compile(
+          "\\b(?:alter\\s+table|(?:change|modify|update)\\s+(?:the\\s+)?(?:database\\s+)?schema|schema\\s+(?:change|migration)|database\\s+migration|migration)\\b");
+  private static final Pattern BOUNDED_NEGATION =
+      Pattern.compile(
+          "(?:\\bdo\\s+not|\\bdon't|\\bmust\\s+not|\\bnever|\\bwithout|\\bavoid(?:ing)?|\\bno)\\s+(?:[a-z0-9_-]+\\s+){0,3}$");
 
   private final ProjectRepoLinkRepository linkRepo;
   private final ProjectRepoRepository repoRepo;
@@ -254,13 +263,23 @@ public class FeatureAssessmentService {
     if (lower.contains("payment") || lower.contains("billing") || lower.contains("invoice")) {
       risks.add("Money path — double-check rounding, currency, and webhook idempotency");
     }
-    if (lower.contains("migration") || lower.contains("schema") || lower.contains("alter table")) {
+    if (containsUnnegatedSchemaChange(lower)) {
       risks.add("Schema change — verify backwards compatibility before deploy");
     }
     if (lower.contains("delete") || lower.contains("drop") || lower.contains("purge")) {
       risks.add("Destructive operation — confirm soft-delete semantics if user data is involved");
     }
     return risks;
+  }
+
+  private static boolean containsUnnegatedSchemaChange(String lower) {
+    Matcher matcher = SCHEMA_CHANGE_PHRASE.matcher(lower);
+    while (matcher.find()) {
+      int prefixStart = Math.max(0, matcher.start() - 48);
+      String boundedPrefix = lower.substring(prefixStart, matcher.start());
+      if (!BOUNDED_NEGATION.matcher(boundedPrefix).find()) return true;
+    }
+    return false;
   }
 
   private List<String> deriveCrossRepoDeps(String projectId, List<String> repoNames) {

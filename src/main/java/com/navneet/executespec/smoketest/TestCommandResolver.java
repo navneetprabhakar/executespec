@@ -21,6 +21,8 @@ import org.springframework.stereotype.Component;
 @Component
 public class TestCommandResolver {
 
+  private record LocatedCommand(String relativePath, TestCommand command) {}
+
   /** A resolved test command + the framework whose output grammar the parser should use. */
   public record TestCommand(
       String command, int timeoutSeconds, Framework framework, String source) {}
@@ -47,41 +49,65 @@ public class TestCommandResolver {
         hasProjectManifest(workspaceRoot) ? resolveSingle(workspaceRoot) : Optional.empty();
     if (root.isPresent()) return root;
 
-    List<String> commands = new ArrayList<>();
+    List<LocatedCommand> resolvedCommands = new ArrayList<>();
     int timeout = 0;
-    try (var children = Files.list(workspaceRoot)) {
-      for (Path child : children.filter(Files::isDirectory).sorted().toList()) {
-        String name = child.getFileName().toString();
-        if (!name.matches("[A-Za-z0-9._-]+")) continue;
+    try {
+      for (Path child : candidateProjectRoots(workspaceRoot)) {
+        String relative = workspaceRoot.relativize(child).toString();
+        if (!relative.matches("[A-Za-z0-9._/-]+")) continue;
         Optional<TestCommand> resolved = resolveSingle(child);
         if (resolved.isEmpty()) continue;
-        commands.add("(cd " + name + " && " + resolved.get().command() + ")");
+        resolvedCommands.add(new LocatedCommand(relative, resolved.get()));
         timeout += resolved.get().timeoutSeconds();
       }
     } catch (Exception ignored) {
       return Optional.empty();
     }
-    if (commands.isEmpty()) return resolveSingle(workspaceRoot);
-    if (commands.size() == 1) {
-      String command = commands.getFirst();
-      Optional<TestCommand> child = directChildCommand(workspaceRoot, command);
-      return child;
+    if (resolvedCommands.isEmpty()) return resolveSingle(workspaceRoot);
+    if (resolvedCommands.size() == 1) {
+      LocatedCommand located = resolvedCommands.getFirst();
+      TestCommand command = located.command();
+      return Optional.of(
+          new TestCommand(
+              "(cd " + located.relativePath() + " && " + command.command() + ")",
+              command.timeoutSeconds(),
+              command.framework(),
+              command.source() + "@" + located.relativePath()));
     }
+    List<String> commands =
+        resolvedCommands.stream()
+            .map(c -> "(cd " + c.relativePath() + " && " + c.command().command() + ")")
+            .toList();
     return Optional.of(
         new TestCommand(
             String.join(" && ", commands), Math.min(timeout, 1200), Framework.MULTI, "multi-root"));
   }
 
-  private Optional<TestCommand> directChildCommand(Path workspaceRoot, String wrappedCommand) {
-    String childName = wrappedCommand.substring(4, wrappedCommand.indexOf(" && "));
-    return resolveSingle(workspaceRoot.resolve(childName))
-        .map(
-            command ->
-                new TestCommand(
-                    wrappedCommand,
-                    command.timeoutSeconds(),
-                    command.framework(),
-                    command.source() + "@" + childName));
+  /**
+   * Multi-repo workspaces use {@code repos/<repo>/}. Treat {@code repos} as a grouping directory,
+   * never as a Python project merely because a nested repository contains {@code test_*.py}.
+   */
+  private static List<Path> candidateProjectRoots(Path workspaceRoot) throws java.io.IOException {
+    List<Path> roots = new ArrayList<>();
+    try (var children = Files.list(workspaceRoot)) {
+      for (Path child : children.filter(Files::isDirectory).sorted().toList()) {
+        String name = child.getFileName().toString();
+        if (!name.matches("[A-Za-z0-9._-]+")) continue;
+        if (!"repos".equals(name)) {
+          roots.add(child);
+          continue;
+        }
+        try (var repositories = Files.list(child)) {
+          roots.addAll(
+              repositories
+                  .filter(Files::isDirectory)
+                  .filter(p -> p.getFileName().toString().matches("[A-Za-z0-9._-]+"))
+                  .sorted()
+                  .toList());
+        }
+      }
+    }
+    return roots;
   }
 
   private Optional<TestCommand> resolveSingle(Path workspaceRoot) {

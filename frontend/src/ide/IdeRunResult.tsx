@@ -12,6 +12,7 @@ import {useDocumentTitle} from '@/hooks/useDocumentTitle';
 import {Markdown} from '@/signal/components/Markdown';
 import {ConfirmModal} from '@/signal/components/Modal';
 import * as api from '@/lib/api';
+import {executeRunMutation} from '@/lib/runMutationAttempt';
 import {
   normalizeUiProvider,
   UI_PROVIDER_USAGE,
@@ -853,7 +854,10 @@ export default function IdeRunResult() {
     if (!run) return;
     action(
       'reprovider',
-      () => retryRunWithProvider(api.forkRun, runId, p),
+      () =>
+        executeRunMutation(`fork:provider:${runId}`, {aiProvider: p}, (idempotencyKey) =>
+          retryRunWithProvider(api.forkRun, runId, p, idempotencyKey),
+        ),
       (r) => {
         const id = (r as {runId?: string})?.runId;
         if (id) navigate(`/live/${id}`);
@@ -875,7 +879,12 @@ export default function IdeRunResult() {
         setBusy('revert-hunk');
         setMsg('Creating a reviewable revert run…');
         try {
-          const fork = await api.forkRun(runId, {userRequest: request});
+          const overrides = {userRequest: request};
+          const fork = await executeRunMutation(
+            `fork:revert:${runId}`,
+            overrides,
+            (idempotencyKey) => api.forkRun(runId, overrides, idempotencyKey),
+          );
           navigate(`/plan/${fork.runId}`);
         } catch (e: unknown) {
           setMsg(e instanceof Error ? e.message : 'Could not create the revert run.');
@@ -894,7 +903,9 @@ export default function IdeRunResult() {
     setMsg('');
     try {
       if (act === 'fork') {
-        const f = await api.forkRun(runId);
+        const f = await executeRunMutation(`fork:${runId}`, {}, (idempotencyKey) =>
+          api.forkRun(runId, undefined, idempotencyKey),
+        );
         navigate(`/plan/${f.runId}`);
         return;
       }
@@ -1126,7 +1137,12 @@ export default function IdeRunResult() {
     setChatBusy(true);
     setMsg('');
     try {
-      const {runId: newId} = await api.iterateRun(runId, instruction);
+      const payload = {userRequest: instruction};
+      const {runId: newId} = await executeRunMutation(
+        `iterate:${runId}`,
+        payload,
+        (idempotencyKey) => api.iterateRun(runId, instruction, idempotencyKey),
+      );
       if (newId) {
         setChatInput('');
         const prod = (run?.executionMode || '').toUpperCase() === 'PRODUCTION';

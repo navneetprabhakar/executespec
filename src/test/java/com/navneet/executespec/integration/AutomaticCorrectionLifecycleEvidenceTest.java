@@ -3,6 +3,7 @@ package com.navneet.executespec.integration;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -12,6 +13,7 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicReference;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.config.featureflag.FeatureFlagService;
@@ -247,6 +249,59 @@ class AutomaticCorrectionLifecycleEvidenceTest {
         .hasMessageContaining("restore unavailable");
 
     verify(lease).close();
+  }
+
+  @Test
+  void rejectedRollbackKeepsPreparedAuthorityUntilDurableTerminalProofCompletes() {
+    CorrectionWorkspaceTransaction workspace = mock(CorrectionWorkspaceTransaction.class);
+    var checkpoint =
+        new CorrectionWorkspaceTransaction.Checkpoint(
+            List.of(
+                new CorrectionWorkspaceTransaction.RepositoryCheckpoint(
+                    Path.of("/tmp/correction-proof"), "head", "tree")));
+    when(workspace.begin(any(Path.class))).thenReturn(checkpoint);
+    DurableCorrectionLifecycle durable = mock(DurableCorrectionLifecycle.class);
+    RunWorkspaceAuthorityService.Lease lease = mock(RunWorkspaceAuthorityService.Lease.class);
+    when(durable.prepare("run-proof", "task-proof", Path.of("/tmp/correction-proof")))
+        .thenReturn(
+            new DurableCorrectionLifecycle.Prepared(
+                UUID.fromString("55555555-5555-5555-5555-555555555555"), checkpoint, lease));
+    AtomicReference<AutomaticCorrectionLifecycle> lifecycleRef = new AtomicReference<>();
+    doAnswer(
+            invocation -> {
+              // The durable terminal transaction must still be able to prove it is resolving the
+              // exact prepared attempt. Removing the map entry before this call caused the live
+              // CORRECTION_DURABLE_ATTEMPT_MISSING cascade.
+              lifecycleRef.get().assertAuthority(checkpoint);
+              return null;
+            })
+        .when(durable)
+        .rolledBack(any(DurableCorrectionLifecycle.Prepared.class));
+    AutomaticCorrectionLifecycle lifecycle =
+        new AutomaticCorrectionLifecycle(
+            workspace,
+            mock(AgentTaskRepository.class),
+            new ObjectMapper(),
+            mock(FeatureFlagService.class),
+            mock(LintPass.class),
+            mock(SseBroadcaster.class),
+            mock(WorkflowConfigEvidenceInspector.class),
+            mock(ValidationReportRepository.class),
+            mock(com.navneet.executespec.contractsurface.BrownfieldHttpContractGuard.class),
+            durable);
+    lifecycleRef.set(lifecycle);
+    lifecycle.begin("run-proof", "task-proof", Path.of("/tmp/correction-proof"));
+
+    lifecycle.rollbackRejectedAttempt(
+        null,
+        checkpoint,
+        null,
+        null,
+        null,
+        CorrectionAcceptancePolicy.Decision.reject("UNRESOLVED", "test"),
+        null);
+
+    verify(durable).rolledBack(any(DurableCorrectionLifecycle.Prepared.class));
   }
 
   private static AutomaticCorrectionLifecycle lifecycle(ValidationReportRepository reports) {

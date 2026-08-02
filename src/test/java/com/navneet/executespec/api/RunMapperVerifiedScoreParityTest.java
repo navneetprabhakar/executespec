@@ -120,6 +120,7 @@ class RunMapperVerifiedScoreParityTest {
         managedUsage,
         new RunEffectiveRouteService(mock(RunStepUsageRepository.class)),
         tasks,
+        null,
         objectMapper);
   }
 }

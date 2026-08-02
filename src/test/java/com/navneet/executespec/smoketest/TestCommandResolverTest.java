@@ -81,4 +81,21 @@ class TestCommandResolverTest {
     assertThat(new TestCommandResolver().resolve(workspace).orElseThrow().command())
         .isEqualTo("mvn -q test");
   }
+
+  @Test
+  void nestedSingleRepoKeepsMavenCommandAndSurefireAttribution(@TempDir Path workspace)
+      throws Exception {
+    Path repository = workspace.resolve("repos/orders-service");
+    Files.createDirectories(repository.resolve("src/test/python"));
+    Files.writeString(repository.resolve("pom.xml"), "<project/>");
+    // This nested helper made the old resolver classify the grouping `repos/` directory as pytest.
+    Files.writeString(
+        repository.resolve("src/test/python/test_fixture.py"), "def test_ok(): pass\n");
+
+    var command = new TestCommandResolver().resolve(workspace).orElseThrow();
+
+    assertThat(command.command()).isEqualTo("(cd repos/orders-service && mvn -q test)");
+    assertThat(command.framework()).isEqualTo(TestCommandResolver.Framework.SUREFIRE);
+    assertThat(command.source()).isEqualTo("maven@repos/orders-service");
+  }
 }

@@ -274,6 +274,7 @@ describe('protected transcript visual contract', () => {
     expect(fork).toHaveBeenCalledWith(
       'run-visual-1',
       expect.objectContaining({userRequest: expect.stringContaining('Revert ONLY hunk 1')}),
+      expect.any(String),
     );
     expect(onOpenRun).toHaveBeenCalledWith('/plan/revert-plan-1');
   });
