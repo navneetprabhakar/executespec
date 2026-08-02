@@ -34,7 +34,7 @@ frontend/
 ├── .eslintrc.cjs · .prettierrc.json · .pa11yci.json · A11Y.md
 ├── public/                          # manifest.webmanifest · sw.js (PWA) · trust-pack.pdf
 └── src/
-    ├── main.tsx                     # app entry + theme/chrome reconciliation + PostHog init
+    ├── main.tsx                     # app entry + theme/chrome reconciliation (no analytics init)
     ├── App.tsx                      # routes — ConsoleShell for every protected route
     ├── index.css · tokens.css       # global + Graphite/Signal palette + 4-band score colours
     ├── ide/                         # route-level surfaces rendered inside ConsoleShell (no longer a mounted chrome)
@@ -62,7 +62,7 @@ frontend/
     ├── stores/                      # Zustand: useAuthStore, useUiStore (theme + uiMode pinned to 'console' via initUiMode), useRunStore, useSseStore
     ├── hooks/                       # useSse, useTierPermissions, useIsMobile, useDocumentTitle
     ├── lib/                         # api/ split client + billing/execution clients + runStatus/ui helpers
-    ├── types/                       # project.ts, execution.ts
+    ├── types/                       # project.ts
     └── design-system/              # contrast.{ts,test.ts} (WCAG ratio helpers + dormant vitest test) + primitives.css
 ```
 
