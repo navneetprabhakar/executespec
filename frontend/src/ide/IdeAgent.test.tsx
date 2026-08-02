@@ -311,6 +311,7 @@ describe('IdeAgent', () => {
     setHappyPathMocks();
     Object.defineProperty(Element.prototype, 'scrollIntoView', {
       configurable: true,
+      writable: true,
       value: vi.fn(),
     });
   });

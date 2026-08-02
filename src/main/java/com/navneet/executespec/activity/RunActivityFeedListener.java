@@ -4,6 +4,8 @@ import java.util.Map;
 import java.util.UUID;
 
 import com.navneet.executespec.harness.event.PipelineEvent;
+import com.navneet.executespec.run.outcome.RunTerminalOutcome;
+import com.navneet.executespec.run.outcome.RunTerminalOutcomeContract;
 import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
 
@@ -69,7 +71,11 @@ public class RunActivityFeedListener {
   public void onRunCompleted(PipelineEvent.RunCompleted event) {
     PipelineRun run = lookup(event.runId());
     if (run == null) return;
-    emit(run, ActivityEventType.RUN_COMPLETED, null, "Run completed" + titleSuffix(run));
+    emit(
+        run,
+        ActivityEventType.RUN_COMPLETED,
+        null,
+        terminalSummary(RunTerminalOutcomeContract.project(run), "Run finished", run));
   }
 
   @Async
@@ -77,9 +83,25 @@ public class RunActivityFeedListener {
   public void onRunFailed(PipelineEvent.RunFailed event) {
     PipelineRun run = lookup(event.runId());
     if (run == null) return;
-    String reason =
-        event.reason() != null && !event.reason().isBlank() ? ": " + event.reason() : "";
-    emit(run, ActivityEventType.RUN_FAILED, null, "Run failed" + titleSuffix(run) + reason);
+    String failureReason =
+        run.getFailureReason() != null && !run.getFailureReason().isBlank()
+            ? run.getFailureReason()
+            : event.reason();
+    RunTerminalOutcome outcome =
+        RunTerminalOutcomeContract.project(
+            run.getRunId(),
+            run.getStatus(),
+            run.getStatusReason(),
+            failureReason,
+            run.getActualCostUsd(),
+            run.getHardCapUsd() != null ? run.getHardCapUsd() : run.getUserCostCap(),
+            run.getScmPrUrl() != null ? run.getScmPrUrl() : run.getGithubPrUrl());
+    emit(run, ActivityEventType.RUN_FAILED, null, terminalSummary(outcome, "Run ended", run));
+  }
+
+  private static String terminalSummary(
+      RunTerminalOutcome outcome, String fallback, PipelineRun run) {
+    return (outcome == null ? fallback : outcome.customerTitle()) + titleSuffix(run);
   }
 
   private PipelineRun lookup(String runId) {

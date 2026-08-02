@@ -69,6 +69,11 @@ LOCAL-hands runs are excluded from GCS workspace upload queries and the event li
   probe permission disables the store at boot even when object access would otherwise work.
   Construction is also disabled before ADC initialization when workspace GCS is off or the bucket
   is blank; local runs must never probe credentials or attempt `gs:///local/...` checkpoints.
+- `WorkspaceRestoreService.java` — Materializes a run archive when local state has expired. Absence
+  of a run row or durable object key is reported as `WorkspaceArchiveUnavailableException`, which
+  lets run sync distinguish a permanent lifecycle 410 from retryable GCS/platform restoration
+  faults. Archives do not contain `.git`; `run/sync/RunSyncService` owns the separate, snapshot-bound
+  Git metadata reconstruction before authenticated fetch/reset.
 - `WorkspaceExportService.java` — ZIP/repo handoff now applies `ArtifactPublicationGuard` to every
   included file and to restored GCS ZIP members before returning bytes. Secret-like content blocks
   the export; symlinks are omitted so an archive cannot follow a link outside the run workspace.

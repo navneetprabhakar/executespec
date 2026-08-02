@@ -4,7 +4,6 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -35,6 +34,7 @@ public class AgentStreamTurnRunner {
   private final org.springframework.core.env.Environment environment;
   private final LlmExecutionOperationCoordinator operationCoordinator;
   private final AgentTurnOperationLifecycle operationLifecycle;
+  private final AgentStreamFailurePublisher failurePublisher;
 
   /** Compatibility constructor retained for focused tests and older package-local callers. */
   AgentStreamTurnRunner(
@@ -110,6 +110,8 @@ public class AgentStreamTurnRunner {
     this.environment = environment;
     this.operationCoordinator = operationCoordinator;
     this.operationLifecycle = new AgentTurnOperationLifecycle(operationCoordinator);
+    this.failurePublisher =
+        new AgentStreamFailurePublisher(sessionService, eventRecorder, operationLifecycle);
   }
 
   public void run(
@@ -267,24 +269,16 @@ public class AgentStreamTurnRunner {
         emitter.complete();
         return;
       }
-      String message = userFacingStreamError(e, ctx.provider());
+      RunCostTracker.Snapshot latest = latestCost(ctx);
       // RR-1453 — a paid provider/tool failure must still settle this turn's usage, not zero.
-      sessionService.failStreamTurn(ctx, message, turnDelta(turnBaseline, latestCost(ctx)));
-      operationLifecycle.fail(operation.get(), operationCompleted, message);
-      try {
-        send(
-            emitter,
-            "error",
-            Map.of(
-                "session_id", ctx.sessionId(),
-                "turn_id", ctx.turnId(),
-                "message", message));
-      } catch (Exception ignored) {
-        // emitter is already broken
-      }
-      // The response is already committed as text/event-stream. Completing with an exception
-      // re-enters Spring's JSON exception handlers and produces a second broken response.
-      emitter.complete();
+      failurePublisher.publish(
+          emitter,
+          ctx,
+          e,
+          latest,
+          turnDelta(turnBaseline, latest),
+          operation.get(),
+          operationCompleted);
     }
   }
 
@@ -451,53 +445,6 @@ public class AgentStreamTurnRunner {
 
   private static Map<String, Object> boundedTextPayload(String text) {
     return AgentTranscriptContent.eventPreview(text);
-  }
-
-  private static String userFacingStreamError(Throwable error, String provider) {
-    com.navneet.executespec.executioncontext.LlmDispatchPolicyException policyFailure =
-        findPolicyFailure(error);
-    if (policyFailure != null
-        && policyFailure.reason()
-            == com.navneet.executespec.executioncontext.LlmDispatchPolicyException.Reason
-                .BUDGET_EXHAUSTED) {
-      return "This agent turn reached its AI execution limit before a response was produced. Start"
-          + " a new sandbox and retry; if it happens on the first message, contact support.";
-    }
-    String raw = error == null ? "" : error.getMessage();
-    if (raw == null || raw.isBlank()) {
-      return "Agent stream failed.";
-    }
-    if (!looksLikeProviderCredentialFailure(raw)) {
-      return new com.navneet.executespec.security.ContextSanitizer().sanitizeException(error);
-    }
-    String providerLabel =
-        provider == null || provider.isBlank() ? "Selected provider" : provider.trim();
-    return providerLabel
-        + " authentication failed. Check the provider key in Settings > Provider keys, switch to a"
-        + " configured provider, or use managed AI credits before retrying.";
-  }
-
-  private static com.navneet.executespec.executioncontext.LlmDispatchPolicyException
-      findPolicyFailure(Throwable error) {
-    Throwable current = error;
-    for (int depth = 0; current != null && depth < 8; depth++) {
-      if (current
-          instanceof com.navneet.executespec.executioncontext.LlmDispatchPolicyException failure) {
-        return failure;
-      }
-      current = current.getCause();
-    }
-    return null;
-  }
-
-  private static boolean looksLikeProviderCredentialFailure(String raw) {
-    String normalized = raw.toLowerCase(Locale.ROOT);
-    return normalized.contains("invalid x-api-key")
-        || normalized.contains("invalid api key")
-        || normalized.contains("api key")
-        || normalized.contains("unauthorized")
-        || normalized.contains("authentication")
-        || normalized.contains("401");
   }
 
   private static final class AccumulatingSink implements SpecChatService.Sink {

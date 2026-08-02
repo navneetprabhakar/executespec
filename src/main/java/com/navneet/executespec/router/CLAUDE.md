@@ -1,5 +1,12 @@
 # `router/` — Model selection + provider routing
 
+## Project route configuration errors (2026-08-02)
+
+`ProjectProviderResolver` differentiates missing and invalid project providers.
+`ModelResolver` uses `ModelMatrixConfigurationException` when matrix resolution is unavailable.
+Project operations translate these to stable 409/503 responses before dispatch and never expose an
+invalid stored value.
+
 > Last reviewed: 2026-07-14 (2.0.0).
 
 User-selected provider routing with YAML as the single source of truth and a Redis-backed circuit breaker. V260 seeds the evidence-gated initial worker-route flag; keep it OFF until observed quality evidence is sufficient.

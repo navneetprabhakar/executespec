@@ -1,5 +1,12 @@
 # `agent/` — LLM agents + routing
 
+## Enterprise-demo request hardening (2026-08-02)
+
+`PlanDocumentedCommandContractGate` distinguishes real documented build/test commands from generic
+framework-list prose. `LlmRouter` guarantees positive Anthropic `max_tokens`: explicit request
+limits win, otherwise the registered limit is used with a bounded fallback. Verify without a live
+Anthropic call.
+
 ## Prompt authority boundary (2026-07-18)
 
 `PromptTrustBoundary` is the shared repository/project evidence wrapper. It normalizes Unicode

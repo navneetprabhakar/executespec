@@ -78,6 +78,7 @@ export interface RunSummary {
    * Null on in-flight runs and on pre-v2.5.10 terminal runs that were never backfilled.
    */
   statusReason?: string | null;
+  terminalOutcome?: import('./runOutcomeTypes').RunTerminalOutcome | null;
   /**
    * PR-B (2026-05-13) — SCM-agnostic pull-request URL raised by this run (GitHub or Bitbucket).
    * Prefer this over {@link githubPrUrl}. Null when no PR has been opened yet.

@@ -105,6 +105,64 @@ class PlanDocumentedCommandContractGateTest {
   }
 
   @Test
+  void ignoresInjectedGenericTestFrameworkListForReadmeOnlyTask() {
+    PlannedTask docs =
+        task(
+            "T1",
+            "Update README documentation",
+            "Add a concise verification note to README.md.\n\n"
+                + "Also include unit tests for any new public function, endpoint, or module this"
+                + " task adds. If a test framework already exists in the workspace (Jest/Vitest,"
+                + " pytest, Go *_test.go, JUnit), extend it; otherwise scaffold a minimal test file"
+                + " with at least one happy-path test + one error case.",
+            List.of("README.md"));
+    List<String> violations = new ArrayList<>();
+
+    PlanDocumentedCommandContractGate.addViolations(plan(docs), violations);
+
+    assertThat(violations).isEmpty();
+    assertThat(PlanContractQualityGate.violations(plan(docs))).isEmpty();
+  }
+
+  @Test
+  void imperativePytestCommandWithCommaStillValidatesItsTarget() {
+    PlannedTask docs =
+        task(
+            "T1",
+            "Update README documentation",
+            "Run pytest, tests/nonexistent/test_api.py to verify the documented setup.",
+            List.of("README.md"));
+    List<String> violations = new ArrayList<>();
+
+    PlanDocumentedCommandContractGate.addViolations(plan(docs), violations);
+
+    assertThat(violations)
+        .anyMatch(
+            violation ->
+                violation.contains("documented pytest target tests/nonexistent/test_api.py")
+                    && violation.contains("is not owned by any plan task"));
+  }
+
+  @Test
+  void parenthesizedImperativePytestCommandStillValidatesItsTarget() {
+    PlannedTask docs =
+        task(
+            "T1",
+            "Update README documentation",
+            "Run (pytest, tests/nonexistent/test_api.py) to verify the documented setup.",
+            List.of("README.md"));
+    List<String> violations = new ArrayList<>();
+
+    PlanDocumentedCommandContractGate.addViolations(plan(docs), violations);
+
+    assertThat(violations)
+        .anyMatch(
+            violation ->
+                violation.contains("documented pytest target tests/nonexistent/test_api.py")
+                    && violation.contains("is not owned by any plan task"));
+  }
+
+  @Test
   void rejectsOriginsVariableThatDisagreesWithExplicitRuntimeProducer() {
     PlannedTask runtime =
         task(

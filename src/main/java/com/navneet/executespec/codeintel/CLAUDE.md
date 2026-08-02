@@ -1,5 +1,12 @@
 # `codeintel/` — project architecture and generated documents
 
+## Provider and model-matrix admission (2026-08-02)
+
+Architecture refresh and generated-document jobs fail before dispatch: missing provider returns
+`PROJECT_PROVIDER_NOT_CONFIGURED` (409), invalid persisted provider returns
+`PROJECT_PROVIDER_INVALID` (409), and unavailable/incomplete matrix returns
+`MODEL_MATRIX_UNAVAILABLE` (503). Rejection creates no durable job or provider call.
+
 `ProjectArchitectureService` owns the project-level architecture pipeline. Per-repository codemaps,
 repository architecture documents, and the combined architecture document remain source evidence;
 provider-generated prose is never stronger than the cited repository snapshot.
@@ -36,6 +43,10 @@ promoted result identity. A partial unique index permits only one active job per
 compatible requests reuse that job; an actor/branch/provider/model mismatch is a typed 409 rather
 than silently sharing authority or provider spend. Atomic claims use the database clock and carry
 owner, expiry, and a monotonically increasing fencing token.
+`ProjectArchitectureJobAdmission` owns this DB/config-local admission boundary: project lookup,
+provider and tier-model resolution, exact-route validation, normalized branch identity, durable job
+creation/dedupe, and active-job compatibility. `ProjectArchitectureJobService` begins source/SCM
+preparation only after admission returns a compatible job.
 The architecture-job API DTO exposes `attemptCount` and `deadlineAt` alongside phase/status so web
 clients can show retry and deadline truth without inferring it from polling duration.
 `NEEDS_CONFIRMATION` is a server admission barrier for every client: ordinary submit returns the

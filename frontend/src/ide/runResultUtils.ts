@@ -19,6 +19,9 @@ export interface RunArtifactActionAvailability {
 export interface TerminalFailureEvidence {
   title: string;
   detail: string;
+  kind: 'warn' | 'bad' | 'neutral';
+  nextAction?: string | null;
+  supportCode?: string | null;
 }
 
 export interface PublicationTrustFact {
@@ -343,9 +346,24 @@ export function publicationTrustFacts(
  * instead of incorrectly claiming that there is nothing to show.
  */
 export function terminalFailureEvidence(
-  run?: Pick<api.RunDetail, 'status' | 'statusReason' | 'failureReason'> | null,
+  run?: Pick<api.RunDetail, 'status' | 'statusReason' | 'failureReason' | 'terminalOutcome'> | null,
 ): TerminalFailureEvidence | null {
   const status = (run?.status || '').toUpperCase();
+  const outcome = run?.terminalOutcome;
+  if (outcome && ['FAILED', 'ERROR', 'PARTIAL', 'CANCELLED'].includes(status)) {
+    return {
+      title: outcome.customerTitle,
+      detail: outcome.customerMessage,
+      kind:
+        outcome.category === 'PLATFORM_FAILURE'
+          ? 'bad'
+          : outcome.category === 'USER_STOPPED'
+            ? 'neutral'
+            : 'warn',
+      nextAction: outcome.nextAction?.label,
+      supportCode: outcome.supportCode,
+    };
+  }
   const detail = run?.failureReason?.trim();
   if (!detail || !['FAILED', 'ERROR', 'PARTIAL'].includes(status)) return null;
   return {
@@ -356,6 +374,7 @@ export function terminalFailureEvidence(
           ? 'Planning failure evidence'
           : 'Terminal failure evidence',
     detail,
+    kind: 'bad',
   };
 }
 
@@ -428,8 +447,20 @@ export function countProducedWorkspaceFiles(
   ).length;
 }
 
-export function verdictFor(score: number | null | undefined, status?: string | null): Verdict {
+export function verdictFor(
+  score: number | null | undefined,
+  status?: string | null,
+  terminalOutcome?: api.RunTerminalOutcome | null,
+): Verdict {
   const s = (status || '').toUpperCase();
+  if (terminalOutcome?.category === 'USER_STOPPED') return {label: 'Cancelled', kind: 'warn'};
+  if (
+    terminalOutcome &&
+    ['ACTION_REQUIRED', 'POLICY_BLOCKED', 'WARNING'].includes(terminalOutcome.category)
+  ) {
+    return {label: terminalOutcome.customerTitle, kind: 'warn'};
+  }
+  if (terminalOutcome?.category === 'PLATFORM_FAILURE') return {label: 'Failed', kind: 'bad'};
   if (s === 'FAILED' || s === 'ERROR' || s === 'CANCELLED') return {label: 'Failed', kind: 'bad'};
   if (score == null) {
     if (s === 'COMPLETE') return {label: 'Complete', kind: 'warn'};
