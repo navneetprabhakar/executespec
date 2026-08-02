@@ -34,6 +34,8 @@ import {ModelPicker, type ModelPickerOption} from '@/ide/ModelPicker';
 import {isProductProvider, productProviderCatalog} from '@/ide/agentModelRouting';
 import {fmtCost} from '@/lib/utils';
 import {executeRunMutation} from '@/lib/runMutationAttempt';
+import {isTerminalRunStatus} from '@/lib/runStatus';
+import {liveRunResultPath} from '@/ide/liveRunRouting';
 
 // Relative timestamps everywhere (review/11 #8) — `toLocaleString()` was
 // locale-ambiguous (DD/MM vs MM/DD), carried seconds noise, and clashed with
@@ -1537,13 +1539,9 @@ export function IdeLive() {
         if (cost && typeof cost.costUsd === 'number') setLiveCost(cost.costUsd);
         if (cost && (cost.inputTokens != null || cost.outputTokens != null))
           setLiveTokens({in: cost.inputTokens ?? 0, out: cost.outputTokens ?? 0});
-        const s = (r.status || '').toUpperCase();
-        if (['COMPLETED', 'COMPLETE', 'PARTIAL'].includes(s)) {
-          navigate(`/result/${runId}`, {replace: true});
-          return;
-        }
-        if (['FAILED', 'ERROR', 'CANCELLED'].includes(s)) {
-          setErr(`Run ${s.toLowerCase()}.`);
+        const resultPath = liveRunResultPath(runId, r.status);
+        if (resultPath) {
+          navigate(resultPath, {replace: true});
           return;
         }
         timer = window.setTimeout(tick, 8000);
@@ -1562,8 +1560,7 @@ export function IdeLive() {
   }, [runId, navigate, fileTick]);
 
   const terminal = useMemo(() => {
-    const s = (run?.status || '').toUpperCase();
-    return ['COMPLETE', 'COMPLETED', 'FAILED', 'ERROR', 'CANCELLED', 'PARTIAL'].includes(s);
+    return isTerminalRunStatus(run?.status);
   }, [run?.status]);
 
   async function performCancel() {

@@ -1,6 +1,7 @@
 package com.navneet.executespec.integration;
 
 import com.navneet.executespec.harness.ExecutionResult;
+import com.navneet.executespec.harness.TaskOutcome;
 import com.navneet.executespec.reviewer.ReviewerResult;
 
 /**
@@ -17,7 +18,7 @@ final class TerminalStatusResolver {
 
   static Result resolve(ExecutionResult exec, ReviewerResult review) {
     if (exec.overall() == ExecutionResult.Overall.ABORTED) {
-      return new Result("FAILED", "EXECUTION_ABORTED");
+      return new Result("FAILED", abortedReason(exec));
     }
     ReviewerResult.Overall verdict = review != null ? review.overall() : null;
     boolean buildPassed = review != null && Boolean.TRUE.equals(review.finalBuildPassed());
@@ -54,6 +55,25 @@ final class TerminalStatusResolver {
 
     // No reviewer evidence is a known state, not the historical LEGACY_UNKNOWN fallback.
     return new Result(RunPipelineSupport.mapOverallToV1Status(exec.overall()), "NO_REVIEW_RESULT");
+  }
+
+  private static String abortedReason(ExecutionResult exec) {
+    if (exec.perTask() == null) return "EXECUTION_ABORTED";
+    for (int index = exec.perTask().size() - 1; index >= 0; index--) {
+      TaskOutcome task = exec.perTask().get(index);
+      if (task == null || task.status() == TaskOutcome.Status.SKIPPED) continue;
+      var worker =
+          task.retryWorkerOutcome() != null ? task.retryWorkerOutcome() : task.workerOutcome();
+      if (worker == null || worker.outcome() == null) return "EXECUTION_ABORTED";
+      return switch (worker.outcome()) {
+        case BUDGET_EXCEEDED -> "WORKER_BUDGET_EXCEEDED";
+        case ITERATION_LIMIT_EXCEEDED -> "WORKER_ITERATION_LIMIT_EXCEEDED";
+        case WALL_CLOCK_EXCEEDED -> "WORKER_WALL_CLOCK_EXCEEDED";
+        case ABSOLUTE_DEADLINE_EXCEEDED -> "WORKER_ABSOLUTE_DEADLINE_EXCEEDED";
+        default -> "EXECUTION_ABORTED";
+      };
+    }
+    return "EXECUTION_ABORTED";
   }
 
   record Result(String status, String reason) {}

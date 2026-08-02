@@ -166,6 +166,9 @@ import lombok.Builder;
  * @param dollarCap optional per-solve hard dollar ceiling forwarded from {@code
  *     EngineBudget.dollarCap}. It is enforced against task-scoped spend; the durable {@code
  *     PipelineRun.hardCapUsd} remains an independent run-wide ceiling.
+ * @param runHardCapUsd immutable run-wide cost ceiling loaded from {@code PipelineRun} before the
+ *     worker starts. Internal worker call paths use it for conservative projected-call admission;
+ *     callers do not set it directly.
  * @param taskTotalTokenCap optional JVM-local per-task input+output safety stop; null/non-positive
  *     is unbounded. It is best-effort because restart recovery does not hydrate RunCostTracker.
  * @param workerStartedAtEpochMs start timestamp used by nested provider/tool guards to enforce the
@@ -204,6 +207,7 @@ public record WorkerTaskRequest(
     Long absoluteDeadlineEpochMs,
     Long shutdownReserveMs,
     Double dollarCap,
+    Double runHardCapUsd,
     Long taskTotalTokenCap,
     Long workerStartedAtEpochMs,
     Boolean zeroWriteSalvageAllowed) {

@@ -11,8 +11,10 @@ export function CostProgressBar({
   cap: number;
   label?: string;
 }) {
-  const pct = cap > 0 ? Math.min(100, (spent / cap) * 100) : 0;
-  const tone = pct >= 100 ? 'fail' : pct >= 80 ? 'warn' : 'good';
+  const rawPct = cap > 0 ? Math.max(0, (spent / cap) * 100) : 0;
+  const fillPct = Math.min(100, rawPct);
+  const overage = cap > 0 ? Math.max(0, spent - cap) : 0;
+  const tone = rawPct >= 100 ? 'fail' : rawPct >= 80 ? 'warn' : 'good';
   const fillColor =
     tone === 'fail'
       ? 'var(--signal-coral)'
@@ -28,9 +30,14 @@ export function CostProgressBar({
   return (
     <div
       role='progressbar'
-      aria-valuenow={Math.round(pct)}
+      aria-valuenow={Math.round(fillPct)}
       aria-valuemin={0}
       aria-valuemax={100}
+      aria-valuetext={
+        overage > 0
+          ? `${Math.round(rawPct)}%, exceeded by $${overage.toFixed(4)}`
+          : `${Math.round(rawPct)}%`
+      }
       aria-label={label}
       style={{width: '100%'}}
     >
@@ -46,9 +53,15 @@ export function CostProgressBar({
       >
         <span>{label}</span>
         <span>
-          ${spent.toFixed(4)} / ${cap.toFixed(4)} · {Math.round(pct)}%
+          ${spent.toFixed(4)} / ${cap.toFixed(4)} · {Math.round(rawPct)}%
         </span>
       </div>
+      {overage > 0 && (
+        <div
+          role='status'
+          style={{color: labelColor, fontSize: 11, marginBottom: 4}}
+        >{`Exceeded by $${overage.toFixed(4)}`}</div>
+      )}
       <div
         style={{
           height: 6,
@@ -59,7 +72,7 @@ export function CostProgressBar({
       >
         <div
           style={{
-            width: `${pct}%`,
+            width: `${fillPct}%`,
             height: '100%',
             background: fillColor,
             transition: 'width 0.3s ease-out',

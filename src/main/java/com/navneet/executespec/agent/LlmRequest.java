@@ -51,6 +51,9 @@ import lombok.Builder;
  * @param llmExecutionOperationAuthority process-local operation capability derived only from {@code
  *     context}; never serialized, logged, or reconstructed from durable request fields
  * @param strictProvider when true, transient failures are not routed to another provider
+ * @param runHardCapUsd optional run-wide dollar ceiling propagated by a cost-bounded worker so the
+ *     router can recheck the exact physical route after managed-AI substitution and on failover
+ * @param taskCostCapUsd optional task-local dollar ceiling with the same exact-route semantics
  * @param usageLogicalCallId stable identity shared by retries/failovers of one logical LLM call;
  *     generated once when omitted and preserved by {@link #toBuilder()}
  */
@@ -80,6 +83,8 @@ public record LlmRequest(
     Integer llmExecutionAttempt,
     String usageLogicalCallId,
     boolean strictProvider,
+    Double runHardCapUsd,
+    Double taskCostCapUsd,
     PromptCacheStrategy promptCacheStrategy) {
 
   /**
@@ -131,8 +136,16 @@ public record LlmRequest(
     if (usageLogicalCallId == null || usageLogicalCallId.isBlank()) {
       usageLogicalCallId = UUID.randomUUID().toString();
     }
+    validateCostCap(runHardCapUsd, "runHardCapUsd");
+    validateCostCap(taskCostCapUsd, "taskCostCapUsd");
     if (temperature == null) temperature = 0.0;
     if (promptCacheStrategy == null) promptCacheStrategy = PromptCacheStrategy.DEFAULT;
+  }
+
+  private static void validateCostCap(Double value, String field) {
+    if (value != null && (!Double.isFinite(value) || value <= 0.0)) {
+      throw new IllegalArgumentException(field + " must be finite and positive when supplied");
+    }
   }
 
   /** Omits the opaque operation authority and prompt contents from diagnostic rendering. */

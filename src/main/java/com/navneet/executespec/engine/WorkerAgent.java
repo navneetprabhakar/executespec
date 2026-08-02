@@ -9,10 +9,10 @@ import java.util.Optional;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import com.navneet.executespec.agent.LlmRequest;
 import com.navneet.executespec.agent.LlmRouter;
 import com.navneet.executespec.agent.PromptTrustBoundary;
 import com.navneet.executespec.context.ContextStore;
+import com.navneet.executespec.cost.ProjectedCallBudgetExceededException;
 import com.navneet.executespec.observability.Metrics;
 import com.navneet.executespec.smoketest.WorkspaceTestRunner;
 import com.navneet.executespec.state.RunMode;
@@ -310,11 +310,18 @@ public class WorkerAgent {
     WorkerTaskRequest effectiveRequest =
         WorkerTaskRequestControls.withRuntimeDefaults(
             req, start, bestEffortMaxTaskTotalTokens, bestEffortMaxTaskCostUsd);
-    return runInternal(effectiveRequest, resumeFrom, start);
+    Optional<PipelineRun> runRow =
+        pipelineRunRepository.findById(effectiveRequest.context().runId());
+    Double runHardCapUsd = runRow.map(PipelineRun::getHardCapUsd).orElse(null);
+    effectiveRequest = effectiveRequest.toBuilder().runHardCapUsd(runHardCapUsd).build();
+    return runInternal(effectiveRequest, resumeFrom, start, runRow);
   }
 
   private WorkerResult runInternal(
-      WorkerTaskRequest req, com.navneet.executespec.context.SavedContext resumeFrom, long start) {
+      WorkerTaskRequest req,
+      com.navneet.executespec.context.SavedContext resumeFrom,
+      long start,
+      Optional<PipelineRun> runRow) {
     int maxIter =
         (req.maxIterations() == null || req.maxIterations() <= 0)
             ? DEFAULT_MAX_ITER
@@ -506,8 +513,7 @@ public class WorkerAgent {
     // Bug #2 fix — load the run's hard cap once so the loop can stop
     // itself if cost blows past it mid-task. Null cap = no enforcement.
     final String runId = req.context().runId();
-    Optional<PipelineRun> runRow = pipelineRunRepository.findById(runId);
-    final Double hardCapUsd = runRow.map(PipelineRun::getHardCapUsd).orElse(null);
+    final Double hardCapUsd = req.runHardCapUsd();
     final boolean patchNoEditNudgeOn =
         !terminalTaskMode && runRow.map(r -> RunMode.isPatch(r.getRunMode())).orElse(false);
 
@@ -641,30 +647,26 @@ public class WorkerAgent {
       try {
         resp =
             router.call(
-                LlmRequest.builder()
-                    .provider(req.provider())
-                    .model(req.model())
-                    .messages(history)
-                    .context(req.context())
-                    .agentRole("WorkerAgent")
-                    .stepId("worker.iteration-" + iter)
-                    .temperature(req.temperature())
-                    .maxTokens(req.maxTokensPerCall())
-                    .strictProvider(Boolean.TRUE.equals(req.strictProvider()))
-                    .toolChoice(forcedThisCall ? "required" : null)
-                    // Strip gitCommit from the worker's tool authorities. See
-                    // ToolRegistry#WORKER_DENY_TOOLS for the rationale.
-                    .toolsOverride(workerTools)
-                    // 2026-05-08 — Gemini's static GeminiNativeToolClient.READ_TIMEOUT is 60s,
-                    // calibrated to fail fast on stalled worker calls. But Gemini thinking models
-                    // regularly take 60-90s on dense tool-call iterations,
-                    // tripping the timeout mid-task. Cmatrix run 84252898 task T3 FAILED with
-                    // ResourceAccessException I/O error after the worker burned 17m of work.
-                    // 120s gives 2× headroom while still detecting genuinely stuck calls within
-                    // 2 minutes. Gemini and OpenAI-wire clients honor this per-call deadline;
-                    // Anthropic retains its configured Spring AI transport timeout.
-                    .readTimeoutSeconds(iterationTimeout.getAsInt())
-                    .build());
+                WorkerLlmRequestFactory.create(
+                    req,
+                    history,
+                    "WorkerAgent",
+                    "worker.iteration-" + iter,
+                    req.temperature(),
+                    req.maxTokensPerCall(),
+                    workerTools,
+                    forcedThisCall ? "required" : null,
+                    iterationTimeout.getAsInt()));
+      } catch (ProjectedCallBudgetExceededException e) {
+        log.warn(
+            "WorkerAgent PROJECTED_BUDGET_EXCEEDED run={} task={} iter={} reason={}",
+            runId,
+            req.context().taskId(),
+            iter,
+            e.getMessage());
+        recordTerminal(WorkerResult.Outcome.BUDGET_EXCEEDED, req, iter);
+        return WorkerAgentSupport.budgetExceededResult(
+            iter, toolsDispatched, e.getMessage(), maxRepeatedAssistantTextCount, toolLog, start);
       } catch (Exception e) {
         if (WorkerAgentSupport.cancellationRequested(pipelineRunRepository, runId)) {
           Thread.currentThread().interrupt();
@@ -1797,21 +1799,16 @@ public class WorkerAgent {
     try {
       resp =
           router.call(
-              LlmRequest.builder()
-                  .provider(req.provider())
-                  .model(req.model())
-                  .messages(history)
-                  .context(req.context())
-                  .agentRole("WorkerAgent")
-                  .stepId(
-                      toolChoice == null ? "worker.salvage-auto" : "worker.salvage-" + toolChoice)
-                  .temperature(0.0)
-                  .maxTokens(req.maxTokensPerCall())
-                  .strictProvider(Boolean.TRUE.equals(req.strictProvider()))
-                  .toolsOverride(tools)
-                  .toolChoice(toolChoice)
-                  .readTimeoutSeconds(callTimeout.getAsInt())
-                  .build());
+              WorkerLlmRequestFactory.create(
+                  req,
+                  history,
+                  "WorkerAgent",
+                  toolChoice == null ? "worker.salvage-auto" : "worker.salvage-" + toolChoice,
+                  0.0,
+                  req.maxTokensPerCall(),
+                  tools,
+                  toolChoice,
+                  callTimeout.getAsInt()));
     } catch (Exception e) {
       log.warn("WorkerAgent SALVAGE router error (toolChoice={}): {}", toolChoice, e.getMessage());
       return null;
@@ -1987,23 +1984,18 @@ public class WorkerAgent {
     try {
       resp =
           router.call(
-              LlmRequest.builder()
-                  .provider(req.provider())
-                  .model(req.model())
-                  .messages(history)
-                  .context(req.context())
-                  .agentRole("WorkerAgent")
-                  .stepId(
-                      toolChoice == null
-                          ? "worker.terminal-finalizer-auto.iteration-" + iter
-                          : "worker.terminal-finalizer-" + toolChoice + ".iteration-" + iter)
-                  .temperature(0.0)
-                  .maxTokens(req.maxTokensPerCall())
-                  .strictProvider(Boolean.TRUE.equals(req.strictProvider()))
-                  .toolsOverride(tools)
-                  .toolChoice(toolChoice)
-                  .readTimeoutSeconds(callTimeout.getAsInt())
-                  .build());
+              WorkerLlmRequestFactory.create(
+                  req,
+                  history,
+                  "WorkerAgent",
+                  toolChoice == null
+                      ? "worker.terminal-finalizer-auto.iteration-" + iter
+                      : "worker.terminal-finalizer-" + toolChoice + ".iteration-" + iter,
+                  0.0,
+                  req.maxTokensPerCall(),
+                  tools,
+                  toolChoice,
+                  callTimeout.getAsInt()));
     } catch (Exception e) {
       log.warn(
           "WorkerAgent TERMINAL_FINALIZER router error (toolChoice={}): {}",
@@ -3194,22 +3186,20 @@ own line and nothing else. Otherwise list ONLY the real gaps, most important fir
           PromptTrustBoundary.wrap("CRITIC_TASK", req.userPrompt())
               + "\n\n"
               + PromptTrustBoundary.wrap("CANDIDATE_DELIVERABLE", deliverable);
+      List<Message> criticMessages =
+          List.of(new SystemMessage(CRITIC_SYSTEM_PROMPT), new UserMessage(userMsg));
       ChatResponse resp =
           router.call(
-              LlmRequest.builder()
-                  .provider(req.provider())
-                  .model(req.model())
-                  .messages(
-                      List.of(new SystemMessage(CRITIC_SYSTEM_PROMPT), new UserMessage(userMsg)))
-                  .context(req.context())
-                  .agentRole("WorkerCriticPass")
-                  .stepId("worker.critic-pass")
-                  .temperature(0.0)
-                  .maxTokens(1500)
-                  .readTimeoutSeconds(callTimeout.getAsInt())
-                  .strictProvider(Boolean.TRUE.equals(req.strictProvider()))
-                  .toolsOverride(List.of()) // no tools — a plain completion
-                  .build());
+              WorkerLlmRequestFactory.create(
+                  req,
+                  criticMessages,
+                  "WorkerCriticPass",
+                  "worker.critic-pass",
+                  0.0,
+                  1500,
+                  List.of(),
+                  null,
+                  callTimeout.getAsInt()));
       String verdict = resp.getResult().getOutput().getText();
       if (verdict == null) return null;
       String trimmed = verdict.strip();

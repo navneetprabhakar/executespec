@@ -88,6 +88,26 @@ class RunCostTrackerModelPricingTest {
     assertThat(tracker.estimateTokenCostUsd(null, "x", 1_000_000, 0)).isZero();
   }
 
+  @Test
+  void conservativeCallProjectionReservesInputHeadroomAndFullOutput() {
+    var projection =
+        tracker.estimateConservativeCallCostUsd("anthropic", "claude-sonnet-5", 80_000, 4_096);
+
+    assertThat(projection).isPresent();
+    // 80k * 1.25 token headroom * Anthropic's 1.25x cache-write input rate ($2/M)
+    // + the full 4,096-token output ceiling ($10/M).
+    assertThat(projection.getAsDouble())
+        .isCloseTo(0.29096, org.assertj.core.api.Assertions.within(1e-6));
+  }
+
+  @Test
+  void conservativeCallProjectionKeepsMissingPricingUnavailableInsteadOfZero() {
+    assertThat(
+            tracker.estimateConservativeCallCostUsd(
+                "not-a-provider", "missing-model", 80_000, 4_096))
+        .isEmpty();
+  }
+
   private static void stubPricing(
       ModelPricingRepository repo, String provider, String model, double in, double out) {
     ModelPricing mp = new ModelPricing();

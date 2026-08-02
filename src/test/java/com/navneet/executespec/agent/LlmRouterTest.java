@@ -23,12 +23,15 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.OptionalDouble;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import com.navneet.executespec.billing.service.ManagedAiUsageService;
 import com.navneet.executespec.config.featureflag.FeatureFlagService;
 import com.navneet.executespec.cost.LlmUsageAttemptIntent;
+import com.navneet.executespec.cost.ProjectedCallBudgetExceededException;
+import com.navneet.executespec.cost.ProjectedCallCostAdmission;
 import com.navneet.executespec.cost.RunCostTracker;
 import com.navneet.executespec.cost.RunStepUsageRecorder;
 import com.navneet.executespec.executioncontext.LlmDispatchPolicyException;
@@ -193,6 +196,7 @@ class LlmRouterTest {
             gemini,
             metrics,
             costTracker,
+            new ProjectedCallCostAdmission(costTracker, registry),
             stepUsageRecorder,
             broadcaster,
             keyStore,
@@ -526,6 +530,52 @@ class LlmRouterTest {
   }
 
   @Test
+  void anthropicPaidForcedResponseRechecksCapBeforeNormalFallbackTransport() {
+    build();
+    AnthropicChatModel anthropic = mock(AnthropicChatModel.class);
+    when(anthropicModelProvider.getIfAvailable()).thenReturn(anthropic);
+    when(anthropicForcedToolClient.canAttempt(any(), any(), any())).thenReturn(true);
+    when(anthropicForcedToolClient.forcedToolCallOutcome(
+            anyString(), any(), any(), any(), any(), nullable(Integer.class)))
+        .thenReturn(new AnthropicForcedToolClient.ForcedToolCallOutcome(ok(), false, null, true));
+    when(costTracker.estimateConservativeCallCostUsd(
+            eq("anthropic"), eq("claude-forced-audit-test"), anyLong(), eq(100L)))
+        .thenReturn(OptionalDouble.of(0.10));
+    // Outer route admission and the forced physical request both fit. Once the paid-but-unusable
+    // forced response is recorded, the normal fallback no longer fits the same run cap.
+    when(costTracker.snapshot("run-1"))
+        .thenReturn(
+            new RunCostTracker.Snapshot(0, 0, 0, 0, 0.80, 1),
+            new RunCostTracker.Snapshot(0, 0, 0, 0, 0.80, 1),
+            new RunCostTracker.Snapshot(0, 0, 0, 0, 0.95, 2));
+    LlmRequest request =
+        req("anthropic", "claude-forced-audit-test").toBuilder()
+            .toolChoice("required")
+            .agentRole("WorkerAgent")
+            .stepId("worker.salvage")
+            .maxTokens(100)
+            .runHardCapUsd(1.0)
+            .build();
+
+    assertThatThrownBy(() -> router.call(request))
+        .isInstanceOf(ProjectedCallBudgetExceededException.class)
+        .hasMessageContaining("estimated next call $0.1000");
+
+    verify(anthropicForcedToolClient, times(1))
+        .forcedToolCallOutcome(anyString(), any(), any(), any(), any(), nullable(Integer.class));
+    verify(anthropic, never()).call(any(Prompt.class));
+    verify(costTracker, times(1))
+        .record(eq("run-1"), eq("T1"), eq("anthropic"), eq("claude-forced-audit-test"), any());
+    verify(stepUsageRecorder, times(1))
+        .recordSuccess(
+            any(RunStepUsageRecorder.AttemptHandle.class),
+            eq(request),
+            anyLong(),
+            any(RunCostTracker.CallUsage.class),
+            any(ChatResponse.class));
+  }
+
+  @Test
   void shadowAuthorityAtomicallyAdmitsAnthropicForcedAttemptWithFreshKeyAndDeadline() {
     build();
     ReflectionTestUtils.setField(
@@ -711,6 +761,77 @@ class LlmRouterTest {
             any(),
             any(),
             eq(RunKeyContext.Source.PLATFORM));
+  }
+
+  @Test
+  void projectedAdmissionUsesManagedEffectiveRouteInsteadOfRequestedRoute() {
+    build();
+    when(managedAiUsageService.authorizeCall(
+            anyString(), anyString(), anyString(), any(), any(), any()))
+        .thenReturn(
+            new ManagedAiUsageService.CallAuthorization(
+                "openai", "gpt-mini", ManagedAiUsageService.CHEAP_ONLY, true, "step down"));
+    when(costTracker.estimateConservativeCallCostUsd(
+            eq("openai"), eq("gpt-mini"), anyLong(), eq(100L)))
+        .thenReturn(OptionalDouble.of(0.05));
+    when(costTracker.snapshot("run-1"))
+        .thenReturn(new RunCostTracker.Snapshot(0, 0, 0, 0, 0.90, 3));
+    when(openai.call(any())).thenReturn(ok());
+
+    assertThat(
+            router.call(
+                attributedReq("anthropic", "claude-expensive").toBuilder()
+                    .provider("openai")
+                    .model("gpt-expensive")
+                    .maxTokens(100)
+                    .runHardCapUsd(1.0)
+                    .build()))
+        .isNotNull();
+
+    verify(costTracker)
+        .estimateConservativeCallCostUsd(eq("openai"), eq("gpt-mini"), anyLong(), eq(100L));
+    verify(costTracker, never())
+        .estimateConservativeCallCostUsd(eq("openai"), eq("gpt-expensive"), anyLong(), anyLong());
+  }
+
+  @Test
+  void managedSubstitutionToPricierRouteIsBlockedBeforeTransport() {
+    build();
+    when(managedAiUsageService.authorizeCall(
+            anyString(), anyString(), anyString(), any(), any(), any()))
+        .thenReturn(
+            new ManagedAiUsageService.CallAuthorization(
+                "anthropic", "claude-expensive", ManagedAiUsageService.FULL, true, "step up"));
+    when(costTracker.estimateConservativeCallCostUsd(
+            eq("anthropic"), eq("claude-expensive"), anyLong(), eq(100L)))
+        .thenReturn(OptionalDouble.of(0.20));
+    when(costTracker.snapshot("run-1"))
+        .thenReturn(new RunCostTracker.Snapshot(0, 0, 0, 0, 0.90, 3));
+
+    assertThatThrownBy(
+            () ->
+                router.call(
+                    attributedReq("openai", "gpt-cheap").toBuilder()
+                        .maxTokens(100)
+                        .runHardCapUsd(1.0)
+                        .build()))
+        .isInstanceOf(ProjectedCallBudgetExceededException.class)
+        .hasMessageContaining("run hard cap $1.00");
+
+    verify(openai, never()).call(any());
+    verify(stepUsageRecorder, never())
+        .prepareAttempt(any(LlmRequest.class), anyString(), anyString(), anyString(), anyInt());
+  }
+
+  @Test
+  void uncappedRequestSkipsProjectedPriceAdmission() {
+    build();
+    when(openai.call(any())).thenReturn(ok());
+
+    assertThat(router.call(attributedReq("openai", "gpt-x"))).isNotNull();
+
+    verify(costTracker, never())
+        .estimateConservativeCallCostUsd(anyString(), anyString(), anyLong(), anyLong());
   }
 
   @Test
@@ -1131,6 +1252,37 @@ class LlmRouterTest {
             anyLong(),
             any(),
             any());
+  }
+
+  @Test
+  void pricierFailoverIsBlockedBeforeAlternateTransportAndPreservesBudgetReason() {
+    build();
+    when(flags.isEnabled(LlmRouter.FAILOVER_FLAG)).thenReturn(true);
+    when(registry.fallbackChainFor("gpt-x", "openai"))
+        .thenReturn(java.util.Collections.singletonList(new String[] {"gemini", "gem-expensive"}));
+    when(costTracker.estimateConservativeCallCostUsd(
+            eq("openai"), eq("gpt-x"), anyLong(), eq(100L)))
+        .thenReturn(OptionalDouble.of(0.05));
+    when(costTracker.estimateConservativeCallCostUsd(
+            eq("gemini"), eq("gem-expensive"), anyLong(), eq(100L)))
+        .thenReturn(OptionalDouble.of(0.25));
+    when(costTracker.snapshot("run-1"))
+        .thenReturn(new RunCostTracker.Snapshot(0, 0, 0, 0, 0.80, 3));
+    when(openai.call(any())).thenThrow(new RuntimeException("503 service unavailable"));
+
+    assertThatThrownBy(
+            () ->
+                router.call(
+                    attributedReq("openai", "gpt-x").toBuilder()
+                        .maxTokens(100)
+                        .runHardCapUsd(1.0)
+                        .build()))
+        .isInstanceOf(ProjectedCallBudgetExceededException.class)
+        .hasMessageContaining("estimated next call $0.2500");
+
+    verify(openai, times(LlmRouter.TRANSIENT_RETRY_MAX_ATTEMPTS)).call(any());
+    verify(gemini, never()).call(any());
+    verify(gemini, never()).callAudited(any(), any());
   }
 
   @Test
