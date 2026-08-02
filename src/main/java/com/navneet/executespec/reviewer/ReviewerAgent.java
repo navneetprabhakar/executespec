@@ -282,8 +282,36 @@ public class ReviewerAgent {
       if (!wiringRun.workspaceQuiescent()) {
         return abandonedReview(general, wiring, "wiring", start);
       }
-      if (wiring.outcome() != WorkerResult.Outcome.COMPLETED) {
-        log.warn("ReviewerAgent wiring pass did not complete: {}", wiring.outcome());
+      if (needsWiringProtocolRecovery(wiring)) {
+        // A missing/invalid verdict is a reviewer-protocol failure, not evidence that the worker's
+        // code is wrong. Retry the read/verify pass once on the exact same route before failing
+        // closed. This retry cannot silently step up or change provider; route policy remains with
+        // the orchestrator after the reviewer has produced an honest result.
+        log.warn(
+            "ReviewerAgent wiring pass produced no valid terminal verdict (outcome={}); running one"
+                + " same-route protocol recovery",
+            wiring == null ? null : wiring.outcome());
+        String recoveryPrompt =
+            loadPrompt("prompts/reviewer-wiring.md")
+                + "\n\n"
+                + loadPrompt("prompts/reviewer-wiring-recovery.md");
+        PassRun recoveryRun =
+            runPassWithTimeout(
+                strictProtocolRecoveryRequest(req),
+                Math.min(maxIter, 20),
+                "reviewer-wiring-recovery",
+                recoveryPrompt,
+                WIRING_PASS_TIMEOUT_SECONDS,
+                null);
+        wiring = recoveryRun.result();
+        if (!recoveryRun.workspaceQuiescent()) {
+          return abandonedReview(general, wiring, "wiring-recovery", start);
+        }
+      }
+      if (needsWiringProtocolRecovery(wiring)) {
+        log.warn(
+            "ReviewerAgent wiring protocol recovery did not produce a valid completed verdict: {}",
+            wiring == null ? null : wiring.outcome());
         // RR-275 — same as the general-pass ERROR branch: keep REVIEW_FAILED but still run the
         // deterministic final build on the frozen workspace so the build verdict is not lost.
         FinalBuildEvidence fb = runFinalBuild(req);
@@ -292,7 +320,7 @@ public class ReviewerAgent {
             .generalPassOutcome(general)
             .generalPassSummary(general.completionSummary())
             .wiringPassOutcome(wiring)
-            .wiringPassSummary(wiring.completionSummary())
+            .wiringPassSummary(wiring == null ? null : wiring.completionSummary())
             .finalBuildPassed(fb.passed())
             .finalBuildExitCode(fb.exitCode())
             .finalBuildOutput(fb.output())
@@ -677,7 +705,7 @@ public class ReviewerAgent {
                 "glob"));
     if (!readOnly) {
       tools.add("editFile");
-      if (!"reviewer-wiring".equals(taskIdSuffix)) tools.add("writeFile");
+      if (!taskIdSuffix.startsWith("reviewer-wiring")) tools.add("writeFile");
     }
     return java.util.Set.copyOf(tools);
   }
@@ -1094,6 +1122,37 @@ exit=0 — the harness will reject premature completions.
 
   private static boolean completedReviewPass(WorkerResult result) {
     return result != null && result.outcome() == WorkerResult.Outcome.COMPLETED;
+  }
+
+  /** A wiring pass is valid only when it completed through completeTask with a typed verdict. */
+  static boolean needsWiringProtocolRecovery(WorkerResult result) {
+    return !completedReviewPass(result) || parsePassVerdict(result) == PassVerdict.UNPARSED;
+  }
+
+  /**
+   * Protocol recovery is not adaptive routing. Fence it to the initial reviewer's exact
+   * provider/model even when the ordinary initial-review policy allowed router failover.
+   */
+  static ReviewerRequest strictProtocolRecoveryRequest(ReviewerRequest request) {
+    return ReviewerRequest.builder()
+        .provider(request.provider())
+        .model(request.model())
+        .strictProvider(true)
+        .context(request.context())
+        .buildCommand(request.buildCommand())
+        .maxIterationsPerPass(request.maxIterationsPerPass())
+        .skipWiringPass(request.skipWiringPass())
+        .brownfield(request.brownfield())
+        .allowedRepoRoots(request.allowedRepoRoots())
+        .approvedNewFiles(request.approvedNewFiles())
+        .allowBuildManifestCreation(request.allowBuildManifestCreation())
+        // Protocol recovery exists only to obtain the missing typed verdict. It must never inherit
+        // mutation authority from older resume/manual-review callers: malformed reviewer output is
+        // not evidence that customer code needs another edit.
+        .readOnly(true)
+        .originalGoal(request.originalGoal())
+        .requirements(request.requirements())
+        .build();
   }
 
   /**

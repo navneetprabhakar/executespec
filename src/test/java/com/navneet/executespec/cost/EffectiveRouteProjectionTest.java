@@ -52,6 +52,11 @@ class EffectiveRouteProjectionTest {
                 row("deepseek", "deepseek-v4-flash-native", "SUCCESS")));
 
     assertThat(projection.attribution()).isEqualTo(EffectiveRouteProjection.Attribution.MIXED);
+    assertThat(projection.provider()).isEqualTo("deepseek");
+    assertThat(projection.model()).isNull();
+    assertThat(projection.divergesFromRequestedRoute("deepseek", null)).isFalse();
+    assertThat(projection.divergesFromRequestedRoute("deepseek", "deepseek-v4-pro-native"))
+        .isTrue();
   }
 
   @Test

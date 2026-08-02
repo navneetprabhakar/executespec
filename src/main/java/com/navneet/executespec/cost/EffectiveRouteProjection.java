@@ -14,9 +14,10 @@ import java.util.Set;
  * dispatch. Any artifact that reports the requested route as though it were the served route is
  * wrong, and a benchmark campaign built on such an artifact is not comparable.
  *
- * <p>A multi-route run is represented as {@link Attribution#MIXED} with {@code provider}/{@code
- * model} left null. Collapsing a mixed run to one of its providers would defeat the entire point of
- * this projection, so it is deliberately not representable here.
+ * <p>A multi-route run is represented as {@link Attribution#MIXED}. When every successful route
+ * used the same provider, {@code provider} retains that common provider while {@code model} remains
+ * null; cross-provider mixing leaves both null. Exact-route consumers must continue to require
+ * {@link Attribution#LEDGER}.
  */
 public record EffectiveRouteProjection(String provider, String model, Attribution attribution) {
 
@@ -44,6 +45,7 @@ public record EffectiveRouteProjection(String provider, String model, Attributio
       return UNATTRIBUTED;
     }
     Set<String> distinct = new LinkedHashSet<>();
+    Set<String> providers = new LinkedHashSet<>();
     String firstProvider = null;
     String firstModel = null;
     for (RunStepUsage row : rows) {
@@ -55,6 +57,7 @@ public record EffectiveRouteProjection(String provider, String model, Attributio
       if (provider == null || model == null) {
         continue;
       }
+      providers.add(provider);
       if (distinct.add(provider + "\u001f" + model) && distinct.size() == 1) {
         firstProvider = provider;
         firstModel = model;
@@ -64,7 +67,8 @@ public record EffectiveRouteProjection(String provider, String model, Attributio
       return UNATTRIBUTED;
     }
     if (distinct.size() > 1) {
-      return new EffectiveRouteProjection(null, null, Attribution.MIXED);
+      return new EffectiveRouteProjection(
+          providers.size() == 1 ? providers.iterator().next() : null, null, Attribution.MIXED);
     }
     return new EffectiveRouteProjection(firstProvider, firstModel, Attribution.LEDGER);
   }
@@ -87,7 +91,10 @@ public record EffectiveRouteProjection(String provider, String model, Attributio
    */
   public boolean divergesFromRequestedRoute(String requestedProvider, String requestedModel) {
     if (attribution == Attribution.MIXED) {
-      return true;
+      // Provider-only requests remain true when tier-specific models stayed on that provider.
+      // Exact model pins still diverge because MIXED proves more than one model served the run.
+      if (isPresent(requestedModel)) return true;
+      return isPresent(requestedProvider) && !equalsNormalized(provider, requestedProvider);
     }
     if (attribution != Attribution.LEDGER) {
       return false;

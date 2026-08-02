@@ -21,4 +21,20 @@ class ReviewerPromptAssemblyTest {
         .isEqualTo("assembled reviewer prompt");
     verify(assembler).assemble("reviewer-general.md");
   }
+
+  @Test
+  void wiringRecoveryInstructionIsAClasspathPrompt() throws Exception {
+    try (var stream =
+        ReviewerPromptAssemblyTest.class
+            .getClassLoader()
+            .getResourceAsStream("prompts/reviewer-wiring-recovery.md")) {
+      assertThat(stream).isNotNull();
+      String prompt = new String(stream.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+      String normalized = prompt.replaceAll("\\s+", " ");
+      assertThat(normalized)
+          .contains("Same-route protocol recovery")
+          .contains("VERDICT: CLEAN")
+          .contains("Do not infer success");
+    }
+  }
 }

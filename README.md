@@ -38,6 +38,35 @@ starts a new BUILD run, records `sourceRunId`, inherits the source route/project
 execution/publication policies, and initializes from a fail-closed Git-tracked workspace snapshot.
 Callers may provide `Idempotency-Key`; the route requires write access to the source run.
 
+The protected Web surfaces send caller-owned idempotency keys for create, fork, and iterate
+mutations. A key is retained in the current browser tab only while the outcome is ambiguous, so a
+retry or same-tab reload replays the same server claim instead of creating duplicate work; a
+successful, definitively rejected, changed, or deliberately repeated action receives a fresh key.
+The tab ledger stores only a SHA-256 digest of the canonical request plus the idempotency key and
+timestamp; spec/request text is never written to sessionStorage.
+Project Start Work also exposes the existing exact per-run model override to Enterprise users; the
+selection applies to that run only and does not alter the project or organization matrix. Its
+catalog comes from the authenticated run-submitter model endpoint, so Enterprise developers do not
+need ORG_ADMIN access merely to select an allowed exact route.
+
+Active run detail overlays persisted cost with the higher JVM-owned live cost snapshot; terminal
+runs always expose stored durable cost. Effective route evidence keeps `MIXED` for multiple physical
+models, but retains the common provider when every tier stayed on that provider, so a provider-only
+request is not falsely shown as cross-provider divergence. Exact model pins remain strict.
+
+Run-event publication uses bounded per-run lock striping to order Redis replay append, local
+delivery, Redis publication, subscription installation, and completion; unconstrained Spring
+listeners run afterward. Remote Redis callbacks are sequence-reordered in a bounded buffer, and a
+typed terminal event closes peer streams only after it is delivered. A bounded terminal marker
+makes later subscribers replay and close. Each connected Web/CLI subscriber has one ordered
+replay/live lane, bounded FIFO, and virtual-thread writer, so a
+disconnected or non-reading socket cannot stall the run orchestrator, Redis listener, event
+producer, or another subscriber. Heartbeats detect quiet half-open sockets; a 30-second blocked-send
+watchdog retires them, while stuck writer/close work remains bounded and admission-accounted.
+Buffer exhaustion retires only that client and relies on `Last-Event-ID` replay; terminal stream
+completion is queued after already accepted frames so final status/cost/completion events are not
+truncated.
+
 Standalone remote `repoMode=EXISTING` runs clone `repoUrl` into the run workspace before the first
 model call and fail closed unless the checkout contains Git metadata plus a deterministic source
 inventory. Project-linked runs retain their multi-repository admission path, source-run iterations
