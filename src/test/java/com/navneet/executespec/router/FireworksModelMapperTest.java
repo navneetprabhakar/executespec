@@ -21,7 +21,7 @@ class FireworksModelMapperTest {
         .isEqualTo("accounts/fireworks/models/glm-5p2");
     assertThat(FireworksModelMapper.toSlug("glm-5.2-fast-fw"))
         .isEqualTo("accounts/fireworks/routers/glm-5p2-fast");
-    assertThat(FireworksModelMapper.allowList()).hasSize(5);
+    assertThat(FireworksModelMapper.allowList()).hasSize(6);
   }
 
   @Test
