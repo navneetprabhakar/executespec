@@ -2,6 +2,8 @@ package com.navneet.executespec.api.dto;
 
 import java.time.Instant;
 
+import com.navneet.executespec.run.outcome.RunTerminalOutcome;
+
 public record RunSummary(
     String runId,
     String status,
@@ -60,6 +62,8 @@ public record RunSummary(
      * RunOrchestrator when scoring.v2-verified is on.
      */
     String statusReason,
+    /** Server-owned customer-safe interpretation of terminal status/failure evidence. */
+    RunTerminalOutcome terminalOutcome,
     /**
      * PR-B (2026-05-13) — SCM-agnostic pull-request URL raised by this run (GitHub / Bitbucket).
      * Mirrors {@code PipelineRun.scmPrUrl}. Null when no PR has been opened yet (run still in

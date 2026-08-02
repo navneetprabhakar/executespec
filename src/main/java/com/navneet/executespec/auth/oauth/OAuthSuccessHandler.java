@@ -125,10 +125,9 @@ public class OAuthSuccessHandler implements AuthenticationSuccessHandler {
           profile.email(),
           user.getId());
 
-      // Redirect to frontend callback with tokens. If sign-in began from the CLI / VS Code
-      // device-auth page, OAuthRedirectCookieFilter stashed its /cli-login return URL in a cookie —
-      // forward it so the browser lands back on /cli-login (the email+password path already
-      // preserves this via ?redirect=).
+      // Redirect to the frontend callback without credentials in the URL. The authorize filter
+      // stashed the validated same-origin return path in an HttpOnly cookie; forward it through
+      // the callback so password and OAuth sign-in preserve the same protected deep link.
       String postLoginRedirect = consumeRedirectCookie(request, response);
       String redirectUrl = baseRedirectUrl + "?oauth=1";
       if (postLoginRedirect != null) {
@@ -188,7 +187,7 @@ public class OAuthSuccessHandler implements AuthenticationSuccessHandler {
 
   /**
    * Reads and immediately clears the {@link OAuthRedirectCookieFilter#COOKIE} device-auth return
-   * cookie. Returns the decoded path only when it is a safe {@code /cli-login} path, else null.
+   * cookie. Returns the decoded path only when it remains a strict same-origin path, else null.
    */
   private String consumeRedirectCookie(HttpServletRequest request, HttpServletResponse response) {
     if (request.getCookies() == null) {
@@ -203,8 +202,12 @@ public class OAuthSuccessHandler implements AuthenticationSuccessHandler {
           clear.append("; Secure");
         }
         response.addHeader("Set-Cookie", clear.toString());
-        String decoded = URLDecoder.decode(cookie.getValue(), StandardCharsets.UTF_8);
-        return OAuthRedirectCookieFilter.isSafe(decoded) ? decoded : null;
+        try {
+          String decoded = URLDecoder.decode(cookie.getValue(), StandardCharsets.UTF_8);
+          return OAuthRedirectCookieFilter.isSafe(decoded) ? decoded : null;
+        } catch (IllegalArgumentException malformedCookie) {
+          return null;
+        }
       }
     }
     return null;

@@ -6,6 +6,7 @@ import {useAuthStore} from '@/stores/useAuthStore';
 import * as api from '@/lib/api';
 import {writeSpecHandoff} from '@/lib/specHandoff';
 import {useAuthProviders} from '@/lib/authProviders';
+import {safeInternalRedirect} from './authRedirect';
 
 const MERGE_RAIL_MARK = '/assets/brand/merge-rail/executespec-merge-rail-mark-light.svg';
 
@@ -89,17 +90,25 @@ export function LoginPage() {
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
 
-  const fromState = (location.state as {from?: {pathname: string}} | null)?.from?.pathname;
+  const fromLocation = (
+    location.state as {
+      from?: {pathname?: string; search?: string; hash?: string};
+    } | null
+  )?.from;
+  const fromState = fromLocation?.pathname
+    ? `${fromLocation.pathname}${fromLocation.search || ''}${fromLocation.hash || ''}`
+    : undefined;
   // `?redirect=` carries a full internal path (incl. query) across the login bounce — used by the
   // CLI/VS Code `/cli-login` device-authorization flow, which must preserve its ?port=&state=.
   const redirectParam = new URLSearchParams(location.search).get('redirect');
-  const safeRedirect = redirectParam && redirectParam.startsWith('/') ? redirectParam : undefined;
+  const safeRedirect = safeInternalRedirect(redirectParam);
+  const safeFromState = safeInternalRedirect(fromState);
   // Default landing must match the rest of the app: `/` and the catch-all both redirect to
   // /home, and the auth-page copy says "The app opens on Home." This previously sent a plain
   // login to /compose, contradicting all three.
-  const target = safeRedirect || fromState || '/home';
+  const target = safeRedirect || safeFromState || '/home';
   // Carry the device-auth return path through the OAuth round-trip too (the email path uses `target`).
-  const oauthQS = safeRedirect ? `?redirect=${encodeURIComponent(safeRedirect)}` : '';
+  const oauthQS = target !== '/home' ? `?redirect=${encodeURIComponent(target)}` : '';
 
   // Pick up OAuth failure bounces — the backend lands us at /login?error=…
   // when the OAuth dance can't complete (no email, email conflict, etc.).
@@ -194,7 +203,7 @@ export function SignupPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const redirectParam = new URLSearchParams(location.search).get('redirect');
-  const safeRedirect = redirectParam && redirectParam.startsWith('/') ? redirectParam : undefined;
+  const safeRedirect = safeInternalRedirect(redirectParam);
   // Carry the CLI / VS Code device-auth return path through the OAuth round-trip (see LoginPage).
   const oauthQS = safeRedirect ? `?redirect=${encodeURIComponent(safeRedirect)}` : '';
   const [email, setEmail] = useState('');

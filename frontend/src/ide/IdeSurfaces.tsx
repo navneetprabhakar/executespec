@@ -1668,8 +1668,10 @@ export function IdeLive() {
           <div className='ide-card'>
             <div style={{display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12}}>
               <IdeBadge kind={statusKind(run.status)}>{phaseLabel(run.status)}</IdeBadge>
-              {run.statusReason && (
-                <span style={{color: 'var(--ide-fg-muted)', fontSize: 12}}>{run.statusReason}</span>
+              {(run.terminalOutcome?.customerTitle || run.statusReason) && (
+                <span style={{color: 'var(--ide-fg-muted)', fontSize: 12}}>
+                  {run.terminalOutcome?.customerTitle || run.statusReason}
+                </span>
               )}
             </div>
             {(run.userRequest || run.runSummary) && (

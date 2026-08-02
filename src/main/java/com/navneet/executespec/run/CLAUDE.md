@@ -1,5 +1,18 @@
 # Run admission, idempotency, and iteration
 
+## Terminal outcome and workspace recovery (2026-08-02)
+
+`run/outcome/RunTerminalOutcomeContract` is the additive customer-safe interpretation of terminal
+runs. Persisted forensic fields remain unchanged; API/Web/email/in-app consumers use the safe
+projection. Unknown failures receive a stable run support code. `RunSyncService` attempts
+`WorkspaceRestoreService.ensureWorkspaceAvailable` before returning `WORKSPACE_UNAVAILABLE` (410).
+Because durable archives intentionally omit `.git`, a successful restore reconstructs repository
+metadata only from the run's immutable repo snapshots and the linked project's credential-free SCM
+clone coordinate, then the normal caller-authenticated fetch/reset selects source bytes. Sync also
+cleans restored untracked archive residue while preserving `.agent-context/`. A confirmed absent
+archive is the permanent 410; storage/platform restore faults return the retryable
+`WORKSPACE_RESTORE_FAILED` (503) contract without leaking the underlying path or provider error.
+
 `run/CustomerRunSubmissionService` is the shared BUILD admission boundary for REST submit,
 fork/iterate, confirmed Web Agent cloud-run creation, and Execution View. It resolves project write
 authority, explicit repository admission, provider/key/spend policy, host-project tenancy, and the

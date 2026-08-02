@@ -63,8 +63,8 @@ describe('agentChatStream', () => {
   });
 
   it('throws typed stream errors', async () => {
-    vi.mocked(api.streamAgentTurn).mockImplementation(async (_sessionId, _body, handlers = {}) => {
-      handlers.onErrorEvent?.({message: 'blocked'});
+    vi.mocked(api.streamAgentTurn).mockImplementation(async () => {
+      throw new Error('blocked');
     });
 
     await expect(
@@ -73,6 +73,30 @@ describe('agentChatStream', () => {
         href: '/projects/p1/agent',
       }),
     ).rejects.toThrow('blocked');
+  });
+
+  it('preserves the action from a structured projected-budget terminal error', async () => {
+    vi.mocked(api.streamAgentTurn).mockImplementation(async (_sessionId, _body, handlers = {}) => {
+      handlers.onErrorEvent?.({
+        code: 'PROJECTED_CALL_BUDGET_EXCEEDED',
+        category: 'ACTION_REQUIRED',
+        message: 'The next model call would exceed this session budget.',
+        retryable: true,
+        next_action: 'Increase the session cap, then retry.',
+      });
+      throw new Error(
+        'The next model call would exceed this session budget. Increase the session cap, then retry.',
+      );
+    });
+
+    await expect(
+      streamWebAgentChatReply('s1', 'continue', {
+        label: 'project agent',
+        href: '/projects/p1/agent',
+      }),
+    ).rejects.toThrow(
+      'The next model call would exceed this session budget. Increase the session cap, then retry.',
+    );
   });
 
   it('formats proposal text consistently', () => {

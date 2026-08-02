@@ -61,6 +61,20 @@ describe('systemUtils', () => {
     expect(markAllNotificationsReadLocal(items)?.map((n) => n.read)).toEqual([true, true]);
   });
 
+  it('maps terminal-outcome notification types to honest severity colors', () => {
+    expect(notificationDotColor(notification({type: 'RUN_PLATFORM_FAILURE'}))).toBe(
+      'var(--ide-red)',
+    );
+    expect(notificationDotColor(notification({type: 'RUN_ACTION_REQUIRED'}))).toBe(
+      'var(--ide-yellow)',
+    );
+    expect(notificationDotColor(notification({type: 'RUN_WARNING'}))).toBe('var(--ide-yellow)');
+    expect(notificationDotColor(notification({type: 'RUN_USER_STOPPED'}))).toBe(
+      'var(--ide-fg-muted)',
+    );
+    expect(notificationDotColor(notification({type: 'RUN_SUCCESS'}))).toBe('var(--ide-green)');
+  });
+
   it('builds search hits with live-route selection and project counters', () => {
     const hits = buildSearchHits(
       'checkout',

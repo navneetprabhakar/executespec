@@ -65,14 +65,6 @@ public class ProjectedCallCostAdmission {
 
   private static void reject(String label, double spentUsd, double projectedUsd, double capUsd) {
     if (spentUsd + projectedUsd <= capUsd) return;
-    throw new ProjectedCallBudgetExceededException(
-        label
-            + " $"
-            + String.format("%.2f", capUsd)
-            + " projected-call reserve would be exceeded (spent $"
-            + String.format("%.4f", spentUsd)
-            + ", estimated next call $"
-            + String.format("%.4f", projectedUsd)
-            + ")");
+    throw new ProjectedCallBudgetExceededException(label, capUsd, spentUsd, projectedUsd);
   }
 }

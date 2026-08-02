@@ -39,9 +39,6 @@ export async function streamWebAgentChatReply(
       onToken: (token) => {
         reply += token.delta;
       },
-      onErrorEvent: (event) => {
-        throw new Error(event.message || 'Agent stream failed.');
-      },
     },
   );
   return (

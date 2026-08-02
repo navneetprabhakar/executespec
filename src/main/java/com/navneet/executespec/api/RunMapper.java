@@ -101,6 +101,7 @@ public class RunMapper {
       Boolean localExecutionAccepted,
       List<AgentTask> tasks) {
     String displayStatus = displayRunStatus(r.getStatus(), tasks);
+    Double actualCostUsd = actualCostForRead(r);
     return new RunSummary(
         r.getRunId(),
         displayStatus,
@@ -130,9 +131,18 @@ public class RunMapper {
         r.getSourceRunId() != null,
         r.getSourceRunId(),
         r.getHarnessVersion(),
-        r.getActualCostUsd(),
+        actualCostUsd,
         displayRunStatusReason(
             r.getStatusReason(), r.getFailureReason(), r.getStatus(), displayStatus),
+        com.navneet.executespec.run.outcome.RunTerminalOutcomeContract.project(
+            r.getRunId(),
+            displayStatus,
+            displayRunStatusReason(
+                r.getStatusReason(), r.getFailureReason(), r.getStatus(), displayStatus),
+            displayRunFailureReason(r.getFailureReason(), r.getStatus(), displayStatus),
+            actualCostUsd,
+            r.getHardCapUsd() != null ? r.getHardCapUsd() : r.getUserCostCap(),
+            r.getScmPrUrl() != null ? r.getScmPrUrl() : r.getGithubPrUrl()),
         // PR-B (2026-05-13) — hydrate PR URLs in the listing endpoint so the project launches
         // surface can render PR pills without a per-row drill-down. Prefer scm-agnostic
         // scmPrUrl; the legacy githubPrUrl ships alongside for pre-SCM-split back-compat.
@@ -164,70 +174,6 @@ public class RunMapper {
         .orElse(null);
   }
 
-  /** Builds the per-agent token entries for the detail view. */
-  private List<RunDetail.AgentTokenEntry> buildAgentTokens(PipelineRun r) {
-    List<RunDetail.AgentTokenEntry> entries = new java.util.ArrayList<>();
-    int pIn = r.getPlannerInputTokens() != null ? r.getPlannerInputTokens() : 0;
-    int pOut = r.getPlannerOutputTokens() != null ? r.getPlannerOutputTokens() : 0;
-    if (pIn > 0 || pOut > 0) {
-      entries.add(
-          new RunDetail.AgentTokenEntry(
-              "planner", r.getPlannerProvider(), r.getPlannerActualModel(), pIn, pOut));
-    }
-    int rIn = r.getReviewerInputTokens() != null ? r.getReviewerInputTokens() : 0;
-    int rOut = r.getReviewerOutputTokens() != null ? r.getReviewerOutputTokens() : 0;
-    if (rIn > 0 || rOut > 0) {
-      entries.add(
-          new RunDetail.AgentTokenEntry(
-              "reviewer", r.getReviewerProvider(), r.getReviewerActualModel(), rIn, rOut));
-    }
-    int cIn = r.getCompilerInputTokens() != null ? r.getCompilerInputTokens() : 0;
-    int cOut = r.getCompilerOutputTokens() != null ? r.getCompilerOutputTokens() : 0;
-    if (cIn > 0 || cOut > 0) {
-      entries.add(
-          new RunDetail.AgentTokenEntry(
-              "compiler", r.getCompilerProvider(), r.getCompilerActualModel(), cIn, cOut));
-    }
-
-    // Test gen pipeline tokens (from TestPlan entity)
-    testPlanRepository
-        .findByRunId(r.getRunId())
-        .ifPresent(
-            tp -> {
-              int tpIn = tp.getPlannerInputTokens() != null ? tp.getPlannerInputTokens() : 0;
-              int tpOut = tp.getPlannerOutputTokens() != null ? tp.getPlannerOutputTokens() : 0;
-              if (tpIn > 0 || tpOut > 0) {
-                entries.add(
-                    new RunDetail.AgentTokenEntry(
-                        "test-planner",
-                        tp.getPlannerProvider(),
-                        tp.getPlannerModel(),
-                        tpIn,
-                        tpOut));
-              }
-              int twIn = tp.getWorkerInputTokens() != null ? tp.getWorkerInputTokens() : 0;
-              int twOut = tp.getWorkerOutputTokens() != null ? tp.getWorkerOutputTokens() : 0;
-              if (twIn > 0 || twOut > 0) {
-                entries.add(
-                    new RunDetail.AgentTokenEntry(
-                        "test-worker", tp.getWorkerProvider(), tp.getWorkerModel(), twIn, twOut));
-              }
-              int trIn = tp.getReportInputTokens() != null ? tp.getReportInputTokens() : 0;
-              int trOut = tp.getReportOutputTokens() != null ? tp.getReportOutputTokens() : 0;
-              if (trIn > 0 || trOut > 0) {
-                entries.add(
-                    new RunDetail.AgentTokenEntry(
-                        "test-report-gen",
-                        tp.getPlannerProvider(),
-                        tp.getPlannerModel(),
-                        trIn,
-                        trOut));
-              }
-            });
-
-    return entries;
-  }
-
   public RunDetail toDetail(PipelineRun r, List<AgentTask> tasks) {
     // Tier 7: populate integration source if this run was triggered by an integration
     RunDetail.IntegrationSource integrationSource =
@@ -249,6 +195,21 @@ public class RunMapper {
     // so it can never drift from the usage facts it summarises.
     EffectiveRouteProjection effectiveRoute = runEffectiveRouteService.forRun(r.getRunId());
     String displayStatus = displayRunStatus(r.getStatus(), tasks);
+    String displayStatusReason =
+        displayRunStatusReason(
+            r.getStatusReason(), r.getFailureReason(), r.getStatus(), displayStatus);
+    String displayFailureReason =
+        displayRunFailureReason(r.getFailureReason(), r.getStatus(), displayStatus);
+    Double actualCostUsd = actualCostForRead(r);
+    com.navneet.executespec.run.outcome.RunTerminalOutcome terminalOutcome =
+        com.navneet.executespec.run.outcome.RunTerminalOutcomeContract.project(
+            r.getRunId(),
+            displayStatus,
+            displayStatusReason,
+            displayFailureReason,
+            actualCostUsd,
+            r.getHardCapUsd() != null ? r.getHardCapUsd() : r.getUserCostCap(),
+            r.getScmPrUrl() != null ? r.getScmPrUrl() : r.getGithubPrUrl());
 
     RunDetail.RunDetailBuilder builder =
         RunDetail.builder()
@@ -267,10 +228,9 @@ public class RunMapper {
             .repoUrl(r.getRepoUrl())
             .repoMode(r.getRepoMode())
             .failureReason(
-                displayRunFailureReason(r.getFailureReason(), r.getStatus(), displayStatus))
-            .statusReason(
-                displayRunStatusReason(
-                    r.getStatusReason(), r.getFailureReason(), r.getStatus(), displayStatus))
+                terminalOutcome == null ? displayFailureReason : terminalOutcome.customerMessage())
+            .statusReason(displayStatusReason)
+            .terminalOutcome(terminalOutcome)
             .planJson(r.getPlanJson())
             .reviewJson(r.getReviewJson())
             .runGoalDoneness(parseJson(r.getRunGoalDonenessJson(), "runGoalDoneness", r.getRunId()))
@@ -289,7 +249,7 @@ public class RunMapper {
             .hasApiSpec(r.isHasApiSpec())
             .previewStatus(r.getPreviewStatus())
             .keySource(r.getKeySource())
-            .actualCostUsd(actualCostForDetail(r))
+            .actualCostUsd(actualCostUsd)
             .costEstimateLow(r.getCostEstimateLow())
             .costEstimateHigh(r.getCostEstimateHigh())
             .creditsCharged(r.getCreditsCharged())
@@ -320,7 +280,7 @@ public class RunMapper {
             .projectId(r.getProjectId())
             .projectName(resolveProjectName(r.getProjectId()))
             .createdByName(resolveCreatorName(r.getCreatedByUserId()))
-            .agentTokens(buildAgentTokens(r))
+            .agentTokens(RunAgentTokenProjection.project(r, testPlanRepository))
             .applySuggestionCount(r.getApplySuggestionCount())
             .runTitle(r.getRunTitle())
             .runSummary(r.getRunSummary())
@@ -369,7 +329,7 @@ public class RunMapper {
    * Active detail reads may be ahead of the last persistence checkpoint. Overlay only a JVM-owned
    * live snapshot, and only monotonically; terminal rows remain durable billing truth.
    */
-  private Double actualCostForDetail(PipelineRun run) {
+  private Double actualCostForRead(PipelineRun run) {
     Double stored = run.getActualCostUsd();
     if (RunPipelineSupport.isTerminal(run.getStatus()) || runCostTracker == null) {
       return stored;

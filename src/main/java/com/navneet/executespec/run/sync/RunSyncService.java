@@ -7,8 +7,13 @@ import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 
+import com.navneet.executespec.deployment.WorkspaceArchiveUnavailableException;
+import com.navneet.executespec.deployment.WorkspaceRestoreService;
 import com.navneet.executespec.harness.WorkspaceInitService;
 import com.navneet.executespec.integration.RunWorkspaceAuthorityService;
+import com.navneet.executespec.project.entity.ProjectRepo;
+import com.navneet.executespec.project.repository.ProjectRepoRepository;
+import com.navneet.executespec.state.entity.RunRepoSnapshot;
 
 import org.springframework.stereotype.Service;
 
@@ -50,12 +55,16 @@ public class RunSyncService {
 
   private static final Pattern COMMIT_SHA = Pattern.compile("[0-9a-fA-F]{40}");
 
+  private static final Pattern SCM_FULL_NAME = Pattern.compile("[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+");
+
   /** Wall-clock ceiling for a single git child. A fetch against a dead remote must not hang. */
   private static final long GIT_TIMEOUT_SECONDS = 120L;
 
   private final WorkspaceInitService workspaceInit;
   private final com.navneet.executespec.state.repository.RunRepoSnapshotRepository snapshotRepo;
+  private final ProjectRepoRepository projectRepoRepository;
   private final RunWorkspaceAuthorityService workspaceAuthorities;
+  private final WorkspaceRestoreService workspaceRestore;
 
   public record SyncOutcome(int reposSynced, List<String> details) {}
 
@@ -101,15 +110,16 @@ public class RunSyncService {
 
   private SyncOutcome syncToOriginalCommitOwned(
       String runId, GitCredential credential, RunWorkspaceAuthorityService.Lease authority) {
-    Path runRoot = workspaceInit.runWorkspacePath(runId);
-    if (!Files.isDirectory(runRoot)) {
-      throw new IllegalStateException("Run workspace not found: " + runRoot);
-    }
-    List<com.navneet.executespec.state.entity.RunRepoSnapshot> snaps =
-        snapshotRepo.findByRunId(runId);
+    Path runRoot = availableWorkspace(runId);
+    List<RunRepoSnapshot> snaps = snapshotRepo.findByRunId(runId);
     if (snaps.isEmpty()) {
       return new SyncOutcome(0, List.of("no snapshot — run predates v2.5.2"));
     }
+    List<RunRepoSnapshot> validSnapshots =
+        snaps.stream()
+            .filter(s -> s.getCommitSha() != null && COMMIT_SHA.matcher(s.getCommitSha()).matches())
+            .toList();
+    ensureRepositoryMetadata(runRoot, validSnapshots, snaps.size());
     List<String> details = new ArrayList<>();
     int synced = 0;
     // Multi-repo workspaces have repos/<name>/ subdirectories; single-repo
@@ -146,6 +156,7 @@ public class RunSyncService {
         runGit(repoRoot, credential, "fetch", "origin");
         authority.assertOwned();
         runGit(repoRoot, credential, "reset", "--hard", sha, "--");
+        runGit(repoRoot, GitCredential.NONE, "clean", "-fd", "-e", ".agent-context/");
         synced++;
         details.add(shortName + " <- " + sha.substring(0, 7) + " (original)");
         log.info("RunSync(original): run={} repo={} reset to {}", runId, shortName, sha);
@@ -171,10 +182,9 @@ public class RunSyncService {
       String branchOverride,
       GitCredential credential,
       RunWorkspaceAuthorityService.Lease authority) {
-    Path runRoot = workspaceInit.runWorkspacePath(runId);
-    if (!Files.isDirectory(runRoot)) {
-      throw new IllegalStateException("Run workspace not found: " + runRoot);
-    }
+    Path runRoot = availableWorkspace(runId);
+    List<RunRepoSnapshot> snapshots = snapshotRepo.findByRunId(runId);
+    ensureRepositoryMetadata(runRoot, snapshots, snapshots.size());
     List<Path> repoRoots = enumerateRepoRoots(runRoot);
     List<String> details = new ArrayList<>();
     int synced = 0;
@@ -183,12 +193,13 @@ public class RunSyncService {
       String branch =
           (branchOverride != null && !branchOverride.isBlank())
               ? branchOverride
-              : detectDefaultBranch(repoRoot);
+              : snapshotBranch(repoRoot, runRoot, snapshots);
       try {
         authority.assertOwned();
         runGit(repoRoot, credential, "fetch", "origin", "--", branch);
         authority.assertOwned();
         runGit(repoRoot, credential, "reset", "--hard", "origin/" + branch, "--");
+        runGit(repoRoot, GitCredential.NONE, "clean", "-fd", "-e", ".agent-context/");
         synced++;
         details.add(name + " <- origin/" + branch);
         log.info("RunSync: run={} repo={} synced to origin/{}", runId, name, branch);
@@ -208,6 +219,126 @@ public class RunSyncService {
       authority.assertOwned();
       return operation.apply(authority);
     }
+  }
+
+  private Path availableWorkspace(String runId) {
+    Path local = workspaceInit.runWorkspacePath(runId);
+    if (Files.isDirectory(local)) return local;
+    try {
+      Path restored = workspaceRestore.ensureWorkspaceAvailable(runId);
+      if (restored != null && Files.isDirectory(restored)) return restored;
+    } catch (WorkspaceArchiveUnavailableException unavailable) {
+      throw new RunWorkspaceUnavailableException(runId, unavailable);
+    } catch (RuntimeException restoreFailure) {
+      throw new RunWorkspaceRestoreFailedException(runId, restoreFailure);
+    }
+    throw new RunWorkspaceUnavailableException(runId, null);
+  }
+
+  /**
+   * GCS archives intentionally exclude {@code .git}. Rebuild only repository metadata from the
+   * authoritative run snapshots and credential-free project clone coordinates before a sync. The
+   * subsequent authenticated fetch/reset remains the operation that chooses source bytes.
+   */
+  private void ensureRepositoryMetadata(
+      Path runRoot, List<RunRepoSnapshot> snapshots, int totalSnapshotCount) {
+    if (snapshots == null || snapshots.isEmpty()) return;
+    for (RunRepoSnapshot snapshot : snapshots) {
+      Path repoRoot = repositoryRoot(runRoot, totalSnapshotCount, snapshot);
+      try {
+        Files.createDirectories(repoRoot);
+        if (!Files.isDirectory(repoRoot.resolve(".git"))) {
+          runGit(repoRoot, GitCredential.NONE, "init", "-b", "main");
+        }
+        String expectedRemote = cloneUrl(snapshot);
+        ExecResult current =
+            runGitResult(repoRoot, GitCredential.NONE, "remote", "get-url", "origin");
+        if (current.exitCode() != 0) {
+          runGit(repoRoot, GitCredential.NONE, "remote", "add", "origin", expectedRemote);
+        } else if (!sameRemote(current.output().trim(), expectedRemote)) {
+          throw new IllegalStateException("origin does not match the authoritative repository");
+        }
+      } catch (RunWorkspaceRestoreFailedException failure) {
+        throw failure;
+      } catch (Exception failure) {
+        throw new RunWorkspaceRestoreFailedException(snapshot.getRunId(), failure);
+      }
+    }
+  }
+
+  private Path repositoryRoot(Path runRoot, int snapshotCount, RunRepoSnapshot snapshot) {
+    String name = shortName(snapshot.getRepoFullName());
+    Path nested = runRoot.resolve("repos").resolve(name);
+    if (Files.isDirectory(nested) || snapshotCount > 1) return nested;
+    return runRoot;
+  }
+
+  private String cloneUrl(RunRepoSnapshot snapshot) {
+    if (snapshot.getRepoId() != null) {
+      ProjectRepo repo = projectRepoRepository.findById(snapshot.getRepoId()).orElse(null);
+      if (repo != null) {
+        if (ProjectRepo.SourceType.LOCAL.name().equalsIgnoreCase(repo.getSourceType())) {
+          throw new RunWorkspaceRestoreFailedException(
+              snapshot.getRunId(), new IllegalStateException("local source has no SCM remote"));
+        }
+        if (repo.getScmCloneUrl() != null && !repo.getScmCloneUrl().isBlank()) {
+          return credentialFreeRemote(repo.getScmCloneUrl());
+        }
+        if ("BITBUCKET".equalsIgnoreCase(repo.getScmProvider())) {
+          return "https://bitbucket.org/" + safeFullName(snapshot.getRepoFullName()) + ".git";
+        }
+      }
+    }
+    return "https://github.com/" + safeFullName(snapshot.getRepoFullName()) + ".git";
+  }
+
+  private static String credentialFreeRemote(String cloneUrl) {
+    String trimmed = cloneUrl.trim();
+    try {
+      java.net.URI uri = java.net.URI.create(trimmed);
+      if (uri.getUserInfo() != null) {
+        throw new IllegalArgumentException("repository clone URL contains user information");
+      }
+    } catch (IllegalArgumentException malformed) {
+      if (trimmed.contains("://")) throw malformed;
+      // Local/file paths are useful for deterministic tests and carry no remote credential.
+    }
+    return trimmed;
+  }
+
+  private static String safeFullName(String fullName) {
+    if (fullName == null || !SCM_FULL_NAME.matcher(fullName).matches()) {
+      throw new IllegalArgumentException("repository full name is invalid");
+    }
+    return fullName;
+  }
+
+  private static String shortName(String fullName) {
+    String safe = safeFullName(fullName);
+    return safe.substring(safe.indexOf('/') + 1);
+  }
+
+  private static boolean sameRemote(String current, String expected) {
+    return normalizeRemote(current).equals(normalizeRemote(expected));
+  }
+
+  private static String normalizeRemote(String value) {
+    String normalized = value == null ? "" : value.trim();
+    while (normalized.endsWith("/")) normalized = normalized.substring(0, normalized.length() - 1);
+    return normalized.endsWith(".git")
+        ? normalized.substring(0, normalized.length() - ".git".length())
+        : normalized;
+  }
+
+  private String snapshotBranch(Path repoRoot, Path runRoot, List<RunRepoSnapshot> snapshots) {
+    for (RunRepoSnapshot snapshot : snapshots) {
+      boolean matches =
+          repoRoot.equals(runRoot)
+              ? snapshots.size() == 1
+              : repoRoot.getFileName().toString().equals(shortName(snapshot.getRepoFullName()));
+      if (matches && isValidBranch(snapshot.getBranch())) return snapshot.getBranch();
+    }
+    return detectDefaultBranch(repoRoot);
   }
 
   /**
@@ -250,6 +381,16 @@ public class RunSyncService {
   }
 
   private void runGit(Path dir, GitCredential credential, String... gitArgs) throws Exception {
+    ExecResult result = runGitResult(dir, credential, gitArgs);
+    if (result.exitCode() != 0) {
+      // Never echo argv: GitProcessAuth keeps the credential out of it, but the reconstructed
+      // command adds nothing a caller can act on beyond the git error itself.
+      throw new RuntimeException("git " + gitArgs[0] + " failed: " + result.output());
+    }
+  }
+
+  private ExecResult runGitResult(Path dir, GitCredential credential, String... gitArgs)
+      throws Exception {
     GitCredential cred = credential == null ? GitCredential.NONE : credential;
     ProcessBuilder pb =
         // RR-1669: this caller selects the repository via ProcessBuilder.directory rather than a
@@ -259,12 +400,7 @@ public class RunSyncService {
             cred.present() ? cred.secret() : null, cred.username(), dir, List.of(gitArgs));
     pb.directory(dir.toFile());
     pb.redirectErrorStream(true);
-    ExecResult result = runBounded(pb);
-    if (result.exitCode() != 0) {
-      // Never echo argv: GitProcessAuth keeps the credential out of it, but the reconstructed
-      // command adds nothing a caller can act on beyond the git error itself.
-      throw new RuntimeException("git " + gitArgs[0] + " failed: " + result.output());
-    }
+    return runBounded(pb);
   }
 
   private record ExecResult(int exitCode, String output) {}

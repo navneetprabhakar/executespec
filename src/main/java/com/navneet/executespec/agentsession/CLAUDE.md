@@ -1,5 +1,11 @@
 # Package: `agentsession`
 
+## Streamed controlled-error contract (2026-08-02)
+
+`AgentStreamTurnRunner` persists and emits the same typed terminal error for turn-budget exhaustion
+and projected-call cap rejection. Payloads carry stable code/category, safe message, retryability,
+one action, and cost/cap when known. Web preserves `ACTION_REQUIRED` as controlled 422 evidence.
+
 Backend protocol for the CLI and VS Code agent shells. This package owns durable agent sessions,
 turns, action events, the action catalog, deterministic first-pass intent classification, repo to
 project resolution, gate decision cards, and the streaming chat bridge that records open-ended
@@ -287,6 +293,7 @@ turns separately from runs.
 | `AgentStreamTurnStarter.java`              | Starts streaming turns: route decision, initial turn row, provider preference update, title update, and `STREAM_STARTED` trace event.                                                                               |
 | `AgentStreamTurnLifecycle.java`            | Persists exact, uncapped assistant text plus UTF-8 byte/character/line/SHA-256 integrity metadata for completion, failure, and disconnect terminal states; usage and terminal action evidence remain separate. |
 | `AgentStreamTurnRunner.java`               | Executes one SSE streaming turn after start and accumulates the complete assistant response for durable persistence. `TURN_TEXT` action evidence keeps a 16,000-character preview with explicit truncation, original size/line count, and full-content SHA-256 metadata. |
+| `AgentStreamFailurePublisher.java`         | Maps projected-call, turn-budget, credential, and unknown stream failures into the canonical typed payload, then performs the ordered durable turn/operation/action settlement and final SSE publication. |
 | `AgentTranscriptContent.java`              | Shared exact-content metadata and bounded event-preview contract; the PostgreSQL `agent_turn.assistant_summary` TEXT row remains authoritative. |
 | `AgentTurnOperationLifecycle.java`         | Owns the fenced complete/fail/cancel transitions for the durable LLM operation claimed by one streamed agent turn. |
 | `AgentTurnRecoveryService.java`            | Bounded oldest-first recovery for stale persisted `STREAMING` turns: records outcome uncertainty, never replays transport, and reconciles the matching operation cancellation under transactional locks. |

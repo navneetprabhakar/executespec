@@ -718,6 +718,43 @@ class LlmRouterTest {
   }
 
   @Test
+  void directOperationContextRequestUsesYamlOutputCapWhenAnthropicCallerOmitsMaxTokens() {
+    build();
+    when(registry.maxOutputForModel("claude-sonnet-4-6")).thenReturn(8192);
+    AnthropicChatModel anthropic = mock(AnthropicChatModel.class);
+    when(anthropicModelProvider.getIfAvailable()).thenReturn(anthropic);
+    when(anthropic.call(any(Prompt.class))).thenReturn(ok());
+
+    router.call(
+        req("anthropic", "claude-sonnet-4-6").toBuilder()
+            .toolsOverride(List.of())
+            .agentRole("AccuracyAssessmentService")
+            .stepId("accuracy-assessment")
+            .build());
+
+    ArgumentCaptor<Prompt> captor = ArgumentCaptor.forClass(Prompt.class);
+    verify(anthropic).call(captor.capture());
+    AnthropicChatOptions options = (AnthropicChatOptions) captor.getValue().getOptions();
+    assertThat(options.getMaxTokens()).isEqualTo(8192);
+  }
+
+  @Test
+  void directAnthropicRequestPreservesExplicitOutputCap() {
+    build();
+    AnthropicChatModel anthropic = mock(AnthropicChatModel.class);
+    when(anthropicModelProvider.getIfAvailable()).thenReturn(anthropic);
+    when(anthropic.call(any(Prompt.class))).thenReturn(ok());
+
+    router.call(req("anthropic", "claude-sonnet-4-6").toBuilder().maxTokens(512).build());
+
+    ArgumentCaptor<Prompt> captor = ArgumentCaptor.forClass(Prompt.class);
+    verify(anthropic).call(captor.capture());
+    AnthropicChatOptions options = (AnthropicChatOptions) captor.getValue().getOptions();
+    assertThat(options.getMaxTokens()).isEqualTo(512);
+    verify(registry, never()).maxOutputForModel("claude-sonnet-4-6");
+  }
+
+  @Test
   void managedAiAuthorizationCanStepDownModelBeforeDispatchAndDebitAdjustedModel() {
     build();
     when(managedAiUsageService.authorizeCall(
@@ -816,7 +853,15 @@ class LlmRouterTest {
                         .runHardCapUsd(1.0)
                         .build()))
         .isInstanceOf(ProjectedCallBudgetExceededException.class)
-        .hasMessageContaining("run hard cap $1.00");
+        .hasMessageContaining("run hard cap $1.00")
+        .isInstanceOfSatisfying(
+            ProjectedCallBudgetExceededException.class,
+            error -> {
+              assertThat(error.scope()).isEqualTo("run hard cap");
+              assertThat(error.capUsd()).isEqualTo(1.0);
+              assertThat(error.spentUsd()).isEqualTo(0.9);
+              assertThat(error.projectedCallUsd()).isEqualTo(0.2);
+            });
 
     verify(openai, never()).call(any());
     verify(stepUsageRecorder, never())
