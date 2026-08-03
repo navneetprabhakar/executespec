@@ -10,6 +10,7 @@ import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
 import java.nio.file.Path;
@@ -633,7 +634,7 @@ class WorkerAgentStagnationTest {
   }
 
   @Test
-  void outputCapWithZeroWritesGetsOneRestrictedSameRouteRecovery() {
+  void outputCapRecoveryReentersNormalWorkerForTestsAndRealCompletion() {
     Fixture f =
         newWorker(
             List.of(
@@ -643,13 +644,22 @@ class WorkerAgentStagnationTest {
                 responseWithCalls(
                     toolCall(
                         "writeFile",
-                        "{\"path\":\"src/main/java/App.java\",\"content\":\"class App {}\"}"))));
+                        "{\"path\":\"src/main/java/App.java\",\"content\":\"class App {}\"}")),
+                responseWithCalls(
+                    toolCall(
+                        "writeFile",
+                        "{\"path\":\"src/test/java/AppTest.java\",\"content\":\"class AppTest"
+                            + " {}\"}")),
+                responseWithCalls(toolCall("runTests", "{}")),
+                responseWithCalls(
+                    toolCall("completeTask", "{\"summary\":\"implementation and tests done\"}"))));
     List<ToolCallback> advertised =
         List.of(
             callback("readFile"),
             callback("writeFile"),
             callback("editFile"),
             callback("completeTask"),
+            callback("runTests"),
             callback("shell"));
     lenient()
         .when(f.registry.bindForWorker(any(), anyString(), anyString(), nullable(Set.class)))
@@ -663,13 +673,17 @@ class WorkerAgentStagnationTest {
     WorkerResult result = f.worker.run(request);
 
     assertEquals(WorkerResult.Outcome.COMPLETED, result.outcome());
-    assertEquals(2, result.iterations(), "the recovery is part of the capped logical iteration");
-    assertTrue(
-        result.salvagedUnverified(), "normal validation must still judge the recovered edit");
+    assertFalse(result.salvagedUnverified());
+    assertTrue(result.iterations() > 2, "recovery must re-enter ordinary verification turns");
+    assertTrue(result.toolCallLog().stream().anyMatch(line -> line.startsWith("runTests")));
 
     ArgumentCaptor<LlmRequest> cap = ArgumentCaptor.forClass(LlmRequest.class);
     verify(f.router, atLeastOnce()).call(cap.capture());
-    LlmRequest recovery = cap.getAllValues().get(cap.getAllValues().size() - 1);
+    LlmRequest recovery =
+        cap.getAllValues().stream()
+            .filter(call -> "worker.output-cap-recovery".equals(call.stepId()))
+            .findFirst()
+            .orElseThrow();
     assertEquals("worker.output-cap-recovery", recovery.stepId());
     assertEquals("deepseek", recovery.provider());
     assertEquals("deepseek-v4-flash-native", recovery.model());
@@ -682,6 +696,144 @@ class WorkerAgentStagnationTest {
             .map(tool -> tool.getToolDefinition().name())
             .collect(java.util.stream.Collectors.toSet()),
         "recovery authority is tighten-only: no reads, shell, build, or publication tools");
+    assertTrue(
+        cap.getAllValues().stream()
+            .filter(call -> call.stepId().startsWith("worker.iteration-"))
+            .skip(2)
+            .anyMatch(
+                call ->
+                    call.toolsOverride().stream()
+                        .anyMatch(tool -> tool.getToolDefinition().name().equals("runTests"))),
+        "after the recovered mutation, the normal worker tool surface must resume");
+  }
+
+  @Test
+  void outputCapRecoveryCannotCompleteBeforeNormalWorkerVerification() {
+    Fixture f =
+        newWorker(
+            List.of(
+                outputCappedWithoutTools("truncated"),
+                responseWithCalls(toolCall("completeTask", "{\"summary\":\"done\"}")),
+                responseWithCalls(
+                    toolCall(
+                        "writeFile", "{\"path\":\"test/feature.test.js\",\"content\":\"ok\"}")),
+                responseWithCalls(toolCall("runTests", "{}")),
+                responseWithCalls(toolCall("completeTask", "{\"summary\":\"verified\"}"))));
+    List<ToolCallback> advertised =
+        List.of(
+            callback("writeFile"),
+            callback("editFile"),
+            callback("completeTask"),
+            callback("runTests"));
+    lenient()
+        .when(f.registry.bindForWorker(any(), anyString(), anyString(), nullable(Set.class)))
+        .thenReturn(advertised);
+
+    WorkerResult result = f.worker.run(reqSalvage(30, false, "deepseek"));
+
+    assertEquals(WorkerResult.Outcome.COMPLETED, result.outcome());
+    assertTrue(
+        result.toolCallLog().stream()
+            .anyMatch(line -> line.contains("REFUSED (output-cap recovery")));
+    assertEquals("verified", result.completionSummary());
+  }
+
+  @Test
+  void outputCapRecoveryRefusesUnadvertisedShellAuthority() {
+    Fixture f =
+        newWorker(
+            List.of(
+                outputCappedWithoutTools("truncated"),
+                responseWithCalls(toolCall("shell", "{\"command\":\"rm -rf /tmp/nope\"}")),
+                responseWithCalls(
+                    toolCall(
+                        "writeFile", "{\"path\":\"test/feature.test.js\",\"content\":\"ok\"}")),
+                responseWithCalls(toolCall("runTests", "{}")),
+                responseWithCalls(toolCall("completeTask", "{\"summary\":\"verified\"}"))));
+    List<ToolCallback> advertised =
+        List.of(
+            callback("writeFile"),
+            callback("editFile"),
+            callback("completeTask"),
+            callback("runTests"),
+            callback("shell"));
+    lenient()
+        .when(f.registry.bindForWorker(any(), anyString(), anyString(), nullable(Set.class)))
+        .thenReturn(advertised);
+
+    WorkerResult result = f.worker.run(reqSalvage(30, false, "deepseek"));
+
+    assertEquals(WorkerResult.Outcome.COMPLETED, result.outcome());
+    assertTrue(
+        result.toolCallLog().stream()
+            .anyMatch(line -> line.contains("outside output-cap recovery authority")));
+    verify(f.registry, never()).find("shell");
+  }
+
+  @Test
+  void outputCapRecoveryRefusesParallelReadsAndBroaderMutationAliasesBeforeDispatch() {
+    Fixture f =
+        newWorker(
+            List.of(
+                outputCappedWithoutTools("truncated"),
+                responseWithCalls(
+                    toolCall("readFile", "{\"path\":\"src/a.js\"}"),
+                    toolCall("readFile", "{\"path\":\"src/b.js\"}"),
+                    toolCall("delete", "{\"path\":\"src/keep.js\"}")),
+                responseWithCalls(
+                    toolCall(
+                        "writeFile", "{\"path\":\"test/feature.test.js\",\"content\":\"ok\"}")),
+                responseWithCalls(toolCall("runTests", "{}")),
+                responseWithCalls(toolCall("completeTask", "{\"summary\":\"verified\"}"))));
+    List<ToolCallback> advertised =
+        List.of(
+            callback("readFile"),
+            callback("writeFile"),
+            callback("editFile"),
+            callback("delete"),
+            callback("completeTask"),
+            callback("runTests"));
+    lenient()
+        .when(f.registry.bindForWorker(any(), anyString(), anyString(), nullable(Set.class)))
+        .thenReturn(advertised);
+
+    WorkerResult result = f.worker.run(reqSalvage(30, false, "deepseek"));
+
+    assertEquals(WorkerResult.Outcome.COMPLETED, result.outcome());
+    assertEquals(
+        3,
+        result.toolCallLog().stream()
+            .filter(line -> line.contains("outside output-cap recovery authority"))
+            .count());
+    verify(f.registry, never()).find("readFile");
+    verify(f.registry, never()).find("delete");
+  }
+
+  @Test
+  void outputCapRecoveryAtIterationCeilingGetsExactlyTwoGuardedFollowUpTurns() {
+    Fixture f =
+        newWorker(
+            List.of(
+                outputCappedWithoutTools("truncated"),
+                responseWithCalls(
+                    toolCall(
+                        "writeFile", "{\"path\":\"test/feature.test.js\",\"content\":\"ok\"}")),
+                responseWithCalls(toolCall("runTests", "{}")),
+                responseWithCalls(toolCall("completeTask", "{\"summary\":\"verified\"}"))));
+    List<ToolCallback> advertised =
+        List.of(
+            callback("writeFile"),
+            callback("editFile"),
+            callback("completeTask"),
+            callback("runTests"));
+    lenient()
+        .when(f.registry.bindForWorker(any(), anyString(), anyString(), nullable(Set.class)))
+        .thenReturn(advertised);
+
+    WorkerResult result = f.worker.run(reqSalvage(1, false, "deepseek"));
+
+    assertEquals(WorkerResult.Outcome.COMPLETED, result.outcome());
+    assertEquals(3, result.iterations());
   }
 
   /**

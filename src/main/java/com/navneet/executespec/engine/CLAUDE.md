@@ -62,9 +62,16 @@ arguments must never be claimed as a delivered product path — and now emits `[
 
 **2026-08-02 zero-write output-cap recovery:** when a provider returns a tool-less
 `length`/`max_tokens`/`max_output_tokens` finish before any mutation, `WorkerAgent` makes exactly one
-same-route call with only `writeFile`/`editFile`/`completeTask`, required tool choice, and an 8K
-bounded output allowance. It never parses partial assistant text as code. A resulting edit is marked
-`salvagedUnverified`, so build, reviewer, and deterministic validation remain authoritative.
+same-route call with only `writeFile`/`editFile`/`completeTask`, required tool choice, and an
+8K–16K output allowance. It never parses partial assistant text as code. The response is queued
+through the normal worker response/tool-dispatch path on the same logical iteration; recovered
+writes therefore enter conversation history and update the ordinary write, churn, verification,
+and context state before the full tool surface resumes. `completeTask` is refused inside the
+recovery response itself: only a later normal turn can complete after all requested production and
+maintained-test edits plus verification. The recovery remains one-shot and preserves exact route,
+deadline, task-cost, and tool-authority fences; unadvertised tools are refused again at dispatch.
+A successful recovery mutation in either of the final two configured iterations receives only the
+missing part of a two-turn verify-then-complete window, capped at two additional guarded iterations.
 Salvage mutations use `WorkerAgent.toolCallLogEntry`'s canonical
 `tool(sig=…) [target=…] -> OK|ERR` representation; recovery markers must not invent a second log
 grammar because executor write counts and admitted Git-diff attribution consume this evidence.
