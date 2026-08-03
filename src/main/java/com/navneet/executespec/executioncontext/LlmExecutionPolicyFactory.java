@@ -238,13 +238,14 @@ public class LlmExecutionPolicyFactory {
     String requestedProvider = firstNonBlank(run.getRequestedProvider(), run.getAiProvider());
     boolean pinned = run.isRoutePinned();
     String requestedModel = pinned ? require(run.getRequestedModel(), "pinned model") : null;
-    String source = "preview-render:" + runId + ":" + require(renderAttemptId, "renderAttemptId");
+    String source = compactPreviewSourceId(runId, renderAttemptId);
+    String correlationId = compactCorrelationId("preview-render", source);
     return createCustomer(
         LlmExecutionContext.ContextType.AGENT_TURN,
         "preview-render",
         "PREVIEW_RENDER",
         source,
-        source,
+        correlationId,
         userId,
         userId,
         orgId,
@@ -277,13 +278,14 @@ public class LlmExecutionPolicyFactory {
     if (route == null) throw new IllegalArgumentException("preview render route required");
     String requestedProvider = require(route.providerName(), "preview render provider");
     String requestedModel = require(route.getModel(), "preview render model");
-    String source = "preview-render:" + runId + ":" + require(renderAttemptId, "renderAttemptId");
+    String source = compactPreviewSourceId(runId, renderAttemptId);
+    String correlationId = compactCorrelationId("preview-render", source);
     return createCustomer(
         LlmExecutionContext.ContextType.AGENT_TURN,
         "preview-render",
         "PREVIEW_RENDER",
         source,
-        source,
+        correlationId,
         userId,
         userId,
         orgId,
@@ -537,12 +539,23 @@ public class LlmExecutionPolicyFactory {
       return java.util.HexFormat.of()
           .formatHex(
               digest.digest(
-                  require(value, "embedding actor")
+                  require(value, "identity value")
                       .getBytes(java.nio.charset.StandardCharsets.UTF_8)))
           .substring(0, 16);
     } catch (java.security.NoSuchAlgorithmException impossible) {
       throw new IllegalStateException("SHA-256 unavailable", impossible);
     }
+  }
+
+  private static String compactCorrelationId(String namespace, String identity) {
+    return require(namespace, "correlation namespace") + ":" + stableIdentityComponent(identity);
+  }
+
+  private static String compactPreviewSourceId(String runId, String renderAttemptId) {
+    return "preview-render:"
+        + require(runId, "runId")
+        + ":"
+        + stableIdentityComponent(require(renderAttemptId, "renderAttemptId"));
   }
 
   public LlmExecutionReference platformInternal(
