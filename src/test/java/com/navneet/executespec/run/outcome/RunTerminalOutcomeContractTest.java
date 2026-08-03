@@ -57,6 +57,18 @@ class RunTerminalOutcomeContractTest {
     assertThat(outcome.customerMessage()).doesNotContain("secret provider payload");
   }
 
+  @ParameterizedTest
+  @CsvSource({
+    "DETERMINISTIC_HTTP_FORBIDDEN_METHOD_PRESENT,exposed an HTTP method",
+    "DETERMINISTIC_HTTP_METHOD_REJECTION_UNPROVEN,could not prove the required HTTP 405"
+  })
+  void methodRejectionFailuresHaveStableCustomerSemantics(String code, String message) {
+    RunTerminalOutcome outcome = project("FAILED", code, "raw source detail", 0.02, 1.0, null);
+
+    assertThat(outcome.category()).isEqualTo(RunTerminalOutcome.Category.ACTION_REQUIRED);
+    assertThat(outcome.customerMessage()).contains(message).doesNotContain("raw source detail");
+  }
+
   @Test
   void unknownFailureIsLeakSafeAndCarriesStableSupportCode() {
     RunTerminalOutcome outcome =

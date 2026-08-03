@@ -59,6 +59,8 @@ public final class RunTerminalOutcomeContract {
           "RE_REVIEW_FAILED",
           "RE_REVIEW_NO_WORKSPACE",
           "DETERMINISTIC_HTTP_REQUIREMENT_MISSING",
+          "DETERMINISTIC_HTTP_FORBIDDEN_METHOD_PRESENT",
+          "DETERMINISTIC_HTTP_METHOD_REJECTION_UNPROVEN",
           "STANDARDS_ENFORCEMENT_UNAVAILABLE",
           "INVARIANT_ENFORCEMENT_UNAVAILABLE");
 
@@ -305,6 +307,10 @@ public final class RunTerminalOutcomeContract {
           "The requested re-review could not access the run workspace.";
       case "DETERMINISTIC_HTTP_REQUIREMENT_MISSING" ->
           "The generated change did not satisfy a required HTTP contract.";
+      case "DETERMINISTIC_HTTP_FORBIDDEN_METHOD_PRESENT" ->
+          "The generated change exposed an HTTP method that must be rejected.";
+      case "DETERMINISTIC_HTTP_METHOD_REJECTION_UNPROVEN" ->
+          "The generated change could not prove the required HTTP 405 behavior.";
       case "STANDARDS_ENFORCEMENT_UNAVAILABLE" ->
           "The required project-standards checks could not be completed.";
       case "INVARIANT_ENFORCEMENT_UNAVAILABLE" ->

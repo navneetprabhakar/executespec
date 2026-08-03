@@ -23,8 +23,11 @@ Plan Review's “Start revised run” uses the canonical Start composer and rest
 request and its project/repository scope; it no longer falls through the project landing redirect.
 Exact HTTP paths in a submitted request retain their namespace through planning: `/route` and
 `/api/route` are distinct producer contracts, and an added or removed `/api` prefix is rejected
-before approval or code-generation spend. Web Agent streaming also treats a parsed terminal `done`
-as authoritative when a proxy resets the connection immediately afterward.
+before approval or code-generation spend. Explicit method-rejection acceptance such as
+`POST /route must return 405` is preserved as a negative contract: the forbidden method must remain
+absent while another supported method proves the path exists, so a 404 cannot masquerade as the
+requested behavior. Web Agent streaming also treats a parsed terminal `done` as authoritative when
+a proxy resets the connection immediately afterward.
 
 The BUILD planner preserves exact behavioral clauses, keeps focused maintained tests with the
 production task they verify, and bounds task breadth to avoid one runaway worker context. Workers
