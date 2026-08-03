@@ -26,7 +26,7 @@ import {useAuthStore} from '@/stores/useAuthStore';
  * directories were retired).
  */
 export default function ProtectedRoute() {
-  const {isAuthenticated, isLoading, loadMe, user} = useAuthStore();
+  const {isAuthenticated, isLoading, loadMe, loadMeError, user} = useAuthStore();
   const location = useLocation();
 
   useEffect(() => {
@@ -35,6 +35,36 @@ export default function ProtectedRoute() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // A transient /me failure must not become an infinite spinner or force a false logout. Preserve
+  // the session and let the user retry explicitly once the service is available.
+  if (isAuthenticated && !user && loadMeError) {
+    return (
+      <main
+        className='flex min-h-screen items-center justify-center px-6'
+        style={{background: 'var(--signal-bg)', color: 'var(--signal-text)'}}
+      >
+        <section
+          role='alert'
+          className='w-full max-w-md rounded-xl border p-6 text-center'
+          style={{borderColor: 'var(--signal-border)', background: 'var(--signal-surface)'}}
+        >
+          <h1 className='text-lg font-semibold'>Could not verify your session</h1>
+          <p className='mt-2 text-sm' style={{color: 'var(--signal-text-muted)'}}>
+            Your session was kept. Retry when the service is available.
+          </p>
+          <button
+            type='button'
+            className='mt-5 rounded-lg px-4 py-2 text-sm font-semibold'
+            style={{background: 'var(--signal-ocean)', color: 'var(--signal-bg)'}}
+            onClick={() => void loadMe()}
+          >
+            Retry
+          </button>
+        </section>
+      </main>
+    );
+  }
 
   // A persisted token makes the session authenticated before the async /me
   // hydration has populated the user. Keep nested guards behind the same
