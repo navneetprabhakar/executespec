@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 
-import {cp, mkdir, mkdtemp, readFile, rm} from 'node:fs/promises';
+import {cp, mkdir, mkdtemp, readFile, rm, stat} from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {
   apiRequest,
+  canonicalJson,
   freezeManifest,
   invalidateManifest,
   loadManifest,
@@ -33,7 +34,7 @@ function usage() {
   litmus.mjs preflight --confirm-live=YES
   litmus.mjs fixture create --confirm-live=YES --confirm-github-mutation=YES
   litmus.mjs fixture cleanup --confirm-live=YES --confirm-delete=OWNER/REPO
-  litmus.mjs advance --to STATE --evidence JSON --confirm-external-operation-completed=YES
+  litmus.mjs advance --to STATE --evidence-file PATH --confirm-external-operation-completed=YES
   litmus.mjs freeze
   litmus.mjs invalidate --reason TEXT
 
@@ -65,7 +66,7 @@ async function init() {
     runRequest: {
       ...runRequest,
       requirementSha256: sha256(requirement.trim()),
-      canonicalJsonSha256: sha256(JSON.stringify(runRequest)),
+      canonicalJsonSha256: sha256(canonicalJson(runRequest)),
     },
   });
   await saveManifest(manifestPath, manifest);
@@ -78,7 +79,14 @@ async function preflight() {
   if (manifest.state !== 'NEW') throw new Error('Preflight requires NEW state');
   const baseUrl = process.env.EXECUTESPEC_LITMUS_BASE_URL;
   const token = process.env.EXECUTESPEC_LITMUS_ACCESS_TOKEN;
-  if (!baseUrl || !token) throw new Error('EXECUTESPEC_LITMUS_BASE_URL and EXECUTESPEC_LITMUS_ACCESS_TOKEN are required');
+  const expectedSha = manifest.deployment.expectedSha || process.env.EXECUTESPEC_LITMUS_DEPLOYED_SHA;
+  const deployedSha = process.env.EXECUTESPEC_LITMUS_DEPLOYED_SHA;
+  const runningSha = process.env.EXECUTESPEC_LITMUS_RUNNING_SHA;
+  const deployWorkflowRunId = process.env.EXECUTESPEC_LITMUS_DEPLOY_WORKFLOW_RUN_ID;
+  const deployWorkflowRunUrl = process.env.EXECUTESPEC_LITMUS_DEPLOY_WORKFLOW_RUN_URL;
+  if (!baseUrl || !token || !expectedSha || !deployedSha || !runningSha || !deployWorkflowRunId || !deployWorkflowRunUrl) {
+    throw new Error('Base URL, access token, exact deploy workflow and expected/deployed/RUNNING_SHA evidence are required');
+  }
   const [health, readiness] = await Promise.all([
     apiRequest(baseUrl, null, '/actuator/health'),
     apiRequest(baseUrl, token, '/api/v3/provider-readiness'),
@@ -89,8 +97,16 @@ async function preflight() {
   const row = readiness.body?.providers?.find((item) => item.provider === route.provider);
   if (!readiness.ok || !row?.dispatchable) throw new Error(`${route.provider} is not dispatchable`);
   const updated = transition(manifest, 'PREFLIGHTED', {
+    expectedSha,
+    deployedSha,
+    runningSha,
+    runningShaAuthority: 'DEPLOYMENT_HOST:/opt/app/RUNNING_SHA',
     health: health.body.status,
+    deployWorkflowRunId,
+    deployWorkflowRunUrl,
+    deployConclusion: 'SUCCESS',
     providerState: row.state,
+    providerPolicyEvidenceId: `sha256:${sha256(JSON.stringify(readiness.body))}`,
     ghAuth: 'VERIFIED',
   });
   await saveManifest(manifestPath, updated);
@@ -115,7 +131,12 @@ async function fixtureCreate() {
     const {stdout: baseSha} = await runCommand('git', ['rev-parse', 'HEAD'], {cwd: temporary});
     const updated = structuredClone(manifest);
     updated.fixture = {...updated.fixture, repoFullName: repo, visibility: 'PRIVATE', baseBranch: 'main', baseSha: baseSha.trim()};
-    await saveManifest(manifestPath, transition(updated, 'FIXTURE_CREATED', {repoFullName: repo, baseSha: baseSha.trim()}));
+    await saveManifest(manifestPath, transition(updated, 'FIXTURE_CREATED', {
+      repoFullName: repo,
+      baseBranch: 'main',
+      visibility: 'PRIVATE',
+      baseSha: baseSha.trim(),
+    }));
   } finally {
     await rm(temporary, {recursive: true, force: true});
   }
@@ -127,8 +148,32 @@ async function fixtureCleanup() {
   const repo = manifest.fixture?.repoFullName;
   if (!repo || values['confirm-delete'] !== repo) throw new Error(`Refusing delete: --confirm-delete=${repo || 'OWNER/REPO'} is required`);
   await runCommand('gh', ['repo', 'delete', repo, '--yes']);
-  const ready = manifest.state === 'CLEANUP_REQUIRED' ? manifest : transition(manifest, 'CLEANUP_REQUIRED', {reason: 'explicit cleanup'});
-  await saveManifest(manifestPath, transition(ready, 'CLEANUP_VERIFIED', {githubRepoDeleted: repo}));
+  const ready = manifest.state === 'CLEANUP_REQUIRED' ? structuredClone(manifest) : transition(manifest, 'CLEANUP_REQUIRED', {
+    reason: 'explicit cleanup after litmus evidence collection',
+    cleanupPlanId: `github-delete:${manifest.campaignId}`,
+  });
+  ready.cleanup.githubDeletionRequested = {repoFullName: repo, at: new Date().toISOString()};
+  ready.updatedAt = new Date().toISOString();
+  await saveManifest(manifestPath, ready);
+}
+
+async function readAdvanceEvidence() {
+  const evidenceFile = values['evidence-file'];
+  if (evidenceFile && values.evidence) throw new Error('Use exactly one of --evidence-file or --evidence');
+  if (evidenceFile) {
+    const file = path.resolve(evidenceFile);
+    const metadata = await stat(file);
+    if (!metadata.isFile() || (metadata.mode & 0o077) !== 0 || (metadata.mode & 0o600) !== 0o600) {
+      throw new Error('--evidence-file must be a regular file with mode 0600');
+    }
+    return JSON.parse(await readFile(file, 'utf8'));
+  }
+  if (!values.evidence) throw new Error('--evidence-file is required (bounded non-secret --evidence is also accepted)');
+  if (Buffer.byteLength(values.evidence, 'utf8') > 16_384) throw new Error('Inline --evidence exceeds the 16 KiB non-secret bound; use --evidence-file');
+  if (/bearer\s|(?:ghp|github_pat|es_pat)_|api.?key|password|secret/i.test(values.evidence)) {
+    throw new Error('Inline --evidence appears to contain a secret; use a sanitized 0600 evidence file');
+  }
+  return JSON.parse(values.evidence);
 }
 
 async function advance() {
@@ -136,8 +181,7 @@ async function advance() {
   const manifest = await loadManifest(manifestPath);
   const next = String(values.to ?? '');
   if (!next) throw new Error('--to is required');
-  if (!values.evidence) throw new Error('--evidence with immutable external operation IDs is required');
-  const evidence = JSON.parse(values.evidence);
+  const evidence = await readAdvanceEvidence();
   if (!evidence || typeof evidence !== 'object' || Array.isArray(evidence) || Object.keys(evidence).length === 0) {
     throw new Error('--evidence must be a non-empty JSON object');
   }
