@@ -415,6 +415,7 @@ public class WorkerAgent {
         terminalTaskMode ? null : new WorkerMutationEpochWatchdog();
     int textOnlyForcedRetries = 0;
     boolean zeroWriteOutputCapRecoveryAttempted = false;
+    ChatResponse pendingOutputCapRecoveryResponse = null;
     boolean forceToolChoiceNextCall = false;
     // task 9 — context-overflow recovery attempts used (compactNow, then hard-trim, then ERROR).
     int overflowRecoveries = 0;
@@ -522,7 +523,8 @@ public class WorkerAgent {
     // signal for WorkerHistoryCompactor. 0 until the first call returns usage.
     long lastInputTokens = 0L;
 
-    for (int iter = startIter; iter <= maxIter; iter++) {
+    int iterationLimit = maxIter;
+    for (int iter = startIter; iter <= iterationLimit; iter++) {
       // A4 (audit 2026-05-29) — cooperative cancellation. A reviewer pass / orchestrator cancels a
       // runaway via future.cancel(true), which sets this thread's interrupt flag; with no check the
       // loop kept generating to completion (still billed). Bail at the iter boundary, before the
@@ -640,24 +642,30 @@ public class WorkerAgent {
       final boolean forcedThisCall = progressV2 && forceToolChoiceNextCall;
       forceToolChoiceNextCall = false;
       ChatResponse resp;
+      boolean outputCapRecoveryResponse = pendingOutputCapRecoveryResponse != null;
       java.util.OptionalInt iterationTimeout = deadlineTimeoutSeconds(req);
       if (iterationTimeout.isEmpty()) {
         return deadlineExceededResult(
             req, iter, toolsDispatched, lastText, maxRepeatedAssistantTextCount, toolLog, start);
       }
       try {
-        resp =
-            router.call(
-                WorkerLlmRequestFactory.create(
-                    req,
-                    history,
-                    "WorkerAgent",
-                    "worker.iteration-" + iter,
-                    req.temperature(),
-                    req.maxTokensPerCall(),
-                    workerTools,
-                    forcedThisCall ? "required" : null,
-                    AbsoluteDeadlineBudget.readTimeoutOverride(iterationTimeout)));
+        if (outputCapRecoveryResponse) {
+          resp = pendingOutputCapRecoveryResponse;
+          pendingOutputCapRecoveryResponse = null;
+        } else {
+          resp =
+              router.call(
+                  WorkerLlmRequestFactory.create(
+                      req,
+                      history,
+                      "WorkerAgent",
+                      "worker.iteration-" + iter,
+                      req.temperature(),
+                      req.maxTokensPerCall(),
+                      workerTools,
+                      forcedThisCall ? "required" : null,
+                      AbsoluteDeadlineBudget.readTimeoutOverride(iterationTimeout)));
+        }
       } catch (ProjectedCallBudgetExceededException e) {
         log.warn(
             "WorkerAgent PROJECTED_BUDGET_EXCEEDED run={} task={} iter={} reason={}",
@@ -828,20 +836,18 @@ public class WorkerAgent {
           zeroWriteOutputCapRecoveryAttempted = true;
           history.add(WorkerZeroWriteOutputCapRecovery.instruction());
           toolLog.add("OUTPUT_CAP_ZERO_WRITE_RECOVERY -> ATTEMPTED");
-          WorkerResult recovered =
-              salvageAttempt(
+          pendingOutputCapRecoveryResponse =
+              WorkerZeroWriteOutputCapRecovery.call(
                   req,
                   history,
-                  toolsDispatched,
-                  toolLog,
-                  start,
                   salvageTools(req, true),
-                  "required",
-                  WorkerZeroWriteOutputCapRecovery.outputTokens(req.maxTokensPerCall()),
-                  iter,
-                  WorkerZeroWriteOutputCapRecovery.STEP_ID,
-                  WorkerZeroWriteOutputCapRecovery.SUMMARY);
-          if (recovered != null) return recovered;
+                  router,
+                  costTracker,
+                  deadlineTimeoutSeconds(req));
+          if (pendingOutputCapRecoveryResponse != null) {
+            iter--;
+            continue;
+          }
         }
         if (terminalVerifiedPass) {
           String summary =
@@ -970,11 +976,21 @@ public class WorkerAgent {
       // below then consumes the cached envelopes in deterministic original order, so every per-call
       // state mutation (metrics / SSE / toolResponses ordering / gate-tracking) is unchanged. Empty
       // for any batch with a write/build/shell/completeTask call (or a remote run) → sequential.
-      java.util.Map<String, String> parallelReads = maybeParallelReadDispatch(calls, req);
+      java.util.Map<String, String> parallelReads =
+          outputCapRecoveryResponse ? java.util.Map.of() : maybeParallelReadDispatch(calls, req);
       for (int callIdx = 0; callIdx < calls.size(); callIdx++) {
         AssistantMessage.ToolCall tc = calls.get(callIdx);
         final boolean isImmediatelyPriorToolCall = (callIdx == lastIdx);
         toolsDispatched++;
+        WorkerZeroWriteOutputCapRecovery.ToolRefusal recoveryRefusal =
+            outputCapRecoveryResponse ? WorkerZeroWriteOutputCapRecovery.refusal(tc.name()) : null;
+        if (recoveryRefusal != null) {
+          String refused = errEnvelope("FORBIDDEN", recoveryRefusal.message());
+          toolResponses.add(
+              new ToolResponseMessage.ToolResponse(safeId(tc.id()), tc.name(), refused));
+          toolLog.add(tc.name() + " → REFUSED (" + recoveryRefusal.logReason() + ")");
+          continue;
+        }
         if (CompleteTaskTool.NAME.equals(tc.name())) {
           // V182 layer-3 verification gate. When the request opted in (patch mode),
           // refuse completeTask unless a runTests call landed within the last
@@ -1426,6 +1442,9 @@ public class WorkerAgent {
 
       completionPolicy.afterToolBatch(
           successfulEditsThisIter, fullSuitePassedThisIter, totalWriteCalls);
+      if (outputCapRecoveryResponse && successfulEditsThisIter > 0) {
+        iterationLimit = WorkerZeroWriteOutputCapRecovery.followUpIterationLimit(maxIter, iter);
+      }
 
       WorkerMutationChurnGuard.Decision churnDecision =
           mutationChurn.evaluate(
@@ -1703,7 +1722,7 @@ public class WorkerAgent {
         "WorkerAgent ITERATION LIMIT run={} task={} iters={} totalWrites={}",
         req.context().runId(),
         req.context().taskId(),
-        maxIter,
+        iterationLimit,
         totalWriteCalls);
 
     // 2026-05-08 Lever B: best-guess salvage. We hit the iter cap with zero writes — the agent
@@ -1726,10 +1745,10 @@ public class WorkerAgent {
       }
     }
 
-    recordTerminal(WorkerResult.Outcome.ITERATION_LIMIT_EXCEEDED, req, maxIter);
+    recordTerminal(WorkerResult.Outcome.ITERATION_LIMIT_EXCEEDED, req, iterationLimit);
     return WorkerResult.builder()
         .outcome(WorkerResult.Outcome.ITERATION_LIMIT_EXCEEDED)
-        .iterations(maxIter)
+        .iterations(iterationLimit)
         .toolCallsDispatched(toolsDispatched)
         .finalAssistantText(lastText)
         .repeatedAssistantTextCount(maxRepeatedAssistantTextCount)

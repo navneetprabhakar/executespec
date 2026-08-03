@@ -8,12 +8,15 @@
 
 Spec-driven AI coding platform. Customer submits a spec in natural language → V2 pipeline plans, codes across one or more repos, builds + tests, opens a pull request with a deterministic verified score. Human approves at the plan gate; everything after is automatic.
 
-**Recovered-mutation trust boundary (2026-08-04):** a zero-write output-cap or best-guess salvage
-may make one bounded mutation recovery. That recovery never claims the model called `completeTask`.
-It remains `COMPLETED_WITH_WARNING` when smoke is skipped, build-only, unavailable, stale, or red;
-only a final-task green build plus a fresh provenance-verified workspace suite with at least one
-pass and a complete pass/skip population promotes the task to `SUCCESS`. Other iteration/stagnation
-soft completions stay conservative.
+**Output-cap recovery trust boundary (2026-08-04):** a zero-write provider output cap gets one
+same-route, mutation-only recovery call with expanded output headroom. Its response is processed by
+the ordinary worker loop instead of terminalizing the task: recovered writes enter normal history,
+the full tool surface resumes, and only a later ordinary turn may call `completeTask` after required
+source/tests and verification are complete. Unadvertised tools are refused at dispatch, and a
+successful mutation at the iteration ceiling receives at most two guarded follow-up turns.
+Best-guess iteration/stagnation salvage remains
+`COMPLETED_WITH_WARNING` even when existing workspace tests are green; non-regression alone does not
+prove requested test coverage or goal completion.
 
 ## Architecture (5-minute orientation)
 
