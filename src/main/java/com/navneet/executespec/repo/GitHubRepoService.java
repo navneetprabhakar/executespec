@@ -1632,10 +1632,37 @@ public class GitHubRepoService {
       boolean isPrivate,
       Long sizeKb) {}
 
+  /** Secret-free result that preserves the provider boundary for repository attachment. */
+  public record RemoteRepoLookupResult(
+      RemoteRepo repository, String errorCode, Integer upstreamStatus, boolean retryable) {
+    public static RemoteRepoLookupResult found(RemoteRepo repository) {
+      return new RemoteRepoLookupResult(repository, null, 200, false);
+    }
+
+    public static RemoteRepoLookupResult failed(
+        String errorCode, Integer upstreamStatus, boolean retryable) {
+      return new RemoteRepoLookupResult(null, errorCode, upstreamStatus, retryable);
+    }
+
+    public boolean successful() {
+      return repository != null;
+    }
+  }
+
   /** Reads canonical repository metadata, including GitHub's immutable numeric repository id. */
   public RemoteRepo getRemoteRepo(String fullName, String overridePat) {
+    return getRemoteRepoResult(fullName, overridePat).repository();
+  }
+
+  /**
+   * Reads canonical repository metadata without erasing GitHub's safe status category.
+   *
+   * <p>The legacy nullable wrapper remains for older readiness callers. New admission paths use
+   * this result so an inaccessible private repository is not mislabeled as an ExecuteSpec outage.
+   */
+  public RemoteRepoLookupResult getRemoteRepoResult(String fullName, String overridePat) {
     if (overridePat == null || overridePat.isBlank() || fullName == null || fullName.isBlank()) {
-      return null;
+      return RemoteRepoLookupResult.failed("GITHUB_REPOSITORY_REQUEST_INVALID", 400, false);
     }
     try {
       HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
@@ -1648,21 +1675,44 @@ public class GitHubRepoService {
               .GET()
               .build();
       HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
-      if (response.statusCode() != 200) return null;
+      if (response.statusCode() != 200) return remoteRepoFailure(response.statusCode());
       JsonNode node = new ObjectMapper().readTree(response.body());
       String canonical = node.path("full_name").asText(null);
-      if (canonical == null || node.path("id").isMissingNode()) return null;
-      return new RemoteRepo(
-          Long.toString(node.path("id").asLong()),
-          canonical,
-          node.path("clone_url").asText("https://github.com/" + canonical + ".git"),
-          node.path("default_branch").asText("main"),
-          node.path("private").asBoolean(false),
-          node.path("size").isNumber() ? node.path("size").asLong() : null);
+      if (canonical == null
+          || canonical.isBlank()
+          || !node.path("id").isIntegralNumber()
+          || node.path("id").asLong() <= 0) {
+        return RemoteRepoLookupResult.failed("GITHUB_INVALID_RESPONSE", 502, true);
+      }
+      return RemoteRepoLookupResult.found(
+          new RemoteRepo(
+              Long.toString(node.path("id").asLong()),
+              canonical,
+              node.path("clone_url").asText("https://github.com/" + canonical + ".git"),
+              node.path("default_branch").asText("main"),
+              node.path("private").asBoolean(false),
+              node.path("size").isNumber() ? node.path("size").asLong() : null));
     } catch (Exception ex) {
-      log.warn("[GitHubRepoService] getRemoteRepo failed for {}: {}", fullName, ex.getMessage());
-      return null;
+      log.warn(
+          "[GitHubRepoService] getRemoteRepo failed for {}: {}",
+          fullName,
+          ex.getClass().getSimpleName());
+      return RemoteRepoLookupResult.failed("GITHUB_UNAVAILABLE", null, true);
     }
+  }
+
+  static RemoteRepoLookupResult remoteRepoFailure(int status) {
+    return switch (status) {
+      case 401 -> RemoteRepoLookupResult.failed("GITHUB_CREDENTIAL_REJECTED", 401, false);
+      case 403 -> RemoteRepoLookupResult.failed("GITHUB_REPOSITORY_ACCESS_DENIED", 403, false);
+      case 404 ->
+          RemoteRepoLookupResult.failed("GITHUB_REPOSITORY_NOT_FOUND_OR_INACCESSIBLE", 404, false);
+      case 429 -> RemoteRepoLookupResult.failed("GITHUB_RATE_LIMITED", 429, true);
+      default ->
+          status >= 500
+              ? RemoteRepoLookupResult.failed("GITHUB_UNAVAILABLE", status, true)
+              : RemoteRepoLookupResult.failed("GITHUB_REPOSITORY_UNREADABLE", status, false);
+    };
   }
 
   /**

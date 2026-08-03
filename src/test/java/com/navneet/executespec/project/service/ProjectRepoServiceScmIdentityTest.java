@@ -26,6 +26,7 @@ import com.navneet.executespec.repo.ScmCapability;
 import com.navneet.executespec.repo.ScmCredential;
 import com.navneet.executespec.repo.ScmCredentialResolver;
 import com.navneet.executespec.repo.ScmProvider;
+import com.navneet.executespec.repo.ScmProviderException;
 import com.navneet.executespec.repo.ScmRemoteRepository;
 import com.navneet.executespec.repo.ScmRepositoryClient;
 import com.navneet.executespec.repo.ScmRepositoryClientRegistry;
@@ -122,6 +123,25 @@ class ProjectRepoServiceScmIdentityTest {
                     false))
         .isInstanceOf(ResponseStatusException.class)
         .hasMessageContaining("409 CONFLICT");
+    verify(repositories, never()).save(any());
+  }
+
+  @Test
+  void providerAccessFailureCannotPersistARepository() {
+    when(bitbucket.inspect("acme/private", new ScmCredential("forge", "secret")))
+        .thenThrow(new ScmProviderException("BITBUCKET_REPOSITORY_ACCESS_DENIED", 403, false));
+
+    assertThatThrownBy(
+            () ->
+                service.createRepo(
+                    new CreateRepoRequest(
+                        "USER", "BITBUCKET", "acme/private", null, null, null, false),
+                    "user-1",
+                    "org-1",
+                    false))
+        .isInstanceOfSatisfying(
+            ScmProviderException.class,
+            error -> assertThat(error.getStatusCode().value()).isEqualTo(403));
     verify(repositories, never()).save(any());
   }
 
