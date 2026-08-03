@@ -1715,7 +1715,10 @@ evidence, and horizontally scaled JVMs require a shared persistent trajectory ro
   `codex/enterprise-litmus-error-contracts`)** — terminal run DTOs carry one server-owned additive
   `terminalOutcome` projection for Web, email, in-app notifications, and future CLI consumption.
   Controlled limits/policy/validation/cancellation are separate from leak-safe platform failures;
-  spend/cap, publication impact, one recovery action, and support code are included when known.
+  spend/cap, publication impact, one next action, and support code are included when known.
+  Web run detail executes only that server-owned primary action (including an explicit href), keeps
+  diagnostic navigation secondary, and presents `USER_STOPPED` cancellation neutrally in both run
+  detail and the Work list. A terminal missing report is fetched once and is never polled.
   Run sync attempts durable workspace restore before `WORKSPACE_UNAVAILABLE` (410), reconstructs
   archive-omitted Git metadata from immutable run snapshots plus credential-free project SCM
   coordinates, and reports transient restore faults as retryable `WORKSPACE_RESTORE_FAILED` (503).

@@ -1,0 +1,213 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://executespec.ai/schemas/enterprise-litmus-manifest-v1.json",
+  "title": "ExecuteSpec enterprise litmus manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "campaignId",
+    "state",
+    "createdAt",
+    "updatedAt",
+    "invalidation",
+    "deployment",
+    "fixture",
+    "project",
+    "route",
+    "runRequest",
+    "approval",
+    "clients",
+    "frozenTupleDigest",
+    "heroes",
+    "postMerge",
+    "negatives",
+    "cleanup",
+    "events"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "campaignId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "state": {
+      "enum": [
+        "NEW",
+        "PREFLIGHTED",
+        "FIXTURE_CREATED",
+        "PROJECT_LINKED",
+        "BASELINE_V1_READY",
+        "SOURCE_REVISION_PUSHED",
+        "BASELINE_V2_READY",
+        "FROZEN",
+        "HERO_1_RUNNING",
+        "HERO_1_VERIFIED",
+        "HERO_2_RUNNING",
+        "HERO_2_VERIFIED",
+        "HERO_3_RUNNING",
+        "HERO_3_VERIFIED",
+        "HERO_PR_MERGED",
+        "MERGED_SHA_REFRESHED",
+        "CONTINUATION_VERIFIED",
+        "CI_FAILURE_CREATED",
+        "CI_FIX_VERIFIED",
+        "DEPLOYMENT_TRACKED",
+        "DEPLOYMENT_SKIPPED",
+        "NEGATIVES_VERIFIED",
+        "CLEANUP_REQUIRED",
+        "CLEANUP_VERIFIED",
+        "COMPLETE",
+        "INVALIDATED"
+      ]
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "updatedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "invalidation": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "deployment": {
+      "$ref": "#/$defs/object"
+    },
+    "fixture": {
+      "$ref": "#/$defs/object"
+    },
+    "project": {
+      "$ref": "#/$defs/object"
+    },
+    "route": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "provider",
+        "model",
+        "routingMode"
+      ],
+      "properties": {
+        "provider": {
+          "enum": [
+            "DEEPSEEK",
+            "FIREWORKS"
+          ]
+        },
+        "model": {
+          "enum": [
+            "deepseek-v4-pro-native",
+            "deepseek-v4-flash-native",
+            "glm-5.2-fw"
+          ]
+        },
+        "routingMode": {
+          "const": "EXACT_LOCK"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "provider": {
+                "const": "FIREWORKS"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "model": {
+                "const": "glm-5.2-fw"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "provider": {
+                "const": "DEEPSEEK"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "model": {
+                "enum": [
+                  "deepseek-v4-pro-native",
+                  "deepseek-v4-flash-native"
+                ]
+              }
+            }
+          }
+        }
+      ]
+    },
+    "runRequest": {
+      "$ref": "#/$defs/object"
+    },
+    "approval": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode",
+        "fingerprintAlgorithm"
+      ],
+      "properties": {
+        "mode": {
+          "const": "MANUAL_EXACT_PLAN"
+        },
+        "fingerprintAlgorithm": {
+          "const": "SHA-256_UTF8_PLAN_JSON"
+        }
+      }
+    },
+    "clients": {
+      "$ref": "#/$defs/object"
+    },
+    "frozenTupleDigest": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "heroes": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/object"
+      }
+    },
+    "postMerge": {
+      "$ref": "#/$defs/object"
+    },
+    "negatives": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/object"
+      }
+    },
+    "cleanup": {
+      "$ref": "#/$defs/object"
+    },
+    "events": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/object"
+      }
+    }
+  },
+  "$defs": {
+    "object": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  }
+}

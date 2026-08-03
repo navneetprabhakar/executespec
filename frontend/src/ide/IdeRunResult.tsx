@@ -104,6 +104,7 @@ import {
   taskBudgetFacts,
   taskGoalLine,
   terminalFailureEvidence,
+  terminalOutcomePrimaryAction,
   testEvidenceSummary,
   timelineTiming,
   testResultSummary,
@@ -1242,6 +1243,8 @@ export default function IdeRunResult() {
         ? `${issues.length} validation issue${issues.length === 1 ? '' : 's'} found.`
         : 'Open the logs and evidence to identify the failing stage.');
   const durableFailureEvidence = terminalFailureEvidence(run);
+  const terminalPrimaryAction = terminalOutcomePrimaryAction(run?.terminalOutcome);
+  const stoppedByUser = run?.terminalOutcome?.category === 'USER_STOPPED';
   const trustFacts = publicationTrustFacts(run, publication);
   const correctionHistory = correctionEvidenceHistory(run);
   // C2 — tab title carries the run name once loaded.
@@ -1390,10 +1393,12 @@ export default function IdeRunResult() {
               )}
             </div>
 
-            {failedTerminal && (
+            {(failedTerminal || stoppedByUser) && (
               <div className='ide-recovery-card'>
                 <div className='ide-recovery-main'>
-                  <div className='ide-recovery-kicker'>Recovery path</div>
+                  <div className='ide-recovery-kicker'>
+                    {stoppedByUser ? 'Run stopped' : 'Next step'}
+                  </div>
                   <div className='ide-recovery-title'>
                     {run?.terminalOutcome?.customerTitle ||
                       (statusUpper === 'PARTIAL'
@@ -1402,38 +1407,70 @@ export default function IdeRunResult() {
                   </div>
                   <div className='ide-recovery-copy'>{failureText}</div>
                   <div className='ide-recovery-meta'>
-                    <span>
-                      {failedTasks.length} blocked step{failedTasks.length === 1 ? '' : 's'}
-                    </span>
+                    {!stoppedByUser && (
+                      <span>
+                        {failedTasks.length} blocked step{failedTasks.length === 1 ? '' : 's'}
+                      </span>
+                    )}
                     <span>
                       {issues.length} evidence issue{issues.length === 1 ? '' : 's'}
                     </span>
                     <span>
                       {productFiles} product file change{productFiles === 1 ? '' : 's'}
                     </span>
+                    {run?.terminalOutcome?.supportCode && (
+                      <span>Support code {run.terminalOutcome.supportCode}</span>
+                    )}
                   </div>
                 </div>
-                <div className='ide-recovery-actions' aria-label='Recovery actions'>
-                  <button className='ide-btn' onClick={() => setTab('Logs')}>
-                    Open logs
-                  </button>
-                  <button className='ide-btn ghost' onClick={() => setTab('Tasks')}>
-                    Failed steps
-                  </button>
-                  <button className='ide-btn ghost' onClick={() => setTab('Validation')}>
-                    Evidence
-                  </button>
-                  <button className='ide-btn ghost' onClick={() => setTab('Code')}>
-                    Files
-                  </button>
-                  <button className='ide-btn ghost' onClick={() => setTab('Chat')}>
-                    Ask about it
-                  </button>
+                <div className='ide-recovery-actions'>
+                  {terminalPrimaryAction && (
+                    <div aria-label='Primary outcome action'>
+                      {terminalPrimaryAction.behavior === 'navigate' ? (
+                        terminalPrimaryAction.href?.startsWith('/') ? (
+                          <Link className='ide-btn' to={terminalPrimaryAction.href}>
+                            {terminalPrimaryAction.label}
+                          </Link>
+                        ) : (
+                          <a className='ide-btn' href={terminalPrimaryAction.href}>
+                            {terminalPrimaryAction.label}
+                          </a>
+                        )
+                      ) : (
+                        <button
+                          className='ide-btn'
+                          disabled={
+                            terminalPrimaryAction.behavior === 'retry' && busy === 'reroute-same'
+                          }
+                          onClick={() => {
+                            if (terminalPrimaryAction.behavior === 'retry') trySameRoute();
+                            else if (terminalPrimaryAction.tab) setTab(terminalPrimaryAction.tab);
+                          }}
+                        >
+                          {terminalPrimaryAction.label}
+                        </button>
+                      )}
+                    </div>
+                  )}
+                  <div
+                    aria-label='Diagnostic navigation'
+                    style={{display: 'flex', gap: 8, flexWrap: 'wrap'}}
+                  >
+                    <button className='ide-btn ghost' onClick={() => setTab('Logs')}>
+                      Logs
+                    </button>
+                    <button className='ide-btn ghost' onClick={() => setTab('Validation')}>
+                      Evidence
+                    </button>
+                    <button className='ide-btn ghost' onClick={() => setTab('Code')}>
+                      Files
+                    </button>
+                  </div>
                 </div>
               </div>
             )}
 
-            {!failedTerminal && phaseDiagnosis && (
+            {!failedTerminal && !stoppedByUser && phaseDiagnosis && (
               <div className='ide-recovery-card'>
                 <div className='ide-recovery-main'>
                   <div className='ide-recovery-kicker'>Current diagnosis</div>
