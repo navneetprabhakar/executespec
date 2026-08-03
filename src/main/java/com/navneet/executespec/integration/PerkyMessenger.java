@@ -22,9 +22,9 @@ import lombok.extern.slf4j.Slf4j;
  * Doubles as a lightweight heartbeat that keeps the SSE stream warm on proxies with short idle
  * timeouts.
  *
- * <p>Call {@link #start(String, String)} when a phase begins (PLANNING / WORKING / REVIEWING),
- * {@link #stop(String)} when it ends. Safe to start/stop multiple times per run; each call replaces
- * the previous scheduled ping so we never double-emit.
+ * <p>Call {@link #start(String, String)} when a phase begins (PLANNING / WORKING / REVIEWING /
+ * VALIDATING), {@link #stop(String)} when it ends. Safe to start/stop multiple times per run; each
+ * call replaces the previous scheduled ping so we never double-emit.
  */
 @Component
 @Slf4j
@@ -51,6 +51,12 @@ public class PerkyMessenger {
     "Running the wiring pass...",
     "Double-checking imports and integrations...",
     "Final build, final breath...",
+  };
+  private static final String[] VALIDATING = {
+    "Checking deterministic run evidence...",
+    "Running the generated test suite...",
+    "Assembling the validation report...",
+    "Reconciling build, test, and review results...",
   };
 
   private final SseBroadcaster broadcaster;
@@ -110,6 +116,7 @@ public class PerkyMessenger {
     return switch (phase.toUpperCase()) {
       case "PLANNING" -> PLANNING;
       case "REVIEWING" -> REVIEWING;
+      case "VALIDATING" -> VALIDATING;
       default -> WORKING;
     };
   }

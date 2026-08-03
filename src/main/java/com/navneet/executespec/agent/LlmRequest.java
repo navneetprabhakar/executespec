@@ -118,11 +118,14 @@ public record LlmRequest(
    * 5/15/25/45/65s) proven on the TB 2.1 campaign: correct for worker/planner/reviewer calls where
    * nobody is watching wall clock. {@link #INTERACTIVE} keeps the pre-campaign 4-attempt 2/4/8s
    * ladder for human-facing chat turns, whose worst-case backoff must read as a slow reply, not a
-   * hang.
+   * hang. {@link #AUXILIARY} bounds best-effort post-run enrichment to one retry; callers must also
+   * set a short read timeout so optional report prose cannot hold terminalization behind repeated
+   * provider socket windows.
    */
   public enum RetryProfile {
     PIPELINE,
-    INTERACTIVE
+    INTERACTIVE,
+    AUXILIARY
   }
 
   public LlmRequest {

@@ -65,6 +65,9 @@ arguments must never be claimed as a delivered product path — and now emits `[
 same-route call with only `writeFile`/`editFile`/`completeTask`, required tool choice, and an 8K
 bounded output allowance. It never parses partial assistant text as code. A resulting edit is marked
 `salvagedUnverified`, so build, reviewer, and deterministic validation remain authoritative.
+Salvage mutations use `WorkerAgent.toolCallLogEntry`'s canonical
+`tool(sig=…) [target=…] -> OK|ERR` representation; recovery markers must not invent a second log
+grammar because executor write counts and admitted Git-diff attribution consume this evidence.
 
 ## Common harness stages on the worker (RL-2026-06)
 

@@ -1850,6 +1850,7 @@ public class WorkerAgent {
         costTracker,
         deadlineTimeoutSeconds(req),
         call -> dispatchOne(call, req, WorkerDispatchMode.NORMAL),
+        this::toolCallLogEntry,
         (outcome, iterations) -> recordTerminal(outcome, req, iterations),
         objectMapper);
   }
