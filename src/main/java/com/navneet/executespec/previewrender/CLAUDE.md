@@ -26,6 +26,9 @@ after a run reaches a terminal state. It does not execute or certify the generat
 - The prompt requires representative populated data unless the source itself is an empty/loading/
   error state. The Web UI permanently labels the result as a simulated visual preview and embeds it
   with `sandbox="allow-scripts"` only; it is not runtime or functional-test evidence.
+- The surface route does not constrain controller negotiation to HTML before invocation: successful
+  bundles set `text/html` explicitly, while missing/rejected surfaces remain canonical JSON 404s
+  even for API clients that send `Accept: application/json`.
 - Archived-workspace rendering remains unsupported as durable proof while the archive lacks the Git
   baseline needed to reconstruct an immutable affected-file set.
 
