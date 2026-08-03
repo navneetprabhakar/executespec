@@ -46,6 +46,16 @@ public record SpringHttpSurfaceSnapshot(
     return Set.copyOf(keys);
   }
 
+  /**
+   * Whether the extracted snapshot contains positive, deterministic Spring MVC evidence.
+   *
+   * <p>An empty extraction only proves that the Spring parser completed. It does not prove that a
+   * Node, Go, Python, plain-Java, or otherwise unsupported repository uses Spring MVC.
+   */
+  public boolean hasDeterministicSpringMvcEvidence() {
+    return !routes.isEmpty() || !configurationSources.isEmpty();
+  }
+
   private static String sha256(List<Route> routes, List<ConfigurationSource> sources) {
     try {
       MessageDigest digest = MessageDigest.getInstance("SHA-256");

@@ -71,6 +71,26 @@ class SpringHttpSurfaceExtractorTest {
         .extracting(source -> source.value() + " " + source.source())
         .containsExactly("/simulation src/main/resources/application.yml:3");
     assertThat(snapshot.schemaVersion()).isEqualTo(2);
+    assertThat(snapshot.hasDeterministicSpringMvcEvidence()).isTrue();
+  }
+
+  @Test
+  void emptyExtractionDoesNotEstablishSpringMvcApplicability() {
+    assertThat(extractor.extract(Map.of()).hasDeterministicSpringMvcEvidence()).isFalse();
+  }
+
+  @Test
+  void contextPathConfigurationAloneEstablishesSpringMvcApplicability() {
+    var snapshot =
+        extractor.extract(
+            Map.of(
+                "src/main/java/example/App.java",
+                "package example; class App {}\n",
+                "src/main/resources/application.properties",
+                "server.servlet.context-path=/catalog\n"));
+
+    assertThat(snapshot.routes()).isEmpty();
+    assertThat(snapshot.hasDeterministicSpringMvcEvidence()).isTrue();
   }
 
   @Test

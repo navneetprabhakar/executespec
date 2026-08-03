@@ -483,6 +483,50 @@ class ProjectDocGeneratorServiceCacheHitTest {
   }
 
   @Test
+  void sourceBundleCarriesExactFunctionEvidenceOnceAndOutsideDeclarationCodemap() {
+    String functionEvidence =
+        ExportedFunctionEvidence.render(
+            "owner/repo-a",
+            SOURCE_SHA,
+            java.util.Map.of(
+                "src/catalog.js",
+                "export function countFeatured(items) {\n"
+                    + "  return items.filter((item) => item.tags.includes('featured')).length;\n"
+                    + "}\n"));
+    wireExactSourceRepository(SOURCE_SHA, "# exact codemap\n\n" + functionEvidence);
+
+    String bundle =
+        svc.buildSourceBundle(
+            project("p-1"), archDoc(7, "{\"owner/repo-a\":\"" + SOURCE_SHA + "\"}"));
+
+    assertThat(bundle)
+        .contains("# Exact exported-function source: owner/repo-a")
+        .contains("item.tags.includes('featured')")
+        .containsOnlyOnce(ExportedFunctionEvidence.BEGIN)
+        .containsOnlyOnce(ExportedFunctionEvidence.END);
+    assertThat(bundle.indexOf(ExportedFunctionEvidence.BEGIN))
+        .isGreaterThan(bundle.indexOf("# Exact exported-function source: owner/repo-a"));
+  }
+
+  @Test
+  void sourceBundleRejectsTamperedExactFunctionEvidence() {
+    String functionEvidence =
+        ExportedFunctionEvidence.render(
+                "owner/repo-a",
+                SOURCE_SHA,
+                java.util.Map.of(
+                    "src/catalog.js", "export function countFeatured() { return 1; }\n"))
+            .replace("return 1", "return 2");
+    wireExactSourceRepository(SOURCE_SHA, "# exact codemap\n\n" + functionEvidence);
+
+    org.assertj.core.api.Assertions.assertThatThrownBy(
+            () ->
+                svc.buildSourceBundle(
+                    project("p-1"), archDoc(7, "{\"owner/repo-a\":\"" + SOURCE_SHA + "\"}")))
+        .isInstanceOf(ProjectDocGeneratorService.StaleSourceException.class);
+  }
+
+  @Test
   void sourceBundleRejectsLatestCodemapWhenExactArchitectureRevisionIsUnavailable() {
     UUID repoId = UUID.fromString("00000000-0000-0000-0000-000000000010");
     when(linkRepo.findByProjectId("p-1"))

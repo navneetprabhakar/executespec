@@ -107,6 +107,20 @@ transitions are short database writes.
 
 ## Generated project documents
 
+An empty successful Spring surface extraction is not positive framework evidence. Codemap
+appendices render it as `Framework: NOT_ESTABLISHED`, `Status: NOT_APPLICABLE`, and
+`NO_DETERMINISTIC_SPRING_MVC_EVIDENCE`; positive route or context-path evidence retains the existing
+`SPRING_MVC` contract, while extraction failures remain `UNAVAILABLE`.
+
+`ExportedFunctionEvidence` adds bounded `EXECUTESPEC_EXPORTED_FUNCTION_EVIDENCE_V1` blocks to
+exact-SHA codemaps for exported named JavaScript/TypeScript functions only. The deliberately narrow
+lexer omits explicit TypeScript return types and files containing a non-comment code slash until
+regex/division grammar is modeled. Project-document bundling validates every retained block's
+repository/SHA, fields, lines and SHA-256 content, strips it from ordinary declaration inventory,
+and budgets it atomically. Malformed evidence is stale; an oversized allocation is omitted whole.
+These excerpts establish only visibly present body code, never callers, consumers, wiring, or
+cross-repository relationships.
+
 V358 routes generation through `project_generated_doc_job`: POST returns `202`, the UI restores and
 polls the durable job, and a leased worker executes the exact provider/model resolved at admission.
 The document row and `SUCCEEDED` job transition share the publisher transaction, so a lost lease

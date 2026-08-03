@@ -7,8 +7,12 @@ import com.navneet.executespec.codeintel.entity.RepoArchitectureDoc;
 /** Keeps provider-free architecture evidence byte-exact across model-generated artifacts. */
 final class DeterministicArchitectureEvidence {
 
-  static final String HTTP_BEGIN = "<!-- EXECUTESPEC_DETERMINISTIC_HTTP_SURFACE_V2_BEGIN -->";
-  static final String HTTP_END = "<!-- EXECUTESPEC_DETERMINISTIC_HTTP_SURFACE_V2_END -->";
+  static final String HTTP_BEGIN = "<!-- EXECUTESPEC_DETERMINISTIC_HTTP_SURFACE_V3_BEGIN -->";
+  static final String HTTP_END = "<!-- EXECUTESPEC_DETERMINISTIC_HTTP_SURFACE_V3_END -->";
+  private static final String LEGACY_HTTP_V2_BEGIN =
+      "<!-- EXECUTESPEC_DETERMINISTIC_HTTP_SURFACE_V2_BEGIN -->";
+  private static final String LEGACY_HTTP_V2_END =
+      "<!-- EXECUTESPEC_DETERMINISTIC_HTTP_SURFACE_V2_END -->";
 
   private DeterministicArchitectureEvidence() {}
 
@@ -135,15 +139,8 @@ final class DeterministicArchitectureEvidence {
   }
 
   private static String stripHttpBlocks(String markdown) {
-    if (markdown == null || markdown.isBlank()) return "";
-    String remaining = markdown;
-    while (true) {
-      int begin = remaining.indexOf(HTTP_BEGIN);
-      if (begin < 0) return remaining;
-      int end = remaining.indexOf(HTTP_END, begin + HTTP_BEGIN.length());
-      if (end < 0) return remaining.substring(0, begin);
-      remaining = remaining.substring(0, begin) + remaining.substring(end + HTTP_END.length());
-    }
+    return stripBlocks(
+        stripBlocks(markdown, HTTP_BEGIN, HTTP_END), LEGACY_HTTP_V2_BEGIN, LEGACY_HTTP_V2_END);
   }
 
   private static String stripEvidenceBlocks(String markdown) {

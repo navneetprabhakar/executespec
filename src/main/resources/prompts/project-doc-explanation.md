@@ -3,8 +3,11 @@ Use only the supplied project architecture, repository codemaps, deterministic e
 metadata. Produce one Markdown document with these sections.
 
 Evidence priority is strict:
-1. Exact-revision deterministic evidence blocks are authoritative for the facts they cover.
-2. Repository codemaps establish file paths, declarations, and inventory only.
+1. Exact-revision deterministic evidence blocks are authoritative for the facts they cover. A
+   `EXECUTESPEC_EXPORTED_FUNCTION_EVIDENCE_V1` entry establishes behavior only when its
+   `Truncated` field is `false`; cite its repository, revision, path, symbol, and exact line range.
+2. Outside marker-delimited deterministic blocks, repository codemaps establish file paths,
+   declarations, and inventory only.
 3. The model-generated architecture is explanatory context only. It MUST NOT ground or corroborate
    a factual claim in this document, even when it states the same claim confidently.
 
@@ -13,11 +16,13 @@ declaration. When that evidence is absent or `PARTIAL`, write "not established b
 deterministic evidence" instead of filling the gap from conventions or architecture prose.
 
 # <Project name>
-One-paragraph elevator pitch.
+One-paragraph evidence-grounded summary. If purpose is not established, say so directly instead of
+writing an elevator pitch.
 
 ## Repositories
-One bullet per repository: name, purpose, and primary technology stack. If evidence for a
-repository was budget-limited, say so instead of inferring missing details.
+One bullet per repository: name, and only purpose or primary technology stack facts established by
+the evidence. State unestablished fields directly. If evidence was budget-limited, say so instead
+of inferring missing details.
 
 ## High-level architecture
 Use two to four paragraphs describing only what the admissible evidence establishes and cite
@@ -32,11 +37,22 @@ is established, say so directly and list independently evidenced entry points on
 Include a sequence diagram only when deterministic evidence establishes every message.
 
 ## Where to contribute
-List common change patterns and the evidenced files a contributor should inspect first.
+List evidenced files a contributor can inspect. Include a common change pattern only when exact
+evidence establishes it; otherwise state that change patterns are not established.
 
 Rules:
 - Plain Markdown; do not wrap section headings in code formatting.
 - Do not invent components, behavior, paths, or relationships.
+- Never infer a data field, return value, side effect, consumer, or relationship from a function
+  name. For an exported-function behavior claim, quote or closely paraphrase only the complete
+  `Content-Json` expression. If the entry is truncated or absent, state that behavior is not
+  established. A name alone never establishes whether implementation checks a property, collection,
+  tag, or other value.
+- `Repository-Evidence-Truncated: true` means the block is a bounded subset, and
+  `Emitted-Symbols` counts only emitted evidence. Never infer that an unlisted export is absent.
+- A call expression visible in `Content-Json` proves only that the named function body contains
+  that expression. It does not establish the callee's component or repository, callers, consumers,
+  liveness, wiring, import identity, ownership, or any integration edge.
 - Do not infer schema ownership from a framework or dependency. Distinguish SQL-init scripts,
   Flyway/Liquibase migrations, and Hibernate/JPA DDL using the exact properties and paths supplied.
 - Do not claim Docker Compose starts the application or full stack unless the deterministic
