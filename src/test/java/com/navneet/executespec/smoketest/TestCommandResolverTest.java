@@ -12,6 +12,29 @@ import org.junit.jupiter.api.io.TempDir;
 class TestCommandResolverTest {
 
   @Test
+  void nodeBuiltInTestRunnerIsNotMisclassifiedAsJest(@TempDir Path workspace) throws Exception {
+    Files.writeString(
+        workspace.resolve("package.json"), "{\"scripts\":{\"test\":\"node --test\"}}\n");
+
+    var command = new TestCommandResolver().resolve(workspace).orElseThrow();
+
+    assertThat(command.command()).isEqualTo("npm test --silent");
+    assertThat(command.framework()).isEqualTo(TestCommandResolver.Framework.NODE_TEST);
+  }
+
+  @Test
+  void unrelatedNodeTestTextOutsideTheTestScriptDoesNotChangeFramework(@TempDir Path workspace)
+      throws Exception {
+    Files.writeString(
+        workspace.resolve("package.json"),
+        "{\"description\":\"example: node --test\",\"scripts\":{\"test\":\"jest\"}}\n");
+
+    var command = new TestCommandResolver().resolve(workspace).orElseThrow();
+
+    assertThat(command.framework()).isEqualTo(TestCommandResolver.Framework.JEST);
+  }
+
+  @Test
   void prefersGeneratedPythonVirtualenv(@TempDir Path workspace) throws Exception {
     Files.writeString(workspace.resolve("pyproject.toml"), "[project]\nname='sample'\n");
     Files.createDirectories(workspace.resolve("venv/bin"));

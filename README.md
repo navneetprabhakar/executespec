@@ -45,6 +45,11 @@ than building unrelated applications. A provider output cap before the first wri
 same-route mutation recovery, whose output still has to pass the ordinary build, review, and
 deterministic validation gates.
 
+Library/module changes without explicit server or API intent stay on the library validation
+surface. Node projects using the built-in `node --test` runner contribute their real executable
+counts, and weaker later test events cannot erase stronger proven evidence. Reviewer provider calls
+are recorded separately from worker calls in the run cost/evidence ledger.
+
 Terminal run results use the validation report's reviewer verdict and product-file count as the
 customer-facing truth. Bootstrap/workspace metadata remains visible in Explorer but is not labeled
 generated product code. “Run again” preserves the persisted provider/model route; changing provider

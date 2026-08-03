@@ -6,6 +6,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+
 import org.springframework.stereotype.Component;
 
 /**
@@ -21,6 +23,8 @@ import org.springframework.stereotype.Component;
 @Component
 public class TestCommandResolver {
 
+  private static final ObjectMapper JSON = new ObjectMapper();
+
   private record LocatedCommand(String relativePath, TestCommand command) {}
 
   /** A resolved test command + the framework whose output grammar the parser should use. */
@@ -29,6 +33,7 @@ public class TestCommandResolver {
 
   public enum Framework {
     PYTEST,
+    NODE_TEST,
     JEST,
     VITEST,
     SUREFIRE, // mvn / gradle JUnit
@@ -109,8 +114,11 @@ public class TestCommandResolver {
       // Only run if a "test" script exists AND it isn't the npm-init placeholder that exits 1.
       String pkg = read(workspaceRoot.resolve("package.json"));
       if (pkg.contains("\"test\"") && !pkg.contains("Error: no test specified")) {
+        String normalizedScript = testScript(pkg).toLowerCase();
         Framework framework =
-            pkg.toLowerCase().contains("vitest") ? Framework.VITEST : Framework.JEST;
+            normalizedScript.contains("node --test")
+                ? Framework.NODE_TEST
+                : normalizedScript.contains("vitest") ? Framework.VITEST : Framework.JEST;
         return Optional.of(new TestCommand("npm test --silent", 600, framework, "npm"));
       }
       return Optional.empty();
@@ -165,6 +173,14 @@ public class TestCommandResolver {
     try {
       return Files.readString(p);
     } catch (Exception e) {
+      return "";
+    }
+  }
+
+  private static String testScript(String packageJson) {
+    try {
+      return JSON.readTree(packageJson).path("scripts").path("test").asText("");
+    } catch (Exception ignored) {
       return "";
     }
   }

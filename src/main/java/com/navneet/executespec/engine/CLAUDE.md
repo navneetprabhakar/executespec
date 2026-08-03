@@ -146,5 +146,10 @@ Fail-closed / evidence-honest corrections; no migration.
   `dispatchRemote`, so reconnects can no longer renew a terminal remote call forever.
 - **RR-622** — worker tool-call metrics record `boundedToolMetricName(tc.name())` (registered alias
   or `"unknown"`), so an adversarial provider cannot mint unbounded Micrometer series.
+- **RR-2026-08-03 physical role attribution** — `WorkerTaskRequest` carries optional tighten-only
+  `agentRole`/`stepPrefix` attribution for specialized consumers. `ReviewerAgent` sets
+  `ReviewerAgent/reviewer.<pass>.*`; `WorkerLlmRequestFactory` applies it consistently to ordinary,
+  salvage, finalizer, and critic calls. Null fields preserve `WorkerAgent/worker.*`, and retry
+  normalization preserves the original attribution.
 - **RR-1562** — `EngineBudget.dollarCap` now propagates onto `WorkerTaskRequest.dollarCap`; the worker
   enforces `min(dollarCap, PipelineRun.hardCapUsd)`, so a per-solve cap is no longer a dead field.
