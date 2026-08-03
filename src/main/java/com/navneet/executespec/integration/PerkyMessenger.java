@@ -22,9 +22,9 @@ import lombok.extern.slf4j.Slf4j;
  * Doubles as a lightweight heartbeat that keeps the SSE stream warm on proxies with short idle
  * timeouts.
  *
- * <p>Call {@link #start(String, String)} when a phase begins (PLANNING / WORKING / REVIEWING),
- * {@link #stop(String)} when it ends. Safe to start/stop multiple times per run; each call replaces
- * the previous scheduled ping so we never double-emit.
+ * <p>Call {@link #start(String, String)} when a phase begins (PLANNING / WORKING / REVIEWING /
+ * VALIDATING), {@link #stop(String)} when it ends. Safe to start/stop multiple times per run; each
+ * call replaces the previous scheduled ping so we never double-emit.
  */
 @Component
 @Slf4j
