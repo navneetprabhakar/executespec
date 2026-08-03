@@ -85,6 +85,11 @@ public class ValidationReportGenerator {
                   .messages(prompt.getInstructions())
                   .context(operationContext.child("validation-report"))
                   .toolsOverride(List.of())
+                  // Markdown prose has a deterministic structured fallback. Keep the route exact
+                  // and bound provider unavailability instead of delaying terminalization.
+                  .readTimeoutSeconds(60)
+                  .retryProfile(LlmRequest.RetryProfile.AUXILIARY)
+                  .strictProvider(true)
                   .agentRole("ValidationReportGenerator")
                   .stepId("generate")
                   .build());

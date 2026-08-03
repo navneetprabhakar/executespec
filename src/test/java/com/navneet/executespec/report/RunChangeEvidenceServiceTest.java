@@ -87,6 +87,16 @@ class RunChangeEvidenceServiceTest {
         .isEqualTo(1);
     assertThat(
             service.meaningfulProductDiffCountForToolLog(
+                runId, List.of("editFile(sig=deadbeef) [target=src/f500.java] -> OK")))
+        .as("canonical salvage entries attribute the admitted product diff")
+        .isEqualTo(1);
+    assertThat(
+            service.meaningfulProductDiffCountForToolLog(
+                runId, List.of("editFile(sig=deadbeef) [target=src/f500.java] -> ERR")))
+        .as("failed salvage entries cannot claim the product diff")
+        .isZero();
+    assertThat(
+            service.meaningfulProductDiffCountForToolLog(
                 runId, List.of("editFile({\"path\":\"src/f500.java\"})")))
         .isZero();
   }

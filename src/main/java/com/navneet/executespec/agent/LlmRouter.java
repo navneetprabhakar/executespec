@@ -657,6 +657,9 @@ public class LlmRouter {
    */
   public static final int INTERACTIVE_TRANSIENT_RETRY_MAX_ATTEMPTS = 4;
 
+  /** One retry for optional post-run enrichment whose deterministic fallback is already usable. */
+  public static final int AUXILIARY_TRANSIENT_RETRY_MAX_ATTEMPTS = 2;
+
   /**
    * PIPELINE spacing — accuracy over latency (2026-08-01, TB 2.1 campaign): one initial call plus
    * five retries at 5s/15s/25s/45s/65s. The old 2s/4s/8s ladder re-hit a still-pressured provider
@@ -670,6 +673,9 @@ public class LlmRouter {
 
   /** INTERACTIVE spacing — the pre-campaign 2s/4s/8s ladder (RL-2026-05-029). */
   private static final long[] INTERACTIVE_RETRY_BACKOFF_MS = {2_000L, 4_000L, 8_000L};
+
+  /** AUXILIARY spacing — fail over to the caller's structured fallback after one short retry. */
+  private static final long[] AUXILIARY_RETRY_BACKOFF_MS = {2_000L};
 
   private static final Duration DEFAULT_TRANSPORT_TIMEOUT = Duration.ofSeconds(120);
   private static final Duration ANTHROPIC_TRANSPORT_TIMEOUT = Duration.ofSeconds(300);
@@ -1379,15 +1385,23 @@ public class LlmRouter {
 
   /** PIPELINE unless the request explicitly opts into the interactive envelope. */
   private static int transientRetryMaxAttempts(LlmRequest request) {
-    return request.retryProfile() == LlmRequest.RetryProfile.INTERACTIVE
-        ? INTERACTIVE_TRANSIENT_RETRY_MAX_ATTEMPTS
-        : TRANSIENT_RETRY_MAX_ATTEMPTS;
+    return switch (request.retryProfile() == null
+        ? LlmRequest.RetryProfile.PIPELINE
+        : request.retryProfile()) {
+      case INTERACTIVE -> INTERACTIVE_TRANSIENT_RETRY_MAX_ATTEMPTS;
+      case AUXILIARY -> AUXILIARY_TRANSIENT_RETRY_MAX_ATTEMPTS;
+      case PIPELINE -> TRANSIENT_RETRY_MAX_ATTEMPTS;
+    };
   }
 
   private static long[] transientRetryBackoffMs(LlmRequest request) {
-    return request.retryProfile() == LlmRequest.RetryProfile.INTERACTIVE
-        ? INTERACTIVE_RETRY_BACKOFF_MS
-        : PIPELINE_RETRY_BACKOFF_MS;
+    return switch (request.retryProfile() == null
+        ? LlmRequest.RetryProfile.PIPELINE
+        : request.retryProfile()) {
+      case INTERACTIVE -> INTERACTIVE_RETRY_BACKOFF_MS;
+      case AUXILIARY -> AUXILIARY_RETRY_BACKOFF_MS;
+      case PIPELINE -> PIPELINE_RETRY_BACKOFF_MS;
+    };
   }
 
   /**
