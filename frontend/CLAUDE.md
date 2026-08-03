@@ -240,6 +240,9 @@ Documented deviations from Google TypeScript style in [`executespec-docs/backend
   and renders their primary line-level LCS content diff; GitHub `compareCommits` source-file changes
   are secondary correlation, not a substitute for document differences.
 - Generated docs — Generate / Regenerate / View / Download for EXPLANATION + SETUP docs.
+- Repository Attach-by-URL keeps the panel open on failure and renders the server's safe typed
+  `message`. A GitHub credential that cannot see a private repository must tell the user to grant
+  that stored credential access or reconnect GitHub; it must not appear as a generic server outage.
 
 ### Org settings (`ide/IdeOrg.tsx` + `ide/orgUtils.ts`)
 

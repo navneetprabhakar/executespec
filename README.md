@@ -15,6 +15,10 @@ snapshot is not a restorable filesystem image. Projects remain the canonical dur
 context: the agent can select an existing project or hand off to the normal Projects creation flow
 and return with that project selected. Closing a Web Agent workspace archives its conversation
 after active work is clear; it does not delete the linked project.
+Repository linking uses the caller's stored SCM credential. If that credential cannot see a
+private GitHub or Bitbucket repository, Web and scoped CLI clients receive the same safe,
+provider-specific instruction to grant repository access or reconnect the integration; the failure
+does not create a partial repository or project link.
 Within a selected project, exact repository search is paired with a read-only bounded source-range
 tool: the agent can expand a `file:line` match into up to 200 lines of method/signature context from
 the linked repository's revision-pinned clone. Reads are project-authorized, repository-relative,

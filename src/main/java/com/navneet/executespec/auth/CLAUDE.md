@@ -88,6 +88,9 @@ Auth, account, org, project, RBAC, PAT, OAuth, and user-level client preferences
   `api:read,runs:write,projects:write,agent:write,settings:write`. Billing, token management,
   `/api/admin/**`, `/api/v2/test/**`, and unknown mutations require an explicit capability or
   `full`. The filter stamps resolved token id/scopes request attributes after authorization.
+- The exact repository collection mutation `POST /api/repos` is a `projects:write` capability, as
+  are repository descendants. Keep exact collection paths pinned separately from descendant
+  prefixes so a least-privilege CLI PAT reaches the same attach admission path as browser JWT.
 - Boundary-crossing agent routes require the UNION of both capabilities, decided before the generic
   `/api/agent/` prefix rule: `POST /api/orchestrator/turn/confirm` creates a billable run and needs
   `agent:write` AND `runs:write`; `/api/agent/sessions/{id}/writer/**` mutates files on the caller's

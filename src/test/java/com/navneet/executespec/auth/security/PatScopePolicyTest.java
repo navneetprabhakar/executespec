@@ -29,6 +29,9 @@ class PatScopePolicyTest {
         .isTrue();
     assertThat(PatScopePolicy.allows(scopes, "POST", "/api/projects/p/architecture/generate"))
         .isTrue();
+    assertThat(PatScopePolicy.allows(scopes, "POST", "/api/repos")).isTrue();
+    assertThat(PatScopePolicy.allows(scopes, "POST", "/api/repos/")).isTrue();
+    assertThat(PatScopePolicy.allows(scopes, "POST", "/api/repositories")).isFalse();
     assertThat(PatScopePolicy.allows(scopes, "PUT", "/api/auth/me/provider-preference")).isTrue();
     assertThat(PatScopePolicy.allows(scopes, "PUT", "/api/auth/me/settings/ai-keys")).isFalse();
     assertThat(PatScopePolicy.allows(scopes, "DELETE", "/api/auth/me/settings/ai-keys/deepseek"))
