@@ -115,6 +115,12 @@ invalid reports are excluded and counted separately.
   unit tests cannot dilute a failing functional result. Missing, failed, stale, zero-test, or
   provenance-unverified execution persists 0/0/unverified evidence; only a non-empty,
   provenance-verified `LIVE_PREVIEW_FUNCTIONAL` suite can earn full test credit and final-goal proof.
+  Rescoring is monotonic by evidence strength: an unavailable/not-applicable asynchronous event
+  cannot replace a proven workspace population, and workspace evidence cannot replace proven live
+  functional evidence. Node's built-in test runner is parsed from its complete
+  `tests/pass/fail/cancelled/skipped/todo` footer, so successful `node --test` execution no longer
+  collapses to 0/0. Positive counts cannot produce executable `PASSED` unless the summary also
+  carries fresh proven-execution provenance.
 - Automatic-correction admission is synchronous and generation-bound: after read-only review,
   `RunValidationKickoff` re-executes the resolver-owned workspace suite, requires a non-empty green
   and provenance-verified result, and proves the canonical workspace generation is unchanged

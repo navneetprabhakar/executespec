@@ -46,5 +46,7 @@ class ReviewerAgentRouteTest {
     assertThat(dispatched.getValue().provider()).isEqualTo("openrouter");
     assertThat(dispatched.getValue().model()).isEqualTo("glm-5.2");
     assertThat(dispatched.getValue().strictProvider()).isTrue();
+    assertThat(dispatched.getValue().agentRole()).isEqualTo("ReviewerAgent");
+    assertThat(dispatched.getValue().stepPrefix()).isEqualTo("reviewer.general");
   }
 }

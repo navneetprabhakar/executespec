@@ -264,7 +264,7 @@ function frozenCampaign() {
       fileDiffOnly: false,
       contentDiffSha256: digest('a'),
       expectedChangedLineEvidenceId: 'changed-line-1',
-      semanticErrorCode: 'OWN_KEYS_OPENAI_CREDENTIAL_UNAVAILABLE',
+      semanticErrorCode: 'INDEX_NOT_BUILT',
       ripgrepAvailable: true,
       semanticProviderCallsDelta: 0,
       semanticFallbackEvidenceId: 'semantic-fallback-1',
@@ -283,11 +283,19 @@ function heroProof(ordinal) {
     sourceSha: gitSha('c'),
     requestSha256: frozenRequestDigest,
     status: 'COMPLETE',
-    plan: { planId: `plan-${ordinal}`, version: 1, fingerprint: digest(hex) },
+    plan: {
+      planId: `plan-${ordinal}`,
+      version: 1,
+      fingerprint: digest(hex),
+      strategy: 'SINGLE_SHOT',
+      classification: 'SINGLE_SHOT',
+      taskCount: 1,
+      evidenceSha256: digest(hex),
+    },
     approvalReceiptId: `approval-${ordinal}`,
     task: {
-      total: 2,
-      completed: 2,
+      total: 1,
+      completed: 1,
       failed: 0,
       buildPassed: true,
       evidenceId: `task-${ordinal}`,
@@ -321,29 +329,35 @@ function heroProof(ordinal) {
       model: 'deepseek-v4-pro-native',
       routingMode: 'EXACT_LOCK',
     },
-    routeCalls: [
-      {
-        callId: `planner-${ordinal}`,
-        provider: 'DEEPSEEK',
-        model: 'deepseek-v4-pro-native',
-        agentRole: 'PLANNER',
-        noFallback: true,
-      },
-      {
-        callId: `worker-${ordinal}`,
-        provider: 'DEEPSEEK',
-        model: 'deepseek-v4-pro-native',
-        agentRole: 'WORKER',
-        noFallback: true,
-      },
-      {
-        callId: `reviewer-${ordinal}`,
-        provider: 'DEEPSEEK',
-        model: 'deepseek-v4-pro-native',
-        agentRole: 'REVIEWER',
-        noFallback: true,
-      },
-    ],
+    physicalCallLedger: {
+      evidenceSha256: digest(hex),
+      complete: true,
+      totalPhysicalAttempts: 2,
+      calls: [
+        {
+          physicalAttemptId: `worker-${ordinal}`,
+          provider: 'DEEPSEEK',
+          model: 'deepseek-v4-pro-native',
+          feature: 'RUN_EXECUTION',
+          agentRole: 'WorkerAgent',
+          stepId: 'worker.iteration-1',
+          attemptStatus: 'SUCCESS',
+          attemptKind: 'PRIMARY',
+          parentAttemptId: null,
+        },
+        {
+          physicalAttemptId: `reviewer-${ordinal}`,
+          provider: 'DEEPSEEK',
+          model: 'deepseek-v4-pro-native',
+          feature: 'RUN_REVIEW',
+          agentRole: 'ReviewerAgent',
+          stepId: 'reviewer.general.iteration-1',
+          attemptStatus: 'SUCCESS',
+          attemptKind: 'PRIMARY',
+          parentAttemptId: null,
+        },
+      ],
+    },
     longFile: {
       byteExact: true,
       lines: 182,
@@ -983,10 +997,35 @@ test('hero omissions, duplicates, contradictions and arbitrary evidence fail clo
     /PR branch\/base/,
   );
   const fallback = heroProof(1);
-  fallback.routeCalls[1].noFallback = false;
+  fallback.physicalCallLedger.calls[1].attemptKind = 'FAILOVER';
   assert.throws(
     () => transition(running, 'HERO_1_VERIFIED', fallback),
-    /noFallback must be true/,
+    /failover attempt/,
+  );
+  const incompleteLedger = heroProof(1);
+  incompleteLedger.physicalCallLedger.totalPhysicalAttempts = 3;
+  assert.throws(
+    () => transition(running, 'HERO_1_VERIFIED', incompleteLedger),
+    /count is incomplete/,
+  );
+  const missingReviewer = heroProof(1);
+  missingReviewer.physicalCallLedger.calls[1].attemptStatus = 'FAILED';
+  assert.throws(
+    () => transition(running, 'HERO_1_VERIFIED', missingReviewer),
+    /missing successful reviewer execution/,
+  );
+  const outlineCall = heroProof(1);
+  outlineCall.physicalCallLedger.calls.push({
+    ...outlineCall.physicalCallLedger.calls[0],
+    physicalAttemptId: 'outline-1',
+    feature: 'RUN_PLANNING',
+    agentRole: 'OutlinePlannerAgent',
+    stepId: 'planner.outline',
+  });
+  outlineCall.physicalCallLedger.totalPhysicalAttempts = 3;
+  assert.throws(
+    () => transition(running, 'HERO_1_VERIFIED', outlineCall),
+    /must not call the outline planner/,
   );
   const twoActions = heroProof(1);
   twoActions.terminal.onePrimaryAction = false;
@@ -1204,7 +1243,8 @@ test('manifest schema is strict at the root and pins provider/model values', asy
     await readFile(path.join(root, 'manifest.schema.json'), 'utf8'),
   );
   assert.equal(schema.additionalProperties, false);
-  assert.equal(schema.properties.schemaVersion.const, 3);
+  assert.equal(schema.properties.schemaVersion.const, 4);
+  assert.match(schema.$id, /manifest-v4/);
   assert.deepEqual(schema.properties.route.properties.provider.enum, [
     'DEEPSEEK',
     'FIREWORKS',
