@@ -4,6 +4,7 @@ import java.time.Instant;
 
 import jakarta.persistence.*;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.navneet.executespec.crypto.EncryptedValueConverter;
 import com.navneet.executespec.tenant.TenantInterceptor;
 
@@ -450,6 +451,7 @@ public class PipelineRun {
   /** Submitting user's GitHub PAT — captured at run creation for immutability. */
   @Convert(converter = EncryptedValueConverter.class)
   @Column(name = "github_pat")
+  @JsonIgnore
   @lombok.ToString.Exclude
   private String githubPat;
 
@@ -480,6 +482,7 @@ public class PipelineRun {
 
   @Convert(converter = EncryptedValueConverter.class)
   @Column(name = "bitbucket_app_password")
+  @JsonIgnore
   @lombok.ToString.Exclude
   private String bitbucketAppPassword;
 

@@ -1,5 +1,9 @@
 # `state/` — Run state management
 
+`PipelineRun` SCM credentials are serialization-denied with `@JsonIgnore`. This is a defense-in-depth
+boundary for the legacy raw-entity Timeline response: decrypted GitHub PATs and Bitbucket app
+passwords must never appear in JSON even when a controller serializes the entity directly.
+
 V360 adds brownfield HTTP-surface JSON/digest fields to `pipeline_run`; admission writes bind the
 canonical route set to the run. V361 adds nullable-for-legacy
 `validation_report.workspace_generation`; every newly generated report must persist a lowercase
