@@ -135,4 +135,121 @@ class ProjectGeneratedDocPublicationPostgresIntegrationTest extends PostgresInte
     assertThat(completed.resultDocId()).isEqualTo(published.getId());
     assertThat(completed.resultDocVersion()).isEqualTo(published.getVersion());
   }
+
+  @Test
+  void confirmedRetryPreservesLifetimeAttemptsAndUsesANewLeaseBoundAttemptContext() {
+    UUID jobId = UUID.randomUUID();
+    ProjectGeneratedDocJobStore.Job created =
+        jobs.createOrGet(
+            jobId,
+            projectId,
+            orgId,
+            userId,
+            DocType.SETUP.name(),
+            "DEEPSEEK",
+            "deepseek-v4-pro-native",
+            Duration.ofMinutes(30));
+
+    ProjectGeneratedDocJobStore.Lease firstLease =
+        jobs.tryAcquire(jobId, "doc-worker-one", Duration.ofMinutes(5)).orElseThrow();
+    assertThat(firstLease.job().id()).isEqualTo(created.id());
+    assertThat(firstLease.job().attemptCount()).isEqualTo(1);
+    assertThat(firstLease.token()).isEqualTo(1);
+    assertThat(jobs.markProviderStarted(firstLease)).isTrue();
+    assertThat(
+            jobs.needsConfirmation(
+                firstLease,
+                "PROVIDER_OUTPUT_INCOMPLETE",
+                "No document was published after provider dispatch began; delivery outcome may be"
+                    + " uncertain."))
+        .isTrue();
+
+    assertThat(
+            jobs.confirmRetry(
+                jobId,
+                projectId,
+                DocType.SETUP.name(),
+                "different-requester",
+                Duration.ofMinutes(30)))
+        .isFalse();
+
+    assertThat(
+            jobs.confirmRetry(
+                jobId, projectId, DocType.SETUP.name(), userId, Duration.ofMinutes(30)))
+        .isTrue();
+
+    ProjectGeneratedDocJobStore.Job requeued = jobs.get(jobId).orElseThrow();
+    assertThat(requeued.id()).isEqualTo(created.id());
+    assertThat(requeued.status()).isEqualTo(ProjectGeneratedDocJobStore.Status.QUEUED);
+    assertThat(requeued.attemptCount()).isEqualTo(1);
+    assertThat(requeued.leaseToken()).isEqualTo(firstLease.token());
+    assertThat(requeued.providerStartedAt()).isNull();
+    assertThat(requeued.startedAt()).isNull();
+    assertThat(requeued.completedAt()).isNull();
+    assertThat(requeued.errorCode()).isNull();
+    assertThat(requeued.requestedProvider()).isEqualTo("DEEPSEEK");
+    assertThat(requeued.requestedModel()).isEqualTo("deepseek-v4-pro-native");
+    assertThat(jobs.markProviderStarted(firstLease)).isFalse();
+    assertThat(
+            jdbc.queryForObject(
+                """
+                SELECT count(*) FROM project_generated_doc_job_retry_confirmation
+                WHERE job_id=? AND project_id=? AND confirmed_by_user_id=?
+                """,
+                Integer.class,
+                jobId,
+                projectId,
+                userId))
+        .isEqualTo(1);
+
+    // A separate store instance represents the later worker/JVM claiming the confirmed replay.
+    ProjectGeneratedDocJobStore laterWorkerStore = new ProjectGeneratedDocJobStore(jdbc);
+    ProjectGeneratedDocJobStore.Lease secondLease =
+        laterWorkerStore.tryAcquire(jobId, "doc-worker-two", Duration.ofMinutes(5)).orElseThrow();
+    assertThat(secondLease.job().id()).isEqualTo(firstLease.job().id());
+    assertThat(secondLease.job().attemptCount()).isEqualTo(2);
+    assertThat(secondLease.token()).isEqualTo(firstLease.token() + 1);
+    assertThat(secondLease.job().requestedProvider())
+        .isEqualTo(firstLease.job().requestedProvider());
+    assertThat(secondLease.job().requestedModel()).isEqualTo(firstLease.job().requestedModel());
+
+    String firstAttemptContext =
+        ProjectDocExecutionPolicy.durableContextId(jobId + ":" + firstLease.token());
+    String secondAttemptContext =
+        ProjectDocExecutionPolicy.durableContextId(jobId + ":" + secondLease.token());
+    assertThat(firstAttemptContext).isEqualTo("project-doc:" + jobId + ":1");
+    assertThat(secondAttemptContext).isEqualTo("project-doc:" + jobId + ":2");
+    assertThat(secondAttemptContext).isNotEqualTo(firstAttemptContext);
+  }
+
+  @Test
+  void expiredPostDispatchLeasePersistsTruthfulUncertainDeliveryMessage() {
+    UUID jobId = UUID.randomUUID();
+    jobs.createOrGet(
+        jobId,
+        projectId,
+        orgId,
+        userId,
+        DocType.EXPLANATION.name(),
+        "DEEPSEEK",
+        "deepseek-v4-pro-native",
+        Duration.ofMinutes(30));
+    ProjectGeneratedDocJobStore.Lease lease =
+        jobs.tryAcquire(jobId, "expired-doc-worker", Duration.ofMinutes(5)).orElseThrow();
+    assertThat(jobs.markProviderStarted(lease)).isTrue();
+    jdbc.update(
+        "UPDATE project_generated_doc_job SET lease_expires_at=clock_timestamp() - INTERVAL '1"
+            + " second' WHERE id=?",
+        jobId);
+
+    assertThat(jobs.sweepExpired()).isEqualTo(1);
+
+    ProjectGeneratedDocJobStore.Job swept = jobs.get(jobId).orElseThrow();
+    assertThat(swept.status()).isEqualTo(ProjectGeneratedDocJobStore.Status.NEEDS_CONFIRMATION);
+    assertThat(swept.errorCode()).isEqualTo("OUTCOME_UNCERTAIN");
+    assertThat(swept.errorMessage())
+        .isEqualTo(
+            "The worker stopped after provider dispatch began; delivery outcome may be uncertain."
+                + " Retry requires confirmation.");
+  }
 }

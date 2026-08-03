@@ -428,11 +428,19 @@ Enterprise org matrix overrides. It cannot adapt or fail over, including across 
 Code Review executor; an unavailable or drifting route returns 503. Usage is attributed to the
 initiating actor while credential resolution remains bound to the host project subject.
 
-Hard caps are architecture **1,000,000 tokens / $10 / 64 provider calls**, generated docs
-**200,000 / $3 / 2**, and code review **300,000 / $5 / 2**. A consumed grant is never resurrected
+Hard limits apply to the configured token and provider-call counts: architecture **1,000,000 tokens
+/ 64 calls**, generated docs **200,000 / 2**, and code review **300,000 / 2**. The corresponding
+**$10 / $3 / $5** ceilings are reconciled from successful provider usage; the final admitted call
+can cross its dollar ceiling before a later call is denied. A consumed grant is never resurrected
 after failure. Issue, deny, consume, expiry, replay, completion, and failure decisions enter the
 hash-chained `activity_audit`; V292 rejects audit-row UPDATE/DELETE and serializes cross-JVM chain
 appends with a PostgreSQL transaction advisory lock.
+
+Durable Web document jobs enforce the same generated-doc token/call limits and post-call dollar
+reconciliation per confirmed attempt, and use the short interactive retry envelope. If provider
+dispatch began but delivery remains uncertain and nothing was published, the job requires explicit
+confirmation before replay and shows a stable safe failure code; it does not silently create
+another billable attempt.
 
 ### Enterprise LLM usage audit
 

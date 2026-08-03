@@ -8,7 +8,10 @@ import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import com.navneet.executespec.agent.ByokContextUnavailableException;
 import com.navneet.executespec.codeintel.entity.ProjectGeneratedDoc.DocType;
+import com.navneet.executespec.cost.ProjectedCallBudgetExceededException;
+import com.navneet.executespec.executioncontext.LlmDispatchPolicyException;
 import com.navneet.executespec.router.LlmProvider;
 
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -93,6 +96,7 @@ public class ProjectGeneratedDocJobWorker {
           provider,
           lease.job().requestedModel(),
           lease.job().id(),
+          lease.token(),
           () -> {
             if (!store.markProviderStarted(lease)) {
               leaseLost.set(true);
@@ -112,12 +116,14 @@ public class ProjectGeneratedDocJobWorker {
           });
     } catch (RuntimeException failure) {
       if (!leaseLost.get()) {
-        if (providerStarted.get()) {
-          store.needsConfirmation(
-              lease,
-              "OUTCOME_UNCERTAIN",
-              "Provider execution began, but no complete document was durably published. Retry"
-                  + " requires confirmation.");
+        if (providerStarted.get() && retryConfirmationRequired(failure)) {
+          store.needsConfirmation(lease, errorCode(failure), postDispatchMessage(failure));
+        } else if (deterministicPreTransportFailure(failure)) {
+          store.fail(lease, errorCode(failure), safeMessage(failure));
+        } else if (providerStarted.get()) {
+          String code =
+              knownPostDispatchFailure(failure) ? errorCode(failure) : "OUTCOME_UNCERTAIN";
+          store.needsConfirmation(lease, code, postDispatchMessage(failure));
         } else {
           store.fail(lease, errorCode(failure), safeMessage(failure));
         }
@@ -135,6 +141,13 @@ public class ProjectGeneratedDocJobWorker {
   }
 
   private static String errorCode(RuntimeException failure) {
+    if (failure
+        instanceof ProjectDocGeneratorService.PreTransportGenerationException preTransport) {
+      return preTransportErrorCode(preTransport.failure());
+    }
+    if (failure instanceof ProjectedCallBudgetExceededException) {
+      return "PROJECT_DOC_BUDGET_EXCEEDED";
+    }
     if (failure instanceof ProjectDocGeneratorService.IncompleteGenerationException
         || failure instanceof ProjectDocGeneratorService.ProviderNonCompleteGenerationException) {
       return "PROVIDER_OUTPUT_INCOMPLETE";
@@ -155,12 +168,21 @@ public class ProjectGeneratedDocJobWorker {
   }
 
   private static String safeMessage(RuntimeException failure) {
+    if (failure
+        instanceof ProjectDocGeneratorService.PreTransportGenerationException preTransport) {
+      return preTransportSafeMessage(preTransport.failure());
+    }
+    if (failure instanceof ProjectedCallBudgetExceededException) {
+      return "The document generation budget was exhausted before another provider request could"
+          + " begin.";
+    }
     if (failure instanceof ProjectDocGeneratorService.IncompleteGenerationException
         || failure instanceof ProjectDocGeneratorService.ProviderNonCompleteGenerationException) {
       return "Provider output ended before the document was complete.";
     }
     if (failure instanceof ProjectDocGeneratorService.StaleSourceException) {
-      return "The project architecture changed during generation. Start a new document job.";
+      return "The project architecture changed during generation. Confirm regeneration against"
+          + " the latest project evidence.";
     }
     if (failure instanceof ProjectDocGeneratorService.UnsafeGeneratedDocumentException) {
       return "The generated document failed the publication safety check.";
@@ -179,5 +201,95 @@ public class ProjectGeneratedDocJobWorker {
       }
     }
     return "Document generation could not be completed. Check project readiness and retry.";
+  }
+
+  private static boolean knownPostDispatchFailure(RuntimeException failure) {
+    return failure instanceof ProjectDocGeneratorService.IncompleteGenerationException
+        || failure instanceof ProjectDocGeneratorService.ProviderNonCompleteGenerationException
+        || failure instanceof ProjectDocGeneratorService.StaleSourceException
+        || failure instanceof ProjectDocGeneratorService.UnsafeGeneratedDocumentException
+        || failure instanceof ProjectDocGeneratorService.InvalidGeneratedDocumentException;
+  }
+
+  private static boolean deterministicPreTransportFailure(RuntimeException failure) {
+    return failure instanceof ProjectDocGeneratorService.PreTransportGenerationException
+        || failure instanceof ProjectedCallBudgetExceededException;
+  }
+
+  /**
+   * A fresh bounded attempt is the only useful recovery after an already-started operation consumed
+   * its physical-call budget. Keep that recovery behind the durable confirmation barrier instead of
+   * allowing a new Generate request to bypass acknowledgement of the earlier provider work.
+   */
+  private static boolean retryConfirmationRequired(RuntimeException failure) {
+    if (failure instanceof ProjectedCallBudgetExceededException) return true;
+    return failure
+            instanceof ProjectDocGeneratorService.PreTransportGenerationException preTransport
+        && (preTransport.failure() instanceof ProjectedCallBudgetExceededException
+            || (preTransport.failure() instanceof LlmDispatchPolicyException policy
+                && policy.reason() == LlmDispatchPolicyException.Reason.BUDGET_EXHAUSTED));
+  }
+
+  private static String preTransportErrorCode(RuntimeException failure) {
+    if (failure instanceof ProjectedCallBudgetExceededException) {
+      return "PROJECT_DOC_BUDGET_EXCEEDED";
+    }
+    if (failure instanceof ByokContextUnavailableException || missingProviderCredential(failure)) {
+      return "PROJECT_PROVIDER_NOT_CONFIGURED";
+    }
+    if (failure instanceof LlmDispatchPolicyException policy) {
+      return switch (policy.reason()) {
+        case CREDENTIAL_UNAVAILABLE -> "PROJECT_PROVIDER_NOT_CONFIGURED";
+        case PROVIDER_NOT_ALLOWED, MODEL_NOT_ALLOWED, EXACT_ROUTE_VIOLATION ->
+            "PROJECT_PROVIDER_INVALID";
+        case BUDGET_EXHAUSTED -> "PROJECT_DOC_BUDGET_EXCEEDED";
+        default -> "PROJECT_PROVIDER_POLICY_REJECTED";
+      };
+    }
+    return "DOCUMENT_GENERATION_FAILED";
+  }
+
+  private static String preTransportSafeMessage(RuntimeException failure) {
+    String code = preTransportErrorCode(failure);
+    return switch (code) {
+      case "PROJECT_DOC_BUDGET_EXCEEDED" ->
+          "The document generation budget was exhausted before another provider request could"
+              + " begin.";
+      case "PROJECT_PROVIDER_NOT_CONFIGURED" ->
+          "The selected project provider is not configured. Update provider settings and retry.";
+      case "PROJECT_PROVIDER_INVALID" ->
+          "The selected project provider or model is not valid for this operation.";
+      case "PROJECT_PROVIDER_POLICY_REJECTED" ->
+          "Provider policy rejected the document request before provider dispatch began.";
+      default -> "Document generation could not start. Check project readiness and retry.";
+    };
+  }
+
+  private static boolean missingProviderCredential(RuntimeException failure) {
+    String message = failure.getMessage();
+    if (message == null) return false;
+    String normalized = message.toLowerCase(Locale.ROOT);
+    return normalized.contains("api-key not configured")
+        || normalized.contains("api key not configured")
+        || normalized.contains("credential unavailable");
+  }
+
+  private static String postDispatchMessage(RuntimeException failure) {
+    if (retryConfirmationRequired(failure)) {
+      return "The bounded document attempt exhausted its provider-call budget after provider"
+          + " dispatch began; delivery outcome may be uncertain. Confirm regeneration on the same"
+          + " route to start a fresh bounded attempt; this may incur additional usage.";
+    }
+    if (failure instanceof ProjectDocGeneratorService.StaleSourceException) {
+      return "The project architecture changed after provider dispatch began. Delivery outcome may"
+          + " be uncertain, and no document was published. Confirm regeneration against the latest"
+          + " project evidence on the same route; this may incur additional usage.";
+    }
+    String replayWarning =
+        " No document was published after provider dispatch began; delivery outcome may be"
+            + " uncertain. Retrying the same route may incur additional usage.";
+    if (knownPostDispatchFailure(failure)) return safeMessage(failure) + replayWarning;
+    return "No document was published after provider dispatch began; delivery outcome may be"
+        + " uncertain. Retrying the same route may incur additional usage.";
   }
 }

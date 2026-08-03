@@ -85,6 +85,11 @@ inline-code method contracts against the staged codemaps. Unverifiable parameter
 are downgraded to the qualified method name; codemaps remain unchanged source evidence. The same
 gate covers repository architecture, combined architecture, and summary while preserving the
 publisher's atomic no-partial-save boundary.
+Publication grounds each repository only against its repo-id-matched codemap. After every prose
+sanitizer runs, the publisher strips model-supplied or stale evidence markers and rebuilds the
+repository appendices byte-for-byte from that codemap; the combined appendix is then rebuilt from
+those restored repository documents. This ordering prevents sanitizer corruption of exact route
+rows and prevents one repository's same-path evidence from authorizing another repository.
 
 V353's database trigger enforces project/org and result/project coherence. SUCCEEDED jobs retain a
 RESTRICT reference to their architecture proof; terminal-job retention must remove the job before
@@ -124,11 +129,25 @@ FAILED, and the UI independently restores both document types, renders QUEUED ve
 requires a spend warning confirmation before replaying an uncertain attempt. The durable
 document-operation deadline remains 30 minutes; it is returned with attempt/provider-start evidence
 on every job response instead of being represented by the browser's generic request timeout.
+Known post-dispatch validation, truncation, stale-source, and safety failures remain behind the same
+confirmation barrier but retain their safe stable error code; only genuinely unknown failures use
+`OUTCOME_UNCERTAIN`. Confirmed replay preserves the lifetime worker-attempt count and receives a new
+`project-doc:<job UUID>:<lease token>` execution context. Each explicitly confirmed attempt therefore
+receives its own bounded attempt budget without resetting the lifetime worker-attempt count or
+losing the joinable durable job identity.
 
 `ProjectDocGeneratorService` generates `EXPLANATION` and `SETUP` documents only through
 `ProjectDocValidatedGeneration`, whose bounded two-attempt loop uses
-`LlmRouter.callTextStrict` on the exact resolved route and rejects truncated, unsafe, or
-deterministically invalid output before publication. Text is concatenated across every non-empty
+`LlmRouter.callTextStrict` on the exact resolved route with the INTERACTIVE transient-retry profile
+and `ProjectDocExecutionPolicy` gives each attempt hard 200,000-token / two-physical-call limits
+plus post-success $3 spend reconciliation; the final admitted call may cross the dollar ceiling.
+The durable provider-start fence runs after attempt admission and local client preflight, immediately
+before transport, so it proves local dispatch began but does not prove provider delivery or charge.
+Generated-document job DTOs also normalize the legacy persisted phrase `provider execution began`
+to truthful dispatch/uncertain-delivery wording for every API consumer; the web fallback remains for
+older servers.
+The validator rejects truncated, unsafe, or deterministically invalid output before publication.
+Text is concatenated across every non-empty
 provider generation because Anthropic may return multiple generations; reading only the first can
 misclassify a paid, complete response as empty. New document rows use `saveAndFlush` before the
 durable job-result fence writes its PostgreSQL foreign key, while both writes remain in the same
@@ -155,14 +174,25 @@ incomplete integration (including grammatical variants). Directional Mermaid/seq
 removed as a whole and replaced with the same non-directional note. Other content and headings
 remain in place.
 Exact-revision project facts cover selected schema/configuration paths, literal Compose service
-declarations, and Spring handler response modes. Schema ownership and Compose application/full-stack
+declarations, bounded setup-source excerpts, and Spring handler response modes. Shell commands
+other than repository clone commands must appear verbatim in those excerpts; a manifest path alone
+never proves a command. Current V2 fact/setup envelopes require the producer-compatible full
+40-hex source revision. For `package.json`, command bodies are authoritative only inside the typed
+`scripts` object; arbitrary metadata string values never authorize a setup command. Schema
+ownership and Compose application/full-stack
 startup are never inferred from framework conventions, directory names, arbitrary images, or build
-targets. Unsupported factual claims fail deterministic validation and receive the same single
-same-route corrective retry as structural failures; two unsupported responses fail publication.
+targets. Unsupported factual prose is replaced deterministically with an explicit not-established
+statement before validation, without paying for a corrective call; structural failures may still
+receive one same-route corrective generation.
 Positive route-representation claims resolve against a repository + HTTP method + exact-path key.
 An unresolved `NOT_ESTABLISHED` handler mode proves neither a view nor a serialized body; in a
-multi-repository bundle, a claim without unambiguous repository attribution fails closed so one
-repository's same-path handler cannot authorize prose about another repository.
+single- or multi-repository bundle, a claim missing an explicit repository or HTTP method fails
+closed so one repository's same-path handler cannot authorize prose about another repository. A
+repository reference is a whole canonical token: a longer slash-qualified name cannot satisfy a
+linked repository or route-ownership check by suffix.
+Setup commands follow the same ownership boundary: single-repository documents infer that sole
+repository, while multi-repository documents must present each command under an explicit exact
+repository context and may use only that repository's encoded sources/derived script commands.
 Legacy same-SHA codemaps without the current fact marker are not reusable, and every repository's
 complete fact block receives a reserved source-budget section before bulk declaration inventory.
 Surrounding repository/combined architecture prose remains model-derived explanatory content; it is
@@ -187,7 +217,10 @@ A provider `length` or `max_tokens` finish reason is `PROVIDER_OUTPUT_LIMIT`; ev
 non-complete finish reason (including safety, refusal, recitation, and content filtering) also fails
 closed. Before publication, a provider-neutral deterministic validator requires the documented
 headings, a meaningful minimum body, balanced fences, no private tool protocol, and no
-high-confidence credential material. A complete and customer-safe response that fails only this
+high-confidence credential material. Setup command validation treats known single-token
+executables as commands even outside a shell-labelled fence, rejects unclosed backtick or tilde
+fences, rejects shell operators even when repository prose contains the same line, and projects npm
+scripts only from operator-free script names. A complete and customer-safe response that fails only this
 deterministic content contract gets at most one corrective regeneration: the validation reason is
 fed back, the full document is requested again, and the same exact provider/model plus the same
 durable execution context are reused through strict routing. Both physical calls consume the shared

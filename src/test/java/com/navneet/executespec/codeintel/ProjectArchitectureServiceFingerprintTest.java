@@ -29,8 +29,24 @@ class ProjectArchitectureServiceFingerprintTest {
 
   private static final String CURRENT_FACTS =
       DeterministicProjectFactEvidence.BEGIN
-          + "\n- Repository: `owner/repo`\n- Status: `AVAILABLE`\n"
-          + DeterministicProjectFactEvidence.END;
+          + "\n- Evidence-Format: `EXECUTESPEC_PROJECT_FACTS_V2`"
+          + "\n- Repository: `owner/repo`"
+          + "\n- Source revision: `1111111111111111111111111111111111111111`"
+          + "\n- Status: `AVAILABLE`\n"
+          + DeterministicProjectFactEvidence.ROUTES_BEGIN
+          + "\n- No exact Spring handler response evidence was discovered.\n"
+          + DeterministicProjectFactEvidence.ROUTES_END
+          + "\n"
+          + DeterministicProjectFactEvidence.END
+          + "\n"
+          + DeterministicProjectFactEvidence.SETUP_BEGIN
+          + "\n- Evidence-Format: EXECUTESPEC_SETUP_SOURCES_V2"
+          + "\n- Repository-Base64: b3duZXIvcmVwbw=="
+          + "\n- Source-Revision: 1111111111111111111111111111111111111111"
+          + "\n- Scm-Provider: GITHUB"
+          + "\n- Source-Selection: COMPLETE"
+          + "\n- No exact setup command source was selected.\n"
+          + DeterministicProjectFactEvidence.SETUP_END;
 
   private final ObjectMapper objectMapper = new ObjectMapper();
 

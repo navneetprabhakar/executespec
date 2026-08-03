@@ -3,8 +3,10 @@ package com.navneet.executespec.codeintel;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 
+import com.navneet.executespec.agent.LlmRequest;
 import com.navneet.executespec.agent.LlmRouter;
 import com.navneet.executespec.agent.PromptTrustBoundary;
 import com.navneet.executespec.codeintel.entity.ProjectGeneratedDoc.DocType;
@@ -45,17 +47,30 @@ final class ProjectDocValidatedGeneration {
     long totalInputTokens = 0;
     long totalOutputTokens = 0;
     for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-      providerDispatchFence.run();
-      ChatResponse response =
-          llmRouter.callTextStrict(
-              resolved.providerName(),
-              exactModel,
-              messages,
-              runId,
-              "project-doc-" + docType.name().toLowerCase(),
-              attempt == 1 ? "generate" : "generate-corrective-retry",
-              null,
-              executionReference);
+      AtomicBoolean currentCallStarted = new AtomicBoolean();
+      ChatResponse response;
+      try {
+        response =
+            llmRouter.callTextStrict(
+                resolved.providerName(),
+                exactModel,
+                messages,
+                runId,
+                "project-doc-" + docType.name().toLowerCase(),
+                attempt == 1 ? "generate" : "generate-corrective-retry",
+                null,
+                executionReference,
+                LlmRequest.RetryProfile.INTERACTIVE,
+                () -> {
+                  providerDispatchFence.run();
+                  currentCallStarted.set(true);
+                });
+      } catch (RuntimeException failure) {
+        if (!currentCallStarted.get()) {
+          throw new ProjectDocGeneratorService.PreTransportGenerationException(failure);
+        }
+        throw failure;
+      }
       if (ProjectDocGeneratorService.responseWasTruncated(response)) {
         log.warn(
             "[{}] Refusing truncated {} document response (reason={})",
@@ -70,6 +85,7 @@ final class ProjectDocValidatedGeneration {
       String groundedContent = GeneratedSignatureGrounding.sanitize(content, codemapEvidence);
       groundedContent =
           GeneratedSignatureGrounding.sanitizeUnsupportedBehavior(groundedContent, codemapEvidence);
+      groundedContent = GeneratedProjectFactGrounding.sanitize(groundedContent, codemapEvidence);
       Usage usage = response.getMetadata() == null ? null : response.getMetadata().getUsage();
       totalInputTokens += usage == null ? 0 : safeInt(usage.getPromptTokens());
       totalOutputTokens += usage == null ? 0 : safeInt(usage.getCompletionTokens());
