@@ -59,6 +59,8 @@ import lombok.Builder;
  *     inherits the pipeline ladder's long backoff tail.
  * @param usageLogicalCallId stable identity shared by retries/failovers of one logical LLM call;
  *     generated once when omitted and preserved by {@link #toBuilder()}
+ * @param physicalAttemptStartedCallback process-local callback invoked after physical-attempt
+ *     admission and local transport preflight, immediately before socket I/O; never serialized
  */
 @Builder(toBuilder = true)
 public record LlmRequest(
@@ -89,7 +91,8 @@ public record LlmRequest(
     Double runHardCapUsd,
     Double taskCostCapUsd,
     PromptCacheStrategy promptCacheStrategy,
-    RetryProfile retryProfile) {
+    RetryProfile retryProfile,
+    @JsonIgnore Runnable physicalAttemptStartedCallback) {
 
   /**
    * Provider-neutral prompt-cache intent. Providers that do not support prompt caching ignore the
@@ -102,6 +105,11 @@ public record LlmRequest(
     SYSTEM_ONLY,
     CONVERSATION_HISTORY,
     NONE
+  }
+
+  /** Signals that an admitted physical request is about to cross the provider transport. */
+  public void signalPhysicalAttemptStarted() {
+    ProviderStartFenceException.signal(physicalAttemptStartedCallback);
   }
 
   /**

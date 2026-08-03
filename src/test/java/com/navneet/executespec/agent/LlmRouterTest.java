@@ -61,7 +61,6 @@ import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.chat.prompt.Prompt;
-import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.test.util.ReflectionTestUtils;
 
 @DisplayName("LlmRouter dispatch / retry / failover")
@@ -82,7 +81,7 @@ class LlmRouterTest {
   private AnthropicForcedToolClient anthropicForcedToolClient;
   private ManagedAiUsageService managedAiUsageService;
   private RunRoutePolicyService routePolicyService;
-  private ObjectProvider<AnthropicChatModel> anthropicModelProvider;
+  private AnthropicAttemptModelFactory anthropicAttemptModelFactory;
   private SseBroadcaster broadcaster;
   private LlmRouter router; // a spy with backoffSleep no-op'd
 
@@ -179,8 +178,7 @@ class LlmRouterTest {
     lenient()
         .when(routePolicyService.forRun(anyString()))
         .thenReturn(new RunRoutePolicyService.RoutePolicy(null, null, "PROVIDER_PREFERRED", false));
-    anthropicModelProvider = mock(ObjectProvider.class);
-    lenient().when(anthropicModelProvider.getIfAvailable()).thenReturn(null);
+    anthropicAttemptModelFactory = mock(AnthropicAttemptModelFactory.class);
     lenient()
         .when(
             managedAiUsageService.authorizeCall(
@@ -212,7 +210,7 @@ class LlmRouterTest {
             routePolicyService,
             dispatchAuthorization,
             new com.navneet.executespec.security.ContextSanitizer(),
-            anthropicModelProvider);
+            anthropicAttemptModelFactory);
     router = spy(real);
     ReflectionTestUtils.setField(router, "executionContextEnforcementEnabled", false);
     doNothing().when(router).backoffSleep(anyLong()); // keep retry tests fast
@@ -363,7 +361,9 @@ class LlmRouterTest {
   void textSeamPreservesAnthropicSystemOnlyCacheIntent() {
     build();
     AnthropicChatModel anthropic = mock(AnthropicChatModel.class);
-    when(anthropicModelProvider.getIfAvailable()).thenReturn(anthropic);
+    when(anthropicAttemptModelFactory.create(
+            nullable(String.class), anyString(), nullable(Integer.class), anyInt()))
+        .thenReturn(anthropic);
     when(anthropic.call(any(Prompt.class))).thenReturn(ok());
 
     router.callText(
@@ -388,7 +388,9 @@ class LlmRouterTest {
   void textSeamCanDisableAnthropicPromptCaching() {
     build();
     AnthropicChatModel anthropic = mock(AnthropicChatModel.class);
-    when(anthropicModelProvider.getIfAvailable()).thenReturn(anthropic);
+    when(anthropicAttemptModelFactory.create(
+            nullable(String.class), anyString(), nullable(Integer.class), anyInt()))
+        .thenReturn(anthropic);
     when(anthropic.call(any(Prompt.class))).thenReturn(ok());
 
     router.callText(
@@ -409,22 +411,211 @@ class LlmRouterTest {
   }
 
   @Test
-  void anthropicForcedNullFallsBackWithOrderedPhysicalAttemptsAndOneCostProjection() {
+  void standardAnthropicSignalsExactlyOnceImmediatelyBeforeModelTransport() {
     build();
+    AtomicInteger providerStarted = new AtomicInteger();
     AnthropicChatModel anthropic = mock(AnthropicChatModel.class);
-    when(anthropicModelProvider.getIfAvailable()).thenReturn(anthropic);
+    when(anthropicAttemptModelFactory.create(
+            nullable(String.class), anyString(), nullable(Integer.class), anyInt()))
+        .thenReturn(anthropic);
+    when(anthropic.call(any(Prompt.class)))
+        .thenAnswer(
+            ignored -> {
+              assertThat(providerStarted).hasValue(1);
+              return ok();
+            });
+    LlmRequest request =
+        req("anthropic", "claude-standard-fence-test").toBuilder()
+            .physicalAttemptStartedCallback(providerStarted::incrementAndGet)
+            .build();
+
+    assertThat(router.call(request)).isNotNull();
+
+    assertThat(providerStarted).hasValue(1);
+    verify(anthropic, times(1)).call(any(Prompt.class));
+  }
+
+  @Test
+  void standardAnthropicFenceFailureIsTerminalAcrossTemperatureRetryAndFailover() {
+    build();
+    when(flags.isEnabled(LlmRouter.FAILOVER_FLAG)).thenReturn(true);
+    when(registry.fallbackChainFor(anyString(), eq("anthropic")))
+        .thenReturn(List.<String[]>of(new String[] {"openai", "gpt-x"}));
+    AtomicInteger callbackAttempts = new AtomicInteger();
+    AnthropicChatModel anthropic = mock(AnthropicChatModel.class);
+    when(anthropicAttemptModelFactory.create(
+            nullable(String.class), anyString(), nullable(Integer.class), anyInt()))
+        .thenReturn(anthropic);
+    LlmRequest request =
+        req("anthropic", "claude-standard-fence-test").toBuilder()
+            .physicalAttemptStartedCallback(
+                () -> {
+                  callbackAttempts.incrementAndGet();
+                  throw new IllegalStateException(
+                      "503 timed out: temperature is deprecated; durable fence lost");
+                })
+            .build();
+
+    assertThatThrownBy(() -> router.call(request))
+        .isInstanceOf(ProviderStartFenceException.class)
+        .hasRootCauseMessage("503 timed out: temperature is deprecated; durable fence lost");
+
+    assertThat(callbackAttempts).hasValue(1);
+    verify(anthropic, never()).call(any(Prompt.class));
+    verify(openai, never()).call(any());
+  }
+
+  @Test
+  void forcedAnthropicFenceFailureIsTerminalAcrossRetryAndFailover() {
+    build();
+    when(flags.isEnabled(LlmRouter.FAILOVER_FLAG)).thenReturn(true);
+    when(registry.fallbackChainFor(anyString(), eq("anthropic")))
+        .thenReturn(List.<String[]>of(new String[] {"openai", "gpt-x"}));
+    AtomicInteger callbackAttempts = new AtomicInteger();
     when(anthropicForcedToolClient.canAttempt(any(), any(), any())).thenReturn(true);
     when(anthropicForcedToolClient.forcedToolCallOutcome(
-            anyString(), any(), any(), any(), any(), nullable(Integer.class)))
+            anyString(), any(), any(), any(), any(), anyInt(), nullable(Runnable.class)))
+        .thenAnswer(
+            invocation -> {
+              ProviderStartFenceException.signal(invocation.getArgument(6));
+              throw new AssertionError("terminal fence signal must throw");
+            });
+    LlmRequest request =
+        req("anthropic", "claude-forced-fence-test").toBuilder()
+            .toolChoice("required")
+            .physicalAttemptStartedCallback(
+                () -> {
+                  callbackAttempts.incrementAndGet();
+                  throw new IllegalStateException("503 timed out; durable fence lost");
+                })
+            .build();
+
+    assertThatThrownBy(() -> router.call(request))
+        .isInstanceOf(ProviderStartFenceException.class)
+        .hasRootCauseMessage("503 timed out; durable fence lost");
+
+    assertThat(callbackAttempts).hasValue(1);
+    verify(anthropicForcedToolClient, times(1))
+        .forcedToolCallOutcome(
+            anyString(), any(), any(), any(), any(), anyInt(), nullable(Runnable.class));
+    verify(anthropicAttemptModelFactory, never())
+        .create(any(), anyString(), nullable(Integer.class), anyInt());
+    verify(openai, never()).call(any());
+  }
+
+  @Test
+  void standardAnthropicFactoryFailureClosesAdmittedAttemptBeforeCallbackOrTransport() {
+    build();
+    ReflectionTestUtils.setField(
+        router, "operationAdmissionPolicy", new LlmExecutionOperationAdmissionPolicy("SHADOW"));
+    AtomicInteger callbackAttempts = new AtomicInteger();
+    LlmRequest request =
+        atomicRequest("anthropic", "claude-factory-failure-test").toBuilder()
+            .physicalAttemptStartedCallback(callbackAttempts::incrementAndGet)
+            .build();
+    LlmExecutionContext durableContext = mock(LlmExecutionContext.class);
+    when(durableContext.getRequestedProvider()).thenReturn("anthropic");
+    when(durableContext.getUserId()).thenReturn("u1");
+    when(durableContext.getCredentialOrgId()).thenReturn("org-1");
+    when(executionDispatchGuard.reauthorize(any()))
         .thenReturn(
-            new AnthropicForcedToolClient.ForcedToolCallOutcome(
-                null, false, new RuntimeException("forced transport failed"), true));
+            new LlmExecutionDispatchGuard.ResolvedDispatch(
+                "logical-key", RunKeyContext.Source.PLATFORM, durableContext));
+    var admitted = admittedAttempt(request, 1, "PRIMARY", null, "fresh-anthropic-key");
+    when(physicalAttemptAdmission.admitChatAttempt(
+            eq(request),
+            eq(1),
+            eq("PRIMARY"),
+            nullable(String.class),
+            eq(Duration.ofSeconds(300)),
+            eq(Duration.ofSeconds(15))))
+        .thenReturn(admitted);
+    when(anthropicAttemptModelFactory.create(
+            eq("fresh-anthropic-key"), eq("claude-factory-failure-test"), anyInt(), anyInt()))
+        .thenThrow(new IllegalStateException("local Anthropic factory preflight failed"));
+
+    assertThatThrownBy(() -> router.call(request))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessage("local Anthropic factory preflight failed");
+
+    assertThat(callbackAttempts).hasValue(0);
+    verify(stepUsageRecorder, times(1))
+        .recordFailure(
+            eq(admitted.handle()), eq(request), anyLong(), any(IllegalStateException.class));
+  }
+
+  @Test
+  void standardAnthropicUsesFreshAdmittedKeyAndDeadlineBoundTimeout() {
+    build();
+    ReflectionTestUtils.setField(
+        router, "operationAdmissionPolicy", new LlmExecutionOperationAdmissionPolicy("SHADOW"));
+    LlmRequest request = atomicRequest("anthropic", "claude-standard-atomic-test");
+    LlmExecutionContext durableContext = mock(LlmExecutionContext.class);
+    when(durableContext.getRequestedProvider()).thenReturn("anthropic");
+    when(durableContext.getUserId()).thenReturn("u1");
+    when(durableContext.getCredentialOrgId()).thenReturn("org-1");
+    when(executionDispatchGuard.reauthorize(any()))
+        .thenReturn(
+            new LlmExecutionDispatchGuard.ResolvedDispatch(
+                "logical-key", RunKeyContext.Source.PLATFORM, durableContext));
+    when(physicalAttemptAdmission.admitChatAttempt(
+            eq(request),
+            eq(1),
+            eq("PRIMARY"),
+            nullable(String.class),
+            eq(Duration.ofSeconds(300)),
+            eq(Duration.ofSeconds(15))))
+        .thenReturn(admittedAttempt(request, 1, "PRIMARY", null, "fresh-anthropic-key"));
+    AnthropicChatModel model = mock(AnthropicChatModel.class);
+    when(anthropicAttemptModelFactory.create(
+            eq("fresh-anthropic-key"), eq("claude-standard-atomic-test"), anyInt(), anyInt()))
+        .thenReturn(model);
+    when(model.call(any(Prompt.class))).thenReturn(ok());
+
+    assertThat(router.call(request)).isNotNull();
+
+    ArgumentCaptor<Integer> readTimeout = ArgumentCaptor.forClass(Integer.class);
+    verify(anthropicAttemptModelFactory)
+        .create(
+            eq("fresh-anthropic-key"),
+            eq("claude-standard-atomic-test"),
+            anyInt(),
+            readTimeout.capture());
+    assertThat(readTimeout.getValue()).isBetween(1, 60);
+    verify(model, times(1)).call(any(Prompt.class));
+  }
+
+  @Test
+  void anthropicForcedNullFallsBackWithOrderedPhysicalAttemptsAndOneCostProjection() {
+    build();
+    AtomicInteger providerStarted = new AtomicInteger();
+    AnthropicChatModel anthropic = mock(AnthropicChatModel.class);
+    when(anthropicAttemptModelFactory.create(
+            nullable(String.class), anyString(), nullable(Integer.class), anyInt()))
+        .thenReturn(anthropic);
+    when(anthropicForcedToolClient.canAttempt(any(), any(), any())).thenReturn(true);
+    when(anthropicForcedToolClient.forcedToolCallOutcome(
+            anyString(),
+            any(),
+            any(),
+            any(),
+            any(),
+            nullable(Integer.class),
+            nullable(Runnable.class)))
+        .thenAnswer(
+            invocation -> {
+              Runnable callback = invocation.getArgument(6);
+              callback.run();
+              return new AnthropicForcedToolClient.ForcedToolCallOutcome(
+                  null, false, new RuntimeException("forced transport failed"), true);
+            });
     when(anthropic.call(any(Prompt.class))).thenReturn(ok());
     LlmRequest request =
         req("anthropic", "claude-forced-audit-test").toBuilder()
             .toolChoice("required")
             .agentRole("WorkerAgent")
             .stepId("worker.salvage")
+            .physicalAttemptStartedCallback(providerStarted::incrementAndGet)
             .build();
 
     assertThat(router.call(request)).isNotNull();
@@ -472,6 +663,7 @@ class LlmRouterTest {
             any(),
             any(),
             eq(RunKeyContext.Source.PLATFORM));
+    assertThat(providerStarted).hasValue(2);
     verify(stepUsageRecorder, never())
         .recordSuccess(
             any(LlmRequest.class),
@@ -488,10 +680,18 @@ class LlmRouterTest {
   void anthropicForcedHttpSuccessWithoutToolAccountsSpendBeforeFallback() {
     build();
     AnthropicChatModel anthropic = mock(AnthropicChatModel.class);
-    when(anthropicModelProvider.getIfAvailable()).thenReturn(anthropic);
+    when(anthropicAttemptModelFactory.create(
+            nullable(String.class), anyString(), nullable(Integer.class), anyInt()))
+        .thenReturn(anthropic);
     when(anthropicForcedToolClient.canAttempt(any(), any(), any())).thenReturn(true);
     when(anthropicForcedToolClient.forcedToolCallOutcome(
-            anyString(), any(), any(), any(), any(), nullable(Integer.class)))
+            anyString(),
+            any(),
+            any(),
+            any(),
+            any(),
+            nullable(Integer.class),
+            nullable(Runnable.class)))
         .thenReturn(new AnthropicForcedToolClient.ForcedToolCallOutcome(ok(), false, null, true));
     when(anthropic.call(any(Prompt.class))).thenReturn(ok());
     LlmRequest request =
@@ -533,10 +733,18 @@ class LlmRouterTest {
   void anthropicPaidForcedResponseRechecksCapBeforeNormalFallbackTransport() {
     build();
     AnthropicChatModel anthropic = mock(AnthropicChatModel.class);
-    when(anthropicModelProvider.getIfAvailable()).thenReturn(anthropic);
+    when(anthropicAttemptModelFactory.create(
+            nullable(String.class), anyString(), nullable(Integer.class), anyInt()))
+        .thenReturn(anthropic);
     when(anthropicForcedToolClient.canAttempt(any(), any(), any())).thenReturn(true);
     when(anthropicForcedToolClient.forcedToolCallOutcome(
-            anyString(), any(), any(), any(), any(), nullable(Integer.class)))
+            anyString(),
+            any(),
+            any(),
+            any(),
+            any(),
+            nullable(Integer.class),
+            nullable(Runnable.class)))
         .thenReturn(new AnthropicForcedToolClient.ForcedToolCallOutcome(ok(), false, null, true));
     when(costTracker.estimateConservativeCallCostUsd(
             eq("anthropic"), eq("claude-forced-audit-test"), anyLong(), eq(100L)))
@@ -562,7 +770,14 @@ class LlmRouterTest {
         .hasMessageContaining("estimated next call $0.1000");
 
     verify(anthropicForcedToolClient, times(1))
-        .forcedToolCallOutcome(anyString(), any(), any(), any(), any(), nullable(Integer.class));
+        .forcedToolCallOutcome(
+            anyString(),
+            any(),
+            any(),
+            any(),
+            any(),
+            nullable(Integer.class),
+            nullable(Runnable.class));
     verify(anthropic, never()).call(any(Prompt.class));
     verify(costTracker, times(1))
         .record(eq("run-1"), eq("T1"), eq("anthropic"), eq("claude-forced-audit-test"), any());
@@ -602,7 +817,7 @@ class LlmRouterTest {
         .thenReturn(admittedAttempt(request, 1, "PRIMARY", null, "fresh-anthropic-key"));
     when(anthropicForcedToolClient.canAttempt(any(), any(), any())).thenReturn(true);
     when(anthropicForcedToolClient.forcedToolCallOutcome(
-            anyString(), any(), any(), any(), any(), anyInt()))
+            anyString(), any(), any(), any(), any(), anyInt(), nullable(Runnable.class)))
         .thenReturn(new AnthropicForcedToolClient.ForcedToolCallOutcome(ok(), true, null, true));
 
     assertThat(router.call(request)).isNotNull();
@@ -614,7 +829,8 @@ class LlmRouterTest {
             any(),
             any(),
             eq("fresh-anthropic-key"),
-            argThat(timeout -> timeout >= 1 && timeout <= 60));
+            argThat(timeout -> timeout >= 1 && timeout <= 60),
+            nullable(Runnable.class));
     verify(executionDispatchGuard, never()).authorize(any());
     verify(stepUsageRecorder)
         .recordSuccess(
@@ -630,16 +846,20 @@ class LlmRouterTest {
     build();
     String model = "claude-temperature-audit-test";
     AnthropicChatModel anthropic = mock(AnthropicChatModel.class);
-    when(anthropicModelProvider.getIfAvailable()).thenReturn(anthropic);
+    when(anthropicAttemptModelFactory.create(
+            nullable(String.class), anyString(), nullable(Integer.class), anyInt()))
+        .thenReturn(anthropic);
     when(anthropic.call(any(Prompt.class)))
         .thenThrow(
             new RuntimeException(
                 "400 - {\"error\":{\"message\":\"`temperature` is deprecated for this model.\"}}"))
         .thenReturn(ok());
+    AtomicInteger providerStarted = new AtomicInteger();
     LlmRequest request =
         req("anthropic", model).toBuilder()
             .agentRole("ReviewerAgent")
             .stepId("review.general")
+            .physicalAttemptStartedCallback(providerStarted::incrementAndGet)
             .build();
 
     assertThat(router.call(request)).isNotNull();
@@ -693,6 +913,7 @@ class LlmRouterTest {
     AnthropicChatOptions second = (AnthropicChatOptions) prompts.getAllValues().get(1).getOptions();
     assertThat(first.getTemperature()).isEqualTo(0.0);
     assertThat(second.getTemperature()).isNull();
+    assertThat(providerStarted).hasValue(2);
   }
 
   @Test
@@ -700,7 +921,9 @@ class LlmRouterTest {
     build();
     when(registry.maxOutputForModel("claude-sonnet-4-6")).thenReturn(4096);
     AnthropicChatModel anthropic = mock(AnthropicChatModel.class);
-    when(anthropicModelProvider.getIfAvailable()).thenReturn(anthropic);
+    when(anthropicAttemptModelFactory.create(
+            nullable(String.class), anyString(), nullable(Integer.class), anyInt()))
+        .thenReturn(anthropic);
     when(anthropic.call(any(Prompt.class))).thenReturn(ok());
 
     router.callText(
@@ -722,7 +945,9 @@ class LlmRouterTest {
     build();
     when(registry.maxOutputForModel("claude-sonnet-4-6")).thenReturn(8192);
     AnthropicChatModel anthropic = mock(AnthropicChatModel.class);
-    when(anthropicModelProvider.getIfAvailable()).thenReturn(anthropic);
+    when(anthropicAttemptModelFactory.create(
+            nullable(String.class), anyString(), nullable(Integer.class), anyInt()))
+        .thenReturn(anthropic);
     when(anthropic.call(any(Prompt.class))).thenReturn(ok());
 
     router.call(
@@ -742,7 +967,9 @@ class LlmRouterTest {
   void directAnthropicRequestPreservesExplicitOutputCap() {
     build();
     AnthropicChatModel anthropic = mock(AnthropicChatModel.class);
-    when(anthropicModelProvider.getIfAvailable()).thenReturn(anthropic);
+    when(anthropicAttemptModelFactory.create(
+            nullable(String.class), anyString(), nullable(Integer.class), anyInt()))
+        .thenReturn(anthropic);
     when(anthropic.call(any(Prompt.class))).thenReturn(ok());
 
     router.call(req("anthropic", "claude-sonnet-4-6").toBuilder().maxTokens(512).build());
@@ -1134,10 +1361,12 @@ class LlmRouterTest {
     build();
     ReflectionTestUtils.setField(
         router, "operationAdmissionPolicy", new LlmExecutionOperationAdmissionPolicy("ENFORCED"));
+    AtomicInteger providerStarted = new AtomicInteger();
     LlmRequest request =
         req("openai", "gpt-x").toBuilder()
             .llmExecutionContextId("ctx-enforced")
             .llmExecutionScope(LlmExecutionScope.customer("org-1"))
+            .physicalAttemptStartedCallback(providerStarted::incrementAndGet)
             .build();
 
     assertThatThrownBy(() -> router.call(request))
@@ -1149,6 +1378,7 @@ class LlmRouterTest {
     verify(physicalAttemptAdmission, never())
         .admitChatAttempt(any(), anyInt(), anyString(), any(), any(), any());
     verify(openai, never()).call(any());
+    assertThat(providerStarted).hasValue(0);
   }
 
   @Test
@@ -1535,6 +1765,72 @@ class LlmRouterTest {
                 request ->
                     request.model().equals("accounts/fireworks/models/deepseek-v4-pro")
                         && request.baseUrl().contains("fireworks")));
+  }
+
+  @Test
+  void deepSeekMissingCredentialFailsPreflightWithoutProviderStart() {
+    build();
+    configureWireProviderUrls();
+    AtomicInteger providerStarted = new AtomicInteger();
+    LlmRequest request =
+        req("deepseek", "deepseek-v4-pro-native").toBuilder()
+            .strictProvider(true)
+            .physicalAttemptStartedCallback(providerStarted::incrementAndGet)
+            .build();
+
+    assertThatThrownBy(() -> router.call(request))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("DeepSeek api-key not configured");
+
+    assertThat(providerStarted).hasValue(0);
+    verify(openai, never()).call(any());
+  }
+
+  @Test
+  void fireworksUnknownModelFailsMapperPreflightWithoutProviderStart() {
+    build();
+    configureWireProviderUrls();
+    ReflectionTestUtils.setField(router, "fireworksApiKey", "fireworks-key");
+    AtomicInteger providerStarted = new AtomicInteger();
+    LlmRequest request =
+        req("fireworks", "not-a-fireworks-model").toBuilder()
+            .strictProvider(true)
+            .physicalAttemptStartedCallback(providerStarted::incrementAndGet)
+            .build();
+
+    assertThatThrownBy(() -> router.call(request)).isInstanceOf(IllegalArgumentException.class);
+
+    assertThat(providerStarted).hasValue(0);
+    verify(openai, never()).call(any());
+  }
+
+  @Test
+  void deepSeekTransientRetrySignalsOncePerPhysicalWireAttempt() {
+    build();
+    configureWireProviderUrls();
+    ReflectionTestUtils.setField(router, "deepSeekApiKey", "deepseek-key");
+    AtomicInteger providerStarted = new AtomicInteger();
+    AtomicInteger wireAttempts = new AtomicInteger();
+    when(openai.call(any()))
+        .thenAnswer(
+            invocation -> {
+              OpenAiNativeToolClient.OpenAiToolCallRequest wire = invocation.getArgument(0);
+              wire.signalPhysicalAttemptStarted();
+              if (wireAttempts.incrementAndGet() == 1) {
+                throw new RuntimeException("503 transient provider failure");
+              }
+              return ok();
+            });
+    LlmRequest request =
+        req("deepseek", "deepseek-v4-pro-native").toBuilder()
+            .strictProvider(true)
+            .physicalAttemptStartedCallback(providerStarted::incrementAndGet)
+            .build();
+
+    assertThat(router.call(request)).isNotNull();
+
+    assertThat(wireAttempts).hasValue(2);
+    assertThat(providerStarted).hasValue(2);
   }
 
   private void configureWireProviderUrls() {

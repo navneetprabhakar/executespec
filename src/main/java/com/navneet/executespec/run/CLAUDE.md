@@ -9,6 +9,10 @@ projection. Unknown failures receive a stable run support code. `RunSyncService`
 Deterministic HTTP failures include separate customer-safe outcomes for a missing required route, a
 forbidden method that was implemented, and 405 behavior that cannot be proven because no supported
 method exists at the path; raw validation/provider detail remains private.
+The Web result surface renders exactly one primary control from `terminalOutcome.nextAction`
+(honoring an explicit `href`) and keeps Logs/Evidence/Files as secondary diagnostics. It treats
+`USER_STOPPED` as a neutral stop rather than a failed recovery case and does not poll for a report
+after a terminal one-shot report read returns absent.
 Because durable archives intentionally omit `.git`, a successful restore reconstructs repository
 metadata only from the run's immutable repo snapshots and the linked project's credential-free SCM
 clone coordinate, then the normal caller-authenticated fetch/reset selects source bytes. Sync also

@@ -23,7 +23,9 @@ may be incomplete.
 ## First-run per repo
 For every repository, show evidenced dependency-installation, migration, test, and development
 start commands. Label each command block with the repository name. Do not manufacture commands
-from framework conventions when they are not evidenced.
+from framework conventions when they are not evidenced. A build-manifest path alone does not prove
+a command. Use commands only when their exact text or script target appears in a supplied setup
+command source excerpt; otherwise state that the command is not established.
 
 ## Running the full stack locally
 Describe the evidenced startup order and health checks. When three or more evidenced services are

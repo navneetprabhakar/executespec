@@ -355,6 +355,49 @@ describe('agent API SSE helpers', () => {
     expect(onErrorEvent).toHaveBeenCalledWith(budgetError);
   });
 
+  it('preserves agent-turn budget exhaustion as a controlled action-required error', async () => {
+    localStorage.setItem('access_token', 'test-token');
+    const encoder = new TextEncoder();
+    const onErrorEvent = vi.fn();
+    const budgetError = {
+      session_id: 's1',
+      turn_id: 't1',
+      code: 'AGENT_TURN_BUDGET_EXHAUSTED',
+      category: 'ACTION_REQUIRED',
+      message: 'This agent turn reached its configured budget.',
+      retryable: true,
+      next_action: 'Increase the session cap, then retry.',
+      actual_cost_usd: 0.5,
+      cap_usd: 0.5,
+    };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(
+            new ReadableStream({
+              start(controller) {
+                controller.enqueue(
+                  encoder.encode(`event: error\ndata: ${JSON.stringify(budgetError)}\n\n`),
+                );
+                controller.close();
+              },
+            }),
+            {status: 200},
+          ),
+      ),
+    );
+
+    await expect(
+      streamAgentTurn('s1', {message: 'continue'}, {onErrorEvent}),
+    ).rejects.toMatchObject({
+      status: 422,
+      message:
+        'This agent turn reached its configured budget. Increase the session cap, then retry.',
+    });
+    expect(onErrorEvent).toHaveBeenCalledWith(budgetError);
+  });
+
   it('confirms a stored cloud-run proposal through the orchestrator endpoint', async () => {
     localStorage.setItem('access_token', 'test-token');
     const fetchMock = vi.fn(async () => {

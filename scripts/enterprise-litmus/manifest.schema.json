@@ -1,0 +1,262 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://executespec.ai/schemas/enterprise-litmus-manifest-v2.json",
+  "title": "ExecuteSpec enterprise litmus manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "campaignId",
+    "state",
+    "createdAt",
+    "updatedAt",
+    "invalidation",
+    "deployment",
+    "fixture",
+    "project",
+    "route",
+    "runRequest",
+    "approval",
+    "clients",
+    "frozenTupleDigest",
+    "heroes",
+    "postMerge",
+    "negatives",
+    "cleanup",
+    "events"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 2
+    },
+    "campaignId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "state": {
+      "enum": [
+        "NEW",
+        "PREFLIGHTED",
+        "FIXTURE_CREATED",
+        "PROJECT_LINKED",
+        "BASELINE_V1_READY",
+        "SOURCE_REVISION_PUSHED",
+        "BASELINE_V2_READY",
+        "FROZEN",
+        "HERO_1_RUNNING",
+        "HERO_1_VERIFIED",
+        "HERO_2_RUNNING",
+        "HERO_2_VERIFIED",
+        "HERO_3_RUNNING",
+        "HERO_3_VERIFIED",
+        "HERO_PR_MERGED",
+        "MERGED_SHA_REFRESHED",
+        "CONTINUATION_VERIFIED",
+        "CI_FAILURE_CREATED",
+        "CI_FIX_VERIFIED",
+        "DEPLOYMENT_TRACKED",
+        "DEPLOYMENT_SKIPPED",
+        "NEGATIVES_VERIFIED",
+        "CLEANUP_REQUIRED",
+        "CLEANUP_VERIFIED",
+        "COMPLETE",
+        "INVALIDATED"
+      ]
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "updatedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "invalidation": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "deployment": {
+      "$ref": "#/$defs/object"
+    },
+    "fixture": {
+      "$ref": "#/$defs/object"
+    },
+    "project": {
+      "$ref": "#/$defs/object"
+    },
+    "route": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "provider",
+        "model",
+        "routingMode"
+      ],
+      "properties": {
+        "provider": {
+          "enum": [
+            "DEEPSEEK",
+            "FIREWORKS"
+          ]
+        },
+        "model": {
+          "enum": [
+            "deepseek-v4-pro-native",
+            "deepseek-v4-flash-native",
+            "glm-5.2-fw"
+          ]
+        },
+        "routingMode": {
+          "const": "EXACT_LOCK"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "provider": {
+                "const": "FIREWORKS"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "model": {
+                "const": "glm-5.2-fw"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "provider": {
+                "const": "DEEPSEEK"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "model": {
+                "enum": [
+                  "deepseek-v4-pro-native",
+                  "deepseek-v4-flash-native"
+                ]
+              }
+            }
+          }
+        }
+      ]
+    },
+    "runRequest": {
+      "$ref": "#/$defs/object"
+    },
+    "approval": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode",
+        "fingerprintAlgorithm",
+        "fingerprintRequired",
+        "creditsConfirmationRequired",
+        "decisionContractSha256"
+      ],
+      "properties": {
+        "mode": {
+          "const": "MANUAL_EXACT_PLAN"
+        },
+        "fingerprintAlgorithm": {
+          "const": "SHA-256_UTF8_PLAN_JSON"
+        },
+        "fingerprintRequired": {
+          "const": true
+        },
+        "creditsConfirmationRequired": {
+          "const": true
+        },
+        "decisionContractSha256": {
+          "type": "string",
+          "pattern": "^(|[0-9a-f]{64})$"
+        }
+      }
+    },
+    "clients": {
+      "$ref": "#/$defs/object"
+    },
+    "frozenTupleDigest": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "heroes": {
+      "type": "array",
+      "maxItems": 3,
+      "items": {
+        "$ref": "#/$defs/hero"
+      }
+    },
+    "postMerge": {
+      "$ref": "#/$defs/object"
+    },
+    "negatives": {
+      "type": "array",
+      "maxItems": 21,
+      "items": {
+        "$ref": "#/$defs/object"
+      }
+    },
+    "cleanup": {
+      "$ref": "#/$defs/object"
+    },
+    "events": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/object"
+      }
+    }
+  },
+  "$defs": {
+    "hero": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ordinal", "runId", "branch", "sourceSha", "requestSha256", "status", "plan",
+        "approvalReceiptId", "task", "files", "tests", "review", "pr", "cost", "route",
+        "routeCalls", "longFile", "reconnect", "parity", "terminal", "correctnessEvidenceId"
+      ],
+      "properties": {
+        "ordinal": {"type": "integer", "minimum": 1, "maximum": 3},
+        "runId": {"type": "string", "minLength": 1},
+        "branch": {"type": "string", "minLength": 1},
+        "sourceSha": {"$ref": "#/$defs/gitSha"},
+        "requestSha256": {"$ref": "#/$defs/digest"},
+        "status": {"const": "COMPLETE"},
+        "plan": {"$ref": "#/$defs/object"},
+        "approvalReceiptId": {"type": "string", "minLength": 1},
+        "task": {"$ref": "#/$defs/object"},
+        "files": {"$ref": "#/$defs/object"},
+        "tests": {"$ref": "#/$defs/object"},
+        "review": {"$ref": "#/$defs/object"},
+        "pr": {"$ref": "#/$defs/object"},
+        "cost": {"$ref": "#/$defs/object"},
+        "route": {"$ref": "#/$defs/object"},
+        "routeCalls": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/object"}},
+        "longFile": {"$ref": "#/$defs/object"},
+        "reconnect": {"$ref": "#/$defs/object"},
+        "parity": {"$ref": "#/$defs/object"},
+        "terminal": {"$ref": "#/$defs/object"},
+        "correctnessEvidenceId": {"type": "string", "minLength": 1}
+      }
+    },
+    "gitSha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "object": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  }
+}

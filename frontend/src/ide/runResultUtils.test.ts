@@ -1,5 +1,10 @@
 import {describe, expect, it} from 'vitest';
-import type {PublicationEligibility, RunDetail, ValidationReportData} from '@/lib/api';
+import type {
+  PublicationEligibility,
+  RunDetail,
+  RunTerminalOutcome,
+  ValidationReportData,
+} from '@/lib/api';
 
 import {
   authoritativeProductFileCount,
@@ -53,6 +58,7 @@ import {
   runChatResponseContent,
   friendlyAiFailureMessage,
   terminalFailureEvidence,
+  terminalOutcomePrimaryAction,
   runPhaseDiagnosis,
   shouldUseRunEvidenceChat,
   shouldShowModelRanking,
@@ -662,7 +668,63 @@ describe('terminalFailureEvidence', () => {
       label: 'Cancelled',
       kind: 'warn',
     });
+    expect(isFailedTerminalStatus('CANCELLED')).toBe(false);
   });
+
+  it.each([
+    ['REVIEW_EVIDENCE', {behavior: 'tab', tab: 'Validation'}],
+    ['RETRY_RUN', {behavior: 'retry'}],
+    ['REVIEW_POLICY', {behavior: 'navigate', href: '/org/settings'}],
+    ['START_NEW_RUN', {behavior: 'navigate', href: '/compose'}],
+  ] as const)(
+    'maps the server %s action to exactly one executable primary action',
+    (type, expected) => {
+      const outcome = terminalOutcomeFixture(type, null);
+
+      expect(terminalOutcomePrimaryAction(outcome)).toMatchObject({
+        type,
+        label: `Action ${type}`,
+        ...expected,
+      });
+    },
+  );
+
+  it('uses the support code in the contact action and honors an explicit server href', () => {
+    const contact = terminalOutcomePrimaryAction(
+      terminalOutcomeFixture('CONTACT_SUPPORT', null, 'ES-RUN-ABC123'),
+    );
+    expect(contact).toMatchObject({
+      type: 'CONTACT_SUPPORT',
+      behavior: 'navigate',
+      label: 'Action CONTACT_SUPPORT',
+    });
+    expect(contact?.href).toContain('mailto:navneet@executespec.ai');
+    expect(contact?.href).toContain('ES-RUN-ABC123');
+
+    expect(
+      terminalOutcomePrimaryAction(
+        terminalOutcomeFixture('RETRY_RUN', '/runs/r1/retry', 'ES-RUN-ABC123'),
+      ),
+    ).toEqual({
+      type: 'RETRY_RUN',
+      label: 'Action RETRY_RUN',
+      behavior: 'navigate',
+      href: '/runs/r1/retry',
+    });
+  });
+
+  it.each(['javascript:alert(1)', '//evil.example/runs/r1'])(
+    'rejects an unsafe server action href and uses the typed fallback: %s',
+    (href) => {
+      expect(
+        terminalOutcomePrimaryAction(terminalOutcomeFixture('RETRY_RUN', href, 'ES-RUN-ABC123')),
+      ).toEqual({
+        type: 'RETRY_RUN',
+        label: 'Action RETRY_RUN',
+        behavior: 'retry',
+      });
+    },
+  );
 
   it('does not invent evidence for an in-flight or reasonless run', () => {
     expect(
@@ -673,6 +735,32 @@ describe('terminalFailureEvidence', () => {
     ).toBeNull();
   });
 });
+
+function terminalOutcomeFixture(
+  type: string,
+  href: string | null,
+  supportCode: string | null = null,
+): RunTerminalOutcome {
+  return {
+    schemaVersion: 1,
+    code: 'TEST_OUTCOME',
+    category: type === 'START_NEW_RUN' ? 'USER_STOPPED' : 'ACTION_REQUIRED',
+    customerTitle: 'Outcome title',
+    customerMessage: 'Outcome message',
+    impact: {
+      actualCostUsd: 0,
+      capUsd: 1,
+      codeChanged: false,
+      publication: 'NOT_CREATED',
+      prUrl: null,
+    },
+    retryable: type === 'RETRY_RUN',
+    nextAction: {type, label: `Action ${type}`, href},
+    supportCode,
+    automationDisposition: type === 'START_NEW_RUN' ? 'STOPPED' : 'ACTION_REQUIRED',
+    automationExitCode: 3,
+  };
+}
 
 describe('testResultSummary', () => {
   it('does not present a zero-test report as a passing measurement', () => {

@@ -80,16 +80,25 @@ final class ProjectDocSourceBundleBuilder {
               .codeMapForSourceSha(project.getId(), repo.getId(), expectedSha)
               .orElseThrow(ProjectDocGeneratorService.StaleSourceException::new);
       String content = exactCodeMap.getContent() == null ? "" : exactCodeMap.getContent();
-      String facts = DeterministicArchitectureEvidence.exactProjectFactBlock(content);
-      if (facts == null) {
+      String facts =
+          DeterministicArchitectureEvidence.exactProjectFactBlock(content, fullName, expectedSha);
+      String setup =
+          DeterministicArchitectureEvidence.exactSetupSourceBlock(content, fullName, expectedSha);
+      if (facts == null || setup == null) {
         // A legacy same-SHA codemap cannot support the current factual publication contract.
         throw new ProjectDocGeneratorService.StaleSourceException();
       }
+      // The declaration codemap comes first so GeneratedSignatureGrounding.codemapEvidence keeps
+      // the separately framed canonical fact/setup sections that follow it. Repository prose is
+      // never searched for marker-delimited setup authority.
+      sections.add(
+          new ProjectDocSourceBudgeter.Section(
+              "# Repository codemap: " + fullName, declarationOnlyCodemap(content)));
       sections.add(
           new ProjectDocSourceBudgeter.Section("# Deterministic facts: " + fullName, facts));
       sections.add(
           new ProjectDocSourceBudgeter.Section(
-              "# Repository codemap: " + fullName, declarationOnlyCodemap(content)));
+              "# Deterministic setup sources: " + fullName, setup));
     }
     if (!sourceShas.isEmpty()) {
       throw new ProjectDocGeneratorService.StaleSourceException();
@@ -110,12 +119,26 @@ final class ProjectDocSourceBundleBuilder {
     if (found != repos.size()) {
       throw new ProjectDocGeneratorService.StaleSourceException();
     }
+    int setupBlocks = 0;
+    cursor = 0;
+    while (true) {
+      int begin = budgeted.indexOf(DeterministicProjectFactEvidence.SETUP_BEGIN, cursor);
+      if (begin < 0) break;
+      int end = budgeted.indexOf(DeterministicProjectFactEvidence.SETUP_END, begin);
+      if (end < 0) throw new ProjectDocGeneratorService.StaleSourceException();
+      setupBlocks++;
+      cursor = end + DeterministicProjectFactEvidence.SETUP_END.length();
+    }
+    if (setupBlocks != repos.size()) {
+      throw new ProjectDocGeneratorService.StaleSourceException();
+    }
     return budgeted;
   }
 
   private static String declarationOnlyCodemap(String content) {
     String withoutFacts = DeterministicArchitectureEvidence.stripProjectFactBlocks(content);
-    return withoutFacts.replaceAll("(?m)^\\*\\*Purpose:\\*\\*[^\\r\\n]*(?:\\R\\s*)?", "");
+    String withoutSetup = DeterministicArchitectureEvidence.stripSetupSourceBlocks(withoutFacts);
+    return withoutSetup.replaceAll("(?m)^\\*\\*Purpose:\\*\\*[^\\r\\n]*(?:\\R\\s*)?", "");
   }
 
   Map<String, String> parseSourceShas(String sourceFingerprint) {

@@ -172,6 +172,7 @@ export function IdeRuns() {
             {filtered.map((r, i) => {
               const score = scoreOf(r);
               const cost = costOf(r);
+              const stoppedByUser = r.terminalOutcome?.category === 'USER_STOPPED';
               return (
                 <Link
                   key={r.runId}
@@ -182,7 +183,9 @@ export function IdeRuns() {
                     borderBottom: i < filtered.length - 1 ? '1px solid var(--ide-border)' : 'none',
                   }}
                 >
-                  <IdeBadge kind={statusKind(r.status)}>{r.status}</IdeBadge>
+                  <IdeBadge kind={stoppedByUser ? 'warn' : statusKind(r.status)}>
+                    {r.status}
+                  </IdeBadge>
                   <span className='ide-work-main'>
                     <span className='ide-work-title'>{runTitleFor(r)}</span>
                     <span className='ide-mono ide-work-meta'>
@@ -196,11 +199,17 @@ export function IdeRuns() {
                         Work in progress — open for live updates
                       </span>
                     )}
-                    {['FAILED', 'CANCELLED'].includes(String(r.status || '').toUpperCase()) && (
-                      <span className='ide-work-state ide-work-state-error' role='status'>
-                        Needs attention — open to review the failure and retry options
+                    {stoppedByUser && (
+                      <span className='ide-work-state' role='status'>
+                        Stopped by you — open to review the saved run evidence
                       </span>
                     )}
+                    {!stoppedByUser &&
+                      ['FAILED', 'ERROR'].includes(String(r.status || '').toUpperCase()) && (
+                        <span className='ide-work-state ide-work-state-error' role='status'>
+                          Needs attention — open to review the failure and retry options
+                        </span>
+                      )}
                   </span>
                   {r.aiProvider && (
                     <span className='ide-work-provider'>{providerLabel(r.aiProvider)}</span>

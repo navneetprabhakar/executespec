@@ -250,7 +250,7 @@ public class ProjectGeneratedDocJobStore {
     int confirmed =
         jdbc.update(
             """
-            UPDATE project_generated_doc_job SET status='QUEUED', attempt_count=0,
+            UPDATE project_generated_doc_job SET status='QUEUED',
               next_attempt_at=clock_timestamp(),
               deadline_at=clock_timestamp() + (? * INTERVAL '1 millisecond'),
               provider_started_at=NULL, result_doc_id=NULL, result_doc_version=NULL,
@@ -284,7 +284,7 @@ public class ProjectGeneratedDocJobStore {
 UPDATE project_generated_doc_job SET status='NEEDS_CONFIRMATION',
   completed_at=clock_timestamp(), lease_owner=NULL, lease_expires_at=NULL,
   error_code='OUTCOME_UNCERTAIN',
-  error_message='The worker stopped after provider execution began; retry requires confirmation.'
+  error_message='The worker stopped after provider dispatch began; delivery outcome may be uncertain. Retry requires confirmation.'
 WHERE status='RUNNING' AND lease_expires_at<=clock_timestamp()
   AND provider_started_at IS NOT NULL
 """);
