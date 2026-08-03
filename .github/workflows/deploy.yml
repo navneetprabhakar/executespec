@@ -22,12 +22,12 @@ on:
         required: false
         type: string
 
-# 2026-06-18 (CI-minutes pass) — serialize deploys per branch. cancel-in-
+# 2026-06-18 (CI-minutes pass) — serialize deploys per target environment. cancel-in-
 # progress is FALSE here (unlike the PR workflows): a half-cancelled deploy
 # could leave the VM mid-update, so let an in-flight deploy finish and queue
 # the next. See docs/reason-log/2026-06.md.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ inputs.target_env || github.ref_name }}
   cancel-in-progress: false
 
 env:
@@ -511,7 +511,21 @@ jobs:
               echo 'Deploy done — service restarting'
             "
 
-      # ── Wait for app to boot (local sleep, not over SSH) ─────────────────
+      # ── Prove the host marker, then wait for app boot ─────────────────
+      - name: Verify deployed RUNNING_SHA
+        run: |
+          RUNNING_SHA=$(gcloud compute ssh ${{ env.GCE_INSTANCE_RESOLVED }} \
+            --project ${{ env.GCP_PROJECT }} \
+            --zone ${{ env.GCE_ZONE_RESOLVED }} \
+            --tunnel-through-iap \
+            --strict-host-key-checking=no \
+            --command="sudo cat /opt/app/RUNNING_SHA" | tr -d '\r\n')
+          echo "RUNNING_SHA=${RUNNING_SHA}"
+          if [ "$RUNNING_SHA" != "${{ env.TARGET_SHA }}" ]; then
+            echo "::error::RUNNING_SHA mismatch: expected ${{ env.TARGET_SHA }}, observed ${RUNNING_SHA:-missing}"
+            exit 1
+          fi
+
       - name: Wait for app startup
         run: sleep 45
 
