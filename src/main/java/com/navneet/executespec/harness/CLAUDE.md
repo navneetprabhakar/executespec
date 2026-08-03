@@ -92,14 +92,16 @@ no explicit failure reason is not classified as unhealthy from its success prose
 task to rerun on another provider.
 | `WorkerToolLogEvidence.java` | **RR-1599 (2026-07-20)** — capability-keyed reading of worker tool-log entries for the executor's waste guards and delivery evidence. Replaces three literal-name predicates that were blind to registry aliases: `repeatedCommandFailureSignature` never grouped a command issued as `executeCommand` / `build` / `runBuild` / `background_process` (so `max-repeated-failures` could not fire for it), and `countFileWrites` ignored `ast_edit` / `move` / `delete`. `mutationPathSignature` additionally only understood the legacy `"path": "…"` argument form while the live log hashes arguments and carries the path in a `[target=…]` marker — so on the current log format it returned null for EVERY entry and edit-churn evidence was dead. Fail-closed direction is per predicate: an unclassified call-shaped entry IS grouped by the waste guard, but is NOT counted as a file write (over-counting would falsely clear the zero-write provider-breakdown signal). |
 
-Best-guess salvage writes now flow through the same canonical tool-log formatter as ordinary worker
+Best-guess salvage writes flow through the same canonical tool-log formatter as ordinary worker
 mutations. A successful salvage therefore contributes its real write and admitted product-diff
 counts. `salvagedUnverified` does not imply or report a `completeTask` call. It keeps the executor's
-completion warning unless the final task subsequently passes both its build gate and a fresh,
-proven workspace test suite for that exact recovered tree with at least one pass and a complete
-pass/skip population; only then is the warning cleared and the task promoted to `SUCCESS`.
-Smoke-skipped, unavailable, build-only, stale, malformed, or red validation remains a warning, and
-failed salvage writes retain `-> ERR` and count as zero.
+completion warning even when the final task subsequently passes its build gate and a fresh workspace
+suite: non-regression does not prove the requested test coverage or goal completion. Output-cap
+recovery no longer returns this terminal salvage shape; it re-enters the ordinary worker loop and
+must reach a later real `completeTask`. Explicit run-level provider/model pins propagate to the
+worker's strict-provider fence on the initial attempt as well as approved continuation attempts, so
+output-cap recovery cannot silently leave the frozen route. Failed salvage writes retain `-> ERR`
+and count as zero.
 | `TaskSimplicityClassifier.java` | Deterministic STEP_DOWN_MODEL eligibility evidence. Only HIGH-complexity, bounded brownfield repairs (BUG_FIX / TEST_FIX / PROJECT_PATCH) that cleanly complete with a small observed iteration/tool/write footprint qualify; greenfield, broad, salvaged, looping, or escalation-worthy tasks remain ineligible. The signal and its bounded evidence are persisted in continuation policy JSON. |
 | `ContinuationConfirmationScope.java` | Immutable per-decision confirmation authority plus `TaskSimplicityClassifier` evidence. It keeps step-down eligibility and its persisted policy evidence out of `SequentialExecutor`'s continuation plumbing. |
 | `TaskWaveScheduler.java` | Pure dependency-wave scheduler. `schedule(...)` groups tasks by `dependsOn` topological levels. `scheduleBounded(...)` adds a hard wave-size cap and conservative `touchesFiles` conflict checks: unknown/broad touch sets serialize alone, same file or parent/child path conflicts split waves, and only declared disjoint file sets can share a wave. `SequentialExecutor` uses `scheduleBounded(...)` at run start to emit advisory `TASK_WAVE_PLAN` evidence; runtime mutating task dispatch remains sequential. |
