@@ -33,6 +33,15 @@ absent while another supported method proves the path exists, so a 404 cannot ma
 requested behavior. Web Agent streaming also treats a parsed terminal `done` as authoritative when
 a proxy resets the connection immediately afterward.
 
+Run detail's **Screens** tab generates a static visual preview, not a live application runtime.
+New generation is available only after the run is terminal and only for screens affected by the
+run's product-code diff; backend-only changes do not reuse unrelated older screens. Every preview
+is permanently labelled as simulated, renders with a script-only sandbox, and uses one frozen
+provider/model route for the whole job. Exact run pins remain exact; otherwise the payer
+organization's WORKHORSE matrix is resolved once before admission. Parallel surfaces share one
+job-wide deadline, and generated examples use representative populated data unless the source
+itself is an empty, loading, or error screen.
+
 The BUILD planner preserves exact behavioral clauses, keeps focused maintained tests with the
 production task they verify, and bounds task breadth to avoid one runaway worker context. Workers
 reject disposable root-level smoke scripts as test substitutes and stop repeated same-path rewrite

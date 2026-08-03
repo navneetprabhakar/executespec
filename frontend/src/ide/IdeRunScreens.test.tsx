@@ -60,7 +60,7 @@ describe('IdeRunScreens evidence gate', () => {
     });
 
     expect(host.querySelector('[role="alert"]')?.textContent).toContain('manifest unavailable');
-    expect(host.textContent).not.toContain('See what you built');
+    expect(host.textContent).not.toContain('Visual preview');
 
     await act(async () => {
       const retry = Array.from(host.querySelectorAll('button')).find((candidate) =>
@@ -71,7 +71,7 @@ describe('IdeRunScreens evidence gate', () => {
     });
 
     expect(host.querySelector('[role="alert"]')).toBeNull();
-    expect(host.textContent).toContain('Render screens');
+    expect(host.textContent).toContain('Generate visual preview');
     expect(reviews.getPreviewRender).toHaveBeenCalledTimes(2);
   });
 
@@ -125,6 +125,7 @@ describe('IdeRunScreens evidence gate', () => {
       expect(iframe?.getAttribute('sandbox')).toBe('allow-scripts');
       expect(iframe?.getAttribute('srcdoc')).toContain('Recovered');
     });
+    expect(host.textContent).toContain('Visual only · controls and data are simulated');
     expect(host.querySelector('[role="alert"]')).toBeNull();
     expect(reviews.getPreviewRenderSurfaceHtml).toHaveBeenCalledTimes(2);
   });
@@ -150,8 +151,8 @@ describe('IdeRunScreens evidence gate', () => {
     expect(host.textContent).toContain(
       'This run stopped before execution and produced no code changes.',
     );
-    expect(host.textContent).not.toContain('Render screens');
-    expect(host.textContent).not.toContain('See what you built');
+    expect(host.textContent).not.toContain('Generate visual preview');
+    expect(host.textContent).not.toContain('Visual preview');
     expect(reviews.startPreviewRender).not.toHaveBeenCalled();
   });
 
@@ -166,7 +167,7 @@ describe('IdeRunScreens evidence gate', () => {
       await Promise.resolve();
     });
 
-    expect(host.textContent).toContain('Render screens');
+    expect(host.textContent).toContain('Generate visual preview');
     expect(host.textContent).not.toContain('No generated product files are available.');
   });
 
@@ -202,7 +203,7 @@ describe('IdeRunScreens evidence gate', () => {
 
     expect(host.textContent).toContain('Screen rendering is turned off for this deployment.');
     expect(host.textContent).not.toContain('No generated product files are available.');
-    expect(host.textContent).not.toContain('See what you built');
+    expect(host.textContent).not.toContain('Visual preview');
   });
 
   it('shows loading without making an early empty-state claim', async () => {

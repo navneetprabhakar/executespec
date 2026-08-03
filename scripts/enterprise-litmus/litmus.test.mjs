@@ -33,6 +33,7 @@ import {
   SOURCE_REVISION_PATCH_SHA256,
   scoreDocument,
   transition,
+  validateCanonicalApiProvider,
   validateManifest,
   validateRoute,
 } from './lib.mjs';
@@ -336,9 +337,9 @@ function heroProof(ordinal) {
       calls: [
         {
           physicalAttemptId: `worker-${ordinal}`,
-          provider: 'DEEPSEEK',
+          provider: 'deepseek',
           model: 'deepseek-v4-pro-native',
-          feature: 'RUN_EXECUTION',
+          feature: 'pipeline',
           agentRole: 'WorkerAgent',
           stepId: 'worker.iteration-1',
           attemptStatus: 'SUCCESS',
@@ -347,9 +348,9 @@ function heroProof(ordinal) {
         },
         {
           physicalAttemptId: `reviewer-${ordinal}`,
-          provider: 'DEEPSEEK',
+          provider: 'deepseek',
           model: 'deepseek-v4-pro-native',
-          feature: 'RUN_REVIEW',
+          feature: 'pipeline',
           agentRole: 'ReviewerAgent',
           stepId: 'reviewer.general.iteration-1',
           attemptStatus: 'SUCCESS',
@@ -586,6 +587,35 @@ test('route allow-list accepts only native DeepSeek and Fireworks GLM 5.2', () =
     /restricted/,
   );
   assert.throws(() => validateRoute('DEEPSEEK', 'glm-5.2-fw'), /restricted/);
+});
+
+test('physical provider evidence accepts only exact canonical lowercase API spelling', () => {
+  assert.equal(validateCanonicalApiProvider('deepseek', 'DEEPSEEK'), 'deepseek');
+  assert.equal(validateCanonicalApiProvider('fireworks', 'FIREWORKS'), 'fireworks');
+
+  for (const rejected of [
+    'DEEPSEEK',
+    'DeepSeek',
+    ' deepseek',
+    'deepseek ',
+    null,
+    {provider: 'deepseek'},
+    42,
+    'Pipeline',
+  ]) {
+    assert.throws(
+      () => validateCanonicalApiProvider(rejected, 'DEEPSEEK'),
+      /canonical lowercase API provider/,
+    );
+  }
+  assert.throws(
+    () => validateCanonicalApiProvider('fireworks', 'DEEPSEEK'),
+    /contradicts frozen route/,
+  );
+  assert.throws(
+    () => validateCanonicalApiProvider('pipeline', 'DEEPSEEK'),
+    /contradicts frozen route/,
+  );
 });
 
 test('redaction removes tokens from text while retaining safe structure', () => {
@@ -1014,11 +1044,36 @@ test('hero omissions, duplicates, contradictions and arbitrary evidence fail clo
     () => transition(running, 'HERO_1_VERIFIED', missingReviewer),
     /missing successful reviewer execution/,
   );
+  const wrongFeature = heroProof(1);
+  wrongFeature.physicalCallLedger.calls[0].feature = 'RUN_EXECUTION';
+  assert.throws(
+    () => transition(running, 'HERO_1_VERIFIED', wrongFeature),
+    /not bound to the pipeline feature/,
+  );
+  assert.doesNotThrow(() => transition(running, 'HERO_1_VERIFIED', heroProof(1)));
+  const wrongProvider = heroProof(1);
+  wrongProvider.physicalCallLedger.calls[0].provider = 'openai';
+  assert.throws(
+    () => transition(running, 'HERO_1_VERIFIED', wrongProvider),
+    /contradicts frozen route/,
+  );
+  const wrongWorkerStep = heroProof(1);
+  wrongWorkerStep.physicalCallLedger.calls[0].stepId = 'reviewer.iteration-1';
+  assert.throws(
+    () => transition(running, 'HERO_1_VERIFIED', wrongWorkerStep),
+    /missing successful worker execution/,
+  );
+  const wrongReviewerStep = heroProof(1);
+  wrongReviewerStep.physicalCallLedger.calls[1].stepId = 'worker.iteration-1';
+  assert.throws(
+    () => transition(running, 'HERO_1_VERIFIED', wrongReviewerStep),
+    /missing successful reviewer execution/,
+  );
   const outlineCall = heroProof(1);
   outlineCall.physicalCallLedger.calls.push({
     ...outlineCall.physicalCallLedger.calls[0],
     physicalAttemptId: 'outline-1',
-    feature: 'RUN_PLANNING',
+    feature: 'pipeline',
     agentRole: 'OutlinePlannerAgent',
     stepId: 'planner.outline',
   });
