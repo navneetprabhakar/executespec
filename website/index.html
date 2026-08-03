@@ -1174,6 +1174,46 @@
         .compare-card.us .row-c .v.good { color: var(--mint); }
         .compare-card.us .row-c .v.bad { color: var(--coral); }
 
+        /* Benchmarks */
+        .bench-table-wrap {
+            background: var(--card-bg);
+            border: 1px solid var(--hairline);
+            border-radius: var(--r-md);
+            padding: 6px 18px 10px;
+            overflow-x: auto;
+        }
+        .bench-table { width: 100%; border-collapse: collapse; min-width: 560px; }
+        .bench-table th {
+            text-align: left; font-size: 11px; font-weight: 600; letter-spacing: 0.06em;
+            text-transform: uppercase; color: var(--text-mute);
+            padding: 12px 14px 8px 0; border-bottom: 1px solid var(--hairline-strong);
+            white-space: nowrap;
+        }
+        .bench-table th.num, .bench-table td.num { text-align: right; }
+        .bench-table td {
+            padding: 11px 14px 11px 0; border-bottom: 1px solid var(--hairline);
+            font-size: 14px; vertical-align: middle;
+        }
+        .bench-table tr:last-child td { border-bottom: 0; }
+        .bench-table td.num { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 13.5px; }
+        .bench-table .model { font-weight: 600; white-space: nowrap; }
+        .bench-table .model .via { display: block; font-weight: 400; font-size: 12px; color: var(--text-mute); }
+        .bench-table .hub a { font-size: 12.5px; color: var(--rail-blue-text); border-bottom: 1px dotted var(--rail-blue-text); white-space: nowrap; }
+        .bench-table .lead { color: var(--mint-text-on-light); font-weight: 700; }
+        .bench-stat-row { display: grid; grid-template-columns: 1fr; gap: 8px; margin-top: 10px; }
+        @media (min-width: 720px) { .bench-stat-row { grid-template-columns: repeat(3, 1fr); } }
+        .bench-stat {
+            background: var(--card-bg); border: 1px solid var(--hairline);
+            border-radius: var(--r-md); padding: 16px 18px;
+        }
+        .bench-stat .v { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 22px; font-weight: 700; color: var(--mint-text-on-light); }
+        .bench-stat .k { font-size: 12.5px; color: var(--text-dim); margin-top: 4px; line-height: 1.5; }
+        .bench-method {
+            margin-top: 14px; font-size: 12.5px; color: var(--text-mute); line-height: 1.6;
+            border-left: 2px solid var(--hairline-strong); padding-left: 12px;
+        }
+        .bench-method strong { color: var(--text-dim); }
+
         /* ─────────── FAQ ─────────── */
         .faq-list { display: grid; gap: 8px; }
         .faq-item {
@@ -1313,6 +1353,7 @@
             <a href='#library'>Library</a>
             <a href='#pricing'>Pricing</a>
             <a href='#compare'>Compare</a>
+            <a href='#benchmarks'>Benchmarks</a>
             <a href='#faq'>FAQ</a>
         </nav>
         <div class='cta-row'>
@@ -1681,6 +1722,72 @@
     </div>
 </section>
 
+<section class='section' id='benchmarks'>
+    <div class='wrap'>
+        <div class='section-eyebrow signal'>Measured, not promised</div>
+        <h2>We run the production harness through public benchmarks — and publish every trial.</h2>
+        <p class='lede'>
+            The same pipeline that runs customer specs — classifier, planner, worker, reviewer — drives open-weight models through Terminal-Bench 2.1 and SWE-bench Lite. Identical frozen harness for every model, official scorers, raw output with no exclusions.
+        </p>
+
+        <div class='bench-table-wrap'>
+            <table class='bench-table'>
+                <thead>
+                    <tr>
+                        <th>Model on our harness</th>
+                        <th class='num'>Tasks solved (of 89)</th>
+                        <th class='num'>Per-attempt</th>
+                        <th class='num'>Trials</th>
+                        <th>Evidence</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td class='model'>GLM 5.2 <span class='via'>via Fireworks Fast</span></td>
+                        <td class='num lead'>79 / 89</td>
+                        <td class='num'>70.6%</td>
+                        <td class='num'>445</td>
+                        <td class='hub'><a href='https://hub.harborframework.com/jobs/7870521c-c40b-4c16-815c-ecb0dfe9774f' target='_blank' rel='noopener'>Harbor Hub ↗</a></td>
+                    </tr>
+                    <tr>
+                        <td class='model'>DeepSeek V4 Pro <span class='via'>native API</span></td>
+                        <td class='num'>73 / 89</td>
+                        <td class='num'>66.6%</td>
+                        <td class='num'>440</td>
+                        <td class='hub'><a href='https://hub.harborframework.com/jobs/e778501b-6e95-4b40-9d79-5bf0a4cf32a0' target='_blank' rel='noopener'>Harbor Hub ↗</a></td>
+                    </tr>
+                    <tr>
+                        <td class='model'>DeepSeek V4 Flash 0731 <span class='via'>via Fireworks</span></td>
+                        <td class='num'>72 / 89</td>
+                        <td class='num'>62.7%</td>
+                        <td class='num'>442</td>
+                        <td class='hub'><a href='https://hub.harborframework.com/jobs/aa2ccc8c-5c99-41f9-ae0e-145ace60a60c' target='_blank' rel='noopener'>Harbor Hub ↗</a></td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class='bench-stat-row'>
+            <div class='bench-stat'>
+                <div class='v'>58.2%</div>
+                <div class='k'>SWE-bench Lite resolved (174 of 299) with DeepSeek V4 Pro — scored by the official swebench 4.1.0 harness. Total LLM cost: $6.02.</div>
+            </div>
+            <div class='bench-stat'>
+                <div class='v'>~$0.05</div>
+                <div class='k'>Cost per solved Terminal-Bench trial on DeepSeek V4 Pro. Open-weight models plus a disciplined harness keep verified delivery cheap.</div>
+            </div>
+            <div class='bench-stat'>
+                <div class='v'>0 errors</div>
+                <div class='k'>Non-timeout transport errors across the 882 DeepSeek Terminal-Bench trials. Every failure was the model, the task, or the clock — not the harness.</div>
+            </div>
+        </div>
+
+        <p class='bench-method'>
+            <strong>Method, stated plainly:</strong> Terminal-Bench 2.1 runs used 89 tasks × 5 attempts under a fixed 1,500-second per-task ceiling — tighter than some tasks declare, so these are internal comparative numbers, not leaderboard submissions. "Tasks solved" counts tasks solved on at least one of five attempts; "per-attempt" is the mean across all trials. All Terminal-Bench trials and agent trajectories are public on Harbor Hub at the links above. Benchmark results measure harness+model performance on benchmark tasks and are not a guarantee of results on your codebase.
+        </p>
+    </div>
+</section>
+
 <section class='section' id='faq'>
     <div class='wrap'>
         <div class='section-eyebrow mint'>FAQ</div>
@@ -1763,6 +1870,7 @@
                 <li><a href='#library'>Library</a></li>
                 <li><a href='#pricing'>Pricing</a></li>
                 <li><a href='#compare'>Compare</a></li>
+                <li><a href='#benchmarks'>Benchmarks</a></li>
             </ul>
         </div>
         <div>

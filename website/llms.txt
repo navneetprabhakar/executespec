@@ -18,6 +18,10 @@ The positioning line: **"AI that ships pull requests your team will actually mer
 - **Autofix surfaces**: one-click patch runs from PR review comments, tech-debt categories, and code-review findings — each opens its own PR.
 - **Agent control plane**: durable chat turns, typed action/permission events, model/provider route visibility, run evidence, and local-hands handoff for CLI/VS Code.
 
+## Benchmarks (measured 2026-08, all trials published)
+
+ExecuteSpec runs its production pipeline through public benchmarks with an identical frozen harness per model and official scorers. Terminal-Bench 2.1 (89 tasks x 5 attempts, fixed 1,500s per-task ceiling -- internal comparative numbers, not leaderboard submissions): GLM 5.2 via Fireworks solved 79/89 tasks at least once (70.6% per-attempt, 445 trials); DeepSeek V4 Pro native 73/89 (66.6%, 440 trials); DeepSeek V4 Flash 0731 via Fireworks 72/89 (62.7%, 442 trials). SWE-bench Lite with DeepSeek V4 Pro: 174/299 resolved (58.2%) under the official swebench 4.1.0 harness for $6.02 total. Zero non-timeout transport errors across the 882 DeepSeek Terminal-Bench trials. All Terminal-Bench trials and trajectories are public on Harbor Hub (hub.harborframework.com). Benchmark results measure harness+model performance on benchmark tasks, not guaranteed results on customer codebases.
+
 ## Claim boundaries
 
 - Product screenshots and the website walkthrough use synthetic demo data. They demonstrate the current UI surface, not customer results, production metrics, or benchmark scores.
