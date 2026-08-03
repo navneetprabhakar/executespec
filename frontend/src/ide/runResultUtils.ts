@@ -51,6 +51,14 @@ export interface PublicationTrustFact {
   kind: 'ok' | 'warn' | 'bad' | 'neutral';
 }
 
+export function missingValidationReportExplanation(
+  run: Pick<api.RunDetail, 'tasks'> | null | undefined,
+): string {
+  return run?.tasks?.length
+    ? 'Worker steps ran, but no completed validation report was produced. Use the activity log and publication evidence to diagnose where validation stopped.'
+    : 'Execution did not reach the worker phase, so no validation report was produced.';
+}
+
 export type CorrectionEvidenceAction = NonNullable<
   NonNullable<api.TaskSummary['continuationActions']>[number]
 >;

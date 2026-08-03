@@ -9,24 +9,19 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
+
+import com.navneet.executespec.contractsurface.ExactHttpConstraintParser;
+import com.navneet.executespec.contractsurface.ExactHttpConstraintParser.Polarity;
 
 /** Fails closed when plan normalization changes an exact source HTTP route namespace. */
 final class PlanSourceHttpRouteGate {
-  private static final Pattern EXACT_ROUTE =
-      Pattern.compile(
-          "(?i)(?:^|\\s|[`(])"
-              + "(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS|TRACE)\\s+"
-              + "(/[A-Za-z0-9_~!$&'()*+=:@%{}./-]+)");
-  private static final Pattern REMOVAL_PREFIX =
-      Pattern.compile("(?i).*\\b(?:remove|delete|retire|drop)\\s*$", Pattern.DOTALL);
-
   private PlanSourceHttpRouteGate() {}
 
   static List<String> violations(String originalRequest, Plan plan) {
-    Set<Operation> required = exactSourceOperations(originalRequest);
-    if (required.isEmpty() || plan == null || plan.tasks() == null) return List.of();
+    SourceOperations source = sourceOperations(originalRequest);
+    if ((source.required().isEmpty() && source.forbidden().isEmpty())
+        || plan == null
+        || plan.tasks() == null) return List.of();
 
     Set<Operation> producerOperations = new LinkedHashSet<>();
     for (PlannedTask task : plan.tasks()) {
@@ -37,11 +32,11 @@ final class PlanSourceHttpRouteGate {
               + task.description()
               + "\n"
               + String.join("\n", task.hardConstraints());
-      producerOperations.addAll(exactSourceOperations(evidence));
+      producerOperations.addAll(sourceOperations(evidence).required());
     }
 
     List<String> violations = new ArrayList<>();
-    for (Operation operation : required) {
+    for (Operation operation : source.required()) {
       Operation alternate = operation.withOppositeApiNamespace();
       if (alternate != null && producerOperations.contains(alternate)) {
         violations.add(
@@ -56,24 +51,33 @@ final class PlanSourceHttpRouteGate {
                 + operation.display());
       }
     }
+    for (Operation operation : source.forbidden()) {
+      if (producerOperations.contains(operation)) {
+        violations.add(
+            "SOURCE_HTTP_FORBIDDEN_METHOD_PRESENT: executable producer plan must preserve the "
+                + "source's method-not-allowed contract for "
+                + operation.display());
+      }
+    }
     return List.copyOf(new LinkedHashSet<>(violations));
   }
 
-  private static Set<Operation> exactSourceOperations(String originalRequest) {
-    if (originalRequest == null || originalRequest.isBlank()) return Set.of();
-    Set<Operation> operations = new LinkedHashSet<>();
-    Matcher matcher = EXACT_ROUTE.matcher(originalRequest);
-    while (matcher.find()) {
-      String prefix = originalRequest.substring(Math.max(0, matcher.start() - 48), matcher.start());
-      if (REMOVAL_PREFIX.matcher(prefix).matches()) continue;
-      String path = matcher.group(2);
-      while (path.length() > 1 && ".,;:)`".indexOf(path.charAt(path.length() - 1)) >= 0) {
-        path = path.substring(0, path.length() - 1);
+  private static SourceOperations sourceOperations(String evidence) {
+    Set<Operation> required = new LinkedHashSet<>();
+    Set<Operation> forbidden = new LinkedHashSet<>();
+    for (var constraint : ExactHttpConstraintParser.parse(evidence)) {
+      Operation operation = new Operation(constraint.method(), constraint.path());
+      if (constraint.polarity() == Polarity.METHOD_NOT_ALLOWED) {
+        forbidden.add(operation);
+        required.remove(operation);
+      } else if (!forbidden.contains(operation)) {
+        required.add(operation);
       }
-      operations.add(new Operation(matcher.group(1), path));
     }
-    return Set.copyOf(operations);
+    return new SourceOperations(Set.copyOf(required), Set.copyOf(forbidden));
   }
+
+  private record SourceOperations(Set<Operation> required, Set<Operation> forbidden) {}
 
   private record Operation(String method, String path) {
     private Operation {

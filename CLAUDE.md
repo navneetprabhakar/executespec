@@ -36,7 +36,10 @@ Execution View final-PR publication admits every current backing pipeline run th
 canonical publication gate before Git. Apply-to-Run exposes exact aggregate and per-repository SCM
 diagnostics, and deterministic HTTP/contract verification failures terminate as `FAILED` with their
 machine code. Run-list surfaces suppress an unexplained numeric zero until causal ledger evidence
-is loaded.
+is loaded. Exact HTTP acceptance parsing is polarity-aware: an explicit 405/Method Not Allowed
+constraint is not converted into a required producer route. Planning rejects an executable task
+that declares the forbidden method; final validation requires that method to be absent and another
+method to exist at the path, with methodless `ANY` mappings treated as violations.
 V364 claims the exact persisted proposal with one durable conditional update, so a duplicate while
 CLAIMED conflicts, while QUEUED/COMPLETED duplicates replay one receipt without queueing or spending
 twice. Every server-side
