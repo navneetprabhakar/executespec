@@ -148,7 +148,86 @@ class OAuthSuccessHandlerTest {
         .anySatisfy(cookie -> assertThat(cookie).contains("Max-Age=0"));
   }
 
+  @Test
+  void noEmailFailurePreservesSafeProtectedRedirect() throws Exception {
+    OAuthSuccessHandler handler =
+        handler(
+            "access-token",
+            "refresh-token",
+            new OAuthProfile("google", "user-sub", null, "OAuth User", null, false),
+            null);
+    ReflectionTestUtils.setField(handler, "appReturnUrl", "http://localhost:5174/auth/callback");
+    MockHttpServletRequest request = requestWithRedirect("/projects/p-1/runs/r-1?tab=code#file");
+    MockHttpServletResponse response = new MockHttpServletResponse();
+
+    handler.onAuthenticationSuccess(request, response, authToken());
+
+    assertFailureRedirect(response, "oauth_no_email", "/projects/p-1/runs/r-1?tab=code#file");
+  }
+
+  @Test
+  void emailConflictFailurePreservesSafeProtectedRedirect() throws Exception {
+    OAuthSuccessHandler handler =
+        handler(
+            "access-token",
+            "refresh-token",
+            defaultProfile(),
+            new OAuthEmailConflictException("account already exists"));
+    ReflectionTestUtils.setField(handler, "appReturnUrl", "http://localhost:5174/auth/callback");
+    MockHttpServletRequest request = requestWithRedirect("/settings?section=notifications");
+    MockHttpServletResponse response = new MockHttpServletResponse();
+
+    handler.onAuthenticationSuccess(request, response, authToken());
+
+    assertFailureRedirect(response, "oauth_email_conflict", "/settings?section=notifications");
+  }
+
+  @Test
+  void genericFailurePreservesSafeProtectedRedirect() throws Exception {
+    OAuthSuccessHandler handler =
+        handler(
+            "access-token",
+            "refresh-token",
+            defaultProfile(),
+            new IllegalStateException("identity service unavailable"));
+    ReflectionTestUtils.setField(handler, "appReturnUrl", "http://localhost:5174/auth/callback");
+    MockHttpServletRequest request = requestWithRedirect("/runs/r-1");
+    MockHttpServletResponse response = new MockHttpServletResponse();
+
+    handler.onAuthenticationSuccess(request, response, authToken());
+
+    assertFailureRedirect(response, "oauth_failed", "/runs/r-1");
+  }
+
+  @Test
+  void failureClearsButNeverForwardsUnsafeRedirect() throws Exception {
+    OAuthSuccessHandler handler =
+        handler(
+            "access-token",
+            "refresh-token",
+            new OAuthProfile("google", "user-sub", null, "OAuth User", null, false),
+            null);
+    ReflectionTestUtils.setField(handler, "appReturnUrl", "http://localhost:5174/auth/callback");
+    MockHttpServletRequest request = requestWithRedirect("https://evil.example/runs/r-1");
+    MockHttpServletResponse response = new MockHttpServletResponse();
+
+    handler.onAuthenticationSuccess(request, response, authToken());
+
+    assertThat(response.getRedirectedUrl())
+        .isEqualTo("http://localhost:5174/login?error=oauth_no_email");
+    assertThat(response.getHeaders("Set-Cookie"))
+        .anySatisfy(cookie -> assertThat(cookie).contains("Max-Age=0"));
+  }
+
   private OAuthSuccessHandler handler(String accessToken, String refreshToken) {
+    return handler(accessToken, refreshToken, defaultProfile(), null);
+  }
+
+  private OAuthSuccessHandler handler(
+      String accessToken,
+      String refreshToken,
+      OAuthProfile profile,
+      RuntimeException accountResolutionFailure) {
     OAuthUserMapper mapper = mock(OAuthUserMapper.class);
     AuthService authService = mock(AuthService.class);
     JwtUtil jwtUtil = mock(JwtUtil.class);
@@ -157,26 +236,54 @@ class OAuthSuccessHandlerTest {
 
     when(authorizedClientService.loadAuthorizedClient(eq("google"), eq("user-sub")))
         .thenReturn(null);
-    when(mapper.toProfile(eq("google"), any(), any()))
-        .thenReturn(
-            new OAuthProfile(
+    when(mapper.toProfile(eq("google"), any(), any())).thenReturn(profile);
+    var accountResolution =
+        when(
+            authService.findOrCreateFromOAuth(
                 "google", "user-sub", "oauth-user@test.local", "OAuth User", null, true));
-    when(authService.findOrCreateFromOAuth(
-            "google", "user-sub", "oauth-user@test.local", "OAuth User", null, true))
-        .thenReturn(
-            AppUser.builder()
-                .id("user-1")
-                .email("oauth-user@test.local")
-                .firstName("OAuth")
-                .lastName("User")
-                .globalRole("USER")
-                .tier("PRO")
-                .status("ACTIVE")
-                .build());
+    if (accountResolutionFailure == null) {
+      accountResolution.thenReturn(
+          AppUser.builder()
+              .id("user-1")
+              .email("oauth-user@test.local")
+              .firstName("OAuth")
+              .lastName("User")
+              .globalRole("USER")
+              .tier("PRO")
+              .status("ACTIVE")
+              .build());
+    } else {
+      accountResolution.thenThrow(accountResolutionFailure);
+    }
     when(jwtUtil.generateAccessToken(any(AppUser.class), any())).thenReturn(accessToken);
     when(jwtUtil.generateRefreshToken(any(AppUser.class))).thenReturn(refreshToken);
 
     return new OAuthSuccessHandler(mapper, authService, jwtUtil, authorizedClientService);
+  }
+
+  private OAuthProfile defaultProfile() {
+    return new OAuthProfile(
+        "google", "user-sub", "oauth-user@test.local", "OAuth User", null, true);
+  }
+
+  private MockHttpServletRequest requestWithRedirect(String redirect) {
+    MockHttpServletRequest request = new MockHttpServletRequest();
+    request.setCookies(
+        new Cookie(
+            OAuthRedirectCookieFilter.COOKIE, URLEncoder.encode(redirect, StandardCharsets.UTF_8)));
+    return request;
+  }
+
+  private void assertFailureRedirect(
+      MockHttpServletResponse response, String error, String redirect) {
+    assertThat(response.getRedirectedUrl())
+        .isEqualTo(
+            "http://localhost:5174/login?error="
+                + error
+                + "&redirect="
+                + URLEncoder.encode(redirect, StandardCharsets.UTF_8));
+    assertThat(response.getHeaders("Set-Cookie"))
+        .anySatisfy(cookie -> assertThat(cookie).contains("Max-Age=0"));
   }
 
   private OAuth2AuthenticationToken authToken() {

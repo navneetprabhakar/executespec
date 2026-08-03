@@ -5,6 +5,7 @@ import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
 const apiMocks = vi.hoisted(() => ({
   getNotificationPreferences: vi.fn(),
+  getRuns: vi.fn(),
   updateNotificationPreference: vi.fn(),
 }));
 
@@ -43,7 +44,7 @@ vi.mock('@/stores/useUiStore', () => ({
   useUiStore: (selector: (state: typeof uiState) => unknown) => selector(uiState),
 }));
 
-import {IdeAccount} from './IdeMore';
+import {IdeAccount, IdeRuns} from './IdeMore';
 
 (globalThis as typeof globalThis & {IS_REACT_ACT_ENVIRONMENT?: boolean}).IS_REACT_ACT_ENVIRONMENT =
   true;
@@ -58,6 +59,7 @@ describe('IdeAccount notification deep link', () => {
     document.body.appendChild(host);
     root = createRoot(host);
     apiMocks.getNotificationPreferences.mockReset();
+    apiMocks.getRuns.mockReset();
     apiMocks.updateNotificationPreference.mockReset();
     apiMocks.updateNotificationPreference.mockResolvedValue(undefined);
     apiMocks.getNotificationPreferences.mockResolvedValue([
@@ -127,5 +129,51 @@ describe('IdeAccount notification deep link', () => {
     );
     expect(document.activeElement).toBe(toggle);
     expect(scrollIntoView).toHaveBeenCalledTimes(1);
+  });
+
+  it('presents a user-stopped run neutrally while retaining failure copy for actual failures', async () => {
+    apiMocks.getRuns.mockResolvedValue({
+      content: [
+        {
+          runId: 'cancelled-run',
+          status: 'CANCELLED',
+          runTitle: 'Cancelled work',
+          startedAt: '2026-07-29T10:00:00Z',
+          terminalOutcome: {
+            category: 'USER_STOPPED',
+          },
+        },
+        {
+          runId: 'failed-run',
+          status: 'FAILED',
+          runTitle: 'Failed work',
+          startedAt: '2026-07-29T10:00:00Z',
+          terminalOutcome: {
+            category: 'PLATFORM_FAILURE',
+          },
+        },
+      ],
+      hasNext: false,
+    });
+
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={['/runs']}>
+          <IdeRuns />
+        </MemoryRouter>,
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const rows = host.querySelectorAll<HTMLElement>('.ide-work-row');
+    expect(rows).toHaveLength(2);
+    expect(rows[0].textContent).toContain('Stopped by you — open to review the saved run evidence');
+    expect(rows[0].textContent).not.toContain('Needs attention');
+    expect(rows[0].querySelector('.ide-badge')?.className).toContain('warn');
+    expect(rows[1].textContent).toContain(
+      'Needs attention — open to review the failure and retry options',
+    );
+    expect(rows[1].querySelector('.ide-badge')?.className).toContain('bad');
   });
 });

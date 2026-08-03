@@ -161,7 +161,7 @@ public class CodeMapGenerator {
     List<String> files = inventory.files();
 
     StringBuilder md = new StringBuilder();
-    md.append("# ").append(repoFullName).append("\n\n");
+    md.append("# ").append(safeMarkdown(repoFullName)).append("\n\n");
     md.append("**Files**: ").append(files.size()).append("\n\n");
     // RR-955 — GitHub marks recursive trees as truncated for very large repositories, so the
     // listing
@@ -186,7 +186,7 @@ public class CodeMapGenerator {
         .distinct()
         .sorted()
         .limit(20)
-        .forEach(d -> md.append("- ").append(d).append("\n"));
+        .forEach(d -> md.append("- ").append(safeMarkdown(d)).append("\n"));
     md.append("\n");
 
     // 2026-05-16 — full file listing.
@@ -206,7 +206,9 @@ public class CodeMapGenerator {
     // context and the planner already truncates upstream if needed.
     if (!files.isEmpty()) {
       md.append("## Files (listing)\n\n");
-      files.stream().limit(1000).forEach(p -> md.append("- `").append(p).append("`\n"));
+      files.stream()
+          .limit(1000)
+          .forEach(p -> md.append("- `").append(safeMarkdown(p)).append("`\n"));
       if (files.size() > 1000) {
         md.append("- … (+").append(files.size() - 1000).append(" more)\n");
       }
@@ -217,7 +219,9 @@ public class CodeMapGenerator {
     List<String> routes = scanRoutes(repoFullName, defaultBranch, files, pat);
     if (!routes.isEmpty()) {
       md.append("## Routes\n\n");
-      routes.stream().limit(40).forEach(r -> md.append("- `").append(r).append("`\n"));
+      routes.stream()
+          .limit(40)
+          .forEach(r -> md.append("- `").append(safeMarkdown(r)).append("`\n"));
       if (routes.size() > 40) md.append("- ... (+").append(routes.size() - 40).append(" more)\n");
       md.append("\n");
     }
@@ -233,7 +237,7 @@ public class CodeMapGenerator {
             .toList();
     if (!models.isEmpty()) {
       md.append("## Models / entities\n\n");
-      models.forEach(m -> md.append("- ").append(m).append("\n"));
+      models.forEach(m -> md.append("- ").append(safeMarkdown(m)).append("\n"));
       md.append("\n");
     }
 
@@ -262,7 +266,7 @@ public class CodeMapGenerator {
       boolean summariesOn = summarizer != null && summarizer.shouldGenerate();
       functions.forEach(
           (path, fns) -> {
-            md.append("### `").append(path).append("`\n\n");
+            md.append("### `").append(safeMarkdown(path)).append("`\n\n");
             if (summariesOn) {
               // Re-fetch the file content for the summarizer. The function-extraction pass
               // already paid for this read, but we don't keep it around to bound memory. The
@@ -277,7 +281,8 @@ public class CodeMapGenerator {
                 if (content != null) {
                   summarizer
                       .summariseFile(repoFullName, path, content, null)
-                      .ifPresent(s -> md.append("**Purpose:** ").append(s).append("\n\n"));
+                      .ifPresent(
+                          s -> md.append("**Purpose:** ").append(safeMarkdown(s)).append("\n\n"));
                 }
               } catch (Exception e) {
                 log.debug(
@@ -287,12 +292,23 @@ public class CodeMapGenerator {
                     e.getMessage());
               }
             }
-            for (String fn : fns) md.append("- `").append(fn).append("`\n");
+            for (String fn : fns) md.append("- `").append(safeMarkdown(fn)).append("`\n");
             md.append("\n");
           });
     }
 
     return md.toString();
+  }
+
+  /** Repository paths and model summaries are data, never Markdown control or evidence markers. */
+  private static String safeMarkdown(String value) {
+    return (value == null ? "" : value)
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace("`", "&#96;")
+        .replace("\r", "&#13;")
+        .replace("\n", "&#10;");
   }
 
   private List<String> scanRoutes(

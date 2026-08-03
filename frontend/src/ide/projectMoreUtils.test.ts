@@ -12,6 +12,9 @@ import {
   docStamp,
   driftSummaryMessage,
   filterProjectFiles,
+  generatedDocConfirmationSummary,
+  generatedDocFailureMessage,
+  generatedDocRetryDeclinedMessage,
   invariantViolationCounts,
   isExternalProjectMember,
   looksLikeArtifact,
@@ -269,10 +272,61 @@ describe('projectMoreUtils', () => {
     );
     expect(retry).not.toHaveBeenCalled();
 
+    const confirm = vi.fn(() => true);
     await expect(
-      confirmUncertainGeneratedDocRetry(uncertain, () => true, retry),
+      confirmUncertainGeneratedDocRetry(uncertain, confirm, retry),
     ).resolves.toMatchObject({id: 'uncertain', status: 'QUEUED'});
+    expect(confirm).toHaveBeenCalledWith(
+      'No setup document was published after ANTHROPIC/claude-sonnet-4-6 dispatch began; delivery outcome may be uncertain. Retry that same job and route? This may incur additional usage.',
+    );
     expect(retry).toHaveBeenCalledWith('project-1', 'SETUP', 'uncertain');
+  });
+
+  it('shows a known safe confirmation code without calling every outcome uncertain', () => {
+    const known: api.GeneratedDocJob = {
+      id: 'known-invalid',
+      projectId: 'project-1',
+      docType: 'EXPLANATION',
+      status: 'NEEDS_CONFIRMATION',
+      terminal: true,
+      provider: 'DEEPSEEK',
+      model: 'deepseek-v4-pro-native',
+      resultDocId: null,
+      resultDocVersion: null,
+      errorCode: 'INVALID_GENERATED_DOCUMENT',
+      errorMessage: 'Generated document failed deterministic validation.',
+      attemptCount: 1,
+      deadlineAt: '2026-07-30T10:30:00Z',
+      providerStartedAt: '2026-07-30T10:00:02Z',
+      createdAt: '2026-07-30T10:00:00Z',
+      startedAt: '2026-07-30T10:00:01Z',
+      completedAt: '2026-07-30T10:05:00Z',
+    };
+
+    expect(generatedDocConfirmationSummary(known)).toBe(
+      'INVALID_GENERATED_DOCUMENT · No document was published after provider dispatch began; delivery outcome may be uncertain. Retrying the same route may incur additional usage.',
+    );
+    expect(
+      generatedDocFailureMessage({
+        ...known,
+        errorMessage:
+          'No document was published after provider execution began. Retrying may incur usage.',
+      }),
+    ).toBe(
+      'No document was published after provider dispatch began; delivery outcome may be uncertain. Retrying may incur usage.',
+    );
+    expect(
+      generatedDocFailureMessage({
+        ...known,
+        errorMessage:
+          'No document was published after provider dispatch began; delivery outcome may be uncertain. Retrying may incur usage.',
+      }),
+    ).toBe(
+      'No document was published after provider dispatch began; delivery outcome may be uncertain. Retrying may incur usage.',
+    );
+    expect(generatedDocRetryDeclinedMessage(known)).toBe(
+      'The document generation was not retried (INVALID_GENERATED_DOCUMENT).',
+    );
   });
 
   it('sorts tech-debt categories by descending count', () => {

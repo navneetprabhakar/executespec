@@ -32,6 +32,9 @@ import {
   contractDetectorSummary,
   driftSummaryMessage,
   filterProjectFiles,
+  generatedDocConfirmationSummary,
+  generatedDocFailureMessage,
+  generatedDocRetryDeclinedMessage,
   invariantViolationCounts,
   looksLikeArtifact,
   restoreGeneratedDocJobs,
@@ -818,7 +821,7 @@ export function IdeProjectCode() {
         api.confirmProjectDocRetry,
       );
       if (!confirmed) {
-        setMsg('The uncertain document generation was not retried.');
+        setMsg(generatedDocRetryDeclinedMessage(admitted));
         return;
       }
       const job = confirmed;
@@ -951,10 +954,7 @@ export function IdeProjectCode() {
               });
               setDocNeedsConfirmation((current) => ({...current, [pending.type]: job}));
               setErr(
-                `${job.errorCode || 'OUTCOME_UNCERTAIN'} · ${
-                  job.errorMessage ||
-                  'Provider execution may have started. Confirm before retrying this document.'
-                }`,
+                `${job.errorCode || 'OUTCOME_UNCERTAIN'} · ${generatedDocFailureMessage(job)}`,
               );
             }
           })
@@ -1405,8 +1405,8 @@ export function IdeProjectCode() {
                   className='ide-card'
                   style={{marginBottom: 8, fontSize: 12, color: 'var(--ide-yellow)'}}
                 >
-                  <strong>{job.docType}</strong> · Outcome uncertain · {job.provider}/{job.model}.
-                  Confirm retry below before any additional provider work.
+                  <strong>{job.docType}</strong> · {job.provider}/{job.model} ·{' '}
+                  {generatedDocConfirmationSummary(job)}
                 </div>
               ),
           )}
