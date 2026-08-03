@@ -19,6 +19,10 @@ not run providers, merge pull requests, deploy, or create project-side resources
   to 16 KiB, must be non-secret, and is intended only for short local proof.
 - If any frozen deployment, fixture, project, route, request, approval, or client identity changes,
   invalidate and restart. Never edit a frozen manifest.
+- Schema v2 manifests are deliberately not auto-migrated because v3 adds mandatory sandbox and CLI
+  evidence that cannot be reconstructed safely. Preserve and archive the v2 file, use the v2 harness
+  revision to clean up every resource recorded in it, then initialize a new v3 campaign. Never
+  replace a discovered v2 file in place.
 
 Secrets are accepted only through environment variables and are redacted before evidence
 persistence. The state file defaults outside the repository at
@@ -45,10 +49,11 @@ node scripts/enterprise-litmus/litmus.mjs init --manifest /absolute/private/path
 
 ## Record evidence
 
-The state machine enforces preflight, fixture and two architecture baselines, freeze, three strictly
-sequential heroes, merge and exact-SHA refresh, continuation, deliberate CI failure and repair,
-deployment tracking or a truthful skip, negative tests, and full cleanup. `advance` cannot skip a
-state.
+The state machine enforces preflight, fixture/project linkage, an explicit sandbox-or-remote-workspace
+assessment, two architecture baselines, freeze, three strictly sequential heroes, a complete CLI
+fallback proof over those same runs, merge and exact-SHA refresh, continuation, deliberate CI failure
+and repair, deployment tracking or a truthful skip, negative tests, and full cleanup. `advance`
+cannot skip a state.
 
 ```bash
 chmod 600 /absolute/private/path/project-linked.json
@@ -77,7 +82,17 @@ other transition similarly rejects missing and unknown fields. The contract in
   changed-file list) and a current governed semantic-index unavailability reason degraded to ripgrep
   with zero provider calls. The retired compatibility error remains accepted only for rollout evidence.
 - The frozen tuple is digest-bound. No deployment, fixture, project, route, request, approval, or
-  client value can change after freeze; invalidate and restart instead.
+  client or sandbox-assessment value can change after freeze; invalidate and restart instead.
+- `SANDBOX_ASSESSED` consumes the canonical client-capability snapshot. A strict sandbox PASS requires
+  every lifecycle/dispatch/strict-runtime/toolchain gate, a digest-pinned image, runtime epoch and
+  lease, exact source SHA and mount/UID/GID proof, command/build/test execution with no host fallback,
+  reload/history/close proof, project-in-workspace classification, and teardown absence bound back
+  to the exact sandbox/runtime epoch/lease/project/source identity. When dev
+  exposes only the server workspace, the manifest must say `REMOTE_WORKSPACE_ONLY`, label it
+  "Remote workspace", prove no sandbox and no host fallback, and mark it do-not-demo. This evidence
+  also records project-context retention plus chat-history snapshot and close availability. It can
+  complete the record but adds `SANDBOX_STRICT_RUNTIME_UNAVAILABLE` (and specific history/close or
+  project-handoff gaps when present) to the non-PASS requirements and keeps `goEligible=false`.
 - Each hero first records a submission and then matching verification. Verification requires
   `COMPLETE`, exact frozen source/request/route, distinct run/branch/approval/PR/head SHA, plan
   ID/version/fingerprint, complete task/build evidence, generated files, passing behavior tests with
@@ -85,15 +100,28 @@ other transition similarly rejects missing and unknown fields. The contract in
   equal to frozen main, exactly one green `fixture-ci` check, bounded cost, byte-exact 151+ line
   output with EOF sentinel, reconnect/reload stability, one primary action plus support code,
   Web/CLI terminal-outcome parity, and independent correctness proof.
+- `CLI_FALLBACK_VERIFIED` binds the exact frozen CLI SHA and all three hero run IDs. It requires PAT
+  auth and capability discovery; TUI/plain/stdin plus text/JSON/stream-JSON parity; cross-surface
+  create/approve against one authoritative run and receipt; attach cursor deduplication; SIGINT exit
+  130 with zero server cancel; provider/model/cost/evidence/PR-CI provenance; controlled local-hands
+  denial with zero provider/cost/code/PR delta; canonical cwd/realpath/head/manifest evidence; tool
+  approval boundaries; and green build, tracked CLI, heavy TUI and Windows smoke evidence. Raw
+  output and normalized-result digests are recorded for all six CLI surfaces; normalized results
+  must agree, and the harness recomputes one parity digest over those artifacts plus the three hero
+  terminal-outcome digests.
 - Merge/refresh binds observed main, workspace, architecture, and exact content to the merge SHA.
   Continuation must complete from that SHA. CI repair must green the same PR at a new head SHA while
   preserving the protected-test digest and explicitly proving tests were not weakened.
 - Deployment must be either successfully tracked at the CI-fixed SHA or explicitly skipped with a
   decision ID, reason, proof no deployment was created, and proof tracking was checked.
 - The registry covers public invalid/reject/cancel/conflict; operator-fixture project-provider
-  missing/invalid and matrix-unavailable cases; public policy and both budget SSE types; workspace
-  409 and 410; repository 404; tenant 403; auth 401;
-  dependency 503; local-hands denial; controlled internal failure; and three corruption-only
+  missing/invalid and matrix-unavailable cases; public policy and the production HTTP-200 SSE
+  budget codes `PROJECTED_CALL_BUDGET_EXCEEDED` and `AGENT_TURN_BUDGET_EXHAUSTED` (both projected as
+  controlled client status 422 / `ACTION_REQUIRED`); permanent
+  workspace-unavailable 410; operator-fixture retryable workspace-restore 503; repository 404;
+  tenant 403; auth 401;
+  dependency 503;
+  local-hands denial; controlled internal failure; and three corruption-only
   operator fixtures. Every public case must be `VERIFIED` with its exact controlled status, zero
   provider/cost/code/PR delta, one action, no raw leak, Web/CLI parity, and distinct delta evidence.
   Only registry entries explicitly marked non-public/operator-fixture may be typed `NOT_RUN`, and must record
@@ -103,8 +131,9 @@ other transition similarly rejects missing and unknown fields. The contract in
   campaign in `CLEANUP_REQUIRED`.
 - `COMPLETE` reruns an independent audit over authoritative fields. Missing, duplicate,
   contradictory, arbitrary, or event-only evidence cannot complete a campaign. The audit separately
-  returns `goEligible=false` whenever any allowlisted fixture case is `NOT_RUN`, so completeness of
-  the record cannot be presented as an enterprise-demo GO verdict.
+  returns `goEligible=false` whenever any allowlisted fixture case is `NOT_RUN` or the strict remote
+  sandbox journey is unavailable, so completeness of the record cannot be presented as an
+  enterprise-demo GO verdict.
 
 The fixture contains a target function after line 150 and an EOF sentinel. Verification compares
 workspace and PR bytes exactly, requires at least 151 lines, and requires the sentinel. Fixture CI
