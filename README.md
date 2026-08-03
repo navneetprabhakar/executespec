@@ -50,12 +50,13 @@ test-runner caches such as `__pycache__`, `.pytest_cache`, and compiled Python b
 Stale project architecture refresh runs durably in the background instead of blocking the planner.
 For monorepos, build and test verification discovers nested manifest roots but selects only modules
 with actual Git working-tree changes; ambiguous unscoped modules are reported unavailable rather
-than building unrelated applications. A provider output cap before the first write, or the existing
-zero-write best-guess salvage boundary, may produce one bounded recovered mutation. The recovery is
-not reported as a model `completeTask` call and
-remains a warning unless the exact recovered workspace produces a fresh, provenance-verified suite
-with at least one passing test and a complete pass/skip population; only that stronger deterministic
-proof can restore clean task completion before the ordinary review and final-validation gates.
+than building unrelated applications. A provider output cap before the first write gets one bounded
+same-route mutation-only call with expanded output headroom. Recovered writes then re-enter the
+ordinary worker loop so required maintained tests, verification, and a later real `completeTask`
+still have to occur; unadvertised recovery tools are refused and at most two guarded follow-up turns
+are added at the iteration ceiling. Existing zero-write best-guess salvage remains a warning even when the current
+workspace suite is green: passing old tests is non-regression evidence, not proof that requested
+new coverage was delivered.
 
 Library/module changes without explicit server or API intent stay on the library validation
 surface. Node projects using the built-in `node --test` runner contribute their real executable
