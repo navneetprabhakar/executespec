@@ -1768,6 +1768,10 @@ evidence, and horizontally scaled JVMs require a shared persistent trajectory ro
   deterministic last-mile correction when a provider claims `finalBuildPassed` proves pytest/test
   success while the report has no concrete test count.
 - **JAVADOC.md is stale** — head reference corrected V202→V208 (2026-05-24), but a full rewrite is still queued; the authoritative surface lives in CLAUDE.md / ARCHITECTURE.md / per-package `CLAUDE.md`.
+- **Timeline secret serialization boundary (2026-08-04)** — `PipelineRun.githubPat` and
+  `PipelineRun.bitbucketAppPassword` are serialization-denied. The authenticated Timeline API
+  currently returns a raw run entity, so decrypted SCM credentials must remain absent from every
+  JSON representation; `PipelineRunSecretSerializationTest` pins this boundary.
 - **Enterprise-demo terminal/error contract batch (2026-08-02, local branch
   `codex/enterprise-litmus-error-contracts`)** — terminal run DTOs carry one server-owned additive
   `terminalOutcome` projection for Web, email, in-app notifications, and future CLI consumption.
