@@ -472,6 +472,15 @@ public class LlmRouter {
   @Value("${spring.ai.fireworks.read-timeout-seconds:300}")
   private int fireworksReadTimeoutSeconds = 300;
 
+  /**
+   * Gemini thinking-model worker calls routinely exceed the client's static 60s default (calibrated
+   * 2026-05-08 from cmatrix run 84252898: T3 timed out after a 17-min worker phase). This window
+   * replaces the WorkerAgent-side global read-timeout pin: the router resolves it for EVERY Gemini
+   * call, so callers no longer need a provider-blind override to avoid the 60s default.
+   */
+  @Value("${spring.ai.gemini.read-timeout-seconds:300}")
+  private int geminiReadTimeoutSeconds = 300;
+
   // 2026-06-09 — Fireworks AI: OpenAI-wire-compatible US-hosted fast inference for the Chinese open
   // models. Same plumbing as DeepSeek (per-call base-URL). System fallback key; org BYOK via
   // RunKeyContext.keyFor("fireworks").
@@ -487,18 +496,35 @@ public class LlmRouter {
    * one 502). Retrying the SAME provider keeps per-provider benchmark numbers honest (no silent
    * failover) and makes customer runs survive transient upstream errors. This is public because
    * durable logical-call budgets must reserve the exact same physical-attempt envelope.
+   *
+   * <p>Since 2026-08-03 the envelope is surface-split via {@link LlmRequest#retryProfile()}: this
+   * constant is the PIPELINE (default) ceiling; interactive chat turns use the smaller {@link
+   * #INTERACTIVE_TRANSIENT_RETRY_MAX_ATTEMPTS}.
    */
   public static final int TRANSIENT_RETRY_MAX_ATTEMPTS = 6;
 
   /**
-   * Accuracy-over-latency spacing (2026-08-01, TB 2.1 campaign): one initial call plus five retries
-   * at 5s/15s/25s/45s/65s. The old 2s/4s/8s ladder re-hit a still-pressured provider fast enough to
-   * exhaust the envelope inside one throttling window; wider gaps trade wall clock for a materially
-   * higher chance the transient clears before the envelope is spent.
+   * Retry ceiling for human-facing chat turns ({@link LlmRequest.RetryProfile#INTERACTIVE}). A
+   * person is watching these calls: the pipeline ladder's ~155s worst-case backoff tail reads as a
+   * hang, so interactive turns keep the pre-campaign envelope (4 attempts, 2s/4s/8s — worst case
+   * ~14s of backoff) and surface the failure to the user instead of waiting out a long throttling
+   * window.
    */
-  private static final long[] TRANSIENT_RETRY_BACKOFF_MS = {
+  public static final int INTERACTIVE_TRANSIENT_RETRY_MAX_ATTEMPTS = 4;
+
+  /**
+   * PIPELINE spacing — accuracy over latency (2026-08-01, TB 2.1 campaign): one initial call plus
+   * five retries at 5s/15s/25s/45s/65s. The old 2s/4s/8s ladder re-hit a still-pressured provider
+   * fast enough to exhaust the envelope inside one throttling window; wider gaps trade wall clock
+   * for a materially higher chance the transient clears before the envelope is spent. Nobody is
+   * watching a worker/planner/reviewer call, so the wall-clock cost is acceptable there.
+   */
+  private static final long[] PIPELINE_RETRY_BACKOFF_MS = {
     5_000L, 15_000L, 25_000L, 45_000L, 65_000L
   };
+
+  /** INTERACTIVE spacing — the pre-campaign 2s/4s/8s ladder (RL-2026-05-029). */
+  private static final long[] INTERACTIVE_RETRY_BACKOFF_MS = {2_000L, 4_000L, 8_000L};
 
   private static final Duration DEFAULT_TRANSPORT_TIMEOUT = Duration.ofSeconds(120);
   private static final Duration ANTHROPIC_TRANSPORT_TIMEOUT = Duration.ofSeconds(300);
@@ -722,7 +748,9 @@ public class LlmRouter {
                 physicalAttemptOrdinal,
                 parentAttemptId)
             : null;
-    for (int attempt = 1; attempt <= TRANSIENT_RETRY_MAX_ATTEMPTS; attempt++) {
+    final int maxAttempts = transientRetryMaxAttempts(request);
+    final long[] backoffLadderMs = transientRetryBackoffMs(request);
+    for (int attempt = 1; attempt <= maxAttempts; attempt++) {
       // This is the last common seam before every physical chat transport. The request already
       // carries the managed-AI or failover route, so price that effective provider/model rather
       // than the worker's earlier requested route. Rechecking each bounded retry also observes any
@@ -796,13 +824,11 @@ public class LlmRouter {
             request.model(),
             elapsed,
             attempt,
-            TRANSIENT_RETRY_MAX_ATTEMPTS,
+            maxAttempts,
             contextSanitizer.sanitizeException(e));
         lastError = e;
-        if (attempt < TRANSIENT_RETRY_MAX_ATTEMPTS && isTransientError(e)) {
-          long backoffMs =
-              TRANSIENT_RETRY_BACKOFF_MS[
-                  Math.min(attempt - 1, TRANSIENT_RETRY_BACKOFF_MS.length - 1)];
+        if (attempt < maxAttempts && isTransientError(e)) {
+          long backoffMs = backoffLadderMs[Math.min(attempt - 1, backoffLadderMs.length - 1)];
           log.warn(
               "LlmRouter transient error on {} — retrying in {}ms", request.provider(), backoffMs);
           backoffSleep(backoffMs);
@@ -1174,22 +1200,59 @@ public class LlmRouter {
     return request.retryOf() == null || request.retryOf().isBlank() ? "PRIMARY" : "FAILOVER";
   }
 
+  /**
+   * Effective transport timeout for one physical call: the per-provider window, tightened (never
+   * widened) by an explicit per-call {@code readTimeoutSeconds} override. The router — not the
+   * caller — owns how long a provider socket may stay open, so a caller carrying a large remaining
+   * wall-clock budget (e.g. a worker hours from its absolute deadline) cannot inflate an HTTP read
+   * timeout past the provider's window. Callers use the override only to SHORTEN the window, e.g.
+   * deadline-capped worker calls near the shutdown reserve. (2026-08-03, productionizing the TB
+   * campaign's global worker 300s pin.)
+   */
   private Duration transportTimeout(LlmRequest request) {
+    Duration window = providerTransportWindow(request.provider());
     if (request.readTimeoutSeconds() != null && request.readTimeoutSeconds() > 0) {
-      return Duration.ofSeconds(request.readTimeoutSeconds());
+      Duration override = Duration.ofSeconds(request.readTimeoutSeconds());
+      return override.compareTo(window) < 0 ? override : window;
     }
-    if ("anthropic".equalsIgnoreCase(request.provider())) return ANTHROPIC_TRANSPORT_TIMEOUT;
-    if ("deepseek".equalsIgnoreCase(request.provider())) {
+    return window;
+  }
+
+  private Duration providerTransportWindow(String provider) {
+    if ("anthropic".equalsIgnoreCase(provider)) return ANTHROPIC_TRANSPORT_TIMEOUT;
+    if ("deepseek".equalsIgnoreCase(provider)) {
       return Duration.ofSeconds(Math.max(1, deepSeekReadTimeoutSeconds));
     }
-    if ("fireworks".equalsIgnoreCase(request.provider())) {
+    if ("fireworks".equalsIgnoreCase(provider)) {
       return Duration.ofSeconds(Math.max(1, fireworksReadTimeoutSeconds));
+    }
+    if ("gemini".equalsIgnoreCase(provider)) {
+      return Duration.ofSeconds(Math.max(1, geminiReadTimeoutSeconds));
     }
     return DEFAULT_TRANSPORT_TIMEOUT;
   }
 
-  private static Integer admittedReadTimeoutSeconds(LlmRequest request, Instant transportDeadline) {
-    if (transportDeadline == null) return request.readTimeoutSeconds();
+  /** PIPELINE unless the request explicitly opts into the interactive envelope. */
+  private static int transientRetryMaxAttempts(LlmRequest request) {
+    return request.retryProfile() == LlmRequest.RetryProfile.INTERACTIVE
+        ? INTERACTIVE_TRANSIENT_RETRY_MAX_ATTEMPTS
+        : TRANSIENT_RETRY_MAX_ATTEMPTS;
+  }
+
+  private static long[] transientRetryBackoffMs(LlmRequest request) {
+    return request.retryProfile() == LlmRequest.RetryProfile.INTERACTIVE
+        ? INTERACTIVE_RETRY_BACKOFF_MS
+        : PIPELINE_RETRY_BACKOFF_MS;
+  }
+
+  /**
+   * The read timeout actually handed to a wire client: the V1-admitted transport deadline when one
+   * exists, otherwise the resolved per-provider window (already min-capped by any caller override
+   * in {@link #transportTimeout}). Never the raw caller override — that let a provider-blind caller
+   * widen a provider's socket window (2026-08-03).
+   */
+  private Integer admittedReadTimeoutSeconds(LlmRequest request, Instant transportDeadline) {
+    if (transportDeadline == null) return (int) transportTimeout(request).toSeconds();
     long millis = Duration.between(Instant.now(), transportDeadline).toMillis();
     return (int) Math.max(1, Math.min(Integer.MAX_VALUE, (millis + 999L) / 1000L));
   }
@@ -1623,7 +1686,9 @@ public class LlmRouter {
         .forceToolCall(forceToolCall)
         .toolChoice(r.toolChoice())
         .apiKey(apiKey)
-        .readTimeoutSeconds(r.readTimeoutSeconds())
+        // Resolved (window-capped) value, not the raw override: a null override previously fell
+        // through to the Gemini client's static 60s default, which is too tight for worker calls.
+        .readTimeoutSeconds((int) transportTimeout(r).toSeconds())
         .build();
   }
 
@@ -1709,10 +1774,7 @@ public class LlmRouter {
             .maxCompletionTokens(r.maxTokens())
             .toolChoice(r.toolChoice())
             .apiKey(key)
-            .readTimeoutSeconds(
-                transportDeadline == null && r.readTimeoutSeconds() == null
-                    ? deepSeekReadTimeoutSeconds
-                    : admittedReadTimeoutSeconds(r, transportDeadline))
+            .readTimeoutSeconds(admittedReadTimeoutSeconds(r, transportDeadline))
             .baseUrl(deepSeekBaseUrl)
             .extraBody(deepSeekExtraBody(r))
             .build());
@@ -1768,10 +1830,7 @@ public class LlmRouter {
             .maxCompletionTokens(r.maxTokens())
             .toolChoice(r.toolChoice())
             .apiKey(key)
-            .readTimeoutSeconds(
-                transportDeadline == null && r.readTimeoutSeconds() == null
-                    ? fireworksReadTimeoutSeconds
-                    : admittedReadTimeoutSeconds(r, transportDeadline))
+            .readTimeoutSeconds(admittedReadTimeoutSeconds(r, transportDeadline))
             .baseUrl(fireworksBaseUrl)
             .build());
   }

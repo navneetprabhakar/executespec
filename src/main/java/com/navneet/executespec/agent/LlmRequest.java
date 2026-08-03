@@ -54,6 +54,9 @@ import lombok.Builder;
  * @param runHardCapUsd optional run-wide dollar ceiling propagated by a cost-bounded worker so the
  *     router can recheck the exact physical route after managed-AI substitution and on failover
  * @param taskCostCapUsd optional task-local dollar ceiling with the same exact-route semantics
+ * @param retryProfile transient-retry envelope selector; null ⇒ {@link RetryProfile#PIPELINE}.
+ *     Interactive chat surfaces set {@link RetryProfile#INTERACTIVE} so a human-facing turn never
+ *     inherits the pipeline ladder's long backoff tail.
  * @param usageLogicalCallId stable identity shared by retries/failovers of one logical LLM call;
  *     generated once when omitted and preserved by {@link #toBuilder()}
  */
@@ -85,7 +88,8 @@ public record LlmRequest(
     boolean strictProvider,
     Double runHardCapUsd,
     Double taskCostCapUsd,
-    PromptCacheStrategy promptCacheStrategy) {
+    PromptCacheStrategy promptCacheStrategy,
+    RetryProfile retryProfile) {
 
   /**
    * Provider-neutral prompt-cache intent. Providers that do not support prompt caching ignore the
@@ -98,6 +102,19 @@ public record LlmRequest(
     SYSTEM_ONLY,
     CONVERSATION_HISTORY,
     NONE
+  }
+
+  /**
+   * Which transient-retry envelope the router applies to this call (2026-08-03 surface split).
+   * {@link #PIPELINE} — the default when null — keeps the accuracy-first ladder (6 attempts,
+   * 5/15/25/45/65s) proven on the TB 2.1 campaign: correct for worker/planner/reviewer calls where
+   * nobody is watching wall clock. {@link #INTERACTIVE} keeps the pre-campaign 4-attempt 2/4/8s
+   * ladder for human-facing chat turns, whose worst-case backoff must read as a slow reply, not a
+   * hang.
+   */
+  public enum RetryProfile {
+    PIPELINE,
+    INTERACTIVE
   }
 
   public LlmRequest {

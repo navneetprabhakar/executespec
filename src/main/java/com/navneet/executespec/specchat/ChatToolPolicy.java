@@ -35,14 +35,22 @@ public final class ChatToolPolicy {
 
   /**
    * The router can make up to four physical same-provider attempts for one logical model round.
-   * Durable execution contexts count terminal physical-attempt rows, so the provider-call ceiling
-   * must reserve the retry envelope rather than only the logical round count. This remains a
-   * separate guard from the model-round counter: retries do not grant the model another turn.
+   * Chat turns run on the INTERACTIVE retry profile, so the reservation envelope tracks {@link
+   * LlmRouter#INTERACTIVE_TRANSIENT_RETRY_MAX_ATTEMPTS}, not the pipeline ladder. Durable execution
+   * contexts count terminal physical-attempt rows, so the provider-call ceiling must reserve the
+   * retry envelope rather than only the logical round count. This remains a separate guard from the
+   * model-round counter: retries do not grant the model another turn.
    */
   public static final int MAX_PROVIDER_ATTEMPTS_PER_MODEL_ROUND =
-      LlmRouter.TRANSIENT_RETRY_MAX_ATTEMPTS;
+      LlmRouter.INTERACTIVE_TRANSIENT_RETRY_MAX_ATTEMPTS;
 
-  /** Five tool-enabled rounds plus one forced synthesis, each with the bounded retry envelope. */
+  /**
+   * Five tool-enabled rounds plus one forced synthesis, each with the bounded retry envelope —
+   * deliberately 24. The 2026-08-01 campaign's pipeline-ladder bump (4→6 attempts) silently
+   * inflated this ceiling to 36 because it was derived from the pipeline constant; the 2026-08-03
+   * surface split restores the interactive envelope this ceiling was designed around. Pinned by
+   * {@code ChatToolPolicyTest}.
+   */
   public static final int MAX_PROVIDER_CALLS_PER_TURN =
       (MAX_MODEL_ROUNDS + 1) * MAX_PROVIDER_ATTEMPTS_PER_MODEL_ROUND;
 
