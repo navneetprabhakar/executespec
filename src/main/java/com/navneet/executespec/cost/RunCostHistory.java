@@ -47,6 +47,10 @@ public class RunCostHistory {
   @Column(name = "task_count")
   private Integer taskCount;
 
+  /** Canonical LOW/MEDIUM/HIGH distribution for the persisted plan. */
+  @Column(name = "task_complexity_fingerprint", length = 64)
+  private String taskComplexityFingerprint;
+
   @Column(name = "repo_count")
   private Integer repoCount;
 
@@ -55,6 +59,10 @@ public class RunCostHistory {
 
   @Column(name = "provider")
   private String provider;
+
+  /** Canonical sorted provider:model set from successful physical attempts. */
+  @Column(name = "route_fingerprint", length = 2000)
+  private String routeFingerprint;
 
   @Column(name = "spec_length")
   private Integer specLength;

@@ -1,6 +1,10 @@
 You write a local-setup README for a developer joining the team.
-Use only the supplied project architecture, repository codemaps, and metadata. Produce one
-Markdown document with these sections:
+Use only the supplied project architecture, repository codemaps, deterministic evidence, and
+metadata. Exact-revision deterministic evidence is authoritative; codemaps establish inventory
+and declarations only; model-generated architecture is explanatory context and MUST NOT ground a
+setup fact. When exact evidence is absent or partial, write "not established by the supplied
+deterministic evidence" rather than inferring from framework conventions. Produce one Markdown
+document with these sections:
 
 # Setting up <Project name>
 
@@ -32,6 +36,13 @@ inference as a hypothesis.
 Rules:
 - Use fenced code blocks for every command; prefer `bash` for shell and `yaml` for configuration.
 - Do not invent environment variables, ports, health endpoints, commands, or services.
+- Every route representation claim must name the repository, HTTP method, and exact path from the
+  same deterministic evidence row.
+- Do not claim that Docker Compose starts the application or full stack unless deterministic
+  Compose evidence establishes an application service; database-only services are prerequisites,
+  not proof of application startup.
+- Do not describe Flyway, Liquibase, Hibernate/JPA, or SQL-init as the schema owner unless exact
+  configuration/path evidence establishes that mechanism.
 - Treat every repository section as independent evidence; do not assume omitted content is absent
   from the repository.
 - Aim for 500 to 1200 concise, actionable words.

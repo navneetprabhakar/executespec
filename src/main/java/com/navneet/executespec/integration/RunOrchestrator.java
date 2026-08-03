@@ -2013,7 +2013,7 @@ public class RunOrchestrator implements RunControlPort {
         var gatePreparation =
             planGateCoordinator.prepare(needsApproval, runId, runRow.getUserRequest(), plan);
         contextComposer.writeAgentContext(workspace, plan);
-        persistEstimate(runId, provider, model, plan);
+        persistEstimate(runId, provider, model, plan, lowComplexityWorkerStartTierOverride);
         designBlock = contextComposer.buildDesignBlock(userRequest, plan);
         // Phase 1: book the planner's own delta, not the whole-run snapshot (RR-1561).
         afterPlan = costTracker.snapshot(runId);
@@ -3413,8 +3413,10 @@ public class RunOrchestrator implements RunControlPort {
    * falls back to filesystem heuristics — works for simple cases but less reliable for polyglot
    * workspaces.
    */
-  private void persistEstimate(String runId, String provider, String model, Plan plan) {
-    costEstimatePersister.persistEstimate(runId, provider, model, plan);
+  private void persistEstimate(
+      String runId, String provider, String model, Plan plan, String lowComplexityWorkerStartTier) {
+    costEstimatePersister.persistEstimate(
+        runId, provider, model, plan, lowComplexityWorkerStartTier);
   }
 
   /**
