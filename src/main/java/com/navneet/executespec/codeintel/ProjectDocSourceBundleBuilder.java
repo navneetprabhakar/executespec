@@ -63,8 +63,12 @@ final class ProjectDocSourceBundleBuilder {
     sections.add(new ProjectDocSourceBudgeter.Section("# Project metadata", metadata.toString()));
     sections.add(
         new ProjectDocSourceBudgeter.Section(
-            "# Architecture document (v" + architecture.getVersion() + ")",
-            architecture.getContent() == null ? "" : architecture.getContent()));
+            "# Model-generated architecture (v"
+                + architecture.getVersion()
+                + "; explanatory context only, never factual grounding)",
+            "The generated architecture body is intentionally excluded from this factual source "
+                + "bundle. Exact-revision codemaps and deterministic evidence below are the only "
+                + "admissible grounding inputs."));
     for (ProjectRepo repo : repos) {
       String fullName = repo.getGithubRepoFullName();
       String expectedSha = sourceShas.remove(fullName);
@@ -75,16 +79,43 @@ final class ProjectDocSourceBundleBuilder {
           architectureService
               .codeMapForSourceSha(project.getId(), repo.getId(), expectedSha)
               .orElseThrow(ProjectDocGeneratorService.StaleSourceException::new);
+      String content = exactCodeMap.getContent() == null ? "" : exactCodeMap.getContent();
+      String facts = DeterministicArchitectureEvidence.exactProjectFactBlock(content);
+      if (facts == null) {
+        // A legacy same-SHA codemap cannot support the current factual publication contract.
+        throw new ProjectDocGeneratorService.StaleSourceException();
+      }
+      sections.add(
+          new ProjectDocSourceBudgeter.Section("# Deterministic facts: " + fullName, facts));
       sections.add(
           new ProjectDocSourceBudgeter.Section(
-              "# Repository codemap: " + fullName,
-              exactCodeMap.getContent() == null ? "" : exactCodeMap.getContent()));
+              "# Repository codemap: " + fullName, declarationOnlyCodemap(content)));
     }
     if (!sourceShas.isEmpty()) {
       throw new ProjectDocGeneratorService.StaleSourceException();
     }
-    return ProjectDocSourceBudgeter.budget(
-        sections, ProjectDocGeneratorService.SOURCE_BUNDLE_CHAR_LIMIT);
+    String budgeted =
+        ProjectDocSourceBudgeter.budget(
+            sections, ProjectDocGeneratorService.SOURCE_BUNDLE_CHAR_LIMIT);
+    int found = 0;
+    int cursor = 0;
+    while (true) {
+      int begin = budgeted.indexOf(DeterministicProjectFactEvidence.BEGIN, cursor);
+      if (begin < 0) break;
+      int end = budgeted.indexOf(DeterministicProjectFactEvidence.END, begin);
+      if (end < 0) throw new ProjectDocGeneratorService.StaleSourceException();
+      found++;
+      cursor = end + DeterministicProjectFactEvidence.END.length();
+    }
+    if (found != repos.size()) {
+      throw new ProjectDocGeneratorService.StaleSourceException();
+    }
+    return budgeted;
+  }
+
+  private static String declarationOnlyCodemap(String content) {
+    String withoutFacts = DeterministicArchitectureEvidence.stripProjectFactBlocks(content);
+    return withoutFacts.replaceAll("(?m)^\\*\\*Purpose:\\*\\*[^\\r\\n]*(?:\\R\\s*)?", "");
   }
 
   Map<String, String> parseSourceShas(String sourceFingerprint) {

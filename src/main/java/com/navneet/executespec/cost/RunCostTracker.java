@@ -1,5 +1,7 @@
 package com.navneet.executespec.cost;
 
+import java.util.EnumSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalDouble;
@@ -376,6 +378,56 @@ public class RunCostTracker {
     int credits = Math.max(1, (int) Math.ceil(buffered / USD_PER_CREDIT));
     double hardCap = credits * USD_PER_CREDIT;
     return new Estimate(low, high, credits, hardCap, totalTasks);
+  }
+
+  /**
+   * Canonical expected provider:model set for the plan phases represented by historical pricing.
+   * Resolution intentionally occurs under the active run's exact pin/org matrix overlay. BUILD
+   * post-planning work uses PLANNING and WORKHORSE. LIGHTWEIGHT is always included because every
+   * successful BUILD journey invokes the title summarizer, including SINGLE_SHOT; an explicit LOW
+   * LIGHTWEIGHT start uses that same tier. Returning null makes history fail closed to the formula.
+   */
+  public String expectedRouteFingerprint(
+      String provider,
+      List<String> taskComplexities,
+      com.navneet.executespec.agent.PlanStrategy strategy,
+      String lowComplexityWorkerStartTier) {
+
+    LlmProvider requestedProvider;
+    try {
+      requestedProvider =
+          LlmProvider.valueOf((provider == null ? "OPENAI" : provider).toUpperCase());
+    } catch (IllegalArgumentException e) {
+      return null;
+    }
+
+    EnumSet<AgentTier> costBearingTiers =
+        EnumSet.of(AgentTier.PLANNING, AgentTier.WORKHORSE, AgentTier.LIGHTWEIGHT);
+    if (taskComplexities != null
+        && taskComplexities.stream().anyMatch(c -> "HIGH".equalsIgnoreCase(c))) {
+      costBearingTiers.add(AgentTier.PLANNING);
+    }
+    if ("LIGHTWEIGHT".equalsIgnoreCase(lowComplexityWorkerStartTier)
+        && taskComplexities != null
+        && taskComplexities.stream().anyMatch(c -> "LOW".equalsIgnoreCase(c))) {
+      costBearingTiers.add(AgentTier.LIGHTWEIGHT);
+    }
+
+    try {
+      java.util.TreeSet<String> routes = new java.util.TreeSet<>();
+      for (AgentTier tier : costBearingTiers) {
+        ResolvedModel route = modelResolver.resolveConfigured(requestedProvider, tier);
+        if (route == null || route.getActualProvider() == null || route.getModel() == null)
+          return null;
+        routes.add(
+            route.getActualProvider().name()
+                + ":"
+                + route.getModel().trim().toLowerCase(java.util.Locale.ROOT));
+      }
+      return routes.isEmpty() ? null : String.join(",", routes);
+    } catch (RuntimeException unresolvedRoute) {
+      return null;
+    }
   }
 
   /** Shared worker-cost computation, extracted so the new + old variants stay in sync. */

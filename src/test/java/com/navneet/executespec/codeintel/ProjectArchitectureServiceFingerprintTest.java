@@ -27,6 +27,11 @@ import org.junit.jupiter.api.Test;
  */
 class ProjectArchitectureServiceFingerprintTest {
 
+  private static final String CURRENT_FACTS =
+      DeterministicProjectFactEvidence.BEGIN
+          + "\n- Repository: `owner/repo`\n- Status: `AVAILABLE`\n"
+          + DeterministicProjectFactEvidence.END;
+
   private final ObjectMapper objectMapper = new ObjectMapper();
 
   @Test
@@ -141,11 +146,27 @@ class ProjectArchitectureServiceFingerprintTest {
                 "# repo — Architecture\n\n"
                     + DeterministicArchitectureEvidence.HTTP_BEGIN
                     + "\n- Status: `AVAILABLE`\n"
-                    + DeterministicArchitectureEvidence.HTTP_END)
+                    + DeterministicArchitectureEvidence.HTTP_END
+                    + "\n"
+                    + CURRENT_FACTS)
             .modelUsed("deepseek-chat")
             .build();
 
     assertThat(ProjectArchitectureService.isReusableRepoArchitecture(generated)).isTrue();
+  }
+
+  @Test
+  void httpOnlyLegacyRepoArchitectureIsNotReusableUnderProjectFactContract() {
+    RepoArchitectureDoc generated =
+        RepoArchitectureDoc.builder()
+            .content(
+                DeterministicArchitectureEvidence.HTTP_BEGIN
+                    + "\n- Status: `AVAILABLE`\n"
+                    + DeterministicArchitectureEvidence.HTTP_END)
+            .modelUsed("deepseek-chat")
+            .build();
+
+    assertThat(ProjectArchitectureService.isReusableRepoArchitecture(generated)).isFalse();
   }
 
   @Test
@@ -176,7 +197,9 @@ class ProjectArchitectureServiceFingerprintTest {
                 "# Combined\n\n"
                     + DeterministicArchitectureEvidence.HTTP_BEGIN
                     + "\n- Status: `AVAILABLE`\n"
-                    + DeterministicArchitectureEvidence.HTTP_END)
+                    + DeterministicArchitectureEvidence.HTTP_END
+                    + "\n"
+                    + CURRENT_FACTS)
             .build();
 
     assertThat(ProjectArchitectureService.isReusableProjectArchitecture(generated)).isTrue();
