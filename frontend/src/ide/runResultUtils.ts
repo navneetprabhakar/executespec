@@ -45,6 +45,56 @@ export interface TerminalFailureEvidence {
   supportCode?: string | null;
 }
 
+export type TerminalOutcomePrimaryAction = {
+  type: string;
+  label: string;
+  behavior: 'navigate' | 'retry' | 'tab';
+  href?: string;
+  tab?: 'Logs' | 'Validation';
+};
+
+/**
+ * Turns the server-owned next action into one executable primary control. An explicit server href
+ * always wins; type fallbacks keep older payloads actionable without inventing extra choices.
+ */
+export function terminalOutcomePrimaryAction(
+  outcome: api.RunTerminalOutcome | null | undefined,
+): TerminalOutcomePrimaryAction | null {
+  const action = outcome?.nextAction;
+  if (!action) return null;
+  if (isSafeTerminalActionHref(action.href)) {
+    return {type: action.type, label: action.label, behavior: 'navigate', href: action.href};
+  }
+  switch (action.type) {
+    case 'REVIEW_EVIDENCE':
+      return {type: action.type, label: action.label, behavior: 'tab', tab: 'Validation'};
+    case 'RETRY_RUN':
+      return {type: action.type, label: action.label, behavior: 'retry'};
+    case 'REVIEW_POLICY':
+      return {type: action.type, label: action.label, behavior: 'navigate', href: '/org/settings'};
+    case 'START_NEW_RUN':
+      return {type: action.type, label: action.label, behavior: 'navigate', href: '/compose'};
+    case 'CONTACT_SUPPORT': {
+      const supportCode = outcome.supportCode ? ` ${outcome.supportCode}` : '';
+      return {
+        type: action.type,
+        label: action.label,
+        behavior: 'navigate',
+        href: `mailto:navneet@executespec.ai?subject=${encodeURIComponent(
+          `ExecuteSpec run support${supportCode}`,
+        )}`,
+      };
+    }
+    default:
+      return {type: action.type, label: action.label, behavior: 'tab', tab: 'Logs'};
+  }
+}
+
+function isSafeTerminalActionHref(href: string | null | undefined): href is string {
+  if (!href) return false;
+  return (href.startsWith('/') && !href.startsWith('//')) || href.startsWith('mailto:');
+}
+
 export interface PublicationTrustFact {
   label: string;
   value: string;
@@ -1145,7 +1195,7 @@ export function runChatResponseContent(response: api.ChatResponse): string {
 }
 
 export function isFailedTerminalStatus(status?: string | null): boolean {
-  return ['FAILED', 'ERROR', 'CANCELLED', 'PARTIAL'].includes((status || '').toUpperCase());
+  return ['FAILED', 'ERROR', 'PARTIAL'].includes((status || '').toUpperCase());
 }
 
 export function hasRunCostEvidence(

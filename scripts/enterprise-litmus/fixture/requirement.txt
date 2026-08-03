@@ -1,0 +1,3 @@
+Extend src/catalog.js filterCatalog without replacing or truncating the file.
+
+Add optional tag, order, and limit support while preserving the existing query behavior and input immutability. Tag matching is exact and case-insensitive. Order accepts title-asc or title-desc. Limit must be a positive integer; invalid values must produce a clear error. Add happy-path and negative tests. Keep the LITMUS_EOF_SENTINEL intact. Run the complete test suite before completion.

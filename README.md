@@ -67,6 +67,9 @@ Active run detail overlays persisted cost with the higher JVM-owned live cost sn
 runs always expose stored durable cost. Effective route evidence keeps `MIXED` for multiple physical
 models, but retains the common provider when every tier stayed on that provider, so a provider-only
 request is not falsely shown as cross-provider divergence. Exact model pins remain strict.
+Terminal result pages render the server-owned outcome verbatim with exactly one primary next action;
+logs, evidence, and files remain secondary diagnostics. User cancellation is presented as a neutral
+stop, while platform failures retain a support code without exposing internal exception detail.
 
 Run-event publication uses bounded per-run lock striping to order Redis replay append, local
 delivery, Redis publication, subscription installation, and completion; unconstrained Spring

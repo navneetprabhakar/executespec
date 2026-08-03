@@ -70,6 +70,9 @@ public class OAuthSuccessHandler implements AuthenticationSuccessHandler {
   public void onAuthenticationSuccess(
       HttpServletRequest request, HttpServletResponse response, Authentication authentication)
       throws IOException {
+    // Consume once at callback entry so every safe outcome — including account-resolution errors —
+    // retains the protected return path for the user's next sign-in attempt.
+    String postLoginRedirect = consumeRedirectCookie(request, response);
     try {
       OAuth2AuthenticationToken oauthToken = (OAuth2AuthenticationToken) authentication;
       OAuth2User oAuth2User = oauthToken.getPrincipal();
@@ -90,9 +93,7 @@ public class OAuthSuccessHandler implements AuthenticationSuccessHandler {
       if (profile.email() == null || profile.email().isBlank()) {
         log.warn("OAuth login failed: no email returned from provider {}", registrationId);
         response.sendRedirect(
-            baseLoginErrorUrl
-                + "?error="
-                + URLEncoder.encode("oauth_no_email", StandardCharsets.UTF_8));
+            loginErrorUrl(baseLoginErrorUrl, "oauth_no_email", postLoginRedirect));
         return;
       }
 
@@ -128,7 +129,6 @@ public class OAuthSuccessHandler implements AuthenticationSuccessHandler {
       // Redirect to the frontend callback without credentials in the URL. The authorize filter
       // stashed the validated same-origin return path in an HttpOnly cookie; forward it through
       // the callback so password and OAuth sign-in preserve the same protected deep link.
-      String postLoginRedirect = consumeRedirectCookie(request, response);
       String redirectUrl = baseRedirectUrl + "?oauth=1";
       if (postLoginRedirect != null) {
         redirectUrl += "&redirect=" + URLEncoder.encode(postLoginRedirect, StandardCharsets.UTF_8);
@@ -137,15 +137,19 @@ public class OAuthSuccessHandler implements AuthenticationSuccessHandler {
 
     } catch (OAuthEmailConflictException e) {
       log.warn("OAuth email conflict: {}", e.getMessage());
-      response.sendRedirect(
-          loginUrl()
-              + "?error="
-              + URLEncoder.encode("oauth_email_conflict", StandardCharsets.UTF_8));
+      response.sendRedirect(loginErrorUrl(loginUrl(), "oauth_email_conflict", postLoginRedirect));
     } catch (Exception e) {
       log.error("OAuth login error", e);
-      response.sendRedirect(
-          loginUrl() + "?error=" + URLEncoder.encode("oauth_failed", StandardCharsets.UTF_8));
+      response.sendRedirect(loginErrorUrl(loginUrl(), "oauth_failed", postLoginRedirect));
     }
+  }
+
+  private String loginErrorUrl(String baseUrl, String error, String postLoginRedirect) {
+    String redirectUrl = baseUrl + "?error=" + URLEncoder.encode(error, StandardCharsets.UTF_8);
+    if (postLoginRedirect != null) {
+      redirectUrl += "&redirect=" + URLEncoder.encode(postLoginRedirect, StandardCharsets.UTF_8);
+    }
+    return redirectUrl;
   }
 
   /**

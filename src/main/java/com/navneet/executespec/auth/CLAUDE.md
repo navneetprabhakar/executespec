@@ -184,9 +184,12 @@ Auth, account, org, project, RBAC, PAT, OAuth, and user-level client preferences
   authorities, protocol-relative/encoded-authority paths, backslashes and control characters, and
   clears stale cookies on authorize requests without a safe target. This preserves both protected
   web deep links and CLI / VS Code `/cli-login...` handoffs without creating an open redirect.
-- `OAuthSuccessHandler` clears and revalidates the cookie before appending it as the callback
-  `redirect=` parameter. `OAuthRedirectCookieFilterTest` and `OAuthSuccessHandlerTest` pin the
-  settings path/query/hash round trip, CLI handoff, stale-cookie clearing, and unsafe rejection.
+- `OAuthSuccessHandler` clears and revalidates the cookie once at callback entry, then appends it as
+  the callback `redirect=` parameter on success or the login `redirect=` parameter on safe
+  no-email, account-conflict, and generic failure paths. This lets the next sign-in attempt resume
+  the same protected target without retaining a stale cookie. `OAuthRedirectCookieFilterTest` and
+  `OAuthSuccessHandlerTest` pin the settings path/query/hash round trip, CLI handoff, failure
+  recovery, stale-cookie clearing, and unsafe rejection.
 
 ## Tier Permissions
 
