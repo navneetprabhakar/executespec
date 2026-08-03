@@ -6,6 +6,7 @@ import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 const auth = vi.hoisted(() => ({
   isAuthenticated: true,
   isLoading: false,
+  loadMeError: null as string | null,
   user: null as {globalRole: string} | null,
   loadMe: vi.fn(),
 }));
@@ -28,6 +29,7 @@ beforeEach(() => {
   root = createRoot(host);
   auth.isAuthenticated = true;
   auth.isLoading = false;
+  auth.loadMeError = null;
   auth.user = null;
   auth.loadMe.mockReset();
 });
@@ -55,5 +57,31 @@ describe('ProtectedRoute', () => {
     expect(host.textContent).not.toContain('Admin shell');
     expect(host.textContent).not.toContain('Home');
     expect(auth.loadMe).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows a retryable error instead of an infinite spinner after transient hydration failure', async () => {
+    auth.loadMeError = 'safe display error';
+
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={['/agent']}>
+          <Routes>
+            <Route element={<ProtectedRoute />}>
+              <Route path='/agent' element={<div>Agent shell</div>} />
+            </Route>
+          </Routes>
+        </MemoryRouter>,
+      );
+    });
+
+    expect(host.querySelector('[role="alert"]')?.textContent).toContain(
+      'Could not verify your session',
+    );
+    expect(host.textContent).not.toContain('Agent shell');
+
+    const retry = host.querySelector('button');
+    expect(retry?.textContent).toBe('Retry');
+    await act(async () => retry?.click());
+    expect(auth.loadMe).toHaveBeenCalledTimes(2);
   });
 });
