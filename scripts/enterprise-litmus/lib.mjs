@@ -444,6 +444,26 @@ function assertHeroRoute(route, manifest, label) {
     throw new Error(`${label} contradicts frozen route`);
 }
 
+/**
+ * The run-cost API emits provider identifiers in canonical lowercase, while the frozen campaign
+ * route uses the server enum spelling. Evidence is not normalized here: accepting uppercase,
+ * whitespace, or a stringified non-string would hide a wire-contract regression.
+ */
+export function validateCanonicalApiProvider(provider, routeProvider, label = 'provider') {
+  if (
+    typeof provider !== 'string' ||
+    provider.length === 0 ||
+    provider !== provider.trim() ||
+    provider !== provider.toLowerCase()
+  ) {
+    throw new Error(`${label} must be a canonical lowercase API provider`);
+  }
+  if (typeof routeProvider !== 'string' || provider !== routeProvider.toLowerCase()) {
+    throw new Error(`${label} contradicts frozen route`);
+  }
+  return provider;
+}
+
 function materializeFrozenRunRequest(request, manifest, label) {
   assertExactKeys(request, FROZEN_RUN_REQUEST_KEYS, [], label);
   assertString(request.userRequest, `${label}.userRequest`);
@@ -737,13 +757,18 @@ function validateHeroProof(proof, manifest, ordinal) {
     if (callIds.has(call.physicalAttemptId))
       throw new Error(`${label}.physicalCallLedger contains duplicate physicalAttemptId`);
     callIds.add(call.physicalAttemptId);
-    if (
-      call.provider !== manifest.route.provider ||
-      call.model !== manifest.route.model
-    )
+    validateCanonicalApiProvider(
+      call.provider,
+      manifest.route.provider,
+      `${label}.physicalCallLedger.calls[].provider`,
+    );
+    assertString(call.model, `${label}.physicalCallLedger.calls[].model`);
+    if (call.model !== manifest.route.model)
       throw new Error(`${label}.physicalCallLedger contradicts frozen route`);
     for (const field of ['feature', 'agentRole', 'stepId', 'attemptStatus', 'attemptKind'])
       assertString(call[field], `${label}.physicalCallLedger.calls[].${field}`);
+    if (call.feature !== 'pipeline')
+      throw new Error(`${label}.physicalCallLedger call is not bound to the pipeline feature`);
     if (call.parentAttemptId !== null)
       assertString(
         call.parentAttemptId,
@@ -760,16 +785,16 @@ function validateHeroProof(proof, manifest, ordinal) {
     )
   )
     throw new Error(`${label} deterministic SINGLE_SHOT must not call the outline planner`);
-  const successfulPhase = (feature, role) =>
+  const successfulProducer = (role, stepPrefix) =>
     physicalCalls.some(
       (call) =>
-        call.feature === feature &&
         call.agentRole === role &&
+        call.stepId.startsWith(stepPrefix) &&
         call.attemptStatus === 'SUCCESS',
     );
-  if (!successfulPhase('RUN_EXECUTION', 'WorkerAgent'))
+  if (!successfulProducer('WorkerAgent', 'worker.'))
     throw new Error(`${label}.physicalCallLedger is missing successful worker execution`);
-  if (!successfulPhase('RUN_REVIEW', 'ReviewerAgent'))
+  if (!successfulProducer('ReviewerAgent', 'reviewer.'))
     throw new Error(`${label}.physicalCallLedger is missing successful reviewer execution`);
   assertExactKeys(
     proof.longFile,

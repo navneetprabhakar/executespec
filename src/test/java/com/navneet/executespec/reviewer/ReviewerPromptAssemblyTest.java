@@ -50,7 +50,11 @@ class ReviewerPromptAssemblyTest {
       assertThat(prompt)
           .contains("includeMetadata: true")
           .contains("never invent an approximate count")
-          .contains("never repeat a successful");
+          .contains("never repeat a successful")
+          .contains("valid-looking values of the wrong runtime type")
+          .contains("coercive acceptance of valid-looking values")
+          .contains("strings accepted as integers")
+          .contains("an obviously unparsable string alone does not prove the type boundary");
     }
   }
 }

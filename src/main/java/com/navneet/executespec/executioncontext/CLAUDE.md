@@ -54,6 +54,9 @@ terminal, cross-tenant, out-of-policy and exhausted contexts fail before provide
   a policy rejection, not a platform fallback.
 - Provider failover and model step-up/down are re-authorized against the same snapshot. A candidate
   that is not allowed and currently credentialed is skipped before spend.
+- Preview rendering snapshots the resolved run route before job admission and builds every surface
+  context with that exact provider/model and `allowProviderFailover=false`; post-run rendering
+  cannot drift from an exact run pin or a persisted payer-org WORKHORSE override.
 - Credentials are not stored in V282 or `ExecutionContext`; only the context reference propagates
   through planner/worker/reviewer/compactor children and survives a JVM restart.
 - Lifecycle mutations take a tenant scope and use a pessimistic row lock plus JPA `@Version`.

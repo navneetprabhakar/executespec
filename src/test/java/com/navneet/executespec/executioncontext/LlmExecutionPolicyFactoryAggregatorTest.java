@@ -19,9 +19,11 @@ import com.navneet.executespec.auth.entity.Org;
 import com.navneet.executespec.auth.entity.Project;
 import com.navneet.executespec.auth.repository.OrgRepository;
 import com.navneet.executespec.auth.repository.ProjectRepository;
+import com.navneet.executespec.router.AgentTier;
 import com.navneet.executespec.router.LlmProvider;
 import com.navneet.executespec.router.ModelMatrixProperties;
 import com.navneet.executespec.router.ModelRegistry;
+import com.navneet.executespec.router.ResolvedModel;
 import com.navneet.executespec.specchat.ChatToolPolicy;
 import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
@@ -220,6 +222,9 @@ class LlmExecutionPolicyFactoryAggregatorTest {
                 "org-1",
                 Map.of("deepseek", ApiKeyResolver.CredentialOrigin.ORG)));
     when(registry.allModels()).thenReturn(Map.of());
+    when(registry.canonicalize("deepseek-org-workhorse")).thenReturn("deepseek-org-workhorse");
+    when(registry.isKnownModel("deepseek-org-workhorse")).thenReturn(true);
+    when(registry.providerFor("deepseek-org-workhorse")).thenReturn("deepseek");
     LlmExecutionContext saved = mock(LlmExecutionContext.class);
     when(saved.getId()).thenReturn("preview-context");
     when(contexts.create(any())).thenReturn(saved);
@@ -233,7 +238,14 @@ class LlmExecutionPolicyFactoryAggregatorTest {
             keys,
             registry);
 
-    factory.forRunPreviewSurface("run-1", "job-1:home");
+    ResolvedModel route =
+        ResolvedModel.builder()
+            .requestedProvider(LlmProvider.DEEPSEEK)
+            .actualProvider(LlmProvider.DEEPSEEK)
+            .model("deepseek-org-workhorse")
+            .agentTier(AgentTier.WORKHORSE)
+            .build();
+    factory.forRunPreviewSurface("run-1", "job-1:home", route);
 
     ArgumentCaptor<LlmExecutionContextCreateRequest> request =
         ArgumentCaptor.forClass(LlmExecutionContextCreateRequest.class);
@@ -248,6 +260,11 @@ class LlmExecutionPolicyFactoryAggregatorTest {
     assertThat(created.policy().keySourceMode())
         .isEqualTo(LlmPolicySnapshot.KeySourceMode.OWN_KEYS);
     assertThat(created.policy().allowedProviders()).containsExactly("deepseek");
+    assertThat(created.policy().requestedProvider()).isEqualTo("deepseek");
+    assertThat(created.policy().requestedModel()).isEqualTo("deepseek-org-workhorse");
+    assertThat(created.policy().routingMode()).isEqualTo(LlmPolicySnapshot.RoutingMode.EXACT);
+    assertThat(created.policy().routePinned()).isTrue();
+    assertThat(created.policy().allowProviderFailover()).isFalse();
   }
 
   @Test

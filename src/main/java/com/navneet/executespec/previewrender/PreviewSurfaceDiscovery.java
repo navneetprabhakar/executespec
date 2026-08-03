@@ -4,6 +4,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -66,8 +67,9 @@ public class PreviewSurfaceDiscovery {
    * Finds renderable surfaces, most screen-like first.
    *
    * @param workspace run workspace root
-   * @param changedProductPaths workspace-relative paths the run actually changed; surfaces among
-   *     them are ranked first so the preview shows the run's own work. May be empty.
+   * @param changedProductPaths workspace-relative paths the run actually changed. Only a directly
+   *     changed screen, a screen importing a directly changed supporting source, or a screen in the
+   *     same repository as a changed design-token file is eligible. Empty means no affected screen.
    * @param maxSurfaces hard cap on returned surfaces
    * @param characterBudget hard cap on total prompt characters across all returned surfaces
    */
@@ -81,6 +83,10 @@ public class PreviewSurfaceDiscovery {
 
     Map<String, String> files = scanner.readCandidateFiles(workspace);
     if (files.isEmpty()) {
+      return List.of();
+    }
+    Set<String> changed = normalizeChangedPaths(changedProductPaths);
+    if (changed.isEmpty()) {
       return List.of();
     }
 
@@ -99,7 +105,10 @@ public class PreviewSurfaceDiscovery {
       if (score <= 0) {
         continue;
       }
-      if (changedProductPaths != null && changedProductPaths.contains(path)) {
+      if (!isAffectedScreen(path, content, files, tokenFiles, changed)) {
+        continue;
+      }
+      if (changed.contains(normalizeEvidencePath(path))) {
         // The run's own output is what the operator asked to see.
         score += 100;
       }
@@ -296,11 +305,83 @@ public class PreviewSurfaceDiscovery {
       if (out.size() >= 12) {
         break;
       }
+      if (!sameRepository(screenPath, token.getKey())) {
+        continue;
+      }
       if (seen.add(token.getKey())) {
         out.add(new PreviewSurface.SupportingSource(token.getKey(), token.getValue()));
       }
     }
     return out;
+  }
+
+  private boolean isAffectedScreen(
+      String screenPath,
+      String content,
+      Map<String, String> files,
+      Map<String, String> tokenFiles,
+      Set<String> changed) {
+    if (changed.contains(normalizeEvidencePath(screenPath))) {
+      return true;
+    }
+
+    Matcher imports = RELATIVE_IMPORT.matcher(content);
+    while (imports.find()) {
+      String supporting = resolveRelativeImport(screenPath, imports.group(1), files.keySet());
+      if (supporting != null && changed.contains(normalizeEvidencePath(supporting))) {
+        return true;
+      }
+    }
+
+    for (String tokenPath : tokenFiles.keySet()) {
+      if (sameRepository(screenPath, tokenPath)
+          && changed.contains(normalizeEvidencePath(tokenPath))) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private Set<String> normalizeChangedPaths(Set<String> paths) {
+    if (paths == null || paths.isEmpty()) {
+      return Set.of();
+    }
+    Set<String> normalized = new HashSet<>();
+    for (String path : paths) {
+      String candidate = normalizeEvidencePath(path);
+      if (!candidate.isBlank()) {
+        normalized.add(candidate);
+      }
+    }
+    return Set.copyOf(normalized);
+  }
+
+  private String normalizeEvidencePath(String raw) {
+    if (raw == null || raw.isBlank()) {
+      return "";
+    }
+    String slashes = raw.replace('\\', '/');
+    while (slashes.startsWith("./")) {
+      slashes = slashes.substring(2);
+    }
+    if (slashes.startsWith("/")) {
+      return "";
+    }
+    String normalized = normalize(slashes);
+    return normalized == null ? "" : normalized.toLowerCase(Locale.ROOT);
+  }
+
+  private boolean sameRepository(String left, String right) {
+    return repositoryScope(left).equals(repositoryScope(right));
+  }
+
+  private String repositoryScope(String path) {
+    String normalized = normalizeEvidencePath(path);
+    if (!normalized.startsWith("repos/")) {
+      return "";
+    }
+    int repoEnd = normalized.indexOf('/', "repos/".length());
+    return repoEnd < 0 ? normalized : normalized.substring(0, repoEnd);
   }
 
   /** Resolves {@code ./Foo} against the importing file, trying the usual extension order. */
@@ -351,6 +432,7 @@ public class PreviewSurfaceDiscovery {
 
   private Map<String, String> collectTokenFiles(Map<String, String> files) {
     Map<String, String> out = new LinkedHashMap<>();
+    Map<String, Integer> perRepository = new HashMap<>();
     for (Map.Entry<String, String> entry : files.entrySet()) {
       String name = fileName(entry.getKey()).toLowerCase(Locale.ROOT);
       for (String hint : TOKEN_FILE_HINTS) {
@@ -358,12 +440,14 @@ public class PreviewSurfaceDiscovery {
         // Extensionless hints such as "tailwind.config" must also match tailwind.config.js / .ts /
         // .cjs.
         if (name.equals(h) || name.startsWith(h + ".")) {
-          out.put(entry.getKey(), entry.getValue());
+          String repository = repositoryScope(entry.getKey());
+          int count = perRepository.getOrDefault(repository, 0);
+          if (count < 4) {
+            out.put(entry.getKey(), entry.getValue());
+            perRepository.put(repository, count + 1);
+          }
           break;
         }
-      }
-      if (out.size() >= 4) {
-        break;
       }
     }
     return out;

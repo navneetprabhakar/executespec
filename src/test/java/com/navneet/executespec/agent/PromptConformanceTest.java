@@ -208,6 +208,8 @@ class PromptConformanceTest {
     String testWorker = prompt("prompts/test-worker.txt");
 
     assertThat(SequentialExecutor.workerSystemPromptBase())
+        .contains("valid-looking value of the wrong runtime type")
+        .contains("Reject coercion unless the actual framework boundary")
         .contains("one atomic critical section/transaction")
         .contains("atomic database claim for the scoped idempotency key")
         .contains("Never mutate")

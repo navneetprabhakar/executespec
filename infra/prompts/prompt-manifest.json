@@ -663,8 +663,8 @@
     {
       "id": "preview-render",
       "path": "src/main/resources/prompts/preview-render.md",
-      "sha256": "9853822bffe0a7120c5f76f15ae61c5794bfcd886500a92a8c14979a1efdb2bf",
-      "bytes": 3296,
+      "sha256": "92836cb4c94bd537e25a52112a6a6acafebe7cfa0a3b6c20123c81211fb7c0d7",
+      "bytes": 3892,
       "active": true,
       "fragments": [],
       "variables": [
@@ -675,10 +675,37 @@
       ]
     },
     {
+      "id": "project-doc-explanation",
+      "path": "src/main/resources/prompts/project-doc-explanation.md",
+      "sha256": "c58aa4364755d1a85cc774877c180d3cc7a7c5849a414fc1ae8cd1298ec9c840",
+      "bytes": 4431,
+      "active": true,
+      "fragments": [],
+      "variables": []
+    },
+    {
+      "id": "project-doc-setup",
+      "path": "src/main/resources/prompts/project-doc-setup.md",
+      "sha256": "92a892f7d31fb625a888eb378bdf8e0d507e2b215485268f4b4852986d3eae00",
+      "bytes": 2795,
+      "active": true,
+      "fragments": [],
+      "variables": []
+    },
+    {
       "id": "reviewer-general",
       "path": "src/main/resources/prompts/reviewer-general.md",
-      "sha256": "29b56971e09458fcbb7c4161159608747a528e6b20eb608c60ef6c1fa1a1fe7d",
-      "bytes": 11165,
+      "sha256": "fad76f79fa99fb5f27bf1af85e907a058e4b18ce6a685e45661b1d003e1b9c8c",
+      "bytes": 12557,
+      "active": true,
+      "fragments": [],
+      "variables": []
+    },
+    {
+      "id": "reviewer-wiring-recovery",
+      "path": "src/main/resources/prompts/reviewer-wiring-recovery.md",
+      "sha256": "10e2df018492cf2da526c52144c3564a14883809416f1bca5280348b14fcc3a9",
+      "bytes": 466,
       "active": true,
       "fragments": [],
       "variables": []
