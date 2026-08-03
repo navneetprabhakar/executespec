@@ -736,7 +736,7 @@ public class ProjectChatTools {
 
   // Tool: semantic source search — embed the query + nearest code chunks (lazy-indexed).
 
-  private ToolCallback searchCode(ToolContext ctx) {
+  ToolCallback searchCode(ToolContext ctx) {
     ToolDefinition def =
         DefaultToolDefinition.builder()
             .name("search_code")
@@ -783,7 +783,14 @@ public class ProjectChatTools {
           if (!index.semanticSearchAvailable()) {
             boolean embeddingUnsupported =
                 index.reason() != null && index.reason().startsWith("EMBEDDING_");
-            if (!embeddingUnsupported && index.status() != CodeIndexStateStore.Status.INDEXING) {
+            boolean terminalAttempt =
+                index.status() == CodeIndexStateStore.Status.PARTIAL
+                    || index.status() == CodeIndexStateStore.Status.FAILED;
+            boolean lazyIndexStarted =
+                !embeddingUnsupported
+                    && !terminalAttempt
+                    && index.status() != CodeIndexStateStore.Status.INDEXING;
+            if (lazyIndexStarted) {
               boolean bitbucket = "BITBUCKET".equalsIgnoreCase(target.getScmProvider());
               AppUser caller = ctx.principal() == null ? null : ctx.principal().getUser();
               codeIndexingService.indexRepoAsync(
@@ -795,7 +802,9 @@ public class ProjectChatTools {
             }
             ObjectNode out = json.createObjectNode();
             out.put("ok", true);
-            out.put("indexing", !embeddingUnsupported);
+            out.put(
+                "indexing",
+                index.status() == CodeIndexStateStore.Status.INDEXING || lazyIndexStarted);
             out.put("semanticStatus", index.status().name());
             out.put("semanticReason", index.reason());
             out.put("semanticCoveragePercent", index.coveragePercent());
@@ -812,7 +821,15 @@ public class ProjectChatTools {
                     + ", "
                     + index.coveragePercent()
                     + "% covered). Use search_repo_files (ripgrep-backed exact/regex search) for"
-                    + " complete lexical fallback while indexing resumes.");
+                    + (embeddingUnsupported
+                        ? " complete lexical fallback. Semantic indexing is unavailable on the"
+                            + " current governed embedding route; an index refresh cannot make an"
+                            + " unavailable governed embedding route compatible."
+                        : terminalAttempt
+                            ? " complete lexical fallback. This partial/failed indexing attempt is"
+                                + " stopped; an explicit semantic-index refresh is required to"
+                                + " retry."
+                            : " complete lexical fallback while indexing continues."));
             return out;
           }
 

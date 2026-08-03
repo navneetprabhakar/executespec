@@ -173,10 +173,13 @@ terminal, cross-tenant, out-of-policy and exhausted contexts fail before provide
 - Project chat/compaction/compiler, architecture, generated docs, project brief/memory, PR Review
   and Code Review create explicit project contexts and resolve the project provider without a
   hidden Anthropic default.
-- Generated project documents use the compact `project-doc:<uuid>` source/correlation/idempotency
-  identity. Project and feature already occupy dedicated context columns, so the full run id is not
-  duplicated into the bounded correlation field; this keeps the value below the 96-character
-  database limit without weakening uniqueness.
+- Ordinary generated project-document calls use compact `project-doc:<uuid>` identities. Durable
+  attempts use `project-doc:<job UUID>:<lease token>` so a confirmed replay retains its job identity
+  and lifetime attempt count while receiving a distinct per-confirmed-attempt budget. Each attempt
+  has hard 200,000-token and two-provider-call limits; its $3 ceiling is reconciled from successful
+  usage, so the final admitted call may cross it before another call is denied. Project and feature
+  already occupy dedicated context columns, keeping both forms within the 96-character database
+  limit without weakening uniqueness.
 - `AvailableProviderResolver` no longer reads the dead `RunKeyStore`; it reloads V282 and current
   credential provenance, failing closed to no candidates on missing/stale/tenant-mismatched state.
 - Project document/code indexing and query vectors use explicit `EMBEDDING_JOB` contexts through

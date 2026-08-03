@@ -76,6 +76,7 @@ class GeminiNativeToolClientAttemptAccountingTest {
   private LlmRequest auditRequest;
   private GeminiNativeToolClient.GeminiToolCallRequest wireRequest;
   private List<Attempt> prepared;
+  private AtomicInteger providerStarts;
 
   @BeforeEach
   void setUp() throws Exception {
@@ -90,6 +91,7 @@ class GeminiNativeToolClientAttemptAccountingTest {
 
     List<Message> messages = List.of(new SystemMessage("stable system"), new UserMessage("hello"));
     ToolCallback tool = tool();
+    providerStarts = new AtomicInteger();
     auditRequest =
         LlmRequest.builder()
             .provider("gemini")
@@ -98,6 +100,7 @@ class GeminiNativeToolClientAttemptAccountingTest {
             .context(new ExecutionContext("run-1", "task-1", Path.of("/").toAbsolutePath()))
             .agentRole("WorkerAgent")
             .stepId("worker.iteration")
+            .physicalAttemptStartedCallback(providerStarts::incrementAndGet)
             .build();
     wireRequest =
         GeminiNativeToolClient.GeminiToolCallRequest.builder()
@@ -193,6 +196,7 @@ class GeminiNativeToolClientAttemptAccountingTest {
             any(RunCostTracker.CallUsage.class),
             any(ChatResponse.class));
     assertThat(server.getRequestCount()).isEqualTo(3);
+    assertThat(providerStarts).hasValue(3);
   }
 
   @Test
@@ -300,6 +304,59 @@ class GeminiNativeToolClientAttemptAccountingTest {
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("Invalid JSON schema");
     verifyNoInteractions(physical);
+    assertThat(providerStarts).hasValue(0);
+  }
+
+  @Test
+  void generationFenceFailurePreventsSocketIo() {
+    when(flags.isEnabled("gemini.explicit-cache.enabled")).thenReturn(false);
+    AtomicInteger rejectedStarts = new AtomicInteger();
+    LlmRequest rejected =
+        auditRequest.toBuilder()
+            .physicalAttemptStartedCallback(
+                () -> {
+                  rejectedStarts.incrementAndGet();
+                  throw new IllegalStateException("durable provider-start fence lost");
+                })
+            .build();
+
+    assertThatThrownBy(
+            () ->
+                client.callAudited(
+                    wireRequest,
+                    new GeminiNativeToolClient.AuditContext(
+                        rejected, "ORG", new AtomicInteger(), new AtomicReference<>())))
+        .isInstanceOf(ProviderStartFenceException.class)
+        .hasRootCauseMessage("durable provider-start fence lost");
+
+    assertThat(rejectedStarts).hasValue(1);
+    assertThat(server.getRequestCount()).isZero();
+  }
+
+  @Test
+  void cacheMintFenceFailureDoesNotFallThroughToGeneration() {
+    when(flags.isEnabled("gemini.explicit-cache.enabled")).thenReturn(true);
+    AtomicInteger rejectedStarts = new AtomicInteger();
+    LlmRequest rejected =
+        auditRequest.toBuilder()
+            .physicalAttemptStartedCallback(
+                () -> {
+                  rejectedStarts.incrementAndGet();
+                  throw new IllegalStateException("durable cache provider-start fence lost");
+                })
+            .build();
+
+    assertThatThrownBy(
+            () ->
+                client.callAudited(
+                    wireRequest,
+                    new GeminiNativeToolClient.AuditContext(
+                        rejected, "ORG", new AtomicInteger(), new AtomicReference<>())))
+        .isInstanceOf(ProviderStartFenceException.class)
+        .hasRootCauseMessage("durable cache provider-start fence lost");
+
+    assertThat(rejectedStarts).hasValue(1);
+    assertThat(server.getRequestCount()).isZero();
   }
 
   @Test
@@ -451,6 +508,7 @@ class GeminiNativeToolClientAttemptAccountingTest {
     assertThat(mint.getRequestUrl().queryParameterNames()).doesNotContain("key");
     assertThat(generate.getHeader("x-goog-api-key")).isEqualTo("test-key");
     assertThat(generate.getRequestUrl().queryParameterNames()).doesNotContain("key");
+    assertThat(providerStarts).hasValue(2);
   }
 
   @Test

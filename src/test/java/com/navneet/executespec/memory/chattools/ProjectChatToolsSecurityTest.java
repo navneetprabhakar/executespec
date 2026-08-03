@@ -26,6 +26,7 @@ import com.navneet.executespec.project.entity.ProjectRepo;
 import com.navneet.executespec.project.entity.ProjectRepoLink;
 import com.navneet.executespec.project.pr.PullRequestRecordRepository;
 import com.navneet.executespec.project.rag.CodeChunkStore;
+import com.navneet.executespec.project.rag.CodeIndexStateStore;
 import com.navneet.executespec.project.rag.CodeIndexWorkspaceMaterializer;
 import com.navneet.executespec.project.rag.CodeIndexingService;
 import com.navneet.executespec.project.rag.EmbeddingService;
@@ -301,6 +302,84 @@ class ProjectChatToolsSecurityTest {
   }
 
   @Test
+  void terminalSemanticAttemptsStayStoppedAndRequireExplicitRefresh() {
+    for (CodeIndexStateStore.Status status :
+        List.of(CodeIndexStateStore.Status.PARTIAL, CodeIndexStateStore.Status.FAILED)) {
+      UUID repoId = UUID.randomUUID();
+      ProjectRepo linked = linkedRepo(repoId);
+      when(linkRepo.findByProjectId("project-1"))
+          .thenReturn(
+              List.of(ProjectRepoLink.builder().projectId("project-1").repoId(repoId).build()));
+      when(repoRepo.findById(repoId)).thenReturn(java.util.Optional.of(linked));
+      when(codeIndexingService.readiness("project-1", linked))
+          .thenReturn(semanticReadiness(repoId, status, "REFRESH_LIMIT_REACHED"));
+
+      String result =
+          tools
+              .searchCode(new ProjectChatTools.ToolContext("project-1", principal(), "pat"))
+              .call("{\"query\":\"authentication\"}");
+
+      assertThat(result)
+          .contains("\"indexing\":false", "\"semanticStatus\":\"" + status + "\"")
+          .contains("explicit semantic-index refresh is required")
+          .doesNotContain("while indexing continues");
+    }
+    verify(codeIndexingService, never()).indexRepoAsync(any(), any(), any(), any(), any());
+  }
+
+  @Test
+  void unsupportedEmbeddingRouteDoesNotPretendIndexingStarted() {
+    UUID repoId = UUID.randomUUID();
+    ProjectRepo linked = linkedRepo(repoId);
+    when(linkRepo.findByProjectId("project-1"))
+        .thenReturn(
+            List.of(ProjectRepoLink.builder().projectId("project-1").repoId(repoId).build()));
+    when(repoRepo.findById(repoId)).thenReturn(java.util.Optional.of(linked));
+    when(codeIndexingService.readiness("project-1", linked))
+        .thenReturn(
+            semanticReadiness(
+                repoId,
+                CodeIndexStateStore.Status.FAILED,
+                "EMBEDDING_SELECTED_PROVIDER_HAS_NO_COMPATIBLE_EMBEDDING_MODEL"));
+
+    String result =
+        tools
+            .searchCode(new ProjectChatTools.ToolContext("project-1", principal(), "pat"))
+            .call("{\"query\":\"authentication\"}");
+
+    assertThat(result)
+        .contains("\"indexing\":false", "current governed embedding route")
+        .contains("index refresh cannot make")
+        .doesNotContain("explicit semantic-index refresh is required")
+        .doesNotContain("while indexing continues");
+    verify(codeIndexingService, never()).indexRepoAsync(any(), any(), any(), any(), any());
+  }
+
+  @Test
+  void unindexedSemanticSearchStartsOneLazyPassWhileIndexingDoesNotDuplicateIt() {
+    UUID repoId = UUID.randomUUID();
+    ProjectRepo linked = linkedRepo(repoId);
+    when(linkRepo.findByProjectId("project-1"))
+        .thenReturn(
+            List.of(ProjectRepoLink.builder().projectId("project-1").repoId(repoId).build()));
+    when(repoRepo.findById(repoId)).thenReturn(java.util.Optional.of(linked));
+    when(codeIndexingService.readiness("project-1", linked))
+        .thenReturn(
+            semanticReadiness(repoId, CodeIndexStateStore.Status.UNINDEXED, "INDEX_NOT_BUILT"),
+            semanticReadiness(repoId, CodeIndexStateStore.Status.INDEXING, "INDEXING"));
+    ProjectChatTools.ToolContext ctx =
+        new ProjectChatTools.ToolContext("project-1", principal(), "pat");
+
+    String first = tools.searchCode(ctx).call("{\"query\":\"authentication\"}");
+    String second = tools.searchCode(ctx).call("{\"query\":\"authentication\"}");
+
+    assertThat(first).contains("\"indexing\":true", "while indexing continues");
+    assertThat(second).contains("\"indexing\":true", "while indexing continues");
+    verify(codeIndexingService, times(1))
+        .indexRepoAsync("project-1", linked, null, "pat", "user-1");
+  }
+
+  @Test
   void lexicalSearchUsesCanonicalMaterializerAndCallerCredential() {
     AppUserDetails principal = principal();
     UUID repoId = UUID.randomUUID();
@@ -439,5 +518,41 @@ class ProjectChatToolsSecurityTest {
             .status("ACTIVE")
             .build();
     return new AppUserDetails(user, null);
+  }
+
+  private static ProjectRepo linkedRepo(UUID repoId) {
+    return ProjectRepo.builder()
+        .id(repoId)
+        .githubRepoFullName("acme/service")
+        .lastSyncedSha("a".repeat(40))
+        .build();
+  }
+
+  private static CodeIndexingService.Readiness semanticReadiness(
+      UUID repoId, CodeIndexStateStore.Status status, String reason) {
+    return new CodeIndexingService.Readiness(
+        "project-1",
+        repoId.toString(),
+        "a".repeat(40),
+        null,
+        status,
+        reason,
+        10,
+        10,
+        status == CodeIndexStateStore.Status.PARTIAL ? 5 : 0,
+        0,
+        0,
+        0,
+        0,
+        status == CodeIndexStateStore.Status.FAILED ? 10 : 0,
+        0,
+        status == CodeIndexStateStore.Status.PARTIAL ? 50 : 0,
+        false,
+        false,
+        true,
+        false,
+        "LEXICAL_FALLBACK_AVAILABLE",
+        "openai",
+        EmbeddingService.DEFAULT_MODEL);
   }
 }

@@ -158,6 +158,21 @@ public class ProjectDocGeneratorService {
     }
   }
 
+  /**
+   * A deterministic rejection raised before the current logical document call crossed provider
+   * transport. The cause is retained only for server-side exact classification; customer output is
+   * always mapped to a bounded safe code/message by the durable worker.
+   */
+  static final class PreTransportGenerationException extends RuntimeException {
+    PreTransportGenerationException(RuntimeException cause) {
+      super("Document provider request was rejected before transport", cause);
+    }
+
+    RuntimeException failure() {
+      return (RuntimeException) getCause();
+    }
+  }
+
   @Autowired
   public ProjectDocGeneratorService(
       ProjectArchitectureService architectureService,
@@ -293,6 +308,7 @@ public class ProjectDocGeneratorService {
       LlmProvider provider,
       String exactModel,
       UUID durableJobId,
+      long durableAttemptToken,
       Runnable providerDispatchFence,
       java.util.function.Consumer<ProjectGeneratedDoc> publicationFence) {
     return generate(
@@ -302,7 +318,7 @@ public class ProjectDocGeneratorService {
         provider,
         null,
         exactModel,
-        durableJobId == null ? null : durableJobId.toString(),
+        durableJobId == null ? null : durableJobId + ":" + durableAttemptToken,
         providerDispatchFence,
         publicationFence);
   }
@@ -402,6 +418,7 @@ public class ProjectDocGeneratorService {
                 sourceFingerprint,
                 sourceRepositories,
                 codemapEvidence,
+                durableJobId,
                 providerDispatchFence,
                 publicationFence));
   }
@@ -420,6 +437,7 @@ public class ProjectDocGeneratorService {
       String sourceFingerprint,
       java.util.Set<String> sourceRepositories,
       String codemapEvidence,
+      String durableJobId,
       Runnable providerDispatchFence,
       java.util.function.Consumer<ProjectGeneratedDoc> publicationFence) {
     String projectId = project.getId();
@@ -432,7 +450,10 @@ public class ProjectDocGeneratorService {
     if (executionPolicyFactory == null) {
       throw new IllegalStateException("Execution policy factory is required for project docs");
     }
-    String contextId = projectDocContextId(java.util.UUID.randomUUID());
+    String contextId =
+        durableJobId == null
+            ? ProjectDocExecutionPolicy.contextId(java.util.UUID.randomUUID())
+            : ProjectDocExecutionPolicy.durableContextId(durableJobId);
     var executionReference =
         confirmedActionReference != null
             ? confirmedActionReference
@@ -444,7 +465,8 @@ public class ProjectDocGeneratorService {
                 contextId,
                 resolved.getActualProvider().name(),
                 exactModel,
-                generatedByUser);
+                generatedByUser,
+                ProjectDocExecutionPolicy.ATTEMPT_BUDGET);
     ProjectDocValidatedGeneration.Result generation =
         ProjectDocValidatedGeneration.generate(
             llmRouter,
@@ -557,18 +579,6 @@ public class ProjectDocGeneratorService {
    */
   static String capSourceBundle(String source) {
     return fairBudgetSourceSections(List.of(new SourceSection("# Source evidence", source)));
-  }
-
-  /**
-   * Builds the durable source/correlation/idempotency identity for one document-generation call.
-   *
-   * <p>The former value prefixed the full project-doc run id to a UUID. For EXPLANATION documents
-   * that produced 97 characters and failed the database's {@code correlation_id VARCHAR(96)}
-   * constraint before any provider call. Project and feature already have dedicated context
-   * columns, so keep this identity compact and collision-resistant instead of duplicating them.
-   */
-  static String projectDocContextId(java.util.UUID nonce) {
-    return "project-doc:" + java.util.Objects.requireNonNull(nonce, "nonce");
   }
 
   private LlmProvider resolveProvider(Project project) {
