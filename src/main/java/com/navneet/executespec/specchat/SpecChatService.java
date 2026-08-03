@@ -899,6 +899,7 @@ claim in a tool result — never invent a runId, score, or status.""";
       if (turnGuard != null) turnGuard.beforeModelRound(providerName, modelName);
       LlmRequest req =
           LlmRequest.builder()
+              .retryProfile(LlmRequest.RetryProfile.INTERACTIVE)
               .provider(providerName)
               .model(modelName)
               .messages(conversation)
@@ -1008,6 +1009,7 @@ claim in a tool result — never invent a runId, score, or status.""";
       if (turnGuard != null) turnGuard.beforeModelRound(providerName, modelName);
       LlmRequest finalRequest =
           LlmRequest.builder()
+              .retryProfile(LlmRequest.RetryProfile.INTERACTIVE)
               .provider(providerName)
               .model(modelName)
               .messages(conversation)
