@@ -17,11 +17,18 @@ after a run reaches a terminal state. It does not execute or certify the generat
 - Every surface uses the job's persisted provider/model and a route-aware execution policy with
   `strictProvider=true` and provider failover disabled. A render job cannot silently substitute a
   provider or model between surfaces.
+- The job and surface remain explicit in the render tables and operation fingerprint, while the
+  execution-context `sourceId` and `correlationId` use stable compact identities. Real
+  multi-repository surface names can exceed the 160/96-character context columns and must never
+  fail before provider dispatch because the full tuple was copied verbatim.
 - Parallel surface generation shares one monotonic job-wide deadline. Unfinished tasks are
   cancelled at that boundary instead of receiving a fresh timeout per surface.
 - The prompt requires representative populated data unless the source itself is an empty/loading/
   error state. The Web UI permanently labels the result as a simulated visual preview and embeds it
   with `sandbox="allow-scripts"` only; it is not runtime or functional-test evidence.
+- The surface route does not constrain controller negotiation to HTML before invocation: successful
+  bundles set `text/html` explicitly, while missing/rejected surfaces remain canonical JSON 404s
+  even for API clients that send `Accept: application/json`.
 - Archived-workspace rendering remains unsupported as durable proof while the archive lacks the Git
   baseline needed to reconstruct an immutable affected-file set.
 

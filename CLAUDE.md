@@ -1154,6 +1154,9 @@ requires the consumer repository to be linked to that project before persistence
   remains reloadable. Discovery fails closed to directly changed screens, screens importing a
   changed supporting source, or same-repository screens affected by a changed token/theme file, so
   backend-only changes cannot render stale UI. Parallel surfaces share one monotonic job deadline.
+  Preview execution contexts use stable compact source/correlation identities while render rows and
+  operation fingerprints retain the full tuple, preventing long multi-repository surface names from
+  exceeding the durable 160/96-character fields before provider dispatch.
   The render route resolves once before admission, persists the exact provider/model, honors an
   exact run pin or the persisted payer-org WORKHORSE matrix, and disables substitution/failover for
   every surface. The web surface labels the output as a simulated visual preview, and the prompt

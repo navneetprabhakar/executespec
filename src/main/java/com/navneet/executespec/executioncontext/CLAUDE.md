@@ -77,6 +77,9 @@ terminal, cross-tenant, out-of-policy and exhausted contexts fail before provide
   `ExecutionContext`/`LlmRequest`, heartbeat bounded work and terminalize only after the business
   result is durable. Explicit retry/re-review begins a new invocation; recovery reclaims or
   cancels the incomplete invocation instead of reconstructing authority from identifiers.
+- Preview-render contexts use stable compact `source_id` and `correlation_id` identities while the
+  render job/surface rows and operation fingerprint retain the full tuple. The request validates
+  the durable 160/96-character bounds before persistence.
 - V354 adds the atomic physical-attempt boundary. `LlmExecutionOperationAdmissionService` locks the
   aggregate context and exact operation in one transaction, validates the opaque authority,
   reserves aggregate call/output budget, extends the lease and no-reclaim horizon, and flushes a

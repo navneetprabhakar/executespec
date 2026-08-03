@@ -192,17 +192,20 @@ class LlmExecutionPolicyFactoryAggregatorTest {
 
   @Test
   void previewSurfaceGetsDedicatedBoundedContextWithRunCredentialPolicy() {
+    String runId = "aff176f1-f630-4d24-906b-e2783e4497f5";
+    String renderAttemptId =
+        "8a94d0f6-0886-401f-b282-ed9656d99f48:repos-taskboard-catalog-lab-20260803184144-demo";
     LlmExecutionContextService contexts = mock(LlmExecutionContextService.class);
     PipelineRunRepository runs = mock(PipelineRunRepository.class);
     OrgRepository orgs = mock(OrgRepository.class);
     ApiKeyResolver keys = mock(ApiKeyResolver.class);
     ModelRegistry registry = mock(ModelRegistry.class);
     PipelineRun run = new PipelineRun();
-    run.setRunId("run-1");
+    run.setRunId(runId);
     run.setCreatedByUserId("user-1");
     run.setOrgId("org-1");
     run.setAiProvider("DEEPSEEK");
-    when(runs.findById("run-1")).thenReturn(java.util.Optional.of(run));
+    when(runs.findById(runId)).thenReturn(java.util.Optional.of(run));
     when(orgs.findById("org-1"))
         .thenReturn(
             java.util.Optional.of(
@@ -245,15 +248,23 @@ class LlmExecutionPolicyFactoryAggregatorTest {
             .model("deepseek-org-workhorse")
             .agentTier(AgentTier.WORKHORSE)
             .build();
-    factory.forRunPreviewSurface("run-1", "job-1:home", route);
+    factory.forRunPreviewSurface(runId, renderAttemptId, route);
+    factory.forRunPreviewSurface(
+        runId, "8a94d0f6-0886-401f-b282-ed9656d99f48:src-pages-settings", route);
 
     ArgumentCaptor<LlmExecutionContextCreateRequest> request =
         ArgumentCaptor.forClass(LlmExecutionContextCreateRequest.class);
-    verify(contexts).create(request.capture());
-    LlmExecutionContextCreateRequest created = request.getValue();
+    verify(contexts, times(2)).create(request.capture());
+    LlmExecutionContextCreateRequest created = request.getAllValues().get(0);
     assertThat(created.feature()).isEqualTo("preview-render");
     assertThat(created.sourceType()).isEqualTo("PREVIEW_RENDER");
-    assertThat(created.sourceId()).isEqualTo("preview-render:run-1:job-1:home");
+    assertThat(created.sourceId())
+        .isEqualTo("preview-render:" + runId + ":0834f923610723bc")
+        .hasSizeLessThanOrEqualTo(160);
+    assertThat(created.correlationId())
+        .isEqualTo("preview-render:9f865be37f01087a")
+        .hasSizeLessThanOrEqualTo(96)
+        .isNotEqualTo(created.sourceId());
     assertThat(created.budget()).isEqualTo(LlmExecutionPolicyFactory.PREVIEW_SURFACE_BUDGET);
     assertThat(created.budget().maxProviderCalls()).isEqualTo(4);
     assertThat(created.budget().maxOutputTokens()).isEqualTo(8_192L);
@@ -265,6 +276,12 @@ class LlmExecutionPolicyFactoryAggregatorTest {
     assertThat(created.policy().routingMode()).isEqualTo(LlmPolicySnapshot.RoutingMode.EXACT);
     assertThat(created.policy().routePinned()).isTrue();
     assertThat(created.policy().allowProviderFailover()).isFalse();
+    assertThat(request.getAllValues())
+        .extracting(LlmExecutionContextCreateRequest::sourceId)
+        .doesNotHaveDuplicates();
+    assertThat(request.getAllValues())
+        .extracting(LlmExecutionContextCreateRequest::correlationId)
+        .doesNotHaveDuplicates();
   }
 
   @Test
