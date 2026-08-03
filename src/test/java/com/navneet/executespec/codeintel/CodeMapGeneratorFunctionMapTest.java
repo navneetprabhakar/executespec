@@ -1,5 +1,6 @@
 package com.navneet.executespec.codeintel;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -388,6 +389,78 @@ class CodeMapGeneratorFunctionMapTest {
   }
 
   @Test
+  void generateAddsExactProjectDocFactsForSchemaComposeAndHandlerResponseMode() {
+    GitHubRepoService gh = mock(GitHubRepoService.class);
+    @SuppressWarnings("unchecked")
+    ObjectProvider<FilePurposeSummaryService> nullSummaryProvider = mock(ObjectProvider.class);
+    CodeMapGenerator gen =
+        new CodeMapGenerator(
+            gh,
+            new SpringHttpArchitectureEvidenceRenderer(gh, new SpringHttpSurfaceExtractor()),
+            nullSummaryProvider);
+    String controller = "src/main/java/example/VetController.java";
+    String config = "src/main/resources/application.properties";
+    String schema = "src/main/resources/db/h2/schema.sql";
+    String compose = "docker-compose.yml";
+    when(gh.listRepoFilesResult(any(), eq("deadbeef"), any()))
+        .thenReturn(
+            GitHubRepoService.RepoFileListResult.success(
+                List.of("pom.xml", compose, schema, config, controller)));
+    lenient()
+        .when(gh.readRepoFile(any(), eq(controller), eq("deadbeef"), any()))
+        .thenReturn(
+            GitHubRepoService.RepoFileResult.success(
+                """
+@Controller
+class VetController {
+  @GetMapping("/vets.html")
+  String showVetList() { return "vets/vetList"; }
+
+  @GetMapping("/vets")
+  @ResponseBody Vets showResourcesVetList() { return new Vets(); }
+
+  @GetMapping("/vets/entity")
+  ResponseEntity<Vets> showEntityVetList() { return ResponseEntity.ok(new Vets()); }
+}
+"""));
+    lenient()
+        .when(gh.readRepoFile(any(), eq(config), eq("deadbeef"), any()))
+        .thenReturn(
+            GitHubRepoService.RepoFileResult.success(
+                """
+                spring.sql.init.schema-locations=classpath*:db/${database}/schema.sql
+                spring.jpa.hibernate.ddl-auto=none
+                """));
+    lenient()
+        .when(gh.readRepoFile(any(), eq(compose), eq("deadbeef"), any()))
+        .thenReturn(
+            GitHubRepoService.RepoFileResult.success(
+                """
+                services:
+                  mysql:
+                    image: mysql:9
+                  postgres:
+                    image: postgres:18
+                """));
+
+    String markdown = gen.generate("owner/repo", "deadbeef", "pat");
+
+    assertThat(markdown)
+        .contains(DeterministicProjectFactEvidence.BEGIN, "- Status: `AVAILABLE`")
+        .contains("- `pom.xml`")
+        .contains("Path: `src/main/resources/db/h2/schema.sql`")
+        .contains("spring.jpa.hibernate.ddl-auto=none")
+        .contains("Service: `mysql`", "Service: `postgres`")
+        .contains("Application service evidence: `NOT_CLASSIFIED`")
+        .contains("`GET /vets` — handler `showResourcesVetList`")
+        .contains("response mode `SERIALIZED_BODY`")
+        .contains("`GET /vets.html` — handler `showVetList`")
+        .contains("response mode `VIEW_NAME`")
+        .contains("`GET /vets/entity` — handler `showEntityVetList`")
+        .contains("return type `ResponseEntity<Vets>`; response mode `SERIALIZED_BODY`");
+  }
+
+  @Test
   void generateMarksSpringSurfaceUnavailableWhenAnyPinnedSourceReadFails() {
     GitHubRepoService gh = mock(GitHubRepoService.class);
     @SuppressWarnings("unchecked")
@@ -408,6 +481,8 @@ class CodeMapGeneratorFunctionMapTest {
 
     assertTrue(markdown.contains("Status: `UNAVAILABLE`"));
     assertTrue(markdown.contains("Reason: `GITHUB_CONTENTS_HTTP_ERROR`"));
+    assertTrue(markdown.contains(DeterministicProjectFactEvidence.BEGIN));
+    assertTrue(markdown.contains("Status: `PARTIAL`"));
     assertFalse(markdown.contains("POST /"));
   }
 

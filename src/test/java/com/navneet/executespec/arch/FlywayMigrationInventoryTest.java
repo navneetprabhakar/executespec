@@ -64,9 +64,10 @@ class FlywayMigrationInventoryTest {
     // inventory to 355. V370 converts V369's CHAR(64) digest columns to VARCHAR(64) because
     // Hibernate schema-validation rejected the bpchar/entity mismatch and crash-looped the dev
     // deployment, bringing the exact inventory to 356. V371 persists skipped-test counts, bringing
-    // the exact inventory to 357.
-    assertThat(migrations).hasSize(357);
-    assertThat(migrations.getLast().version()).isEqualTo("371");
+    // the exact inventory to 357. V372 binds cost history to the exact effective route and task
+    // complexity shape, bringing the exact inventory to 358.
+    assertThat(migrations).hasSize(358);
+    assertThat(migrations.getLast().version()).isEqualTo("372");
 
     assertThat(migrations.stream().map(MigrationFile::version)).doesNotHaveDuplicates();
     assertThat(migrations.stream().map(MigrationFile::fileName))

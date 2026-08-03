@@ -29,8 +29,7 @@ import lombok.extern.slf4j.Slf4j;
  * than scattered through the orchestrator:
  *
  * <ul>
- *   <li>historical k-NN pricing, skipped for an explicitly pinned model because the history is
- *       model-blind and would return the same number for two runs that differ only by model;
+ *   <li>historical k-NN pricing, matched on the exact expected physical provider/model route set;
  *   <li>the tier-aware formula fallback, which is model-aware;
  *   <li>the BYOK / platform hard-cap decision, including the customer's voluntary {@code
  *       userCostCap}.
@@ -50,7 +49,8 @@ class RunCostEstimatePersister {
    * Estimate the run's cost from its plan and persist {@code costEstimateLow/High}, {@code
    * creditsCharged} and {@code hardCapUsd}.
    */
-  void persistEstimate(String runId, String provider, String model, Plan plan) {
+  void persistEstimate(
+      String runId, String provider, String model, Plan plan, String lowComplexityWorkerStartTier) {
     List<String> complexities =
         plan.tasks().stream()
             .map(t -> t.complexity() == null ? "MEDIUM" : t.complexity().name())
@@ -92,21 +92,28 @@ class RunCostEstimatePersister {
                 && !runRow.getRequestedModel().isBlank()
             ? runRow.getRequestedModel().trim()
             : null;
-    // The historical k-NN is model-blind (keyed on strategy/provider/repoCount/taskCount only), so
-    // it would return the same number for two runs that differ only by pinned model. When the run
-    // carries an explicit model pin, skip history and price that exact model with the model-aware
-    // formula so the estimate actually changes with the selected model.
+    // V372 makes history model-aware through a canonical physical-route fingerprint. Resolve the
+    // expected route while the run's exact pin/org matrix is bound; an equivalent explicit pin now
+    // shares its cohort, while a different model or provider/failover cannot contaminate it.
     //
     // RR-1551 — the history lookup is scoped to THIS run's owning org. The band it returns becomes
     // creditsCharged and hardCapUsd below, so pricing a tenant from other tenants' observed spend
     // was both a billing defect and a cross-tenant aggregate disclosure. A run with no orgId gets
     // the model-aware formula, never a global pool.
     String orgId = runRow == null ? null : runRow.getOrgId();
+    String routeFingerprint =
+        costTracker.expectedRouteFingerprint(
+            provider, complexities, strategy, lowComplexityWorkerStartTier);
+    String taskComplexityFingerprint = CostHistoryService.taskComplexityFingerprint(complexities);
     Optional<RunCostTracker.Estimate> historical =
-        pinnedModel != null
-            ? Optional.empty()
-            : costHistoryService.estimateFromHistory(
-                orgId, strategyKey, providerKey, repoCount, complexities.size());
+        costHistoryService.estimateFromHistory(
+            orgId,
+            strategyKey,
+            providerKey,
+            routeFingerprint,
+            repoCount,
+            complexities.size(),
+            taskComplexityFingerprint);
     RunCostTracker.Estimate est =
         historical.orElseGet(
             () ->

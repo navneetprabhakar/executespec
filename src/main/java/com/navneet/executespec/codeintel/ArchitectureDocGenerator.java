@@ -67,9 +67,9 @@ public class ArchitectureDocGenerator {
       request paths cross repo boundaries.
 
       ## 3. Cross-repo data flows
-      Numbered list of 3-6 concrete end-to-end flows (user action →
-      repo A endpoint → repo B service → storage → ...). Reference file
-      paths from the per-repo docs so a reviewer can verify.
+      Include zero or more end-to-end flows only when deterministic evidence establishes every
+      step and direction. If none is established, state that directly; never fabricate a flow to
+      satisfy a minimum count.
 
       ## 4. Shared contracts
       - APIs consumed / produced between repos
@@ -83,6 +83,10 @@ public class ArchitectureDocGenerator {
       Rules:
       - Do NOT invent routes, classes, or integrations not present in the
         per-repo docs.
+      - Model-generated prose in the per-repo documents is explanatory context, not corroboration.
+        Deterministic evidence blocks are authoritative for the facts they cover. Declaration
+        co-occurrence does not prove calls, dependencies, schema ownership, Compose application
+        startup, response representation, or cross-repository flow.
       - Prefer prose to bulletised dumps.
       - If only one repo is in scope, produce the document anyway but
         note that cross-repo flows degenerate to intra-repo flows.
@@ -215,9 +219,16 @@ public class ArchitectureDocGenerator {
         inTok,
         outTok,
         resolved.getModel());
+    String sourceEvidence =
+        repoArchDocs.stream()
+            .map(RepoArchitectureDoc::getContent)
+            .filter(java.util.Objects::nonNull)
+            .collect(java.util.stream.Collectors.joining("\n"));
+    String grounded = GeneratedSignatureGrounding.sanitize(text.trim(), sourceEvidence);
+    grounded = GeneratedSignatureGrounding.sanitizeUnsupportedBehavior(grounded, sourceEvidence);
+    grounded = GeneratedProjectFactGrounding.sanitize(grounded, sourceEvidence);
     return new Result(
-        DeterministicArchitectureEvidence.appendFromRepoDocs(
-            text.trim(), repoArchDocs, repoFullNames),
+        DeterministicArchitectureEvidence.appendFromRepoDocs(grounded, repoArchDocs, repoFullNames),
         inTok,
         outTok,
         resolved.getModel());
