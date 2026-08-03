@@ -283,6 +283,11 @@ egress is required before the four runtime flags can be enabled.
 | CI                  | GitHub Actions: `lint.yml` on PRs to `dev`/`main`; `deploy.yml` on push to `dev`/`benchmark` plus manual protected `prod` dispatch. Deploy reads `/opt/app/RUNNING_SHA` back from the target host and fails on any target-SHA mismatch before health verification. | [`.github/workflows/lint.yml`](.github/workflows/lint.yml), [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) |
 | Cloud               | GCP us-east4 — single GCE VM serves prod + dev; Cloud Run for on-demand previews; Workload Identity Federation for deploy auth | [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) |
 
+Browser session hydration is fail-visible: protected routes retain a valid session across a
+transient `/auth/me` failure and show an explicit Retry action instead of an indefinite loading
+screen. Automatic cookie refresh uses the same bounded 30-second transport deadline as other API
+requests.
+
 Python previews resolve bounded nested application packages: a FastAPI app declared in
 `app/main.py` is launched as `app.main:app` for both VM/Docker and Cloud Run preview commands.
 

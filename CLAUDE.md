@@ -336,6 +336,12 @@ access after a FREE/PRO downgrade.
 
 Browser logout blocklists the presented refresh JTI and advances the user's per-user token invalidation epoch, so access and refresh JWTs issued before logout are both rejected. Refresh rotation uses JTI-only revocation so it does not invalidate the replacement session. New JWTs carry an additive full-precision `issued_at` claim (with legacy NumericDate `iat` fallback), allowing an immediate same-second re-login without reopening the prior session.
 
+Browser auth hydration is bounded and fail-visible. The frontend deduplicates `/auth/me` hydration,
+preserves the authenticated session on transient failure, and shows a manual Retry state rather
+than leaving protected routes behind an indefinite spinner. The automatic cookie-refresh fetch has
+the same 30-second total deadline as the shared API transport; it remains a raw request to avoid
+recursive refresh handling.
+
 PAT capabilities are enforced at the authentication boundary. Legacy `full` rows remain
 compatible; omitted-scope and Web device-login tokens default to
 `api:read,runs:write,projects:write,agent:write,settings:write`, excluding billing, token
