@@ -21,6 +21,13 @@ exceeded budget fails extraction; it must never produce a partial baseline that 
 deep controller.
 `SpringHttpSurfaceSnapshot` owns canonical ordering, route keys and digest construction separately
 from source parsing; provider prose never participates in that digest.
+`ExactHttpConstraintParser` is the shared provider-free parser for explicit `METHOD /path`
+acceptance. It distinguishes required producer routes from route-bound 405/Method Not Allowed
+constraints, binds suffix polarity only to the current route occurrence, and ignores explicit
+removal instructions. Both `PlanSourceHttpRouteGate` and final deterministic HTTP verification must
+use this parser rather than maintaining divergent regexes. Exact source polarity overrides a
+contradictory planner restatement. A forbidden method must be absent while another supported method
+exists at the same path; an `ANY` mapping violates the forbidden-method contract.
 `BrownfieldHttpContractGuard` stores the admitted surface/digest on `pipeline_run` (V360) and
 compares it after workers/corrections and before publication. It is also enforced inside
 `RunValidationKickoff`, so every normal, crash-resume, retry-validation, and re-review entrypoint
