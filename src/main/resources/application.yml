@@ -135,6 +135,11 @@ spring:
       # Long agentic GLM tool turns exceed the generic 120s window; the provider bills the
       # completion the client would otherwise cancel at exactly 120s. Applies only to callFireworks.
       read-timeout-seconds: ${FIREWORKS_READ_TIMEOUT_SECONDS:300}
+    gemini:
+      # Per-provider transport window for every Gemini call (2026-08-03). Replaces the worker-side
+      # global read-timeout pin; without it a null per-call override fell through to the Gemini
+      # client's static 60s default, too tight for thinking-model worker turns.
+      read-timeout-seconds: ${GEMINI_READ_TIMEOUT_SECONDS:300}
 
 execution:
   continuation:
