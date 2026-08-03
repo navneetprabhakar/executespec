@@ -63,6 +63,7 @@ class RunValidationKickoff {
   private final WorkflowConfigEvidenceInspector workflowConfigEvidenceInspector;
   private final DeterministicHttpRequirementVerifier deterministicHttpRequirementVerifier;
   private final BrownfieldHttpContractGuard brownfieldHttpContractGuard;
+  private final PerkyMessenger perky;
   private final RunValidationFailureReporter failureReporter;
 
   java.util.Optional<ValidationReport> generateValidationReport(
@@ -136,6 +137,7 @@ class RunValidationKickoff {
     try {
       var run = runRepo.findById(runId).orElse(null);
       if (run == null) return java.util.Optional.empty();
+      perky.start(runId, "VALIDATING");
       failureReporter.beginAttempt(runId);
       var tasks = taskRepo.findByRunId(runId);
 
