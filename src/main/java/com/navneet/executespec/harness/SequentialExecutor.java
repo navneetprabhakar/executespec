@@ -2206,19 +2206,22 @@ to boot — skip it for those.""";
 
     SmokeTestResult smoke = runSmokeTest(taskCtx, plan.buildCommand());
     if (smoke.passed()) {
-      TaskOutcome.Status status =
-          softCompletion ? TaskOutcome.Status.COMPLETED_WITH_WARNING : TaskOutcome.Status.SUCCESS;
+      var resolution =
+          RecoveredMutationVerificationPolicy.resolve(
+              primary, smoke, softCompletion, softWarnReason);
+      TaskOutcome.Status status = resolution.status();
       log.info(
-          "Executor task={} {} (smoke exit={}, took {}ms)",
+          "Executor task={} {} (smoke exit={}, testsVerified={}, took {}ms)",
           task.id(),
-          softCompletion ? "COMPLETED_WITH_WARNING" : "SUCCESS",
+          status,
           smoke.exitCode(),
+          smoke.testsVerified(),
           smoke.latencyMs());
-      persistTaskStatus(runId, task.id(), "COMPLETE", softWarnReason);
+      persistTaskStatus(runId, task.id(), "COMPLETE", resolution.warning());
       broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "COMPLETE"));
       GoalTaskDecision goalDecision =
           emitGoalDecision(
-              runId, task, primary, status, true, softWarnReason, cfg.provider, cfg.model);
+              runId, task, primary, status, true, resolution.warning(), cfg.provider, cfg.model);
       return TaskOutcome.builder()
           .taskId(task.id())
           .taskTitle(task.title())
@@ -3630,7 +3633,7 @@ to boot — skip it for those.""";
     int runTotalTokens = totalTrackedTokens(runCost);
     long wallClockMs = workerResult == null ? 0L : workerResult.totalLatencyMs();
     boolean completeTaskClaimed =
-        workerResult != null && workerResult.outcome() == WorkerResult.Outcome.COMPLETED;
+        RecoveredMutationVerificationPolicy.completeTaskClaimed(workerResult);
     boolean validationAttempted = smokePassed != null;
     boolean validationPassed = Boolean.TRUE.equals(smokePassed);
     boolean statusClean =
@@ -3640,16 +3643,12 @@ to boot — skip it for those.""";
     boolean meaningfulDiffRequired = TaskCategoryClassifier.requiresMeaningfulDiff(category, task);
     boolean requiredOutputsPresent =
         validationPassed && statusClean && (!meaningfulDiffRequired || meaningfulProductDiffs > 0);
+    boolean recoveredAndVerified =
+        RecoveredMutationVerificationPolicy.recoveredAndVerified(
+            workerResult, validationPassed, statusClean);
     List<String> completed = new ArrayList<>();
-    if (completeTaskClaimed) {
-      completed.add("worker called completeTask");
-    }
-    if (fileWrites > 0) {
-      completed.add(fileWrites + " file write" + (fileWrites == 1 ? "" : "s"));
-    }
-    if (validationPassed) {
-      completed.add("smoke validation passed");
-    }
+    RecoveredMutationVerificationPolicy.appendCompletedEvidence(
+        completed, completeTaskClaimed, fileWrites, validationPassed, recoveredAndVerified);
 
     List<String> incomplete = new ArrayList<>();
     if (!statusClean) {
@@ -3696,7 +3695,9 @@ to boot — skip it for those.""";
     boolean budgetCeilingReached = budgetCeilingReason != null && !validationPassed;
     boolean blockedByEnvironment = blockedByEnvironment(workerResult, failureReason);
     boolean unsafeContinuation = unsafeContinuation(workerResult, failureReason);
-    boolean completionConfidenceLow = fileWrites > 0 && (!completeTaskClaimed || !statusClean);
+    boolean completionConfidenceLow =
+        RecoveredMutationVerificationPolicy.completionConfidenceLow(
+            fileWrites, completeTaskClaimed, recoveredAndVerified, statusClean);
     int noProgressIterations =
         fileWrites == 0 && !completeTaskClaimed && workerResult != null
             ? Math.max(0, workerResult.iterations())
@@ -3724,7 +3725,9 @@ to boot — skip it for those.""";
 
     return GoalEvidence.builder()
         .goalSummary(goalSummary(task))
-        .goalCriteriaSatisfied(completeTaskClaimed && requiredOutputsPresent)
+        .goalCriteriaSatisfied(
+            RecoveredMutationVerificationPolicy.goalCriteriaSatisfied(
+                completeTaskClaimed, recoveredAndVerified, requiredOutputsPresent))
         .validationAttempted(validationAttempted)
         .validationPassed(smokePassed)
         .requiredOutputsPresent(requiredOutputsPresent)
@@ -4634,6 +4637,7 @@ to boot — skip it for those.""";
           com.navneet.executespec.smoketest.BuildVerificationResult.parse(content);
       int exit = verification.exitCode() == null ? -1 : verification.exitCode();
       boolean passed = verification.passed();
+      boolean testsVerified = false;
       if (verification.status()
           == com.navneet.executespec.smoketest.BuildVerificationResult.Status.UNAVAILABLE) {
         content =
@@ -4653,6 +4657,7 @@ to boot — skip it for those.""";
         try {
           java.util.Optional<com.navneet.executespec.testgen.model.TestExecutionSummary> ts =
               inLoopTestRunner.runTests(ctx.runId(), ctx.workspaceRoot());
+          testsVerified = RecoveredMutationVerificationPolicy.freshGreenTests(ts);
           if (ts.isPresent() && (ts.get().getFailed() > 0 || ts.get().getErrors() > 0)) {
             int bad = ts.get().getFailed() + ts.get().getErrors();
             passed = false;
@@ -4678,11 +4683,11 @@ to boot — skip it for those.""";
         }
       }
       metrics.recordSmokeTest(passed ? "pass" : "fail");
-      return new SmokeTestResult(passed, exit, content, elapsed);
+      return new SmokeTestResult(passed, exit, content, elapsed, testsVerified);
     }
     // Tool Err — treat as smoke failure with a synthetic exit code
     metrics.recordSmokeTest("fail");
     String msg = result instanceof ToolResult.Err err ? err.message() : "(unknown tool err)";
-    return new SmokeTestResult(false, -1, "tool error: " + msg, elapsed);
+    return new SmokeTestResult(false, -1, "tool error: " + msg, elapsed, false);
   }
 }
