@@ -32,6 +32,14 @@ class OutlinePlannerSingleShotSurfaceTest {
   }
 
   @Test
+  void sourceFunctionChangeWithoutExternalRuntimeDefaultsToLibrary() {
+    assertThat(
+            SingleShotSurfaceClassifier.infer(
+                "Extend src/catalog.js filterCatalog without replacing or truncating the file."))
+        .isEqualTo(Plan.RuntimeSurface.LIBRARY);
+  }
+
+  @Test
   void negatedHttpConstraintDoesNotOverrideCliSurface() {
     assertThat(
             SingleShotSurfaceClassifier.infer(

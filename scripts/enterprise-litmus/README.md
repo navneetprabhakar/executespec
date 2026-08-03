@@ -80,7 +80,9 @@ other transition similarly rejects missing and unknown fields. The contract in
 - Baselines bind code-map, architecture, document source SHA, rubric score, provider/model and
   operation provenance. V2 additionally proves Compare History used a real content diff (not only a
   changed-file list) and a current governed semantic-index unavailability reason degraded to ripgrep
-  with zero provider calls. The retired compatibility error remains accepted only for rollout evidence.
+  with zero provider calls. A never-indexed repository may report `INDEX_NOT_BUILT`; recording it is
+  valid only with the same ripgrep and zero-provider-call proof. The retired compatibility error
+  remains accepted only for rollout evidence.
 - The frozen tuple is digest-bound. No deployment, fixture, project, route, request, approval, or
   client or sandbox-assessment value can change after freeze; invalidate and restart instead.
 - `SANDBOX_ASSESSED` consumes the canonical client-capability snapshot. A strict sandbox PASS requires
@@ -95,8 +97,11 @@ other transition similarly rejects missing and unknown fields. The contract in
   project-handoff gaps when present) to the non-PASS requirements and keeps `goEligible=false`.
 - Each hero first records a submission and then matching verification. Verification requires
   `COMPLETE`, exact frozen source/request/route, distinct run/branch/approval/PR/head SHA, plan
-  ID/version/fingerprint, complete task/build evidence, generated files, passing behavior tests with
-  zero failures/skips, truthful review evidence, a physical no-fallback route-call ledger, PR base
+  ID/version/fingerprint plus digest-bound deterministic `SINGLE_SHOT` strategy/classification,
+  complete task/build evidence, generated files, passing behavior tests with zero failures/skips,
+  truthful review evidence, and a complete raw physical-attempt ledger. The ledger must prove
+  successful execution and review calls on the exact frozen route, contain no failover, and contain
+  no outline-planner call because single-shot planning is deterministic. It also requires PR base
   equal to frozen main, exactly one green `fixture-ci` check, bounded cost, byte-exact 151+ line
   output with EOF sentinel, reconnect/reload stability, one primary action plus support code,
   Web/CLI terminal-outcome parity, and independent correctness proof.

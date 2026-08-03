@@ -313,7 +313,7 @@ public class ValidationReportService {
       ExecutableVerificationEvidence executableVerification =
           executableVerification(
               finalBuildPassed,
-              ts != null,
+              ts != null && ts.hasProvenTestExecution(),
               testsPassedCount,
               testsTotalCount,
               testsSkippedCount,
@@ -528,6 +528,20 @@ public class ValidationReportService {
 
     ValidationReport report = found.get();
     boolean provenTestExecution = summary.hasProvenTestExecution();
+    boolean existingExecutionProven = Boolean.TRUE.equals(report.getTestExecutionVerified());
+    boolean existingFunctionalProof =
+        existingExecutionProven
+            && TestExecutionSummary.EvidenceScope.LIVE_PREVIEW_FUNCTIONAL
+                .name()
+                .equals(report.getTestEvidenceScope());
+    boolean incomingFunctionalProof = summary.isIndependentFunctionalProof();
+    // A failed/not-applicable asynchronous suite contains no replacement population. It must not
+    // erase a fresh workspace suite. Likewise, a later workspace event cannot downgrade an
+    // already-proven live-preview population.
+    if ((existingExecutionProven && !provenTestExecution)
+        || (existingFunctionalProof && !incomingFunctionalProof)) {
+      return Optional.of(report);
+    }
     int incomingTotal = provenTestExecution ? Math.max(0, summary.getTotalTests()) : 0;
     int incomingPassed =
         provenTestExecution ? Math.max(0, Math.min(summary.getPassed(), incomingTotal)) : 0;
@@ -560,7 +574,7 @@ public class ValidationReportService {
     ExecutableVerificationEvidence executableVerification =
         executableVerification(
             report.getFinalBuildPassed(),
-            true,
+            provenTestExecution,
             passed,
             total,
             incomingSkipped,
@@ -695,12 +709,12 @@ public class ValidationReportService {
 
   private ExecutableVerificationEvidence executableVerification(
       Boolean buildPassed,
-      boolean testSummaryPresent,
+      boolean testExecutionProven,
       int testsPassed,
       int testsTotal,
       int testsSkipped,
       String provenanceFailure) {
-    boolean testsRun = testSummaryPresent && testsTotal > 0;
+    boolean testsRun = testExecutionProven && testsTotal > 0;
     boolean validCounts =
         testsPassed >= 0 && testsSkipped >= 0 && (long) testsPassed + testsSkipped <= testsTotal;
     Boolean testsPassedSignal =

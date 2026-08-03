@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://executespec.ai/schemas/enterprise-litmus-manifest-v3.json",
+  "$id": "https://executespec.ai/schemas/enterprise-litmus-manifest-v4.json",
   "title": "ExecuteSpec enterprise litmus manifest",
   "type": "object",
   "additionalProperties": false,
@@ -29,7 +29,7 @@
   ],
   "properties": {
     "schemaVersion": {
-      "const": 3
+      "const": 4
     },
     "campaignId": {
       "type": "string",
@@ -1352,7 +1352,7 @@
         "pr",
         "cost",
         "route",
-        "routeCalls",
+        "physicalCallLedger",
         "longFile",
         "reconnect",
         "parity",
@@ -1366,7 +1366,7 @@
         "sourceSha": { "$ref": "#/$defs/gitSha" },
         "requestSha256": { "$ref": "#/$defs/digest" },
         "status": { "const": "COMPLETE" },
-        "plan": { "$ref": "#/$defs/object" },
+        "plan": { "$ref": "#/$defs/heroPlan" },
         "approvalReceiptId": { "type": "string", "minLength": 1 },
         "task": { "$ref": "#/$defs/object" },
         "files": { "$ref": "#/$defs/object" },
@@ -1375,16 +1375,79 @@
         "pr": { "$ref": "#/$defs/object" },
         "cost": { "$ref": "#/$defs/object" },
         "route": { "$ref": "#/$defs/object" },
-        "routeCalls": {
-          "type": "array",
-          "minItems": 1,
-          "items": { "$ref": "#/$defs/object" }
+        "physicalCallLedger": {
+          "$ref": "#/$defs/physicalCallLedger"
         },
         "longFile": { "$ref": "#/$defs/object" },
         "reconnect": { "$ref": "#/$defs/object" },
         "parity": { "$ref": "#/$defs/object" },
         "terminal": { "$ref": "#/$defs/object" },
         "correctnessEvidenceId": { "type": "string", "minLength": 1 }
+      }
+    },
+    "heroPlan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "planId",
+        "version",
+        "fingerprint",
+        "strategy",
+        "classification",
+        "taskCount",
+        "evidenceSha256"
+      ],
+      "properties": {
+        "planId": { "$ref": "#/$defs/nonEmptyString" },
+        "version": { "type": "integer", "minimum": 1 },
+        "fingerprint": { "$ref": "#/$defs/digest" },
+        "strategy": { "const": "SINGLE_SHOT" },
+        "classification": { "const": "SINGLE_SHOT" },
+        "taskCount": { "const": 1 },
+        "evidenceSha256": { "$ref": "#/$defs/digest" }
+      }
+    },
+    "physicalCallLedger": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["evidenceSha256", "complete", "totalPhysicalAttempts", "calls"],
+      "properties": {
+        "evidenceSha256": { "$ref": "#/$defs/digest" },
+        "complete": { "const": true },
+        "totalPhysicalAttempts": { "type": "integer", "minimum": 1 },
+        "calls": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/physicalCall" }
+        }
+      }
+    },
+    "physicalCall": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "physicalAttemptId",
+        "provider",
+        "model",
+        "feature",
+        "agentRole",
+        "stepId",
+        "attemptStatus",
+        "attemptKind",
+        "parentAttemptId"
+      ],
+      "properties": {
+        "physicalAttemptId": { "$ref": "#/$defs/nonEmptyString" },
+        "provider": { "$ref": "#/$defs/nonEmptyString" },
+        "model": { "$ref": "#/$defs/nonEmptyString" },
+        "feature": { "$ref": "#/$defs/nonEmptyString" },
+        "agentRole": { "$ref": "#/$defs/nonEmptyString" },
+        "stepId": { "$ref": "#/$defs/nonEmptyString" },
+        "attemptStatus": { "$ref": "#/$defs/nonEmptyString" },
+        "attemptKind": { "$ref": "#/$defs/nonEmptyString" },
+        "parentAttemptId": {
+          "anyOf": [{ "$ref": "#/$defs/nonEmptyString" }, { "type": "null" }]
+        }
       }
     },
     "gitSha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
