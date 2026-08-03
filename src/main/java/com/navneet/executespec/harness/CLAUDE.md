@@ -94,8 +94,12 @@ task to rerun on another provider.
 
 Best-guess salvage writes now flow through the same canonical tool-log formatter as ordinary worker
 mutations. A successful salvage therefore contributes its real write and admitted product-diff
-counts while `salvagedUnverified` still forces the executor's completion warning; failed salvage
-writes retain `-> ERR` and count as zero.
+counts. `salvagedUnverified` does not imply or report a `completeTask` call. It keeps the executor's
+completion warning unless the final task subsequently passes both its build gate and a fresh,
+proven workspace test suite for that exact recovered tree with at least one pass and a complete
+pass/skip population; only then is the warning cleared and the task promoted to `SUCCESS`.
+Smoke-skipped, unavailable, build-only, stale, malformed, or red validation remains a warning, and
+failed salvage writes retain `-> ERR` and count as zero.
 | `TaskSimplicityClassifier.java` | Deterministic STEP_DOWN_MODEL eligibility evidence. Only HIGH-complexity, bounded brownfield repairs (BUG_FIX / TEST_FIX / PROJECT_PATCH) that cleanly complete with a small observed iteration/tool/write footprint qualify; greenfield, broad, salvaged, looping, or escalation-worthy tasks remain ineligible. The signal and its bounded evidence are persisted in continuation policy JSON. |
 | `ContinuationConfirmationScope.java` | Immutable per-decision confirmation authority plus `TaskSimplicityClassifier` evidence. It keeps step-down eligibility and its persisted policy evidence out of `SequentialExecutor`'s continuation plumbing. |
 | `TaskWaveScheduler.java` | Pure dependency-wave scheduler. `schedule(...)` groups tasks by `dependsOn` topological levels. `scheduleBounded(...)` adds a hard wave-size cap and conservative `touchesFiles` conflict checks: unknown/broad touch sets serialize alone, same file or parent/child path conflicts split waves, and only declared disjoint file sets can share a wave. `SequentialExecutor` uses `scheduleBounded(...)` at run start to emit advisory `TASK_WAVE_PLAN` evidence; runtime mutating task dispatch remains sequential. |

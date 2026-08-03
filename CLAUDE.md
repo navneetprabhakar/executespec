@@ -8,6 +8,13 @@
 
 Spec-driven AI coding platform. Customer submits a spec in natural language → V2 pipeline plans, codes across one or more repos, builds + tests, opens a pull request with a deterministic verified score. Human approves at the plan gate; everything after is automatic.
 
+**Recovered-mutation trust boundary (2026-08-04):** a zero-write output-cap or best-guess salvage
+may make one bounded mutation recovery. That recovery never claims the model called `completeTask`.
+It remains `COMPLETED_WITH_WARNING` when smoke is skipped, build-only, unavailable, stale, or red;
+only a final-task green build plus a fresh provenance-verified workspace suite with at least one
+pass and a complete pass/skip population promotes the task to `SUCCESS`. Other iteration/stagnation
+soft completions stay conservative.
+
 ## Architecture (5-minute orientation)
 
 - **Backend:** Java 21, Spring Boot 3.5, Spring AI 1.1.6, PostgreSQL (Cloud SQL) + Redis. Single Spring Boot JAR; frontend served from `static/`. The fat JAR excludes unused heavyweight transitives from Spring AI Anthropic (`json-path`/Groovy), Tika unsupported parser families, and Google xDS/Conscrypt clients; keep parser coverage pinned with `DocumentExtractorTest` before relaxing or expanding those exclusions.

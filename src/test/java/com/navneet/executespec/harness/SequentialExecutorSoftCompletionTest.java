@@ -89,6 +89,8 @@ class SequentialExecutorSoftCompletionTest {
       mock(com.navneet.executespec.router.ModelResolver.class);
   private final com.navneet.executespec.project.rag.RetrievalService retrievalService =
       mock(com.navneet.executespec.project.rag.RetrievalService.class);
+  private final com.navneet.executespec.smoketest.WorkspaceTestRunner workspaceTestRunner =
+      mock(com.navneet.executespec.smoketest.WorkspaceTestRunner.class);
   private final com.navneet.executespec.cost.RunCostTracker costTracker =
       mock(com.navneet.executespec.cost.RunCostTracker.class);
   private final com.navneet.executespec.config.featureflag.FeatureFlagService featureFlagService =
@@ -121,7 +123,7 @@ class SequentialExecutorSoftCompletionTest {
         modelResolver,
         matrixProps,
         retrievalService,
-        org.mockito.Mockito.mock(com.navneet.executespec.smoketest.WorkspaceTestRunner.class),
+        workspaceTestRunner,
         featureFlagService,
         org.mockito.Mockito.mock(com.navneet.executespec.context.ContextStore.class),
         costTracker,
@@ -620,6 +622,118 @@ class SequentialExecutorSoftCompletionTest {
                             .contains("meaningfulProductDiffs=1")
                         && ((List<?>) event.data().get("evidence"))
                             .contains("completionConfidenceLow=true")));
+  }
+
+  @Test
+  void
+      salvaged_recovered_mutation_with_fresh_green_tests_is_SUCCESS_without_false_completion_claim() {
+    stubTaskRow();
+    when(worker.run(any(WorkerTaskRequest.class), any())).thenReturn(workerSalvaged());
+    when(buildProjectTool.execute(any(), any())).thenReturn(new ToolResult.Ok("exit=0\nbuild ok"));
+    when(featureFlagService.isEnabled("worker.auto-verify.enabled")).thenReturn(true);
+    when(workspaceTestRunner.runTests(anyString(), any()))
+        .thenReturn(
+            java.util.Optional.of(
+                com.navneet.executespec.testgen.model.TestExecutionSummary.builder()
+                    .totalTests(12)
+                    .passed(12)
+                    .executionVerified(Boolean.TRUE)
+                    .evidenceScope(
+                        com.navneet.executespec.testgen.model.TestExecutionSummary.EvidenceScope
+                            .WORKSPACE_TEST_SUITE)
+                    .build()));
+
+    ExecutionResult result = newExecutor().execute(req(singleTaskPlan(), true));
+
+    assertEquals(TaskOutcome.Status.SUCCESS, result.perTask().get(0).status());
+    assertEquals(ExecutionResult.Overall.ALL_SUCCESS, result.overall());
+    verify(broadcaster)
+        .emit(
+            anyString(),
+            argThat(
+                event ->
+                    isGoalDecisionEvent(event)
+                        && "DONE".equals(event.data().get("state"))
+                        && !((List<?>) event.data().get("completedItems"))
+                            .contains("worker called completeTask")
+                        && ((List<?>) event.data().get("completedItems"))
+                            .contains("recovered mutation passed fresh workspace tests")));
+  }
+
+  @Test
+  void salvaged_recovery_with_build_only_smoke_remains_WARNING() {
+    stubTaskRow();
+    when(worker.run(any(WorkerTaskRequest.class), any())).thenReturn(workerSalvaged());
+    when(buildProjectTool.execute(any(), any())).thenReturn(new ToolResult.Ok("exit=0\nbuild ok"));
+
+    ExecutionResult result = newExecutor().execute(req(singleTaskPlan(), true));
+
+    assertEquals(TaskOutcome.Status.COMPLETED_WITH_WARNING, result.perTask().get(0).status());
+    assertEquals(ExecutionResult.Overall.PARTIAL_WITH_WARNINGS, result.overall());
+  }
+
+  @Test
+  void salvaged_recovery_with_all_tests_skipped_remains_WARNING() {
+    stubTaskRow();
+    when(worker.run(any(WorkerTaskRequest.class), any())).thenReturn(workerSalvaged());
+    when(buildProjectTool.execute(any(), any())).thenReturn(new ToolResult.Ok("exit=0\nbuild ok"));
+    when(featureFlagService.isEnabled("worker.auto-verify.enabled")).thenReturn(true);
+    when(workspaceTestRunner.runTests(anyString(), any()))
+        .thenReturn(
+            java.util.Optional.of(
+                com.navneet.executespec.testgen.model.TestExecutionSummary.builder()
+                    .totalTests(12)
+                    .passed(0)
+                    .skipped(12)
+                    .executionVerified(Boolean.TRUE)
+                    .evidenceScope(
+                        com.navneet.executespec.testgen.model.TestExecutionSummary.EvidenceScope
+                            .WORKSPACE_TEST_SUITE)
+                    .build()));
+
+    ExecutionResult result = newExecutor().execute(req(singleTaskPlan(), true));
+
+    assertEquals(TaskOutcome.Status.COMPLETED_WITH_WARNING, result.perTask().get(0).status());
+    assertEquals(ExecutionResult.Overall.PARTIAL_WITH_WARNINGS, result.overall());
+  }
+
+  @Test
+  void salvaged_recovery_with_incomplete_test_population_remains_WARNING() {
+    stubTaskRow();
+    when(worker.run(any(WorkerTaskRequest.class), any())).thenReturn(workerSalvaged());
+    when(buildProjectTool.execute(any(), any())).thenReturn(new ToolResult.Ok("exit=0\nbuild ok"));
+    when(featureFlagService.isEnabled("worker.auto-verify.enabled")).thenReturn(true);
+    when(workspaceTestRunner.runTests(anyString(), any()))
+        .thenReturn(
+            java.util.Optional.of(
+                com.navneet.executespec.testgen.model.TestExecutionSummary.builder()
+                    .totalTests(12)
+                    .passed(1)
+                    .skipped(0)
+                    .executionVerified(Boolean.TRUE)
+                    .evidenceScope(
+                        com.navneet.executespec.testgen.model.TestExecutionSummary.EvidenceScope
+                            .WORKSPACE_TEST_SUITE)
+                    .build()));
+
+    ExecutionResult result = newExecutor().execute(req(singleTaskPlan(), true));
+
+    assertEquals(TaskOutcome.Status.COMPLETED_WITH_WARNING, result.perTask().get(0).status());
+    assertEquals(ExecutionResult.Overall.PARTIAL_WITH_WARNINGS, result.overall());
+  }
+
+  @Test
+  void salvaged_recovery_with_red_smoke_remains_WARNING() {
+    stubTaskRow();
+    when(worker.run(any(WorkerTaskRequest.class), any())).thenReturn(workerSalvaged());
+    when(buildProjectTool.execute(any(), any()))
+        .thenReturn(new ToolResult.Ok("exit=1\nSyntaxError: unexpected token"));
+
+    ExecutionResult result = newExecutor().execute(req(singleTaskPlan(), true));
+
+    assertEquals(TaskOutcome.Status.COMPLETED_WITH_WARNING, result.perTask().get(0).status());
+    assertEquals(false, result.perTask().get(0).smokeTestPassed());
+    assertEquals(ExecutionResult.Overall.PARTIAL_WITH_WARNINGS, result.overall());
   }
 
   // RR-260 control — a NORMAL COMPLETED with smoke skipped is a clean SUCCESS, proving the warning
