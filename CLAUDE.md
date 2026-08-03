@@ -19,8 +19,15 @@ Spec-driven AI coding platform. Customer submits a spec in natural language → 
   silently permitting an unsafe call. Enterprise Project Start Work reuses the Compose exact
   `modelName` override for that run only. Web Agent trust copy is evidence-qualified: retention is
   policy-bound, BYOK caps are optional, and PR creation remains publication-gated.
-- **Infra:** GCP us-east4. Single GCE VM serves prod + dev; Cloud Run serves on-demand previews. Cloudflare in front of `*.executespec.ai`.
+- **Infra:** GCP us-east4. Single GCE VM serves prod + dev; Cloud Run serves on-demand previews. Cloudflare in front of `*.executespec.ai`. The deploy workflow checksum-verifies the immutable JAR, writes `/opt/app/RUNNING_SHA`, then reads that marker back from the target host and fails before health verification if it differs from the resolved target SHA.
 - **Codebase shape:** 85 top-level package roots under `com.navneet.executespec.*` (83 with Java sources; flat — the historical `v2.*` / `v3.*` prefixes were retired in 2026-05-07's unification pass). Current source includes 118 `@RestController` classes (123 files match the annotation) serving 577 routes pinned by `arch/ApiRouteInventoryTest`, `agentsession/` for cross-surface agent sessions, the committed `repositoryintel/` read-only evidence port, and the provider-free `repositoryexplorer/` selection/bundle contract. Frontend ~65K LOC of TS/TSX.
+
+**Enterprise litmus evidence contract (2026-08-03):** `scripts/enterprise-litmus/` schema v3
+adds mandatory sandbox-or-remote-workspace assessment and CLI-fallback proof around three sequential
+hero runs. Reload validation replays every materialized merge, refresh, continuation, CI-failure,
+CI-fix, and deployment contract; the JSON Schema separately enforces per-state structural
+reachability. Schema v2 evidence is never guessed or rewritten: operators must preserve it, clean up
+with the matching v2 harness revision, archive it, and start a new v3 campaign.
 
 **Correction/publication trust boundary (V360–V364):** approved continuation retries bind the exact
 run/task/action/provider/model/proposal digest and apply a strict override only to the target task;
