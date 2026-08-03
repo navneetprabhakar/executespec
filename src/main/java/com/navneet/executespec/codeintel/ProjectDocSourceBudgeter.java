@@ -10,10 +10,16 @@ final class ProjectDocSourceBudgeter {
   private static final String OMITTED_MARKER =
       "[section evidence truncated at a complete line; omitted content may contain additional "
           + "facts]\n";
+  private static final String ATOMIC_OMITTED_MARKER =
+      "[atomic evidence omitted because the complete block did not fit the source budget]\n";
 
   private ProjectDocSourceBudgeter() {}
 
-  record Section(String heading, String content) {}
+  record Section(String heading, String content, boolean atomic) {
+    Section(String heading, String content) {
+      this(heading, content, false);
+    }
+  }
 
   static String budget(List<Section> sections, int characterLimit) {
     if (sections == null || sections.isEmpty()) return "";
@@ -21,13 +27,31 @@ final class ProjectDocSourceBudgeter {
         sections.stream()
             .mapToLong(
                 section ->
-                    safeHeading(section.heading()).length() + 1 + OMITTED_MARKER.length() + 2)
+                    safeHeading(section.heading()).length()
+                        + 1
+                        + omissionMarker(section).length()
+                        + 2)
             .sum();
     if (structuralChars > characterLimit) {
       throw new IllegalStateException("Too many repository evidence sections to budget safely");
     }
 
-    int[] allocations = allocate(sections, characterLimit - Math.toIntExact(structuralChars));
+    int available = characterLimit - Math.toIntExact(structuralChars);
+    boolean[] omittedAtomic = new boolean[sections.size()];
+    int[] allocations;
+    while (true) {
+      allocations = allocate(sections, available, omittedAtomic);
+      boolean changed = false;
+      for (int i = 0; i < sections.size(); i++) {
+        if (!omittedAtomic[i]
+            && sections.get(i).atomic()
+            && allocations[i] < content(sections.get(i)).length()) {
+          omittedAtomic[i] = true;
+          changed = true;
+        }
+      }
+      if (!changed) break;
+    }
     StringBuilder result = new StringBuilder(characterLimit);
     for (int i = 0; i < sections.size(); i++) {
       Section section = sections.get(i);
@@ -38,7 +62,7 @@ final class ProjectDocSourceBudgeter {
               ? content
               : truncateAtLineBoundary(content, allocations[i]));
       if (result.isEmpty() || result.charAt(result.length() - 1) != '\n') result.append('\n');
-      if (allocations[i] < content.length()) result.append(OMITTED_MARKER);
+      if (allocations[i] < content.length()) result.append(omissionMarker(section));
       result.append('\n');
     }
     if (result.length() > characterLimit) {
@@ -47,10 +71,16 @@ final class ProjectDocSourceBudgeter {
     return result.toString();
   }
 
-  private static int[] allocate(List<Section> sections, int available) {
+  private static String omissionMarker(Section section) {
+    return section.atomic() ? ATOMIC_OMITTED_MARKER : OMITTED_MARKER;
+  }
+
+  private static int[] allocate(List<Section> sections, int available, boolean[] omittedAtomic) {
     int[] allocations = new int[sections.size()];
     Set<Integer> active = new LinkedHashSet<>();
-    for (int i = 0; i < sections.size(); i++) active.add(i);
+    for (int i = 0; i < sections.size(); i++) {
+      if (!omittedAtomic[i]) active.add(i);
+    }
     int remaining = available;
     while (!active.isEmpty() && remaining > 0) {
       int share = remaining / active.size();

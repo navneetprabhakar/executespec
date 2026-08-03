@@ -60,6 +60,7 @@ final class ProjectDocSourceBundleBuilder {
     }
 
     List<ProjectDocSourceBudgeter.Section> sections = new ArrayList<>();
+    List<ProjectDocSourceBudgeter.Section> functionEvidenceSections = new ArrayList<>();
     sections.add(new ProjectDocSourceBudgeter.Section("# Project metadata", metadata.toString()));
     sections.add(
         new ProjectDocSourceBudgeter.Section(
@@ -88,6 +89,11 @@ final class ProjectDocSourceBundleBuilder {
         // A legacy same-SHA codemap cannot support the current factual publication contract.
         throw new ProjectDocGeneratorService.StaleSourceException();
       }
+      ExportedFunctionEvidence.Inspection functionInspection =
+          ExportedFunctionEvidence.inspectExactBlock(content, fullName, expectedSha);
+      if (functionInspection.status() == ExportedFunctionEvidence.InspectionStatus.MALFORMED) {
+        throw new ProjectDocGeneratorService.StaleSourceException();
+      }
       // The declaration codemap comes first so GeneratedSignatureGrounding.codemapEvidence keeps
       // the separately framed canonical fact/setup sections that follow it. Repository prose is
       // never searched for marker-delimited setup authority.
@@ -99,13 +105,20 @@ final class ProjectDocSourceBundleBuilder {
       sections.add(
           new ProjectDocSourceBudgeter.Section(
               "# Deterministic setup sources: " + fullName, setup));
+      if (functionInspection.status() == ExportedFunctionEvidence.InspectionStatus.VALID) {
+        functionEvidenceSections.add(
+            new ProjectDocSourceBudgeter.Section(
+                "# Exact exported-function source: " + fullName, functionInspection.block(), true));
+      }
     }
     if (!sourceShas.isEmpty()) {
       throw new ProjectDocGeneratorService.StaleSourceException();
     }
+    List<ProjectDocSourceBudgeter.Section> withFunctionEvidence = new ArrayList<>(sections);
+    withFunctionEvidence.addAll(functionEvidenceSections);
     String budgeted =
         ProjectDocSourceBudgeter.budget(
-            sections, ProjectDocGeneratorService.SOURCE_BUNDLE_CHAR_LIMIT);
+            withFunctionEvidence, ProjectDocGeneratorService.SOURCE_BUNDLE_CHAR_LIMIT);
     int found = 0;
     int cursor = 0;
     while (true) {
@@ -138,7 +151,9 @@ final class ProjectDocSourceBundleBuilder {
   private static String declarationOnlyCodemap(String content) {
     String withoutFacts = DeterministicArchitectureEvidence.stripProjectFactBlocks(content);
     String withoutSetup = DeterministicArchitectureEvidence.stripSetupSourceBlocks(withoutFacts);
-    return withoutSetup.replaceAll("(?m)^\\*\\*Purpose:\\*\\*[^\\r\\n]*(?:\\R\\s*)?", "");
+    String withoutFunctionEvidence = ExportedFunctionEvidence.stripBlocks(withoutSetup);
+    return withoutFunctionEvidence.replaceAll(
+        "(?m)^\\*\\*Purpose:\\*\\*[^\\r\\n]*(?:\\R\\s*)?", "");
   }
 
   Map<String, String> parseSourceShas(String sourceFingerprint) {

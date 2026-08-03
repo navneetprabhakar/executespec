@@ -246,7 +246,8 @@ public class CodeMapGenerator {
     // any file does. Function names give the next layer of grain at zero LLM cost. Bounded:
     // we scan up to MAX_FUNCTION_FILES files and emit up to MAX_FUNCTIONS_PER_FILE per file
     // so the codemap stays prompt-friendly even on large repos.
-    Map<String, List<String>> functions = scanFunctions(repoFullName, defaultBranch, files, pat);
+    FunctionScan functionScan = scanFunctionSources(repoFullName, defaultBranch, files, pat);
+    Map<String, List<String>> functions = functionScan.symbols();
     if (!functions.isEmpty()) {
       int total = functions.values().stream().mapToInt(List::size).sum();
       md.append("## Functions\n\n");
@@ -296,6 +297,9 @@ public class CodeMapGenerator {
             md.append("\n");
           });
     }
+
+    md.append(
+        ExportedFunctionEvidence.render(repoFullName, defaultBranch, functionScan.sourceByPath()));
 
     return md.toString();
   }
@@ -360,7 +364,13 @@ public class CodeMapGenerator {
    */
   Map<String, List<String>> scanFunctions(
       String repoFullName, String branch, List<String> files, String pat) {
+    return scanFunctionSources(repoFullName, branch, files, pat).symbols();
+  }
+
+  private FunctionScan scanFunctionSources(
+      String repoFullName, String branch, List<String> files, String pat) {
     LinkedHashMap<String, List<String>> out = new LinkedHashMap<>();
+    LinkedHashMap<String, String> sourceByPath = new LinkedHashMap<>();
 
     List<String> candidates =
         files.stream()
@@ -385,10 +395,16 @@ public class CodeMapGenerator {
       List<String> symbols = extractSymbols(path, content);
       if (!symbols.isEmpty()) {
         out.put(path, symbols.stream().distinct().limit(MAX_FUNCTIONS_PER_FILE).toList());
+        sourceByPath.put(path, content);
       }
     }
-    return out;
+    return new FunctionScan(
+        java.util.Collections.unmodifiableMap(new LinkedHashMap<>(out)),
+        java.util.Collections.unmodifiableMap(new LinkedHashMap<>(sourceByPath)));
   }
+
+  private record FunctionScan(
+      Map<String, List<String>> symbols, Map<String, String> sourceByPath) {}
 
   /**
    * Pull function / class / method names out of {@code content} based on the file extension. Each
