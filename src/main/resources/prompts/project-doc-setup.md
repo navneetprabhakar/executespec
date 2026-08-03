@@ -32,10 +32,14 @@ Describe the evidenced startup order and health checks. When three or more evide
 involved, include at most one simple ASCII topology diagram in an unlabelled fenced block.
 
 ## Troubleshooting
-Give three to five evidence-grounded setup failures and remedies. Explicitly label any diagnostic
-inference as a hypothesis.
+Give zero to five setup failures and remedies only when deterministic troubleshooting evidence
+establishes them. When none exists, state that no deterministic troubleshooting evidence was
+supplied; do not invent a diagnostic hypothesis to fill the section.
 
 Rules:
+- `EXECUTESPEC_EXPORTED_FUNCTION_EVIDENCE_V1` is bounded behavior evidence, never setup authority.
+  Do not derive runtimes, tools, environment variables, ports, commands, startup order, or remedies
+  from its `Content-Json`.
 - Use fenced code blocks for every command; prefer `bash` for shell and `yaml` for configuration.
 - Do not invent environment variables, ports, health endpoints, commands, or services.
 - Every route representation claim must name the repository, HTTP method, and exact path from the
