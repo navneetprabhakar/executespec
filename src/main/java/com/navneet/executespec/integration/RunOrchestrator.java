@@ -2441,6 +2441,13 @@ public class RunOrchestrator implements RunControlPort {
 
       // 5. Generate validation report + kick off test generation
       op = runOperationLifecycle.finishReviewAndClear(op, reviewerErrored);
+      // Keep the durable REVIEWING state backward-compatible, but stop lying in the live stream:
+      // reviewer work is complete and provider latency from here belongs to validation.
+      perky.start(runId, "VALIDATING");
+      broadcaster.emit(
+          runId,
+          RunEvent.log(
+              runId, null, "Reviewer complete; checking tests and validation evidence..."));
       Optional<ValidationReport> validationReport =
           validationKickoff.generateValidationReport(
               runId, execResult, reviewResult, plan, contractBreakingIssues, "validation");

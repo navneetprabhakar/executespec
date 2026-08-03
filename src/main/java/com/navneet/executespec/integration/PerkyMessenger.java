@@ -52,6 +52,12 @@ public class PerkyMessenger {
     "Double-checking imports and integrations...",
     "Final build, final breath...",
   };
+  private static final String[] VALIDATING = {
+    "Checking deterministic run evidence...",
+    "Running the generated test suite...",
+    "Assembling the validation report...",
+    "Reconciling build, test, and review results...",
+  };
 
   private final SseBroadcaster broadcaster;
   private final ScheduledExecutorService scheduler =
@@ -110,6 +116,7 @@ public class PerkyMessenger {
     return switch (phase.toUpperCase()) {
       case "PLANNING" -> PLANNING;
       case "REVIEWING" -> REVIEWING;
+      case "VALIDATING" -> VALIDATING;
       default -> WORKING;
     };
   }
