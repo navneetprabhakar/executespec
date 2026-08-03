@@ -174,6 +174,11 @@ public class CodeMapGenerator {
               + " whole repository.\n\n");
     }
 
+    // Reserved before the potentially 60KB file listing so exact-revision facts cannot be
+    // truncated out of a downstream section budget while lower-authority inventory survives.
+    md.append(
+        springHttpEvidence.render(repoFullName, defaultBranch, files, pat, inventory.truncated()));
+
     // Surface major directories
     md.append("## Top-level layout\n\n");
     files.stream()
@@ -207,9 +212,6 @@ public class CodeMapGenerator {
       }
       md.append("\n");
     }
-
-    md.append(
-        springHttpEvidence.render(repoFullName, defaultBranch, files, pat, inventory.truncated()));
 
     // Routes — scan a small set of likely files; full-text scan would be too expensive.
     List<String> routes = scanRoutes(repoFullName, defaultBranch, files, pat);

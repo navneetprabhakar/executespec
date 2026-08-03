@@ -82,6 +82,9 @@ final class ProjectGeneratedDocValidator {
           GeneratedSignatureGrounding.unsupportedBehaviorClaim(content, codemapEvidence);
       if (unsupported.isPresent()) return unsupported;
     }
+    Optional<String> unsupportedFacts =
+        GeneratedProjectFactGrounding.unsupportedFactualClaim(content, codemapEvidence);
+    if (unsupportedFacts.isPresent()) return unsupportedFacts;
     return Optional.empty();
   }
 

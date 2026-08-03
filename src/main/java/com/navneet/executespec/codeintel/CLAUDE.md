@@ -134,8 +134,10 @@ misclassify a paid, complete response as empty. New document rows use `saveAndFl
 durable job-result fence writes its PostgreSQL foreign key, while both writes remain in the same
 publisher transaction and roll back together on fence loss. Its provider-neutral system prompts are
 `prompts/project-doc-explanation.md` and `prompts/project-doc-setup.md`, assembled through
-`PromptAssembler`. Project metadata, architecture, and codemaps stay in the separately wrapped
-`PROJECT_DOC_EVIDENCE` user message.
+`PromptAssembler`. Project metadata, exact-SHA codemaps, and separately reserved deterministic fact
+blocks stay in the wrapped `PROJECT_DOC_EVIDENCE` user message. The model-generated architecture
+body is deliberately excluded from factual grounding, and model-generated `Purpose` lines are
+removed from codemap evidence before document generation.
 Concrete inline-code method signatures in generated documents are grounded only against the
 codemap sections of that evidence bundle, never against generated architecture prose; unverifiable
 contracts are reduced to method-name-only references before publication.
@@ -152,14 +154,28 @@ single-symbol descriptive inventory remains unless it attributes reliance, a hin
 incomplete integration (including grammatical variants). Directional Mermaid/sequence blocks are
 removed as a whole and replaced with the same non-directional note. Other content and headings
 remain in place.
-The provider retry is therefore reserved for remaining structural failures. Every EXPLANATION
-corrective retry enumerates the four
+Exact-revision project facts cover selected schema/configuration paths, literal Compose service
+declarations, and Spring handler response modes. Schema ownership and Compose application/full-stack
+startup are never inferred from framework conventions, directory names, arbitrary images, or build
+targets. Unsupported factual claims fail deterministic validation and receive the same single
+same-route corrective retry as structural failures; two unsupported responses fail publication.
+Positive route-representation claims resolve against a repository + HTTP method + exact-path key.
+An unresolved `NOT_ESTABLISHED` handler mode proves neither a view nor a serialized body; in a
+multi-repository bundle, a claim without unambiguous repository attribution fails closed so one
+repository's same-path handler cannot authorize prose about another repository.
+Legacy same-SHA codemaps without the current fact marker are not reusable, and every repository's
+complete fact block receives a reserved source-budget section before bulk declaration inventory.
+Surrounding repository/combined architecture prose remains model-derived explanatory content; it is
+conservatively sanitized and carries byte-exact deterministic appendices separately.
+
+Every EXPLANATION corrective retry enumerates the four
 mandatory H2 lines verbatim/exactly once and forbids renaming, deleting, merging, reordering, or
 demoting them. The validator remains as a fail-closed post-sanitization backstop, and cache hits are
 checked under the same current grounding contract before reuse.
 
-The source bundle has a hard 60,000-character ceiling. Budgeting is section-aware: architecture and
-every linked repository receive an independent water-filled share, short sections return unused
+The source bundle has a hard 60,000-character ceiling. Budgeting is section-aware: metadata,
+reserved per-repository facts, and every linked repository receive independent water-filled shares;
+short sections return unused
 capacity, cuts occur only after complete lines, and each affected section carries an omission
 marker. Resolved repositories are sorted by canonical full name and repository id before rendering,
 so prompt bytes and budget allocation do not depend on database query order. Each codemap is loaded

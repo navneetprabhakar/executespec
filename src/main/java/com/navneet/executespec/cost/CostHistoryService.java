@@ -4,7 +4,10 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import java.util.TreeSet;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
 
@@ -35,6 +38,8 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class CostHistoryService {
 
+  private static final ObjectMapper JSON = new ObjectMapper();
+
   /** Minimum number of similar runs required to trust the historical estimate. */
   public static final int MIN_SAMPLES = 10;
 
@@ -52,6 +57,7 @@ public class CostHistoryService {
 
   private final RunCostHistoryRepository historyRepo;
   private final PipelineRunRepository runRepo;
+  private final RunStepUsageRepository stepUsageRepo;
 
   /**
    * Record a completed run's actual cost + features. Idempotent — duplicate records replace. Logged
@@ -63,8 +69,24 @@ public class CostHistoryService {
       Optional<PipelineRun> opt = runRepo.findById(runId);
       if (opt.isEmpty()) return;
       PipelineRun r = opt.get();
-      if (r.getActualCostUsd() == null || r.getCompletedAt() == null) {
-        // Don't record runs we don't have cost / terminal-time for yet.
+      if (!"COMPLETE".equals(r.getStatus())
+          || r.getActualCostUsd() == null
+          || r.getCompletedAt() == null) {
+        // Failed/partial/cancelled runs do not represent the full planned journey and would
+        // depress a future approval cap. Also skip rows without cost / terminal-time evidence.
+        return;
+      }
+      String routeFingerprint =
+          routeFingerprint(stepUsageRepo.findByRunIdOrderByCreatedAtAsc(runId));
+      if (routeFingerprint == null) {
+        // Model-blind history is unsafe: a requested provider may have physically failed over or
+        // used a different matrix/pinned model. Only ledger-attributed routes enter schema v2.
+        return;
+      }
+      PlanShape planShape = extractPlanShape(r);
+      if (planShape == null) {
+        // Task count without its complexity distribution is not a safe pricing cohort. A three-LOW
+        // plan and a three-HIGH plan can have materially different worker and review spend.
         return;
       }
       RunCostHistory h =
@@ -74,10 +96,12 @@ public class CostHistoryService {
               .projectId(r.getProjectId())
               .planStrategy(r.getPlanStrategy())
               .classification(extractClassification(r))
-              .taskCount(extractTaskCount(r))
+              .taskCount(planShape.taskCount())
+              .taskComplexityFingerprint(planShape.complexityFingerprint())
               .repoCount(extractRepoCount(r))
               .projectType(extractProjectType(r))
               .provider(r.getAiProvider() == null ? null : r.getAiProvider().toUpperCase())
+              .routeFingerprint(routeFingerprint)
               .specLength(r.getUserRequest() == null ? 0 : r.getUserRequest().length())
               .actualCostUsd(BigDecimal.valueOf(r.getActualCostUsd()))
               .actualTokensIn(
@@ -92,7 +116,7 @@ public class CostHistoryService {
               .statusReason(r.getStatusReason())
               .startedAt(r.getStartedAt() == null ? Instant.now() : r.getStartedAt())
               .completedAt(r.getCompletedAt())
-              .schemaVersion((short) 1)
+              .schemaVersion((short) 2)
               .build();
       historyRepo.save(h);
       log.debug(
@@ -126,10 +150,22 @@ public class CostHistoryService {
    * @param provider provider key (uppercase: ANTHROPIC / OPENAI / GEMINI)
    * @param repoCount linked repo count
    * @param taskCount expected task count
+   * @param taskComplexityFingerprint canonical LOW/MEDIUM/HIGH distribution
    */
   public Optional<RunCostTracker.Estimate> estimateFromHistory(
-      String orgId, String strategy, String provider, int repoCount, int taskCount) {
-    if (strategy == null || provider == null) return Optional.empty();
+      String orgId,
+      String strategy,
+      String provider,
+      String routeFingerprint,
+      int repoCount,
+      int taskCount,
+      String taskComplexityFingerprint) {
+    if (strategy == null
+        || provider == null
+        || routeFingerprint == null
+        || routeFingerprint.isBlank()
+        || taskComplexityFingerprint == null
+        || taskComplexityFingerprint.isBlank()) return Optional.empty();
     // RR-1551 — no tenant, no history. Never fall through to a cross-org pool.
     if (orgId == null || orgId.isBlank()) {
       log.debug(
@@ -138,22 +174,28 @@ public class CostHistoryService {
     }
     List<BigDecimal> strict =
         historyRepo.findSimilarCosts(
-            orgId, strategy, provider, repoCount, taskCount, PageRequest.of(0, MAX_SAMPLES));
-    List<BigDecimal> use =
-        strict.size() >= MIN_SAMPLES
-            ? strict
-            : historyRepo.findSimilarCostsLoose(
-                orgId, strategy, provider, PageRequest.of(0, MAX_SAMPLES));
+            orgId,
+            strategy,
+            provider,
+            routeFingerprint,
+            repoCount,
+            taskCount,
+            taskComplexityFingerprint,
+            PageRequest.of(0, MAX_SAMPLES));
+    // Do not fall back across repository/task shapes. A route-equivalent 20-task project is not a
+    // safe approval-cap analogue for a one-task run (or vice versa).
+    List<BigDecimal> use = strict;
     if (use.size() < MIN_SAMPLES) {
       log.debug(
           "[CostHistory] estimate-from-history skipped — only {} samples for org={} {} {} repos={}"
-              + " tasks={} (need ≥{})",
+              + " tasks={} complexity={} (need ≥{})",
           use.size(),
           orgId,
           strategy,
           provider,
           repoCount,
           taskCount,
+          taskComplexityFingerprint,
           MIN_SAMPLES);
       return Optional.empty();
     }
@@ -163,16 +205,36 @@ public class CostHistoryService {
     int credits = Math.max(1, (int) Math.ceil(((low + high) / 2.0 * 1.20) / 5.0));
     double hardCap = credits * 5.0;
     log.info(
-        "[CostHistory] estimate from {} samples for org={} {} {} repos={} tasks={}: ${}-${}",
+        "[CostHistory] estimate from {} samples for org={} {} {} repos={} tasks={} complexity={}:"
+            + " ${}-${}",
         sorted.length,
         orgId,
         strategy,
         provider,
         repoCount,
         taskCount,
+        taskComplexityFingerprint,
         String.format("%.4f", low),
         String.format("%.4f", high));
     return Optional.of(new RunCostTracker.Estimate(low, high, credits, hardCap, taskCount));
+  }
+
+  static String routeFingerprint(List<RunStepUsage> attempts) {
+    TreeSet<String> routes = new TreeSet<>();
+    if (attempts != null) {
+      attempts.stream()
+          .filter(java.util.Objects::nonNull)
+          .filter(a -> "SUCCESS".equalsIgnoreCase(a.getAttemptStatus()))
+          .filter(a -> a.getProvider() != null && !a.getProvider().isBlank())
+          .filter(a -> a.getModel() != null && !a.getModel().isBlank())
+          .forEach(
+              a ->
+                  routes.add(
+                      a.getProvider().trim().toUpperCase()
+                          + ":"
+                          + a.getModel().trim().toLowerCase()));
+    }
+    return routes.isEmpty() ? null : String.join(",", routes);
   }
 
   private static double percentile(double[] sortedAsc, double q) {
@@ -186,11 +248,45 @@ public class CostHistoryService {
     return sortedAsc[lo] + frac * (sortedAsc[hi] - sortedAsc[lo]);
   }
 
-  private static int extractTaskCount(PipelineRun r) {
-    // PipelineRun has no direct task count; the planJson would include it, but parsing here
-    // would be lossy. Default to 1; future revision can plumb the real count through.
-    return 1;
+  public static String taskComplexityFingerprint(List<String> complexities) {
+    if (complexities == null || complexities.isEmpty()) return null;
+    int low = 0;
+    int medium = 0;
+    int high = 0;
+    for (String complexity : complexities) {
+      switch (complexity == null ? "MEDIUM" : complexity.trim().toUpperCase()) {
+        case "LOW" -> low++;
+        case "HIGH" -> high++;
+        default -> medium++;
+      }
+    }
+    return "LOW:" + low + ",MEDIUM:" + medium + ",HIGH:" + high;
   }
+
+  private static PlanShape extractPlanShape(PipelineRun r) {
+    String planJson = r.getPlanJson();
+    if (planJson != null && !planJson.isBlank()) {
+      try {
+        JsonNode tasks = JSON.readTree(planJson).path("tasks");
+        if (tasks.isArray() && !tasks.isEmpty()) {
+          java.util.ArrayList<String> complexities = new java.util.ArrayList<>();
+          tasks.forEach(
+              task -> {
+                JsonNode complexity = task.get("complexity");
+                complexities.add(
+                    complexity == null || complexity.isNull() ? "MEDIUM" : complexity.asText());
+              });
+          return new PlanShape(tasks.size(), taskComplexityFingerprint(complexities));
+        }
+      } catch (Exception malformedPlan) {
+        // Cost history is best-effort. Malformed/legacy plans remain schema v1 rather than entering
+        // a shape-blind cohort.
+      }
+    }
+    return null;
+  }
+
+  private record PlanShape(int taskCount, String complexityFingerprint) {}
 
   private static int extractRepoCount(PipelineRun r) {
     String csv = r.getSelectedRepoIds();

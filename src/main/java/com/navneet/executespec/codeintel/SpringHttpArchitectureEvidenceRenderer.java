@@ -30,32 +30,56 @@ class SpringHttpArchitectureEvidenceRenderer {
       String pat,
       boolean inventoryTruncated) {
     StringBuilder evidence = header(sourceRevision);
-    if (inventoryTruncated) return unavailable(evidence, "SOURCE_INVENTORY_TRUNCATED");
+    Map<String, String> snapshot = new LinkedHashMap<>();
+    SpringHttpSurfaceSnapshot surface = null;
+    String http;
+    if (inventoryTruncated) {
+      http = unavailable(evidence, "SOURCE_INVENTORY_TRUNCATED");
+      return http + renderFacts(repoFullName, sourceRevision, files, pat, true, snapshot, null);
+    }
     List<String> candidates = files.stream().filter(this::isSource).sorted().toList();
     if (candidates.size() > MAX_SOURCE_FILES) {
-      return unavailable(evidence, "SOURCE_FILE_LIMIT_EXCEEDED");
+      http = unavailable(evidence, "SOURCE_FILE_LIMIT_EXCEEDED");
+      return http + renderFacts(repoFullName, sourceRevision, files, pat, false, snapshot, null);
     }
-    Map<String, String> snapshot = new LinkedHashMap<>();
     for (String path : candidates) {
       GitHubRepoService.RepoFileResult read;
       try {
         read = github.readRepoFile("https://github.com/" + repoFullName, path, sourceRevision, pat);
       } catch (Exception failure) {
-        return unavailable(evidence, "SOURCE_READ_FAILED");
+        http = unavailable(evidence, "SOURCE_READ_FAILED");
+        return http + renderFacts(repoFullName, sourceRevision, files, pat, false, snapshot, null);
       }
       if (read == null || !read.successful()) {
-        return unavailable(
-            evidence,
-            read == null || read.errorCode() == null ? "SOURCE_READ_FAILED" : read.errorCode());
+        http =
+            unavailable(
+                evidence,
+                read == null || read.errorCode() == null ? "SOURCE_READ_FAILED" : read.errorCode());
+        return http + renderFacts(repoFullName, sourceRevision, files, pat, false, snapshot, null);
       }
       snapshot.put(path, read.content());
     }
     try {
-      renderAvailable(evidence, extractor.extract(snapshot));
+      surface = extractor.extract(snapshot);
+      renderAvailable(evidence, surface);
     } catch (SpringHttpSurfaceExtractor.SurfaceExtractionException failure) {
-      return unavailable(evidence, "SURFACE_EXTRACTION_UNAVAILABLE");
+      http = unavailable(evidence, "SURFACE_EXTRACTION_UNAVAILABLE");
+      return http + renderFacts(repoFullName, sourceRevision, files, pat, false, snapshot, null);
     }
-    return finish(evidence);
+    return finish(evidence)
+        + renderFacts(repoFullName, sourceRevision, files, pat, false, snapshot, surface);
+  }
+
+  private String renderFacts(
+      String repoFullName,
+      String sourceRevision,
+      List<String> files,
+      String pat,
+      boolean inventoryTruncated,
+      Map<String, String> snapshot,
+      SpringHttpSurfaceSnapshot surface) {
+    return DeterministicProjectFactEvidence.render(
+        repoFullName, sourceRevision, files, pat, inventoryTruncated, github, snapshot, surface);
   }
 
   private static StringBuilder header(String revision) {

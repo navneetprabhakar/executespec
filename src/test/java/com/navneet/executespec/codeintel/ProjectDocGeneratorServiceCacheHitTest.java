@@ -43,6 +43,8 @@ import com.navneet.executespec.router.ResolvedModel;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.mockito.ArgumentCaptor;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.metadata.ChatGenerationMetadata;
@@ -61,6 +63,14 @@ import org.springframework.ai.chat.model.Generation;
  * pre-PR-Q behaviour that everything else already tests.
  */
 class ProjectDocGeneratorServiceCacheHitTest {
+
+  private static final String FACTS =
+      "\n\n"
+          + DeterministicProjectFactEvidence.BEGIN
+          + "\n- Repository: `owner/repo-a`\n- Source revision: `"
+          + "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`\n- Status: `AVAILABLE`\n"
+          + DeterministicProjectFactEvidence.END
+          + "\n";
 
   private static final UUID SOURCE_REPO_ID =
       UUID.fromString("00000000-0000-0000-0000-000000000099");
@@ -400,11 +410,13 @@ class ProjectDocGeneratorServiceCacheHitTest {
             Optional.of(
                 ProjectRepo.builder().id(aFirstId).githubRepoFullName("alpha/repo-a").build()));
     when(architectureService.codeMapForSourceSha("p-1", zId, "sha-z"))
-        .thenReturn(Optional.of(ProjectCodeMap.builder().content("zeta-map").build()));
+        .thenReturn(Optional.of(ProjectCodeMap.builder().content(withFacts("zeta-map")).build()));
     when(architectureService.codeMapForSourceSha("p-1", aLaterId, "sha-b"))
-        .thenReturn(Optional.of(ProjectCodeMap.builder().content("alpha-later-map").build()));
+        .thenReturn(
+            Optional.of(ProjectCodeMap.builder().content(withFacts("alpha-later-map")).build()));
     when(architectureService.codeMapForSourceSha("p-1", aFirstId, "sha-a"))
-        .thenReturn(Optional.of(ProjectCodeMap.builder().content("alpha-first-map").build()));
+        .thenReturn(
+            Optional.of(ProjectCodeMap.builder().content(withFacts("alpha-first-map")).build()));
 
     String bundle =
         svc.buildSourceBundle(
@@ -416,6 +428,32 @@ class ProjectDocGeneratorServiceCacheHitTest {
 
     assertThat(bundle.indexOf("alpha-first-map")).isLessThan(bundle.indexOf("alpha-later-map"));
     assertThat(bundle.indexOf("alpha-later-map")).isLessThan(bundle.indexOf("zeta-map"));
+  }
+
+  @Test
+  void sourceBundleDoesNotRecycleModelGeneratedArchitectureAsFactualEvidence() {
+    UUID repoId = UUID.fromString("00000000-0000-0000-0000-000000000010");
+    when(linkRepo.findByProjectId("p-1"))
+        .thenReturn(List.of(ProjectRepoLink.builder().projectId("p-1").repoId(repoId).build()));
+    when(repoRepo.findById(repoId))
+        .thenReturn(
+            Optional.of(ProjectRepo.builder().id(repoId).githubRepoFullName("owner/repo").build()));
+    when(architectureService.codeMapForSourceSha("p-1", repoId, "source-sha"))
+        .thenReturn(
+            Optional.of(ProjectCodeMap.builder().content(withFacts("# exact codemap")).build()));
+    ProjectArchitectureDoc architecture =
+        ProjectArchitectureDoc.builder()
+            .projectId("p-1")
+            .version(7)
+            .content("Flyway manages the schema and Compose runs the full application stack.")
+            .generatedFromShas("{\"owner/repo\":\"source-sha\"}")
+            .build();
+
+    String bundle = svc.buildSourceBundle(project("p-1"), architecture);
+
+    assertThat(bundle)
+        .contains("generated architecture body is intentionally excluded", "# exact codemap")
+        .doesNotContain("Flyway manages", "Compose runs the full application stack");
   }
 
   @Test
@@ -905,6 +943,44 @@ class ProjectDocGeneratorServiceCacheHitTest {
             any(LlmExecutionReference.class));
   }
 
+  @ParameterizedTest
+  @EnumSource(DocType.class)
+  void unsupportedProjectFactGetsOneSameRouteCorrectionForBothDocumentTypes(DocType type) {
+    wireCacheMiss();
+    wireExactSourceRepository("aaa");
+    String unsafe =
+        validDoc(type, "Unsafe")
+            .replaceFirst(
+                "(?m)^# ([^\\r\\n]+)$", "$0\n\nDocker Compose starts the full application stack.");
+    String corrected = validDoc(type, "Corrected");
+    when(llmRouter.callTextStrict(
+            anyString(),
+            anyString(),
+            anyList(),
+            anyString(),
+            anyString(),
+            anyString(),
+            org.mockito.ArgumentMatchers.nullable(Integer.class),
+            any(LlmExecutionReference.class)))
+        .thenReturn(textResponse(unsafe, "stop"), textResponse(corrected, "stop"));
+    when(docRepo.saveAndFlush(any(ProjectGeneratedDoc.class)))
+        .thenAnswer(invocation -> invocation.getArgument(0));
+
+    ProjectGeneratedDoc generated = svc.generate("p-1", type, "actor-1", LlmProvider.ANTHROPIC);
+
+    assertThat(generated.getContent()).isEqualTo(corrected);
+    verify(llmRouter, org.mockito.Mockito.times(2))
+        .callTextStrict(
+            anyString(),
+            anyString(),
+            anyList(),
+            anyString(),
+            anyString(),
+            anyString(),
+            org.mockito.ArgumentMatchers.nullable(Integer.class),
+            any(LlmExecutionReference.class));
+  }
+
   @Test
   void malformedShortProviderOutputRetriesOnceThenFailsTheDocumentQualityGate() {
     wireCacheMiss();
@@ -1115,8 +1191,14 @@ class ProjectDocGeneratorServiceCacheHitTest {
                     .projectId("p-1")
                     .repoId(SOURCE_REPO_ID)
                     .generatedFromSha(sha)
-                    .content(content)
+                    .content(withFacts(content))
                     .build()));
+  }
+
+  private static String withFacts(String content) {
+    return content != null && content.contains(DeterministicProjectFactEvidence.BEGIN)
+        ? content
+        : content + FACTS;
   }
 
   private static ChatResponse textResponse(String text, String finishReason) {

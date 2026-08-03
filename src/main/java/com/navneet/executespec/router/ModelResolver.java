@@ -170,6 +170,18 @@ public class ModelResolver {
   }
 
   /**
+   * Resolves the configured provider/tier cell without adaptive provider selection.
+   *
+   * <p>Used by pre-dispatch pricing fingerprints: historical physical attempts may be reused only
+   * when they match the run's bound YAML/org/exact-pin matrix. A health/performance decision that
+   * can change between calls is not a stable cohort identity; any later physical failover/adaptive
+   * route simply produces a different recorded fingerprint and is excluded.
+   */
+  public ResolvedModel resolveConfigured(LlmProvider provider, AgentTier tier) {
+    return resolved(provider, provider, lookupModel(provider, tier), tier, false);
+  }
+
+  /**
    * Checks if a healthy failover provider has materially better performance than the primary.
    * Returns the better provider, or null if the primary is best (or data is insufficient).
    */

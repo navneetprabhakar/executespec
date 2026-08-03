@@ -304,7 +304,7 @@ public class ProjectArchitectureService {
         if (latest != null
             && latest.getContent() != null
             && !latest.getContent().isBlank()
-            && DeterministicArchitectureEvidence.hasCurrentHttpEvidence(latest.getContent())) {
+            && DeterministicArchitectureEvidence.hasCurrentEvidence(latest.getContent())) {
           codeMapContent = latest.getContent();
         } else {
           CodeMapGenerator.Result generated =
@@ -702,7 +702,7 @@ public class ProjectArchitectureService {
     if (latest.isPresent() && currentSha != null) {
       String generatedSha = latest.get().getGeneratedFromSha();
       if (currentSha.equals(generatedSha)
-          && DeterministicArchitectureEvidence.hasCurrentHttpEvidence(latest.get().getContent())) {
+          && DeterministicArchitectureEvidence.hasCurrentEvidence(latest.get().getContent())) {
         log.info(
             "[{}] codemap for {} up-to-date @ sha={} — reusing v{}",
             projectId,
@@ -716,7 +716,7 @@ public class ProjectArchitectureService {
       // generatedFromSha and regenerates (→ publish → HEAD moves → regen → …). If the ONLY change
       // since this codemap was generated is under .executespec/, the source is unchanged — reuse +
       // advance the stored SHA so subsequent syncs short-circuit on the equality check above.
-      if (DeterministicArchitectureEvidence.hasCurrentHttpEvidence(latest.get().getContent())
+      if (DeterministicArchitectureEvidence.hasCurrentEvidence(latest.get().getContent())
           && gitHub.diffConfinedTo(
               repo.getGithubRepoFullName(),
               generatedSha,
@@ -855,7 +855,7 @@ public class ProjectArchitectureService {
         && !model.isBlank()
         && !"fallback".equalsIgnoreCase(model)
         && !doc.getContent().contains("LLM generation failed")
-        && DeterministicArchitectureEvidence.hasCurrentHttpEvidence(doc.getContent());
+        && DeterministicArchitectureEvidence.hasCurrentEvidence(doc.getContent());
   }
 
   static String fallbackRepoArchitectureMarkdown(String repoFullName, String codeMap) {
@@ -871,7 +871,7 @@ public class ProjectArchitectureService {
     String content = doc.getContent();
     return !content.startsWith("# Project architecture (deterministic)")
         && !content.contains("LLM generation failed")
-        && DeterministicArchitectureEvidence.hasCurrentHttpEvidence(content);
+        && DeterministicArchitectureEvidence.hasCurrentEvidence(content);
   }
 
   /**

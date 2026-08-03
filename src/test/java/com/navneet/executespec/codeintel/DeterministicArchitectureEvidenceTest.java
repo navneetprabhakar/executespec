@@ -19,6 +19,10 @@ class DeterministicArchitectureEvidenceTest {
           + "- Evidence digest: `digest`\n"
           + "- `POST /simulation/casino-game` — `SimulationController.java:3`\n"
           + DeterministicArchitectureEvidence.HTTP_END;
+  private static final String FACTS =
+      DeterministicProjectFactEvidence.BEGIN
+          + "\n- Repository: `owner/repo`\n- Status: `AVAILABLE`\n"
+          + DeterministicProjectFactEvidence.END;
 
   @Test
   void repoArchitectureKeepsTrustedCodemapBlockAfterProviderOmitsAndContradictsIt() {
@@ -29,11 +33,13 @@ class DeterministicArchitectureEvidenceTest {
             + DeterministicArchitectureEvidence.HTTP_END;
 
     String result =
-        DeterministicArchitectureEvidence.appendFromCodemap(generated, "# codemap\n\n" + EVIDENCE);
+        DeterministicArchitectureEvidence.appendFromCodemap(
+            generated, "# codemap\n\n" + EVIDENCE + "\n" + FACTS);
 
     assertThat(result).contains("POST /simulation/casino-game");
     assertThat(result).contains("Source revision: `deadbeef`");
     assertThat(result).doesNotContain("forged");
+    assertThat(result).contains(DeterministicProjectFactEvidence.BEGIN);
     assertThat(result.indexOf(DeterministicArchitectureEvidence.HTTP_BEGIN))
         .isEqualTo(result.lastIndexOf(DeterministicArchitectureEvidence.HTTP_BEGIN));
   }
@@ -43,12 +49,16 @@ class DeterministicArchitectureEvidenceTest {
     RepoArchitectureDoc first =
         RepoArchitectureDoc.builder()
             .repoId(UUID.randomUUID())
-            .content("# first\n\n" + EVIDENCE)
+            .content("# first\n\n" + EVIDENCE + "\n" + FACTS)
             .build();
     RepoArchitectureDoc second =
         RepoArchitectureDoc.builder()
             .repoId(UUID.randomUUID())
-            .content("# second\n\n" + EVIDENCE.replace("/simulation/casino-game", "/orders/health"))
+            .content(
+                "# second\n\n"
+                    + EVIDENCE.replace("/simulation/casino-game", "/orders/health")
+                    + "\n"
+                    + FACTS.replace("owner/repo", "owner/orders"))
             .build();
 
     String result =
@@ -61,6 +71,7 @@ class DeterministicArchitectureEvidenceTest {
         .contains("### `owner/casino`")
         .contains("POST /simulation/casino-game")
         .contains("### `owner/orders`")
-        .contains("POST /orders/health");
+        .contains("POST /orders/health")
+        .contains("Repository: `owner/orders`");
   }
 }

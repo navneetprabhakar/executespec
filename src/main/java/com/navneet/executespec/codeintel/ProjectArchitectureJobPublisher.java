@@ -89,12 +89,25 @@ public class ProjectArchitectureJobPublisher {
         staged.repoArchitectures()) {
       groundedRepoArchitectures.put(
           repoArchitecture.repoId(),
-          GeneratedSignatureGrounding.sanitize(repoArchitecture.content(), sourceEvidence));
+          GeneratedProjectFactGrounding.sanitize(
+              GeneratedSignatureGrounding.sanitizeUnsupportedBehavior(
+                  GeneratedSignatureGrounding.sanitize(repoArchitecture.content(), sourceEvidence),
+                  sourceEvidence),
+              sourceEvidence));
     }
     String groundedProjectArchitecture =
-        GeneratedSignatureGrounding.sanitize(
-            staged.projectArchitecture().content(), sourceEvidence);
-    String groundedSummary = GeneratedSignatureGrounding.sanitize(staged.summary(), sourceEvidence);
+        GeneratedProjectFactGrounding.sanitize(
+            GeneratedSignatureGrounding.sanitizeUnsupportedBehavior(
+                GeneratedSignatureGrounding.sanitize(
+                    staged.projectArchitecture().content(), sourceEvidence),
+                sourceEvidence),
+            sourceEvidence);
+    String groundedSummary =
+        GeneratedProjectFactGrounding.sanitize(
+            GeneratedSignatureGrounding.sanitizeUnsupportedBehavior(
+                GeneratedSignatureGrounding.sanitize(staged.summary(), sourceEvidence),
+                sourceEvidence),
+            sourceEvidence);
 
     List<ProjectCodeMap> savedCodeMaps = new ArrayList<>();
     Map<UUID, ProjectCodeMap> codeMapByRepo = new LinkedHashMap<>();

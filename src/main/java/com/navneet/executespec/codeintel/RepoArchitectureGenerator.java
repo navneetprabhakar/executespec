@@ -74,6 +74,11 @@ public class RepoArchitectureGenerator {
       Rules:
       - Natural language prose, not bullet-dumps, except where lists improve scanning.
       - Do NOT invent files, classes, or routes that are not in the codemap.
+      - Deterministic evidence blocks are authoritative for the facts they cover. File and symbol
+        inventory does not prove calls, dependencies, runtime flow, schema ownership, Compose
+        application startup, or response-vs-view behavior. State "not established by the supplied
+        deterministic evidence" instead of inferring those facts from framework conventions.
+      - Do not turn declaration co-occurrence into an integration or data-flow claim.
       - Cite file paths inline with backticks.
       - Aim for 500-1000 words. Dense, scannable, citation-rich.
       """;
@@ -201,8 +206,11 @@ public class RepoArchitectureGenerator {
         inTok,
         outTok,
         resolved.getModel());
+    String grounded = GeneratedSignatureGrounding.sanitize(text.trim(), codeMapMarkdown);
+    grounded = GeneratedSignatureGrounding.sanitizeUnsupportedBehavior(grounded, codeMapMarkdown);
+    grounded = GeneratedProjectFactGrounding.sanitize(grounded, codeMapMarkdown);
     return new Result(
-        DeterministicArchitectureEvidence.appendFromCodemap(text.trim(), codeMapMarkdown),
+        DeterministicArchitectureEvidence.appendFromCodemap(grounded, codeMapMarkdown),
         inTok,
         outTok,
         resolved.getModel());
