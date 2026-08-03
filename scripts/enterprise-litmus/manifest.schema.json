@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://executespec.ai/schemas/enterprise-litmus-manifest-v2.json",
+  "$id": "https://executespec.ai/schemas/enterprise-litmus-manifest-v3.json",
   "title": "ExecuteSpec enterprise litmus manifest",
   "type": "object",
   "additionalProperties": false,
@@ -18,6 +18,8 @@
     "runRequest",
     "approval",
     "clients",
+    "sandboxJourney",
+    "cliFallback",
     "frozenTupleDigest",
     "heroes",
     "postMerge",
@@ -27,7 +29,7 @@
   ],
   "properties": {
     "schemaVersion": {
-      "const": 2
+      "const": 3
     },
     "campaignId": {
       "type": "string",
@@ -39,6 +41,7 @@
         "PREFLIGHTED",
         "FIXTURE_CREATED",
         "PROJECT_LINKED",
+        "SANDBOX_ASSESSED",
         "BASELINE_V1_READY",
         "SOURCE_REVISION_PUSHED",
         "BASELINE_V2_READY",
@@ -49,6 +52,7 @@
         "HERO_2_VERIFIED",
         "HERO_3_RUNNING",
         "HERO_3_VERIFIED",
+        "CLI_FALLBACK_VERIFIED",
         "HERO_PR_MERGED",
         "MERGED_SHA_REFRESHED",
         "CONTINUATION_VERIFIED",
@@ -72,10 +76,7 @@
       "format": "date-time"
     },
     "invalidation": {
-      "type": [
-        "object",
-        "null"
-      ]
+      "type": ["object", "null"]
     },
     "deployment": {
       "$ref": "#/$defs/object"
@@ -89,17 +90,10 @@
     "route": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "provider",
-        "model",
-        "routingMode"
-      ],
+      "required": ["provider", "model", "routingMode"],
       "properties": {
         "provider": {
-          "enum": [
-            "DEEPSEEK",
-            "FIREWORKS"
-          ]
+          "enum": ["DEEPSEEK", "FIREWORKS"]
         },
         "model": {
           "enum": [
@@ -140,10 +134,7 @@
           "then": {
             "properties": {
               "model": {
-                "enum": [
-                  "deepseek-v4-pro-native",
-                  "deepseek-v4-flash-native"
-                ]
+                "enum": ["deepseek-v4-pro-native", "deepseek-v4-flash-native"]
               }
             }
           }
@@ -185,11 +176,20 @@
     "clients": {
       "$ref": "#/$defs/object"
     },
+    "sandboxJourney": {
+      "oneOf": [
+        { "$ref": "#/$defs/emptyObject" },
+        { "$ref": "#/$defs/sandboxJourney" }
+      ]
+    },
+    "cliFallback": {
+      "oneOf": [
+        { "$ref": "#/$defs/emptyObject" },
+        { "$ref": "#/$defs/cliFallback" }
+      ]
+    },
     "frozenTupleDigest": {
-      "type": [
-        "string",
-        "null"
-      ],
+      "type": ["string", "null"],
       "pattern": "^[0-9a-f]{64}$"
     },
     "heroes": {
@@ -219,41 +219,1176 @@
       }
     }
   },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "state": {
+            "enum": [
+              "SANDBOX_ASSESSED",
+              "BASELINE_V1_READY",
+              "SOURCE_REVISION_PUSHED",
+              "BASELINE_V2_READY",
+              "FROZEN",
+              "HERO_1_RUNNING",
+              "HERO_1_VERIFIED",
+              "HERO_2_RUNNING",
+              "HERO_2_VERIFIED",
+              "HERO_3_RUNNING",
+              "HERO_3_VERIFIED",
+              "CLI_FALLBACK_VERIFIED",
+              "HERO_PR_MERGED",
+              "MERGED_SHA_REFRESHED",
+              "CONTINUATION_VERIFIED",
+              "CI_FAILURE_CREATED",
+              "CI_FIX_VERIFIED",
+              "DEPLOYMENT_TRACKED",
+              "DEPLOYMENT_SKIPPED",
+              "NEGATIVES_VERIFIED",
+              "COMPLETE"
+            ]
+          }
+        },
+        "required": ["state"]
+      },
+      "then": {
+        "properties": {
+          "sandboxJourney": { "$ref": "#/$defs/sandboxJourney" }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "state": {
+            "enum": [
+              "CLI_FALLBACK_VERIFIED",
+              "HERO_PR_MERGED",
+              "MERGED_SHA_REFRESHED",
+              "CONTINUATION_VERIFIED",
+              "CI_FAILURE_CREATED",
+              "CI_FIX_VERIFIED",
+              "DEPLOYMENT_TRACKED",
+              "DEPLOYMENT_SKIPPED",
+              "NEGATIVES_VERIFIED",
+              "COMPLETE"
+            ]
+          }
+        },
+        "required": ["state"]
+      },
+      "then": {
+        "properties": {
+          "cliFallback": { "$ref": "#/$defs/cliFallback" }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "state": {
+            "enum": [
+              "NEW",
+              "PREFLIGHTED",
+              "FIXTURE_CREATED",
+              "PROJECT_LINKED",
+              "SANDBOX_ASSESSED",
+              "BASELINE_V1_READY",
+              "SOURCE_REVISION_PUSHED",
+              "BASELINE_V2_READY",
+              "FROZEN"
+            ]
+          }
+        },
+        "required": ["state"]
+      },
+      "then": { "$ref": "#/$defs/evidenceEmpty" }
+    },
+    {
+      "if": {
+        "properties": { "state": { "const": "HERO_1_RUNNING" } },
+        "required": ["state"]
+      },
+      "then": { "$ref": "#/$defs/evidenceHero1Pending" }
+    },
+    {
+      "if": {
+        "properties": { "state": { "const": "HERO_1_VERIFIED" } },
+        "required": ["state"]
+      },
+      "then": { "$ref": "#/$defs/evidenceHero1Verified" }
+    },
+    {
+      "if": {
+        "properties": { "state": { "const": "HERO_2_RUNNING" } },
+        "required": ["state"]
+      },
+      "then": { "$ref": "#/$defs/evidenceHero2Pending" }
+    },
+    {
+      "if": {
+        "properties": { "state": { "const": "HERO_2_VERIFIED" } },
+        "required": ["state"]
+      },
+      "then": { "$ref": "#/$defs/evidenceHero2Verified" }
+    },
+    {
+      "if": {
+        "properties": { "state": { "const": "HERO_3_RUNNING" } },
+        "required": ["state"]
+      },
+      "then": { "$ref": "#/$defs/evidenceHero3Pending" }
+    },
+    {
+      "if": {
+        "properties": {
+          "state": { "enum": ["HERO_3_VERIFIED", "CLI_FALLBACK_VERIFIED"] }
+        },
+        "required": ["state"]
+      },
+      "then": { "$ref": "#/$defs/evidenceHero3Verified" }
+    },
+    {
+      "if": {
+        "properties": { "state": { "const": "HERO_PR_MERGED" } },
+        "required": ["state"]
+      },
+      "then": { "$ref": "#/$defs/evidenceHeroPrMerged" }
+    },
+    {
+      "if": {
+        "properties": { "state": { "const": "MERGED_SHA_REFRESHED" } },
+        "required": ["state"]
+      },
+      "then": { "$ref": "#/$defs/evidenceMergedShaRefreshed" }
+    },
+    {
+      "if": {
+        "properties": { "state": { "const": "CONTINUATION_VERIFIED" } },
+        "required": ["state"]
+      },
+      "then": { "$ref": "#/$defs/evidenceContinuationVerified" }
+    },
+    {
+      "if": {
+        "properties": { "state": { "const": "CI_FAILURE_CREATED" } },
+        "required": ["state"]
+      },
+      "then": { "$ref": "#/$defs/evidenceCiFailureCreated" }
+    },
+    {
+      "if": {
+        "properties": { "state": { "const": "CI_FIX_VERIFIED" } },
+        "required": ["state"]
+      },
+      "then": { "$ref": "#/$defs/evidenceCiFixVerified" }
+    },
+    {
+      "if": {
+        "properties": {
+          "state": { "enum": ["DEPLOYMENT_TRACKED", "DEPLOYMENT_SKIPPED"] }
+        },
+        "required": ["state"]
+      },
+      "then": { "$ref": "#/$defs/evidenceDeploymentResolved" }
+    },
+    {
+      "if": {
+        "properties": {
+          "state": { "enum": ["NEGATIVES_VERIFIED", "COMPLETE"] }
+        },
+        "required": ["state"]
+      },
+      "then": { "$ref": "#/$defs/evidenceNegativesVerified" }
+    },
+    {
+      "if": {
+        "properties": { "state": { "const": "CLEANUP_REQUIRED" } },
+        "required": ["state"]
+      },
+      "then": {
+        "properties": {
+          "cleanup": {
+            "type": "object",
+            "required": ["required"],
+            "properties": {
+              "required": { "$ref": "#/$defs/cleanupRequiredBoundary" }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "state": { "const": "CLEANUP_VERIFIED" } },
+        "required": ["state"]
+      },
+      "then": {
+        "properties": {
+          "cleanup": {
+            "type": "object",
+            "required": ["required", "verified"],
+            "properties": {
+              "required": { "$ref": "#/$defs/cleanupRequiredBoundary" },
+              "verified": { "$ref": "#/$defs/cleanupVerifiedEvidence" }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "state": { "const": "COMPLETE" } },
+        "required": ["state"]
+      },
+      "then": {
+        "properties": {
+          "cleanup": { "$ref": "#/$defs/completeCleanup" }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "state": { "const": "INVALIDATED" } },
+        "required": ["state"]
+      },
+      "then": {
+        "properties": {
+          "invalidation": { "$ref": "#/$defs/invalidationBoundary" }
+        }
+      }
+    }
+  ],
   "$defs": {
+    "nonEmptyString": { "type": "string", "minLength": 1 },
+    "emptyObject": {
+      "type": "object",
+      "additionalProperties": false,
+      "maxProperties": 0
+    },
+    "heroSubmission": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ordinal",
+        "runId",
+        "branch",
+        "sourceSha",
+        "requestSha256",
+        "submittedEvidenceId"
+      ],
+      "properties": {
+        "ordinal": { "type": "integer", "minimum": 1, "maximum": 3 },
+        "runId": { "$ref": "#/$defs/nonEmptyString" },
+        "branch": { "$ref": "#/$defs/nonEmptyString" },
+        "sourceSha": { "$ref": "#/$defs/gitSha" },
+        "requestSha256": { "$ref": "#/$defs/digest" },
+        "submittedEvidenceId": { "$ref": "#/$defs/nonEmptyString" }
+      }
+    },
+    "heroSubmission1": {
+      "allOf": [
+        { "$ref": "#/$defs/heroSubmission" },
+        { "properties": { "ordinal": { "const": 1 } } }
+      ]
+    },
+    "heroSubmission2": {
+      "allOf": [
+        { "$ref": "#/$defs/heroSubmission" },
+        { "properties": { "ordinal": { "const": 2 } } }
+      ]
+    },
+    "heroSubmission3": {
+      "allOf": [
+        { "$ref": "#/$defs/heroSubmission" },
+        { "properties": { "ordinal": { "const": 3 } } }
+      ]
+    },
+    "heroSubmissions1": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 1,
+      "prefixItems": [{ "$ref": "#/$defs/heroSubmission1" }],
+      "items": false
+    },
+    "heroSubmissions2": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "prefixItems": [
+        { "$ref": "#/$defs/heroSubmission1" },
+        { "$ref": "#/$defs/heroSubmission2" }
+      ],
+      "items": false
+    },
+    "heroSubmissions3": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "prefixItems": [
+        { "$ref": "#/$defs/heroSubmission1" },
+        { "$ref": "#/$defs/heroSubmission2" },
+        { "$ref": "#/$defs/heroSubmission3" }
+      ],
+      "items": false
+    },
+    "postMergePending1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pendingHero"],
+      "properties": {
+        "pendingHero": { "$ref": "#/$defs/heroSubmission1" }
+      }
+    },
+    "postMergeSubmissions1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["heroSubmissions"],
+      "properties": {
+        "heroSubmissions": { "$ref": "#/$defs/heroSubmissions1" }
+      }
+    },
+    "postMergeSubmissions1Pending2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["heroSubmissions", "pendingHero"],
+      "properties": {
+        "heroSubmissions": { "$ref": "#/$defs/heroSubmissions1" },
+        "pendingHero": { "$ref": "#/$defs/heroSubmission2" }
+      }
+    },
+    "postMergeSubmissions2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["heroSubmissions"],
+      "properties": {
+        "heroSubmissions": { "$ref": "#/$defs/heroSubmissions2" }
+      }
+    },
+    "postMergeSubmissions2Pending3": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["heroSubmissions", "pendingHero"],
+      "properties": {
+        "heroSubmissions": { "$ref": "#/$defs/heroSubmissions2" },
+        "pendingHero": { "$ref": "#/$defs/heroSubmission3" }
+      }
+    },
+    "postMergeSubmissions3": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["heroSubmissions"],
+      "properties": {
+        "heroSubmissions": { "$ref": "#/$defs/heroSubmissions3" }
+      }
+    },
+    "postMergeMerged": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["heroSubmissions", "merge"],
+      "properties": {
+        "heroSubmissions": { "$ref": "#/$defs/heroSubmissions3" },
+        "merge": { "$ref": "#/$defs/object" }
+      }
+    },
+    "postMergeRefreshed": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["heroSubmissions", "merge", "refresh"],
+      "properties": {
+        "heroSubmissions": { "$ref": "#/$defs/heroSubmissions3" },
+        "merge": { "$ref": "#/$defs/object" },
+        "refresh": { "$ref": "#/$defs/object" }
+      }
+    },
+    "postMergeContinuation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["heroSubmissions", "merge", "refresh", "continuation"],
+      "properties": {
+        "heroSubmissions": { "$ref": "#/$defs/heroSubmissions3" },
+        "merge": { "$ref": "#/$defs/object" },
+        "refresh": { "$ref": "#/$defs/object" },
+        "continuation": { "$ref": "#/$defs/object" }
+      }
+    },
+    "postMergeCiFailure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "heroSubmissions",
+        "merge",
+        "refresh",
+        "continuation",
+        "ciFailure"
+      ],
+      "properties": {
+        "heroSubmissions": { "$ref": "#/$defs/heroSubmissions3" },
+        "merge": { "$ref": "#/$defs/object" },
+        "refresh": { "$ref": "#/$defs/object" },
+        "continuation": { "$ref": "#/$defs/object" },
+        "ciFailure": { "$ref": "#/$defs/object" }
+      }
+    },
+    "postMergeCiFix": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "heroSubmissions",
+        "merge",
+        "refresh",
+        "continuation",
+        "ciFailure",
+        "ciFix"
+      ],
+      "properties": {
+        "heroSubmissions": { "$ref": "#/$defs/heroSubmissions3" },
+        "merge": { "$ref": "#/$defs/object" },
+        "refresh": { "$ref": "#/$defs/object" },
+        "continuation": { "$ref": "#/$defs/object" },
+        "ciFailure": { "$ref": "#/$defs/object" },
+        "ciFix": { "$ref": "#/$defs/object" }
+      }
+    },
+    "postMergeDeployment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "heroSubmissions",
+        "merge",
+        "refresh",
+        "continuation",
+        "ciFailure",
+        "ciFix",
+        "deployment"
+      ],
+      "properties": {
+        "heroSubmissions": { "$ref": "#/$defs/heroSubmissions3" },
+        "merge": { "$ref": "#/$defs/object" },
+        "refresh": { "$ref": "#/$defs/object" },
+        "continuation": { "$ref": "#/$defs/object" },
+        "ciFailure": { "$ref": "#/$defs/object" },
+        "ciFix": { "$ref": "#/$defs/object" },
+        "deployment": { "$ref": "#/$defs/object" }
+      }
+    },
+    "evidenceEmpty": {
+      "properties": {
+        "heroes": { "maxItems": 0 },
+        "postMerge": { "$ref": "#/$defs/emptyObject" },
+        "negatives": { "maxItems": 0 }
+      }
+    },
+    "evidenceHero1Pending": {
+      "properties": {
+        "heroes": { "maxItems": 0 },
+        "postMerge": { "$ref": "#/$defs/postMergePending1" },
+        "negatives": { "maxItems": 0 }
+      }
+    },
+    "evidenceHero1Verified": {
+      "properties": {
+        "heroes": { "minItems": 1, "maxItems": 1 },
+        "postMerge": { "$ref": "#/$defs/postMergeSubmissions1" },
+        "negatives": { "maxItems": 0 }
+      }
+    },
+    "evidenceHero2Pending": {
+      "properties": {
+        "heroes": { "minItems": 1, "maxItems": 1 },
+        "postMerge": { "$ref": "#/$defs/postMergeSubmissions1Pending2" },
+        "negatives": { "maxItems": 0 }
+      }
+    },
+    "evidenceHero2Verified": {
+      "properties": {
+        "heroes": { "minItems": 2, "maxItems": 2 },
+        "postMerge": { "$ref": "#/$defs/postMergeSubmissions2" },
+        "negatives": { "maxItems": 0 }
+      }
+    },
+    "evidenceHero3Pending": {
+      "properties": {
+        "heroes": { "minItems": 2, "maxItems": 2 },
+        "postMerge": { "$ref": "#/$defs/postMergeSubmissions2Pending3" },
+        "negatives": { "maxItems": 0 }
+      }
+    },
+    "evidenceHero3Verified": {
+      "properties": {
+        "heroes": { "minItems": 3, "maxItems": 3 },
+        "postMerge": { "$ref": "#/$defs/postMergeSubmissions3" },
+        "negatives": { "maxItems": 0 }
+      }
+    },
+    "evidenceHeroPrMerged": {
+      "properties": {
+        "heroes": { "minItems": 3, "maxItems": 3 },
+        "postMerge": { "$ref": "#/$defs/postMergeMerged" },
+        "negatives": { "maxItems": 0 }
+      }
+    },
+    "evidenceMergedShaRefreshed": {
+      "properties": {
+        "heroes": { "minItems": 3, "maxItems": 3 },
+        "postMerge": { "$ref": "#/$defs/postMergeRefreshed" },
+        "negatives": { "maxItems": 0 }
+      }
+    },
+    "evidenceContinuationVerified": {
+      "properties": {
+        "heroes": { "minItems": 3, "maxItems": 3 },
+        "postMerge": { "$ref": "#/$defs/postMergeContinuation" },
+        "negatives": { "maxItems": 0 }
+      }
+    },
+    "evidenceCiFailureCreated": {
+      "properties": {
+        "heroes": { "minItems": 3, "maxItems": 3 },
+        "postMerge": { "$ref": "#/$defs/postMergeCiFailure" },
+        "negatives": { "maxItems": 0 }
+      }
+    },
+    "evidenceCiFixVerified": {
+      "properties": {
+        "heroes": { "minItems": 3, "maxItems": 3 },
+        "postMerge": { "$ref": "#/$defs/postMergeCiFix" },
+        "negatives": { "maxItems": 0 }
+      }
+    },
+    "evidenceDeploymentResolved": {
+      "properties": {
+        "heroes": { "minItems": 3, "maxItems": 3 },
+        "postMerge": { "$ref": "#/$defs/postMergeDeployment" },
+        "negatives": { "maxItems": 0 }
+      }
+    },
+    "evidenceNegativesVerified": {
+      "properties": {
+        "heroes": { "minItems": 3, "maxItems": 3 },
+        "postMerge": { "$ref": "#/$defs/postMergeDeployment" },
+        "negatives": { "minItems": 21, "maxItems": 21 }
+      }
+    },
+    "evidenceOriginState": {
+      "enum": [
+        "NEW",
+        "PREFLIGHTED",
+        "FIXTURE_CREATED",
+        "PROJECT_LINKED",
+        "SANDBOX_ASSESSED",
+        "BASELINE_V1_READY",
+        "SOURCE_REVISION_PUSHED",
+        "BASELINE_V2_READY",
+        "FROZEN",
+        "HERO_1_RUNNING",
+        "HERO_1_VERIFIED",
+        "HERO_2_RUNNING",
+        "HERO_2_VERIFIED",
+        "HERO_3_RUNNING",
+        "HERO_3_VERIFIED",
+        "CLI_FALLBACK_VERIFIED",
+        "HERO_PR_MERGED",
+        "MERGED_SHA_REFRESHED",
+        "CONTINUATION_VERIFIED",
+        "CI_FAILURE_CREATED",
+        "CI_FIX_VERIFIED",
+        "DEPLOYMENT_TRACKED",
+        "DEPLOYMENT_SKIPPED",
+        "NEGATIVES_VERIFIED",
+        "COMPLETE"
+      ]
+    },
+    "cleanupRequiredBoundary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "reason",
+        "cleanupPlanId",
+        "enteredFromState",
+        "heroCountAtEntry",
+        "stateEvidenceDigest"
+      ],
+      "properties": {
+        "reason": { "$ref": "#/$defs/nonEmptyString" },
+        "cleanupPlanId": { "$ref": "#/$defs/nonEmptyString" },
+        "enteredFromState": { "$ref": "#/$defs/evidenceOriginState" },
+        "heroCountAtEntry": { "type": "integer", "minimum": 0, "maximum": 3 },
+        "stateEvidenceDigest": { "$ref": "#/$defs/digest" }
+      }
+    },
+    "invalidationBoundary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "at",
+        "reason",
+        "fromState",
+        "heroCountAtEntry",
+        "stateEvidenceDigest"
+      ],
+      "properties": {
+        "at": { "type": "string", "format": "date-time" },
+        "reason": { "$ref": "#/$defs/nonEmptyString" },
+        "fromState": { "$ref": "#/$defs/evidenceOriginState" },
+        "heroCountAtEntry": { "type": "integer", "minimum": 0, "maximum": 3 },
+        "stateEvidenceDigest": { "$ref": "#/$defs/digest" }
+      }
+    },
+    "cleanupVerifiedEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "githubRepo",
+        "githubAbsent",
+        "executespecProjectId",
+        "projectAbsent",
+        "repositoryLinkAbsent",
+        "executespecRepositoryAbsent",
+        "sandboxAbsent",
+        "runsAbsent",
+        "deploymentAbsent",
+        "remoteBranchesAbsent",
+        "localArtifactsRemoved",
+        "cleanupEvidenceId"
+      ],
+      "properties": {
+        "githubRepo": { "$ref": "#/$defs/nonEmptyString" },
+        "githubAbsent": { "const": true },
+        "executespecProjectId": { "$ref": "#/$defs/nonEmptyString" },
+        "projectAbsent": { "const": true },
+        "repositoryLinkAbsent": { "const": true },
+        "executespecRepositoryAbsent": { "const": true },
+        "sandboxAbsent": { "const": true },
+        "runsAbsent": { "const": true },
+        "deploymentAbsent": { "const": true },
+        "remoteBranchesAbsent": { "const": true },
+        "localArtifactsRemoved": { "const": true },
+        "cleanupEvidenceId": { "$ref": "#/$defs/nonEmptyString" }
+      }
+    },
+    "cleanupAudit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["auditId", "auditor", "pass"],
+      "properties": {
+        "auditId": { "$ref": "#/$defs/nonEmptyString" },
+        "auditor": { "$ref": "#/$defs/nonEmptyString" },
+        "pass": { "const": true },
+        "goEligible": { "type": "boolean" },
+        "nonPassNegativeCases": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/nonEmptyString" },
+          "uniqueItems": true
+        },
+        "nonPassRequirements": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/nonEmptyString" },
+          "uniqueItems": true
+        }
+      }
+    },
+    "completeCleanup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["required", "verified", "audit"],
+      "properties": {
+        "required": { "$ref": "#/$defs/cleanupRequiredBoundary" },
+        "verified": { "$ref": "#/$defs/cleanupVerifiedEvidence" },
+        "audit": { "$ref": "#/$defs/cleanupAudit" },
+        "githubDeletionRequested": { "$ref": "#/$defs/object" }
+      }
+    },
+    "capabilitySnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "lifecycleEnabled",
+        "runtimeDispatchEnabled",
+        "containerStrictV1Enabled",
+        "toolchainReadinessEnabled"
+      ],
+      "properties": {
+        "lifecycleEnabled": { "type": "boolean" },
+        "runtimeDispatchEnabled": { "type": "boolean" },
+        "containerStrictV1Enabled": { "type": "boolean" },
+        "toolchainReadinessEnabled": { "type": "boolean" }
+      }
+    },
+    "strictCapabilitySnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "lifecycleEnabled",
+        "runtimeDispatchEnabled",
+        "containerStrictV1Enabled",
+        "toolchainReadinessEnabled"
+      ],
+      "properties": {
+        "lifecycleEnabled": { "const": true },
+        "runtimeDispatchEnabled": { "const": true },
+        "containerStrictV1Enabled": { "const": true },
+        "toolchainReadinessEnabled": { "const": true }
+      }
+    },
+    "projectInteraction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "classification",
+        "createOrLinkInsideAgentAvailable",
+        "handoffAvailable",
+        "evidenceId"
+      ],
+      "properties": {
+        "classification": {
+          "enum": [
+            "SUPPORTED",
+            "INTENTIONAL_SEPARATION",
+            "HANDOFF_DEFECT",
+            "MISSING"
+          ]
+        },
+        "createOrLinkInsideAgentAvailable": { "type": "boolean" },
+        "handoffAvailable": { "type": "boolean" },
+        "evidenceId": { "$ref": "#/$defs/nonEmptyString" }
+      }
+    },
+    "strictSandboxExecution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sandboxId",
+        "imageDigest",
+        "runtimeEpoch",
+        "leaseId",
+        "sourceSha",
+        "workspaceMount",
+        "uid",
+        "gid",
+        "noHostFallback",
+        "commandPassed",
+        "buildPassed",
+        "testsPassed",
+        "projectContextPreserved",
+        "historyReloadPassed",
+        "closePassed",
+        "evidenceId"
+      ],
+      "properties": {
+        "sandboxId": { "$ref": "#/$defs/nonEmptyString" },
+        "imageDigest": {
+          "type": "string",
+          "pattern": "@sha256:[0-9a-fA-F]{64}$"
+        },
+        "runtimeEpoch": { "$ref": "#/$defs/nonEmptyString" },
+        "leaseId": { "$ref": "#/$defs/nonEmptyString" },
+        "sourceSha": { "$ref": "#/$defs/gitSha" },
+        "workspaceMount": { "$ref": "#/$defs/nonEmptyString" },
+        "uid": { "type": "integer", "minimum": 1 },
+        "gid": { "type": "integer", "minimum": 1 },
+        "noHostFallback": { "const": true },
+        "commandPassed": { "const": true },
+        "buildPassed": { "const": true },
+        "testsPassed": { "const": true },
+        "projectContextPreserved": { "const": true },
+        "historyReloadPassed": { "const": true },
+        "closePassed": { "const": true },
+        "evidenceId": { "$ref": "#/$defs/nonEmptyString" }
+      }
+    },
+    "remoteWorkspaceExecution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sandboxCreated",
+        "hostFallbackUsed",
+        "truthfulLabel",
+        "doNotDemo",
+        "limitation",
+        "projectContextPreserved",
+        "historySnapshotAvailable",
+        "closeAvailable",
+        "evidenceId"
+      ],
+      "properties": {
+        "sandboxCreated": { "const": false },
+        "hostFallbackUsed": { "const": false },
+        "truthfulLabel": { "const": "Remote workspace" },
+        "doNotDemo": { "const": true },
+        "limitation": { "$ref": "#/$defs/nonEmptyString" },
+        "projectContextPreserved": { "type": "boolean" },
+        "historySnapshotAvailable": { "type": "boolean" },
+        "closeAvailable": { "type": "boolean" },
+        "evidenceId": { "$ref": "#/$defs/nonEmptyString" }
+      }
+    },
+    "strictSandboxTeardown": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode",
+        "projectId",
+        "sourceSha",
+        "sandboxId",
+        "runtimeEpoch",
+        "leaseId",
+        "sandboxAbsent",
+        "workspaceClosed",
+        "evidenceId"
+      ],
+      "properties": {
+        "mode": { "const": "STRICT_REMOTE_SANDBOX" },
+        "projectId": { "$ref": "#/$defs/nonEmptyString" },
+        "sourceSha": { "$ref": "#/$defs/gitSha" },
+        "sandboxId": { "$ref": "#/$defs/nonEmptyString" },
+        "runtimeEpoch": { "$ref": "#/$defs/nonEmptyString" },
+        "leaseId": { "$ref": "#/$defs/nonEmptyString" },
+        "sandboxAbsent": { "const": true },
+        "workspaceClosed": { "const": true },
+        "evidenceId": { "$ref": "#/$defs/nonEmptyString" }
+      }
+    },
+    "remoteWorkspaceTeardown": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode",
+        "projectId",
+        "sourceSha",
+        "sandboxAbsent",
+        "workspaceClosed",
+        "evidenceId"
+      ],
+      "properties": {
+        "mode": { "const": "REMOTE_WORKSPACE_ONLY" },
+        "projectId": { "$ref": "#/$defs/nonEmptyString" },
+        "sourceSha": { "$ref": "#/$defs/gitSha" },
+        "sandboxAbsent": { "const": true },
+        "workspaceClosed": { "const": true },
+        "evidenceId": { "$ref": "#/$defs/nonEmptyString" }
+      }
+    },
+    "sandboxJourney": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "mode",
+            "projectId",
+            "capabilitySnapshot",
+            "capabilityEvidenceId",
+            "projectInteraction",
+            "execution",
+            "teardown"
+          ],
+          "properties": {
+            "mode": { "const": "STRICT_REMOTE_SANDBOX" },
+            "projectId": { "$ref": "#/$defs/nonEmptyString" },
+            "capabilitySnapshot": {
+              "$ref": "#/$defs/strictCapabilitySnapshot"
+            },
+            "capabilityEvidenceId": { "$ref": "#/$defs/nonEmptyString" },
+            "projectInteraction": { "$ref": "#/$defs/projectInteraction" },
+            "execution": { "$ref": "#/$defs/strictSandboxExecution" },
+            "teardown": { "$ref": "#/$defs/strictSandboxTeardown" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "mode",
+            "projectId",
+            "capabilitySnapshot",
+            "capabilityEvidenceId",
+            "projectInteraction",
+            "execution",
+            "teardown"
+          ],
+          "properties": {
+            "mode": { "const": "REMOTE_WORKSPACE_ONLY" },
+            "projectId": { "$ref": "#/$defs/nonEmptyString" },
+            "capabilitySnapshot": { "$ref": "#/$defs/capabilitySnapshot" },
+            "capabilityEvidenceId": { "$ref": "#/$defs/nonEmptyString" },
+            "projectInteraction": { "$ref": "#/$defs/projectInteraction" },
+            "execution": { "$ref": "#/$defs/remoteWorkspaceExecution" },
+            "teardown": { "$ref": "#/$defs/remoteWorkspaceTeardown" }
+          }
+        }
+      ]
+    },
+    "surfaceDigestMap": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tui", "plain", "stdin", "text", "json", "streamJson"],
+      "properties": {
+        "tui": { "$ref": "#/$defs/digest" },
+        "plain": { "$ref": "#/$defs/digest" },
+        "stdin": { "$ref": "#/$defs/digest" },
+        "text": { "$ref": "#/$defs/digest" },
+        "json": { "$ref": "#/$defs/digest" },
+        "streamJson": { "$ref": "#/$defs/digest" }
+      }
+    },
+    "cliFallback": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cliSha",
+        "heroRunIds",
+        "auth",
+        "surfaces",
+        "crossSurface",
+        "attach",
+        "sigint",
+        "provenance",
+        "localHands",
+        "cwd",
+        "toolPolicy",
+        "verification",
+        "parityDigest"
+      ],
+      "properties": {
+        "cliSha": { "$ref": "#/$defs/gitSha" },
+        "heroRunIds": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 3,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/nonEmptyString" }
+        },
+        "auth": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["patAuthenticated", "capabilitiesLoaded", "evidenceId"],
+          "properties": {
+            "patAuthenticated": { "const": true },
+            "capabilitiesLoaded": { "const": true },
+            "evidenceId": { "$ref": "#/$defs/nonEmptyString" }
+          }
+        },
+        "surfaces": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "outputDigests",
+            "normalizedResultDigests",
+            "evidenceId"
+          ],
+          "properties": {
+            "outputDigests": { "$ref": "#/$defs/surfaceDigestMap" },
+            "normalizedResultDigests": { "$ref": "#/$defs/surfaceDigestMap" },
+            "evidenceId": { "$ref": "#/$defs/nonEmptyString" }
+          }
+        },
+        "crossSurface": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "createdRunId",
+            "approvedRunId",
+            "createdBy",
+            "approvedBy",
+            "approvalReceiptId",
+            "sameRun",
+            "evidenceId"
+          ],
+          "properties": {
+            "createdRunId": { "$ref": "#/$defs/nonEmptyString" },
+            "approvedRunId": { "$ref": "#/$defs/nonEmptyString" },
+            "createdBy": { "enum": ["WEB", "CLI"] },
+            "approvedBy": { "enum": ["WEB", "CLI"] },
+            "approvalReceiptId": { "$ref": "#/$defs/nonEmptyString" },
+            "sameRun": { "const": true },
+            "evidenceId": { "$ref": "#/$defs/nonEmptyString" }
+          }
+        },
+        "attach": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["runId", "cursor", "deduplicated", "evidenceId"],
+          "properties": {
+            "runId": { "$ref": "#/$defs/nonEmptyString" },
+            "cursor": { "$ref": "#/$defs/nonEmptyString" },
+            "deduplicated": { "const": true },
+            "evidenceId": { "$ref": "#/$defs/nonEmptyString" }
+          }
+        },
+        "sigint": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["exitCode", "serverCancelRequestsDelta", "evidenceId"],
+          "properties": {
+            "exitCode": { "const": 130 },
+            "serverCancelRequestsDelta": { "const": 0 },
+            "evidenceId": { "$ref": "#/$defs/nonEmptyString" }
+          }
+        },
+        "provenance": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "provider",
+            "model",
+            "costVisible",
+            "evidenceVisible",
+            "prCiVisible",
+            "evidenceId"
+          ],
+          "properties": {
+            "provider": { "enum": ["DEEPSEEK", "FIREWORKS"] },
+            "model": {
+              "enum": [
+                "deepseek-v4-pro-native",
+                "deepseek-v4-flash-native",
+                "glm-5.2-fw"
+              ]
+            },
+            "costVisible": { "const": true },
+            "evidenceVisible": { "const": true },
+            "prCiVisible": { "const": true },
+            "evidenceId": { "$ref": "#/$defs/nonEmptyString" }
+          }
+        },
+        "localHands": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "httpStatus",
+            "terminalCode",
+            "providerCallsDelta",
+            "chargeUsdDelta",
+            "codeChangesDelta",
+            "prCountDelta",
+            "evidenceId"
+          ],
+          "properties": {
+            "httpStatus": { "enum": [403, 409] },
+            "terminalCode": { "$ref": "#/$defs/nonEmptyString" },
+            "providerCallsDelta": { "const": 0 },
+            "chargeUsdDelta": { "const": 0 },
+            "codeChangesDelta": { "const": 0 },
+            "prCountDelta": { "const": 0 },
+            "evidenceId": { "$ref": "#/$defs/nonEmptyString" }
+          }
+        },
+        "cwd": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "requestedPath",
+            "canonicalPath",
+            "realpathBound",
+            "headSha",
+            "manifestSha256",
+            "evidenceId"
+          ],
+          "properties": {
+            "requestedPath": { "$ref": "#/$defs/nonEmptyString" },
+            "canonicalPath": { "$ref": "#/$defs/nonEmptyString" },
+            "realpathBound": { "const": true },
+            "headSha": { "$ref": "#/$defs/gitSha" },
+            "manifestSha256": { "$ref": "#/$defs/digest" },
+            "evidenceId": { "$ref": "#/$defs/nonEmptyString" }
+          }
+        },
+        "toolPolicy": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "readAllowed",
+            "shellDeniedWithoutApproval",
+            "mutationDeniedWithoutApproval",
+            "explicitApprovalRequired",
+            "evidenceId"
+          ],
+          "properties": {
+            "readAllowed": { "const": true },
+            "shellDeniedWithoutApproval": { "const": true },
+            "mutationDeniedWithoutApproval": { "const": true },
+            "explicitApprovalRequired": { "const": true },
+            "evidenceId": { "$ref": "#/$defs/nonEmptyString" }
+          }
+        },
+        "verification": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "buildPassed",
+            "trackedCliTestsPassed",
+            "heavyTuiPassed",
+            "windowsSmokePassed",
+            "evidenceId"
+          ],
+          "properties": {
+            "buildPassed": { "const": true },
+            "trackedCliTestsPassed": { "const": true },
+            "heavyTuiPassed": { "const": true },
+            "windowsSmokePassed": { "const": true },
+            "evidenceId": { "$ref": "#/$defs/nonEmptyString" }
+          }
+        },
+        "parityDigest": { "$ref": "#/$defs/digest" }
+      }
+    },
     "hero": {
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "ordinal", "runId", "branch", "sourceSha", "requestSha256", "status", "plan",
-        "approvalReceiptId", "task", "files", "tests", "review", "pr", "cost", "route",
-        "routeCalls", "longFile", "reconnect", "parity", "terminal", "correctnessEvidenceId"
+        "ordinal",
+        "runId",
+        "branch",
+        "sourceSha",
+        "requestSha256",
+        "status",
+        "plan",
+        "approvalReceiptId",
+        "task",
+        "files",
+        "tests",
+        "review",
+        "pr",
+        "cost",
+        "route",
+        "routeCalls",
+        "longFile",
+        "reconnect",
+        "parity",
+        "terminal",
+        "correctnessEvidenceId"
       ],
       "properties": {
-        "ordinal": {"type": "integer", "minimum": 1, "maximum": 3},
-        "runId": {"type": "string", "minLength": 1},
-        "branch": {"type": "string", "minLength": 1},
-        "sourceSha": {"$ref": "#/$defs/gitSha"},
-        "requestSha256": {"$ref": "#/$defs/digest"},
-        "status": {"const": "COMPLETE"},
-        "plan": {"$ref": "#/$defs/object"},
-        "approvalReceiptId": {"type": "string", "minLength": 1},
-        "task": {"$ref": "#/$defs/object"},
-        "files": {"$ref": "#/$defs/object"},
-        "tests": {"$ref": "#/$defs/object"},
-        "review": {"$ref": "#/$defs/object"},
-        "pr": {"$ref": "#/$defs/object"},
-        "cost": {"$ref": "#/$defs/object"},
-        "route": {"$ref": "#/$defs/object"},
-        "routeCalls": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/object"}},
-        "longFile": {"$ref": "#/$defs/object"},
-        "reconnect": {"$ref": "#/$defs/object"},
-        "parity": {"$ref": "#/$defs/object"},
-        "terminal": {"$ref": "#/$defs/object"},
-        "correctnessEvidenceId": {"type": "string", "minLength": 1}
+        "ordinal": { "type": "integer", "minimum": 1, "maximum": 3 },
+        "runId": { "type": "string", "minLength": 1 },
+        "branch": { "type": "string", "minLength": 1 },
+        "sourceSha": { "$ref": "#/$defs/gitSha" },
+        "requestSha256": { "$ref": "#/$defs/digest" },
+        "status": { "const": "COMPLETE" },
+        "plan": { "$ref": "#/$defs/object" },
+        "approvalReceiptId": { "type": "string", "minLength": 1 },
+        "task": { "$ref": "#/$defs/object" },
+        "files": { "$ref": "#/$defs/object" },
+        "tests": { "$ref": "#/$defs/object" },
+        "review": { "$ref": "#/$defs/object" },
+        "pr": { "$ref": "#/$defs/object" },
+        "cost": { "$ref": "#/$defs/object" },
+        "route": { "$ref": "#/$defs/object" },
+        "routeCalls": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/object" }
+        },
+        "longFile": { "$ref": "#/$defs/object" },
+        "reconnect": { "$ref": "#/$defs/object" },
+        "parity": { "$ref": "#/$defs/object" },
+        "terminal": { "$ref": "#/$defs/object" },
+        "correctnessEvidenceId": { "type": "string", "minLength": 1 }
       }
     },
-    "gitSha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
-    "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "gitSha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
     "object": {
       "type": "object",
       "additionalProperties": true
