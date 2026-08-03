@@ -223,7 +223,11 @@ export default function IdeRunScreens({
             </span>
           ) : (
             <button className='ide-btn' onClick={start} disabled={starting || inFlight}>
-              {inFlight ? 'Rendering…' : manifest?.jobId ? 'Re-render' : 'Render screens'}
+              {inFlight
+                ? 'Rendering…'
+                : manifest?.jobId
+                  ? 'Regenerate visual preview'
+                  : 'Generate visual preview'}
             </button>
           )}
           {inFlight && (
@@ -282,10 +286,10 @@ export default function IdeRunScreens({
         !inFlight &&
         renderAllowed && (
           <div className='ide-screens-empty'>
-            <h3>See what you built</h3>
+            <h3>Visual preview</h3>
             <p>
               Renders this run&apos;s screens as a visual approximation — no container, no deploy,
-              and it works even when the build is failing. Data shown is invented sample content.
+              and no claim that the application is running. Controls and data are simulated.
             </p>
           </div>
         )}
@@ -324,46 +328,49 @@ export default function IdeRunScreens({
       )}
 
       {rendered.length > 0 && (
-        <div className='ide-screens-body'>
-          <nav className='ide-screens-list' aria-label='Screens'>
-            {rendered.map((s) => (
-              <button
-                key={s.surfaceId}
-                className={`ide-screens-item ${selected === s.surfaceId ? 'is-active' : ''}`}
-                onClick={() => setSelected(s.surfaceId)}
-                title={s.sourcePath}
-              >
-                <span className='ide-screens-item-name'>{s.displayName}</span>
-                <span className='ide-screens-item-target'>{TARGET_LABEL[s.target]}</span>
-              </button>
-            ))}
-          </nav>
+        <>
+          <p className='ide-screens-note'>Visual only · controls and data are simulated</p>
+          <div className='ide-screens-body'>
+            <nav className='ide-screens-list' aria-label='Screens'>
+              {rendered.map((s) => (
+                <button
+                  key={s.surfaceId}
+                  className={`ide-screens-item ${selected === s.surfaceId ? 'is-active' : ''}`}
+                  onClick={() => setSelected(s.surfaceId)}
+                  title={s.sourcePath}
+                >
+                  <span className='ide-screens-item-name'>{s.displayName}</span>
+                  <span className='ide-screens-item-target'>{TARGET_LABEL[s.target]}</span>
+                </button>
+              ))}
+            </nav>
 
-          <div className='ide-screens-stage'>
-            {loadingSurface && <div className='ide-screens-loading'>Loading…</div>}
-            {html && activeSurface && (
-              <div
-                className={`ide-screens-frame ${activeSurface.target !== 'WEB' ? 'is-device' : ''}`}
-                style={{width: frame.width, height: frame.height}}
-              >
-                <iframe
-                  key={activeSurface.surfaceId}
-                  title={`${activeSurface.displayName} preview`}
-                  srcDoc={html}
-                  /*
-                   * allow-scripts only. Omitting allow-same-origin is what puts this document on an
-                   * opaque origin — with both together the sandbox would be defeated entirely.
-                   */
-                  sandbox='allow-scripts'
-                  referrerPolicy='no-referrer'
-                  width={frame.width}
-                  height={frame.height}
-                  style={{border: 0, display: 'block'}}
-                />
-              </div>
-            )}
+            <div className='ide-screens-stage'>
+              {loadingSurface && <div className='ide-screens-loading'>Loading…</div>}
+              {html && activeSurface && (
+                <div
+                  className={`ide-screens-frame ${activeSurface.target !== 'WEB' ? 'is-device' : ''}`}
+                  style={{width: frame.width, height: frame.height}}
+                >
+                  <iframe
+                    key={activeSurface.surfaceId}
+                    title={`${activeSurface.displayName} preview`}
+                    srcDoc={html}
+                    /*
+                     * allow-scripts only. Omitting allow-same-origin is what puts this document on an
+                     * opaque origin — with both together the sandbox would be defeated entirely.
+                     */
+                    sandbox='allow-scripts'
+                    referrerPolicy='no-referrer'
+                    width={frame.width}
+                    height={frame.height}
+                    style={{border: 0, display: 'block'}}
+                  />
+                </div>
+              )}
+            </div>
           </div>
-        </div>
+        </>
       )}
 
       {failed.length > 0 && (

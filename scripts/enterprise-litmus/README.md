@@ -19,10 +19,11 @@ not run providers, merge pull requests, deploy, or create project-side resources
   to 16 KiB, must be non-secret, and is intended only for short local proof.
 - If any frozen deployment, fixture, project, route, request, approval, or client identity changes,
   invalidate and restart. Never edit a frozen manifest.
-- Schema v2 manifests are deliberately not auto-migrated because v3 adds mandatory sandbox and CLI
-  evidence that cannot be reconstructed safely. Preserve and archive the v2 file, use the v2 harness
-  revision to clean up every resource recorded in it, then initialize a new v3 campaign. Never
-  replace a discovered v2 file in place.
+- Older manifests are deliberately not auto-migrated because schema v4 adds mandatory sandbox, CLI,
+  deterministic single-shot-plan, and complete physical-attempt evidence that cannot be reconstructed
+  safely. Preserve and archive the old file, use its matching harness revision to clean up every
+  resource recorded in it, then initialize a new v4 campaign. Never replace a discovered older file
+  in place.
 
 Secrets are accepted only through environment variables and are redacted before evidence
 persistence. The state file defaults outside the repository at
@@ -99,9 +100,13 @@ other transition similarly rejects missing and unknown fields. The contract in
   `COMPLETE`, exact frozen source/request/route, distinct run/branch/approval/PR/head SHA, plan
   ID/version/fingerprint plus digest-bound deterministic `SINGLE_SHOT` strategy/classification,
   complete task/build evidence, generated files, passing behavior tests with zero failures/skips,
-  truthful review evidence, and a complete raw physical-attempt ledger. The ledger must prove
-  successful execution and review calls on the exact frozen route, contain no failover, and contain
-  no outline-planner call because single-shot planning is deterministic. It also requires PR base
+  truthful review evidence, and a complete raw physical-attempt ledger. The ledger must bind every
+  call to the shared `pipeline` execution-context feature, prove successful `WorkerAgent/worker.*`
+  and `ReviewerAgent/reviewer.*` calls on the exact frozen route, contain no failover, and contain no
+  outline-planner call because single-shot planning is deterministic. The ledger requires the API's
+  exact canonical lowercase provider spelling (`deepseek` or `fireworks`) and compares it explicitly
+  with the frozen uppercase route enum; evidence is never trimmed, coerced, or case-normalized. It
+  also requires PR base
   equal to frozen main, exactly one green `fixture-ci` check, bounded cost, byte-exact 151+ line
   output with EOF sentinel, reconnect/reload stability, one primary action plus support code,
   Web/CLI terminal-outcome parity, and independent correctness proof.

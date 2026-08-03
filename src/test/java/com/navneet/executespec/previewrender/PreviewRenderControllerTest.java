@@ -45,7 +45,7 @@ class PreviewRenderControllerTest {
     assertThat(manifest.jobId()).isNull();
     assertThat(manifest.surfaces()).isEmpty();
     verify(service, never()).latestJob(anyString());
-    verify(service, never()).hasProductFilesToRender(anyString());
+    verify(service, never()).canStartRender(anyString());
   }
 
   @Test
@@ -65,7 +65,7 @@ class PreviewRenderControllerTest {
   void admittedBaselineControlsAnAbsentJobsRenderEligibility() {
     when(service.enabled()).thenReturn(true);
     when(service.latestJob(RUN_ID)).thenReturn(Optional.empty());
-    when(service.hasProductFilesToRender(RUN_ID)).thenReturn(true);
+    when(service.canStartRender(RUN_ID)).thenReturn(true);
 
     PreviewRenderDtos.RenderManifest manifest = controller.manifest(RUN_ID, null).getBody();
 
@@ -90,6 +90,6 @@ class PreviewRenderControllerTest {
     assertThat(manifest).isNotNull();
     assertThat(manifest.jobId()).isEqualTo(active.getId().toString());
     assertThat(manifest.renderAllowed()).isTrue();
-    verify(service, never()).hasProductFilesToRender(anyString());
+    verify(service, never()).canStartRender(anyString());
   }
 }

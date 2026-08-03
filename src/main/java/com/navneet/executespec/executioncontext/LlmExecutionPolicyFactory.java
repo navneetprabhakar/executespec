@@ -17,6 +17,7 @@ import com.navneet.executespec.auth.repository.ProjectRepository;
 import com.navneet.executespec.router.LlmProvider;
 import com.navneet.executespec.router.ModelAccessService;
 import com.navneet.executespec.router.ModelRegistry;
+import com.navneet.executespec.router.ResolvedModel;
 import com.navneet.executespec.state.BenchmarkSourceType;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
 
@@ -253,6 +254,45 @@ public class LlmExecutionPolicyFactory {
         pinned,
         PREVIEW_SURFACE_BUDGET,
         "preview-render-v1",
+        null);
+  }
+
+  /**
+   * Dedicated fixed-route context for one static screen-render surface.
+   *
+   * <p>The render job resolves its WORKHORSE route once before parallel surface work begins. This
+   * overload snapshots that exact physical provider/model as a pin even when the source run itself
+   * was provider-preferred, preventing managed-AI substitution or cross-provider failover from
+   * making persisted job attribution disagree with the route that produced a bundle.
+   */
+  public LlmExecutionReference forRunPreviewSurface(
+      String runId, String renderAttemptId, ResolvedModel route) {
+    var run =
+        runRepository
+            .findById(require(runId, "runId"))
+            .orElseThrow(() -> new IllegalArgumentException("pipeline run not found"));
+    String userId = require(run.getCreatedByUserId(), "run owner");
+    String orgId = require(run.getOrgId(), "run org");
+    requireRunCredentialBinding(run, userId, orgId);
+    if (route == null) throw new IllegalArgumentException("preview render route required");
+    String requestedProvider = require(route.providerName(), "preview render provider");
+    String requestedModel = require(route.getModel(), "preview render model");
+    String source = "preview-render:" + runId + ":" + require(renderAttemptId, "renderAttemptId");
+    return createCustomer(
+        LlmExecutionContext.ContextType.AGENT_TURN,
+        "preview-render",
+        "PREVIEW_RENDER",
+        source,
+        source,
+        userId,
+        userId,
+        orgId,
+        run.getProjectId(),
+        requestedProvider,
+        requestedModel,
+        true,
+        PREVIEW_SURFACE_BUDGET,
+        "preview-render-v2-exact-route",
         null);
   }
 

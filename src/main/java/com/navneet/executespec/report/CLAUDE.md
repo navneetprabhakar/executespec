@@ -115,6 +115,9 @@ invalid reports are excluded and counted separately.
   unit tests cannot dilute a failing functional result. Missing, failed, stale, zero-test, or
   provenance-unverified execution persists 0/0/unverified evidence; only a non-empty,
   provenance-verified `LIVE_PREVIEW_FUNCTIONAL` suite can earn full test credit and final-goal proof.
+  When workspace tests pass but independent functional proof is unavailable, run-level goal proof
+  remains `UNCERTAIN`/`UNPROVEN` and now recommends `STOP_BLOCKED` with the exact evidence gap; it
+  must not advise another code-generation turn because a model rerun cannot strengthen test scope.
   Rescoring is monotonic by evidence strength: an unavailable/not-applicable asynchronous event
   cannot replace a proven workspace population, and workspace evidence cannot replace proven live
   functional evidence. Node's built-in test runner is parsed from its complete

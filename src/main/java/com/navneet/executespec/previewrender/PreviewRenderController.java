@@ -75,7 +75,7 @@ public class PreviewRenderController {
     // Feature-off wins and avoids a needless workspace/Git inspection. An active job remains
     // reloadable even if its workspace evidence disappears after it was admitted.
     boolean renderAllowed =
-        (job != null && !job.isTerminal()) || renderService.hasProductFilesToRender(runId);
+        (job != null && !job.isTerminal()) || renderService.canStartRender(runId);
     if (job == null) {
       return ResponseEntity.ok(
           PreviewRenderDtos.RenderManifest.absent(runId, available, renderAllowed));
