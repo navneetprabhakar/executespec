@@ -286,10 +286,14 @@ class ValidationReportServiceConcreteRescoreTest {
     assertEquals("PASS", tests.status());
     assertEquals("DETERMINISTIC_WORKSPACE_SUITE", tests.source());
     assertTrue(tests.summary().contains("1 skipped"));
+    var goalDecision = eventCaptor.getValue().runGoalDecision();
     assertEquals(
-        com.navneet.executespec.execution.model.RunContinuationDecision
-            .CONTINUE_SAME_MODEL_PROVIDER,
-        eventCaptor.getValue().runGoalDecision().recommendedDecision());
+        com.navneet.executespec.execution.model.GoalDonenessState.UNCERTAIN, goalDecision.state());
+    assertEquals(
+        com.navneet.executespec.execution.model.RunContinuationDecision.STOP_BLOCKED,
+        goalDecision.recommendedDecision());
+    assertFalse(goalDecision.anotherModelProviderMightHelp());
+    assertTrue(goalDecision.recommendedNextStep().contains("independent verifier"));
   }
 
   /**

@@ -214,6 +214,10 @@ also create or extend a test that exercises it before calling completeTask:
   - Tests MUST invoke the real production implementation through its public or supported boundary.
     Never copy the target predicate/algorithm into the test and test the copy; that is zero
     coverage even when it passes.
+  - Treat explicit input types as contracts. For a direct function or module API, include a
+    valid-looking value of the wrong runtime type (for example `"2"` for a positive integer), not
+    only an obviously unparsable value. Reject coercion unless the actual framework boundary is
+    documented to deliver encoded strings.
   - Never disable, replace, monkeypatch, or no-op authentication, authorization, CSRF, validation,
     middleware, persistence, or another requirement under test merely to make the suite green.
     Mock only a true external dependency while keeping the required production boundary active.

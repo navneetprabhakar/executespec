@@ -7,6 +7,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 import com.navneet.executespec.agent.LlmRequest;
@@ -18,15 +19,29 @@ import com.navneet.executespec.executioncontext.LlmExecutionReference;
 import com.navneet.executespec.executioncontext.LlmExecutionScope;
 import com.navneet.executespec.router.AgentTier;
 import com.navneet.executespec.router.LlmProvider;
-import com.navneet.executespec.router.ModelResolver;
 import com.navneet.executespec.router.ResolvedModel;
 
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
+import org.springframework.core.io.ClassPathResource;
 
 class PreviewRenderAgentContextTest {
+
+  @Test
+  void promptRequiresPopulatedRepresentativeDataAndHonestRuntimeSemantics() throws Exception {
+    String prompt =
+        new ClassPathResource("prompts/preview-render.md")
+            .getContentAsString(StandardCharsets.UTF_8);
+
+    assertThat(prompt)
+        .contains("populated successful state")
+        .contains("3–6 varied entries")
+        .contains("must not imply that the application")
+        .contains("controls are actually running");
+  }
 
   @Test
   void admissionFailuresBecomeStableCustomerSafeReasons() {
@@ -45,31 +60,20 @@ class PreviewRenderAgentContextTest {
   @Test
   void renderUsesDedicatedPostRunContextInsteadOfTerminalPipelineBudget() {
     LlmRouter router = mock(LlmRouter.class);
-    ModelResolver resolver = mock(ModelResolver.class);
     PromptAssembler prompts = mock(PromptAssembler.class);
     LlmExecutionPolicyFactory policies = mock(LlmExecutionPolicyFactory.class);
     LlmExecutionReference reference =
         new LlmExecutionReference("preview-context", LlmExecutionScope.customer("org-1"));
-    when(resolver.resolve("PreviewRenderAgent", LlmProvider.ANTHROPIC, AgentTier.WORKHORSE))
-        .thenReturn(
-            ResolvedModel.builder()
-                .requestedProvider(LlmProvider.ANTHROPIC)
-                .actualProvider(LlmProvider.ANTHROPIC)
-                .model("claude-sonnet")
-                .agentTier(AgentTier.WORKHORSE)
-                .build());
+    ResolvedModel route =
+        ResolvedModel.builder()
+            .requestedProvider(LlmProvider.ANTHROPIC)
+            .actualProvider(LlmProvider.ANTHROPIC)
+            .model("claude-sonnet")
+            .agentTier(AgentTier.WORKHORSE)
+            .build();
     when(prompts.assemble(eq("preview-render.md"), any())).thenReturn("render safely");
-    when(policies.forRunPreviewSurface("run-1", "job-1:home")).thenReturn(reference);
-    when(router.callText(
-            eq("anthropic"),
-            eq("claude-sonnet"),
-            any(),
-            eq("run-1"),
-            eq("PreviewRenderAgent"),
-            eq("render:home"),
-            eq(8192),
-            eq(LlmRequest.PromptCacheStrategy.DEFAULT),
-            eq(reference)))
+    when(policies.forRunPreviewSurface("run-1", "job-1:home", route)).thenReturn(reference);
+    when(router.call(any(LlmRequest.class)))
         .thenReturn(
             ChatResponse.builder()
                 .generations(
@@ -80,7 +84,6 @@ class PreviewRenderAgentContextTest {
     PreviewRenderAgent agent =
         new PreviewRenderAgent(
             router,
-            resolver,
             prompts,
             new PreviewRenderGuard(new com.navneet.executespec.security.GeneratedSecretScanner()),
             policies);
@@ -95,9 +98,14 @@ class PreviewRenderAgentContextTest {
             100);
 
     PreviewRenderAgent.RenderedSurface result =
-        agent.render(surface, LlmProvider.ANTHROPIC, "run-1", "job-1:home");
+        agent.render(surface, route, "run-1", "job-1:home", null);
 
     assertThat(result.ok()).isTrue();
-    verify(policies).forRunPreviewSurface("run-1", "job-1:home");
+    verify(policies).forRunPreviewSurface("run-1", "job-1:home", route);
+    ArgumentCaptor<LlmRequest> request = ArgumentCaptor.forClass(LlmRequest.class);
+    verify(router).call(request.capture());
+    assertThat(request.getValue().provider()).isEqualTo("anthropic");
+    assertThat(request.getValue().model()).isEqualTo("claude-sonnet");
+    assertThat(request.getValue().strictProvider()).isTrue();
   }
 }

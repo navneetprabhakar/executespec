@@ -33,7 +33,8 @@ class PreviewRenderOperationRootTest {
     LlmExecutionOperationService operations = mock(LlmExecutionOperationService.class);
     LlmExecutionReference reference =
         new LlmExecutionReference("ctx-preview", LlmExecutionScope.customer("org"));
-    when(policies.forRunPreviewSurface("run-1", "00000000-0000-0000-0000-000000000001:home"))
+    ResolvedModel route = route();
+    when(policies.forRunPreviewSurface("run-1", "00000000-0000-0000-0000-000000000001:home", route))
         .thenReturn(reference);
     when(operations.claimOrResume(eq(reference), any(), eq("worker"), any()))
         .thenReturn(Optional.empty());
@@ -45,7 +46,7 @@ class PreviewRenderOperationRootTest {
                 UUID.fromString("00000000-0000-0000-0000-000000000001"),
                 "run-1",
                 surface(),
-                route(),
+                route,
                 "worker",
                 Duration.ofMinutes(2)))
         .isEmpty();
@@ -58,7 +59,7 @@ class PreviewRenderOperationRootTest {
     LlmExecutionOperationService operations = mock(LlmExecutionOperationService.class);
     LlmExecutionReference reference =
         new LlmExecutionReference("ctx-preview", LlmExecutionScope.customer("org"));
-    when(policies.forRunPreviewSurface(any(), any())).thenReturn(reference);
+    when(policies.forRunPreviewSurface(any(), any(), any())).thenReturn(reference);
     when(operations.claimOrResume(eq(reference), any(), eq("worker"), any()))
         .thenReturn(
             Optional.of(
