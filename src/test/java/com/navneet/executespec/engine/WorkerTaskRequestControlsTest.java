@@ -50,6 +50,8 @@ class WorkerTaskRequestControlsTest {
             .workerStartedAtEpochMs(456L)
             .strictProvider(true)
             .zeroWriteSalvageAllowed(false)
+            .agentRole("ReviewerAgent")
+            .stepPrefix("reviewer.general")
             .build();
 
     WorkerTaskRequest retry =
@@ -60,6 +62,8 @@ class WorkerTaskRequestControlsTest {
     assertThat(retry.workerStartedAtEpochMs()).isEqualTo(456L);
     assertThat(retry.strictProvider()).isTrue();
     assertThat(retry.zeroWriteSalvageAllowed()).isFalse();
+    assertThat(retry.agentRole()).isEqualTo("ReviewerAgent");
+    assertThat(retry.stepPrefix()).isEqualTo("reviewer.general");
   }
 
   @Test

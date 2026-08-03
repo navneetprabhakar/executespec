@@ -48,6 +48,35 @@ class TestOutputParserTest {
   }
 
   @Test
+  void node_test_complete_footer_drives_count() {
+    String output =
+        "✔ preserves the catalogue (1.2ms)\n"
+            + "ℹ tests 7\n"
+            + "ℹ suites 0\n"
+            + "ℹ pass 4\n"
+            + "ℹ fail 1\n"
+            + "ℹ cancelled 1\n"
+            + "ℹ skipped 0\n"
+            + "ℹ todo 1\n";
+
+    var summary = ok(TestOutputParser.parse(Framework.NODE_TEST, output, 1));
+
+    assertEquals(7, summary.getTotalTests());
+    assertEquals(4, summary.getPassed());
+    assertEquals(1, summary.getFailed());
+    assertEquals(1, summary.getErrors());
+    assertEquals(1, summary.getSkipped());
+  }
+
+  @Test
+  void node_test_tap_footer_is_supported() {
+    String output = "# tests 5\n# pass 5\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n";
+    var summary = ok(TestOutputParser.parse(Framework.NODE_TEST, output, 0));
+    assertEquals(5, summary.getTotalTests());
+    assertEquals(5, summary.getPassed());
+  }
+
+  @Test
   void jest_total_drives_count() {
     var s =
         ok(TestOutputParser.parse(Framework.JEST, "Tests:       2 failed, 5 passed, 7 total", 1));
@@ -124,6 +153,7 @@ class TestOutputParserTest {
     // The contract: if we can't read a real count, do NOT make one up. The caller falls back to
     // LLM coverage, which is better than a wrong hard number.
     assertTrue(TestOutputParser.parse(Framework.PYTEST, "Segmentation fault", 139).isEmpty());
+    assertTrue(TestOutputParser.parse(Framework.NODE_TEST, "✔ one test", 0).isEmpty());
     assertTrue(TestOutputParser.parse(Framework.JEST, "command not found: jest", 127).isEmpty());
     assertTrue(
         TestOutputParser.parse(Framework.VITEST, "command not found: vitest", 127).isEmpty());

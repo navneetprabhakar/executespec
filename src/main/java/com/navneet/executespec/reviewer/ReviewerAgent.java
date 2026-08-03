@@ -655,6 +655,8 @@ public class ReviewerAgent {
             .systemPrompt(systemPrompt)
             .userPrompt(userPrompt)
             .context(passCtx)
+            .agentRole("ReviewerAgent")
+            .stepPrefix(reviewerStepPrefix(taskIdSuffix))
             .maxIterations(maxIter)
             // A4 (audit 2026-05-29) — give the worker the same wall-clock budget the pass executor
             // enforces, so a runaway reviewer pass self-terminates at the cap even independent of
@@ -695,6 +697,11 @@ public class ReviewerAgent {
             Boolean.TRUE.equals(req.readOnly())
                 ? com.navneet.executespec.tool.ReviewerMutationScope.withSingleBuildProject(pass)
                 : pass.get());
+  }
+
+  private static String reviewerStepPrefix(String taskIdSuffix) {
+    String pass = taskIdSuffix == null ? "pass" : taskIdSuffix.replaceFirst("^reviewer-", "");
+    return "reviewer." + pass.replace('-', '.');
   }
 
   static java.util.Set<String> reviewerToolNames(String taskIdSuffix) {

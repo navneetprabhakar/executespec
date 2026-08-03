@@ -27,6 +27,8 @@ public final class WorkerTaskRequestControls {
         .workerStartedAtEpochMs(primary.workerStartedAtEpochMs())
         .strictProvider(primary.strictProvider())
         .zeroWriteSalvageAllowed(primary.zeroWriteSalvageAllowed())
+        .agentRole(primary.agentRole())
+        .stepPrefix(primary.stepPrefix())
         .build();
   }
 

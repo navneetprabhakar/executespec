@@ -26,7 +26,7 @@ const SAFE_SUBPROCESS_ENV_KEYS = new Set([
   'XDG_DATA_HOME',
 ]);
 
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 export const SOURCE_REVISION_PATCH_SHA256 =
   '2106e27f7ff5e55a51c18f7ccb39f7c814788a45918dc5eb094b67a52ecb07bd';
 const TOP_LEVEL_KEYS = new Set([
@@ -118,6 +118,9 @@ const FROZEN_RUN_REQUEST_KEYS = Object.freeze([
 ]);
 const SEMANTIC_FALLBACK_CODES = Object.freeze(
   new Set([
+    // A repository can truthfully remain lexical-only before any embedding invocation is admitted.
+    // The accompanying evidence must still prove ripgrep availability and zero provider calls.
+    'INDEX_NOT_BUILT',
     'OWN_KEYS_OPENAI_CREDENTIAL_UNAVAILABLE',
     'OPENAI_CREDENTIAL_UNAVAILABLE',
     'AUTHORIZED_OPENAI_CREDENTIAL_UNAVAILABLE',
@@ -520,7 +523,7 @@ function validateHeroProof(proof, manifest, ordinal) {
       'pr',
       'cost',
       'route',
-      'routeCalls',
+      'physicalCallLedger',
       'longFile',
       'reconnect',
       'parity',
@@ -543,7 +546,15 @@ function validateHeroProof(proof, manifest, ordinal) {
     throw new Error(`${label}.requestSha256 contradicts frozen request`);
   assertExactKeys(
     proof.plan,
-    ['planId', 'version', 'fingerprint'],
+    [
+      'planId',
+      'version',
+      'fingerprint',
+      'strategy',
+      'classification',
+      'taskCount',
+      'evidenceSha256',
+    ],
     [],
     `${label}.plan`,
   );
@@ -551,6 +562,13 @@ function validateHeroProof(proof, manifest, ordinal) {
   if (!Number.isInteger(proof.plan.version) || proof.plan.version < 1)
     throw new Error(`${label}.plan.version must be positive`);
   assertDigest(proof.plan.fingerprint, `${label}.plan.fingerprint`);
+  if (
+    proof.plan.strategy !== 'SINGLE_SHOT' ||
+    proof.plan.classification !== 'SINGLE_SHOT' ||
+    proof.plan.taskCount !== 1
+  )
+    throw new Error(`${label}.plan must prove deterministic SINGLE_SHOT planning`);
+  assertDigest(proof.plan.evidenceSha256, `${label}.plan.evidenceSha256`);
   assertString(proof.approvalReceiptId, `${label}.approvalReceiptId`);
   assertExactKeys(
     proof.task,
@@ -565,6 +583,8 @@ function validateHeroProof(proof, manifest, ordinal) {
     proof.task.failed !== 0
   )
     throw new Error(`${label} task evidence is incomplete`);
+  if (proof.task.total !== proof.plan.taskCount)
+    throw new Error(`${label} plan task count contradicts task evidence`);
   assertBoolean(proof.task.buildPassed, true, `${label}.task.buildPassed`);
   assertString(proof.task.evidenceId, `${label}.task.evidenceId`);
   assertExactKeys(
@@ -672,34 +692,85 @@ function validateHeroProof(proof, manifest, ordinal) {
   }
   assertBoolean(proof.cost.bounded, true, `${label}.cost.bounded`);
   assertHeroRoute(proof.route, manifest, `${label}.route`);
-  if (!Array.isArray(proof.routeCalls) || proof.routeCalls.length < 1)
-    throw new Error(
-      `${label}.routeCalls must contain the physical call ledger`,
-    );
+  assertExactKeys(
+    proof.physicalCallLedger,
+    ['evidenceSha256', 'complete', 'totalPhysicalAttempts', 'calls'],
+    [],
+    `${label}.physicalCallLedger`,
+  );
+  assertDigest(
+    proof.physicalCallLedger.evidenceSha256,
+    `${label}.physicalCallLedger.evidenceSha256`,
+  );
+  assertBoolean(
+    proof.physicalCallLedger.complete,
+    true,
+    `${label}.physicalCallLedger.complete`,
+  );
+  const physicalCalls = proof.physicalCallLedger.calls;
+  if (!Array.isArray(physicalCalls) || physicalCalls.length < 1)
+    throw new Error(`${label}.physicalCallLedger.calls must not be empty`);
+  if (proof.physicalCallLedger.totalPhysicalAttempts !== physicalCalls.length)
+    throw new Error(`${label}.physicalCallLedger count is incomplete`);
   const callIds = new Set();
-  for (const call of proof.routeCalls) {
+  for (const call of physicalCalls) {
     assertExactKeys(
       call,
-      ['callId', 'provider', 'model', 'agentRole', 'noFallback'],
+      [
+        'physicalAttemptId',
+        'provider',
+        'model',
+        'feature',
+        'agentRole',
+        'stepId',
+        'attemptStatus',
+        'attemptKind',
+        'parentAttemptId',
+      ],
       [],
-      `${label}.routeCalls[]`,
+      `${label}.physicalCallLedger.calls[]`,
     );
-    assertString(call.callId, `${label}.routeCalls[].callId`);
-    if (callIds.has(call.callId))
-      throw new Error(`${label}.routeCalls contains duplicate callId`);
-    callIds.add(call.callId);
+    assertString(
+      call.physicalAttemptId,
+      `${label}.physicalCallLedger.calls[].physicalAttemptId`,
+    );
+    if (callIds.has(call.physicalAttemptId))
+      throw new Error(`${label}.physicalCallLedger contains duplicate physicalAttemptId`);
+    callIds.add(call.physicalAttemptId);
     if (
       call.provider !== manifest.route.provider ||
       call.model !== manifest.route.model
     )
-      throw new Error(`${label}.routeCalls contradict frozen route`);
-    assertString(call.agentRole, `${label}.routeCalls[].agentRole`);
-    assertBoolean(call.noFallback, true, `${label}.routeCalls[].noFallback`);
+      throw new Error(`${label}.physicalCallLedger contradicts frozen route`);
+    for (const field of ['feature', 'agentRole', 'stepId', 'attemptStatus', 'attemptKind'])
+      assertString(call[field], `${label}.physicalCallLedger.calls[].${field}`);
+    if (call.parentAttemptId !== null)
+      assertString(
+        call.parentAttemptId,
+        `${label}.physicalCallLedger.calls[].parentAttemptId`,
+      );
+    if (call.attemptKind === 'FAILOVER')
+      throw new Error(`${label}.physicalCallLedger contains a failover attempt`);
   }
-  for (const role of ['PLANNER', 'WORKER', 'REVIEWER']) {
-    if (!proof.routeCalls.some((call) => call.agentRole === role))
-      throw new Error(`${label}.routeCalls is missing ${role}`);
-  }
+  if (
+    physicalCalls.some(
+      (call) =>
+        call.agentRole === 'OutlinePlannerAgent' ||
+        call.stepId.startsWith('planner.outline'),
+    )
+  )
+    throw new Error(`${label} deterministic SINGLE_SHOT must not call the outline planner`);
+  const successfulPhase = (feature, role) =>
+    physicalCalls.some(
+      (call) =>
+        call.feature === feature &&
+        call.agentRole === role &&
+        call.attemptStatus === 'SUCCESS',
+    );
+  if (!successfulPhase('RUN_EXECUTION', 'WorkerAgent'))
+    throw new Error(`${label}.physicalCallLedger is missing successful worker execution`);
+  if (!successfulPhase('RUN_REVIEW', 'ReviewerAgent'))
+    throw new Error(`${label}.physicalCallLedger is missing successful reviewer execution`);
   assertExactKeys(
     proof.longFile,
     [
