@@ -1022,6 +1022,62 @@ class LlmRouterTest {
   }
 
   @Test
+  void callerReadTimeoutOverrideTightensButNeverWidensProviderWindow() {
+    build();
+    when(openai.call(any())).thenReturn(ok());
+    ArgumentCaptor<OpenAiNativeToolClient.OpenAiToolCallRequest> wire =
+        ArgumentCaptor.forClass(OpenAiNativeToolClient.OpenAiToolCallRequest.class);
+
+    // No override: the resolved per-provider window (openai default 120s), never null.
+    router.call(req("openai", "gpt-x"));
+    // Widening attempt (e.g. a worker hours from its absolute deadline): capped at the window.
+    router.call(req("openai", "gpt-x").toBuilder().readTimeoutSeconds(3_540).build());
+    // Tightening (deadline-capped call near the shutdown reserve): honoured.
+    router.call(req("openai", "gpt-x").toBuilder().readTimeoutSeconds(30).build());
+
+    verify(openai, times(3)).call(wire.capture());
+    assertThat(wire.getAllValues())
+        .extracting(OpenAiNativeToolClient.OpenAiToolCallRequest::readTimeoutSeconds)
+        .containsExactly(120, 120, 30);
+  }
+
+  @Test
+  void pipeline_default_profile_uses_six_attempt_accuracy_ladder() {
+    build();
+    when(openai.call(any())).thenThrow(new RuntimeException("503 service unavailable"));
+    assertThatThrownBy(() -> router.call(req("openai", "gpt-x")))
+        .isInstanceOf(RuntimeException.class);
+    verify(openai, times(LlmRouter.TRANSIENT_RETRY_MAX_ATTEMPTS)).call(any());
+    // 5 backoffs between 6 attempts, at the campaign-proven pipeline spacing.
+    verify(router, times(5)).backoffSleep(anyLong());
+    verify(router).backoffSleep(5_000L);
+    verify(router).backoffSleep(15_000L);
+    verify(router).backoffSleep(25_000L);
+    verify(router).backoffSleep(45_000L);
+    verify(router).backoffSleep(65_000L);
+  }
+
+  @Test
+  void interactive_profile_keeps_short_four_attempt_ladder() {
+    build();
+    when(openai.call(any())).thenThrow(new RuntimeException("503 service unavailable"));
+    assertThatThrownBy(
+            () ->
+                router.call(
+                    req("openai", "gpt-x").toBuilder()
+                        .retryProfile(LlmRequest.RetryProfile.INTERACTIVE)
+                        .build()))
+        .isInstanceOf(RuntimeException.class);
+    // A human is watching: 4 attempts with 2s/4s/8s backoff — worst case ~14s, never the
+    // pipeline ladder's ~155s tail.
+    verify(openai, times(LlmRouter.INTERACTIVE_TRANSIENT_RETRY_MAX_ATTEMPTS)).call(any());
+    verify(router, times(3)).backoffSleep(anyLong());
+    verify(router).backoffSleep(2_000L);
+    verify(router).backoffSleep(4_000L);
+    verify(router).backoffSleep(8_000L);
+  }
+
+  @Test
   void context_length_error_is_not_retried_or_failed_over() {
     // A context-window-exceeded error is permanent (the next call would be identical) — must fail
     // fast, not burn 4 retries. The real fix for the cause is history compaction (WS3).

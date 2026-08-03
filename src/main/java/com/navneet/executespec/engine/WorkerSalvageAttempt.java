@@ -74,7 +74,7 @@ final class WorkerSalvageAttempt {
                   config.maxTokens(),
                   tools,
                   config.toolChoice(),
-                  timeout.getAsInt()));
+                  AbsoluteDeadlineBudget.readTimeoutOverride(timeout)));
     } catch (Exception failure) {
       log.warn(
           "WorkerAgent SALVAGE router error (toolChoice={}): {}",

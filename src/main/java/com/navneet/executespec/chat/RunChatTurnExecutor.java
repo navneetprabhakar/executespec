@@ -45,6 +45,7 @@ final class RunChatTurnExecutor {
     for (int round = 0; round < MAX_TOOL_ROUNDS; round++) {
       LlmRequest req =
           LlmRequest.builder()
+              .retryProfile(LlmRequest.RetryProfile.INTERACTIVE)
               .provider(providerName)
               .model(modelName)
               .messages(conversation)
@@ -144,6 +145,7 @@ final class RunChatTurnExecutor {
       ExecutionContext ctx) {
     LlmRequest synthesis =
         LlmRequest.builder()
+            .retryProfile(LlmRequest.RetryProfile.INTERACTIVE)
             .provider(providerName)
             .model(modelName)
             .messages(conversation)

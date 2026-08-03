@@ -261,20 +261,14 @@ public class WorkerAgent {
    */
   public static final int TERMINAL_VISIBLE_TEST_GATE_MAX_REFUSALS = 3;
 
-  /**
-   * Per-call HTTP read-timeout override applied to every worker LLM call. Honoured by {@link
-   * GeminiNativeToolClient} (where the static default 60s is too tight for thinking-model worker
-   * calls); ignored by Anthropic + OpenAI clients (Spring AI manages their HTTP timeouts).
-   * Calibrated 2026-05-08 from cmatrix gemini run 84252898 — task T3 timed out after a 17-min
-   * worker phase with 122k input tokens.
-   */
-  // 2026-08-01 TB campaign (benchmark branch only): hardcoded 300 to match the router's
-  // Fireworks/DeepSeek transport window. The worker pins readTimeoutSeconds on every LLM call,
-  // overriding the per-provider window, so 120 here cancelled long GLM Fast turns at exactly 120s
-  // while the provider billed the discarded completion. A consistent hardcoded value cannot
-  // silently regress on a restart the way an env override could. Proper per-provider plumbing
-  // follows the campaign.
-  private static final int WORKER_HTTP_READ_TIMEOUT_SECONDS = 300;
+  // 2026-08-03 — the worker no longer pins a provider-blind HTTP read timeout on its LLM calls.
+  // The old global constant (120s pre-campaign, hardcoded 300s during the TB 2.1 campaign)
+  // overrode LlmRouter's per-provider transport windows on every call, which cancelled long
+  // GLM/DeepSeek turns mid-generation while the provider billed the discarded completion. The
+  // router now owns the window per provider (spring.ai.<provider>.read-timeout-seconds for
+  // gemini/deepseek/fireworks, constants for anthropic/default) and caps any caller override at
+  // that window. The worker supplies an override only when an absolute deadline constrains the
+  // call — see AbsoluteDeadlineBudget.readTimeoutOverride.
 
   public WorkerResult run(WorkerTaskRequest req) {
     return run(req, null);
@@ -663,7 +657,7 @@ public class WorkerAgent {
                     req.maxTokensPerCall(),
                     workerTools,
                     forcedThisCall ? "required" : null,
-                    iterationTimeout.getAsInt()));
+                    AbsoluteDeadlineBudget.readTimeoutOverride(iterationTimeout)));
       } catch (ProjectedCallBudgetExceededException e) {
         log.warn(
             "WorkerAgent PROJECTED_BUDGET_EXCEEDED run={} task={} iter={} reason={}",
@@ -1980,7 +1974,7 @@ public class WorkerAgent {
                   req.maxTokensPerCall(),
                   tools,
                   toolChoice,
-                  callTimeout.getAsInt()));
+                  AbsoluteDeadlineBudget.readTimeoutOverride(callTimeout)));
     } catch (Exception e) {
       log.warn(
           "WorkerAgent TERMINAL_FINALIZER router error (toolChoice={}): {}",
@@ -2240,12 +2234,18 @@ public class WorkerAgent {
     return envelope != null && envelope.startsWith("{\"ok\":true");
   }
 
+  /**
+   * Remaining-deadline budget for the next LLM call. Empty ⇒ starting the call would consume the
+   * protected shutdown reserve and must be refused. {@link AbsoluteDeadlineBudget#NO_DEADLINE_CAP}
+   * ⇒ no deadline constrains this run; {@link AbsoluteDeadlineBudget#readTimeoutOverride} maps that
+   * to a null per-call override so the router's per-provider transport window governs.
+   */
   static java.util.OptionalInt deadlineTimeoutSeconds(WorkerTaskRequest req) {
     return AbsoluteDeadlineBudget.timeoutSeconds(
         req.absoluteDeadlineEpochMs(),
         req.shutdownReserveMs(),
         System.currentTimeMillis(),
-        WORKER_HTTP_READ_TIMEOUT_SECONDS);
+        AbsoluteDeadlineBudget.NO_DEADLINE_CAP);
   }
 
   private WorkerResult deadlineExceededResult(
@@ -3184,7 +3184,7 @@ own line and nothing else. Otherwise list ONLY the real gaps, most important fir
                   1500,
                   List.of(),
                   null,
-                  callTimeout.getAsInt()));
+                  AbsoluteDeadlineBudget.readTimeoutOverride(callTimeout)));
       String verdict = resp.getResult().getOutput().getText();
       if (verdict == null) return null;
       String trimmed = verdict.strip();
