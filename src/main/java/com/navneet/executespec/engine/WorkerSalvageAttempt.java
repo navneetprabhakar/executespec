@@ -32,6 +32,11 @@ final class WorkerSalvageAttempt {
   }
 
   @FunctionalInterface
+  interface ToolLogFormatter {
+    String format(AssistantMessage.ToolCall call, String envelope);
+  }
+
+  @FunctionalInterface
   interface TerminalRecorder {
     void record(WorkerResult.Outcome outcome, int iterations);
   }
@@ -50,6 +55,7 @@ final class WorkerSalvageAttempt {
       RunCostTracker costTracker,
       OptionalInt timeout,
       ToolDispatch dispatch,
+      ToolLogFormatter toolLogFormatter,
       TerminalRecorder terminal,
       ObjectMapper objectMapper) {
     if (WorkerLiveBudgetGuard.taskViolation(request, costTracker, request.workerStartedAtEpochMs())
@@ -109,7 +115,11 @@ final class WorkerSalvageAttempt {
       if (WorkerToolPolicy.isWriteTool(call.name())) {
         String envelope = dispatch.dispatch(call);
         boolean ok = envelope != null && envelope.startsWith("{\"ok\":true");
-        toolLog.add("SALVAGE " + call.name() + " -> " + (ok ? "OK" : "ERR"));
+        // Use the same durable entry shape as the normal worker loop. Downstream goal and Git-diff
+        // evidence deliberately parse the canonical leading tool name, stable argument signature,
+        // mutation target and terminal status; the old "SALVAGE writeFile -> OK" marker hid a
+        // successful recovery from all three readers.
+        toolLog.add(toolLogFormatter.format(call, envelope));
         wrote |= ok;
       }
     }

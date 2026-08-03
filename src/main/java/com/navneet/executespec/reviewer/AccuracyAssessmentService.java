@@ -456,6 +456,11 @@ SCORE COMPUTATION GUIDANCE:
             .messages(messages)
             .context(operationContext.child("accuracy-" + stepId))
             .toolsOverride(List.of())
+            // Best-effort enrichment: deterministic build/test/reviewer evidence remains usable
+            // when this call fails. Do not let six provider windows hold run terminalization.
+            .readTimeoutSeconds(60)
+            .retryProfile(LlmRequest.RetryProfile.AUXILIARY)
+            .strictProvider(true)
             .agentRole("AccuracyAssessmentService")
             .stepId(stepId)
             .build());

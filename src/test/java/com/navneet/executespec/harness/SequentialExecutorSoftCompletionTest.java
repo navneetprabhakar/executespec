@@ -373,7 +373,7 @@ class SequentialExecutorSoftCompletionTest {
         .iterations(60)
         .toolCallsDispatched(61)
         .completionSummary("salvage: best-guess edit produced after iter-limit")
-        .toolCallLog(List.of("SALVAGE writeFile -> OK"))
+        .toolCallLog(List.of("writeFile(sig=deadbeef) [target=src/App.java] -> OK"))
         .totalLatencyMs(120_000L)
         .salvagedUnverified(true)
         .build();
@@ -609,6 +609,17 @@ class SequentialExecutorSoftCompletionTest {
         TaskOutcome.Status.COMPLETED_WITH_WARNING,
         t1.status(),
         "A salvage best-guess edit must not be promoted to SUCCESS without verification.");
+    verify(broadcaster)
+        .emit(
+            anyString(),
+            argThat(
+                event ->
+                    isGoalDecisionEvent(event)
+                        && ((List<?>) event.data().get("evidence")).contains("fileWrites=1")
+                        && ((List<?>) event.data().get("evidence"))
+                            .contains("meaningfulProductDiffs=1")
+                        && ((List<?>) event.data().get("evidence"))
+                            .contains("completionConfidenceLow=true")));
   }
 
   // RR-260 control — a NORMAL COMPLETED with smoke skipped is a clean SUCCESS, proving the warning

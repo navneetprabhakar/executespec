@@ -1305,6 +1305,21 @@ class LlmRouterTest {
   }
 
   @Test
+  void auxiliary_profile_uses_one_short_retry_before_structured_fallback() {
+    build();
+    when(openai.call(any())).thenThrow(new RuntimeException("503 service unavailable"));
+    assertThatThrownBy(
+            () ->
+                router.call(
+                    req("openai", "gpt-x").toBuilder()
+                        .retryProfile(LlmRequest.RetryProfile.AUXILIARY)
+                        .build()))
+        .isInstanceOf(RuntimeException.class);
+    verify(openai, times(LlmRouter.AUXILIARY_TRANSIENT_RETRY_MAX_ATTEMPTS)).call(any());
+    verify(router, times(1)).backoffSleep(2_000L);
+  }
+
+  @Test
   void context_length_error_is_not_retried_or_failed_over() {
     // A context-window-exceeded error is permanent (the next call would be identical) — must fail
     // fast, not burn 4 retries. The real fix for the cause is history compaction (WS3).

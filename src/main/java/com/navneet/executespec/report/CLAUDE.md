@@ -1,5 +1,11 @@
 # `report/` — validation reports and score evidence
 
+Run-end accuracy assessment and generated markdown are best-effort enrichment over deterministic
+build/test/reviewer evidence. Their provider calls use the AUXILIARY retry profile (two attempts,
+one 2-second backoff), a 60-second per-attempt read cap, and strict same-provider routing. Failure
+therefore falls back to the existing conservative accuracy/default report and structured markdown
+instead of keeping an otherwise reviewed run non-terminal through the unattended retry ladder.
+
 Validation-report inputs and test-failure details are wrapped user evidence. Static report and JSON
 output policy stays in `SystemMessage`; repository-derived issue descriptions, expected/actual
 values, conventions, and generated evidence never receive system authority.

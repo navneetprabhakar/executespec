@@ -116,6 +116,30 @@ class WorkerAgentStagnationTest {
     };
   }
 
+  private static Tool failingTool(String name) {
+    return new Tool() {
+      @Override
+      public String name() {
+        return name;
+      }
+
+      @Override
+      public String description() {
+        return "stub failure";
+      }
+
+      @Override
+      public String inputSchema() {
+        return "{\"type\":\"object\",\"additionalProperties\":false}";
+      }
+
+      @Override
+      public ToolResult execute(JsonNode args, ExecutionContext ctx) {
+        return new ToolResult.Err("rejected by test", ToolResult.ErrorKind.FORBIDDEN);
+      }
+    };
+  }
+
   private record Fixture(
       WorkerAgent worker,
       LlmRouter router,
@@ -524,6 +548,42 @@ class WorkerAgentStagnationTest {
             + " flip to COMPLETED via the salvage write, not stay COMPLETED_BY_STAGNATION."
             + " Saw: "
             + result.outcome());
+    assertTrue(result.salvagedUnverified(), "successful salvage remains explicitly unverified");
+    assertTrue(
+        result.toolCallLog().stream()
+            .anyMatch(
+                entry ->
+                    entry.startsWith("writeFile(sig=")
+                        && entry.contains("[target=y]")
+                        && entry.endsWith("-> OK")),
+        "salvage writes must use the canonical durable tool-log shape: " + result.toolCallLog());
+    assertFalse(
+        result.toolCallLog().stream().anyMatch(entry -> entry.startsWith("SALVAGE ")),
+        "the legacy salvage marker is invisible to downstream write/diff evidence");
+  }
+
+  @Test
+  void failed_salvage_write_uses_canonical_error_entry_and_does_not_rescue_task() {
+    List<ChatResponse> seq = new ArrayList<>();
+    for (int i = 0; i < 12; i++) {
+      seq.add(responseWithCalls(toolCall("readFile", "{\"path\":\"x\"}")));
+    }
+    seq.add(responseWithCalls(toolCall("writeFile", "{\"path\":\"y\",\"content\":\"z\"}")));
+    Fixture f = newWorker(seq);
+    lenient().when(f.registry.find("writeFile")).thenReturn(failingTool("writeFile"));
+
+    WorkerResult result = f.worker.run(req(40));
+
+    assertEquals(WorkerResult.Outcome.COMPLETED_BY_STAGNATION, result.outcome());
+    assertFalse(result.salvagedUnverified(), "a rejected salvage write did not recover an edit");
+    assertTrue(
+        result.toolCallLog().stream()
+            .anyMatch(
+                entry ->
+                    entry.startsWith("writeFile(sig=")
+                        && entry.contains("[target=y]")
+                        && entry.endsWith("-> ERR")),
+        "failed salvage must retain canonical target and error status: " + result.toolCallLog());
   }
 
   /**
