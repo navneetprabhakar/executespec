@@ -74,6 +74,7 @@ import {
   logLabel,
   logMeta,
   logMessage,
+  missingValidationReportExplanation,
   missingScoreExplanation,
   modelRankingCandidateLabel,
   modelRankingCandidateMetrics,
@@ -2954,7 +2955,7 @@ export default function IdeRunResult() {
                     </div>
                   )}
                   <div style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 8}}>
-                    Validation did not run because execution never reached the worker phase.
+                    {missingValidationReportExplanation(run)}
                   </div>
                 </div>
               ) : (

@@ -6,6 +6,9 @@
 runs. Persisted forensic fields remain unchanged; API/Web/email/in-app consumers use the safe
 projection. Unknown failures receive a stable run support code. `RunSyncService` attempts
 `WorkspaceRestoreService.ensureWorkspaceAvailable` before returning `WORKSPACE_UNAVAILABLE` (410).
+Deterministic HTTP failures include separate customer-safe outcomes for a missing required route, a
+forbidden method that was implemented, and 405 behavior that cannot be proven because no supported
+method exists at the path; raw validation/provider detail remains private.
 Because durable archives intentionally omit `.git`, a successful restore reconstructs repository
 metadata only from the run's immutable repo snapshots and the linked project's credential-free SCM
 clone coordinate, then the normal caller-authenticated fetch/reset selects source bytes. Sync also

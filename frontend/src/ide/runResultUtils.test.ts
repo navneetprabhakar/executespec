@@ -40,6 +40,7 @@ import {
   logLabel,
   logMeta,
   logMessage,
+  missingValidationReportExplanation,
   missingScoreExplanation,
   modelRankingCandidateLabel,
   modelRankingCandidateMetrics,
@@ -110,6 +111,17 @@ describe('run result surface routing', () => {
 });
 
 describe('terminal result honesty', () => {
+  it('does not claim the worker never ran when terminal tasks exist without a report', () => {
+    expect(
+      missingValidationReportExplanation({
+        tasks: [{id: 'T1'} as unknown as RunDetail['tasks'][number]],
+      }),
+    ).toContain('Worker steps ran');
+    expect(missingValidationReportExplanation({tasks: []})).toContain(
+      'did not reach the worker phase',
+    );
+  });
+
   it('uses the reviewer verdict before legacy severity counts', () => {
     expect(reviewerSignal({reviewerVerdict: 'UNRESOLVED_ISSUES', reviewFailures: 0})).toBe(
       'unresolved issues',

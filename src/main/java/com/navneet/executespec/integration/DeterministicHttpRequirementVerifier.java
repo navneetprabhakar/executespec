@@ -4,12 +4,11 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Set;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 import com.navneet.executespec.agent.Plan;
+import com.navneet.executespec.contractsurface.ExactHttpConstraintParser;
+import com.navneet.executespec.contractsurface.ExactHttpConstraintParser.Polarity;
 import com.navneet.executespec.contractsurface.SpringHttpSurfaceExtractor;
 import com.navneet.executespec.contractsurface.SpringHttpSurfaceExtractor.RouteKey;
 
@@ -27,23 +26,14 @@ import lombok.RequiredArgsConstructor;
 @Component
 @RequiredArgsConstructor
 class DeterministicHttpRequirementVerifier {
-
-  private static final Pattern EXACT_ROUTE =
-      Pattern.compile(
-          "(?i)(?:^|\\s|[`(])"
-              + "(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS|TRACE)\\s+"
-              + "(/[A-Za-z0-9_~!$&'()*+=:@%{}./-]+)");
-  private static final Pattern REMOVAL_PREFIX =
-      Pattern.compile("(?i).*\\b(?:remove|delete|retire|drop)\\s*$", Pattern.DOTALL);
-
   private final SpringHttpSurfaceExtractor extractor;
 
   Verification verify(Plan plan, String originalRequest, List<Path> repositoryRoots) {
     if (plan != null && plan.runtimeSurface() != Plan.RuntimeSurface.HTTP) {
       return Verification.notApplicable();
     }
-    Set<RouteKey> required = exactRequirements(plan, originalRequest);
-    if (required.isEmpty()) {
+    HttpConstraints constraints = exactRequirements(plan, originalRequest);
+    if (constraints.required().isEmpty() && constraints.forbidden().isEmpty()) {
       return Verification.notApplicable();
     }
     Set<RouteKey> actual = new LinkedHashSet<>();
@@ -55,8 +45,31 @@ class DeterministicHttpRequirementVerifier {
           .forEach(actual::add);
     }
     List<RouteKey> missing =
-        required.stream().filter(route -> !actual.contains(route)).sorted().toList();
-    return new Verification(true, Set.copyOf(required), Set.copyOf(actual), missing);
+        constraints.required().stream()
+            .filter(route -> !containsRoute(actual, route))
+            .sorted()
+            .toList();
+    List<RouteKey> presentForbidden =
+        constraints.forbidden().stream()
+            .filter(route -> containsRoute(actual, route))
+            .sorted()
+            .toList();
+    List<RouteKey> unprovenMethodRejections =
+        constraints.forbidden().stream()
+            .filter(route -> !containsRoute(actual, route))
+            .filter(
+                route ->
+                    actual.stream().noneMatch(candidate -> candidate.path().equals(route.path())))
+            .sorted()
+            .toList();
+    return new Verification(
+        true,
+        constraints.required(),
+        constraints.forbidden(),
+        Set.copyOf(actual),
+        missing,
+        presentForbidden,
+        unprovenMethodRejections);
   }
 
   Verification verify(Plan plan, String originalRequest, Path workspaceRoot) {
@@ -80,22 +93,31 @@ class DeterministicHttpRequirementVerifier {
 
   private static void assertSatisfied(Verification verification) {
     if (!verification.applicable() || verification.missing().isEmpty()) {
+      if (!verification.presentForbidden().isEmpty()) {
+        throw new IllegalStateException(
+            "DETERMINISTIC_HTTP_FORBIDDEN_METHOD_PRESENT: methods required to be rejected are "
+                + "implemented: "
+                + display(verification.presentForbidden()));
+      }
+      if (!verification.unprovenMethodRejections().isEmpty()) {
+        throw new IllegalStateException(
+            "DETERMINISTIC_HTTP_METHOD_REJECTION_UNPROVEN: no supported route exists at paths "
+                + "that must reject a method with 405: "
+                + display(verification.unprovenMethodRejections()));
+      }
       return;
     }
-    String missing =
-        verification.missing().stream()
-            .map(route -> route.method() + " " + route.path())
-            .reduce((left, right) -> left + ", " + right)
-            .orElse("(unknown)");
     throw new IllegalStateException(
-        "DETERMINISTIC_HTTP_REQUIREMENT_MISSING: required HTTP routes are absent: " + missing);
+        "DETERMINISTIC_HTTP_REQUIREMENT_MISSING: required HTTP routes are absent: "
+            + display(verification.missing()));
   }
 
-  private static Set<RouteKey> exactRequirements(Plan plan, String originalRequest) {
+  private static HttpConstraints exactRequirements(Plan plan, String originalRequest) {
+    Set<RouteKey> sourceRequired = new LinkedHashSet<>();
+    Set<RouteKey> sourceForbidden = new LinkedHashSet<>();
+    addConstraints(originalRequest, sourceRequired, sourceForbidden, Set.of());
+
     List<String> evidence = new ArrayList<>();
-    if (originalRequest != null && !originalRequest.isBlank()) {
-      evidence.add(originalRequest);
-    }
     if (plan != null) {
       plan.requirements().stream()
           .map(requirement -> requirement.text())
@@ -109,34 +131,66 @@ class DeterministicHttpRequirementVerifier {
             .forEach(evidence::add);
       }
     }
-    Set<RouteKey> required = new LinkedHashSet<>();
+    Set<RouteKey> required = new LinkedHashSet<>(sourceRequired);
+    Set<RouteKey> forbidden = new LinkedHashSet<>(sourceForbidden);
+    Set<RouteKey> sourceAuthority = new LinkedHashSet<>(sourceRequired);
+    sourceAuthority.addAll(sourceForbidden);
     for (String text : evidence) {
-      Matcher matcher = EXACT_ROUTE.matcher(text);
-      while (matcher.find()) {
-        String prefix = text.substring(Math.max(0, matcher.start() - 48), matcher.start());
-        if (REMOVAL_PREFIX.matcher(prefix).matches()) {
-          continue;
-        }
-        String path = matcher.group(2);
-        while (path.length() > 1 && ".,;:)`".indexOf(path.charAt(path.length() - 1)) >= 0) {
-          path = path.substring(0, path.length() - 1);
-        }
-        required.add(new RouteKey(matcher.group(1).toUpperCase(Locale.ROOT), path));
+      addConstraints(text, required, forbidden, sourceAuthority);
+    }
+    return new HttpConstraints(Set.copyOf(required), Set.copyOf(forbidden));
+  }
+
+  private static void addConstraints(
+      String evidence,
+      Set<RouteKey> required,
+      Set<RouteKey> forbidden,
+      Set<RouteKey> immutableSourceAuthority) {
+    for (var constraint : ExactHttpConstraintParser.parse(evidence)) {
+      RouteKey route = new RouteKey(constraint.method(), constraint.path());
+      if (immutableSourceAuthority.contains(route)) continue;
+      if (constraint.polarity() == Polarity.METHOD_NOT_ALLOWED) {
+        forbidden.add(route);
+        required.remove(route);
+      } else if (!forbidden.contains(route)) {
+        required.add(route);
       }
     }
-    return Set.copyOf(required);
+  }
+
+  private static boolean containsRoute(Set<RouteKey> actual, RouteKey route) {
+    return actual.contains(route) || actual.contains(new RouteKey("ANY", route.path()));
+  }
+
+  private static String display(List<RouteKey> routes) {
+    return routes.stream()
+        .map(route -> route.method() + " " + route.path())
+        .reduce((left, right) -> left + ", " + right)
+        .orElse("(unknown)");
   }
 
   record Verification(
-      boolean applicable, Set<RouteKey> required, Set<RouteKey> actual, List<RouteKey> missing) {
+      boolean applicable,
+      Set<RouteKey> required,
+      Set<RouteKey> forbidden,
+      Set<RouteKey> actual,
+      List<RouteKey> missing,
+      List<RouteKey> presentForbidden,
+      List<RouteKey> unprovenMethodRejections) {
     Verification {
       required = required == null ? Set.of() : Set.copyOf(required);
+      forbidden = forbidden == null ? Set.of() : Set.copyOf(forbidden);
       actual = actual == null ? Set.of() : Set.copyOf(actual);
       missing = missing == null ? List.of() : List.copyOf(missing);
+      presentForbidden = presentForbidden == null ? List.of() : List.copyOf(presentForbidden);
+      unprovenMethodRejections =
+          unprovenMethodRejections == null ? List.of() : List.copyOf(unprovenMethodRejections);
     }
 
     static Verification notApplicable() {
-      return new Verification(false, Set.of(), Set.of(), List.of());
+      return new Verification(false, Set.of(), Set.of(), Set.of(), List.of(), List.of(), List.of());
     }
   }
+
+  private record HttpConstraints(Set<RouteKey> required, Set<RouteKey> forbidden) {}
 }
