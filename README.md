@@ -151,6 +151,12 @@ source run's host tenant while assigning the current actor as payer on BUILD ite
 server-internal finding PATCH submission resolve its active host project and active actor before
 dedupe or dispatch.
 
+Project architecture and generated-document evidence distinguish an empty Spring parser result
+from positive Spring MVC evidence. Non-Spring repositories are labelled `NOT_ESTABLISHED`.
+Generated project explanations can ground narrowly scoped behavior in digest-validated, exact-SHA
+exported JavaScript/TypeScript function excerpts; incomplete or budget-truncated excerpts are never
+treated as authority.
+
 The current deployment candidate advances the migration source head to V372. V354 adds
 rollout-gated operation-fenced provider-attempt admission; its default remains
 `EXECUTESPEC_LLM_OPERATION_ADMISSION_MODE=LEGACY`, so this deployment does not activate the new

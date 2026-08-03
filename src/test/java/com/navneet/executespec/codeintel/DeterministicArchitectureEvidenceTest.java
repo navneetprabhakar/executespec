@@ -74,4 +74,19 @@ class DeterministicArchitectureEvidenceTest {
         .contains("POST /orders/health")
         .contains("Repository: `owner/orders`");
   }
+
+  @Test
+  void legacyV2HttpEvidenceIsNotCurrentAndIsRemovedDuringV3Publication() {
+    String legacy =
+        "<!-- EXECUTESPEC_DETERMINISTIC_HTTP_SURFACE_V2_BEGIN -->\n"
+            + "- Framework: `SPRING_MVC`\n- Status: `AVAILABLE`\n"
+            + "<!-- EXECUTESPEC_DETERMINISTIC_HTTP_SURFACE_V2_END -->";
+
+    assertThat(DeterministicArchitectureEvidence.hasCurrentHttpEvidence(legacy)).isFalse();
+    assertThat(
+            DeterministicArchitectureEvidence.appendFromCodemap(
+                "# Architecture\n\n" + legacy, "# Codemap\n\n" + EVIDENCE + "\n" + FACTS))
+        .contains(DeterministicArchitectureEvidence.HTTP_BEGIN)
+        .doesNotContain("EXECUTESPEC_DETERMINISTIC_HTTP_SURFACE_V2");
+  }
 }

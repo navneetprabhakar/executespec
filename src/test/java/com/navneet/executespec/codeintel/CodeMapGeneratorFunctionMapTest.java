@@ -599,6 +599,10 @@ class VetController {
     assertFalse(md.contains("## Functions"), "no Functions section when nothing extracted");
     assertTrue(md.contains("# owner/repo"));
     assertTrue(md.contains("**Files**: 3"));
+    assertTrue(md.contains("Framework: `NOT_ESTABLISHED`"));
+    assertTrue(md.contains("Status: `NOT_APPLICABLE`"));
+    assertTrue(md.contains("Reason: `NO_DETERMINISTIC_SPRING_MVC_EVIDENCE`"));
+    assertFalse(md.contains("Framework: `SPRING_MVC`"));
   }
 
   @Test

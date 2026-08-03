@@ -40,7 +40,8 @@ public class ProjectHttpSurfaceReadTool {
         DefaultToolDefinition.builder()
             .name("list_public_http_surface")
             .description(
-                "List the deterministic public Spring HTTP surface of a linked repository."
+                "List the deterministic public Spring HTTP surface of a linked repository, or"
+                    + " report that Spring MVC is not established."
                     + " Combines server.servlet.context-path, class-level mappings, and method"
                     + " mappings into exact method/path/source rows. Prefer this over manually"
                     + " inferring public endpoints from controller annotations. Read-only.")
@@ -79,7 +80,12 @@ public class ProjectHttpSurfaceReadTool {
       ObjectNode out = json.createObjectNode();
       out.put("ok", true);
       out.put("repo", repository.getGithubRepoFullName());
-      out.put("framework", "SPRING_MVC");
+      boolean applicable = surface.hasDeterministicSpringMvcEvidence();
+      out.put("applicable", applicable);
+      out.put("framework", applicable ? "SPRING_MVC" : "NOT_ESTABLISHED");
+      if (!applicable) {
+        out.put("reasonCode", "NO_DETERMINISTIC_SPRING_MVC_EVIDENCE");
+      }
       out.put("schemaVersion", surface.schemaVersion());
       out.put("digest", surface.digest());
       var routes = out.putArray("routes");

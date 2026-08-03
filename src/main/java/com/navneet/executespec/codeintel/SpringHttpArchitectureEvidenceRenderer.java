@@ -61,7 +61,11 @@ class SpringHttpArchitectureEvidenceRenderer {
     }
     try {
       surface = extractor.extract(snapshot);
-      renderAvailable(evidence, surface);
+      if (surface.hasDeterministicSpringMvcEvidence()) {
+        renderAvailable(evidence, surface);
+      } else {
+        renderNotApplicable(evidence, surface);
+      }
     } catch (SpringHttpSurfaceExtractor.SurfaceExtractionException failure) {
       http = unavailable(evidence, "SURFACE_EXTRACTION_UNAVAILABLE");
       return http + renderFacts(repoFullName, sourceRevision, files, pat, false, snapshot, null);
@@ -85,15 +89,14 @@ class SpringHttpArchitectureEvidenceRenderer {
   private static StringBuilder header(String revision) {
     return new StringBuilder()
         .append(DeterministicArchitectureEvidence.HTTP_BEGIN)
-        .append("\n## Deterministic public HTTP surface\n\n- Framework: `SPRING_MVC`\n")
-        .append("- Source revision: `")
+        .append("\n## Deterministic public HTTP surface\n\n- Source revision: `")
         .append(revision)
         .append("`\n");
   }
 
   private static void renderAvailable(StringBuilder evidence, SpringHttpSurfaceSnapshot surface) {
     evidence
-        .append("- Status: `AVAILABLE`\n- Schema version: `")
+        .append("- Framework: `SPRING_MVC`\n- Status: `AVAILABLE`\n- Schema version: `")
         .append(surface.schemaVersion())
         .append("`\n- Evidence digest: `")
         .append(surface.digest())
@@ -133,6 +136,19 @@ class SpringHttpArchitectureEvidenceRenderer {
     }
   }
 
+  private static void renderNotApplicable(
+      StringBuilder evidence, SpringHttpSurfaceSnapshot surface) {
+    evidence
+        .append("- Framework: `NOT_ESTABLISHED`\n")
+        .append("- Status: `NOT_APPLICABLE`\n")
+        .append("- Reason: `NO_DETERMINISTIC_SPRING_MVC_EVIDENCE`\n")
+        .append("- Schema version: `")
+        .append(surface.schemaVersion())
+        .append("`\n- Evidence digest: `")
+        .append(surface.digest())
+        .append("`\n\nNo Spring MVC framework, context path, or route claim is established.\n");
+  }
+
   private boolean isSource(String path) {
     String normalized = path.replace('\\', '/').toLowerCase(Locale.ROOT);
     if (CodeMapGenerator.isSkippedPath(normalized)) return false;
@@ -143,7 +159,11 @@ class SpringHttpArchitectureEvidenceRenderer {
   }
 
   private static String unavailable(StringBuilder evidence, String reason) {
-    evidence.append("- Status: `UNAVAILABLE`\n- Reason: `").append(reason).append("`\n");
+    evidence
+        .append("- Framework: `NOT_ESTABLISHED`\n")
+        .append("- Status: `UNAVAILABLE`\n- Reason: `")
+        .append(reason)
+        .append("`\n");
     evidence.append(
         "\nExact Spring method/path claims must not be inferred from this unavailable evidence.\n");
     return finish(evidence);
