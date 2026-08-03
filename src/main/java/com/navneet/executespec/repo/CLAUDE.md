@@ -64,6 +64,11 @@ never offered to a destination chosen at push time.
 - Bitbucket pagination is same-origin and bounded: catalogue 5 pages/500 repositories; inventory
   100 pages/500 directories/10,000 files. 401/403/404/429/5xx and transport failures are typed,
   secret-free `ScmProviderException` values. A truncated inventory never becomes READY evidence.
+- GitHub attach inspection uses `RemoteRepoLookupResult`; non-200 and transport failures retain a
+  safe status/code/retryability tuple instead of becoming nullable `GITHUB_REPOSITORY_UNREADABLE`.
+  The nullable `getRemoteRepo` wrapper exists only for legacy readiness callers. New admission
+  paths must consume the typed result so repository access failures are not mislabeled as platform
+  outages.
 - Bitbucket catalogue uses the configured workspace-scoped `/repositories/{workspace}` endpoint;
   the cross-workspace `/repositories?role=member` endpoint was removed under CHANGE-2770. Current
   REST credentials are Atlassian account email + scoped API token. Git-over-HTTPS uses the static

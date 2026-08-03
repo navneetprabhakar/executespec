@@ -71,6 +71,17 @@ describe('API transport contract', () => {
 
   it('uses structured backend messages while keeping safe status fallbacks', () => {
     expect(parseErrorMessage(422, '{"message":"spec is invalid"}')).toBe('spec is invalid');
+    expect(
+      parseErrorMessage(
+        403,
+        JSON.stringify({
+          errorCode: 'GITHUB_REPOSITORY_ACCESS_DENIED',
+          message:
+            "ExecuteSpec's GitHub connection cannot access this repository. Grant the stored GitHub credential access to it, or reconnect GitHub.",
+          action: 'UPDATE_GITHUB_ACCESS',
+        }),
+      ),
+    ).toContain('reconnect GitHub');
     expect(parseErrorMessage(403, '{"error":"Forbidden"}')).toBe(
       "You don't have permission to perform this action.",
     );

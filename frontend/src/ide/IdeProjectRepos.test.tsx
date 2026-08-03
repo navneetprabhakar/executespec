@@ -20,6 +20,10 @@ const api = vi.hoisted(() => ({
   getWorkspaceHealth: vi.fn(),
   getProjectCodeIndex: vi.fn(),
   regenerateRepoArchitecture: vi.fn(),
+  listScmRepos: vi.fn(),
+  listRepos: vi.fn(),
+  createRepo: vi.fn(),
+  linkProjectRepo: vi.fn(),
 }));
 
 vi.mock('@/lib/api', () => api);
@@ -48,6 +52,9 @@ beforeEach(() => {
     projectId: 'project-1',
     status: 'QUEUED',
   });
+  api.listScmRepos.mockResolvedValue([]);
+  api.listRepos.mockResolvedValue([]);
+  api.linkProjectRepo.mockResolvedValue({});
 });
 
 afterEach(() => {
@@ -57,6 +64,62 @@ afterEach(() => {
 });
 
 describe('IdeProjectRepos semantic-index honesty', () => {
+  it('keeps the link panel open and presents the repository-access remediation', async () => {
+    api.getProjectCodeIndex.mockResolvedValue([]);
+    api.createRepo.mockRejectedValue(
+      new Error(
+        "ExecuteSpec's GitHub connection cannot access this repository. Grant the stored GitHub credential access to it, or reconnect GitHub.",
+      ),
+    );
+
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={['/projects/project-1/repos']}>
+          <Routes>
+            <Route path='/projects/:projectId/repos' element={<IdeProjectRepos />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const open = Array.from(host.querySelectorAll('button')).find(
+      (button) => button.textContent === '+ Link repo',
+    );
+    await act(async () => {
+      open?.click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    const search = host.querySelector<HTMLInputElement>(
+      'input[placeholder^="Search repos or paste"]',
+    );
+    expect(search).not.toBeNull();
+    if (!search) throw new Error('repository search input was not rendered');
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+      setter?.call(search, 'https://github.com/acme/private-repo');
+      search.dispatchEvent(new Event('input', {bubbles: true}));
+      await Promise.resolve();
+    });
+    const attach = Array.from(host.querySelectorAll('button')).find(
+      (button) => button.textContent === 'Attach by URL',
+    );
+    await act(async () => {
+      attach?.click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(api.createRepo).toHaveBeenCalledWith(
+      expect.objectContaining({repoFullName: 'acme/private-repo', scmProvider: 'GITHUB'}),
+    );
+    expect(api.linkProjectRepo).not.toHaveBeenCalled();
+    expect(host.textContent).toContain('reconnect GitHub');
+    expect(host.textContent).toContain('Available repos');
+  });
+
   it('renders a retryable unknown state when readiness cannot be loaded', async () => {
     await act(async () => {
       root.render(

@@ -172,6 +172,7 @@ public final class PatScopePolicy {
         || path.startsWith("/api/executions/")) return RUNS_WRITE;
     if (path.startsWith("/api/projects/")
         || path.equals("/api/projects")
+        || path.equals("/api/repos")
         || path.startsWith("/api/repos/")
         || path.startsWith("/api/pr-reviews")
         || path.startsWith("/api/code-reviews")
