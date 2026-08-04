@@ -178,6 +178,39 @@ class RunTerminalOutcomeContractTest {
     assertThat(project("WORKING", null, null, 0.1, 1.0, null)).isNull();
   }
 
+  @Test
+  void branchMismatchPreflightGetsHonestBranchOutcomeNotAccessAdvice() {
+    RunTerminalOutcome outcome =
+        project(
+            "FAILED",
+            null,
+            "WORKSPACE_PREFLIGHT_FAILED:BRANCH_MISMATCH: repository branch mismatch for acme/api:"
+                + " expected main but workspace is on executespec/deadbeef",
+            0.0,
+            5.0,
+            null);
+
+    assertThat(outcome.code()).isEqualTo("WORKSPACE_PREFLIGHT_FAILED");
+    assertThat(outcome.customerTitle()).isEqualTo("Workspace branch mismatch");
+    assertThat(outcome.customerMessage()).contains("not on the expected repository branch");
+    assertThat(outcome.nextAction().label()).doesNotContainIgnoringCase("repository access");
+  }
+
+  @Test
+  void genericWorkspacePreflightFailureKeepsAccessAdvice() {
+    RunTerminalOutcome outcome =
+        project(
+            "FAILED",
+            null,
+            "WORKSPACE_PREFLIGHT_FAILED:CLONE_MISSING: clone missing for acme/api",
+            0.0,
+            5.0,
+            null);
+
+    assertThat(outcome.customerTitle()).isEqualTo("Repository workspace unavailable");
+    assertThat(outcome.nextAction().label()).containsIgnoringCase("repository access");
+  }
+
   private static RunTerminalOutcome project(
       String status,
       String statusReason,
