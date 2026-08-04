@@ -236,12 +236,19 @@ headings, a meaningful minimum body, balanced fences, no private tool protocol, 
 high-confidence credential material. Setup command validation treats known single-token
 executables as commands even outside a shell-labelled fence, rejects unclosed backtick or tilde
 fences, rejects shell operators even when repository prose contains the same line, and projects npm
-scripts only from operator-free script names. A complete and customer-safe response that fails only this
-deterministic content contract gets at most one corrective regeneration: the validation reason is
-fed back, the full document is requested again, and the same exact provider/model plus the same
-durable execution context are reused through strict routing. Both physical calls consume the shared
-operation budget and their token usage is included in the saved document's cost fields. Truncation,
-provider non-completion, and unsafe content never retry. Nothing is inserted into
+scripts only from operator-free script names. A complete and customer-safe response that fails only
+this deterministic content contract gets at most one corrective regeneration: the validation reason
+is fed back, the full document is requested again, and the same exact provider/model plus the same
+durable execution context are reused through strict routing. An unauthorized SETUP command adds a
+projection-bounded corrective instruction: the second response must keep only exact commands from
+the deterministic safe-command projection plus literal linked-repository clone commands; an absent
+or empty projection authorizes zero non-clone commands. It must state that every other conventional
+workflow command is not established, cover commands in every fence/console/inline/indented form,
+and place each projected command only beneath the exact repository that supplied it. Clone commands
+remain literal, fenced, and linked-repository-specific. The publication validator remains unchanged
+and fail-closed. Both physical calls consume the shared operation budget and their token usage is
+included in the saved document's cost fields. Truncation, provider non-completion, and unsafe
+content never retry. Nothing is inserted into
 `project_generated_doc` or mirrored into the workspace until a response validates; two malformed
 responses still fail atomically. POST maps provider non-completion to 502 and unsafe/malformed
 content to 422; GET and download rescan retained legacy rows before returning content.
