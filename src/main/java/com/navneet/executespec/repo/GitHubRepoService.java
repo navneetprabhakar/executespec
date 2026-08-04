@@ -877,17 +877,34 @@ public class GitHubRepoService {
    * @return default branch name, or "main" on failure
    */
   public String getDefaultBranch(String repoUrl, String overridePat) {
+    DefaultBranchLookup lookup = findDefaultBranch(repoUrl, overridePat);
+    return lookup.known() ? lookup.branch() : "main";
+  }
+
+  public record DefaultBranchLookup(boolean known, String branch) {
+    public static DefaultBranchLookup unknown() {
+      return new DefaultBranchLookup(false, null);
+    }
+
+    public static DefaultBranchLookup found(String branch) {
+      return new DefaultBranchLookup(true, branch);
+    }
+  }
+
+  /** Bounded fail-closed default-branch lookup for publication/admission security decisions. */
+  public DefaultBranchLookup findDefaultBranch(String repoUrl, String overridePat) {
     String effectivePat = overridePat;
-    if (effectivePat == null || effectivePat.isBlank()) return "main";
+    if (effectivePat == null || effectivePat.isBlank()) return DefaultBranchLookup.unknown();
 
     String[] ownerRepo = extractOwnerRepo(repoUrl);
-    if (ownerRepo == null) return "main";
+    if (ownerRepo == null) return DefaultBranchLookup.unknown();
 
     try {
-      HttpClient client = HttpClient.newHttpClient();
+      HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
       HttpRequest request =
           HttpRequest.newBuilder()
               .uri(URI.create("https://api.github.com/repos/" + ownerRepo[0] + "/" + ownerRepo[1]))
+              .timeout(Duration.ofSeconds(15))
               .header("Authorization", "Bearer " + effectivePat)
               .header("Accept", "application/vnd.github+json")
               .GET()
@@ -895,12 +912,9 @@ public class GitHubRepoService {
 
       HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
       if (response.statusCode() == 200) {
-        String body = response.body();
-        int idx = body.indexOf("\"default_branch\":");
-        if (idx >= 0) {
-          int start = body.indexOf("\"", idx + 17) + 1;
-          int end = body.indexOf("\"", start);
-          return body.substring(start, end);
+        String branch = JSON_MAPPER.readTree(response.body()).path("default_branch").asText(null);
+        if (branch != null && !branch.isBlank()) {
+          return DefaultBranchLookup.found(branch);
         }
       }
       log.warn(
@@ -910,7 +924,7 @@ public class GitHubRepoService {
     } catch (Exception e) {
       log.warn("[GitHubRepoService] Error getting default branch: {}", e.getMessage());
     }
-    return "main";
+    return DefaultBranchLookup.unknown();
   }
 
   /**
@@ -1173,18 +1187,28 @@ public class GitHubRepoService {
    * transport error, unexpected status) and callers must fail closed rather than assume "none".
    */
   public record OpenPullRequestLookup(
-      boolean known, boolean present, String prUrl, Integer prNumber) {
+      boolean known,
+      boolean present,
+      String prUrl,
+      Integer prNumber,
+      String baseBranch,
+      String headSha) {
 
     public static OpenPullRequestLookup unknown() {
-      return new OpenPullRequestLookup(false, false, null, null);
+      return new OpenPullRequestLookup(false, false, null, null, null, null);
     }
 
     public static OpenPullRequestLookup none() {
-      return new OpenPullRequestLookup(true, false, null, null);
+      return new OpenPullRequestLookup(true, false, null, null, null, null);
     }
 
     public static OpenPullRequestLookup found(String prUrl, Integer prNumber) {
-      return new OpenPullRequestLookup(true, true, prUrl, prNumber);
+      return new OpenPullRequestLookup(true, true, prUrl, prNumber, null, null);
+    }
+
+    public static OpenPullRequestLookup found(
+        String prUrl, Integer prNumber, String baseBranch, String headSha) {
+      return new OpenPullRequestLookup(true, true, prUrl, prNumber, baseBranch, headSha);
     }
 
     /** True only when GitHub positively answered that no open PR references the branch. */
@@ -1227,23 +1251,57 @@ public class GitHubRepoService {
             response.statusCode());
         return OpenPullRequestLookup.unknown();
       }
-      JsonNode array = JSON_MAPPER.readTree(response.body());
-      if (!array.isArray()) return OpenPullRequestLookup.unknown();
-      for (JsonNode pr : array) {
-        // GitHub's head filter is a prefix-tolerant query; require an exact ref match.
-        if (branch.equals(pr.path("head").path("ref").asText(""))) {
-          return OpenPullRequestLookup.found(
-              pr.path("html_url").asText(null),
-              pr.hasNonNull("number") ? pr.path("number").asInt() : null);
-        }
-      }
-      return OpenPullRequestLookup.none();
+      return parseOpenPullRequestLookup(repoFullName, branch, response.body());
     } catch (Exception e) {
       log.warn(
           "[GitHubRepoService] open-PR lookup {} head={} failed: {}",
           repoFullName,
           branch,
           e.getMessage());
+      return OpenPullRequestLookup.unknown();
+    }
+  }
+
+  static OpenPullRequestLookup parseOpenPullRequestLookup(
+      String repoFullName, String branch, String responseBody) {
+    try {
+      JsonNode array = JSON_MAPPER.readTree(responseBody);
+      if (!array.isArray()) return OpenPullRequestLookup.unknown();
+      OpenPullRequestLookup match = null;
+      for (JsonNode pr : array) {
+        // GitHub's head filter is prefix-tolerant; exact ref equality is mandatory.
+        if (!branch.equals(pr.path("head").path("ref").asText(""))) continue;
+        String prUrl = pr.path("html_url").asText(null);
+        Integer prNumber = pr.hasNonNull("number") ? pr.path("number").asInt() : null;
+        String baseBranch = pr.path("base").path("ref").asText(null);
+        String headSha = pr.path("head").path("sha").asText(null);
+        if (prUrl == null
+            || prUrl.isBlank()
+            || prNumber == null
+            || prNumber <= 0
+            || baseBranch == null
+            || baseBranch.isBlank()
+            || headSha == null
+            || !headSha.matches("[0-9a-fA-F]{40}")) {
+          log.warn(
+              "[GitHubRepoService] malformed open-PR lookup {} head={} omitted exact identity",
+              repoFullName,
+              branch);
+          return OpenPullRequestLookup.unknown();
+        }
+        OpenPullRequestLookup candidate =
+            OpenPullRequestLookup.found(prUrl, prNumber, baseBranch, headSha);
+        if (match != null) {
+          log.warn(
+              "[GitHubRepoService] ambiguous open-PR lookup {} head={} matched multiple PRs",
+              repoFullName,
+              branch);
+          return OpenPullRequestLookup.unknown();
+        }
+        match = candidate;
+      }
+      return match == null ? OpenPullRequestLookup.none() : match;
+    } catch (Exception malformed) {
       return OpenPullRequestLookup.unknown();
     }
   }

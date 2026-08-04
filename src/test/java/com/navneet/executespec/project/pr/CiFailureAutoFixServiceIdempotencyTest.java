@@ -21,6 +21,8 @@ import org.mockito.ArgumentCaptor;
 
 class CiFailureAutoFixServiceIdempotencyTest {
 
+  private static final UUID REPO_ID = UUID.fromString("00000000-0000-0000-0000-000000000042");
+
   private final PullRequestRecordRepository prRepository = mock(PullRequestRecordRepository.class);
   private final CiFailureRunRepository runRepository = mock(CiFailureRunRepository.class);
   private final CiFailureDeliveryClaimStore claimStore = mock(CiFailureDeliveryClaimStore.class);
@@ -51,7 +53,7 @@ class CiFailureAutoFixServiceIdempotencyTest {
 
     var result =
         service.onCheckRunFailed(
-            "acme/app", "feature", "tests failed", "https://checks/77", "77", "abcdef123456");
+            "acme/app", "feature", "tests failed", "https://checks/77", "77", "a".repeat(40));
 
     assertThat(result.dispatched()).isFalse();
     assertThat(result.reason()).contains("already handled by run patch-run-1");
@@ -86,11 +88,17 @@ class CiFailureAutoFixServiceIdempotencyTest {
             "tests failed",
             "https://checks/77",
             "77",
-            "abcdef1234567890ffff");
+            "abcdef1234567890ffffabcdef1234567890ffff");
 
     ArgumentCaptor<Finding> finding = ArgumentCaptor.forClass(Finding.class);
     verify(submitter).submit(finding.capture());
     assertThat(finding.getValue().id()).isEqualTo(pr.getId() + "|check-77|sha-abcdef1234567890");
+    assertThat(finding.getValue().selectedRepoIds()).containsExactly(REPO_ID);
+    assertThat(finding.getValue().branchOverride()).isEqualTo("feature");
+    assertThat(finding.getValue().publicationRepoFullName()).isEqualTo("acme/app");
+    assertThat(finding.getValue().publicationPrNumber()).isEqualTo(42);
+    assertThat(finding.getValue().publicationHeadSha())
+        .isEqualTo("abcdef1234567890ffffabcdef1234567890ffff");
     assertThat(result.dispatched()).isTrue();
     // V359 reserves the attempt inside the claim transaction; the stale DTO is not re-saved.
     assertThat(pr.getCiAutoFixAttempts()).isZero();
@@ -112,7 +120,7 @@ class CiFailureAutoFixServiceIdempotencyTest {
 
     var result =
         service.onCheckRunFailed(
-            "acme/app", "feature", "tests failed", "https://checks/77", "77", "abcdef123456");
+            "acme/app", "feature", "tests failed", "https://checks/77", "77", "a".repeat(40));
 
     assertThat(result.dispatched()).isFalse();
     assertThat(result.reason()).contains("already being handled");
@@ -124,6 +132,7 @@ class CiFailureAutoFixServiceIdempotencyTest {
     return PullRequestRecord.builder()
         .id(UUID.fromString("2ab7ed75-8dcb-44ea-99e9-81384a647d4a"))
         .runId("origin-run")
+        .repoId(REPO_ID)
         .repoFullName("acme/app")
         .prNumber(42)
         .prUrl("https://github.com/acme/app/pull/42")

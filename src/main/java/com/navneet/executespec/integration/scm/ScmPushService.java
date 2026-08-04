@@ -754,11 +754,105 @@ public class ScmPushService {
                 ? projectRepository.findById(run.getProjectId()).orElse(null)
                 : null;
         branchName = resolveBranchName(project, run);
-        String expectedRemoteSha =
-            expectedRemoteShaFor(run.getRunId(), repoFullNameFromUrl(remote), branchName);
+        boolean existingBranchTarget = StringUtils.hasText(run.getBranchOverride());
+        if (existingBranchTarget
+            && StringUtils.hasText(run.getCheckoutBranch())
+            && !run.getBranchOverride().equals(run.getCheckoutBranch())) {
+          return PushResult.blocked(
+              "SCM_PUBLICATION_IDENTITY_MISMATCH",
+              "BRANCH_TARGET",
+              "The checked-out branch does not match the authorized pull-request branch",
+              "GITHUB",
+              false,
+              "Submit a new run against the exact pull-request head branch.");
+        }
+        GitHubRepoService.DefaultBranchLookup defaultBranchLookup = null;
+        if (existingBranchTarget) {
+          blockingGate = "DEFAULT_BRANCH_RESOLUTION";
+          defaultBranchLookup = gitHubRepoService.findDefaultBranch(remote, pat);
+        }
+        if (existingBranchTarget && !defaultBranchLookup.known()) {
+          return PushResult.blocked(
+              "SCM_DEFAULT_BRANCH_UNAVAILABLE",
+              "DEFAULT_BRANCH_RESOLUTION",
+              "The repository default branch could not be verified",
+              "GITHUB",
+              true,
+              "Retry after GitHub repository metadata is available.");
+        }
+        String targetBranch =
+            (project != null && StringUtils.hasText(project.getTargetBranch()))
+                ? project.getTargetBranch()
+                : existingBranchTarget ? defaultBranchLookup.branch() : null;
+        GitHubRepoService.OpenPullRequestLookup existingPullRequest = null;
+        if (existingBranchTarget) {
+          if (branchName.equals(targetBranch) || branchName.equals(defaultBranchLookup.branch())) {
+            return PushResult.blocked(
+                "SCM_PROTECTED_BRANCH_TARGET",
+                "BRANCH_TARGET",
+                "An existing-PR run cannot publish directly to the repository target branch",
+                "GITHUB",
+                false,
+                "Select the head branch of an open pull request and submit a new run.");
+          }
+          existingPullRequest =
+              gitHubRepoService.findOpenPullRequestForHead(
+                  repoFullNameFromUrl(remote), branchName, pat);
+          if (!existingPullRequest.known()) {
+            return PushResult.blocked(
+                "SCM_EXISTING_PR_LOOKUP_UNAVAILABLE",
+                "PR_LOOKUP",
+                "The open pull request for the selected branch could not be verified",
+                "GITHUB",
+                true,
+                "Retry after GitHub pull-request lookup is available.");
+          }
+          if (!existingPullRequest.present()) {
+            return PushResult.blocked(
+                "SCM_EXISTING_PR_REQUIRED",
+                "PR_LOOKUP",
+                "The selected branch is not the head of an open pull request",
+                "GITHUB",
+                false,
+                "Select an open pull-request head branch or omit the branch to create a new PR.");
+          }
+          if (!targetBranch.equals(existingPullRequest.baseBranch())) {
+            return PushResult.blocked(
+                "SCM_EXISTING_PR_BASE_MISMATCH",
+                "PR_LOOKUP",
+                "The selected pull request does not target the configured repository branch",
+                "GITHUB",
+                false,
+                "Select an open pull request against the configured target branch.");
+          }
+          String actualRepo = repoFullNameFromUrl(remote);
+          if ((StringUtils.hasText(run.getPublicationRepoFullName())
+                  && !actualRepo.equalsIgnoreCase(run.getPublicationRepoFullName()))
+              || (run.getPublicationPrNumber() != null
+                  && !run.getPublicationPrNumber().equals(existingPullRequest.prNumber()))
+              || (StringUtils.hasText(run.getPublicationHeadSha())
+                  && !run.getPublicationHeadSha()
+                      .equalsIgnoreCase(existingPullRequest.headSha()))) {
+            return PushResult.blocked(
+                "SCM_PUBLICATION_IDENTITY_MISMATCH",
+                "PR_LOOKUP",
+                "The open pull request no longer matches the authorized publication target",
+                "GITHUB",
+                false,
+                "Start a new run for the intended repository and pull request.");
+          }
+        }
         blockingGate = "GIT_PUSH";
         GitToolResult result =
-            gitTool.pushToBranch(run.getRunId(), remote, pat, branchName, expectedRemoteSha);
+            existingBranchTarget
+                ? gitTool.pushToExistingBranch(
+                    run.getRunId(), ".", remote, pat, branchName, runCommitMessage(run))
+                : gitTool.pushToBranch(
+                    run.getRunId(),
+                    remote,
+                    pat,
+                    branchName,
+                    expectedRemoteShaFor(run.getRunId(), repoFullNameFromUrl(remote), branchName));
         if (!result.isOk()) {
           log.warn("GitHub branch push failed for run {}: {}", run.getRunId(), result.value());
           return PushResult.failed(
@@ -769,19 +863,24 @@ public class ScmPushService {
               "Check GitHub Git credentials, remote branch policy, and connectivity, then retry.");
         }
         branchPushed = true;
-        blockingGate = "DEFAULT_BRANCH_RESOLUTION";
-        String targetBranch =
-            (project != null && StringUtils.hasText(project.getTargetBranch()))
-                ? project.getTargetBranch()
-                : gitHubRepoService.getDefaultBranch(remote, pat);
+        if (!StringUtils.hasText(targetBranch)) {
+          // New ExecuteSpec branches retain the established saga ordering: push first, then resolve
+          // the PR base. If base discovery fails, the catch path can compensate the orphan branch.
+          // Existing-PR updates resolve and verify their base before any mutation above.
+          blockingGate = "DEFAULT_BRANCH_RESOLUTION";
+          targetBranch = gitHubRepoService.getDefaultBranch(remote, pat);
+        }
         String prTitle = run.getRunTitle() != null ? run.getRunTitle() : "ExecuteSpec changes";
         String prBody = run.getRunSummary() != null ? run.getRunSummary() : run.getUserRequest();
         // RR-146 — an existing PR for this head is NOT a failure. Only a typed FAILED outcome may
         // authorize deleting the branch we just pushed.
         blockingGate = "PR_CREATION";
         GitHubRepoService.PullRequestCreation creation =
-            gitHubRepoService.createPullRequestDetailed(
-                remote, branchName, targetBranch, prTitle, prBody, pat);
+            existingBranchTarget
+                ? GitHubRepoService.PullRequestCreation.alreadyExists(
+                    existingPullRequest.prUrl(), existingPullRequest.prNumber())
+                : gitHubRepoService.createPullRequestDetailed(
+                    remote, branchName, targetBranch, prTitle, prBody, pat);
         String prUrl = creation.prUrl();
         if (creation.prExists() && prUrl != null) {
           pullRequestEstablished = true;
@@ -794,10 +893,28 @@ public class ScmPushService {
           run.setGithubPrUrl(prUrl);
           run.setScmPrUrl(prUrl);
           run.setScmProvider("GITHUB");
-          log.info("Created PR for run {}: {}", run.getRunId(), prUrl);
+          boolean updatedExistingPr =
+              creation.outcome() == GitHubRepoService.PullRequestCreation.Outcome.ALREADY_EXISTS;
+          boolean existingPrAlreadyCurrent =
+              updatedExistingPr && "ALREADY_CURRENT".equals(result.value());
+          log.info(
+              "{} PR for run {}: {}",
+              existingPrAlreadyCurrent
+                  ? "Verified already-current existing"
+                  : updatedExistingPr ? "Updated existing" : "Created",
+              run.getRunId(),
+              prUrl);
           broadcaster.emit(
               run.getRunId(),
-              RunEvent.log(run.getRunId(), "scm", "Pull request created: " + prUrl));
+              RunEvent.log(
+                  run.getRunId(),
+                  "scm",
+                  (existingPrAlreadyCurrent
+                          ? "Existing pull request already current; no new changes: "
+                          : updatedExistingPr
+                              ? "Existing pull request updated: "
+                              : "Pull request created: ")
+                      + prUrl));
 
           // Persist a PullRequestRecord so the UI can show multi-PR status
           // and the GitHub webhook can flip it to MERGED/CLOSED later.
@@ -822,7 +939,9 @@ public class ScmPushService {
               "GITHUB",
               prUrl,
               creation.outcome() == GitHubRepoService.PullRequestCreation.Outcome.ALREADY_EXISTS
-                  ? "Existing GitHub pull request updated"
+                  ? existingPrAlreadyCurrent
+                      ? "Existing GitHub pull request already current; no new changes"
+                      : "Existing GitHub pull request updated"
                   : "GitHub pull request created");
         } else if (creation.prExists()) {
           pullRequestEstablished = true;
@@ -844,8 +963,10 @@ public class ScmPushService {
           // now an orphan. Enqueue the saga compensation to delete it (PAT resolved from the run
           // owner at execution time — not stored in the payload). RR-146: reached only for a typed
           // FAILED outcome, never for "a pull request already exists".
-          enqueueOrphanBranchCleanup(run.getRunId(), repoFullNameFromUrl(remote), branchName);
-          orphanCleanupEnqueued = true;
+          if (!existingBranchTarget) {
+            enqueueOrphanBranchCleanup(run.getRunId(), repoFullNameFromUrl(remote), branchName);
+            orphanCleanupEnqueued = true;
+          }
           blockingGate = "REPOSITORY_DESCRIPTION";
           gitHubRepoService.updateRepoDescription(remote, run.getUserRequest(), pat);
           return PushResult.failed(
@@ -870,7 +991,11 @@ public class ScmPushService {
         return PushResult.pushed("GITHUB", "", "GitHub changes pushed");
       }
     } catch (Exception failure) {
-      if (branchPushed && !pullRequestEstablished && !orphanCleanupEnqueued && branchName != null) {
+      if (branchPushed
+          && !pullRequestEstablished
+          && !orphanCleanupEnqueued
+          && branchName != null
+          && !StringUtils.hasText(run.getBranchOverride())) {
         enqueueOrphanBranchCleanup(run.getRunId(), repoFullNameFromUrl(remote), branchName);
       }
       log.warn(
@@ -955,6 +1080,9 @@ public class ScmPushService {
    * executespec/<runId-short>} default.
    */
   private static String resolveBranchName(Project project, PipelineRun run) {
+    if (StringUtils.hasText(run.getBranchOverride())) {
+      return run.getBranchOverride();
+    }
     String pattern = project != null ? project.getBranchNamingPattern() : null;
     String shortId = run.getRunId().substring(0, Math.min(8, run.getRunId().length()));
     if (!StringUtils.hasText(pattern)) {
@@ -971,6 +1099,12 @@ public class ScmPushService {
     String slug = text.toLowerCase().replaceAll("[^a-z0-9]+", "-").replaceAll("^-+|-+$", "");
     if (slug.isBlank()) return "change";
     return slug.length() > 40 ? slug.substring(0, 40) : slug;
+  }
+
+  private static String runCommitMessage(PipelineRun run) {
+    String title =
+        StringUtils.hasText(run.getRunTitle()) ? run.getRunTitle() : "ExecuteSpec changes";
+    return title + "\n\nCo-Authored-By: ExecuteSpec <admin@executespec.ai>";
   }
 
   /** Extracts {@code owner/repo} from an HTTPS GitHub URL. */
@@ -1027,6 +1161,27 @@ public class ScmPushService {
       return PushResult.noConfiguration("GITHUB", "No linked repositories configured");
 
     String branchName = resolveBranchName(project, run);
+    boolean existingBranchTarget = StringUtils.hasText(run.getBranchOverride());
+    if (existingBranchTarget && ids.size() != 1) {
+      return PushResult.blocked(
+          "SCM_EXISTING_PR_REPOSITORY_SCOPE_INVALID",
+          "REPOSITORY_RESOLUTION",
+          "Existing pull-request publication requires exactly one repository",
+          "GITHUB",
+          false,
+          "Select only the repository that owns the pull request and submit a new run.");
+    }
+    if (existingBranchTarget
+        && StringUtils.hasText(run.getCheckoutBranch())
+        && !run.getBranchOverride().equals(run.getCheckoutBranch())) {
+      return PushResult.blocked(
+          "SCM_PUBLICATION_IDENTITY_MISMATCH",
+          "BRANCH_TARGET",
+          "The checked-out branch does not match the authorized pull-request branch",
+          "GITHUB",
+          false,
+          "Submit a new run against the exact pull-request head branch.");
+    }
     String runTitle =
         StringUtils.hasText(run.getRunTitle()) ? run.getRunTitle() : "ExecuteSpec changes";
     String prTitle = runTitle;
@@ -1034,7 +1189,12 @@ public class ScmPushService {
         StringUtils.hasText(run.getRunSummary()) ? run.getRunSummary() : run.getUserRequest();
     List<String> reviewers = parseReviewers(project);
 
-    record Created(ProjectRepo repo, String prUrl, Integer prNumber) {}
+    record Created(
+        ProjectRepo repo,
+        String prUrl,
+        Integer prNumber,
+        boolean alreadyExisted,
+        boolean noNewChanges) {}
     List<Created> created = new java.util.ArrayList<>();
     int attempted = 0;
     int failed = 0;
@@ -1074,11 +1234,84 @@ public class ScmPushService {
         continue;
       }
 
-      String expectedRemoteSha =
-          expectedRemoteShaFor(run.getRunId(), repo.getGithubRepoFullName(), branchName);
+      String targetBranch =
+          (project != null && StringUtils.hasText(project.getTargetBranch()))
+              ? project.getTargetBranch()
+              : (repo.getDefaultBranch() != null ? repo.getDefaultBranch() : "main");
+      GitHubRepoService.OpenPullRequestLookup existingPullRequest = null;
+      if (existingBranchTarget) {
+        if (branchName.equals(targetBranch) || branchName.equals(repo.getDefaultBranch())) {
+          log.warn(
+              "[{}] existing-PR publication refused for {}: branch {} is the target branch",
+              run.getRunId(),
+              repo.getGithubRepoFullName(),
+              branchName);
+          failed++;
+          continue;
+        }
+        existingPullRequest =
+            gitHubRepoService.findOpenPullRequestForHead(
+                repo.getGithubRepoFullName(), branchName, pat);
+        if (!existingPullRequest.known()) {
+          return PushResult.blocked(
+              "SCM_EXISTING_PR_LOOKUP_UNAVAILABLE",
+              "PR_LOOKUP",
+              "The open pull request for the selected branch could not be verified",
+              "GITHUB",
+              true,
+              "Retry after GitHub pull-request lookup is available.");
+        }
+        if (!existingPullRequest.present()) {
+          return PushResult.blocked(
+              "SCM_EXISTING_PR_REQUIRED",
+              "PR_LOOKUP",
+              "The selected branch is not the head of an open pull request",
+              "GITHUB",
+              false,
+              "Start a new run against an open pull-request head branch.");
+        }
+        if (!targetBranch.equals(existingPullRequest.baseBranch())) {
+          return PushResult.blocked(
+              "SCM_EXISTING_PR_BASE_MISMATCH",
+              "PR_LOOKUP",
+              "The selected pull request does not target the configured repository branch",
+              "GITHUB",
+              false,
+              "Start a new run against a pull request targeting the configured branch.");
+        }
+        if ((StringUtils.hasText(run.getPublicationRepoFullName())
+                && !repo.getGithubRepoFullName().equalsIgnoreCase(run.getPublicationRepoFullName()))
+            || (run.getPublicationPrNumber() != null
+                && !run.getPublicationPrNumber().equals(existingPullRequest.prNumber()))
+            || (StringUtils.hasText(run.getPublicationHeadSha())
+                && !run.getPublicationHeadSha().equalsIgnoreCase(existingPullRequest.headSha()))) {
+          log.warn(
+              "[{}] existing-PR publication identity mismatch for {} branch {}",
+              run.getRunId(),
+              repo.getGithubRepoFullName(),
+              branchName);
+          return PushResult.blocked(
+              "SCM_PUBLICATION_IDENTITY_MISMATCH",
+              "PR_LOOKUP",
+              "The open pull request no longer matches the authorized publication target",
+              "GITHUB",
+              false,
+              "Start a new run for the intended repository and pull request.");
+        }
+      }
+
       var pushResult =
-          gitTool.commitAndPushSubdir(
-              run.getRunId(), subPath, remote, pat, branchName, commitMsg, expectedRemoteSha);
+          existingBranchTarget
+              ? gitTool.pushToExistingBranch(
+                  run.getRunId(), subPath, remote, pat, branchName, commitMsg)
+              : gitTool.commitAndPushSubdir(
+                  run.getRunId(),
+                  subPath,
+                  remote,
+                  pat,
+                  branchName,
+                  commitMsg,
+                  expectedRemoteShaFor(run.getRunId(), repo.getGithubRepoFullName(), branchName));
       if (!pushResult.isOk()) {
         log.warn(
             "[{}] multi-repo push failed for {}: {}",
@@ -1094,25 +1327,27 @@ public class ScmPushService {
         failed++;
         continue;
       }
-      if ("CLEAN".equals(pushResult.value())) {
+      if ("CLEAN".equals(pushResult.value()) && !existingBranchTarget) {
         log.info(
             "[{}] no changes for {}, skipping PR", run.getRunId(), repo.getGithubRepoFullName());
         clean++;
         continue;
       }
+      boolean noNewChanges = "ALREADY_CURRENT".equals(pushResult.value());
 
-      String targetBranch =
-          (project != null && StringUtils.hasText(project.getTargetBranch()))
-              ? project.getTargetBranch()
-              : (repo.getDefaultBranch() != null ? repo.getDefaultBranch() : "main");
       GitHubRepoService.PullRequestCreation creation =
-          gitHubRepoService.createPullRequestDetailed(
-              remote, branchName, targetBranch, prTitle, prBodyBase, pat);
+          existingBranchTarget
+              ? GitHubRepoService.PullRequestCreation.alreadyExists(
+                  existingPullRequest.prUrl(), existingPullRequest.prNumber())
+              : gitHubRepoService.createPullRequestDetailed(
+                  remote, branchName, targetBranch, prTitle, prBodyBase, pat);
       if (creation.failed()) {
         // RL-2026-05-041 (audit #16) — branch pushed but PR creation failed → orphan branch.
         // RR-146: only a typed FAILED outcome reaches here; "a pull request already exists" does
         // not, because that branch is live review material.
-        enqueueOrphanBranchCleanup(run.getRunId(), repo.getGithubRepoFullName(), branchName);
+        if (!existingBranchTarget) {
+          enqueueOrphanBranchCleanup(run.getRunId(), repo.getGithubRepoFullName(), branchName);
+        }
         failed++;
         continue;
       }
@@ -1135,7 +1370,15 @@ public class ScmPushService {
               prUrl,
               branchName,
               targetBranch);
-      if (record != null) created.add(new Created(repo, prUrl, prNumber));
+      if (record != null) {
+        created.add(
+            new Created(
+                repo,
+                prUrl,
+                prNumber,
+                creation.outcome() == GitHubRepoService.PullRequestCreation.Outcome.ALREADY_EXISTS,
+                noNewChanges));
+      }
 
       if (!reviewers.isEmpty() && prNumber != null) {
         gitHubRepoService.requestReviewers(remote, prNumber, reviewers, pat);
@@ -1145,7 +1388,12 @@ public class ScmPushService {
           RunEvent.log(
               run.getRunId(),
               "scm",
-              "PR opened for " + repo.getGithubRepoFullName() + ": " + prUrl));
+              (creation.outcome() == GitHubRepoService.PullRequestCreation.Outcome.ALREADY_EXISTS
+                      ? noNewChanges ? "PR already current for " : "PR updated for "
+                      : "PR opened for ")
+                  + repo.getGithubRepoFullName()
+                  + ": "
+                  + prUrl));
     }
 
     // Cross-link: patch each PR body with the list of sibling PRs.
@@ -1223,7 +1471,18 @@ public class ScmPushService {
           failed);
     }
     if (!created.isEmpty()) {
-      return PushResult.pushed("GITHUB", representativePr, "GitHub pull requests created");
+      boolean allExisting = created.stream().allMatch(Created::alreadyExisted);
+      boolean anyExisting = created.stream().anyMatch(Created::alreadyExisted);
+      boolean allAlreadyCurrent = allExisting && created.stream().allMatch(Created::noNewChanges);
+      String message =
+          allAlreadyCurrent
+              ? "Existing GitHub pull requests already current; no new changes"
+              : allExisting
+                  ? "Existing GitHub pull requests updated"
+                  : anyExisting
+                      ? "GitHub pull requests created or updated"
+                      : "GitHub pull requests created";
+      return PushResult.pushed("GITHUB", representativePr, message);
     }
     if (failed > 0) {
       return PushResult.failed(

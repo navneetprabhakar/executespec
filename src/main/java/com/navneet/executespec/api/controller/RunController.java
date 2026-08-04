@@ -699,6 +699,9 @@ public class RunController {
     values.put("figmaUrl", command.figmaUrl());
     values.put("tddMode", String.valueOf(command.tddMode()));
     values.put("branchOverride", command.branchOverride());
+    values.put("checkoutBranch", command.checkoutBranch());
+    values.put("existingPrRepoFullName", command.existingPrRepoFullName());
+    values.put("existingPrNumber", String.valueOf(command.existingPrNumber()));
     values.put("prReviewComments", command.prReviewComments());
     values.put("userCostCap", String.valueOf(command.userCostCap()));
     values.put("skipAutoPush", String.valueOf(command.skipAutoPush()));
