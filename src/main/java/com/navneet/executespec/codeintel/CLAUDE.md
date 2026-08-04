@@ -163,6 +163,13 @@ Generated-document job DTOs also normalize the legacy persisted phrase `provider
 to truthful dispatch/uncertain-delivery wording for every API consumer; the web fallback remains for
 older servers.
 The validator rejects truncated, unsafe, or deterministically invalid output before publication.
+For SETUP, `ProjectSetupOperationalGrounding` replaces the complete customer-visible body with a
+byte-stable document assembled from decoded exact-revision `SetupAuthority`. Each linked repository
+gets one exact clone block and each projected command gets its own fenced block; Node engine facts
+are retained, while environment, service-order, health, and troubleshooting gaps are stated as
+unknown. The assembled document is safety-scanned and passes the unchanged strict validator.
+Canonicality is required for cache reuse and publication dedupe. The provider call remains for the
+current durable-job dispatch/accounting contract; removing it is a separate job-contract change.
 Text is concatenated across every non-empty
 provider generation because Anthropic may return multiple generations; reading only the first can
 misclassify a paid, complete response as empty. New document rows use `saveAndFlush` before the
@@ -236,17 +243,14 @@ headings, a meaningful minimum body, balanced fences, no private tool protocol, 
 high-confidence credential material. Setup command validation treats known single-token
 executables as commands even outside a shell-labelled fence, rejects unclosed backtick or tilde
 fences, rejects shell operators even when repository prose contains the same line, and projects npm
-scripts only from operator-free script names. A complete and customer-safe response that fails only
+scripts only from operator-free script names. Inline strings containing only version-range
+characters (for example `>=20`) are non-executable facts, not shell commands. A complete and customer-safe response that fails only
 this deterministic content contract gets at most one corrective regeneration: the validation reason
 is fed back, the full document is requested again, and the same exact provider/model plus the same
-durable execution context are reused through strict routing. An unauthorized SETUP command adds a
-projection-bounded corrective instruction: the second response must keep only exact commands from
-the deterministic safe-command projection plus literal linked-repository clone commands; an absent
-or empty projection authorizes zero non-clone commands. It must state that every other conventional
-workflow command is not established, cover commands in every fence/console/inline/indented form,
-and place each projected command only beneath the exact repository that supplied it. Clone commands
-remain literal, fenced, and linked-repository-specific. The publication validator remains unchanged
-and fail-closed. Both physical calls consume the shared operation budget and their token usage is
+durable execution context are reused through strict routing. SETUP operational claims are instead
+discarded and deterministically assembled from the complete safe-command projection; an absent
+projection emits zero non-clone commands. The publication validator remains unchanged and
+fail-closed. Both physical calls, when a genuine provider-shape retry is needed, consume the shared operation budget and their token usage is
 included in the saved document's cost fields. Truncation, provider non-completion, and unsafe
 content never retry. Nothing is inserted into
 `project_generated_doc` or mirrored into the workspace until a response validates; two malformed

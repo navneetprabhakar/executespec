@@ -369,6 +369,15 @@ final class ValidationVerificationLedgerBuilder {
             entity.getReviewerVerdict(),
             countUnfixedCriticalIssues(issues),
             accuracy.testCited() ? accuracy.testCoverageLevel() : null);
+    if (!functionalTestCountsProven(entity)) {
+      int functionalCap = Math.min(trustCap.cap(), 75);
+      String functionalReason = "independent functional verification is unavailable";
+      String reason =
+          "no trust cap applied".equals(trustCap.reason())
+              ? functionalReason
+              : trustCap.reason() + "; " + functionalReason;
+      trustCap = new TrustCap(Math.min(trustCap.score(), functionalCap), functionalCap, reason);
+    }
     if (trustCap.cap() < 100) {
       out.add(
           evidence(

@@ -373,9 +373,8 @@ public class ProjectDocGeneratorService {
                           .isEmpty())
               .filter(
                   d ->
-                      docType != DocType.EXPLANATION
-                          || ProjectExplanationOperationalGrounding.isCanonical(
-                              d.getContent(), codemapEvidence, sourceRepositories));
+                      ProjectGeneratedDocCanonicality.isCanonical(
+                          d, project.getName(), codemapEvidence, sourceRepositories));
       if (cached.isPresent()) {
         assertSafeForCustomer(cached.get().getContent());
         log.info(
@@ -481,6 +480,7 @@ public class ProjectDocGeneratorService {
             llmRouter,
             this::assertSafeForCustomer,
             projectId,
+            project.getName(),
             docType,
             resolved,
             exactModel,
@@ -510,7 +510,7 @@ public class ProjectDocGeneratorService {
             sourceFingerprint);
     ProjectGeneratedDoc doc =
         publisher.publishValidated(
-            candidate, sourceRepositories, codemapEvidence, publicationFence);
+            candidate, project.getName(), sourceRepositories, codemapEvidence, publicationFence);
 
     // Mirror to disk so the UI can use the same read path as summary.md.
     try {

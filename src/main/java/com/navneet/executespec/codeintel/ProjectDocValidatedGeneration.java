@@ -34,6 +34,7 @@ final class ProjectDocValidatedGeneration {
       LlmRouter llmRouter,
       Consumer<String> publicationSafetyCheck,
       String projectId,
+      String projectName,
       DocType docType,
       ResolvedModel resolved,
       String exactModel,
@@ -98,6 +99,10 @@ final class ProjectDocValidatedGeneration {
           groundedContent =
               ProjectExplanationOperationalGrounding.append(
                   groundedContent, codemapEvidence, sourceRepositories);
+        } else if (docType == DocType.SETUP) {
+          groundedContent =
+              ProjectSetupOperationalGrounding.assemble(
+                  projectName, codemapEvidence, sourceRepositories);
         }
         // Deterministic grounding is still customer-visible publication content. Scan the final
         // assembled document as well as the provider response so an evidenced command cannot
