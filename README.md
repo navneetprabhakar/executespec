@@ -615,7 +615,10 @@ budget across architecture plus every linked repository. Each repository section
 codemap at the exact SHA captured by that architecture version; source drift fails closed. Every
 abnormal provider finish reason is rejected. Required structure, balanced code fences, secrets, and
 tool-protocol leakage are checked before save, while reads/downloads re-scan retained legacy
-documents. EXPLANATION output also fails closed on concrete symbol-to-symbol call edges and
+documents. SETUP publication deterministically rebuilds the complete operational guide from exact
+setup authority: clone targets and projected commands are repository-scoped and fenced one command
+at a time, while unproven environment, startup-order, health, or troubleshooting details are stated
+as unknown. Provider-authored setup commands are never published. EXPLANATION output also fails closed on concrete symbol-to-symbol call edges and
 inactive/unused/stub/dead-code claims, plus directional Mermaid edges, that declaration-only
 codemaps cannot prove. Relationship euphemisms such as works/interacts/collaborates/depends/uses and
 symbol-local hinted/placeholder/prototype/candidate labels are covered by the same narrow gate.
