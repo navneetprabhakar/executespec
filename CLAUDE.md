@@ -109,7 +109,13 @@ conventional build-output trees, filters only explicit `src/test` test sources, 
 file/byte budget overflow or read errors. Generic `test`, `tests`, and `generated` names stay
 eligible, so deeply nested multi-repository controllers cannot disappear from the admitted baseline.
 Validation evidence is bound to a canonical workspace-generation SHA and persists deterministic
-workflow/config plus exact build/test command evidence. SCM publication and permanent deployment
+workflow/config plus exact build/test command evidence. The generation digest is v2: it covers the
+workspace root repository plus every nested `repos/<name>` working tree, each computed through a
+temporary Git index (never the live caller-owned index) with nested repository roots excluded from
+the parent tree so each byte is counted once by its owning repository. Commit-only operations
+(auto-push gitlink movement) therefore no longer change the digest, and legacy pre-v2 digests
+intentionally read as stale and route to the existing regenerate/mismatch remediation. SCM
+publication and permanent deployment
 require that generation to remain current plus explicit passing build and execution-verified tests.
 SCM push responses distinguish Git transport, PR creation, repository resolution, workspace safety,
 and multi-repository publication through stable `code`, `blockingGate`, and `remediation` fields.

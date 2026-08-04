@@ -127,7 +127,8 @@ public class RunCompletionEmailListener {
               persistedFailureReason,
               run.getActualCostUsd(),
               run.getHardCapUsd() != null ? run.getHardCapUsd() : run.getUserCostCap(),
-              prUrl);
+              prUrl,
+              RunTerminalOutcomeContract.autoPublicationExpected(run));
       // Use the projected customer impact, not merely the bus event. A PARTIAL run may arrive on
       // RunCompleted while still requiring user action; that must honor RUN_FAILED preferences.
       if (!prefService.shouldNotify(

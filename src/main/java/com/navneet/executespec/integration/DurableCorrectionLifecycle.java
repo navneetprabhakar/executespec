@@ -434,6 +434,7 @@ public class DurableCorrectionLifecycle {
           objectMapper.readValue(attempt.getRepositoriesJson(), RepositoryRef[].class);
       Path root = realPath(attempt.getWorkspaceRoot());
       return new CorrectionWorkspaceTransaction.Checkpoint(
+          root,
           java.util.Arrays.stream(refs)
               .map(
                   ref -> {
@@ -461,6 +462,7 @@ public class DurableCorrectionLifecycle {
   private static CorrectionWorkspaceTransaction.Checkpoint canonicalCheckpoint(
       Path canonicalRoot, CorrectionWorkspaceTransaction.Checkpoint checkpoint) {
     return new CorrectionWorkspaceTransaction.Checkpoint(
+        canonicalRoot,
         checkpoint.repositories().stream()
             .map(
                 repository -> {

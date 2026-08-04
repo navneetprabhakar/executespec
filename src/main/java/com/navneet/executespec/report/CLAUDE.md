@@ -63,7 +63,11 @@ invalid reports are excluded and counted separately.
 - Ledger entries label provenance (`DETERMINISTIC_FUNCTIONAL`,
   `DETERMINISTIC_WORKSPACE_SUITE`, `DETERMINISTIC_EXECUTION` for legacy fresh-but-unscoped rows,
   `UNVERIFIED_COUNT`, `LLM_REVIEWER`, `LLM_ASSESSMENT`, `LLM_ASSISTED_COUNT`, `HYBRID`, or
-  `INTERNAL_FORMULA`). A score is a summary, not independent proof.
+  `INTERNAL_FORMULA`). A score is a summary, not independent proof. When the accuracy provider
+  call failed and `accuracy_json.gradingNotes` carries the "Accuracy assessment unavailable"
+  fallback, the spec-adherence row is `UNKNOWN`/`INTERNAL_FORMULA` with an explicit
+  "heuristic estimate" summary and no numeric grade — it must never present the issue-count
+  heuristic as an `LLM_ASSESSMENT`.
 - Authenticated report DTOs expose `goalProofReferences`: a typed, reloadable projection of the
   durable run lifecycle, validation result, and exact verification-ledger rows used by final goal
   proof. Each reference carries a proof role (`PROVEN`, `BLOCKING`, `UNPROVEN`, or `CONTEXT`),
