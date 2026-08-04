@@ -311,7 +311,7 @@ class ProjectChatToolsSecurityTest {
           .thenReturn(
               List.of(ProjectRepoLink.builder().projectId("project-1").repoId(repoId).build()));
       when(repoRepo.findById(repoId)).thenReturn(java.util.Optional.of(linked));
-      when(codeIndexingService.readiness("project-1", linked))
+      when(codeIndexingService.readiness("project-1", linked, "user-1"))
           .thenReturn(semanticReadiness(repoId, status, "REFRESH_LIMIT_REACHED"));
 
       String result =
@@ -335,7 +335,7 @@ class ProjectChatToolsSecurityTest {
         .thenReturn(
             List.of(ProjectRepoLink.builder().projectId("project-1").repoId(repoId).build()));
     when(repoRepo.findById(repoId)).thenReturn(java.util.Optional.of(linked));
-    when(codeIndexingService.readiness("project-1", linked))
+    when(codeIndexingService.readiness("project-1", linked, "user-1"))
         .thenReturn(
             semanticReadiness(
                 repoId,
@@ -363,7 +363,7 @@ class ProjectChatToolsSecurityTest {
         .thenReturn(
             List.of(ProjectRepoLink.builder().projectId("project-1").repoId(repoId).build()));
     when(repoRepo.findById(repoId)).thenReturn(java.util.Optional.of(linked));
-    when(codeIndexingService.readiness("project-1", linked))
+    when(codeIndexingService.readiness("project-1", linked, "user-1"))
         .thenReturn(
             semanticReadiness(repoId, CodeIndexStateStore.Status.UNINDEXED, "INDEX_NOT_BUILT"),
             semanticReadiness(repoId, CodeIndexStateStore.Status.INDEXING, "INDEXING"));

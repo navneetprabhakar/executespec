@@ -99,7 +99,10 @@ class RunCompletionNotifierTest {
   void cancellationIsNeutralInsteadOfFailedOrPlatformCopy() {
     PipelineRun run = run("run-cancel", "CANCELLED", null, "Cancelled by user from WORKING");
     when(stateStore.findRun("run-cancel")).thenReturn(Optional.of(run));
-    allowFailedNotification();
+    when(prefService.shouldNotify(
+            "user-1", ActivityEventType.RUN_COMPLETED, NotificationPrefService.Channel.IN_APP))
+        .thenReturn(true);
+    when(notificationRepository.existsByLinkAndType(anyString(), anyString())).thenReturn(false);
 
     notifier.onRunFailed(new PipelineEvent.RunFailed("run-cancel", "Cancelled by user"));
 
@@ -109,6 +112,12 @@ class RunCompletionNotifierTest {
     assertThat(call.body())
         .contains("The run was cancelled.", "Start a new run when ready.")
         .doesNotContain("internal error", "platform failure");
+    verify(prefService)
+        .shouldNotify(
+            "user-1", ActivityEventType.RUN_COMPLETED, NotificationPrefService.Channel.IN_APP);
+    verify(prefService, never())
+        .shouldNotify(
+            "user-1", ActivityEventType.RUN_FAILED, NotificationPrefService.Channel.IN_APP);
   }
 
   @Test

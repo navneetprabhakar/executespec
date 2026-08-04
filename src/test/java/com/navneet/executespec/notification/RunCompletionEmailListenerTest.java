@@ -175,4 +175,55 @@ class RunCompletionEmailListenerTest {
         .shouldNotify(
             "user-1", ActivityEventType.RUN_COMPLETED, NotificationPrefService.Channel.EMAIL);
   }
+
+  @Test
+  void cancelledRunUsesCompletionEmailPreferenceEvenWhenDeliveredAsFailureEvent() {
+    String runId = "123e4567-e89b-12d3-a456-426614174001";
+    PipelineRun run =
+        PipelineRun.builder()
+            .runId(runId)
+            .createdByUserId("user-1")
+            .runTitle("Stopped fixture")
+            .status("CANCELLED")
+            .statusReason("RUN_CANCELLED")
+            .build();
+    AppUser user =
+        AppUser.builder().id("user-1").email("navneet@executespec.ai").firstName("Navneet").build();
+    PipelineRunRepository runRepo = mock(PipelineRunRepository.class);
+    AppUserRepository userRepo = mock(AppUserRepository.class);
+    ValidationReportRepository reportRepo = mock(ValidationReportRepository.class);
+    MailService mailService = mock(MailService.class);
+    NotificationPrefService prefService = mock(NotificationPrefService.class);
+    when(runRepo.findById(runId)).thenReturn(Optional.of(run));
+    when(userRepo.findById("user-1")).thenReturn(Optional.of(user));
+    when(reportRepo.findByRunId(runId)).thenReturn(Optional.empty());
+    when(prefService.shouldNotify(
+            "user-1", ActivityEventType.RUN_COMPLETED, NotificationPrefService.Channel.EMAIL))
+        .thenReturn(true);
+    RunCompletionEmailListener listener =
+        new RunCompletionEmailListener(runRepo, userRepo, reportRepo, mailService, prefService);
+
+    listener.onRunFailed(new PipelineEvent.RunFailed(runId, "cancelled by user"));
+
+    verify(prefService)
+        .shouldNotify(
+            "user-1", ActivityEventType.RUN_COMPLETED, NotificationPrefService.Channel.EMAIL);
+    verify(prefService, never())
+        .shouldNotify(
+            "user-1", ActivityEventType.RUN_FAILED, NotificationPrefService.Channel.EMAIL);
+    ArgumentCaptor<RunTerminalOutcome> outcome = ArgumentCaptor.forClass(RunTerminalOutcome.class);
+    verify(mailService)
+        .sendRunCompletionEmail(
+            eq("navneet@executespec.ai"),
+            eq("Navneet"),
+            eq(runId),
+            eq("CANCELLED"),
+            outcome.capture(),
+            eq("Stopped fixture"),
+            isNull(),
+            isNull(),
+            isNull(),
+            anyString());
+    assertThat(outcome.getValue().category()).isEqualTo(RunTerminalOutcome.Category.USER_STOPPED);
+  }
 }

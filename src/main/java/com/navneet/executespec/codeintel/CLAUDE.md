@@ -5,7 +5,9 @@
 Architecture refresh and generated-document jobs fail before dispatch: missing provider returns
 `PROJECT_PROVIDER_NOT_CONFIGURED` (409), invalid persisted provider returns
 `PROJECT_PROVIDER_INVALID` (409), and unavailable/incomplete matrix returns
-`MODEL_MATRIX_UNAVAILABLE` (503). Rejection creates no durable job or provider call.
+`MODEL_MATRIX_UNAVAILABLE` (503). These are structured `errorCode` response fields with separate
+customer-safe copy, not prefixes that clients must parse from a message. Rejection creates no
+durable job or provider call.
 
 `ProjectArchitectureService` owns the project-level architecture pipeline. Per-repository codemaps,
 repository architecture documents, and the combined architecture document remain source evidence;
@@ -266,3 +268,20 @@ dispatch and deterministic retry/shape validation stay in `ProjectDocValidatedGe
 customer-safety validation stays in `ProjectDocGeneratorService`, while
 `ProjectDocResponsePolicy` owns fail-closed provider finish-reason classification. Do not fold these
 source, publication, or response-policy responsibilities back into that service.
+
+## 2026-08-04 generated-document consistency
+
+- SETUP repository coverage requires one exact safe clone target for every expected repository
+  after parsing the existing literal `git clone` grammar; a narrative repository token is not
+  sufficient. The strict standalone `owner/repo` token boundary is not relaxed, so suffix/prefix
+  repository attacks remain rejected.
+- Deterministic validation failures carry a stable subcode and durable jobs expose
+  `INVALID_GENERATED_DOCUMENT_<SUBCODE>` through the existing `error_code` column; customer-safe
+  messages remain generic while the internal reason drives the one bounded same-route correction.
+- EXPLANATION publication rebuilds `Verified local workflow` and `Troubleshooting` from typed
+  exact-revision setup evidence. It emits only evidenced commands and an `engines.node` constraint
+  when present; absent command categories remain explicitly unestablished. Cache reuse and the
+  serialized publication dedupe both require byte-canonical operational grounding for the current
+  exact evidence/repository set, and the final grounded document is safety-scanned before save.
+- Re-appending combined deterministic repository evidence replaces the prior marker-owned appendix
+  instead of leaving duplicate H2/H3 wrappers.

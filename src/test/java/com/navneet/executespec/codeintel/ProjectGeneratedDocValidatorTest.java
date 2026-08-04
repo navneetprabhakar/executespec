@@ -13,6 +13,46 @@ import org.junit.jupiter.api.Test;
 class ProjectGeneratedDocValidatorTest {
 
   @Test
+  void canonicalCloneUrlSatisfiesSetupRepositoryCoverageWithoutWeakeningSlugBoundary() {
+    String urlOnly =
+        setupWithCommand("npm test")
+            .replace(
+                "`owner/repo` has this exact evidenced command:",
+                "The cloned repository has this exact evidenced command:");
+
+    assertThat(
+            ProjectGeneratedDocValidator.validate(
+                DocType.SETUP,
+                urlOnly,
+                Set.of("owner/repo"),
+                encodedSetupEvidence("README.md", "npm test")))
+        .isEmpty();
+
+    String attacker =
+        urlOnly.replace(
+            "https://github.com/owner/repo.git", "https://github.com/attacker/owner-repo.git");
+    assertThat(
+            ProjectGeneratedDocValidator.validate(
+                DocType.SETUP,
+                attacker,
+                Set.of("owner/repo"),
+                encodedSetupEvidence("README.md", "npm test")))
+        .contains("git clone target is not a linked repository");
+  }
+
+  @Test
+  void validatorReasonsMapToStablePersistableSubcodes() {
+    assertThat(ProjectGeneratedDocFailureCode.fromReason("output is too short"))
+        .isEqualTo("OUTPUT_TOO_SHORT");
+    assertThat(ProjectGeneratedDocFailureCode.fromReason("missing linked repository owner/repo"))
+        .isEqualTo("MISSING_LINKED_REPOSITORY");
+    assertThat(
+            ProjectGeneratedDocFailureCode.fromReason(
+                "setup command is not present in encoded exact-revision setup evidence"))
+        .isEqualTo("SETUP_COMMAND_UNAUTHORIZED");
+  }
+
+  @Test
   void linkedRepositoryReferenceMustBeAnExactRepositoryToken() {
     assertThat(
             ProjectGeneratedDocValidator.validate(
@@ -325,6 +365,10 @@ class ProjectGeneratedDocValidatorTest {
            Runtime data-flow behavior is not established by the supplied evidence.
            ## Where to contribute
            Inspect exact-revision source and tests before selecting a contribution point.
+           ## Verified local workflow
+           Install, test, and run commands are not established by supplied deterministic evidence.
+           ## Troubleshooting
+           Inspect the exact revision before choosing any repository-specific recovery command.
            """
         .formatted(detail, detail, detail, detail, detail, repository)
         .strip();
@@ -368,6 +412,7 @@ Git plus only runtimes established by exact evidence for `owner/repo-a` and `own
 ## Clone
 ```bash
 git clone https://github.com/owner/repo-a.git
+git clone https://github.com/owner/repo-b.git
 ```
 ## Environment variables
 No environment variable is established for either linked repository.

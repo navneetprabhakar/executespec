@@ -15,6 +15,7 @@ import java.time.Instant;
 import java.util.Optional;
 
 import com.navneet.executespec.api.advice.GlobalExceptionAdvice;
+import com.navneet.executespec.api.advice.ValidationAdvice;
 import com.navneet.executespec.auth.security.RunAccessGuard;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -41,7 +42,7 @@ class PreviewRenderControllerTest {
             service, mock(PreviewRenderGuard.class), mock(RunAccessGuard.class));
     mvc =
         MockMvcBuilders.standaloneSetup(controller)
-            .setControllerAdvice(new GlobalExceptionAdvice())
+            .setControllerAdvice(new ValidationAdvice(), new GlobalExceptionAdvice())
             .build();
   }
 

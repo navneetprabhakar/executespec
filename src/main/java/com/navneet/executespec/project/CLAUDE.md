@@ -218,6 +218,12 @@ bypassed with a raw user id.
   epoch. The immutable context records the initiating member for usage attribution, so a different
   authorized project member refreshing the same repository/SHA must receive a separate context
   rather than hitting `IDEMPOTENCY_CONFLICT` before inventory and reporting 0/0 files.
+- **2026-08-04 current-source readiness** — code-index readiness resolves the authenticated actor's
+  cached SCM default-branch HEAD through `WorkspaceHealthService`; `ProjectRepo.lastSyncedSha` is
+  not current-source authority. An unavailable current HEAD yields
+  `CURRENT_SOURCE_REVISION_UNAVAILABLE`, disables semantic claims, and retains lexical fallback.
+  UNINDEXED UI reports coverage as not measured and renders the actual lexical-fallback and
+  relationship-graph capability booleans rather than hardcoded labels.
 
 ## System Map UI evidence states
 

@@ -64,11 +64,33 @@ final class RequiredIterationWorkspaceCopier {
           "source workspace contains no Git-tracked files for iteration " + sourceRunId);
     }
 
-    for (RunRepoSnapshot sourceSnapshot : snapshotRepository.findByRunId(sourceRunId)) {
-      Path targetRepo =
-          target
+    List<RunRepoSnapshot> sourceSnapshots = snapshotRepository.findByRunId(sourceRunId);
+    for (RunRepoSnapshot sourceSnapshot : sourceSnapshots) {
+      Path sourceNested =
+          source
               .resolve("repos")
               .resolve(WorkspaceInitService.repoDirectoryName(sourceSnapshot.getRepoFullName()));
+      Path targetRepo;
+      if (sourceSnapshot.getRepoId() != null) {
+        if (!Files.isDirectory(sourceNested)) {
+          throw new IllegalStateException(
+              "source repository workspace unavailable after restore: "
+                  + sourceSnapshot.getRepoFullName());
+        }
+        if (!Files.isDirectory(sourceNested.resolve(".git"))) {
+          throw new IllegalStateException(
+              "source repository Git metadata unavailable after restore: "
+                  + sourceSnapshot.getRepoFullName());
+        }
+        targetRepo =
+            target
+                .resolve("repos")
+                .resolve(WorkspaceInitService.repoDirectoryName(sourceSnapshot.getRepoFullName()));
+      } else if (sourceSnapshots.size() == 1 && Files.isDirectory(source.resolve(".git"))) {
+        targetRepo = target;
+      } else {
+        continue;
+      }
       if (!Files.isDirectory(targetRepo.resolve(".git"))) continue;
       persistSnapshot(targetRunId, sourceSnapshot, targetRepo);
     }

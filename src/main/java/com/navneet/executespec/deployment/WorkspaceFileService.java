@@ -386,25 +386,29 @@ public class WorkspaceFileService {
       }
     }
 
-    // Files outside any repos/<name>/ subdir — no base in any repo, treat as ADDED.
+    String repoName;
+    String repoRelativePath;
+    Path repoDir;
+    String baseSha;
     if (!relativePath.startsWith("repos/")) {
-      String head = readLocalFile(root, relativePath);
-      return new FileDiff(relativePath, "", head, Status.ADDED);
+      RunRepoSnapshot standalone = standaloneRootSnapshot(runId, root);
+      if (standalone == null) {
+        String head = readLocalFile(root, relativePath);
+        return new FileDiff(relativePath, "", head, Status.ADDED);
+      }
+      repoName = standaloneShortName(standalone);
+      repoRelativePath = relativePath;
+      repoDir = root;
+      baseSha = standalone.getCommitSha();
+    } else {
+      String[] parts = relativePath.split("/", 3);
+      if (parts.length < 3) throw new NoSuchFileException(relativePath);
+      repoName = parts[1];
+      repoRelativePath = parts[2];
+      repoDir = root.resolve("repos").resolve(repoName);
+      if (!Files.isDirectory(repoDir)) throw new NoSuchFileException(relativePath);
+      baseSha = lookupBaseSha(runId, repoName, repoDir);
     }
-
-    String[] parts = relativePath.split("/", 3);
-    if (parts.length < 3) {
-      throw new NoSuchFileException(relativePath);
-    }
-    String repoName = parts[1];
-    String repoRelativePath = parts[2];
-    Path repoDir = root.resolve("repos").resolve(repoName);
-    if (!Files.isDirectory(repoDir)) {
-      throw new NoSuchFileException(relativePath);
-    }
-
-    // Resolve base SHA: prefer the persisted snapshot, fall back to merge-base.
-    String baseSha = lookupBaseSha(runId, repoName, repoDir);
 
     String head;
     boolean headExists;
@@ -471,6 +475,28 @@ public class WorkspaceFileService {
       log.debug("merge-base fallback failed for {}: {}", repoName, e.getMessage());
     }
     return null;
+  }
+
+  /** Returns the sole admitted root snapshot without confusing restored nested project layout. */
+  private RunRepoSnapshot standaloneRootSnapshot(String runId, Path root) {
+    if (!Files.isDirectory(root.resolve(".git"))) return null;
+    try {
+      List<RunRepoSnapshot> snapshots = runRepoSnapshotRepository.findByRunId(runId);
+      if (snapshots.size() != 1) return null;
+      RunRepoSnapshot snapshot = snapshots.getFirst();
+      return snapshot.getRepoId() == null ? snapshot : null;
+    } catch (Exception failure) {
+      log.debug("standalone snapshot lookup failed for {}: {}", runId, failure.getMessage());
+      return null;
+    }
+  }
+
+  private static String standaloneShortName(RunRepoSnapshot snapshot) {
+    String fullName = snapshot.getRepoFullName();
+    if (fullName == null) return "";
+    int slash = fullName.lastIndexOf('/');
+    String name = slash < 0 ? fullName : fullName.substring(slash + 1);
+    return name.endsWith(".git") ? name.substring(0, name.length() - 4) : name;
   }
 
   /**
@@ -550,12 +576,14 @@ public class WorkspaceFileService {
     }
 
     List<String> all = listLocalFiles(root);
-    java.util.Map<String, Status> statusByRepo = collectGitStatusForAllRepos(root);
+    RunRepoSnapshot standalone = standaloneRootSnapshot(runId, root);
+    java.util.Map<String, Status> statusByRepo = collectGitStatusForAllRepos(root, standalone);
     // 2026-05-02 — porcelain only shows uncommitted changes; once the worker calls gitCommit
     // every changed file flips back to UNCHANGED and the A/M chips on the file tree go blank.
     // Layer in committed-since-clone deltas via `git diff --name-status <baseSha>..HEAD` so
     // file-tree status remains accurate end-to-end.
-    java.util.Map<String, Status> committedByRepo = collectCommittedDeltasForAllRepos(runId, root);
+    java.util.Map<String, Status> committedByRepo =
+        collectCommittedDeltasForAllRepos(runId, root, standalone);
 
     List<FileEntry> out = new ArrayList<>(all.size());
     for (String path : all) {
@@ -565,7 +593,10 @@ public class WorkspaceFileService {
       }
       // Files outside repos/<name>/ that aren't tracked anywhere → treat as ADDED (the
       // worker created them; e.g. .agent-context/project.json).
-      if (s == Status.UNCHANGED && !path.startsWith("repos/") && !path.contains("/.git/")) {
+      if (s == Status.UNCHANGED
+          && standalone == null
+          && !path.startsWith("repos/")
+          && !path.contains("/.git/")) {
         s = Status.ADDED;
       }
       out.add(new FileEntry(path, s));
@@ -580,8 +611,11 @@ public class WorkspaceFileService {
    * silently per repo when the base SHA can't be resolved.
    */
   private java.util.Map<String, Status> collectCommittedDeltasForAllRepos(
-      String runId, Path workspaceRoot) {
+      String runId, Path workspaceRoot, RunRepoSnapshot standalone) {
     java.util.Map<String, Status> merged = new java.util.HashMap<>();
+    if (standalone != null) {
+      collectCommittedDeltas(workspaceRoot, standalone.getCommitSha(), "", merged);
+    }
     Path reposDir = workspaceRoot.resolve("repos");
     if (!Files.isDirectory(reposDir)) return merged;
 
@@ -594,38 +628,35 @@ public class WorkspaceFileService {
                 String baseSha = lookupBaseSha(runId, repoName, repoDir);
                 if (baseSha == null) return;
                 String prefix = "repos/" + repoName + "/";
-                try {
-                  for (var line :
-                      runGit(repoDir, List.of("diff", "--name-status", baseSha + "..HEAD"), 15)) {
-                    if (line.isBlank()) continue;
-                    char code = line.charAt(0);
-                    int tab = line.indexOf('\t');
-                    if (tab < 0) continue;
-                    String rest = line.substring(tab + 1).trim();
-                    // Renames: "R100\told\tnew" — take the "new" path.
-                    if (code == 'R' || code == 'C') {
-                      int sep = rest.indexOf('\t');
-                      if (sep > 0) rest = rest.substring(sep + 1).trim();
-                    }
-                    Status s;
-                    if (code == 'A') s = Status.ADDED;
-                    else if (code == 'D') continue; // deletion — head doesn't exist, skip
-                    else if (code == 'R' || code == 'C') s = Status.ADDED; // rename target
-                    else s = Status.MODIFIED;
-                    merged.put(prefix + rest, s);
-                  }
-                } catch (Exception e) {
-                  log.debug(
-                      "git diff --name-status failed in {} ({}): {}",
-                      repoDir,
-                      repoName,
-                      e.getMessage());
-                }
+                collectCommittedDeltas(repoDir, baseSha, prefix, merged);
               });
     } catch (IOException ignored) {
       // listing failure is non-fatal — UI gets UNCHANGED everywhere
     }
     return merged;
+  }
+
+  private void collectCommittedDeltas(
+      Path repoDir, String baseSha, String prefix, java.util.Map<String, Status> merged) {
+    if (baseSha == null || baseSha.isBlank()) return;
+    try {
+      for (var line : runGit(repoDir, List.of("diff", "--name-status", baseSha + "..HEAD"), 15)) {
+        if (line.isBlank()) continue;
+        char code = line.charAt(0);
+        int tab = line.indexOf('\t');
+        if (tab < 0) continue;
+        String rest = line.substring(tab + 1).trim();
+        if (code == 'R' || code == 'C') {
+          int separator = rest.indexOf('\t');
+          if (separator > 0) rest = rest.substring(separator + 1).trim();
+        }
+        if (code == 'D') continue;
+        Status status = code == 'A' || code == 'R' || code == 'C' ? Status.ADDED : Status.MODIFIED;
+        merged.put(prefix + rest, status);
+      }
+    } catch (Exception failure) {
+      log.debug("git diff --name-status failed in {}: {}", repoDir, failure.getMessage());
+    }
   }
 
   /**
@@ -634,8 +665,10 @@ public class WorkspaceFileService {
    * what {@link #listLocalFiles} produces). Best-effort — git failures log + the repo's files fall
    * through to UNCHANGED.
    */
-  private java.util.Map<String, Status> collectGitStatusForAllRepos(Path workspaceRoot) {
+  private java.util.Map<String, Status> collectGitStatusForAllRepos(
+      Path workspaceRoot, RunRepoSnapshot standalone) {
     java.util.Map<String, Status> merged = new java.util.HashMap<>();
+    if (standalone != null) collectGitStatus(workspaceRoot, "", merged);
     Path reposDir = workspaceRoot.resolve("repos");
     if (!Files.isDirectory(reposDir)) return merged;
 
@@ -646,36 +679,31 @@ public class WorkspaceFileService {
               repoDir -> {
                 String repoName = repoDir.getFileName().toString();
                 String prefix = "repos/" + repoName + "/";
-                try {
-                  for (var line : runGitStatusPorcelain(repoDir)) {
-                    // Porcelain v1: 2-char status, space, path. e.g. " M src/foo.ts",
-                    // "?? src/bar.ts", "A  src/baz.ts". Renames look like "R  old -> new".
-                    if (line.length() < 3) continue;
-                    String code = line.substring(0, 2);
-                    String rest = line.substring(3).trim();
-                    String path =
-                        rest.contains(" -> ") ? rest.substring(rest.indexOf(" -> ") + 4) : rest;
-                    // Quoted paths (when special chars present) — strip surrounding quotes.
-                    if (path.startsWith("\"") && path.endsWith("\"")) {
-                      path = path.substring(1, path.length() - 1);
-                    }
-                    Status s = classifyPorcelainCode(code);
-                    if (s != Status.UNCHANGED) {
-                      merged.put(prefix + path, s);
-                    }
-                  }
-                } catch (Exception e) {
-                  log.debug(
-                      "git status failed in {} ({}); leaving repo as UNCHANGED: {}",
-                      repoDir,
-                      repoName,
-                      e.getMessage());
-                }
+                collectGitStatus(repoDir, prefix, merged);
               });
     } catch (IOException ignored) {
       // listing failure is non-fatal — UI gets UNCHANGED everywhere
     }
     return merged;
+  }
+
+  private void collectGitStatus(Path repoDir, String prefix, java.util.Map<String, Status> merged) {
+    try {
+      for (var line : runGitStatusPorcelain(repoDir)) {
+        if (line.length() < 3) continue;
+        String code = line.substring(0, 2);
+        String rest = line.substring(3).trim();
+        String path = rest.contains(" -> ") ? rest.substring(rest.indexOf(" -> ") + 4) : rest;
+        if (path.startsWith("\"") && path.endsWith("\"")) {
+          path = path.substring(1, path.length() - 1);
+        }
+        Status status = classifyPorcelainCode(code);
+        if (status != Status.UNCHANGED) merged.put(prefix + path, status);
+      }
+    } catch (Exception failure) {
+      log.debug(
+          "git status failed in {}; leaving files UNCHANGED: {}", repoDir, failure.getMessage());
+    }
   }
 
   private List<String> runGitStatusPorcelain(Path repoDir)

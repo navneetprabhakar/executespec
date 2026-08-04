@@ -72,19 +72,38 @@ public class WorkspaceRepositoryRevisionService {
   void persistCloneSnapshot(
       String runId, WorkspaceInitService.RepoToClone repository, Path target) {
     try {
-      boolean alreadyPersisted =
-          snapshotRepo.findByRunId(runId).stream()
-              .anyMatch(snapshot -> repository.fullName().equals(snapshot.getRepoFullName()));
-      if (alreadyPersisted) return;
       String sha = captureHeadSha(target);
       if (sha == null || sha.isBlank()) {
         throw new IllegalStateException(
-            "could not capture baseline SHA for " + repository.fullName());
+            "repository has no committed revision: " + repository.fullName());
       }
-      String branch =
-          repository.branch() == null || repository.branch().isBlank()
-              ? "main"
-              : repository.branch();
+      String branch = captureCurrentBranch(target);
+      if (branch == null || branch.isBlank()) {
+        throw new IllegalStateException(
+            "could not capture checked-out branch for " + repository.fullName());
+      }
+      RunRepoSnapshot existing =
+          snapshotRepo.findByRunId(runId).stream()
+              .filter(snapshot -> repository.fullName().equals(snapshot.getRepoFullName()))
+              .findFirst()
+              .orElse(null);
+      if (existing != null) {
+        if (!sha.equalsIgnoreCase(existing.getCommitSha())
+            || !branch.equals(existing.getBranch())) {
+          throw new IllegalStateException(
+              "persisted baseline does not match checked-out repository "
+                  + repository.fullName()
+                  + ": expected "
+                  + existing.getBranch()
+                  + "@"
+                  + existing.getCommitSha()
+                  + " but found "
+                  + branch
+                  + "@"
+                  + sha);
+        }
+        return;
+      }
       RunRepoSnapshot snapshot =
           RunRepoSnapshot.builder()
               .runId(runId)
@@ -188,6 +207,19 @@ public class WorkspaceRepositoryRevisionService {
       return null;
     }
     return output;
+  }
+
+  private String captureCurrentBranch(Path repoDir) throws IOException, InterruptedException {
+    ProcessBuilder pb =
+        new ProcessBuilder("git", "branch", "--show-current").directory(repoDir.toFile());
+    pb.redirectErrorStream(true);
+    Process process = pb.start();
+    String branch = new String(process.getInputStream().readAllBytes()).trim();
+    int exit = process.waitFor();
+    if (exit != 0) {
+      throw new IOException("git branch --show-current exited with " + exit);
+    }
+    return branch;
   }
 
   private static void runGit(Path directory, String... arguments)
