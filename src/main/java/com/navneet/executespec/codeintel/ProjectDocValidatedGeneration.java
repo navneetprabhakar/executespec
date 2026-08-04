@@ -148,6 +148,27 @@ final class ProjectDocValidatedGeneration {
   }
 
   private static String correctiveGroundingInstruction(String reason) {
+    if (reason != null
+        && reason.startsWith(
+            "setup command is not present in encoded exact-revision setup evidence")) {
+      return """
+
+
+This SETUP correction must use any supplied `#### Safe deterministic command projection` as the
+complete allow-list for non-clone commands. If that projection is absent or empty, no non-clone
+command is authorized. Review the entire document and remove each command-like instruction from
+every fenced block regardless of its language label, every console prompt, every inline-code span,
+and every indented-code block unless that exact command is allow-listed. Keep each projected
+command only under the unambiguous exact linked-repository name that supplied it; do not place a
+repository command at project-wide scope or under another repository. Keep one literal fenced
+`git clone` command per linked repository. Do not infer
+`install`, `ci`, `build`, `test`, `start`, `dev`, migration, or health-check commands from a
+manifest, lockfile, framework, or ecosystem convention. Where an expected workflow command is not
+allow-listed, say that it is not established by the supplied deterministic evidence. Do not
+replace a removed command with a placeholder command. Preserve every required heading and
+meaningful section body.\
+""";
+    }
     if (reason == null || !reason.startsWith("unsupported ")) return "";
     return """
 
