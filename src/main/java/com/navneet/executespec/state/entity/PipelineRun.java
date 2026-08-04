@@ -213,6 +213,38 @@ public class PipelineRun {
 
   private String repoUrl; // HTTPS clone URL (null if no repo)
   private String repoMode; // "NEW" | "EXISTING" | null
+
+  /**
+   * Exact existing SCM branch selected at admission time. A non-null value means this run must
+   * clone and publish back to that branch (for example, a CI-fix run targeting an open PR) rather
+   * than generating a new {@code executespec/<runId>} branch. Persisted so plan-gate, pause, and
+   * crash recovery cannot silently change the publication target.
+   */
+  @Column(name = "branch_override", length = 200)
+  private String branchOverride;
+
+  /**
+   * Source branch to clone when it is distinct from publication authority. Execution View/AIDLC
+   * uses this to start from a selected revision while still publishing to a fresh ExecuteSpec
+   * branch and pull request. Null falls back to the publication branch, then the repo default.
+   */
+  @Column(name = "checkout_branch", length = 200)
+  private String checkoutBranch;
+
+  /** Repository bound to an exact existing-PR publication authority, when present. */
+  @Column(name = "publication_repo_full_name", length = 255)
+  private String publicationRepoFullName;
+
+  /**
+   * Pull-request number bound with {@link #publicationRepoFullName} and {@link #branchOverride}.
+   */
+  @Column(name = "publication_pr_number")
+  private Integer publicationPrNumber;
+
+  /** Exact open-PR head revision admitted before any provider spend. */
+  @Column(name = "publication_head_sha", length = 40)
+  private String publicationHeadSha;
+
   private String workspacePath; // per-run path: ./workspace/projects/{runId}/
 
   /**
