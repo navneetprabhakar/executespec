@@ -1,7 +1,17 @@
 import {useCallback, useEffect, useRef, useState} from 'react';
 import * as api from '@/lib/api';
 
-export type AgentRunUnavailableReason = 'RUN_NOT_FOUND' | 'AUTH_REQUIRED';
+export type AgentRunUnavailableReason = 'RUN_NOT_FOUND' | 'AUTH_REQUIRED' | 'ACCESS_DENIED';
+
+const UNAVAILABLE_MESSAGES: Record<AgentRunUnavailableReason, string> = {
+  RUN_NOT_FOUND: 'Run no longer available',
+  AUTH_REQUIRED: 'Sign in again to view this run',
+  ACCESS_DENIED: 'You do not have access to this run',
+};
+
+export function agentRunUnavailableMessage(reason?: AgentRunUnavailableReason | null) {
+  return reason ? UNAVAILABLE_MESSAGES[reason] : null;
+}
 
 export type AgentRunStreamStatus = 'IDLE' | 'CONNECTING' | 'CONNECTED' | 'RECONNECTING' | 'CLOSED';
 
@@ -11,6 +21,11 @@ export type AgentRunEvent = {
   data?: Record<string, unknown>;
   [key: string]: unknown;
 };
+
+const RECONNECT_BACKOFF_MS = [1000, 2000, 4000, 8000, 16000, 30000] as const;
+const RECONNECT_MAX_MS = 30000;
+const RECONNECT_STABLE_MS = 15000;
+const RECONNECT_MAX_ATTEMPTS = 12;
 
 export function parseAgentRunEvent(raw: string): AgentRunEvent | null {
   try {
@@ -48,6 +63,7 @@ export function unavailableReason(error: unknown): AgentRunUnavailableReason | n
       : null;
   if (status === 404) return 'RUN_NOT_FOUND';
   if (status === 401) return 'AUTH_REQUIRED';
+  if (status === 403) return 'ACCESS_DENIED';
   return null;
 }
 
@@ -79,6 +95,7 @@ export function useAgentRunStream(runId: string | null) {
   const [status, setStatus] = useState<AgentRunStreamStatus>('IDLE');
   const sourceRef = useRef<EventSource | null>(null);
   const retryRef = useRef<ReturnType<typeof setTimeout> | undefined>();
+  const stableRef = useRef<ReturnType<typeof setTimeout> | undefined>();
   const attemptRef = useRef(0);
   const lastEventIdRef = useRef<string | null>(null);
   const terminalRef = useRef(false);
@@ -91,7 +108,9 @@ export function useAgentRunStream(runId: string | null) {
     sourceRef.current?.close();
     sourceRef.current = null;
     if (retryRef.current) clearTimeout(retryRef.current);
+    if (stableRef.current) clearTimeout(stableRef.current);
     retryRef.current = undefined;
+    stableRef.current = undefined;
     setUnavailable(reason);
     setStatus('CLOSED');
   }, []);
@@ -110,6 +129,7 @@ export function useAgentRunStream(runId: string | null) {
   useEffect(() => {
     sourceRef.current?.close();
     if (retryRef.current) clearTimeout(retryRef.current);
+    if (stableRef.current) clearTimeout(stableRef.current);
     terminalRef.current = false;
     unavailableRef.current = null;
     setUnavailable(null);
@@ -123,6 +143,25 @@ export function useAgentRunStream(runId: string | null) {
     }
 
     let alive = true;
+    const clearStableTimer = () => {
+      if (stableRef.current) clearTimeout(stableRef.current);
+      stableRef.current = undefined;
+    };
+    const scheduleReconnect = () => {
+      if (!alive || terminalRef.current || unavailableRef.current) return;
+      clearStableTimer();
+      if (attemptRef.current >= RECONNECT_MAX_ATTEMPTS) {
+        setStatus('CLOSED');
+        return;
+      }
+      setStatus('RECONNECTING');
+      const delay = Math.min(
+        RECONNECT_MAX_MS,
+        RECONNECT_BACKOFF_MS[Math.min(attemptRef.current, RECONNECT_BACKOFF_MS.length - 1)],
+      );
+      attemptRef.current += 1;
+      retryRef.current = setTimeout(() => void connect(), delay);
+    };
     const connect = async () => {
       if (
         !alive ||
@@ -134,18 +173,23 @@ export function useAgentRunStream(runId: string | null) {
         return;
       }
       setStatus(attemptRef.current === 0 ? 'CONNECTING' : 'RECONNECTING');
-      let url = `/api/runs/${runId}/events`;
+      let token: string;
       try {
-        const token = await api.getSseToken(runId);
-        url += `?token=${encodeURIComponent(token.token)}`;
+        token = (await api.getSseToken(runId)).token;
+        if (!token) throw new Error('Scoped SSE token was empty.');
       } catch (error) {
         const reason = unavailableReason(error);
         if (reason && alive) {
           markUnavailable(reason);
           return;
         }
-        // Initial snapshot remains useful if the scoped stream token is unavailable.
+        // EventSource cannot send an Authorization header. Opening it without the scoped token
+        // creates a guaranteed 401 loop, so keep the last durable snapshot and retry the token
+        // request under the same bounded reconnect policy instead.
+        scheduleReconnect();
+        return;
       }
+      let url = `/api/runs/${runId}/events?token=${encodeURIComponent(token)}`;
       if (lastEventIdRef.current) {
         url += `${url.includes('?') ? '&' : '?'}lastEventId=${encodeURIComponent(lastEventIdRef.current)}`;
       }
@@ -156,7 +200,13 @@ export function useAgentRunStream(runId: string | null) {
         if (!alive) return;
         setStatus('CONNECTED');
         const reconnect = attemptRef.current > 0;
-        attemptRef.current = 0;
+        // A socket that opens and immediately dies is not healthy. Reset the backoff only after
+        // the connection stays up long enough to prove stability, matching the main run stream.
+        clearStableTimer();
+        stableRef.current = setTimeout(() => {
+          attemptRef.current = 0;
+          stableRef.current = undefined;
+        }, RECONNECT_STABLE_MS);
         if (reconnect) {
           void refresh().catch((error) => {
             const reason = unavailableReason(error);
@@ -184,6 +234,9 @@ export function useAgentRunStream(runId: string | null) {
           if (terminalRef.current) void refresh().catch(() => undefined);
         }
         if (terminalRef.current) {
+          clearStableTimer();
+          if (retryRef.current) clearTimeout(retryRef.current);
+          retryRef.current = undefined;
           source.close();
           sourceRef.current = null;
           setStatus('CLOSED');
@@ -193,10 +246,7 @@ export function useAgentRunStream(runId: string | null) {
         source.close();
         sourceRef.current = null;
         if (!alive || terminalRef.current) return;
-        setStatus('RECONNECTING');
-        const delay = [1000, 2000, 4000, 8000, 16000, 30000][Math.min(attemptRef.current, 5)];
-        attemptRef.current += 1;
-        retryRef.current = setTimeout(() => void connect(), delay);
+        scheduleReconnect();
       };
     };
     void (async () => {
@@ -216,6 +266,9 @@ export function useAgentRunStream(runId: string | null) {
       sourceRef.current?.close();
       sourceRef.current = null;
       if (retryRef.current) clearTimeout(retryRef.current);
+      if (stableRef.current) clearTimeout(stableRef.current);
+      retryRef.current = undefined;
+      stableRef.current = undefined;
       setStatus('CLOSED');
     };
   }, [markUnavailable, refresh, runId]);

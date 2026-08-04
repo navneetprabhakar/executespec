@@ -674,6 +674,7 @@ describe('terminalFailureEvidence', () => {
   it.each([
     ['REVIEW_EVIDENCE', {behavior: 'tab', tab: 'Validation'}],
     ['RETRY_RUN', {behavior: 'retry'}],
+    ['OPEN_PROVIDER_SETTINGS', {behavior: 'navigate', href: '/provider-keys'}],
     ['REVIEW_POLICY', {behavior: 'navigate', href: '/org/settings'}],
     ['START_NEW_RUN', {behavior: 'navigate', href: '/compose'}],
   ] as const)(

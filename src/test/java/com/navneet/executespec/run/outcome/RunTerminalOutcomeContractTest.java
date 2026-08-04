@@ -130,9 +130,47 @@ class RunTerminalOutcomeContractTest {
             "https://github.com/example/repo/pull/7");
 
     assertThat(outcome.impact().publication()).isEqualTo(RunTerminalOutcome.Publication.PR_CREATED);
+    assertThat(outcome.impact().prUrl()).isEqualTo("https://github.com/example/repo/pull/7");
+    assertThat(outcome.impact().codeChanged())
+        .as("an existing PR is not attempt-scoped mutation proof")
+        .isNull();
     assertThat(outcome.customerMessage())
-        .contains("existing pull request")
+        .contains("existing pull request", "not updated by this attempt")
         .doesNotContain("No pull request was published");
+  }
+
+  @ParameterizedTest
+  @CsvSource({
+    "BYOK_CONTEXT_UNAVAILABLE",
+    "PROJECT_PROVIDER_NOT_CONFIGURED",
+    "PROJECT_PROVIDER_INVALID",
+    "MODEL_MATRIX_UNAVAILABLE"
+  })
+  void unavailableAiRoutesPointToProviderSettingsInsteadOfRetryingUnchanged(String code) {
+    RunTerminalOutcome outcome = project("FAILED", code, "provider detail", 0.0, 1.0, null);
+
+    assertThat(outcome.category()).isEqualTo(RunTerminalOutcome.Category.ACTION_REQUIRED);
+    assertThat(outcome.retryable()).isTrue();
+    assertThat(outcome.impact().codeChanged()).isFalse();
+    assertThat(outcome.customerMessage()).doesNotContain("provider detail");
+    assertThat(outcome.nextAction().type()).isEqualTo("OPEN_PROVIDER_SETTINGS");
+    assertThat(outcome.nextAction().label())
+        .isEqualTo("Open provider settings and correct the route.");
+    assertThat(outcome.nextAction().href()).isEqualTo("/provider-keys");
+  }
+
+  @Test
+  void completedPublishedRunCanClaimCodeChanged() {
+    RunTerminalOutcome outcome =
+        project(
+            "COMPLETE",
+            "CLEAN_COMPLETION",
+            null,
+            0.20,
+            1.0,
+            "https://github.com/example/repo/pull/8");
+
+    assertThat(outcome.impact().codeChanged()).isTrue();
   }
 
   @Test

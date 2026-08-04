@@ -31,7 +31,11 @@ before approval or code-generation spend. Explicit method-rejection acceptance s
 `POST /route must return 405` is preserved as a negative contract: the forbidden method must remain
 absent while another supported method proves the path exists, so a 404 cannot masquerade as the
 requested behavior. Web Agent streaming also treats a parsed terminal `done` as authoritative when
-a proxy resets the connection immediately afterward.
+a proxy resets the connection immediately afterward. Its pinned-run event stream never opens
+without a run-scoped SSE token: 401/403/404 outcomes close with an explicit auth/access/not-found
+state, while transient failures use capped exponential reconnects whose budget resets only after a
+stable connection. When that budget is exhausted, the latest durable run snapshot remains visible
+as snapshot-only evidence instead of looping indefinitely.
 
 Run detail's **Screens** tab generates a static visual preview, not a live application runtime.
 New generation is available only after the run is terminal and only for screens affected by the
@@ -92,6 +96,9 @@ request is not falsely shown as cross-provider divergence. Exact model pins rema
 Terminal result pages render the server-owned outcome verbatim with exactly one primary next action;
 logs, evidence, and files remain secondary diagnostics. User cancellation is presented as a neutral
 stop, while platform failures retain a support code without exposing internal exception detail.
+An existing pull request does not by itself prove that the terminal attempt changed code; failed or
+limited attempts leave that impact unknown. Provider and model-route failures lead directly to
+`/provider-keys` rather than offering a retry against the same invalid configuration.
 
 Run-event publication uses bounded per-run lock striping to order Redis replay append, local
 delivery, Redis publication, subscription installation, and completion; unconstrained Spring
