@@ -14,6 +14,11 @@ The Web result surface renders exactly one primary control from `terminalOutcome
 `USER_STOPPED` as a neutral stop rather than a failed recovery case and does not poll for a report
 after a terminal one-shot report read returns absent. Email and in-app cancellation notifications
 also honor the neutral completion preference rather than the failure preference.
+An existing pull request is publication history, not attempt-scoped mutation proof: only a clean or
+warning completion paired with a PR may set `impact.codeChanged=true`; failed/limited attempts keep
+that field unknown unless a future mutation receipt proves it. Provider/key/model-matrix outcomes
+return one `OPEN_PROVIDER_SETTINGS` action at `/provider-keys` instead of retrying an unchanged
+route.
 Because durable archives intentionally omit `.git`, a successful restore reconstructs repository
 metadata only from immutable repo snapshots plus an authoritative credential-free coordinate:
 linked Project repositories use their stored SCM clone URL, while standalone runs use the exact
