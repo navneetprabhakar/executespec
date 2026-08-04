@@ -137,6 +137,87 @@ class WorkspaceInitServiceIterationCopyTest {
         .save(org.mockito.ArgumentMatchers.any());
   }
 
+  @Test
+  void requiredCopyReanchorsNestedRepoOnSnapshotBranchAfterAutoPushResidue() throws Exception {
+    Path source = workspace.resolve("published-project-run");
+    initRepo(source);
+    Path nested = source.resolve("repos").resolve("api");
+    initRepo(nested);
+    Files.writeString(nested.resolve("Api.java"), "class Api { int version = 3; }\n");
+    git(nested, "add", "Api.java");
+    git(nested, "commit", "-m", "api");
+    // Auto-push leaves the source checkout on its publication branch; the copied child must be
+    // re-anchored on the snapshot baseline branch or preflight branch verification fails.
+    git(nested, "checkout", "-B", "executespec/deadbeef");
+
+    AgentProperties properties = new AgentProperties();
+    properties.setWorkspace(workspace.toString());
+    RunRepoSnapshotRepository snapshots = mock(RunRepoSnapshotRepository.class);
+    RunRepoSnapshot sourceSnapshot =
+        RunRepoSnapshot.builder()
+            .runId("published-project-run")
+            .repoId(java.util.UUID.randomUUID())
+            .repoFullName("acme/api")
+            .branch("main")
+            .commitSha("b".repeat(40))
+            .build();
+    when(snapshots.findByRunId("published-project-run")).thenReturn(List.of(sourceSnapshot));
+    when(snapshots.findByRunId("published-child")).thenReturn(List.of());
+    WorkspaceInitService service =
+        new WorkspaceInitService(
+            properties,
+            mock(WorkspaceRestoreService.class),
+            snapshots,
+            mock(VendoredPathGuard.class),
+            mock(com.navneet.executespec.contractsurface.BrownfieldHttpContractGuard.class),
+            new WorkspaceRepositoryRevisionService(properties, snapshots));
+
+    service.copyFromRunRequired("published-project-run", "published-child");
+
+    Path childRepo = workspace.resolve("published-child").resolve("repos").resolve("api");
+    assertThat(output(childRepo, "branch", "--show-current")).isEqualTo("main");
+    assertThat(Files.readString(childRepo.resolve("Api.java"))).contains("version = 3");
+    ArgumentCaptor<RunRepoSnapshot> persisted = ArgumentCaptor.forClass(RunRepoSnapshot.class);
+    verify(snapshots).save(persisted.capture());
+    assertThat(persisted.getValue().getBranch()).isEqualTo("main");
+    assertThat(persisted.getValue().getCommitSha())
+        .isEqualTo(output(childRepo, "rev-parse", "HEAD"));
+  }
+
+  @Test
+  void requiredCopyRejectsUnsafeSnapshotBranchName() throws Exception {
+    Path source = workspace.resolve("unsafe-branch-run");
+    initRepo(source);
+    Path nested = source.resolve("repos").resolve("api");
+    initRepo(nested);
+
+    AgentProperties properties = new AgentProperties();
+    properties.setWorkspace(workspace.toString());
+    RunRepoSnapshotRepository snapshots = mock(RunRepoSnapshotRepository.class);
+    RunRepoSnapshot sourceSnapshot =
+        RunRepoSnapshot.builder()
+            .runId("unsafe-branch-run")
+            .repoId(java.util.UUID.randomUUID())
+            .repoFullName("acme/api")
+            .branch("--upload-pack=evil")
+            .commitSha("c".repeat(40))
+            .build();
+    when(snapshots.findByRunId("unsafe-branch-run")).thenReturn(List.of(sourceSnapshot));
+    when(snapshots.findByRunId("unsafe-child")).thenReturn(List.of());
+    WorkspaceInitService service =
+        new WorkspaceInitService(
+            properties,
+            mock(WorkspaceRestoreService.class),
+            snapshots,
+            mock(VendoredPathGuard.class),
+            mock(com.navneet.executespec.contractsurface.BrownfieldHttpContractGuard.class),
+            new WorkspaceRepositoryRevisionService(properties, snapshots));
+
+    assertThatThrownBy(() -> service.copyFromRunRequired("unsafe-branch-run", "unsafe-child"))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("not a safe Git branch name");
+  }
+
   private static void initRepo(Path directory) throws Exception {
     Files.createDirectories(directory);
     git(directory, "init", "-b", "main");

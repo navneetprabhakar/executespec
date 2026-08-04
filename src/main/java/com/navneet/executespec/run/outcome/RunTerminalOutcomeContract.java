@@ -251,6 +251,18 @@ public final class RunTerminalOutcomeContract {
           "Inspect the validation evidence and address the reported failure before retrying.");
     }
     if (code.startsWith("WORKSPACE_PREFLIGHT_FAILED")) {
+      if (reasonDetail != null
+          && (reasonDetail.startsWith("WORKSPACE_PREFLIGHT_FAILED:BRANCH_MISMATCH")
+              || reasonDetail.startsWith("BRANCH_MISMATCH"))) {
+        // Repository access is fine here and a plain retry is deterministically futile, so the
+        // generic access wording would be actively misleading.
+        return actionRequired(
+            "Workspace branch mismatch",
+            "The run workspace is not on the expected repository branch, so the change could"
+                + " not be prepared.",
+            "Retry the run; if this repeats, the source run's workspace branch state needs"
+                + " attention.");
+      }
       return actionRequired(
           "Repository workspace unavailable",
           "The repository workspace could not be prepared.",
