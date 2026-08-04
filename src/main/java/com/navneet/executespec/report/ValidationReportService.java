@@ -473,6 +473,34 @@ public class ValidationReportService {
     }
   }
 
+  /**
+   * Recomputes persisted run-level goal proof after the terminal compare-and-set succeeds.
+   * Validation is intentionally generated while the run is still REVIEWING; without this
+   * provider-free refresh, run detail can retain that stale lifecycle after the run is COMPLETE.
+   */
+  public void refreshRunGoalDecisionAfterTerminal(String runId) {
+    if (runId == null || runId.isBlank()) return;
+    repository
+        .findByRunId(runId)
+        .filter(report -> "COMPLETE".equalsIgnoreCase(report.getStatus()))
+        .ifPresent(
+            report -> {
+              List<ReportIssueDTO> issues = parseIssues(report.getIssuesJson());
+              List<VerificationEvidenceDTO> ledger = buildVerificationLedger(report, issues);
+              PipelineRun run = findRunForReport(runId);
+              if (run == null) return;
+              GoalDonenessDecision decision =
+                  goalProofEvaluator.evaluateForRun(
+                      runId,
+                      runGoalSummary(run),
+                      run.getStatus(),
+                      report.getPipelineResult(),
+                      ledger);
+              persistRunGoalDecision(run, decision);
+              publishEvidenceEvent(report, ledger, decision);
+            });
+  }
+
   private void publishEvidenceEvent(
       ValidationReport saved,
       List<VerificationEvidenceDTO> verificationLedger,

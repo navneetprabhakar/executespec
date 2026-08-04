@@ -1801,6 +1801,10 @@ evidence, and horizontally scaled JVMs require a shared persistent trajectory ro
   fails closed when current revision cannot be established. Accuracy assessment includes static-web
   implementation sources (`html/css/vue/svelte` families) so a changed page is not graded from its
   test file alone.
+  SETUP bodies are now byte-stable exact-evidence assemblies rather than provider-authored command
+  prose; inline engine constraints such as `>=20` are not misclassified as shell operators. Run
+  terminalization refreshes persisted goal proof after the successful terminal claim, and the
+  evidence ledger states the 75-point independent-functional-proof cap explicitly.
 - **Timeline secret serialization boundary (2026-08-04)** — `PipelineRun.githubPat` and
   `PipelineRun.bitbucketAppPassword` are serialization-denied. The authenticated Timeline API
   currently returns a raw run entity, so decrypted SCM credentials must remain absent from every

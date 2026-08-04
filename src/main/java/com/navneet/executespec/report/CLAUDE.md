@@ -116,7 +116,8 @@ invalid reports are excluded and counted separately.
   zeros state that the cause is unavailable rather than inferring one.
 - Fresh workspace suites remain customer-visible deterministic test evidence, explicitly labelled
   `workspace suite only`; they cannot certify deployed journeys and cap both verified/rubric
-  headlines at 75. The independently generated black-box suite exercises the live preview/runtime
+  headlines at 75. The reloadable verification ledger emits that exact independent-functional
+  trust cap instead of leaving users to infer it from the test row. The independently generated black-box suite exercises the live preview/runtime
   and replaces the earlier population. Events are idempotent overwrite, not arithmetic merge:
   unit tests cannot dilute a failing functional result. Missing, failed, stale, zero-test, or
   provenance-unverified execution persists 0/0/unverified evidence; only a non-empty,
@@ -124,6 +125,10 @@ invalid reports are excluded and counted separately.
   When workspace tests pass but independent functional proof is unavailable, run-level goal proof
   remains `UNCERTAIN`/`UNPROVEN` and now recommends `STOP_BLOCKED` with the exact evidence gap; it
   must not advise another code-generation turn because a model rerun cannot strengthen test scope.
+  Validation is initially persisted while the run is REVIEWING. After the terminal compare-and-set
+  succeeds, `RunOrchestrator` invokes the provider-free terminal refresh through
+  `RunValidationKickoff`; saved run-level goal proof and the evidence event therefore match the
+  terminal status projected by the report DTO instead of retaining stale REVIEWING prose.
   Rescoring is monotonic by evidence strength: an unavailable/not-applicable asynchronous event
   cannot replace a proven workspace population, and workspace evidence cannot replace proven live
   functional evidence. Node's built-in test runner is parsed from its complete

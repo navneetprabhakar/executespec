@@ -271,6 +271,10 @@ final class ProjectGeneratedDocValidator {
   private static boolean looksCommandLike(String candidate, SetupAuthority authority) {
     String command = normalizePrompt(candidate);
     if (command.isBlank() || command.startsWith("{") || command.startsWith("[")) return false;
+    // Version constraints are commonly rendered as inline code (for example `>=20`). They can
+    // contain comparison metacharacters, but a string made only of version-range characters has
+    // no executable token and must not be classified as a shell command.
+    if (command.matches("(?i)[v~^<>=*0-9.x\\s.-]+")) return false;
     if (authority.authorizesAnywhere(command) || isGitClone(command)) return true;
     if (command.startsWith("./") || command.startsWith("../") || command.startsWith("/"))
       return true;

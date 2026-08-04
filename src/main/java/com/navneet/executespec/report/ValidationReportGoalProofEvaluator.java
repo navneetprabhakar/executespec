@@ -269,6 +269,15 @@ public class ValidationReportGoalProofEvaluator {
       if ("UNKNOWN".equals(status)) {
         continue;
       }
+      // The explicit independent-functional trust-cap row explains the same gap already carried
+      // by a passing workspace-only tests row. Keep it in the evidence ledger, but do not turn
+      // that single verifier gap into a second code-quality gap that recommends more codegen.
+      if ("trust-cap".equals(id)
+          && nonFunctionalTests
+          && row.summary() != null
+          && row.summary().contains("independent functional verification is unavailable")) {
+        continue;
+      }
       hasUnproven = true;
       hasOtherUnproven = true;
       String item = label(row) + " is " + status.toLowerCase();

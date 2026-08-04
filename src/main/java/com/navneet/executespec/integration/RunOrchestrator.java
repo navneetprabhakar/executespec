@@ -3315,6 +3315,9 @@ public class RunOrchestrator implements RunControlPort {
             });
     String actualStatus = persistedStatus[0];
     String actualReason = persistedReason[0];
+    if (terminalClaim > 0 && !"PAUSED".equalsIgnoreCase(actualStatus)) {
+      validationKickoff.refreshRunGoalDecisionAfterTerminal(runId);
+    }
     broadcaster.emit(runId, RunEvent.runStatus(runId, actualStatus));
     broadcaster.emit(runId, RunEvent.costUpdate(runId, cost.costUsd()));
     broadcaster.emit(runId, RunEvent.complete(runId, actualStatus, actualReason));
