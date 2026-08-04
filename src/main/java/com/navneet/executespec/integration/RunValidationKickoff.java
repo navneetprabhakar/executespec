@@ -66,6 +66,10 @@ class RunValidationKickoff {
   private final PerkyMessenger perky;
   private final RunValidationFailureReporter failureReporter;
 
+  void refreshRunGoalDecisionAfterTerminal(String runId) {
+    validationReportService.refreshRunGoalDecisionAfterTerminal(runId);
+  }
+
   java.util.Optional<ValidationReport> generateValidationReport(
       String runId, ExecutionResult execResult, ReviewerResult reviewResult, Plan plan) {
     return generateValidationReport(

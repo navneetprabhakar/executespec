@@ -903,7 +903,10 @@ class ProjectDocGeneratorServiceCacheHitTest {
     ProjectGeneratedDoc retry =
         svc.generate("p-1", DocType.SETUP, "actor-1", LlmProvider.ANTHROPIC);
 
-    assertThat(retry.getContent()).isEqualTo(validDoc(DocType.SETUP, "Complete"));
+    assertThat(retry.getContent())
+        .startsWith("# Setting up Test")
+        .contains("git clone https://github.com/owner/repo-a.git")
+        .doesNotContain("Start the repository service", "dependency installation");
     verify(llmRouter, org.mockito.Mockito.times(2))
         .callTextStrict(
             anyString(),
@@ -1084,7 +1087,7 @@ class ProjectDocGeneratorServiceCacheHitTest {
   }
 
   @Test
-  void unauthorizedSetupCommandGetsProjectionBoundedCorrectiveInstruction() {
+  void providerInventedSetupCommandIsDiscardedByCanonicalAssemblyWithoutCorrectiveCall() {
     wireCacheMiss();
     String unsupportedSetup =
         validDoc(DocType.SETUP, "First")
@@ -1107,23 +1110,18 @@ class ProjectDocGeneratorServiceCacheHitTest {
             any(LlmExecutionReference.class),
             eq(LlmRequest.RetryProfile.INTERACTIVE),
             any(Runnable.class)))
-        .thenReturn(
-            textResponse(unsupportedSetup, "stop"),
-            textResponse(validDoc(DocType.SETUP, "Corrected"), "stop"));
+        .thenReturn(textResponse(unsupportedSetup, "stop"));
     when(docRepo.saveAndFlush(any(ProjectGeneratedDoc.class)))
         .thenAnswer(invocation -> invocation.getArgument(0));
 
     ProjectGeneratedDoc generated =
         svc.generate("p-1", DocType.SETUP, "actor-1", LlmProvider.ANTHROPIC);
 
-    @SuppressWarnings("unchecked")
-    ArgumentCaptor<List<org.springframework.ai.chat.messages.Message>> messages =
-        ArgumentCaptor.forClass(List.class);
-    verify(llmRouter, org.mockito.Mockito.times(2))
+    verify(llmRouter, org.mockito.Mockito.times(1))
         .callTextStrict(
             anyString(),
             anyString(),
-            messages.capture(),
+            anyList(),
             org.mockito.ArgumentMatchers.eq("project-doc-setup-p-1"),
             org.mockito.ArgumentMatchers.eq("project-doc-setup"),
             anyString(),
@@ -1132,24 +1130,11 @@ class ProjectDocGeneratorServiceCacheHitTest {
             org.mockito.ArgumentMatchers.eq(LlmRequest.RetryProfile.INTERACTIVE),
             any(Runnable.class));
 
-    assertThat(generated.getContent()).isEqualTo(validDoc(DocType.SETUP, "Corrected"));
-    assertThat(messages.getAllValues().get(0).get(1).getText())
-        .contains("No exact setup command source was selected")
-        .doesNotContain("Safe deterministic command projection");
-    assertThat(messages.getAllValues().get(1).get(2).getText())
-        .contains("PROJECT_DOC_VALIDATION_ERROR")
-        .contains("setup command is not present in encoded exact-revision setup evidence")
-        .contains("Safe deterministic command projection")
-        .contains("complete allow-list for non-clone commands")
-        .contains("If that projection is absent or empty, no non-clone")
-        .contains("command is authorized")
-        .contains("every fenced block regardless of its language label")
-        .contains("every console prompt", "every inline-code span", "every indented-code block")
-        .contains("unambiguous exact linked-repository name that supplied it")
-        .contains("one literal fenced")
-        .contains("git clone")
-        .contains("Do not infer")
-        .contains("not established by the supplied deterministic evidence");
+    assertThat(generated.getContent())
+        .startsWith("# Setting up Test")
+        .contains("git clone https://github.com/owner/repo-a.git")
+        .contains("No test, check, or start command is established")
+        .doesNotContain("npm install", "conventional dependency installer");
   }
 
   @Test
@@ -1242,7 +1227,11 @@ class ProjectDocGeneratorServiceCacheHitTest {
     ProjectGeneratedDoc generated = svc.generate("p-1", type, "actor-1", LlmProvider.ANTHROPIC);
 
     assertThat(generated.getContent())
-        .contains("Compose application-service startup is not established")
+        .contains(
+            type == DocType.EXPLANATION
+                ? "Compose application-service startup is not established"
+                : "No multi-service startup order, port, health endpoint, or health-check command"
+                    + " is established")
         .doesNotContain("Docker Compose starts the full application stack");
     verify(llmRouter, org.mockito.Mockito.times(1))
         .callTextStrict(

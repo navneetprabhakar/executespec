@@ -653,9 +653,10 @@ class ValidationReportServiceVerificationLedgerTest {
                     null)));
 
     assertEntry(ledger, "report-issues", "FAIL", "HYBRID", "MEDIUM");
-    assertTrue(
-        ledger.stream().noneMatch(entry -> "trust-cap".equals(entry.id())),
-        "non-critical issue must not create a CRITICAL trust-cap evidence row");
+    VerificationEvidenceDTO cap = find(ledger, "trust-cap");
+    assertEquals(75, cap.total());
+    assertTrue(cap.summary().contains("independent functional verification is unavailable"));
+    assertFalse(cap.summary().contains("unresolved critical"));
   }
 
   @Test
@@ -860,6 +861,52 @@ class ValidationReportServiceVerificationLedgerTest {
                     "pipeline-result".equals(reference.evidenceId())
                         && "PROVEN".equals(reference.proofStatus())
                         && "validation_report.pipeline_result".equals(reference.artifact())));
+  }
+
+  @Test
+  void terminalRefreshPersistsTheSameGoalDecisionProjectedByRunReport() throws Exception {
+    ValidationReportRepository repository = mock(ValidationReportRepository.class);
+    StateStore stateStore = mock(StateStore.class);
+    ObjectMapper mapper = new ObjectMapper();
+    ValidationReportService service =
+        new ValidationReportService(repository, null, mapper, null, stateStore, null, flags);
+    ValidationReport report =
+        ValidationReport.builder()
+            .id("vr-terminal")
+            .runId("run-terminal")
+            .status("COMPLETE")
+            .filesGenerated(1)
+            .pipelineResult(PipelineResult.PASSED)
+            .issuesJson("[]")
+            .finalBuildPassed(true)
+            .testsPassed(1)
+            .testsTotal(1)
+            .testExecutionVerified(true)
+            .testEvidenceScope("LIVE_PREVIEW_FUNCTIONAL")
+            .reviewerVerdict("CLEAN")
+            .verifiedScore(95)
+            .accuracyJson("{\"specAdherenceScore\":95}")
+            .build();
+    PipelineRun run =
+        PipelineRun.builder()
+            .runId("run-terminal")
+            .status("COMPLETE")
+            .userRequest("Render a visible browser heading")
+            .runGoalDonenessJson("{\"reason\":\"run lifecycle is REVIEWING\"}")
+            .build();
+    when(repository.findByRunId("run-terminal")).thenReturn(Optional.of(report));
+    when(stateStore.findRun("run-terminal")).thenReturn(Optional.of(run));
+
+    service.refreshRunGoalDecisionAfterTerminal("run-terminal");
+    var projected = service.getByRunId("run-terminal").orElseThrow().runGoalDecision();
+
+    var persisted = mapper.readTree(run.getRunGoalDonenessJson());
+    assertEquals(projected.state().name(), persisted.path("state").asText());
+    assertEquals(
+        projected.recommendedDecision().name(), persisted.path("recommendedDecision").asText());
+    assertEquals(projected.goalSummary(), persisted.path("goalSummary").asText());
+    assertFalse(run.getRunGoalDonenessJson().contains("REVIEWING"));
+    verify(stateStore).save(run);
   }
 
   @Test
