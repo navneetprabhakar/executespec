@@ -139,6 +139,31 @@ describe('system map history comparison', () => {
     );
   });
 
+  it('renders changed architecture content when source revisions have zero changed files', async () => {
+    api.getArchitectureDiff.mockResolvedValue({
+      fromVersion: 1,
+      toVersion: 2,
+      fromContent: '# Map\n\nThe API accepts sku, name, and category.',
+      toContent: '# Map\n\nThe API accepts sku and name.',
+      totalFiles: 0,
+      perRepo: [],
+      skipped: [],
+      unverified: [],
+    });
+
+    await renderAndCompare();
+
+    expect(host.textContent).toContain('System map content · v1 → v2');
+    expect(host.textContent).toContain('architecture.md');
+    expect(host.textContent).toContain('The API accepts sku, name, and category.');
+    expect(host.textContent).toContain('The API accepts sku and name.');
+    expect(host.textContent).not.toContain('No system-map content changes.');
+    expect(host.textContent).toContain('Source revisions · 0 files changed');
+    expect(host.textContent).toContain(
+      'No source-file changes were found across all comparable repository pairs.',
+    );
+  });
+
   it('renders an auth or network compare failure as unverified, never as no changes', async () => {
     api.getArchitectureDiff.mockResolvedValue({
       fromVersion: 1,

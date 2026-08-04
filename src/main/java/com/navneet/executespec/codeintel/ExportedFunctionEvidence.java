@@ -5,6 +5,7 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.HexFormat;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.regex.Matcher;
@@ -101,6 +102,67 @@ final class ExportedFunctionEvidence {
     return admitted.equals(canonical.toString())
         ? Inspection.valid(admitted)
         : Inspection.malformed();
+  }
+
+  /**
+   * Returns complete function bodies from the one canonical exact-source block in {@code markdown}.
+   * Arbitrary codemap prose, purpose summaries, truncated entries, and malformed envelopes never
+   * become source-contract authority.
+   */
+  static Map<String, String> completeContentBySymbol(
+      String markdown, String expectedRepository, String expectedSourceRevision) {
+    Inspection inspection = inspectExactBlock(markdown, expectedRepository, expectedSourceRevision);
+    if (inspection.status() != InspectionStatus.VALID) return Map.of();
+    String block = inspection.block();
+    try {
+      String emittedValue = field(block, "Emitted-Symbols");
+      if (emittedValue == null) return Map.of();
+
+      int emitted = Integer.parseInt(emittedValue);
+      Map<String, String> complete = new LinkedHashMap<>();
+      for (int ordinal = 1; ordinal <= emitted; ordinal++) {
+        int entryStart = block.indexOf("### Exported function " + ordinal + "\n");
+        int entryEnd =
+            ordinal == emitted
+                ? block.indexOf("\n- Emitted-Symbols:", entryStart)
+                : block.indexOf("### Exported function " + (ordinal + 1) + "\n", entryStart);
+        if (entryStart < 0 || entryEnd < 0) return Map.of();
+        String entry = block.substring(entryStart, entryEnd);
+        if (!"false".equals(field(entry, "Truncated"))) continue;
+        String symbolJson = field(entry, "Symbol-Json");
+        String contentJson = field(entry, "Content-Json");
+        if (symbolJson == null || contentJson == null) return Map.of();
+        String symbol = JSON.readValue(symbolJson, String.class);
+        String content = JSON.readValue(contentJson, String.class);
+        if (complete.put(symbol, content) != null) return Map.of();
+      }
+      return Map.copyOf(complete);
+    } catch (Exception malformed) {
+      return Map.of();
+    }
+  }
+
+  /**
+   * Returns a same-length projection of {@code source} with comment bodies and string contents
+   * blanked, so structural matching cannot be satisfied by commented-out or quoted pseudo-code.
+   * Newlines survive and offsets are stable for exact-slice extraction from the original text.
+   */
+  static String maskNonCode(String source) {
+    StringBuilder masked = new StringBuilder(source.length());
+    ScanState state = new ScanState();
+    int index = 0;
+    while (index < source.length()) {
+      boolean codeBefore = state.code();
+      int consumed = state.consume(source, index);
+      boolean codeAfter = state.code();
+      int last = Math.min(consumed, source.length() - 1);
+      for (int at = index; at <= last; at++) {
+        char c = source.charAt(at);
+        masked.append(c == '\n' || (codeBefore && codeAfter) ? c : ' ');
+      }
+      index = last + 1;
+    }
+    return masked.toString();
   }
 
   private static String canonicalEntry(String entry, int ordinal) {

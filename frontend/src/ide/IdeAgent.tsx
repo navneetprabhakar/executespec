@@ -42,6 +42,11 @@ import {repoSupports} from '@/ide/projectRepoUi';
 import {friendlyAiFailureMessage} from '@/ide/runResultUtils';
 import {ConfirmModal} from '@/signal/components/Modal';
 import {consumeAgentProjectHandoff, createAgentProjectHandoff} from '@/ide/agentProjectHandoff';
+import {
+  agentComposerDraftKey,
+  loadAgentComposerDraft,
+  saveAgentComposerDraft,
+} from '@/ide/agentComposerDraft';
 
 interface RepoBoundaryState {
   actionKey: string | null;
@@ -204,6 +209,27 @@ export default function IdeAgent() {
     if (!candidate) return null;
     return agentSessionMatchesScope(candidate, scope) ? candidate : null;
   }, [scope, state.sessions, state.selectedId]);
+
+  // Enterprise-litmus P2: an ordinary reload must not lose a typed-but-unsent
+  // draft. Restore once per scope; declared before the handoff effects so an
+  // explicit handoff/router draft dispatched later still wins over the stored
+  // one, and an already-populated composer is never clobbered.
+  const draftScopeRef = useRef<string | null>(null);
+  useEffect(() => {
+    const key = agentComposerDraftKey(scope);
+    if (draftScopeRef.current === key) return;
+    draftScopeRef.current = key;
+    if (state.input) return;
+    const draft = loadAgentComposerDraft(scope);
+    if (draft) dispatch({type: 'input:set', input: draft});
+  }, [scope, state.input]);
+
+  // Persist the draft as it changes; an emptied composer (message sent, or the
+  // user cleared it) removes the stored value. Text only — attachments are
+  // never persisted — and the module fails open on any storage error.
+  useEffect(() => {
+    saveAgentComposerDraft(scope, state.input);
+  }, [scope, state.input]);
 
   useEffect(() => {
     setSelectedProvider(selected?.defaultProvider ?? '');
