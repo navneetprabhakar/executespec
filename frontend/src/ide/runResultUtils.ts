@@ -70,6 +70,8 @@ export function terminalOutcomePrimaryAction(
       return {type: action.type, label: action.label, behavior: 'tab', tab: 'Validation'};
     case 'RETRY_RUN':
       return {type: action.type, label: action.label, behavior: 'retry'};
+    case 'OPEN_PROVIDER_SETTINGS':
+      return {type: action.type, label: action.label, behavior: 'navigate', href: '/provider-keys'};
     case 'REVIEW_POLICY':
       return {type: action.type, label: action.label, behavior: 'navigate', href: '/org/settings'};
     case 'START_NEW_RUN':

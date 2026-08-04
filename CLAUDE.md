@@ -32,7 +32,11 @@ prove requested test coverage or goal completion.
   success or definitive rejection; `frontend/src/lib/api/runs.ts` requires the header rather than
   silently permitting an unsafe call. Enterprise Project Start Work reuses the Compose exact
   `modelName` override for that run only. Web Agent trust copy is evidence-qualified: retention is
-  policy-bound, BYOK caps are optional, and PR creation remains publication-gated.
+  policy-bound, BYOK caps are optional, and PR creation remains publication-gated. The pinned-run
+  stream obtains a run-scoped SSE token before constructing `EventSource`, closes 401/403/404 as
+  stable unavailable outcomes, and caps exponential transient reconnects; an open socket resets
+  the retry budget only after a 15-second stable window. Exhaustion leaves the durable snapshot
+  visible instead of retrying forever.
 - **Infra:** GCP us-east4. Single GCE VM serves prod + dev; Cloud Run serves on-demand previews. Cloudflare in front of `*.executespec.ai`. The deploy workflow checksum-verifies the immutable JAR, writes `/opt/app/RUNNING_SHA`, then reads that marker back from the target host and fails before health verification if it differs from the resolved target SHA.
 - **Codebase shape:** 85 top-level package roots under `com.navneet.executespec.*` (83 with Java sources; flat — the historical `v2.*` / `v3.*` prefixes were retired in 2026-05-07's unification pass). Current source includes 118 `@RestController` classes (123 files match the annotation) serving 577 routes pinned by `arch/ApiRouteInventoryTest`, `agentsession/` for cross-surface agent sessions, the committed `repositoryintel/` read-only evidence port, and the provider-free `repositoryexplorer/` selection/bundle contract. Frontend ~65K LOC of TS/TSX.
 
@@ -1811,12 +1815,15 @@ evidence, and horizontally scaled JVMs require a shared persistent trajectory ro
   JSON representation; `PipelineRunSecretSerializationTest` pins this boundary.
 - **Enterprise-demo terminal/error contract state (merged base plus 2026-08-04 local
   follow-up)** — the merged base terminal run DTOs carry one server-owned additive
-  `terminalOutcome` projection for Web, email, in-app notifications, and future CLI consumption.
+  `terminalOutcome` projection for Web, email, in-app notifications, and CLI consumption.
   Controlled limits/policy/validation/cancellation are separate from leak-safe platform failures;
   spend/cap, publication impact, one next action, and support code are included when known.
   Web run detail executes only that server-owned primary action (including an explicit href), keeps
   diagnostic navigation secondary, and presents `USER_STOPPED` cancellation neutrally in both run
   detail and the Work list. A terminal missing report is fetched once and is never polled.
+  A pre-existing PR is not attempt-scoped mutation evidence: only clean/warning publication may
+  assert `codeChanged=true`, while failed/limited attempts remain unknown. Provider/key/matrix
+  failures return one `/provider-keys` action instead of retrying the unchanged route.
   The current local consistency follow-up makes email and in-app cancellation notifications honor
   the completion preference rather than the failure preference. Run sync still attempts durable
   workspace restore before `WORKSPACE_UNAVAILABLE` (410), and the local follow-up reconstructs

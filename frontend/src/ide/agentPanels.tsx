@@ -20,6 +20,7 @@ import {extractAgentArtifacts} from '@/ide/agentArtifacts';
 import {ArtifactRail} from '@/ide/agentArtifactRail';
 import {boundedInlineDiff} from '@/ide/agentDiff';
 import {isCloudRunAction, isConfirmableCloudRun} from '@/ide/agentActionPolicy';
+import {agentRunUnavailableMessage, type AgentRunUnavailableReason} from '@/ide/agentRunStream';
 import {AgentBlockedActionCard} from '@/ide/AgentBlockedActionCard';
 import {
   asText,
@@ -734,7 +735,7 @@ function SandboxRunCard({
   run: api.RunDetail;
   liveCostUsd: number | null;
   streamStatus?: 'IDLE' | 'CONNECTING' | 'CONNECTED' | 'RECONNECTING' | 'CLOSED';
-  unavailable?: 'RUN_NOT_FOUND' | 'AUTH_REQUIRED' | null;
+  unavailable?: AgentRunUnavailableReason | null;
   busy: boolean;
   onOpen: (path: string) => void;
   onStop: () => void;
@@ -754,19 +755,16 @@ function SandboxRunCard({
     run.verifiedScore == null ? 'Evidence pending' : `${run.verifiedScore}/100 · internal`;
   const provider = run.aiProvider || run.workerModel || 'default route';
   const streamLabel =
-    unavailable === 'RUN_NOT_FOUND'
-      ? 'Run no longer available'
-      : unavailable === 'AUTH_REQUIRED'
-        ? 'Sign in again to view this run'
-        : streamStatus === 'RECONNECTING'
-          ? 'Reconnecting live events'
-          : streamStatus === 'CONNECTING'
-            ? 'Connecting live events'
-            : streamStatus === 'CONNECTED'
-              ? 'Live events connected'
-              : streamStatus === 'CLOSED' && !terminal
-                ? 'Snapshot only · live events unavailable'
-                : null;
+    agentRunUnavailableMessage(unavailable) ??
+    (streamStatus === 'RECONNECTING'
+      ? 'Reconnecting live events'
+      : streamStatus === 'CONNECTING'
+        ? 'Connecting live events'
+        : streamStatus === 'CONNECTED'
+          ? 'Live events connected'
+          : streamStatus === 'CLOSED' && !terminal
+            ? 'Snapshot only · live events unavailable'
+            : null);
   const prUrl = run.scmPrUrl || run.githubPrUrl;
   const terminalLabel = failed
     ? 'Open failure evidence'
@@ -1506,7 +1504,7 @@ export function AgentConversation({
   runCard: api.RunDetail | null;
   runCost: number | null;
   runStreamStatus?: 'IDLE' | 'CONNECTING' | 'CONNECTED' | 'RECONNECTING' | 'CLOSED';
-  runUnavailable?: 'RUN_NOT_FOUND' | 'AUTH_REQUIRED' | null;
+  runUnavailable?: AgentRunUnavailableReason | null;
   routingState?: RoutingState;
   remoteSandboxEnabled?: boolean;
   repoSelection?: CloudRunRepoSelection;
@@ -1545,15 +1543,13 @@ export function AgentConversation({
         <div className='ide-sr-only' role='status' aria-live='polite' aria-atomic='true'>
           {runCard
             ? `${remoteSandboxEnabled ? 'Remote sandbox' : 'Remote workspace'} ${runPhaseLabel(runCard.status)}${
-                runUnavailable === 'RUN_NOT_FOUND'
-                  ? '. Run no longer available.'
-                  : runUnavailable === 'AUTH_REQUIRED'
-                    ? '. Sign in again to view this run.'
-                    : runStreamStatus === 'RECONNECTING'
-                      ? '. Reconnecting live events.'
-                      : runStreamStatus === 'CLOSED' && !isTerminalRunStatus(runCard.status)
-                        ? '. Live events unavailable; showing the latest snapshot.'
-                        : ''
+                runUnavailable
+                  ? `. ${agentRunUnavailableMessage(runUnavailable)}.`
+                  : runStreamStatus === 'RECONNECTING'
+                    ? '. Reconnecting live events.'
+                    : runStreamStatus === 'CLOSED' && !isTerminalRunStatus(runCard.status)
+                      ? '. Live events unavailable; showing the latest snapshot.'
+                      : ''
               }`
             : isBusy
               ? streamText

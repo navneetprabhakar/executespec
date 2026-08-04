@@ -260,10 +260,10 @@ public final class RunTerminalOutcomeContract {
         || "PROJECT_PROVIDER_NOT_CONFIGURED".equals(code)
         || "PROJECT_PROVIDER_INVALID".equals(code)
         || "MODEL_MATRIX_UNAVAILABLE".equals(code)) {
-      return actionRequired(
+      return providerSettingsRequired(
           "AI route unavailable",
           "The configured provider or model route is unavailable.",
-          "Open provider settings, correct the route, and retry.");
+          "Open provider settings and correct the route.");
     }
     if ("LOCAL_HANDS_DISABLED".equals(code)) {
       return actionRequired(
@@ -327,16 +327,26 @@ public final class RunTerminalOutcomeContract {
   }
 
   private static Boolean codeChanged(String code, Publication publication) {
-    if (publication == Publication.PR_CREATED) return true;
     if (Set.of(
-            "PLANNER_RECOVERY_POLICY_BLOCKED",
-            "PLANNER_UNAVAILABLE",
-            "PLAN_VALIDATION_REJECTED",
-            "PROJECT_PROVIDER_NOT_CONFIGURED",
-            "PROJECT_PROVIDER_INVALID",
-            "MODEL_MATRIX_UNAVAILABLE")
-        .contains(code)) {
+                "PLANNER_RECOVERY_POLICY_BLOCKED",
+                "PLANNER_UNAVAILABLE",
+                "PLAN_VALIDATION_REJECTED",
+                "BYOK_CONTEXT_UNAVAILABLE",
+                "LOCAL_HANDS_DISABLED",
+                "PROJECT_PROVIDER_NOT_CONFIGURED",
+                "PROJECT_PROVIDER_INVALID",
+                "MODEL_MATRIX_UNAVAILABLE")
+            .contains(code)
+        || code.startsWith("WORKSPACE_PREFLIGHT_FAILED")) {
       return false;
+    }
+    // A pre-existing PR proves publication history, not that this terminal attempt changed code or
+    // updated the PR. Only a clean/warning completion paired with a PR is strong enough for the
+    // public projection to make the positive claim; failure/limit outcomes remain honestly
+    // unknown unless a future attempt-scoped mutation receipt proves otherwise.
+    if (publication == Publication.PR_CREATED
+        && (SUCCESS_CODES.contains(code) || WARNING_CODES.contains(code))) {
+      return true;
     }
     return null;
   }
@@ -376,6 +386,20 @@ public final class RunTerminalOutcomeContract {
         "RETRY_RUN",
         nextAction,
         null,
+        AutomationDisposition.ACTION_REQUIRED,
+        3);
+  }
+
+  private static Definition providerSettingsRequired(
+      String title, String message, String nextAction) {
+    return new Definition(
+        Category.ACTION_REQUIRED,
+        title,
+        message,
+        true,
+        "OPEN_PROVIDER_SETTINGS",
+        nextAction,
+        "/provider-keys",
         AutomationDisposition.ACTION_REQUIRED,
         3);
   }

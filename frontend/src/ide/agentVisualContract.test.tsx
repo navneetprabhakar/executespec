@@ -142,6 +142,27 @@ describe('protected transcript visual contract', () => {
     );
   });
 
+  it('renders forbidden run access as a stable authorization outcome', () => {
+    const rendered = mount(
+      <AgentConversation
+        {...baseConversation}
+        isBusy={false}
+        streamEvents={[]}
+        hasNewActivity={false}
+        runStreamStatus='CLOSED'
+        runUnavailable='ACCESS_DENIED'
+        runCard={activeRun}
+      />,
+    );
+
+    const card = rendered.querySelector('[data-agent-region="run-card"]');
+    expect(card?.getAttribute('data-run-unavailable')).toBe('ACCESS_DENIED');
+    expect(card?.textContent).toContain('You do not have access to this run');
+    expect(rendered.querySelector('[aria-live="polite"]')?.textContent).toContain(
+      'You do not have access to this run',
+    );
+  });
+
   it('marks terminal failure visually without losing the evidence action', () => {
     const failedRun: RunCard = {
       ...activeRun,
