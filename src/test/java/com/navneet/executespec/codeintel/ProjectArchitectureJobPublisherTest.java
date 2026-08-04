@@ -257,6 +257,115 @@ class ProjectArchitectureJobPublisherTest {
   }
 
   @Test
+  void promotionDegradesUnsupportedExhaustiveSourceContractsOnEveryPublishedSurface()
+      throws Exception {
+    UUID repoId = UUID.randomUUID();
+    String revision = "4".repeat(40);
+    String repo = "acme/inventory";
+    String codemap =
+        routeCodemap(repo, revision, "GET", "/health", "SERIALIZED_BODY")
+            + "\n## Functions\n\n- `sortInventory`\n- `normalizeItem`\n";
+    String falseClaim =
+        "`sortInventory` accepts valid fields (`sku`, `name`, `category`, `priceCents`,"
+            + " `quantity`).";
+    var snapshot = snapshot(source(repoId, repo, revision));
+    var base =
+        staged(
+            snapshot,
+            List.of(codeMap(repoId, repo, revision, codemap)),
+            List.of(repoArchitecture(repoId, repo, revision, "# Repo\n\n" + falseClaim)),
+            "# Combined\n\n" + falseClaim);
+    var staged =
+        new ProjectArchitectureService.StagedArtifacts(
+            base.schemaVersion(),
+            base.projectId(),
+            base.codeMaps(),
+            base.repoArchitectures(),
+            base.projectArchitecture(),
+            falseClaim,
+            base.qualityStatus(),
+            base.qualityEvidence());
+
+    var published = promote(staged, snapshot);
+
+    assertThat(published.repoArchitectures().getFirst().getContent())
+        .contains(
+            "Source contract for `sortInventory`: not established by complete exact-source"
+                + " evidence.")
+        .doesNotContain("`category`", "accepts valid fields");
+    assertThat(published.architecture().getContent())
+        .contains("Source contract for `sortInventory`: not established")
+        .doesNotContain("`category`", "accepts valid fields");
+    assertThat(published.summary())
+        .contains("Source contract for `sortInventory`: not established")
+        .doesNotContain("`category`", "accepts valid fields");
+    assertThat(
+            exactBlock(
+                published.repoArchitectures().getFirst().getContent(),
+                DeterministicProjectFactEvidence.BEGIN,
+                DeterministicProjectFactEvidence.END))
+        .isEqualTo(
+            exactBlock(
+                codemap,
+                DeterministicProjectFactEvidence.BEGIN,
+                DeterministicProjectFactEvidence.END));
+  }
+
+  @Test
+  void promotionUsesRepoBoundAuthorityButNeverCrossGroundsCombinedOrSummaryContent()
+      throws Exception {
+    UUID repoId = UUID.randomUUID();
+    String revision = "5".repeat(40);
+    String repo = "acme/inventory";
+    String source =
+        """
+        export function sortInventory(items, field) {
+          const allowedSortFields = new Set(['sku', 'name', 'priceCents', 'quantity']);
+          if (!allowedSortFields.has(field)) throw new Error('invalid field');
+          return [...items];
+        }
+        """;
+    String exactSource =
+        ExportedFunctionEvidence.render(repo, revision, Map.of("src/inventory.js", source));
+    String codemap =
+        routeCodemap(repo, revision, "GET", "/health", "SERIALIZED_BODY")
+            + "\n## Functions\n\n- `sortInventory`\n"
+            + exactSource;
+    String validClaim =
+        "`sortInventory` accepts valid fields (`sku`, `name`, `priceCents`, `quantity`).";
+    var snapshot = snapshot(source(repoId, repo, revision));
+    var base =
+        staged(
+            snapshot,
+            List.of(codeMap(repoId, repo, revision, codemap)),
+            List.of(repoArchitecture(repoId, repo, revision, "# Repo\n\n" + validClaim)),
+            "# Combined\n\n" + validClaim);
+    var staged =
+        new ProjectArchitectureService.StagedArtifacts(
+            base.schemaVersion(),
+            base.projectId(),
+            base.codeMaps(),
+            base.repoArchitectures(),
+            base.projectArchitecture(),
+            validClaim,
+            base.qualityStatus(),
+            base.qualityEvidence());
+
+    var published = promote(staged, snapshot);
+
+    assertThat(published.repoArchitectures().getFirst().getContent()).contains(validClaim);
+    assertThat(published.architecture().getContent())
+        .contains(
+            "Source contract for `sortInventory`: not established by complete exact-source"
+                + " evidence.")
+        .doesNotContain(validClaim);
+    assertThat(published.summary())
+        .isEqualTo(
+            "Source contract for `sortInventory`: not established by complete exact-source"
+                + " evidence.");
+  }
+
+  @Test
   void promotionPairsEvidenceByRepoIdWhenArtifactOrderDiffersAndRoutesShareAPath()
       throws Exception {
     UUID apiId = UUID.randomUUID();

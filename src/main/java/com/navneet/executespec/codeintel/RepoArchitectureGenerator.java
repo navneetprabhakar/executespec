@@ -79,6 +79,10 @@ Rules:
   application startup, or response-vs-view behavior. State "not established by the supplied
   deterministic evidence" instead of inferring those facts from framework conventions.
 - Do not turn declaration co-occurrence into an integration or data-flow claim.
+- Never enumerate allowed, supported, accepted, or valid fields/options/values for one symbol unless
+  that same symbol has a complete Truncated:false exact-source entry containing every listed
+  literal. An unresolved constant name, another function's prose, a Purpose line, or ordinary
+  codemap inventory is not authority for an exhaustive source contract.
 - An EXECUTESPEC_EXPORTED_FUNCTION_EVIDENCE_V1 entry is exact-source authority only for its
   named repository, revision, path, symbol, and code visibly present in Content-Json. Describe
   only behavior directly shown by a Truncated:false excerpt and cite repository, path, and
@@ -127,7 +131,27 @@ Rules:
         provider,
         actorUserId,
         confirmedActionReference,
+        null,
         null);
+  }
+
+  Result generateForRevision(
+      String projectId,
+      String repoFullName,
+      String sourceRevision,
+      String codeMapMarkdown,
+      LlmProvider provider,
+      String actorUserId,
+      LlmExecutionReference confirmedActionReference) {
+    return generateInternal(
+        projectId,
+        repoFullName,
+        codeMapMarkdown,
+        provider,
+        actorUserId,
+        confirmedActionReference,
+        null,
+        sourceRevision);
   }
 
   Result generateWithOperationContext(
@@ -136,10 +160,18 @@ Rules:
       String codeMapMarkdown,
       LlmProvider provider,
       String actorUserId,
-      ExecutionContext operationContext) {
+      ExecutionContext operationContext,
+      String sourceRevision) {
     if (operationContext == null) throw new IllegalArgumentException("operationContext required");
     return generateInternal(
-        projectId, repoFullName, codeMapMarkdown, provider, actorUserId, null, operationContext);
+        projectId,
+        repoFullName,
+        codeMapMarkdown,
+        provider,
+        actorUserId,
+        null,
+        operationContext,
+        sourceRevision);
   }
 
   private Result generateInternal(
@@ -149,7 +181,8 @@ Rules:
       LlmProvider provider,
       String actorUserId,
       LlmExecutionReference confirmedActionReference,
-      ExecutionContext operationContext) {
+      ExecutionContext operationContext,
+      String sourceRevision) {
     if (codeMapMarkdown == null || codeMapMarkdown.isBlank()) {
       throw new IllegalArgumentException("code map is empty for " + repoFullName);
     }
@@ -215,6 +248,9 @@ Rules:
         resolved.getModel());
     String grounded = GeneratedSignatureGrounding.sanitize(text.trim(), codeMapMarkdown);
     grounded = GeneratedSignatureGrounding.sanitizeUnsupportedBehavior(grounded, codeMapMarkdown);
+    grounded =
+        GeneratedSourceContractGrounding.sanitizeForRepository(
+            grounded, codeMapMarkdown, repoFullName, sourceRevision);
     grounded = GeneratedProjectFactGrounding.sanitize(grounded, codeMapMarkdown);
     return new Result(
         DeterministicArchitectureEvidence.appendFromCodemap(grounded, codeMapMarkdown),

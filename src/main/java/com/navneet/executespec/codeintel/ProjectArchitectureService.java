@@ -334,9 +334,10 @@ public class ProjectArchitectureService {
           cooperativeFence.run();
           generatedRepo =
               operationContext == null
-                  ? repoArchGenerator.generate(
+                  ? repoArchGenerator.generateForRevision(
                       job.projectId(),
                       source.repoFullName(),
+                      source.revision(),
                       codeMapContent,
                       provider,
                       job.requestedByUserId(),
@@ -347,7 +348,8 @@ public class ProjectArchitectureService {
                       codeMapContent,
                       provider,
                       job.requestedByUserId(),
-                      operationContext.child("repo-architecture-" + source.repoId()));
+                      operationContext.child("repo-architecture-" + source.repoId()),
+                      source.revision());
           cooperativeFence.run();
         } catch (RepoArchitectureGenerator.ProviderOutputIncompleteException incomplete) {
           throw incomplete;
@@ -794,9 +796,10 @@ public class ProjectArchitectureService {
     RepoArchitectureGenerator.Result rar;
     try {
       rar =
-          repoArchGenerator.generate(
+          repoArchGenerator.generateForRevision(
               projectId,
               repo.getGithubRepoFullName(),
+              codeMap.getGeneratedFromSha(),
               codeMap.getContent(),
               provider,
               actorUserId,
