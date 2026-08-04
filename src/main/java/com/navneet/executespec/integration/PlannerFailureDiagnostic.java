@@ -1,11 +1,11 @@
 package com.navneet.executespec.integration;
 
 import java.util.Locale;
-import java.util.regex.Pattern;
 
 import com.navneet.executespec.agent.TaskExecutionBriefCompiler;
 import com.navneet.executespec.agent.TaskExpanderAgent;
 import com.navneet.executespec.security.ContextSanitizer;
+import com.navneet.executespec.security.WorkspacePathRedaction;
 
 /** Customer-safe, bounded evidence for deterministic planner-contract rejection. */
 public final class PlannerFailureDiagnostic {
@@ -14,12 +14,6 @@ public final class PlannerFailureDiagnostic {
   private static final String TRUNCATION_SUFFIX = "… [truncated]";
   private static final String DETERMINISTIC_PREFIX = "Plan validation rejected: ";
 
-  private static final Pattern LOCAL_UNIX_PATH =
-      Pattern.compile(
-          "(?i)(?<![A-Za-z0-9])/(?:Users|home|tmp|var/folders|private/tmp|private/var/folders)/[^\\s;,]+");
-  private static final Pattern LOCAL_WINDOWS_PATH =
-      Pattern.compile("(?i)\\b[A-Z]:\\\\(?:Users|Temp)\\\\[^\\s;,]+");
-
   private PlannerFailureDiagnostic() {}
 
   static String describe(Throwable failure, String genericReason, ContextSanitizer sanitizer) {
@@ -27,8 +21,9 @@ public final class PlannerFailureDiagnostic {
     if (deterministic == null) return genericReason;
 
     String safe = sanitizer.sanitizeOutput(deterministic);
-    safe = LOCAL_UNIX_PATH.matcher(safe).replaceAll("[local path redacted]");
-    safe = LOCAL_WINDOWS_PATH.matcher(safe).replaceAll("[local path redacted]");
+    // Shared known-root redaction includes the Linux deploy parent /opt/app alongside the
+    // macOS/Linux user and temp trees this diagnostic always covered.
+    safe = WorkspacePathRedaction.redactKnownRoots(safe, "[local path redacted]");
     safe = safe.replaceAll("[\\p{Cntrl}&&[^\\t]]+", " ").replaceAll("\\s+", " ").trim();
     String diagnostic = DETERMINISTIC_PREFIX + safe;
     return diagnostic.length() <= MAX_CHARS

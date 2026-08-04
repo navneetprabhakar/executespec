@@ -63,7 +63,8 @@ class RunDetailEffectiveRouteTest {
         new RunEffectiveRouteService(usageRepository),
         null,
         runCostTracker,
-        new ObjectMapper());
+        new ObjectMapper(),
+        null);
   }
 
   private static RunStepUsage success(String provider, String model) {

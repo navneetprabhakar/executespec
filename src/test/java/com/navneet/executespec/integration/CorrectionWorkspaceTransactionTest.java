@@ -125,14 +125,64 @@ class CorrectionWorkspaceTransactionTest {
   }
 
   @Test
-  void refusesToDestroyPreStagedCallerState() throws Exception {
+  void capturesEvidenceWithoutDisturbingPreStagedCallerState() throws Exception {
     Path repository = repository("staged");
     Files.writeString(repository.resolve("tracked.txt"), "staged state\n");
     git(repository, "add", "tracked.txt");
 
-    assertThatThrownBy(() -> transaction.begin(repository))
-        .isInstanceOf(IllegalStateException.class)
-        .hasMessageContaining("pre-staged");
+    var checkpoint = transaction.begin(repository);
+
+    // Generation capture runs on a temporary index, so the caller's staged entry survives.
+    assertThat(gitOutput(repository, "diff", "--cached", "--name-only")).contains("tracked.txt");
+    Files.writeString(repository.resolve("tracked.txt"), "post-checkpoint edit\n");
+    assertThat(transaction.currentGeneration(checkpoint)).isNotEqualTo(checkpoint.generation());
+  }
+
+  @Test
+  void nestedRepositoryWorkingTreesAreFirstClassGenerationEvidence() throws Exception {
+    Path root = repository("nested-workspace");
+    Path app = repository(Files.createDirectories(root.resolve("repos")), "app");
+
+    String baseline = transaction.captureGeneration(root);
+
+    Files.writeString(app.resolve("service.txt"), "first uncommitted edit\n");
+    String firstEdit = transaction.captureGeneration(root);
+    Files.writeString(app.resolve("service.txt"), "second uncommitted edit\n");
+    String secondEdit = transaction.captureGeneration(root);
+
+    assertThat(firstEdit).isNotEqualTo(baseline);
+    assertThat(secondEdit).isNotEqualTo(firstEdit);
+
+    // A nested commit with byte-identical working trees must not move the generation
+    // (commit-only auto-push previously flipped freshness to STALE through the parent gitlink).
+    git(app, "add", "service.txt");
+    git(app, "commit", "-q", "-m", "commit-only");
+    assertThat(transaction.captureGeneration(root)).isEqualTo(secondEdit);
+  }
+
+  @Test
+  void rollbackAndDiffEvidenceCoverNestedRepositories() throws Exception {
+    Path root = repository("nested-rollback");
+    Path app = repository(Files.createDirectories(root.resolve("repos")), "app");
+    Files.writeString(app.resolve("tracked.txt"), "nested worker state\n");
+
+    var checkpoint = transaction.begin(root);
+    String before = checkpoint.generation();
+    assertThat(checkpoint.repositories()).hasSize(2);
+
+    Files.writeString(app.resolve("tracked.txt"), "regressive nested correction\n");
+    Files.writeString(root.resolve("root-note.txt"), "root correction\n");
+
+    var evidence = transaction.diffEvidence(checkpoint);
+    assertThat(evidence.changedFiles())
+        .containsExactlyInAnyOrder("0:root-note.txt", "1:tracked.txt");
+
+    transaction.rollback(checkpoint);
+
+    assertThat(Files.readString(app.resolve("tracked.txt"))).isEqualTo("nested worker state\n");
+    assertThat(root.resolve("root-note.txt")).doesNotExist();
+    assertThat(app.resolve(".git")).exists();
+    assertThat(transaction.currentGeneration(checkpoint)).isEqualTo(before);
   }
 
   @Test
@@ -201,5 +251,19 @@ class CorrectionWorkspaceTransactionTest {
     System.arraycopy(args, 0, command, 1, args.length);
     Process process = new ProcessBuilder(command).directory(repository.toFile()).start();
     assertThat(process.waitFor()).isZero();
+  }
+
+  private static String gitOutput(Path repository, String... args) throws Exception {
+    String[] command = new String[args.length + 1];
+    command[0] = "git";
+    System.arraycopy(args, 0, command, 1, args.length);
+    Process process =
+        new ProcessBuilder(command)
+            .directory(repository.toFile())
+            .redirectErrorStream(true)
+            .start();
+    String output = new String(process.getInputStream().readAllBytes());
+    assertThat(process.waitFor()).isZero();
+    return output;
   }
 }

@@ -174,6 +174,88 @@ class RunTerminalOutcomeContractTest {
   }
 
   @Test
+  void cleanRunWithoutPublicationStillClaimsCodeChangedFromItsOwnValidatedDiff() {
+    RunTerminalOutcome outcome = project("COMPLETE", "CLEAN_COMPLETION", null, 0.20, 1.0, null);
+
+    assertThat(outcome.impact().publication())
+        .isEqualTo(RunTerminalOutcome.Publication.NOT_CREATED);
+    assertThat(outcome.impact().codeChanged()).isTrue();
+  }
+
+  @Test
+  void cleanRunWhoseExpectedPublicationWasBlockedIsHonestAndPointsAtPublicationEvidence() {
+    RunTerminalOutcome outcome =
+        projectExpectedPublication(
+            "COMPLETE",
+            "CLEAN_COMPLETION",
+            "PUBLICATION_BLOCKED[PUBLICATION_EVIDENCE_STALE]: gate=EVIDENCE_FRESHNESS; Regenerate"
+                + " validation on the current workspace.",
+            null);
+
+    assertThat(outcome.code()).isEqualTo("CLEAN_COMPLETION");
+    assertThat(outcome.category()).isEqualTo(RunTerminalOutcome.Category.SUCCESS);
+    assertThat(outcome.customerTitle()).contains("pull request not created");
+    assertThat(outcome.customerMessage())
+        .contains("completed successfully")
+        .contains("pull request was not created")
+        .contains("PUBLICATION_EVIDENCE_STALE");
+    assertThat(outcome.nextAction().type()).isEqualTo("OPEN_PUBLICATION_ELIGIBILITY");
+    assertThat(outcome.nextAction().label()).containsIgnoringCase("publication evidence");
+    assertThat(outcome.impact().codeChanged()).isTrue();
+    assertThat(outcome.automationExitCode()).isEqualTo(0);
+  }
+
+  @Test
+  void cleanUnpublishedRunWithoutAMarkerStillStatesThePullRequestWasNotCreated() {
+    RunTerminalOutcome outcome =
+        projectExpectedPublication("COMPLETE", "CLEAN_COMPLETION", null, null);
+
+    assertThat(outcome.customerMessage())
+        .contains("pull request was not created")
+        .doesNotContain("blocked by");
+    assertThat(outcome.nextAction().type()).isEqualTo("OPEN_PUBLICATION_ELIGIBILITY");
+  }
+
+  @Test
+  void cleanRunWithExpectedPublicationAndAPrKeepsThePlainSuccessProjection() {
+    RunTerminalOutcome outcome =
+        projectExpectedPublication(
+            "COMPLETE", "CLEAN_COMPLETION", null, "https://github.com/example/repo/pull/9");
+
+    assertThat(outcome.customerTitle()).isEqualTo("Run complete");
+    assertThat(outcome.customerMessage()).isEqualTo("The run completed successfully.");
+    assertThat(outcome.nextAction()).isNull();
+  }
+
+  @Test
+  void cleanRunNotExpectedToPublishKeepsThePlainSuccessProjection() {
+    RunTerminalOutcome outcome = project("COMPLETE", "CLEAN_COMPLETION", null, 0.20, 1.0, null);
+
+    assertThat(outcome.customerTitle()).isEqualTo("Run complete");
+    assertThat(outcome.customerMessage()).isEqualTo("The run completed successfully.");
+    assertThat(outcome.nextAction()).isNull();
+  }
+
+  @Test
+  void warningRunWhoseExpectedPublicationWasWithheldNamesTheMissingPullRequest() {
+    RunTerminalOutcome outcome =
+        projectExpectedPublication("PARTIAL", "CLEAN_WITH_INTERMEDIATE_WARNINGS", null, null);
+
+    assertThat(outcome.category()).isEqualTo(RunTerminalOutcome.Category.WARNING);
+    assertThat(outcome.customerMessage()).contains("pull request was not created");
+    assertThat(outcome.nextAction().type()).isEqualTo("OPEN_PUBLICATION_ELIGIBILITY");
+    assertThat(outcome.impact().codeChanged()).isTrue();
+  }
+
+  @Test
+  void localExecutionRunNeverClaimsAMissingServerPullRequest() {
+    RunTerminalOutcome outcome =
+        projectExpectedPublication("PARTIAL", "LOCAL_EXECUTION", null, null);
+
+    assertThat(outcome.customerMessage()).doesNotContain("pull request was not created");
+  }
+
+  @Test
   void inFlightRunHasNoTerminalProjection() {
     assertThat(project("WORKING", null, null, 0.1, 1.0, null)).isNull();
   }
@@ -211,6 +293,25 @@ class RunTerminalOutcomeContractTest {
     assertThat(outcome.nextAction().label()).containsIgnoringCase("repository access");
   }
 
+  @Test
+  void autoPublicationExpectedRequiresARepoBackedServerRunWithoutWithheldConsent() {
+    com.navneet.executespec.state.entity.PipelineRun run =
+        new com.navneet.executespec.state.entity.PipelineRun();
+    run.setRepoUrl("https://github.com/example/repo.git");
+    assertThat(RunTerminalOutcomeContract.autoPublicationExpected(run)).isTrue();
+
+    run.setSkipAutoPush(true);
+    assertThat(RunTerminalOutcomeContract.autoPublicationExpected(run)).isFalse();
+
+    run.setSkipAutoPush(false);
+    run.setLocalExecutionRequested(true);
+    assertThat(RunTerminalOutcomeContract.autoPublicationExpected(run)).isFalse();
+
+    com.navneet.executespec.state.entity.PipelineRun repoless =
+        new com.navneet.executespec.state.entity.PipelineRun();
+    assertThat(RunTerminalOutcomeContract.autoPublicationExpected(repoless)).isFalse();
+  }
+
   private static RunTerminalOutcome project(
       String status,
       String statusReason,
@@ -226,5 +327,18 @@ class RunTerminalOutcomeContractTest {
         actualCost,
         hardCap,
         prUrl);
+  }
+
+  private static RunTerminalOutcome projectExpectedPublication(
+      String status, String statusReason, String failureReason, String prUrl) {
+    return RunTerminalOutcomeContract.project(
+        "123e4567-e89b-12d3-a456-426614174000",
+        status,
+        statusReason,
+        failureReason,
+        0.20,
+        1.0,
+        prUrl,
+        true);
   }
 }
