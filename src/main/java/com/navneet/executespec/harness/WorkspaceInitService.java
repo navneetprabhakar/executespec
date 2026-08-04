@@ -185,9 +185,13 @@ public class WorkspaceInitService {
       throws Exception {
     Path workspace = runWorkspacePath(runId);
     if (Files.isDirectory(workspace.resolve(".git"))) {
-      repositoryRevisions.requireExpectedBranch(
-          workspace, branch, WorkspaceRepositoryRevisionService.repositoryFullName(repoUrl));
-      if (captureBaseline) brownfieldHttpContractGuard.captureBaselineIfAbsent(runId, workspace);
+      String fullName = WorkspaceRepositoryRevisionService.repositoryFullName(repoUrl);
+      repositoryRevisions.requireExpectedBranch(workspace, branch, fullName);
+      if (captureBaseline) {
+        repositoryRevisions.persistCloneSnapshot(
+            runId, new RepoToClone(fullName, repoUrl, null, branch), workspace);
+        brownfieldHttpContractGuard.captureBaselineIfAbsent(runId, workspace);
+      }
       log.debug("Workspace for run {} already cloned: {}", runId, workspace);
       return;
     }
@@ -220,7 +224,7 @@ public class WorkspaceInitService {
     // RR-1546 — keep ExecuteSpec's internal .agent-context/ evidence out of the customer's tree
     // without mutating their tracked .gitignore.
     excludeAgentContextInClone(workspace);
-    if (captureBaseline && branch != null && !branch.isBlank()) {
+    if (captureBaseline) {
       String fullName = WorkspaceRepositoryRevisionService.repositoryFullName(repoUrl);
       repositoryRevisions.requireExpectedBranch(workspace, branch, fullName);
       repositoryRevisions.persistCloneSnapshot(
@@ -510,8 +514,9 @@ public class WorkspaceInitService {
    * @param repoId optional — persisted into {@code run_repo_snapshot.repo_id} when present, so the
    *     "reset to original" path can match back to the caller's {@code ProjectRepo}. Null is valid
    *     (snapshot still captures fullName + sha).
-   * @param branch optional — the branch being cloned (used only as the {@code
-   *     run_repo_snapshot.branch} value for display). When null we fall back to {@code "main"}.
+   * @param branch optional — an explicitly requested branch. Snapshot persistence always records
+   *     the branch Git actually checked out, including a repository whose default branch is not
+   *     {@code main}.
    */
   public record RepoToClone(String fullName, String cloneUrl, UUID repoId, String branch) {
     public RepoToClone(String fullName, String cloneUrl) {

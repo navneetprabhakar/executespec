@@ -7,6 +7,8 @@ import com.navneet.executespec.codeintel.entity.RepoArchitectureDoc;
 /** Keeps provider-free architecture evidence byte-exact across model-generated artifacts. */
 final class DeterministicArchitectureEvidence {
 
+  private static final String REPOSITORY_EVIDENCE_HEADING = "## Deterministic repository evidence";
+
   static final String HTTP_BEGIN = "<!-- EXECUTESPEC_DETERMINISTIC_HTTP_SURFACE_V3_BEGIN -->";
   static final String HTTP_END = "<!-- EXECUTESPEC_DETERMINISTIC_HTTP_SURFACE_V3_END -->";
   private static final String LEGACY_HTTP_V2_BEGIN =
@@ -61,10 +63,34 @@ final class DeterministicArchitectureEvidence {
       if (facts != null) appendix.append(facts).append("\n\n");
     }
     if (appendix.isEmpty()) return generatedMarkdown;
-    return stripEvidenceBlocks(generatedMarkdown).stripTrailing()
-        + "\n\n## Deterministic repository evidence\n\n"
+    return stripEvidenceBlocks(stripGeneratedRepositoryAppendix(generatedMarkdown)).stripTrailing()
+        + "\n\n"
+        + REPOSITORY_EVIDENCE_HEADING
+        + "\n\n"
         + appendix.toString().stripTrailing()
         + "\n";
+  }
+
+  /**
+   * Removes only an appendix previously assembled by this class. Stripping the marker bodies alone
+   * leaves their generated H2/H3 wrappers behind, so a refresh otherwise publishes duplicate
+   * deterministic-evidence headings. A model-authored section with the same title is preserved
+   * unless its suffix also contains one of our private evidence markers.
+   */
+  private static String stripGeneratedRepositoryAppendix(String markdown) {
+    if (markdown == null || markdown.isBlank()) return "";
+    int heading = markdown.lastIndexOf(REPOSITORY_EVIDENCE_HEADING);
+    if (heading < 0) return markdown;
+    String suffix = markdown.substring(heading);
+    if (!containsDeterministicMarker(suffix)) return markdown;
+    return markdown.substring(0, heading);
+  }
+
+  private static boolean containsDeterministicMarker(String markdown) {
+    return markdown.contains(HTTP_BEGIN)
+        || markdown.contains(LEGACY_HTTP_V2_BEGIN)
+        || markdown.contains(DeterministicProjectFactEvidence.BEGIN)
+        || markdown.contains(DeterministicProjectFactEvidence.SETUP_BEGIN);
   }
 
   static boolean hasCurrentHttpEvidence(String markdown) {

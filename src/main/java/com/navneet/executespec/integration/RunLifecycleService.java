@@ -945,8 +945,6 @@ public class RunLifecycleService {
         operation = requireRunOperationLifecycle().finishReviewAndClear(operation, true);
       }
 
-      contextComposer.ensureReadme(
-          runId, workspace, row.getUserRequest(), plan, execResult, reviewResult, startedAt);
       var validationReport =
           validationKickoff.generateValidationReport(runId, execResult, reviewResult, plan);
 

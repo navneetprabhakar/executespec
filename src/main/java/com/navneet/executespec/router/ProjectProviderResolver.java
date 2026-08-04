@@ -6,9 +6,7 @@ import com.navneet.executespec.auth.entity.Project;
 import com.navneet.executespec.auth.repository.AppUserRepository;
 import com.navneet.executespec.auth.repository.ProjectRepository;
 
-import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
-import org.springframework.web.server.ResponseStatusException;
 
 import lombok.RequiredArgsConstructor;
 
@@ -68,16 +66,11 @@ public class ProjectProviderResolver {
     try {
       return LlmProvider.valueOf(normalized);
     } catch (IllegalArgumentException ignored) {
-      throw new ResponseStatusException(
-          HttpStatus.CONFLICT,
-          "PROJECT_PROVIDER_INVALID: Choose a supported AI provider in project or account"
-              + " settings.");
+      throw ProjectRoutingException.providerInvalid();
     }
   }
 
-  private static ResponseStatusException providerNotConfigured() {
-    return new ResponseStatusException(
-        HttpStatus.CONFLICT,
-        "PROJECT_PROVIDER_NOT_CONFIGURED: Choose an AI provider in project or account settings.");
+  private static ProjectRoutingException providerNotConfigured() {
+    return ProjectRoutingException.providerNotConfigured();
   }
 }

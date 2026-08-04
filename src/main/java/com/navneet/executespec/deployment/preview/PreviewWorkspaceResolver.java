@@ -44,14 +44,23 @@ class PreviewWorkspaceResolver {
     }
 
     String fullName = snapshots.getFirst().getRepoFullName();
+    RunRepoSnapshot snapshot = snapshots.getFirst();
     String directoryName = repositoryDirectoryName(fullName);
     try {
-      Path applicationRoot =
-          SafeWorkspacePath.resolveWithin(restoredRunRoot, "repos/" + directoryName);
-      if (!Files.isDirectory(applicationRoot, LinkOption.NOFOLLOW_LINKS)) {
+      Path nested = SafeWorkspacePath.resolveWithin(restoredRunRoot, "repos/" + directoryName);
+      // repoId is the durable layout discriminator: project-linked snapshots always carry it;
+      // standalone run snapshots deliberately do not. Directory names are customer-controlled and
+      // cannot identify layout (a standalone repository may legitimately contain repos/<name>).
+      if (snapshot.getRepoId() == null) {
+        if (Files.isDirectory(restoredRunRoot.resolve(".git"), LinkOption.NOFOLLOW_LINKS)) {
+          return restoredRunRoot;
+        }
         throw new PreviewException("Repository workspace is unavailable for preview: " + fullName);
       }
-      return applicationRoot;
+      // GCS archives omit every nested .git directory and reconstruct one synthetic repository at
+      // the wrapper root. Directory layout, not nested Git metadata, is therefore authoritative.
+      if (Files.isDirectory(nested, LinkOption.NOFOLLOW_LINKS)) return nested;
+      throw new PreviewException("Repository workspace is unavailable for preview: " + fullName);
     } catch (IOException | SecurityException e) {
       throw new PreviewException("Repository workspace is unsafe for preview: " + fullName, e);
     }

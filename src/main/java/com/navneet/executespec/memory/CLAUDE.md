@@ -59,6 +59,10 @@ reads share one atomic materialization, partial clones are replaced, and failure
 source codes instead of being misreported as credential errors. GitHub PATs and Bitbucket
 username/app-password credentials are selected from the authenticated principal per SCM provider;
 one provider's secret is never sent to the other.
+Code-index readiness uses the authenticated member propagated by Project Chat and controller
+callers to resolve the actor-authorized current origin SHA. A stale `lastSyncedSha` is not treated as
+current-source authority; unavailable current revision disables semantic claims and fails closed
+while the provider-free lexical capability remains explicitly reported.
 `ProjectRepositorySourceReadTools.read_repo_file_range` is the pure-read companion to lexical
 search: it expands an exact `file:line` hit into a required inclusive line range (maximum 200 lines)
 from the same canonical materialization. Project-linked repository selection is repeated inside the

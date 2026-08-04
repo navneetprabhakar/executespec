@@ -1731,9 +1731,9 @@ evidence, and horizontally scaled JVMs require a shared persistent trajectory ro
   activated.
 - **Benchmark usage reconciliation (RL-2026-07-18-017)** — `POST /api/v2/test/benchmark/{id}/reconcile-usage` is benchmark-profile + SUPER_ADMIN only. It repairs historical tracker projections exclusively from the canonical `run_step_usage` rows linked by each task's `esRunId`; clients cannot supply replacement usage. Score, outcome and task identity remain immutable, and a changed repair appends `USAGE_RECONCILED` while exact replay is a no-op.
 - **Deterministic protected-Web QA fixture** — `test/WebQaFixtureController` is `@Profile("web-qa")` only and SUPER_ADMIN-gated at `/api/v2/test/web-fixture`. It creates provider-free terminal success/failure/approval runs, tasks, validation/test evidence, a workspace, Redis SSE replay, and an agent-session action card for current-SHA browser capture; the approval fixture includes the same coherent durable `LEGACY`/`UNBOUND` pending plan-gate row expected from a historical run rather than manufacturing `AWAITING_APPROVAL` without a gate. `DELETE` removes its `web-qa-*` gates/fixtures plus the exact authenticated real-browser session id supplied by the harness. `AgentStreamTurnRunner` emits its bounded scripted token/tool/result stream only for the reserved `web-qa-*` namespace when `web-qa` is the sole active profile and `executespec.live-llm.enabled=false`; local/dev/test, mixed profiles, live dispatch, and ordinary session ids cannot receive fabricated stream evidence. The dedicated `application-web-qa.yml` profile disables live LLM dispatch without activating the local/dev flag initializer; `scripts/run-web-provider-free-functional.sh` runs that profile against disposable PostgreSQL/Redis, supplies a generated test identity without reading a credential file, exercises real protected session creation plus fixture-backed run surfaces, and fails if the before/after feature-flag digest changes. Child processes receive purpose-specific allowlisted environments. Existing local/dev capture callers remain compatible, but only the isolated profile produces `safety.safe=true`. The former provider-free `RECOVERY` transition was removed on 2026-07-19 because it manufactured terminal success without the fenced reviewer/validation lifecycle; restart evidence must now use the real `RunLifecycleService.resumeAfterCrash` path. It is not a customer or production endpoint and must never be enabled outside those QA profiles.
-- **God classes** — `RunOrchestrator.java` is at exactly 4,322 LOC — AT its ratchet ceiling with zero headroom; the next added line fails `GodClassLineCeilingTest`; residual backend decomposition is tracked in `pending.md` §E1/I1. `SubagentExecutionService` and `AgentStreamTurnRunner` delegate lifecycle/failure mechanics to focused package collaborators, while `RunMapper` delegates per-agent token projection and `ProjectArchitectureJobService` delegates DB/config-local admission; all remain below the 600-line new-class gate. Frontend debt remains concentrated in the shared DTO registry `frontend/src/lib/api/core.ts` (1,681 LOC after terminal-outcome extraction) and the isolated transport `frontend/src/lib/api/transport.ts` (~191 LOC); `signal/pages/ExtraPages.tsx` is now 377 LOC after the prior split. These remain high-coupling and under-tested areas.
+- **God classes** — `RunOrchestrator.java` is 4,297 LOC against a 4,322-line ratchet ceiling; residual backend decomposition is tracked in `pending.md` §E1/I1. `SubagentExecutionService` and `AgentStreamTurnRunner` delegate lifecycle/failure mechanics to focused package collaborators, while `RunMapper` delegates per-agent token projection and `ProjectArchitectureJobService` delegates DB/config-local admission; all remain below the 600-line new-class gate. Frontend debt remains concentrated in the shared DTO registry `frontend/src/lib/api/core.ts` (1,681 LOC after terminal-outcome extraction) and the isolated transport `frontend/src/lib/api/transport.ts` (283 LOC); `signal/pages/ExtraPages.tsx` is now 280 LOC after the prior split. These remain high-coupling and under-tested areas.
 - **Governance truthfulness** — org standards YAML is validated before persistence and a missing configured lint adapter is reported as UNAVAILABLE, producing critical evidence and a PARTIAL status rather than a silent pass. Durable contract/ADR/invariant source ingestion and restart-safe activity projection remain open.
-- **Frontend: residual coupling and browser coverage debt** — vendor and route-level code splitting are active (`vite.config.ts` `manualChunks` plus `React.lazy`), and the Vitest suite is enforced in CI (current: 83 files / 533 tests). Remaining debt is concentrated in the shared DTO registry `frontend/src/lib/api/core.ts` (~1,650 LOC), plus the absence of broad end-to-end browser coverage.
+- **Frontend: residual coupling and browser coverage debt** — vendor and route-level code splitting are active (`vite.config.ts` `manualChunks` plus `React.lazy`), and the current local Vitest gate passes 90 files / 631 tests. Remaining debt is concentrated in the shared DTO registry `frontend/src/lib/api/core.ts` (1,681 LOC), plus the absence of broad end-to-end browser coverage.
 - ~~**Bug #1c (router strict-provider bypass)**~~ — **mostly mitigated** (corrected 2026-05-24). `ModelResolver` now gates adaptive routing behind `!strict && featureFlagService.isEnabled("routing.adaptive-routing.enabled")` ([line 84-88](src/main/java/com/navneet/executespec/router/ModelResolver.java)), flag default OFF — so `-Dexecutespec.strict-provider=true` DOES block the switch now. DeepSeek is additionally excluded from adaptive replacement so native-first ordering remains deterministic; explicit provider selection still wins. Residual: non-DeepSeek adaptive switches remain silent when the flag is ON; no per-org opt-out.
 - ~~**Planner model sourced from run model, not tier**~~ — FIXED / stale note (RL-2026-05-015). Planner/worker/reviewer all resolve via `ModelResolver` (worker through `SequentialExecutor.tierConfigFor`); YAML-matrix + F3 per-org overrides take effect.
 - ~~**10 legacy access-guard sites**~~ — **resolved** (corrected 2026-05-24). `AccessGuardCoverageTest.KNOWN_LEGACY_DRIFT` is now an empty, closed set (35/35 cleared); any new violator fails the build.
@@ -1788,27 +1788,46 @@ evidence, and horizontally scaled JVMs require a shared persistent trajectory ro
   deterministic last-mile correction when a provider claims `finalBuildPassed` proves pytest/test
   success while the report has no concrete test count.
 - **JAVADOC.md is stale** — head reference corrected V202→V208 (2026-05-24), but a full rewrite is still queued; the authoritative surface lives in CLAUDE.md / ARCHITECTURE.md / per-package `CLAUDE.md`.
+- **Enterprise litmus consistency boundary (2026-08-04)** — standalone default-branch clones now
+  persist the actual checked-out branch and immutable run-start SHA even when the request omitted a
+  branch. Root-workspace Files and change evidence use that baseline; Preview uses the durable
+  standalone-versus-project layout discriminator. Run finalization no longer synthesizes an
+  unplanned `README.md` after
+  reviewer completion. Generated EXPLANATION docs receive deterministic exact-revision local
+  workflow/troubleshooting sections, SETUP clone URLs satisfy exact repository coverage, malformed
+  document jobs persist stable `INVALID_GENERATED_DOCUMENT_<SUBCODE>` reasons, and combined
+  architecture evidence appendices are idempotent. Semantic code-index readiness resolves the
+  authenticated actor's cached current SCM origin SHA instead of stale repository metadata and
+  fails closed when current revision cannot be established. Accuracy assessment includes static-web
+  implementation sources (`html/css/vue/svelte` families) so a changed page is not graded from its
+  test file alone.
 - **Timeline secret serialization boundary (2026-08-04)** — `PipelineRun.githubPat` and
   `PipelineRun.bitbucketAppPassword` are serialization-denied. The authenticated Timeline API
   currently returns a raw run entity, so decrypted SCM credentials must remain absent from every
   JSON representation; `PipelineRunSecretSerializationTest` pins this boundary.
-- **Enterprise-demo terminal/error contract batch (2026-08-02, local branch
-  `codex/enterprise-litmus-error-contracts`)** — terminal run DTOs carry one server-owned additive
+- **Enterprise-demo terminal/error contract state (merged base plus 2026-08-04 local
+  follow-up)** — the merged base terminal run DTOs carry one server-owned additive
   `terminalOutcome` projection for Web, email, in-app notifications, and future CLI consumption.
   Controlled limits/policy/validation/cancellation are separate from leak-safe platform failures;
   spend/cap, publication impact, one next action, and support code are included when known.
   Web run detail executes only that server-owned primary action (including an explicit href), keeps
   diagnostic navigation secondary, and presents `USER_STOPPED` cancellation neutrally in both run
   detail and the Work list. A terminal missing report is fetched once and is never polled.
-  Run sync attempts durable workspace restore before `WORKSPACE_UNAVAILABLE` (410), reconstructs
-  archive-omitted Git metadata from immutable run snapshots plus credential-free project SCM
-  coordinates, and reports transient restore faults as retryable `WORKSPACE_RESTORE_FAILED` (503).
-  Project
-  architecture/document admission returns stable provider/matrix 409/503 contracts before durable
-  work or dispatch. Agent streams preserve typed projected-call and turn-budget failures. The
+  The current local consistency follow-up makes email and in-app cancellation notifications honor
+  the completion preference rather than the failure preference. Run sync still attempts durable
+  workspace restore before `WORKSPACE_UNAVAILABLE` (410), and the local follow-up reconstructs
+  archive-omitted Git metadata from immutable run snapshots plus authoritative credential-free
+  coordinates: Project repositories use their stored SCM coordinate, while standalone runs use the
+  exact `PipelineRun.repoUrl`. URI user information, queries, and fragments fail closed before Git
+  metadata is written. Transient restore faults remain retryable `WORKSPACE_RESTORE_FAILED` (503).
+  The local follow-up also makes Project architecture/document admission return stable
+  provider/matrix 409/503 contracts with structured
+  `errorCode` fields before durable work or dispatch. Specific validation advice preserves
+  controlled 403/404/409/503 outcomes without a broad error-hierarchy remap. Agent streams preserve
+  typed projected-call and turn-budget failures. The
   planner command gate ignores generic framework-list prose while retaining real command
-  validation. This is not release evidence until local gates, merge, deploy-SHA verification, and
-  live litmus complete.
+  validation. The 2026-08-04 local additions are not release evidence until merge, deploy-SHA
+  verification, and live litmus complete.
 - **Enterprise-demo evidence-trust batch (2026-08-02, local branch
   `codex/enterprise-litmus-evidence-trust`)** — workspace preparation writes generated/vendor
   ignore rules only to repository-local `.git/info/exclude`, so ExecuteSpec does not edit or commit

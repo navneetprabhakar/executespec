@@ -14,6 +14,7 @@ import com.navneet.executespec.integration.RunWorkspaceAuthorityService;
 import com.navneet.executespec.project.entity.ProjectRepo;
 import com.navneet.executespec.project.repository.ProjectRepoRepository;
 import com.navneet.executespec.state.entity.RunRepoSnapshot;
+import com.navneet.executespec.state.repository.PipelineRunRepository;
 
 import org.springframework.stereotype.Service;
 
@@ -65,6 +66,7 @@ public class RunSyncService {
   private final ProjectRepoRepository projectRepoRepository;
   private final RunWorkspaceAuthorityService workspaceAuthorities;
   private final WorkspaceRestoreService workspaceRestore;
+  private final PipelineRunRepository pipelineRunRepository;
 
   public record SyncOutcome(int reposSynced, List<String> details) {}
 
@@ -127,30 +129,15 @@ public class RunSyncService {
     if (snaps.isEmpty()) {
       return new SyncOutcome(0, List.of("no snapshot — run predates v2.5.2"));
     }
-    List<RunRepoSnapshot> validSnapshots =
+    ensureRepositoryMetadata(
+        runRoot,
         snaps.stream()
             .filter(s -> s.getCommitSha() != null && COMMIT_SHA.matcher(s.getCommitSha()).matches())
-            .toList();
-    ensureRepositoryMetadata(runRoot, validSnapshots, snaps.size());
+            .toList());
     List<String> details = new ArrayList<>();
     int synced = 0;
-    // Multi-repo workspaces have repos/<name>/ subdirectories; single-repo
-    // runs use the root. Snapshot.repoFullName's short name maps to the
-    // subdirectory name used by cloneMultipleRepos.
-    for (var snap : snaps) {
-      String shortName =
-          snap.getRepoFullName().contains("/")
-              ? snap.getRepoFullName().substring(snap.getRepoFullName().indexOf('/') + 1)
-              : snap.getRepoFullName();
-      Path repoRoot = runRoot.resolve("repos").resolve(shortName);
-      if (!Files.isDirectory(repoRoot.resolve(".git"))) {
-        // Fall back to the run root for legacy single-repo layouts.
-        if (Files.isDirectory(runRoot.resolve(".git"))) repoRoot = runRoot;
-        else {
-          details.add(shortName + " MISSING (no .git found)");
-          continue;
-        }
-      }
+    for (RunRepoSnapshot snap : snaps) {
+      String shortName = shortName(snap.getRepoFullName());
       String sha = snap.getCommitSha();
       if (sha == null || !COMMIT_SHA.matcher(sha).matches()) {
         // A snapshot that does not hold a full object id is not a reset target. Resetting to an
@@ -158,6 +145,11 @@ public class RunSyncService {
         details.add(shortName + " FAILED: snapshot commit is not a 40-character object id");
         log.warn(
             "RunSync(original): run={} repo={} rejected malformed snapshot sha", runId, shortName);
+        continue;
+      }
+      Path repoRoot = repositoryRoot(runRoot, snap);
+      if (!Files.isDirectory(repoRoot.resolve(".git"))) {
+        details.add(shortName + " MISSING (no admitted .git found)");
         continue;
       }
       try {
@@ -196,16 +188,21 @@ public class RunSyncService {
       RunWorkspaceAuthorityService.Lease authority) {
     Path runRoot = availableWorkspace(runId);
     List<RunRepoSnapshot> snapshots = snapshotRepo.findByRunId(runId);
-    ensureRepositoryMetadata(runRoot, snapshots, snapshots.size());
-    List<Path> repoRoots = enumerateRepoRoots(runRoot);
+    if (snapshots.isEmpty()) {
+      return new SyncOutcome(0, List.of("no admitted repository snapshot"));
+    }
+    ensureRepositoryMetadata(runRoot, snapshots);
     List<String> details = new ArrayList<>();
     int synced = 0;
-    for (Path repoRoot : repoRoots) {
+    for (RunRepoSnapshot snapshot : snapshots) {
+      Path repoRoot = repositoryRoot(runRoot, snapshot);
       String name = repoRoot.equals(runRoot) ? "(root)" : repoRoot.getFileName().toString();
       String branch =
           (branchOverride != null && !branchOverride.isBlank())
               ? branchOverride
-              : snapshotBranch(repoRoot, runRoot, snapshots);
+              : isValidBranch(snapshot.getBranch())
+                  ? snapshot.getBranch()
+                  : detectDefaultBranch(repoRoot);
       try {
         authority.assertOwned();
         runGit(repoRoot, credential, "fetch", "origin", "--", branch);
@@ -252,11 +249,10 @@ public class RunSyncService {
    * authoritative run snapshots and credential-free project clone coordinates before a sync. The
    * subsequent authenticated fetch/reset remains the operation that chooses source bytes.
    */
-  private void ensureRepositoryMetadata(
-      Path runRoot, List<RunRepoSnapshot> snapshots, int totalSnapshotCount) {
+  private void ensureRepositoryMetadata(Path runRoot, List<RunRepoSnapshot> snapshots) {
     if (snapshots == null || snapshots.isEmpty()) return;
     for (RunRepoSnapshot snapshot : snapshots) {
-      Path repoRoot = repositoryRoot(runRoot, totalSnapshotCount, snapshot);
+      Path repoRoot = repositoryRoot(runRoot, snapshot);
       try {
         Files.createDirectories(repoRoot);
         if (!Files.isDirectory(repoRoot.resolve(".git"))) {
@@ -278,38 +274,68 @@ public class RunSyncService {
     }
   }
 
-  private Path repositoryRoot(Path runRoot, int snapshotCount, RunRepoSnapshot snapshot) {
+  private Path repositoryRoot(Path runRoot, RunRepoSnapshot snapshot) {
     String name = shortName(snapshot.getRepoFullName());
     Path nested = runRoot.resolve("repos").resolve(name);
-    if (Files.isDirectory(nested) || snapshotCount > 1) return nested;
-    return runRoot;
+    return snapshot.getRepoId() == null ? runRoot : nested;
   }
 
-  private String cloneUrl(RunRepoSnapshot snapshot) {
-    if (snapshot.getRepoId() != null) {
-      ProjectRepo repo = projectRepoRepository.findById(snapshot.getRepoId()).orElse(null);
-      if (repo != null) {
-        if (ProjectRepo.SourceType.LOCAL.name().equalsIgnoreCase(repo.getSourceType())) {
-          throw new RunWorkspaceRestoreFailedException(
-              snapshot.getRunId(), new IllegalStateException("local source has no SCM remote"));
-        }
-        if (repo.getScmCloneUrl() != null && !repo.getScmCloneUrl().isBlank()) {
-          return credentialFreeRemote(repo.getScmCloneUrl());
-        }
-        if ("BITBUCKET".equalsIgnoreCase(repo.getScmProvider())) {
-          return "https://bitbucket.org/" + safeFullName(snapshot.getRepoFullName()) + ".git";
-        }
-      }
+  String cloneUrl(RunRepoSnapshot snapshot) {
+    if (snapshot.getRepoId() == null) {
+      String original =
+          pipelineRunRepository
+              .findById(snapshot.getRunId())
+              .map(com.navneet.executespec.state.entity.PipelineRun::getRepoUrl)
+              .filter(value -> value != null && !value.isBlank())
+              .orElseThrow(
+                  () ->
+                      new RunWorkspaceRestoreFailedException(
+                          snapshot.getRunId(),
+                          new IllegalStateException(
+                              "standalone repository clone coordinate is unavailable")));
+      return safeCloneRemote(snapshot.getRunId(), original);
     }
-    return "https://github.com/" + safeFullName(snapshot.getRepoFullName()) + ".git";
+    ProjectRepo repo =
+        projectRepoRepository
+            .findById(snapshot.getRepoId())
+            .orElseThrow(
+                () ->
+                    new RunWorkspaceRestoreFailedException(
+                        snapshot.getRunId(),
+                        new IllegalStateException("project repository coordinate is unavailable")));
+    if (ProjectRepo.SourceType.LOCAL.name().equalsIgnoreCase(repo.getSourceType())) {
+      throw new RunWorkspaceRestoreFailedException(
+          snapshot.getRunId(), new IllegalStateException("local source has no SCM remote"));
+    }
+    if (repo.getScmCloneUrl() != null && !repo.getScmCloneUrl().isBlank()) {
+      return safeCloneRemote(snapshot.getRunId(), repo.getScmCloneUrl());
+    }
+    String provider = repo.getScmProvider();
+    if ("GITHUB".equalsIgnoreCase(provider)) {
+      return "https://github.com/" + safeFullName(snapshot.getRepoFullName()) + ".git";
+    }
+    if ("BITBUCKET".equalsIgnoreCase(provider)) {
+      return "https://bitbucket.org/" + safeFullName(snapshot.getRepoFullName()) + ".git";
+    }
+    throw new RunWorkspaceRestoreFailedException(
+        snapshot.getRunId(),
+        new IllegalStateException("project repository clone coordinate is unavailable"));
+  }
+
+  private static String safeCloneRemote(String runId, String cloneUrl) {
+    try {
+      return credentialFreeRemote(cloneUrl);
+    } catch (IllegalArgumentException unsafeCoordinate) {
+      throw new RunWorkspaceRestoreFailedException(runId, unsafeCoordinate);
+    }
   }
 
   private static String credentialFreeRemote(String cloneUrl) {
     String trimmed = cloneUrl.trim();
     try {
       java.net.URI uri = java.net.URI.create(trimmed);
-      if (uri.getUserInfo() != null) {
-        throw new IllegalArgumentException("repository clone URL contains user information");
+      if (uri.getUserInfo() != null || uri.getQuery() != null || uri.getFragment() != null) {
+        throw new IllegalArgumentException("repository clone URL contains unsafe URI components");
       }
     } catch (IllegalArgumentException malformed) {
       if (trimmed.contains("://")) throw malformed;
@@ -340,38 +366,6 @@ public class RunSyncService {
     return normalized.endsWith(".git")
         ? normalized.substring(0, normalized.length() - ".git".length())
         : normalized;
-  }
-
-  private String snapshotBranch(Path repoRoot, Path runRoot, List<RunRepoSnapshot> snapshots) {
-    for (RunRepoSnapshot snapshot : snapshots) {
-      boolean matches =
-          repoRoot.equals(runRoot)
-              ? snapshots.size() == 1
-              : repoRoot.getFileName().toString().equals(shortName(snapshot.getRepoFullName()));
-      if (matches && isValidBranch(snapshot.getBranch())) return snapshot.getBranch();
-    }
-    return detectDefaultBranch(repoRoot);
-  }
-
-  /**
-   * Multi-repo workspaces have {@code repos/<name>/} subdirectories; single-repo runs use the
-   * workspace root. Returns the right set of git roots to refresh.
-   */
-  private List<Path> enumerateRepoRoots(Path runRoot) {
-    Path multiBase = runRoot.resolve("repos");
-    if (Files.isDirectory(multiBase)) {
-      try (var stream = Files.list(multiBase)) {
-        List<Path> out = new ArrayList<>();
-        stream
-            .filter(Files::isDirectory)
-            .filter(p -> Files.isDirectory(p.resolve(".git")))
-            .forEach(out::add);
-        if (!out.isEmpty()) return out;
-      } catch (Exception ignore) {
-      }
-    }
-    if (Files.isDirectory(runRoot.resolve(".git"))) return List.of(runRoot);
-    return List.of();
   }
 
   private String detectDefaultBranch(Path repoRoot) {

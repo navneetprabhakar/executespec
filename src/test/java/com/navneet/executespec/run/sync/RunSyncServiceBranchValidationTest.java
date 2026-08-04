@@ -19,7 +19,9 @@ import com.navneet.executespec.harness.WorkspaceInitService;
 import com.navneet.executespec.integration.RunWorkspaceAuthorityService;
 import com.navneet.executespec.project.entity.ProjectRepo;
 import com.navneet.executespec.project.repository.ProjectRepoRepository;
+import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.entity.RunRepoSnapshot;
+import com.navneet.executespec.state.repository.PipelineRunRepository;
 import com.navneet.executespec.state.repository.RunRepoSnapshotRepository;
 
 import org.junit.jupiter.api.Test;
@@ -73,7 +75,8 @@ class RunSyncServiceBranchValidationTest {
             mock(RunRepoSnapshotRepository.class),
             mock(ProjectRepoRepository.class),
             authorities,
-            mock(WorkspaceRestoreService.class));
+            mock(WorkspaceRestoreService.class),
+            mock(com.navneet.executespec.state.repository.PipelineRunRepository.class));
     when(workspaceInit.runWorkspacePath("run-1")).thenReturn(tmp.resolve("absent"));
 
     assertThatThrownBy(
@@ -114,7 +117,8 @@ class RunSyncServiceBranchValidationTest {
             snapshots,
             mock(ProjectRepoRepository.class),
             authorities,
-            mock(WorkspaceRestoreService.class));
+            mock(WorkspaceRestoreService.class),
+            mock(com.navneet.executespec.state.repository.PipelineRunRepository.class));
     var outcome = service.syncToOriginalCommit("run-2", RunSyncService.GitCredential.NONE);
 
     assertThat(outcome.reposSynced()).isZero();
@@ -133,6 +137,7 @@ class RunSyncServiceBranchValidationTest {
     RunWorkspaceAuthorityService.Lease authority = mock(RunWorkspaceAuthorityService.Lease.class);
     WorkspaceRestoreService restore = mock(WorkspaceRestoreService.class);
     Path restored = tmp.resolve("restored");
+    Path restoredRepo = restored.resolve("repos/app");
 
     Path source = tmp.resolve("source");
     Files.createDirectories(source);
@@ -169,8 +174,8 @@ class RunSyncServiceBranchValidationTest {
     when(restore.ensureWorkspaceAvailable("run-restored"))
         .thenAnswer(
             ignored -> {
-              Files.createDirectories(restored);
-              Files.writeString(restored.resolve("stale.txt"), "archive-only");
+              Files.createDirectories(restoredRepo);
+              Files.writeString(restoredRepo.resolve("stale.txt"), "archive-only");
               return restored;
             });
     when(snapshots.findByRunId("run-restored")).thenReturn(java.util.List.of(snapshot));
@@ -178,22 +183,185 @@ class RunSyncServiceBranchValidationTest {
     when(authorities.acquire("run-restored", RunWorkspaceAuthorityService.Authority.PUBLICATION))
         .thenReturn(authority);
     RunSyncService service =
-        new RunSyncService(workspaceInit, snapshots, projectRepos, authorities, restore);
+        new RunSyncService(
+            workspaceInit,
+            snapshots,
+            projectRepos,
+            authorities,
+            restore,
+            mock(com.navneet.executespec.state.repository.PipelineRunRepository.class));
 
     RunSyncService.SyncOutcome current =
         service.sync("run-restored", null, RunSyncService.GitCredential.NONE);
     assertThat(current.reposSynced()).isOne();
-    assertThat(git(restored, "rev-parse", "HEAD").trim()).isEqualTo(currentSha);
-    assertThat(Files.readString(restored.resolve("app.txt"))).isEqualTo("v2");
-    assertThat(restored.resolve("stale.txt")).doesNotExist();
+    assertThat(git(restoredRepo, "rev-parse", "HEAD").trim()).isEqualTo(currentSha);
+    assertThat(Files.readString(restoredRepo.resolve("app.txt"))).isEqualTo("v2");
+    assertThat(restoredRepo.resolve("stale.txt")).doesNotExist();
 
     RunSyncService.SyncOutcome original =
         service.syncToOriginalCommit("run-restored", RunSyncService.GitCredential.NONE);
 
     assertThat(original.reposSynced()).isOne();
-    assertThat(git(restored, "rev-parse", "HEAD").trim()).isEqualTo(originalSha);
-    assertThat(Files.readString(restored.resolve("app.txt"))).isEqualTo("v1");
+    assertThat(git(restoredRepo, "rev-parse", "HEAD").trim()).isEqualTo(originalSha);
+    assertThat(Files.readString(restoredRepo.resolve("app.txt"))).isEqualTo("v1");
     verify(restore).ensureWorkspaceAvailable("run-restored");
+  }
+
+  @Test
+  void standaloneRestoreUsesTheRunsExactProviderNeutralCloneCoordinate() {
+    PipelineRunRepository runs = mock(PipelineRunRepository.class);
+    PipelineRun run = new PipelineRun();
+    run.setRunId("run-bitbucket");
+    run.setRepoUrl("https://bitbucket.org/acme/app.git");
+    when(runs.findById("run-bitbucket")).thenReturn(java.util.Optional.of(run));
+    RunSyncService service =
+        new RunSyncService(
+            mock(WorkspaceInitService.class),
+            mock(RunRepoSnapshotRepository.class),
+            mock(ProjectRepoRepository.class),
+            mock(RunWorkspaceAuthorityService.class),
+            mock(WorkspaceRestoreService.class),
+            runs);
+    RunRepoSnapshot standalone =
+        RunRepoSnapshot.builder()
+            .runId("run-bitbucket")
+            .repoFullName("acme/app")
+            .branch("main")
+            .commitSha("a".repeat(40))
+            .build();
+
+    assertThat(service.cloneUrl(standalone)).isEqualTo("https://bitbucket.org/acme/app.git");
+  }
+
+  @Test
+  void standaloneRestoreRejectsCloneCoordinatesWithCredentialBearingUriComponents() {
+    PipelineRunRepository runs = mock(PipelineRunRepository.class);
+    RunSyncService service =
+        new RunSyncService(
+            mock(WorkspaceInitService.class),
+            mock(RunRepoSnapshotRepository.class),
+            mock(ProjectRepoRepository.class),
+            mock(RunWorkspaceAuthorityService.class),
+            mock(WorkspaceRestoreService.class),
+            runs);
+    for (String coordinate :
+        java.util.List.of(
+            "https://user:secret@bitbucket.org/acme/app.git",
+            "https://bitbucket.org/acme/app.git?access_token=secret",
+            "https://bitbucket.org/acme/app.git#token=secret")) {
+      PipelineRun run = new PipelineRun();
+      run.setRunId("run-credentialed");
+      run.setRepoUrl(coordinate);
+      when(runs.findById("run-credentialed")).thenReturn(java.util.Optional.of(run));
+      RunRepoSnapshot standalone =
+          RunRepoSnapshot.builder()
+              .runId("run-credentialed")
+              .repoFullName("acme/app")
+              .branch("main")
+              .commitSha("a".repeat(40))
+              .build();
+
+      assertThatThrownBy(() -> service.cloneUrl(standalone))
+          .isInstanceOf(RunWorkspaceRestoreFailedException.class)
+          .hasMessage("Workspace restore failed for run run-credentialed")
+          .hasMessageNotContaining("secret");
+    }
+  }
+
+  @Test
+  void projectRestoreFailsClosedWithoutADurableRepositoryCoordinate() {
+    RunSyncService service =
+        new RunSyncService(
+            mock(WorkspaceInitService.class),
+            mock(RunRepoSnapshotRepository.class),
+            mock(ProjectRepoRepository.class),
+            mock(RunWorkspaceAuthorityService.class),
+            mock(WorkspaceRestoreService.class),
+            mock(PipelineRunRepository.class));
+    RunRepoSnapshot project =
+        RunRepoSnapshot.builder()
+            .runId("run-project")
+            .repoId(UUID.randomUUID())
+            .repoFullName("acme/app")
+            .branch("main")
+            .commitSha("a".repeat(40))
+            .build();
+
+    assertThatThrownBy(() -> service.cloneUrl(project))
+        .isInstanceOf(RunWorkspaceRestoreFailedException.class)
+        .hasMessage("Workspace restore failed for run run-project");
+  }
+
+  @Test
+  void standaloneSyncAndOriginalIgnoreNestedGitCollision(@TempDir Path tmp) throws Exception {
+    Path source = tmp.resolve("source");
+    Files.createDirectories(source);
+    git(source, "init", "-b", "main");
+    git(source, "config", "user.email", "test@example.com");
+    git(source, "config", "user.name", "Test");
+    Files.writeString(source.resolve("app.txt"), "v1");
+    git(source, "add", "app.txt");
+    git(source, "commit", "-m", "v1");
+    String originalSha = git(source, "rev-parse", "HEAD").trim();
+    Files.writeString(source.resolve("app.txt"), "v2");
+    git(source, "commit", "-am", "v2");
+    String currentSha = git(source, "rev-parse", "HEAD").trim();
+    Path remote = tmp.resolve("remote.git");
+    git(tmp, "clone", "--bare", source.toString(), remote.toString());
+
+    Path runRoot = tmp.resolve("run-collision");
+    git(tmp, "clone", remote.toString(), runRoot.toString());
+    git(runRoot, "reset", "--hard", originalSha);
+    Path nested = runRoot.resolve("repos/app");
+    Files.createDirectories(nested);
+    git(nested, "init", "-b", "main");
+    git(nested, "config", "user.email", "test@example.com");
+    git(nested, "config", "user.name", "Test");
+    Files.writeString(nested.resolve("bait.txt"), "do-not-sync");
+    git(nested, "add", "bait.txt");
+    git(nested, "commit", "-m", "bait");
+    String nestedSha = git(nested, "rev-parse", "HEAD").trim();
+
+    WorkspaceInitService workspaceInit = mock(WorkspaceInitService.class);
+    RunRepoSnapshotRepository snapshots = mock(RunRepoSnapshotRepository.class);
+    RunWorkspaceAuthorityService authorities = mock(RunWorkspaceAuthorityService.class);
+    RunWorkspaceAuthorityService.Lease authority = mock(RunWorkspaceAuthorityService.Lease.class);
+    PipelineRunRepository runs = mock(PipelineRunRepository.class);
+    RunRepoSnapshot snapshot =
+        RunRepoSnapshot.builder()
+            .runId("run-collision")
+            .repoFullName("acme/app")
+            .branch("main")
+            .commitSha(originalSha)
+            .build();
+    PipelineRun run =
+        PipelineRun.builder().runId("run-collision").repoUrl(remote.toString()).build();
+    when(workspaceInit.runWorkspacePath("run-collision")).thenReturn(runRoot);
+    when(snapshots.findByRunId("run-collision")).thenReturn(java.util.List.of(snapshot));
+    when(runs.findById("run-collision")).thenReturn(java.util.Optional.of(run));
+    when(authorities.acquire("run-collision", RunWorkspaceAuthorityService.Authority.PUBLICATION))
+        .thenReturn(authority);
+    RunSyncService service =
+        new RunSyncService(
+            workspaceInit,
+            snapshots,
+            mock(ProjectRepoRepository.class),
+            authorities,
+            mock(WorkspaceRestoreService.class),
+            runs);
+
+    assertThat(service.sync("run-collision", null, RunSyncService.GitCredential.NONE).reposSynced())
+        .isOne();
+    assertThat(git(runRoot, "rev-parse", "HEAD").trim()).isEqualTo(currentSha);
+    assertThat(git(nested, "rev-parse", "HEAD").trim()).isEqualTo(nestedSha);
+
+    assertThat(
+            service
+                .syncToOriginalCommit("run-collision", RunSyncService.GitCredential.NONE)
+                .reposSynced())
+        .isOne();
+    assertThat(git(runRoot, "rev-parse", "HEAD").trim()).isEqualTo(originalSha);
+    assertThat(git(nested, "rev-parse", "HEAD").trim()).isEqualTo(nestedSha);
   }
 
   @Test
@@ -213,7 +381,8 @@ class RunSyncServiceBranchValidationTest {
             mock(RunRepoSnapshotRepository.class),
             mock(ProjectRepoRepository.class),
             authorities,
-            restore);
+            restore,
+            mock(com.navneet.executespec.state.repository.PipelineRunRepository.class));
 
     assertThatThrownBy(() -> service.sync("run-gone", null, RunSyncService.GitCredential.NONE))
         .isInstanceOf(RunWorkspaceUnavailableException.class)
@@ -240,7 +409,8 @@ class RunSyncServiceBranchValidationTest {
             mock(RunRepoSnapshotRepository.class),
             mock(ProjectRepoRepository.class),
             authorities,
-            restore);
+            restore,
+            mock(com.navneet.executespec.state.repository.PipelineRunRepository.class));
 
     assertThatThrownBy(() -> service.sync("run-retry", null, RunSyncService.GitCredential.NONE))
         .isInstanceOf(RunWorkspaceRestoreFailedException.class)

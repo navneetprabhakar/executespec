@@ -82,23 +82,38 @@ final class ProjectDocValidatedGeneration {
       ProjectDocResponsePolicy.requireComplete(response);
       String content = responseText(response);
       publicationSafetyCheck.accept(content);
-      String groundedContent = GeneratedSignatureGrounding.sanitize(content, codemapEvidence);
-      groundedContent =
-          GeneratedSignatureGrounding.sanitizeUnsupportedBehavior(groundedContent, codemapEvidence);
-      groundedContent = GeneratedProjectFactGrounding.sanitize(groundedContent, codemapEvidence);
       Usage usage = response.getMetadata() == null ? null : response.getMetadata().getUsage();
       totalInputTokens += usage == null ? 0 : safeInt(usage.getPromptTokens());
       totalOutputTokens += usage == null ? 0 : safeInt(usage.getCompletionTokens());
 
-      Optional<String> failure =
-          ProjectGeneratedDocValidator.validate(
-              docType, groundedContent, sourceRepositories, codemapEvidence);
+      String groundedContent = content;
+      Optional<String> failure = ProjectGeneratedDocValidator.validateProviderShape(content);
+      if (failure.isEmpty()) {
+        groundedContent = GeneratedSignatureGrounding.sanitize(content, codemapEvidence);
+        groundedContent =
+            GeneratedSignatureGrounding.sanitizeUnsupportedBehavior(
+                groundedContent, codemapEvidence);
+        groundedContent = GeneratedProjectFactGrounding.sanitize(groundedContent, codemapEvidence);
+        if (docType == DocType.EXPLANATION) {
+          groundedContent =
+              ProjectExplanationOperationalGrounding.append(
+                  groundedContent, codemapEvidence, sourceRepositories);
+        }
+        // Deterministic grounding is still customer-visible publication content. Scan the final
+        // assembled document as well as the provider response so an evidenced command cannot
+        // reintroduce a credential or tool-protocol payload after the first safety boundary.
+        publicationSafetyCheck.accept(groundedContent);
+        failure =
+            ProjectGeneratedDocValidator.validate(
+                docType, groundedContent, sourceRepositories, codemapEvidence);
+      }
       if (failure.isEmpty()) {
         return new Result(groundedContent, safeInt(totalInputTokens), safeInt(totalOutputTokens));
       }
       String reason = failure.orElseThrow();
       if (attempt == MAX_ATTEMPTS) {
-        throw new ProjectDocGeneratorService.InvalidGeneratedDocumentException(reason);
+        throw new ProjectDocGeneratorService.InvalidGeneratedDocumentException(
+            ProjectGeneratedDocFailureCode.fromReason(reason), reason);
       }
       log.warn(
           "[{}] {} document failed deterministic validation; retrying once on the same route: {}",
@@ -161,6 +176,8 @@ The corrected EXPLANATION must retain each of these exact H2 heading lines exact
 ## High-level architecture
 ## Key data flows
 ## Where to contribute
+## Verified local workflow
+## Troubleshooting
 Do not rename, delete, merge, reorder, or demote any of these headings. Keep meaningful \
 content beneath every one.
 """;
