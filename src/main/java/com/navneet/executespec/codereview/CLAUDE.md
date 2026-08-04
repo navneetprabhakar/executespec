@@ -1,5 +1,13 @@
 # `codereview/` — Whole-repo Code Review agent
 
+## Exact-source inspection workspace (2026-08-04)
+
+Durable Code Review jobs clone through `WorkspaceInitService.cloneReadOnlyRepository`; their
+synthetic `scan-*` workspace identity never creates `run_repo_snapshot` evidence or requires a
+`pipeline_run` parent. Before Semgrep or model disclosure, the worker checks out the exact admitted
+review SHA and fails closed when that revision is unavailable. Do not replace this with the normal
+run-clone seam or scan a moving default-branch HEAD.
+
 The authenticated Markdown report download is a publication boundary: high-confidence credential
 material fails closed with 422 and the matched value is never returned.
 

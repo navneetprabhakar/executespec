@@ -12,6 +12,7 @@ import com.navneet.executespec.router.ModelMatrixConfigurationException;
 import com.navneet.executespec.router.ModelResolver;
 import com.navneet.executespec.router.OrgModelOverrideService;
 import com.navneet.executespec.router.ProjectProviderResolver;
+import com.navneet.executespec.router.ProjectRoutingException;
 import com.navneet.executespec.router.RunModelOverrides;
 
 import org.springframework.http.HttpStatus;
@@ -48,10 +49,7 @@ public class ProjectGeneratedDocJobService {
       try {
         route = modelResolver.resolve("ProjectDocGeneratorService", provider);
       } catch (ModelMatrixConfigurationException invalidConfiguration) {
-        throw new ResponseStatusException(
-            HttpStatus.SERVICE_UNAVAILABLE,
-            "MODEL_MATRIX_UNAVAILABLE: Project AI routing is temporarily unavailable.",
-            invalidConfiguration);
+        throw ProjectRoutingException.modelMatrixUnavailable(invalidConfiguration);
       }
     } finally {
       RunModelOverrides.clear();

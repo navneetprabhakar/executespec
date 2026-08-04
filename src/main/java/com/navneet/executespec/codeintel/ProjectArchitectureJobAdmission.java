@@ -10,6 +10,7 @@ import com.navneet.executespec.router.LlmProvider;
 import com.navneet.executespec.router.ModelMatrixConfigurationException;
 import com.navneet.executespec.router.ModelResolver;
 import com.navneet.executespec.router.ProjectProviderResolver;
+import com.navneet.executespec.router.ProjectRoutingException;
 import com.navneet.executespec.router.ResolvedModel;
 
 import org.springframework.http.HttpStatus;
@@ -125,10 +126,7 @@ class ProjectArchitectureJobAdmission {
     try {
       return modelResolver.resolve(agentName, provider);
     } catch (ModelMatrixConfigurationException invalidConfiguration) {
-      throw new ResponseStatusException(
-          HttpStatus.SERVICE_UNAVAILABLE,
-          "MODEL_MATRIX_UNAVAILABLE: Project AI routing is temporarily unavailable.",
-          invalidConfiguration);
+      throw ProjectRoutingException.modelMatrixUnavailable(invalidConfiguration);
     }
   }
 

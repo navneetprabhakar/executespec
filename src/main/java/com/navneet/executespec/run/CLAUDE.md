@@ -12,13 +12,19 @@ method exists at the path; raw validation/provider detail remains private.
 The Web result surface renders exactly one primary control from `terminalOutcome.nextAction`
 (honoring an explicit `href`) and keeps Logs/Evidence/Files as secondary diagnostics. It treats
 `USER_STOPPED` as a neutral stop rather than a failed recovery case and does not poll for a report
-after a terminal one-shot report read returns absent.
+after a terminal one-shot report read returns absent. Email and in-app cancellation notifications
+also honor the neutral completion preference rather than the failure preference.
 Because durable archives intentionally omit `.git`, a successful restore reconstructs repository
-metadata only from the run's immutable repo snapshots and the linked project's credential-free SCM
-clone coordinate, then the normal caller-authenticated fetch/reset selects source bytes. Sync also
-cleans restored untracked archive residue while preserving `.agent-context/`. A confirmed absent
-archive is the permanent 410; storage/platform restore faults return the retryable
-`WORKSPACE_RESTORE_FAILED` (503) contract without leaking the underlying path or provider error.
+metadata only from immutable repo snapshots plus an authoritative credential-free coordinate:
+linked Project repositories use their stored SCM clone URL, while standalone runs use the exact
+`PipelineRun.repoUrl` rather than a fabricated GitHub URL. Clone coordinates containing URI user
+information, a query, or a fragment fail closed before Git metadata is written. The normal
+caller-authenticated
+fetch/reset then selects source bytes. Sync also cleans restored untracked archive residue while
+preserving `.agent-context/`. Render may use restored nested repository bytes without `.git`, but
+change evidence and required iteration fail closed until original Git history is available; they do
+not invent a baseline. A confirmed absent archive is the permanent 410; storage/platform restore
+faults return retryable `WORKSPACE_RESTORE_FAILED` (503) without leaking the provider error.
 
 `run/CustomerRunSubmissionService` is the shared BUILD admission boundary for REST submit,
 fork/iterate, confirmed Web Agent cloud-run creation, and Execution View. It resolves project write

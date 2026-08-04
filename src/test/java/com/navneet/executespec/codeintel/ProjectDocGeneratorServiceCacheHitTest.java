@@ -177,6 +177,55 @@ class ProjectDocGeneratorServiceCacheHitTest {
   }
 
   @Test
+  void nonCanonicalOperationalGroundingIsRegeneratedInsteadOfReturnedFromCache() {
+    wireCacheMiss();
+    String shasJson = "{\"owner/repo-a\":\"" + SHA_A + "\"}";
+    ProjectGeneratedDoc stale = generatedDoc(DocType.EXPLANATION, 3, 7, shasJson);
+    stale.setContent(
+        stale
+            .getContent()
+            .replace(
+                "No install, test, run, or runtime prerequisite is established by the supplied"
+                    + " deterministic setup evidence.",
+                "Run `npm install` and `npm start`; this cached instruction is not evidenced."));
+    when(docRepo
+            .findFirstByProjectIdAndDocTypeAndSourceArchVersionAndSourceShasFingerprintOrderByVersionDesc(
+                "p-1", DocType.EXPLANATION, 7, shasJson))
+        .thenReturn(Optional.of(stale));
+    when(llmRouter.callTextStrict(
+            anyString(),
+            anyString(),
+            anyList(),
+            anyString(),
+            anyString(),
+            anyString(),
+            org.mockito.ArgumentMatchers.nullable(Integer.class),
+            any(LlmExecutionReference.class),
+            eq(LlmRequest.RetryProfile.INTERACTIVE),
+            any(Runnable.class)))
+        .thenReturn(textResponse(validDoc(DocType.EXPLANATION, "Regenerated"), "stop"));
+    when(docRepo.saveAndFlush(any(ProjectGeneratedDoc.class)))
+        .thenAnswer(invocation -> invocation.getArgument(0));
+
+    ProjectGeneratedDoc result =
+        svc.generate("p-1", DocType.EXPLANATION, "actor-1", LlmProvider.ANTHROPIC);
+
+    assertThat(result.getContent()).doesNotContain("cached instruction", "`npm install`");
+    verify(llmRouter)
+        .callTextStrict(
+            anyString(),
+            anyString(),
+            anyList(),
+            anyString(),
+            anyString(),
+            anyString(),
+            org.mockito.ArgumentMatchers.nullable(Integer.class),
+            any(LlmExecutionReference.class),
+            eq(LlmRequest.RetryProfile.INTERACTIVE),
+            any(Runnable.class));
+  }
+
+  @Test
   void cacheHit_emptyContent_fallsThrough() {
     // Defensive: if the cached row happens to have null/blank content (a bug or partial write
     // in some prior code path), we must NOT short-circuit on it — fall through to regenerate.
@@ -925,6 +974,44 @@ class ProjectDocGeneratorServiceCacheHitTest {
   }
 
   @Test
+  void credentialIntroducedByDeterministicWorkflowGroundingIsRejectedBeforePublication() {
+    wireCacheMiss();
+    String credential = "xoxb-1234567890-abcdefghijklmnop";
+    String setupSource =
+        "- Source-Path-Base64: "
+            + Base64.getEncoder().encodeToString("README.md".getBytes(StandardCharsets.UTF_8))
+            + "\n  Content-Base64: "
+            + Base64.getEncoder()
+                .encodeToString(
+                    ("pip install https://user:" + credential + "@packages.example/pkg")
+                        .getBytes(StandardCharsets.UTF_8))
+            + "\n  Truncated: false";
+    wireExactSourceRepository(
+        SHA_A,
+        facts("owner/repo-a", SHA_A)
+            .replace("- No exact setup command source was selected.", setupSource));
+    when(llmRouter.callTextStrict(
+            anyString(),
+            anyString(),
+            anyList(),
+            anyString(),
+            anyString(),
+            anyString(),
+            org.mockito.ArgumentMatchers.nullable(Integer.class),
+            any(LlmExecutionReference.class),
+            eq(LlmRequest.RetryProfile.INTERACTIVE),
+            any(Runnable.class)))
+        .thenReturn(textResponse(validDoc(DocType.EXPLANATION, "Grounded"), "stop"));
+
+    org.assertj.core.api.Assertions.assertThatThrownBy(
+            () -> svc.generate("p-1", DocType.EXPLANATION, "actor-1", LlmProvider.ANTHROPIC))
+        .isInstanceOf(ProjectDocGeneratorService.UnsafeGeneratedDocumentException.class);
+
+    verify(docRepo, never()).saveAndFlush(any(ProjectGeneratedDoc.class));
+    verify(workspace, never()).writeRawFile(anyString(), anyString(), anyString());
+  }
+
+  @Test
   void missingRequiredHeadingGetsOneSameRouteCorrectiveRetryBeforePublication() {
     wireCacheMiss();
     String missingArchitecture =
@@ -1380,17 +1467,25 @@ class ProjectDocGeneratorServiceCacheHitTest {
         switch (type) {
           case EXPLANATION ->
               """
-              # %s
-              %s
-              ## Repositories
-              - owner/repo-a: application source.
-              ## High-level architecture
-              %s
-              ## Key data flows
-              1. Request enters the application and reaches the service.
-              ## Where to contribute
-              Start with the linked repository and its existing tests.
-              """
+# %s
+%s
+## Repositories
+- owner/repo-a: application source.
+## High-level architecture
+%s
+## Key data flows
+1. Request enters the application and reaches the service.
+## Where to contribute
+Start with the linked repository and its existing tests.
+
+## Verified local workflow
+
+No install, test, run, or runtime prerequisite is established by the supplied deterministic setup evidence.
+
+## Troubleshooting
+
+No repository-specific troubleshooting remedy is established by the supplied deterministic evidence. Inspect the exact revision and its setup sources before choosing a command.
+"""
                   .formatted(label, detail, detail);
           case SETUP ->
               """

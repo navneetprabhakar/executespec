@@ -4,8 +4,9 @@
 
 `ProjectProviderResolver` differentiates missing and invalid project providers.
 `ModelResolver` uses `ModelMatrixConfigurationException` when matrix resolution is unavailable.
-Project operations translate these to stable 409/503 responses before dispatch and never expose an
-invalid stored value.
+`ProjectRoutingException` translates these to stable structured 409/503 `errorCode` responses
+before dispatch. Its message is customer-safe and never exposes the invalid stored value or matrix
+cause.
 
 > Last reviewed: 2026-08-03 (2.0.0).
 

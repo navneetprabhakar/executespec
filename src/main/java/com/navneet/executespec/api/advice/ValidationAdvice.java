@@ -10,6 +10,7 @@ import jakarta.validation.ConstraintViolation;
 import jakarta.validation.ConstraintViolationException;
 
 import com.navneet.executespec.billing.exception.BillingException;
+import com.navneet.executespec.router.ProjectRoutingException;
 
 import org.springframework.context.support.DefaultMessageSourceResolvable;
 import org.springframework.core.Ordered;
@@ -21,12 +22,17 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.validation.FieldError;
+import org.springframework.web.HttpMediaTypeNotAcceptableException;
+import org.springframework.web.HttpMediaTypeNotSupportedException;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingRequestCookieException;
+import org.springframework.web.bind.MissingRequestHeaderException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.multipart.support.MissingServletRequestPartException;
 import org.springframework.web.server.ResponseStatusException;
 
 import lombok.extern.slf4j.Slf4j;
@@ -108,6 +114,15 @@ public class ValidationAdvice {
     return jsonError(code, body);
   }
 
+  /** Stable project-route admission codes remain separate from customer-safe explanatory copy. */
+  @ExceptionHandler(ProjectRoutingException.class)
+  public ResponseEntity<Map<String, Object>> onProjectRouting(ProjectRoutingException ex) {
+    Map<String, Object> body =
+        baseBody(ex.getStatusCode(), slugForStatus(ex.getStatusCode()), ex.getReason());
+    body.put("errorCode", ex.errorCode());
+    return jsonError(ex.getStatusCode(), body);
+  }
+
   @ExceptionHandler(AccessDeniedException.class)
   public ResponseEntity<Map<String, Object>> onAccessDenied(AccessDeniedException ex) {
     return jsonError(
@@ -124,6 +139,43 @@ public class ValidationAdvice {
         HttpStatus.BAD_REQUEST,
         baseBody(
             HttpStatus.BAD_REQUEST, "bad_request", "Request body is missing or not valid JSON"));
+  }
+
+  @ExceptionHandler(HttpMediaTypeNotSupportedException.class)
+  public ResponseEntity<Map<String, Object>> onUnsupportedMediaType(
+      HttpMediaTypeNotSupportedException ex) {
+    return jsonError(
+        HttpStatus.UNSUPPORTED_MEDIA_TYPE,
+        baseBody(
+            HttpStatus.UNSUPPORTED_MEDIA_TYPE,
+            "unsupported_media_type",
+            "The request content type is not supported."));
+  }
+
+  @ExceptionHandler(HttpMediaTypeNotAcceptableException.class)
+  public ResponseEntity<Map<String, Object>> onNotAcceptable(
+      HttpMediaTypeNotAcceptableException ex) {
+    return jsonError(
+        HttpStatus.NOT_ACCEPTABLE,
+        baseBody(
+            HttpStatus.NOT_ACCEPTABLE,
+            "not_acceptable",
+            "No acceptable response representation is available."));
+  }
+
+  @ExceptionHandler(MissingRequestHeaderException.class)
+  public ResponseEntity<Map<String, Object>> onMissingHeader(MissingRequestHeaderException ex) {
+    return missingInput("header", ex.getHeaderName());
+  }
+
+  @ExceptionHandler(MissingRequestCookieException.class)
+  public ResponseEntity<Map<String, Object>> onMissingCookie(MissingRequestCookieException ex) {
+    return missingInput("cookie", ex.getCookieName());
+  }
+
+  @ExceptionHandler(MissingServletRequestPartException.class)
+  public ResponseEntity<Map<String, Object>> onMissingPart(MissingServletRequestPartException ex) {
+    return missingInput("request part", ex.getRequestPartName());
   }
 
   @ExceptionHandler(MethodArgumentTypeMismatchException.class)
@@ -258,6 +310,13 @@ public class ValidationAdvice {
    */
   private static <T> ResponseEntity<T> jsonError(HttpStatusCode code, T body) {
     return ResponseEntity.status(code).contentType(MediaType.APPLICATION_JSON).body(body);
+  }
+
+  private static ResponseEntity<Map<String, Object>> missingInput(String kind, String name) {
+    return jsonError(
+        HttpStatus.BAD_REQUEST,
+        baseBody(
+            HttpStatus.BAD_REQUEST, "bad_request", "Missing required " + kind + " '" + name + "'"));
   }
 
   private static Map<String, Object> baseBody(

@@ -779,7 +779,7 @@ public class ProjectChatTools {
           // masquerades as semantic-ready merely because one old chunk exists. Keep the exact
           // ripgrep tool available while a resumable pass runs.
           CodeIndexingService.Readiness index =
-              codeIndexingService.readiness(ctx.projectId(), target);
+              codeIndexingService.readiness(ctx.projectId(), target, ctx.userId());
           if (!index.semanticSearchAvailable()) {
             boolean embeddingUnsupported =
                 index.reason() != null && index.reason().startsWith("EMBEDDING_");

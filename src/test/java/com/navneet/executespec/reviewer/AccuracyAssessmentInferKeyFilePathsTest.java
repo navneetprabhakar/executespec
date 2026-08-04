@@ -221,6 +221,26 @@ class AccuracyAssessmentInferKeyFilePathsTest {
   }
 
   @Test
+  void staticWebSourcesAreIncludedAsImplementationEvidence() throws Exception {
+    String tree =
+        String.join(
+            "\n",
+            "repos/site/index.html",
+            "repos/site/styles.css",
+            "repos/site/src/App.vue",
+            "repos/site/src/widget.svelte",
+            "repos/site/test/render.test.js");
+
+    assertThat(infer(tree))
+        .contains(
+            "repos/site/index.html",
+            "repos/site/styles.css",
+            "repos/site/src/App.vue",
+            "repos/site/src/widget.svelte")
+        .doesNotContain("repos/site/test/render.test.js");
+  }
+
+  @Test
   void emptyOrBlankTree_returnsEmpty() throws Exception {
     assertThat(infer("")).isEmpty();
     assertThat(infer("   ")).isEmpty();

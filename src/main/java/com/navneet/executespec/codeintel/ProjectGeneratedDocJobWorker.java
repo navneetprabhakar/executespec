@@ -158,8 +158,8 @@ public class ProjectGeneratedDocJobWorker {
     if (failure instanceof ProjectDocGeneratorService.UnsafeGeneratedDocumentException) {
       return "UNSAFE_GENERATED_CONTENT";
     }
-    if (failure instanceof ProjectDocGeneratorService.InvalidGeneratedDocumentException) {
-      return "INVALID_GENERATED_DOCUMENT";
+    if (failure instanceof ProjectDocGeneratorService.InvalidGeneratedDocumentException invalid) {
+      return "INVALID_GENERATED_DOCUMENT_" + invalid.validationSubcode();
     }
     String simple = failure.getClass().getSimpleName();
     return simple.isBlank()

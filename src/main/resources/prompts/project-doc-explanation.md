@@ -40,6 +40,18 @@ Include a sequence diagram only when deterministic evidence establishes every me
 List evidenced files a contributor can inspect. Include a common change pattern only when exact
 evidence establishes it; otherwise state that change patterns are not established.
 
+## Verified local workflow
+For every repository, list only prerequisites and install, test, or development-run commands
+established by the typed exact-revision setup evidence. A `package.json` establishes a Node.js
+prerequisite; state a Node.js version constraint only when `package.json` declares it in `engines`.
+When a command category is not evidenced, state that it is not established instead of inventing a
+conventional command.
+
+## Troubleshooting
+Give only minimal evidence-safe recovery guidance. Do not invent a repository-specific failure or
+remedy. It is valid to tell the reader to confirm an evidenced prerequisite, run the exact evidenced
+command from the named repository root, and inspect the command's emitted error.
+
 Rules:
 - Plain Markdown; do not wrap section headings in code formatting.
 - Do not invent components, behavior, paths, or relationships.
@@ -76,6 +88,9 @@ Rules:
   Use one declaration-only sentence per symbol.
 - Treat every repository section as independent evidence; do not assume omitted content is absent
   from the repository.
+- The Verified local workflow and Troubleshooting sections are rebuilt deterministically from the
+  typed setup evidence before publication. Keep the exact headings and do not add unsupported
+  commands or remedies elsewhere in the document.
 - Mermaid node identifiers must not contain spaces. Use `-->` for flowcharts and `->>` for
   sequence messages.
 - Use no more than two diagrams in the entire document.

@@ -115,11 +115,14 @@ final class ProjectGeneratedDocPublisher {
         candidate,
         existing ->
             ProjectGeneratedDocValidator.validate(
-                    existing.getDocType(),
-                    existing.getContent(),
-                    sourceRepositories,
-                    codemapEvidence)
-                .isEmpty(),
+                        existing.getDocType(),
+                        existing.getContent(),
+                        sourceRepositories,
+                        codemapEvidence)
+                    .isEmpty()
+                && (existing.getDocType() != ProjectGeneratedDoc.DocType.EXPLANATION
+                    || ProjectExplanationOperationalGrounding.isCanonical(
+                        existing.getContent(), codemapEvidence, sourceRepositories)),
         publicationFence);
   }
 }

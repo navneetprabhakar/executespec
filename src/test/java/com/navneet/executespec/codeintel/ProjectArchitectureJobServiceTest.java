@@ -126,18 +126,14 @@ class ProjectArchitectureJobServiceTest {
   @Test
   void missingProjectProviderRemainsAStableCustomerCorrectableConflict() {
     when(providers.resolve(any(Project.class)))
-        .thenThrow(
-            new ResponseStatusException(
-                HttpStatus.CONFLICT,
-                "PROJECT_PROVIDER_NOT_CONFIGURED: Choose an AI provider in project or account"
-                    + " settings."));
+        .thenThrow(ProjectRoutingException.providerNotConfigured());
 
     assertThatThrownBy(() -> service.request("project-1", "actor-1"))
         .isInstanceOfSatisfying(
-            ResponseStatusException.class,
+            ProjectRoutingException.class,
             error -> {
               assertThat(error.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
-              assertThat(error.getReason()).startsWith("PROJECT_PROVIDER_NOT_CONFIGURED:");
+              assertThat(error.errorCode()).isEqualTo("PROJECT_PROVIDER_NOT_CONFIGURED");
             });
     verifyNoInteractions(store);
   }
@@ -149,10 +145,10 @@ class ProjectArchitectureJobServiceTest {
 
     assertThatThrownBy(() -> service.request("project-1", "actor-1"))
         .isInstanceOfSatisfying(
-            ResponseStatusException.class,
+            ProjectRoutingException.class,
             error -> {
               assertThat(error.getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
-              assertThat(error.getReason()).startsWith("MODEL_MATRIX_UNAVAILABLE:");
+              assertThat(error.errorCode()).isEqualTo("MODEL_MATRIX_UNAVAILABLE");
             });
     verifyNoInteractions(store);
   }

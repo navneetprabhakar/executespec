@@ -17,16 +17,14 @@ class GlobalExceptionAdviceTest {
   // RR-1119 — the status-derived error code uses the underscore convention CLI/core classifiers
   // recognize, matching onNoResource ("not_found") — not the old hyphenated "not-found".
   @Test
-  void statusDerivedErrorCodeUsesUnderscoreNotHyphen() {
-    var response =
-        new GlobalExceptionAdvice()
-            .onErrorResponse(new ResponseStatusException(HttpStatus.NOT_FOUND, "missing"));
-
-    assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
-    assertThat(response.getBody())
-        .containsEntry("error", "not_found")
-        .containsEntry("status", 404)
-        .containsEntry("message", "missing");
+  void lastChanceAdviceDoesNotGloballyRemapSpringStatusExceptions() {
+    for (var method : GlobalExceptionAdvice.class.getDeclaredMethods()) {
+      ExceptionHandler handler = method.getAnnotation(ExceptionHandler.class);
+      if (handler == null) continue;
+      assertThat(handler.value()).doesNotContain(ResponseStatusException.class);
+      assertThat(java.util.Arrays.stream(handler.value()).map(Class::getName))
+          .noneMatch(name -> name.equals("org.springframework.web.ErrorResponseException"));
+    }
   }
 
   @Test

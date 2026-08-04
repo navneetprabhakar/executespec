@@ -206,6 +206,42 @@ class WorkspaceInitServiceAdmissionTest {
   }
 
   @Test
+  void snapshotPersistenceRecordsTheActualDefaultBranchInsteadOfAssumingMain() throws Exception {
+    Path checkout = workspace.resolve("default-branch-checkout");
+    Files.createDirectories(checkout);
+    run(checkout, "git", "init", "-b", "trunk");
+    Files.writeString(checkout.resolve("Application.java"), "class Application {}\n");
+    run(checkout, "git", "add", "Application.java");
+    run(
+        checkout,
+        "git",
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@example.com",
+        "commit",
+        "-m",
+        "baseline");
+
+    RunRepoSnapshotRepository snapshots = mock(RunRepoSnapshotRepository.class);
+    when(snapshots.findByRunId("run-default")).thenReturn(List.of());
+    AgentProperties properties = new AgentProperties();
+    properties.setWorkspace(workspace.toString());
+    WorkspaceRepositoryRevisionService revisions =
+        new WorkspaceRepositoryRevisionService(properties, snapshots);
+
+    revisions.persistCloneSnapshot(
+        "run-default",
+        new WorkspaceInitService.RepoToClone("acme/app", null, null, null),
+        checkout);
+
+    ArgumentCaptor<RunRepoSnapshot> snapshot = ArgumentCaptor.forClass(RunRepoSnapshot.class);
+    verify(snapshots).save(snapshot.capture());
+    assertEquals("trunk", snapshot.getValue().getBranch());
+    assertEquals(output(checkout, "git", "rev-parse", "HEAD"), snapshot.getValue().getCommitSha());
+  }
+
+  @Test
   void rejectsTwoSelectedRepositoriesThatWouldShareOneCheckoutDirectory() {
     WorkspaceInitService service = service();
 
@@ -265,20 +301,46 @@ class WorkspaceInitServiceAdmissionTest {
     var baseline = mock(com.navneet.executespec.contractsurface.BrownfieldHttpContractGuard.class);
     AgentProperties properties = new AgentProperties();
     properties.setWorkspace(workspace.resolve("runs").toString());
+    RunRepoSnapshotRepository snapshots = mock(RunRepoSnapshotRepository.class);
     WorkspaceInitService service =
         new WorkspaceInitService(
             properties,
             mock(WorkspaceRestoreService.class),
-            mock(RunRepoSnapshotRepository.class),
+            snapshots,
             mock(VendoredPathGuard.class),
             baseline,
-            new WorkspaceRepositoryRevisionService(
-                properties, mock(RunRepoSnapshotRepository.class)));
+            new WorkspaceRepositoryRevisionService(properties, snapshots));
 
     service.cloneReadOnlyRepository("project-source", source.toString(), null, null);
 
     assertTrue(Files.exists(service.runWorkspacePath("project-source").resolve("App.java")));
-    verifyNoInteractions(baseline);
+    verifyNoInteractions(snapshots, baseline);
+  }
+
+  @Test
+  void emptyRepositoryBaselineIsRejectedWithoutFabricatingSnapshot() throws Exception {
+    Path empty = workspace.resolve("empty");
+    Files.createDirectories(empty);
+    run(empty, "git", "init", "-b", "main");
+    AgentProperties properties = new AgentProperties();
+    properties.setWorkspace(workspace.toString());
+    RunRepoSnapshotRepository snapshots = mock(RunRepoSnapshotRepository.class);
+    WorkspaceRepositoryRevisionService revisions =
+        new WorkspaceRepositoryRevisionService(properties, snapshots);
+
+    var failure =
+        assertThrows(
+            IllegalStateException.class,
+            () ->
+                revisions.persistCloneSnapshot(
+                    "run-empty",
+                    new WorkspaceInitService.RepoToClone(
+                        "acme/empty", "https://github.com/acme/empty", null, "main"),
+                    empty));
+
+    assertTrue(failure.getMessage().contains("could not persist repository baseline"));
+    assertTrue(failure.getCause().getMessage().contains("repository has no committed revision"));
+    verifyNoInteractions(snapshots);
   }
 
   private static void run(Path directory, String... command) throws Exception {
