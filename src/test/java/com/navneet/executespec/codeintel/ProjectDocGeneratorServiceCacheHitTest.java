@@ -1084,6 +1084,75 @@ class ProjectDocGeneratorServiceCacheHitTest {
   }
 
   @Test
+  void unauthorizedSetupCommandGetsProjectionBoundedCorrectiveInstruction() {
+    wireCacheMiss();
+    String unsupportedSetup =
+        validDoc(DocType.SETUP, "First")
+            .replace(
+                "Follow the repository README and detected package scripts.",
+                """
+                Run the conventional dependency installer:
+                ```bash
+                npm install
+                ```
+                """);
+    when(llmRouter.callTextStrict(
+            anyString(),
+            anyString(),
+            anyList(),
+            anyString(),
+            anyString(),
+            anyString(),
+            org.mockito.ArgumentMatchers.nullable(Integer.class),
+            any(LlmExecutionReference.class),
+            eq(LlmRequest.RetryProfile.INTERACTIVE),
+            any(Runnable.class)))
+        .thenReturn(
+            textResponse(unsupportedSetup, "stop"),
+            textResponse(validDoc(DocType.SETUP, "Corrected"), "stop"));
+    when(docRepo.saveAndFlush(any(ProjectGeneratedDoc.class)))
+        .thenAnswer(invocation -> invocation.getArgument(0));
+
+    ProjectGeneratedDoc generated =
+        svc.generate("p-1", DocType.SETUP, "actor-1", LlmProvider.ANTHROPIC);
+
+    @SuppressWarnings("unchecked")
+    ArgumentCaptor<List<org.springframework.ai.chat.messages.Message>> messages =
+        ArgumentCaptor.forClass(List.class);
+    verify(llmRouter, org.mockito.Mockito.times(2))
+        .callTextStrict(
+            anyString(),
+            anyString(),
+            messages.capture(),
+            org.mockito.ArgumentMatchers.eq("project-doc-setup-p-1"),
+            org.mockito.ArgumentMatchers.eq("project-doc-setup"),
+            anyString(),
+            org.mockito.ArgumentMatchers.nullable(Integer.class),
+            any(LlmExecutionReference.class),
+            org.mockito.ArgumentMatchers.eq(LlmRequest.RetryProfile.INTERACTIVE),
+            any(Runnable.class));
+
+    assertThat(generated.getContent()).isEqualTo(validDoc(DocType.SETUP, "Corrected"));
+    assertThat(messages.getAllValues().get(0).get(1).getText())
+        .contains("No exact setup command source was selected")
+        .doesNotContain("Safe deterministic command projection");
+    assertThat(messages.getAllValues().get(1).get(2).getText())
+        .contains("PROJECT_DOC_VALIDATION_ERROR")
+        .contains("setup command is not present in encoded exact-revision setup evidence")
+        .contains("Safe deterministic command projection")
+        .contains("complete allow-list for non-clone commands")
+        .contains("If that projection is absent or empty, no non-clone")
+        .contains("command is authorized")
+        .contains("every fenced block regardless of its language label")
+        .contains("every console prompt", "every inline-code span", "every indented-code block")
+        .contains("unambiguous exact linked-repository name that supplied it")
+        .contains("one literal fenced")
+        .contains("git clone")
+        .contains("Do not infer")
+        .contains("not established by the supplied deterministic evidence");
+  }
+
+  @Test
   void unsupportedBehaviorClaimIsDeterministicallyDegradedWithoutProviderRetry() {
     wireCacheMiss();
     wireExactSourceRepository(
