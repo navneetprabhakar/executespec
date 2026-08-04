@@ -37,6 +37,8 @@ final class ProjectGeneratedDocValidator {
       Pattern.compile("(?m)^  Derived-Command-Base64: ([A-Za-z0-9+/=]+)$");
   private static final Pattern PACKAGE_SCRIPTS =
       Pattern.compile("(?s)\\\"scripts\\\"\\s*:\\s*\\{(.*?)\\}");
+  private static final Pattern PACKAGE_ENGINES =
+      Pattern.compile("(?s)\\\"engines\\\"\\s*:\\s*\\{(.*?)\\}");
   private static final Pattern JSON_STRING_PAIR =
       Pattern.compile("\\\"([^\\\"]+)\\\"\\s*:\\s*\\\"((?:\\\\.|[^\\\"])*)\\\"");
   private static final Pattern INDENTED_CODE = Pattern.compile("(?m)^(?: {4}|\\t)(\\S.*)$");
@@ -89,12 +91,19 @@ final class ProjectGeneratedDocValidator {
     return validate(type, content, expectedRepositories, "");
   }
 
-  static Optional<String> validate(
-      DocType type, String content, Set<String> expectedRepositories, String codemapEvidence) {
+  /** Provider-output checks that deterministic appendices must never repair or obscure. */
+  static Optional<String> validateProviderShape(String content) {
     if (content == null || content.isBlank()) return Optional.of("empty output");
     long meaningful = content.chars().filter(c -> !Character.isWhitespace(c)).count();
     if (meaningful < MIN_NON_WHITESPACE_CHARACTERS) return Optional.of("output is too short");
     if (hasUnbalancedFence(content)) return Optional.of("unbalanced fenced code block");
+    return Optional.empty();
+  }
+
+  static Optional<String> validate(
+      DocType type, String content, Set<String> expectedRepositories, String codemapEvidence) {
+    Optional<String> providerShape = validateProviderShape(content);
+    if (providerShape.isPresent()) return providerShape;
 
     String normalized = content.toLowerCase(Locale.ROOT);
     List<String> required =
@@ -105,7 +114,9 @@ final class ProjectGeneratedDocValidator {
                   "## repositories",
                   "## high-level architecture",
                   "## key data flows",
-                  "## where to contribute");
+                  "## where to contribute",
+                  "## verified local workflow",
+                  "## troubleshooting");
           case SETUP ->
               List.of(
                   "# setting up",
@@ -130,14 +141,6 @@ final class ProjectGeneratedDocValidator {
       }
     }
 
-    if (expectedRepositories != null) {
-      for (String repo : expectedRepositories) {
-        if (repo != null && !repo.isBlank() && !containsExactRepository(content, repo)) {
-          return Optional.of("missing linked repository " + repo);
-        }
-      }
-    }
-
     if (type == DocType.SETUP) {
       String clone = section(normalized, "## clone");
       if (!clone.contains("git clone") || !FENCED_BLOCK.matcher(clone).find()) {
@@ -146,6 +149,17 @@ final class ProjectGeneratedDocValidator {
       Optional<String> unsupportedCommand =
           unsupportedSetupCommand(content, codemapEvidence, expectedRepositories);
       if (unsupportedCommand.isPresent()) return unsupportedCommand;
+    }
+    if (expectedRepositories != null) {
+      for (String repo : expectedRepositories) {
+        boolean covered =
+            type == DocType.SETUP
+                ? ProjectGeneratedDocCloneCoverage.containsExactCloneTarget(content, repo)
+                : containsExactRepository(content, repo);
+        if (repo != null && !repo.isBlank() && !covered) {
+          return Optional.of("missing linked repository " + repo);
+        }
+      }
     }
     if (type == DocType.EXPLANATION) {
       Optional<String> unsupported =
@@ -309,8 +323,7 @@ final class ProjectGeneratedDocValidator {
     return Optional.empty();
   }
 
-  private static SetupAuthority decodedSetupSources(
-      String evidence, Set<String> expectedRepositories) {
+  static SetupAuthority decodedSetupSources(String evidence, Set<String> expectedRepositories) {
     if (evidence == null || evidence.isBlank())
       return SetupAuthority.invalid("setup evidence is missing");
     Set<String> expected = normalizedRepositories(expectedRepositories);
@@ -416,7 +429,7 @@ final class ProjectGeneratedDocValidator {
     return occurrences;
   }
 
-  private record SetupAuthority(
+  record SetupAuthority(
       boolean valid,
       Set<SetupSource> sources,
       java.util.Map<String, Set<String>> derivedCommandsByRepository,
@@ -448,6 +461,55 @@ final class ProjectGeneratedDocValidator {
     boolean authorizesAnywhere(String command) {
       return scmByRepository.keySet().stream()
           .anyMatch(repository -> authorizes(repository, command));
+    }
+
+    Set<String> evidencedCommands(String repository) {
+      if (repository == null) return Set.of();
+      String normalizedRepository = repository.strip().toLowerCase(Locale.ROOT);
+      Set<String> commands = new java.util.TreeSet<>();
+      commands.addAll(derivedCommandsByRepository.getOrDefault(normalizedRepository, Set.of()));
+      for (SetupSource source : sources) {
+        if (!source.repository().equals(normalizedRepository)) continue;
+        for (String line : source.content().split("\\R")) {
+          String command = normalizePrompt(line.strip());
+          if (!command.isBlank()
+              && !SHELL_META.matcher(command).find()
+              && looksCommandLike(command, this)
+              && authorizes(normalizedRepository, command)) {
+            commands.add(command);
+          }
+        }
+      }
+      return Set.copyOf(commands);
+    }
+
+    boolean hasPackageJson(String repository) {
+      if (repository == null) return false;
+      String normalizedRepository = repository.strip().toLowerCase(Locale.ROOT);
+      return sources.stream()
+          .anyMatch(
+              source -> source.repository().equals(normalizedRepository) && source.isPackageJson());
+    }
+
+    Optional<String> nodeEngine(String repository) {
+      if (repository == null) return Optional.empty();
+      String normalizedRepository = repository.strip().toLowerCase(Locale.ROOT);
+      for (SetupSource source : sources) {
+        if (!source.repository().equals(normalizedRepository) || !source.isPackageJson()) continue;
+        Matcher engines = PACKAGE_ENGINES.matcher(source.content());
+        if (!engines.find()) continue;
+        Matcher pair = JSON_STRING_PAIR.matcher(engines.group(1));
+        while (pair.find()) {
+          if (!pair.group(1).equalsIgnoreCase("node")) continue;
+          String requirement = pair.group(2).strip();
+          if (!requirement.isEmpty()
+              && requirement.length() <= 64
+              && requirement.matches("[A-Za-z0-9 .<>=~^|*+_-]+")) {
+            return Optional.of(requirement);
+          }
+        }
+      }
+      return Optional.empty();
     }
 
     String presentedRepository(String context) {
@@ -482,7 +544,7 @@ final class ProjectGeneratedDocValidator {
     }
   }
 
-  private record SetupSource(String repository, String path, String content) {
+  record SetupSource(String repository, String path, String content) {
     boolean isPackageJson() {
       try {
         return java.nio.file.Path.of(path)

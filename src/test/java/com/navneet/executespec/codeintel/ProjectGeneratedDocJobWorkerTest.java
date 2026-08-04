@@ -195,7 +195,7 @@ class ProjectGeneratedDocJobWorkerTest {
       verify(store)
           .needsConfirmation(
               lease,
-              "INVALID_GENERATED_DOCUMENT",
+              "INVALID_GENERATED_DOCUMENT_MISSING_REQUIRED_HEADING",
               "The generated document did not satisfy the required document structure. No"
                   + " document was published after provider dispatch began; delivery outcome may"
                   + " be uncertain. Retrying the same route may incur additional usage.");

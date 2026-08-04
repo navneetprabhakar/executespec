@@ -15,7 +15,6 @@ import com.navneet.executespec.auth.repository.ProjectRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
-import org.springframework.web.server.ResponseStatusException;
 
 class ProjectProviderResolverTest {
 
@@ -58,10 +57,10 @@ class ProjectProviderResolverTest {
     assertThatThrownBy(
             () -> resolver.resolve(Project.builder().aiProvider(null).createdBy("u-1").build()))
         .isInstanceOfSatisfying(
-            ResponseStatusException.class,
+            ProjectRoutingException.class,
             error -> {
               assertThat(error.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
-              assertThat(error.getReason()).startsWith("PROJECT_PROVIDER_INVALID:");
+              assertThat(error.errorCode()).isEqualTo("PROJECT_PROVIDER_INVALID");
               assertThat(error.getReason()).doesNotContain("retired-provider");
             });
     assertThatThrownBy(() -> resolver.resolve((Project) null))
@@ -77,10 +76,10 @@ class ProjectProviderResolverTest {
     assertThatThrownBy(
             () -> resolver.resolve(Project.builder().aiProvider(null).createdBy("u-1").build()))
         .isInstanceOfSatisfying(
-            ResponseStatusException.class,
+            ProjectRoutingException.class,
             error -> {
               assertThat(error.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
-              assertThat(error.getReason()).startsWith("PROJECT_PROVIDER_NOT_CONFIGURED:");
+              assertThat(error.errorCode()).isEqualTo("PROJECT_PROVIDER_NOT_CONFIGURED");
             });
   }
 

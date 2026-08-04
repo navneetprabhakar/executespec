@@ -1,4 +1,4 @@
-import type {ProjectCodeIndexRefreshAccepted} from '@/types/project';
+import type {ProjectCodeIndexReadiness, ProjectCodeIndexRefreshAccepted} from '@/types/project';
 
 export type RepoBadge = {kind: 'ok' | 'warn' | 'bad'; label: string};
 const BITBUCKET_READ_CAPABILITIES = new Set([
@@ -92,4 +92,25 @@ export function codeIndexRefreshNotice(result: ProjectCodeIndexRefreshAccepted):
     default:
       return `Semantic indexing status unavailable${reason}. Ripgrep search remains available.`;
   }
+}
+
+export function semanticIndexBadgeLabel(readiness: ProjectCodeIndexReadiness): string {
+  const status = readiness.status.toLowerCase();
+  return readiness.status === 'UNINDEXED'
+    ? `semantic ${status}`
+    : `semantic ${status} · ${readiness.coveragePercent.toFixed(0)}%`;
+}
+
+export function semanticCoverageLabel(readiness: ProjectCodeIndexReadiness): string {
+  if (readiness.status === 'UNINDEXED') return 'Not measured — index not built';
+  return `${readiness.indexedFiles}/${readiness.eligibleFiles} files · ${readiness.coveragePercent.toFixed(1)}%`;
+}
+
+export function codeSearchCapabilitiesLabel(readiness: ProjectCodeIndexReadiness): string {
+  return [
+    readiness.lexicalFallbackAvailable ? 'ripgrep available' : 'ripgrep unavailable',
+    readiness.relationshipGraphAvailable
+      ? 'relationship graph available'
+      : 'relationship graph not available',
+  ].join(' · ');
 }

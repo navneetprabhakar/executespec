@@ -525,7 +525,13 @@ public class CodeReviewService {
     Path workspaceRoot;
     try {
       String cloneUrl = resolveCloneUrl(repoId, repoFullName);
-      workspaceInitService.cloneFromRepo(workspaceRunId, cloneUrl, pat);
+      // A code-review scan owns an ephemeral inspection workspace, not a PipelineRun. Using the
+      // run-clone seam would try to persist RunRepoSnapshot with synthetic `scan-*` identity and
+      // violate the snapshot's pipeline_run foreign key.
+      workspaceInitService.cloneReadOnlyRepository(workspaceRunId, cloneUrl, null, pat);
+      if (!workspaceInitService.checkoutExactCommit(workspaceRunId, sha)) {
+        throw new IllegalStateException("review source revision is unavailable");
+      }
       workspaceRoot = workspaceInitService.runWorkspacePath(workspaceRunId);
       checkpoint.run();
     } catch (Exception e) {

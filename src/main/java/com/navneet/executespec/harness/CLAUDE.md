@@ -307,3 +307,10 @@ Fail-closed / evidence-honest corrections; no migration.
   patterns only in `.git/info/exclude`. It does not rewrite, stage, or commit the customer's
   `.gitignore`; vendored cleanup remains bounded to exact safe vendored paths. The regression gate
   requires an unchanged HEAD, merge base, origin diff, and tracked `.gitignore` after preparation.
+- **2026-08-04 standalone baseline correction** — every captured standalone clone, including a
+  default-branch request with no explicit branch, persists the actual checked-out branch and HEAD
+  SHA in `run_repo_snapshot`. Re-entry verifies an existing snapshot against the checkout instead
+  of silently replacing it. Read-only Code Review clones never create run snapshots and check out
+  the exact admitted SHA. Required iteration copies preserve the sole root-repository snapshot;
+  restored nested repositories without their original Git proof fail closed instead of being
+  reclassified as the synthetic root repository.

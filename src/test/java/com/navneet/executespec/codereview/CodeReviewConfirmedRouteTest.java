@@ -3,11 +3,13 @@ package com.navneet.executespec.codereview;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.nio.file.Path;
@@ -83,7 +85,8 @@ class CodeReviewConfirmedRouteTest {
     when(scans.findById(any()))
         .thenAnswer(invocation -> Optional.ofNullable(rows.get(invocation.getArgument(0))));
     when(repos.findById(repoId)).thenReturn(Optional.of(repo));
-    doNothing().when(workspaces).cloneFromRepo(anyString(), anyString(), any());
+    doNothing().when(workspaces).cloneReadOnlyRepository(anyString(), anyString(), any(), any());
+    when(workspaces.checkoutExactCommit(anyString(), anyString())).thenReturn(true);
     when(workspaces.runWorkspacePath(anyString())).thenReturn(workspace);
     when(semgrep.scan(workspace))
         .thenReturn(new SemgrepRunner.ScanResult(false, List.of(), 0, "test", 1));
@@ -173,10 +176,30 @@ class CodeReviewConfirmedRouteTest {
     assertThat(confirmedRequest.get().model()).isEqualTo("deepseek-v4-pro-native");
     assertThat(confirmedRequest.get().actorUserId()).isEqualTo("developer-1");
     assertThat(confirmedRequest.get().executionReference()).isEqualTo(reference);
+    verify(workspaces)
+        .cloneReadOnlyRepository(
+            anyString(), org.mockito.ArgumentMatchers.contains("org/repo"), any(), any());
+    verify(workspaces)
+        .checkoutExactCommit(anyString(), org.mockito.ArgumentMatchers.eq("a".repeat(40)));
     for (AgentTier tier : AgentTier.values()) {
       assertThat(confirmedRoute.get().get(RunModelOverrides.key(LlmProvider.DEEPSEEK, tier)))
           .isEqualTo("deepseek-v4-pro-native");
     }
+
+    clearInvocations(semgrep, agent);
+    when(workspaces.checkoutExactCommit(anyString(), anyString())).thenReturn(false);
+    org.assertj.core.api.Assertions.assertThatThrownBy(
+            () ->
+                service.runDurableJob(
+                    new ReviewBackgroundJobStore.Lease(
+                        persistedJob.get(), "worker", 2, java.time.Instant.now().plusSeconds(60)),
+                    "org/repo",
+                    "b".repeat(40),
+                    () -> {}))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessage("clone failed")
+        .hasRootCauseMessage("review source revision is unavailable");
+    verifyNoInteractions(semgrep, agent);
 
     var lease =
         new ReviewBackgroundJobStore.Lease(

@@ -207,3 +207,13 @@ App VM (executespec)                    Preview GW VM (preview-gw)
 3. **VM cron** (`cleanup-expired.sh`): every 5 min, checks directory age on preview-gw — last-resort safety net
 
 **VM config:** `preview.vm.*` in `application.yml` — gateway IP, SSH key, TTL, VM list with `maxConcurrent` for load balancing.
+
+## 2026-08-04 standalone snapshot resolution
+
+`PreviewWorkspaceResolver` uses the admitted snapshot's durable `repoId` as the layout authority:
+non-null identifies `repos/<repository-name>` Project/restored layout, while null identifies the
+standalone run root. Directory existence is never the discriminator, so a legitimate standalone
+repository containing its own `repos/<name>` directory cannot be reclassified. Multiple snapshots
+still fail closed. `WorkspaceFileService` uses the same authority for root base/head diffs and
+status. Preview/Render may read restored Project bytes whose archive omits nested Git; evidence and
+iteration paths separately fail closed when exact Git history is unavailable.

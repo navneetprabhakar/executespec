@@ -12,9 +12,8 @@ final class RunNotificationPreferencePolicy {
       RunTerminalOutcome outcome, ActivityEventType fallbackEventType) {
     if (outcome == null) return fallbackEventType;
     return switch (outcome.category()) {
-      case SUCCESS, WARNING -> ActivityEventType.RUN_COMPLETED;
-      case ACTION_REQUIRED, POLICY_BLOCKED, USER_STOPPED, PLATFORM_FAILURE ->
-          ActivityEventType.RUN_FAILED;
+      case SUCCESS, WARNING, USER_STOPPED -> ActivityEventType.RUN_COMPLETED;
+      case ACTION_REQUIRED, POLICY_BLOCKED, PLATFORM_FAILURE -> ActivityEventType.RUN_FAILED;
     };
   }
 }

@@ -76,6 +76,27 @@ class DeterministicArchitectureEvidenceTest {
   }
 
   @Test
+  void combinedArchitectureRefreshReplacesItsGeneratedAppendixInsteadOfDuplicatingHeadings() {
+    RepoArchitectureDoc repo =
+        RepoArchitectureDoc.builder()
+            .repoId(UUID.randomUUID())
+            .content("# repo\n\n" + EVIDENCE + "\n" + FACTS)
+            .build();
+
+    String once =
+        DeterministicArchitectureEvidence.appendFromRepoDocs(
+            "# Combined\n\nOverview.", List.of(repo), List.of("owner/repo"));
+    String twice =
+        DeterministicArchitectureEvidence.appendFromRepoDocs(
+            once, List.of(repo), List.of("owner/repo"));
+
+    assertThat(twice).containsOnlyOnce("## Deterministic repository evidence");
+    assertThat(twice).containsOnlyOnce("### `owner/repo`");
+    assertThat(twice).containsOnlyOnce(DeterministicArchitectureEvidence.HTTP_BEGIN);
+    assertThat(twice).isEqualTo(once);
+  }
+
+  @Test
   void legacyV2HttpEvidenceIsNotCurrentAndIsRemovedDuringV3Publication() {
     String legacy =
         "<!-- EXECUTESPEC_DETERMINISTIC_HTTP_SURFACE_V2_BEGIN -->\n"

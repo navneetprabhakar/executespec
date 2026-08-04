@@ -570,6 +570,15 @@ Validation evidence is fail-closed: code-changing tasks require an admitted base
 diff attributable to that task, and persisted executable verification distinguishes `PASSED`,
 `BUILD_ONLY`, `FAILED`, and `UNAVAILABLE`. The Web evidence ledger exposes those deterministic facts;
 the headline score is a summary and must not be treated as independent proof.
+Standalone existing-repository runs persist the actual checked-out branch and immutable starting
+commit even when the default branch was implicit; root-workspace Files and change evidence use
+that baseline, while Render uses the admitted repository layout. Restored project Preview/Render
+use their nested `repos/<name>` content even though archives omit nested Git metadata; change
+evidence and required iteration copies fail closed when the original nested Git proof is
+unavailable. Project architecture and generated-doc
+admission return structured provider/matrix error codes, generated EXPLANATION workflow guidance is
+rebuilt from exact-revision setup evidence, and unbuilt semantic indexes are shown as unmeasured
+rather than misleading `0/0` coverage.
 Post-run Ask follows the same rule: configured build success is not test success, missing concrete
 test counts remain an explicit verification gap, and provider tool-protocol markup is suppressed
 rather than displayed to customers. A post-run Ask response stopped by `length` / `max_tokens`

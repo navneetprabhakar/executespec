@@ -51,8 +51,7 @@ import lombok.extern.slf4j.Slf4j;
  * persisted both to {@link ProjectGeneratedDocRepository} (authoritative) AND to disk at {@code
  * workspace/projects/<id>/docs/<type>.md} (fast read cache).
  *
- * <p>Callers must have already run analyse() on the project — if no architecture doc exists we
- * throw so the UI can prompt the user to run it first.
+ * <p>Requires an existing project architecture document.
  */
 @Service
 @Slf4j
@@ -137,13 +136,24 @@ public class ProjectDocGeneratorService {
 
   /** Provider output did not satisfy the deterministic document contract. */
   public static final class InvalidGeneratedDocumentException extends IllegalStateException {
+    private final String validationSubcode;
+
     public InvalidGeneratedDocumentException(String detail) {
+      this(ProjectGeneratedDocFailureCode.fromReason(detail), detail);
+    }
+
+    public InvalidGeneratedDocumentException(String validationSubcode, String detail) {
       super(
           "Generated document is incomplete or malformed (" + detail + "); no document was saved.");
+      this.validationSubcode = validationSubcode;
     }
 
     public String reason() {
       return INVALID_CONTENT_REASON;
+    }
+
+    public String validationSubcode() {
+      return validationSubcode;
     }
   }
 
@@ -348,12 +358,6 @@ public class ProjectDocGeneratorService {
     java.util.Set<String> sourceRepositories =
         sourceBundleBuilder.parseSourceShas(arch.getGeneratedFromShas()).keySet();
 
-    // PR-Q (2026-05-13) — short-circuit cache. Same idea as PR-K's fingerprint short-circuit
-    // on combined-arch regen, one layer up: if the most recent doc of this type was generated
-    // against the SAME arch version AND the SAME per-repo SHA fingerprint, return it instead
-    // of burning a 15-40s LLM call. Cheap composite key (Integer + short String) — no
-    // additional query cost over the existing latest-version lookup the cost-aware code path
-    // does anyway.
     Integer sourceArchVersion = arch.getVersion();
     String sourceFingerprint = arch.getGeneratedFromShas(); // already a canonical JSON string
     if (sourceArchVersion != null && sourceFingerprint != null) {
@@ -366,7 +370,12 @@ public class ProjectDocGeneratorService {
                   d ->
                       ProjectGeneratedDocValidator.validate(
                               docType, d.getContent(), sourceRepositories, codemapEvidence)
-                          .isEmpty());
+                          .isEmpty())
+              .filter(
+                  d ->
+                      docType != DocType.EXPLANATION
+                          || ProjectExplanationOperationalGrounding.isCanonical(
+                              d.getContent(), codemapEvidence, sourceRepositories));
       if (cached.isPresent()) {
         assertSafeForCustomer(cached.get().getContent());
         log.info(

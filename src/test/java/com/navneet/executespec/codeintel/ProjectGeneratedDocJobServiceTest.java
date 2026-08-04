@@ -19,6 +19,7 @@ import com.navneet.executespec.router.ModelMatrixConfigurationException;
 import com.navneet.executespec.router.ModelResolver;
 import com.navneet.executespec.router.OrgModelOverrideService;
 import com.navneet.executespec.router.ProjectProviderResolver;
+import com.navneet.executespec.router.ProjectRoutingException;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
@@ -74,12 +75,7 @@ class ProjectGeneratedDocJobServiceTest {
     ProjectProviderResolver providers = mock(ProjectProviderResolver.class);
     Project project = Project.builder().id("project-1").orgId("org-1").build();
     when(projects.findById("project-1")).thenReturn(Optional.of(project));
-    when(providers.resolve(project))
-        .thenThrow(
-            new ResponseStatusException(
-                HttpStatus.CONFLICT,
-                "PROJECT_PROVIDER_NOT_CONFIGURED: Choose an AI provider in project or account"
-                    + " settings."));
+    when(providers.resolve(project)).thenThrow(ProjectRoutingException.providerNotConfigured());
     ProjectGeneratedDocJobService service =
         new ProjectGeneratedDocJobService(
             store,
@@ -90,10 +86,10 @@ class ProjectGeneratedDocJobServiceTest {
 
     assertThatThrownBy(() -> service.request("project-1", DocType.EXPLANATION, "actor-1"))
         .isInstanceOfSatisfying(
-            ResponseStatusException.class,
+            ProjectRoutingException.class,
             error -> {
               assertThat(error.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
-              assertThat(error.getReason()).startsWith("PROJECT_PROVIDER_NOT_CONFIGURED:");
+              assertThat(error.errorCode()).isEqualTo("PROJECT_PROVIDER_NOT_CONFIGURED");
             });
     verify(store, never())
         .createOrGet(
@@ -125,11 +121,21 @@ class ProjectGeneratedDocJobServiceTest {
 
     assertThatThrownBy(() -> service.request("project-1", DocType.EXPLANATION, "actor-1"))
         .isInstanceOfSatisfying(
-            ResponseStatusException.class,
+            ProjectRoutingException.class,
             error -> {
               assertThat(error.getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
-              assertThat(error.getReason()).startsWith("MODEL_MATRIX_UNAVAILABLE:");
+              assertThat(error.errorCode()).isEqualTo("MODEL_MATRIX_UNAVAILABLE");
             });
+    verify(store, never())
+        .createOrGet(
+            org.mockito.ArgumentMatchers.any(),
+            org.mockito.ArgumentMatchers.anyString(),
+            org.mockito.ArgumentMatchers.anyString(),
+            org.mockito.ArgumentMatchers.anyString(),
+            org.mockito.ArgumentMatchers.anyString(),
+            org.mockito.ArgumentMatchers.anyString(),
+            org.mockito.ArgumentMatchers.anyString(),
+            org.mockito.ArgumentMatchers.any());
   }
 
   private static ProjectGeneratedDocJobService service(ProjectGeneratedDocJobStore store) {

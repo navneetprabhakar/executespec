@@ -148,6 +148,13 @@ invalid reports are excluded and counted separately.
   (six files / 30K characters). Production-file inference still excludes tests, but the LLM coverage
   judgment must inspect real test content rather than infer `NONE` from an intentionally test-free
   source snippet.
+- Static-web implementation files (`html`, `htm`, `css`, `scss`, `sass`, `less`, `vue`, and
+  `svelte`) participate in the bounded production-evidence lane. A page requirement must not be
+  marked unverified merely because the assessor sampled its test while filtering out the changed
+  page itself.
+- A run-start snapshot may identify a sole repository at the workspace root as well as under
+  `repos/<name>`. `RunChangeEvidenceService` applies the immutable snapshot SHA with an empty prefix
+  for that root layout, so standalone default-branch runs cannot lose product-diff/Render admission.
 - Final assessment is tighten-only: `CLEAN_*` pre-report status cannot erase a newly measured
   `NEEDS_ATTENTION` result; successfully auto-fixed visibility issues are not open blockers; and an
   accuracy report with admitted missing/partial/unknown requirements caps the headline/rubric score

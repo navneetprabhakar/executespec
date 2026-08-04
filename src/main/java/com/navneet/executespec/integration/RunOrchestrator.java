@@ -2420,15 +2420,7 @@ public class RunOrchestrator implements RunControlPort {
         }
       }
 
-      // 4. Ensure README.md exists in the workspace
-      // If the planner emitted a "create README" task the file is already there
-      // and we leave it alone. If not (typical for trivial specs), write a
-      // deterministic run-meta README so the download-zip experience always
-      // includes an entry-point doc.
-      contextComposer.ensureReadme(
-          runId, workspace, userRequest, plan, execResult, reviewResult, startedAt);
-
-      // 4b. Pre-resolve terminal status BEFORE the validation report.
+      // 4. Pre-resolve terminal status BEFORE the validation report.
       // 2026-05-10 — bug fix for dev run 61c9fffa where the run came back
       // status=COMPLETE + statusReason=CLEAN_WITH_INTERMEDIATE_WARNINGS but
       // the validation report was persisted with pipelineResult=FAILED.
@@ -3384,18 +3376,6 @@ public class RunOrchestrator implements RunControlPort {
     }
   }
 
-  /**
-   * Writes a run-meta README.md into the workspace if one doesn't already exist.
-   *
-   * <p>The planner is instructed (in prompts/planner.md invariant #3) to emit a "Create README.md"
-   * task for non-trivial specs. That user-facing README is authored by the worker and takes
-   * precedence — we never overwrite it. For trivial specs (single-file, no framework) the planner
-   * skips the README task; this method then writes a deterministic run-meta README so the
-   * download-zip experience always includes an entry-point doc.
-   *
-   * <p>Best-effort — IO errors are logged and swallowed. A missing README isn't worth failing a run
-   * over.
-   */
   // Run-end validation-report kickoff (assemble ReportInput + accuracy + synthesise ReviewIssues +
   // score) moved to RunValidationKickoff (god-class split inc-5b); called via validationKickoff.
 

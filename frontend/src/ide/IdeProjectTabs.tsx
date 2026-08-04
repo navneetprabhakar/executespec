@@ -19,9 +19,12 @@ import {ConfirmModal} from '@/signal/components/Modal';
 import {runTitleFor, repoDisplayName, repoIdFor} from '@/signal/lib/runUtils';
 import {useAuthStore, selectIsSuperAdmin} from '@/stores/useAuthStore';
 import {
+  codeSearchCapabilitiesLabel,
   codeIndexRefreshNotice,
   normalizeScmRepoQuery,
   repoSupports,
+  semanticCoverageLabel,
+  semanticIndexBadgeLabel,
   sourceReadinessBadge,
   syncBadge,
 } from '@/ide/projectRepoUi';
@@ -1770,8 +1773,7 @@ export function IdeProjectRepos() {
                       <IdeBadge kind={source.kind}>{source.label}</IdeBadge>
                       {semanticIndex && (
                         <IdeBadge kind={semanticKind}>
-                          semantic {semanticIndex.status.toLowerCase()} ·{' '}
-                          {semanticIndex.coveragePercent.toFixed(0)}%
+                          {semanticIndexBadgeLabel(semanticIndex)}
                         </IdeBadge>
                       )}
                     </>
@@ -1784,8 +1786,7 @@ export function IdeProjectRepos() {
                       <IdeBadge kind={source.kind}>{source.label}</IdeBadge>
                       {semanticIndex && (
                         <IdeBadge kind={semanticKind}>
-                          semantic {semanticIndex.status.toLowerCase()} ·{' '}
-                          {semanticIndex.coveragePercent.toFixed(0)}%
+                          {semanticIndexBadgeLabel(semanticIndex)}
                         </IdeBadge>
                       )}
                       {repoSupports(repo, 'BOOTSTRAP') && (
@@ -1868,10 +1869,7 @@ export function IdeProjectRepos() {
                   <>
                     <div className='ide-kv'>
                       <span>Semantic source coverage</span>
-                      <span>
-                        {semanticIndex.indexedFiles}/{semanticIndex.eligibleFiles} files ·{' '}
-                        {semanticIndex.coveragePercent.toFixed(1)}%
-                      </span>
+                      <span>{semanticCoverageLabel(semanticIndex)}</span>
                     </div>
                     <div className='ide-kv'>
                       <span>Semantic status</span>
@@ -1882,7 +1880,7 @@ export function IdeProjectRepos() {
                     </div>
                     <div className='ide-kv'>
                       <span>Search fallback</span>
-                      <span>ripgrep available · relationship graph not available</span>
+                      <span>{codeSearchCapabilitiesLabel(semanticIndex)}</span>
                     </div>
                   </>
                 )}
