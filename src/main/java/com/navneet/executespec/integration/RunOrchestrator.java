@@ -515,7 +515,8 @@ public class RunOrchestrator implements RunControlPort {
         source.isTddMode(),
         source.getUserCostCap(),
         source.isSkipAutoPush(),
-        source.getOrgId());
+        source.getOrgId(),
+        source.getCheckoutBranch());
   }
 
   record IterationPolicy(
@@ -527,7 +528,8 @@ public class RunOrchestrator implements RunControlPort {
       boolean tddMode,
       Double userCostCap,
       boolean skipAutoPush,
-      String tenantOrgId) {}
+      String tenantOrgId,
+      String checkoutBranch) {}
 
   static String normalizeIterationExecutionMode(String executionMode) {
     return "PROTOTYPE".equalsIgnoreCase(executionMode) ? "PROTOTYPE" : "PRODUCTION";

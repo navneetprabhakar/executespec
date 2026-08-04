@@ -314,3 +314,13 @@ Fail-closed / evidence-honest corrections; no migration.
   the exact admitted SHA. Required iteration copies preserve the sole root-repository snapshot;
   restored nested repositories without their original Git proof fail closed instead of being
   reclassified as the synthetic root repository.
+- **2026-08-04 iterate branch re-anchor** — auto-push leaves the source run's checkout on its
+  publication branch (`executespec/<runId>`), and the iteration copy follows that HEAD, so every
+  published project run's follow-up deterministically failed preflight branch verification.
+  `RequiredIterationWorkspaceCopier` now re-anchors each copied repository on its
+  `run_repo_snapshot.branch` baseline (`git checkout -B`, working tree and HEAD commit unchanged;
+  unsafe branch shapes fail closed), and `IterationSubmitPolicyFactory` inherits the source run's
+  `checkoutBranch` so a source that legitimately ran on a non-default branch is verified against
+  that same branch. `WorkspaceInitService.verifyMultipleRepos` rejections carry a closed sub-code
+  vocabulary (`BRANCH_MISMATCH` / `CLONE_MISSING` / `EMPTY_INVENTORY` / `INVENTORY_ERROR`) so the
+  terminal outcome can be honest instead of blaming repository access.
