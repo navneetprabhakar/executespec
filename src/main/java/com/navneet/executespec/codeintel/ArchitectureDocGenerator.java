@@ -89,6 +89,8 @@ Rules:
 - Per-repository model prose cannot establish behavior or a cross-repository relationship.
   EXECUTESPEC_EXPORTED_FUNCTION_EVIDENCE_V1 is not propagated into this combined input, so it
   cannot be used here as exact-source authority.
+- Do not enumerate allowed, supported, accepted, or valid fields/options/values for a symbol. The
+  combined input has no exact-source authority for exhaustive source contracts.
 - Prefer prose to bulletised dumps.
       - If only one repo is in scope, produce the document anyway but
         state that no cross-repository flow exists in scope. Describe an intra-repository flow only
@@ -229,6 +231,8 @@ Rules:
             .collect(java.util.stream.Collectors.joining("\n"));
     String grounded = GeneratedSignatureGrounding.sanitize(text.trim(), sourceEvidence);
     grounded = GeneratedSignatureGrounding.sanitizeUnsupportedBehavior(grounded, sourceEvidence);
+    grounded =
+        GeneratedSourceContractGrounding.sanitizeWithoutSourceAuthority(grounded, sourceEvidence);
     grounded = GeneratedProjectFactGrounding.sanitize(grounded, sourceEvidence);
     return new Result(
         DeterministicArchitectureEvidence.appendFromRepoDocs(grounded, repoArchDocs, repoFullNames),

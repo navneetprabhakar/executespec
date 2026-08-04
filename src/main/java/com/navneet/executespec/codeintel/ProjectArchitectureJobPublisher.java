@@ -97,9 +97,14 @@ public class ProjectArchitectureJobPublisher {
       }
       String groundedProse =
           GeneratedProjectFactGrounding.sanitize(
-              GeneratedSignatureGrounding.sanitizeUnsupportedBehavior(
-                  GeneratedSignatureGrounding.sanitize(repoArchitecture.content(), repoEvidence),
-                  repoEvidence),
+              GeneratedSourceContractGrounding.sanitizeForRepository(
+                  GeneratedSignatureGrounding.sanitizeUnsupportedBehavior(
+                      GeneratedSignatureGrounding.sanitize(
+                          repoArchitecture.content(), repoEvidence),
+                      repoEvidence),
+                  repoEvidence,
+                  repoArchitecture.repoFullName(),
+                  repoArchitecture.revision()),
               repoEvidence);
       groundedRepoArchitectures.put(
           repoArchitecture.repoId(),
@@ -111,15 +116,19 @@ public class ProjectArchitectureJobPublisher {
     }
     String groundedProjectProse =
         GeneratedProjectFactGrounding.sanitize(
-            GeneratedSignatureGrounding.sanitizeUnsupportedBehavior(
-                GeneratedSignatureGrounding.sanitize(
-                    staged.projectArchitecture().content(), sourceEvidence),
+            GeneratedSourceContractGrounding.sanitizeWithoutSourceAuthority(
+                GeneratedSignatureGrounding.sanitizeUnsupportedBehavior(
+                    GeneratedSignatureGrounding.sanitize(
+                        staged.projectArchitecture().content(), sourceEvidence),
+                    sourceEvidence),
                 sourceEvidence),
             sourceEvidence);
     String groundedSummary =
         GeneratedProjectFactGrounding.sanitize(
-            GeneratedSignatureGrounding.sanitizeUnsupportedBehavior(
-                GeneratedSignatureGrounding.sanitize(staged.summary(), sourceEvidence),
+            GeneratedSourceContractGrounding.sanitizeWithoutSourceAuthority(
+                GeneratedSignatureGrounding.sanitizeUnsupportedBehavior(
+                    GeneratedSignatureGrounding.sanitize(staged.summary(), sourceEvidence),
+                    sourceEvidence),
                 sourceEvidence),
             sourceEvidence);
 

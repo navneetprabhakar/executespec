@@ -220,6 +220,22 @@ Legacy same-SHA codemaps without the current fact marker are not reusable, and e
 complete fact block receives a reserved source-budget section before bulk declaration inventory.
 Surrounding repository/combined architecture prose remains model-derived explanatory content; it is
 conservatively sanitized and carries byte-exact deterministic appendices separately.
+`GeneratedSourceContractGrounding` also rejects exhaustive single-symbol contracts such as allowed,
+supported, accepted, or valid field/option/value lists unless one canonical
+`EXECUTESPEC_EXPORTED_FUNCTION_EVIDENCE_V1` entry is bound to that repository and exact source SHA,
+the same complete function declares the literal collection, the same collection receives the
+membership check against a function parameter, and the claimed values exactly equal that
+collection. Declaration inventory, model-generated `Purpose` prose, another function or
+repository, an unrelated collection/check, a subset, an unresolved constant, a truncated excerpt,
+or an absent/malformed evidence envelope cannot authorize the list. Structural matching runs
+against a code-only projection (`ExportedFunctionEvidence.maskNonCode`) with comment bodies and
+string contents blanked at stable offsets, so commented-out or string-quoted pseudo-code cannot
+authorize a contract while literal collection values are still read from the original matched
+offsets. Combined architecture and
+summary prose have no single-repository source-contract authority and therefore fail closed. The
+guard runs after both architecture generators and again in `ProjectArchitectureJobPublisher`.
+Unsupported prose is replaced with an explicit exact-source-evidence limitation; Markdown code
+examples and the deterministic appendices remain byte-exact.
 
 Every EXPLANATION corrective retry enumerates the four
 mandatory H2 lines verbatim/exactly once and forbids renaming, deleting, merging, reordering, or
