@@ -30,7 +30,8 @@ class WorkspaceAgentContextExclusionTest {
         mock(WorkspaceRestoreService.class),
         mock(RunRepoSnapshotRepository.class),
         mock(VendoredPathGuard.class),
-        mock(com.navneet.executespec.contractsurface.BrownfieldHttpContractGuard.class));
+        mock(com.navneet.executespec.contractsurface.BrownfieldHttpContractGuard.class),
+        new WorkspaceRepositoryRevisionService(properties, mock(RunRepoSnapshotRepository.class)));
   }
 
   @Test

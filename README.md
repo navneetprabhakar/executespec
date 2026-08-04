@@ -161,7 +161,7 @@ Generated project explanations can ground narrowly scoped behavior in digest-val
 exported JavaScript/TypeScript function excerpts; incomplete or budget-truncated excerpts are never
 treated as authority.
 
-The current deployment candidate advances the migration source head to V372. V354 adds
+The current deployment candidate advances the migration source head to V373. V354 adds
 rollout-gated operation-fenced provider-attempt admission; its default remains
 `EXECUTESPEC_LLM_OPERATION_ADMISSION_MODE=LEGACY`, so this deployment does not activate the new
 admission path. V355 adds bounded oldest-first recovery for stale streamed agent turns and never
@@ -172,7 +172,19 @@ documents durable asynchronous jobs with exact-route admission, fenced publicati
 status, and bounded terminal-job retention. V359 gives each immutable GitHub check-run/head-SHA
 failure a unique database claim before CI autofix submission, binds the canonical PATCH run in the
 next fenced transaction, and permits a later delivery to retry after a fenced failed submission or
-an expired claim with no discoverable run. V360 persists a run-bound canonical Spring HTTP surface
+an expired claim with no discoverable run. V373 separates the durable checkout branch from
+existing-PR publication authority. Ordinary Execution View/AIDLC launches may clone a selected
+source branch while still opening a fresh ExecuteSpec PR. Continue-on-PR runs bind the checkout,
+repository, PR number, and head branch before async dispatch; publication revalidates that exact
+identity, fast-forwards without force, and never schedules the pre-existing branch for cleanup.
+PR-review and CI-fix admission also recheck the live open PR, configured base, and captured 40-hex
+head SHA before dispatch; V373 persists that SHA immutably and fresh/recovered clones prove actual
+HEAD before provider spend. An active-run replay is accepted only when actor, tenant, payer,
+selected repository, checkout branch, and publication tuple all match exactly. Private-repository
+clones retain the active actor's in-memory GitHub credential. Crash-recovered clones must prove
+their actual branch before planning, and correction runs project the reused PR's live status/CI
+evidence through their own run-detail API.
+V360 persists a run-bound canonical Spring HTTP surface
 at brownfield admission and blocks route removal after workers, corrections, validation, and
 immediately before publication unless an exact durable `BREAKING` gate receipt authorizes it. V361
 binds every new validation report and ledger entry to a canonical Git-tree workspace generation.
@@ -242,7 +254,7 @@ RequirementIR also remains `LEGACY`.
 | Project           | `2.0.0`             | [`VERSION`](VERSION), [`Version`](Version), [`pom.xml`](pom.xml) `<version>` |
 | Spring Boot       | `3.5.14`            | [`pom.xml`](pom.xml) `<parent>` (bumped from `3.3.0` by Dependabot #132, 2026-05-16) |
 | Spring AI         | `1.1.6`             | [`pom.xml`](pom.xml) `<spring-ai.version>` (BOM import)                |
-| Flyway head       | `V372`              | V372 route-fingerprints historical cost cohorts; next V373               |
+| Flyway head       | `V373`              | V373 separates checkout from exact existing-PR authority; next V374      |
 | Frontend          | `2.0.0`             | [`frontend/package.json`](frontend/package.json) `"version"`           |
 
 `VERSION` and `Version` are kept identical by hand; the project's own conventions reference `Version` as the source of truth. The frontend ships under the same release stamp as the backend.
@@ -278,7 +290,7 @@ egress is required before the four runtime flags can be enabled.
 | Framework           | Spring Boot 3.5.14 (Web, Data JPA, Security, OAuth2 client, Mail, Thymeleaf, Actuator, AOP, Validation, Retry, Data Redis) | [`pom.xml`](pom.xml) deps 1, 5, 14–20, 30, 36–39, 60 |
 | LLM SDK             | Spring AI 1.1.6 starters for Anthropic, OpenAI, Google GenAI                        | [`pom.xml`](pom.xml) deps 2–4                                                    |
 | LLM auto-config     | Provider auto-configurations disabled in favor of manual `AgentModelConfig` beans   | [`src/main/java/com/navneet/executespec/ExecutespecApplication.java`](src/main/java/com/navneet/executespec/ExecutespecApplication.java) |
-| Database            | PostgreSQL (Cloud SQL in prod), Flyway migrations head V372                         | [`pom.xml`](pom.xml) deps 6–8, `src/main/resources/db/migration/`                 |
+| Database            | PostgreSQL (Cloud SQL in prod), Flyway migrations head V373                         | [`pom.xml`](pom.xml) deps 6–8, `src/main/resources/db/migration/`                 |
 | Cache / lock        | Redis (Lettuce), ShedLock 7.7.0                                                     | [`pom.xml`](pom.xml) deps 30–32                                                  |
 | Auth                | JJWT 0.13.0 + Spring Security OAuth2 client (Google, GitHub)                        | [`pom.xml`](pom.xml) deps 14–18                                                  |
 | Billing             | Stripe 32.1.0, Razorpay (HMAC), invoice PDFs via OpenPDF 2.0.3 + flying-saucer 9.4.0 | [`pom.xml`](pom.xml) deps 21–22, 56; HMAC via commons-codec 1.22.0 (dep 35)     |
@@ -338,7 +350,7 @@ Gemini 3.5 Flash/3.5 Flash-Lite, native DeepSeek V4, and the surviving Fireworks
 │   └── ... (78 package roots total under com.navneet.executespec)
 ├── src/main/resources/
 │   ├── application.yml           Single source of truth for model matrix, provider routes, pricing, failover
-│   ├── db/migration/             Flyway V*.sql (head V372; next V373; 358 source files; immutable post-apply)
+│   ├── db/migration/             Flyway V*.sql (head V373; next V374; 359 source files; immutable post-apply)
 │   ├── prompts/                  External LLM prompts (assembled by PromptAssembler)
 │   └── static/                   Vite build output served by Spring Boot
 ├── src/test/java/                Unit + ArchUnit guard tests (e.g. AccessGuardCoverageTest)

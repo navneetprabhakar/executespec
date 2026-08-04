@@ -43,6 +43,12 @@ class RunSyncServiceBranchValidationTest {
     assertThat(RunSyncService.isValidBranch("main$(id)")).isFalse();
     assertThat(RunSyncService.isValidBranch("")).isFalse();
     assertThat(RunSyncService.isValidBranch(null)).isFalse();
+    assertThat(RunSyncService.isValidBranch("feature//double")).isFalse();
+    assertThat(RunSyncService.isValidBranch("feature/../main")).isFalse();
+    assertThat(RunSyncService.isValidBranch("feature/work.lock")).isFalse();
+    assertThat(RunSyncService.isValidBranch("feature/trailing/")).isFalse();
+    assertThat(RunSyncService.isValidBranch("feature/trailing.")).isFalse();
+    assertThat(RunSyncService.isValidBranch("feature/@{upstream}")).isFalse();
   }
 
   @Test
