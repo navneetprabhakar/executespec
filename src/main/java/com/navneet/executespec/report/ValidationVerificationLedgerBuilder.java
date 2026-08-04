@@ -295,32 +295,38 @@ final class ValidationVerificationLedgerBuilder {
                     accuracy.incompleteRequirements(),
                     accuracy.unknownRequirements())
                 : entity.getRubricScore();
+    // A failed accuracy provider call leaves an internal issue-count heuristic; that row must not
+    // claim a model graded the spec, so it drops to UNKNOWN/INTERNAL_FORMULA with no numeric grade.
+    boolean heuristicSpec = accuracy.heuristicEstimate();
     out.add(
         evidence(
             "spec-adherence",
             "Spec adherence",
             "SPEC",
-            accuracy.score() == null || !accuracy.specCited()
+            heuristicSpec || accuracy.score() == null || !accuracy.specCited()
                 ? "UNKNOWN"
                 : accuracy.unknownRequirements() > 0
                     ? "WARN"
                     : accuracy.score() >= 85 ? "PASS" : accuracy.score() >= 70 ? "WARN" : "FAIL",
-            "LLM_ASSESSMENT",
+            heuristicSpec ? "INTERNAL_FORMULA" : "LLM_ASSESSMENT",
             "LOW",
             "The delivered code appears to satisfy the natural-language spec.",
-            accuracy.score() == null
-                ? "Accuracy assessment was not captured."
-                : "LLM assessment: "
-                    + accuracy.score()
-                    + "/100"
-                    + (accuracy.grade() == null ? "" : " (" + accuracy.grade() + ")")
-                    + (accuracy.unknownRequirements() > 0
-                        ? "; " + accuracy.unknownRequirements() + " requirement(s) unverified"
-                        : "")
-                    + ".",
+            heuristicSpec
+                ? "Accuracy assessment unavailable; heuristic estimate from review issue count —"
+                    + " no model graded the spec."
+                : accuracy.score() == null
+                    ? "Accuracy assessment was not captured."
+                    : "LLM assessment: "
+                        + accuracy.score()
+                        + "/100"
+                        + (accuracy.grade() == null ? "" : " (" + accuracy.grade() + ")")
+                        + (accuracy.unknownRequirements() > 0
+                            ? "; " + accuracy.unknownRequirements() + " requirement(s) unverified"
+                            : "")
+                        + ".",
             accuracy.specArtifact("validation_report.accuracy_json"),
-            accuracy.score(),
-            accuracy.score() == null ? null : 100));
+            heuristicSpec ? null : accuracy.score(),
+            heuristicSpec || accuracy.score() == null ? null : 100));
 
     out.add(
         ValidationEndpointCoverageEvidence.build(

@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
@@ -209,6 +210,34 @@ class ValidationReportServiceVerificationLedgerTest {
     assertEntry(ledger, "endpoint-coverage", "UNKNOWN", "LLM_ASSISTED_COUNT", "MEDIUM");
     assertEntry(ledger, "test-coverage-judgment", "UNKNOWN", "LLM_ASSESSMENT", "LOW");
     assertTrue(find(ledger, "spec-adherence").artifact().startsWith("UNAVAILABLE:"));
+  }
+
+  @Test
+  void heuristicAccuracyFallbackIsLabelledInternalFormulaWithoutANumericGrade() {
+    ValidationReport report =
+        ValidationReport.builder()
+            .id("vr-heuristic")
+            .runId("run-heuristic")
+            .runtimeSurface("HTTP")
+            .accuracyJson(
+                """
+{
+  "specAdherenceScore": 75,
+  "overallAccuracyGrade": "C",
+  "gradingNotes": "Accuracy assessment unavailable — estimated from review issue count.",
+  "testCoverageLevel": "PARTIAL"
+}
+""")
+            .build();
+
+    List<VerificationEvidenceDTO> ledger = svc.buildVerificationLedger(report, List.of());
+
+    assertEntry(ledger, "spec-adherence", "UNKNOWN", "INTERNAL_FORMULA", "LOW");
+    VerificationEvidenceDTO row = find(ledger, "spec-adherence");
+    assertTrue(row.summary().contains("assessment unavailable"));
+    assertTrue(row.summary().contains("heuristic estimate"));
+    assertNull(row.observed());
+    assertNull(row.total());
   }
 
   @Test

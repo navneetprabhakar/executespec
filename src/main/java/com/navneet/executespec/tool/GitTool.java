@@ -690,8 +690,8 @@ public class GitTool {
         return GitToolResult.err("Push failed: " + output);
       }
     } catch (Exception e) {
-      log.warn("[GitTool] Push failed: {}", e.getMessage());
-      return GitToolResult.err("Push failed: " + e.getMessage());
+      log.warn("[GitTool] Push failed: {}", describeFailure(e));
+      return GitToolResult.err("Push failed: " + describeFailure(e));
     }
   }
 
@@ -735,6 +735,16 @@ public class GitTool {
    * rejection surfaces as {@code stale info}; a plain non-forced push to a divergent remote
    * surfaces as {@code non-fast-forward} / {@code fetch first}.
    */
+  /**
+   * Never null: a message-less exception (e.g. an NPE) reports its type instead of the literal
+   * string "null", which previously surfaced to customers as "subdir push failed: null".
+   */
+  private static String describeFailure(Exception e) {
+    return e.getMessage() != null && !e.getMessage().isBlank()
+        ? e.getMessage()
+        : e.getClass().getSimpleName();
+  }
+
   private static String describePushFailure(
       String branch, String expectedRemoteSha, String output) {
     String lower = output == null ? "" : output.toLowerCase(java.util.Locale.ROOT);
@@ -812,8 +822,8 @@ public class GitTool {
         return GitToolResult.err("Push branch failed: " + detail);
       }
     } catch (Exception e) {
-      log.warn("[GitTool] Push branch failed: {}", e.getMessage());
-      return GitToolResult.err("Push branch failed: " + e.getMessage());
+      log.warn("[GitTool] Push branch failed: {}", describeFailure(e));
+      return GitToolResult.err("Push branch failed: " + describeFailure(e));
     }
   }
 
@@ -874,8 +884,8 @@ public class GitTool {
             "push failed: " + describePushFailure(branchName, expectedRemoteSha, pushOut));
       return GitToolResult.ok(branchName);
     } catch (Exception e) {
-      log.warn("[GitTool] commitAndPushSubdir failed: {}", e.getMessage());
-      return GitToolResult.err("subdir push failed: " + e.getMessage());
+      log.warn("[GitTool] commitAndPushSubdir failed", e);
+      return GitToolResult.err("subdir push failed: " + describeFailure(e));
     }
   }
 
@@ -957,8 +967,8 @@ public class GitTool {
       if (pushExit != 0) return GitToolResult.err("push failed: " + pushOut);
       return GitToolResult.ok(worktreeClean ? "PUSHED_EXISTING_COMMIT" : branchName);
     } catch (Exception e) {
-      log.warn("[GitTool] pushToExistingBranch failed: {}", e.getMessage());
-      return GitToolResult.err("push to existing branch failed: " + e.getMessage());
+      log.warn("[GitTool] pushToExistingBranch failed: {}", describeFailure(e));
+      return GitToolResult.err("push to existing branch failed: " + describeFailure(e));
     }
   }
 
@@ -1057,8 +1067,8 @@ public class GitTool {
         return GitToolResult.err("Push branch failed: " + detail);
       }
     } catch (Exception e) {
-      log.warn("[GitTool] Bitbucket push failed: {}", e.getMessage());
-      return GitToolResult.err("Push branch failed: " + e.getMessage());
+      log.warn("[GitTool] Bitbucket push failed: {}", describeFailure(e));
+      return GitToolResult.err("Push branch failed: " + describeFailure(e));
     }
   }
 

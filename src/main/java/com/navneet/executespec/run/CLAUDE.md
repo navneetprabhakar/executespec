@@ -14,9 +14,18 @@ The Web result surface renders exactly one primary control from `terminalOutcome
 `USER_STOPPED` as a neutral stop rather than a failed recovery case and does not poll for a report
 after a terminal one-shot report read returns absent. Email and in-app cancellation notifications
 also honor the neutral completion preference rather than the failure preference.
-An existing pull request is publication history, not attempt-scoped mutation proof: only a clean or
-warning completion paired with a PR may set `impact.codeChanged=true`; failed/limited attempts keep
-that field unknown unless a future mutation receipt proves it. Provider/key/model-matrix outcomes
+An existing pull request is publication history, not attempt-scoped mutation proof: a clean or
+warning completion may set `impact.codeChanged=true` even when publication is `NOT_CREATED`,
+because the run's own validated product diff proves mutation; failed/limited attempts keep that
+field unknown unless a future mutation receipt proves it.
+A clean or warning completion whose expected auto-publication did not create a pull request is no
+longer projected as an unqualified success: when the run is repo-backed, server-executed, and the
+customer did not withhold publication (`RunTerminalOutcomeContract.autoPublicationExpected`), the
+projection states that the pull request was not created and carries an
+`OPEN_PUBLICATION_ELIGIBILITY` next action pointing at the publication evidence. The stable
+blocking code is read from the bounded `PUBLICATION_BLOCKED[<code>]` marker `ScmPushService`
+persists into the otherwise-null `pipeline_run.failure_reason` after a non-published push; a real
+failure reason is never overwritten and a later successful push clears a stale marker. Provider/key/model-matrix outcomes
 return one `OPEN_PROVIDER_SETTINGS` action at `/provider-keys` instead of retrying an unchanged
 route. `WORKSPACE_PREFLIGHT_FAILED` with a `BRANCH_MISMATCH` sub-code projects an honest
 branch-state outcome instead of the generic "check repository access" advice, because access is

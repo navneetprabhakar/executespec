@@ -199,6 +199,7 @@ class AutomaticCorrectionLifecycleEvidenceTest {
     CorrectionWorkspaceTransaction workspace = mock(CorrectionWorkspaceTransaction.class);
     var checkpoint =
         new CorrectionWorkspaceTransaction.Checkpoint(
+            Path.of("/tmp/correction-test"),
             List.of(
                 new CorrectionWorkspaceTransaction.RepositoryCheckpoint(
                     Path.of("/tmp/correction-test"), "head", "tree")));
@@ -256,6 +257,7 @@ class AutomaticCorrectionLifecycleEvidenceTest {
     CorrectionWorkspaceTransaction workspace = mock(CorrectionWorkspaceTransaction.class);
     var checkpoint =
         new CorrectionWorkspaceTransaction.Checkpoint(
+            Path.of("/tmp/correction-proof"),
             List.of(
                 new CorrectionWorkspaceTransaction.RepositoryCheckpoint(
                     Path.of("/tmp/correction-proof"), "head", "tree")));
