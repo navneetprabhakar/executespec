@@ -25,8 +25,10 @@ import com.navneet.executespec.billing.service.UsageTrackingService;
 import com.navneet.executespec.config.featureflag.FeatureFlagService;
 import com.navneet.executespec.integration.PlanGateBypassPolicy;
 import com.navneet.executespec.integration.RunOrchestrator;
+import com.navneet.executespec.project.entity.ProjectRepo;
 import com.navneet.executespec.project.security.ProjectAccessGuard;
 import com.navneet.executespec.project.service.ProjectRepoService;
+import com.navneet.executespec.repo.GitHubRepoService;
 import com.navneet.executespec.router.ModelAccessService;
 import com.navneet.executespec.security.InputSanitizer;
 import com.navneet.executespec.state.StateStore;
@@ -49,6 +51,7 @@ class CustomerRunSubmissionServiceTest {
   @Mock PlanGateBypassPolicy bypassPolicy;
   @Mock ProjectAccessGuard projectGuard;
   @Mock ProjectRepoService projectRepos;
+  @Mock GitHubRepoService gitHubRepoService;
   @Mock ModelAccessService modelAccess;
   @Mock AiProviderPreferenceService providerPreference;
   @Mock ManagedAiUsageService managedAiUsage;
@@ -73,6 +76,7 @@ class CustomerRunSubmissionServiceTest {
             bypassPolicy,
             projectGuard,
             projectRepos,
+            gitHubRepoService,
             modelAccess,
             providerPreference,
             managedAiUsage,
@@ -98,6 +102,308 @@ class CustomerRunSubmissionServiceTest {
                     .isEqualTo(HttpStatus.BAD_REQUEST));
 
     verifyNoInteractions(idempotency, managedAiUsage, orchestrator);
+  }
+
+  @Test
+  void rejectsInvalidBranchBeforeIdempotencyClaimOrProviderSpend() {
+    assertThatThrownBy(
+            () -> service.submit(command().branchOverride("feature/../main").build(), actor))
+        .isInstanceOf(ResponseStatusException.class)
+        .satisfies(
+            error ->
+                assertThat(((ResponseStatusException) error).getStatusCode())
+                    .isEqualTo(HttpStatus.BAD_REQUEST));
+
+    verifyNoInteractions(idempotency, managedAiUsage, orchestrator);
+  }
+
+  @Test
+  void rejectsLocalHandsExistingPrPublicationAsTypedRequestErrorBeforeSpend() {
+    assertThatThrownBy(
+            () ->
+                service.submit(
+                    command()
+                        .localExecution(true)
+                        .branchOverride("feature/pr-12")
+                        .patAuthenticated(true)
+                        .build(),
+                    actor))
+        .isInstanceOf(ResponseStatusException.class)
+        .satisfies(
+            error ->
+                assertThat(((ResponseStatusException) error).getStatusCode())
+                    .isEqualTo(HttpStatus.UNPROCESSABLE_ENTITY));
+
+    verifyNoInteractions(idempotency, managedAiUsage, orchestrator);
+  }
+
+  @Test
+  void rejectsDefaultBranchTargetBeforeProviderSpend() {
+    AppUserDetails githubActor =
+        new AppUserDetails(
+            AppUser.builder().id("user-1").orgId("org-home").githubPat("ghp_user_pat").build(),
+            null);
+    when(gitHubRepoService.findDefaultBranch(
+            "https://github.com/acme/customer-repo", "ghp_user_pat"))
+        .thenReturn(GitHubRepoService.DefaultBranchLookup.found("main"));
+    when(idempotency.claim("user-1", null, null)).thenReturn(RunIdempotencyClaim.disabled());
+
+    assertThatThrownBy(
+            () ->
+                service.submit(
+                    command()
+                        .repoUrl("https://github.com/acme/customer-repo")
+                        .repoMode("EXISTING")
+                        .branchOverride("main")
+                        .build(),
+                    githubActor))
+        .isInstanceOf(ResponseStatusException.class)
+        .satisfies(
+            error ->
+                assertThat(((ResponseStatusException) error).getStatusCode())
+                    .isEqualTo(HttpStatus.BAD_REQUEST));
+
+    verifyNoInteractions(managedAiUsage, orchestrator);
+  }
+
+  @Test
+  void rejectsBranchWithoutOpenPullRequestBeforeProviderSpend() {
+    AppUserDetails githubActor =
+        new AppUserDetails(
+            AppUser.builder().id("user-1").orgId("org-home").githubPat("ghp_user_pat").build(),
+            null);
+    when(gitHubRepoService.findDefaultBranch(
+            "https://github.com/acme/customer-repo", "ghp_user_pat"))
+        .thenReturn(GitHubRepoService.DefaultBranchLookup.found("main"));
+    when(gitHubRepoService.findOpenPullRequestForHead(
+            "acme/customer-repo", "feature/no-pr", "ghp_user_pat"))
+        .thenReturn(GitHubRepoService.OpenPullRequestLookup.none());
+    when(idempotency.claim("user-1", null, null)).thenReturn(RunIdempotencyClaim.disabled());
+
+    assertThatThrownBy(
+            () ->
+                service.submit(
+                    command()
+                        .repoUrl("https://github.com/acme/customer-repo")
+                        .repoMode("EXISTING")
+                        .branchOverride("feature/no-pr")
+                        .build(),
+                    githubActor))
+        .isInstanceOf(ResponseStatusException.class)
+        .satisfies(
+            error ->
+                assertThat(((ResponseStatusException) error).getStatusCode())
+                    .isEqualTo(HttpStatus.CONFLICT));
+
+    verifyNoInteractions(managedAiUsage, orchestrator);
+  }
+
+  @Test
+  void projectBranchCannotTargetEitherDefaultOrConfiguredTargetBeforeSpend() {
+    UUID repoId = UUID.randomUUID();
+    AppUserDetails githubActor = githubActor();
+    Project project =
+        Project.builder().id("project-1").orgId("org-home").targetBranch("develop").build();
+    ProjectRepo repo =
+        ProjectRepo.builder()
+            .id(repoId)
+            .githubRepoFullName("acme/customer-repo")
+            .scmProvider("GITHUB")
+            .defaultBranch("main")
+            .build();
+    when(projectGuard.assertCanWrite("project-1", githubActor)).thenReturn(project);
+    when(projectRepos.resolveForRunStrict("project-1", List.of(repoId))).thenReturn(List.of(repo));
+    when(idempotency.claim("user-1", null, null)).thenReturn(RunIdempotencyClaim.disabled());
+
+    for (String protectedBranch : List.of("main", "develop")) {
+      assertThatThrownBy(
+              () ->
+                  service.submit(
+                      command()
+                          .projectId("project-1")
+                          .selectedRepoIds(List.of(repoId))
+                          .branchOverride(protectedBranch)
+                          .build(),
+                      githubActor))
+          .isInstanceOf(ResponseStatusException.class)
+          .satisfies(
+              error ->
+                  assertThat(((ResponseStatusException) error).getStatusCode())
+                      .isEqualTo(HttpStatus.BAD_REQUEST));
+    }
+
+    verifyNoInteractions(managedAiUsage, orchestrator);
+  }
+
+  @Test
+  void projectPullRequestMustTargetTheConfiguredBaseBeforeSpend() {
+    UUID repoId = UUID.randomUUID();
+    AppUserDetails githubActor = githubActor();
+    Project project =
+        Project.builder().id("project-1").orgId("org-home").targetBranch("develop").build();
+    ProjectRepo repo =
+        ProjectRepo.builder()
+            .id(repoId)
+            .githubRepoFullName("acme/customer-repo")
+            .scmProvider("GITHUB")
+            .defaultBranch("main")
+            .build();
+    when(projectGuard.assertCanWrite("project-1", githubActor)).thenReturn(project);
+    when(projectRepos.resolveForRunStrict("project-1", List.of(repoId))).thenReturn(List.of(repo));
+    when(gitHubRepoService.findOpenPullRequestForHead(
+            "acme/customer-repo", "feature/pr-12", "ghp_user_pat"))
+        .thenReturn(
+            GitHubRepoService.OpenPullRequestLookup.found(
+                "https://github.com/acme/customer-repo/pull/12", 12, "main", "a".repeat(40)));
+    when(idempotency.claim("user-1", null, null)).thenReturn(RunIdempotencyClaim.disabled());
+
+    assertThatThrownBy(
+            () ->
+                service.submit(
+                    command()
+                        .projectId("project-1")
+                        .selectedRepoIds(List.of(repoId))
+                        .branchOverride("feature/pr-12")
+                        .build(),
+                    githubActor))
+        .isInstanceOf(ResponseStatusException.class)
+        .satisfies(
+            error ->
+                assertThat(((ResponseStatusException) error).getStatusCode())
+                    .isEqualTo(HttpStatus.CONFLICT));
+
+    verifyNoInteractions(managedAiUsage, orchestrator);
+  }
+
+  @Test
+  void projectPullRequestAgainstConfiguredBaseIsAdmitted() {
+    UUID repoId = UUID.randomUUID();
+    AppUserDetails githubActor = githubActor();
+    Project project =
+        Project.builder().id("project-1").orgId("org-home").targetBranch("develop").build();
+    ProjectRepo repo =
+        ProjectRepo.builder()
+            .id(repoId)
+            .githubRepoFullName("acme/customer-repo")
+            .scmProvider("GITHUB")
+            .defaultBranch("main")
+            .build();
+    when(projectGuard.assertCanWrite("project-1", githubActor)).thenReturn(project);
+    when(projectRepos.resolveForRunStrict("project-1", List.of(repoId))).thenReturn(List.of(repo));
+    when(gitHubRepoService.findOpenPullRequestForHead(
+            "acme/customer-repo", "feature/pr-12", "ghp_user_pat"))
+        .thenReturn(
+            GitHubRepoService.OpenPullRequestLookup.found(
+                "https://github.com/acme/customer-repo/pull/12", 12, "develop", "a".repeat(40)));
+    PipelineRun created =
+        PipelineRun.builder().runId("run-created").createdByUserId("user-1").build();
+    AtomicReference<RunOrchestrator.SubmitPolicy> publicationPolicy = new AtomicReference<>();
+    AtomicReference<String> publicationBranch = new AtomicReference<>();
+    when(idempotency.claim("user-1", "key-1", "fingerprint"))
+        .thenReturn(RunIdempotencyClaim.claimed("user-1", "key-1", "owner", 1L));
+    submitStub()
+        .thenAnswer(
+            invocation -> {
+              publicationBranch.set(invocation.getArgument(17));
+              publicationPolicy.set(invocation.getArgument(24));
+              return created;
+            });
+    when(idempotency.complete(any(), org.mockito.ArgumentMatchers.eq("run-created")))
+        .thenReturn(
+            new RunIdempotencyService.Completion(
+                RunIdempotencyService.CompletionStatus.PUBLISHED, "run-created"));
+
+    CustomerRunSubmissionService.Submission result =
+        service.submit(
+            command()
+                .projectId("project-1")
+                .selectedRepoIds(List.of(repoId))
+                .branchOverride("feature/pr-12")
+                .checkoutBranch("feature/pr-12")
+                .existingPrRepoFullName("acme/customer-repo")
+                .existingPrNumber(12)
+                .idempotencyKey("key-1")
+                .requestFingerprint("fingerprint")
+                .build(),
+            githubActor);
+
+    assertThat(result.run()).isSameAs(created);
+    assertThat(result.created()).isTrue();
+    assertThat(publicationBranch.get()).isEqualTo("feature/pr-12");
+    assertThat(publicationPolicy.get().checkoutBranch()).isEqualTo("feature/pr-12");
+    assertThat(publicationPolicy.get().publicationRepoFullName()).isEqualTo("acme/customer-repo");
+    assertThat(publicationPolicy.get().publicationPrNumber()).isEqualTo(12);
+    assertThat(publicationPolicy.get().publicationHeadSha()).isEqualTo("a".repeat(40));
+    verify(managedAiUsage).assertCanStartRun(githubActor, false);
+  }
+
+  @Test
+  void exactPullRequestNumberMismatchFailsBeforeProviderSpend() {
+    UUID repoId = UUID.randomUUID();
+    AppUserDetails githubActor = githubActor();
+    Project project =
+        Project.builder().id("project-1").orgId("org-home").targetBranch("main").build();
+    ProjectRepo repo =
+        ProjectRepo.builder()
+            .id(repoId)
+            .githubRepoFullName("acme/customer-repo")
+            .scmProvider("GITHUB")
+            .defaultBranch("main")
+            .build();
+    when(projectGuard.assertCanWrite("project-1", githubActor)).thenReturn(project);
+    when(projectRepos.resolveForRunStrict("project-1", List.of(repoId))).thenReturn(List.of(repo));
+    when(gitHubRepoService.findOpenPullRequestForHead(
+            "acme/customer-repo", "feature/pr-12", "ghp_user_pat"))
+        .thenReturn(
+            GitHubRepoService.OpenPullRequestLookup.found(
+                "https://github.com/acme/customer-repo/pull/12", 12, "main", "a".repeat(40)));
+    when(idempotency.claim("user-1", null, null)).thenReturn(RunIdempotencyClaim.disabled());
+
+    assertThatThrownBy(
+            () ->
+                service.submit(
+                    command()
+                        .projectId("project-1")
+                        .selectedRepoIds(List.of(repoId))
+                        .branchOverride("feature/pr-12")
+                        .checkoutBranch("feature/pr-12")
+                        .existingPrRepoFullName("acme/customer-repo")
+                        .existingPrNumber(16)
+                        .build(),
+                    githubActor))
+        .isInstanceOf(ResponseStatusException.class)
+        .satisfies(
+            error ->
+                assertThat(((ResponseStatusException) error).getStatusCode())
+                    .isEqualTo(HttpStatus.CONFLICT));
+    verifyNoInteractions(managedAiUsage, orchestrator);
+  }
+
+  @Test
+  void idempotentReplayReturnsCanonicalRunWithoutRecheckingMutablePullRequestState() {
+    AppUserDetails githubActor = githubActor();
+    PipelineRun canonical =
+        PipelineRun.builder().runId("run-canonical").createdByUserId("user-1").build();
+    when(idempotency.claim("user-1", "key-1", "fingerprint"))
+        .thenReturn(
+            RunIdempotencyClaim.resolved(
+                RunIdempotencyStatus.DUPLICATE, "user-1", "key-1", "run-canonical", null));
+    when(stateStore.findRun("run-canonical")).thenReturn(Optional.of(canonical));
+
+    CustomerRunSubmissionService.Submission result =
+        service.submit(
+            command()
+                .repoUrl("https://github.com/acme/customer-repo")
+                .repoMode("EXISTING")
+                .branchOverride("feature/pr-12")
+                .idempotencyKey("key-1")
+                .requestFingerprint("fingerprint")
+                .build(),
+            githubActor);
+
+    assertThat(result.created()).isFalse();
+    assertThat(result.run().getRunId()).isEqualTo("run-canonical");
+    verifyNoInteractions(gitHubRepoService, managedAiUsage, orchestrator);
   }
 
   @Test
@@ -169,6 +475,7 @@ class CustomerRunSubmissionServiceTest {
             bypassPolicy,
             projectGuard,
             projectRepos,
+            gitHubRepoService,
             modelAccess,
             providerPreference,
             managedAiUsage,
@@ -398,5 +705,10 @@ class CustomerRunSubmissionServiceTest {
     return CustomerRunSubmissionService.Command.builder()
         .userRequest("build a safe change")
         .source("REST");
+  }
+
+  private static AppUserDetails githubActor() {
+    return new AppUserDetails(
+        AppUser.builder().id("user-1").orgId("org-home").githubPat("ghp_user_pat").build(), null);
   }
 }

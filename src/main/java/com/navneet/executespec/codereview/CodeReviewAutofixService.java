@@ -108,6 +108,9 @@ public class CodeReviewAutofixService {
             // No branchOverride — code-review autofix opens a fresh PR per severity.
             null,
             user.getId(),
+            null,
+            null,
+            null,
             null);
 
     FindingPatchSubmitter.SubmitResult result = submitter.submit(finding);

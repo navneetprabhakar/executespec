@@ -92,7 +92,19 @@ public class RunSyncService {
 
   /** True when {@code branch} is a safe refspec token (never an option, never a metacharacter). */
   public static boolean isValidBranch(String branch) {
-    return branch != null && BRANCH.matcher(branch).matches();
+    if (branch == null || !BRANCH.matcher(branch).matches()) return false;
+    if (branch.contains("..")
+        || branch.contains("//")
+        || branch.endsWith("/")
+        || branch.endsWith(".")
+        || branch.contains("@{")
+        || branch.equals("@")) return false;
+    for (String component : branch.split("/", -1)) {
+      if (component.isBlank() || component.startsWith(".") || component.endsWith(".lock")) {
+        return false;
+      }
+    }
+    return true;
   }
 
   /**

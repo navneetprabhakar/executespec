@@ -43,7 +43,8 @@ public class StandaloneExistingWorkspaceAdmission {
       boolean localRun,
       String repoMode,
       String repoUrl,
-      String credentialSecret)
+      String credentialSecret,
+      String branchOverride)
       throws Exception {
     if (sourceRunId != null) {
       workspaceInit.copyFromRunRequired(sourceRunId, runId);
@@ -55,7 +56,7 @@ public class StandaloneExistingWorkspaceAdmission {
       workspaceInit.ensureRunWorkspace(runId);
       return Admission.admitted(0);
     }
-    Admission admission = admit(runId, repoUrl, credentialSecret);
+    Admission admission = admit(runId, repoUrl, credentialSecret, branchOverride);
     if (admission.admitted()) {
       log.info(
           "Admitted standalone brownfield run={} sourceFiles={}",
@@ -78,12 +79,17 @@ public class StandaloneExistingWorkspaceAdmission {
         && "EXISTING".equalsIgnoreCase(repoMode);
   }
 
-  private Admission admit(String runId, String repoUrl, String credentialSecret) {
+  private Admission admit(
+      String runId, String repoUrl, String credentialSecret, String branchOverride) {
     if (repoUrl == null || repoUrl.isBlank()) {
       return Admission.rejected("standalone EXISTING run requires a repository URL");
     }
     try {
-      workspaceInit.cloneFromRepo(runId, repoUrl, credentialSecret);
+      if (branchOverride == null || branchOverride.isBlank()) {
+        workspaceInit.cloneFromRepo(runId, repoUrl, credentialSecret);
+      } else {
+        workspaceInit.cloneFromRepoBranch(runId, repoUrl, branchOverride, credentialSecret);
+      }
     } catch (Exception cloneFailure) {
       log.warn(
           "Standalone brownfield clone failed run={} failureType={}",

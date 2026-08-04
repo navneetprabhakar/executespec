@@ -15,6 +15,7 @@ import com.navneet.executespec.analytics.EventTrackingService;
 import com.navneet.executespec.notification.InAppNotificationService;
 import com.navneet.executespec.notification.NotificationRepository;
 import com.navneet.executespec.project.repository.ProjectRepoRepository;
+import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
 
 import org.junit.jupiter.api.Test;
@@ -26,12 +27,13 @@ import org.junit.jupiter.api.Test;
 class PullRequestRecordServiceWebhookOrderingTest {
 
   private final PullRequestRecordRepository repo = mock(PullRequestRecordRepository.class);
+  private final PipelineRunRepository pipelineRuns = mock(PipelineRunRepository.class);
   private final PullRequestRecordService service =
       new PullRequestRecordService(
           repo,
           mock(InAppNotificationService.class),
           mock(NotificationRepository.class),
-          mock(PipelineRunRepository.class),
+          pipelineRuns,
           mock(ProjectRepoRepository.class),
           mock(EventTrackingService.class),
           mock(ActivityEventEmitter.class));
@@ -52,5 +54,28 @@ class PullRequestRecordServiceWebhookOrderingTest {
 
     assertThat(merged.getStatus()).isEqualTo(PullRequestRecord.Status.MERGED);
     verify(repo, never()).save(any());
+  }
+
+  @Test
+  void existingPrCorrectionRunProjectsTheOriginalLivePrRecord() {
+    PullRequestRecord existing =
+        PullRequestRecord.builder()
+            .runId("origin-run")
+            .repoFullName("acme/repo")
+            .prNumber(7)
+            .prUrl("https://github.com/acme/repo/pull/7")
+            .status(PullRequestRecord.Status.OPEN)
+            .build();
+    PipelineRun correction =
+        PipelineRun.builder()
+            .runId("fix-run")
+            .publicationRepoFullName("acme/repo")
+            .publicationPrNumber(7)
+            .build();
+    when(repo.findByRunIdOrderByCreatedAtAsc("fix-run")).thenReturn(java.util.List.of());
+    when(pipelineRuns.findById("fix-run")).thenReturn(Optional.of(correction));
+    when(repo.findByRepoFullNameAndPrNumber("acme/repo", 7)).thenReturn(Optional.of(existing));
+
+    assertThat(service.listForRun("fix-run")).containsExactly(existing);
   }
 }

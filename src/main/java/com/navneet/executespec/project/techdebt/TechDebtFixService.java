@@ -92,6 +92,9 @@ public class TechDebtFixService {
             // executespec/<runShort> branch + open a new PR per category.
             null,
             user.getId(),
+            null,
+            null,
+            null,
             null);
 
     FindingPatchSubmitter.SubmitResult result = submitter.submit(finding);

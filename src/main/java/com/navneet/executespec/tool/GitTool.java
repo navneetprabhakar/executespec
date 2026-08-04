@@ -882,8 +882,9 @@ public class GitTool {
   /**
    * v2.5.7 — incremental push to an existing remote branch. Unlike {@link #commitAndPushSubdir}
    * this method does NOT force-push and does NOT create a new branch. The workspace must already be
-   * on the target branch (cloned with {@code git clone -b <branch>}). Returns "CLEAN" if there's
-   * nothing to commit.
+   * on the target branch (cloned with {@code git clone -b <branch>}). Returns {@code
+   * ALREADY_CURRENT} only when the clean local HEAD already equals the remote, and {@code
+   * PUSHED_EXISTING_COMMIT} when a clean retry publishes a previously committed local change.
    */
   public GitToolResult pushToExistingBranch(
       String runId,
@@ -896,41 +897,91 @@ public class GitTool {
       String repoDir =
           Path.of(workspaceRoot, runId, subPath).toAbsolutePath().normalize().toString();
 
-      // Check for changes
+      ProcessBuilder currentBranch =
+          new ProcessBuilder("git", "-C", repoDir, "branch", "--show-current");
+      currentBranch.redirectErrorStream(true);
+      Process branchProcess = currentBranch.start();
+      String branchOut = new String(branchProcess.getInputStream().readAllBytes()).trim();
+      int branchExit = branchProcess.waitFor();
+      if (branchExit != 0 || !branchName.equals(branchOut)) {
+        return GitToolResult.err(
+            "existing branch mismatch: expected "
+                + branchName
+                + " but workspace is on "
+                + (branchOut.isBlank() ? "a detached or unknown branch" : branchOut));
+      }
+
+      // Check for changes. A clean worktree may still contain a locally committed change from a
+      // previous non-fast-forward attempt. Compare local and remote heads before deciding whether
+      // it is truly already current; a clean but ahead local HEAD must still be pushed.
       ProcessBuilder status = new ProcessBuilder("git", "-C", repoDir, "status", "--porcelain");
       status.redirectErrorStream(true);
       Process ps = status.start();
       String statusOut = new String(ps.getInputStream().readAllBytes());
       int statusExit = ps.waitFor();
       if (statusExit != 0) return GitToolResult.err("status failed: " + statusOut);
-      if (statusOut.isBlank()) return GitToolResult.ok("CLEAN");
+      boolean worktreeClean = statusOut.isBlank();
+      if (!worktreeClean) {
+        runQuietly(repoDir, "git", "-C", repoDir, "add", "-A");
+        runQuietly(
+            repoDir, "git", "-C", repoDir, "config", "user.email", "agent@executespec.local");
+        runQuietly(repoDir, "git", "-C", repoDir, "config", "user.name", "ExecuteSpec Agent");
 
-      runQuietly(repoDir, "git", "-C", repoDir, "add", "-A");
-      runQuietly(repoDir, "git", "-C", repoDir, "config", "user.email", "agent@executespec.local");
-      runQuietly(repoDir, "git", "-C", repoDir, "config", "user.name", "ExecuteSpec Agent");
-
-      ProcessBuilder commit =
-          new ProcessBuilder("git", "-C", repoDir, "commit", "-m", commitMessage);
-      commit.redirectErrorStream(true);
-      Process pc = commit.start();
-      String commitOut = new String(pc.getInputStream().readAllBytes());
-      int commitExit = pc.waitFor();
-      if (commitExit != 0) return GitToolResult.err("commit failed: " + commitOut);
+        ProcessBuilder commit =
+            new ProcessBuilder("git", "-C", repoDir, "commit", "-m", commitMessage);
+        commit.redirectErrorStream(true);
+        Process pc = commit.start();
+        String commitOut = new String(pc.getInputStream().readAllBytes());
+        int commitExit = pc.waitFor();
+        if (commitExit != 0) return GitToolResult.err("commit failed: " + commitOut);
+      } else {
+        String localHead = gitRevision(repoDir, "HEAD");
+        String remoteHead = remoteRevision(repoDir, remoteUrl, pat, branchName);
+        if (localHead == null || remoteHead == null) {
+          return GitToolResult.err("existing branch head could not be verified before publication");
+        }
+        if (localHead.equalsIgnoreCase(remoteHead)) {
+          return GitToolResult.ok("ALREADY_CURRENT");
+        }
+      }
 
       // Push WITHOUT --force (fast-forward only → safe for existing PR branches)
       ProcessBuilder push =
           com.navneet.executespec.repo.GitProcessAuth.git(
-              pat, java.util.List.of("-C", repoDir, "push", remoteUrl, branchName));
+              pat,
+              java.util.List.of("-C", repoDir, "push", remoteUrl, "HEAD:refs/heads/" + branchName));
       push.redirectErrorStream(true);
       Process pp = push.start();
       String pushOut = new String(pp.getInputStream().readAllBytes());
       int pushExit = pp.waitFor();
       if (pushExit != 0) return GitToolResult.err("push failed: " + pushOut);
-      return GitToolResult.ok(branchName);
+      return GitToolResult.ok(worktreeClean ? "PUSHED_EXISTING_COMMIT" : branchName);
     } catch (Exception e) {
       log.warn("[GitTool] pushToExistingBranch failed: {}", e.getMessage());
       return GitToolResult.err("push to existing branch failed: " + e.getMessage());
     }
+  }
+
+  private static String gitRevision(String repoDir, String revision) throws Exception {
+    ProcessBuilder pb = new ProcessBuilder("git", "-C", repoDir, "rev-parse", revision);
+    pb.redirectErrorStream(true);
+    Process process = pb.start();
+    String output = new String(process.getInputStream().readAllBytes()).trim();
+    return process.waitFor() == 0 && output.matches("[0-9a-fA-F]{40}") ? output : null;
+  }
+
+  private static String remoteRevision(
+      String repoDir, String remoteUrl, String pat, String branchName) throws Exception {
+    ProcessBuilder pb =
+        com.navneet.executespec.repo.GitProcessAuth.git(
+            pat,
+            java.util.List.of("-C", repoDir, "ls-remote", remoteUrl, "refs/heads/" + branchName));
+    pb.redirectErrorStream(true);
+    Process process = pb.start();
+    String output = new String(process.getInputStream().readAllBytes()).trim();
+    if (process.waitFor() != 0 || output.isBlank()) return null;
+    String sha = output.split("\\s+", 2)[0];
+    return sha.matches("[0-9a-fA-F]{40}") ? sha : null;
   }
 
   private static void runQuietly(String dir, String... cmd) throws Exception {

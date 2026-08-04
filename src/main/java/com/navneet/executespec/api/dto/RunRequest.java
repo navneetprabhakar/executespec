@@ -83,8 +83,9 @@ public record RunRequest(
      * the DTO didn't expose it. Also accepted as {@code branchOverride} for forward-compat with
      * external callers that prefer the longer name.
      *
-     * <p>Use cases: (1) re-launch on an existing PR's head branch to address review comments; (2)
-     * stack a staged launch onto an in-progress branch.
+     * <p>The branch must be the verified head of an open pull request against the configured target
+     * branch. Default/target branches, unverified refs, and staged branches without an open PR are
+     * rejected before provider spend.
      */
     @Size(max = 200, message = "Branch must not exceed 200 characters") @JsonAlias({"branchOverride"})
         String branch,

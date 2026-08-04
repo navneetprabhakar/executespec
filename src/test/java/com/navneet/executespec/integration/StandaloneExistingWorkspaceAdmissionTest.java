@@ -46,6 +46,7 @@ class StandaloneExistingWorkspaceAdmissionTest {
                 false,
                 "EXISTING",
                 "https://github.com/acme/public-repo",
+                null,
                 null);
 
     assertThat(admission.admitted()).isTrue();
@@ -65,7 +66,7 @@ class StandaloneExistingWorkspaceAdmissionTest {
                 workspaceInit,
                 mock(com.navneet.executespec.contractsurface.BrownfieldHttpContractGuard.class))
             .prepareInitial(
-                "run-1", null, null, false, "EXISTING", "https://github.com/acme/repo", null);
+                "run-1", null, null, false, "EXISTING", "https://github.com/acme/repo", null, null);
 
     assertThat(admission.admitted()).isFalse();
     assertThat(admission.reason()).isEqualTo("repository clone failed");
@@ -89,7 +90,14 @@ class StandaloneExistingWorkspaceAdmissionTest {
                 workspaceInit,
                 mock(com.navneet.executespec.contractsurface.BrownfieldHttpContractGuard.class))
             .prepareInitial(
-                "run-1", null, null, false, "EXISTING", "https://github.com/acme/empty", null);
+                "run-1",
+                null,
+                null,
+                false,
+                "EXISTING",
+                "https://github.com/acme/empty",
+                null,
+                null);
 
     assertThat(admission.admitted()).isFalse();
     assertThat(admission.reason()).isEqualTo("repository has no deterministic source inventory");
@@ -110,7 +118,8 @@ class StandaloneExistingWorkspaceAdmissionTest {
                 false,
                 "EXISTING",
                 "https://github.com/acme/repo",
-                "secret");
+                "secret",
+                null);
 
     assertThat(admission.admitted()).isTrue();
     verify(workspaceInit).copyFromRunRequired("parent", "child");
@@ -128,11 +137,50 @@ class StandaloneExistingWorkspaceAdmissionTest {
                 workspaceInit,
                 mock(com.navneet.executespec.contractsurface.BrownfieldHttpContractGuard.class))
             .prepareInitial(
-                "run-1", null, null, true, "EXISTING", "https://github.com/acme/repo", "secret");
+                "run-1",
+                null,
+                null,
+                true,
+                "EXISTING",
+                "https://github.com/acme/repo",
+                "secret",
+                null);
 
     assertThat(admission.admitted()).isTrue();
     verify(workspaceInit).ensureRunWorkspace("run-1");
     verifyNoMoreInteractions(workspaceInit);
+  }
+
+  @Test
+  void explicitBranchUsesBranchAwareCloneBeforeInventory() throws Exception {
+    WorkspaceInitService workspaceInit = mock(WorkspaceInitService.class);
+    when(workspaceInit.runWorkspacePath("run-pr")).thenReturn(workspace);
+    doAnswer(
+            ignored -> {
+              Files.createDirectories(workspace.resolve(".git"));
+              Files.createDirectories(workspace.resolve("src"));
+              Files.writeString(workspace.resolve("src/app.js"), "export const ok = true;");
+              return null;
+            })
+        .when(workspaceInit)
+        .cloneFromRepoBranch("run-pr", "https://github.com/acme/repo", "feature/pr-12", "secret");
+
+    StandaloneExistingWorkspaceAdmission.Admission admission =
+        new StandaloneExistingWorkspaceAdmission(
+                workspaceInit, mock(BrownfieldHttpContractGuard.class))
+            .prepareInitial(
+                "run-pr",
+                null,
+                null,
+                false,
+                "EXISTING",
+                "https://github.com/acme/repo",
+                "secret",
+                "feature/pr-12");
+
+    assertThat(admission.admitted()).isTrue();
+    verify(workspaceInit)
+        .cloneFromRepoBranch("run-pr", "https://github.com/acme/repo", "feature/pr-12", "secret");
   }
 
   @Test

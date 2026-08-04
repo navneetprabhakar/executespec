@@ -364,15 +364,64 @@ public class ExecutionOrchestrator {
       }
     }
 
-    // Continue-on-PR: resolve branch from the PR record so the clone targets
-    // the existing PR branch. The user's explicit branch field takes precedence.
+    // Continue-on-PR is exact authority, not a branch hint. Resolve the recorded open PR before
+    // persisting the execution and reject incomplete, missing, closed, or contradictory input.
     String branch = blankToNull(req.branch());
-    if (branch == null && req.continuePrNumber() != null && req.continuePrRepoFullName() != null) {
-      branch =
+    String continueRepo = blankToNull(req.continuePrRepoFullName());
+    boolean hasContinueNumber = req.continuePrNumber() != null;
+    boolean hasContinueRepo = continueRepo != null;
+    if (hasContinueNumber != hasContinueRepo) {
+      throw new ResponseStatusException(
+          HttpStatus.BAD_REQUEST, "Continue-on-PR requires both repository and PR number");
+    }
+    if (hasContinueNumber) {
+      if (effectiveRepoIds.size() != 1) {
+        throw new ResponseStatusException(
+            HttpStatus.BAD_REQUEST,
+            "Continue-on-PR requires exactly one selected project repository");
+      }
+      UUID selectedRepoId;
+      try {
+        selectedRepoId = UUID.fromString(effectiveRepoIds.get(0));
+      } catch (IllegalArgumentException invalidRepoId) {
+        throw new ResponseStatusException(
+            HttpStatus.BAD_REQUEST, "Continue-on-PR repository selection is invalid");
+      }
+      List<ProjectRepo> selectedRepos =
+          projectRepoService.resolveForRunStrict(project.getId(), List.of(selectedRepoId));
+      if (selectedRepos.size() != 1
+          || !continueRepo.equalsIgnoreCase(selectedRepos.get(0).getGithubRepoFullName())) {
+        throw new ResponseStatusException(
+            HttpStatus.CONFLICT,
+            "The selected pull request does not belong to the selected project repository");
+      }
+      com.navneet.executespec.project.pr.PullRequestRecord pr =
           prRecordRepo
-              .findByRepoFullNameAndPrNumber(req.continuePrRepoFullName(), req.continuePrNumber())
-              .map(pr -> pr.getHeadBranch())
-              .orElse(null);
+              .findByRepoFullNameAndPrNumber(continueRepo, req.continuePrNumber())
+              .orElseThrow(
+                  () ->
+                      new ResponseStatusException(
+                          HttpStatus.CONFLICT,
+                          "The selected pull request is not tracked by this project"));
+      if (pr.getStatus() != com.navneet.executespec.project.pr.PullRequestRecord.Status.OPEN) {
+        throw new ResponseStatusException(
+            HttpStatus.CONFLICT, "The selected pull request is no longer open");
+      }
+      if (pr.getProjectId() != null && !project.getId().equals(pr.getProjectId())) {
+        throw new ResponseStatusException(
+            HttpStatus.CONFLICT, "The selected pull request belongs to another project");
+      }
+      String recordedHead = blankToNull(pr.getHeadBranch());
+      if (recordedHead == null) {
+        throw new ResponseStatusException(
+            HttpStatus.CONFLICT, "The selected pull request has no recorded head branch");
+      }
+      if (branch != null && !branch.equals(recordedHead)) {
+        throw new ResponseStatusException(
+            HttpStatus.CONFLICT,
+            "The requested branch does not match the selected pull request head");
+      }
+      branch = recordedHead;
     }
 
     ExecutionRun run =
@@ -391,7 +440,7 @@ public class ExecutionOrchestrator {
             .branch(branch)
             .sourceExecutionId(blankToNull(req.sourceExecutionId()))
             .continuePrNumber(req.continuePrNumber())
-            .continuePrRepo(blankToNull(req.continuePrRepoFullName()))
+            .continuePrRepo(continueRepo)
             // R-324 — persist the launch-time repo selection (existing
             // links + any newly-minted repos from req.newRepos()) so
             // the planner can scope decomposition + the SSE/UI can
