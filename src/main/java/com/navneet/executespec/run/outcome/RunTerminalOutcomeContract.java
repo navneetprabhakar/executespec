@@ -2,6 +2,8 @@ package com.navneet.executespec.run.outcome;
 
 import java.util.Locale;
 import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import com.navneet.executespec.run.outcome.RunTerminalOutcome.AutomationDisposition;
 import com.navneet.executespec.run.outcome.RunTerminalOutcome.Category;
@@ -77,6 +79,13 @@ public final class RunTerminalOutcomeContract {
   private static final Set<String> PLATFORM_CODES =
       Set.of("INTERNAL_ERROR", "PATCH_ENGINE_ERROR", "PATCH_UNKNOWN_OUTCOME");
 
+  /**
+   * Bounded marker persisted by the auto-push path when a clean run's publication was blocked. Only
+   * the stable code token inside the brackets is ever surfaced to customers.
+   */
+  private static final Pattern PUBLICATION_BLOCK_MARKER =
+      Pattern.compile("PUBLICATION_BLOCKED\\[([A-Z][A-Z0-9_]{1,63})\\]");
+
   private RunTerminalOutcomeContract() {}
 
   public static RunTerminalOutcome project(PipelineRun run) {
@@ -90,7 +99,18 @@ public final class RunTerminalOutcomeContract {
         run.getFailureReason(),
         run.getActualCostUsd(),
         hardCap,
-        prUrl);
+        prUrl,
+        autoPublicationExpected(run));
+  }
+
+  /**
+   * Whether this run was expected to publish a pull request on clean completion: a repo-backed run
+   * whose customer did not ask to withhold publication and whose changes live on the server. Local
+   * hands runs keep their changes on the customer machine, so no server PR is ever expected.
+   */
+  public static boolean autoPublicationExpected(PipelineRun run) {
+    if (run == null || run.isSkipAutoPush() || run.isLocalExecutionRequested()) return false;
+    return hasText(run.getRepoUrl()) || hasText(run.getSelectedRepoIds());
   }
 
   public static RunTerminalOutcome project(
@@ -101,6 +121,19 @@ public final class RunTerminalOutcomeContract {
       Double actualCostUsd,
       Double hardCapUsd,
       String prUrl) {
+    return project(
+        runId, status, statusReason, failureReason, actualCostUsd, hardCapUsd, prUrl, false);
+  }
+
+  public static RunTerminalOutcome project(
+      String runId,
+      String status,
+      String statusReason,
+      String failureReason,
+      Double actualCostUsd,
+      Double hardCapUsd,
+      String prUrl,
+      boolean autoPublicationExpected) {
     String normalizedStatus = normalize(status);
     if (!TERMINAL_STATUSES.contains(normalizedStatus)) return null;
 
@@ -111,7 +144,14 @@ public final class RunTerminalOutcomeContract {
             : normalize(failureReason);
     Publication publication =
         prUrl == null || prUrl.isBlank() ? Publication.NOT_CREATED : Publication.PR_CREATED;
-    Definition definition = definition(normalizedStatus, code, reasonDetail, publication);
+    Definition definition =
+        definition(
+            normalizedStatus,
+            code,
+            reasonDetail,
+            publication,
+            autoPublicationExpected,
+            publicationBlockCode(failureReason));
     Impact impact =
         new Impact(actualCostUsd, hardCapUsd, codeChanged(code, publication), publication, prUrl);
     String supportCode =
@@ -189,11 +229,23 @@ public final class RunTerminalOutcomeContract {
   }
 
   private static Definition definition(
-      String status, String code, String reasonDetail, Publication publication) {
+      String status,
+      String code,
+      String reasonDetail,
+      Publication publication,
+      boolean autoPublicationExpected,
+      String publicationBlockCode) {
+    boolean publicationWithheld = publication == Publication.NOT_CREATED && autoPublicationExpected;
     if ("CLEAN_COMPLETION".equals(code)) {
+      if (publicationWithheld) {
+        return successUnpublished(publicationBlockCode);
+      }
       return success("Run complete", "The run completed successfully.");
     }
     if (WARNING_CODES.contains(code)) {
+      if (publicationWithheld && !"LOCAL_EXECUTION".equals(code)) {
+        return warningUnpublished(publicationBlockCode);
+      }
       return warning(
           "Completed with warnings",
           "Changes were generated, but some completion evidence needs attention.",
@@ -353,14 +405,69 @@ public final class RunTerminalOutcomeContract {
       return false;
     }
     // A pre-existing PR proves publication history, not that this terminal attempt changed code or
-    // updated the PR. Only a clean/warning completion paired with a PR is strong enough for the
-    // public projection to make the positive claim; failure/limit outcomes remain honestly
-    // unknown unless a future attempt-scoped mutation receipt proves otherwise.
-    if (publication == Publication.PR_CREATED
-        && (SUCCESS_CODES.contains(code) || WARNING_CODES.contains(code))) {
+    // updated the PR. A clean/warning completion is strong enough for the positive claim on its
+    // own: the run's validated product diff proves mutation even when publication was blocked or
+    // withheld. Failure/limit outcomes remain honestly unknown unless a future attempt-scoped
+    // mutation receipt proves otherwise.
+    if (SUCCESS_CODES.contains(code) || WARNING_CODES.contains(code)) {
       return true;
     }
     return null;
+  }
+
+  /**
+   * Clean completion whose expected pull request was not created. The run itself succeeded, so the
+   * category and automation disposition stay SUCCESS, but the customer copy must not imply a PR
+   * exists and the primary action points at the publication evidence carrying the exact gate.
+   */
+  private static Definition successUnpublished(String publicationBlockCode) {
+    return new Definition(
+        Category.SUCCESS,
+        "Run complete — pull request not created",
+        "The run completed successfully, but its pull request was not created."
+            + blockedBySentence(publicationBlockCode),
+        false,
+        "OPEN_PUBLICATION_ELIGIBILITY",
+        "Open the run's publication evidence for the exact blocking gate and remediation.",
+        null,
+        AutomationDisposition.SUCCEEDED,
+        0);
+  }
+
+  private static Definition warningUnpublished(String publicationBlockCode) {
+    return new Definition(
+        Category.WARNING,
+        "Completed with warnings — pull request not created",
+        "Changes were generated, but some completion evidence needs attention and the pull"
+            + " request was not created."
+            + blockedBySentence(publicationBlockCode),
+        false,
+        "OPEN_PUBLICATION_ELIGIBILITY",
+        "Open the run's publication evidence for the exact blocking gate and remediation.",
+        null,
+        AutomationDisposition.COMPLETED_WITH_WARNINGS,
+        3);
+  }
+
+  private static String blockedBySentence(String publicationBlockCode) {
+    return publicationBlockCode == null
+        ? ""
+        : " Publication was blocked by " + publicationBlockCode + ".";
+  }
+
+  /**
+   * Extracts the stable publication-block code the auto-push path persisted as a bounded {@code
+   * PUBLICATION_BLOCKED[<code>]} marker. Only the validated code token is returned; the surrounding
+   * detail never reaches customer copy through this path.
+   */
+  private static String publicationBlockCode(String failureReason) {
+    if (failureReason == null) return null;
+    Matcher marker = PUBLICATION_BLOCK_MARKER.matcher(failureReason);
+    return marker.find() ? marker.group(1) : null;
+  }
+
+  private static boolean hasText(String value) {
+    return value != null && !value.isBlank();
   }
 
   private static Definition success(String title, String message) {

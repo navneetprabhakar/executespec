@@ -295,7 +295,67 @@ public class ScmPushService {
         run.getCreatedByUserId() != null
             ? appUserRepository.findById(run.getCreatedByUserId()).orElse(null)
             : null;
-    return pushIfConfigured(run, scmUser);
+    PushResult result = pushIfConfigured(run, scmUser);
+    recordPublicationBlockEvidence(run, result);
+    return result;
+  }
+
+  /** Prefix of the bounded durable marker consumed by {@code RunTerminalOutcomeContract}. */
+  static final String PUBLICATION_BLOCK_MARKER_PREFIX = "PUBLICATION_BLOCKED[";
+
+  /**
+   * A clean terminal run whose expected publication did not happen used to keep a success-only
+   * projection with no in-band reason — the truth lived only at {@code /publication-eligibility}.
+   * Persist the stable blocking code as a bounded marker in the otherwise-null failure reason so
+   * the terminal-outcome projection can state why no pull request exists. A real (non-marker)
+   * failure reason is never overwritten, and a later successful push clears a stale marker.
+   */
+  void recordPublicationBlockEvidence(PipelineRun run, PushResult result) {
+    if (run == null || result == null || run.getRunId() == null) return;
+    try {
+      PipelineRun fresh = stateStore.findRun(run.getRunId()).orElse(run);
+      String existing = fresh.getFailureReason();
+      boolean existingIsMarker =
+          existing != null && existing.startsWith(PUBLICATION_BLOCK_MARKER_PREFIX);
+      if (result.pushed()) {
+        if (existingIsMarker) {
+          fresh.setFailureReason(null);
+          stateStore.save(fresh);
+        }
+        return;
+      }
+      if (existing != null && !existing.isBlank() && !existingIsMarker) return;
+      // Only clean/warning completions need in-band "why is there no PR" evidence; a FAILED run
+      // already explains itself through its own status reason.
+      String status = fresh.getStatus() == null ? "" : fresh.getStatus();
+      if (!"COMPLETE".equals(status) && !"PARTIAL".equals(status)) return;
+      String marker = publicationBlockMarker(result);
+      if (marker == null || marker.equals(existing)) return;
+      fresh.setFailureReason(marker);
+      stateStore.save(fresh);
+    } catch (Exception persistEx) {
+      log.warn(
+          "[{}] could not persist publication-block marker: {}",
+          run.getRunId(),
+          persistEx.getMessage());
+    }
+  }
+
+  private static String publicationBlockMarker(PushResult result) {
+    String code =
+        result.code() != null && result.code().matches("[A-Z][A-Z0-9_]{1,63}")
+            ? result.code()
+            : "SCM_PUSH_FAILED";
+    StringBuilder marker =
+        new StringBuilder(PUBLICATION_BLOCK_MARKER_PREFIX).append(code).append(']');
+    if (StringUtils.hasText(result.blockingGate())) {
+      marker.append(": gate=").append(result.blockingGate());
+    }
+    if (StringUtils.hasText(result.remediation())) {
+      marker.append("; ").append(result.remediation());
+    }
+    String bounded = marker.toString();
+    return bounded.length() > 500 ? bounded.substring(0, 500) : bounded;
   }
 
   /** Dispatch to the durable source provider; credentials only authorize that provider. */
@@ -310,14 +370,37 @@ public class ScmPushService {
           run.getRunId(),
           ineligible.code(),
           ineligible.getMessage());
+      String remediation =
+          "Regenerate validation on the current workspace and resolve the named deterministic gate"
+              + " before retrying.";
+      // The event log must carry the structured admission verdict, not a bare transport error:
+      // this is often the only in-band trace of why a clean run has no pull request.
+      emitQuietly(
+          run.getRunId(),
+          "Push blocked ["
+              + ineligible.code()
+              + "] gate="
+              + ineligible.eligibility().blockingGate()
+              + ": "
+              + ineligible.getMessage()
+              + " — "
+              + remediation);
       return PushResult.blocked(
           ineligible.code(),
           ineligible.eligibility().blockingGate(),
           ineligible.getMessage(),
           run.getScmProvider(),
           false,
-          "Regenerate validation on the current workspace and resolve the named deterministic gate"
-              + " before retrying.");
+          remediation);
+    }
+  }
+
+  /** Best-effort SSE/event-log line; publication outcomes never fail on broadcast problems. */
+  private void emitQuietly(String runId, String message) {
+    try {
+      broadcaster.emit(runId, RunEvent.log(runId, "scm", message));
+    } catch (Exception broadcastEx) {
+      log.debug("[{}] publication event broadcast failed: {}", runId, broadcastEx.getMessage());
     }
   }
 

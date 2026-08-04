@@ -51,6 +51,7 @@ public class RunMapper {
   private final AgentTaskRepository agentTaskRepository;
   private final RunCostTracker runCostTracker;
   private final ObjectMapper objectMapper;
+  private final com.navneet.executespec.security.WorkspacePathRedaction workspacePathRedaction;
 
   public RunSummary toSummary(PipelineRun r) {
     return toSummary(r, null, null, null);
@@ -142,7 +143,9 @@ public class RunMapper {
             displayRunFailureReason(r.getFailureReason(), r.getStatus(), displayStatus),
             actualCostUsd,
             r.getHardCapUsd() != null ? r.getHardCapUsd() : r.getUserCostCap(),
-            r.getScmPrUrl() != null ? r.getScmPrUrl() : r.getGithubPrUrl()),
+            r.getScmPrUrl() != null ? r.getScmPrUrl() : r.getGithubPrUrl(),
+            com.navneet.executespec.run.outcome.RunTerminalOutcomeContract.autoPublicationExpected(
+                r)),
         // PR-B (2026-05-13) — hydrate PR URLs in the listing endpoint so the project launches
         // surface can render PR pills without a per-row drill-down. Prefer scm-agnostic
         // scmPrUrl; the legacy githubPrUrl ships alongside for pre-SCM-split back-compat.
@@ -199,7 +202,7 @@ public class RunMapper {
         displayRunStatusReason(
             r.getStatusReason(), r.getFailureReason(), r.getStatus(), displayStatus);
     String displayFailureReason =
-        displayRunFailureReason(r.getFailureReason(), r.getStatus(), displayStatus);
+        redactPaths(displayRunFailureReason(r.getFailureReason(), r.getStatus(), displayStatus));
     Double actualCostUsd = actualCostForRead(r);
     com.navneet.executespec.run.outcome.RunTerminalOutcome terminalOutcome =
         com.navneet.executespec.run.outcome.RunTerminalOutcomeContract.project(
@@ -209,7 +212,9 @@ public class RunMapper {
             displayFailureReason,
             actualCostUsd,
             r.getHardCapUsd() != null ? r.getHardCapUsd() : r.getUserCostCap(),
-            r.getScmPrUrl() != null ? r.getScmPrUrl() : r.getGithubPrUrl());
+            r.getScmPrUrl() != null ? r.getScmPrUrl() : r.getGithubPrUrl(),
+            com.navneet.executespec.run.outcome.RunTerminalOutcomeContract.autoPublicationExpected(
+                r));
 
     RunDetail.RunDetailBuilder builder =
         RunDetail.builder()
@@ -233,7 +238,8 @@ public class RunMapper {
             .terminalOutcome(terminalOutcome)
             .planJson(r.getPlanJson())
             .reviewJson(r.getReviewJson())
-            .runGoalDoneness(parseJson(r.getRunGoalDonenessJson(), "runGoalDoneness", r.getRunId()))
+            .runGoalDoneness(
+                parseJson(redactPaths(r.getRunGoalDonenessJson()), "runGoalDoneness", r.getRunId()))
             .tasks(
                 tasks.stream()
                     // RR-1446 — order by the persisted planner-intent index first so the approval
@@ -355,9 +361,12 @@ public class RunMapper {
   }
 
   public TaskSummary toTaskSummary(AgentTask t) {
-    JsonNode goalDoneness = parseJson(t.getGoalDonenessJson(), "goalDoneness", t.getTaskId());
+    // Server workspace paths (e.g. /opt/app/workspace/<runId>/...) are host layout, not customer
+    // evidence — redact them from every DTO-projected diagnostic field before it leaves the API.
+    JsonNode goalDoneness =
+        parseJson(redactPaths(t.getGoalDonenessJson()), "goalDoneness", t.getTaskId());
     String displayStatus = displayTaskStatus(t.getStatus(), goalDoneness);
-    String failureReason = extractFailureReason(t);
+    String failureReason = redactPaths(extractFailureReason(t));
     if (failureReason == null && "PARTIAL".equals(displayStatus) && goalDoneness != null) {
       failureReason = goalDoneness.path("reason").asText(null);
     }
@@ -385,8 +394,10 @@ public class RunMapper {
         t.getCompletedAt(),
         failureReason,
         goalDoneness,
-        parseJson(t.getContinuationDecisionJson(), "continuationDecision", t.getTaskId()),
-        parseJson(t.getContinuationActionsJson(), "continuationActions", t.getTaskId()),
+        parseJson(
+            redactPaths(t.getContinuationDecisionJson()), "continuationDecision", t.getTaskId()),
+        parseJson(
+            redactPaths(t.getContinuationActionsJson()), "continuationActions", t.getTaskId()),
         extractObjective(t.getTaskJson()),
         t.getCompletionNotes(),
         t.getParentTaskId(),
@@ -456,9 +467,37 @@ public class RunMapper {
       String persistedFailure,
       String persistedStatus,
       String displayStatus) {
-    return "COMPLETE".equals(persistedStatus) && "PARTIAL".equals(displayStatus)
-        ? "TASK_PROOF_INCOMPLETE"
-        : PlannerFailureDiagnostic.projectStatusReason(persistedReason, persistedFailure);
+    if ("COMPLETE".equals(persistedStatus) && "PARTIAL".equals(displayStatus)) {
+      return "TASK_PROOF_INCOMPLETE";
+    }
+    String projected =
+        PlannerFailureDiagnostic.projectStatusReason(persistedReason, persistedFailure);
+    if (projected != null && !projected.isBlank()) return projected;
+    // FAILED/ERROR rows historically persisted only a coded failureReason, leaving statusReason
+    // null while terminalOutcome carried a real code. Fall back to the stable code prefix only —
+    // never the raw detail after the first colon, and never free prose that fails the code shape.
+    if ("FAILED".equals(persistedStatus) || "ERROR".equals(persistedStatus)) {
+      return stableFailureCodePrefix(persistedFailure);
+    }
+    return projected;
+  }
+
+  /** Null-tolerant path redaction so bare test constructions without the bean stay usable. */
+  private String redactPaths(String value) {
+    return workspacePathRedaction == null ? value : workspacePathRedaction.redact(value);
+  }
+
+  /**
+   * Bounded stable-code prefix of a persisted failure reason, or null when it is not code-shaped.
+   */
+  private static final java.util.regex.Pattern STABLE_FAILURE_CODE =
+      java.util.regex.Pattern.compile("[A-Z][A-Z0-9_]{2,63}");
+
+  static String stableFailureCodePrefix(String persistedFailure) {
+    if (persistedFailure == null || persistedFailure.isBlank()) return null;
+    int colon = persistedFailure.indexOf(':');
+    String prefix = (colon < 0 ? persistedFailure : persistedFailure.substring(0, colon)).trim();
+    return STABLE_FAILURE_CODE.matcher(prefix).matches() ? prefix : null;
   }
 
   private static String displayRunFailureReason(

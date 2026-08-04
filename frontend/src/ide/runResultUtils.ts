@@ -50,7 +50,7 @@ export type TerminalOutcomePrimaryAction = {
   label: string;
   behavior: 'navigate' | 'retry' | 'tab';
   href?: string;
-  tab?: 'Logs' | 'Validation';
+  tab?: 'Logs' | 'Validation' | 'PR';
 };
 
 /**
@@ -68,6 +68,9 @@ export function terminalOutcomePrimaryAction(
   switch (action.type) {
     case 'REVIEW_EVIDENCE':
       return {type: action.type, label: action.label, behavior: 'tab', tab: 'Validation'};
+    case 'OPEN_PUBLICATION_ELIGIBILITY':
+      // The Pull request tab renders the publication-eligibility reason and push affordance.
+      return {type: action.type, label: action.label, behavior: 'tab', tab: 'PR'};
     case 'RETRY_RUN':
       return {type: action.type, label: action.label, behavior: 'retry'};
     case 'OPEN_PROVIDER_SETTINGS':

@@ -123,6 +123,7 @@ class CorrectionValidationAdmissionTest {
 
   private static CorrectionWorkspaceTransaction.Checkpoint checkpoint() {
     return new CorrectionWorkspaceTransaction.Checkpoint(
+        Path.of("/tmp/correction-validation-test"),
         List.of(
             new CorrectionWorkspaceTransaction.RepositoryCheckpoint(
                 Path.of("/tmp/correction-validation-test"), "head", "tree")));

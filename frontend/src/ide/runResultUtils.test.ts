@@ -673,6 +673,7 @@ describe('terminalFailureEvidence', () => {
 
   it.each([
     ['REVIEW_EVIDENCE', {behavior: 'tab', tab: 'Validation'}],
+    ['OPEN_PUBLICATION_ELIGIBILITY', {behavior: 'tab', tab: 'PR'}],
     ['RETRY_RUN', {behavior: 'retry'}],
     ['OPEN_PROVIDER_SETTINGS', {behavior: 'navigate', href: '/provider-keys'}],
     ['REVIEW_POLICY', {behavior: 'navigate', href: '/org/settings'}],
