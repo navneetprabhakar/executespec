@@ -245,6 +245,12 @@ model, failover route, or materially cheaper task mix. Project-generated
 setup/explanation documents exclude recursive model-generated architecture prose, reserve exact-SHA
 configuration/Compose/Spring-handler facts ahead of bulk codemap inventory, and retry or fail closed
 on unsupported schema-ownership, Compose-startup, or response-representation claims.
+System Map prose also fails closed on exhaustive function contracts such as allowed fields or
+options unless one complete exact-source entry is bound to the repository and exact source SHA and
+the same function checks a same-variable literal collection whose values exactly equal the claim.
+Declaration inventory, Purpose summaries, unrelated functions/repositories or collections, subset
+claims, unresolved constants, truncated evidence, and combined-project prose cannot authorize the
+claim.
 SCM push failures expose a stable failure code, the exact blocking gate (for example `GIT_PUSH` or
 `PR_CREATION`), and remediation. Correction evidence shows the complete durable task/action history
 instead of only the last transaction.
