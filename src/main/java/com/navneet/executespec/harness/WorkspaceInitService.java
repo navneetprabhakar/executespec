@@ -429,12 +429,14 @@ public class WorkspaceInitService {
       String dirName = repoDirectoryName(repo.fullName());
       Path target = reposRoot.resolve(dirName);
       if (!Files.isDirectory(target.resolve(".git"))) {
-        return new WorkspaceAdmission(false, totalFiles, "clone missing for " + repo.fullName());
+        return new WorkspaceAdmission(
+            false, totalFiles, "CLONE_MISSING: clone missing for " + repo.fullName());
       }
       try {
         repositoryRevisions.requireExpectedBranch(target, repo.branch(), repo.fullName());
       } catch (IllegalStateException branchMismatch) {
-        return new WorkspaceAdmission(false, totalFiles, branchMismatch.getMessage());
+        return new WorkspaceAdmission(
+            false, totalFiles, "BRANCH_MISMATCH: " + branchMismatch.getMessage());
       }
       try (var files = Files.walk(target)) {
         long repoFiles =
@@ -452,12 +454,16 @@ public class WorkspaceInitService {
                 .count();
         if (repoFiles == 0) {
           return new WorkspaceAdmission(
-              false, totalFiles, "repository has no source files: " + repo.fullName());
+              false,
+              totalFiles,
+              "EMPTY_INVENTORY: repository has no source files: " + repo.fullName());
         }
         totalFiles += repoFiles;
       } catch (IOException e) {
         return new WorkspaceAdmission(
-            false, totalFiles, "could not inventory " + repo.fullName() + ": " + e.getMessage());
+            false,
+            totalFiles,
+            "INVENTORY_ERROR: could not inventory " + repo.fullName() + ": " + e.getMessage());
       }
     }
     return new WorkspaceAdmission(true, totalFiles, null);

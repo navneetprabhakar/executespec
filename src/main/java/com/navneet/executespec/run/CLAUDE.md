@@ -18,7 +18,9 @@ An existing pull request is publication history, not attempt-scoped mutation pro
 warning completion paired with a PR may set `impact.codeChanged=true`; failed/limited attempts keep
 that field unknown unless a future mutation receipt proves it. Provider/key/model-matrix outcomes
 return one `OPEN_PROVIDER_SETTINGS` action at `/provider-keys` instead of retrying an unchanged
-route.
+route. `WORKSPACE_PREFLIGHT_FAILED` with a `BRANCH_MISMATCH` sub-code projects an honest
+branch-state outcome instead of the generic "check repository access" advice, because access is
+fine and a plain retry is deterministically futile there.
 Because durable archives intentionally omit `.git`, a successful restore reconstructs repository
 metadata only from immutable repo snapshots plus an authoritative credential-free coordinate:
 linked Project repositories use their stored SCM clone URL, while standalone runs use the exact
