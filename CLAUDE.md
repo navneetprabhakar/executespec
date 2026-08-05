@@ -1315,7 +1315,13 @@ same transaction. The receipt binds the exact plan, continuation, RequirementIR 
 resolution source, actor/effective authority, payer, provider/key provenance, managed-AI,
 governance, the run's provider/execution mode, distinct fixed-six-decimal `estimateHighUsd` and
 nullable `hardCapUsd`, expected and confirmed credits, and breaking-change outcomes without
-credential material. When a contract report requires typed acknowledgement, the canonical receipt
+credential material. The six-decimal money strings mirror the integrity trigger's PostgreSQL
+semantics exactly — the exact binary double rounded to 15 significant digits half-even (the
+`float8::numeric` / C `%.15g` cast) before six-decimal half-up scaling — because on shortest-
+representation boundaries such as `0.5961704999999999` the previous `BigDecimal.valueOf` path
+produced `0.596170` while the deferred trigger recomputed `0.596171` and rejected every
+APPROVE/REJECT/CANCEL commit for that run (2026-08-05 dev run e7f599b7; pinned by
+`PlanGateDecisionDecimalParityTest` with live-PostgreSQL-verified vectors). When a contract report requires typed acknowledgement, the canonical receipt
 snapshots and cross-binds the report's exact digest, `requiresTypedAck`, acknowledgement timestamp,
 acknowledging actor, and exact stored text. New acknowledgements persist uppercase `BREAKING`;
 complete pre-V348 acknowledgement tuples remain byte-exact while validity is checked by trimmed,

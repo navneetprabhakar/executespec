@@ -386,8 +386,22 @@ final class PlanGateDecisionEvidence {
     return run.getHardCapUsd() == null ? 0.0 : run.getHardCapUsd();
   }
 
+  /**
+   * Formats a double exactly the way the V348 integrity trigger sees it. PostgreSQL's {@code
+   * float8::numeric} cast renders the value via C {@code %.15g} — the EXACT binary value correctly
+   * rounded to 15 significant decimal digits, ties to even — before {@code round(,6)} (half away
+   * from zero) is applied. {@code BigDecimal.valueOf} instead keeps the shortest round-trip
+   * representation (up to 17 digits), so on representation boundaries such as {@code
+   * 0.5961704999999999} (exact binary 0.59617049999999994…) Java said {@code 0.596170} while the
+   * trigger computed {@code 0.596171} and the deferred constraint rejected every
+   * APPROVE/REJECT/CANCEL commit for that run (dev run e7f599b7). Every previously COMMITTED
+   * receipt already satisfies the trigger, so matching its semantics is replay-compatible.
+   */
   static String decimal(double value) {
-    return BigDecimal.valueOf(value).setScale(6, java.math.RoundingMode.HALF_UP).toPlainString();
+    return new BigDecimal(value)
+        .round(new java.math.MathContext(15, java.math.RoundingMode.HALF_EVEN))
+        .setScale(6, java.math.RoundingMode.HALF_UP)
+        .toPlainString();
   }
 
   static String decimal(BigDecimal value) {
