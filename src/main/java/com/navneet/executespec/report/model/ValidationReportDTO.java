@@ -17,6 +17,13 @@ public record ValidationReportDTO(
     List<ReportIssueDTO> issues,
     List<String> checksPassed,
     String reportMarkdown,
+    /**
+     * Legacy single-model field. Historically the model that generated the report markdown; it was
+     * widely read as "the model that served the run", which is untrue for multi-route runs. When
+     * the run's physical attribution is {@code MIXED} this field now carries the literal {@code
+     * "MIXED"} instead of an arbitrary single model — consumers needing the full set must read
+     * {@link #modelsUsed()} and {@link #routeAttribution()}.
+     */
     String modelUsed,
     Instant createdAt,
     int issuesCaught,
@@ -73,4 +80,16 @@ public record ValidationReportDTO(
     Integer rubricScore,
     // Preview URL at time of report generation (nullable — batch runs and expired previews won't
     // have this)
-    String previewUrl) {}
+    String previewUrl,
+    /**
+     * Additive: distinct models proven by the run's successful physical-attempt ledger, first-seen
+     * order (via {@code RunEffectiveRouteService}). Empty when no successful attempt names a real
+     * model or the ledger seam is unavailable.
+     */
+    List<String> modelsUsed,
+    /**
+     * Additive: {@code LEDGER} (exactly one successful route), {@code MIXED} (several), or {@code
+     * UNATTRIBUTED} (no successful attempt). {@code null} only when the ledger seam was unavailable
+     * to the projection (bare test constructions).
+     */
+    String routeAttribution) {}

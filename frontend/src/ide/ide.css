@@ -500,6 +500,11 @@
   color: var(--ide-red);
   border-color: var(--ide-red);
 }
+/* Neutral/informational evidence disclosure — not a pass, not a defect. */
+.ide-badge.info {
+  color: var(--ide-blue);
+  border-color: var(--ide-blue);
+}
 /* Scoped under .ide-root so the IDE's filled primary button wins over the legacy
    `.signal-app button { background: transparent; color: inherit }` reset (0,1,1),
    which the IDE inherits because it renders inside the .signal-app wrapper. Without

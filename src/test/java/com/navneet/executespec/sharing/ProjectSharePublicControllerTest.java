@@ -66,7 +66,8 @@ class ProjectSharePublicControllerTest {
             null,
             null,
             null,
-            mock(ApplicationEventPublisher.class));
+            mock(ApplicationEventPublisher.class),
+            null);
     controller =
         new ProjectSharePublicController(
             linkService,

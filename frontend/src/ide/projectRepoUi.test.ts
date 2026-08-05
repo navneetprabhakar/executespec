@@ -1,5 +1,6 @@
 import {describe, expect, it} from 'vitest';
 import {
+  codeIndexActionLabel,
   codeIndexRefreshNotice,
   codeSearchCapabilitiesLabel,
   explicitLinkedRepoSelection,
@@ -119,6 +120,24 @@ describe('brownfield repository UI contracts', () => {
         relationshipGraphAvailable: false,
       }),
     ).toBe('ripgrep available · relationship graph not available');
+  });
+
+  it('offers "Build semantic index" when nothing was ever indexed', () => {
+    expect(codeIndexActionLabel(unindexed)).toBe('Build semantic index');
+    expect(codeIndexActionLabel(null)).toBe('Build semantic index');
+    expect(codeIndexActionLabel(undefined)).toBe('Build semantic index');
+  });
+
+  it('offers "Resume semantic index" for a partially built index', () => {
+    expect(codeIndexActionLabel({...unindexed, status: 'PARTIAL' as const})).toBe(
+      'Resume semantic index',
+    );
+    expect(codeIndexActionLabel({...unindexed, status: 'STALE' as const})).toBe(
+      'Resume semantic index',
+    );
+    expect(codeIndexActionLabel({...unindexed, status: 'FAILED' as const})).toBe(
+      'Resume semantic index',
+    );
   });
 
   it.each([

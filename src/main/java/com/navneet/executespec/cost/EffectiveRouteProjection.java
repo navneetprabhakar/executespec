@@ -73,6 +73,31 @@ public record EffectiveRouteProjection(String provider, String model, Attributio
     return new EffectiveRouteProjection(firstProvider, firstModel, Attribution.LEDGER);
   }
 
+  /**
+   * Distinct models across the successful attempts, in first-seen order. This is the honest plural
+   * companion to the single-model projection: a MIXED run has no single served model, but its
+   * complete successful model set remains reportable evidence. Rows with absent/sentinel provider
+   * or model are excluded exactly as {@link #from(List)} excludes them.
+   */
+  public static List<String> distinctSuccessfulModels(List<RunStepUsage> rows) {
+    if (rows == null || rows.isEmpty()) {
+      return List.of();
+    }
+    LinkedHashSet<String> models = new LinkedHashSet<>();
+    for (RunStepUsage row : rows) {
+      if (row == null || !SUCCESS.equalsIgnoreCase(row.getAttemptStatus())) {
+        continue;
+      }
+      String provider = normalize(row.getProvider());
+      String model = normalizeModel(row.getModel());
+      if (provider == null || model == null) {
+        continue;
+      }
+      models.add(model);
+    }
+    return List.copyOf(models);
+  }
+
   /** True when the ledger proves exactly one route and it differs from what was requested. */
   public boolean divergesFrom(String requestedProvider, String requestedModel) {
     if (attribution == Attribution.MIXED) {

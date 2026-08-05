@@ -18,9 +18,23 @@ Output shape:
 - `comments[]` — line-anchored, each with `filePath`, `lineNumber`, `side` (LEFT/RIGHT
   per GitHub Reviews API convention), `category`, `severity`, `body`
 
+**CI verdict gate (2026-08-05, persona register P1 #4):** the durable job fetches the head SHA's
+CURRENT check-run rollup through the existing `GitHubRepoService.getCheckRunRollup` path before the
+agent call, injects it into the user prompt as untrusted `PR_CI_STATUS` evidence, and then
+`PrReviewCiGate` runs deterministically AFTER the model's `submitReview` tool call is parsed — the
+model cannot override it. FAILURE caps `APPROVE` → `REQUEST_CHANGES` (tighten-only; COMMENT /
+REQUEST_CHANGES keep their verdicts) and prepends a structured `CI failing on head <sha> (N failing
+check-run(s))` finding to the summary; UNKNOWN / PENDING / NEUTRAL never cap but prepend an
+explicit "CI status … is unverified" note so the review cannot read as green; SUCCESS returns the
+review byte-identical. `AgentRequest` gained additive `ciStatus` / `ciFailingCount` builder fields
+(null = UNKNOWN, never green). Pinned by `PrReviewCiGateTest`, `PrReviewAgentCiGateTest`, and
+`PrReviewServiceCiEvidenceTest`; the autofix flow and persisted DTO shapes are unchanged.
+
 ## Files
 
-- `PrReviewAgent.java` — single-call agent. PLANNING-tier via `ModelResolver.resolve("PrReviewAgent", provider)`. Emits `submitReview` tool call; orchestrator parses args directly.
+- `PrReviewAgent.java` — single-call agent. PLANNING-tier via `ModelResolver.resolve("PrReviewAgent", provider)`. Emits `submitReview` tool call; orchestrator parses args directly, then applies `PrReviewCiGate` post-parse.
+- `PrReviewCiGate.java` — deterministic post-model CI verdict gate (see above). Pure/static; no Spring bean.
+- `PrReviewQuotaPolicy.java` — tier + monthly-quota admission extracted verbatim from the service (600-line production-class ceiling); `PrReviewService.assertTierAndQuota` remains the public seam and delegates.
 - `PrReviewService.java` — orchestrator. Tier gate (`assertTierAndQuota`) → project-scoped idempotency check → persist QUEUED row → dispatch on dedicated 4-thread pool → SSE on `pr-review-{prReviewId}`. Cost attribution via `RunCostTracker.snapshot("pr-review-{id}")`.
 - `PrReviewController.java` — REST surface. `POST /api/pr-reviews` requires `projectId + repoId + prNumber`, write-guards the project, and canonicalises the optional `repoFullName` assertion through the linked `ProjectRepo` before tier/quota checks. FREE → 403, quota exhausted → 429, GitHub fetch fail → 502. Direct detail and by-PR list reads are project-read-guarded.
 - `entity/PrReview.java`, `entity/PrReviewComment.java` — JPA entities for `pr_review` + `pr_review_comment` (V172).

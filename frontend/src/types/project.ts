@@ -146,6 +146,13 @@ export interface PrSummary {
   ciFailingCount?: number;
   /** ISO-8601 timestamp of the last successful check-runs poll; null pre-poll. */
   ciCheckedAt?: string | null;
+  /**
+   * Server-explained cause for an UNKNOWN ciStatus (e.g. `WEBHOOK_NOT_INSTALLED`). Absent on
+   * older servers; the UI must render unchanged when missing.
+   */
+  ciStatusReason?: string | null;
+  /** Linked repository id for webhook installation. Absent on older servers. */
+  repoId?: string | null;
 }
 
 export interface TaskSummary {
