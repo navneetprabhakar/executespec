@@ -555,8 +555,83 @@ function replaceLastTimelineId(state: AgentState, id: string, streamSequence?: n
   };
 }
 
+/**
+ * Server titles minted before lazy titling landed are all identical
+ * ("Project agent" × N), so they carry no identity. Treat them as absent and
+ * derive something meaningful from the durable fields the list DTO does carry.
+ */
+const GENERIC_SESSION_TITLES = new Set([
+  'project agent',
+  'web agent',
+  'agent conversation',
+  'new conversation',
+]);
+
+const TITLE_MAX = 60;
+
+function clipTitle(value: string): string {
+  const normalized = value.replace(/\s+/g, ' ').trim();
+  return normalized.length > TITLE_MAX ? `${normalized.slice(0, TITLE_MAX - 1)}…` : normalized;
+}
+
+export function isGenericSessionTitle(title?: string | null): boolean {
+  const normalized = (title ?? '').replace(/\s+/g, ' ').trim().toLowerCase();
+  if (!normalized) return true;
+  if (GENERIC_SESSION_TITLES.has(normalized)) return true;
+  // "Run <uuid> agent" — the generated run-scoped default.
+  return /^run [0-9a-z-]+ agent$/.test(normalized);
+}
+
+/**
+ * Deterministic "this conversation never got a message" check for list rows.
+ * The list DTO has no turn count; a session whose `updatedAt` still equals its
+ * `createdAt` and that never linked a run provably received no turn.
+ */
+export function isEmptyConversation(s: api.AgentSessionResponse): boolean {
+  return !s.latestLinkedRunId && !!s.createdAt && s.createdAt === s.updatedAt;
+}
+
+/** Short deterministic start stamp for derived titles ("Aug 5, 10:42 AM"). */
+export function conversationStartLabel(iso?: string | null): string {
+  if (!iso) return '';
+  const parsed = new Date(iso);
+  if (Number.isNaN(parsed.getTime())) return '';
+  return parsed.toLocaleString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+}
+
+/**
+ * Display title for a conversation row/header. Never an LLM call:
+ * 1. a real (non-generic) server title wins;
+ * 2. else the first user message (when the caller has the transcript);
+ * 3. else the latest linked run's title;
+ * 4. else "Empty conversation" for provably message-less sessions;
+ * 5. else scope (project name when known) + creation time.
+ */
+export function deriveSessionTitle(
+  s: api.AgentSessionResponse,
+  projectName?: string | null,
+  firstUserMessage?: string | null,
+): string {
+  const title = (s.title ?? '').trim();
+  if (title && !isGenericSessionTitle(title)) return clipTitle(title);
+  const message = (firstUserMessage ?? '').trim();
+  if (message) return clipTitle(message);
+  if (s.latestLinkedRunTitle) return clipTitle(s.latestLinkedRunTitle);
+  if (isEmptyConversation(s)) return 'Empty conversation';
+  const scope =
+    (projectName ?? '').trim() ||
+    (s.projectId ? 'Project' : s.runId ? `Run ${s.runId.slice(0, 8)}` : 'Conversation');
+  const started = conversationStartLabel(s.createdAt);
+  return clipTitle(started ? `${scope} · ${started}` : scope);
+}
+
 export function sessionTitle(s: api.AgentSessionResponse): string {
-  return (s.title || s.projectId || s.id).slice(0, 54);
+  return deriveSessionTitle(s);
 }
 
 export function actionFromTurn(turn: api.AgentTurnResponse): PendingAction | null {

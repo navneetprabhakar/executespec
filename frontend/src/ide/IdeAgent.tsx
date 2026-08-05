@@ -5,7 +5,9 @@ import {
   actionFromTurn,
   agentReducer,
   deriveBarStatus,
+  deriveSessionTitle,
   initialAgentState,
+  isEmptyConversation,
   isTerminalRunStatus,
   toMessages,
   toolEventTimelineItem,
@@ -26,6 +28,7 @@ import {
   isConfirmableCloudRun,
 } from '@/ide/agentActionPolicy';
 import {
+  conversationTitleFromMessage,
   createCanonicalAgentSession,
   newAgentSessionRequest,
   subscribeNewAgentSession,
@@ -94,13 +97,11 @@ export default function IdeAgent() {
   const [projects, setProjects] = useState<api.ProjectDto[]>([]);
   const [projectsLoading, setProjectsLoading] = useState(true);
   const [projectsError, setProjectsError] = useState<string | null>(null);
-  const [projectQuery, setProjectQuery] = useState('');
   const [projectReload, setProjectReload] = useState(0);
   const [hasEarlierTurns, setHasEarlierTurns] = useState(false);
   const [loadingEarlierTurns, setLoadingEarlierTurns] = useState(false);
   const [earlierTurnsError, setEarlierTurnsError] = useState<string | null>(null);
   const [closeTarget, setCloseTarget] = useState<api.AgentSessionResponse | null>(null);
-  const [closingSession, setClosingSession] = useState(false);
   // Isolation is a server capability, never a client-side assumption. Until the
   // capability request explicitly proves it is enabled, describe this surface
   // as the policy-guarded remote workspace it actually is.
@@ -472,11 +473,13 @@ export default function IdeAgent() {
   }, []);
 
   const persistConversationRoute = async (provider: string, model: string) => {
-    if (!selected || selected.status !== 'ACTIVE') return;
     const previousProvider = selectedProvider;
     const previousModel = selectedModel;
     setSelectedProvider(provider);
     setSelectedModel(model);
+    // With no active session yet (lazy creation), the choice is applied when
+    // the first message creates the session; nothing to persist server-side.
+    if (!selected || selected.status !== 'ACTIVE') return;
     try {
       await api.updateAgentSessionRoute(selected.id, {
         provider: provider || null,
@@ -700,6 +703,9 @@ export default function IdeAgent() {
     [dispatch],
   );
 
+  // Project-creation handoff. Sessions are created lazily on the first
+  // message, so the handoff only restores the draft and conversation route —
+  // it must never POST an empty session just because navigation happened.
   useEffect(() => {
     const handoffId = searchParams.get('agentProjectHandoff');
     if (!projectId || !handoffId) return;
@@ -712,29 +718,23 @@ export default function IdeAgent() {
       return;
     }
     dispatch({type: 'input:set', input: handoff.draft});
-    void createSessionForRequest(
-      newAgentSessionRequest({projectId}, {provider: handoff.provider, model: handoff.model}),
-    )
-      .then(() => navigate(`/projects/${projectId}/agent`, {replace: true}))
-      .catch((error: unknown) => {
-        dispatch({
-          type: 'error',
-          error:
-            error instanceof Error ? error.message : 'Project conversation could not be linked.',
-        });
-      });
-  }, [createSessionForRequest, navigate, projectId, searchParams]);
+    if (handoff.provider) setSelectedProvider(handoff.provider);
+    if (handoff.model) setSelectedModel(handoff.model);
+    navigate(`/projects/${projectId}/agent`, {replace: true});
+  }, [navigate, projectId, searchParams]);
 
   useEffect(() => {
-    const draft = (location.state as {agentDraft?: unknown} | null)?.agentDraft;
+    const routed = location.state as {
+      agentDraft?: unknown;
+      agentRoute?: {provider?: string | null; model?: string | null} | null;
+    } | null;
+    const draft = routed?.agentDraft;
     if (typeof draft !== 'string') return;
     dispatch({type: 'input:set', input: draft});
+    if (routed?.agentRoute?.provider) setSelectedProvider(routed.agentRoute.provider);
+    if (routed?.agentRoute?.model) setSelectedModel(routed.agentRoute.model);
     navigate(`${location.pathname}${location.search}`, {replace: true, state: null});
   }, [location.pathname, location.search, location.state, navigate]);
-
-  async function createSession() {
-    return createSessionForRequest(newAgentSessionRequest(scope));
-  }
 
   // Toolbar/drawer actions are intentionally fire-and-forget, but a failed
   // session creation must still become visible in the same error surface as
@@ -781,9 +781,29 @@ export default function IdeAgent() {
     return subscribeNewAgentSession(fulfilRequest);
   }, [fulfilRequest]);
 
-  async function ensureSession() {
+  // Lazy session creation. A conversation shell is minted only when the user
+  // actually sends something (or uploads an attachment) — switching project
+  // scope must never create a session by itself. An existing empty session for
+  // the same scope is reused instead of minting another identical row.
+  async function ensureSession(firstMessage?: string) {
     if (selected?.status === 'ACTIVE') return selected;
-    return createSession();
+    const reusable = state.sessions.find(
+      (session) =>
+        session.status === 'ACTIVE' &&
+        agentSessionMatchesScope(session, scope) &&
+        isEmptyConversation(session),
+    );
+    if (reusable) {
+      dispatch({type: 'session:select', sessionId: reusable.id});
+      return reusable;
+    }
+    return createSessionForRequest(
+      newAgentSessionRequest(
+        scope,
+        {provider: selectedProvider, model: selectedModel},
+        conversationTitleFromMessage(firstMessage),
+      ),
+    );
   }
 
   async function handleFiles(files: FileList | null) {
@@ -868,7 +888,7 @@ export default function IdeAgent() {
     abortRef.current = abort;
     let activeSessionId: string | null = null;
     try {
-      const session = await ensureSession();
+      const session = await ensureSession(message);
       activeSessionId = session.id;
       await api.streamAgentTurn(
         session.id,
@@ -1127,6 +1147,17 @@ export default function IdeAgent() {
     runActive,
   });
   const currentProject = projects.find((project) => project.id === projectId) ?? null;
+  const projectNameFor = useCallback(
+    (id: string | null) => projects.find((project) => project.id === id)?.name ?? null,
+    [projects],
+  );
+  const firstUserMessage = useMemo(
+    () => state.turns.find((turn) => turn.userMessage)?.userMessage ?? null,
+    [state.turns],
+  );
+  const sessionDisplayTitle = selected
+    ? deriveSessionTitle(selected, projectNameFor(selected.projectId), firstUserMessage)
+    : null;
   const scopeLabel = runId
     ? `Run ${runId.slice(0, 8)}`
     : projectId
@@ -1146,25 +1177,18 @@ export default function IdeAgent() {
     endRef.current?.scrollIntoView({behavior: 'smooth', block: 'end'});
   };
 
-  const switchProjectContext = async (targetProjectId: string | null) => {
+  // Scope switching is navigation only. The old implementation POSTed a fresh
+  // agent session on every project change, which is how dozens of identical
+  // empty "Project agent" conversations accumulated; a session is now created
+  // lazily when the user sends their first message in the new scope.
+  const switchProjectContext = (targetProjectId: string | null) => {
     if (projectContextDisabledReason) return;
-    try {
-      const nextScope = targetProjectId ? {projectId: targetProjectId} : {};
-      await createSessionForRequest(
-        newAgentSessionRequest(nextScope, {
-          provider: selectedProvider,
-          model: selectedModel,
-        }),
-      );
-      navigate(targetProjectId ? `/projects/${targetProjectId}/agent` : '/agent', {
-        state: {agentDraft: state.input},
-      });
-    } catch (error) {
-      dispatch({
-        type: 'error',
-        error: error instanceof Error ? error.message : 'Project context could not be changed.',
-      });
-    }
+    navigate(targetProjectId ? `/projects/${targetProjectId}/agent` : '/agent', {
+      state: {
+        agentDraft: state.input,
+        agentRoute: {provider: selectedProvider, model: selectedModel},
+      },
+    });
   };
 
   const openCanonicalProjectCreation = () => {
@@ -1179,33 +1203,58 @@ export default function IdeAgent() {
     navigate(`/projects?agentProjectHandoff=${encodeURIComponent(handoff.id)}`);
   };
 
-  const confirmCloseSession = async () => {
-    if (!closeTarget) return;
-    setClosingSession(true);
-    try {
-      await api.closeAgentSession(closeTarget.id);
-      const remaining = (await loadSessions()).filter((session) => session.id !== closeTarget.id);
-      if (state.selectedId === closeTarget.id) {
-        dispatch({
-          type: 'session:select',
-          sessionId: selectScopedAgentSession(remaining, scope)?.id ?? null,
-        });
-      }
-      setCloseTarget(null);
-    } catch (error) {
+  // Optimistic close: the row disappears immediately and the archive request
+  // runs in the background. The old flow awaited the server archive plus a full
+  // session re-list before touching state — the founder-reported multi-second
+  // lag — and the re-list still contained the archived row, so the conversation
+  // never visibly left the drawer. Failure restores the row with a visible error.
+  const confirmCloseSession = () => {
+    const target = closeTarget;
+    if (!target) return;
+    const previousSessions = state.sessions;
+    const previousSelectedId = state.selectedId;
+    const remaining = previousSessions.filter((session) => session.id !== target.id);
+    dispatch({type: 'sessions:set', sessions: remaining});
+    if (previousSelectedId === target.id) {
       dispatch({
-        type: 'error',
-        error: error instanceof Error ? error.message : 'Conversation could not be closed.',
+        type: 'session:select',
+        sessionId: selectScopedAgentSession(remaining, scope)?.id ?? null,
       });
-    } finally {
-      setClosingSession(false);
     }
+    setCloseTarget(null);
+    void api
+      .closeAgentSession(target.id)
+      .then(async () => {
+        // Background reconciliation only; the optimistic removal already
+        // happened. The just-closed row stays hidden even if the server list
+        // still returns its archived shell.
+        try {
+          const rows = await api.listAgentSessions(100);
+          dispatch({
+            type: 'sessions:set',
+            sessions: rows.filter((session) => session.id !== target.id),
+          });
+        } catch {
+          // Keep the optimistic state; the next full load reconciles.
+        }
+      })
+      .catch((error: unknown) => {
+        dispatch({type: 'sessions:set', sessions: previousSessions});
+        if (previousSelectedId === target.id) {
+          dispatch({type: 'session:select', sessionId: previousSelectedId});
+        }
+        dispatch({
+          type: 'error',
+          error: error instanceof Error ? error.message : 'Conversation could not be closed.',
+        });
+      });
   };
 
   return (
     <div className='ide-page agent-chat-page'>
       <AgentTopBar
         selected={selected}
+        sessionDisplayTitle={sessionDisplayTitle}
         barStatus={barStatus}
         scopeLabel={scopeLabel}
         busy={sessionCreationBusy}
@@ -1278,13 +1327,11 @@ export default function IdeAgent() {
           currentProject={currentProject}
           linkedProjectId={projectId}
           projects={projects}
-          query={projectQuery}
           loading={projectsLoading}
           error={projectsError}
           disabledReason={projectContextDisabledReason}
-          onQueryChange={setProjectQuery}
-          onSelect={(project) => void switchProjectContext(project.id)}
-          onUnlink={() => void switchProjectContext(null)}
+          onSelect={(project) => switchProjectContext(project.id)}
+          onUnlink={() => switchProjectContext(null)}
           onCreate={openCanonicalProjectCreation}
           onRetry={() => setProjectReload((value) => value + 1)}
         />
@@ -1321,6 +1368,7 @@ export default function IdeAgent() {
         sessionLimitReached={state.sessions.length === 100}
         onClose={() => setChatsOpen(false)}
         remoteSandboxEnabled={remoteSandboxEnabled}
+        projectNameFor={projectNameFor}
       />
 
       <AgentConversation
@@ -1371,11 +1419,8 @@ export default function IdeAgent() {
         body='This archives the conversation on the server. Messages and run links may remain subject to retention policy; its filesystem is not restorable.'
         confirmLabel='Close conversation'
         danger
-        busy={closingSession}
         onConfirm={confirmCloseSession}
-        onClose={() => {
-          if (!closingSession) setCloseTarget(null);
-        }}
+        onClose={() => setCloseTarget(null)}
       />
     </div>
   );

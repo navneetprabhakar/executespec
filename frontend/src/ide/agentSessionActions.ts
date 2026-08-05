@@ -21,6 +21,12 @@ export type NewAgentSessionRequest = {
   requestId: string;
   scope: AgentSessionScope;
   conversationRoute?: {provider?: string | null; model?: string | null};
+  /**
+   * Deterministic display title, e.g. the first user message (~60 chars) when
+   * the session is created lazily at send time. Absent falls back to the
+   * generic scope title.
+   */
+  title?: string | null;
 };
 
 function mintId(): string {
@@ -34,8 +40,16 @@ function mintId(): string {
 export function newAgentSessionRequest(
   scope: AgentSessionScope = {},
   conversationRoute?: NewAgentSessionRequest['conversationRoute'],
+  title?: string | null,
 ): NewAgentSessionRequest {
-  return {requestId: mintId(), scope, conversationRoute};
+  return {requestId: mintId(), scope, conversationRoute, title: title ?? null};
+}
+
+/** First-message-derived conversation title (single-line, ~60 chars, no LLM). */
+export function conversationTitleFromMessage(message?: string | null): string | null {
+  const normalized = (message ?? '').replace(/\s+/g, ' ').trim();
+  if (!normalized) return null;
+  return normalized.length > 60 ? `${normalized.slice(0, 59)}…` : normalized;
 }
 
 /**
@@ -45,9 +59,11 @@ export function newAgentSessionRequest(
 export function createCanonicalAgentSession(
   request: NewAgentSessionRequest,
 ): Promise<api.AgentSessionResponse> {
+  const base = webAgentSessionRequest(request.scope);
   return api.createAgentSession({
-    ...webAgentSessionRequest(request.scope),
+    ...base,
     id: request.requestId,
+    title: request.title || base.title,
     defaultProvider: request.conversationRoute?.provider ?? null,
     defaultModel: request.conversationRoute?.model ?? null,
   });
