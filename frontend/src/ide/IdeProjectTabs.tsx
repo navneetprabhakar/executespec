@@ -166,7 +166,7 @@ export function ProjectTabs({projectId}: {projectId: string}) {
           ? members.value.length
           : undefined;
       const totalRuns = d
-        ? (d.activeRuns ?? 0) + (d.completedRuns ?? 0) + (d.failedRuns ?? 0)
+        ? (d.activeRuns ?? 0) + (d.completedRuns ?? 0) + (d.partialRuns ?? 0) + (d.failedRuns ?? 0)
         : undefined;
       const debtTotal =
         debt.status === 'fulfilled'
@@ -379,6 +379,11 @@ export function IdeProjectPulse() {
   // spend is the all-time `totalCostUsd` (relabelled below); merged PRs are counted from the
   // recent-PR list (relabelled "recent", since the list is capped, not a 30-day window).
   const completedRuns = dash ? (numOf(dash, 'completedRuns') ?? 0) : 0;
+  // Run buckets come from the dashboard's display-status counters. `partialRuns` is additive on
+  // the server DTO, so an older backend omits it — render "—" (unknown) rather than a false 0.
+  const failedRuns = dash ? numOf(dash, 'failedRuns') : undefined;
+  const partialRuns = dash ? numOf(dash, 'partialRuns') : undefined;
+  const bucket = (n: number | undefined) => (n != null ? String(n) : '—');
   const rawAvgScore = dash ? numOf(dash, 'avgScore') : undefined;
   const avgScore = completedRuns > 0 ? rawAvgScore : undefined;
   const excludedScoreReports = dash ? (numOf(dash, 'excludedScoreReports') ?? 0) : 0;
@@ -422,6 +427,9 @@ export function IdeProjectPulse() {
       ) : (
         <>
           <div style={{display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 8}}>
+            <Metric label='Runs · completed' value={bucket(completedRuns)} />
+            <Metric label='Runs · partial' value={bucket(partialRuns)} />
+            <Metric label='Runs · failed' value={bucket(failedRuns)} />
             <Metric
               label='Avg score · internal'
               value={avgScore != null ? `${Math.round(avgScore)}% · review evidence` : '—'}

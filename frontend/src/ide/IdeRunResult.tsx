@@ -3898,7 +3898,7 @@ export default function IdeRunResult() {
               )}
               <div ref={chatEndRef} />
             </div>
-            <div style={{display: 'flex', gap: 8, alignItems: 'flex-end'}}>
+            <div className='ide-ask-composer'>
               <div style={{display: 'grid', gap: 6, flex: 1}}>
                 <textarea
                   className='ide-input'
@@ -3940,7 +3940,7 @@ export default function IdeRunResult() {
                   </div>
                 )}
               </div>
-              <div style={{display: 'flex', flexDirection: 'column', gap: 6, flexShrink: 0}}>
+              <div className='ide-ask-composer-actions'>
                 <button
                   className='ide-btn'
                   onClick={sendChat}

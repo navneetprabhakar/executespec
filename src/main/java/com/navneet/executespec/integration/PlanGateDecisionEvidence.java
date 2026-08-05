@@ -271,7 +271,9 @@ final class PlanGateDecisionEvidence {
 
   static String requireExactPlan(PipelineRun run) {
     if (run.getPlanJson() == null || run.getPlanJson().isBlank()) {
-      throw conflict("The persisted plan is missing; approval cannot continue.");
+      throw new BrokenPlanGateStateException(
+          BrokenPlanGateStateException.Code.PLAN_ARTIFACT_MISSING,
+          "The immutable persisted plan artifact is missing.");
     }
     return ExactPlanFingerprint.sha256(run.getPlanJson());
   }
