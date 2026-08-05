@@ -237,3 +237,13 @@ missing proof; before this, "Endpoint coverage is n/a" demoted every non-HTTP cl
 sole-independent-gap advisory state (`independentProofGapOnly=true`) to a generic UNCERTAIN that
 recommended more provider work. Pinned by
 `ValidationReportGoalProofEvaluatorTest.explicitlyNotApplicableEvidenceDoesNotBlockTheSoleIndependentGapState`.
+
+## Informational disclosures do not gate pipelineResult (2026-08-05)
+
+`SYNTH-HTTP-STACK-UNPROVABLE` (exact-route proof unavailable on a non-Spring stack) stays visible
+in the report/ledger but is excluded from the NEEDS_ATTENTION derivation: a run whose only issue is
+that disclosure remains PASSED. Before this, the note demoted clean Node-stack runs to
+`PARTIAL/VALIDATION_REPORT_LOW_QUALITY` — recreating, one notch softer, the false failure the
+unprovable state was introduced to prevent. `isInformationalDisclosure` (review-issue id) and
+`isInformationalDisclosureDescription` (DTO description, no id available) are the twin filters;
+pinned by `ValidationReportServiceR09Test.httpStackUnprovableDisclosureDoesNot{Gate,Mask}...`.
