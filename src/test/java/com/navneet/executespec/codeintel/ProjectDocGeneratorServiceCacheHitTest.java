@@ -880,6 +880,8 @@ class ProjectDocGeneratorServiceCacheHitTest {
   @Test
   void failedGenerationIsRemovedFromSingleFlightSoRetryCanSucceed() {
     wireCacheMiss();
+    // Keep a non-empty command projection so SETUP still takes the provider lane under test.
+    wireExactSourceRepositoryWithNpmTestProjection(SHA_A);
     when(llmRouter.callTextStrict(
             anyString(),
             anyString(),
@@ -906,6 +908,7 @@ class ProjectDocGeneratorServiceCacheHitTest {
     assertThat(retry.getContent())
         .startsWith("# Setting up Test")
         .contains("git clone https://github.com/owner/repo-a.git")
+        .contains("```bash\nnpm test\n```")
         .doesNotContain("Start the repository service", "dependency installation");
     verify(llmRouter, org.mockito.Mockito.times(2))
         .callTextStrict(
@@ -954,6 +957,8 @@ class ProjectDocGeneratorServiceCacheHitTest {
   @Test
   void credentialLikeProviderOutputIsRejectedBeforePersistenceOrMirror() {
     wireCacheMiss();
+    // Keep a non-empty command projection so SETUP still takes the provider lane under test.
+    wireExactSourceRepositoryWithNpmTestProjection(SHA_A);
     String unsafe = validDoc(DocType.SETUP, "Unsafe") + "\nActual key: sk-ant-" + "A".repeat(40);
     when(llmRouter.callTextStrict(
             anyString(),
@@ -1087,8 +1092,55 @@ class ProjectDocGeneratorServiceCacheHitTest {
   }
 
   @Test
+  void emptySetupCommandProjectionAssemblesCloneOnlyDocumentWithZeroProviderCalls() {
+    // wireCacheMiss wires the canonical empty-projection facts block ("No exact setup command
+    // source was selected."), so no non-clone command is authorized. The document is fully
+    // determined by evidence: the provider loop must not run at all — zero spend.
+    wireCacheMiss();
+    when(docRepo.saveAndFlush(any(ProjectGeneratedDoc.class)))
+        .thenAnswer(invocation -> invocation.getArgument(0));
+
+    ProjectGeneratedDoc generated =
+        svc.generate("p-1", DocType.SETUP, "actor-1", LlmProvider.ANTHROPIC);
+
+    assertThat(generated.getContent())
+        .startsWith("# Setting up Test")
+        .contains("git clone https://github.com/owner/repo-a.git")
+        .contains("No test, check, or start command is established")
+        .contains("Dependency installation is not established by the supplied deterministic")
+        .doesNotContain("npm install", "npm test", "make ");
+    assertThat(generated.getInputTokens()).isZero();
+    assertThat(generated.getOutputTokens()).isZero();
+    // The assembled document must satisfy the unchanged strict validator.
+    assertThat(
+            ProjectGeneratedDocValidator.validate(
+                DocType.SETUP,
+                generated.getContent(),
+                java.util.Set.of("owner/repo-a"),
+                GeneratedSignatureGrounding.codemapEvidence(
+                    svc.buildSourceBundle(
+                        project("p-1"), archDoc(7, "{\"owner/repo-a\":\"" + SHA_A + "\"}")))))
+        .isEmpty();
+    verifyNoInteractions(llmRouter);
+    verify(executionPolicyFactory, never())
+        .forProject(
+            anyString(),
+            anyString(),
+            anyString(),
+            anyString(),
+            anyString(),
+            anyString(),
+            org.mockito.ArgumentMatchers.nullable(String.class),
+            anyString(),
+            any());
+    verify(docRepo, org.mockito.Mockito.times(1)).saveAndFlush(any(ProjectGeneratedDoc.class));
+  }
+
+  @Test
   void providerInventedSetupCommandIsDiscardedByCanonicalAssemblyWithoutCorrectiveCall() {
     wireCacheMiss();
+    // A non-empty command projection keeps the existing provider-dispatch lane unchanged.
+    wireExactSourceRepositoryWithNpmTestProjection(SHA_A);
     String unsupportedSetup =
         validDoc(DocType.SETUP, "First")
             .replace(
@@ -1133,7 +1185,7 @@ class ProjectDocGeneratorServiceCacheHitTest {
     assertThat(generated.getContent())
         .startsWith("# Setting up Test")
         .contains("git clone https://github.com/owner/repo-a.git")
-        .contains("No test, check, or start command is established")
+        .contains("```bash\nnpm test\n```")
         .doesNotContain("npm install", "conventional dependency installer");
   }
 
@@ -1233,7 +1285,9 @@ class ProjectDocGeneratorServiceCacheHitTest {
                 : "No multi-service startup order, port, health endpoint, or health-check command"
                     + " is established")
         .doesNotContain("Docker Compose starts the full application stack");
-    verify(llmRouter, org.mockito.Mockito.times(1))
+    // SETUP with the wired empty command projection is assembled deterministically with zero
+    // provider calls; EXPLANATION keeps its single provider call.
+    verify(llmRouter, org.mockito.Mockito.times(type == DocType.EXPLANATION ? 1 : 0))
         .callTextStrict(
             anyString(),
             anyString(),
@@ -1446,6 +1500,26 @@ class ProjectDocGeneratorServiceCacheHitTest {
 
   private void wireExactSourceRepository(String sha) {
     wireExactSourceRepository(sha, "source map for " + sha);
+  }
+
+  /**
+   * Wires the exact source repository with a NON-empty safe deterministic command projection
+   * (package.json source + derived {@code npm test}), so SETUP generation keeps the provider lane.
+   */
+  private void wireExactSourceRepositoryWithNpmTestProjection(String sha) {
+    String setupSource =
+        "- Source-Path-Base64: "
+            + Base64.getEncoder().encodeToString("package.json".getBytes(StandardCharsets.UTF_8))
+            + "\n  Content-Base64: "
+            + Base64.getEncoder()
+                .encodeToString(
+                    "{\"scripts\":{\"test\":\"node --test\"}}".getBytes(StandardCharsets.UTF_8))
+            + "\n  Truncated: false\n  Derived-Command-Base64: "
+            + Base64.getEncoder().encodeToString("npm test".getBytes(StandardCharsets.UTF_8));
+    wireExactSourceRepository(
+        sha,
+        facts("owner/repo-a", sha)
+            .replace("- No exact setup command source was selected.", setupSource));
   }
 
   private void wireExactSourceRepository(String sha, String content) {

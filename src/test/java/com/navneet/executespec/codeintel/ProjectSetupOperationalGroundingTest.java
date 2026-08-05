@@ -100,6 +100,50 @@ class ProjectSetupOperationalGroundingTest {
   }
 
   @Test
+  void emptyCommandProjectionIsDetectedOnlyForValidAuthorityWithRepositories() {
+    String emptyProjection =
+        envelope("owner/repo", "- No exact setup command source was selected.\n");
+    String projectedCommand =
+        envelope(
+            "owner/repo",
+            source("package.json", "{\"scripts\":{\"test\":\"node --test\"}}")
+                + derived("npm test"));
+
+    assertThat(
+            ProjectSetupOperationalGrounding.hasEmptyCommandProjection(
+                emptyProjection, Set.of("owner/repo")))
+        .isTrue();
+    // A source excerpt alone (no derived command) still projects nothing.
+    assertThat(
+            ProjectSetupOperationalGrounding.hasEmptyCommandProjection(
+                envelope("owner/repo", source("README.md", "documentation prose only")),
+                Set.of("owner/repo")))
+        .isTrue();
+    assertThat(
+            ProjectSetupOperationalGrounding.hasEmptyCommandProjection(
+                projectedCommand, Set.of("owner/repo")))
+        .isFalse();
+    // Malformed/incomplete evidence must not be classified as an empty projection: the ordinary
+    // fail-closed generation path owns surfacing its exact error.
+    assertThat(
+            ProjectSetupOperationalGrounding.hasEmptyCommandProjection(
+                "malformed", Set.of("owner/repo")))
+        .isFalse();
+    assertThat(
+            ProjectSetupOperationalGrounding.hasEmptyCommandProjection(emptyProjection, Set.of()))
+        .isFalse();
+    // Multi-repo: one projected command anywhere keeps the provider lane.
+    assertThat(
+            ProjectSetupOperationalGrounding.hasEmptyCommandProjection(
+                envelope("owner/repo-a", "- No exact setup command source was selected.\n")
+                    + envelope(
+                        "owner/repo-b",
+                        source("Makefile", "check:\n\ttrue") + derived("make check")),
+                Set.of("owner/repo-a", "owner/repo-b")))
+        .isFalse();
+  }
+
+  @Test
   void malformedAuthorityFailsClosedAndCannotBeCanonical() {
     assertThatThrownBy(
             () ->
