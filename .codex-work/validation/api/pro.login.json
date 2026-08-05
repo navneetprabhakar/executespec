@@ -1,0 +1,30 @@
+{
+  "user": {
+    "id": "b81d5ef1-c407-408f-8fc6-9d1110ae42fb",
+    "email": "revalidate-pro@test.local",
+    "firstName": "Reval",
+    "lastName": "pro",
+    "globalRole": "USER",
+    "tier": "PRO",
+    "status": "ACTIVE",
+    "mustChangePassword": false,
+    "emailVerified": true,
+    "orgId": "7e2349b5-6bc2-4763-94ec-a98ecdc52ba1",
+    "orgRole": "ORG_ADMIN",
+    "githubOwner": null,
+    "hasGithubPat": false,
+    "hasOpenAiKey": false,
+    "hasAnthropicKey": false,
+    "hasGeminiKey": false,
+    "hasDeepSeekKey": false,
+    "hasFireworksKey": false,
+    "jiraBaseUrl": null,
+    "jiraEmail": null,
+    "hasJiraToken": false,
+    "confluenceBaseUrl": null,
+    "confluenceEmail": null,
+    "hasConfluenceToken": false,
+    "viewMode": "vibe",
+    "preferredAiProvider": "DEEPSEEK"
+  }
+}

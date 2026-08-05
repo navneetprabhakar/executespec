@@ -1,0 +1,14 @@
+{
+  "architectureVersionId": "19a7a6d6-37d3-4fe9-bf71-014467ff7d4b",
+  "sourceSha": "17289843c6b1fe3ab43e38b23816194f8a46e01d",
+  "codeMapEvidenceId": "workspace-health:158436d5-1ff4-4bf3-9a81-d7fceeea9016:17289843c6b1fe3ab43e38b23816194f8a46e01d",
+  "architectureEvidenceId": "architecture-job:64320847-7267-453a-a4f5-941f4309c6c3:QUALIFIED",
+  "documentEvidenceId": "4d135bfb-a5c2-437d-8a97-264fcd8123fc",
+  "documentRubricPass": true,
+  "documentScore": 84,
+  "documentMaxScore": 100,
+  "documentSourceSha": "17289843c6b1fe3ab43e38b23816194f8a46e01d",
+  "documentProvider": "DEEPSEEK",
+  "documentModel": "deepseek-v4-pro-native",
+  "documentOperationId": "bfbcfc71-43d0-438d-a713-fd4096dd0bcb"
+}

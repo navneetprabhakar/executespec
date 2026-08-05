@@ -1,0 +1,36 @@
+{
+  "mode": "REMOTE_WORKSPACE_ONLY",
+  "projectId": "c0f3d58e-9e9d-4fac-b978-dc7f37472103",
+  "capabilitySnapshot": {
+    "lifecycleEnabled": false,
+    "runtimeDispatchEnabled": false,
+    "containerStrictV1Enabled": false,
+    "toolchainReadinessEnabled": false
+  },
+  "capabilityEvidenceId": "cli-doctor-1.0.4-policy-only-2026-08-03",
+  "projectInteraction": {
+    "classification": "SUPPORTED",
+    "createOrLinkInsideAgentAvailable": true,
+    "handoffAvailable": true,
+    "evidenceId": "web-agent-project-picker-and-create-2026-08-03"
+  },
+  "execution": {
+    "sandboxCreated": false,
+    "hostFallbackUsed": false,
+    "truthfulLabel": "Remote workspace",
+    "doNotDemo": true,
+    "limitation": "Dev exposes a policy-guarded server clone, not a strict digest-pinned isolated sandbox runtime.",
+    "projectContextPreserved": true,
+    "historySnapshotAvailable": true,
+    "closeAvailable": true,
+    "evidenceId": "web-agent-remote-workspace-history-close-2026-08-03"
+  },
+  "teardown": {
+    "mode": "REMOTE_WORKSPACE_ONLY",
+    "projectId": "c0f3d58e-9e9d-4fac-b978-dc7f37472103",
+    "sourceSha": "8a1a65e9d46d3f62c5c5e2003ce94c99b5f1bf67",
+    "sandboxAbsent": true,
+    "workspaceClosed": true,
+    "evidenceId": "no-strict-sandbox-created-2026-08-03"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "meta": {
+    "id": "32e363f4-1560-489a-93cd-13ec3651f01b",
+    "name": "codex-local-validation-free-1784739826",
+    "tokenPrefix": "es_pat_Qc7tmUw",
+    "scopes": "api:read,runs:write,projects:write,agent:write,settings:write",
+    "createdAt": "2026-07-22T17:03:47.019693Z",
+    "lastUsedAt": null,
+    "expiresAt": "2026-07-23T17:03:47.009182Z",
+    "revoked": false
+  }
+}

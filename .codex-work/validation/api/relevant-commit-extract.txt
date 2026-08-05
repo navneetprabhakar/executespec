@@ -1,0 +1,210 @@
+49----END---
+50-2630526d96da3ee93354ac9546869594ae7c3341
+51:merge(fix/p0-audit): RR-1551 P0 — cost history was cross-tenant
+52-
+53-AUDIT FINDING, genuinely open: RunCostHistoryRepository.findSimilarCosts/findSimilarCostsLoose
+--
+69----END---
+70-ac86667b262e87ade04a81a67a567e9a0176e638
+71:fix(p0-audit): scope historical cost estimation to the submitting org (RR-1551)
+72-
+73-The k-NN cost estimate that sets pipeline_run.credits_charged and
+--
+195-
+196-RR-1081 (pooled RestClient by base-url+timeout), RR-1084 (32MiB ceiling + StreamReadConstraints),
+197:RR-509/510 (Gemini cache identity: tool MODE + credential fingerprint), RR-568/1201 (classifier cache
+198-key + no transient-fallback caching), RR-1192/1194 (atomic MOVE_FILE + blank-reason reject), RR-1151/1152
+199-(namespaced + atomic-Lua circuit breaker), RR-1131 (prompt-resource verifier). Deferred: planner-schema
+--
+219-- RR-510 GeminiNativeToolClient: partition the explicit-cache key by a stable
+220-  non-reversible credential fingerprint (raw key never logged/keyed).
+221:- RR-568 SmartClassifierAgent: fingerprint projectType + provider + project
+222-  memory into the classifier cache key.
+223-- RR-1201 SmartClassifierAgent: never cache a transient LLM_FALLBACK_TO_HEURISTIC
+--
+417-RR-129 (JWT secret HS256 byte-strength + entropy), RR-131 (OAuth linking requires provider-verified
+418-email — account-takeover), RR-132 (email-verification tokens hashed), RR-013 (admin invite no false
+419:success), RR-212 (cross-org collaborator run listing), RR-253 (SSO write tier-gated), RR-829 (unarchive
+420-cap recheck), RR-834 (DeepSeek/Fireworks ORG keys for BYOK tiers), RR-934 (DELETE dead rollout package
+421-+ allowlist entry + 2 routes, routeCount 561->559). 13 deferred (migration/concurrency).
+--
+443-- RR-013 admin invite no longer returns "Invitation sent" when no target org
+444-  is supplied; rejects with 400 and returns the resolved orgId on success.
+445:- RR-212 RunVisibilitySpec now OR-s in the caller's ACTIVE project
+446-  memberships so an accepted (cross-org) collaborator can discover the host
+447-  project's runs in list, not only open a known URL. No host-org broadening.
+--
+541-merge(fix/p1-fe2): P1 sweep frontend pass 2 (18 fixed)
+542-
+543:Security/session: RR-196 (logout real revocation + block cookie refresh), RR-1331/1332 (share-state
+544-generation guards), RR-1335 (adopt email-verification session). Financial: RR-359 (paid invoices not
+545-Pending), RR-783 (cost cap opt-in). Error/evidence honesty: RR-947/748/749/761/781/1469/1475/1381.
+--
+608-
+609-Security / session:
+610:- RR-196: logout is now a real server revocation — retry once, surface `logoutError` when
+611-  unconfirmed, and set a marker that blocks cookie-based auto-refresh in loadMe so an unconfirmed
+612-  sign-out cannot silently reauthenticate the next visitor on a shared machine (useAuthStore).
+--
+727-merge(fix/p1-fe1): P1 sweep frontend pass 1 (18 fixed)
+728-
+729:Entitlement honesty: RR-167 (tier union incl PRO_PLUS/BYOK), RR-1338 (BYOK exempt cost-cap),
+730-RR-786 (Fireworks selectable for own-keys), RR-1507 (membership vs share-link authority split).
+731-State/races: RR-1423 (async-scope reset), RR-1484 (project-runs keyed by projectId), RR-624
+--
+739-
+740-Frontend P1 audit-remediation PASS 1. Verified-open findings only; several
+741:candidates (RR-202, RR-736) were already closed on this base and skipped.
+742-
+743-Contract / entitlement honesty:
+744-- RR-167  widen AuthUser.tier union to the canonical ladder (adds PRO_PLUS, BYOK)
+745:- RR-1338 requiresCostCap exempts BYOK (own-keys tier) and handles PRO_PLUS
+746-- RR-786  Fireworks is selectable for own-keys tiers / users holding the key
+747-- RR-1507 split membership vs share-link authority (PROJECT_DEVELOPER can manage
+--
+767-- RR-771   openInstall uses noopener,noreferrer + https validation + null opener
+768-
+769:Tests: added runProgress (RR-1492), requiresCostCap (RR-1338), membership/share
+770-authority (RR-1507), useAsyncData scope reset (RR-1423), agent-stream terminal
+771-error (RR-1344). Gate: build green, vitest 373/373, eslint 0 errors, prettier clean.
+--
+826-
+827-RR-511 (Gemini abnormal-termination drops tool call), RR-1181 (Anthropic forced-tool salvage
+828:gated on clean stop_reason), RR-569 (classifier SPEC via PromptTrustBoundary), RR-1230 (single-pass
+829-PromptAssembler, no rescan of inserted values), RR-1082 (stable tool-call id minted once),
+830-RR-1083 (empty-choices/blank-tool no longer a paid SUCCESS), RR-1219/1220 (planner test-gate
+--
+862-          termination; abnormal reasons fail closed (LlmRouter falls through to
+863-          auto). Extracted buildForcedOutcome() to make the gate unit-testable.
+864:- RR-569  SmartClassifier: the customer SPEC was inserted raw as classifier
+865-          instructions. Now framed with the same PromptTrustBoundary evidence
+866-          wrapper as the other inputs, so embedded directives don't gain prompt
+--
+883-
+884-Already-closed (verified, no change): RR-505 (planner timeout cancels+interrupts),
+885:RR-521 (prompt-audit failure logged+metered+degraded), RR-1180 (forced-call HTTP
+886-read ceiling; live-deadline wiring is caller-side/deferred).
+887-
+--
+988-  mutation/spend against a hidden-but-retained project during the 30-day
+989-  window.
+990:- RR-830 TierEnforcementService project/repo-cap checks fail closed
+991-  (503) on a MISSING tier_config row instead of mapping absent -> -1
+992-  (unlimited); an explicit -1 still means unlimited. Closes a fail-open
+--
+994-
+995-Tenant isolation / org invariants:
+996:- RR-224 InvitationService.resendInvitation is now authorized on
+997-  (id, orgId); an ORG_ADMIN can no longer reactivate/resend another
+998-  tenant's invitation by UUID.
+--
+1024-  plaintext downgrade.
+1025-
+1026:Tests: +4 new classes, 4 updated (incl. the RR-830 and RR-139 pins).
+1027-Gate: mvn -B spotless:check test -> Tests run: 4514, Failures: 0, Errors: 1
+1028-(only FlywayCompatibilityContractTest NoSuchFile, the worktree docs-sibling
+--
+1038-
+1039-Fixed:
+1040:- RR-414 Slack notification logs scoped to caller org (was cross-tenant readable by run id)
+1041-- RR-466 codemap + architecture artifacts wrapped in PromptTrustBoundary (prompt injection)
+1042-- RR-467 defaultModelFor fails closed instead of crossing to Anthropic Haiku on misconfig
+1043-- RR-405 workspace file listing excludes symlinks (NOFOLLOW) — no host-file score inflation
+1044:- RR-523 Slack OAuth form body + cursor built via MultiValueMap/URI builder (encode once)
+1045-- RR-583 Slack outbound mrkdwn: untrusted spec/failure/summary/task text escaped (no <!channel> injection)
+1046-- RR-584 Confluence inbound webhook fails closed; removed outbound-apiToken-as-inbound-bearer fallback
+--
+1256-
+1257-RR-345 (first-class terminal PARTIAL, no collapse to COMPLETE), RR-348 (bounded pool +
+1258:terminal settle, no EXECUTING stranding), RR-527 (advisory-locked run admission), RR-529
+1259-(multi-repo passes every mapped repo), RR-532 (attempt-row collision reconcile), RR-693
+1260-(CANCELLED/PARTIAL terminal in overview), RR-694 (repo-create authority fail-closed), RR-995/996
+--
+1277-  stranded the launch in EXECUTING. Now dispatches on the bounded PipelineExecutorPool
+1278-  with propagated trace/tenant context and always settles the launch terminally.
+1279:RR-527 — active-run admission was a non-atomic read-before-create (two concurrent
+1280-  creates could both pass). Serialized behind a per-project transaction-scoped
+1281-  advisory lock in admitAndCreateExecution.
+1282:RR-529 — a multi-repo solution silently ran against only its first mapping. Now
+1283-  passes every mapped repo deterministically as the canonical multi-repo request
+1284-  and fails closed on an unresolved mapping.
+--
+1304-Deferred (out of this lane): RR-298/RR-906 (need an evidence-bundle / parent-
+1305-heartbeat column → migration); RR-347/RR-907/RR-692 (event-outbox mirroring,
+1306:operator backfill job, UNION pagination — larger re-architecture); RR-528/RR-695
+1307-(project-scoped effective-entitlement snapshot); RR-937/938/939/940-persistence/
+1308-941/942 (legacy flag-off ExecutionPlannerService path — unreachable under default
+--
+1556----END---
+1557-91bee0ad518c6b2295618d52891e08ed27df9dbe
+1558:fix(sharing,sse,crypto): P1 authz + fail-closed batch (RR-974/1328/977/979/424/124)
+1559-
+1560-Sharing:
+1561:- RR-974: invite list/revoke now require host invite-admin authority
+1562-  (SUPER_ADMIN or host ORG_ADMIN) via shared assertHostInviteAdmin, not
+1563-  plain project read/write. Closes invitee-PII enumeration by external
+--
+1576-
+1577-SSE:
+1578:- RR-424: the Redis echo-suppression instance id gains a per-boot UUID
+1579-  suffix so two replicas sharing a container hostname / PID 1 can no longer
+1580-  classify each other's pub/sub events as self-echoes.
+--
+1695-  (controller + tools) attribute audit events to the host project org, not the
+1696-  actor's home org. ToolContext gains an optional hostOrgId.
+1697:- RR-564 ProjectChatTools: parse the tool result THEN cap by shrinking the largest
+1698-  string field (valid JSON preserved) instead of cutting JSON before re-parsing,
+1699-  which turned every large artifact into "invalid result envelope".
+--
+1706-
+1707-Already-closed (verified against current code):
+1708:- RR-563 (raw provider-dollar cost) already gated by CostVisibilityPolicy.
+1709-
+1710-Deferred (bounded rewrite out of this lane):
+1711-- RR-1254 (run-scoped start/final SHA diff) needs run-snapshot SHA plumbing.
+1712-- RR-1257 (multi-language context discovery) needs per-repo language inventory.
+1713:- RR-565/RR-566 (provider-neutral SCM checkout + governed clone cache) architectural.
+1714-- RR-594 (paginated history + retained-byte quotas) API-contract + frontend change.
+1715-- RR-654 (per-turn transaction boundary) god-class refactor requiring load testing.
+--
+1735-  (passed as the ref) rather than the mutable branch name, so a mid-generation
+1736-  push cannot be mislabelled under the persisted SHA.
+1737:- RR-524: ContractDriftController resolved the caller PAT via
+1738-  userRepo.findById(auth.getName()) where getName() is the EMAIL, not the AppUser
+1739-  id — every private-repo drift check/refresh silently ran with a null PAT, and
+--
+1854-- RR-200 per-request generation guard drops a stale run/list read (no more run A under route B)
+1855-- RR-201 retry uses a retrySubmitting state + rollback, no false optimistic PENDING
+1856:- RR-202 SSE backoff resets only after 15s healthy (was: reset on every open -> reconnect storm);
+1857-  jitter + 12-attempt budget, 30s ceiling preserved
+1858-- RR-203 scoped token required; no unauthenticated EventSource fallback; ERROR surfaced in UI
+--
+1875-  added retrySubmitting state, commit server state only after acceptance, and
+1876-  refetch/surface error on rejection.
+1877:- RR-202 (P1) useSse: backoff no longer resets on a sub-threshold open — the
+1878-  attempt counter resets only after STABLE_MS of a healthy connection; added
+1879-  jitter (ceiling preserved at 30s) and a MAX_ATTEMPTS retry budget → ERROR
+--
+2272-P1 wave 1: RR-154/155/161/477/505/554/696/999/1001/1037/1180/1565 (bounded
+2273-process/future timeouts), RR-183/211/229/230/563 (DSAR/invoice/cost authorization),
+2274:RR-518/520 (notification claim-before-send dedupe), RR-521/538/576/1610/1611
+2275-(swallowed errors + silent-pass lint surfaced).
+2276-
+--
+2312-
+2313-Notification double-send (deliver-before-dedupe-insert):
+2314:- RR-520 ManagedAiNotificationService: claim the unique (period,to_state,channel)
+2315-  dedupe row FIRST via ManagedAiNotificationDedupe (REQUIRES_NEW insert, catch
+2316-  unique-violation), then deliver — only the claim winner sends.
+--
+2320-
+2321-Errors swallowed into false success:
+2322:- RR-521 PromptAssembler.assembleAndTrack: log + metric the audit-persist failure and
+2323-  return the prompt DEGRADED (tracked=false) instead of silently discarding it.
+2324-- RR-538 ToolRegistry: route the unexpected-tool-exception through ContextSanitizer
+--
+2398-branch with every billing flag false).
+2399-
+2400:RR-563: new CostVisibilityPolicy gates raw provider-dollar cost to
+2401-SUPER_ADMIN/FINANCE or an owning-org ORG_ADMIN/BILLING_ADMIN. Applied to the
+2402-list_recent_runs chat tool, CodeReview/PrReview scan DTOs, the project

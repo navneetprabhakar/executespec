@@ -1,0 +1,1525 @@
+{
+  "runId": "enterprise-closure-v2-2026-07-20",
+  "fileKey": "aq1I0rCCUpfRKe7gyyO41S",
+  "phase": "phase7-external-designer-handoff",
+  "step": "P7.b-cp-078-plain-english-designer-prd",
+  "entities": {
+    "collections": {
+      "primitives": "VariableCollectionId:2:2",
+      "color": "VariableCollectionId:2:3",
+      "size": "VariableCollectionId:2:4"
+    },
+    "pages": {
+      "cover": "0:1",
+      "foundations": "5:2",
+      "components": "5:3",
+      "enterpriseScreens": "5:4"
+    },
+    "foundationDocumentation": {
+      "root": "75:31",
+      "header": "75:32",
+      "productUxContracts": "75:36",
+      "colourSystem": "75:58",
+      "typography": "75:732",
+      "dimensions": "76:2",
+      "focusAndElevation": "76:87",
+      "identityAndMaturity": "76:106"
+    },
+    "removed": {
+      "legacyFoundationSummary": "5:10"
+    },
+    "components": {
+      "legacyButton": "8:10",
+      "legacyObjectiveRow": "8:17",
+      "legacySourceRow": "8:28",
+      "actionButtonBase": "80:4",
+      "actionButtonVariants": {
+        "coreSmall": ["82:4","82:11","82:18","82:25","82:32","82:39","82:46","82:53","82:60","82:67","82:74","82:81","82:88","82:95","82:102","82:109","82:116","82:123","82:130","82:137"],
+        "coreMedium": ["82:144","82:151","82:158","82:165","82:172","82:179","82:186","82:193","82:200","82:207","82:214","82:221","82:228","82:235","82:242","82:249","82:256","82:263","82:270","82:277"],
+        "coreLarge": ["82:284","82:291","82:298","82:305","82:312","82:319","82:326","82:333","82:340","82:347","82:354","82:361","82:368","82:375","82:382","82:389","82:396","82:403","82:410","82:417"],
+        "supporting": ["82:424","82:431","82:438","82:445","82:452","82:459","82:466","82:473","82:480","82:487","82:494","82:501","82:508","82:515","82:522","82:529","82:536","82:543","82:550","82:557","82:564","82:571","82:578","82:585","82:592","82:599","82:606","82:613","82:620","82:627"],
+        "disabled": ["82:634","82:641","82:648"]
+      },
+      "actionButtonDoc": "83:190",
+      "actionButtonSets": {
+        "coreSmall": "83:194",
+        "coreMedium": "83:196",
+        "coreLarge": "83:198",
+        "supporting": "83:200",
+        "disabled": "83:202"
+      },
+      "iconFamilyDoc": "78:2",
+      "icons": {
+        "Home": "78:12",
+        "Objective": "78:20",
+        "Intelligence": "78:27",
+        "Services": "78:36",
+        "Evidence": "78:44",
+        "Settings": "78:51",
+        "Search": "78:58",
+        "Plus": "78:64",
+        "ChevronLeft": "78:70",
+        "ChevronRight": "78:76",
+        "PanelLeft": "78:84",
+        "PanelRight": "78:92",
+        "Close": "78:98",
+        "Ask": "78:105",
+        "Notifications": "78:112",
+        "Account": "78:119",
+        "More": "78:127"
+      },
+      "statusIconDoc": "92:190",
+      "statusIcons": {
+        "Neutral": "92:198",
+        "Active": "92:204",
+        "Attention": "92:210",
+        "Blocked": "92:216",
+        "Failure": "92:222",
+        "Success": "92:228",
+        "Terminal": "92:234"
+      },
+      "statusMaturityDoc": "93:190",
+      "statusMaturitySet": "93:566",
+      "statusCompoundDoc": "94:202",
+      "statusCompoundSet": "94:674",
+      "navigationRowDoc": "95:230",
+      "navigationRowSet": "97:342",
+      "navigationPaneToggleDoc": "98:342",
+      "navigationPaneToggleSet": "98:808",
+      "permissionNoticeDoc": "100:402",
+      "permissionNoticeSet": "100:818",
+      "identityMarkDoc": "103:422",
+      "identityMarks": {
+        "Bitbucket Cloud": "103:427",
+        "Jira Cloud": "103:432",
+        "Slack": "103:437",
+        "OpenAI": "103:445",
+        "Anthropic": "103:456",
+        "Google": "103:461"
+      },
+      "providerIdentityDoc": "105:422",
+      "providerIdentitySet": "105:470",
+      "sourceIdentityDoc": "106:443",
+      "sourceIdentitySet": "106:980",
+      "modelIdentityDoc": "109:574",
+      "modelIdentitySet": "109:1681",
+      "objectiveRowDoc": "111:994",
+      "objectiveRowSet": "111:1363",
+      "searchContextDoc": "112:1114",
+      "searchContextSet": "112:1225",
+      "objectiveComposerDoc": "113:1144",
+      "objectiveComposerSet": "113:1321",
+      "scopeBuilderDoc": "115:1192",
+      "scopeBuilderSet": "115:1324",
+      "citationRowDoc": "116:1198",
+      "citationRowSet": "116:1633",
+      "evidenceCardDoc": "117:1318",
+      "evidenceCardSet": "117:1471",
+      "evidenceLedgerRowDoc": "118:1330",
+      "evidenceLedgerRowSet": "118:1645",
+      "actionCardDoc": "119:1402",
+      "actionCardSet": "119:3751",
+      "decisionOptionDoc": "121:1738",
+      "decisionOptionSet": "121:1866",
+      "conflictCardDoc": "122:1778",
+      "conflictCardSet": "122:1953",
+      "answerPanelDoc": "123:1838",
+      "answerPanelSet": "123:2137",
+      "verificationPlanRowDoc": "126:1902",
+      "verificationPlanRowSet": "126:2015",
+      "verificationRunRowDoc": "127:1912",
+      "verificationRunRowSet": "127:2123",
+      "generatedTestProofDoc": "129:1928",
+      "generatedTestProofSet": "129:2327",
+      "shellTopBarDoc": "132:1952",
+      "shellTopBarSet": "132:2085",
+      "shellLeftPaneDoc": "136:2018",
+      "shellLeftPaneSet": "136:2403",
+      "shellInspectDoc": "137:2227",
+      "shellInspectSet": "137:2448"
+    },
+    "variables": {
+      "approval-deep": "VariableID:69:2",
+      "destructive-deep": "VariableID:69:3",
+      "stone-18": "VariableID:69:4",
+      "yellow-16": "VariableID:69:5",
+      "red-16": "VariableID:69:6",
+      "light-yellow-14": "VariableID:69:7",
+      "light-red-12": "VariableID:69:8",
+      "black-60": "VariableID:69:9",
+      "color/action/normal": "VariableID:70:2",
+      "color/action/approval": "VariableID:70:3",
+      "color/action/high-impact": "VariableID:70:4",
+      "color/action/destructive": "VariableID:70:5",
+      "color/action/blocked": "VariableID:70:6",
+      "color/action/disabled-soft": "VariableID:70:7",
+      "color/action/high-impact-soft": "VariableID:70:8",
+      "color/action/destructive-soft": "VariableID:70:9",
+      "color/text/on-approval": "VariableID:70:10",
+      "color/text/on-high-impact": "VariableID:70:11",
+      "color/text/on-destructive": "VariableID:70:12",
+      "color/state/active": "VariableID:70:13",
+      "color/state/attention": "VariableID:70:14",
+      "color/state/blocked": "VariableID:70:15",
+      "color/state/terminal-neutral": "VariableID:70:16",
+      "color/bg/denied-redacted": "VariableID:70:17",
+      "color/bg/stale": "VariableID:70:18",
+      "color/bg/scrim": "VariableID:70:19",
+      "size/hit-preferred": "VariableID:71:3",
+      "size/hit-mobile": "VariableID:71:4",
+      "size/icon-slot": "VariableID:71:5",
+      "size/rail-collapsed": "VariableID:71:6",
+      "size/rail-expanded-compact": "VariableID:71:7",
+      "size/rail-expanded": "VariableID:71:8",
+      "size/inspect-compact": "VariableID:71:9",
+      "size/inspect": "VariableID:71:10"
+    },
+    "textStyles": {
+      "Heading/Page/Large": "S:d49db4d3b6848f2ca840a9e1db82c577b4007735,",
+      "Heading/Section/Large": "S:127837b715b2b2dfcd73140f6be609c962cc8dcf,",
+      "Body/Instruction": "S:13f7f3a94056f2f16131a0873e97dbe4837241de,",
+      "Body/Navigation": "S:3d6d6e3f96a918c4841ae7ab4942bc452de5bd9a,",
+      "Label/Action": "S:c74f53b0e40ad2e8012bb08c743d46489d3a38dd,"
+    },
+    "effectStyles": {
+      "Focus/Normal": "S:98bd0002254faf96279f2e788ccf0c8b27fbda17,",
+      "Focus/HighImpact": "S:ba180894774a4db4865648b394eb058a02a6360b,",
+      "Focus/Danger": "S:b96440600c43d0f89d58970e247b4bd53f846e76,"
+    },
+    "prototype": {
+      "directory": "39:103",
+      "start": "27:126"
+    }
+  },
+  "baseline": {
+    "variables": 71,
+    "textStyles": 7,
+    "effectStyles": 2,
+    "componentSets": 3,
+    "screenTopLevelNodes": 47,
+    "prototypeReactions": 224
+  },
+  "pendingValidations": [],
+  "phase3Validation": {
+    "iconFamily": {
+      "passed": true,
+      "components": 17,
+      "boundVectors": true,
+      "missingFonts": 0,
+      "screenshotReviewed": true
+    },
+    "actionButton": {
+      "passed": true,
+      "variantCount": 93,
+      "setCounts": [20, 20, 20, 30, 3],
+      "propertiesWired": true,
+      "semanticPaintBindings": true,
+      "darkFallbackResolved": true,
+      "stateOverlayDefectFixed": true,
+      "loadingLabelFixed": true,
+      "disabledLabelFixed": true,
+      "componentSetScreenshotReviewed": true,
+      "focusedSpecimenScreenshotReviewed": true,
+      "pendingFreshStructuralRead": false,
+      "freshStructuralReadPassed": true,
+      "freshStructuralReadFailures": 0
+    },
+    "statusIcons": {
+      "passed": true,
+      "components": 7,
+      "size": 24,
+      "boundVectors": true,
+      "missingFonts": 0,
+      "screenshotReviewed": true
+    },
+    "statusMaturity": {
+      "passed": true,
+      "componentSetId": "93:566",
+      "variants": 6,
+      "axis": ["Current", "Partial", "Planned P0", "P1", "P2", "Conditional"],
+      "fixedLabels": true,
+      "editableProperties": 0,
+      "semanticIconsFixed": true,
+      "screenshotReviewed": true
+    },
+    "statusCompound": {
+      "passed": true,
+      "componentSetId": "94:674",
+      "variants": 14,
+      "toneAxis": ["Neutral", "Active", "Attention", "Blocked", "Failure", "Success", "Terminal"],
+      "layoutAxis": ["Inline", "Stacked"],
+      "textProperties": 2,
+      "booleanProperties": 1,
+      "instanceSwapProperties": 0,
+      "semanticIconsFixed": true,
+      "screenshotReviewed": true
+    },
+    "navigationRow": {
+      "passed": true,
+      "componentSetId": "97:342",
+      "variants": 28,
+      "modeAxis": ["Expanded", "Collapsed"],
+      "targetAxis": ["Desktop", "Touch"],
+      "stateAxis": ["Default", "Hover", "Focused", "Active", "Unread", "Warning", "Disabled"],
+      "iconSlot": 24,
+      "collapsedMinimumTarget": 44,
+      "textProperties": 1,
+      "instanceSwapProperties": 1,
+      "stateDotsFixed": true,
+      "screenshotReviewed": true
+    },
+    "navigationPaneToggle": {
+      "passed": true,
+      "componentSetId": "98:808",
+      "variants": 20,
+      "paneAxis": ["Left", "Right"],
+      "paneStateAxis": ["Expanded", "Collapsed"],
+      "stateAxis": ["Default", "Hover", "Focused", "Pressed", "Disabled"],
+      "target": 44,
+      "fixedIconDirection": true,
+      "fixedAccessibleLabels": true,
+      "editableProperties": 0,
+      "screenshotReviewed": true
+    },
+    "permissionNotice": {
+      "passed": true,
+      "componentSetId": "100:818",
+      "variants": 10,
+      "permissionAxis": ["Allowed", "Limited", "Denied", "Revoked", "Unknown"],
+      "layoutAxis": ["Inline", "Stacked"],
+      "fixedTitles": true,
+      "fixedSemanticIcons": true,
+      "textProperties": 1,
+      "booleanProperties": 0,
+      "instanceSwapProperties": 0,
+      "defaultDetail": "Protected content remains hidden.",
+      "textFitPassed": true,
+      "screenshotReviewed": true
+    },
+    "identityMarks": {
+      "passed": true,
+      "components": 6,
+      "size": 24,
+      "sources": ["Bitbucket Cloud", "Jira Cloud", "Slack", "OpenAI", "Anthropic", "Google"],
+      "provisionalPendingOfficialAssetReview": true,
+      "brandVectorsUnmodified": true,
+      "screenshotReviewed": true
+    },
+    "providerIdentity": {
+      "passed": true,
+      "componentSetId": "105:470",
+      "variants": 10,
+      "approvedOrProvisionalMarks": ["Bitbucket Cloud", "Jira Cloud", "Slack", "OpenAI", "Anthropic", "Google"],
+      "logoWithheld": ["DeepSeek", "OpenRouter", "Fireworks"],
+      "customerHostedNeutralMark": true,
+      "placeholderLogos": 0,
+      "screenshotReviewed": true
+    },
+    "sourceIdentity": {
+      "passed": true,
+      "componentSetId": "106:980",
+      "variants": 18,
+      "providerAxis": ["Bitbucket Cloud", "Jira Cloud", "Slack"],
+      "layoutAxis": ["Compact", "Full"],
+      "stateAxis": ["Available", "Denied", "Unavailable"],
+      "identityAndOperationalStateSeparated": true,
+      "editableTextProperties": 2,
+      "childBoundsPassed": true,
+      "screenshotReviewed": true
+    },
+    "modelIdentity": {
+      "passed": true,
+      "componentSetId": "109:1681",
+      "variants": 42,
+      "providerAxis": ["Anthropic", "OpenAI", "Google", "DeepSeek", "OpenRouter", "Fireworks", "Customer-hosted"],
+      "layoutAxis": ["Compact", "Full"],
+      "availabilityAxis": ["Allowed", "Limited", "Unavailable"],
+      "fullModelLabelProperty": true,
+      "providerRouteMaturityPairingFixed": true,
+      "logoWithheld": ["DeepSeek", "OpenRouter", "Fireworks"],
+      "placeholderLogos": 0,
+      "childBoundsPassed": true,
+      "screenshotReviewed": true
+    },
+    "objectiveRow": {
+      "passed": true,
+      "componentSetId": "111:1363",
+      "variants": 24,
+      "stateAxis": ["Default", "Selected", "Needs you", "Working", "Blocked", "Complete", "Unread", "Disabled"],
+      "sourceAxis": ["Jira Cloud", "Slack", "Bitbucket Cloud"],
+      "fixedLifecycleIconsAndLabels": true,
+      "fixedSourceMarkNamePairing": true,
+      "attentionNotColourOnly": true,
+      "childBoundsPassed": true,
+      "screenshotReviewed": true
+    },
+    "searchContext": {
+      "passed": true,
+      "componentSetId": "112:1225",
+      "variants": 6,
+      "stateAxis": ["Empty", "Focused", "Searching", "Partial", "Error", "Denied"],
+      "readOnlyIndicatorFixed": true,
+      "scopeAndModesAlwaysVisible": true,
+      "mutationAffordances": 0,
+      "textProperties": 1,
+      "childBoundsPassed": true,
+      "screenshotReviewed": true
+    },
+    "objectiveComposer": {
+      "passed": true,
+      "componentSetId": "113:1321",
+      "variants": 6,
+      "stateAxis": ["Empty", "Focused", "Draft", "Sending", "Error", "Disabled"],
+      "proposalOnlyAuthorityLabel": true,
+      "scopeAndContextVisible": true,
+      "typedActionButtonStates": true,
+      "directMutationAuthority": false,
+      "childBoundsPassed": true,
+      "screenshotReviewed": true
+    },
+    "scopeBuilder": {
+      "passed": true,
+      "componentSetId": "115:1324",
+      "variants": 4,
+      "stateAxis": ["Compact", "Expanded", "Conflict", "Denied"],
+      "scopeFields": ["Org", "Team", "Project", "Service", "Repo", "Source", "Time"],
+      "approvalInvalidationWarning": true,
+      "deniedProtectedFields": ["Service", "Repo", "Source", "Time"],
+      "deniedIdentifiersRedacted": true,
+      "childBoundsPassed": true,
+      "screenshotReviewed": true
+    },
+    "citationRow": {
+      "passed": true,
+      "componentSetId": "116:1633",
+      "variants": 24,
+      "epistemicAxis": ["Authoritative", "Observed", "Declared", "Generated", "Derived", "Inferred", "Unknown", "Denied"],
+      "sourceAxis": ["Jira Cloud", "Slack", "Bitbucket Cloud"],
+      "fixedSourceMarkNamePairing": true,
+      "requiredMetadata": ["Object", "Version", "Observed time", "Epistemic"],
+      "deniedFieldsRedacted": ["Object", "Version", "Observed time"],
+      "childBoundsPassed": true,
+      "screenshotReviewed": true
+    },
+    "evidenceCard": {
+      "passed": true,
+      "componentSetId": "117:1471",
+      "variants": 6,
+      "stateAxis": ["Passed", "Failed", "Partial", "Inconclusive", "Unmeasured", "Stale"],
+      "requiredMetadata": ["Category", "Classification", "Subject version", "Environment", "Observed time", "Limitations"],
+      "unmeasuredDistinctFromPassed": true,
+      "limitationsAlwaysVisible": true,
+      "childBoundsPassed": true,
+      "screenshotReviewed": true
+    },
+    "evidenceLedgerRow": {
+      "passed": true,
+      "componentSetId": "118:1645",
+      "variants": 12,
+      "stateAxis": ["Passed", "Failed", "Partial", "Inconclusive", "Unmeasured", "Stale"],
+      "layoutAxis": ["Compact", "Detail"],
+      "fixedColumns": ["Source and artifact", "Attempts", "Classification", "Exact version", "Outcome"],
+      "compactAndDetailAnchorsEqual": true,
+      "retryHistoryVisibleInDetail": true,
+      "childBoundsPassed": true,
+      "screenshotReviewed": true
+    },
+    "actionCard": {
+      "passed": true,
+      "componentSetId": "119:3751",
+      "variants": 42,
+      "lifecycleAxis": ["Proposed", "Awaiting approval", "Authorised", "Blocked", "Running", "Failed", "Recovered"],
+      "impactAxis": ["Normal", "High impact", "Destructive"],
+      "layoutAxis": ["Wide", "Stacked"],
+      "exactActionFields": ["Action type", "Actor", "Target", "Scope", "Effect", "Route", "Budget", "Preconditions", "Evidence", "Recovery", "Maturity", "Expiry"],
+      "blockedUsesDisabledAction": true,
+      "runningUsesLoadingAction": true,
+      "approvalUsesApprovalIntent": true,
+      "childBoundsPassed": true,
+      "wideAndStackedScreenshotReviewed": true
+    },
+    "decisionOption": {
+      "passed": true,
+      "componentSetId": "121:1866",
+      "variants": 5,
+      "stateAxis": ["Unselected", "Selected", "Disabled", "Conflict", "Recommended"],
+      "wholeCardSelectionContract": true,
+      "visibleFocusOnSelectedAndRecommended": true,
+      "requiredMetadata": ["Title", "Rationale", "Risk", "Evidence", "Maturity"],
+      "childBoundsPassed": true,
+      "screenshotReviewed": true
+    },
+    "conflictCard": {
+      "passed": true,
+      "componentSetId": "122:1953",
+      "variants": 4,
+      "stateAxis": ["Unresolved", "Authority selected", "Resolved", "Superseded"],
+      "attributedSources": ["Jira Cloud", "Slack"],
+      "noAutomaticSimilarityMerge": true,
+      "authoritySelectionRequiresExplicitAction": true,
+      "supersededUsesDisabledAction": true,
+      "childBoundsPassed": true,
+      "screenshotReviewed": true
+    },
+    "answerPanel": {
+      "passed": true,
+      "componentSetId": "123:2137",
+      "variants": 8,
+      "stateAxis": ["Complete", "Partial", "Denied", "Conflicting", "Stale", "Unable", "Timeout", "Greenfield"],
+      "groundingClaimAllowedOnly": ["Complete", "Partial"],
+      "unsupportedConclusionsFixedAndNonEditable": true,
+      "stateSafeCountDefaults": true,
+      "requiredMetadata": ["Scope", "Modes", "Citations", "Conflicts", "Omissions", "Actions"],
+      "childBoundsPassed": true,
+      "screenshotReviewed": true
+    },
+    "verificationPlanRow": {
+      "passed": true,
+      "componentSetId": "126:2015",
+      "variants": 5,
+      "statusAxis": ["Required", "Recommended", "Excluded", "Missing", "Exception requested"],
+      "requiredRemovalUsesExceptionFlow": true,
+      "requiredMetadata": ["Test boundary", "Reason", "Environment/data", "Cost/time", "Owner"],
+      "childBoundsPassed": true,
+      "screenshotReviewed": true
+    },
+    "verificationRunRow": {
+      "passed": true,
+      "componentSetId": "127:2123",
+      "variants": 8,
+      "statusAxis": ["Queued", "Running", "Passed", "Failed", "Flaky", "Environment failed", "Cancelled", "Superseded"],
+      "requiredMetadata": ["Test suite", "Subject SHA", "Environment", "Attempts", "Duration", "Artifact"],
+      "wrongShaRejectedAsSuperseded": true,
+      "environmentFailureLeavesOutcomeUnmeasured": true,
+      "retryHistoryVisible": true,
+      "childBoundsPassed": true,
+      "screenshotReviewed": true
+    },
+    "generatedTestProof": {
+      "passed": true,
+      "componentSetId": "129:2327",
+      "variants": 12,
+      "contextAxis": ["Regression", "New behavior", "Refactor", "Incident"],
+      "validityAxis": ["Valid", "Inconclusive", "Rejected"],
+      "passingOnBothIsInconclusive": true,
+      "requiredMetadata": ["Baseline", "Candidate", "Expected reason", "Dependency mode", "Assertions", "Mutation evidence", "Owner"],
+      "childBoundsPassed": true,
+      "screenshotReviewed": true
+    },
+    "shellTopBar": {
+      "passed": true,
+      "componentSetId": "132:2085",
+      "variants": 4,
+      "viewportAxis": ["Desktop", "Compact", "Tablet", "Mobile"],
+      "dimensions": ["1320x64", "1040x64", "834x64", "390x56"],
+      "globalCreateActionExcluded": true,
+      "contextStatusAskNotificationsAccountCovered": true,
+      "mobileOverflowFixed": true,
+      "childBoundsPassed": true,
+      "tokenAndFontAuditPassed": true,
+      "screenshotReviewed": true
+    },
+    "shellLeftPane": {
+      "passed": true,
+      "componentSetId": "136:2403",
+      "variants": 3,
+      "modeAxis": ["Expanded", "Collapsed", "Overlay"],
+      "widths": [288, 56, 320],
+      "collapsedNumericPlaceholders": 0,
+      "collapsedSemanticNames": ["Home", "Objectives", "Intelligence", "Services", "Evidence", "Settings", "Account"],
+      "officialBrandVectorHardcodesAllowed": ["Bitbucket Cloud", "Jira Cloud", "Slack"],
+      "childBoundsPassed": true,
+      "screenshotReviewed": true
+    },
+    "shellInspect": {
+      "passed": true,
+      "componentSetId": "137:2448",
+      "variants": 4,
+      "modeAxis": ["Docked", "Collapsed", "Tablet drawer", "Mobile route"],
+      "widths": [440, 56, 360, 390],
+      "searchContextReadOnly": true,
+      "objectiveComposerConfusionRemoved": true,
+      "initialContainmentFailuresFixed": 7,
+      "collapsedSemanticIconsFixed": true,
+      "childBoundsPassed": true,
+      "screenshotReviewed": true
+    },
+    "serviceRow": {
+      "passed": true,
+      "docId": "140:2280",
+      "componentSetId": "140:2389",
+      "variants": 5,
+      "stateAxis": ["Healthy", "Warning", "Incident", "Unknown", "Unavailable"],
+      "observationModesFixed": ["LIVE", "HISTORY"],
+      "initialContainmentFailuresFixed": 8,
+      "childBoundsPassed": true,
+      "screenshotReviewed": true
+    },
+    "sourceRow": {
+      "passed": true,
+      "docId": "141:2290",
+      "componentSetId": "141:2518",
+      "variants": 7,
+      "stateAxis": ["Healthy", "Stale", "Drift", "Denied", "Unavailable", "Disconnected", "Deletion queued"],
+      "identityStateCapabilityPermissionFreshnessOwnerSeparated": true,
+      "deletionQueuedLabel": "PURGE QUEUED",
+      "nestedIdentityOverlapFixed": true,
+      "childBoundsPassed": true,
+      "screenshotReviewed": true
+    },
+    "connectorCard": {
+      "passed": true,
+      "docId": "143:2395",
+      "componentSetId": "143:3455",
+      "variants": 24,
+      "providerAxis": ["Bitbucket Cloud", "Jira Cloud", "Slack"],
+      "stateAxis": ["Not connected", "Validating", "Healthy", "Stale", "Drift", "Failed", "Disconnected", "Purge"],
+      "wholeCardAccessibleControl": true,
+      "providerIdentityAndOperationalStateSeparated": true,
+      "validatingStateReviewed": true,
+      "purgeStateReviewed": true,
+      "childBoundsPassed": true,
+      "screenshotReviewed": true
+    },
+    "providerLogoException": {
+      "decision": "DeepSeek, OpenRouter and Fireworks remain supported and named but render without logos or placeholders",
+      "providerIdentityConforms": true,
+      "modelIdentityConforms": true,
+      "verifiedTextHits": 36
+    },
+    "settingsGroupNav": {
+      "passed": true,
+      "docId": "147:2519",
+      "componentSetId": "147:2663",
+      "variants": 3,
+      "layoutAxis": ["Expanded", "Compact", "Mobile"],
+      "groups": ["Account", "Workspace", "Integrations", "AI & models", "Security", "Data & audit"],
+      "compactPillOverflowFixed": true,
+      "expandedMobileBadgeContrastFixed": true,
+      "childBoundsPassed": true,
+      "screenshotReviewed": true
+    },
+    "settingsChangeReview": {
+      "passed": true,
+      "docId": "147:2664",
+      "componentSetId": "147:2836",
+      "variants": 7,
+      "stateAxis": ["Clean", "Dirty", "Validation failed", "Approval required", "Saving", "Saved", "Failed"],
+      "atomicReviewedBatch": true,
+      "serverRevalidationVisible": true,
+      "ambiguousUnavailableCopyRemoved": true,
+      "childBoundsPassed": true,
+      "screenshotReviewed": true
+    },
+    "memoryRow": {
+      "passed": true,
+      "docId": "151:2618",
+      "componentSetId": "151:2741",
+      "variants": 5,
+      "stateAxis": ["Explicit", "Inferred", "Policy", "Disabled", "Expired"],
+      "provenanceConfidenceScopePrecedenceExpiryControlsVisible": true,
+      "defaultWhiteFrameLeakFixed": true,
+      "childBoundsPassed": true,
+      "screenshotReviewed": true
+    },
+    "auditRow": {
+      "passed": true,
+      "docId": "151:2742",
+      "componentSetId": "151:2880",
+      "variants": 5,
+      "eventAxis": ["Read", "Action", "Approval", "External result", "Deletion"],
+      "actorTenantSourceTargetCorrelationTimeResultVisible": true,
+      "viewerSafeRedactionVisible": true,
+      "defaultWhiteFrameLeakFixed": true,
+      "childBoundsPassed": true,
+      "screenshotReviewed": true
+    },
+    "handoffCard": {
+      "passed": true,
+      "docId": "152:2638",
+      "componentSetId": "152:2791",
+      "variants": 6,
+      "stateAxis": ["Draft", "Sent", "Accepted", "Declined", "Redirected", "Expired"],
+      "consentBasedNoSilentAssignment": true,
+      "initialContainmentFailuresFixed": 24,
+      "childBoundsPassed": true,
+      "screenshotReviewed": true
+    },
+    "continuityCard": {
+      "passed": true,
+      "docId": "152:2792",
+      "componentSetId": "152:2909",
+      "variants": 6,
+      "stateAxis": ["Token created", "Opened", "Expired", "Revoked", "Source changed", "Completed"],
+      "oneTimeUserBoundToken": true,
+      "destinationReauthorizationRequired": true,
+      "initialContainmentFailuresFixed": 6,
+      "childBoundsPassed": true,
+      "screenshotReviewed": true
+    },
+    "objectiveStage": {
+      "passed": true,
+      "docId": "153:2662",
+      "wideSetId": "153:3025",
+      "compactSetId": "153:3026",
+      "variantsPerSet": 24,
+      "stages": ["Intent", "Context", "Decision", "Plan", "Working", "Verify", "Deliver", "Monitor"],
+      "states": ["Current", "Complete", "Blocked"],
+      "childBoundsPassed": true,
+      "screenshotReviewed": true
+    },
+    "timelineEvent": {
+      "passed": true,
+      "docId": "153:3027",
+      "componentSetId": "153:3156",
+      "variants": 6,
+      "types": ["Lifecycle", "Action", "Verification", "Delivery", "External", "Learning"],
+      "childBoundsPassed": true,
+      "screenshotReviewed": true
+    },
+    "emptyState": {
+      "passed": true,
+      "docId": "154:2770",
+      "componentSetId": "154:2817",
+      "variants": 4,
+      "states": ["First use", "No result", "Not searched", "No ready work"],
+      "childBoundsPassed": true,
+      "screenshotReviewed": true
+    },
+    "failurePanel": {
+      "passed": true,
+      "docId": "154:2818",
+      "componentSetId": "154:2917",
+      "variants": 6,
+      "classes": ["Product", "Environment", "Connector", "Permission", "External write", "Unknown"],
+      "childBoundsPassed": true,
+      "screenshotReviewed": true
+    },
+    "drawerModalSheet": {
+      "passed": true,
+      "docId": "155:2790",
+      "componentSetId": "155:2857",
+      "variants": 4,
+      "modes": ["Desktop modal", "Tablet drawer", "Mobile sheet", "Mobile route"],
+      "focusTrapRestoreAndLabelledScrollRecorded": true,
+      "childBoundsPassed": true,
+      "screenshotReviewed": true
+    },
+    "toastBanner": {
+      "passed": true,
+      "docId": "157:2798",
+      "componentSetId": "157:2877",
+      "variants": 8,
+      "tones": ["Info", "Success", "Warning", "Danger"],
+      "modes": ["Dismissible", "Persistent"],
+      "dangerAnnouncement": "assertive-once",
+      "childBoundsPassed": true,
+      "screenshotReviewed": true
+    },
+    "loadingSkeleton": {
+      "passed": true,
+      "docId": "157:2878",
+      "componentSetId": "157:2937",
+      "variants": 5,
+      "types": ["List", "Panel", "Table", "Answer", "Timeline"],
+      "knownScopeVisible": true,
+      "bakedShimmer": false,
+      "childBoundsPassed": true,
+      "screenshotReviewed": true
+    },
+    "permissionNoticeReconciliation": {
+      "passed": true,
+      "componentSetId": "100:818",
+      "currentVariants": 14,
+      "permissionAxis": ["Allowed", "Limited", "Denied", "Revoked", "Unknown", "Expired", "Wrong view"],
+      "layoutAxis": ["Inline", "Stacked"],
+      "repairedComponents": ["158:22", "158:29", "158:38", "158:47"],
+      "coverStrays": 0,
+      "expiredToneCorrectedToTerminalNeutral": true,
+      "detailPropertyBindingsFixedAtCp061": ["158:26", "158:33", "158:42", "158:51"],
+      "sharedDetailProperty": "Detail#100:0",
+      "instanceOverrideTestPassed": true,
+      "childBoundsPassed": true,
+      "screenshotReviewed": true
+    },
+    "phase3InventoryAudit": {
+      "passed": true,
+      "requiredFamilyContracts": 41,
+      "missingFamilies": 0,
+      "componentSetsIncludingLegacy": 50,
+      "missingFonts": 0,
+      "directChildOverflows": 0,
+      "providerLogoException": {
+        "DeepSeek": {"providerInstances": 0, "modelVariants": 6, "modelLogoInstances": 0},
+        "OpenRouter": {"providerInstances": 0, "modelVariants": 6, "modelLogoInstances": 0},
+        "Fireworks": {"providerInstances": 0, "modelVariants": 6, "modelLogoInstances": 0}
+      },
+      "deprecatedLegacySets": ["8:10", "8:17", "8:28"]
+    },
+    "answerPanelPartialBindingRepair": {
+      "passed": true,
+      "componentId": "123:1878",
+      "bindings": {
+        "123:1895": "Citations#123:41",
+        "123:1898": "Conflicts#123:42",
+        "123:1901": "Omissions#123:43",
+        "123:1904": "Omissions detail#123:44"
+      },
+      "instanceTruthTest": {
+        "screenNodeId": "181:806",
+        "citations": "4",
+        "conflicts": "1",
+        "omissions": "2",
+        "omissionDetailUpdated": true
+      }
+    }
+  },
+  "phase4Validation": {
+    "desktopNeutralRedactionBatch1": {
+      "passed": true,
+      "screens": {
+        "neutralViewChoice": {
+          "nodeId": "166:345",
+          "replacesNodeId": "50:291",
+          "canonicalInstances": ["121:1766", "121:1741", "100:405", "82:144"],
+          "tenantContextBeforeSelection": false,
+          "forbiddenIdentifierHits": 0,
+          "overflowCount": 0,
+          "screenshotReviewed": true
+        },
+        "zeroInformation": {
+          "nodeId": "168:3261",
+          "replacesNodeId": "40:103",
+          "canonicalInstances": ["132:1956", "154:2773", "100:405", "82:144"],
+          "inheritedIdentifiers": false,
+          "forbiddenIdentifierHits": 0,
+          "overflowCount": 0,
+          "screenshotReviewed": true
+        }
+      },
+      "originalsRetainedPendingPrototypeValidation": true
+    },
+    "desktopStateSplitBatch2": {
+      "passed": true,
+      "screens": {
+        "contextPermissionDenied": {
+          "nodeId": "172:487",
+          "splitFromNodeId": "40:438",
+          "canonicalInstances": ["132:1956", "100:433", "123:1915"],
+          "retrievalExecuted": false,
+          "protectedIdentifiersVisible": false,
+          "overflowCount": 0,
+          "screenshotReviewed": true
+        },
+        "contextSearchedNoResult": {
+          "nodeId": "174:562",
+          "splitFromNodeId": "40:438",
+          "canonicalInstances": ["132:1956", "154:2784", "100:405", "82:144"],
+          "searchCompleted": true,
+          "zeroPermittedMatches": true,
+          "deniedContentExcludedFromZero": true,
+          "overflowCount": 0,
+          "screenshotReviewed": true
+        },
+        "wrongViewRecovery": {
+          "nodeId": "175:611",
+          "splitFromNodeId": "50:626",
+          "canonicalInstances": ["158:38", "82:144"],
+          "targetResolved": false,
+          "overflowCount": 0,
+          "screenshotReviewed": true
+        },
+        "continuityExpired": {
+          "nodeId": "176:3425",
+          "splitFromNodeId": "50:626",
+          "canonicalInstances": ["158:22", "152:2833"],
+          "destinationSessionCreated": false,
+          "protectedContextVisible": false,
+          "overflowCount": 0,
+          "screenshotReviewed": true
+        },
+        "linkAuthorizationDenied": {
+          "nodeId": "177:663",
+          "splitFromNodeId": "50:626",
+          "canonicalInstances": ["100:433", "154:2869"],
+          "targetIdentifiersVisible": false,
+          "wrongViewOrExpiredSemanticsMixed": false,
+          "overflowCount": 0,
+          "screenshotReviewed": true
+        }
+      },
+      "forbiddenIdentifierHits": 0,
+      "originalsRetainedPendingPrototypeValidation": true
+    },
+    "desktopEvidenceAnswerTruthBatch3": {
+      "passed": true,
+      "screens": {
+        "verificationFailedIncomplete": {
+          "nodeId": "179:674",
+          "replacesNodeId": "42:175",
+          "canonicalInstances": ["132:1956", "94:277", "117:1346", "117:1396", "117:1421", "154:2821"],
+          "processFinished": true,
+          "passedOrCompleteClaim": false,
+          "failedInconclusiveUnmeasuredVisible": true,
+          "overflowCount": 0,
+          "screenshotReviewed": true
+        },
+        "answerPartialStaleConflicting": {
+          "nodeId": "181:806",
+          "replacesNodeId": "42:399",
+          "canonicalInstances": ["132:1956", "94:241", "123:1878", "122:1781", "117:1446"],
+          "completeGroundingClaim": false,
+          "omissions": 2,
+          "unresolvedConflicts": 1,
+          "staleSources": 1,
+          "automaticAuthoritySelection": false,
+          "layoutOverflowCount": 0,
+          "officialBrandVectorBleedExceptions": 2,
+          "screenshotReviewed": true
+        },
+        "answerDenied": {
+          "nodeId": "183:973",
+          "splitFromNodeId": "42:510",
+          "canonicalInstances": ["132:1956", "100:433", "123:1915"],
+          "cause": "permission",
+          "groundingClaim": false,
+          "protectedIdentifiersVisible": false,
+          "overflowCount": 0,
+          "screenshotReviewed": true
+        },
+        "answerUnavailable": {
+          "nodeId": "184:1026",
+          "splitFromNodeId": "42:510",
+          "canonicalInstances": ["132:1956", "94:259", "123:2026", "154:2837"],
+          "cause": "environment-availability",
+          "permissionRemainsAllowed": true,
+          "groundingClaim": false,
+          "overflowCount": 0,
+          "screenshotReviewed": true
+        }
+      },
+      "originalsRetainedPendingPrototypeValidation": true
+    },
+    "desktopOperationalConsequenceBatch4": {
+      "passed": true,
+      "screens": {
+        "connectorDrift": {
+          "nodeId": "187:1120",
+          "replacesNodeId": "44:359",
+          "canonicalInstances": ["132:1956", "94:241", "143:2915", "82:144", "141:2358"],
+          "healthyClaim": false,
+          "stateTuple": ["connection", "permission", "availability", "freshness", "capability"],
+          "layoutOverflowCount": 0,
+          "screenshotReviewed": true
+        },
+        "disconnectPurgeExport": {
+          "nodeId": "189:1278",
+          "replacesNodeId": "44:471",
+          "canonicalInstances": ["132:1956", "94:259", "143:3001", "119:1621", "82:144", "82:249"],
+          "exportFirstVisible": true,
+          "retainedAndDeletedInventoryVisible": true,
+          "legalHoldVisible": true,
+          "recoveryLimitVisible": true,
+          "freshAdminAuthenticationRequired": true,
+          "layoutOverflowCount": 0,
+          "screenshotReviewed": true
+        },
+        "planRejectedExpiredInvalidated": {
+          "nodeId": "192:1440",
+          "replacesNodeId": "41:139",
+          "canonicalInstances": ["132:1956", "94:259", "119:2521", "153:3030", "153:3051"],
+          "executionBlocked": true,
+          "planVersionsVisible": ["v3", "v4"],
+          "supersededDecisionHistoryVisible": true,
+          "freshReapprovalPathVisible": true,
+          "overflowCount": 0,
+          "screenshotReviewed": true
+        },
+        "incidentConditionalRemediation": {
+          "nodeId": "194:1593",
+          "replacesNodeId": "27:714",
+          "canonicalInstances": ["132:1956", "94:277", "93:213", "93:218", "119:1849", "82:214"],
+          "maturity": ["P2", "Conditional"],
+          "p0P1ExecutableRollback": false,
+          "incidentCommanderApprovalRequired": true,
+          "exactTargetEvidenceRecoveryVisible": true,
+          "overflowCount": 0,
+          "screenshotReviewed": true
+        }
+      },
+      "originalsRetainedPendingPrototypeValidation": true
+    },
+    "desktopOperationalConsequenceBatch5": {
+      "passed": true,
+      "screens": {
+        "routeUnavailableUsageLimit": {
+          "nodeId": "200:1698",
+          "replacesNodeId": "44:583",
+          "canonicalInstances": ["132:1956", "94:259", "109:781", "119:2521", "82:214"],
+          "currentRouteIdentityVisible": true,
+          "healthUsagePolicySeparated": true,
+          "silentFailover": false,
+          "directApplyAction": false,
+          "pausedCallReconciliationVisible": true,
+          "missingRequiredCopy": 0,
+          "forbiddenLanguageHits": 0,
+          "missingFonts": 0,
+          "minimumActionHeight": 44,
+          "screenshotReviewed": true,
+          "screenshotPath": "/private/tmp/executespec-en-d-55m-route-r1-final.png"
+        },
+        "externalWriteReconciliation": {
+          "nodeId": "202:1834",
+          "replacesNodeId": "51:327",
+          "canonicalInstances": ["132:1956", "94:277", "154:2885", "119:2521", "153:3114", "82:144"],
+          "outcomeUnknown": true,
+          "authoritativeReadBeforeRetry": true,
+          "blindRetryAllowed": false,
+          "newIdempotencyKeyAllowed": false,
+          "preservedEvidence": ["request hash", "body digest", "page version 184", "wb_7f31", "ext_2a9c"],
+          "missingRequiredCopy": 0,
+          "forbiddenLanguageHits": 0,
+          "missingFonts": 0,
+          "minimumActionHeight": 44,
+          "screenshotReviewed": true,
+          "screenshotPath": "/private/tmp/executespec-en-d-62r-reconciliation-r1-v2.png"
+        }
+      },
+      "sharedComponentRepair": {
+        "timelineExternalComponentId": "153:3114",
+        "labelNodeId": "153:3119",
+        "previousFalseLabel": "JIRA RESULT CONFIRMED",
+        "newNeutralLabel": "EXTERNAL WRITE EVENT",
+        "screenOverride": "OUTCOME UNKNOWN"
+      },
+      "scriptedContractAuditPassed": true,
+      "screensOverlap": false,
+      "originalsRetainedPendingPrototypeValidation": true
+    },
+    "desktopGlobalToolsBatch6": {
+      "passed": true,
+      "screens": {
+        "intelligenceScopedQuery": {
+          "nodeId": "207:1960",
+          "replacesNodeId": "27:518",
+          "canonicalInstances": ["132:1956", "136:2022", "137:2231", "115:1195", "112:1135", "82:144"],
+          "primaryObject": "scoped read-only query session",
+          "objectiveComposerCount": 0,
+          "organisationScopeLabelledP1": true,
+          "sourceMutationAllowed": false,
+          "exactScope": "Acme Engineering / Checkout / checkout-api",
+          "screenshotReviewed": true,
+          "screenshotPath": "/private/tmp/executespec-en-d-30q-intelligence-r1-final.png"
+        },
+        "servicesPortfolio": {
+          "nodeId": "209:2309",
+          "replacesNodeId": "27:616",
+          "canonicalInstances": ["132:1956", "136:2161", "137:2295", "140:2305", "140:2284", "140:2326", "82:144"],
+          "primaryObject": "service portfolio",
+          "leftPaneMode": "Collapsed",
+          "inspectMode": "Collapsed until selection",
+          "serviceRowSize": "1320x88",
+          "observationTimeRequired": true,
+          "productionMutationAllowed": false,
+          "screenshotReviewed": true,
+          "screenshotPath": "/private/tmp/executespec-en-d-40p-services-r1-final.png"
+        },
+        "enterpriseSettingsHome": {
+          "nodeId": "211:2595",
+          "replacesNodeId": "27:812",
+          "canonicalInstances": ["132:1956", "136:2022", "137:2295", "147:2522", "147:2692", "82:214", "82:144"],
+          "primaryObject": "six-group administration workspace",
+          "groups": ["Organisation + people", "Knowledge + context", "Integrations", "Governance + AI", "Environments + operations", "Billing + audit"],
+          "selectedGroup": "Governance + AI",
+          "dirtyStateVisible": true,
+          "auditPreviewVisible": true,
+          "serverRevalidationVisible": true,
+          "screenshotReviewed": true,
+          "screenshotPath": "/private/tmp/executespec-en-d-50h-settings-r1-final-v2.png"
+        }
+      },
+      "sharedComponentRepairs": {
+        "searchContext": {
+          "componentSetId": "112:1225",
+          "property": "Scope summary#208:0",
+          "boundLayers": ["112:1573", "112:1577", "112:1581", "112:1585", "112:1589", "112:1593"]
+        },
+        "settingsGroupNav": {
+          "componentSetId": "147:2663",
+          "expandedAndMobileLabelsCanonical": true,
+          "currentInstanceSelectionOverride": "Governance + AI",
+          "reusableSelectedGroupApiPending": true
+        }
+      },
+      "scriptedContractAuditPassed": true,
+      "missingRequiredCopy": 0,
+      "forbiddenLanguageHits": 0,
+      "missingFonts": 0,
+      "minimumActionHeight": 44,
+      "screensOverlap": false,
+      "originalsRetainedPendingPrototypeValidation": true
+    },
+    "desktopModelPolicyBatch7": {
+      "passed": true,
+      "screen": {
+        "nodeId": "220:2861",
+        "replacesNodeId": "31:94",
+        "canonicalInstances": ["132:1956", "136:2022", "137:2295", "219:2938", "109:721", "109:577", "109:925", "82:214", "82:144"],
+        "routes": [
+          {"provider": "OpenAI", "model": "PLANNING · GPT-5.4 · native", "availability": "Allowed"},
+          {"provider": "Anthropic", "model": "WORKHORSE · Claude Sonnet 4.6 · native", "availability": "Allowed"},
+          {"provider": "Google", "model": "LIGHTWEIGHT · Gemini 3 Flash · native", "availability": "Limited"}
+        ],
+        "managedCeilingUsd": 200,
+        "managedUsedUsd": 184,
+        "silentCrossProviderFailover": false,
+        "directApplyAction": false,
+        "minimumActionHeight": 44,
+        "missingFonts": 0,
+        "screenshotReviewed": true,
+        "screenshotPath": "/private/tmp/executespec-en-d-55p-model-policy-r1-final-v2.png"
+      },
+      "settingsGroupNav": {
+        "componentSetId": "147:2663",
+        "variantCount": 18,
+        "layouts": ["Expanded", "Compact", "Mobile"],
+        "selectedGroups": ["Organisation + people", "Knowledge + context", "Integrations", "Governance + AI", "Environments + operations", "Billing + audit"],
+        "subsectionProperty": "Subsection#147:3",
+        "boundSubsectionLayers": 18,
+        "oneMatchingActiveRowPerVariant": true,
+        "setSize": "822x3280",
+        "documentationFrameHeight": 3462,
+        "downstreamDocumentationShift": 2702,
+        "screenshotReviewed": true,
+        "screenshotPath": "/private/tmp/executespec-settings-groupnav-18-variants.png"
+      },
+      "scriptedContractAuditPassed": true,
+      "originalsRetainedPendingPrototypeValidation": true
+    },
+    "desktopCoreLifecycleBatch8": {
+      "passed": true,
+      "screens": {
+        "homeNeedsYou": {
+          "nodeId": "227:3203",
+          "replacesNodeId": "27:126",
+          "selectedDestination": "Home",
+          "typedObjectiveRows": ["Needs you", "Working", "Blocked"],
+          "proposalOnlyComposer": true,
+          "screenshotReviewed": true,
+          "screenshotPath": "/private/tmp/executespec-en-d-10h-home-r1-final-v3.png"
+        },
+        "objectiveContextConflict": {
+          "nodeId": "227:3470",
+          "replacesNodeId": "9:2",
+          "selectedDestination": "Objectives",
+          "currentStage": "Decision",
+          "scopeState": "Compact exact scope",
+          "conflictClass": "source authority",
+          "automaticMergeAllowed": false,
+          "humanAuthorityRequired": true,
+          "screenshotReviewed": true,
+          "screenshotPath": "/private/tmp/executespec-en-d-20c-context-r1-final-v3.png"
+        },
+        "planApproval": {
+          "nodeId": "227:3737",
+          "replacesNodeId": "27:224",
+          "selectedDestination": "Objectives",
+          "currentStage": "Plan",
+          "productionDeploymentIncluded": false,
+          "costCeilingUsd": 8.4,
+          "changeScopeAndRejectPaths": true,
+          "screenshotReviewed": true,
+          "screenshotPath": "/private/tmp/executespec-en-d-23a-plan-r1-final.png"
+        },
+        "workingObjective": {
+          "nodeId": "227:4004",
+          "replacesNodeId": "27:322",
+          "selectedDestination": "Objectives",
+          "currentStage": "Working",
+          "durableCheckpoint": true,
+          "liveVerificationRow": true,
+          "pauseAndCancelPreserve": true,
+          "screenshotReviewed": true,
+          "screenshotPath": "/private/tmp/executespec-en-d-24w-working-r1-final.png"
+        },
+        "evidenceAndDelivery": {
+          "nodeId": "227:4271",
+          "replacesNodeId": "27:420",
+          "selectedDestination": "Evidence",
+          "currentStage": "Deliver",
+          "deterministicEvidenceRows": 2,
+          "unmeasuredEvidenceRows": 1,
+          "mergeOrProductionClaim": false,
+          "reconciledWriteContract": true,
+          "screenshotReviewed": true,
+          "screenshotPath": "/private/tmp/executespec-en-d-25e-evidence-r1-final-v3.png"
+        }
+      },
+      "sharedComponentRepairs": {
+        "shellLeftPane": {
+          "componentSetId": "136:2403",
+          "variantCount": 18,
+          "modes": ["Expanded", "Collapsed", "Overlay"],
+          "selectedDestinations": ["Home", "Objectives", "Intelligence", "Services", "Evidence", "Settings"],
+          "oneMatchingActiveDestinationPerVariant": true,
+          "persistentFocusedStateCount": 0,
+          "setSize": "776x4728",
+          "documentationFrameId": "136:2018",
+          "documentationFrameHeight": 4951,
+          "downstreamDocumentationShift": 3920,
+          "screenshotReviewed": true,
+          "screenshotPath": "/private/tmp/executespec-leftpane-18-variants.png"
+        },
+        "shellTopBar": {
+          "componentSetId": "132:2085",
+          "desktopAskHeight": 40,
+          "compactAskHeight": 40,
+          "tabletAskHeight": 44,
+          "screenshotReviewed": true,
+          "screenshotPath": "/private/tmp/executespec-topbar-targets-final.png"
+        }
+      },
+      "scriptedContractAuditPassed": true,
+      "legacyComponentCount": 0,
+      "screenOverflowCount": 0,
+      "missingFonts": 0,
+      "minimumActionHeight": 40,
+      "screensOverlap": false,
+      "originalsRetainedPendingPrototypeValidation": true
+    },
+    "desktopDegradedRecoveryBatch9": {
+      "passed": true,
+      "screens": {
+        "homeSourceUnavailable": {"nodeId":"235:5159","replacesNodeId":"40:215","selectedDestination":"Home","sourceState":"Unavailable","cachedEvidencePreserved":true,"completionClaim":false,"screenshotReviewed":true,"screenshotPath":"/private/tmp/executespec-en-d-11u-home-source-unavailable-r1.png"},
+        "contextPartialStale": {"nodeId":"235:5449","replacesNodeId":"40:327","selectedDestination":"Objectives","currentStage":"Context","citations":5,"omissions":2,"staleJiraVisible":true,"deniedSlackVisible":true,"completeGroundingClaim":false,"screenshotReviewed":true,"screenshotPath":"/private/tmp/executespec-en-d-21p-context-partial-stale-r1.png"},
+        "planApprovedBoundedAuthority": {"nodeId":"235:5745","replacesNodeId":"41:251","selectedDestination":"Objectives","currentStage":"Working","authority":"isolated preview only","costCeilingUsd":8.4,"productionDeploymentIncluded":false,"mergeIncluded":false,"revokePathVisible":true,"screenshotReviewed":true,"screenshotPath":"/private/tmp/executespec-en-d-23b-plan-approved-bounded-r1.png"},
+        "workingBlocked": {"nodeId":"235:6027","replacesNodeId":"41:363","selectedDestination":"Objectives","currentStage":"Working blocked","checkpointDurable":true,"testOutcome":"Unmeasured","requestAccessPathVisible":true,"cancelPreservesCheckpoint":true,"screenshotReviewed":true,"screenshotPath":"/private/tmp/executespec-en-d-24b-working-blocked-r1.png"},
+        "workingRecoveredSuperseded": {"nodeId":"235:6335","replacesNodeId":"41:475","selectedDestination":"Objectives","currentStage":"Working","replacementSha":"93bc7e1","originalSha":"8fa21c4","originalEvidenceClassification":"Superseded","screenshotReviewed":true,"screenshotPath":"/private/tmp/executespec-en-d-24r-working-recovered-r1.png"},
+        "deliveryPartialWriteBack": {"nodeId":"235:6639","replacesNodeId":"42:287","selectedDestination":"Evidence","currentStage":"Deliver","successfulWrites":["GitHub PR #184","Jira PROD-1842"],"failedWrite":"Confluence page 4821","retryScope":"Confluence only","rollbackPathVisible":true,"screenshotReviewed":true,"screenshotPath":"/private/tmp/executespec-en-d-25w-delivery-partial-write-r1.png"}
+      },
+      "scriptedContractAuditPassed": true,
+      "legacyComponentCount": 0,
+      "screenOverflowCount": 0,
+      "missingFonts": 0,
+      "minimumActionHeight": 40,
+      "originalsRetainedPendingPrototypeValidation": true
+    },
+    "desktopOperationalSurfacesBatch10": {
+      "passed": true,
+      "screens": {
+        "serviceLiveUnavailable": {"nodeId":"239:1356","replacesNodeId":"43:211","selectedDestination":"Services","leftPaneMode":"Collapsed","serviceRowWidth":1320,"observation":"HISTORY ONLY · yesterday","currentHealthClaim":false,"lastValidObservationVisible":true,"screenshotReviewed":true,"screenshotPath":"/private/tmp/executespec-en-d-41u-service-live-unavailable-r1.png"},
+        "activeIncidentInvestigation": {"nodeId":"239:1843","replacesNodeId":"43:323","selectedDestination":"Services","leftPaneMode":"Collapsed","maturity":["P1","Conditional"],"liveEvidenceReadOnly":true,"productionMutationAvailable":false,"remediationObjectiveProposal":true,"screenshotReviewed":true,"screenshotPath":"/private/tmp/executespec-en-d-42i-active-incident-r1.png"},
+        "incidentActionBlocked": {"nodeId":"239:2257","replacesNodeId":"43:435","selectedDestination":"Services","productionActionAvailable":false,"futureMaturity":"P2","executionTokenIssued":false,"credentialsVisible":false,"safeAlternatives":["investigate","escalate","governed runbook","handoff"],"screenshotReviewed":true,"screenshotPath":"/private/tmp/executespec-en-d-42b-incident-action-blocked-r1-final-v3.png"},
+        "incidentVerifiedWriteBackFailed": {"nodeId":"239:2671","replacesNodeId":"43:548","selectedDestination":"Services","productionVerification":"Passed","serviceNowWrite":"HTTP 403","incidentRecordChanged":false,"retryBlockedUntilPermissionRestored":true,"screenshotReviewed":true,"screenshotPath":"/private/tmp/executespec-en-d-42v-incident-writeback-failed-r1-final-v2.png"},
+        "firstConnectorPermissionImpact": {"nodeId":"239:3226","replacesNodeId":"44:247","selectedDestination":"Settings","selectedSettingsGroup":"Integrations","connector":"Jira Cloud","connectorState":"Not connected","tenantDataReadBeforeApproval":false,"leastPrivilegeAndRegionReview":true,"recovery":["cancel before OAuth","narrow scope","disconnect and purge"],"screenshotReviewed":true,"screenshotPath":"/private/tmp/executespec-en-d-53c-first-connector-r1-final-v2.png"}
+      },
+      "visualCorrections": ["Integrations subsection override", "denied notice fixed-capacity copy", "fixed-slot status copy"],
+      "scriptedContractAuditPassed": true,
+      "legacyComponentCount": 0,
+      "screenOverflowCount": 0,
+      "missingFonts": 0,
+      "minimumActionHeight": 40,
+      "originalsRetainedPendingPrototypeValidation": true
+    },
+    "desktopSecureContinuityBatch11": {
+      "passed": true,
+      "screens": {
+        "handoffTokenCreated": {"nodeId":"245:1722","state":"Token created","selectedDestination":"Objectives","sameUserOnly":true,"oneTime":true,"protectedContentEmbeddedInLink":false,"destinationPermissionEvaluationRequired":true,"revokeAvailable":true,"screenshotReviewed":true,"screenshotPath":"/private/tmp/executespec-en-d-61c-handoff-created-r1-final.png"},
+        "continuitySourceChanged": {"nodeId":"245:2113","state":"Source changed","selectedDestination":"Objectives","restorationBlocked":true,"changedObject":"checkout-api SHA","exactDiffReviewRequired":true,"currentSourceReauthorizationRequired":true,"recovery":["revoke token","issue new token","return to origin"],"screenshotReviewed":true,"screenshotPath":"/private/tmp/executespec-en-d-61s-continuity-source-changed-r1.png"},
+        "continuityCompleted": {"nodeId":"245:2417","state":"Completed","selectedDestination":"Objectives","currentPermissionsEvaluated":true,"sameUserVerified":true,"restoredSnapshot":"OBJ-184 · 93bc7e1","tokenConsumed":true,"tokenReusable":false,"screenshotReviewed":true,"screenshotPath":"/private/tmp/executespec-en-d-61d-continuity-completed-r1-final.png"}
+      },
+      "genericDeviceLabels": true,
+      "secretLikeTokenVisible": false,
+      "scriptedContractAuditPassed": true,
+      "legacyComponentCount": 0,
+      "screenOverflowCount": 0,
+      "missingFonts": 0,
+      "minimumActionHeight": 40,
+      "desktopRepairInventoryClosed": true,
+      "originalsRetainedPendingPrototypeValidation": true
+    }
+  },
+  "phase5Validation": {
+    "coreTabletBatch12": {
+      "passed": true,
+      "screens": {
+        "homeNeedsYou": {"nodeId":"251:9440","size":"834x960","selectedDestination":"Home","semanticRailWidth":56,"primaryWidth":778,"minimumActionHeight":44,"screenshotReviewed":true,"screenshotPath":"/private/tmp/executespec-en-t-01-home-r1.png"},
+        "objectiveContext": {"nodeId":"251:9706","size":"834x960","selectedDestination":"Objectives","currentStage":"Decision","readOnlyAuthorityComparison":true,"automaticMergeAllowed":false,"minimumActionHeight":44,"screenshotReviewed":true,"screenshotPath":"/private/tmp/executespec-en-t-02-context-r1-final-v2.png"},
+        "planDecision": {"nodeId":"251:10003","size":"834x960","currentStage":"Plan","scopeCostExpiryProofRecoveryVisible":true,"minimumActionHeight":44,"screenshotReviewed":true,"screenshotPath":"/private/tmp/executespec-en-t-03-plan-r1-final-v2.png"},
+        "workingObjective": {"nodeId":"251:10185","size":"834x960","currentStage":"Working","durableCheckpoint":true,"boundedRouteBudgetSha":true,"cancelPreservesCheckpoint":true,"minimumActionHeight":44,"screenshotReviewed":true,"screenshotPath":"/private/tmp/executespec-en-t-04-working-r1-final-v2.png"},
+        "evidenceAndDelivery": {"nodeId":"251:10379","size":"834x960","selectedDestination":"Evidence","deterministicAndUnmeasuredSeparated":true,"reviewedWriteBackAction":true,"minimumActionHeight":44,"screenshotReviewed":true,"screenshotPath":"/private/tmp/executespec-en-t-05-evidence-r1-final-v2.png"},
+        "inspectModal": {"nodeId":"251:10683","size":"834x960","backgroundInert":true,"drawer":{"x":274,"y":64,"width":560,"height":896},"focusTrap":true,"escapeBackClose":true,"focusReturnsToInvoker":true,"searchReadOnlyAndPermissionScoped":true,"screenshotReviewed":true,"screenshotPath":"/private/tmp/executespec-en-t-11-inspect-r1-final-v2.png"}
+      },
+      "sharedComponentRepairs": {
+        "shellInspectTablet": {"nodeId":"137:2318","previousWidth":360,"width":560,"height":760,"setId":"137:2448","documentationFrameId":"137:2227"},
+        "drawerModalSheetTablet": {"nodeId":"155:2810","previousWidth":360,"width":560,"rootId":"155:2809","rootSize":"834x760"},
+        "statusStripCopy": {"separateLabelAndDetailOverrides":true,"overflowCount":0},
+        "sourceAuthorityComparison": {"embeddedSubTouchActionRemoved":true,"separateActionHeight":44}
+      },
+      "scriptedContractAuditPassed": true,
+      "frameFailureCount": 0,
+      "textOutsideCount": 0,
+      "statusOverflowCount": 0,
+      "legacyComponentCount": 0,
+      "missingFonts": 0,
+      "minimumActionHeight": 44
+    },
+    "coreMobileBatch13": {
+      "passed": true,
+      "screens": {
+        "navigationOverlay": {"nodeId":"263:11434","size":"390x844","overlayWidth":320,"permanentPane":false,"statusIcon":"Neutral","screenshotReviewed":true,"screenshotPath":"/private/tmp/executespec-en-m-00-nav-r1.png"},
+        "homeNeedsYou": {"nodeId":"263:11688","size":"390x844","selectedDestination":"Home","objectiveStates":["Needs you","Working","Blocked"],"screenshotReviewed":true,"screenshotPath":"/private/tmp/executespec-en-m-01-home-r1.png"},
+        "objectiveContext": {"nodeId":"263:11804","size":"390x844","currentStage":"Decision","composerVisible":true,"automaticMergeAllowed":false,"actions":["Inspect evidence","Change scope","Choose source"],"screenshotReviewed":true,"screenshotPath":"/private/tmp/executespec-en-m-02-objective-r1.png"},
+        "inspectSourceEvidence": {"nodeId":"266:15874","size":"390x844","component":"Shell/Inspect Mode=Mobile route","backCloseSearchTargets":44,"readOnlyPermissionScoped":true,"screenshotReviewed":true,"screenshotPath":"/private/tmp/executespec-en-m-02i-inspect-r1.png"},
+        "planApproval": {"nodeId":"263:11937","size":"390x844","currentStage":"Plan","actions":["Inspect evidence","Change scope","Reject","Approve plan"],"driftInvalidatesApproval":true,"screenshotReviewed":true,"screenshotPath":"/private/tmp/executespec-en-m-03-plan-r1.png"},
+        "workingObjective": {"nodeId":"263:12063","size":"390x844","statusIcon":"Active","durableCheckpoint":true,"pauseAndCancelPreserve":true,"screenshotReviewed":true,"screenshotPath":"/private/tmp/executespec-en-m-04-working-r1-final.png"},
+        "workingBlockedRecovery": {"nodeId":"263:12180","size":"390x844","statusIcon":"Blocked","testOutcome":"Unmeasured","requestAccessPath":true,"screenshotReviewed":true,"screenshotPath":"/private/tmp/executespec-en-m-04b-blocked-r1.png"},
+        "evidenceAndDelivery": {"nodeId":"263:12297","size":"390x844","selectedDestination":"Evidence","deterministicAndUnmeasuredSeparated":true,"screenshotReviewed":true,"screenshotPath":"/private/tmp/executespec-en-m-05-evidence-r1.png"},
+        "partialWriteBack": {"nodeId":"263:12433","size":"390x844","statusIcon":"Failure","successfulWrites":["GitHub","Jira"],"failedWrite":"Confluence HTTP 403","screenshotReviewed":true,"screenshotPath":"/private/tmp/executespec-en-m-05p-partial-r1-final.png"},
+        "handoffCreated": {"nodeId":"264:12400","size":"390x844","statusIcon":"Success","protectedContentEmbedded":false,"sameUserOnly":true,"screenshotReviewed":true,"screenshotPath":"/private/tmp/executespec-en-m-10c-created-r1.png"},
+        "handoffSourceChanged": {"nodeId":"264:12504","size":"390x844","statusIcon":"Blocked","staleRestoreBlocked":true,"exactDiffAndReauthorisationRequired":true,"screenshotReviewed":true,"screenshotPath":"/private/tmp/executespec-en-m-10s-changed-r1.png"},
+        "handoffExpired": {"nodeId":"264:12613","size":"390x844","statusIcon":"Terminal","destinationSessionRestored":false,"screenshotReviewed":true,"screenshotPath":"/private/tmp/executespec-en-m-10x-expired-r1-final.png"},
+        "continuityCompleted": {"nodeId":"264:12715","size":"390x844","statusIcon":"Success","currentPermissionsAndSameUserVerified":true,"tokenReusable":false,"screenshotReviewed":true,"screenshotPath":"/private/tmp/executespec-en-m-10d-done-r1-final.png"}
+      },
+      "sharedComponents": {
+        "mobileBottomNav": {"documentationId":"261:6681","componentSetId":"261:6859","variantCount":5,"selected":["Home","Objectives","Intelligence","Evidence","More"],"itemSize":"72x56"},
+        "mobileInspectRoute": {"componentId":"137:2381","instanceNodeId":"266:15875","fullScreen":true},
+        "topBarStatusToneOverrides": {"truthful":true,"icons":["Neutral","Attention","Active","Blocked","Failure","Terminal","Success"]}
+      },
+      "prototype": {
+        "reactionSources": 76,
+        "invalidDestinations": 0,
+        "selfNavigation": 0,
+        "flowStarts": [
+          {"nodeId":"263:11688","name":"Enterprise Mobile · Core Objective Flow"},
+          {"nodeId":"264:12400","name":"Enterprise Mobile · Secure Continuity"}
+        ]
+      },
+      "scriptedContractAuditPassed": true,
+      "frameFailureCount": 0,
+      "textOutsideCount": 0,
+      "legacyComponentCount": 0,
+      "missingFonts": 0,
+      "permanentPaneCount": 0,
+      "minimumActionAndHotspotSize": 44
+    },
+    "responsiveOperationalGlobalBatch14": {
+      "passed": true,
+      "screens": {
+        "tabletIntelligencePartial": {"nodeId":"270:12803","size":"834x960","selectedDestination":"Intelligence","answerState":"Partial","completeGroundingClaim":false,"deniedContentInfluencedAnswer":false,"screenshotReviewed":true,"screenshotPath":"/private/tmp/executespec-en-t-06-intel-r1.png"},
+        "tabletServicesPortfolio": {"nodeId":"270:13019","size":"834x960","selectedDestination":"Services","currentHealthClaim":"Unknown where live observation is unavailable","productionActionAvailable":false,"screenshotReviewed":true,"screenshotPath":"/private/tmp/executespec-en-t-07-services-r1.png"},
+        "tabletIncidentConditional": {"nodeId":"270:13183","size":"834x960","selectedDestination":"Services","maturity":["P2","Conditional"],"productionMutationAvailable":false,"remediationObjectiveProposal":true,"screenshotReviewed":true,"screenshotPath":"/private/tmp/executespec-en-t-08-incident-r1.png"},
+        "tabletConnectorReview": {"nodeId":"270:13339","size":"834x960","selectedDestination":"Settings","tenantDataReadBeforeApproval":false,"silentScopeExpansionAllowed":false,"screenshotReviewed":true,"screenshotPath":"/private/tmp/executespec-en-t-09-settings-r1-final.png"},
+        "tabletIntelligenceDenied": {"nodeId":"273:13993","size":"834x960","selectedDestination":"Intelligence","retrievalExecuted":false,"protectedIdentifiersVisible":false,"screenshotReviewed":true,"screenshotPath":"/private/tmp/executespec-en-t-06d-denied-r1.png"},
+        "tabletAuthorizationFailed": {"nodeId":"273:14146","size":"834x960","selectedDestination":"Settings","partialConnectionCreated":false,"objectsRead":0,"objectsIndexed":0,"screenshotReviewed":true,"screenshotPath":"/private/tmp/executespec-en-t-10-recovery-r1-final.png"},
+        "mobileIntelligencePartial": {"nodeId":"271:13510","size":"390x844","selectedDestination":"Intelligence","answerState":"Partial","completeGroundingClaim":false,"deniedContentInfluencedAnswer":false,"screenshotReviewed":true,"screenshotPath":"/private/tmp/executespec-en-m-06-intel-r1.png"},
+        "mobileIntelligenceDenied": {"nodeId":"271:13640","size":"390x844","selectedDestination":"Intelligence","queryExecuted":false,"answerProduced":false,"screenshotReviewed":true,"screenshotPath":"/private/tmp/executespec-en-m-06d-denied-r1.png"},
+        "mobileIncidentConditional": {"nodeId":"271:13749","size":"390x844","maturity":["P2","Conditional"],"credentialVisible":false,"productionMutationAvailable":false,"screenshotReviewed":true,"screenshotPath":"/private/tmp/executespec-en-m-07-incident-r1.png"},
+        "mobileConnectorReview": {"nodeId":"271:13878","size":"390x844","tenantDataReadBeforeApproval":false,"silentScopeExpansionAllowed":false,"screenshotReviewed":true,"screenshotPath":"/private/tmp/executespec-en-m-08-settings-r1.png"},
+        "mobileAuthorizationFailed": {"nodeId":"271:13990","size":"390x844","connectorState":"Not connected","objectsRead":0,"screenshotReviewed":true,"screenshotPath":"/private/tmp/executespec-en-m-08f-settings-failed-r1-final.png"}
+      },
+      "prototype": {
+        "reactionSources": 42,
+        "checkedDestinations": 42,
+        "invalidDestinations": 0,
+        "selfNavigation": 0,
+        "flowStarts": [
+          {"nodeId":"270:13019","name":"Enterprise Tablet · Operations and Governance"},
+          {"nodeId":"271:13510","name":"Enterprise Mobile · Intelligence, Incident and Settings"}
+        ]
+      },
+      "visualCorrections": ["mobile authorization-failure banner copy", "tablet connector-review field bounds", "tablet authorization-recovery field bounds"],
+      "scriptedContractAuditPassed": true,
+      "auditedRoots": 11,
+      "checkedTextNodes": 350,
+      "failureCount": 0,
+      "textOutsideCount": 0,
+      "missingFonts": 0,
+      "permanentMobilePaneCount": 0,
+      "minimumActionAndHotspotSize": 44
+    },
+    "responsiveDeepLinkContinuityBatch15": {
+      "passed": true,
+      "screens": {
+        "tabletDeepLinkAuthorized": {"nodeId":"282:14299","size":"834x960","state":"Authorized","officialJiraIdentity":true,"creatorPermissionInherited":false,"exactTargetVisibleAfterAuthorization":true,"screenshotReviewed":true,"screenshotPath":"/private/tmp/executespec-en-t-09a-link-authorized-r1.png"},
+        "tabletDeepLinkWrongView": {"nodeId":"282:15102","size":"834x960","state":"Wrong view","neutralShell":true,"protectedTargetResolved":false,"screenshotReviewed":true,"screenshotPath":"/private/tmp/executespec-en-t-09w-link-wrong-r1.png"},
+        "tabletDeepLinkExpired": {"nodeId":"282:15899","size":"834x960","state":"Expired","destinationSessionCreated":false,"approvalReused":false,"screenshotReviewed":true,"screenshotPath":"/private/tmp/executespec-en-t-09e-link-expired-r1.png"},
+        "tabletDeepLinkDenied": {"nodeId":"282:16704","size":"834x960","state":"Denied","targetIdentifiersRedacted":true,"denialEvidencePreserved":true,"screenshotReviewed":true,"screenshotPath":"/private/tmp/executespec-en-t-09d-link-denied-r1.png"},
+        "mobileDeepLinkAuthorized": {"nodeId":"282:17515","size":"390x844","state":"Authorized","officialJiraIdentity":true,"creatorPermissionInherited":false,"exactTargetVisibleAfterAuthorization":true,"screenshotReviewed":true,"screenshotPath":"/private/tmp/executespec-en-m-09a-link-authorized-r1.png"},
+        "mobileDeepLinkWrongView": {"nodeId":"282:18354","size":"390x844","state":"Wrong view","neutralShell":true,"protectedTargetResolved":false,"screenshotReviewed":true,"screenshotPath":"/private/tmp/executespec-en-m-09w-link-wrong-r1.png"},
+        "mobileDeepLinkExpired": {"nodeId":"282:19185","size":"390x844","state":"Expired","destinationSessionCreated":false,"headingFlowRepaired":true,"screenshotReviewed":true,"screenshotPath":"/private/tmp/executespec-en-m-09e-link-expired-r1-final.png"},
+        "mobileDeepLinkDenied": {"nodeId":"282:20025","size":"390x844","state":"Denied","targetIdentifiersRedacted":true,"headingFlowRepaired":true,"screenshotReviewed":true,"screenshotPath":"/private/tmp/executespec-en-m-09d-link-denied-r1-final.png"},
+        "tabletContinuityCreated": {"nodeId":"283:14489","size":"834x960","state":"Token created","protectedContentSerialized":false,"screenshotReviewed":true,"screenshotPath":"/private/tmp/executespec-en-t-10c-created-r1.png"},
+        "tabletContinuityOpened": {"nodeId":"283:15533","size":"834x960","state":"Opened","protectedContextRestored":false,"destinationChecksPending":true,"screenshotReviewed":true,"screenshotPath":"/private/tmp/executespec-en-t-10o-opened-r1.png"},
+        "tabletContinuityExpired": {"nodeId":"283:16587","size":"834x960","state":"Expired","destinationSessionCreated":false,"approvalReused":false,"screenshotReviewed":true,"screenshotPath":"/private/tmp/executespec-en-t-10x-expired-r1.png"},
+        "tabletContinuityRevoked": {"nodeId":"283:17647","size":"834x960","state":"Revoked","tokenInvalidated":true,"destinationCanContinue":false,"screenshotReviewed":true,"screenshotPath":"/private/tmp/executespec-en-t-10r-revoked-r1.png"},
+        "tabletContinuitySourceChanged": {"nodeId":"283:18717","size":"834x960","state":"Source changed","staleRestoreBlocked":true,"currentSourceReauthorizationRequired":true,"screenshotReviewed":true,"screenshotPath":"/private/tmp/executespec-en-t-10s-source-changed-r1.png"},
+        "tabletContinuityCompleted": {"nodeId":"283:19794","size":"834x960","state":"Completed","sameUserAndCurrentPermissionVerified":true,"tokenReusable":false,"screenshotReviewed":true,"screenshotPath":"/private/tmp/executespec-en-t-10d-completed-r1.png"},
+        "mobileContinuityOpened": {"nodeId":"283:20866","size":"390x844","state":"Opened","protectedContextRestored":false,"destinationChecksPending":true,"screenshotReviewed":true,"screenshotPath":"/private/tmp/executespec-en-m-10o-opened-r1.png"},
+        "mobileContinuityRevoked": {"nodeId":"283:21844","size":"390x844","state":"Revoked","tokenInvalidated":true,"destinationCanContinue":false,"screenshotReviewed":true,"screenshotPath":"/private/tmp/executespec-en-m-10r-revoked-r1.png"}
+      },
+      "prototype": {
+        "reactionSources": 43,
+        "checkedDestinations": 43,
+        "invalidDestinations": 0,
+        "selfNavigation": 0,
+        "explicitlyRewrittenClonedButtonReactions": 35,
+        "flowStarts": [
+          {"nodeId":"282:14299","name":"Enterprise Tablet · External Link Authorized"},
+          {"nodeId":"282:15102","name":"Enterprise Tablet · External Link Recovery"},
+          {"nodeId":"282:17515","name":"Enterprise Mobile · External Link Authorized"},
+          {"nodeId":"282:18354","name":"Enterprise Mobile · External Link Recovery"},
+          {"nodeId":"283:14489","name":"Enterprise Tablet · Secure Continuity"},
+          {"nodeId":"264:12400","name":"Enterprise Mobile · Secure Continuity"}
+        ]
+      },
+      "visualCorrections": ["mobile expired heading flow", "mobile denied heading flow", "cloned button reaction replacement"],
+      "scriptedContractAuditPassed": true,
+      "auditedRoots": 16,
+      "checkedTextNodes": 333,
+      "failureCount": 0,
+      "neutralShellDisclosureFailures": 0,
+      "missingFonts": 0,
+      "personalDeviceIdentifiers": 0,
+      "minimumActionAndHotspotSize": 44,
+      "responsiveDerivationClosed": true
+    }
+  },
+  "phase6Validation": {
+    "checkpoint": "CP-076",
+    "passed": true,
+    "prototypeGraph": {
+      "acceptedRoots": 110,
+      "visibleActionButtons": 327,
+      "wired": 316,
+      "explicitlyInert": 11,
+      "accidentalUnwired": 0,
+      "invalidDestinations": 0,
+      "selfNavigation": 0,
+      "malformedExternalUrls": 0
+    },
+    "desktopContinuity": {
+      "opened": "296:15631",
+      "revoked": "297:15875"
+    },
+    "responsivePrdGapScreens": {
+      "tabletZeroInformation": "301:16123",
+      "mobileZeroInformation": "301:19043",
+      "tabletAuthorityResolved": "301:19230",
+      "mobileAuthorityResolved": "302:16424",
+      "mobileModelRouteReview": "302:19297",
+      "mobileModelRouteBlocked": "302:19483",
+      "tabletNeutralViewChoice": "302:19673",
+      "mobileNeutralViewChoice": "302:19907"
+    },
+    "focusedAccessibility": {
+      "screens": 10,
+      "mobileMinimumTarget": 44,
+      "minimumFocusedTextPx": 9,
+      "topbarOverflow": 0,
+      "duplicateScreenNames": 0,
+      "pendingPrototypeDestinations": 0,
+      "screenshotReviewed": true
+    },
+    "wholeFileAudit": {
+      "screens": 110,
+      "desktop": 48,
+      "tablet": 30,
+      "mobile": 32,
+      "visibleTextNodes": 4035,
+      "textBelow9Px": 0,
+      "visibleTextClips": 0,
+      "viewportOverflows": 0,
+      "contrastMeasured": 4035,
+      "contrastFailures": 0,
+      "iconOnlyTargets": 127,
+      "iconSemanticNameFailures": 0,
+      "iconTargetSizeFailures": 0,
+      "namedFlowStarts": 20,
+      "genericOrNonAcceptedStarts": 0,
+      "acceptedScreenDeadEnds": 0,
+      "redactionCriticalRoots": 13,
+      "redactionFailures": 0,
+      "totalFailures": 0
+    },
+    "implementationArtifacts": {
+      "codingAgentHandoff": "21-CODING-AGENT-IMPLEMENTATION-HANDOFF.md",
+      "prototypeGraph": "22-FIGMA-PROTOTYPE-GRAPH.json"
+    },
+    "remainingImplementationGates": [
+      "browser keyboard and screen-reader execution",
+      "200% browser reflow and 30% localisation expansion",
+      "production RBAC and source-ACL redaction",
+      "connector sandbox certification and reconciliation",
+      "deterministic AT-PRD-ID test commands and results",
+      "official identity licensing if logos are reintroduced"
+    ]
+  },
+  "phase1Validation": {
+    "passed": true,
+    "variables": 105,
+    "primitiveVariables": 42,
+    "colorVariables": 39,
+    "sizeVariables": 24,
+    "textStyles": 12,
+    "effectStyles": 5,
+    "brokenAliases": 0,
+    "componentSets": 3,
+    "screenTopLevelNodes": 47,
+    "prototypeReactions": 224
+  },
+  "phase2Validation": {
+    "passed": true,
+    "canonicalRoot": "75:31",
+    "width": 1440,
+    "height": 5573,
+    "sections": 7,
+    "boundColourSwatches": 81,
+    "typeSpecimens": 12,
+    "boundDimensionBars": 17,
+    "boundRadiusDemos": 6,
+    "boundEffectCards": 5,
+    "missingFonts": 0,
+    "containmentFailures": 0
+  },
+  "completedSteps": ["P0.a", "P0.b", "P0.c", "P0.d", "P0.e", "P0.f", "P1.a", "P1.b", "P1.c", "P1.d", "P1.e", "P1.f", "P1.g", "P1.h", "P2.a", "P2.b", "P2.c", "P2.d", "P2.e", "P3.a", "P3.b", "P3.c", "P3.d", "P3.e", "P3.f", "P3.g", "P3.h", "P3.i", "P3.j", "P3.k", "P3.l", "P3.m", "P3.n", "P4.a.1", "P4.a.2", "P4.a.3", "P4.a.4", "P4.a.5", "P4.a.6", "P4.a.7", "P4.a.8", "P4.a.9", "P4.a.10", "P4.a.11", "P4.a.12", "P4.a.13", "P4.a.14", "P4.a.15", "P4.b.1", "P4.b.2", "P4.b.3", "P4.b.4", "P4.b.5", "P4.b.6", "P4.c.1", "P4.c.2", "P4.c.3", "P4.c.4", "P4.d.1", "P4.d.2", "P4.d.3", "P4.d.4", "P4.d.5", "P4.e.1", "P4.e.2", "P4.e.3", "P5.a.1", "P5.a.2", "P5.b.1", "P5.b.2", "P5.c.1", "P5.c.2", "P5.c.3", "P5.c.4", "P6.a", "P6.b", "P6.c", "P6.d", "P6.e", "P6.f", "P7.a", "P7.b"],
+  "preflight": {
+    "mutationSpec": "12-FIGMA-PHASE-1-MUTATION-SPEC.md",
+    "screenRepairBacklog": "13-FIGMA-SCREEN-REPAIR-BACKLOG.md",
+    "identityAssetManifest": "14-OFFICIAL-IDENTITY-ASSET-MANIFEST.md",
+    "expectedVariables": 105,
+    "expectedTextStyles": 12,
+    "expectedEffectStyles": 5,
+    "contrastValidated": true,
+    "officialAssetInventoryReadOnly": true
+  },
+  "handoff": {
+    "checkpoint": "CP-078",
+    "document": "18-SESSION-HANDOFF-AND-CHECKPOINT.md",
+    "implementationDocument": "21-CODING-AGENT-IMPLEMENTATION-HANDOFF.md",
+    "prototypeGraph": "22-FIGMA-PROTOTYPE-GRAPH.json",
+    "updateEveryCheckpoint": true,
+    "goalStatus": "complete"
+  },
+  "designerHandoff": {
+    "screenDocument": "23-ENTERPRISE-SCREEN-BY-SCREEN-DESIGN-HANDOFF.md",
+    "journeyDocument": "24-ENTERPRISE-USER-JOURNEYS-AND-FIGMA-FLOWS.md",
+    "prdDocument": "25-ENTERPRISE-DESIGNER-PRD.md",
+    "pdf": "ExecuteSpec-Enterprise-Designer-PRD.pdf",
+    "screens": 110,
+    "desktop": 48,
+    "tablet": 30,
+    "mobile": 32,
+    "journeys": 14,
+    "figmaFlows": 20,
+    "plainEnglishDocument": "26-ENTERPRISE-PLAIN-ENGLISH-DESIGNER-PRD.md",
+    "pdfPages": 43,
+    "pdfUriLinks": 145,
+    "pdfInternalLinks": 124,
+    "pdfUnexpectedExternalLinks": 0,
+    "plainEnglishBlocks": 124,
+    "genericScreenExplanationFallbacks": 0,
+    "visualQa": "all 43 pages rendered; four contact sheets and representative full-size pages inspected"
+  },
+  "nextStep": "External UX designer review using document 26 and the revised PDF; implementation remains paused until explicit product-owner approval"
+}

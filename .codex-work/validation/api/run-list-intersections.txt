@@ -1,0 +1,6 @@
+free-pro intersections=0
+
+free-team intersections=0
+
+pro-team intersections=0
+

@@ -1,0 +1,240 @@
+{
+  "schemaVersion": 4,
+  "campaignId": "litmus-20260804015832",
+  "state": "SOURCE_REVISION_PUSHED",
+  "createdAt": "2026-08-04T01:58:32.203Z",
+  "updatedAt": "2026-08-04T02:23:48.183Z",
+  "invalidation": null,
+  "deployment": {
+    "expectedSha": "ac865f99ec6f1c7727e03e6df8328b3d7a326c24",
+    "deployedSha": "ac865f99ec6f1c7727e03e6df8328b3d7a326c24",
+    "runningSha": "ac865f99ec6f1c7727e03e6df8328b3d7a326c24",
+    "runningShaAuthority": "DEPLOYMENT_HOST:/opt/app/RUNNING_SHA",
+    "deployWorkflowRunId": "30870041263",
+    "deployWorkflowRunUrl": "https://github.com/navneetprabhakar/executespec/actions/runs/30870041263",
+    "deployConclusion": "SUCCESS",
+    "health": "UP",
+    "providerState": "AVAILABLE_USER_KEY",
+    "providerPolicyEvidenceId": "sha256:54748f1e83c55c70a9ea3fbcf0b7a657b58b100be6df3ce4b12c9fa807e6d07d"
+  },
+  "fixture": {
+    "repoFullName": "navneetprabhakar/executespec-litmus-litmus-20260804015832",
+    "visibility": "PRIVATE",
+    "baseBranch": "main",
+    "baseSha": "8c3569367c679c366517855563c8861283e0b07f",
+    "currentBaseSha": "badc296e027a8a676ccfa3590597d2ea8accfd68",
+    "sourceRevisionPatchSha256": "2106e27f7ff5e55a51c18f7ccb39f7c814788a45918dc5eb094b67a52ecb07bd",
+    "sourceRevisionChangedPaths": [
+      "src/catalog.js",
+      "test/baseline.test.js"
+    ],
+    "sourceRevisionCiEvidenceId": "github-actions:30871627101:91874638804",
+    "sourceRevisionEvidenceId": "github-commit:badc296e027a8a676ccfa3590597d2ea8accfd68"
+  },
+  "project": {
+    "projectId": "7ae7f2e7-481a-4d14-ae67-e88002a381fc",
+    "repoId": "c6451693-952d-479e-964c-2e9a71713297",
+    "linkEvidenceId": "eaca7369-49d0-44ae-a912-59184c76d71d",
+    "baselineV1": {
+      "architectureVersionId": "5819573e-30c9-4c13-b604-48ae273e91ce",
+      "sourceSha": "8c3569367c679c366517855563c8861283e0b07f",
+      "codeMapEvidenceId": "codemap:c6451693-952d-479e-964c-2e9a71713297:v1:8c3569367c679c366517855563c8861283e0b07f",
+      "architectureEvidenceId": "architecture-job:16d7a14f-adb3-4077-95f0-52abde540306:QUALIFIED",
+      "documentEvidenceId": "7165b48e-b7fd-4568-bc74-e9de996663f7",
+      "documentRubricPass": true,
+      "documentScore": 85,
+      "documentMaxScore": 100,
+      "documentSourceSha": "8c3569367c679c366517855563c8861283e0b07f",
+      "documentProvider": "DEEPSEEK",
+      "documentModel": "deepseek-v4-pro-native",
+      "documentOperationId": "cba094d3-88eb-4e67-b40d-905e50caf6e3"
+    }
+  },
+  "route": {
+    "provider": "DEEPSEEK",
+    "model": "deepseek-v4-pro-native",
+    "routingMode": "EXACT_LOCK"
+  },
+  "runRequest": {
+    "userRequest": "Extend src/catalog.js filterCatalog without replacing or truncating the file.\n\nAdd optional tag, order, and limit support while preserving the existing query behavior and input immutability. Tag matching is exact and case-insensitive. Order accepts title-asc or title-desc. Limit must be a positive integer; invalid values must produce a clear error. Add happy-path and negative tests. Keep the LITMUS_EOF_SENTINEL intact. Run the complete test suite before completion.",
+    "executionMode": "PRODUCTION",
+    "skipApproval": false,
+    "tddMode": false,
+    "aiProvider": "DEEPSEEK",
+    "modelName": "deepseek-v4-pro-native",
+    "requireConfirmationBeforeExpensiveContinuation": true,
+    "requireBenchmarkPriorForAutomaticContinuation": false,
+    "userCostCap": 3,
+    "requirementSha256": "2b52e82c61d32db5f18c30807144dc1f5d0089a3a9c200e25988b8ac11e302ef",
+    "canonicalJsonSha256": "eeb5ef773826bb4dd7215854304b4b6ba85f536c2fc73b84afd397f586816342"
+  },
+  "approval": {
+    "mode": "MANUAL_EXACT_PLAN",
+    "fingerprintAlgorithm": "SHA-256_UTF8_PLAN_JSON",
+    "fingerprintRequired": true,
+    "creditsConfirmationRequired": true,
+    "decisionContractSha256": ""
+  },
+  "clients": {},
+  "sandboxJourney": {
+    "mode": "REMOTE_WORKSPACE_ONLY",
+    "projectId": "7ae7f2e7-481a-4d14-ae67-e88002a381fc",
+    "capabilitySnapshot": {
+      "lifecycleEnabled": false,
+      "runtimeDispatchEnabled": false,
+      "containerStrictV1Enabled": false,
+      "toolchainReadinessEnabled": false
+    },
+    "capabilityEvidenceId": "cli-doctor:2026-08-04T02:04:51.623472662Z",
+    "projectInteraction": {
+      "classification": "SUPPORTED",
+      "createOrLinkInsideAgentAvailable": true,
+      "handoffAvailable": true,
+      "evidenceId": "browser:project-agent-desktop-dom.txt"
+    },
+    "execution": {
+      "sandboxCreated": false,
+      "hostFallbackUsed": false,
+      "truthfulLabel": "Remote workspace",
+      "doNotDemo": true,
+      "limitation": "Dev exposes a policy-guarded server workspace only: remote sandbox lifecycle, dispatch, strict container, toolchain readiness, pinned image, and runtime are disabled. No isolated sandbox was created or exercised.",
+      "projectContextPreserved": true,
+      "historySnapshotAvailable": true,
+      "closeAvailable": false,
+      "evidenceId": "browser:project-agent-desktop-dom.txt+project-agent-mobile-metrics.json"
+    },
+    "teardown": {
+      "mode": "REMOTE_WORKSPACE_ONLY",
+      "projectId": "7ae7f2e7-481a-4d14-ae67-e88002a381fc",
+      "sourceSha": "8c3569367c679c366517855563c8861283e0b07f",
+      "sandboxAbsent": true,
+      "workspaceClosed": true,
+      "evidenceId": "capability:no-sandbox-runtime-or-workspace-session-created"
+    }
+  },
+  "cliFallback": {},
+  "frozenTupleDigest": null,
+  "heroes": [],
+  "postMerge": {},
+  "negatives": [],
+  "cleanup": {},
+  "events": [
+    {
+      "at": "2026-08-04T01:58:43.894Z",
+      "from": "NEW",
+      "to": "PREFLIGHTED",
+      "evidence": {
+        "expectedSha": "ac865f99ec6f1c7727e03e6df8328b3d7a326c24",
+        "deployedSha": "ac865f99ec6f1c7727e03e6df8328b3d7a326c24",
+        "runningSha": "ac865f99ec6f1c7727e03e6df8328b3d7a326c24",
+        "runningShaAuthority": "DEPLOYMENT_HOST:/opt/app/RUNNING_SHA",
+        "health": "UP",
+        "deployWorkflowRunId": "30870041263",
+        "deployWorkflowRunUrl": "https://github.com/navneetprabhakar/executespec/actions/runs/30870041263",
+        "deployConclusion": "SUCCESS",
+        "providerState": "AVAILABLE_USER_KEY",
+        "providerPolicyEvidenceId": "sha256:54748f1e83c55c70a9ea3fbcf0b7a657b58b100be6df3ce4b12c9fa807e6d07d",
+        "ghAuth": "VERIFIED"
+      }
+    },
+    {
+      "at": "2026-08-04T01:59:04.993Z",
+      "from": "PREFLIGHTED",
+      "to": "FIXTURE_CREATED",
+      "evidence": {
+        "repoFullName": "navneetprabhakar/executespec-litmus-litmus-20260804015832",
+        "baseBranch": "main",
+        "visibility": "PRIVATE",
+        "baseSha": "8c3569367c679c366517855563c8861283e0b07f"
+      }
+    },
+    {
+      "at": "2026-08-04T02:00:48.640Z",
+      "from": "FIXTURE_CREATED",
+      "to": "PROJECT_LINKED",
+      "evidence": {
+        "projectId": "7ae7f2e7-481a-4d14-ae67-e88002a381fc",
+        "repoId": "c6451693-952d-479e-964c-2e9a71713297",
+        "linkEvidenceId": "eaca7369-49d0-44ae-a912-59184c76d71d"
+      }
+    },
+    {
+      "at": "2026-08-04T02:05:10.181Z",
+      "from": "PROJECT_LINKED",
+      "to": "SANDBOX_ASSESSED",
+      "evidence": {
+        "mode": "REMOTE_WORKSPACE_ONLY",
+        "projectId": "7ae7f2e7-481a-4d14-ae67-e88002a381fc",
+        "capabilitySnapshot": {
+          "lifecycleEnabled": false,
+          "runtimeDispatchEnabled": false,
+          "containerStrictV1Enabled": false,
+          "toolchainReadinessEnabled": false
+        },
+        "capabilityEvidenceId": "cli-doctor:2026-08-04T02:04:51.623472662Z",
+        "projectInteraction": {
+          "classification": "SUPPORTED",
+          "createOrLinkInsideAgentAvailable": true,
+          "handoffAvailable": true,
+          "evidenceId": "browser:project-agent-desktop-dom.txt"
+        },
+        "execution": {
+          "sandboxCreated": false,
+          "hostFallbackUsed": false,
+          "truthfulLabel": "Remote workspace",
+          "doNotDemo": true,
+          "limitation": "Dev exposes a policy-guarded server workspace only: remote sandbox lifecycle, dispatch, strict container, toolchain readiness, pinned image, and runtime are disabled. No isolated sandbox was created or exercised.",
+          "projectContextPreserved": true,
+          "historySnapshotAvailable": true,
+          "closeAvailable": false,
+          "evidenceId": "browser:project-agent-desktop-dom.txt+project-agent-mobile-metrics.json"
+        },
+        "teardown": {
+          "mode": "REMOTE_WORKSPACE_ONLY",
+          "projectId": "7ae7f2e7-481a-4d14-ae67-e88002a381fc",
+          "sourceSha": "8c3569367c679c366517855563c8861283e0b07f",
+          "sandboxAbsent": true,
+          "workspaceClosed": true,
+          "evidenceId": "capability:no-sandbox-runtime-or-workspace-session-created"
+        }
+      }
+    },
+    {
+      "at": "2026-08-04T02:22:21.128Z",
+      "from": "SANDBOX_ASSESSED",
+      "to": "BASELINE_V1_READY",
+      "evidence": {
+        "architectureVersionId": "5819573e-30c9-4c13-b604-48ae273e91ce",
+        "sourceSha": "8c3569367c679c366517855563c8861283e0b07f",
+        "codeMapEvidenceId": "codemap:c6451693-952d-479e-964c-2e9a71713297:v1:8c3569367c679c366517855563c8861283e0b07f",
+        "architectureEvidenceId": "architecture-job:16d7a14f-adb3-4077-95f0-52abde540306:QUALIFIED",
+        "documentEvidenceId": "7165b48e-b7fd-4568-bc74-e9de996663f7",
+        "documentRubricPass": true,
+        "documentScore": 85,
+        "documentMaxScore": 100,
+        "documentSourceSha": "8c3569367c679c366517855563c8861283e0b07f",
+        "documentProvider": "DEEPSEEK",
+        "documentModel": "deepseek-v4-pro-native",
+        "documentOperationId": "cba094d3-88eb-4e67-b40d-905e50caf6e3"
+      }
+    },
+    {
+      "at": "2026-08-04T02:23:48.183Z",
+      "from": "BASELINE_V1_READY",
+      "to": "SOURCE_REVISION_PUSHED",
+      "evidence": {
+        "previousSha": "8c3569367c679c366517855563c8861283e0b07f",
+        "currentBaseSha": "badc296e027a8a676ccfa3590597d2ea8accfd68",
+        "patchSha256": "2106e27f7ff5e55a51c18f7ccb39f7c814788a45918dc5eb094b67a52ecb07bd",
+        "changedPaths": [
+          "src/catalog.js",
+          "test/baseline.test.js"
+        ],
+        "checkName": "fixture-ci",
+        "checkConclusion": "SUCCESS",
+        "ciEvidenceId": "github-actions:30871627101:91874638804",
+        "pushEvidenceId": "github-commit:badc296e027a8a676ccfa3590597d2ea8accfd68"
+      }
+    }
+  ]
+}

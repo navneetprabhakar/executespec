@@ -1,0 +1,13 @@
+{
+  "previousSha": "17289843c6b1fe3ab43e38b23816194f8a46e01d",
+  "currentBaseSha": "0dc124cc4fa065aae6faac9c8172287a05e2931c",
+  "patchSha256": "2106e27f7ff5e55a51c18f7ccb39f7c814788a45918dc5eb094b67a52ecb07bd",
+  "changedPaths": [
+    "src/catalog.js",
+    "test/baseline.test.js"
+  ],
+  "checkName": "fixture-ci",
+  "checkConclusion": "SUCCESS",
+  "ciEvidenceId": "github-actions:30838037403:91767934656",
+  "pushEvidenceId": "github-merge:pull-2:0dc124cc4fa065aae6faac9c8172287a05e2931c"
+}

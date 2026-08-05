@@ -1,0 +1,14 @@
+{
+  "architectureVersionId": "c54a23d5-4b27-4776-b67c-7356b61b0c47",
+  "sourceSha": "88f0aa680cf22916b1a82504858a4ea3841bda10",
+  "codeMapEvidenceId": "architecture-v2-exact-source-88f0aa680cf22916b1a82504858a4ea3841bda10",
+  "architectureEvidenceId": "c54a23d5-4b27-4776-b67c-7356b61b0c47",
+  "documentEvidenceId": "9483a5b6-04cd-4889-b713-087add3faf6a",
+  "documentRubricPass": true,
+  "documentScore": 90,
+  "documentMaxScore": 100,
+  "documentSourceSha": "88f0aa680cf22916b1a82504858a4ea3841bda10",
+  "documentProvider": "DEEPSEEK",
+  "documentModel": "deepseek-v4-pro-native",
+  "documentOperationId": "270c9720-4a69-48f6-a256-543124752b44"
+}

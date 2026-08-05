@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "projectId": "8974aabb-08f2-4091-933d-1e91d65beab0",
+  "repoId": "26231029-e8d2-4fc3-8dbc-8d32dd7326be",
+  "sourceSha": "f9e02258189a2bc81031ea1a10316336a360fc76",
+  "webSha": "5ac6f4d185e9c8028e923a46d8e2aed955b8788a",
+  "cliSha": "13e897f9fee38fc96c3bb7a0637f63056cc19e03",
+  "route": {
+    "provider": "DEEPSEEK",
+    "model": "deepseek-v4-pro-native",
+    "mode": "EXACT_LOCK"
+  },
+  "approval": {
+    "mode": "MANUAL_EXACT_PLAN",
+    "fingerprintAlgorithm": "SHA-256_UTF8_PLAN_JSON",
+    "fingerprintRequired": true,
+    "creditsConfirmationRequired": true
+  },
+  "runRequestCanonicalJsonSha256": "eeb5ef773826bb4dd7215854304b4b6ba85f536c2fc73b84afd397f586816342"
+}

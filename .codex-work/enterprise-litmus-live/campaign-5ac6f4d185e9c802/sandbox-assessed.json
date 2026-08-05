@@ -1,0 +1,36 @@
+{
+  "mode": "REMOTE_WORKSPACE_ONLY",
+  "projectId": "8974aabb-08f2-4091-933d-1e91d65beab0",
+  "capabilitySnapshot": {
+    "lifecycleEnabled": false,
+    "runtimeDispatchEnabled": false,
+    "containerStrictV1Enabled": false,
+    "toolchainReadinessEnabled": false
+  },
+  "capabilityEvidenceId": "client-capabilities:2026-08-03T18:48:44.661699840Z",
+  "projectInteraction": {
+    "classification": "INTENTIONAL_SEPARATION",
+    "createOrLinkInsideAgentAvailable": false,
+    "handoffAvailable": true,
+    "evidenceId": "project-agent-route:8974aabb-08f2-4091-933d-1e91d65beab0"
+  },
+  "execution": {
+    "sandboxCreated": false,
+    "hostFallbackUsed": false,
+    "truthfulLabel": "Remote workspace",
+    "doNotDemo": true,
+    "limitation": "Strict sandbox execution is disabled; runs use a policy-guarded server workspace and must not be advertised as isolated sandboxes.",
+    "projectContextPreserved": true,
+    "historySnapshotAvailable": true,
+    "closeAvailable": true,
+    "evidenceId": "capabilities:remoteSandbox.isolationProfile=NOT_ENABLED:runtimeAvailable=false"
+  },
+  "teardown": {
+    "mode": "REMOTE_WORKSPACE_ONLY",
+    "projectId": "8974aabb-08f2-4091-933d-1e91d65beab0",
+    "sourceSha": "c9e47e7350a085eed49d4b87e933de20079e7878",
+    "sandboxAbsent": true,
+    "workspaceClosed": true,
+    "evidenceId": "no-sandbox-created:capability-disabled"
+  }
+}

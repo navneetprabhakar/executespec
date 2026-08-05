@@ -1,0 +1,18 @@
+{
+  "clientWidth": 390,
+  "horizontalOverflow": false,
+  "input": {
+    "bottom": 724,
+    "left": 63,
+    "right": 325,
+    "width": 262
+  },
+  "main": {
+    "left": 0,
+    "right": 390,
+    "width": 390
+  },
+  "scrollWidth": 390,
+  "viewportHeight": 844,
+  "viewportWidth": 390
+}

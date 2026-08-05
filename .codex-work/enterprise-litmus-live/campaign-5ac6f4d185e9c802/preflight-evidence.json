@@ -1,0 +1,13 @@
+{
+  "expectedSha": "5ac6f4d185e9c8028e923a46d8e2aed955b8788a",
+  "deployedSha": "5ac6f4d185e9c8028e923a46d8e2aed955b8788a",
+  "runningSha": "5ac6f4d185e9c8028e923a46d8e2aed955b8788a",
+  "runningShaAuthority": "DEPLOYMENT_HOST:/opt/app/RUNNING_SHA",
+  "health": "UP",
+  "deployWorkflowRunId": "30841756961",
+  "deployWorkflowRunUrl": "https://github.com/navneetprabhakar/executespec/actions/runs/30841756961",
+  "deployConclusion": "SUCCESS",
+  "providerState": "AVAILABLE_USER_KEY",
+  "providerPolicyEvidenceId": "github-actions:30841756961:91780243832:Verify-provider-keys+authenticated-provider-keys-ui:DeepSeek-connected",
+  "ghAuth": "VERIFIED"
+}

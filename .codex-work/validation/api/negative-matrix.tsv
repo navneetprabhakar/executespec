@@ -1,0 +1,7 @@
+unauth-runs	401
+malformed-page	400
+oversized-page	400
+traversal-run	400
+invalid-uuid	404
+cross-sse-token	403
+own-sse-token	200

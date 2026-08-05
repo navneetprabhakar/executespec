@@ -1,0 +1,117 @@
+{
+  "ordinal": 1,
+  "runId": "c9cce06b-c235-48a7-bc84-5e219e991233",
+  "branch": "executespec/c9cce06b/add-tag-order-limit-support-tests-to-fil",
+  "sourceSha": "68109d51a4f54698644a095c3fb05cb6645e98e2",
+  "requestSha256": "e512342ff3db99ceacd8823df06aa2a531c320d5fd2f7f83a8460b3a679dd5a3",
+  "status": "COMPLETE",
+  "plan": {
+    "planId": "gate:plan:c9cce06b-c235-48a7-bc84-5e219e991233",
+    "version": 1,
+    "fingerprint": "a7608b96a491c9717091e569ec227f60737f95ad3f2c647a679c72505d0f52d5",
+    "strategy": "SINGLE_SHOT",
+    "classification": "SINGLE_SHOT",
+    "taskCount": 1,
+    "evidenceSha256": "137f5ec1a1d843881af787dbb98c46e0b44daf58d62937febce0c5a04813834c"
+  },
+  "approvalReceiptId": "gate:plan:c9cce06b-c235-48a7-bc84-5e219e991233@APPROVED",
+  "task": {
+    "total": 1,
+    "completed": 1,
+    "failed": 0,
+    "buildPassed": true,
+    "evidenceId": "run-detail:c9cce06b-c235-48a7-bc84-5e219e991233#task:c9cce06b_T1"
+  },
+  "files": {
+    "changed": [
+      "src/catalog.js",
+      "test/filter-catalog-extended.test.js"
+    ],
+    "generatedCodeSha256": "2f40c0d3a7af2e210ad2b50459403049c56d8eff07455174b6a6930970835122"
+  },
+  "tests": {
+    "passed": 37,
+    "failed": 0,
+    "skipped": 0,
+    "behaviorVerified": true
+  },
+  "review": {
+    "truthful": true,
+    "verifiedScore": 75,
+    "evidenceId": "run-report:c9cce06b-c235-48a7-bc84-5e219e991233"
+  },
+  "pr": {
+    "number": 2,
+    "url": "https://github.com/navneetprabhakar/taskboard-catalog-lab-20260803/pull/2",
+    "branch": "executespec/c9cce06b/add-tag-order-limit-support-tests-to-fil",
+    "baseSha": "68109d51a4f54698644a095c3fb05cb6645e98e2",
+    "headSha": "c64b820fc66481c21a0d2fb7793766674073be14",
+    "ci": {
+      "checkName": "fixture-ci",
+      "conclusion": "SUCCESS",
+      "totalChecks": 1,
+      "headSha": "c64b820fc66481c21a0d2fb7793766674073be14"
+    }
+  },
+  "cost": {
+    "actualUsd": 0.027875496,
+    "capUsd": 3,
+    "bounded": true
+  },
+  "route": {
+    "provider": "DEEPSEEK",
+    "model": "deepseek-v4-pro-native",
+    "routingMode": "EXACT_LOCK"
+  },
+  "physicalCallLedger": {
+    "evidenceSha256": "bc40fbbb60e7ddb0182bd3aba18bbb7e3e4089b3ace1c654b00c1c37f2ae58cf",
+    "complete": true,
+    "totalPhysicalAttempts": 18,
+    "calls": [
+      {"physicalAttemptId":"00fe13fe-5acb-4075-b131-2e08dbd2b20b:deepseek:1","provider":"deepseek","model":"deepseek-v4-pro-native","feature":"pipeline","agentRole":"SmartClassifierAgent","stepId":"planner.classify","attemptStatus":"SUCCESS","attemptKind":"PRIMARY","parentAttemptId":null},
+      {"physicalAttemptId":"7d19fdcd-b421-46a5-8ce6-28970505c795:deepseek:1","provider":"deepseek","model":"deepseek-v4-pro-native","feature":"pipeline","agentRole":"RunTitleSummarizer","stepId":"title","attemptStatus":"SUCCESS","attemptKind":"PRIMARY","parentAttemptId":null},
+      {"physicalAttemptId":"5a9b02a0-3b60-4016-8d10-34c125942471:deepseek:1","provider":"deepseek","model":"deepseek-v4-pro-native","feature":"pipeline","agentRole":"WorkerAgent","stepId":"worker.iteration-1","attemptStatus":"SUCCESS","attemptKind":"PRIMARY","parentAttemptId":null},
+      {"physicalAttemptId":"06a083df-a6b8-433a-9bb3-51726281d8fa:deepseek:1","provider":"deepseek","model":"deepseek-v4-pro-native","feature":"pipeline","agentRole":"WorkerAgent","stepId":"worker.iteration-2","attemptStatus":"SUCCESS","attemptKind":"PRIMARY","parentAttemptId":null},
+      {"physicalAttemptId":"156a3705-e2b2-4cfe-9a68-f47f6c7e1676:deepseek:1","provider":"deepseek","model":"deepseek-v4-pro-native","feature":"pipeline","agentRole":"WorkerAgent","stepId":"worker.iteration-3","attemptStatus":"SUCCESS","attemptKind":"PRIMARY","parentAttemptId":null},
+      {"physicalAttemptId":"5b0485d7-042d-4b89-8032-483a19105bfe:deepseek:1","provider":"deepseek","model":"deepseek-v4-pro-native","feature":"pipeline","agentRole":"WorkerAgent","stepId":"worker.iteration-4","attemptStatus":"SUCCESS","attemptKind":"PRIMARY","parentAttemptId":null},
+      {"physicalAttemptId":"cab4d320-2ed0-4fac-92b8-9345da2a9986:deepseek:1","provider":"deepseek","model":"deepseek-v4-pro-native","feature":"pipeline","agentRole":"WorkerAgent","stepId":"worker.iteration-5","attemptStatus":"SUCCESS","attemptKind":"PRIMARY","parentAttemptId":null},
+      {"physicalAttemptId":"7ba3a731-5403-4f99-ab62-0d1f8f2cb901:deepseek:1","provider":"deepseek","model":"deepseek-v4-pro-native","feature":"pipeline","agentRole":"WorkerAgent","stepId":"worker.iteration-6","attemptStatus":"SUCCESS","attemptKind":"PRIMARY","parentAttemptId":null},
+      {"physicalAttemptId":"6f24b864-21fc-4861-a9ab-55d80ee938cb:deepseek:1","provider":"deepseek","model":"deepseek-v4-pro-native","feature":"pipeline","agentRole":"WorkerAgent","stepId":"worker.iteration-7","attemptStatus":"SUCCESS","attemptKind":"PRIMARY","parentAttemptId":null},
+      {"physicalAttemptId":"7befe5a6-bb6c-425a-a712-7bb6bf30b372:deepseek:1","provider":"deepseek","model":"deepseek-v4-pro-native","feature":"pipeline","agentRole":"ReviewerAgent","stepId":"reviewer.general.iteration-1","attemptStatus":"SUCCESS","attemptKind":"PRIMARY","parentAttemptId":null},
+      {"physicalAttemptId":"e693ba21-388d-4396-927a-dbd188c319b5:deepseek:1","provider":"deepseek","model":"deepseek-v4-pro-native","feature":"pipeline","agentRole":"ReviewerAgent","stepId":"reviewer.general.iteration-2","attemptStatus":"SUCCESS","attemptKind":"PRIMARY","parentAttemptId":null},
+      {"physicalAttemptId":"1faaeb22-4856-4a5e-9695-a71d999efb5c:deepseek:1","provider":"deepseek","model":"deepseek-v4-pro-native","feature":"pipeline","agentRole":"ReviewerAgent","stepId":"reviewer.general.iteration-3","attemptStatus":"SUCCESS","attemptKind":"PRIMARY","parentAttemptId":null},
+      {"physicalAttemptId":"b8e162d7-eaf7-444f-835b-484001a22314:deepseek:1","provider":"deepseek","model":"deepseek-v4-pro-native","feature":"pipeline","agentRole":"ReviewerAgent","stepId":"reviewer.general.iteration-4","attemptStatus":"SUCCESS","attemptKind":"PRIMARY","parentAttemptId":null},
+      {"physicalAttemptId":"11fc700e-f072-448b-81ed-c5d796b61be4:deepseek:1","provider":"deepseek","model":"deepseek-v4-pro-native","feature":"pipeline","agentRole":"ReviewerAgent","stepId":"reviewer.general.iteration-5","attemptStatus":"SUCCESS","attemptKind":"PRIMARY","parentAttemptId":null},
+      {"physicalAttemptId":"dfc95ac0-cf7e-45a6-9d66-9c57a33779a8:deepseek:1","provider":"deepseek","model":"deepseek-v4-pro-native","feature":"pipeline","agentRole":"ReviewerAgent","stepId":"reviewer.general.iteration-6","attemptStatus":"SUCCESS","attemptKind":"PRIMARY","parentAttemptId":null},
+      {"physicalAttemptId":"f4a24487-3051-4600-97ca-4610e25802b0:deepseek:1","provider":"deepseek","model":"deepseek-v4-pro-native","feature":"pipeline","agentRole":"AccuracyAssessmentService","stepId":"assessment","attemptStatus":"SUCCESS","attemptKind":"PRIMARY","parentAttemptId":null},
+      {"physicalAttemptId":"41996b7b-7fc8-47e1-a0e6-24e25425b09c:deepseek:1","provider":"deepseek","model":"deepseek-v4-pro-native","feature":"pipeline","agentRole":"ValidationReportGenerator","stepId":"generate","attemptStatus":"SUCCESS","attemptKind":"PRIMARY","parentAttemptId":null},
+      {"physicalAttemptId":"57c37414-005b-4c71-ae88-ee84cdeaf4ed:deepseek:1","provider":"deepseek","model":"deepseek-v4-pro-native","feature":"pipeline","agentRole":"run-ledger","stepId":"generate","attemptStatus":"SUCCESS","attemptKind":"PRIMARY","parentAttemptId":null}
+    ]
+  },
+  "longFile": {
+    "byteExact": true,
+    "lines": 214,
+    "sentinelPresent": true,
+    "workspaceSha256": "6bec86e955ab63c057735b7e108d16895e90e7d51b804fd3360ff75ebc2a9150",
+    "prSha256": "6bec86e955ab63c057735b7e108d16895e90e7d51b804fd3360ff75ebc2a9150",
+    "pass": true
+  },
+  "reconnect": {
+    "sseRecovered": true,
+    "reloadStable": true,
+    "evidenceId": "event-log-replay-and-browser-reload:c9cce06b-c235-48a7-bc84-5e219e991233"
+  },
+  "parity": {
+    "web": true,
+    "cli": true,
+    "terminalOutcomeDigest": "4290d6337fd2327fffee28b575454d9ce7a1c1dd983305316bf689c0cffc4434"
+  },
+  "terminal": {
+    "onePrimaryAction": true,
+    "actionCode": "CLEAN_COMPLETION",
+    "supportCode": "CLEAN_COMPLETION",
+    "webCliParity": true,
+    "evidenceId": "web-cli-terminal-outcome:c9cce06b-c235-48a7-bc84-5e219e991233"
+  },
+  "correctnessEvidenceId": "node-workspace-23-plus-heldout-14:c64b820fc66481c21a0d2fb7793766674073be14"
+}
