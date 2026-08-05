@@ -357,6 +357,13 @@
   font-size: 12px;
   color: var(--ide-fg-muted);
   flex-shrink: 0;
+  /* On narrow viewports the trailing controls (Revert hunk / Wrap / Copy) used
+     to be clipped with no way to reach them; scroll the toolbar in place. */
+  overflow-x: auto;
+}
+.ide-code-toolbar > * {
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 .ide-code-scroll {
   flex: 1;
@@ -800,11 +807,12 @@
   color: var(--ide-fg-muted);
 }
 
+/* Single-column flow: header (kicker + title), copy paragraph, chip row, then
+   the action row at the bottom. The old two-column grid sized its second track
+   to the actions' max-content, so a long primary-action label crushed the
+   title/description into a ~120px sliver at desktop widths. */
 .ide-recovery-card {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(220px, auto);
-  gap: 16px;
-  align-items: start;
+  display: block;
   margin-bottom: 14px;
   padding: 14px 16px;
   border: 1px solid color-mix(in srgb, var(--ide-red) 50%, var(--ide-border));
@@ -850,8 +858,23 @@
 .ide-recovery-actions {
   display: flex;
   flex-wrap: wrap;
-  justify-content: flex-end;
+  align-items: center;
+  justify-content: flex-start;
   gap: 8px;
+  margin-top: 12px;
+}
+/* Run Ask composer — textarea beside a compact action column on desktop;
+   stacks with full-width actions on phones (see the 600px media query). */
+.ide-ask-composer {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+}
+.ide-ask-composer-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex-shrink: 0;
 }
 .ide-project-context-grid {
   display: grid;
@@ -2712,7 +2735,6 @@
   .ide-root .ide-stack-mobile {
     grid-template-columns: 1fr !important;
   }
-  .ide-recovery-card,
   .ide-project-context-grid {
     grid-template-columns: 1fr;
   }
@@ -2721,6 +2743,19 @@
   }
   .ide-recovery-actions .ide-btn {
     flex: 1 1 140px;
+    justify-content: center;
+  }
+  /* Ask composer stacks on phones: full-width textarea, then a row of
+     full-width actions, instead of squeezing the textarea beside them. */
+  .ide-ask-composer {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .ide-ask-composer-actions {
+    flex-direction: row;
+  }
+  .ide-ask-composer-actions .ide-btn {
+    flex: 1 1 0;
     justify-content: center;
   }
   .ide-compose {
