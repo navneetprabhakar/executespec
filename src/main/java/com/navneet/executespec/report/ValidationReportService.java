@@ -1144,13 +1144,24 @@ public class ValidationReportService {
       return PipelineResult.FAILED;
     }
 
-    if (issues.isEmpty()) return PipelineResult.PASSED;
+    // Informational disclosures are evidence, not open defects: SYNTH-HTTP-STACK-UNPROVABLE
+    // states that exact-route proof is UNAVAILABLE for a non-Spring stack (2026-08-05). It must
+    // stay visible in the report/ledger without demoting an otherwise clean run to
+    // NEEDS_ATTENTION — that would recreate the false failure the unprovable state exists to
+    // prevent, just one notch softer.
+    List<ReportIssueDTO> gating =
+        issues.stream()
+            .filter(i -> !isInformationalDisclosureDescription(i.description()))
+            .toList();
+    if (gating.isEmpty()) return PipelineResult.PASSED;
 
     // Check if all review issues were auto-fixed successfully
     ReviewReport review = input.review();
     if (review != null && review.getIssues() != null && !review.getIssues().isEmpty()) {
       boolean allFixed =
-          review.getIssues().stream().allMatch(i -> i.isAutoFixed() && i.isFixSucceeded());
+          review.getIssues().stream()
+              .filter(i -> !isInformationalDisclosure(i.getId()))
+              .allMatch(i -> i.isAutoFixed() && i.isFixSucceeded());
       if (allFixed) return PipelineResult.PASSED_WITH_FIXES;
 
       // Only independently deterministic CRITICAL evidence may hard-fail the report. Reviewer and
@@ -1166,6 +1177,22 @@ public class ValidationReportService {
 
     // Issues exist but not all resolved (e.g. MINOR unresolved, or test failures)
     return PipelineResult.NEEDS_ATTENTION;
+  }
+
+  /** Disclosure-only synthesized notes that must never gate the pipeline result. */
+  static boolean isInformationalDisclosure(String issueId) {
+    return issueId != null && issueId.startsWith("SYNTH-HTTP-STACK-UNPROVABLE");
+  }
+
+  /**
+   * DTO-level twin of {@link #isInformationalDisclosure} — report issues carry no id. The prefix
+   * mirrors {@code ValidationReviewIssueSynthesizer.HTTP_STACK_UNPROVABLE_PREFIX} (package-private
+   * in integration); both sides are pinned together by {@code
+   * ValidationReportServiceR09Test.httpStackUnprovableDisclosureDoesNotGatePipelineResult}.
+   */
+  static boolean isInformationalDisclosureDescription(String description) {
+    return description != null
+        && description.startsWith("Exact HTTP route verification is not applicable to this stack");
   }
 
   static boolean isDeterministicHardFailureIssue(
