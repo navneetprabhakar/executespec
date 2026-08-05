@@ -169,9 +169,9 @@ export default function IdeProjects() {
             ['Tech debt', techDebt != null ? String(techDebt) : '—'],
           ].map(([k, v]) => (
             <div key={k}>
-              <div style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}>{k}</div>
+              <div style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}>{k}</div>
               <div
-                style={{fontSize: 15, fontWeight: 600, marginTop: 2, color: 'var(--ide-fg-bright)'}}
+                style={{fontSize: 14, fontWeight: 600, marginTop: 2, color: 'var(--ide-fg-bright)'}}
               >
                 {v}
               </div>

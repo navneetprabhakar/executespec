@@ -218,7 +218,7 @@ export function IdeRuns() {
                     {score != null ? (
                       <ScoreBadge score={score} compact />
                     ) : (
-                      <span style={{fontSize: 12.5, fontWeight: 600, color: scoreColor(score)}}>
+                      <span style={{fontSize: 12, fontWeight: 600, color: scoreColor(score)}}>
                         {isLiveStatus(r.status) ? 'live' : '—'}
                       </span>
                     )}
@@ -487,7 +487,7 @@ export function IdeAccount() {
       <div className='ide-sub'>{email}</div>
 
       <div className='ide-card'>
-        <div style={{fontSize: 15, fontWeight: 600, color: 'var(--ide-fg-bright)'}}>{name}</div>
+        <div style={{fontSize: 14, fontWeight: 600, color: 'var(--ide-fg-bright)'}}>{name}</div>
         <div style={{display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap'}}>
           <IdeBadge kind='ok'>{tier} tier</IdeBadge>
           <IdeBadge kind='warn'>
@@ -539,7 +539,7 @@ export function IdeAccount() {
       </button>
       {contactOpen && (
         <div className='ide-card'>
-          <div style={{fontSize: 12.5, color: 'var(--ide-fg-muted)', marginBottom: 12}}>
+          <div style={{fontSize: 12, color: 'var(--ide-fg-muted)', marginBottom: 12}}>
             Questions, bugs, or ideas — this reaches the ExecuteSpec team directly.
           </div>
           <label
@@ -585,7 +585,7 @@ export function IdeAccount() {
             {contactNote && (
               <span
                 style={{
-                  fontSize: 12.5,
+                  fontSize: 12,
                   color: contactNote.kind === 'ok' ? 'var(--ide-green)' : 'var(--ide-red)',
                 }}
               >
@@ -667,7 +667,7 @@ export function IdeAccount() {
                   <span style={{display: 'block', fontSize: 13, color: 'var(--ide-fg-bright)'}}>
                     {notificationPreferenceLabel(row.eventType)}
                   </span>
-                  <span style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}>
+                  <span style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}>
                     {notificationChannelLabel(row.channel)}
                   </span>
                 </span>
@@ -798,7 +798,7 @@ export function IdeAccount() {
             {erasing ? 'Deleting…' : 'Delete'}
           </button>
         </div>
-        {msg && <div style={{marginTop: 10, fontSize: 12.5, color: 'var(--ide-blue)'}}>{msg}</div>}
+        {msg && <div style={{marginTop: 10, fontSize: 12, color: 'var(--ide-blue)'}}>{msg}</div>}
       </div>
 
       <button
@@ -925,13 +925,13 @@ export function IdeDeployments() {
             >
               <div style={{display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6}}>
                 <IdeBadge kind={statusKind(d.status)}>{d.status}</IdeBadge>
-                <span className='ide-mono' style={{fontSize: 12.5, fontWeight: 600}}>
+                <span className='ide-mono' style={{fontSize: 12, fontWeight: 600}}>
                   {d.versionTag || d.id.slice(0, 8)}
                 </span>
-                <span style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}>{d.strategy}</span>
+                <span style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}>{d.strategy}</span>
                 <Link
                   to={`/result/${d.runId}`}
-                  style={{fontSize: 11, color: 'var(--ide-blue)', marginLeft: 'auto'}}
+                  style={{fontSize: 12, color: 'var(--ide-blue)', marginLeft: 'auto'}}
                 >
                   work ↗
                 </Link>
@@ -953,7 +953,7 @@ export function IdeDeployments() {
                   {d.serviceUrl}
                 </a>
               )}
-              <div style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginBottom: 8}}>
+              <div style={{fontSize: 12, color: 'var(--ide-fg-muted)', marginBottom: 8}}>
                 Created {fmtWhen(d.createdAt)}
                 {d.ttlExpiresAt ? ` · TTL ${fmtWhen(d.ttlExpiresAt)}` : ''}
               </div>

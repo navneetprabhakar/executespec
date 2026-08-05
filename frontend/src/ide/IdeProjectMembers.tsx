@@ -280,10 +280,10 @@ export function IdeProjectMembers() {
                         padding: '1px 6px',
                         background: 'var(--ide-bg-input)',
                         color: 'var(--ide-blue)',
-                        fontSize: 9,
+                        fontSize: 12,
                         fontWeight: 700,
                         letterSpacing: '0.06em',
-                        borderRadius: 3,
+                        borderRadius: 'var(--ide-r-control)',
                       }}
                     >
                       EXT
@@ -409,7 +409,7 @@ export function IdeProjectMembers() {
             <div className='ide-card' style={{borderColor: 'var(--ide-blue)'}}>
               <div
                 style={{
-                  fontSize: 11,
+                  fontSize: 12,
                   fontWeight: 700,
                   color: 'var(--ide-blue)',
                   letterSpacing: '0.14em',
@@ -435,7 +435,7 @@ export function IdeProjectMembers() {
         <div className='ide-card' style={{borderColor: 'var(--ide-blue)', marginTop: 12}}>
           <div
             style={{
-              fontSize: 11,
+              fontSize: 12,
               fontWeight: 700,
               color: 'var(--ide-blue)',
               letterSpacing: '0.14em',
@@ -483,7 +483,7 @@ export function IdeProjectMembers() {
                     <div
                       className='ide-mono'
                       style={{
-                        fontSize: 11,
+                        fontSize: 12,
                         color: 'var(--ide-fg-muted)',
                         overflow: 'hidden',
                         textOverflow: 'ellipsis',
@@ -525,7 +525,7 @@ export function IdeProjectMembers() {
       {newShareUrl && (
         <div className='ide-card' style={{marginBottom: 10}} role='status'>
           <div style={{fontWeight: 650, marginBottom: 6}}>New link — shown once</div>
-          <div className='ide-mono' style={{fontSize: 11, overflowWrap: 'anywhere'}}>
+          <div className='ide-mono' style={{fontSize: 12, overflowWrap: 'anywhere'}}>
             {newShareUrl}
           </div>
           <div style={{display: 'flex', gap: 8, marginTop: 10}}>
@@ -584,7 +584,7 @@ export function IdeProjectMembers() {
                   <div
                     className='ide-mono'
                     style={{
-                      fontSize: 11,
+                      fontSize: 12,
                       color: 'var(--ide-fg-muted)',
                       overflow: 'hidden',
                       textOverflow: 'ellipsis',

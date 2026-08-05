@@ -1550,34 +1550,12 @@ export default function IdeRunResult() {
                   />
                   <Kv k='Pipeline' v={reportPipelineLabel(report)} />
                   {fileCounts.explanation && (
-                    <div
-                      className='ide-card'
-                      style={{
-                        marginTop: 12,
-                        padding: 12,
-                        borderColor: 'color-mix(in srgb, var(--ide-yellow) 55%, var(--ide-border))',
-                        background: 'color-mix(in srgb, var(--ide-yellow) 8%, var(--ide-bg-card))',
-                        color: 'var(--ide-fg-muted)',
-                        fontSize: 12.5,
-                        lineHeight: 1.45,
-                      }}
-                    >
+                    <div className='ide-note warn' style={{marginTop: 12}}>
                       {fileCounts.explanation}
                     </div>
                   )}
                   {scoredWithoutFunctionalTests && (
-                    <div
-                      className='ide-card'
-                      style={{
-                        marginTop: 12,
-                        padding: 12,
-                        borderColor: 'color-mix(in srgb, var(--ide-yellow) 55%, var(--ide-border))',
-                        background: 'color-mix(in srgb, var(--ide-yellow) 8%, var(--ide-bg-card))',
-                        color: 'var(--ide-fg-muted)',
-                        fontSize: 12.5,
-                        lineHeight: 1.45,
-                      }}
-                    >
+                    <div className='ide-note warn' style={{marginTop: 12}}>
                       No independently verified functional test run backs this score. Fresh
                       workspace tests remain useful code-level evidence, but they do not prove
                       deployed product journeys or external integrations end to end.
@@ -1614,7 +1592,7 @@ export default function IdeRunResult() {
                 <Kv
                   k='Worker'
                   v={
-                    <span className='ide-mono' style={{fontSize: 11}}>
+                    <span className='ide-mono' style={{fontSize: 12}}>
                       {run?.workerModel || '—'}
                     </span>
                   }
@@ -1703,8 +1681,7 @@ export default function IdeRunResult() {
                   String(run?.status || '').toUpperCase(),
                 ) && (
                   <button
-                    className='ide-btn ghost'
-                    style={{color: 'var(--ide-red)'}}
+                    className='ide-btn ghost danger'
                     disabled={busy === 'revert-workspace'}
                     onClick={() =>
                       setConfirm({
@@ -1856,7 +1833,7 @@ export default function IdeRunResult() {
                     boxShadow: '0 6px 16px var(--ide-shadow)',
                   }}
                 >
-                  <div style={{padding: '8px 10px', color: 'var(--ide-fg-muted)', fontSize: 11}}>
+                  <div style={{padding: '8px 10px', color: 'var(--ide-fg-muted)', fontSize: 12}}>
                     {run?.routePinned
                       ? 'This run used an exact route. Changing provider clears that model pin.'
                       : 'Changing provider starts a separate paid run.'}
@@ -1879,7 +1856,7 @@ export default function IdeRunResult() {
                     </button>
                   ))}
                   {!providerReadiness.loading && alternativeProviders.length === 0 && (
-                    <div style={{padding: '8px 10px', color: 'var(--ide-fg-muted)', fontSize: 11}}>
+                    <div style={{padding: '8px 10px', color: 'var(--ide-fg-muted)', fontSize: 12}}>
                       {providerReadiness.error
                         ? 'Provider readiness unavailable; route changes are disabled.'
                         : 'No other provider is currently ready for dispatch.'}
@@ -1977,7 +1954,7 @@ export default function IdeRunResult() {
                       Preview
                       <IdeBadge kind={live ? 'ok' : failed ? 'bad' : 'warn'}>{ps}</IdeBadge>
                       {preview?.ttlRemainingSeconds ? (
-                        <span style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}>
+                        <span style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}>
                           TTL {Math.max(0, Math.round(preview.ttlRemainingSeconds))}s
                         </span>
                       ) : null}
@@ -2052,7 +2029,7 @@ export default function IdeRunResult() {
                           <span
                             className='ide-mono'
                             style={{
-                              fontSize: 11,
+                              fontSize: 12,
                               color: 'var(--ide-fg-muted)',
                               flex: 1,
                               minWidth: 0,
@@ -2105,7 +2082,7 @@ export default function IdeRunResult() {
                         <pre
                           className='ide-card ide-mono'
                           style={{
-                            fontSize: 11,
+                            fontSize: 12,
                             lineHeight: 1.5,
                             maxHeight: 220,
                             overflow: 'auto',
@@ -2148,7 +2125,7 @@ export default function IdeRunResult() {
                 {files.length > 0 && (
                   <button
                     className='ide-btn ghost'
-                    style={{padding: '2px 8px', fontSize: 11}}
+                    style={{padding: '2px 8px', fontSize: 12}}
                     disabled={busy === 'code' || !artifactActions.codeZip}
                     title={
                       artifactActions.codeZip
@@ -2332,16 +2309,16 @@ export default function IdeRunResult() {
                     {durableFailureEvidence.detail}
                   </div>
                   {durableFailureEvidence.nextAction && (
-                    <div style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 8}}>
+                    <div style={{fontSize: 12, color: 'var(--ide-fg-muted)', marginTop: 8}}>
                       Next: {durableFailureEvidence.nextAction}
                     </div>
                   )}
                   {durableFailureEvidence.supportCode && (
-                    <div style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 8}}>
+                    <div style={{fontSize: 12, color: 'var(--ide-fg-muted)', marginTop: 8}}>
                       Support code: {durableFailureEvidence.supportCode}
                     </div>
                   )}
-                  <div style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 8}}>
+                  <div style={{fontSize: 12, color: 'var(--ide-fg-muted)', marginTop: 8}}>
                     Execution did not start, so no worker steps were created.
                   </div>
                 </div>
@@ -2394,7 +2371,7 @@ export default function IdeRunResult() {
                           {customerStepStatusLabel(t.status)}
                         </IdeBadge>
                         <span style={{flex: 1, fontWeight: 500}}>{safeTitle}</span>
-                        <span style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}>
+                        <span style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}>
                           {fmtDur(t.durationMs)}
                         </span>
                         {(t.status === 'FAILED' ||
@@ -2443,7 +2420,7 @@ export default function IdeRunResult() {
                       </div>
                       <div
                         className='ide-mono'
-                        style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 4}}
+                        style={{fontSize: 12, color: 'var(--ide-fg-muted)', marginTop: 4}}
                       >
                         {(t.complexity || 'complexity pending').toUpperCase()} ·{' '}
                         {t.routingTaskCategory || 'category pending'} ·{' '}
@@ -2456,12 +2433,12 @@ export default function IdeRunResult() {
                         {t.routeDiverged ? ' · changed during execution' : ''}
                       </div>
                       {continuationSummary && (
-                        <div style={{fontSize: 11, color: 'var(--ide-amber)', marginTop: 4}}>
+                        <div style={{fontSize: 12, color: 'var(--ide-amber)', marginTop: 4}}>
                           {continuationSummary}
                         </div>
                       )}
                       {limitSummary && (
-                        <div style={{fontSize: 11, color: 'var(--ide-amber)', marginTop: 4}}>
+                        <div style={{fontSize: 12, color: 'var(--ide-amber)', marginTop: 4}}>
                           {limitSummary}
                         </div>
                       )}
@@ -2514,7 +2491,7 @@ export default function IdeRunResult() {
                           <div
                             style={{
                               border: '1px solid var(--ide-border)',
-                              borderRadius: 6,
+                              borderRadius: 'var(--ide-r-control)',
                               padding: '7px 8px',
                             }}
                           >
@@ -2573,12 +2550,12 @@ export default function IdeRunResult() {
                                 key={fact.k}
                                 style={{
                                   border: '1px solid var(--ide-border)',
-                                  borderRadius: 6,
+                                  borderRadius: 'var(--ide-r-control)',
                                   padding: '6px 8px',
                                   minWidth: 0,
                                 }}
                               >
-                                <div style={{fontSize: 10, textTransform: 'uppercase'}}>
+                                <div style={{fontSize: 12, textTransform: 'uppercase'}}>
                                   {fact.k}
                                 </div>
                                 <div className='ide-mono'>{fact.v}</div>
@@ -2644,7 +2621,7 @@ export default function IdeRunResult() {
                   Activity log{visibleLog?.length ? ` · ${visibleLog.length}` : ''}{' '}
                   <span
                     className='ide-mono'
-                    style={{fontSize: 11, color: 'var(--ide-fg-muted)', fontWeight: 400}}
+                    style={{fontSize: 12, color: 'var(--ide-fg-muted)', fontWeight: 400}}
                   >
                     {eventReplay?.available && eventReplay.retainedUntil
                       ? `· replay available until ${new Date(eventReplay.retainedUntil).toLocaleString()}`
@@ -2671,7 +2648,7 @@ export default function IdeRunResult() {
                 ) : (
                   <div
                     style={{
-                      borderRadius: 8,
+                      borderRadius: 'var(--ide-r-card)',
                       border: '1px solid var(--ide-border)',
                       background: 'var(--ide-bg-panel)',
                       padding: 8,
@@ -2713,7 +2690,7 @@ export default function IdeRunResult() {
                             style={{
                               color,
                               textTransform: 'uppercase',
-                              fontSize: 10,
+                              fontSize: 12,
                               paddingTop: 2,
                               overflow: 'hidden',
                               textOverflow: 'ellipsis',
@@ -2725,7 +2702,7 @@ export default function IdeRunResult() {
                           </span>
                           <span
                             className='ide-mono'
-                            style={{color: 'var(--ide-fg-muted)', fontSize: 10, paddingTop: 2}}
+                            style={{color: 'var(--ide-fg-muted)', fontSize: 12, paddingTop: 2}}
                           >
                             {ev.timestamp != null
                               ? new Date(ev.timestamp as string | number).toLocaleTimeString()
@@ -2753,7 +2730,7 @@ export default function IdeRunResult() {
                                       borderRadius: 999,
                                       padding: '1px 6px',
                                       color: 'var(--ide-fg-muted)',
-                                      fontSize: 10,
+                                      fontSize: 12,
                                       background:
                                         'color-mix(in srgb, var(--ide-bg-widget) 78%, transparent)',
                                     }}
@@ -2843,7 +2820,7 @@ export default function IdeRunResult() {
                           </span>
                           <span
                             className='ide-mono'
-                            style={{fontSize: 11, color: 'var(--ide-fg-muted)', flexShrink: 0}}
+                            style={{fontSize: 12, color: 'var(--ide-fg-muted)', flexShrink: 0}}
                           >
                             {fmtDur(timing.durationMs)}
                           </span>
@@ -2853,7 +2830,7 @@ export default function IdeRunResult() {
                             position: 'relative',
                             height: 8,
                             background: 'var(--ide-bg)',
-                            borderRadius: 4,
+                            borderRadius: 'var(--ide-r-control)',
                             overflow: 'hidden',
                           }}
                         >
@@ -2864,7 +2841,7 @@ export default function IdeRunResult() {
                               width: `${widthPct}%`,
                               top: 0,
                               bottom: 0,
-                              borderRadius: 4,
+                              borderRadius: 'var(--ide-r-control)',
                               background: failed
                                 ? 'var(--ide-red)'
                                 : done
@@ -2925,8 +2902,19 @@ export default function IdeRunResult() {
                     alignItems: 'start',
                   }}
                 >
-                  <span style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}>{fact.label}</span>
-                  <div style={{display: 'flex', alignItems: 'flex-start', gap: 8, minWidth: 0}}>
+                  <span style={{fontSize: 13, color: 'var(--ide-fg-muted)'}}>{fact.label}</span>
+                  {/* The verdict pill is a fixed column so every row's evidence
+                      text starts at the same x — a PASS/BLOCK/UNKNOWN/INFO label
+                      must not decide where the sentence beside it begins. */}
+                  <div
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: '84px minmax(0, 1fr)',
+                      alignItems: 'start',
+                      gap: 12,
+                      minWidth: 0,
+                    }}
+                  >
                     <IdeBadge kind={fact.kind === 'neutral' ? 'warn' : fact.kind}>
                       {fact.kind === 'ok'
                         ? 'PASS'
@@ -2938,7 +2926,7 @@ export default function IdeRunResult() {
                     </IdeBadge>
                     <span
                       className='ide-mono'
-                      style={{fontSize: 11, overflowWrap: 'anywhere', lineHeight: 1.5}}
+                      style={{fontSize: 12, overflowWrap: 'anywhere', lineHeight: 1.5}}
                     >
                       {fact.value}
                     </span>
@@ -2963,7 +2951,7 @@ export default function IdeRunResult() {
                     {publication.remediation}
                   </div>
                 )}
-                <div className='ide-mono' style={{fontSize: 11, marginTop: 6}}>
+                <div className='ide-mono' style={{fontSize: 12, marginTop: 6}}>
                   {publication.retryable
                     ? 'Safe to retry after remediation'
                     : 'Direct retry blocked'}
@@ -2989,16 +2977,16 @@ export default function IdeRunResult() {
                     {durableFailureEvidence.detail}
                   </div>
                   {durableFailureEvidence.nextAction && (
-                    <div style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 8}}>
+                    <div style={{fontSize: 12, color: 'var(--ide-fg-muted)', marginTop: 8}}>
                       Next: {durableFailureEvidence.nextAction}
                     </div>
                   )}
                   {durableFailureEvidence.supportCode && (
-                    <div style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 8}}>
+                    <div style={{fontSize: 12, color: 'var(--ide-fg-muted)', marginTop: 8}}>
                       Support code: {durableFailureEvidence.supportCode}
                     </div>
                   )}
-                  <div style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 8}}>
+                  <div style={{fontSize: 12, color: 'var(--ide-fg-muted)', marginTop: 8}}>
                     {missingValidationReportExplanation(run)}
                   </div>
                 </div>
@@ -3046,7 +3034,7 @@ export default function IdeRunResult() {
                         <div style={{marginTop: 10}}>
                           <div
                             className='ide-mono'
-                            style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}
+                            style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}
                           >
                             Decision evidence
                           </div>
@@ -3068,7 +3056,7 @@ export default function IdeRunResult() {
                                 </span>
                                 <span
                                   className='ide-mono'
-                                  style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}
+                                  style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}
                                 >
                                   {reference.observedStatus}
                                 </span>
@@ -3076,7 +3064,7 @@ export default function IdeRunResult() {
                               {(reference.source || reference.confidence) && (
                                 <div
                                   className='ide-mono'
-                                  style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 4}}
+                                  style={{fontSize: 12, color: 'var(--ide-fg-muted)', marginTop: 4}}
                                 >
                                   {[reference.source, reference.confidence]
                                     .filter(Boolean)
@@ -3086,7 +3074,7 @@ export default function IdeRunResult() {
                               {reference.artifact && (
                                 <div
                                   className='ide-mono'
-                                  style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 3}}
+                                  style={{fontSize: 12, color: 'var(--ide-fg-muted)', marginTop: 3}}
                                 >
                                   {reference.artifact}
                                   {reference.total != null && reference.observed != null
@@ -3117,7 +3105,7 @@ export default function IdeRunResult() {
                           <div style={{marginTop: 10}}>
                             <div
                               className='ide-mono'
-                              style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}
+                              style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}
                             >
                               Remaining proof
                             </div>
@@ -3134,7 +3122,7 @@ export default function IdeRunResult() {
                           <div style={{marginTop: 10}}>
                             <div
                               className='ide-mono'
-                              style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}
+                              style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}
                             >
                               Risks
                             </div>
@@ -3168,14 +3156,14 @@ export default function IdeRunResult() {
                             <span style={{fontWeight: 600}}>{e.label}</span>
                             <span
                               className='ide-mono'
-                              style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}
+                              style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}
                             >
                               {e.source}
                             </span>
                             <span
                               className='ide-mono'
                               style={{
-                                fontSize: 11,
+                                fontSize: 12,
                                 color: confidenceColor(e.confidence),
                                 marginLeft: 'auto',
                               }}
@@ -3186,7 +3174,7 @@ export default function IdeRunResult() {
                           <div style={{fontSize: 13, marginTop: 4}}>{e.summary}</div>
                           <div
                             className='ide-mono'
-                            style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 4}}
+                            style={{fontSize: 12, color: 'var(--ide-fg-muted)', marginTop: 4}}
                           >
                             {e.artifact}
                             {e.total != null && e.observed != null
@@ -3219,14 +3207,14 @@ export default function IdeRunResult() {
                             {is.filePath && (
                               <span
                                 className='ide-mono'
-                                style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}
+                                style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}
                               >
                                 {is.filePath}
                               </span>
                             )}
                             <span
                               style={{
-                                fontSize: 10,
+                                fontSize: 12,
                                 color: 'var(--ide-fg-muted)',
                                 marginLeft: 'auto',
                               }}
@@ -3295,17 +3283,7 @@ export default function IdeRunResult() {
               )}
             </div>
             {!hasCostEvidence && failedTerminal && (
-              <div
-                className='ide-card'
-                style={{
-                  marginTop: 12,
-                  borderColor: 'color-mix(in srgb, var(--ide-yellow) 55%, var(--ide-border))',
-                  background: 'color-mix(in srgb, var(--ide-yellow) 8%, var(--ide-bg-card))',
-                  color: 'var(--ide-fg-muted)',
-                  fontSize: 12.5,
-                  lineHeight: 1.45,
-                }}
-              >
+              <div className='ide-note warn' style={{marginTop: 12}}>
                 No token or AI-credit usage was recorded for this failed run. That usually means the
                 run stopped before a billable provider response, for example provider authentication
                 failure or tool setup failure.
@@ -3331,7 +3309,7 @@ export default function IdeRunResult() {
                         style={{alignItems: 'start'}}
                       >
                         <span>{agent.role}</span>
-                        <span className='ide-mono' style={{fontSize: 11, textAlign: 'right'}}>
+                        <span className='ide-mono' style={{fontSize: 12, textAlign: 'right'}}>
                           {agent.provider || '—'} · {agent.model || '—'}
                           <br />
                           {agent.inputTokens.toLocaleString()} in ·{' '}
@@ -3362,7 +3340,7 @@ export default function IdeRunResult() {
                       No per-call attribution is available for this run.
                     </div>
                   ) : (
-                    <table style={{width: '100%', borderCollapse: 'collapse', fontSize: 11}}>
+                    <table style={{width: '100%', borderCollapse: 'collapse', fontSize: 12}}>
                       <thead>
                         <tr style={{textAlign: 'left', color: 'var(--ide-fg-muted)'}}>
                           <th>Role / task</th>
@@ -3441,7 +3419,7 @@ export default function IdeRunResult() {
                   {stepCalls.kind === 'rows' && stepCalls.hasMore && (
                     // RR-1558 paged the ledger newest-first. Without this the table silently
                     // looks like the complete history of the run.
-                    <div style={{marginTop: 8, fontSize: 11, color: 'var(--ide-fg-muted)'}}>
+                    <div style={{marginTop: 8, fontSize: 12, color: 'var(--ide-fg-muted)'}}>
                       Showing the {stepCalls.rows.length.toLocaleString()} most recent of{' '}
                       {stepCalls.total.toLocaleString()} provider calls.
                     </div>
@@ -3563,22 +3541,22 @@ export default function IdeRunResult() {
               <>
                 <div className='ide-card' style={{display: 'flex', gap: 18}}>
                   <div>
-                    <div style={{fontSize: 22, fontWeight: 700}}>{testsSummary?.headline}</div>
-                    <div style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}>
+                    <div style={{fontSize: 24, fontWeight: 700}}>{testsSummary?.headline}</div>
+                    <div style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}>
                       {testsSummary?.label}
                     </div>
                   </div>
                   {testsSummary?.measured && (
                     <>
                       <div>
-                        <div style={{fontSize: 22, fontWeight: 700, color: 'var(--ide-red)'}}>
+                        <div style={{fontSize: 24, fontWeight: 700, color: 'var(--ide-red)'}}>
                           {tests.failed}
                         </div>
-                        <div style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}>failed</div>
+                        <div style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}>failed</div>
                       </div>
                       <div>
-                        <div style={{fontSize: 22, fontWeight: 700}}>{tests.errors}</div>
-                        <div style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}>errors</div>
+                        <div style={{fontSize: 24, fontWeight: 700}}>{tests.errors}</div>
+                        <div style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}>errors</div>
                       </div>
                     </>
                   )}
@@ -3636,7 +3614,7 @@ export default function IdeRunResult() {
                               {tk.taskName}
                             </span>
                             {tk.testCategory && (
-                              <span style={{fontSize: 10, color: 'var(--ide-fg-muted)'}}>
+                              <span style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}>
                                 {tk.testCategory}
                               </span>
                             )}
@@ -3644,7 +3622,7 @@ export default function IdeRunResult() {
                           {tk.compilationError && (
                             <div
                               className='ide-mono'
-                              style={{fontSize: 11, color: 'var(--ide-red)', marginTop: 4}}
+                              style={{fontSize: 12, color: 'var(--ide-red)', marginTop: 4}}
                             >
                               {tk.compilationError}
                             </div>
@@ -3678,7 +3656,7 @@ export default function IdeRunResult() {
                           </div>
                           <div
                             style={{
-                              fontSize: 11,
+                              fontSize: 12,
                               color: 'var(--ide-fg-muted)',
                               marginBottom: fix ? 10 : 0,
                             }}
@@ -3690,7 +3668,7 @@ export default function IdeRunResult() {
                               style={{
                                 background: 'var(--ide-bg-input)',
                                 padding: '10px 12px',
-                                borderRadius: 6,
+                                borderRadius: 'var(--ide-r-control)',
                                 fontSize: 12,
                                 lineHeight: 1.5,
                               }}
@@ -3763,12 +3741,12 @@ export default function IdeRunResult() {
                                 <span style={{fontWeight: 500}}>{r.testMethod}</span>{' '}
                                 <span
                                   className='ide-mono'
-                                  style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}
+                                  style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}
                                 >
                                   {r.testClass}
                                 </span>
                               </span>
-                              <span style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}>
+                              <span style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}>
                                 {fmtDur(r.durationMs)}
                               </span>
                               {bad && r.testResultId != null && (
@@ -3799,7 +3777,7 @@ export default function IdeRunResult() {
                               <div
                                 className='ide-mono'
                                 style={{
-                                  fontSize: 11,
+                                  fontSize: 12,
                                   color: 'var(--ide-red)',
                                   marginTop: 4,
                                   whiteSpace: 'pre-wrap',
@@ -3816,7 +3794,7 @@ export default function IdeRunResult() {
                     {tests.results.length > 60 && (
                       <div
                         style={{
-                          fontSize: 11,
+                          fontSize: 12,
                           color: 'var(--ide-fg-muted)',
                           marginTop: 8,
                         }}
@@ -3881,7 +3859,7 @@ export default function IdeRunResult() {
                     >
                       <div
                         className='ide-mono'
-                        style={{fontSize: 10, opacity: 0.7, marginBottom: 4}}
+                        style={{fontSize: 12, opacity: 0.7, marginBottom: 4}}
                       >
                         {isUser ? 'YOU' : 'RUN COPILOT'}
                       </div>

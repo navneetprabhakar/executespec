@@ -114,11 +114,11 @@ function SuiteChip({suite}: {suite: string}) {
   return (
     <span
       style={{
-        fontSize: 11,
+        fontSize: 12,
         fontWeight: 600,
         letterSpacing: 0.3,
         padding: '2px 7px',
-        borderRadius: 4,
+        borderRadius: 'var(--ide-r-control)',
         background: 'var(--ide-bg-input)',
         border: '1px solid var(--ide-border)',
         color: 'var(--ide-fg-bright)',
@@ -140,9 +140,9 @@ function SubChip({status, url}: {status: string; url?: string | null}) {
         : 'var(--ide-yellow)';
   const label = `submission: ${status.toLowerCase()}`;
   const style: React.CSSProperties = {
-    fontSize: 11,
+    fontSize: 12,
     padding: '2px 7px',
-    borderRadius: 4,
+    borderRadius: 'var(--ide-r-control)',
     border: `1px solid ${color}`,
     color,
     whiteSpace: 'nowrap',
@@ -167,7 +167,7 @@ function ResolvedBar({resolved, total}: {resolved: number; total: number}) {
         height: 8,
         background: 'var(--ide-bg-input)',
         border: '1px solid var(--ide-border)',
-        borderRadius: 4,
+        borderRadius: 'var(--ide-r-control)',
         overflow: 'hidden',
       }}
     >
@@ -179,7 +179,7 @@ function ResolvedBar({resolved, total}: {resolved: number; total: number}) {
 function KV({k, children}: {k: string; children: React.ReactNode}) {
   return (
     <div style={{display: 'flex', flexDirection: 'column', gap: 3}}>
-      <span style={{fontSize: 11, color: MUTED, textTransform: 'uppercase', letterSpacing: 0.4}}>
+      <span style={{fontSize: 12, color: MUTED, textTransform: 'uppercase', letterSpacing: 0.4}}>
         {k}
       </span>
       <span style={{fontSize: 13}}>{children}</span>
@@ -273,7 +273,7 @@ function RunRow({r, onOpen}: {r: api.BenchmarkRun; onOpen: () => void}) {
       <td style={{...TD, color: MUTED, whiteSpace: 'nowrap'}}>
         {r.activeAttemptCount ? `${r.activeAttemptCount} active · ` : ''}
         {duration(r.elapsedSeconds)} elapsed
-        <div style={{fontSize: 11}}>
+        <div style={{fontSize: 12}}>
           {r.finishedAt
             ? `done ${dateTime(r.finishedAt)}`
             : r.etaSeconds != null
@@ -411,7 +411,7 @@ function BenchmarkSection({
 const TH: React.CSSProperties = {
   textAlign: 'left',
   padding: '8px 12px',
-  fontSize: 11,
+  fontSize: 12,
   textTransform: 'uppercase',
   letterSpacing: 0.4,
   color: MUTED,
@@ -529,12 +529,12 @@ function TaskTable({groups, k, runDone}: {groups: TaskGroup[]; k: number; runDon
                   </span>
                 )}
                 {!g.passed && (g.outcome || g.reason) && (
-                  <div style={{marginTop: 3, color: MUTED, fontSize: 11}}>
+                  <div style={{marginTop: 3, color: MUTED, fontSize: 12}}>
                     {[g.outcome, g.reason].filter(Boolean).join(' · ')}
                   </div>
                 )}
                 {!g.passed && g.attempts[g.attempts.length - 1]?.failureClassification && (
-                  <div style={{marginTop: 3, color: MUTED, fontSize: 11}}>
+                  <div style={{marginTop: 3, color: MUTED, fontSize: 12}}>
                     {g.attempts[g.attempts.length - 1]?.failureClassification}
                   </div>
                 )}
@@ -559,7 +559,7 @@ function TaskTable({groups, k, runDone}: {groups: TaskGroup[]; k: number; runDon
                   .map((a) => (
                     <div
                       key={`trajectory-${a.attempt}`}
-                      style={{marginTop: 3, color: MUTED, fontSize: 11, maxWidth: 220}}
+                      style={{marginTop: 3, color: MUTED, fontSize: 12, maxWidth: 220}}
                       title={`${a.trajectoryLocation}\nsha256:${a.trajectorySha256}`}
                     >
                       a{a.attempt} trajectory · {a.trajectorySha256?.slice(0, 10)}…
@@ -677,7 +677,7 @@ function Detail({d}: {d: api.BenchmarkDetail}) {
         <KV k='Readiness'>
           {r.submissionReadiness || 'NOT_REQUIRED'}
           {r.submissionReadinessReason && (
-            <div style={{fontSize: 11, color: MUTED}}>{r.submissionReadinessReason}</div>
+            <div style={{fontSize: 12, color: MUTED}}>{r.submissionReadinessReason}</div>
           )}
         </KV>
         <KV k='Elapsed / ETA'>
@@ -866,7 +866,7 @@ export default function IdeBenchmark() {
       aria-live='polite'
       style={{
         color: err || isStale ? 'var(--ide-yellow)' : 'var(--ide-muted)',
-        fontSize: 11,
+        fontSize: 12,
         marginBottom: 10,
       }}
     >

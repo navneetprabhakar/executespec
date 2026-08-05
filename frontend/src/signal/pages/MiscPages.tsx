@@ -90,7 +90,7 @@ export function AdminPage() {
         <Card style={{background: 'var(--signal-coral-soft)', borderColor: 'transparent'}}>
           <div
             style={{
-              fontSize: 11,
+              fontSize: 12,
               fontWeight: 700,
               color: 'var(--signal-coral-text)',
               letterSpacing: '0.14em',
@@ -123,7 +123,7 @@ export function AdminPage() {
                   ? 'var(--signal-mint-text-on-light)'
                   : 'var(--signal-coral-text)',
               border: `1px solid ${toast.kind === 'ok' ? 'var(--signal-mint)' : 'var(--signal-coral)'}`,
-              borderRadius: 10,
+              borderRadius: 'var(--ide-r-card)',
               padding: '10px 14px',
               marginTop: 12,
               fontSize: 13,
@@ -181,7 +181,7 @@ function AdminOverview() {
           <h4>Active orgs</h4>
           <div
             className='count'
-            style={{color: 'var(--signal-ink)', fontSize: 17, fontWeight: 600}}
+            style={{color: 'var(--signal-ink)', fontSize: 16, fontWeight: 600}}
           >
             {orgs.length}
           </div>
@@ -193,7 +193,7 @@ function AdminOverview() {
           <h4>Signups · 30d</h4>
           <div
             className='count'
-            style={{color: 'var(--signal-ink)', fontSize: 17, fontWeight: 600}}
+            style={{color: 'var(--signal-ink)', fontSize: 16, fontWeight: 600}}
           >
             {stage('SIGNUP')}
           </div>
@@ -205,7 +205,7 @@ function AdminOverview() {
           <h4>Runs · 30d</h4>
           <div
             className='count'
-            style={{color: 'var(--signal-ink)', fontSize: 17, fontWeight: 600}}
+            style={{color: 'var(--signal-ink)', fontSize: 16, fontWeight: 600}}
           >
             {stage('RUN_COMPLETE')}
           </div>
@@ -253,7 +253,7 @@ function AdminOverview() {
               v: (
                 <span>
                   {f.flagValue}{' '}
-                  <span style={{color: 'var(--signal-text-mute)', fontSize: 11}}>· {f.scope}</span>
+                  <span style={{color: 'var(--signal-text-mute)', fontSize: 12}}>· {f.scope}</span>
                 </span>
               ),
             }))}
@@ -294,7 +294,7 @@ function AdminMiniSelect({
         background: 'var(--signal-surface-2, var(--signal-surface))',
         color: 'var(--signal-ink)',
         border: '1px solid var(--signal-line)',
-        borderRadius: 8,
+        borderRadius: 'var(--ide-r-card)',
         padding: '4px 8px',
         fontSize: 12,
         fontFamily: 'inherit',
@@ -650,7 +650,7 @@ function AdminAnalyticsSection({orgId}: {orgId: string | null}) {
                 <h4>{label}</h4>
                 <div
                   className='count'
-                  style={{color: 'var(--signal-ink)', fontSize: 17, fontWeight: 600}}
+                  style={{color: 'var(--signal-ink)', fontSize: 16, fontWeight: 600}}
                 >
                   {value}
                 </div>

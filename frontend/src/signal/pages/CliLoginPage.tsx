@@ -69,7 +69,7 @@ export default function CliLoginPage() {
   return (
     <div style={wrap}>
       <div style={card}>
-        <h2 style={{margin: '0 0 .35rem', fontSize: 20}}>
+        <h2 style={{margin: '0 0 .35rem', fontSize: 18}}>
           Authorize the ExecuteSpec {isVscode ? 'VS Code extension' : 'CLI'}
         </h2>
         <p style={{color: 'var(--signal-text-dim)', margin: '0 0 1.25rem', fontSize: 14}}>
@@ -125,7 +125,7 @@ const card: CSSProperties = {
   textAlign: 'center',
   background: 'var(--signal-surface, #ffffff)',
   border: '1px solid var(--signal-hairline)',
-  borderRadius: 12,
+  borderRadius: 'var(--ide-r-card)',
   padding: 32,
 };
 const errStyle: CSSProperties = {color: '#dc2626', fontSize: 14, marginBottom: 12};
@@ -133,7 +133,7 @@ const primaryBtn: CSSProperties = {
   background: 'var(--signal-coral, #5b8def)',
   color: '#ffffff',
   border: 'none',
-  borderRadius: 8,
+  borderRadius: 'var(--ide-r-card)',
   padding: '10px 20px',
   fontSize: 14,
   cursor: 'pointer',
@@ -143,7 +143,7 @@ const ghostBtn: CSSProperties = {
   background: 'transparent',
   color: 'var(--signal-text)',
   border: '1px solid var(--signal-hairline)',
-  borderRadius: 8,
+  borderRadius: 'var(--ide-r-card)',
   padding: '10px 20px',
   fontSize: 14,
   cursor: 'pointer',

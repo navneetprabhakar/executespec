@@ -451,7 +451,7 @@ export function IdeProjectChat() {
               <div className='ide-card' style={{borderColor: 'var(--ide-blue)'}}>
                 <div
                   style={{
-                    fontSize: 11,
+                    fontSize: 12,
                     fontWeight: 700,
                     color: 'var(--ide-blue)',
                     letterSpacing: '0.14em',
@@ -624,7 +624,7 @@ export function IdeProjectChat() {
               >
                 Prepare code review
               </button>
-              <div className='muted' style={{fontSize: 11}}>
+              <div className='muted' style={{fontSize: 12}}>
                 Semantic search, subagents, and plan mutations are not confirmable from project
                 chat.
               </div>
@@ -1244,7 +1244,7 @@ export function IdeProjectCode() {
                       </div>
                       <div
                         className='ide-mono'
-                        style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}
+                        style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}
                       >
                         {(r.currentOriginSha || '').slice(0, 7) || '—'}{' '}
                         {drift ? '· stale vs origin' : syncKnown ? '· in sync' : '· status unknown'}
@@ -1272,7 +1272,7 @@ export function IdeProjectCode() {
                       gap: 10,
                       paddingTop: 10,
                       borderTop: '1px solid var(--ide-border)',
-                      fontSize: 12.5,
+                      fontSize: 12,
                     }}
                   >
                     <div>
@@ -1325,7 +1325,7 @@ export function IdeProjectCode() {
               <div className='ide-card' style={{marginBottom: 12, borderColor: 'var(--ide-blue)'}}>
                 <div
                   style={{
-                    fontSize: 11,
+                    fontSize: 12,
                     fontWeight: 700,
                     color: 'var(--ide-blue)',
                     letterSpacing: '0.14em',
@@ -1428,7 +1428,7 @@ export function IdeProjectCode() {
                 <span className='ide-mono' style={{flex: 1}}>
                   {d.docType}.md
                 </span>
-                <span style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}>
+                <span style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}>
                   {d.generatedAt
                     ? `updated ${new Date(d.generatedAt).toLocaleDateString()}`
                     : 'fresh'}
@@ -2170,7 +2170,7 @@ export function IdeProjectArchitecture() {
                 <div style={{flex: 1}}>
                   <div
                     style={{
-                      fontSize: 11,
+                      fontSize: 12,
                       fontWeight: 700,
                       color: 'var(--ide-fg-muted)',
                       letterSpacing: '0.14em',
@@ -2179,7 +2179,7 @@ export function IdeProjectArchitecture() {
                   >
                     System map
                   </div>
-                  <div style={{fontSize: 15, fontWeight: 600, color: 'var(--ide-fg-bright)'}}>
+                  <div style={{fontSize: 14, fontWeight: 600, color: 'var(--ide-fg-bright)'}}>
                     {arch?.version ? `v${arch.version}` : 'Latest'}
                   </div>
                 </div>
@@ -2329,7 +2329,7 @@ export function IdeProjectArchitecture() {
                           <div key={pr.repoFullName} style={{marginBottom: 8}}>
                             <div
                               className='ide-mono'
-                              style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginBottom: 4}}
+                              style={{fontSize: 12, color: 'var(--ide-fg-muted)', marginBottom: 4}}
                             >
                               {pr.repoFullName}
                             </div>

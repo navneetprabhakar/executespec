@@ -23,7 +23,7 @@ function Row({row}: {row: PlanContractGateRow}) {
         borderTop: '1px solid var(--ide-border)',
         paddingTop: 10,
         marginTop: 10,
-        fontSize: 12.5,
+        fontSize: 12,
         lineHeight: 1.6,
       }}
     >
@@ -85,7 +85,7 @@ export function PlanContractGateCard({
         <strong style={{color: 'var(--ide-red)'}}>Breaking change</strong>
         <IdeBadge kind='bad'>Acknowledgement required</IdeBadge>
       </div>
-      <div style={{fontSize: 12.5, lineHeight: 1.6, color: 'var(--ide-fg-muted)'}}>
+      <div style={{fontSize: 12, lineHeight: 1.6, color: 'var(--ide-fg-muted)'}}>
         {rows.length > 0 && `${gateHeadline(rows)} `}
         {brownfieldHttpRouteRemovals.length > 0 &&
           `This plan explicitly removes ${brownfieldHttpRouteRemovals.length} protected HTTP ${
@@ -108,7 +108,7 @@ export function PlanContractGateCard({
             paddingTop: 10,
             marginTop: 10,
             color: 'var(--ide-red)',
-            fontSize: 12.5,
+            fontSize: 12,
           }}
         >
           Remove {route.method} {route.path}
@@ -119,7 +119,7 @@ export function PlanContractGateCard({
         style={{
           display: 'block',
           marginTop: 14,
-          fontSize: 12.5,
+          fontSize: 12,
           color: 'var(--ide-fg)',
         }}
       >

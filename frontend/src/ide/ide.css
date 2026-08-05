@@ -45,6 +45,42 @@
   --ide-text: var(--ide-fg);
   --ide-bg-hover: var(--ide-hover);
 
+  /* ── Design grammar tokens (2026-08-05 visual-polish pass) ───────────────
+   *
+   * Before this pass the protected app had 20 distinct font sizes, 13 distinct
+   * radii, and no spacing scale, so no two surfaces agreed on control height,
+   * card padding, or corner shape. These five families are the whole vocabulary
+   * now — reach for a token, never a new literal.
+   *
+   * TYPE: monospace is for code, ids, and aligned numbers ONLY. UI prose reads
+   * in the sans face with real weight contrast; hierarchy comes from weight and
+   * size, never opacity. `--ide-font-mono` is opt-in per element.
+   */
+  --ide-font-ui: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', system-ui, sans-serif;
+  --ide-font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  /* SHAPE: three stable roles. Controls and pills share one step, containers
+   * another, badges/dots are fully round. */
+  --ide-r-control: 6px;
+  --ide-r-card: 10px;
+  --ide-r-pill: 999px;
+
+  /* SPACE: one 4/8/12/16/24/32 scale. */
+  --ide-s1: 4px;
+  --ide-s2: 8px;
+  --ide-s3: 12px;
+  --ide-s4: 16px;
+  --ide-s5: 24px;
+  --ide-s6: 32px;
+
+  /* CONTROL METRICS: every button, input, select, and icon button in the app
+   * is one of these two heights. */
+  --ide-control-h: 32px;
+  --ide-control-h-lg: 38px;
+
+  /* MOTION: one curve, entrances only. */
+  --ide-ease: cubic-bezier(0.16, 1, 0.3, 1);
+
   position: fixed;
   inset: 0;
   display: flex;
@@ -52,8 +88,9 @@
   height: 100dvh;
   background: var(--ide-bg-editor);
   color: var(--ide-fg);
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  font-family: var(--ide-font-ui);
   font-size: 13px;
+  line-height: 1.5;
   overflow: hidden;
 }
 
@@ -130,12 +167,58 @@
   --signal-shadow-strong: var(--ide-shadow);
 }
 
-.ide-mono {
-  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+/* Monospace is opt-in: code, identifiers, and columns of aligned numbers. Never
+   UI prose — the whole protected app used to render in JetBrains Mono, which is
+   the single biggest reason the chrome read as unfinished. */
+.ide-mono,
+.ide-root code,
+.ide-root pre,
+.ide-root kbd,
+.ide-root samp {
+  font-family: var(--ide-font-mono);
+}
+
+/* One disclosure idiom app-wide. Surfaces were mixing the browser's default
+   triangle, a bare muted word with no affordance, and hand-rolled chevrons. */
+.ide-root details > summary {
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: var(--ide-s2);
+  min-height: var(--ide-control-h);
+  color: var(--ide-fg-muted);
+  font-size: 13px;
+  transition: color 120ms var(--ide-ease);
+}
+.ide-root details > summary::-webkit-details-marker {
+  display: none;
+}
+.ide-root details > summary::before {
+  content: '›';
+  flex: 0 0 12px;
+  font-size: 14px;
+  line-height: 1;
+  transition: transform 140ms var(--ide-ease);
+}
+.ide-root details[open] > summary::before {
+  transform: rotate(90deg);
+}
+.ide-root details > summary:hover,
+.ide-root details[open] > summary {
+  color: var(--ide-fg-bright);
+}
+
+/* Numbers that stack into a column must not shift width digit-to-digit. */
+.ide-num,
+.ide-root .ide-kv dd,
+.ide-work-score,
+.ide-work-cost {
+  font-variant-numeric: tabular-nums;
 }
 
 .ide-side-head {
-  font-size: 11px;
+  font-size: 12px;
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--ide-fg-muted);
@@ -145,7 +228,7 @@
   align-items: center;
 }
 .ide-tree-group-title {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -193,7 +276,7 @@
   opacity: 0.9;
 }
 .ide-tree-sub {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--ide-fg-muted);
   margin-left: auto;
   padding-left: 8px;
@@ -260,9 +343,9 @@
 .ide-status-chip {
   background: rgba(255, 255, 255, 0.22);
   color: #fff;
-  border-radius: 9px;
+  border-radius: var(--ide-r-card);
   padding: 1px 7px;
-  font-size: 10.5px;
+  font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.04em;
 }
@@ -283,7 +366,7 @@
   max-height: 60vh;
   background: var(--ide-bg-widget);
   border: 1px solid var(--ide-border-strong);
-  border-radius: 8px;
+  border-radius: var(--ide-r-card);
   box-shadow: 0 18px 48px -22px var(--ide-shadow);
   display: flex;
   flex-direction: column;
@@ -297,7 +380,7 @@
   font-size: 14px;
   padding: 10px 12px;
   margin: 8px;
-  border-radius: 6px;
+  border-radius: var(--ide-r-control);
   border: 1px solid var(--ide-border-strong);
 }
 /* RR-794: restore a visible focus indicator for keyboard users. The input is
@@ -336,7 +419,7 @@
 }
 .ide-palette-kbd {
   margin-left: auto;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--ide-fg-muted);
 }
 
@@ -374,7 +457,7 @@
   border-collapse: collapse;
   width: 100%;
   font-family: 'JetBrains Mono', ui-monospace, monospace;
-  font-size: 12.5px;
+  font-size: 12px;
   line-height: 1.5;
 }
 .ide-code-gutter {
@@ -416,59 +499,110 @@
 }
 
 /* ───────── generic IDE surface chrome (welcome/compose/result) ───────── */
+/* One page container for every surface: identical gutter, identical measure, so
+   cards and rows on different routes stop drifting relative to each other. */
 .ide-pane {
-  padding: 22px 28px;
-  max-width: 1100px;
+  padding: var(--ide-s5) var(--ide-s5) 48px;
+  max-width: 1180px;
+}
+@media (max-width: 700px) {
+  .ide-pane {
+    padding: var(--ide-s4) var(--ide-s4) var(--ide-s6);
+  }
 }
 .ide-h1 {
-  font-size: 22px;
-  font-weight: 600;
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 1.2;
   color: var(--ide-fg-bright);
-  margin: 0 0 4px;
+  margin: 0 0 var(--ide-s1);
 }
 .ide-sub {
-  font-size: 13px;
+  font-size: 14px;
   color: var(--ide-fg-muted);
-  margin: 0 0 20px;
+  margin: 0 0 var(--ide-s5);
 }
+/* Section label. Sentence-weight, not a shouty uppercase micro-label: hierarchy
+   comes from weight and colour, not from tracking out 11px capitals. */
 .ide-h2 {
-  font-size: 12px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--ide-fg-muted);
-  margin: 22px 0 10px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--ide-fg-bright);
+  margin: var(--ide-s5) 0 var(--ide-s3);
 }
 .ide-card {
   background: var(--ide-bg-sidebar);
   border: 1px solid var(--ide-border);
-  border-radius: 8px;
-  padding: 14px 16px;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035);
+  border-radius: var(--ide-r-card);
+  padding: var(--ide-s4);
+}
+/* One visible edge per container. Inner structure comes from background tint and
+   spacing — a box inside a box inside a box is what made these surfaces read as
+   drawn rather than designed. */
+.ide-card .ide-card,
+.ide-card .ide-inner {
+  border-color: transparent;
+  background: color-mix(in srgb, var(--ide-fg) 5%, transparent);
+}
+
+/* An inline note inside a card. Status reads as a tint plus a 3px leading edge —
+   never a second full stroked box competing with its parent's border. */
+.ide-note {
+  border: 0;
+  border-left: 3px solid var(--ide-border-strong);
+  border-radius: var(--ide-r-control);
+  padding: var(--ide-s3);
+  background: color-mix(in srgb, var(--ide-fg) 5%, transparent);
+  color: var(--ide-fg-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.ide-note.warn {
+  border-left-color: var(--ide-yellow);
+  background: color-mix(in srgb, var(--ide-yellow) 9%, transparent);
+}
+.ide-note.bad {
+  border-left-color: var(--ide-red);
+  background: color-mix(in srgb, var(--ide-red) 9%, transparent);
+}
+.ide-note.ok {
+  border-left-color: var(--ide-green);
+  background: color-mix(in srgb, var(--ide-green) 9%, transparent);
+}
+.ide-note.info {
+  border-left-color: var(--ide-blue);
+  background: color-mix(in srgb, var(--ide-blue) 9%, transparent);
 }
 .ide-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: var(--ide-s3);
 }
 .ide-run-card {
   background: var(--ide-bg-sidebar);
   border: 1px solid var(--ide-border);
-  border-radius: 6px;
-  padding: 13px 15px;
+  border-radius: var(--ide-r-card);
+  padding: var(--ide-s4);
   cursor: pointer;
   text-decoration: none;
   color: var(--ide-fg);
   display: block;
+  transition:
+    background-color 120ms var(--ide-ease),
+    border-color 120ms var(--ide-ease);
 }
 .ide-run-card:hover {
-  border-color: var(--ide-accent);
+  background: var(--ide-hover);
+  border-color: var(--ide-border-strong);
 }
 .ide-run-title {
   font-size: 14px;
   font-weight: 600;
   color: var(--ide-fg-bright);
-  margin-bottom: 4px;
+  margin-bottom: var(--ide-s1);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -481,36 +615,46 @@
   align-items: center;
   flex-wrap: wrap;
 }
+/* A badge is a quiet pill: tinted fill + status text, one uniform height so a
+   column of them cannot ragged-edge the content beside it. It used to be an
+   outlined box whose width varied with the label, which is why the Work list's
+   run titles started at four different x positions. */
 .ide-badge {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 1px 7px;
-  border-radius: 10px;
-  font-size: 11px;
+  justify-content: center;
+  gap: var(--ide-s1);
+  min-height: 20px;
+  padding: 0 var(--ide-s2);
+  border-radius: var(--ide-r-pill);
+  font-size: 12px;
   font-weight: 600;
-  border: 1px solid var(--ide-border-strong);
+  line-height: 1;
+  white-space: nowrap;
+  color: var(--ide-fg-muted);
+  background: color-mix(in srgb, var(--ide-fg-muted) 12%, transparent);
+  border: 1px solid transparent;
 }
 .ide-badge.interactive {
-  min-height: 32px;
-  padding: 6px 10px;
+  min-height: var(--ide-control-h);
+  padding: 0 var(--ide-s3);
 }
 .ide-badge.ok {
   color: var(--ide-green);
-  border-color: var(--ide-green);
+  background: color-mix(in srgb, var(--ide-green) 15%, transparent);
 }
 .ide-badge.warn {
   color: var(--ide-yellow);
-  border-color: var(--ide-yellow);
+  background: color-mix(in srgb, var(--ide-yellow) 15%, transparent);
 }
 .ide-badge.bad {
   color: var(--ide-red);
-  border-color: var(--ide-red);
+  background: color-mix(in srgb, var(--ide-red) 15%, transparent);
 }
 /* Neutral/informational evidence disclosure — not a pass, not a defect. */
 .ide-badge.info {
   color: var(--ide-blue);
-  border-color: var(--ide-blue);
+  background: color-mix(in srgb, var(--ide-blue) 15%, transparent);
 }
 /* Scoped under .ide-root so the IDE's filled primary button wins over the legacy
    `.signal-app button { background: transparent; color: inherit }` reset (0,1,1),
@@ -518,36 +662,99 @@
    the .ide-root prefix, .ide-btn (0,1,0) loses and every filled IDE button renders
    as borderless plain text (founder-reported on the Run spec CTA, 2026-05-30). The
    .ghost / :hover / :disabled variants are already ≥(0,2,0) so they're unaffected. */
+/* ── Button system ────────────────────────────────────────────────────────
+ *
+ * Two tiers, ONE metric. `.ide-btn` is the accent-filled commit action;
+ * `.ide-btn.ghost` is everything else — transparent, hairline border, muted
+ * label that strengthens on hover. `.ide-btn.danger` is a ghost that only turns
+ * destructive when you aim at it. Disabled is unmistakably dead, not merely dim.
+ *
+ * Every variant shares `--ide-control-h`, the same radius, the same horizontal
+ * padding and the same 13px medium label, so a row of mixed actions lines up on
+ * one baseline instead of reading as five differently-sized boxes.
+ *
+ * `white-space: nowrap` + `flex-shrink: 0` on the label is deliberate: a control
+ * must fit its text or wrap the ROW, never clip the word (founder-reported on a
+ * "Ca…"-clipped tab). Nothing here sets overflow:hidden.
+ *
+ * Scoped under .ide-root so the filled variant wins over the legacy
+ * `.signal-app button { background: transparent; color: inherit }` reset (0,1,1);
+ * without the prefix .ide-btn (0,1,0) loses and every filled button renders as
+ * borderless plain text (founder-reported on the Run spec CTA, 2026-05-30).
+ */
 .ide-root .ide-btn {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  justify-content: center;
+  gap: var(--ide-s2);
+  min-height: var(--ide-control-h);
+  padding: 0 var(--ide-s3);
   background: var(--ide-accent);
   color: var(--ide-accent-fg);
-  border: none;
-  border-radius: 3px;
-  padding: 7px 14px;
+  border: 1px solid transparent;
+  border-radius: var(--ide-r-control);
+  font-family: inherit;
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 550;
+  line-height: 1;
+  white-space: nowrap;
   cursor: pointer;
   text-decoration: none;
+  transition:
+    background-color 120ms var(--ide-ease),
+    border-color 120ms var(--ide-ease),
+    color 120ms var(--ide-ease);
 }
-.ide-btn:hover {
-  filter: brightness(1.04);
-  transform: translateY(-1px);
+.ide-root .ide-btn:hover {
+  background: color-mix(in srgb, var(--ide-accent) 88%, var(--ide-fg-bright));
 }
-.ide-btn.ghost {
+.ide-root .ide-btn.ghost {
   background: transparent;
-  color: var(--ide-fg);
-  border: 1px solid var(--ide-border-strong);
+  color: var(--ide-fg-muted);
+  border-color: var(--ide-border);
+}
+.ide-root .ide-btn.ghost:hover {
+  background: var(--ide-hover);
+  border-color: var(--ide-border-strong);
+  color: var(--ide-fg-bright);
+}
+/* Destruction is quiet until aimed at. */
+.ide-root .ide-btn.danger {
+  background: transparent;
+  color: var(--ide-fg-muted);
+  border-color: var(--ide-border);
+}
+.ide-root .ide-btn.danger:hover {
+  background: color-mix(in srgb, var(--ide-red) 12%, transparent);
+  border-color: var(--ide-red);
+  color: var(--ide-red);
+}
+.ide-root .ide-btn.lg {
+  min-height: var(--ide-control-h-lg);
+  padding: 0 var(--ide-s5);
+  font-size: 14px;
+  font-weight: 600;
+}
+.ide-btn:active {
+  transform: translateY(0.5px);
 }
 .ide-btn:focus-visible {
   outline: 2px solid var(--ide-accent);
   outline-offset: 2px;
 }
-.ide-btn:disabled {
-  opacity: 0.5;
-  cursor: default;
+.ide-root .ide-btn:disabled,
+.ide-root .ide-btn[aria-disabled='true'] {
+  background: transparent;
+  border-color: var(--ide-border);
+  color: color-mix(in srgb, var(--ide-fg-muted) 55%, transparent);
+  cursor: not-allowed;
+  transform: none;
+}
+.ide-root .ide-btn:disabled:hover,
+.ide-root .ide-btn[aria-disabled='true']:hover {
+  background: transparent;
+  border-color: var(--ide-border);
+  color: color-mix(in srgb, var(--ide-fg-muted) 55%, transparent);
 }
 /* Grounded footer for the primary submit CTA (e.g. "Run spec"): a top divider
    separates the action from the form so the button reads as THE main action
@@ -557,13 +764,14 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 10px;
-  margin-top: 18px;
-  padding-top: 16px;
+  gap: var(--ide-s3);
+  margin-top: var(--ide-s5);
+  padding-top: var(--ide-s4);
   border-top: 1px solid var(--ide-border);
 }
-.ide-run-action .ide-btn {
-  padding: 10px 22px;
+.ide-root .ide-run-action .ide-btn {
+  min-height: var(--ide-control-h-lg);
+  padding: 0 var(--ide-s5);
   font-size: 14px;
   font-weight: 600;
 }
@@ -573,28 +781,44 @@
     justify-content: center;
   }
 }
+/* Inputs share the button metric exactly, so a control row never steps. */
 .ide-input,
 .ide-textarea,
 .ide-select {
   width: 100%;
+  min-height: var(--ide-control-h);
   background: var(--ide-bg-input);
   color: var(--ide-fg);
-  border: 1px solid var(--ide-border-strong);
-  border-radius: 4px;
-  padding: 9px 11px;
+  border: 1px solid var(--ide-border);
+  border-radius: var(--ide-r-control);
+  padding: 6px var(--ide-s3);
+  font-family: inherit;
   font-size: 13px;
+  line-height: 1.4;
   outline: none;
   box-sizing: border-box;
 }
+/* A spec is prose, not code — it reads in the UI face like everything the
+   customer types. Only the code viewer stays monospace. */
 .ide-textarea {
-  font-family: 'JetBrains Mono', ui-monospace, monospace;
   line-height: 1.55;
+  padding: var(--ide-s2) var(--ide-s3);
   resize: vertical;
+}
+.ide-input::placeholder,
+.ide-textarea::placeholder {
+  color: color-mix(in srgb, var(--ide-fg-muted) 72%, transparent);
+}
+/* A field must be wide enough for its own placeholder. The cost-cap input was
+   90px against a "Default" placeholder and rendered "Defaul…" (founder-reported). */
+.ide-input {
+  min-width: 8ch;
 }
 .ide-input:focus,
 .ide-textarea:focus,
 .ide-select:focus {
   border-color: var(--ide-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ide-accent) 18%, transparent);
 }
 .ide-model-picker {
   position: relative;
@@ -602,13 +826,13 @@
 }
 .ide-model-picker-trigger {
   width: 100%;
-  min-height: 38px;
+  min-height: var(--ide-control-h-lg);
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 7px 10px;
-  border-radius: 4px;
-  border: 1px solid var(--ide-border-strong);
+  gap: var(--ide-s3);
+  padding: var(--ide-s2) var(--ide-s3);
+  border-radius: var(--ide-r-control);
+  border: 1px solid var(--ide-border);
   background: var(--ide-bg-input);
   color: var(--ide-fg);
   font: inherit;
@@ -639,7 +863,7 @@
 .ide-model-picker-selected small,
 .ide-model-picker-option-text small {
   color: var(--ide-fg-muted);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.2;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -659,7 +883,7 @@
   overflow: auto;
   padding: 5px;
   border: 1px solid var(--ide-border-strong);
-  border-radius: 6px;
+  border-radius: var(--ide-r-control);
   background: var(--ide-bg-sidebar);
   box-shadow: 0 18px 34px var(--ide-shadow);
 }
@@ -671,7 +895,7 @@
   gap: 10px;
   padding: 7px 8px;
   border: 0;
-  border-radius: 4px;
+  border-radius: var(--ide-r-control);
   background: transparent;
   color: var(--ide-fg);
   font: inherit;
@@ -705,9 +929,9 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 5px;
+  border-radius: var(--ide-r-control);
   border: 1px solid color-mix(in srgb, currentColor 35%, transparent);
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 800;
   letter-spacing: 0;
   color: var(--ide-fg-bright);
@@ -801,15 +1025,29 @@
   padding: 14px 16px;
   background: var(--ide-bg-sidebar);
 }
+/* Label/value pair. The label is muted and left, the value is emphasis-weight and
+   right, with tabular figures so a stack of numbers forms a real column. */
 .ide-kv {
   display: flex;
+  align-items: baseline;
   justify-content: space-between;
-  font-size: 12.5px;
-  padding: 5px 0;
+  gap: var(--ide-s4);
+  font-size: 13px;
+  padding: var(--ide-s2) 0;
   border-bottom: 1px solid var(--ide-border);
+}
+.ide-kv:last-child {
+  border-bottom: 0;
 }
 .ide-kv span:first-child {
   color: var(--ide-fg-muted);
+  flex: 0 1 auto;
+}
+.ide-kv span:last-child {
+  color: var(--ide-fg-bright);
+  font-weight: 500;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
 }
 
 /* Single-column flow: header (kicker + title), copy paragraph, chip row, then
@@ -821,7 +1059,7 @@
   margin-bottom: 14px;
   padding: 14px 16px;
   border: 1px solid color-mix(in srgb, var(--ide-red) 50%, var(--ide-border));
-  border-radius: 6px;
+  border-radius: var(--ide-r-control);
   background: color-mix(in srgb, var(--ide-red) 9%, var(--ide-bg-sidebar));
 }
 .ide-recovery-main {
@@ -830,20 +1068,20 @@
 .ide-recovery-kicker {
   margin-bottom: 4px;
   color: var(--ide-red);
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
 .ide-recovery-title {
   color: var(--ide-fg-bright);
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 650;
 }
 .ide-recovery-copy {
   margin-top: 6px;
   color: var(--ide-fg-muted);
-  font-size: 12.5px;
+  font-size: 12px;
   line-height: 1.5;
 }
 .ide-recovery-meta {
@@ -852,7 +1090,7 @@
   gap: 8px;
   margin-top: 10px;
   color: var(--ide-fg-muted);
-  font-size: 11px;
+  font-size: 12px;
 }
 .ide-recovery-meta span {
   border: 1px solid var(--ide-border);
@@ -894,7 +1132,7 @@
   width: 17px;
   text-align: center;
   font-family: 'JetBrains Mono', ui-monospace, monospace;
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 700;
   flex-shrink: 0;
   letter-spacing: -0.5px;
@@ -906,7 +1144,7 @@
 .ide-tree-chev {
   width: 12px;
   display: inline-block;
-  font-size: 9px;
+  font-size: 12px;
   color: var(--ide-fg-muted);
   flex-shrink: 0;
 }
@@ -950,13 +1188,28 @@
 .ide-work-row {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 11px 16px;
+  gap: var(--ide-s3);
+  padding: var(--ide-s3) var(--ide-s4);
   text-decoration: none;
   color: var(--ide-fg);
 }
 .ide-work-row:hover {
   background: var(--ide-hover);
+}
+/* The leading status pill is a fixed COLUMN, not an inline chip. Its label used
+   to size the badge, so `FAILED`, `COMPLETE` and `AWAITING_APPROVAL` each pushed
+   the run title to a different x and every row started somewhere else — the
+   single most visible alignment defect in the app. */
+.ide-work-row > .ide-badge:first-child {
+  flex: 0 0 132px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: inline-flex;
+}
+@media (max-width: 700px) {
+  .ide-work-row > .ide-badge:first-child {
+    flex-basis: 96px;
+  }
 }
 .ide-work-main {
   flex: 1;
@@ -967,11 +1220,14 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-weight: 500;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ide-fg-bright);
 }
 .ide-work-meta {
   display: block;
-  font-size: 11px;
+  margin-top: 2px;
+  font-size: 12px;
   color: var(--ide-fg-muted);
 }
 .ide-work-state {
@@ -980,7 +1236,7 @@
   gap: 5px;
   margin-top: 5px;
   color: var(--ide-accent);
-  font-size: 11px;
+  font-size: 12px;
 }
 .ide-work-state-error {
   color: var(--ide-red);
@@ -1004,7 +1260,7 @@
 }
 .ide-work-cost {
   display: block;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--ide-fg-muted);
 }
 .ide-project-more-tab {
@@ -1020,14 +1276,14 @@
   min-width: 180px;
   padding: 4px;
   border: 1px solid var(--ide-border);
-  border-radius: 6px;
+  border-radius: var(--ide-r-control);
   background: var(--ide-bg-widget);
   box-shadow: 0 8px 20px var(--ide-shadow);
 }
 .ide-project-more-item {
   display: block;
   padding: 8px 10px;
-  border-radius: 5px;
+  border-radius: var(--ide-r-control);
   color: var(--ide-fg);
   text-decoration: none;
   font-size: 13px;
@@ -1062,7 +1318,7 @@
   gap: 8px;
   padding: 0 12px;
   border: 1px solid var(--ide-border);
-  border-radius: 6px;
+  border-radius: var(--ide-r-control);
   background: var(--ide-bg-sidebar);
   color: var(--ide-fg-bright);
   cursor: pointer;
@@ -1083,14 +1339,14 @@
   margin-top: 6px;
   padding: 5px;
   border: 1px solid var(--ide-border);
-  border-radius: 6px;
+  border-radius: var(--ide-r-control);
   background: var(--ide-bg-widget);
   box-shadow: 0 8px 20px var(--ide-shadow);
 }
 .ide-project-mobile-item {
   display: block;
   padding: 10px 12px;
-  border-radius: 5px;
+  border-radius: var(--ide-r-control);
   color: var(--ide-fg);
   text-decoration: none;
 }
@@ -1100,9 +1356,9 @@
   color: var(--ide-fg-bright);
 }
 .ide-rtab-badge {
-  font-size: 10px;
+  font-size: 12px;
   background: var(--ide-bg-tab-inactive);
-  border-radius: 8px;
+  border-radius: var(--ide-r-card);
   padding: 0 5px;
   color: var(--ide-fg-muted);
 }
@@ -1110,7 +1366,7 @@
   margin-left: 4px;
   width: 16px;
   height: 16px;
-  border-radius: 3px;
+  border-radius: var(--ide-r-control);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1145,7 +1401,7 @@
   overflow: auto;
   margin-top: 8px;
   border: 1px solid var(--ide-border);
-  border-radius: 6px;
+  border-radius: var(--ide-r-control);
   background: var(--ide-bg-editor);
 }
 .ide-mobile-file-tree-list .ide-tree-item {
@@ -1160,10 +1416,10 @@
   margin-top: 8px;
   padding: 7px 9px;
   border: 1px solid var(--ide-border);
-  border-radius: 6px;
+  border-radius: var(--ide-r-control);
   background: var(--ide-bg-editor);
   color: var(--ide-fg-muted);
-  font-size: 11.5px;
+  font-size: 12px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1177,7 +1433,7 @@
 .ide-mobile-code-switch button {
   min-height: 36px;
   border: 1px solid var(--ide-border);
-  border-radius: 6px;
+  border-radius: var(--ide-r-control);
   background: var(--ide-bg-sidebar);
   color: var(--ide-fg-muted);
   cursor: pointer;
@@ -1274,7 +1530,7 @@
   gap: 4px;
   margin-bottom: 4px;
   color: var(--ide-fg-muted);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .ide-project-chat-message-meta button {
@@ -1303,7 +1559,7 @@
   text-align: left;
   padding: 8px 10px;
   border: 1px solid var(--ide-border);
-  border-radius: 6px;
+  border-radius: var(--ide-r-control);
   background: var(--ide-bg-sidebar);
   color: var(--ide-fg);
   cursor: pointer;
@@ -1340,7 +1596,7 @@
   color: var(--ide-yellow);
   cursor: pointer;
   font: inherit;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.08em;
   text-align: left;
@@ -1411,7 +1667,7 @@
 .agent-head h1 {
   margin: 4px 0;
   color: var(--ide-fg-bright);
-  font-size: 22px;
+  font-size: 24px;
   line-height: 1.2;
 }
 
@@ -1427,7 +1683,7 @@
   align-items: center;
   gap: 7px;
   color: var(--ide-accent);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -1480,7 +1736,7 @@
   width: 22px;
   height: 22px;
   border: 1px solid var(--ide-border);
-  border-radius: 5px;
+  border-radius: var(--ide-r-control);
   background: transparent;
   color: var(--ide-fg-muted);
   cursor: pointer;
@@ -1510,14 +1766,14 @@
   border-radius: 999px;
   background: var(--ide-bg-sidebar);
   color: var(--ide-fg);
-  font-size: 11px;
+  font-size: 12px;
   max-width: 220px;
 }
 .agent-attach-thumb {
   width: 24px;
   height: 24px;
   object-fit: cover;
-  border-radius: 4px;
+  border-radius: var(--ide-r-control);
   border: 1px solid var(--ide-border);
   flex: 0 0 auto;
 }
@@ -1562,7 +1818,7 @@
   margin-bottom: 12px;
   padding: 8px 10px;
   border: 1px solid var(--ide-border);
-  border-radius: 6px;
+  border-radius: var(--ide-r-control);
   background: var(--ide-bg-sidebar);
   color: var(--ide-fg-muted);
   font-size: 12px;
@@ -1593,7 +1849,7 @@
 
 .agent-panel-head {
   justify-content: space-between;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -1611,7 +1867,7 @@
   width: 100%;
   padding: 9px 10px;
   border: 1px solid var(--ide-border);
-  border-radius: 6px;
+  border-radius: var(--ide-r-control);
   background: var(--ide-bg-editor);
   color: var(--ide-fg);
   cursor: pointer;
@@ -1653,7 +1909,7 @@
   border: 1px solid var(--ide-border);
   border-radius: 999px;
   color: var(--ide-fg);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .agent-command-grid {
@@ -1665,7 +1921,7 @@
   width: 100%;
   padding: 7px 8px;
   border: 1px solid var(--ide-border);
-  border-radius: 5px;
+  border-radius: var(--ide-r-control);
   background: var(--ide-bg-editor);
   color: var(--ide-fg);
   font: inherit;
@@ -1710,7 +1966,7 @@
 .agent-main-head span {
   overflow: hidden;
   color: var(--ide-fg-muted);
-  font-size: 11px;
+  font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1735,7 +1991,7 @@
 .agent-msg-meta {
   margin-bottom: 4px;
   color: var(--ide-fg-muted);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .agent-msg.user .agent-msg-meta {
@@ -1745,7 +2001,7 @@
 .agent-msg-body {
   padding: 10px 12px;
   border: 1px solid var(--ide-border);
-  border-radius: 8px;
+  border-radius: var(--ide-r-card);
   background: var(--ide-bg-sidebar);
   color: var(--ide-fg);
   font-size: 13px;
@@ -1773,7 +2029,7 @@
   gap: 7px;
   padding: 6px 8px;
   border: 1px solid var(--ide-border);
-  border-radius: 6px;
+  border-radius: var(--ide-r-control);
   background: var(--ide-bg-sidebar);
   color: var(--ide-fg);
   font-size: 12px;
@@ -1794,7 +2050,7 @@
   margin: 10px 0 12px;
   padding: 12px;
   border: 1px solid var(--ide-yellow);
-  border-radius: 7px;
+  border-radius: var(--ide-r-control);
   background: color-mix(in srgb, var(--ide-yellow) 8%, var(--ide-bg-sidebar));
 }
 
@@ -1887,7 +2143,7 @@
   flex-wrap: wrap;
   gap: 6px;
   color: var(--ide-fg-muted);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .agent-gate-tasks {
@@ -1936,7 +2192,7 @@
   border: 1px solid var(--ide-border);
   border-radius: 999px;
   color: var(--ide-fg-muted);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .agent-composer textarea {
@@ -1950,7 +2206,7 @@
 
 .agent-composer-actions span {
   color: var(--ide-fg-muted);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 @media (max-width: 860px) {
@@ -2040,7 +2296,7 @@
     padding: 0 12px;
     margin-left: auto;
     border: none;
-    border-radius: 6px;
+    border-radius: var(--ide-r-control);
     background: var(--ide-accent);
     color: var(--ide-accent-fg);
     cursor: pointer;
@@ -2059,7 +2315,7 @@
     min-height: 36px;
     padding: 0 10px;
     border: 1px solid var(--ide-border);
-    border-radius: 6px;
+    border-radius: var(--ide-r-control);
     background: var(--ide-bg-sidebar);
     color: var(--ide-fg-muted);
     font: inherit;
@@ -2194,7 +2450,7 @@
   .ide-work-provider {
     grid-column: 1;
     grid-row: 3;
-    font-size: 11px;
+    font-size: 12px;
   }
   .ide-work-score {
     grid-column: 2;
@@ -2229,14 +2485,14 @@
   border: 1px solid var(--ide-border);
   color: var(--ide-fg-bright);
   padding: 1px 5px;
-  border-radius: 4px;
+  border-radius: var(--ide-r-control);
   font-family: 'JetBrains Mono', ui-monospace, monospace;
   font-size: 12px;
 }
 .ide-root .signal-md-codeblock {
   background: var(--ide-bg-widget);
   border: 1px solid var(--ide-border);
-  border-radius: 6px;
+  border-radius: var(--ide-r-control);
   padding: 10px 12px;
   margin: 8px 0;
   overflow-x: auto;
@@ -2247,7 +2503,7 @@
 }
 .ide-root .signal-md-codeblock .signal-md-codelang {
   color: var(--ide-fg-muted);
-  font-size: 10px;
+  font-size: 12px;
   letter-spacing: 0.12em;
   text-transform: uppercase;
   margin-bottom: 6px;
@@ -2255,7 +2511,7 @@
 .ide-root .signal-md-codefold {
   margin: 8px 0;
   border: 1px solid var(--ide-border);
-  border-radius: 7px;
+  border-radius: var(--ide-r-control);
   background: var(--ide-bg-sidebar);
   overflow: hidden;
 }
@@ -2307,10 +2563,10 @@
   align-items: center;
   gap: 6px;
   font-family: 'JetBrains Mono', monospace;
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1;
   padding: 3px 8px;
-  border-radius: 4px;
+  border-radius: var(--ide-r-control);
   cursor: pointer;
   color: var(--ide-yellow);
   border: 1px solid var(--ide-yellow);
@@ -2344,7 +2600,7 @@
   max-width: 360px;
   background: var(--ide-bg-widget);
   border: 1px solid var(--ide-border);
-  border-radius: 6px;
+  border-radius: var(--ide-r-control);
   box-shadow: 0 8px 24px var(--ide-shadow);
   overflow: hidden;
 }
@@ -2355,7 +2611,7 @@
   top: calc(100% + 6px);
 }
 .ide-gate-pop-head {
-  font-size: 10px;
+  font-size: 12px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--ide-fg-muted);
@@ -2381,7 +2637,7 @@
   font-size: 12px;
 }
 .ide-gate-pop-meta {
-  font-size: 10px;
+  font-size: 12px;
   color: var(--ide-fg-muted);
   font-family: 'JetBrains Mono', monospace;
 }
@@ -2446,7 +2702,7 @@
   color: var(--ide-fg);
 }
 .ide-timeline-state {
-  font-size: 10px;
+  font-size: 12px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--ide-fg-muted);
@@ -2530,18 +2786,41 @@
   margin-top: 14px;
 }
 .ide-compose-advanced {
-  margin-top: 14px;
+  margin-top: var(--ide-s4);
 }
+/* A disclosure must look like a control. These were bare muted text with no
+   affordance, so "Examples" and "Advanced options" read as dead labels. */
 .ide-compose-advanced summary {
   color: var(--ide-fg-muted);
   cursor: pointer;
   display: flex;
   align-items: center;
-  font-size: 12px;
-  list-style-position: inside;
-  min-height: 32px;
+  gap: var(--ide-s2);
+  font-size: 13px;
+  font-weight: 500;
+  list-style: none;
+  min-height: var(--ide-control-h);
+  border-radius: var(--ide-r-control);
+  transition: color 120ms var(--ide-ease);
 }
-.ide-compose-advanced[open] summary {
+.ide-compose-advanced summary::-webkit-details-marker {
+  display: none;
+}
+.ide-compose-advanced summary::before {
+  content: '›';
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  font-size: 14px;
+  line-height: 1;
+  transition: transform 140ms var(--ide-ease);
+}
+.ide-compose-advanced[open] > summary::before {
+  transform: rotate(90deg);
+}
+.ide-compose-advanced summary:hover,
+.ide-compose-advanced[open] > summary {
   color: var(--ide-fg-bright);
 }
 .ide-setup-advanced {
@@ -2591,7 +2870,7 @@
   border-radius: 999px;
   background: var(--ide-bg-input);
   color: var(--ide-fg-muted);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 20px;
   text-align: center;
 }
@@ -2783,11 +3062,11 @@
     min-height: 42px;
     padding: 6px 4px;
     border: 1px solid var(--ide-border);
-    border-radius: 6px;
+    border-radius: var(--ide-r-control);
     background: var(--ide-bg-sidebar);
     color: var(--ide-fg-muted);
     font: inherit;
-    font-size: 11px;
+    font-size: 12px;
     cursor: pointer;
   }
   .ide-compose-steps button span {
@@ -2798,7 +3077,7 @@
     border-radius: 999px;
     background: var(--ide-bg-input);
     color: var(--ide-fg-muted);
-    font-size: 10px;
+    font-size: 12px;
     line-height: 18px;
   }
   .ide-compose-steps button.active {
@@ -2843,7 +3122,7 @@
   .ide-compose-mobile-help {
     grid-column: 1 / -1;
     color: var(--ide-fg-muted);
-    font-size: 11px;
+    font-size: 12px;
     text-align: center;
   }
   .ide-invoice-row {
@@ -2899,7 +3178,7 @@
     min-width: 0;
     padding: 14px;
     border: 1px solid var(--ide-border);
-    border-radius: 8px;
+    border-radius: var(--ide-r-card);
     background: var(--ide-bg-sidebar);
     color: var(--ide-fg);
   }
@@ -2912,7 +3191,7 @@
     height: 44px;
     padding: 0;
     border: 1px solid var(--ide-border);
-    border-radius: 6px;
+    border-radius: var(--ide-r-control);
     background: var(--ide-bg-input);
     color: var(--ide-fg-muted);
     cursor: pointer;
@@ -2954,7 +3233,7 @@
 @media (max-width: 600px) {
   .ide-root h1.ide-clamp2,
   .ide-root .ide-title.ide-clamp2 {
-    font-size: 22px;
+    font-size: 24px;
     line-height: 1.3;
   }
 }
@@ -2983,7 +3262,7 @@
   min-height: 32px;
   padding: 6px 11px;
   border: 1px solid var(--ide-border);
-  border-radius: 7px;
+  border-radius: var(--ide-r-control);
   background: transparent;
   color: var(--ide-fg);
   font-size: 13px;
@@ -3021,12 +3300,12 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  border: 1px solid var(--ide-border);
-  border-radius: 999px;
-  padding: 3px 9px;
+  border: 0;
+  border-radius: var(--ide-r-pill);
+  padding: var(--ide-s1) var(--ide-s3);
   color: var(--ide-fg-muted);
-  background: var(--ide-bg-sidebar);
-  font-size: 11px;
+  background: color-mix(in srgb, var(--ide-fg) 7%, transparent);
+  font-size: 12px;
 }
 .agent-bar-dot {
   width: 7px;
@@ -3066,7 +3345,7 @@
   min-height: 32px;
   padding: 6px;
   border: 1px solid var(--ide-border);
-  border-radius: 7px;
+  border-radius: var(--ide-r-control);
   background: transparent;
   color: var(--ide-fg-muted);
   cursor: pointer;
@@ -3094,7 +3373,7 @@
   padding: 12px 14px;
   background: var(--ide-bg-sidebar);
   border: 1px solid var(--ide-border);
-  border-radius: 10px;
+  border-radius: var(--ide-r-card);
   display: grid;
   gap: 8px;
 }
@@ -3145,7 +3424,7 @@
 }
 .agent-model-controls label {
   color: var(--ide-fg);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
 }
 .agent-model-controls select {
@@ -3154,7 +3433,7 @@
   color: var(--ide-fg-bright);
   background: var(--ide-bg);
   border: 1px solid var(--ide-border);
-  border-radius: 6px;
+  border-radius: var(--ide-r-control);
   padding: 6px 8px;
 }
 .agent-model-controls small {
@@ -3168,7 +3447,7 @@
   display: grid;
   gap: 4px;
   border: 1px solid var(--ide-border);
-  border-radius: 8px;
+  border-radius: var(--ide-r-card);
   padding: 8px;
   color: var(--ide-fg-muted);
   font-size: 12px;
@@ -3179,11 +3458,11 @@
 }
 .agent-pop-balance small {
   color: var(--ide-fg-muted);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.35;
 }
 .agent-pop-caps-label {
-  font-size: 11px;
+  font-size: 12px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--ide-fg-muted);
@@ -3198,7 +3477,7 @@
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--ide-fg);
   border: 1px solid var(--ide-border);
   border-radius: 999px;
@@ -3214,7 +3493,7 @@
   cursor: pointer;
   display: flex;
   align-items: center;
-  font-size: 11px;
+  font-size: 12px;
   min-height: 32px;
   color: var(--ide-fg-muted);
 }
@@ -3259,16 +3538,16 @@
 }
 .agent-drawer-summary span {
   border: 1px solid var(--ide-border);
-  border-radius: 7px;
+  border-radius: var(--ide-r-control);
   padding: 7px 8px;
   color: var(--ide-fg-muted);
-  font-size: 11px;
+  font-size: 12px;
   min-width: 0;
 }
 .agent-drawer-truth {
   margin: 0;
   color: var(--ide-fg-muted);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.45;
 }
 .agent-drawer-section {
@@ -3277,7 +3556,7 @@
 }
 .agent-drawer-label {
   color: var(--ide-fg-muted);
-  font-size: 11px;
+  font-size: 12px;
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
@@ -3316,7 +3595,7 @@
   background: transparent;
   color: var(--ide-fg);
   font-size: 13px;
-  border-radius: 7px;
+  border-radius: var(--ide-r-control);
   cursor: pointer;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -3334,7 +3613,7 @@
   gap: 6px;
   width: 100%;
   border: 1px solid rgba(210, 153, 34, 0.28);
-  border-radius: 7px;
+  border-radius: var(--ide-r-control);
   background: rgba(210, 153, 34, 0.07);
   padding: 8px;
 }
@@ -3353,7 +3632,7 @@
 }
 .agent-project-context > label {
   color: var(--ide-fg-muted);
-  font-size: 11px;
+  font-size: 12px;
   text-transform: uppercase;
   letter-spacing: 0.06em;
 }
@@ -3366,11 +3645,11 @@
   align-items: center;
   gap: 8px;
   color: var(--ide-fg-muted);
-  font-size: 11px;
+  font-size: 12px;
 }
 .agent-project-locked {
   color: var(--ide-fg-muted);
-  font-size: 11px;
+  font-size: 12px;
 }
 .agent-load-earlier {
   display: grid;
@@ -3392,7 +3671,7 @@
 .agent-drawer-actions .ide-btn {
   min-height: 28px;
   padding: 4px 8px;
-  font-size: 11px;
+  font-size: 12px;
 }
 .agent-drawer-riskline {
   display: flex;
@@ -3405,7 +3684,7 @@
   border: 1px solid rgba(210, 153, 34, 0.22);
   border-radius: 999px;
   padding: 1px 7px;
-  font-size: 10.5px;
+  font-size: 12px;
   color: var(--ide-fg-muted);
   font-weight: 500;
 }
@@ -3482,10 +3761,10 @@
   align-items: flex-end;
 }
 .agent-msg.user .agent-msg-body {
-  background: var(--ide-bg-sidebar);
-  border: 1px solid var(--ide-border);
-  border-radius: 14px 14px 4px 14px;
-  padding: 9px 14px;
+  background: var(--ide-list-active);
+  border: 0;
+  border-radius: var(--ide-r-card);
+  padding: var(--ide-s2) var(--ide-s4);
   max-width: 80%;
   font-size: 14px;
   line-height: 1.55;
@@ -3497,7 +3776,7 @@
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--ide-fg-muted);
 }
 .agent-msg-usage {
@@ -3508,8 +3787,15 @@
    bubble rules). Markdown owns its own whitespace: `pre-wrap` on rendered
    markdown doubles every soft break into a giant gap, so assistant/system
    bodies use normal whitespace while user bubbles stay pre-wrap. */
+/* The transcript is asymmetric on purpose: the customer's message is a discrete
+   bubble, the agent's reply is a DOCUMENT that sits directly on the canvas.
+   Boxing the agent side wasted width and wrapped a border around what is really
+   the page's own content — and nested every tool card inside a second frame. */
 .agent-msg.assistant .agent-msg-body,
 .agent-msg.system .agent-msg-body {
+  padding: 0;
+  border: 0;
+  background: transparent;
   font-size: 14px;
   line-height: 1.6;
   color: var(--ide-fg);
@@ -3521,10 +3807,10 @@
   line-height: inherit;
 }
 .agent-msg-body .signal-md-h1 {
-  font-size: 17px;
+  font-size: 16px;
 }
 .agent-msg-body .signal-md-h2 {
-  font-size: 15px;
+  font-size: 14px;
 }
 .agent-msg-body .signal-md-h3,
 .agent-msg-body .signal-md-h4,
@@ -3541,7 +3827,7 @@
 .agent-artifact-rail {
   margin-top: 8px;
   border: 1px solid var(--ide-border);
-  border-radius: 8px;
+  border-radius: var(--ide-r-card);
   background: var(--ide-bg-sidebar);
   overflow: hidden;
 }
@@ -3552,7 +3838,7 @@
   justify-content: space-between;
   gap: 10px;
   padding: 8px 10px;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--ide-fg-muted);
 }
 .agent-artifact-head {
@@ -3581,12 +3867,12 @@
 }
 .agent-artifact-main code {
   color: var(--ide-fg-bright);
-  font-size: 12.5px;
+  font-size: 12px;
   word-break: break-all;
 }
 .agent-artifact-main span {
   color: var(--ide-fg-muted);
-  font-size: 11.5px;
+  font-size: 12px;
 }
 .agent-artifact-actions {
   display: flex;
@@ -3598,7 +3884,7 @@
 .agent-artifact-actions .ide-btn {
   min-height: 32px;
   padding: 4px 8px;
-  font-size: 11.5px;
+  font-size: 12px;
 }
 .agent-artifact-handoff a {
   display: inline-flex;
@@ -3628,7 +3914,7 @@
 .agent-activity-evidence {
   margin: 0;
   border: 1px solid color-mix(in srgb, var(--ide-blue) 28%, transparent);
-  border-radius: 8px;
+  border-radius: var(--ide-r-card);
   background: color-mix(in srgb, var(--ide-blue) 7%, transparent);
 }
 .agent-activity-evidence summary {
@@ -3676,7 +3962,7 @@
 }
 .agent-card {
   border: 1px solid var(--ide-border);
-  border-radius: 12px;
+  border-radius: var(--ide-r-card);
   padding: 13px 15px;
   background: var(--ide-bg-sidebar);
   display: grid;
@@ -3696,7 +3982,7 @@
 }
 .agent-card-meta {
   margin-left: auto;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--ide-fg-muted);
 }
 .agent-card-title {
@@ -3714,7 +4000,7 @@
   color: var(--ide-blue);
 }
 .agent-card-sub {
-  font-size: 12.5px;
+  font-size: 12px;
   color: var(--ide-fg-muted);
   line-height: 1.5;
 }
@@ -3727,7 +4013,7 @@
   gap: 8px;
   padding: 10px;
   border: 1px solid var(--ide-border);
-  border-radius: 8px;
+  border-radius: var(--ide-r-card);
   background: var(--ide-bg);
 }
 .agent-repo-options {
@@ -3741,7 +4027,7 @@
   min-height: 32px;
   padding: 5px 8px;
   border: 1px solid var(--ide-border);
-  border-radius: 6px;
+  border-radius: var(--ide-r-control);
   color: var(--ide-fg);
   cursor: pointer;
 }
@@ -3759,7 +4045,7 @@
 .agent-repo-option small {
   margin-left: auto;
   color: var(--ide-fg-muted);
-  font-size: 11px;
+  font-size: 12px;
 }
 .agent-repo-boundary-warning,
 .agent-repo-boundary-error {
@@ -3776,7 +4062,7 @@
 .agent-card-tasks {
   margin: 0;
   padding-left: 18px;
-  font-size: 12.5px;
+  font-size: 12px;
   color: var(--ide-fg);
   display: grid;
   gap: 2px;
@@ -3788,7 +4074,7 @@
 }
 .agent-contract-panel {
   border: 1px solid rgba(91, 141, 239, 0.24);
-  border-radius: 10px;
+  border-radius: var(--ide-r-card);
   background: rgba(91, 141, 239, 0.06);
   padding: 10px;
   display: grid;
@@ -3808,15 +4094,15 @@
   display: grid;
   gap: 2px;
   border: 1px solid var(--ide-border);
-  border-radius: 7px;
+  border-radius: var(--ide-r-control);
   padding: 7px 8px;
   color: var(--ide-fg-muted);
-  font-size: 11px;
+  font-size: 12px;
   min-width: 0;
 }
 .agent-contract-grid b {
   color: var(--ide-fg-bright);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 650;
 }
 .agent-trust-panel {
@@ -3826,11 +4112,11 @@
 }
 .agent-trust-panel span {
   border: 1px solid rgba(63, 185, 80, 0.26);
-  border-radius: 7px;
+  border-radius: var(--ide-r-control);
   background: rgba(63, 185, 80, 0.06);
   color: var(--ide-fg-muted);
   padding: 6px 8px;
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.35;
 }
 .agent-trust-panel.compact {
@@ -3838,7 +4124,7 @@
 }
 .agent-recent-transcript {
   border: 1px solid var(--ide-border);
-  border-radius: 10px;
+  border-radius: var(--ide-r-card);
   background: var(--ide-bg-sidebar);
   padding: 9px 11px;
 }
@@ -3903,7 +4189,7 @@
   gap: 10px;
 }
 .agent-gates-label {
-  font-size: 11px;
+  font-size: 12px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--ide-fg-muted);
@@ -3921,13 +4207,13 @@
   margin-bottom: 4px;
 }
 .agent-empty strong {
-  font-size: 17px;
+  font-size: 16px;
   color: var(--ide-fg-bright);
 }
 .agent-empty p {
   margin: 0;
   max-width: 440px;
-  font-size: 13.5px;
+  font-size: 13px;
   line-height: 1.6;
   color: var(--ide-fg-muted);
 }
@@ -3939,11 +4225,11 @@
   margin-top: 8px;
 }
 .ide-root .agent-empty-chips button {
-  font-size: 12.5px;
+  font-size: 12px;
   min-height: 32px;
   padding: 6px 12px;
   border: 1px solid rgba(91, 141, 239, 0.32);
-  border-radius: 7px;
+  border-radius: var(--ide-r-control);
   background: rgba(91, 141, 239, 0.06);
   color: var(--ide-fg);
   cursor: pointer;
@@ -3955,7 +4241,7 @@
 .agent-operator-intro {
   border: 1px solid rgba(91, 141, 239, 0.34);
   background: rgba(91, 141, 239, 0.07);
-  border-radius: 12px;
+  border-radius: var(--ide-r-card);
   padding: 18px;
   display: grid;
   gap: 14px;
@@ -3993,7 +4279,7 @@
 .agent-operator-details-body > p {
   margin: 0;
   color: var(--ide-fg-muted);
-  font-size: 12.5px;
+  font-size: 12px;
   line-height: 1.6;
 }
 .agent-operator-details-body .agent-operator-steps {
@@ -4008,7 +4294,7 @@
 .agent-operator-steps span {
   border: 1px solid var(--ide-border);
   background: var(--ide-bg-editor);
-  border-radius: 7px;
+  border-radius: var(--ide-r-control);
   color: var(--ide-fg);
   font-size: 12px;
   padding: 6px 9px;
@@ -4035,11 +4321,11 @@
 }
 .agent-composer-contract span {
   border: 1px solid var(--ide-border);
-  border-radius: 7px;
+  border-radius: var(--ide-r-control);
   background: var(--ide-bg-sidebar);
   color: var(--ide-fg-muted);
   padding: 6px 8px;
-  font-size: 11px;
+  font-size: 12px;
   text-align: center;
   min-width: 0;
 }
@@ -4048,7 +4334,7 @@
   align-items: flex-end;
   gap: 8px;
   border: 1px solid var(--ide-border);
-  border-radius: 12px;
+  border-radius: var(--ide-r-card);
   padding: 7px 8px 7px 10px;
   background: var(--ide-bg-sidebar);
 }
@@ -4062,7 +4348,7 @@
   min-width: 32px;
   min-height: 32px;
   padding: 6px;
-  border-radius: 8px;
+  border-radius: var(--ide-r-card);
   color: var(--ide-fg-muted);
   cursor: pointer;
   flex-shrink: 0;
@@ -4103,7 +4389,7 @@
   justify-content: center;
   width: 36px;
   height: 36px;
-  border-radius: 9px;
+  border-radius: var(--ide-r-card);
   flex-shrink: 0;
   border: 1px solid var(--ide-blue);
   background: var(--ide-blue);
@@ -4115,7 +4401,7 @@
   cursor: default;
 }
 .agent-composer-hint {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--ide-fg-muted);
   margin-top: 7px;
   text-align: center;
@@ -4242,7 +4528,7 @@
   background: rgba(210, 153, 34, 0.07);
 }
 .agent-card-consequence {
-  font-size: 12.5px;
+  font-size: 12px;
   color: var(--ide-fg-muted);
   line-height: 1.5;
 }
@@ -4261,7 +4547,7 @@
 .agent-runcard {
   border: 1px solid rgba(91, 141, 239, 0.34);
   background: rgba(91, 141, 239, 0.08);
-  border-radius: 12px;
+  border-radius: var(--ide-r-card);
   padding: 14px;
   display: grid;
   gap: 11px;
@@ -4291,7 +4577,7 @@
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  font-size: 11px;
+  font-size: 12px;
   border-radius: 999px;
   padding: 2px 8px;
   border: 1px solid var(--ide-border);
@@ -4329,7 +4615,7 @@
   align-items: center;
   color: var(--ide-fg-muted);
   display: flex;
-  font-size: 11px;
+  font-size: 12px;
   gap: 6px;
   margin-top: 5px;
 }
@@ -4342,43 +4628,47 @@
 .agent-runcard-stream.ok {
   color: var(--ide-success, #42d392);
 }
+/* The phase rail is ONE container with eight segments, not eight independently
+   stroked pills. Progress reads as fill; the outlines it used to draw are what
+   made this row look like eight unrelated boxes. */
 .agent-runcard-phases {
   display: grid;
   grid-template-columns: repeat(8, minmax(0, 1fr));
-  gap: 4px;
+  gap: 2px;
+  padding: 2px;
+  border-radius: var(--ide-r-pill);
+  background: color-mix(in srgb, var(--ide-fg) 6%, transparent);
 }
 .agent-runcard-phase {
-  border: 1px solid var(--ide-border);
-  border-radius: 999px;
-  padding: 3px 5px;
+  border: 0;
+  border-radius: var(--ide-r-pill);
+  padding: var(--ide-s1) var(--ide-s2);
   text-align: center;
   color: var(--ide-fg-muted);
-  font-size: 10.5px;
+  font-size: 12px;
+  line-height: 1.3;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .agent-runcard-phase.done {
   color: var(--ide-green);
-  border-color: rgba(63, 185, 80, 0.35);
-  background: rgba(63, 185, 80, 0.08);
+  background: color-mix(in srgb, var(--ide-green) 14%, transparent);
 }
 .agent-runcard-phase.active {
   color: var(--ide-blue);
-  border-color: rgba(91, 141, 239, 0.5);
-  background: rgba(91, 141, 239, 0.13);
+  background: color-mix(in srgb, var(--ide-blue) 20%, transparent);
+  font-weight: 600;
 }
 .agent-runcard-phase.bad {
   color: var(--ide-red);
-  border-color: rgba(248, 81, 73, 0.4);
-  background: rgba(248, 81, 73, 0.08);
+  background: color-mix(in srgb, var(--ide-red) 14%, transparent);
 }
 .agent-runcard-phase.muted {
   color: var(--ide-fg-muted);
-  background: var(--ide-hover);
 }
 .agent-runcard-step {
-  font-size: 12.5px;
+  font-size: 12px;
   color: var(--ide-fg-muted);
 }
 .agent-runcard-kpis {
@@ -4386,19 +4676,22 @@
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 7px;
 }
+/* KPI tiles sit INSIDE the run card, so they take a tint rather than a second
+   stroke — three boxes inside a box was the nested-container defect again. */
 .agent-runcard-kpis span {
   display: grid;
   gap: 2px;
-  border: 1px solid var(--ide-border);
-  border-radius: 7px;
-  padding: 7px 8px;
+  border: 0;
+  border-radius: var(--ide-r-control);
+  padding: var(--ide-s2) var(--ide-s3);
+  background: color-mix(in srgb, var(--ide-fg) 5%, transparent);
   color: var(--ide-fg-muted);
-  font-size: 11px;
+  font-size: 12px;
   min-width: 0;
 }
 .agent-runcard-kpis b {
   color: var(--ide-fg-bright);
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -4461,7 +4754,7 @@
   color: var(--ide-fg-bright);
 }
 .agent-drawer-meta {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--ide-fg-muted);
 }
 .ide-sr-only {
@@ -4478,7 +4771,7 @@
 
 .agent-msg.assistant .agent-msg-body,
 .agent-msg.system .agent-msg-body {
-  font-size: 14.5px;
+  font-size: 14px;
 }
 .agent-msg.user .agent-msg-body {
   font-size: 13px;
@@ -4491,10 +4784,10 @@
   margin: 8px 0 12px;
   padding: 8px 10px;
   border: 1px solid color-mix(in srgb, var(--ide-accent) 35%, var(--ide-border));
-  border-radius: 8px;
+  border-radius: var(--ide-r-card);
   background: color-mix(in srgb, var(--ide-accent) 7%, var(--ide-surface-2));
   color: var(--ide-fg-muted);
-  font-size: 11px;
+  font-size: 12px;
 }
 .agent-route-decision strong {
   color: var(--ide-fg-bright);
@@ -4520,7 +4813,7 @@
 .agent-inline-diff-panel {
   margin-top: 8px;
   border: 1px solid var(--ide-border);
-  border-radius: 8px;
+  border-radius: var(--ide-r-card);
   overflow: hidden;
   background: var(--ide-surface-2);
 }
@@ -4529,7 +4822,7 @@
 .agent-inline-diff-note {
   padding: 8px 10px;
   color: var(--ide-muted);
-  font-size: 11px;
+  font-size: 12px;
 }
 .agent-inline-diff-head {
   display: flex;
@@ -4566,7 +4859,7 @@
 }
 .agent-inline-diff-files button span {
   color: var(--ide-muted);
-  font-size: 10px;
+  font-size: 12px;
   text-transform: uppercase;
 }
 .agent-inline-diff-view {
@@ -4583,7 +4876,7 @@
   border-top: 1px solid var(--ide-border);
   background: color-mix(in srgb, var(--ide-accent) 8%, var(--ide-surface-2));
   color: var(--ide-text);
-  font-size: 11px;
+  font-size: 12px;
 }
 .agent-inline-diff-confirm > span {
   flex: 1 1 260px;
@@ -4693,7 +4986,7 @@
 .ide-screens .ide-chip {
   background: transparent;
   border: 1px solid var(--ide-border);
-  border-radius: 4px;
+  border-radius: var(--ide-r-control);
   color: var(--ide-fg-muted);
   cursor: pointer;
   font: inherit;
@@ -4730,14 +5023,14 @@
 
 .ide-screens-empty {
   border: 1px dashed var(--ide-border);
-  border-radius: 6px;
+  border-radius: var(--ide-r-control);
   padding: 32px 24px;
   text-align: center;
 }
 
 .ide-screens-empty h3 {
   color: var(--ide-fg-bright);
-  font-size: 15px;
+  font-size: 14px;
   margin: 0 0 6px;
 }
 
@@ -4794,7 +5087,7 @@
 }
 
 .ide-screens-item-target {
-  font-size: 11px;
+  font-size: 12px;
   opacity: 0.7;
 }
 
@@ -4816,7 +5109,7 @@
 .ide-screens-frame {
   background: #fff;
   border: 1px solid var(--ide-border);
-  border-radius: 2px;
+  border-radius: var(--ide-r-control);
   flex: none;
   overflow: hidden;
 }
@@ -4847,7 +5140,7 @@
 }
 
 .ide-screens-failed code {
-  font-size: 11px;
+  font-size: 12px;
 }
 
 @media (max-width: 900px) {
@@ -4890,7 +5183,7 @@
   display: flex;
   flex-direction: column;
   border: 1px solid var(--ide-border);
-  border-radius: 6px;
+  border-radius: var(--ide-r-control);
   overflow: hidden;
   margin-bottom: 8px;
   background: var(--ide-bg-widget);
@@ -4906,7 +5199,7 @@
 .agent-artifact-preview-note {
   margin-left: auto;
   color: var(--ide-fg-muted);
-  font-size: 11px;
+  font-size: 12px;
 }
 .agent-artifact-preview-frame {
   width: 100%;

@@ -28,6 +28,32 @@
  * ──────────────────────────────────────────────────────────────────────── */
 
 :root {
+  /* ── Design grammar (2026-08-05 visual-polish pass) ───────────────────
+   *
+   * Declared at :root, not only on `.ide-root`, because `signal/components/*`
+   * (Modal, SpecChat, CostProgressBar, the review panels) render BOTH inside the
+   * protected shell and on public auth/marketing pages. A token that resolved
+   * only under `.ide-root` would silently drop `border-radius` to square corners
+   * on every public page that mounts a shared primitive.
+   *
+   * `.ide-root` redeclares the same values so the protected app stays
+   * self-describing; the values are identical, so the cascade is a no-op.
+   */
+  --ide-font-ui: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', system-ui, sans-serif;
+  --ide-font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  --ide-r-control: 6px;
+  --ide-r-card: 10px;
+  --ide-r-pill: 999px;
+  --ide-s1: 4px;
+  --ide-s2: 8px;
+  --ide-s3: 12px;
+  --ide-s4: 16px;
+  --ide-s5: 24px;
+  --ide-s6: 32px;
+  --ide-control-h: 32px;
+  --ide-control-h-lg: 38px;
+  --ide-ease: cubic-bezier(0.16, 1, 0.3, 1);
+
   /* ── Surface ladder (dark = default) ─────────────────────────────────── */
   /* R-301 (Wave 6) — values now alias the primitive layer
    * (frontend/src/design-system/primitives.css). Token NAMES are

@@ -378,6 +378,37 @@ Surfaces that report absence must distinguish "none" from "we could not tell you
 - Dormant WCAG ratio regression test at `src/design-system/contrast.test.ts`.
 - See `frontend/A11Y.md` for the enablement guide.
 
+## Design grammar (tokens in `ide/ide.css`, 2026-08-05)
+
+The protected app has ONE visual vocabulary. Reach for a token; do not add a literal.
+
+- **Type.** `--ide-font-ui` is the UI face. `--ide-font-mono` is **opt-in** — code, identifiers, and
+  columns of aligned numbers only (`.ide-mono`, `code`, `pre`, `kbd`). `.con-root` used to force
+  JetBrains Mono onto every word of UI prose; it no longer does, and re-adding a blanket monospace
+  `font-family` to a shell class regresses the whole app. Ramp: page title 24 / card title + body 14 /
+  labels + buttons 13 / captions + badges 12. **Nothing below 12px**, and hierarchy comes from weight
+  and token tier, never opacity.
+- **Shape.** `--ide-r-control` (6px) for controls and pills, `--ide-r-card` (10px) for containers,
+  `--ide-r-pill` (999px) for badges and dots. Three roles, no fourth.
+- **Space.** `--ide-s1…--ide-s6` = 4/8/12/16/24/32.
+- **Controls.** Every button, input, and select is `--ide-control-h` (32px) or `--ide-control-h-lg`
+  (38px). `.ide-btn` is the accent-filled commit action, `.ide-btn.ghost` is everything else,
+  `.ide-btn.danger` is a ghost that turns destructive on hover only, and `:disabled` is unmistakably
+  dead. A control must fit its label or let the row wrap — never `overflow: hidden` on a control.
+- **Containers.** One visible edge per box. A card inside a card takes a tint (`.ide-card .ide-card`,
+  `.ide-inner`); an inline callout is `.ide-note[.ok|.warn|.bad|.info]` — a tint plus a 3px leading
+  edge, not a second full stroke.
+- **Selection** is a fill plus strengthened text, never a border or an inset ring. Status/identity is
+  a quiet pill or an edge bar and must not fight the hover/selection grammar.
+- **Alignment.** A leading status badge in a list is a fixed-width COLUMN (`.ide-work-row > .ide-badge:first-child`,
+  and the 84px grid track in the run Evidence ledger). Letting the badge label size itself pushes every
+  row's title to a different x — the defect this pass was opened for.
+- **Disclosures.** All `<details>` inside `.ide-root` share one chevron + control-height summary.
+- **Motion.** `--ide-ease` only; hover changes colour, not position.
+
+Before/after evidence for the pass lives outside the repo in `ux-gallery/` (92 pairs, desktop
+1600×900 + mobile 375×667, captured on the provider-free `web-qa` fixture stack).
+
 ## Recent work (kept as breadcrumbs)
 
 - **Run-result recovery-card + mobile layout QA pass (2026-08-05, provider-free web-qa walk)** — founder-reported: the terminal "NEXT STEP" card on `/result/:id` collapsed at desktop widths because `.ide-recovery-card`'s two-column grid sized its second track to the action row's max-content, so a long `terminalOutcome.primaryAction` label crushed title/description into a ~120px sliver with stacked chips and dead space. `ide.css` now lays the card out as a single column (header → copy → chip row → bottom action row, `.ide-recovery-actions` left-aligned with `margin-top`); the same classes serve the "Current diagnosis" card. Same pass: the run Ask composer got `.ide-ask-composer`/`.ide-ask-composer-actions` classes and stacks full-width on ≤600px instead of squeezing the textarea beside the Send/follow-up column; `.ide-code-toolbar` scrolls horizontally in place instead of clipping Revert hunk/Wrap/Copy on phones; and the org-settings workspace-setup callout row uses `alignItems: 'flex-start'` so the "Finish setup" button no longer stretches to the description height. Verified via the web-qa fixture stack with Playwright screenshots at 1600×900, 2000×1000, and 375×667.

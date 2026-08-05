@@ -339,7 +339,7 @@ export function IdeProjectSettings() {
                       </option>
                     ))}
                   </select>
-                  <div style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 4}}>
+                  <div style={{fontSize: 12, color: 'var(--ide-fg-muted)', marginTop: 4}}>
                     {!providerReadiness.supported
                       ? 'The server will enforce provider policy when work starts.'
                       : providerReadiness.error
@@ -368,7 +368,7 @@ export function IdeProjectSettings() {
                     disabled={!canEdit}
                     onChange={(e) => setBranchNaming(e.target.value)}
                   />
-                  <div style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 4}}>
+                  <div style={{fontSize: 12, color: 'var(--ide-fg-muted)', marginTop: 4}}>
                     Variables: {'{slug}'}, {'{date}'}, {'{runId}'}
                     <br />
                     Example: execspec/{'{slug}'}-{'{date}'} →
@@ -505,12 +505,12 @@ export function IdeProjectSettings() {
                           >
                             {display.label}
                           </div>
-                          <div style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}>
+                          <div style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}>
                             {display.sizeLabel}
                             {d.mimeType ? ` · ${d.mimeType}` : ''}
                           </div>
                           {display.readiness && (
-                            <div style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 2}}>
+                            <div style={{fontSize: 12, color: 'var(--ide-fg-muted)', marginTop: 2}}>
                               {display.readiness.replace(/_/g, ' ').toLowerCase()}
                             </div>
                           )}
@@ -632,10 +632,10 @@ export function IdeProjectSettings() {
                     >
                       <div style={{display: 'flex', alignItems: 'center', gap: 8}}>
                         <div style={{flex: 1, minWidth: 0}}>
-                          <div className='ide-mono' style={{fontSize: 11}}>
+                          <div className='ide-mono' style={{fontSize: 12}}>
                             {job.id.slice(0, 8)}
                           </div>
-                          <div style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 3}}>
+                          <div style={{fontSize: 12, color: 'var(--ide-fg-muted)', marginTop: 3}}>
                             {new Date(job.createdAt).toLocaleString()}
                             {job.sizeBytes != null ? ` · ${formatBytes(job.sizeBytes)}` : ''}
                             {job.expiresAt
@@ -656,14 +656,14 @@ export function IdeProjectSettings() {
                         </IdeBadge>
                       </div>
                       {job.errorCode && (
-                        <div style={{fontSize: 11, color: 'var(--ide-red)', marginTop: 6}}>
+                        <div style={{fontSize: 12, color: 'var(--ide-red)', marginTop: 6}}>
                           {job.errorCode.replace(/_/g, ' ')}
                         </div>
                       )}
                       {job.sha256 && (
                         <div
                           className='ide-mono'
-                          style={{fontSize: 10, color: 'var(--ide-fg-muted)', marginTop: 5}}
+                          style={{fontSize: 12, color: 'var(--ide-fg-muted)', marginTop: 5}}
                         >
                           SHA-256 {job.sha256}
                         </div>
@@ -696,7 +696,7 @@ export function IdeProjectSettings() {
                         </button>
                       </div>
                       {exportAudit?.jobId === job.id && (
-                        <div style={{marginTop: 10, fontSize: 11}}>
+                        <div style={{marginTop: 10, fontSize: 12}}>
                           {exportAudit.rows.map((event) => (
                             <div key={event.id} className='ide-kv'>
                               <span>{event.eventType.replace(/_/g, ' ')}</span>

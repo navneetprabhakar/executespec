@@ -409,7 +409,7 @@ export default function IdeProject() {
           </select>
           <div
             role={selectedProviderReady ? 'status' : 'alert'}
-            style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 4}}
+            style={{fontSize: 12, color: 'var(--ide-fg-muted)', marginTop: 4}}
           >
             {providerReadiness.error
               ? 'Provider readiness unavailable; starting work is disabled.'
@@ -429,7 +429,7 @@ export default function IdeProject() {
               options={modelPickerOptions}
               onChange={setModelName}
             />
-            <div style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 4}}>
+            <div style={{fontSize: 12, color: 'var(--ide-fg-muted)', marginTop: 4}}>
               Overrides this run only
             </div>
           </div>

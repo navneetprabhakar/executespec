@@ -45,17 +45,7 @@ function SectionTitle({children}: {children: React.ReactNode}) {
 // Soft blue informational callout (mirrors IdeOrg's InfoCard).
 function InfoCard({children}: {children: React.ReactNode}) {
   return (
-    <div
-      className='ide-card'
-      style={{
-        marginBottom: 12,
-        fontSize: 12.5,
-        lineHeight: 1.55,
-        color: 'var(--ide-fg)',
-        background: 'color-mix(in srgb, var(--ide-blue) 12%, transparent)',
-        borderColor: 'color-mix(in srgb, var(--ide-blue) 35%, transparent)',
-      }}
-    >
+    <div className='ide-note info' style={{marginBottom: 12}}>
       {children}
     </div>
   );
@@ -64,7 +54,7 @@ function InfoCard({children}: {children: React.ReactNode}) {
 function Stat({label, value}: {label: string; value: React.ReactNode}) {
   return (
     <div>
-      <div style={{color: 'var(--ide-fg-muted)', fontSize: 11, marginBottom: 2}}>{label}</div>
+      <div style={{color: 'var(--ide-fg-muted)', fontSize: 12, marginBottom: 2}}>{label}</div>
       <div style={{fontWeight: 700, fontSize: 16, color: 'var(--ide-fg-bright)'}}>{value}</div>
     </div>
   );
@@ -163,7 +153,7 @@ export function IdeBilling() {
               <div>
                 <div
                   style={{
-                    fontSize: 10,
+                    fontSize: 12,
                     fontWeight: 700,
                     color: 'var(--ide-fg-muted)',
                     letterSpacing: '0.12em',
@@ -175,7 +165,7 @@ export function IdeBilling() {
                 </div>
                 <div
                   style={{
-                    fontSize: 20,
+                    fontSize: 18,
                     fontWeight: 700,
                     letterSpacing: '-0.02em',
                     color: 'var(--ide-fg-bright)',
@@ -239,14 +229,14 @@ export function IdeBilling() {
                   <div>
                     <div
                       style={{
-                        fontSize: 13.5,
+                        fontSize: 13,
                         fontWeight: 700,
                         color: 'var(--ide-fg-bright)',
                       }}
                     >
                       AI credits
                     </div>
-                    <div style={{fontSize: 12.5, color: 'var(--ide-fg-muted)', marginTop: 2}}>
+                    <div style={{fontSize: 12, color: 'var(--ide-fg-muted)', marginTop: 2}}>
                       $1.25 = 100 AI credits. Frontier calls step down automatically near policy
                       thresholds.
                     </div>
@@ -259,7 +249,7 @@ export function IdeBilling() {
                     {managedAiStatusLabel(managedAi)}
                   </IdeBadge>
                 </div>
-                <div style={{fontSize: 12.5, color: 'var(--ide-fg-muted)', marginBottom: 12}}>
+                <div style={{fontSize: 12, color: 'var(--ide-fg-muted)', marginBottom: 12}}>
                   {formatManagedAiPlanMessage(managedAi)}
                 </div>
                 <div
@@ -367,7 +357,7 @@ export function IdeBilling() {
           <div className='ide-card'>
             <div
               style={{
-                fontSize: 11,
+                fontSize: 12,
                 fontWeight: 700,
                 color: 'var(--ide-fg-muted)',
                 letterSpacing: '0.12em',
@@ -451,7 +441,7 @@ export function IdeBilling() {
                       </div>
                       <div
                         style={{
-                          fontSize: 11.5,
+                          fontSize: 12,
                           color: 'var(--ide-fg-muted)',
                           display: 'flex',
                           gap: 6,
@@ -674,7 +664,7 @@ export function IdePlans() {
                       right: 14,
                       background: isCurrent ? 'var(--ide-green)' : 'var(--ide-accent)',
                       color: 'var(--ide-accent-fg)',
-                      fontSize: 9.5,
+                      fontSize: 12,
                       fontWeight: 700,
                       padding: '3px 9px',
                       borderRadius: 999,
@@ -698,7 +688,7 @@ export function IdePlans() {
                   <div>
                     <span
                       style={{
-                        fontSize: 22,
+                        fontSize: 24,
                         fontWeight: 700,
                         letterSpacing: '-0.02em',
                         color: 'var(--ide-fg-bright)',
@@ -718,7 +708,7 @@ export function IdePlans() {
                 {showYearlyLine && (
                   <div
                     style={{
-                      fontSize: 11.5,
+                      fontSize: 12,
                       color: 'var(--ide-fg-muted)',
                       textAlign: 'right',
                       marginBottom: 6,
@@ -742,7 +732,7 @@ export function IdePlans() {
                 {p.recommended && (
                   <div
                     style={{
-                      fontSize: 11.5,
+                      fontSize: 12,
                       fontWeight: 600,
                       color: 'var(--ide-accent)',
                       marginBottom: 14,
