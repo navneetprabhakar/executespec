@@ -28,6 +28,18 @@ removal instructions. Both `PlanSourceHttpRouteGate` and final deterministic HTT
 use this parser rather than maintaining divergent regexes. Exact source polarity overrides a
 contradictory planner restatement. A forbidden method must be absent while another supported method
 exists at the same path; an `ANY` mapping violates the forbidden-method contract.
+`SpringHttpSurfaceExtractor.extractWithApplicability` additionally reports whether any admitted
+production Java source carries a recognized Spring MVC mapping annotation (`@RequestMapping` /
+`@GetMapping` family). This is the stack-applicability discriminator required by the V367
+principle: an empty successful extraction over a Node/Express, FastAPI, Go, Micronaut/JAX-RS, or
+plain-Java repository is `NOT_APPLICABLE`, never positive "no routes exist" evidence. The
+`integration/DeterministicHttpRequirementVerifier` consumes it — when exact required/forbidden
+routes exist but NO inspected root has a Spring-recognizable source, verification returns the
+honest `unprovableForStack` state (ledger evidence note, no `DETERMINISTIC_HTTP_*` failure) instead
+of failing the run by construction; any root with a Spring surface keeps the full fail-closed
+semantics over the combined surface. `BrownfieldHttpContractGuard` is unaffected by design: it
+diffs removals against the run's own admitted baseline, so an empty non-Spring baseline can never
+produce a false removal.
 `BrownfieldHttpContractGuard` stores the admitted surface/digest on `pipeline_run` (V360) and
 compares it after workers/corrections and before publication. It is also enforced inside
 `RunValidationKickoff`, so every normal, crash-resume, retry-validation, and re-review entrypoint
