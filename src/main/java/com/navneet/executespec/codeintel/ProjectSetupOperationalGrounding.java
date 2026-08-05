@@ -152,7 +152,15 @@ final class ProjectSetupOperationalGrounding {
                 + " evidence.\n\n");
       } else {
         for (String command : commands) {
-          out.append(commandLabel(command)).append(":\n\n");
+          // The strict validator attributes each fenced command to a repository from the text
+          // between the previous fenced block and this one. A bare label ("Start:") carries no
+          // repository identity there, so a repository's second and later command blocks would be
+          // unattributable in a multi-repository document and fail closed. Name the exact
+          // repository in every label so each block is unambiguously scoped.
+          out.append(commandLabel(command))
+              .append(" for `")
+              .append(safeInline(repository))
+              .append("`:\n\n");
           appendCommand(out, command);
         }
       }
