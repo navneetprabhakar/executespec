@@ -92,6 +92,30 @@ class ValidationReportGoalProofEvaluatorTest {
   }
 
   @Test
+  void explicitlyNotApplicableEvidenceDoesNotBlockTheSoleIndependentGapState() {
+    // 2026-08-05 live residual: a LIBRARY/CLI run's endpoint-coverage row carries status "N/A"
+    // (V367 runtime-surface applicability). Declared-not-measurable evidence is not a missing
+    // proof — it must not demote the sole-independent-gap advisory state to a generic UNCERTAIN.
+    List<VerificationEvidenceDTO> ledger =
+        new java.util.ArrayList<>(
+            passingLedger().stream()
+                .map(
+                    row ->
+                        "tests".equals(row.id())
+                            ? row("tests", "Tests", "PASS", "DETERMINISTIC_WORKSPACE_SUITE", 10, 10)
+                            : row)
+                .toList());
+    ledger.add(row("endpoint-coverage", "Endpoint coverage", "N/A", "NOT_APPLICABLE"));
+
+    var decision = evaluator.evaluate("run-na-endpoint", PipelineResult.PASSED, ledger);
+
+    assertThat(decision.state()).isEqualTo(GoalDonenessState.UNCERTAIN);
+    assertThat(decision.recommendedDecision()).isEqualTo(RunContinuationDecision.STOP_BLOCKED);
+    assertThat(decision.independentProofGapOnly()).isTrue();
+    assertThat(decision.incompleteItems()).doesNotContain("Endpoint coverage is n/a");
+  }
+
+  @Test
   void independentProofGapOnlyIsFalseWheneverAnyOtherGapOrOutcomeExists() {
     // Mixed gaps: workspace-scope gap plus an unknown reviewer — not the only gap.
     List<VerificationEvidenceDTO> mixed =

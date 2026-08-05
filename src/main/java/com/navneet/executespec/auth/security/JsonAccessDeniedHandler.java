@@ -69,13 +69,25 @@ public class JsonAccessDeniedHandler implements AccessDeniedHandler {
   }
 
   private void writeJson(HttpServletResponse response, String path) throws IOException {
+    writeForbiddenBody(objectMapper, response, path, "Access denied");
+  }
+
+  /**
+   * Shared writer for every filter-level 403 producer. {@code JwtAuthenticationFilter}'s
+   * PAT-capability rejection reuses this so a scoped-PAT caller sees the same {@code timestamp,
+   * status, error, message, path} envelope as the URL-rule denial path instead of the Boot default
+   * body (live-verification residual, 2026-08-05).
+   */
+  public static void writeForbiddenBody(
+      ObjectMapper objectMapper, HttpServletResponse response, String path, String message)
+      throws IOException {
     response.setStatus(HttpStatus.FORBIDDEN.value());
     response.setContentType(MediaType.APPLICATION_JSON_VALUE);
     Map<String, Object> body = new LinkedHashMap<>();
     body.put("timestamp", Instant.now().toString());
     body.put("status", HttpStatus.FORBIDDEN.value());
     body.put("error", "forbidden");
-    body.put("message", "Access denied");
+    body.put("message", message);
     body.put("path", path);
     objectMapper.writeValue(response.getWriter(), body);
   }

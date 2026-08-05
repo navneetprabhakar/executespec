@@ -44,6 +44,11 @@ Auth, account, org, project, RBAC, PAT, OAuth, and user-level client preferences
   through `ValidationAdvice.onAccessDenied` and stay unchanged.
 - Pinned by `JsonAccessDeniedHandlerTest`, which asserts the 403 field set equals the 401 entry
   point's field set byte-for-byte.
+- The PAT-capability rejection in `JwtAuthenticationFilter.authenticateWithPat` reuses
+  `JsonAccessDeniedHandler.writeForbiddenBody` (message "PAT scope does not permit this action")
+  instead of `sendError`, so scoped-PAT API consumers get the same envelope — the last 403
+  producer that leaked the Boot default body (2026-08-05 live-verification residual). Pinned by
+  `JwtAuthenticationFilterPatTransportTest.patScopeDenialWritesTheUniformForbiddenJsonBody`.
 
 ## Signing-secret boot gate (RR-858)
 

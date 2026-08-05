@@ -34,6 +34,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
   private final JwtUtil jwtUtil;
   private final UserDetailsServiceImpl userDetailsService;
   private final PersonalAccessTokenService personalAccessTokenService;
+  private final com.fasterxml.jackson.databind.ObjectMapper objectMapper;
 
   @Override
   protected void doFilterInternal(
@@ -65,8 +66,13 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         personalAccessTokenService.resolveToken(token);
     if (resolved != null) {
       if (!PatScopePolicy.allows(resolved.scopes(), request.getMethod(), request.getRequestURI())) {
-        response.sendError(
-            HttpServletResponse.SC_FORBIDDEN, "PAT scope does not permit this action");
+        // Same uniform 403 envelope as JsonAccessDeniedHandler — sendError() here leaked the Boot
+        // default body shape to scoped-PAT API consumers (2026-08-05 live-verification residual).
+        JsonAccessDeniedHandler.writeForbiddenBody(
+            objectMapper,
+            response,
+            request.getRequestURI(),
+            "PAT scope does not permit this action");
         return false;
       }
       UserDetails userDetails = userDetailsService.loadUserById(resolved.userId());

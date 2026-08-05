@@ -74,7 +74,10 @@ public class PlanGateDecisionActivityListener {
     payload.put("actorEmail", event.actorEmail() == null ? "" : event.actorEmail());
     payload.put(
         "actorDisplayName", event.actorDisplayName() == null ? "" : event.actorDisplayName());
-    emitter.emit(projectId, type, actor, "RUN", event.runId(), summary, payload);
+    // A plan-gate decision always has a human decider; pass the raw id as fallback so a non-UUID
+    // principal (seeded operator accounts) still projects actorType=USER instead of SYSTEM.
+    emitter.emitWithActor(
+        projectId, type, actor, event.actorUserId(), "RUN", event.runId(), summary, payload);
   }
 
   private static UUID parseUuid(String s) {
