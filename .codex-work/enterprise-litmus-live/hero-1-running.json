@@ -1,8 +1,0 @@
-{
-  "ordinal": 1,
-  "runId": "174a17c3-2f6f-48ef-ab52-54da7b0a8afb",
-  "branch": "executespec/174a17c3/add-tag-order-limit-to-filtercatalog-in-",
-  "sourceSha": "68109d51a4f54698644a095c3fb05cb6645e98e2",
-  "requestSha256": "e512342ff3db99ceacd8823df06aa2a531c320d5fd2f7f83a8460b3a679dd5a3",
-  "submittedEvidenceId": "web-compose-plan-174a17c3-2f6f-48ef-ab52-54da7b0a8afb"
-}

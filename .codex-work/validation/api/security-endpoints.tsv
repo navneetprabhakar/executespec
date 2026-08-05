@@ -1,4 +1,0 @@
-github-webhook-no-signature	401
-github-webhook-bad-signature	401
-stripe-webhook-no-signature	401
-razorpay-webhook-no-signature	401

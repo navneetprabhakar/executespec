@@ -1,8 +1,0 @@
-{
-  "ordinal": 2,
-  "runId": "b4bf1631-7970-4ed0-896a-fd593e45693e",
-  "branch": "executespec/b4bf1631/add-tag-order-limit-support-to-filtercat",
-  "sourceSha": "68109d51a4f54698644a095c3fb05cb6645e98e2",
-  "requestSha256": "e512342ff3db99ceacd8823df06aa2a531c320d5fd2f7f83a8460b3a679dd5a3",
-  "submittedEvidenceId": "cli-server-submit:b4bf1631-7970-4ed0-896a-fd593e45693e"
-}
