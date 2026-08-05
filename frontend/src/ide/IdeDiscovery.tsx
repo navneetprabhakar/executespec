@@ -120,7 +120,7 @@ export function IdeInsights() {
           <div key={c.label} className='ide-card'>
             <div
               style={{
-                fontSize: 10,
+                fontSize: 12,
                 fontWeight: 700,
                 color: 'var(--ide-fg-muted)',
                 letterSpacing: '0.1em',
@@ -191,7 +191,7 @@ export function IdeInsights() {
         <>
           <SectionLabel>Most active user</SectionLabel>
           <div className='ide-card'>
-            <div style={{fontSize: 13.5, fontWeight: 500, color: 'var(--ide-fg-bright)'}}>
+            <div style={{fontSize: 13, fontWeight: 500, color: 'var(--ide-fg-bright)'}}>
               {topUser.name}
             </div>
             <div style={{fontSize: 12, color: 'var(--ide-fg-muted)', marginTop: 4}}>

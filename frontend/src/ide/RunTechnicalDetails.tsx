@@ -12,7 +12,7 @@ export function RunTechnicalDetails({
       <summary
         style={{
           cursor: 'pointer',
-          fontSize: 11,
+          fontSize: 12,
           color: 'var(--ide-fg-muted)',
         }}
       >
@@ -23,7 +23,7 @@ export function RunTechnicalDetails({
           display: 'grid',
           gap: 6,
           marginTop: 8,
-          fontSize: 11,
+          fontSize: 12,
           color: 'var(--ide-fg-muted)',
           overflowWrap: 'anywhere',
         }}

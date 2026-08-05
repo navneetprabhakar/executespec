@@ -61,17 +61,7 @@ function Banner({err, msg}: {err?: string; msg?: string}) {
 // "heads up" cards. Blue-tinted so it reads as guidance, not an error.
 function InfoCard({children}: {children: React.ReactNode}) {
   return (
-    <div
-      className='ide-card'
-      style={{
-        marginBottom: 12,
-        fontSize: 12.5,
-        lineHeight: 1.55,
-        color: 'var(--ide-fg)',
-        background: 'color-mix(in srgb, var(--ide-blue) 12%, transparent)',
-        borderColor: 'color-mix(in srgb, var(--ide-blue) 35%, transparent)',
-      }}
-    >
+    <div className='ide-note info' style={{marginBottom: 12}}>
       {children}
     </div>
   );
@@ -83,7 +73,7 @@ function Field({label, children}: {label: string; children: React.ReactNode}) {
     <div style={{marginBottom: 12}}>
       <div
         style={{
-          fontSize: 11,
+          fontSize: 12,
           fontWeight: 700,
           letterSpacing: '0.06em',
           textTransform: 'uppercase',
@@ -244,7 +234,7 @@ export function IdeApiKeys() {
         }}
       >
         <div
-          style={{fontSize: 13.5, fontWeight: 600, marginBottom: 8, color: 'var(--ide-fg-bright)'}}
+          style={{fontSize: 13, fontWeight: 600, marginBottom: 8, color: 'var(--ide-fg-bright)'}}
         >
           {label}
         </div>
@@ -282,7 +272,7 @@ export function IdeApiKeys() {
           )}
         </div>
         {canManage && connected && (
-          <div style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 6}}>
+          <div style={{fontSize: 12, color: 'var(--ide-fg-muted)', marginTop: 6}}>
             Leave blank to keep your current key
           </div>
         )}
@@ -332,10 +322,10 @@ export function IdeApiKeys() {
       <div className='ide-card' style={{marginTop: 12}}>
         <div style={{display: 'flex', alignItems: 'center', gap: 10}}>
           <div style={{flex: 1}}>
-            <div style={{fontSize: 13.5, fontWeight: 600, color: 'var(--ide-fg-bright)'}}>
+            <div style={{fontSize: 13, fontWeight: 600, color: 'var(--ide-fg-bright)'}}>
               OpenRouter
             </div>
-            <div style={{fontSize: 11.5, color: 'var(--ide-fg-muted)', marginTop: 4}}>
+            <div style={{fontSize: 12, color: 'var(--ide-fg-muted)', marginTop: 4}}>
               OpenRouter is an organization gateway credential, shared under the org provider policy
               rather than stored as a personal key.
             </div>
@@ -523,7 +513,7 @@ export function IdeOrgMembers() {
           <div>
             <div
               style={{
-                fontSize: 10,
+                fontSize: 12,
                 fontWeight: 700,
                 color: 'var(--ide-fg-muted)',
                 letterSpacing: '0.1em',
@@ -533,7 +523,7 @@ export function IdeOrgMembers() {
             >
               Seats used
             </div>
-            <div style={{fontSize: 22, fontWeight: 700, color: 'var(--ide-fg-bright)'}}>
+            <div style={{fontSize: 24, fontWeight: 700, color: 'var(--ide-fg-bright)'}}>
               {seatValue}
             </div>
             {orgTier === 'ENTERPRISE' && (
@@ -560,7 +550,7 @@ export function IdeOrgMembers() {
             <div style={{display: 'flex', flexDirection: 'column', gap: 8, minWidth: 240}}>
               <div
                 style={{
-                  fontSize: 10,
+                  fontSize: 12,
                   fontWeight: 700,
                   color: 'var(--ide-fg-muted)',
                   letterSpacing: '0.1em',
@@ -646,7 +636,7 @@ export function IdeOrgMembers() {
                     flexShrink: 0,
                     display: 'grid',
                     placeItems: 'center',
-                    fontSize: 11,
+                    fontSize: 12,
                     fontWeight: 700,
                     color: 'var(--ide-accent-fg)',
                     background: 'var(--ide-accent)',
@@ -663,7 +653,7 @@ export function IdeOrgMembers() {
                   </div>
                   <div
                     style={{
-                      fontSize: 11.5,
+                      fontSize: 12,
                       color: 'var(--ide-fg-muted)',
                       display: 'flex',
                       gap: 6,
@@ -758,7 +748,7 @@ export function IdeOrgMembers() {
                     </div>
                     <div
                       style={{
-                        fontSize: 11.5,
+                        fontSize: 12,
                         color: 'var(--ide-fg-muted)',
                         display: 'flex',
                         gap: 6,
@@ -889,10 +879,10 @@ function CreateOrgPanel({
         }}
       >
         <div style={{minWidth: 0, flex: 1}}>
-          <div style={{fontSize: 13.5, fontWeight: 600, color: 'var(--ide-fg-bright)'}}>
+          <div style={{fontSize: 13, fontWeight: 600, color: 'var(--ide-fg-bright)'}}>
             {workspaceSetupPending ? 'Team workspace setup' : 'Organization workspace'}
           </div>
-          <div style={{fontSize: 12.5, color: 'var(--ide-fg-muted)', lineHeight: 1.5}}>
+          <div style={{fontSize: 12, color: 'var(--ide-fg-muted)', lineHeight: 1.5}}>
             {workspaceSetupPending
               ? 'Your paid workspace has team controls enabled. Add organization name and domains so buyers do not see a personal workspace shell.'
               : org?.isPersonal
@@ -962,7 +952,7 @@ function CreateOrgPanel({
             />
           </Field>
           {err && (
-            <div style={{fontSize: 12.5, color: 'var(--ide-red)', marginBottom: 10}}>{err}</div>
+            <div style={{fontSize: 12, color: 'var(--ide-red)', marginBottom: 10}}>{err}</div>
           )}
           <button className='ide-btn' disabled={busy} onClick={submit}>
             {busy
@@ -1353,7 +1343,7 @@ export function IdeOrgSettings() {
         <div className='ide-card'>
           <div
             style={{
-              fontSize: 12.5,
+              fontSize: 12,
               color: 'var(--ide-fg-muted)',
               lineHeight: 1.5,
               marginBottom: 12,
@@ -1391,14 +1381,12 @@ export function IdeOrgSettings() {
         </div>
       ) : (
         <div className='ide-card'>
-          <div style={{fontSize: 13.5, fontWeight: 600, color: 'var(--ide-fg-bright)'}}>
+          <div style={{fontSize: 13, fontWeight: 600, color: 'var(--ide-fg-bright)'}}>
             {orgTier === 'ENTERPRISE'
               ? 'Enterprise seats are contract-managed'
               : 'Seat changes are unavailable'}
           </div>
-          <div
-            style={{fontSize: 12.5, color: 'var(--ide-fg-muted)', lineHeight: 1.5, marginTop: 6}}
-          >
+          <div style={{fontSize: 12, color: 'var(--ide-fg-muted)', lineHeight: 1.5, marginTop: 6}}>
             This org currently reports {seatDisplayCount} seat
             {seatDisplayCount === 1 ? '' : 's'}. Self-serve seat adjustment only applies to
             TEAM-tier billing. To give someone access to a project, open the project&apos;s{' '}
@@ -1542,7 +1530,7 @@ export function IdeOrgSettings() {
                 marginBottom: 8,
               }}
             >
-              <div style={{fontSize: 13.5, fontWeight: 600, color: 'var(--ide-fg-bright)'}}>
+              <div style={{fontSize: 13, fontWeight: 600, color: 'var(--ide-fg-bright)'}}>
                 {row.label}
               </div>
               <IdeBadge kind={row.connected ? 'ok' : 'warn'}>
@@ -1619,10 +1607,10 @@ export function IdeOrgSettings() {
           }}
         >
           <div>
-            <div style={{fontSize: 13.5, fontWeight: 700, color: 'var(--ide-fg-bright)'}}>
+            <div style={{fontSize: 13, fontWeight: 700, color: 'var(--ide-fg-bright)'}}>
               Managed AI policy
             </div>
-            <div style={{fontSize: 12.5, color: 'var(--ide-fg-muted)', marginTop: 2}}>
+            <div style={{fontSize: 12, color: 'var(--ide-fg-muted)', marginTop: 2}}>
               Effective server policy for this account. Enforcement is backend-side and can step
               models up or down during execution.
             </div>
@@ -1691,7 +1679,7 @@ export function IdeOrgSettings() {
                   style={{
                     width: 92,
                     flexShrink: 0,
-                    fontSize: 12.5,
+                    fontSize: 12,
                     color: 'var(--ide-fg-muted)',
                     textTransform: 'capitalize',
                   }}
@@ -1745,7 +1733,7 @@ export function IdeOrgSettings() {
           <div style={{minWidth: 0, flex: 1}}>
             <div
               style={{
-                fontSize: 13.5,
+                fontSize: 13,
                 fontWeight: 600,
                 marginBottom: 4,
                 color: 'var(--ide-fg-bright)',
@@ -1753,7 +1741,7 @@ export function IdeOrgSettings() {
             >
               Allow project-only collaborators outside your org
             </div>
-            <div style={{fontSize: 12.5, color: 'var(--ide-fg-muted)', lineHeight: 1.5}}>
+            <div style={{fontSize: 12, color: 'var(--ide-fg-muted)', lineHeight: 1.5}}>
               When on, org admins and super admins can invite any email — including Gmail or Outlook
               — to a single project as a viewer, developer, or project admin. This does not make
               them organization members and does not bypass the work-domain requirement for org
@@ -1862,10 +1850,10 @@ export function IdeOrgSettings() {
                   <div style={{fontSize: 13, fontWeight: 600, color: 'var(--ide-fg-bright)'}}>
                     {mName}
                     {isSelf && (
-                      <span style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}> · you</span>
+                      <span style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}> · you</span>
                     )}
                   </div>
-                  <div style={{fontSize: 11.5, color: 'var(--ide-fg-muted)'}}>
+                  <div style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}>
                     {m.email} · {m.orgRole}
                   </div>
                 </div>
@@ -1903,7 +1891,7 @@ export function IdeOrgSettings() {
       <div className='ide-card' style={{padding: 0}}>
         {!auditOpen ? (
           <div style={{padding: 16}}>
-            <div style={{fontSize: 12.5, color: 'var(--ide-fg-muted)', marginBottom: 12}}>
+            <div style={{fontSize: 12, color: 'var(--ide-fg-muted)', marginBottom: 12}}>
               Org-scoped audit trail — role changes, SSO, project-collaborator toggles, member
               actions. Shows only the most recent 50 events; older entries are not paged here.
             </div>
@@ -1916,7 +1904,7 @@ export function IdeOrgSettings() {
             <IdeLoader label='Loading audit log…' />
           </div>
         ) : audit.length === 0 ? (
-          <div style={{padding: 16, fontSize: 12.5, color: 'var(--ide-fg-muted)'}}>
+          <div style={{padding: 16, fontSize: 12, color: 'var(--ide-fg-muted)'}}>
             No audit entries yet.
           </div>
         ) : (
@@ -1939,11 +1927,11 @@ export function IdeOrgSettings() {
                 <span style={{fontSize: 13, fontWeight: 600, color: 'var(--ide-fg-bright)'}}>
                   {a.eventType}
                 </span>
-                <span style={{fontSize: 11, color: 'var(--ide-fg-muted)', flexShrink: 0}}>
+                <span style={{fontSize: 12, color: 'var(--ide-fg-muted)', flexShrink: 0}}>
                   {a.createdAt ? new Date(a.createdAt).toLocaleString() : ''}
                 </span>
               </div>
-              <div style={{fontSize: 11.5, color: 'var(--ide-fg-muted)', marginTop: 2}}>
+              <div style={{fontSize: 12, color: 'var(--ide-fg-muted)', marginTop: 2}}>
                 {a.entityType}
                 {a.entityId ? ` · ${a.entityId.slice(0, 12)}` : ''}
                 {a.actorEmail ? ` · by ${a.actorEmail}` : ''}
@@ -1952,7 +1940,7 @@ export function IdeOrgSettings() {
           ))
         )}
         {auditOpen && audit && audit.length >= 50 && (
-          <div style={{padding: '11px 16px', fontSize: 11.5, color: 'var(--ide-fg-muted)'}}>
+          <div style={{padding: '11px 16px', fontSize: 12, color: 'var(--ide-fg-muted)'}}>
             Showing the latest 50 events. Older audit history is not paginated here.
           </div>
         )}

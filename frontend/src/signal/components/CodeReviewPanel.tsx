@@ -251,14 +251,14 @@ export function CodeReviewPanel({
           paddingTop: 10,
           marginTop: 10,
           borderTop: `1px solid ${ide ? 'var(--ide-border)' : 'var(--signal-hairline)'}`,
-          fontSize: 12.5,
+          fontSize: 12,
         }}
       >
         {items.map(([k, v]) => (
           <div key={k}>
             <div
               style={{
-                fontSize: 10,
+                fontSize: 12,
                 fontWeight: 700,
                 color: muted,
                 letterSpacing: '0.1em',
@@ -509,7 +509,7 @@ export function CodeReviewPanel({
           >
             {loc}
           </span>
-          <span style={{fontSize: 11, color: muted}}>
+          <span style={{fontSize: 12, color: muted}}>
             {it.source}
             {it.ruleId ? ` · ${it.ruleId}` : ''}
             {it.category ? ` · ${it.category}` : ''}
@@ -517,7 +517,7 @@ export function CodeReviewPanel({
         </div>
         <div style={{fontSize: 13, lineHeight: 1.5, color: bright}}>{it.message}</div>
         {it.suggestedFix && (
-          <div style={{marginTop: 6, fontSize: 12.5}}>
+          <div style={{marginTop: 6, fontSize: 12}}>
             <Markdown>{it.suggestedFix}</Markdown>
           </div>
         )}
@@ -563,7 +563,7 @@ export function CodeReviewPanel({
           background: 'var(--signal-coral-soft)',
           color: 'var(--signal-coral-text)',
           border: '1px solid var(--signal-coral)',
-          borderRadius: 10,
+          borderRadius: 'var(--ide-r-card)',
           padding: '10px 14px',
           marginBottom: 12,
           fontSize: 13,

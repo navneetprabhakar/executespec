@@ -226,7 +226,7 @@ export function IdeWelcome() {
                 boxShadow: '0 0 8px var(--ide-accent)',
               }}
             />
-            <span className='ide-mono' style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}>
+            <span className='ide-mono' style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}>
               {shortRunId(liveRun.runId)}
             </span>
             <IdeBadge kind={statusKind(liveRun.status)}>{phaseLabel(liveRun.status)}</IdeBadge>
@@ -1146,7 +1146,7 @@ export function IdeCompose() {
                   </select>
                   <div
                     role={selectedProviderReady ? 'status' : 'alert'}
-                    style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 4}}
+                    style={{fontSize: 12, color: 'var(--ide-fg-muted)', marginTop: 4}}
                   >
                     {providerReadiness.error
                       ? 'Provider readiness unavailable; starting work is disabled.'
@@ -1168,7 +1168,7 @@ export function IdeCompose() {
                       options={modelPickerOptions}
                       onChange={setModelName}
                     />
-                    <div style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 4}}>
+                    <div style={{fontSize: 12, color: 'var(--ide-fg-muted)', marginTop: 4}}>
                       Overrides this run only
                     </div>
                   </div>
@@ -1221,17 +1221,7 @@ export function IdeCompose() {
                 </div>
               </div>
 
-              <div
-                style={{
-                  marginTop: 12,
-                  padding: 12,
-                  border: '1px solid var(--ide-border)',
-                  borderRadius: 8,
-                  fontSize: 12.5,
-                  lineHeight: 1.45,
-                  background: 'color-mix(in srgb, var(--ide-bg-tab-inactive) 55%, transparent)',
-                }}
-              >
+              <div className='ide-inner' style={{marginTop: 12, padding: 12}}>
                 <div
                   style={{
                     display: 'flex',
@@ -1356,7 +1346,7 @@ export function IdeCompose() {
                   Estimate
                 </div>
                 {/* RUN-7 — freshness line; flips to a refresh link-button after 60s. */}
-                <div style={{fontSize: 11, color: 'var(--ide-fg-muted)', margin: '-6px 0 8px'}}>
+                <div style={{fontSize: 12, color: 'var(--ide-fg-muted)', margin: '-6px 0 8px'}}>
                   {estimateStale ? (
                     <button
                       type='button'
@@ -1695,13 +1685,13 @@ export function IdeLive() {
             </div>
             <div className='ide-kv'>
               <span>Worker model</span>
-              <span className='ide-mono' style={{fontSize: 11}}>
+              <span className='ide-mono' style={{fontSize: 12}}>
                 {run.workerModel || '—'}
               </span>
             </div>
             <div className='ide-kv'>
               <span>Tokens</span>
-              <span className='ide-mono' style={{fontSize: 11}}>
+              <span className='ide-mono' style={{fontSize: 12}}>
                 {tokIn + tokOut > 0
                   ? `${tokIn.toLocaleString()} in · ${tokOut.toLocaleString()} out`
                   : '—'}
@@ -1756,7 +1746,7 @@ export function IdeLive() {
             Activity log{logList.length ? ` · ${logList.length}` : ''}{' '}
             <span
               className='ide-mono'
-              style={{fontSize: 11, color: 'var(--ide-fg-muted)', fontWeight: 400}}
+              style={{fontSize: 12, color: 'var(--ide-fg-muted)', fontWeight: 400}}
             >
               · {sseLabel}
             </span>
@@ -1784,7 +1774,7 @@ export function IdeLive() {
               style={{
                 maxHeight: '46vh',
                 overflowY: 'auto',
-                borderRadius: 8,
+                borderRadius: 'var(--ide-r-card)',
                 border: '1px solid var(--ide-border)',
                 background: 'var(--ide-bg-panel)',
                 padding: 8,
@@ -1795,7 +1785,7 @@ export function IdeLive() {
                   role='status'
                   style={{
                     padding: '6px 8px',
-                    fontSize: 11,
+                    fontSize: 12,
                     color: 'var(--ide-fg-muted)',
                     borderBottom: '1px solid var(--ide-border)',
                   }}
@@ -1829,13 +1819,13 @@ export function IdeLive() {
                       lineHeight: 1.5,
                     }}
                   >
-                    <span className='ide-mono' style={{color, marginRight: 8, fontSize: 10}}>
+                    <span className='ide-mono' style={{color, marginRight: 8, fontSize: 12}}>
                       {logLabel(ev.type)}
                     </span>
                     {ts != null && (
                       <span
                         className='ide-mono'
-                        style={{color: 'var(--ide-fg-muted)', marginRight: 8, fontSize: 10}}
+                        style={{color: 'var(--ide-fg-muted)', marginRight: 8, fontSize: 12}}
                       >
                         {new Date(ts).toLocaleTimeString()}
                       </span>

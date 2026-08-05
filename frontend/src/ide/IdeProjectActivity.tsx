@@ -47,13 +47,13 @@ export function IdeProjectActivity() {
                 fontSize: 13,
               }}
             >
-              <span style={{color: 'var(--ide-accent)', fontSize: 11, width: 110, flexShrink: 0}}>
+              <span style={{color: 'var(--ide-accent)', fontSize: 12, width: 110, flexShrink: 0}}>
                 {String(e.eventType || e.type || 'event')}
               </span>
               <span style={{flex: 1, minWidth: 180}}>
                 {String(e.summary || e.description || e.message || '')}
               </span>
-              <span style={{color: 'var(--ide-fg-muted)', fontSize: 11}}>{actorLabel(e)}</span>
+              <span style={{color: 'var(--ide-fg-muted)', fontSize: 12}}>{actorLabel(e)}</span>
             </div>
           ))}
         </div>

@@ -18,7 +18,7 @@ export function TrustPage() {
               <h4>{b.label}</h4>
               <div
                 className='count'
-                style={{color: 'var(--signal-ink)', fontSize: 15, fontWeight: 600}}
+                style={{color: 'var(--signal-ink)', fontSize: 14, fontWeight: 600}}
               >
                 {b.v}
               </div>
@@ -200,7 +200,7 @@ export function PublicPricingPage() {
                     right: 16,
                     background: 'var(--signal-y)',
                     color: 'var(--signal-y-text)',
-                    fontSize: 10,
+                    fontSize: 12,
                     fontWeight: 700,
                     padding: '3px 9px',
                     borderRadius: 999,
@@ -219,7 +219,7 @@ export function PublicPricingPage() {
               >
                 <div style={{fontSize: 16, fontWeight: 700}}>{p.tier}</div>
                 <div>
-                  <span style={{fontSize: 22, fontWeight: 700, letterSpacing: '-0.02em'}}>
+                  <span style={{fontSize: 24, fontWeight: 700, letterSpacing: '-0.02em'}}>
                     {p.price}
                   </span>
                   {p.unit && (
@@ -239,7 +239,7 @@ export function PublicPricingPage() {
                   margin: 0,
                   display: 'grid',
                   gap: 8,
-                  fontSize: 13.5,
+                  fontSize: 13,
                 }}
               >
                 {p.features.map((f) => (

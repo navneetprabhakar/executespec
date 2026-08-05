@@ -55,7 +55,7 @@ function ReconciliationCard({
   ];
   return (
     <div className='ide-card' style={{marginBottom: 12}}>
-      <div style={{fontSize: 12.5, fontWeight: 700, marginBottom: 8}}>Reconciliation</div>
+      <div style={{fontSize: 12, fontWeight: 700, marginBottom: 8}}>Reconciliation</div>
       <div style={{display: 'flex', flexDirection: 'column', gap: 8}}>
         {rows.map((row) => (
           <div key={row.label} style={{display: 'flex', gap: 8, alignItems: 'flex-start'}}>
@@ -63,9 +63,9 @@ function ReconciliationCard({
               {row.status || 'UNKNOWN'}
             </IdeBadge>
             <div style={{minWidth: 0}}>
-              <div style={{fontSize: 12.5, color: 'var(--ide-fg-bright)'}}>{row.label}</div>
+              <div style={{fontSize: 12, color: 'var(--ide-fg-bright)'}}>{row.label}</div>
               {row.explanation && (
-                <div style={{fontSize: 11.5, color: 'var(--ide-fg-muted)'}}>{row.explanation}</div>
+                <div style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}>{row.explanation}</div>
               )}
             </div>
           </div>
@@ -238,12 +238,12 @@ export function LlmUsageAuditPanel({orgId, scopeLabel}: {orgId: string; scopeLab
     <section aria-label='LLM usage audit'>
       <div className='ide-h2'>LLM token and cost audit</div>
       <div className='ide-card'>
-        <div style={{fontSize: 12.5, color: 'var(--ide-fg-muted)', marginBottom: 12}}>
+        <div style={{fontSize: 12, color: 'var(--ide-fg-muted)', marginBottom: 12}}>
           {scopeLabel}. Physical provider attempts include retries and failures. Cost is explicitly
           a lower bound whenever a provider did not report failed-attempt cost.
         </div>
         <div style={{display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'end'}}>
-          <label style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}>
+          <label style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}>
             From
             <input
               aria-label='Usage from date'
@@ -253,7 +253,7 @@ export function LlmUsageAuditPanel({orgId, scopeLabel}: {orgId: string; scopeLab
               onChange={(e) => setFrom(e.target.value)}
             />
           </label>
-          <label style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}>
+          <label style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}>
             To
             <input
               aria-label='Usage to date'
@@ -263,7 +263,7 @@ export function LlmUsageAuditPanel({orgId, scopeLabel}: {orgId: string; scopeLab
               onChange={(e) => setTo(e.target.value)}
             />
           </label>
-          <label style={{fontSize: 11, color: 'var(--ide-fg-muted)', flex: 1, minWidth: 180}}>
+          <label style={{fontSize: 12, color: 'var(--ide-fg-muted)', flex: 1, minWidth: 180}}>
             IANA timezone
             <input
               aria-label='Usage timezone'
@@ -293,11 +293,9 @@ export function LlmUsageAuditPanel({orgId, scopeLabel}: {orgId: string; scopeLab
             {download === 'json' ? 'Downloading…' : 'Download JSON (first 500)'}
           </button>
         </div>
-        {error && (
-          <div style={{color: 'var(--ide-red)', fontSize: 12.5, marginTop: 10}}>{error}</div>
-        )}
+        {error && <div style={{color: 'var(--ide-red)', fontSize: 12, marginTop: 10}}>{error}</div>}
         {downloadNote && (
-          <div role='status' style={{color: 'var(--ide-yellow)', fontSize: 12.5, marginTop: 10}}>
+          <div role='status' style={{color: 'var(--ide-yellow)', fontSize: 12, marginTop: 10}}>
             {downloadNote}
           </div>
         )}
@@ -317,14 +315,14 @@ export function LlmUsageAuditPanel({orgId, scopeLabel}: {orgId: string; scopeLab
               ['Known cost', `$${Number(report.totals.knownCostUsdLowerBound).toFixed(4)}`],
             ].map(([label, value]) => (
               <div className='ide-card' key={label} style={{minWidth: 120, flex: 1}}>
-                <div style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}>{label}</div>
-                <div style={{fontSize: 19, fontWeight: 700, marginTop: 3}}>{value}</div>
+                <div style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}>{label}</div>
+                <div style={{fontSize: 18, fontWeight: 700, marginTop: 3}}>{value}</div>
               </div>
             ))}
           </div>
 
           {report.totals.hasUnknownProviderCost && (
-            <div className='ide-card' style={{color: 'var(--ide-yellow)', fontSize: 12.5}}>
+            <div className='ide-card' style={{color: 'var(--ide-yellow)', fontSize: 12}}>
               {fmt(report.totals.unknownCostAttempts)} attempt(s) have unknown provider cost. The
               displayed USD amount is a lower bound, not a reconciled invoice total.
             </div>
@@ -336,7 +334,7 @@ export function LlmUsageAuditPanel({orgId, scopeLabel}: {orgId: string; scopeLab
 
           <div className='ide-card' style={{marginBottom: 12}}>
             <div style={{display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap'}}>
-              <strong style={{fontSize: 12.5}}>Group by</strong>
+              <strong style={{fontSize: 12}}>Group by</strong>
               <select
                 className='ide-input'
                 aria-label='Usage grouping dimension'
@@ -390,8 +388,8 @@ export function LlmUsageAuditPanel({orgId, scopeLabel}: {orgId: string; scopeLab
 
           <div className='ide-card'>
             <div style={{display: 'flex', justifyContent: 'space-between', gap: 8}}>
-              <strong style={{fontSize: 12.5}}>Physical attempts</strong>
-              <span style={{fontSize: 11.5, color: 'var(--ide-fg-muted)'}}>
+              <strong style={{fontSize: 12}}>Physical attempts</strong>
+              <span style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}>
                 {report.page.totalRows} total · page {report.page.number + 1} of{' '}
                 {Math.max(1, report.page.totalPages)}
               </span>

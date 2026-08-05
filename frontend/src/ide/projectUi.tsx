@@ -50,7 +50,10 @@ export function ProjectRouteTabs({
           </div>
         )}
       </div>
-      <div className='ide-rtabs ide-local-tabs' style={{marginBottom: 16, borderRadius: 4}}>
+      <div
+        className='ide-rtabs ide-local-tabs'
+        style={{marginBottom: 16, borderRadius: 'var(--ide-r-control)'}}
+      >
         {tabs.map((t) => (
           <button
             key={t.key}
@@ -87,7 +90,7 @@ export function ProjectMetaLabel({children}: {children: ReactNode}) {
   return (
     <div
       style={{
-        fontSize: 10,
+        fontSize: 12,
         fontWeight: 700,
         color: 'var(--ide-fg-muted)',
         letterSpacing: '0.1em',
@@ -105,7 +108,7 @@ export function ProjectField({label, children}: {label: string; children: ReactN
     <div style={{marginBottom: 14}}>
       <div
         style={{
-          fontSize: 11,
+          fontSize: 12,
           fontWeight: 700,
           letterSpacing: '0.14em',
           textTransform: 'uppercase',
@@ -143,7 +146,7 @@ export function ProjectChatMessageCard({message}: {message: AgentChatBubble}) {
           </button>
         )}
       </div>
-      <div className='signal-md' style={{fontSize: 13.5}}>
+      <div className='signal-md' style={{fontSize: 13}}>
         <Markdown>{visible}</Markdown>
       </div>
     </div>

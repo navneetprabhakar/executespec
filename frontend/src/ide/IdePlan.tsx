@@ -493,7 +493,7 @@ export default function IdePlan() {
             </div>
           </div>
 
-          <div className='ide-card' style={{fontSize: 12.5, lineHeight: 1.5}}>
+          <div className='ide-card' style={{fontSize: 12, lineHeight: 1.5}}>
             <div
               style={{
                 display: 'flex',
@@ -552,7 +552,7 @@ export default function IdePlan() {
               <div
                 style={{
                   textAlign: 'right',
-                  fontSize: 11,
+                  fontSize: 12,
                   color: 'var(--ide-fg-muted)',
                   marginTop: 4,
                 }}

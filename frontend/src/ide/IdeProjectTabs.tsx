@@ -284,8 +284,8 @@ export function ProjectTabs({projectId}: {projectId: string}) {
 function Metric({label, value}: {label: string; value: string}) {
   return (
     <div className='ide-card' style={{flex: 1, minWidth: 130}}>
-      <div style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}>{label}</div>
-      <div style={{fontSize: 22, fontWeight: 700, color: 'var(--ide-fg-bright)', marginTop: 4}}>
+      <div style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}>{label}</div>
+      <div style={{fontSize: 24, fontWeight: 700, color: 'var(--ide-fg-bright)', marginTop: 4}}>
         {value}
       </div>
     </div>
@@ -504,7 +504,7 @@ export function IdeProjectPulse() {
                         {(add != null || rem != null) && (
                           <span
                             className='ide-mono'
-                            style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}
+                            style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}
                           >
                             {add != null ? `+${add}` : ''} {rem != null ? `−${rem}` : ''}
                           </span>
@@ -523,7 +523,7 @@ export function IdeProjectPulse() {
                       </div>
                       <div
                         className='ide-mono'
-                        style={{fontSize: 11.5, color: 'var(--ide-fg-muted)', marginTop: 4}}
+                        style={{fontSize: 12, color: 'var(--ide-fg-muted)', marginTop: 4}}
                       >
                         {repo}#{String(num ?? '')}
                       </div>
@@ -608,7 +608,7 @@ export function IdeProjectPulse() {
                     {typeof cost === 'number' && cost > 0 && (
                       <span
                         className='ide-mono'
-                        style={{fontSize: 11, color: 'var(--ide-fg-muted)', flexShrink: 0}}
+                        style={{fontSize: 12, color: 'var(--ide-fg-muted)', flexShrink: 0}}
                       >
                         ${cost.toFixed(4)}
                       </span>
@@ -699,7 +699,7 @@ function RunDetailPanel({
           <IdeBadge kind={statusKind(run.status)}>{verdict}</IdeBadge>
           <div
             className='ide-mono'
-            style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 4}}
+            style={{fontSize: 12, color: 'var(--ide-fg-muted)', marginTop: 4}}
           >
             R-{run.runId.slice(0, 6)} · {run.status?.toLowerCase() || '—'}
           </div>
@@ -753,7 +753,7 @@ function RunDetailPanel({
               return (
                 <div
                   key={t.taskId || i}
-                  style={{display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5}}
+                  style={{display: 'flex', alignItems: 'center', gap: 8, fontSize: 12}}
                 >
                   <IdeBadge kind={k}>{ts || 'TODO'}</IdeBadge>
                   <span
@@ -1131,7 +1131,7 @@ function IdeProjectRunsInner() {
                         </span>
                         <span
                           className='ide-mono'
-                          style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}
+                          style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}
                         >
                           R-{r.runId.slice(0, 6)} · {relTime(r.startedAt)}
                         </span>
@@ -1154,7 +1154,7 @@ function IdeProjectRunsInner() {
                           <span>live</span>
                         ) : null}
                         {typeof cost === 'number' && cost > 0 && (
-                          <span className='ide-mono' style={{fontSize: 11}}>
+                          <span className='ide-mono' style={{fontSize: 12}}>
                             ${cost.toFixed(4)}
                           </span>
                         )}
@@ -1232,7 +1232,7 @@ function IdeProjectRunsInner() {
                       <IdeBadge kind={statusKind(status)}>PR · {status}</IdeBadge>
                       <span style={{flex: 1}} />
                       {!!(pr.mergedAt || pr.openedAt) && (
-                        <span style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}>
+                        <span style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}>
                           {relTime(String(pr.mergedAt || pr.openedAt))}
                         </span>
                       )}
@@ -1250,7 +1250,7 @@ function IdeProjectRunsInner() {
                     </div>
                     <div
                       className='ide-mono'
-                      style={{fontSize: 11.5, color: 'var(--ide-fg-muted)', marginTop: 4}}
+                      style={{fontSize: 12, color: 'var(--ide-fg-muted)', marginTop: 4}}
                     >
                       {repo}#{num}
                     </div>
@@ -1266,13 +1266,13 @@ function IdeProjectRunsInner() {
                       {add != null && (
                         <span
                           className='ide-mono'
-                          style={{fontSize: 11, color: 'var(--ide-green)'}}
+                          style={{fontSize: 12, color: 'var(--ide-green)'}}
                         >
                           +{add}
                         </span>
                       )}
                       {rem != null && (
-                        <span className='ide-mono' style={{fontSize: 11, color: 'var(--ide-red)'}}>
+                        <span className='ide-mono' style={{fontSize: 12, color: 'var(--ide-red)'}}>
                           −{rem}
                         </span>
                       )}
@@ -1285,7 +1285,7 @@ function IdeProjectRunsInner() {
                       )}
                       {verdict && <IdeBadge kind='warn'>{verdict}</IdeBadge>}
                       {comments > 0 && (
-                        <span style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}>
+                        <span style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}>
                           {comments} comment{comments === 1 ? '' : 's'}
                         </span>
                       )}
@@ -1645,10 +1645,10 @@ export function IdeProjectRepos() {
                     gap: 10,
                     padding: '8px 12px',
                     background: 'var(--ide-bg-sidebar)',
-                    borderRadius: 6,
+                    borderRadius: 'var(--ide-r-control)',
                   }}
                 >
-                  <span className='ide-mono' style={{flex: 1, fontSize: 12.5}}>
+                  <span className='ide-mono' style={{flex: 1, fontSize: 12}}>
                     {attachableTypedSlug}
                   </span>
                   <button
@@ -1686,10 +1686,10 @@ export function IdeProjectRepos() {
                       gap: 10,
                       padding: '8px 12px',
                       background: 'var(--ide-bg-sidebar)',
-                      borderRadius: 6,
+                      borderRadius: 'var(--ide-r-control)',
                     }}
                   >
-                    <span className='ide-mono' style={{flex: 1, fontSize: 12.5}}>
+                    <span className='ide-mono' style={{flex: 1, fontSize: 12}}>
                       {r.fullName}
                     </span>
                     <button

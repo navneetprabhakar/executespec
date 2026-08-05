@@ -51,7 +51,7 @@ export function PlanReviewDetails({planJson}: {planJson: string}) {
 
   return (
     <div data-testid='plan-review-details'>
-      <div className='ide-card' style={{fontSize: 12.5, lineHeight: 1.55}}>
+      <div className='ide-card' style={{fontSize: 12, lineHeight: 1.55}}>
         <div className='ide-kv'>
           <span>Runtime</span>
           <span>{[plan.projectType, plan.runtimeSurface].filter(Boolean).join(' · ') || '—'}</span>
@@ -77,7 +77,7 @@ export function PlanReviewDetails({planJson}: {planJson: string}) {
               {index + 1}. {task.title || task.id || 'Untitled step'}
               {task.complexity ? ` · ${task.complexity}` : ''}
             </summary>
-            <div style={{fontSize: 12.5, lineHeight: 1.55, marginTop: 10}}>
+            <div style={{fontSize: 12, lineHeight: 1.55, marginTop: 10}}>
               <div style={{marginBottom: 10}}>{task.description || 'No task description.'}</div>
               <strong>Depends on</strong>
               <BulletList items={task.dependsOn} />

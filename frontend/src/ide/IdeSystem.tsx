@@ -247,7 +247,7 @@ export default function IdeNotifications() {
                 {ts && (
                   <span
                     className='ide-mono'
-                    style={{fontSize: 11, color: 'var(--ide-fg-muted)', flexShrink: 0}}
+                    style={{fontSize: 12, color: 'var(--ide-fg-muted)', flexShrink: 0}}
                   >
                     {ts}
                   </span>
@@ -304,7 +304,7 @@ export function IdeSearch() {
           alignItems: 'center',
           background: 'var(--ide-bg-input, var(--ide-bg-tab-inactive))',
           border: '1px solid var(--ide-border)',
-          borderRadius: 6,
+          borderRadius: 'var(--ide-r-control)',
           padding: '8px 12px',
           marginBottom: 16,
         }}
@@ -342,11 +342,11 @@ export function IdeSearch() {
         <span
           className='ide-mono'
           style={{
-            fontSize: 10,
+            fontSize: 12,
             color: 'var(--ide-fg-muted)',
             background: 'var(--ide-bg-tab-inactive)',
             padding: '3px 7px',
-            borderRadius: 4,
+            borderRadius: 'var(--ide-r-control)',
             flexShrink: 0,
           }}
         >
@@ -401,7 +401,7 @@ export function IdeSearch() {
                     >
                       {runTitleFor(r)}
                     </span>
-                    <span className='ide-mono' style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}>
+                    <span className='ide-mono' style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}>
                       R-{r.runId.slice(0, 6)}
                     </span>
                   </span>
@@ -582,7 +582,7 @@ export function IdeAudit() {
                 </span>
                 <span
                   className='ide-mono'
-                  style={{fontSize: 11, color: 'var(--ide-fg-muted)', flexShrink: 0}}
+                  style={{fontSize: 12, color: 'var(--ide-fg-muted)', flexShrink: 0}}
                 >
                   {ts ? new Date(ts).toLocaleString() : '—'}
                 </span>
@@ -604,7 +604,7 @@ export function IdeEmptyProject() {
 
       <div className='ide-card' style={{borderColor: 'var(--ide-green)'}}>
         <div
-          style={{fontSize: 15, fontWeight: 600, color: 'var(--ide-fg-bright)', marginBottom: 6}}
+          style={{fontSize: 14, fontWeight: 600, color: 'var(--ide-fg-bright)', marginBottom: 6}}
         >
           You don’t have any projects yet
         </div>
