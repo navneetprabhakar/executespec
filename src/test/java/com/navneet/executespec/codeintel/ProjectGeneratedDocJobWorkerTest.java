@@ -73,6 +73,107 @@ class ProjectGeneratedDocJobWorkerTest {
   }
 
   @Test
+  void deterministicSetupPublicationCompletesWithoutTheProviderStartFence() {
+    // An empty SETUP command projection is assembled with zero provider calls, so the generator
+    // never invokes the provider-dispatch fence. The durable job must still complete normally and
+    // provider_started_at must remain unset (honest: no provider work occurred).
+    ProjectGeneratedDocJobStore store = mock(ProjectGeneratedDocJobStore.class);
+    ProjectDocGeneratorService generator = mock(ProjectDocGeneratorService.class);
+    ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+    executor.initialize();
+    var leaseExecutor = Executors.newSingleThreadScheduledExecutor();
+    try {
+      ProjectGeneratedDocJobWorker worker =
+          new ProjectGeneratedDocJobWorker(store, generator, executor, leaseExecutor);
+      var lease = lease("DEEPSEEK", "deepseek-v4-flash-native");
+      UUID resultId = UUID.randomUUID();
+      ProjectGeneratedDoc result =
+          ProjectGeneratedDoc.builder()
+              .id(resultId)
+              .projectId("project-1")
+              .docType(DocType.EXPLANATION)
+              .version(2)
+              .content("# Setting up — clone-only deterministic assembly")
+              .build();
+      doAnswer(
+              invocation -> {
+                // Deterministic path: the provider fence (argument 7) is deliberately NOT run.
+                @SuppressWarnings("unchecked")
+                java.util.function.Consumer<ProjectGeneratedDoc> fence = invocation.getArgument(8);
+                fence.accept(result);
+                return result;
+              })
+          .when(generator)
+          .generateExactForJob(
+              org.mockito.ArgumentMatchers.eq("project-1"),
+              org.mockito.ArgumentMatchers.eq(DocType.EXPLANATION),
+              org.mockito.ArgumentMatchers.eq("user-1"),
+              org.mockito.ArgumentMatchers.eq(com.navneet.executespec.router.LlmProvider.DEEPSEEK),
+              org.mockito.ArgumentMatchers.eq("deepseek-v4-flash-native"),
+              org.mockito.ArgumentMatchers.eq(lease.job().id()),
+              org.mockito.ArgumentMatchers.eq(lease.token()),
+              org.mockito.ArgumentMatchers.any(),
+              org.mockito.ArgumentMatchers.any());
+      org.mockito.Mockito.when(store.complete(lease, resultId, 2)).thenReturn(true);
+
+      worker.process(lease);
+
+      verify(store).complete(lease, resultId, 2);
+      verify(store, never()).markProviderStarted(any());
+      verify(store, never()).needsConfirmation(any(), anyString(), anyString());
+      verify(store, never()).fail(any(), anyString(), anyString());
+    } finally {
+      leaseExecutor.shutdownNow();
+      executor.shutdown();
+    }
+  }
+
+  @Test
+  void deterministicSetupValidationFailureBeforeProviderStartFailsClosedWithoutConfirmation() {
+    // If the zero-provider assembly cannot satisfy the strict validator, no provider work was
+    // dispatched, so the job must FAIL with the exact subcode instead of parking behind the
+    // uncertain-outcome confirmation barrier (the old repeated NEEDS_CONFIRMATION loop).
+    ProjectGeneratedDocJobStore store = mock(ProjectGeneratedDocJobStore.class);
+    ProjectDocGeneratorService generator = mock(ProjectDocGeneratorService.class);
+    ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+    executor.initialize();
+    var leaseExecutor = Executors.newSingleThreadScheduledExecutor();
+    try {
+      ProjectGeneratedDocJobWorker worker =
+          new ProjectGeneratedDocJobWorker(store, generator, executor, leaseExecutor);
+      var lease = lease("DEEPSEEK", "deepseek-v4-flash-native");
+      org.mockito.Mockito.when(
+              generator.generateExactForJob(
+                  org.mockito.ArgumentMatchers.eq("project-1"),
+                  org.mockito.ArgumentMatchers.eq(DocType.EXPLANATION),
+                  org.mockito.ArgumentMatchers.eq("user-1"),
+                  org.mockito.ArgumentMatchers.eq(
+                      com.navneet.executespec.router.LlmProvider.DEEPSEEK),
+                  org.mockito.ArgumentMatchers.eq("deepseek-v4-flash-native"),
+                  org.mockito.ArgumentMatchers.eq(lease.job().id()),
+                  org.mockito.ArgumentMatchers.eq(lease.token()),
+                  org.mockito.ArgumentMatchers.any(),
+                  org.mockito.ArgumentMatchers.any()))
+          .thenThrow(
+              new ProjectDocGeneratorService.InvalidGeneratedDocumentException(
+                  "clone commands must be present in a fenced block"));
+
+      worker.process(lease);
+
+      verify(store)
+          .fail(
+              lease,
+              "INVALID_GENERATED_DOCUMENT_CLONE_BLOCK_REQUIRED",
+              "The generated document did not satisfy the required document structure.");
+      verify(store, never()).markProviderStarted(any());
+      verify(store, never()).needsConfirmation(any(), anyString(), anyString());
+    } finally {
+      leaseExecutor.shutdownNow();
+      executor.shutdown();
+    }
+  }
+
+  @Test
   void persistsActionableFailureInsteadOfLosingTheJob() {
     ProjectGeneratedDocJobStore store = mock(ProjectGeneratedDocJobStore.class);
     ProjectDocGeneratorService generator = mock(ProjectDocGeneratorService.class);
