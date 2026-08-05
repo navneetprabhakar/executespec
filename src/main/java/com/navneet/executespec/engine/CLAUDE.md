@@ -60,6 +60,22 @@ arguments must never be claimed as a delivered product path — and now emits `[
 | `WorkerResult.java` | **(Phase 4, moved from `agent/`)** the worker's terminal result + `Outcome` enum. |
 | `WorkerTaskRequest.java` | **(Phase 4, moved from `agent/`)** the worker's input (provider / model / prompts / context / budget / verify flags), including an optional tighten-only `allowedToolNames` profile for bounded specialist passes. |
 
+**2026-08-02 zero-write output-cap recovery:** when a provider returns a tool-less
+`length`/`max_tokens`/`max_output_tokens` finish before any mutation, `WorkerAgent` makes exactly one
+same-route call with only `writeFile`/`editFile`/`completeTask`, required tool choice, and an
+8K–16K output allowance. It never parses partial assistant text as code. The response is queued
+through the normal worker response/tool-dispatch path on the same logical iteration; recovered
+writes therefore enter conversation history and update the ordinary write, churn, verification,
+and context state before the full tool surface resumes. `completeTask` is refused inside the
+recovery response itself: only a later normal turn can complete after all requested production and
+maintained-test edits plus verification. The recovery remains one-shot and preserves exact route,
+deadline, task-cost, and tool-authority fences; unadvertised tools are refused again at dispatch.
+A successful recovery mutation in either of the final two configured iterations receives only the
+missing part of a two-turn verify-then-complete window, capped at two additional guarded iterations.
+Salvage mutations use `WorkerAgent.toolCallLogEntry`'s canonical
+`tool(sig=…) [target=…] -> OK|ERR` representation; recovery markers must not invent a second log
+grammar because executor write counts and admitted Git-diff attribution consume this evidence.
+
 ## Common harness stages on the worker (RL-2026-06)
 
 Common completion/protection stages live IN the shared `WorkerAgent` as **flag/data-activated capabilities** — NOT a Terminal-Bench fork. Each is bounded/fail-open where it can block, and deliverable reads use `dispatchToolDirect` (workspace-agnostic: local `tool.execute()` on the VM workspace, or remote container dispatch). Inert for any consumer that doesn't opt in, so BUILD/PATCH are byte-identical until they do.
@@ -140,5 +156,10 @@ Fail-closed / evidence-honest corrections; no migration.
   `dispatchRemote`, so reconnects can no longer renew a terminal remote call forever.
 - **RR-622** — worker tool-call metrics record `boundedToolMetricName(tc.name())` (registered alias
   or `"unknown"`), so an adversarial provider cannot mint unbounded Micrometer series.
+- **RR-2026-08-03 physical role attribution** — `WorkerTaskRequest` carries optional tighten-only
+  `agentRole`/`stepPrefix` attribution for specialized consumers. `ReviewerAgent` sets
+  `ReviewerAgent/reviewer.<pass>.*`; `WorkerLlmRequestFactory` applies it consistently to ordinary,
+  salvage, finalizer, and critic calls. Null fields preserve `WorkerAgent/worker.*`, and retry
+  normalization preserves the original attribution.
 - **RR-1562** — `EngineBudget.dollarCap` now propagates onto `WorkerTaskRequest.dollarCap`; the worker
   enforces `min(dollarCap, PipelineRun.hardCapUsd)`, so a per-solve cap is no longer a dead field.

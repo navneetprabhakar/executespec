@@ -1,7 +1,28 @@
 import type * as api from '@/lib/api';
 import type {DiffLine} from '@/ide/IdeKit';
+import {isAwaitingApprovalRunStatus, isLiveRunStatus, isQueuedRunStatus} from '@/lib/runStatus';
 
 export type Verdict = {label: string; kind: 'ok' | 'warn' | 'bad'};
+
+export type RunSurfaceDestination = 'plan' | 'live' | null;
+
+/**
+ * Keeps the terminal result surface honest: plan-gated runs belong on the plan surface and every
+ * active pipeline phase belongs on the live surface. A missing report during these phases is
+ * expected pending evidence, not a terminal report-load failure.
+ */
+export function runSurfaceDestination(status: string | null | undefined): RunSurfaceDestination {
+  const normalized = status?.trim().toUpperCase();
+  if (isAwaitingApprovalRunStatus(normalized)) return 'plan';
+  if (
+    isQueuedRunStatus(normalized) ||
+    isLiveRunStatus(normalized) ||
+    ['GENERATING_REPORT', 'REPORTING'].includes(normalized || '')
+  ) {
+    return 'live';
+  }
+  return null;
+}
 
 export interface RunArtifactActionAvailability {
   push: boolean;
@@ -19,12 +40,78 @@ export interface RunArtifactActionAvailability {
 export interface TerminalFailureEvidence {
   title: string;
   detail: string;
+  kind: 'warn' | 'bad' | 'neutral';
+  nextAction?: string | null;
+  supportCode?: string | null;
+}
+
+export type TerminalOutcomePrimaryAction = {
+  type: string;
+  label: string;
+  behavior: 'navigate' | 'retry' | 'tab';
+  href?: string;
+  tab?: 'Logs' | 'Validation' | 'PR';
+};
+
+/**
+ * Turns the server-owned next action into one executable primary control. An explicit server href
+ * always wins; type fallbacks keep older payloads actionable without inventing extra choices.
+ */
+export function terminalOutcomePrimaryAction(
+  outcome: api.RunTerminalOutcome | null | undefined,
+): TerminalOutcomePrimaryAction | null {
+  const action = outcome?.nextAction;
+  if (!action) return null;
+  if (isSafeTerminalActionHref(action.href)) {
+    return {type: action.type, label: action.label, behavior: 'navigate', href: action.href};
+  }
+  switch (action.type) {
+    case 'REVIEW_EVIDENCE':
+      return {type: action.type, label: action.label, behavior: 'tab', tab: 'Validation'};
+    case 'OPEN_PUBLICATION_ELIGIBILITY':
+      // The Pull request tab renders the publication-eligibility reason and push affordance.
+      return {type: action.type, label: action.label, behavior: 'tab', tab: 'PR'};
+    case 'RETRY_RUN':
+      return {type: action.type, label: action.label, behavior: 'retry'};
+    case 'OPEN_PROVIDER_SETTINGS':
+      return {type: action.type, label: action.label, behavior: 'navigate', href: '/provider-keys'};
+    case 'REVIEW_POLICY':
+      return {type: action.type, label: action.label, behavior: 'navigate', href: '/org/settings'};
+    case 'START_NEW_RUN':
+      return {type: action.type, label: action.label, behavior: 'navigate', href: '/compose'};
+    case 'CONTACT_SUPPORT': {
+      const supportCode = outcome.supportCode ? ` ${outcome.supportCode}` : '';
+      return {
+        type: action.type,
+        label: action.label,
+        behavior: 'navigate',
+        href: `mailto:navneet@executespec.ai?subject=${encodeURIComponent(
+          `ExecuteSpec run support${supportCode}`,
+        )}`,
+      };
+    }
+    default:
+      return {type: action.type, label: action.label, behavior: 'tab', tab: 'Logs'};
+  }
+}
+
+function isSafeTerminalActionHref(href: string | null | undefined): href is string {
+  if (!href) return false;
+  return (href.startsWith('/') && !href.startsWith('//')) || href.startsWith('mailto:');
 }
 
 export interface PublicationTrustFact {
   label: string;
   value: string;
   kind: 'ok' | 'warn' | 'bad' | 'neutral';
+}
+
+export function missingValidationReportExplanation(
+  run: Pick<api.RunDetail, 'tasks'> | null | undefined,
+): string {
+  return run?.tasks?.length
+    ? 'Worker steps ran, but no completed validation report was produced. Use the activity log and publication evidence to diagnose where validation stopped.'
+    : 'Execution did not reach the worker phase, so no validation report was produced.';
 }
 
 export type CorrectionEvidenceAction = NonNullable<
@@ -185,6 +272,15 @@ export function publicationTrustFacts(
     publication?.evidenceWorkspaceGeneration != null &&
     publication.currentWorkspaceGeneration != null &&
     publication.evidenceWorkspaceGeneration === publication.currentWorkspaceGeneration;
+  const testsPassed = run.testsPassed ?? 0;
+  const testsSkipped = run.testsSkipped ?? 0;
+  const testsTotal = run.testsTotal;
+  const testPopulationValid =
+    testsTotal != null &&
+    testsTotal > 0 &&
+    testsPassed > 0 &&
+    testsSkipped >= 0 &&
+    testsPassed + testsSkipped === testsTotal;
 
   const facts: PublicationTrustFact[] = [
     {
@@ -236,14 +332,14 @@ export function publicationTrustFacts(
       label: 'Tests',
       value:
         run.testsTotal != null
-          ? `${run.testsPassed ?? 0}/${run.testsTotal} passed · ${
+          ? `${run.testsPassed ?? 0}/${run.testsTotal} passed · ${run.testsSkipped ?? 0} skipped · ${
               run.testExecutionVerified ? 'execution verified' : 'not execution verified'
             }`
           : 'Unmeasured',
       kind:
-        run.testExecutionVerified && (run.testsTotal ?? 0) > 0 && run.testsPassed === run.testsTotal
+        run.testExecutionVerified && testPopulationValid
           ? 'ok'
-          : run.testsTotal != null && (run.testsPassed ?? 0) < run.testsTotal
+          : run.testsTotal != null
             ? 'bad'
             : 'warn',
     },
@@ -343,9 +439,24 @@ export function publicationTrustFacts(
  * instead of incorrectly claiming that there is nothing to show.
  */
 export function terminalFailureEvidence(
-  run?: Pick<api.RunDetail, 'status' | 'statusReason' | 'failureReason'> | null,
+  run?: Pick<api.RunDetail, 'status' | 'statusReason' | 'failureReason' | 'terminalOutcome'> | null,
 ): TerminalFailureEvidence | null {
   const status = (run?.status || '').toUpperCase();
+  const outcome = run?.terminalOutcome;
+  if (outcome && ['FAILED', 'ERROR', 'PARTIAL', 'CANCELLED'].includes(status)) {
+    return {
+      title: outcome.customerTitle,
+      detail: outcome.customerMessage,
+      kind:
+        outcome.category === 'PLATFORM_FAILURE'
+          ? 'bad'
+          : outcome.category === 'USER_STOPPED'
+            ? 'neutral'
+            : 'warn',
+      nextAction: outcome.nextAction?.label,
+      supportCode: outcome.supportCode,
+    };
+  }
   const detail = run?.failureReason?.trim();
   if (!detail || !['FAILED', 'ERROR', 'PARTIAL'].includes(status)) return null;
   return {
@@ -356,6 +467,7 @@ export function terminalFailureEvidence(
           ? 'Planning failure evidence'
           : 'Terminal failure evidence',
     detail,
+    kind: 'bad',
   };
 }
 
@@ -428,8 +540,50 @@ export function countProducedWorkspaceFiles(
   ).length;
 }
 
-export function verdictFor(score: number | null | undefined, status?: string | null): Verdict {
+/**
+ * A completed validation report owns the product-diff count. The workspace-status endpoint is a
+ * broader inventory heuristic and can include deterministic run metadata such as README.md.
+ */
+export function authoritativeProductFileCount(
+  reportedFiles: number | null | undefined,
+  workspaceDeltaCandidates: number,
+): number {
+  return reportedFiles != null && reportedFiles >= 0 ? reportedFiles : workspaceDeltaCandidates;
+}
+
+/** Reviewer verdict is the gate result; severity buckets are only a legacy fallback. */
+export function reviewerSignal(
+  report: Pick<api.ValidationReportData, 'reviewerVerdict' | 'reviewFailures'> | null | undefined,
+): string {
+  if (!report) return '—';
+  switch ((report.reviewerVerdict || '').toUpperCase()) {
+    case 'CLEAN':
+      return 'clean';
+    case 'FIXED_ISSUES':
+      return 'fixed issues';
+    case 'UNRESOLVED_ISSUES':
+      return 'unresolved issues';
+    case 'REVIEW_FAILED':
+      return 'review failed';
+    default:
+      return report.reviewFailures > 0 ? `${report.reviewFailures} unresolved` : 'not measured';
+  }
+}
+
+export function verdictFor(
+  score: number | null | undefined,
+  status?: string | null,
+  terminalOutcome?: api.RunTerminalOutcome | null,
+): Verdict {
   const s = (status || '').toUpperCase();
+  if (terminalOutcome?.category === 'USER_STOPPED') return {label: 'Cancelled', kind: 'warn'};
+  if (
+    terminalOutcome &&
+    ['ACTION_REQUIRED', 'POLICY_BLOCKED', 'WARNING'].includes(terminalOutcome.category)
+  ) {
+    return {label: terminalOutcome.customerTitle, kind: 'warn'};
+  }
+  if (terminalOutcome?.category === 'PLATFORM_FAILURE') return {label: 'Failed', kind: 'bad'};
   if (s === 'FAILED' || s === 'ERROR' || s === 'CANCELLED') return {label: 'Failed', kind: 'bad'};
   if (score == null) {
     if (s === 'COMPLETE') return {label: 'Complete', kind: 'warn'};
@@ -1046,7 +1200,7 @@ export function runChatResponseContent(response: api.ChatResponse): string {
 }
 
 export function isFailedTerminalStatus(status?: string | null): boolean {
-  return ['FAILED', 'ERROR', 'CANCELLED', 'PARTIAL'].includes((status || '').toUpperCase());
+  return ['FAILED', 'ERROR', 'PARTIAL'].includes((status || '').toUpperCase());
 }
 
 export function hasRunCostEvidence(
@@ -1118,15 +1272,16 @@ export function fileCountSummary({
 }): {label: string; title: string; mismatch: boolean; explanation: string | null} {
   const mismatch = reportedFiles != null && reportedFiles !== workspaceFiles;
   const label =
-    reportedFiles != null
-      ? `${reportedFiles} reported${mismatch ? ` · ${workspaceFiles} visible` : ''}`
-      : String(workspaceFiles);
+    reportedFiles != null ? `${reportedFiles} product change(s)` : String(workspaceFiles);
   return {
     label,
-    title: `${workspaceFiles} generated or modified product file(s)`,
+    title:
+      reportedFiles != null
+        ? `${reportedFiles} product file change(s) proven by validation`
+        : `${workspaceFiles} workspace delta candidate(s); validation evidence is not available`,
     mismatch,
     explanation: mismatch
-      ? 'File counts differ because validation reports persisted generation evidence, while this count uses current git-derived product changes and excludes bootstrap metadata.'
+      ? `Validation proves ${reportedFiles} product change(s). The workspace inventory also contains ${workspaceFiles} delta candidate(s), which can include deterministic run metadata.`
       : null,
   };
 }

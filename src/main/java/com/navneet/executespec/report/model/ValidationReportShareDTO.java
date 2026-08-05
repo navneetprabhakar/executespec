@@ -19,5 +19,6 @@ public record ValidationReportShareDTO(
     Boolean finalBuildPassed,
     Integer testsPassed,
     Integer testsTotal,
+    Integer testsSkipped,
     String reviewerVerdict,
     List<VerificationEvidenceDTO> verificationLedger) {}

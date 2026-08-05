@@ -109,6 +109,37 @@ class RunMapperVerifiedScoreParityTest {
     assertThat(mapper.toDetail(run, List.of()).getVerifiedScore()).isEqualTo(100);
   }
 
+  @Test
+  void summaryAndDetailExposeTheSameLeakSafeTerminalOutcome() {
+    PipelineRun run = new PipelineRun();
+    run.setRunId(RUN_ID);
+    run.setStatus("FAILED");
+    run.setStatusReason("WORKER_BUDGET_EXCEEDED");
+    run.setFailureReason("provider stack api_key=secret");
+    run.setActualCostUsd(0.42);
+    run.setHardCapUsd(0.50);
+
+    when(reports.findScoresByRunIds(List.of(RUN_ID))).thenReturn(List.of());
+    when(tasks.findByRunIdIn(List.of(RUN_ID))).thenReturn(List.of());
+    when(reports.findByRunId(RUN_ID)).thenReturn(Optional.empty());
+    when(integrationRuns.findByRunId(RUN_ID)).thenReturn(Optional.empty());
+    when(codeMaps.findByRunId(RUN_ID)).thenReturn(Optional.empty());
+
+    RunMapper mapper = mapper();
+    RunSummary summary = mapper.toSummaries(List.of(run)).getFirst();
+    RunDetail detail = mapper.toDetail(run, List.of());
+
+    assertThat(summary.terminalOutcome()).isEqualTo(detail.getTerminalOutcome());
+    assertThat(summary.terminalOutcome().code()).isEqualTo("WORKER_BUDGET_EXCEEDED");
+    assertThat(summary.terminalOutcome().category())
+        .isEqualTo(com.navneet.executespec.run.outcome.RunTerminalOutcome.Category.ACTION_REQUIRED);
+    assertThat(summary.terminalOutcome().impact().actualCostUsd()).isEqualTo(0.42);
+    assertThat(summary.terminalOutcome().impact().capUsd()).isEqualTo(0.50);
+    assertThat(detail.getFailureReason())
+        .isEqualTo(summary.terminalOutcome().customerMessage())
+        .doesNotContain("provider stack", "api_key", "secret");
+  }
+
   private RunMapper mapper() {
     return new RunMapper(
         integrationRuns,
@@ -120,6 +151,8 @@ class RunMapperVerifiedScoreParityTest {
         managedUsage,
         new RunEffectiveRouteService(mock(RunStepUsageRepository.class)),
         tasks,
-        objectMapper);
+        null,
+        objectMapper,
+        null);
   }
 }

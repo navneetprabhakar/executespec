@@ -37,7 +37,6 @@ import com.navneet.executespec.recovery.RecoveryCheckpointLease;
 import com.navneet.executespec.report.ValidationReportRepository;
 import com.navneet.executespec.report.entity.ValidationReport;
 import com.navneet.executespec.reviewer.ReviewerAgent;
-import com.navneet.executespec.reviewer.ReviewerRequest;
 import com.navneet.executespec.reviewer.ReviewerResult;
 import com.navneet.executespec.router.AgentTier;
 import com.navneet.executespec.router.LlmProvider;
@@ -922,7 +921,7 @@ public class RunLifecycleService {
       try {
         reviewResult =
             reviewer.review(
-                ReviewerRequest.builder()
+                InitialReviewerRequestPolicy.builder()
                     .provider(provider)
                     .model(reviewerModel)
                     .context(reviewContext)
@@ -946,8 +945,6 @@ public class RunLifecycleService {
         operation = requireRunOperationLifecycle().finishReviewAndClear(operation, true);
       }
 
-      contextComposer.ensureReadme(
-          runId, workspace, row.getUserRequest(), plan, execResult, reviewResult, startedAt);
       var validationReport =
           validationKickoff.generateValidationReport(runId, execResult, reviewResult, plan);
 
@@ -1742,7 +1739,7 @@ public class RunLifecycleService {
     try {
       ReviewerResult reviewResult =
           reviewer.review(
-              ReviewerRequest.builder()
+              InitialReviewerRequestPolicy.builder()
                   .provider(reviewerRoute.provider())
                   .model(reviewerRoute.model())
                   .strictProvider(true)
@@ -2890,7 +2887,7 @@ public class RunLifecycleService {
           buildCommand == null ? "(auto)" : buildCommand);
       reviewResult =
           reviewer.review(
-              ReviewerRequest.builder()
+              InitialReviewerRequestPolicy.builder()
                   .provider(provider.name().toLowerCase())
                   .model(reviewerModel.getModel())
                   .context(rootCtx)

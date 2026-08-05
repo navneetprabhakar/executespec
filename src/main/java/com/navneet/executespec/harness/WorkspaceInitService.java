@@ -33,6 +33,7 @@ public class WorkspaceInitService {
   private final com.navneet.executespec.state.repository.RunRepoSnapshotRepository snapshotRepo;
   private final VendoredPathGuard vendoredPathGuard;
   private final BrownfieldHttpContractGuard brownfieldHttpContractGuard;
+  private final WorkspaceRepositoryRevisionService repositoryRevisions;
 
   /**
    * Exclusions written into every greenfield run workspace. {@code .agent-context/} is the internal
@@ -159,21 +160,38 @@ public class WorkspaceInitService {
   /** Provider-neutral clone overload (e.g. Bitbucket app-password username + secret). */
   public void cloneFromRepo(String runId, String repoUrl, String username, String secret)
       throws Exception {
-    cloneRepository(runId, repoUrl, username, secret, true);
+    cloneRepository(runId, repoUrl, null, username, secret, true);
+  }
+
+  /** Clone a run workspace from one exact existing branch and persist its branch/SHA baseline. */
+  public void cloneFromRepoBranch(String runId, String repoUrl, String branch, String secret)
+      throws Exception {
+    cloneRepository(runId, repoUrl, branch, null, secret, true);
   }
 
   /** Clone-only seam for read-only source inspection; it deliberately creates no run evidence. */
   public void cloneReadOnlyRepository(
       String workspaceId, String repoUrl, String username, String secret) throws Exception {
-    cloneRepository(workspaceId, repoUrl, username, secret, false);
+    cloneRepository(workspaceId, repoUrl, null, username, secret, false);
   }
 
   private void cloneRepository(
-      String runId, String repoUrl, String username, String secret, boolean captureBaseline)
+      String runId,
+      String repoUrl,
+      String branch,
+      String username,
+      String secret,
+      boolean captureBaseline)
       throws Exception {
     Path workspace = runWorkspacePath(runId);
     if (Files.isDirectory(workspace.resolve(".git"))) {
-      if (captureBaseline) brownfieldHttpContractGuard.captureBaselineIfAbsent(runId, workspace);
+      String fullName = WorkspaceRepositoryRevisionService.repositoryFullName(repoUrl);
+      repositoryRevisions.requireExpectedBranch(workspace, branch, fullName);
+      if (captureBaseline) {
+        repositoryRevisions.persistCloneSnapshot(
+            runId, new RepoToClone(fullName, repoUrl, null, branch), workspace);
+        brownfieldHttpContractGuard.captureBaselineIfAbsent(runId, workspace);
+      }
       log.debug("Workspace for run {} already cloned: {}", runId, workspace);
       return;
     }
@@ -181,8 +199,20 @@ public class WorkspaceInitService {
 
     log.info("Cloning {} into workspace for run {}", repoUrl, runId);
     // Credential-gate: authentication stays in the child environment, never argv or origin URL.
-    runGitStrictAuthWithUsername(
-        workspace.getParent(), username, secret, "clone", repoUrl, workspace.toString());
+    if (branch == null || branch.isBlank()) {
+      runGitStrictAuthWithUsername(
+          workspace.getParent(), username, secret, "clone", repoUrl, workspace.toString());
+    } else {
+      runGitStrictAuthWithUsername(
+          workspace.getParent(),
+          username,
+          secret,
+          "clone",
+          "-b",
+          branch,
+          repoUrl,
+          workspace.toString());
+    }
 
     // Override commit identity for agent commits
     runGit(workspace, "git", "config", "user.email", "agent@executespec.local");
@@ -190,10 +220,16 @@ public class WorkspaceInitService {
     // 2026-05-02 — same vendored-path guard as cloneMultipleRepos. The legacy single-repo
     // path lands the clone at the workspace root rather than a repos/<name>/ subdir, but the
     // class of bug is identical (committed node_modules/ etc.).
-    vendoredPathGuard.augmentGitignore(workspace);
+    vendoredPathGuard.installLocalExcludes(workspace);
     // RR-1546 — keep ExecuteSpec's internal .agent-context/ evidence out of the customer's tree
     // without mutating their tracked .gitignore.
     excludeAgentContextInClone(workspace);
+    if (captureBaseline) {
+      String fullName = WorkspaceRepositoryRevisionService.repositoryFullName(repoUrl);
+      repositoryRevisions.requireExpectedBranch(workspace, branch, fullName);
+      repositoryRevisions.persistCloneSnapshot(
+          runId, new RepoToClone(fullName, repoUrl, null, branch), workspace);
+    }
     if (captureBaseline) brownfieldHttpContractGuard.captureBaselineIfAbsent(runId, workspace);
     log.info("Cloned workspace ready for run {}", runId);
   }
@@ -350,8 +386,11 @@ public class WorkspaceInitService {
       Path target = reposRoot.resolve(dirName);
       if (Files.isDirectory(target.resolve(".git"))) {
         // A crash may have left a complete clone before its baseline row was persisted. Reconcile
-        // the immutable baseline before treating the clone as admitted.
-        persistCloneSnapshot(runId, r, target);
+        // the immutable baseline only after proving it is the requested branch. Otherwise a
+        // partial/stale clone could reach the planner on different source and fail only after
+        // provider spend at publication time.
+        repositoryRevisions.requireExpectedBranch(target, r.branch(), r.fullName());
+        repositoryRevisions.persistCloneSnapshot(runId, r, target);
         log.debug("Repo {} already cloned for run {}", r.fullName(), runId);
         continue;
       }
@@ -365,11 +404,11 @@ public class WorkspaceInitService {
         log.info("Cloning {} into {} for run {}", r.fullName(), target, runId);
         runGitStrictAuth(reposRoot, pat, "clone", httpsUrl, target.toString());
       }
-      persistCloneSnapshot(runId, r, target);
-      // 2026-05-02 — augment .gitignore with vendored-path patterns BEFORE the worker starts
-      // running. Closes the run-b171fa52 class of bug where the worker added Node code to a
-      // Python repo whose .gitignore was Python-only and committed 9605 node_modules/ files.
-      vendoredPathGuard.augmentGitignore(target);
+      repositoryRevisions.requireExpectedBranch(target, cloneBranch, r.fullName());
+      repositoryRevisions.persistCloneSnapshot(runId, r, target);
+      // Install non-versioned vendored-path excludes BEFORE the worker starts running. This closes
+      // the run-b171fa52 class without changing customer history or widening a file-scoped PR.
+      vendoredPathGuard.installLocalExcludes(target);
       excludeAgentContextInClone(target); // RR-1546
     }
     brownfieldHttpContractGuard.captureBaselineIfAbsent(runId, workspace);
@@ -390,7 +429,14 @@ public class WorkspaceInitService {
       String dirName = repoDirectoryName(repo.fullName());
       Path target = reposRoot.resolve(dirName);
       if (!Files.isDirectory(target.resolve(".git"))) {
-        return new WorkspaceAdmission(false, totalFiles, "clone missing for " + repo.fullName());
+        return new WorkspaceAdmission(
+            false, totalFiles, "CLONE_MISSING: clone missing for " + repo.fullName());
+      }
+      try {
+        repositoryRevisions.requireExpectedBranch(target, repo.branch(), repo.fullName());
+      } catch (IllegalStateException branchMismatch) {
+        return new WorkspaceAdmission(
+            false, totalFiles, "BRANCH_MISMATCH: " + branchMismatch.getMessage());
       }
       try (var files = Files.walk(target)) {
         long repoFiles =
@@ -408,15 +454,29 @@ public class WorkspaceInitService {
                 .count();
         if (repoFiles == 0) {
           return new WorkspaceAdmission(
-              false, totalFiles, "repository has no source files: " + repo.fullName());
+              false,
+              totalFiles,
+              "EMPTY_INVENTORY: repository has no source files: " + repo.fullName());
         }
         totalFiles += repoFiles;
       } catch (IOException e) {
         return new WorkspaceAdmission(
-            false, totalFiles, "could not inventory " + repo.fullName() + ": " + e.getMessage());
+            false,
+            totalFiles,
+            "INVENTORY_ERROR: could not inventory " + repo.fullName() + ": " + e.getMessage());
       }
     }
     return new WorkspaceAdmission(true, totalFiles, null);
+  }
+
+  /**
+   * Proves that an existing-PR workspace still starts at the exact head revision admitted before
+   * async dispatch. This closes the branch-advance race between GitHub preflight and clone and is
+   * deliberately checked again on crash recovery before any provider call.
+   */
+  public void requirePublicationHead(
+      String runId, String publicationRepoFullName, String expectedHeadSha) {
+    repositoryRevisions.requirePublicationHead(runId, publicationRepoFullName, expectedHeadSha);
   }
 
   public record WorkspaceAdmission(boolean admitted, long fileCount, String reason) {}
@@ -435,38 +495,6 @@ public class WorkspaceInitService {
   }
 
   /**
-   * Captures {@code git rev-parse HEAD} in the newly cloned repo and writes a {@link
-   * com.navneet.executespec.state.entity.RunRepoSnapshot} row. Baseline persistence is part of
-   * brownfield admission: without the exact branch/SHA the run cannot later prove what changed.
-   */
-  private void persistCloneSnapshot(String runId, RepoToClone r, Path target) {
-    try {
-      boolean alreadyPersisted =
-          snapshotRepo.findByRunId(runId).stream()
-              .anyMatch(snapshot -> r.fullName().equals(snapshot.getRepoFullName()));
-      if (alreadyPersisted) return;
-      String sha = captureHeadSha(target);
-      if (sha == null || sha.isBlank()) {
-        throw new IllegalStateException("could not capture baseline SHA for " + r.fullName());
-      }
-      String branch = r.branch() == null || r.branch().isBlank() ? "main" : r.branch();
-      com.navneet.executespec.state.entity.RunRepoSnapshot snap =
-          com.navneet.executespec.state.entity.RunRepoSnapshot.builder()
-              .runId(runId)
-              .repoId(r.repoId())
-              .repoFullName(r.fullName())
-              .branch(branch)
-              .commitSha(sha)
-              .build();
-      snapshotRepo.save(snap);
-      log.debug("Snapshot saved run={} repo={} branch={} sha={}", runId, r.fullName(), branch, sha);
-    } catch (Exception e) {
-      throw new IllegalStateException(
-          "could not persist repository baseline for " + r.fullName(), e);
-    }
-  }
-
-  /**
    * RR-641 — pin an already-cloned workspace to an exact commit and prove it. {@link
    * #cloneFromRepo} lands the repository's current default HEAD, so a semantic index that labels
    * its chunks with a previously recorded {@code lastSyncedSha} would silently publish newer code
@@ -481,39 +509,7 @@ public class WorkspaceInitService {
    * @return {@code true} only when the resulting {@code HEAD} equals {@code commitSha}
    */
   public boolean checkoutExactCommit(String runId, String commitSha) {
-    if (commitSha == null || commitSha.isBlank()) return false;
-    Path workspace = runWorkspacePath(runId);
-    try {
-      runGit(workspace, "git", "checkout", "--detach", commitSha);
-      String head = captureHeadSha(workspace);
-      boolean matched = head != null && commitSha.equalsIgnoreCase(head.trim());
-      if (!matched) {
-        log.warn(
-            "RR-641 — workspace {} could not be pinned to {} (HEAD={})", runId, commitSha, head);
-      }
-      return matched;
-    } catch (InterruptedException e) {
-      Thread.currentThread().interrupt();
-      log.warn("RR-641 — checkoutExactCommit interrupted for {} @ {}", runId, commitSha);
-      return false;
-    } catch (IOException e) {
-      log.warn(
-          "RR-641 — checkoutExactCommit failed for {} @ {}: {}", runId, commitSha, e.getMessage());
-      return false;
-    }
-  }
-
-  private String captureHeadSha(Path repoDir) throws IOException, InterruptedException {
-    ProcessBuilder pb = new ProcessBuilder("git", "rev-parse", "HEAD").directory(repoDir.toFile());
-    pb.redirectErrorStream(true);
-    Process p = pb.start();
-    String out = new String(p.getInputStream().readAllBytes()).trim();
-    int exit = p.waitFor();
-    if (exit != 0) {
-      log.warn("git rev-parse HEAD exit {} in {}: {}", exit, repoDir, out);
-      return null;
-    }
-    return out;
+    return repositoryRevisions.checkoutExactCommit(runId, commitSha);
   }
 
   /**
@@ -524,8 +520,9 @@ public class WorkspaceInitService {
    * @param repoId optional — persisted into {@code run_repo_snapshot.repo_id} when present, so the
    *     "reset to original" path can match back to the caller's {@code ProjectRepo}. Null is valid
    *     (snapshot still captures fullName + sha).
-   * @param branch optional — the branch being cloned (used only as the {@code
-   *     run_repo_snapshot.branch} value for display). When null we fall back to {@code "main"}.
+   * @param branch optional — an explicitly requested branch. Snapshot persistence always records
+   *     the branch Git actually checked out, including a repository whose default branch is not
+   *     {@code main}.
    */
   public record RepoToClone(String fullName, String cloneUrl, UUID repoId, String branch) {
     public RepoToClone(String fullName, String cloneUrl) {

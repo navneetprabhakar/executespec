@@ -3,7 +3,10 @@ package com.navneet.executespec.scoring;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
@@ -15,6 +18,8 @@ import com.navneet.executespec.reviewer.model.ReviewIssue;
 import com.navneet.executespec.reviewer.model.ReviewReport;
 import com.navneet.executespec.state.entity.PipelineRun;
 
+import org.eclipse.jgit.api.Git;
+import org.eclipse.jgit.api.Status;
 import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
@@ -210,6 +215,11 @@ public class ReviewScoringService {
    * <p>v2.5.12 fix for the "Test coverage = 20 by default" bug.
    */
   private static Integer deriveTestCoverage(WorkspaceStats ws, AccuracyReport accuracy) {
+    // Missing Git evidence is not evidence of a doc-only change. Hide the dimension rather than
+    // manufacturing a score from clone mtimes or treating an unavailable measurement as zero.
+    if (!ws.changedFilesMeasured) {
+      return null;
+    }
     // No source files in the CHANGED set → doc-only change. Hide the bar.
     if (ws.sourceFilesChanged <= 0) {
       return null;
@@ -249,29 +259,53 @@ public class ReviewScoringService {
   }
 
   /**
-   * Workspace scan results. The *Changed counters cover files this run actually touched (mtime
-   * after run start); auth hints come from any file in the workspace regardless of modification
-   * time.
+   * Workspace scan results. The *Changed counters come exclusively from exact Git index/worktree
+   * status; auth hints come from any file in the workspace regardless of Git modification state.
    */
-  private record WorkspaceStats(
-      int sourceFilesChanged, int testFilesChanged, boolean hasAuthHints) {}
+  record WorkspaceStats(
+      int sourceFilesChanged,
+      int testFilesChanged,
+      boolean hasAuthHints,
+      boolean changedFilesMeasured) {}
 
-  private WorkspaceStats scanWorkspace(PipelineRun run) {
-    if (run == null || run.getRunId() == null) return new WorkspaceStats(0, 0, false);
+  WorkspaceStats scanWorkspace(PipelineRun run) {
+    if (run == null || run.getRunId() == null) return new WorkspaceStats(0, 0, false, false);
     Path root;
     try {
       root = workspaceInitService.runWorkspacePath(run.getRunId());
     } catch (Exception e) {
-      return new WorkspaceStats(0, 0, false);
+      return new WorkspaceStats(0, 0, false, false);
     }
-    if (!Files.isDirectory(root)) return new WorkspaceStats(0, 0, false);
+    if (!Files.isDirectory(root)) return new WorkspaceStats(0, 0, false, false);
 
-    // mtime floor = run start - 10s grace (clock skew / initial clone).
-    long mtimeFloorMs =
-        run.getStartedAt() != null ? run.getStartedAt().toEpochMilli() - 10_000L : 0L;
+    boolean auth = scanAuthorizationHints(root, run.getRunId());
+    Set<String> changedPaths;
+    try {
+      changedPaths = gitChangedPaths(root);
+    } catch (Exception e) {
+      log.warn(
+          "Git changed-file measurement unavailable for run {}: {}",
+          run.getRunId(),
+          e.getMessage());
+      return new WorkspaceStats(0, 0, auth, false);
+    }
 
-    int[] sourceChanged = {0};
-    int[] testChanged = {0};
+    int sourceChanged = 0;
+    int testChanged = 0;
+    for (String rel : changedPaths) {
+      if (DOC_OR_CONFIG.matcher(rel).find()) continue;
+      if (TEST_FILE.matcher(rel).find()) {
+        testChanged++;
+        sourceChanged++; // tests remain in the source denominator used by deriveTestCoverage
+      } else if (SOURCE_FILE.matcher(rel).find()) {
+        sourceChanged++;
+      }
+    }
+    return new WorkspaceStats(sourceChanged, testChanged, auth, true);
+  }
+
+  /** Preserves the independent whole-workspace authorization hint scan. */
+  private boolean scanAuthorizationHints(Path root, String runId) {
     boolean[] auth = {false};
     int limit = 5000;
 
@@ -289,25 +323,6 @@ public class ReviewScoringService {
                     || rel.contains("/.venv/")) {
                   return;
                 }
-                // Only count files this run touched. Doc/config files are
-                // excluded from the "source" denominator so a README-only
-                // change doesn't count against test coverage.
-                long mtime = 0L;
-                try {
-                  mtime = Files.getLastModifiedTime(p).toMillis();
-                } catch (IOException ignored) {
-                }
-                boolean changed = mtime >= mtimeFloorMs;
-
-                if (changed && !DOC_OR_CONFIG.matcher(rel).find()) {
-                  if (TEST_FILE.matcher(rel).find()) {
-                    testChanged[0]++;
-                    sourceChanged[0]++; // count test as source too so ratio has denominator
-                  } else if (SOURCE_FILE.matcher(rel).find()) {
-                    sourceChanged[0]++;
-                  }
-                }
-
                 if (!auth[0]) {
                   try {
                     String head = readHead(p, 4000);
@@ -317,9 +332,66 @@ public class ReviewScoringService {
                 }
               });
     } catch (IOException e) {
-      log.debug("Workspace scan failed for run {}: {}", run.getRunId(), e.getMessage());
+      log.debug("Workspace auth scan failed for run {}: {}", runId, e.getMessage());
     }
-    return new WorkspaceStats(sourceChanged[0], testChanged[0], auth[0]);
+    return auth[0];
+  }
+
+  /**
+   * Returns the exact union of modified/indexed/untracked/deleted/conflicting paths. Multi-repo
+   * workspaces measure each checkout below {@code repos/}; the outer seed repository is not source
+   * evidence. Any unavailable checkout makes the whole measurement unavailable rather than silently
+   * undercounting.
+   */
+  private Set<String> gitChangedPaths(Path workspaceRoot) throws Exception {
+    List<Path> repositories = gitRepositories(workspaceRoot);
+    Set<String> changed = new LinkedHashSet<>();
+    for (Path repository : repositories) {
+      Status status;
+      try (Git git = Git.open(repository.toFile())) {
+        status = git.status().call();
+      }
+      Set<String> repositoryPaths = new LinkedHashSet<>();
+      repositoryPaths.addAll(status.getAdded());
+      repositoryPaths.addAll(status.getChanged());
+      repositoryPaths.addAll(status.getModified());
+      repositoryPaths.addAll(status.getRemoved());
+      repositoryPaths.addAll(status.getMissing());
+      repositoryPaths.addAll(status.getConflicting());
+      repositoryPaths.addAll(status.getUntracked());
+      for (String repositoryPath : repositoryPaths) {
+        Path absolute = repository.resolve(repositoryPath).normalize();
+        if (!absolute.startsWith(repository.normalize())) {
+          throw new IOException("Git status returned an escaping path");
+        }
+        changed.add(workspaceRoot.relativize(absolute).toString().replace('\\', '/'));
+      }
+    }
+    return changed;
+  }
+
+  private List<Path> gitRepositories(Path workspaceRoot) throws IOException {
+    Path reposRoot = workspaceRoot.resolve("repos");
+    if (Files.isDirectory(reposRoot)) {
+      List<Path> children;
+      try (Stream<Path> stream = Files.list(reposRoot)) {
+        children = stream.filter(Files::isDirectory).sorted().toList();
+      }
+      if (!children.isEmpty()) {
+        List<Path> repositories = new ArrayList<>(children.size());
+        for (Path child : children) {
+          if (Files.isSymbolicLink(child) || !Files.exists(child.resolve(".git"))) {
+            throw new IOException("repository checkout unavailable: " + child.getFileName());
+          }
+          repositories.add(child);
+        }
+        return repositories;
+      }
+    }
+    if (Files.exists(workspaceRoot.resolve(".git"))) {
+      return List.of(workspaceRoot);
+    }
+    throw new IOException("workspace has no Git checkout");
   }
 
   private static String readHead(Path p, int max) throws IOException {

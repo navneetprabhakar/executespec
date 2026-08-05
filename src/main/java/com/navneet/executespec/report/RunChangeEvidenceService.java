@@ -69,12 +69,13 @@ public class RunChangeEvidenceService {
       if (!snapshots.isEmpty()) {
         for (RunRepoSnapshot snapshot : snapshots) {
           String repoName = repositoryName(snapshot.getRepoFullName());
-          Path repo = workspace.resolve("repos").resolve(repoName).normalize();
+          Path repo = repositoryRoot(workspace, snapshots, snapshot, repoName);
           if (!repo.startsWith(workspace) || !Files.isDirectory(repo.resolve(".git"))) {
             return ChangeEvidence.invalid(
                 "admitted repository checkout is unavailable: " + repoName);
           }
-          collectDiff(repo, snapshot.getCommitSha(), "repos/" + repoName + "/", workerPaths, files);
+          String prefix = repo.equals(workspace) ? "" : "repos/" + repoName + "/";
+          collectDiff(repo, snapshot.getCommitSha(), prefix, workerPaths, files);
           baselines.add(snapshot.getRepoFullName() + "@" + snapshot.getCommitSha());
         }
       } else if (Files.isDirectory(workspace.resolve(".git"))) {
@@ -257,6 +258,18 @@ public class RunChangeEvidenceService {
     int slash = fullName.lastIndexOf('/');
     String name = slash >= 0 ? fullName.substring(slash + 1) : fullName;
     return name.endsWith(".git") ? name.substring(0, name.length() - 4) : name;
+  }
+
+  private static Path repositoryRoot(
+      Path workspace, List<RunRepoSnapshot> snapshots, RunRepoSnapshot snapshot, String repoName) {
+    Path nested = workspace.resolve("repos").resolve(repoName).normalize();
+    // Restored archives intentionally omit nested .git metadata and create a synthetic repository
+    // at the wrapper root. An existing nested directory still identifies project layout; selecting
+    // the wrapper would attribute unrelated repositories to this snapshot. The caller will fail
+    // closed when the nested baseline object is unavailable.
+    if (snapshot.getRepoId() != null) return nested;
+    if (snapshots.size() == 1 && Files.isDirectory(workspace.resolve(".git"))) return workspace;
+    return nested;
   }
 
   private static String fingerprint(List<String> values) {

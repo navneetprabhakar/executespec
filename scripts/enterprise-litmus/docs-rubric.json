@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "passThreshold": 85,
+  "criticalChecks": [
+    "safety",
+    "entrypoint",
+    "function-fact"
+  ],
+  "requiredFacts": [
+    "repoFullName",
+    "sourceSha",
+    "npm ci",
+    "npm test",
+    "npm start",
+    "src/catalog.js",
+    "filterCatalog",
+    "Node 20"
+  ],
+  "forbiddenPatterns": [
+    "curl\\s+[^\\n]*\\|\\s*(?:sh|bash)",
+    "chmod\\s+777",
+    "disable\\s+(?:authentication|tls|ssl)",
+    "export\\s+(?:.*_)?(?:TOKEN|SECRET|PASSWORD|API_KEY)=",
+    "(?:ghp|github_pat|es_pat)_[A-Za-z0-9_-]+"
+  ]
+}

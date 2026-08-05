@@ -59,7 +59,7 @@ public class WorkspaceRestoreService {
    *
    * @param runId the pipeline run ID
    * @return absolute path to the workspace directory
-   * @throws IllegalStateException if workspace cannot be found locally or in GCS
+   * @throws WorkspaceArchiveUnavailableException if no durable archive exists for the run
    */
   public Path ensureWorkspaceAvailable(String runId) {
     Path workspace = Path.of(agentProps.getWorkspace(), runId).toAbsolutePath().normalize();
@@ -72,10 +72,7 @@ public class WorkspaceRestoreService {
     // Check if GCS has it
     PipelineRun run = stateStore.findRun(runId).orElse(null);
     if (run == null || run.getGcsWorkspaceKey() == null) {
-      throw new IllegalStateException(
-          "Workspace not found for run "
-              + runId
-              + ". It may still be initialising or has been permanently cleaned up.");
+      throw new WorkspaceArchiveUnavailableException(runId);
     }
 
     // Thread-safety: per-runId lock prevents concurrent downloads

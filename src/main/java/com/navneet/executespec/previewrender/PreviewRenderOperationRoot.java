@@ -37,7 +37,7 @@ class PreviewRenderOperationRoot {
       String owner,
       Duration leaseDuration) {
     String attemptId = jobId + ":" + surface.id();
-    LlmExecutionReference reference = policyFactory.forRunPreviewSurface(runId, attemptId);
+    LlmExecutionReference reference = policyFactory.forRunPreviewSurface(runId, attemptId, route);
     LlmExecutionOperationDescriptor descriptor =
         LlmExecutionOperationDescriptor.of(
             "preview-render:" + surface.id(),

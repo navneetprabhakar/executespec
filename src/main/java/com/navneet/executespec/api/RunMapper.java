@@ -16,8 +16,10 @@ import com.navneet.executespec.billing.repository.ManagedAiUsageEventRepository;
 import com.navneet.executespec.codeintel.entity.RunCodeMap;
 import com.navneet.executespec.codeintel.repository.RunCodeMapRepository;
 import com.navneet.executespec.cost.EffectiveRouteProjection;
+import com.navneet.executespec.cost.RunCostTracker;
 import com.navneet.executespec.cost.RunEffectiveRouteService;
 import com.navneet.executespec.integration.PlannerFailureDiagnostic;
+import com.navneet.executespec.integration.RunPipelineSupport;
 import com.navneet.executespec.report.ValidationReportRepository;
 import com.navneet.executespec.report.ValidationReportScoreProjection;
 import com.navneet.executespec.report.entity.ValidationReport;
@@ -38,7 +40,6 @@ import lombok.extern.slf4j.Slf4j;
 public class RunMapper {
 
   private static final int UNPROVEN_COMPLETION_SCORE_CAP = 84;
-
   private final IntegrationRunRepository integrationRunRepository;
   private final ProjectRepository projectRepository;
   private final AppUserRepository appUserRepository;
@@ -48,7 +49,9 @@ public class RunMapper {
   private final ManagedAiUsageEventRepository managedAiUsageEventRepository;
   private final RunEffectiveRouteService runEffectiveRouteService;
   private final AgentTaskRepository agentTaskRepository;
+  private final RunCostTracker runCostTracker;
   private final ObjectMapper objectMapper;
+  private final com.navneet.executespec.security.WorkspacePathRedaction workspacePathRedaction;
 
   public RunSummary toSummary(PipelineRun r) {
     return toSummary(r, null, null, null);
@@ -99,6 +102,7 @@ public class RunMapper {
       Boolean localExecutionAccepted,
       List<AgentTask> tasks) {
     String displayStatus = displayRunStatus(r.getStatus(), tasks);
+    Double actualCostUsd = actualCostForRead(r);
     return new RunSummary(
         r.getRunId(),
         displayStatus,
@@ -128,9 +132,20 @@ public class RunMapper {
         r.getSourceRunId() != null,
         r.getSourceRunId(),
         r.getHarnessVersion(),
-        r.getActualCostUsd(),
+        actualCostUsd,
         displayRunStatusReason(
             r.getStatusReason(), r.getFailureReason(), r.getStatus(), displayStatus),
+        com.navneet.executespec.run.outcome.RunTerminalOutcomeContract.project(
+            r.getRunId(),
+            displayStatus,
+            displayRunStatusReason(
+                r.getStatusReason(), r.getFailureReason(), r.getStatus(), displayStatus),
+            displayRunFailureReason(r.getFailureReason(), r.getStatus(), displayStatus),
+            actualCostUsd,
+            r.getHardCapUsd() != null ? r.getHardCapUsd() : r.getUserCostCap(),
+            r.getScmPrUrl() != null ? r.getScmPrUrl() : r.getGithubPrUrl(),
+            com.navneet.executespec.run.outcome.RunTerminalOutcomeContract.autoPublicationExpected(
+                r)),
         // PR-B (2026-05-13) — hydrate PR URLs in the listing endpoint so the project launches
         // surface can render PR pills without a per-row drill-down. Prefer scm-agnostic
         // scmPrUrl; the legacy githubPrUrl ships alongside for pre-SCM-split back-compat.
@@ -162,72 +177,6 @@ public class RunMapper {
         .orElse(null);
   }
 
-  /**
-   * Builds the per-agent (planner/reviewer/compiler/test-gen) token entries for the detail view.
-   */
-  private List<RunDetail.AgentTokenEntry> buildAgentTokens(PipelineRun r) {
-    List<RunDetail.AgentTokenEntry> entries = new java.util.ArrayList<>();
-    int pIn = r.getPlannerInputTokens() != null ? r.getPlannerInputTokens() : 0;
-    int pOut = r.getPlannerOutputTokens() != null ? r.getPlannerOutputTokens() : 0;
-    if (pIn > 0 || pOut > 0) {
-      entries.add(
-          new RunDetail.AgentTokenEntry(
-              "planner", r.getPlannerProvider(), r.getPlannerActualModel(), pIn, pOut));
-    }
-    int rIn = r.getReviewerInputTokens() != null ? r.getReviewerInputTokens() : 0;
-    int rOut = r.getReviewerOutputTokens() != null ? r.getReviewerOutputTokens() : 0;
-    if (rIn > 0 || rOut > 0) {
-      entries.add(
-          new RunDetail.AgentTokenEntry(
-              "reviewer", r.getReviewerProvider(), r.getReviewerActualModel(), rIn, rOut));
-    }
-    int cIn = r.getCompilerInputTokens() != null ? r.getCompilerInputTokens() : 0;
-    int cOut = r.getCompilerOutputTokens() != null ? r.getCompilerOutputTokens() : 0;
-    if (cIn > 0 || cOut > 0) {
-      entries.add(
-          new RunDetail.AgentTokenEntry(
-              "compiler", r.getCompilerProvider(), r.getCompilerActualModel(), cIn, cOut));
-    }
-
-    // Test gen pipeline tokens (from TestPlan entity)
-    testPlanRepository
-        .findByRunId(r.getRunId())
-        .ifPresent(
-            tp -> {
-              int tpIn = tp.getPlannerInputTokens() != null ? tp.getPlannerInputTokens() : 0;
-              int tpOut = tp.getPlannerOutputTokens() != null ? tp.getPlannerOutputTokens() : 0;
-              if (tpIn > 0 || tpOut > 0) {
-                entries.add(
-                    new RunDetail.AgentTokenEntry(
-                        "test-planner",
-                        tp.getPlannerProvider(),
-                        tp.getPlannerModel(),
-                        tpIn,
-                        tpOut));
-              }
-              int twIn = tp.getWorkerInputTokens() != null ? tp.getWorkerInputTokens() : 0;
-              int twOut = tp.getWorkerOutputTokens() != null ? tp.getWorkerOutputTokens() : 0;
-              if (twIn > 0 || twOut > 0) {
-                entries.add(
-                    new RunDetail.AgentTokenEntry(
-                        "test-worker", tp.getWorkerProvider(), tp.getWorkerModel(), twIn, twOut));
-              }
-              int trIn = tp.getReportInputTokens() != null ? tp.getReportInputTokens() : 0;
-              int trOut = tp.getReportOutputTokens() != null ? tp.getReportOutputTokens() : 0;
-              if (trIn > 0 || trOut > 0) {
-                entries.add(
-                    new RunDetail.AgentTokenEntry(
-                        "test-report-gen",
-                        tp.getPlannerProvider(),
-                        tp.getPlannerModel(),
-                        trIn,
-                        trOut));
-              }
-            });
-
-    return entries;
-  }
-
   public RunDetail toDetail(PipelineRun r, List<AgentTask> tasks) {
     // Tier 7: populate integration source if this run was triggered by an integration
     RunDetail.IntegrationSource integrationSource =
@@ -249,6 +198,23 @@ public class RunMapper {
     // so it can never drift from the usage facts it summarises.
     EffectiveRouteProjection effectiveRoute = runEffectiveRouteService.forRun(r.getRunId());
     String displayStatus = displayRunStatus(r.getStatus(), tasks);
+    String displayStatusReason =
+        displayRunStatusReason(
+            r.getStatusReason(), r.getFailureReason(), r.getStatus(), displayStatus);
+    String displayFailureReason =
+        redactPaths(displayRunFailureReason(r.getFailureReason(), r.getStatus(), displayStatus));
+    Double actualCostUsd = actualCostForRead(r);
+    com.navneet.executespec.run.outcome.RunTerminalOutcome terminalOutcome =
+        com.navneet.executespec.run.outcome.RunTerminalOutcomeContract.project(
+            r.getRunId(),
+            displayStatus,
+            displayStatusReason,
+            displayFailureReason,
+            actualCostUsd,
+            r.getHardCapUsd() != null ? r.getHardCapUsd() : r.getUserCostCap(),
+            r.getScmPrUrl() != null ? r.getScmPrUrl() : r.getGithubPrUrl(),
+            com.navneet.executespec.run.outcome.RunTerminalOutcomeContract.autoPublicationExpected(
+                r));
 
     RunDetail.RunDetailBuilder builder =
         RunDetail.builder()
@@ -267,13 +233,13 @@ public class RunMapper {
             .repoUrl(r.getRepoUrl())
             .repoMode(r.getRepoMode())
             .failureReason(
-                displayRunFailureReason(r.getFailureReason(), r.getStatus(), displayStatus))
-            .statusReason(
-                displayRunStatusReason(
-                    r.getStatusReason(), r.getFailureReason(), r.getStatus(), displayStatus))
+                terminalOutcome == null ? displayFailureReason : terminalOutcome.customerMessage())
+            .statusReason(displayStatusReason)
+            .terminalOutcome(terminalOutcome)
             .planJson(r.getPlanJson())
             .reviewJson(r.getReviewJson())
-            .runGoalDoneness(parseJson(r.getRunGoalDonenessJson(), "runGoalDoneness", r.getRunId()))
+            .runGoalDoneness(
+                parseJson(redactPaths(r.getRunGoalDonenessJson()), "runGoalDoneness", r.getRunId()))
             .tasks(
                 tasks.stream()
                     // RR-1446 — order by the persisted planner-intent index first so the approval
@@ -289,7 +255,7 @@ public class RunMapper {
             .hasApiSpec(r.isHasApiSpec())
             .previewStatus(r.getPreviewStatus())
             .keySource(r.getKeySource())
-            .actualCostUsd(r.getActualCostUsd())
+            .actualCostUsd(actualCostUsd)
             .costEstimateLow(r.getCostEstimateLow())
             .costEstimateHigh(r.getCostEstimateHigh())
             .creditsCharged(r.getCreditsCharged())
@@ -320,7 +286,7 @@ public class RunMapper {
             .projectId(r.getProjectId())
             .projectName(resolveProjectName(r.getProjectId()))
             .createdByName(resolveCreatorName(r.getCreatedByUserId()))
-            .agentTokens(buildAgentTokens(r))
+            .agentTokens(RunAgentTokenProjection.project(r, testPlanRepository))
             .applySuggestionCount(r.getApplySuggestionCount())
             .runTitle(r.getRunTitle())
             .runSummary(r.getRunSummary())
@@ -366,9 +332,20 @@ public class RunMapper {
   }
 
   /**
-   * Sort order for tasks in the detail view: WORKING first (in-flight), then PENDING/LOCKED
-   * (queued), then PARTIAL/BLOCKED (stalled), then FAILED, and finally COMPLETE at the bottom.
+   * Active detail reads may be ahead of the last persistence checkpoint. Overlay only a JVM-owned
+   * live snapshot, and only monotonically; terminal rows remain durable billing truth.
    */
+  private Double actualCostForRead(PipelineRun run) {
+    Double stored = run.getActualCostUsd();
+    if (RunPipelineSupport.isTerminal(run.getStatus()) || runCostTracker == null) {
+      return stored;
+    }
+    return runCostTracker
+        .liveSnapshot(run.getRunId())
+        .map(snapshot -> Math.max(stored == null ? 0.0 : stored, snapshot.costUsd()))
+        .orElse(stored);
+  }
+
   /**
    * RR-1446 — task display order for the run detail view and the approval gate. The persisted
    * planner-intent index is the primary key so the human sees the planner's sequence; status is a
@@ -384,9 +361,12 @@ public class RunMapper {
   }
 
   public TaskSummary toTaskSummary(AgentTask t) {
-    JsonNode goalDoneness = parseJson(t.getGoalDonenessJson(), "goalDoneness", t.getTaskId());
+    // Server workspace paths (e.g. /opt/app/workspace/<runId>/...) are host layout, not customer
+    // evidence — redact them from every DTO-projected diagnostic field before it leaves the API.
+    JsonNode goalDoneness =
+        parseJson(redactPaths(t.getGoalDonenessJson()), "goalDoneness", t.getTaskId());
     String displayStatus = displayTaskStatus(t.getStatus(), goalDoneness);
-    String failureReason = extractFailureReason(t);
+    String failureReason = redactPaths(extractFailureReason(t));
     if (failureReason == null && "PARTIAL".equals(displayStatus) && goalDoneness != null) {
       failureReason = goalDoneness.path("reason").asText(null);
     }
@@ -414,8 +394,10 @@ public class RunMapper {
         t.getCompletedAt(),
         failureReason,
         goalDoneness,
-        parseJson(t.getContinuationDecisionJson(), "continuationDecision", t.getTaskId()),
-        parseJson(t.getContinuationActionsJson(), "continuationActions", t.getTaskId()),
+        parseJson(
+            redactPaths(t.getContinuationDecisionJson()), "continuationDecision", t.getTaskId()),
+        parseJson(
+            redactPaths(t.getContinuationActionsJson()), "continuationActions", t.getTaskId()),
         extractObjective(t.getTaskJson()),
         t.getCompletionNotes(),
         t.getParentTaskId(),
@@ -485,9 +467,37 @@ public class RunMapper {
       String persistedFailure,
       String persistedStatus,
       String displayStatus) {
-    return "COMPLETE".equals(persistedStatus) && "PARTIAL".equals(displayStatus)
-        ? "TASK_PROOF_INCOMPLETE"
-        : PlannerFailureDiagnostic.projectStatusReason(persistedReason, persistedFailure);
+    if ("COMPLETE".equals(persistedStatus) && "PARTIAL".equals(displayStatus)) {
+      return "TASK_PROOF_INCOMPLETE";
+    }
+    String projected =
+        PlannerFailureDiagnostic.projectStatusReason(persistedReason, persistedFailure);
+    if (projected != null && !projected.isBlank()) return projected;
+    // FAILED/ERROR rows historically persisted only a coded failureReason, leaving statusReason
+    // null while terminalOutcome carried a real code. Fall back to the stable code prefix only —
+    // never the raw detail after the first colon, and never free prose that fails the code shape.
+    if ("FAILED".equals(persistedStatus) || "ERROR".equals(persistedStatus)) {
+      return stableFailureCodePrefix(persistedFailure);
+    }
+    return projected;
+  }
+
+  /** Null-tolerant path redaction so bare test constructions without the bean stay usable. */
+  private String redactPaths(String value) {
+    return workspacePathRedaction == null ? value : workspacePathRedaction.redact(value);
+  }
+
+  /**
+   * Bounded stable-code prefix of a persisted failure reason, or null when it is not code-shaped.
+   */
+  private static final java.util.regex.Pattern STABLE_FAILURE_CODE =
+      java.util.regex.Pattern.compile("[A-Z][A-Z0-9_]{2,63}");
+
+  static String stableFailureCodePrefix(String persistedFailure) {
+    if (persistedFailure == null || persistedFailure.isBlank()) return null;
+    int colon = persistedFailure.indexOf(':');
+    String prefix = (colon < 0 ? persistedFailure : persistedFailure.substring(0, colon)).trim();
+    return STABLE_FAILURE_CODE.matcher(prefix).matches() ? prefix : null;
   }
 
   private static String displayRunFailureReason(

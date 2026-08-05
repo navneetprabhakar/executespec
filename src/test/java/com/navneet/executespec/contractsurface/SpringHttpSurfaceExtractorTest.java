@@ -71,6 +71,26 @@ class SpringHttpSurfaceExtractorTest {
         .extracting(source -> source.value() + " " + source.source())
         .containsExactly("/simulation src/main/resources/application.yml:3");
     assertThat(snapshot.schemaVersion()).isEqualTo(2);
+    assertThat(snapshot.hasDeterministicSpringMvcEvidence()).isTrue();
+  }
+
+  @Test
+  void emptyExtractionDoesNotEstablishSpringMvcApplicability() {
+    assertThat(extractor.extract(Map.of()).hasDeterministicSpringMvcEvidence()).isFalse();
+  }
+
+  @Test
+  void contextPathConfigurationAloneEstablishesSpringMvcApplicability() {
+    var snapshot =
+        extractor.extract(
+            Map.of(
+                "src/main/java/example/App.java",
+                "package example; class App {}\n",
+                "src/main/resources/application.properties",
+                "server.servlet.context-path=/catalog\n"));
+
+    assertThat(snapshot.routes()).isEmpty();
+    assertThat(snapshot.hasDeterministicSpringMvcEvidence()).isTrue();
   }
 
   @Test
@@ -99,6 +119,89 @@ class SpringHttpSurfaceExtractorTest {
         .containsExactly(
             "server.servlet.context-path=/simulation"
                 + " src/main/resources/application.properties:2");
+  }
+
+  @Test
+  void parsesJavaRecordsWhenExtractingWorkspaceSurface() throws Exception {
+    write(
+        "src/main/java/example/ClinicSummary.java",
+        """
+        package example;
+        public record ClinicSummary(long ownerCount, long vetCount) {}
+        """);
+    write(
+        "src/main/java/example/ClinicSummaryController.java",
+        """
+        package example;
+        @RestController
+        class ClinicSummaryController {
+          @GetMapping("/api/clinic/summary")
+          ClinicSummary summary() { return new ClinicSummary(0, 0); }
+        }
+        """);
+
+    assertThat(extractor.extract(workspace).routes())
+        .extracting(route -> route.method() + " " + route.path())
+        .containsExactly("GET /api/clinic/summary");
+  }
+
+  @Test
+  void parsesJavaRecordsWhenExtractingImmutableSourceSnapshot() {
+    var snapshot =
+        extractor.extract(
+            Map.of(
+                "src/main/java/example/ClinicSummary.java",
+                "package example; public record ClinicSummary(long ownerCount) {}",
+                "src/main/java/example/ClinicSummaryController.java",
+                """
+                package example;
+                @RestController
+                class ClinicSummaryController {
+                  @GetMapping("/api/clinic/summary")
+                  ClinicSummary summary() { return new ClinicSummary(0); }
+                }
+                """));
+
+    assertThat(snapshot.routes())
+        .extracting(route -> route.method() + " " + route.path())
+        .containsExactly("GET /api/clinic/summary");
+  }
+
+  @Test
+  void rejectsRecoveredMalformedJavaWhenExtractingWorkspaceSurface() throws Exception {
+    write(
+        "src/main/java/example/BrokenController.java",
+        """
+        package example;
+        @RestController
+        class BrokenController {
+          @GetMapping("/api/broken")
+          Object broken( { return null; }
+        }
+        """);
+
+    assertThatThrownBy(() -> extractor.extract(workspace))
+        .isInstanceOf(SpringHttpSurfaceExtractor.SurfaceExtractionException.class)
+        .hasMessageContaining("BrokenController.java");
+  }
+
+  @Test
+  void rejectsRecoveredMalformedJavaWhenExtractingImmutableSourceSnapshot() {
+    assertThatThrownBy(
+            () ->
+                extractor.extract(
+                    Map.of(
+                        "src/main/java/example/BrokenController.java",
+                        """
+                        package example;
+                        @RestController
+                        class BrokenController {
+                          @GetMapping("/api/broken")
+                          Object broken( { return null; }
+                        }
+                        """)))
+        .isInstanceOf(SpringHttpSurfaceExtractor.SurfaceExtractionException.class)
+        .hasMessageContaining("BrokenController.java");
   }
 
   @Test

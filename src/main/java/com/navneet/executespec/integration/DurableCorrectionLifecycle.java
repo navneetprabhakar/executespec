@@ -300,8 +300,10 @@ public class DurableCorrectionLifecycle {
         || !Boolean.TRUE.equals(currentReport.getTestExecutionVerified())
         || currentReport.getTestsTotal() == null
         || currentReport.getTestsTotal() <= 0
-        || !java.util.Objects.equals(
-            currentReport.getTestsPassed(), currentReport.getTestsTotal())) {
+        || !com.navneet.executespec.report.TestExecutionTrust.successfulPopulation(
+            currentReport.getTestsPassed(),
+            currentReport.getTestsSkipped(),
+            currentReport.getTestsTotal())) {
       throw new IllegalStateException(
           "Completed correction approval lacks fresh accepted-generation evidence");
     }
@@ -432,6 +434,7 @@ public class DurableCorrectionLifecycle {
           objectMapper.readValue(attempt.getRepositoriesJson(), RepositoryRef[].class);
       Path root = realPath(attempt.getWorkspaceRoot());
       return new CorrectionWorkspaceTransaction.Checkpoint(
+          root,
           java.util.Arrays.stream(refs)
               .map(
                   ref -> {
@@ -459,6 +462,7 @@ public class DurableCorrectionLifecycle {
   private static CorrectionWorkspaceTransaction.Checkpoint canonicalCheckpoint(
       Path canonicalRoot, CorrectionWorkspaceTransaction.Checkpoint checkpoint) {
     return new CorrectionWorkspaceTransaction.Checkpoint(
+        canonicalRoot,
         checkpoint.repositories().stream()
             .map(
                 repository -> {
@@ -504,14 +508,21 @@ public class DurableCorrectionLifecycle {
     if (!Integer.valueOf(1).equals(attempt.getSnapshotSchemaVersion())) {
       throw new IllegalStateException("Unsupported correction snapshot schema");
     }
-    if (!attempt.getEvidenceSnapshotDigest().equals(sha256(attempt.getEvidenceSnapshotJson()))) {
-      throw new IllegalStateException("Correction evidence snapshot digest mismatch");
-    }
     try {
       ValidationSnapshotV1 snapshot =
           objectMapper.readValue(attempt.getEvidenceSnapshotJson(), ValidationSnapshotV1.class);
       if (snapshot.schemaVersion() != 1) {
         throw new IllegalStateException("Unsupported correction validation snapshot schema");
+      }
+      // evidence_snapshot_json is PostgreSQL jsonb. jsonb preserves every typed value (including
+      // the byte-exact reportJson string) but is explicitly free to reorder the outer object's
+      // keys. V369 digested the Java record serialization before insertion, so hashing the raw
+      // value read back from jsonb rejects an unchanged checkpoint whenever PostgreSQL returns a
+      // different key order. Re-serialize the typed V1 envelope in its declared record order: this
+      // reproduces the bytes V369 originally digested while still binding every evidence/share
+      // value, and remains compatible with already-persisted unresolved attempts.
+      if (!attempt.getEvidenceSnapshotDigest().equals(sha256(write(snapshot)))) {
+        throw new IllegalStateException("Correction evidence snapshot digest mismatch");
       }
       return snapshot;
     } catch (JsonProcessingException malformed) {

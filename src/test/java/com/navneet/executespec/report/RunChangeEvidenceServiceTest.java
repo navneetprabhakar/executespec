@@ -10,6 +10,7 @@ import java.util.List;
 
 import com.navneet.executespec.agent.model.WorkerReport;
 import com.navneet.executespec.config.AgentProperties;
+import com.navneet.executespec.state.entity.RunRepoSnapshot;
 import com.navneet.executespec.state.repository.RunRepoSnapshotRepository;
 
 import org.junit.jupiter.api.Test;
@@ -87,6 +88,16 @@ class RunChangeEvidenceServiceTest {
         .isEqualTo(1);
     assertThat(
             service.meaningfulProductDiffCountForToolLog(
+                runId, List.of("editFile(sig=deadbeef) [target=src/f500.java] -> OK")))
+        .as("canonical salvage entries attribute the admitted product diff")
+        .isEqualTo(1);
+    assertThat(
+            service.meaningfulProductDiffCountForToolLog(
+                runId, List.of("editFile(sig=deadbeef) [target=src/f500.java] -> ERR")))
+        .as("failed salvage entries cannot claim the product diff")
+        .isZero();
+    assertThat(
+            service.meaningfulProductDiffCountForToolLog(
                 runId, List.of("editFile({\"path\":\"src/f500.java\"})")))
         .isZero();
   }
@@ -154,6 +165,90 @@ class RunChangeEvidenceServiceTest {
     assertThat(evidence.productFiles())
         .extracting(RunChangeEvidenceService.ChangedFile::path)
         .containsExactly("app/main.py");
+  }
+
+  @Test
+  void resolvesAnAdmittedStandaloneSnapshotAtTheRunWorkspaceRoot() throws Exception {
+    String runId = "run-root-snapshot";
+    Path workspace = temp.resolve(runId);
+    Files.createDirectories(workspace);
+    git(workspace, "init", "-b", "trunk");
+    git(workspace, "config", "user.email", "test@example.com");
+    git(workspace, "config", "user.name", "Test");
+    Files.writeString(workspace.resolve("app.js"), "export const value = 1;\n");
+    Files.createDirectories(workspace.resolve("repos/app"));
+    Files.writeString(workspace.resolve("repos/app/bait.js"), "export const bait = true;\n");
+    git(workspace, "add", "app.js");
+    git(workspace, "commit", "-m", "baseline");
+    String baseline = gitOutput(workspace, "rev-parse", "HEAD");
+    Files.writeString(workspace.resolve("app.js"), "export const value = 2;\n");
+
+    RunRepoSnapshotRepository snapshots = mock(RunRepoSnapshotRepository.class);
+    when(snapshots.findByRunId(runId))
+        .thenReturn(
+            List.of(
+                RunRepoSnapshot.builder()
+                    .runId(runId)
+                    .repoFullName("acme/app")
+                    .branch("trunk")
+                    .commitSha(baseline)
+                    .build()));
+    AgentProperties properties = new AgentProperties();
+    properties.setWorkspace(temp.toString());
+
+    var evidence = new RunChangeEvidenceService(properties, snapshots).inspect(runId, List.of());
+
+    assertThat(evidence.valid()).isTrue();
+    assertThat(evidence.productFiles())
+        .extracting(RunChangeEvidenceService.ChangedFile::path)
+        // `repos/app` is ordinary content in this admitted standalone repository. Keeping the
+        // root-relative prefix proves it was not misclassified as a nested Project checkout.
+        .containsExactly("app.js", "repos/app/bait.js");
+  }
+
+  @Test
+  void restoredNestedProjectFailsClosedInsteadOfUsingSyntheticRootRepository() throws Exception {
+    String runId = "run-restored-project";
+    Path workspace = temp.resolve(runId);
+    Files.createDirectories(workspace);
+    git(workspace, "init", "-b", "main");
+    git(workspace, "config", "user.email", "test@example.com");
+    git(workspace, "config", "user.name", "Test");
+    Path nested = Files.createDirectories(workspace.resolve("repos/api"));
+    Files.writeString(nested.resolve("Api.java"), "class Api {}\n");
+    git(workspace, "add", ".");
+    git(workspace, "commit", "-m", "synthetic restored archive");
+
+    RunRepoSnapshotRepository snapshots = mock(RunRepoSnapshotRepository.class);
+    when(snapshots.findByRunId(runId))
+        .thenReturn(
+            List.of(
+                RunRepoSnapshot.builder()
+                    .runId(runId)
+                    .repoId(java.util.UUID.randomUUID())
+                    .repoFullName("acme/api")
+                    .branch("main")
+                    .commitSha("a".repeat(40))
+                    .build()));
+    AgentProperties properties = new AgentProperties();
+    properties.setWorkspace(temp.toString());
+
+    var evidence = new RunChangeEvidenceService(properties, snapshots).inspect(runId, List.of());
+
+    assertThat(evidence.valid()).isFalse();
+    assertThat(evidence.invalidReason())
+        .isEqualTo("admitted repository checkout is unavailable: api");
+  }
+
+  private static String gitOutput(Path dir, String... args) throws Exception {
+    java.util.List<String> command = new java.util.ArrayList<>();
+    command.add("git");
+    command.addAll(List.of(args));
+    Process process =
+        new ProcessBuilder(command).directory(dir.toFile()).redirectErrorStream(true).start();
+    String output = new String(process.getInputStream().readAllBytes()).trim();
+    if (process.waitFor() != 0) throw new AssertionError(output);
+    return output;
   }
 
   private static void git(Path dir, String... args) throws Exception {

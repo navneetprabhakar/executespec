@@ -11,6 +11,18 @@ import org.springframework.ai.tool.definition.ToolDefinition;
 
 class ChatToolPolicyTest {
 
+  /**
+   * Deliberately a literal, not a derivation: the 2026-08-01 pipeline retry-ladder bump silently
+   * inflated this ceiling 24 → 36 because it was derived from the pipeline constant. Chat turns run
+   * on the INTERACTIVE retry profile; if this assertion fails, a retry-envelope change leaked into
+   * the chat provider-call budget again.
+   */
+  @Test
+  void providerCallCeilingPerTurnIsPinnedAtTwentyFour() {
+    assertThat(ChatToolPolicy.MAX_PROVIDER_CALLS_PER_TURN).isEqualTo(24);
+    assertThat(ChatToolPolicy.MAX_PROVIDER_ATTEMPTS_PER_MODEL_ROUND).isEqualTo(4);
+  }
+
   @Test
   void explicitlyClassifiesReadAnalyseSpendAndWriteTools() {
     assertThat(ChatToolPolicy.capability("list_repos"))

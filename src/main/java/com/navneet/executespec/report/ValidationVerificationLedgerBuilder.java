@@ -192,15 +192,19 @@ final class ValidationVerificationLedgerBuilder {
 
     Integer testsPassed = entity.getTestsPassed();
     Integer testsTotal = entity.getTestsTotal();
+    Integer testsSkipped = entity.getTestsSkipped();
     int total = testsTotal == null ? 0 : testsTotal;
     int passed = testsPassed == null ? 0 : testsPassed;
+    int skipped = testsSkipped == null ? 0 : testsSkipped;
     boolean countsProven = total > 0 && testCountsProven(entity);
+    boolean suitePassed =
+        countsProven && passed > 0 && skipped >= 0 && (long) passed + skipped == total;
     out.add(
         evidence(
             "tests",
             "Tests",
             "TESTS",
-            !countsProven ? "UNKNOWN" : passed == total ? "PASS" : passed > 0 ? "WARN" : "FAIL",
+            !countsProven ? "UNKNOWN" : suitePassed ? "PASS" : passed > 0 ? "WARN" : "FAIL",
             countsProven ? testCountSource(entity) : UNPROVEN_TEST_COUNT_SOURCE,
             countsProven ? PROVEN_TEST_COUNT_CONFIDENCE : UNPROVEN_TEST_COUNT_CONFIDENCE,
             total <= 0
@@ -225,6 +229,7 @@ final class ValidationVerificationLedgerBuilder {
                     + "/"
                     + total
                     + " tests passed"
+                    + (skipped > 0 ? "; " + skipped + " skipped" : "")
                     + (functionalTestCountsProven(entity)
                         ? " (functional)."
                         : countsProven ? " (workspace suite only)." : " (counts unverified)."),
@@ -290,32 +295,38 @@ final class ValidationVerificationLedgerBuilder {
                     accuracy.incompleteRequirements(),
                     accuracy.unknownRequirements())
                 : entity.getRubricScore();
+    // A failed accuracy provider call leaves an internal issue-count heuristic; that row must not
+    // claim a model graded the spec, so it drops to UNKNOWN/INTERNAL_FORMULA with no numeric grade.
+    boolean heuristicSpec = accuracy.heuristicEstimate();
     out.add(
         evidence(
             "spec-adherence",
             "Spec adherence",
             "SPEC",
-            accuracy.score() == null || !accuracy.specCited()
+            heuristicSpec || accuracy.score() == null || !accuracy.specCited()
                 ? "UNKNOWN"
                 : accuracy.unknownRequirements() > 0
                     ? "WARN"
                     : accuracy.score() >= 85 ? "PASS" : accuracy.score() >= 70 ? "WARN" : "FAIL",
-            "LLM_ASSESSMENT",
+            heuristicSpec ? "INTERNAL_FORMULA" : "LLM_ASSESSMENT",
             "LOW",
             "The delivered code appears to satisfy the natural-language spec.",
-            accuracy.score() == null
-                ? "Accuracy assessment was not captured."
-                : "LLM assessment: "
-                    + accuracy.score()
-                    + "/100"
-                    + (accuracy.grade() == null ? "" : " (" + accuracy.grade() + ")")
-                    + (accuracy.unknownRequirements() > 0
-                        ? "; " + accuracy.unknownRequirements() + " requirement(s) unverified"
-                        : "")
-                    + ".",
+            heuristicSpec
+                ? "Accuracy assessment unavailable; heuristic estimate from review issue count —"
+                    + " no model graded the spec."
+                : accuracy.score() == null
+                    ? "Accuracy assessment was not captured."
+                    : "LLM assessment: "
+                        + accuracy.score()
+                        + "/100"
+                        + (accuracy.grade() == null ? "" : " (" + accuracy.grade() + ")")
+                        + (accuracy.unknownRequirements() > 0
+                            ? "; " + accuracy.unknownRequirements() + " requirement(s) unverified"
+                            : "")
+                        + ".",
             accuracy.specArtifact("validation_report.accuracy_json"),
-            accuracy.score(),
-            accuracy.score() == null ? null : 100));
+            heuristicSpec ? null : accuracy.score(),
+            heuristicSpec || accuracy.score() == null ? null : 100));
 
     out.add(
         ValidationEndpointCoverageEvidence.build(
@@ -360,9 +371,19 @@ final class ValidationVerificationLedgerBuilder {
             entity.getFinalBuildPassed(),
             passed,
             total,
+            skipped,
             entity.getReviewerVerdict(),
             countUnfixedCriticalIssues(issues),
             accuracy.testCited() ? accuracy.testCoverageLevel() : null);
+    if (!functionalTestCountsProven(entity)) {
+      int functionalCap = Math.min(trustCap.cap(), 75);
+      String functionalReason = "independent functional verification is unavailable";
+      String reason =
+          "no trust cap applied".equals(trustCap.reason())
+              ? functionalReason
+              : trustCap.reason() + "; " + functionalReason;
+      trustCap = new TrustCap(Math.min(trustCap.score(), functionalCap), functionalCap, reason);
+    }
     if (trustCap.cap() < 100) {
       out.add(
           evidence(
@@ -499,6 +520,26 @@ final class ValidationVerificationLedgerBuilder {
       String reviewerVerdictName,
       int unfixedCriticalCount,
       String testCoverageLevel) {
+    return trustCap(
+        rawScore,
+        finalBuildPassed,
+        testsPassed,
+        testsTotal,
+        0,
+        reviewerVerdictName,
+        unfixedCriticalCount,
+        testCoverageLevel);
+  }
+
+  TrustCap trustCap(
+      int rawScore,
+      Boolean finalBuildPassed,
+      int testsPassed,
+      int testsTotal,
+      int testsSkipped,
+      String reviewerVerdictName,
+      int unfixedCriticalCount,
+      String testCoverageLevel) {
     int cap = 100;
     List<String> reasons = new ArrayList<>();
 
@@ -523,9 +564,16 @@ final class ValidationVerificationLedgerBuilder {
       reasons.add("final build failed");
     }
 
-    if (testsTotal > 0 && testsPassed < testsTotal) {
+    boolean successfulPopulation =
+        testsPassed > 0 && testsSkipped >= 0 && (long) testsPassed + testsSkipped == testsTotal;
+    if (testsTotal > 0 && !successfulPopulation) {
       cap = Math.min(cap, testsPassed <= 0 ? 70 : 85);
-      reasons.add(testsPassed + "/" + testsTotal + " tests passed");
+      reasons.add(
+          testsPassed
+              + "/"
+              + testsTotal
+              + " tests passed"
+              + (testsSkipped > 0 ? "; " + testsSkipped + " skipped" : ""));
     } else if (testsTotal <= 0) {
       String level = testCoverageLevel == null ? null : testCoverageLevel.toUpperCase();
       if ("NONE".equals(level)) {

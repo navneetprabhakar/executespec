@@ -99,6 +99,10 @@ public class BuildProjectTool implements Tool {
 
   @Override
   public ToolResult execute(JsonNode args, ExecutionContext ctx) {
+    String reviewerLimit = ReviewerMutationScope.validateBuildProject();
+    if (reviewerLimit != null) {
+      return ToolResult.err(ToolResult.ErrorKind.FORBIDDEN, reviewerLimit);
+    }
     String plannerCmd =
         args.hasNonNull("plannerCommand")
             ? args.get("plannerCommand").asText()
@@ -114,7 +118,9 @@ public class BuildProjectTool implements Tool {
     // lets the worker fix the pom in 1-2 iterations instead of hunting for
     // ghost compile errors. No-op on non-Maven projects.
     MavenDependencyValidator.ValidationResult depCheck =
-        mavenDependencyValidator.validate(ctx.workspaceRoot());
+        bc.validationRoots().isEmpty()
+            ? mavenDependencyValidator.validate(ctx.workspaceRoot())
+            : mavenDependencyValidator.validateAll(bc.validationRoots());
     if (!depCheck.isPassed()) {
       log.warn(
           "buildProject preflight: {} hallucinated/missing dep(s) in pom.xml — failing fast"

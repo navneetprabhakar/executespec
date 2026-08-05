@@ -2,6 +2,8 @@ package com.navneet.executespec.sse;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.timeout;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.lang.reflect.Method;
@@ -106,13 +108,15 @@ class SseBroadcasterReplayContractTest {
   }
 
   @Test
-  void idleSubscriptionFlushesAnInitialComment() throws Exception {
+  void idleSubscriptionFlushesAnInitialCommentThroughTheDeliveryWriter() throws Exception {
     SseEmitter emitter = mock(SseEmitter.class);
+    SseBroadcaster service = broadcaster();
 
-    broadcaster().sendInitialConnectionComment(emitter);
+    service.subscribeWithEmitter("run-comment", null, emitter);
 
-    org.mockito.Mockito.verify(emitter)
+    verify(emitter, timeout(1000))
         .send(org.mockito.ArgumentMatchers.<SseEmitter.SseEventBuilder>any());
+    service.shutdown();
   }
 
   @Test

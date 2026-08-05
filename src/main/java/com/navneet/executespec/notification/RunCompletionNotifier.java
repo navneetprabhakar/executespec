@@ -1,7 +1,11 @@
 package com.navneet.executespec.notification;
 
+import com.navneet.executespec.activity.ActivityEventType;
 import com.navneet.executespec.harness.event.PipelineEvent;
 import com.navneet.executespec.harness.event.QuotaEvent;
+import com.navneet.executespec.notification.pref.NotificationPrefService;
+import com.navneet.executespec.run.outcome.RunTerminalOutcome;
+import com.navneet.executespec.run.outcome.RunTerminalOutcomeContract;
 import com.navneet.executespec.state.StateStore;
 import com.navneet.executespec.state.entity.PipelineRun;
 
@@ -30,6 +34,7 @@ public class RunCompletionNotifier {
   private final InAppNotificationService notificationService;
   private final NotificationRepository notificationRepository;
   private final StateStore stateStore;
+  private final NotificationPrefService prefService;
 
   @Async
   @EventListener
@@ -37,9 +42,14 @@ public class RunCompletionNotifier {
     try {
       PipelineRun run = stateStore.findRun(event.runId()).orElse(null);
       if (run == null || run.getCreatedByUserId() == null) return;
+      RunTerminalOutcome outcome = RunTerminalOutcomeContract.project(run);
+      if (!prefService.shouldNotify(
+          run.getCreatedByUserId(),
+          RunNotificationPreferencePolicy.eventType(outcome, ActivityEventType.RUN_COMPLETED),
+          NotificationPrefService.Channel.IN_APP)) return;
 
       boolean isBatch = "BATCH".equals(run.getApprovedExecutionMode());
-      String type = isBatch ? "BATCH_COMPLETE" : "RUN_COMPLETE";
+      String type = notificationType(isBatch, outcome);
       String link = "/runs/" + event.runId();
 
       if (notificationRepository.existsByLinkAndType(link, type)) {
@@ -47,11 +57,11 @@ public class RunCompletionNotifier {
         return;
       }
 
-      String title = "Run complete: " + pickTitle(run);
+      String title = outcomeTitle(outcome) + ": " + pickTitle(run);
       // Phase 1.3 #31 — notification body upgrade. Lead with the four
       // signals the user actually cares about (verdict + cost +
       // duration + PR link if any), then the run summary as fallback.
-      String body = buildRichBody(run, event.runId());
+      String body = buildOutcomeBody(run, outcome);
 
       notificationService.create(run.getCreatedByUserId(), type, title, body, link);
       log.debug(
@@ -71,9 +81,26 @@ public class RunCompletionNotifier {
     try {
       PipelineRun run = stateStore.findRun(event.runId()).orElse(null);
       if (run == null || run.getCreatedByUserId() == null) return;
+      String fallbackFailureReason =
+          run.getFailureReason() != null && !run.getFailureReason().isBlank()
+              ? run.getFailureReason()
+              : event.reason();
+      RunTerminalOutcome outcome =
+          RunTerminalOutcomeContract.project(
+              run.getRunId(),
+              run.getStatus(),
+              run.getStatusReason(),
+              fallbackFailureReason,
+              run.getActualCostUsd(),
+              run.getHardCapUsd() != null ? run.getHardCapUsd() : run.getUserCostCap(),
+              run.getScmPrUrl() != null ? run.getScmPrUrl() : run.getGithubPrUrl());
+      if (!prefService.shouldNotify(
+          run.getCreatedByUserId(),
+          RunNotificationPreferencePolicy.eventType(outcome, ActivityEventType.RUN_FAILED),
+          NotificationPrefService.Channel.IN_APP)) return;
 
       boolean isBatch = "BATCH".equals(run.getApprovedExecutionMode());
-      String type = isBatch ? "BATCH_FAILED" : "RUN_FAILED";
+      String type = notificationType(isBatch, outcome);
       String link = "/runs/" + event.runId();
 
       if (notificationRepository.existsByLinkAndType(link, type)) {
@@ -81,14 +108,14 @@ public class RunCompletionNotifier {
         return;
       }
 
-      String title = "Run failed: " + pickTitle(run);
+      String title = outcomeTitle(outcome) + ": " + pickTitle(run);
       // M-053 + M-054 (Backlog) — failure notifications get the same
       // rich-body treatment as completions: lead with the cost/duration
       // signals, then include the failure reason. Previously the body
       // was just the reason string — useful but missing the "$0.42 ·
       // 4m12s" signal that helps Sara/Raj/Marcus decide whether to
       // retry immediately or batch the fix.
-      String body = buildRichFailureBody(run, event.reason());
+      String body = buildOutcomeBody(run, outcome);
 
       notificationService.create(run.getCreatedByUserId(), type, title, body, link);
       log.debug(
@@ -106,7 +133,7 @@ public class RunCompletionNotifier {
    * operator-friendly reason. Returns the bare reason if the run never started accumulating cost
    * (early-stage failures) so we don't render "$0.00 · 0s" noise.
    */
-  private String buildRichFailureBody(PipelineRun run, String reason) {
+  private String buildOutcomeBody(PipelineRun run, RunTerminalOutcome outcome) {
     StringBuilder parts = new StringBuilder();
     Double cost = run.getActualCostUsd();
     if (cost != null && cost > 0) {
@@ -120,14 +147,32 @@ public class RunCompletionNotifier {
         else parts.append(secs / 60).append("m").append(String.format("%02ds", secs % 60));
       }
     }
-    if (reason != null && !reason.isBlank()) {
+    if (outcome != null && outcome.customerMessage() != null) {
       if (parts.length() > 0) parts.append("\n");
-      parts.append(truncate(reason, 500));
+      parts.append(outcome.customerMessage());
+    }
+    if (outcome != null && outcome.nextAction() != null) {
+      if (parts.length() > 0) parts.append("\n");
+      parts.append("Next: ").append(outcome.nextAction().label());
+    }
+    if (outcome != null && outcome.supportCode() != null) {
+      if (parts.length() > 0) parts.append("\n");
+      parts.append("Support code: ").append(outcome.supportCode());
     }
     if (parts.length() == 0) {
       return "The run could not be completed.";
     }
     return parts.toString();
+  }
+
+  private static String notificationType(boolean batch, RunTerminalOutcome outcome) {
+    String prefix = batch ? "BATCH_" : "RUN_";
+    if (outcome == null) return prefix + "PLATFORM_FAILURE";
+    return prefix + outcome.category().name();
+  }
+
+  private static String outcomeTitle(RunTerminalOutcome outcome) {
+    return outcome == null ? "ExecuteSpec could not complete the run" : outcome.customerTitle();
   }
 
   /**

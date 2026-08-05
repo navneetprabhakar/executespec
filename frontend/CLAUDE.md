@@ -34,7 +34,7 @@ frontend/
 ├── .eslintrc.cjs · .prettierrc.json · .pa11yci.json · A11Y.md
 ├── public/                          # manifest.webmanifest · sw.js (PWA) · trust-pack.pdf
 └── src/
-    ├── main.tsx                     # app entry + theme/chrome reconciliation + PostHog init
+    ├── main.tsx                     # app entry + theme/chrome reconciliation (no analytics init)
     ├── App.tsx                      # routes — ConsoleShell for every protected route
     ├── index.css · tokens.css       # global + Graphite/Signal palette + 4-band score colours
     ├── ide/                         # route-level surfaces rendered inside ConsoleShell (no longer a mounted chrome)
@@ -62,7 +62,7 @@ frontend/
     ├── stores/                      # Zustand: useAuthStore, useUiStore (theme + uiMode pinned to 'console' via initUiMode), useRunStore, useSseStore
     ├── hooks/                       # useSse, useTierPermissions, useIsMobile, useDocumentTitle
     ├── lib/                         # api/ split client + billing/execution clients + runStatus/ui helpers
-    ├── types/                       # project.ts, execution.ts
+    ├── types/                       # project.ts
     └── design-system/              # contrast.{ts,test.ts} (WCAG ratio helpers + dormant vitest test) + primitives.css
 ```
 
@@ -100,7 +100,14 @@ JetBrainsMono variable font is the single typeface for the entire app (PR #108, 
 
 ## API client
 
-`frontend/src/lib/api/` is the primary API client. `transport.ts` owns `BASE`, auth headers, `ApiError`, error parsing, token refresh, and the shared `req<T>` / `reqText` helpers; `core.ts` preserves the stable import surface while owning shared cross-domain DTO/type contracts. Domain modules (`runs.ts`, `projects.ts`, `auth.ts`, `org.ts`, `billing.ts`, etc.) export endpoint helpers through `index.ts`; billing plans and managed-AI/payment APIs are co-located in `billing.ts` (the removed standalone `billing-api.ts` must not be reintroduced), and notification DTOs/preferences live in `notifications.ts`. Project settings updates, including target-branch and branch-naming fields, must use `projects.ts:updateProjectSettings` rather than a component-level `fetch`; GDPR archive downloads use `misc.ts:downloadUserDataExport`. `agent.ts` owns agent-session REST helpers and re-exports `agentStream.ts`, which owns the POST-SSE stream parser/dispatcher. ArchUnit test `arch/ApiContractTest` asserts frontend API URLs resolve to registered backend `@*Mapping`s.
+`frontend/src/lib/api/` is the primary API client. `transport.ts` owns `BASE`, auth headers, `ApiError`, error parsing, token refresh, and the shared `req<T>` / `reqText` helpers; `core.ts` preserves the stable import surface while owning shared cross-domain DTO/type contracts. The server-owned terminal-run projection lives in `runOutcomeTypes.ts` so adding outcome parity does not grow the ratcheted shared DTO registry. Domain modules (`runs.ts`, `projects.ts`, `auth.ts`, `org.ts`, `billing.ts`, etc.) export endpoint helpers through `index.ts`; billing plans and managed-AI/payment APIs are co-located in `billing.ts` (the removed standalone `billing-api.ts` must not be reintroduced), and notification DTOs/preferences live in `notifications.ts`. Project settings updates, including target-branch and branch-naming fields, must use `projects.ts:updateProjectSettings` rather than a component-level `fetch`; GDPR archive downloads use `misc.ts:downloadUserDataExport`. `agent.ts` owns agent-session REST helpers and re-exports `agentStream.ts`, which owns the POST-SSE stream parser/dispatcher. ArchUnit test `arch/ApiContractTest` asserts frontend API URLs resolve to registered backend `@*Mapping`s.
+
+Protected-route session hydration is an explicit state machine. `useAuthStore.loadMe` owns the
+single in-flight `/auth/me` attempt, preserves authentication truth on transient failures, and
+records a retryable hydration error; `ProtectedRoute` renders that error instead of leaving
+`isAuthenticated=true, user=null` behind a permanent spinner. The raw automatic refresh request in
+`transport.ts` must keep the shared 30-second deadline even though it cannot call `req()` without
+recursing.
 
 For the full audit of which endpoint is consumed by which frontend file, see [`executespec-docs/backend/architecture/frontend-api-usage.md`](../../executespec-docs/backend/architecture/frontend-api-usage.md). The agent POST-SSE client treats `done`/`error` as explicit terminal events and rejects a transport EOF/read failure after a partial stream, so a dropped connection cannot be rendered as a completed answer; once `done` is parsed, a later proxy reset cannot overwrite that authoritative completion with a network error, while a terminal server `error` still wins. `IdeAgent` treats the subsequent session/gate refresh as best-effort synchronization rather than turn execution, so refresh failure cannot reclassify a completed turn. JSON transport keeps a 30-second default but accepts an explicit `timeoutMs`; synchronous architecture generation uses 5 minutes, per-repository architecture regeneration and project-document generation use 3 minutes. Add long-operation deadlines at the endpoint wrapper, never by weakening the shared default globally.
 
@@ -147,6 +154,10 @@ Documented deviations from Google TypeScript style in [`executespec-docs/backend
   confirmation predicate, and selection UI; keep this authority out of the proposal card and
   stream lifecycle code.
 - Web agent chat usage is displayed as included conversation usage, not pending AI credits. `IdeAgent.tsx` prepends the current visible token totals and billing boundary to the streamed conversation so cost questions can answer from session facts; run credits remain separate and charge only through the plan-gate approval path.
+- Agent runtime copy must describe only evidence the product can prove: actions/evidence are retained
+  subject to retention policy, BYOK cost caps are optional, and a PR is prepared only after
+  publication gates pass. Do not claim that every event is permanently audited, every run is
+  capped, or every terminal run necessarily opens a PR.
 - **Sandbox correctness contracts (Phase 4, 2026-07-19).** `agentActionPolicy.ts` is the single confirmability predicate (`isConfirmableCloudRun` / `isCloudRunAction` / `cloudRunBlockingReasons` / `cloudRunBlockingCopy` / `requiresProjectSelection`) consumed by BOTH `agentPanels.tsx` rendering and `IdeAgent.tsx` confirmation dispatch — do not reintroduce a bare `action.type === 'create_cloud_run'` check in either place. It honours the backend `AgentTypedAction.actionContext` (`AgentActionContext`) as authoritative, and independently requires a non-blank `arguments.projectId`, so a legacy turn replayed without a context cannot become confirmable by omission. A blocked proposal renders `AgentBlockedActionCard.tsx` instead of a confirm card. `agentSessionActions.ts` is the canonical session-creation action: every entry point (`ConsoleShell` header CTA, `Agent: New remote sandbox` palette command, `IdeAgent` header/empty state) mints one `NewAgentSessionRequest` whose client UUID is sent as `CreateAgentSessionRequest.id`, which the backend treats idempotently — navigation alone is never creation. `ConsoleShell`'s "latest sandbox" command reads `latestLinkedRun*` from `listAgentSessions`, never the global `runs[0]`. `lib/specHandoff.ts` replaces the raw `signal:pending-spec` string with a versioned envelope (`schemaVersion`, `handoffId`, `spec`, `projectId`, `repoId`, `scope`, `source`, `createdAt`) that migrates the legacy bare-string form on read. Covered by `agentActionPolicy.test.ts`, `agentSessionActions.test.ts`, and `specHandoff.test.ts`.
 - `agentArtifacts.ts` extracts generated fenced-code artifacts from assistant messages. `agentPanels.tsx` renders the artifact rail with file identity, copy, download, preview for browser-safe types, a "Draft sandbox request" composer prefill (renamed from "Use in sandbox", which claimed a runtime that does not exist), and a `/cli-login` local-handoff link; keep artifact parsing covered by `agentArtifacts.test.ts` and rendered affordances covered by `IdeAgent.test.tsx`.
 - `lib/api/validationReportTypes.ts` owns the typed final-goal evidence-reference shape shared by
@@ -207,6 +218,18 @@ Documented deviations from Google TypeScript style in [`executespec-docs/backend
 ### Project workbench (`ide/IdeProjects.tsx` + `ide/IdeProject.tsx` + `ide/IdeProjectTabs.tsx` + `ide/IdeProjectMore.tsx` + `ide/IdeProjectSettings.tsx`)
 
 - `IdeProjects` — health cards over the project list; `IdeProject` — the project composer with repo scoping.
+- Enterprise Project Start Work reuses the global Compose `ModelPicker` and
+  `buildIdeComposeRunRequest` exact-route contract. The selected `modelName` is a per-run override,
+  resets when the provider changes, and never mutates the project or organization model matrix.
+- `lib/runMutationAttempt.ts` owns browser caller-attempt identity for run create/fork/iterate.
+  Active Web call sites must execute those mutations through `executeRunMutation` and pass the
+  resulting required `Idempotency-Key` to `lib/api/runs.ts`. Pending keys live in `sessionStorage`
+  (tab-scoped) and survive an ambiguous network/5xx/in-flight response plus same-tab reload; clear
+  them on success or definitive rejection so an intentional repeat creates new work. Storage holds
+  only a SHA-256 digest of canonical request bytes plus key/timestamp metadata—never spec/request
+  text—and removes the known scoped v1 body-bearing row during upgrade. Hashing is asynchronous;
+  callers must await `executeRunMutation`. Keep canonical equivalence, material-change separation,
+  secret absence, and retry classification pinned by `runMutationAttempt.test.ts`.
 - Project sub-tabs (Pulse / Repos / Runs / Code / Chat / Architecture / Setup / Members / Activity / Settings) live across `IdeProjectTabs` + `IdeProjectMore` + `IdeProjectSettings`. `IdeProjectPulse` shows a last-run hero + `ScoreRing` + signal chips + workspace-health rollup and live-polls runs while any is non-terminal.
 - `IdeProjectSettings.tsx` owns `/projects/:id/settings`: settings form, reference-doc upload/delete/polling, project memory compaction, and project archive/delete confirmations. Keep settings-specific route effects there; keep pure projections in `projectSettingsUtils.ts`.
 - `projectMoreUtils.ts` owns pure helpers for project-more routes: assistant artifact detection, generated-doc freshness stamps, tech-debt category sorting, mobile file filtering, architecture markdown section parsing, invariant/contract rollups, and member display/availability helpers. Keep additional project-more formatting/parser helpers there with `projectMoreUtils.test.ts`.
@@ -224,6 +247,9 @@ Documented deviations from Google TypeScript style in [`executespec-docs/backend
   and renders their primary line-level LCS content diff; GitHub `compareCommits` source-file changes
   are secondary correlation, not a substitute for document differences.
 - Generated docs — Generate / Regenerate / View / Download for EXPLANATION + SETUP docs.
+- Repository Attach-by-URL keeps the panel open on failure and renders the server's safe typed
+  `message`. A GitHub credential that cannot see a private repository must tell the user to grant
+  that stored credential access or reconnect GitHub; it must not appear as a generic server outage.
 
 ### Org settings (`ide/IdeOrg.tsx` + `ide/orgUtils.ts`)
 
@@ -251,7 +277,12 @@ Documented deviations from Google TypeScript style in [`executespec-docs/backend
 ### System surfaces (`ide/IdeSystem.tsx` + `ide/systemUtils.ts`)
 
 - `IdeSystem.tsx` owns the protected notifications inbox, search page, audit log, empty-project onboarding page, and setup/more menu.
-- `systemUtils.ts` owns pure system-surface helpers: notification filtering/read-state/deep-linking, search hit construction, audit filtering/error copy/export CSV shaping, active-project filtering, and setup-menu row projection. Keep new notification/search/audit/setup display logic there with `systemUtils.test.ts`.
+- `systemUtils.ts` owns pure system-surface helpers: notification filtering/read-state/deep-linking,
+  outcome-type severity colours, search hit construction, audit filtering/error copy/export CSV
+  shaping, active-project filtering, and setup-menu row projection. `IdeAccount` handles the
+  `/settings?section=notifications` focus jump once per navigation so preference refreshes do not
+  steal focus from a toggle. Keep new notification/search/audit/setup display logic covered by
+  `systemUtils.test.ts` / `IdeMore.test.tsx`.
 
 ### Discovery surfaces (`ide/IdeDiscovery.tsx` + `ide/discoveryUtils.ts`)
 

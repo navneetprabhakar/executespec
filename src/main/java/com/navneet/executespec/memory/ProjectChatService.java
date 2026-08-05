@@ -182,6 +182,7 @@ public class ProjectChatService {
       ChatResponse resp =
           router.call(
               LlmRequest.builder()
+                  .retryProfile(LlmRequest.RetryProfile.INTERACTIVE)
                   .provider(resolved.getActualProvider().name().toLowerCase())
                   .model(resolved.getModel())
                   .messages(
@@ -308,6 +309,7 @@ public class ProjectChatService {
       ChatResponse resp =
           router.call(
               LlmRequest.builder()
+                  .retryProfile(LlmRequest.RetryProfile.INTERACTIVE)
                   .provider(resolved.getActualProvider().name().toLowerCase())
                   .model(resolved.getModel())
                   .messages(
@@ -460,6 +462,7 @@ public class ProjectChatService {
         ChatResponse resp =
             router.call(
                 LlmRequest.builder()
+                    .retryProfile(LlmRequest.RetryProfile.INTERACTIVE)
                     .provider(resolved.getActualProvider().name().toLowerCase())
                     .model(resolved.getModel())
                     .messages(conversation)

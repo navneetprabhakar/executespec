@@ -1,17 +1,23 @@
 package com.navneet.executespec.finding;
 
 import java.util.List;
+import java.util.UUID;
 
 import com.navneet.executespec.auth.entity.AppUser;
 import com.navneet.executespec.auth.entity.Project;
 import com.navneet.executespec.auth.repository.AppUserRepository;
 import com.navneet.executespec.auth.repository.ProjectRepository;
 import com.navneet.executespec.integration.RunOrchestrator;
+import com.navneet.executespec.project.entity.ProjectRepo;
+import com.navneet.executespec.project.service.ProjectRepoService;
+import com.navneet.executespec.repo.GitHubRepoService;
 import com.navneet.executespec.state.RunMode;
 import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
 
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.web.server.ResponseStatusException;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -54,6 +60,8 @@ public class FindingPatchSubmitter {
   private final PipelineRunRepository runRepo;
   private final AppUserRepository userRepo;
   private final ProjectRepository projectRepo;
+  private final ProjectRepoService projectRepoService;
+  private final GitHubRepoService gitHubRepoService;
 
   /**
    * Result of {@link #submit(Finding)}. Either {@link Outcome#DISPATCHED} (a fresh run was created)
@@ -83,7 +91,16 @@ public class FindingPatchSubmitter {
     // 1. Dedupe — if there's an active run for this finding, reuse it.
     List<PipelineRun> active = runRepo.findActiveByTriggeredByFinding(key);
     if (!active.isEmpty()) {
-      PipelineRun existing = active.get(0);
+      PipelineRun existing =
+          active.stream()
+              .filter(run -> exactActiveRun(run, finding, tenancy, key))
+              .findFirst()
+              .orElseThrow(
+                  () ->
+                      new ResponseStatusException(
+                          HttpStatus.CONFLICT,
+                          "An active patch run exists for this finding, but its exact repository"
+                              + " and publication authority cannot be verified."));
       log.info(
           "FindingPatchSubmitter REUSE_ACTIVE finding={} existing-run={} status={}",
           key,
@@ -91,6 +108,12 @@ public class FindingPatchSubmitter {
           existing.getStatus());
       return new SubmitResult(SubmitResult.Outcome.REUSED_ACTIVE, existing.getRunId(), key);
     }
+
+    // A PR-shaped finding is allowed to spend only while its exact publication target remains
+    // current. Re-check after canonical dedupe (replay must not depend on mutable GitHub state) and
+    // before the orchestrator can make any provider call. This shared boundary covers both the
+    // user-clicked PR-review path and unattended CI autofix deliveries.
+    validatePublicationTarget(finding, tenancy);
 
     // 2. Submit through the server-internal PATCH route. The host project's org owns the data
     // boundary; the actor's home org remains the payer, credential and provider-policy authority.
@@ -103,8 +126,8 @@ public class FindingPatchSubmitter {
             /* source */ source,
             /* repoUrl */ null,
             /* repoMode */ "EXISTING",
-            /* githubPat */ null,
-            /* githubOwner */ null,
+            /* githubPat */ tenancy.actor().getGithubPat(),
+            /* githubOwner */ tenancy.actor().getGithubOwner(),
             /* skipApproval */ true,
             /* autoMerge */ false,
             /* modelName */ null,
@@ -128,7 +151,11 @@ public class FindingPatchSubmitter {
                 /* skipAutoPush */ false,
                 tenancy.tenantOrgId(),
                 tenancy.billingOrgId(),
-                key));
+                key,
+                /* checkoutBranch */ null,
+                finding.publicationRepoFullName(),
+                finding.publicationPrNumber(),
+                finding.publicationHeadSha()));
 
     log.info(
         "FindingPatchSubmitter DISPATCHED finding={} run={} project={} repos={} branchOverride={}",
@@ -166,7 +193,101 @@ public class FindingPatchSubmitter {
       throw new IllegalStateException(
           "Finding PATCH project is not active: " + finding.projectId());
     }
-    return new SubmissionTenancy(tenantOrgId, billingOrgId);
+    return new SubmissionTenancy(tenantOrgId, billingOrgId, actor, project);
+  }
+
+  private void validatePublicationTarget(Finding finding, SubmissionTenancy tenancy) {
+    if (finding.branchOverride() == null || finding.branchOverride().isBlank()) return;
+
+    List<ProjectRepo> repositories =
+        projectRepoService.resolveForRunStrict(finding.projectId(), finding.selectedRepoIds());
+    if (repositories.size() != 1) {
+      throw publicationConflict("Existing-PR autofix requires exactly one selected repository.");
+    }
+    ProjectRepo repository = repositories.get(0);
+    if (!"GITHUB".equalsIgnoreCase(repository.getScmProvider())
+        || repository.getGithubRepoFullName() == null
+        || !repository
+            .getGithubRepoFullName()
+            .equalsIgnoreCase(finding.publicationRepoFullName())) {
+      throw publicationConflict(
+          "The selected repository no longer matches the autofix pull request.");
+    }
+
+    String pat = tenancy.actor().getGithubPat();
+    if (pat == null || pat.isBlank()) {
+      throw publicationConflict("Connect GitHub before retrying this pull-request autofix.");
+    }
+    GitHubRepoService.OpenPullRequestLookup lookup =
+        gitHubRepoService.findOpenPullRequestForHead(
+            finding.publicationRepoFullName(), finding.branchOverride(), pat);
+    if (!lookup.known()) {
+      throw new ResponseStatusException(
+          HttpStatus.SERVICE_UNAVAILABLE,
+          "GitHub pull-request verification is temporarily unavailable.");
+    }
+    if (!lookup.present()
+        || lookup.prNumber() == null
+        || !lookup.prNumber().equals(finding.publicationPrNumber())) {
+      throw publicationConflict("The autofix pull request is no longer open on this branch.");
+    }
+    if (lookup.headSha() == null
+        || !lookup.headSha().equalsIgnoreCase(finding.publicationHeadSha())) {
+      throw publicationConflict(
+          "The pull-request head changed after this finding was captured; refresh and retry.");
+    }
+
+    String expectedBase = tenancy.project().getTargetBranch();
+    if (expectedBase == null || expectedBase.isBlank()) {
+      expectedBase = repository.getDefaultBranch();
+    }
+    if (expectedBase == null
+        || lookup.baseBranch() == null
+        || !expectedBase.equals(lookup.baseBranch())) {
+      throw publicationConflict(
+          "The autofix pull request no longer targets the configured project branch.");
+    }
+  }
+
+  private static ResponseStatusException publicationConflict(String message) {
+    return new ResponseStatusException(HttpStatus.CONFLICT, message);
+  }
+
+  private static boolean exactActiveRun(
+      PipelineRun run, Finding finding, SubmissionTenancy tenancy, String findingKey) {
+    return java.util.Objects.equals(run.getTriggeredByFinding(), findingKey)
+        && java.util.Objects.equals(run.getCreatedByUserId(), finding.userId())
+        && java.util.Objects.equals(run.getProjectId(), finding.projectId())
+        && java.util.Objects.equals(run.getOrgId(), tenancy.tenantOrgId())
+        && java.util.Objects.equals(run.getBillingOrgId(), tenancy.billingOrgId())
+        && canonicalRepoIds(run.getSelectedRepoIds())
+            .equals(canonicalRepoIds(finding.selectedRepoIds()))
+        && java.util.Objects.equals(run.getCheckoutBranch(), finding.branchOverride())
+        && java.util.Objects.equals(run.getBranchOverride(), finding.branchOverride())
+        && java.util.Objects.equals(
+            run.getPublicationRepoFullName(), finding.publicationRepoFullName())
+        && java.util.Objects.equals(run.getPublicationPrNumber(), finding.publicationPrNumber())
+        && java.util.Objects.equals(run.getPublicationHeadSha(), finding.publicationHeadSha());
+  }
+
+  private static String canonicalRepoIds(List<UUID> ids) {
+    if (ids == null) return "";
+    return ids.stream()
+        .map(UUID::toString)
+        .sorted()
+        .collect(java.util.stream.Collectors.joining(","));
+  }
+
+  private static String canonicalRepoIds(String json) {
+    if (json == null || json.isBlank()) return "";
+    try {
+      List<UUID> ids =
+          new com.fasterxml.jackson.databind.ObjectMapper()
+              .readValue(json, new com.fasterxml.jackson.core.type.TypeReference<List<UUID>>() {});
+      return canonicalRepoIds(ids);
+    } catch (Exception invalid) {
+      return "!invalid-active-run-repository-identity!";
+    }
   }
 
   private static String requireOrgId(String orgId, String owner) {
@@ -176,5 +297,6 @@ public class FindingPatchSubmitter {
     return orgId;
   }
 
-  private record SubmissionTenancy(String tenantOrgId, String billingOrgId) {}
+  private record SubmissionTenancy(
+      String tenantOrgId, String billingOrgId, AppUser actor, Project project) {}
 }

@@ -6,6 +6,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+
 import org.springframework.stereotype.Component;
 
 /**
@@ -21,12 +23,17 @@ import org.springframework.stereotype.Component;
 @Component
 public class TestCommandResolver {
 
+  private static final ObjectMapper JSON = new ObjectMapper();
+
+  private record LocatedCommand(String relativePath, TestCommand command) {}
+
   /** A resolved test command + the framework whose output grammar the parser should use. */
   public record TestCommand(
       String command, int timeoutSeconds, Framework framework, String source) {}
 
   public enum Framework {
     PYTEST,
+    NODE_TEST,
     JEST,
     VITEST,
     SUREFIRE, // mvn / gradle JUnit
@@ -42,46 +49,46 @@ public class TestCommandResolver {
    */
   public Optional<TestCommand> resolve(Path workspaceRoot) {
     if (workspaceRoot == null) return Optional.empty();
+    Path normalizedWorkspace = workspaceRoot.toAbsolutePath().normalize();
 
-    Optional<TestCommand> root =
-        hasProjectManifest(workspaceRoot) ? resolveSingle(workspaceRoot) : Optional.empty();
-    if (root.isPresent()) return root;
+    BuildRootDiscovery.Selection selection = BuildRootDiscovery.select(normalizedWorkspace);
+    if (selection.ambiguous()) return Optional.empty();
+    if (selection.roots().size() == 1 && selection.roots().getFirst().equals(normalizedWorkspace)) {
+      return resolveSingle(normalizedWorkspace);
+    }
 
-    List<String> commands = new ArrayList<>();
+    List<LocatedCommand> resolvedCommands = new ArrayList<>();
     int timeout = 0;
-    try (var children = Files.list(workspaceRoot)) {
-      for (Path child : children.filter(Files::isDirectory).sorted().toList()) {
-        String name = child.getFileName().toString();
-        if (!name.matches("[A-Za-z0-9._-]+")) continue;
+    try {
+      for (Path child : selection.roots()) {
+        String relative = normalizedWorkspace.relativize(child).toString();
+        if (!relative.matches("[A-Za-z0-9._/-]+")) continue;
         Optional<TestCommand> resolved = resolveSingle(child);
         if (resolved.isEmpty()) continue;
-        commands.add("(cd " + name + " && " + resolved.get().command() + ")");
+        resolvedCommands.add(new LocatedCommand(relative, resolved.get()));
         timeout += resolved.get().timeoutSeconds();
       }
     } catch (Exception ignored) {
       return Optional.empty();
     }
-    if (commands.isEmpty()) return resolveSingle(workspaceRoot);
-    if (commands.size() == 1) {
-      String command = commands.getFirst();
-      Optional<TestCommand> child = directChildCommand(workspaceRoot, command);
-      return child;
+    if (resolvedCommands.isEmpty()) return resolveSingle(normalizedWorkspace);
+    if (resolvedCommands.size() == 1) {
+      LocatedCommand located = resolvedCommands.getFirst();
+      TestCommand command = located.command();
+      return Optional.of(
+          new TestCommand(
+              "(cd " + located.relativePath() + " && " + command.command() + ")",
+              command.timeoutSeconds(),
+              command.framework(),
+              command.source() + "@" + located.relativePath()));
     }
+    List<String> commands =
+        resolvedCommands.stream()
+            .map(c -> "(cd " + c.relativePath() + " && " + c.command().command() + ")")
+            .toList();
     return Optional.of(
         new TestCommand(
             String.join(" && ", commands), Math.min(timeout, 1200), Framework.MULTI, "multi-root"));
-  }
-
-  private Optional<TestCommand> directChildCommand(Path workspaceRoot, String wrappedCommand) {
-    String childName = wrappedCommand.substring(4, wrappedCommand.indexOf(" && "));
-    return resolveSingle(workspaceRoot.resolve(childName))
-        .map(
-            command ->
-                new TestCommand(
-                    wrappedCommand,
-                    command.timeoutSeconds(),
-                    command.framework(),
-                    command.source() + "@" + childName));
   }
 
   private Optional<TestCommand> resolveSingle(Path workspaceRoot) {
@@ -107,8 +114,11 @@ public class TestCommandResolver {
       // Only run if a "test" script exists AND it isn't the npm-init placeholder that exits 1.
       String pkg = read(workspaceRoot.resolve("package.json"));
       if (pkg.contains("\"test\"") && !pkg.contains("Error: no test specified")) {
+        String normalizedScript = testScript(pkg).toLowerCase();
         Framework framework =
-            pkg.toLowerCase().contains("vitest") ? Framework.VITEST : Framework.JEST;
+            normalizedScript.contains("node --test")
+                ? Framework.NODE_TEST
+                : normalizedScript.contains("vitest") ? Framework.VITEST : Framework.JEST;
         return Optional.of(new TestCommand("npm test --silent", 600, framework, "npm"));
       }
       return Optional.empty();
@@ -126,18 +136,6 @@ public class TestCommandResolver {
           new TestCommand(python + " -m pytest -q", 600, Framework.PYTEST, "pytest"));
     }
     return Optional.empty();
-  }
-
-  private static boolean hasProjectManifest(Path root) {
-    return exists(root, "pom.xml")
-        || exists(root, "build.gradle")
-        || exists(root, "build.gradle.kts")
-        || exists(root, "Cargo.toml")
-        || exists(root, "go.mod")
-        || exists(root, "package.json")
-        || exists(root, "pyproject.toml")
-        || exists(root, "setup.py")
-        || exists(root, "requirements.txt");
   }
 
   private static boolean exists(Path dir, String name) {
@@ -175,6 +173,14 @@ public class TestCommandResolver {
     try {
       return Files.readString(p);
     } catch (Exception e) {
+      return "";
+    }
+  }
+
+  private static String testScript(String packageJson) {
+    try {
+      return JSON.readTree(packageJson).path("scripts").path("test").asText("");
+    } catch (Exception ignored) {
       return "";
     }
   }

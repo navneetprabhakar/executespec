@@ -8,6 +8,22 @@ import org.junit.jupiter.api.Test;
 
 class ReviewerMutationScopeTest {
 
+  @Test
+  void readOnlyAttestationAllowsExactlyOneBuildProjectCall() {
+    ReviewerMutationScope.withSingleBuildProject(
+        () -> {
+          org.assertj.core.api.Assertions.assertThat(ReviewerMutationScope.validateBuildProject())
+              .isNull();
+          org.assertj.core.api.Assertions.assertThat(ReviewerMutationScope.validateBuildProject())
+              .contains("already executed")
+              .contains("completeTask");
+          return null;
+        });
+
+    org.assertj.core.api.Assertions.assertThat(ReviewerMutationScope.validateBuildProject())
+        .isNull();
+  }
+
   private static final ReviewerMutationScope.Policy BROWNFIELD =
       new ReviewerMutationScope.Policy(
           true,

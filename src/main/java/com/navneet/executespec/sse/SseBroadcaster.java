@@ -2,13 +2,17 @@ package com.navneet.executespec.sse;
 
 import java.time.Duration;
 import java.time.Instant;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
@@ -43,18 +47,18 @@ import lombok.extern.slf4j.Slf4j;
  * <h3>Local delivery</h3>
  *
  * Emitters are in-memory and instance-local. The bounds from Issue #15 apply: max {@link
- * #MAX_EMITTERS_PER_RUN} per run, {@link #MAX_TOTAL_EMITTERS} globally.
+ * #MAX_EMITTERS_PER_RUN} per run, {@link #MAX_TOTAL_EMITTERS} globally. Each emitter owns one
+ * ordered replay/live lane drained by a dedicated virtual-thread writer, so Tomcat socket
+ * backpressure never blocks a pipeline or Redis-listener thread. Heartbeat maintenance retires
+ * quiet half-open sockets, and retired writer tasks keep consuming admission capacity until they
+ * really exit. Reconnect replay recovers from the last acknowledged event id.
  *
- * <h3>Cross-instance delivery</h3>
+ * <p>On every {@link #emit}, events are published to Redis channel {@code sse:{runId}}. Every
+ * instance subscribes to {@code sse:*} and delivers incoming messages to its locally-connected
+ * emitters. A self-origin marker ({@code "from":instanceId}) is embedded in each Redis message to
+ * avoid echoing back to the publishing instance.
  *
- * On every {@link #emit}, events are published to Redis channel {@code sse:{runId}}. Every instance
- * subscribes to {@code sse:*} and delivers incoming messages to its locally-connected emitters. A
- * self-origin marker ({@code "from":instanceId}) is embedded in each Redis message to avoid echoing
- * back to the publishing instance.
- *
- * <h3>Event replay on reconnect</h3>
- *
- * Events are appended to a Redis List {@code sse:replay:{runId}} (capped at {@link
+ * <p>Events are appended to a Redis List {@code sse:replay:{runId}} (capped at {@link
  * #MAX_REPLAY_EVENTS}, 24h TTL). Clients reconnecting with {@code Last-Event-ID: N} receive all
  * events from sequence N+1 onward. Sequence numbers are independent of the bounded list index, so
  * trimming old entries never reuses an SSE id.
@@ -63,19 +67,17 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class SseBroadcaster {
 
-  /** Maximum SSE connections per run. */
   static final int MAX_EMITTERS_PER_RUN = 15;
 
-  /** Global cap on live SSE emitters across all runs. */
   static final int MAX_TOTAL_EMITTERS = 500;
 
   /** Maximum events to retain per run for replay. */
   static final int MAX_REPLAY_EVENTS = 500;
 
+  static final Duration HEARTBEAT_INTERVAL = Duration.ofSeconds(15);
+  static final Duration SEND_STALL_TIMEOUT = Duration.ofSeconds(30);
+  static final int MAX_CONCURRENT_CLOSE_ATTEMPTS = 32;
   private static final String CHANNEL_PREFIX = "sse:";
-  private static final String REPLAY_PREFIX = "sse:replay:";
-  private static final String SEQUENCE_PREFIX = "sse:sequence:";
-  private static final Duration REPLAY_TTL = Duration.ofHours(24);
 
   /**
    * Unique ID for this JVM instance — used to suppress echo from Redis pub/sub.
@@ -95,7 +97,20 @@ public class SseBroadcaster {
           + java.util.UUID.randomUUID();
 
   private final Map<String, CopyOnWriteArrayList<SseEmitter>> emitters = new ConcurrentHashMap<>();
+  private final Map<SseEmitter, SseEmitterDelivery> localDeliveries = new ConcurrentHashMap<>();
+  private final Object subscriptionAdmissionLock = new Object();
   private final AtomicInteger totalEmitterCount = new AtomicInteger(0);
+  private final AtomicInteger deliveryTaskCount = new AtomicInteger(0);
+  private final Map<String, AtomicInteger> deliveryTaskCountByRun = new ConcurrentHashMap<>();
+  private final AtomicInteger outstandingCloseAttempts = new AtomicInteger(0);
+  private final AtomicLong backpressureEvictionCount = new AtomicLong();
+  private final Semaphore closeAttemptPermits = new Semaphore(MAX_CONCURRENT_CLOSE_ATTEMPTS);
+  private final ExecutorService localDeliveryExecutor =
+      Executors.newThreadPerTaskExecutor(
+          Thread.ofVirtual().name("executespec-sse-delivery-", 0).factory());
+  private final ScheduledExecutorService maintenanceExecutor =
+      Executors.newSingleThreadScheduledExecutor(
+          Thread.ofVirtual().name("executespec-sse-maintenance", 0).factory());
 
   private final ObjectMapper mapper;
   private final ApplicationEventPublisher eventPublisher;
@@ -103,6 +118,8 @@ public class SseBroadcaster {
   private final StringRedisTemplate redis;
   private final RedisMessageListenerContainer listenerContainer;
   private final BenchmarkTrajectoryStore benchmarkTrajectoryStore;
+  private final SseReplayStore replayStore;
+  private final SseRunDeliveryCoordinator runDeliveryCoordinator;
 
   @Autowired
   public SseBroadcaster(
@@ -118,6 +135,8 @@ public class SseBroadcaster {
     this.redis = redis;
     this.listenerContainer = listenerContainer;
     this.benchmarkTrajectoryStore = benchmarkTrajectoryStore.getIfAvailable();
+    this.replayStore = new SseReplayStore(mapper, redis);
+    this.runDeliveryCoordinator = createRunDeliveryCoordinator();
   }
 
   /** Provider-free constructor retained for narrow unit tests outside the benchmark profile. */
@@ -133,6 +152,17 @@ public class SseBroadcaster {
     this.redis = redis;
     this.listenerContainer = listenerContainer;
     this.benchmarkTrajectoryStore = null;
+    this.replayStore = new SseReplayStore(mapper, redis);
+    this.runDeliveryCoordinator = createRunDeliveryCoordinator();
+  }
+
+  private SseRunDeliveryCoordinator createRunDeliveryCoordinator() {
+    return new SseRunDeliveryCoordinator(
+        replayStore,
+        this::deliverLocal,
+        this::publishToRedis,
+        this::completeLiveSubscribersLocked,
+        this::retireLiveSubscribersLocked);
   }
 
   @PostConstruct
@@ -141,6 +171,24 @@ public class SseBroadcaster {
     Gauge.builder("executespec.sse.emitters.active", totalEmitterCount, AtomicInteger::get)
         .description("Total live SSE emitter connections across all runs")
         .register(meterRegistry);
+    Gauge.builder(
+            "executespec.sse.emitters.backpressure.evictions",
+            backpressureEvictionCount,
+            AtomicLong::get)
+        .description("Slow SSE subscribers retired after exhausting their bounded private queue")
+        .register(meterRegistry);
+    Gauge.builder("executespec.sse.delivery.tasks", deliveryTaskCount, AtomicInteger::get)
+        .description("SSE writer tasks, including retired writers that have not terminated")
+        .register(meterRegistry);
+    Gauge.builder("executespec.sse.close.attempts", outstandingCloseAttempts, AtomicInteger::get)
+        .description("Bounded asynchronous SSE response-close attempts currently running")
+        .register(meterRegistry);
+
+    maintenanceExecutor.scheduleAtFixedRate(
+        this::maintainLocalDeliveries,
+        HEARTBEAT_INTERVAL.toMillis(),
+        HEARTBEAT_INTERVAL.toMillis(),
+        TimeUnit.MILLISECONDS);
 
     // Subscribe to all sse:* channels (pattern subscription)
     listenerContainer.addMessageListener(
@@ -158,10 +206,13 @@ public class SseBroadcaster {
   @PreDestroy
   @EventListener(ContextClosedEvent.class)
   void shutdown() {
-    List<SseEmitter> open = emitters.values().stream().flatMap(List::stream).distinct().toList();
+    List<SseEmitterDelivery> open = localDeliveries.values().stream().distinct().toList();
     emitters.clear();
+    localDeliveries.clear();
     totalEmitterCount.set(0);
-    open.forEach(SseBroadcaster::completeQuietly);
+    open.forEach(delivery -> delivery.abort(true));
+    localDeliveryExecutor.shutdownNow();
+    maintenanceExecutor.shutdownNow();
     if (!open.isEmpty()) {
       log.info("[SseBroadcaster] Completed {} emitter(s) for shutdown", open.size());
     }
@@ -179,86 +230,36 @@ public class SseBroadcaster {
    * @return the SSE emitter (Spring will stream it to the client)
    */
   public SseEmitter subscribe(String runId, String lastEventId) {
-    // Global limit
-    if (totalEmitterCount.get() >= MAX_TOTAL_EMITTERS) {
-      Counter.builder("executespec.sse.emitters.rejected")
-          .tag("reason", "global_limit")
-          .register(meterRegistry)
-          .increment();
-      log.warn(
-          "SSE global limit ({}) reached — rejecting subscription for run {}",
-          MAX_TOTAL_EMITTERS,
-          runId);
-      throw new ResponseStatusException(
-          HttpStatus.TOO_MANY_REQUESTS, "SSE connection limit reached. Try again later.");
-    }
+    return subscribeWithEmitter(runId, lastEventId, new SseEmitter(0L));
+  }
 
-    // Per-run limit — prune stale/dead emitters first to reclaim slots before checking
-    List<SseEmitter> runEmitters =
-        emitters.computeIfAbsent(runId, id -> new CopyOnWriteArrayList<>());
-    if (runEmitters.size() >= MAX_EMITTERS_PER_RUN) {
-      // Attempt to flush dead connections by sending a keep-alive; removes those that throw
-      List<SseEmitter> dead = new ArrayList<>();
-      for (SseEmitter e : runEmitters) {
-        try {
-          e.send(SseEmitter.event().comment("ping"));
-        } catch (Throwable t) {
-          dead.add(e);
-          completeQuietly(e);
-        }
-      }
-      if (!dead.isEmpty()) {
-        runEmitters.removeAll(dead);
-        totalEmitterCount.addAndGet(-dead.size());
-        log.debug("SSE pruned {} dead emitter(s) for run {}", dead.size(), runId);
-      }
-    }
-    if (runEmitters.size() >= MAX_EMITTERS_PER_RUN) {
-      Counter.builder("executespec.sse.emitters.rejected")
-          .tag("reason", "per_run_limit")
-          .register(meterRegistry)
-          .increment();
-      log.warn(
-          "SSE per-run limit ({}) reached for run {} — rejecting", MAX_EMITTERS_PER_RUN, runId);
-      throw new ResponseStatusException(
-          HttpStatus.TOO_MANY_REQUESTS,
-          "Too many SSE connections for this run (max " + MAX_EMITTERS_PER_RUN + ").");
-    }
-
-    SseEmitter emitter = new SseEmitter(0L);
-    runEmitters.add(emitter);
-    totalEmitterCount.incrementAndGet();
+  /** Package-visible seam for deterministic replay/socket-failure tests. */
+  SseEmitter subscribeWithEmitter(String runId, String lastEventId, SseEmitter emitter) {
+    SubscriptionAdmission admission = admitLocalEmitter(runId, emitter);
+    SseEmitterDelivery delivery = admission.delivery();
 
     emitter.onCompletion(() -> remove(runId, emitter));
     emitter.onTimeout(() -> remove(runId, emitter));
     emitter.onError(e -> remove(runId, emitter));
 
-    // Flush the response headers immediately. Without a comment frame an idle subscription may
-    // remain buffered until the first run event, leaving EventSource clients stuck in CONNECTING
-    // or RECONNECTING even though the emitter is registered. Comments carry no event id and are
-    // therefore safe to send before replaying durable events on reconnect.
-    sendInitialConnectionComment(emitter);
-
-    // Replay missed events if Last-Event-ID was provided
-    if (lastEventId != null && !lastEventId.isBlank()) {
-      replayMissedEvents(runId, lastEventId, emitter);
-    }
+    // Registration intentionally precedes the replay read: live frames are buffered while the
+    // snapshot is loaded, then one writer emits connected -> replay -> de-duplicated live frames.
+    // Redis I/O may delay this request, but no socket write can block it.
+    String replayCursor =
+        admission.terminalAtAdmission() && (lastEventId == null || lastEventId.isBlank())
+            ? "0"
+            : lastEventId;
+    List<SseEmitterDelivery.ReplayFrame> replay =
+        replayCursor == null || replayCursor.isBlank()
+            ? List.of()
+            : loadMissedEvents(runId, replayCursor);
+    delivery.finishBootstrap(true, replay);
 
     return emitter;
   }
 
-  /** Convenience overload for callers that don't support reconnect replay. */
   public SseEmitter subscribe(String runId) {
     return subscribe(runId, null);
-  }
-
-  /** Send a comment-only frame so an idle SSE response flushes its headers immediately. */
-  void sendInitialConnectionComment(SseEmitter emitter) {
-    try {
-      emitter.send(SseEmitter.event().comment("connected"));
-    } catch (Exception e) {
-      log.debug("[SSE] Initial connection comment failed: {}", e.getMessage());
-    }
   }
 
   /**
@@ -273,14 +274,7 @@ public class SseBroadcaster {
 
     appendBenchmarkTrajectory(runId, event);
 
-    // Persist to replay log (before local delivery so reconnecting clients see it)
-    long seqNum = appendToReplayLog(runId, json);
-
-    // Deliver to local emitters with SSE id = sequence number
-    deliverLocal(runId, json, seqNum);
-
-    // Publish to Redis pub/sub for other instances
-    publishToRedis(runId, json, seqNum);
+    appendDeliverAndPublish(runId, json);
 
     // Spring event for local listeners (Slack notifications, etc.)
     try {
@@ -298,9 +292,16 @@ public class SseBroadcaster {
     String json = serialize(event);
     if (json == null) return;
     appendBenchmarkTrajectory(runId, event);
-    long seqNum = appendToReplayLog(runId, json);
-    deliverLocal(runId, json, seqNum);
-    publishToRedis(runId, json, seqNum);
+    appendDeliverAndPublish(runId, json);
+  }
+
+  /**
+   * Keep sequence allocation, durable replay append, local admission, and Redis publication in one
+   * per-run order. Fixed lock striping bounds lock memory for arbitrary run ids. Spring application
+   * listeners intentionally remain outside this section because their execution is unconstrained.
+   */
+  private void appendDeliverAndPublish(String runId, String json) {
+    runDeliveryCoordinator.appendDeliverAndPublish(runId, json);
   }
 
   private void appendBenchmarkTrajectory(String runId, RunEvent event) {
@@ -324,70 +325,43 @@ public class SseBroadcaster {
 
   /** Complete the SSE stream for a run (run finished or validation complete). */
   public void complete(String runId) {
+    runDeliveryCoordinator.complete(runId);
+  }
+
+  private void completeLiveSubscribersLocked(String runId) {
     List<SseEmitter> clients = emitters.remove(runId);
     if (clients == null) return;
     totalEmitterCount.addAndGet(-clients.size());
     for (SseEmitter emitter : clients) {
-      try {
-        emitter.complete();
-      } catch (Throwable t) {
-        log.debug("SSE complete failed for run {} ({})", runId, t.getMessage());
-      }
+      // Keep the delivery registered until the terminal frame drains so the maintenance watchdog
+      // can still retire a socket that stalls during final status/completion delivery.
+      SseEmitterDelivery delivery = localDeliveries.get(emitter);
+      if (delivery != null) delivery.completeAfterPending();
     }
   }
 
-  private void deliverLocal(String runId, String json, long seqNum) {
+  void deliverLocal(String runId, String json, long seqNum) {
     List<SseEmitter> clients = emitters.getOrDefault(runId, new CopyOnWriteArrayList<>());
     if (clients.isEmpty()) return;
-    List<SseEmitter> dead = new ArrayList<>();
     for (SseEmitter emitter : clients) {
-      try {
-        emitter.send(SseEmitter.event().id(String.valueOf(seqNum)).data(json));
-      } catch (Throwable t) {
-        dead.add(emitter);
-        // Once send() fails, Tomcat/Spring has already marked the async response unusable.
-        // Calling complete() here can re-dispatch a second text/event-stream error through the
-        // global exception handler; removing the emitter is enough.
-        log.debug("SSE client disconnected for run {} ({})", runId, t.getMessage());
-      }
+      SseEmitterDelivery delivery = localDeliveries.get(emitter);
+      if (delivery != null) delivery.offer(json, seqNum);
     }
-    if (!dead.isEmpty()) {
-      clients.removeAll(dead);
-      totalEmitterCount.addAndGet(-dead.size());
+  }
+
+  private void retireLiveSubscribersLocked(String runId) {
+    List<SseEmitter> clients = emitters.remove(runId);
+    if (clients == null) return;
+    totalEmitterCount.addAndGet(-clients.size());
+    for (SseEmitter emitter : clients) {
+      SseEmitterDelivery delivery = localDeliveries.get(emitter);
+      if (delivery != null) delivery.abort(true);
     }
   }
 
   /** Appends JSON to the Redis replay list with a monotonic per-run sequence. */
   private long appendToReplayLog(String runId, String json) {
-    String key = REPLAY_PREFIX + runId;
-    String sequenceKey = SEQUENCE_PREFIX + runId;
-    try {
-      Long sequence = redis.opsForValue().increment(sequenceKey);
-      if (sequence == null) return 0;
-      appendReplayEntry(runId, json, sequence);
-      return sequence;
-    } catch (Exception e) {
-      log.debug("[SSE] Redis replay log write failed for run {}: {}", runId, e.getMessage());
-      return 0;
-    }
-  }
-
-  /** Store an event with an origin sequence, used when mirroring Redis pub/sub to this JVM. */
-  private void appendReplayEntry(String runId, String json, long sequence) {
-    if (sequence <= 0) {
-      appendToReplayLog(runId, json);
-      return;
-    }
-    String key = REPLAY_PREFIX + runId;
-    try {
-      redis.expire(SEQUENCE_PREFIX + runId, REPLAY_TTL);
-      String entry = mapper.writeValueAsString(Map.of("seq", sequence, "payload", json));
-      redis.opsForList().rightPush(key, entry);
-      redis.opsForList().trim(key, -MAX_REPLAY_EVENTS, -1);
-      redis.expire(key, REPLAY_TTL);
-    } catch (Exception e) {
-      log.debug("[SSE] Redis replay mirror failed for run {}: {}", runId, e.getMessage());
-    }
+    return replayStore.append(runId, json);
   }
 
   /**
@@ -397,51 +371,7 @@ public class SseBroadcaster {
    * entry already carries {@code type} + {@code timestamp} + payload fields (see {@link RunEvent}).
    */
   public ReplayLog getReplayLog(String runId) {
-    try {
-      String key = REPLAY_PREFIX + runId;
-      List<String> raw = redis.opsForList().range(key, 0, -1);
-      Long ttlMs = redis.getExpire(key, TimeUnit.MILLISECONDS);
-      if (raw == null || raw.isEmpty()) {
-        return new ReplayLog(java.util.List.of(), false, "EXPIRED_OR_EMPTY", null, null, false);
-      }
-      List<java.util.Map<String, Object>> out = new java.util.ArrayList<>(raw.size());
-      long firstSequence = 0;
-      long lastSequence = 0;
-      for (String entry : raw) {
-        try {
-          com.fasterxml.jackson.databind.JsonNode node = mapper.readTree(entry);
-          // New entries carry both a sequence and payload wrapper. A legacy RunEvent also has a
-          // payload field, so checking payload alone would incorrectly unwrap the event body and
-          // drop that row from the run-detail Logs API.
-          String json =
-              node.has("seq") && node.has("payload") ? node.path("payload").asText() : entry;
-          java.util.Map<String, Object> event =
-              mapper.readValue(json, new com.fasterxml.jackson.core.type.TypeReference<>() {});
-          if (node.has("seq")) {
-            long sequence = node.path("seq").asLong(0);
-            if (firstSequence == 0) firstSequence = sequence;
-            lastSequence = sequence;
-            // The browser receives this same sequence as Last-Event-ID on the live stream. Keeping
-            // it in the durable row gives both transports one stable deduplication identity.
-            event.put("_eventId", String.valueOf(sequence));
-          }
-          out.add(event);
-        } catch (Exception ignore) {
-          // skip a single malformed entry; keep the rest of the log
-        }
-      }
-      Instant retainedUntil = ttlMs != null && ttlMs > 0 ? Instant.now().plusMillis(ttlMs) : null;
-      return new ReplayLog(
-          out,
-          true,
-          "AVAILABLE",
-          retainedUntil,
-          lastSequence > 0 ? String.valueOf(lastSequence) : null,
-          firstSequence > 1);
-    } catch (Exception e) {
-      log.debug("[SSE] replay-log read failed for run {}: {}", runId, e.getMessage());
-      return new ReplayLog(java.util.List.of(), false, "STORE_UNAVAILABLE", null, null, false);
-    }
+    return replayStore.getReplayLog(runId);
   }
 
   public record ReplayLog(
@@ -463,54 +393,9 @@ public class SseBroadcaster {
     }
   }
 
-  private void replayMissedEvents(String runId, String lastEventId, SseEmitter emitter) {
-    try {
-      long lastSequence = Long.parseLong(lastEventId);
-      String key = REPLAY_PREFIX + runId;
-      List<String> entries = redis.opsForList().range(key, 0, -1);
-      if (entries == null || entries.isEmpty()) return;
-      List<ReplayEntry> missed = new ArrayList<>();
-      for (int i = 0; i < entries.size(); i++) {
-        String entry = entries.get(i);
-        try {
-          com.fasterxml.jackson.databind.JsonNode node = mapper.readTree(entry);
-          if (node.has("seq") && node.has("payload")) {
-            long sequence = node.path("seq").asLong(-1);
-            if (sequence > lastSequence) {
-              missed.add(new ReplayEntry(sequence, node.path("payload").asText()));
-            }
-          } else if (i > lastSequence) {
-            // Compatibility with rows written before monotonic sequence IDs were introduced.
-            missed.add(new ReplayEntry(i, entry));
-          }
-        } catch (Exception ignored) {
-          log.debug("[SSE] Skipping malformed replay entry for run {}", runId);
-        }
-      }
-      if (missed.isEmpty()) return;
-      log.debug(
-          "[SSE] Replaying {} missed events for run {} from seq {}",
-          missed.size(),
-          runId,
-          lastSequence + 1);
-      for (ReplayEntry replay : missed) {
-        try {
-          emitter.send(
-              SseEmitter.event().id(String.valueOf(replay.sequence())).data(replay.payload()));
-        } catch (Exception e) {
-          log.debug("[SSE] Replay send failed for run {}: {}", runId, e.getMessage());
-          break;
-        }
-      }
-    } catch (NumberFormatException e) {
-      log.debug(
-          "[SSE] Invalid Last-Event-ID '{}' for run {} — skipping replay", lastEventId, runId);
-    } catch (Exception e) {
-      log.debug("[SSE] Replay failed for run {}: {}", runId, e.getMessage());
-    }
+  private List<SseEmitterDelivery.ReplayFrame> loadMissedEvents(String runId, String lastEventId) {
+    return replayStore.loadMissedEvents(runId, lastEventId);
   }
-
-  private record ReplayEntry(long sequence, String payload) {}
 
   private String serialize(RunEvent event) {
     try {
@@ -522,9 +407,167 @@ public class SseBroadcaster {
   }
 
   private void remove(String runId, SseEmitter emitter) {
+    runDeliveryCoordinator.withRunLock(runId, () -> removeLocked(runId, emitter));
+  }
+
+  private void removeLocked(String runId, SseEmitter emitter) {
     List<SseEmitter> clients = emitters.get(runId);
     if (clients != null && clients.remove(emitter)) {
       totalEmitterCount.decrementAndGet();
+      if (clients.isEmpty()) {
+        emitters.remove(runId, clients);
+        runDeliveryCoordinator.forgetOrder(runId);
+      }
+    }
+    SseEmitterDelivery delivery = localDeliveries.remove(emitter);
+    if (delivery != null) delivery.abort(false);
+  }
+
+  /** Package-visible registration seam for deterministic socket-isolation tests. */
+  void registerLocalEmitter(String runId, SseEmitter emitter) {
+    admitLocalEmitter(runId, emitter).delivery().finishBootstrap(false, List.of());
+  }
+
+  private SseEmitterDelivery prepareLocalEmitter(
+      String runId, SseEmitter emitter, boolean liveSubscriber) {
+    List<SseEmitter> clients = null;
+    if (liveSubscriber) {
+      clients = emitters.computeIfAbsent(runId, ignored -> new CopyOnWriteArrayList<>());
+      clients.add(emitter);
+      totalEmitterCount.incrementAndGet();
+    }
+    reserveDeliverySlot(runId);
+    SseEmitterDelivery delivery =
+        new SseEmitterDelivery(
+            runId,
+            emitter,
+            localDeliveryExecutor,
+            () -> remove(runId, emitter),
+            () -> releaseDeliverySlot(runId),
+            backpressureEvictionCount::incrementAndGet,
+            () -> requestEmitterClose(emitter));
+    localDeliveries.put(emitter, delivery);
+    try {
+      delivery.start();
+    } catch (RuntimeException rejected) {
+      localDeliveries.remove(emitter, delivery);
+      if (clients != null && clients.remove(emitter)) totalEmitterCount.decrementAndGet();
+      releaseDeliverySlot(runId);
+      throw rejected;
+    }
+    return delivery;
+  }
+
+  private SubscriptionAdmission admitLocalEmitter(String runId, SseEmitter emitter) {
+    SseRunDeliveryCoordinator.Admission<SseEmitterDelivery> admission =
+        runDeliveryCoordinator.admit(
+            runId,
+            terminalAtAdmission -> {
+              synchronized (subscriptionAdmissionLock) {
+                if (deliveryTaskCount.get() + outstandingCloseAttempts.get()
+                    >= MAX_TOTAL_EMITTERS) {
+                  Counter.builder("executespec.sse.emitters.rejected")
+                      .tag("reason", "global_limit")
+                      .register(meterRegistry)
+                      .increment();
+                  log.warn(
+                      "SSE global delivery limit ({}) reached — rejecting subscription for run {}",
+                      MAX_TOTAL_EMITTERS,
+                      runId);
+                  throw new ResponseStatusException(
+                      HttpStatus.TOO_MANY_REQUESTS,
+                      "SSE connection limit reached. Try again later.");
+                }
+                if (deliveryTaskCountFor(runId) >= MAX_EMITTERS_PER_RUN) {
+                  Counter.builder("executespec.sse.emitters.rejected")
+                      .tag("reason", "per_run_limit")
+                      .register(meterRegistry)
+                      .increment();
+                  log.warn(
+                      "SSE per-run delivery limit ({}) reached for run {} — rejecting",
+                      MAX_EMITTERS_PER_RUN,
+                      runId);
+                  throw new ResponseStatusException(
+                      HttpStatus.TOO_MANY_REQUESTS,
+                      "Too many SSE connections for this run (max " + MAX_EMITTERS_PER_RUN + ").");
+                }
+                SseEmitterDelivery delivery =
+                    prepareLocalEmitter(runId, emitter, !terminalAtAdmission);
+                if (terminalAtAdmission) delivery.completeAfterPending();
+                return delivery;
+              }
+            });
+    return new SubscriptionAdmission(admission.value(), admission.terminalAtAdmission());
+  }
+
+  private int deliveryTaskCountFor(String runId) {
+    AtomicInteger count = deliveryTaskCountByRun.get(runId);
+    return count == null ? 0 : count.get();
+  }
+
+  private void reserveDeliverySlot(String runId) {
+    deliveryTaskCount.incrementAndGet();
+    deliveryTaskCountByRun.computeIfAbsent(runId, ignored -> new AtomicInteger()).incrementAndGet();
+  }
+
+  private void releaseDeliverySlot(String runId) {
+    deliveryTaskCount.decrementAndGet();
+    deliveryTaskCountByRun.computeIfPresent(
+        runId,
+        (ignored, count) -> {
+          count.decrementAndGet();
+          return count.get() <= 0 ? null : count;
+        });
+  }
+
+  /** One bounded maintenance sweep owns heartbeat and stalled-send retirement. */
+  void maintainLocalDeliveries() {
+    long now = System.nanoTime();
+    for (SseEmitterDelivery delivery : localDeliveries.values()) {
+      try {
+        delivery.maintain(now, HEARTBEAT_INTERVAL.toNanos(), SEND_STALL_TIMEOUT.toNanos());
+      } catch (RuntimeException maintenanceFailure) {
+        log.debug("SSE maintenance failed: {}", maintenanceFailure.getMessage());
+      }
+    }
+    runDeliveryCoordinator.maintain(now);
+  }
+
+  /** Package-visible seam for deterministic cross-instance ordering tests. */
+  void deliverRemote(String runId, String json, long sequence) {
+    runDeliveryCoordinator.deliverRemote(runId, json, sequence);
+  }
+
+  /**
+   * A close may itself wait in the servlet container. Permit-gating makes that resource explicit
+   * and bounded; a stuck writer remains counted separately until its task really exits.
+   */
+  private void requestEmitterClose(SseEmitter emitter) {
+    if (!closeAttemptPermits.tryAcquire()) {
+      log.warn(
+          "SSE close-attempt limit ({}) reached; relying on writer interruption/container cleanup",
+          MAX_CONCURRENT_CLOSE_ATTEMPTS);
+      return;
+    }
+    outstandingCloseAttempts.incrementAndGet();
+    try {
+      Thread.ofVirtual()
+          .name("executespec-sse-close")
+          .start(
+              () -> {
+                try {
+                  emitter.complete();
+                } catch (Throwable ignored) {
+                  // The client or container has already closed the async response.
+                } finally {
+                  outstandingCloseAttempts.decrementAndGet();
+                  closeAttemptPermits.release();
+                }
+              });
+    } catch (RuntimeException startFailure) {
+      outstandingCloseAttempts.decrementAndGet();
+      closeAttemptPermits.release();
+      log.debug("SSE close task could not start: {}", startFailure.getMessage());
     }
   }
 
@@ -546,35 +589,12 @@ public class SseBroadcaster {
         long sequence = node.path("seq").asLong(0);
         String json = mapper.writeValueAsString(node.get("data"));
 
-        // Check if this instance has any local clients for this run
-        List<SseEmitter> clients = emitters.get(runId);
-        if (clients == null || clients.isEmpty()) return;
-
-        List<SseEmitter> dead = new ArrayList<>();
-        for (SseEmitter emitter : clients) {
-          try {
-            SseEmitter.SseEventBuilder builder = SseEmitter.event().data(json);
-            if (sequence > 0) builder.id(String.valueOf(sequence));
-            emitter.send(builder);
-          } catch (Throwable t) {
-            dead.add(emitter);
-          }
-        }
-        if (!dead.isEmpty()) {
-          clients.removeAll(dead);
-          totalEmitterCount.addAndGet(-dead.size());
-        }
+        deliverRemote(runId, json, sequence);
       } catch (Exception e) {
         log.debug("[SSE] Redis listener error: {}", e.getMessage());
       }
     }
   }
 
-  private static void completeQuietly(SseEmitter emitter) {
-    try {
-      emitter.complete();
-    } catch (Throwable ignored) {
-      // client is already gone
-    }
-  }
+  private record SubscriptionAdmission(SseEmitterDelivery delivery, boolean terminalAtAdmission) {}
 }

@@ -1,5 +1,11 @@
 # `harness/` — V2 pipeline orchestration
 
+V373 existing-PR admission proves both the durable checkout branch and immutable 40-hex
+`publicationHeadSha`. `WorkspaceInitService.requirePublicationHead` delegates to the focused
+`WorkspaceRepositoryRevisionService` after fresh clone and on crash recovery before
+classifier/planner dispatch, so a branch advance cannot silently change the source revision after
+synchronous GitHub preflight.
+
 Approved continuation resumes carry an exact target task, provider, model, action, and
 schema-versioned proposal digest. `SequentialExecutor` applies the strict provider/model override
 only to that target. The exact path uses a mechanical budget-only config and never invokes initial
@@ -42,6 +48,10 @@ Run-scoped provider/model intent is durable from V275 onward. `RunRoutePolicySer
 persisted route contract (with a bounded cache), and exact-lock runs must bind the same
 `RunModelOverrides` route after restart or retry. Binding failure is terminal for an exact route;
 the executor must not silently return to tier defaults.
+
+The shared worker test contract treats explicitly typed direct function/module inputs as runtime
+contracts: generated tests must include a valid-looking wrong-type value and may accept coercion
+only when the actual framework boundary is documented to encode strings.
 
 | File | Purpose |
 |------|---------|
@@ -87,16 +97,28 @@ no explicit failure reason is not classified as unhealthy from its success prose
 "stable API errors" previously matched the broad `api error` transport signature and caused a green
 task to rerun on another provider.
 | `WorkerToolLogEvidence.java` | **RR-1599 (2026-07-20)** — capability-keyed reading of worker tool-log entries for the executor's waste guards and delivery evidence. Replaces three literal-name predicates that were blind to registry aliases: `repeatedCommandFailureSignature` never grouped a command issued as `executeCommand` / `build` / `runBuild` / `background_process` (so `max-repeated-failures` could not fire for it), and `countFileWrites` ignored `ast_edit` / `move` / `delete`. `mutationPathSignature` additionally only understood the legacy `"path": "…"` argument form while the live log hashes arguments and carries the path in a `[target=…]` marker — so on the current log format it returned null for EVERY entry and edit-churn evidence was dead. Fail-closed direction is per predicate: an unclassified call-shaped entry IS grouped by the waste guard, but is NOT counted as a file write (over-counting would falsely clear the zero-write provider-breakdown signal). |
+
+Best-guess salvage writes flow through the same canonical tool-log formatter as ordinary worker
+mutations. A successful salvage therefore contributes its real write and admitted product-diff
+counts. `salvagedUnverified` does not imply or report a `completeTask` call. It keeps the executor's
+completion warning even when the final task subsequently passes its build gate and a fresh workspace
+suite: non-regression does not prove the requested test coverage or goal completion. Output-cap
+recovery no longer returns this terminal salvage shape; it re-enters the ordinary worker loop and
+must reach a later real `completeTask`. Explicit run-level provider/model pins propagate to the
+worker's strict-provider fence on the initial attempt as well as approved continuation attempts, so
+output-cap recovery cannot silently leave the frozen route. Failed salvage writes retain `-> ERR`
+and count as zero.
 | `TaskSimplicityClassifier.java` | Deterministic STEP_DOWN_MODEL eligibility evidence. Only HIGH-complexity, bounded brownfield repairs (BUG_FIX / TEST_FIX / PROJECT_PATCH) that cleanly complete with a small observed iteration/tool/write footprint qualify; greenfield, broad, salvaged, looping, or escalation-worthy tasks remain ineligible. The signal and its bounded evidence are persisted in continuation policy JSON. |
 | `ContinuationConfirmationScope.java` | Immutable per-decision confirmation authority plus `TaskSimplicityClassifier` evidence. It keeps step-down eligibility and its persisted policy evidence out of `SequentialExecutor`'s continuation plumbing. |
 | `TaskWaveScheduler.java` | Pure dependency-wave scheduler. `schedule(...)` groups tasks by `dependsOn` topological levels. `scheduleBounded(...)` adds a hard wave-size cap and conservative `touchesFiles` conflict checks: unknown/broad touch sets serialize alone, same file or parent/child path conflicts split waves, and only declared disjoint file sets can share a wave. `SequentialExecutor` uses `scheduleBounded(...)` at run start to emit advisory `TASK_WAVE_PLAN` evidence; runtime mutating task dispatch remains sequential. |
-| `WorkspaceInitService.java` | Creates fresh git repo for each run. Writes `.gitignore`, `.gitattributes`. Multi-repo runs clone each linked repo into `<workspace>/<runId>/repos/<name>/` via `cloneMultipleRepos`. `copyFromRunRequired` delegates the fail-closed local/GCS lineage copy to `RequiredIterationWorkspaceCopier`: only Git-tracked regular files cross the boundary, nested project repos retain Git metadata/remotes, symlinks and missing/unreadable sources fail the child before planning, and new per-repo baseline snapshots are recorded. Captures per-repo SHA snapshot into `run_repo_snapshot` (V100) for the "reset to run state" feature. |
+| `WorkspaceInitService.java` | Creates a fresh Git repository and `.gitattributes` for generated workspaces. Multi-repo runs clone each linked repo into `<workspace>/<runId>/repos/<name>/` via `cloneMultipleRepos`, then install generated/vendor exclusions only in clone-local `.git/info/exclude`; preparation never mutates the customer's `.gitignore` or adds a preparation commit. V373's durable `checkoutBranch` is the only non-default clone input; it is intentionally separate from existing-PR publication authority and records the exact branch/SHA baseline. Fresh and crash-recovered clones prove the actual current branch before baseline persistence or provider dispatch. Generic read-only Code Review clones stay evidence-free. `copyFromRunRequired` delegates the fail-closed local/GCS lineage copy to `RequiredIterationWorkspaceCopier`: only Git-tracked regular files cross the boundary, nested project repos retain Git metadata/remotes, symlinks and missing/unreadable sources fail the child before planning, and new per-repo baseline snapshots are recorded. Captures per-repo SHA snapshot into `run_repo_snapshot` (V100) for the "reset to run state" feature. |
+| `WorkspaceRepositoryRevisionService.java` | Focused exact-revision boundary extracted from `WorkspaceInitService`: validates the checked-out branch, persists immutable branch/SHA clone baselines, pins an inspection workspace to an exact commit, and proves the admitted existing-PR head before provider dispatch. |
 | `GateStore.java` | Legacy compatibility surface for non-C03C callers plus transient Redis signal cleanup. **RR-241/RR-346 (2026-07-21):** whether a run reaches the plan gate is decided by `integration/PlanGateBypassPolicy`, not the caller's `skipApproval` bit. It is neither a waiter nor production decision/continuation authority: all customer APPROVE/REJECT and pre-approval CANCEL operations use `integration/PlanGateDecisionService`, and all approved continuation uses `PlanGateResumeDispatcher`. Redis is only a short-lived compatibility signal/cleanup aid. |
 | `GateRecord` RequirementIR binding | V352 allows ENFORCED `BLOCKED` only for an exact structurally valid immutable RequirementIR artifact whose persisted completeness/blocker summary proves it is not approval-ready. The frozen evidence projection also surfaces deterministic derived blocker codes that older issue ledgers omitted. APPROVE remains restricted to `BOUND`, `READY`, zero blockers, while REJECT/CANCEL remain available. |
 | `entity/PlanGateResumeOutbox.java` + V346–V348 gate fields | C03C durable gate protocol. V347 atomically persists exact binding, WAITING continuation intent, and `PLANNING → AWAITING_APPROVAL`; V348 atomically persists canonical decision evidence/request identity and makes APPROVE, REJECT, and CANCEL distinct. The receipt cross-binds provider/mode/fixed-six-decimal `estimateHighUsd`/separate nullable `hardCapUsd`/credits/payer/continuation/report and exact typed-ack fields. New acknowledgements persist uppercase `BREAKING`; complete pre-V348 tuples remain byte-exact and are semantically checked case-insensitively after trimming, with REJECT/CANCEL recorded as `NOT_EVALUATED`. An absent legacy client fingerprint stays absent/null, while a supplied fingerprint must match and ENFORCED requires it. APPROVE commits gate `PENDING → APPROVED`, run `AWAITING_APPROVAL → APPROVAL_RESUMING`, and outbox `WAITING → READY`; REJECT/CANCEL cancel run/outbox together. `PlanGateResumeDispatcher` owns durable selection, validation, handoff, retry and local dispatch; focused collaborator `PlanGateWorkspaceRecovery` owns only bounded workspace I/O and lease/queued-owner renewal. The dispatcher claims READY or expired PROCESSING work with a fenced lease, validates before workspace restore, revalidates at handoff, and commits run `APPROVAL_RESUMING → WORKING` with outbox `PROCESSING → COMPLETED` before executor dispatch. COMPLETED means durable WORKING handoff, not terminal run success. A process-unique `:plan-gate-queued:` execution owner identifies only pre-start Futures; the dispatcher may recover that queued lane with its persisted backoff/attempt budget, while the Future's first instruction atomically transfers ownership to the normal runtime host. Runtime-started crashes are deliberately left to generic checkpoint recovery. Scheduled/startup sweeps recover the outbox; generic startup recovery does not dispatch APPROVAL_RESUMING or queued COMPLETED handoffs. Direct child evidence deletion is blocked while parent-run cascade remains valid; the new report→run FK checks new writes but is `NOT VALID` for historical orphans. `requirement.ir.gate.mode` remains LEGACY. |
 | `UiStyleResolver.java` | Resolves design-system / UI style from user request or project defaults. 3-signal priority: explicit hint > planner `ui_style` > project type heuristic. |
 | `PromptResourceReader.java` | Single fail-closed reader for optional provider/project prompt overlays; validates dynamic keys as one safe classpath segment and preserves the base prompt when an overlay is missing. |
-| `PromptComposer.java` | Package-local prompt assembly seam for worker system/user prompts, run-journal blocks, and provider/model/project overlay lookup; `SequentialExecutor` retains compatibility facades. Generated task title/description and retry build errors are delimiter-safe `UserMessage` evidence, while fixed worker policy and trusted classpath overlays remain system authority. |
+| `PromptComposer.java` | **P1-4 (2026-08-01):** brownfield BUILD workers receive a deterministic `ADMITTED_HTTP_SURFACE` evidence block — the exact public routes (context-path included) the publication gate verifies, bounded at 60 rows, plus context-path reconciliation guidance — sourced fail-soft from `BrownfieldHttpContractGuard.protectedRoutes`. This closes the live dev failure where a worker wrote a naive controller mapping on a context-path-prefixed app and produced green code + green self-test that the deterministic HTTP gate then correctly failed. Package-local prompt assembly seam for worker system/user prompts, run-journal blocks, and provider/model/project overlay lookup; `SequentialExecutor` retains compatibility facades. Generated task title/description and retry build errors are delimiter-safe `UserMessage` evidence, while fixed worker policy and trusted classpath overlays remain system authority. |
 | `DesignSystemProperties.java` | YAML config for the company design-system library. Filesystem-backed (54 design systems shipped). |
 | `WorkerTaskRequest.java` | Per-task request shape — `taskId`, `complexity`, model + tier, `maxIterations`, `wallClockSeconds`, `requireBuildVerification`, `requireTestVerification` (patch-mode gate). |
 | `ExecutionRequest.java` | Executor input shape. `localHandsMode=true` is set only by CLI local-hands runs and appends a local-only scope prompt so empty working-tree edits do not sprout unsolicited scaffolds/tests. `lowComplexityWorkerStartTier=LIGHTWEIGHT` is the per-run non-pinning way to start LOW tasks on the cheap tier while keeping automatic step-up/change-provider available. |
@@ -141,7 +163,7 @@ for bounded retry/recovery, not a claim that an in-flight provider future surviv
 9. `ValidationReportService` computes `verifiedScore` — additive-weighted by default (flag `scoring.additive-v2`, V201): CODE_DELIVERED(30)+BUILD(25)+TESTS(20)+REVIEWER(20)+CRITICALS(5), weighted-average over fired slots, hard 0-floor when zero files generated. Legacy multiplicative formula stays behind the flag-off path.
 10. **Mark run terminal** (`COMPLETE / PARTIAL / FAILED`) with `status_reason`.
 11. **Background: auto-preview** (5-min TTL) + `TestGenOrchestrator` (plan → generate → compile → execute against live preview) + `MergeCompleted` event (drives Slack / JIRA / Confluence outbound comments).
-12. **Auto-push:** `ScmPushService.pushMultiRepo` opens per-repo PRs with cross-link.
+12. **Auto-push:** ordinary runs—including checkout-only AIDLC launches—use `ScmPushService.pushMultiRepo` to open fresh PRs. A V373 run carrying explicit publication authority must target exactly one repository and the persisted open PR number/head; it fast-forwards without force, reuses that PR, and never schedules the pre-existing branch for cleanup.
 
 PATCH mode: `RunOrchestrator.runPatchPipeline` calls `CodeGenEngine.solve`, which runs one `WorkerAgent` loop, skipping classifier / planner / reviewer. Used by the 4 autofix surfaces + SWE-bench / ProgramBench adapters.
 
@@ -154,10 +176,10 @@ PATCH mode: `RunOrchestrator.runPatchPipeline` calls `CodeGenEngine.solve`, whic
 | `STOPPED_WITHOUT_COMPLETE` | Worker hit terminal without calling `completeTask`. Falls through to soft-completion gate. |
 | `ITERATION_LIMIT_EXCEEDED` | Per-tier cap hit. |
 | `WALL_CLOCK_EXCEEDED` | Per-tier wall-clock cap hit (2026-05-10). |
-| `BUDGET_EXCEEDED` | Hard-cap dollar ceiling hit. Lever B salvage fires when 0 writes happened. |
+| `BUDGET_EXCEEDED` | Observed ceiling reached or the conservative next-call reserve would cross it. The run stops before post-worker LLM review; missing pricing never becomes a zero-cost projection. |
 | `ERROR` | Router or tool error. |
 
-**One progress signal** in `WorkerAgent` (RL-2026-05-005, unifying the old Lever A + Lever C + stagnation warn/force): `itersSinceProgress` counts consecutive iterations with no `writeFile`/`editFile`; crossing `progressWarnAfter` (per-tier `req.stagnationWarnAfter`) injects ONE corrective UserMessage nudge — which also fires on a premature text-only stop; crossing `progressForceAfter` force-terminates with `COMPLETED_BY_STAGNATION`. **Lever B** (best-guess salvage — one final LLM call on iter-limit / budget-exceeded / progress-force when `totalWriteCalls=0`) remains available to ordinary attempts but is explicitly disabled for selected shared-workspace continuation attempts. The dollar budget cap survives unchanged. UserMessage (not SystemMessage) so Gemini's implicit-cache prefix stays intact.
+**One progress signal** in `WorkerAgent` (RL-2026-05-005, unifying the old Lever A + Lever C + stagnation warn/force): `itersSinceProgress` counts consecutive iterations with no `writeFile`/`editFile`; crossing `progressWarnAfter` (per-tier `req.stagnationWarnAfter`) injects ONE corrective UserMessage nudge — which also fires on a premature text-only stop; crossing `progressForceAfter` force-terminates with `COMPLETED_BY_STAGNATION`. **Lever B** (best-guess salvage — one final LLM call on iter-limit / progress-force when `totalWriteCalls=0`) remains available to ordinary attempts but is explicitly disabled for selected shared-workspace continuation attempts and cannot run after a cost ceiling. Every normal, salvage, terminal-finalizer, or critic request carries the run/task ceilings into `LlmRouter`; its last common pre-transport admission prices the effective managed-AI or failover route using uncached input with headroom and the requested maximum output. Missing route pricing retains observed-spend enforcement and is never interpreted as free. UserMessage (not SystemMessage) keeps Gemini's implicit-cache prefix intact.
 
 Model-specific tuning is an optional, fail-closed overlay: `model-matrix.capability-profiles` may supply `stagnationWarnAfter` / `stagnationForceAfter` for `provider/model` (or provider) keys. `SequentialExecutor.tierConfigFor` applies a profile only when the separately seeded `worker.capability-profiles.enabled` flag (V271) is ON, both values are positive, and `force > warn`; model-specific lookup canonicalizes legacy aliases before falling back to provider scope. Absent, malformed, unavailable, or partial profiles preserve the complexity defaults. `ToolRegistry` uses the same gate before binding profile `optional-tools`, so a YAML edit alone cannot widen a worker schema. Build prompts also accept an optional classpath fragment at `prompts/fragments/model/<provider>/<model>/build.md` when `worker.provider-prompt-tuning.enabled` is ON; model keys are normalized to one safe segment and missing fragments are no-ops, preserving provider-only and base-prompt behavior. Enable model-specific overlays only after a fixed-corpus, k>=3, budget-reconciled comparison against a disabled-profile baseline; keep both gates OFF by default.
 
@@ -281,3 +303,24 @@ Fail-closed / evidence-honest corrections; no migration.
   generated code/tests as untrusted intermediate output: later tasks remove contradictory security
   fallbacks instead of preserving them to keep self-authored tests green. Immutable replay tests
   compare serialized status/body/contract headers, not only parsed fields.
+- **2026-08-02 customer-scope correction** — workspace preparation installs generated/vendor
+  patterns only in `.git/info/exclude`. It does not rewrite, stage, or commit the customer's
+  `.gitignore`; vendored cleanup remains bounded to exact safe vendored paths. The regression gate
+  requires an unchanged HEAD, merge base, origin diff, and tracked `.gitignore` after preparation.
+- **2026-08-04 standalone baseline correction** — every captured standalone clone, including a
+  default-branch request with no explicit branch, persists the actual checked-out branch and HEAD
+  SHA in `run_repo_snapshot`. Re-entry verifies an existing snapshot against the checkout instead
+  of silently replacing it. Read-only Code Review clones never create run snapshots and check out
+  the exact admitted SHA. Required iteration copies preserve the sole root-repository snapshot;
+  restored nested repositories without their original Git proof fail closed instead of being
+  reclassified as the synthetic root repository.
+- **2026-08-04 iterate branch re-anchor** — auto-push leaves the source run's checkout on its
+  publication branch (`executespec/<runId>`), and the iteration copy follows that HEAD, so every
+  published project run's follow-up deterministically failed preflight branch verification.
+  `RequiredIterationWorkspaceCopier` now re-anchors each copied repository on its
+  `run_repo_snapshot.branch` baseline (`git checkout -B`, working tree and HEAD commit unchanged;
+  unsafe branch shapes fail closed), and `IterationSubmitPolicyFactory` inherits the source run's
+  `checkoutBranch` so a source that legitimately ran on a non-default branch is verified against
+  that same branch. `WorkspaceInitService.verifyMultipleRepos` rejections carry a closed sub-code
+  vocabulary (`BRANCH_MISMATCH` / `CLONE_MISSING` / `EMPTY_INVENTORY` / `INVENTORY_ERROR`) so the
+  terminal outcome can be honest instead of blaming repository access.

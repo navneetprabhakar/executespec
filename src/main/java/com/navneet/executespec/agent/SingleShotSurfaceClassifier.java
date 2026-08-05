@@ -29,7 +29,11 @@ final class SingleShotSurfaceClassifier {
                 + " interface|ui|page|dashboard|landing site)\\b.*")) {
       return Plan.RuntimeSurface.STATIC_WEB;
     }
-    return Plan.RuntimeSurface.HTTP;
+    // No stated runtime boundary is not evidence of an HTTP service. LIBRARY is the conservative
+    // fallback: it keeps ordinary source/module changes out of endpoint scoring and prevents an
+    // unrelated generated HTTP suite from being admitted. Explicit API/server wording above still
+    // wins.
+    return Plan.RuntimeSurface.LIBRARY;
   }
 
   static String projectType(Plan.RuntimeSurface surface) {

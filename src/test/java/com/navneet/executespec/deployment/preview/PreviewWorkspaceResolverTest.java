@@ -49,6 +49,36 @@ class PreviewWorkspaceResolverTest {
   }
 
   @Test
+  void stagesStandaloneSnapshotFromTheRunWorkspaceRoot() throws Exception {
+    Files.createDirectories(runRoot.resolve(".git"));
+    Files.writeString(runRoot.resolve("app.js"), "standalone source");
+    Files.createDirectories(runRoot.resolve("repos/standalone"));
+    Files.writeString(runRoot.resolve("repos/standalone/bait.js"), "not the root application");
+    when(snapshots.findByRunId("run-root"))
+        .thenReturn(List.of(standaloneSnapshot("run-root", "owner/standalone")));
+
+    Path staged = new PreviewWorkspaceResolver(snapshots).resolve("run-root", runRoot);
+
+    assertThat(staged).isNotEqualTo(runRoot);
+    assertThat(staged.resolve("app.js")).hasContent("standalone source");
+  }
+
+  @Test
+  void restoredProjectPrefersExistingNestedRepositoryOverSyntheticRootGit() throws Exception {
+    Files.createDirectories(runRoot.resolve(".git"));
+    Path nested = Files.createDirectories(runRoot.resolve("repos/montecarlo"));
+    Files.writeString(runRoot.resolve("wrapper.txt"), "not the application");
+    Files.writeString(nested.resolve("app.js"), "restored source");
+    when(snapshots.findByRunId("run-restored"))
+        .thenReturn(List.of(snapshot("run-restored", "owner/montecarlo")));
+
+    Path staged = new PreviewWorkspaceResolver(snapshots).resolve("run-restored", runRoot);
+
+    assertThat(staged.resolve("app.js")).hasContent("restored source");
+    assertThat(staged.resolve("wrapper.txt")).doesNotExist();
+  }
+
+  @Test
   void failsClosedForMultiRepositoryRun() {
     when(snapshots.findByRunId("run-1"))
         .thenReturn(List.of(snapshot("run-1", "owner/one"), snapshot("run-1", "owner/two")));
@@ -71,6 +101,16 @@ class PreviewWorkspaceResolverTest {
   }
 
   private static RunRepoSnapshot snapshot(String runId, String fullName) {
+    return RunRepoSnapshot.builder()
+        .runId(runId)
+        .repoId(java.util.UUID.randomUUID())
+        .repoFullName(fullName)
+        .branch("master")
+        .commitSha("a".repeat(40))
+        .build();
+  }
+
+  private static RunRepoSnapshot standaloneSnapshot(String runId, String fullName) {
     return RunRepoSnapshot.builder()
         .runId(runId)
         .repoFullName(fullName)

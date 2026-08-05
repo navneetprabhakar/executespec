@@ -89,6 +89,8 @@ class SequentialExecutorSoftCompletionTest {
       mock(com.navneet.executespec.router.ModelResolver.class);
   private final com.navneet.executespec.project.rag.RetrievalService retrievalService =
       mock(com.navneet.executespec.project.rag.RetrievalService.class);
+  private final com.navneet.executespec.smoketest.WorkspaceTestRunner workspaceTestRunner =
+      mock(com.navneet.executespec.smoketest.WorkspaceTestRunner.class);
   private final com.navneet.executespec.cost.RunCostTracker costTracker =
       mock(com.navneet.executespec.cost.RunCostTracker.class);
   private final com.navneet.executespec.config.featureflag.FeatureFlagService featureFlagService =
@@ -121,7 +123,7 @@ class SequentialExecutorSoftCompletionTest {
         modelResolver,
         matrixProps,
         retrievalService,
-        org.mockito.Mockito.mock(com.navneet.executespec.smoketest.WorkspaceTestRunner.class),
+        workspaceTestRunner,
         featureFlagService,
         org.mockito.Mockito.mock(com.navneet.executespec.context.ContextStore.class),
         costTracker,
@@ -373,7 +375,7 @@ class SequentialExecutorSoftCompletionTest {
         .iterations(60)
         .toolCallsDispatched(61)
         .completionSummary("salvage: best-guess edit produced after iter-limit")
-        .toolCallLog(List.of("SALVAGE writeFile -> OK"))
+        .toolCallLog(List.of("writeFile(sig=deadbeef) [target=src/App.java] -> OK"))
         .totalLatencyMs(120_000L)
         .salvagedUnverified(true)
         .build();
@@ -468,6 +470,31 @@ class SequentialExecutorSoftCompletionTest {
     verify(executor, never()).initialRouteFor(any(), any(), any(), any(), anyBoolean());
     verify(initialRouting, never()).decide(any(), any(), any());
     verify(modelResolver, never()).resolve(anyString(), any());
+  }
+
+  @Test
+  void initialPinnedRunUsesStrictProviderWithoutContinuationOverride() {
+    stubTaskRow();
+    when(worker.run(any(WorkerTaskRequest.class), any())).thenReturn(workerCompleted(1));
+    when(buildProjectTool.execute(any(), any())).thenReturn(new ToolResult.Ok("exit=0\nbuild ok"));
+
+    ExecutionRequest pinned =
+        ExecutionRequest.builder()
+            .plan(singleTaskPlan())
+            .provider("fireworks")
+            .model("glm-5.2-fw")
+            .runContext(new ExecutionContext("run-soft", "run-soft", Path.of("/tmp/ws-soft")))
+            .enableSmokeTests(true)
+            .routePinned(true)
+            .build();
+
+    newExecutor().execute(pinned);
+
+    ArgumentCaptor<WorkerTaskRequest> request = ArgumentCaptor.forClass(WorkerTaskRequest.class);
+    verify(worker).run(request.capture(), any());
+    assertEquals("fireworks", request.getValue().provider());
+    assertEquals("glm-5.2-fw", request.getValue().model());
+    assertTrue(request.getValue().strictProvider());
   }
 
   @Test
@@ -609,6 +636,51 @@ class SequentialExecutorSoftCompletionTest {
         TaskOutcome.Status.COMPLETED_WITH_WARNING,
         t1.status(),
         "A salvage best-guess edit must not be promoted to SUCCESS without verification.");
+    verify(broadcaster)
+        .emit(
+            anyString(),
+            argThat(
+                event ->
+                    isGoalDecisionEvent(event)
+                        && ((List<?>) event.data().get("evidence")).contains("fileWrites=1")
+                        && ((List<?>) event.data().get("evidence"))
+                            .contains("meaningfulProductDiffs=1")
+                        && ((List<?>) event.data().get("evidence"))
+                            .contains("completionConfidenceLow=true")));
+  }
+
+  @Test
+  void
+      salvaged_recovered_mutation_with_fresh_green_tests_remains_WARNING_without_false_completion_claim() {
+    stubTaskRow();
+    when(worker.run(any(WorkerTaskRequest.class), any())).thenReturn(workerSalvaged());
+    when(buildProjectTool.execute(any(), any())).thenReturn(new ToolResult.Ok("exit=0\nbuild ok"));
+    when(featureFlagService.isEnabled("worker.auto-verify.enabled")).thenReturn(true);
+    when(workspaceTestRunner.runTests(anyString(), any()))
+        .thenReturn(
+            java.util.Optional.of(
+                com.navneet.executespec.testgen.model.TestExecutionSummary.builder()
+                    .totalTests(12)
+                    .passed(12)
+                    .executionVerified(Boolean.TRUE)
+                    .evidenceScope(
+                        com.navneet.executespec.testgen.model.TestExecutionSummary.EvidenceScope
+                            .WORKSPACE_TEST_SUITE)
+                    .build()));
+
+    ExecutionResult result = newExecutor().execute(req(singleTaskPlan(), true));
+
+    assertEquals(TaskOutcome.Status.COMPLETED_WITH_WARNING, result.perTask().get(0).status());
+    assertEquals(ExecutionResult.Overall.PARTIAL_WITH_WARNINGS, result.overall());
+    verify(broadcaster)
+        .emit(
+            anyString(),
+            argThat(
+                event ->
+                    isGoalDecisionEvent(event)
+                        && "NOT_DONE_BUT_PROGRESSING".equals(event.data().get("state"))
+                        && !((List<?>) event.data().get("completedItems"))
+                            .contains("worker called completeTask")));
   }
 
   // RR-260 control — a NORMAL COMPLETED with smoke skipped is a clean SUCCESS, proving the warning

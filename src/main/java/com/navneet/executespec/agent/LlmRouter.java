@@ -1,9 +1,6 @@
 package com.navneet.executespec.agent;
 
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
@@ -14,9 +11,9 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
-import com.github.benmanes.caffeine.cache.Cache;
-import com.github.benmanes.caffeine.cache.Caffeine;
 import com.navneet.executespec.billing.service.ManagedAiUsageService;
+import com.navneet.executespec.cost.ProjectedCallBudgetExceededException;
+import com.navneet.executespec.cost.ProjectedCallCostAdmission;
 import com.navneet.executespec.cost.RunCostTracker;
 import com.navneet.executespec.cost.RunStepUsageRecorder;
 import com.navneet.executespec.executioncontext.LlmExecutionDispatchGuard;
@@ -34,7 +31,6 @@ import com.navneet.executespec.tool.ToolRegistry;
 
 import org.springframework.ai.anthropic.AnthropicChatModel;
 import org.springframework.ai.anthropic.AnthropicChatOptions;
-import org.springframework.ai.anthropic.api.AnthropicApi;
 import org.springframework.ai.anthropic.api.AnthropicCacheOptions;
 import org.springframework.ai.anthropic.api.AnthropicCacheStrategy;
 import org.springframework.ai.chat.messages.Message;
@@ -42,8 +38,6 @@ import org.springframework.ai.chat.messages.MessageType;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.tool.ToolCallback;
-import org.springframework.beans.factory.ObjectProvider;
-import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -75,10 +69,10 @@ import lombok.extern.slf4j.Slf4j;
  * provider/model/key-source policy and resolves the current encrypted credential immediately before
  * each physical attempt. Missing, stale, cross-tenant, out-of-policy or exhausted contexts fail
  * before transport; OWN_KEYS never falls through to a platform key. The legacy per-run key cache
- * remains only as compatibility plumbing when enforcement is explicitly disabled. For Anthropic the
- * per-key model cache ({@link #anthropicByKey}) wraps Spring AI's singleton bean — keyed by
- * SHA-256(apiKey), Caffeine LRU 128 × 1h TTL — so customer prompt-caching stays on the customer's
- * API account. OpenAI + Gemini wrappers accept the per-request resolved key directly.
+ * remains only as compatibility plumbing when enforcement is explicitly disabled. Anthropic builds
+ * a bounded, single-attempt model for each admitted physical request so Spring AI cannot hide
+ * retries from the durable attempt ledger; provider-side prompt caching remains scoped by the
+ * resolved API account. OpenAI + Gemini wrappers accept the per-request resolved key directly.
  *
  * <p><strong>Audit 2026-05-12 review item M #68 — CLOSED (RL-2026-05-062):</strong> multi-provider
  * failover is now wired in {@link #maybeFailover}. After the same-provider bounded transient retry
@@ -107,6 +101,7 @@ public class LlmRouter {
   private final GeminiNativeToolClient geminiNativeToolClient;
   private final Metrics metrics;
   private final RunCostTracker costTracker;
+  private final ProjectedCallCostAdmission projectedCallCostAdmission;
   private final RunStepUsageRecorder stepUsageRecorder;
   private final SseBroadcaster broadcaster;
   private final RunKeyContextStore keyContextStore;
@@ -138,11 +133,7 @@ public class LlmRouter {
    */
   private final ContextSanitizer contextSanitizer;
 
-  @Qualifier("anthropicChatModel") private final ObjectProvider<AnthropicChatModel> anthropicModelProvider;
-
-  /** Model-specific Anthropic clients whose defaults never include deprecated temperature. */
-  private final Cache<String, AnthropicChatModel> anthropicDeprecatedModelCache =
-      Caffeine.newBuilder().maximumSize(256).expireAfterAccess(Duration.ofHours(1)).build();
+  private final AnthropicAttemptModelFactory anthropicAttemptModelFactory;
 
   @Value("${spring.ai.anthropic.api-key:}")
   private String platformAnthropicApiKey;
@@ -248,6 +239,65 @@ public class LlmRouter {
         LlmRequest.PromptCacheStrategy.DEFAULT,
         reference,
         true);
+  }
+
+  /**
+   * Customer-safe strict text seam with an explicit transient-retry profile.
+   *
+   * <p>Use this for human-triggered, bounded project operations that must not inherit the long
+   * unattended pipeline retry ladder.
+   */
+  public ChatResponse callTextStrict(
+      String provider,
+      String model,
+      List<Message> messages,
+      String runId,
+      String agentRole,
+      String stepId,
+      Integer maxTokens,
+      LlmExecutionReference reference,
+      LlmRequest.RetryProfile retryProfile) {
+    return callTextStrict(
+        provider,
+        model,
+        messages,
+        runId,
+        agentRole,
+        stepId,
+        maxTokens,
+        reference,
+        retryProfile,
+        null);
+  }
+
+  /**
+   * Strict text seam that signals a durable caller only after physical-attempt admission and local
+   * transport preflight, immediately before provider I/O.
+   */
+  public ChatResponse callTextStrict(
+      String provider,
+      String model,
+      List<Message> messages,
+      String runId,
+      String agentRole,
+      String stepId,
+      Integer maxTokens,
+      LlmExecutionReference reference,
+      LlmRequest.RetryProfile retryProfile,
+      Runnable physicalAttemptStartedCallback) {
+    return callText(
+        provider,
+        model,
+        messages,
+        runId,
+        agentRole,
+        stepId,
+        maxTokens,
+        LlmRequest.PromptCacheStrategy.DEFAULT,
+        reference,
+        true,
+        retryProfile,
+        physicalAttemptStartedCallback);
   }
 
   /** Customer-safe bounded text seam with an explicit prompt-cache policy. */
@@ -364,6 +414,60 @@ public class LlmRouter {
       LlmRequest.PromptCacheStrategy promptCacheStrategy,
       LlmExecutionReference reference,
       boolean strictProvider) {
+    return callText(
+        provider,
+        model,
+        messages,
+        runId,
+        agentRole,
+        stepId,
+        maxTokens,
+        promptCacheStrategy,
+        reference,
+        strictProvider,
+        null);
+  }
+
+  private ChatResponse callText(
+      String provider,
+      String model,
+      List<Message> messages,
+      String runId,
+      String agentRole,
+      String stepId,
+      Integer maxTokens,
+      LlmRequest.PromptCacheStrategy promptCacheStrategy,
+      LlmExecutionReference reference,
+      boolean strictProvider,
+      LlmRequest.RetryProfile retryProfile) {
+    return callText(
+        provider,
+        model,
+        messages,
+        runId,
+        agentRole,
+        stepId,
+        maxTokens,
+        promptCacheStrategy,
+        reference,
+        strictProvider,
+        retryProfile,
+        null);
+  }
+
+  private ChatResponse callText(
+      String provider,
+      String model,
+      List<Message> messages,
+      String runId,
+      String agentRole,
+      String stepId,
+      Integer maxTokens,
+      LlmRequest.PromptCacheStrategy promptCacheStrategy,
+      LlmExecutionReference reference,
+      boolean strictProvider,
+      LlmRequest.RetryProfile retryProfile,
+      Runnable physicalAttemptStartedCallback) {
     String effectiveRunId =
         (runId == null || runId.isBlank())
             ? "text-" + Integer.toHexString(messages.hashCode())
@@ -386,7 +490,9 @@ public class LlmRouter {
         stepId,
         maxTokens,
         promptCacheStrategy,
-        strictProvider);
+        strictProvider,
+        retryProfile,
+        physicalAttemptStartedCallback);
   }
 
   private ChatResponse callTextWithContext(
@@ -399,6 +505,56 @@ public class LlmRouter {
       Integer maxTokens,
       LlmRequest.PromptCacheStrategy promptCacheStrategy,
       boolean strictProvider) {
+    return callTextWithContext(
+        provider,
+        model,
+        messages,
+        context,
+        agentRole,
+        stepId,
+        maxTokens,
+        promptCacheStrategy,
+        strictProvider,
+        null);
+  }
+
+  private ChatResponse callTextWithContext(
+      String provider,
+      String model,
+      List<Message> messages,
+      ExecutionContext context,
+      String agentRole,
+      String stepId,
+      Integer maxTokens,
+      LlmRequest.PromptCacheStrategy promptCacheStrategy,
+      boolean strictProvider,
+      LlmRequest.RetryProfile retryProfile) {
+    return callTextWithContext(
+        provider,
+        model,
+        messages,
+        context,
+        agentRole,
+        stepId,
+        maxTokens,
+        promptCacheStrategy,
+        strictProvider,
+        retryProfile,
+        null);
+  }
+
+  private ChatResponse callTextWithContext(
+      String provider,
+      String model,
+      List<Message> messages,
+      ExecutionContext context,
+      String agentRole,
+      String stepId,
+      Integer maxTokens,
+      LlmRequest.PromptCacheStrategy promptCacheStrategy,
+      boolean strictProvider,
+      LlmRequest.RetryProfile retryProfile,
+      Runnable physicalAttemptStartedCallback) {
     if (context == null) throw new IllegalArgumentException("context required");
     String taskId =
         (agentRole == null || agentRole.isBlank()) ? "__text__" : "__text__-" + agentRole;
@@ -422,19 +578,11 @@ public class LlmRouter {
             .stepId(stepId)
             .maxTokens(effectiveMaxTokens)
             .strictProvider(strictProvider)
+            .retryProfile(retryProfile)
+            .physicalAttemptStartedCallback(physicalAttemptStartedCallback)
             .promptCacheStrategy(promptCacheStrategy)
             .build());
   }
-
-  /**
-   * Per-customer-key Anthropic model cache. Spring AI's {@link AnthropicChatModel} is a singleton
-   * with the API key bound at bean construction, so per-call key override requires a fresh model
-   * (cheap HTTP-client + serializer registration ~50ms first time, ~0ms cache-hit). Keyed by
-   * SHA-256(apiKey) so the plaintext key never lives in the cache key. 128 entries × 1h TTL covers
-   * any realistic mix of concurrent BYOK customers; eviction returns to bean-construction.
-   */
-  private final Cache<String, AnthropicChatModel> anthropicByKey =
-      Caffeine.newBuilder().maximumSize(128).expireAfterAccess(Duration.ofHours(1)).build();
 
   // Auto-configured Spring AI bean for Anthropic (the one provider whose native
   // tool calling works correctly on Spring AI 1.1.4). OpenAI and Gemini both have
@@ -461,6 +609,23 @@ public class LlmRouter {
   @Value("${spring.ai.deepseek.read-timeout-seconds:300}")
   private int deepSeekReadTimeoutSeconds = 300;
 
+  /**
+   * Fireworks long agentic tool turns (500K-token GLM contexts) routinely exceed the generic 120s
+   * OpenAI-wire window; the provider keeps generating and bills the discarded completion while the
+   * client cancels at exactly 120s. Same window as native DeepSeek.
+   */
+  @Value("${spring.ai.fireworks.read-timeout-seconds:300}")
+  private int fireworksReadTimeoutSeconds = 300;
+
+  /**
+   * Gemini thinking-model worker calls routinely exceed the client's static 60s default (calibrated
+   * 2026-05-08 from cmatrix run 84252898: T3 timed out after a 17-min worker phase). This window
+   * replaces the WorkerAgent-side global read-timeout pin: the router resolves it for EVERY Gemini
+   * call, so callers no longer need a provider-blind override to avoid the 60s default.
+   */
+  @Value("${spring.ai.gemini.read-timeout-seconds:300}")
+  private int geminiReadTimeoutSeconds = 300;
+
   // 2026-06-09 — Fireworks AI: OpenAI-wire-compatible US-hosted fast inference for the Chinese open
   // models. Same plumbing as DeepSeek (per-call base-URL). System fallback key; org BYOK via
   // RunKeyContext.keyFor("fireworks").
@@ -476,12 +641,45 @@ public class LlmRouter {
    * one 502). Retrying the SAME provider keeps per-provider benchmark numbers honest (no silent
    * failover) and makes customer runs survive transient upstream errors. This is public because
    * durable logical-call budgets must reserve the exact same physical-attempt envelope.
+   *
+   * <p>Since 2026-08-03 the envelope is surface-split via {@link LlmRequest#retryProfile()}: this
+   * constant is the PIPELINE (default) ceiling; interactive chat turns use the smaller {@link
+   * #INTERACTIVE_TRANSIENT_RETRY_MAX_ATTEMPTS}.
    */
-  public static final int TRANSIENT_RETRY_MAX_ATTEMPTS = 4;
+  public static final int TRANSIENT_RETRY_MAX_ATTEMPTS = 6;
 
-  private static final long TRANSIENT_RETRY_BASE_MS = 2000L;
+  /**
+   * Retry ceiling for human-facing chat turns ({@link LlmRequest.RetryProfile#INTERACTIVE}). A
+   * person is watching these calls: the pipeline ladder's ~155s worst-case backoff tail reads as a
+   * hang, so interactive turns keep the pre-campaign envelope (4 attempts, 2s/4s/8s — worst case
+   * ~14s of backoff) and surface the failure to the user instead of waiting out a long throttling
+   * window.
+   */
+  public static final int INTERACTIVE_TRANSIENT_RETRY_MAX_ATTEMPTS = 4;
+
+  /** One retry for optional post-run enrichment whose deterministic fallback is already usable. */
+  public static final int AUXILIARY_TRANSIENT_RETRY_MAX_ATTEMPTS = 2;
+
+  /**
+   * PIPELINE spacing — accuracy over latency (2026-08-01, TB 2.1 campaign): one initial call plus
+   * five retries at 5s/15s/25s/45s/65s. The old 2s/4s/8s ladder re-hit a still-pressured provider
+   * fast enough to exhaust the envelope inside one throttling window; wider gaps trade wall clock
+   * for a materially higher chance the transient clears before the envelope is spent. Nobody is
+   * watching a worker/planner/reviewer call, so the wall-clock cost is acceptable there.
+   */
+  private static final long[] PIPELINE_RETRY_BACKOFF_MS = {
+    5_000L, 15_000L, 25_000L, 45_000L, 65_000L
+  };
+
+  /** INTERACTIVE spacing — the pre-campaign 2s/4s/8s ladder (RL-2026-05-029). */
+  private static final long[] INTERACTIVE_RETRY_BACKOFF_MS = {2_000L, 4_000L, 8_000L};
+
+  /** AUXILIARY spacing — fail over to the caller's structured fallback after one short retry. */
+  private static final long[] AUXILIARY_RETRY_BACKOFF_MS = {2_000L};
+
   private static final Duration DEFAULT_TRANSPORT_TIMEOUT = Duration.ofSeconds(120);
   private static final Duration ANTHROPIC_TRANSPORT_TIMEOUT = Duration.ofSeconds(300);
+  private static final int ANTHROPIC_FALLBACK_MAX_TOKENS = 16_000;
   private static final Duration TRANSPORT_SAFETY_MARGIN = Duration.ofSeconds(15);
 
   /**
@@ -701,7 +899,14 @@ public class LlmRouter {
                 physicalAttemptOrdinal,
                 parentAttemptId)
             : null;
-    for (int attempt = 1; attempt <= TRANSIENT_RETRY_MAX_ATTEMPTS; attempt++) {
+    final int maxAttempts = transientRetryMaxAttempts(request);
+    final long[] backoffLadderMs = transientRetryBackoffMs(request);
+    for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+      // This is the last common seam before every physical chat transport. The request already
+      // carries the managed-AI or failover route, so price that effective provider/model rather
+      // than the worker's earlier requested route. Rechecking each bounded retry also observes any
+      // spend recorded by another in-process call before this attempt starts.
+      projectedCallCostAdmission.admit(request, tools);
       // Audit intent is write-ahead and fail-closed. If this durable append fails, the provider
       // transport is never invoked and no unaccounted Enterprise spend can occur.
       PhysicalDispatch physicalDispatch =
@@ -770,11 +975,11 @@ public class LlmRouter {
             request.model(),
             elapsed,
             attempt,
-            TRANSIENT_RETRY_MAX_ATTEMPTS,
+            maxAttempts,
             contextSanitizer.sanitizeException(e));
         lastError = e;
-        if (attempt < TRANSIENT_RETRY_MAX_ATTEMPTS && isTransientError(e)) {
-          long backoffMs = TRANSIENT_RETRY_BASE_MS * (1L << (attempt - 1));
+        if (attempt < maxAttempts && isTransientError(e)) {
+          long backoffMs = backoffLadderMs[Math.min(attempt - 1, backoffLadderMs.length - 1)];
           log.warn(
               "LlmRouter transient error on {} — retrying in {}ms", request.provider(), backoffMs);
           backoffSleep(backoffMs);
@@ -1077,6 +1282,10 @@ public class LlmRouter {
       try {
         return dispatchWithRetry(
             altRequest, tools, altKey, altSource, keys, operationAdmissionDecision);
+      } catch (ProjectedCallBudgetExceededException budgetExceeded) {
+        // A route that cannot fit the customer's ceiling is not a provider failure. Do not mask it
+        // behind the primary 5xx or walk to another billable transport.
+        throw budgetExceeded;
       } catch (RuntimeException altError) {
         log.warn(
             "LlmRouter failover target {} also failed: {}",
@@ -1142,19 +1351,67 @@ public class LlmRouter {
     return request.retryOf() == null || request.retryOf().isBlank() ? "PRIMARY" : "FAILOVER";
   }
 
+  /**
+   * Effective transport timeout for one physical call: the per-provider window, tightened (never
+   * widened) by an explicit per-call {@code readTimeoutSeconds} override. The router — not the
+   * caller — owns how long a provider socket may stay open, so a caller carrying a large remaining
+   * wall-clock budget (e.g. a worker hours from its absolute deadline) cannot inflate an HTTP read
+   * timeout past the provider's window. Callers use the override only to SHORTEN the window, e.g.
+   * deadline-capped worker calls near the shutdown reserve. (2026-08-03, productionizing the TB
+   * campaign's global worker 300s pin.)
+   */
   private Duration transportTimeout(LlmRequest request) {
+    Duration window = providerTransportWindow(request.provider());
     if (request.readTimeoutSeconds() != null && request.readTimeoutSeconds() > 0) {
-      return Duration.ofSeconds(request.readTimeoutSeconds());
+      Duration override = Duration.ofSeconds(request.readTimeoutSeconds());
+      return override.compareTo(window) < 0 ? override : window;
     }
-    if ("anthropic".equalsIgnoreCase(request.provider())) return ANTHROPIC_TRANSPORT_TIMEOUT;
-    if ("deepseek".equalsIgnoreCase(request.provider())) {
+    return window;
+  }
+
+  private Duration providerTransportWindow(String provider) {
+    if ("anthropic".equalsIgnoreCase(provider)) return ANTHROPIC_TRANSPORT_TIMEOUT;
+    if ("deepseek".equalsIgnoreCase(provider)) {
       return Duration.ofSeconds(Math.max(1, deepSeekReadTimeoutSeconds));
+    }
+    if ("fireworks".equalsIgnoreCase(provider)) {
+      return Duration.ofSeconds(Math.max(1, fireworksReadTimeoutSeconds));
+    }
+    if ("gemini".equalsIgnoreCase(provider)) {
+      return Duration.ofSeconds(Math.max(1, geminiReadTimeoutSeconds));
     }
     return DEFAULT_TRANSPORT_TIMEOUT;
   }
 
-  private static Integer admittedReadTimeoutSeconds(LlmRequest request, Instant transportDeadline) {
-    if (transportDeadline == null) return request.readTimeoutSeconds();
+  /** PIPELINE unless the request explicitly opts into the interactive envelope. */
+  private static int transientRetryMaxAttempts(LlmRequest request) {
+    return switch (request.retryProfile() == null
+        ? LlmRequest.RetryProfile.PIPELINE
+        : request.retryProfile()) {
+      case INTERACTIVE -> INTERACTIVE_TRANSIENT_RETRY_MAX_ATTEMPTS;
+      case AUXILIARY -> AUXILIARY_TRANSIENT_RETRY_MAX_ATTEMPTS;
+      case PIPELINE -> TRANSIENT_RETRY_MAX_ATTEMPTS;
+    };
+  }
+
+  private static long[] transientRetryBackoffMs(LlmRequest request) {
+    return switch (request.retryProfile() == null
+        ? LlmRequest.RetryProfile.PIPELINE
+        : request.retryProfile()) {
+      case INTERACTIVE -> INTERACTIVE_RETRY_BACKOFF_MS;
+      case AUXILIARY -> AUXILIARY_RETRY_BACKOFF_MS;
+      case PIPELINE -> PIPELINE_RETRY_BACKOFF_MS;
+    };
+  }
+
+  /**
+   * The read timeout actually handed to a wire client: the V1-admitted transport deadline when one
+   * exists, otherwise the resolved per-provider window (already min-capped by any caller override
+   * in {@link #transportTimeout}). Never the raw caller override — that let a provider-blind caller
+   * widen a provider's socket window (2026-08-03).
+   */
+  private Integer admittedReadTimeoutSeconds(LlmRequest request, Instant transportDeadline) {
+    if (transportDeadline == null) return (int) transportTimeout(request).toSeconds();
     long millis = Duration.between(Instant.now(), transportDeadline).toMillis();
     return (int) Math.max(1, Math.min(Integer.MAX_VALUE, (millis + 999L) / 1000L));
   }
@@ -1165,6 +1422,7 @@ public class LlmRouter {
    * chain + falls back to message sniffing since the three provider clients throw different types.
    */
   static boolean isTransientError(Throwable e) {
+    if (ProviderStartFenceException.causedBy(e)) return false;
     // User cancellation is terminal for this dispatch. HTTP clients commonly wrap an interrupt in
     // ResourceAccessException, which is otherwise retryable; classifying it as transient caused a
     // cancelled provider call to enter the 2s/4s/8s retry loop and risk more spend.
@@ -1238,6 +1496,13 @@ public class LlmRouter {
 
   private CanonicalDispatchResult callAnthropicInternal(
       LlmRequest r, List<ToolCallback> tools, String apiKey, PhysicalAttemptChain auditContext) {
+    // Anthropic requires max_tokens on every request. Normalize at the provider transport seam so
+    // direct operation-context calls, managed-route substitutions, and Anthropic failover targets
+    // all receive a valid request without rewriting the logical request used by audit/fencing.
+    int configuredMaxTokens =
+        r.maxTokens() != null ? r.maxTokens() : modelRegistry.maxOutputForModel(r.model());
+    int effectiveMaxTokens =
+        configuredMaxTokens > 0 ? configuredMaxTokens : ANTHROPIC_FALLBACK_MAX_TOKENS;
     // Pick the per-customer-key model when BYOK is in play; fall back to
     // the platform singleton otherwise. The cache lookup is keyed by
     // SHA-256(apiKey) so the plaintext never sits in the cache key.
@@ -1251,18 +1516,29 @@ public class LlmRouter {
     // never regress production Anthropic traffic and only runs on an already-failing salvage call.
     if ("required".equals(r.toolChoice())
         && anthropicForcedToolClient.canAttempt(r.messages(), tools, apiKey)) {
+      // The forced-tool seam can return a paid but semantically unusable HTTP 200 and then fall
+      // through to the normal Anthropic transport. Admit each physical request independently so
+      // that first response's newly recorded spend can fence the fallback request.
+      projectedCallCostAdmission.admit(r, tools);
       PhysicalDispatch forcedAttempt = prepareAnthropicAttempt(auditContext);
       String forcedApiKey = forcedAttempt == null ? apiKey : forcedAttempt.apiKey();
       long forcedStartedAt = System.currentTimeMillis();
-      AnthropicForcedToolClient.ForcedToolCallOutcome forced =
-          anthropicForcedToolClient.forcedToolCallOutcome(
-              r.model(),
-              r.messages(),
-              tools,
-              r.maxTokens(),
-              forcedApiKey,
-              admittedReadTimeoutSeconds(
-                  r, forcedAttempt == null ? null : forcedAttempt.transportDeadline()));
+      AnthropicForcedToolClient.ForcedToolCallOutcome forced;
+      try {
+        forced =
+            anthropicForcedToolClient.forcedToolCallOutcome(
+                r.model(),
+                r.messages(),
+                tools,
+                effectiveMaxTokens,
+                forcedApiKey,
+                admittedReadTimeoutSeconds(
+                    r, forcedAttempt == null ? null : forcedAttempt.transportDeadline()),
+                r.physicalAttemptStartedCallback());
+      } catch (RuntimeException forcedFailure) {
+        recordAnthropicFailure(auditContext, forcedAttempt, forcedStartedAt, forcedFailure);
+        throw forcedFailure;
+      }
       if (forced.failure() != null || forced.response() == null) {
         recordAnthropicFailure(
             auditContext,
@@ -1319,46 +1595,47 @@ public class LlmRouter {
             .internalToolExecutionEnabled(false);
     if (cache != null) b.cacheOptions(cache);
     if (!dropTemperature) b.temperature(r.temperature());
-    if (r.maxTokens() != null) b.maxTokens(r.maxTokens());
+    b.maxTokens(effectiveMaxTokens);
+    projectedCallCostAdmission.admit(r, tools);
     PhysicalDispatch primaryAttempt = prepareAnthropicAttempt(auditContext);
     String primaryApiKey = primaryAttempt == null ? apiKey : primaryAttempt.apiKey();
-    AnthropicChatModel model =
-        deprecatedTemperatureModel
-            ? modelWithoutDeprecatedDefaults(r.model(), r.maxTokens(), primaryApiKey)
-            : (primaryApiKey != null && !primaryApiKey.isBlank())
-                ? perKeyAnthropicModel(primaryApiKey)
-                : anthropicModelProvider.getIfAvailable();
-    if (model == null) throw new IllegalStateException("Anthropic model not configured");
     long primaryStartedAt = System.currentTimeMillis();
     ChatResponse primaryResponse;
     try {
-      primaryResponse = model.call(new Prompt(r.messages(), b.build()));
+      AnthropicChatModel model =
+          anthropicModelForAttempt(r, primaryApiKey, effectiveMaxTokens, primaryAttempt);
+      Prompt primaryPrompt = new Prompt(r.messages(), b.build());
+      r.signalPhysicalAttemptStarted();
+      primaryResponse = model.call(primaryPrompt);
       if (primaryResponse == null)
         throw new IllegalStateException("Anthropic returned empty response");
     } catch (RuntimeException ex) {
       recordAnthropicFailure(auditContext, primaryAttempt, primaryStartedAt, ex);
+      if (ProviderStartFenceException.causedBy(ex)) throw ex;
       if (!AnthropicModelOptions.isTemperatureDeprecatedError(ex)) throw ex;
       ANTHROPIC_DEPRECATED_TEMP_MODELS.add(r.model());
       log.warn(
           "Anthropic rejected `temperature` for model={} — retrying without it (will skip on"
               + " subsequent calls this JVM)",
           r.model());
+      projectedCallCostAdmission.admit(r, tools);
       PhysicalDispatch retryAttempt = prepareAnthropicAttempt(auditContext);
       String retryApiKey = retryAttempt == null ? apiKey : retryAttempt.apiKey();
-      AnthropicChatModel retryModel =
-          modelWithoutDeprecatedDefaults(r.model(), r.maxTokens(), retryApiKey);
-      if (retryModel != null) model = retryModel;
       var retry =
           AnthropicChatOptions.builder()
               .model(r.model())
               .toolCallbacks(tools)
               .internalToolExecutionEnabled(false);
       if (cache != null) retry.cacheOptions(cache);
-      if (r.maxTokens() != null) retry.maxTokens(r.maxTokens());
+      retry.maxTokens(effectiveMaxTokens);
       long retryStartedAt = System.currentTimeMillis();
       ChatResponse retryResponse;
       try {
-        retryResponse = model.call(new Prompt(r.messages(), retry.build()));
+        AnthropicChatModel model =
+            anthropicModelForAttempt(r, retryApiKey, effectiveMaxTokens, retryAttempt);
+        Prompt retryPrompt = new Prompt(r.messages(), retry.build());
+        r.signalPhysicalAttemptStarted();
+        retryResponse = model.call(retryPrompt);
         if (retryResponse == null)
           throw new IllegalStateException("Anthropic returned empty response");
       } catch (RuntimeException retryFailure) {
@@ -1471,61 +1748,20 @@ public class LlmRouter {
                 attempt.keySource()));
   }
 
-  /**
-   * Build a cached Anthropic model with no temperature default. Spring AI merges model defaults
-   * into request options, so the shared Haiku-configured bean cannot safely serve Sonnet 5/Opus
-   * 4.7+ requests.
-   */
-  private AnthropicChatModel modelWithoutDeprecatedDefaults(
-      String model, Integer maxTokens, String apiKeyOverride) {
+  /** Build one bounded, non-retrying Anthropic transport for one admitted physical attempt. */
+  private AnthropicChatModel anthropicModelForAttempt(
+      LlmRequest request,
+      String apiKeyOverride,
+      Integer maxTokens,
+      PhysicalDispatch physicalAttempt) {
     String key =
         (apiKeyOverride != null && !apiKeyOverride.isBlank())
             ? apiKeyOverride
             : platformAnthropicApiKey;
-    if (key == null || key.isBlank()) return null;
-    String cacheKey =
-        sha256Hex(key) + ":" + model + ":" + (maxTokens == null ? "default" : maxTokens);
-    return anthropicDeprecatedModelCache.get(
-        cacheKey,
-        ignored -> {
-          AnthropicApi api = AnthropicApi.builder().apiKey(key).build();
-          AnthropicChatOptions.Builder options = AnthropicChatOptions.builder().model(model);
-          if (maxTokens != null && maxTokens > 0) options.maxTokens(maxTokens);
-          return AnthropicChatModel.builder()
-              .anthropicApi(api)
-              .defaultOptions(options.build())
-              .build();
-        });
-  }
-
-  /**
-   * Per-customer-key Anthropic model — built once per unique key and cached. Key cache key is
-   * SHA-256(apiKey) so the plaintext never appears as a cache key. Caffeine handles eviction (128 ×
-   * 1h TTL).
-   */
-  private AnthropicChatModel perKeyAnthropicModel(String apiKey) {
-    String hash = sha256Hex(apiKey);
-    return anthropicByKey.get(
-        hash,
-        h -> {
-          AnthropicApi api = AnthropicApi.builder().apiKey(apiKey).build();
-          return AnthropicChatModel.builder().anthropicApi(api).build();
-        });
-  }
-
-  private static String sha256Hex(String input) {
-    try {
-      MessageDigest md = MessageDigest.getInstance("SHA-256");
-      byte[] hash = md.digest(input.getBytes(StandardCharsets.UTF_8));
-      StringBuilder hex = new StringBuilder(hash.length * 2);
-      for (byte b : hash) hex.append(String.format("%02x", b));
-      return hex.toString();
-    } catch (NoSuchAlgorithmException e) {
-      // SHA-256 is JDK-mandatory; this branch is unreachable. If it
-      // ever fires, fail loud rather than silently using a weaker hash
-      // that could collide and leak keys across customers.
-      throw new IllegalStateException("SHA-256 unavailable — refusing to fall back", e);
-    }
+    int timeoutSeconds =
+        admittedReadTimeoutSeconds(
+            request, physicalAttempt == null ? null : physicalAttempt.transportDeadline());
+    return anthropicAttemptModelFactory.create(key, request.model(), maxTokens, timeoutSeconds);
   }
 
   /** Models whose API has rejected `temperature` with the deprecation error within this JVM. */
@@ -1575,7 +1811,9 @@ public class LlmRouter {
         .forceToolCall(forceToolCall)
         .toolChoice(r.toolChoice())
         .apiKey(apiKey)
-        .readTimeoutSeconds(r.readTimeoutSeconds())
+        // Resolved (window-capped) value, not the raw override: a null override previously fell
+        // through to the Gemini client's static 60s default, which is too tight for worker calls.
+        .readTimeoutSeconds((int) transportTimeout(r).toSeconds())
         .build();
   }
 
@@ -1593,6 +1831,7 @@ public class LlmRouter {
             .maxCompletionTokens(r.maxTokens())
             .toolChoice(r.toolChoice())
             .apiKey(apiKey)
+            .physicalAttemptStartedCallback(r.physicalAttemptStartedCallback())
             .readTimeoutSeconds(admittedReadTimeoutSeconds(r, transportDeadline))
             .build());
   }
@@ -1619,6 +1858,7 @@ public class LlmRouter {
             .maxCompletionTokens(r.maxTokens())
             .toolChoice(r.toolChoice())
             .apiKey(key)
+            .physicalAttemptStartedCallback(r.physicalAttemptStartedCallback())
             .readTimeoutSeconds(admittedReadTimeoutSeconds(r, transportDeadline))
             .baseUrl(openRouterBaseUrl)
             .extraBody(
@@ -1661,10 +1901,8 @@ public class LlmRouter {
             .maxCompletionTokens(r.maxTokens())
             .toolChoice(r.toolChoice())
             .apiKey(key)
-            .readTimeoutSeconds(
-                transportDeadline == null && r.readTimeoutSeconds() == null
-                    ? deepSeekReadTimeoutSeconds
-                    : admittedReadTimeoutSeconds(r, transportDeadline))
+            .physicalAttemptStartedCallback(r.physicalAttemptStartedCallback())
+            .readTimeoutSeconds(admittedReadTimeoutSeconds(r, transportDeadline))
             .baseUrl(deepSeekBaseUrl)
             .extraBody(deepSeekExtraBody(r))
             .build());
@@ -1720,6 +1958,7 @@ public class LlmRouter {
             .maxCompletionTokens(r.maxTokens())
             .toolChoice(r.toolChoice())
             .apiKey(key)
+            .physicalAttemptStartedCallback(r.physicalAttemptStartedCallback())
             .readTimeoutSeconds(admittedReadTimeoutSeconds(r, transportDeadline))
             .baseUrl(fireworksBaseUrl)
             .build());

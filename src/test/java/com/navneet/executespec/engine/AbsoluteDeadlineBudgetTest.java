@@ -20,4 +20,22 @@ class AbsoluteDeadlineBudgetTest {
   void noAbsoluteDeadlinePreservesConfiguredTimeout() {
     assertThat(AbsoluteDeadlineBudget.timeoutSeconds(null, null, 10_000L, 120)).hasValue(120);
   }
+
+  @Test
+  void noDeadlineCapSentinelMapsToNullOverrideSoRouterWindowGoverns() {
+    var timeout =
+        AbsoluteDeadlineBudget.timeoutSeconds(
+            null, null, 10_000L, AbsoluteDeadlineBudget.NO_DEADLINE_CAP);
+    assertThat(timeout).hasValue(AbsoluteDeadlineBudget.NO_DEADLINE_CAP);
+    assertThat(AbsoluteDeadlineBudget.readTimeoutOverride(timeout)).isNull();
+  }
+
+  @Test
+  void deadlineConstrainedCallKeepsRemainingBudgetAsOverride() {
+    var timeout =
+        AbsoluteDeadlineBudget.timeoutSeconds(
+            20_000L, 5_000L, 10_000L, AbsoluteDeadlineBudget.NO_DEADLINE_CAP);
+    assertThat(timeout).hasValue(5);
+    assertThat(AbsoluteDeadlineBudget.readTimeoutOverride(timeout)).isEqualTo(5);
+  }
 }

@@ -88,7 +88,11 @@ public class PrReviewAutofixService {
     GitHubRepoService.PullRequestSnapshot snap =
         github.getPullRequestSnapshot(
             review.getRepoFullName(), review.getPrNumber(), user.getGithubPat(), 0);
-    if (snap == null || snap.headBranch() == null || snap.headBranch().isBlank()) {
+    if (snap == null
+        || snap.headBranch() == null
+        || snap.headBranch().isBlank()
+        || snap.headSha() == null
+        || !snap.headSha().matches("[0-9a-fA-F]{40}")) {
       throw new ResponseStatusException(
           HttpStatus.BAD_GATEWAY,
           "GitHub did not return a head branch for "
@@ -97,9 +101,9 @@ public class PrReviewAutofixService {
               + review.getPrNumber()
               + " — cannot dispatch autofix.");
     }
-    if ("closed".equalsIgnoreCase(snap.state()) && !snap.merged()) {
+    if (!"open".equalsIgnoreCase(snap.state()) || snap.merged()) {
       throw new ResponseStatusException(
-          HttpStatus.CONFLICT, "PR is closed without merge — autofix would have nowhere to push.");
+          HttpStatus.CONFLICT, "PR is no longer open — autofix would have nowhere to push.");
     }
 
     String prompt = buildPrompt(review, comments, snap);
@@ -113,7 +117,10 @@ public class PrReviewAutofixService {
             prompt,
             snap.headBranch(),
             user.getId(),
-            null);
+            null,
+            review.getRepoFullName(),
+            review.getPrNumber(),
+            snap.headSha());
 
     FindingPatchSubmitter.SubmitResult result = submitter.submit(finding);
     log.info(

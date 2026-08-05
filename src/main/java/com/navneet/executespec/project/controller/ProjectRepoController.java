@@ -22,6 +22,7 @@ import com.navneet.executespec.repo.GitHubRepoService.RemoteRepo;
 import com.navneet.executespec.repo.ScmCapability;
 import com.navneet.executespec.repo.ScmCredentialResolver;
 import com.navneet.executespec.repo.ScmProvider;
+import com.navneet.executespec.repo.ScmProviderException;
 import com.navneet.executespec.repo.ScmRemoteRepository;
 import com.navneet.executespec.repo.ScmRepositoryClient;
 import com.navneet.executespec.repo.ScmRepositoryClientRegistry;
@@ -40,6 +41,9 @@ import lombok.RequiredArgsConstructor;
 @RestController
 @RequiredArgsConstructor
 public class ProjectRepoController {
+
+  public record RepoAccessError(
+      String errorCode, String message, boolean retryable, String action) {}
 
   public record WebhookInstallResponse(
       boolean installed,
@@ -308,5 +312,47 @@ public class ProjectRepoController {
     return "SUPER_ADMIN".equals(userDetails.getUser().getGlobalRole())
         || (userDetails.getOrgMember() != null
             && "ORG_ADMIN".equals(userDetails.getOrgMember().getOrgRole()));
+  }
+
+  /**
+   * Exact SCM failure projection; never exposes provider bodies, credentials, or exception text.
+   */
+  @ExceptionHandler(ScmProviderException.class)
+  public ResponseEntity<RepoAccessError> handleScmProviderException(ScmProviderException error) {
+    HttpStatus status = HttpStatus.valueOf(error.getStatusCode().value());
+    boolean bitbucket = error.errorCode() != null && error.errorCode().startsWith("BITBUCKET_");
+    String provider = bitbucket ? "Bitbucket" : "GitHub";
+    String updateAccessAction = bitbucket ? "UPDATE_BITBUCKET_ACCESS" : "UPDATE_GITHUB_ACCESS";
+    RepoAccessError body;
+    if (status == HttpStatus.UNPROCESSABLE_ENTITY
+        || status == HttpStatus.FORBIDDEN
+        || status == HttpStatus.NOT_FOUND) {
+      body =
+          new RepoAccessError(
+              error.errorCode(),
+              "ExecuteSpec's "
+                  + provider
+                  + " connection cannot access this repository. Grant the stored credential"
+                  + " access to it, or reconnect "
+                  + provider
+                  + ".",
+              false,
+              updateAccessAction);
+    } else if (status == HttpStatus.TOO_MANY_REQUESTS) {
+      body =
+          new RepoAccessError(
+              error.errorCode(),
+              provider + " is rate-limiting repository access. Wait a moment, then retry.",
+              true,
+              "RETRY");
+    } else {
+      body =
+          new RepoAccessError(
+              error.errorCode(),
+              provider + " repository access is temporarily unavailable. Retry shortly.",
+              error.retryable(),
+              "RETRY");
+    }
+    return ResponseEntity.status(status).body(body);
   }
 }

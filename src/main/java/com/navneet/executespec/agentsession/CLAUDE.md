@@ -1,5 +1,11 @@
 # Package: `agentsession`
 
+## Streamed controlled-error contract (2026-08-02)
+
+`AgentStreamTurnRunner` persists and emits the same typed terminal error for turn-budget exhaustion
+and projected-call cap rejection. Payloads carry stable code/category, safe message, retryability,
+one action, and cost/cap when known. Web preserves `ACTION_REQUIRED` as controlled 422 evidence.
+
 Backend protocol for the CLI and VS Code agent shells. This package owns durable agent sessions,
 turns, action events, the action catalog, deterministic first-pass intent classification, repo to
 project resolution, gate decision cards, and the streaming chat bridge that records open-ended
@@ -35,6 +41,12 @@ turns separately from runs.
   and a turn replayed from `agent_turn.proposed_action_json` keeps the same contract after reload.
   The context is nullable for rows persisted before it existed; clients must treat absent context
   as unknown, never as confirmable.
+  Interrogative questions ABOUT code are never code changes (P1-3, 2026-08-01): a mutation
+  keyword counts only when at least one clause uses it outside an interrogative-information
+  context, so "which files implement the simulation logic?" routes read-only while polite
+  imperatives ("can you implement …") and mixed messages ("Explain X. Then implement Y") remain
+  confirmation-gated run proposals. The live dev misroute that produced a paid run card for that
+  exact question is pinned in the corpus (`read-0451`).
   Imperative code-generation vocabulary includes `build`; the exact request “i want to build a
   simple web ui todo app” must therefore become a cloud-run proposal with project context, or the
   typed project-selection blocker without it, never an inline model answer that can end at the
@@ -281,6 +293,7 @@ turns separately from runs.
 | `AgentStreamTurnStarter.java`              | Starts streaming turns: route decision, initial turn row, provider preference update, title update, and `STREAM_STARTED` trace event.                                                                               |
 | `AgentStreamTurnLifecycle.java`            | Persists exact, uncapped assistant text plus UTF-8 byte/character/line/SHA-256 integrity metadata for completion, failure, and disconnect terminal states; usage and terminal action evidence remain separate. |
 | `AgentStreamTurnRunner.java`               | Executes one SSE streaming turn after start and accumulates the complete assistant response for durable persistence. `TURN_TEXT` action evidence keeps a 16,000-character preview with explicit truncation, original size/line count, and full-content SHA-256 metadata. |
+| `AgentStreamFailurePublisher.java`         | Maps projected-call, turn-budget, credential, and unknown stream failures into the canonical typed payload, then performs the ordered durable turn/operation/action settlement and final SSE publication. |
 | `AgentTranscriptContent.java`              | Shared exact-content metadata and bounded event-preview contract; the PostgreSQL `agent_turn.assistant_summary` TEXT row remains authoritative. |
 | `AgentTurnOperationLifecycle.java`         | Owns the fenced complete/fail/cancel transitions for the durable LLM operation claimed by one streamed agent turn. |
 | `AgentTurnRecoveryService.java`            | Bounded oldest-first recovery for stale persisted `STREAMING` turns: records outcome uncertainty, never replays transport, and reconciles the matching operation cancellation under transactional locks. |
@@ -381,7 +394,7 @@ turns separately from runs.
 - `AgentIntentPatternsTest` pins route-vocabulary helpers directly: UUID/short-run-id extraction,
   read-only route precedence, vague-mutation target requirements, local git/shell action detection,
   and unsafe/no-edit phrase separation.
-- `AgentRoutingCorpusTest` loads `src/main/resources/orchestrator/routing-corpus.jsonl`, a 450-row
+- `AgentRoutingCorpusTest` loads `src/main/resources/orchestrator/routing-corpus.jsonl`, a 456-row
   deterministic corpus covering read-only, plan/review, code-change, lifecycle, ambiguous, and
   unsafe prompts. Rows marked `forbidRun` must keep `policy.runApiAllowed=false`, and every
   `CODE_RUN_REQUIRED` decision must require explicit confirmation.

@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
@@ -212,6 +213,34 @@ class ValidationReportServiceVerificationLedgerTest {
   }
 
   @Test
+  void heuristicAccuracyFallbackIsLabelledInternalFormulaWithoutANumericGrade() {
+    ValidationReport report =
+        ValidationReport.builder()
+            .id("vr-heuristic")
+            .runId("run-heuristic")
+            .runtimeSurface("HTTP")
+            .accuracyJson(
+                """
+{
+  "specAdherenceScore": 75,
+  "overallAccuracyGrade": "C",
+  "gradingNotes": "Accuracy assessment unavailable — estimated from review issue count.",
+  "testCoverageLevel": "PARTIAL"
+}
+""")
+            .build();
+
+    List<VerificationEvidenceDTO> ledger = svc.buildVerificationLedger(report, List.of());
+
+    assertEntry(ledger, "spec-adherence", "UNKNOWN", "INTERNAL_FORMULA", "LOW");
+    VerificationEvidenceDTO row = find(ledger, "spec-adherence");
+    assertTrue(row.summary().contains("assessment unavailable"));
+    assertTrue(row.summary().contains("heuristic estimate"));
+    assertNull(row.observed());
+    assertNull(row.total());
+  }
+
+  @Test
   void citationForOneDimensionCannotAuthenticateTheOtherDimensions() {
     ValidationReport report =
         ValidationReport.builder()
@@ -373,7 +402,8 @@ class ValidationReportServiceVerificationLedgerTest {
     TestExecutionSummary tests =
         TestExecutionSummary.builder()
             .totalTests(4)
-            .passed(4)
+            .passed(3)
+            .skipped(1)
             .executionVerified(true)
             .evidenceScope(EvidenceScope.LIVE_PREVIEW_FUNCTIONAL)
             .build();
@@ -407,6 +437,10 @@ class ValidationReportServiceVerificationLedgerTest {
     ValidationReport saved = service.generateAndPersist("run-cli-score", input).orElseThrow();
 
     assertEquals("CLI", saved.getRuntimeSurface());
+    assertEquals(3, saved.getTestsPassed());
+    assertEquals(1, saved.getTestsSkipped());
+    assertEquals(4, saved.getTestsTotal());
+    assertEquals(Boolean.TRUE, saved.getExecutableTestsPassed());
     assertEquals(100, saved.getVerifiedScore());
     assertEquals(100, saved.getRubricScore());
     assertEntry(
@@ -648,9 +682,10 @@ class ValidationReportServiceVerificationLedgerTest {
                     null)));
 
     assertEntry(ledger, "report-issues", "FAIL", "HYBRID", "MEDIUM");
-    assertTrue(
-        ledger.stream().noneMatch(entry -> "trust-cap".equals(entry.id())),
-        "non-critical issue must not create a CRITICAL trust-cap evidence row");
+    VerificationEvidenceDTO cap = find(ledger, "trust-cap");
+    assertEquals(75, cap.total());
+    assertTrue(cap.summary().contains("independent functional verification is unavailable"));
+    assertFalse(cap.summary().contains("unresolved critical"));
   }
 
   @Test
@@ -855,6 +890,52 @@ class ValidationReportServiceVerificationLedgerTest {
                     "pipeline-result".equals(reference.evidenceId())
                         && "PROVEN".equals(reference.proofStatus())
                         && "validation_report.pipeline_result".equals(reference.artifact())));
+  }
+
+  @Test
+  void terminalRefreshPersistsTheSameGoalDecisionProjectedByRunReport() throws Exception {
+    ValidationReportRepository repository = mock(ValidationReportRepository.class);
+    StateStore stateStore = mock(StateStore.class);
+    ObjectMapper mapper = new ObjectMapper();
+    ValidationReportService service =
+        new ValidationReportService(repository, null, mapper, null, stateStore, null, flags);
+    ValidationReport report =
+        ValidationReport.builder()
+            .id("vr-terminal")
+            .runId("run-terminal")
+            .status("COMPLETE")
+            .filesGenerated(1)
+            .pipelineResult(PipelineResult.PASSED)
+            .issuesJson("[]")
+            .finalBuildPassed(true)
+            .testsPassed(1)
+            .testsTotal(1)
+            .testExecutionVerified(true)
+            .testEvidenceScope("LIVE_PREVIEW_FUNCTIONAL")
+            .reviewerVerdict("CLEAN")
+            .verifiedScore(95)
+            .accuracyJson("{\"specAdherenceScore\":95}")
+            .build();
+    PipelineRun run =
+        PipelineRun.builder()
+            .runId("run-terminal")
+            .status("COMPLETE")
+            .userRequest("Render a visible browser heading")
+            .runGoalDonenessJson("{\"reason\":\"run lifecycle is REVIEWING\"}")
+            .build();
+    when(repository.findByRunId("run-terminal")).thenReturn(Optional.of(report));
+    when(stateStore.findRun("run-terminal")).thenReturn(Optional.of(run));
+
+    service.refreshRunGoalDecisionAfterTerminal("run-terminal");
+    var projected = service.getByRunId("run-terminal").orElseThrow().runGoalDecision();
+
+    var persisted = mapper.readTree(run.getRunGoalDonenessJson());
+    assertEquals(projected.state().name(), persisted.path("state").asText());
+    assertEquals(
+        projected.recommendedDecision().name(), persisted.path("recommendedDecision").asText());
+    assertEquals(projected.goalSummary(), persisted.path("goalSummary").asText());
+    assertFalse(run.getRunGoalDonenessJson().contains("REVIEWING"));
+    verify(stateStore).save(run);
   }
 
   @Test

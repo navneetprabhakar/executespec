@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import com.navneet.executespec.agent.AnthropicAttemptModelFactory;
 import com.navneet.executespec.router.ModelRegistry;
 
 import org.junit.jupiter.api.Test;
@@ -18,7 +19,12 @@ class AgentModelConfigTest {
     AgentProperties properties = new AgentProperties();
     ApplicationContext context = mock(ApplicationContext.class);
 
-    AgentModelConfig config = new AgentModelConfig(properties, context, mock(ModelRegistry.class));
+    AgentModelConfig config =
+        new AgentModelConfig(
+            properties,
+            context,
+            mock(ModelRegistry.class),
+            mock(AnthropicAttemptModelFactory.class));
 
     assertThat(config.plannerModel()).isNull();
   }
@@ -30,7 +36,12 @@ class AgentModelConfigTest {
     AnthropicChatModel model = mock(AnthropicChatModel.class);
     when(context.getBean("anthropicChatModel", AnthropicChatModel.class)).thenReturn(model);
 
-    AgentModelConfig config = new AgentModelConfig(properties, context, mock(ModelRegistry.class));
+    AgentModelConfig config =
+        new AgentModelConfig(
+            properties,
+            context,
+            mock(ModelRegistry.class),
+            mock(AnthropicAttemptModelFactory.class));
 
     assertThat(config.plannerModel()).isSameAs(model);
   }

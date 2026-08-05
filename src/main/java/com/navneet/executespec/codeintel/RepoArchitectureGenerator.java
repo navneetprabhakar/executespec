@@ -44,39 +44,55 @@ public class RepoArchitectureGenerator {
 
   private static final String SYSTEM_PROMPT =
       """
-      You are writing the architecture document for a single repository in a
-      multi-repo project. The input is a code map (directory outline, routes,
-      models). Produce a single markdown document in natural language with:
+You are writing the architecture document for a single repository in a
+multi-repo project. The input is a code map (directory outline, routes,
+models). Produce a single markdown document in natural language with:
 
-      # <repo full name> — Architecture
+# <repo full name> — Architecture
 
-      ## 1. High-Level Design (HLD)
-      2-4 paragraphs on the purpose of this repo, its place in the project,
-      the major components / layers, and the external dependencies it talks
-      to (databases, queues, other services, third-party APIs).
+## 1. High-Level Design (HLD)
+2-4 paragraphs describing evidenced repository inventory and only behavior shown by exact
+source evidence. If purpose, project role, components, layers, or external dependencies are
+not deterministically established, state that rather than inferring them.
 
       ## 2. Low-Level Design (LLD)
-      Grouped subsections — one per major component surfaced in the codemap
-      (controllers, services, repositories, workers, UI modules, etc.).
-      Under each, name the concrete classes/files, describe their responsibility
-      in 1-3 sentences, and cite the file path from the codemap.
+      Grouped inventory subsections for declarations and files surfaced in the codemap. Name each
+      concrete declaration/file and cite its path. Describe narrow behavior only when a complete
+      exact-source V1 entry visibly establishes it; otherwise do not assign responsibility.
 
       ## 3. Surface area
-      - Routes / endpoints this repo exposes (copy from the codemap if present)
-      - Entities / domain models
-      - Background jobs / schedulers
+      - Public routes only from AVAILABLE deterministic HTTP evidence; heuristic route inventory is
+        not exposure authority
+      - Entity/model declarations without ownership or liveness claims
+      - Job/scheduler declarations without execution or wiring claims
 
-      ## 4. Integration points
-      What this repo consumes from other repos in the project and what it
-      publishes. If unclear from the codemap, state 'not evident from the
-      codemap — confirm with reviewer'.
+## 4. Integration points
+List only relationships established by deterministic relationship evidence. Exported-function
+evidence never establishes inbound consumers or cross-repository edges. Otherwise state
+'not established by the supplied deterministic evidence'.
 
-      Rules:
-      - Natural language prose, not bullet-dumps, except where lists improve scanning.
-      - Do NOT invent files, classes, or routes that are not in the codemap.
-      - Cite file paths inline with backticks.
-      - Aim for 500-1000 words. Dense, scannable, citation-rich.
-      """;
+Rules:
+- Natural language prose, not bullet-dumps, except where lists improve scanning.
+- Do NOT invent files, classes, or routes that are not in the codemap.
+- Deterministic evidence blocks are authoritative for the facts they cover. File and symbol
+  inventory does not prove calls, dependencies, runtime flow, schema ownership, Compose
+  application startup, or response-vs-view behavior. State "not established by the supplied
+  deterministic evidence" instead of inferring those facts from framework conventions.
+- Do not turn declaration co-occurrence into an integration or data-flow claim.
+- Never enumerate allowed, supported, accepted, or valid fields/options/values for one symbol unless
+  that same symbol has a complete Truncated:false exact-source entry containing every listed
+  literal. An unresolved constant name, another function's prose, a Purpose line, or ordinary
+  codemap inventory is not authority for an exhaustive source contract.
+- An EXECUTESPEC_EXPORTED_FUNCTION_EVIDENCE_V1 entry is exact-source authority only for its
+  named repository, revision, path, symbol, and code visibly present in Content-Json. Describe
+  only behavior directly shown by a Truncated:false excerpt and cite repository, path, and
+  line range. Truncated:true forbids completeness, absence, all-return-path, side-effect, or
+  full-contract claims. Repository-Evidence-Truncated:true means unlisted exports may exist.
+  A visible call expression does not establish callers, consumers, liveness, wiring, import
+  identity, ownership, the callee's component/repository, or an integration edge.
+- Cite file paths inline with backticks.
+- Aim for 500-1000 words. Dense, scannable, citation-rich.
+""";
 
   public record Result(String markdown, int inputTokens, int outputTokens, String modelUsed) {}
 
@@ -115,7 +131,27 @@ public class RepoArchitectureGenerator {
         provider,
         actorUserId,
         confirmedActionReference,
+        null,
         null);
+  }
+
+  Result generateForRevision(
+      String projectId,
+      String repoFullName,
+      String sourceRevision,
+      String codeMapMarkdown,
+      LlmProvider provider,
+      String actorUserId,
+      LlmExecutionReference confirmedActionReference) {
+    return generateInternal(
+        projectId,
+        repoFullName,
+        codeMapMarkdown,
+        provider,
+        actorUserId,
+        confirmedActionReference,
+        null,
+        sourceRevision);
   }
 
   Result generateWithOperationContext(
@@ -124,10 +160,18 @@ public class RepoArchitectureGenerator {
       String codeMapMarkdown,
       LlmProvider provider,
       String actorUserId,
-      ExecutionContext operationContext) {
+      ExecutionContext operationContext,
+      String sourceRevision) {
     if (operationContext == null) throw new IllegalArgumentException("operationContext required");
     return generateInternal(
-        projectId, repoFullName, codeMapMarkdown, provider, actorUserId, null, operationContext);
+        projectId,
+        repoFullName,
+        codeMapMarkdown,
+        provider,
+        actorUserId,
+        null,
+        operationContext,
+        sourceRevision);
   }
 
   private Result generateInternal(
@@ -137,7 +181,8 @@ public class RepoArchitectureGenerator {
       LlmProvider provider,
       String actorUserId,
       LlmExecutionReference confirmedActionReference,
-      ExecutionContext operationContext) {
+      ExecutionContext operationContext,
+      String sourceRevision) {
     if (codeMapMarkdown == null || codeMapMarkdown.isBlank()) {
       throw new IllegalArgumentException("code map is empty for " + repoFullName);
     }
@@ -201,8 +246,14 @@ public class RepoArchitectureGenerator {
         inTok,
         outTok,
         resolved.getModel());
+    String grounded = GeneratedSignatureGrounding.sanitize(text.trim(), codeMapMarkdown);
+    grounded = GeneratedSignatureGrounding.sanitizeUnsupportedBehavior(grounded, codeMapMarkdown);
+    grounded =
+        GeneratedSourceContractGrounding.sanitizeForRepository(
+            grounded, codeMapMarkdown, repoFullName, sourceRevision);
+    grounded = GeneratedProjectFactGrounding.sanitize(grounded, codeMapMarkdown);
     return new Result(
-        DeterministicArchitectureEvidence.appendFromCodemap(text.trim(), codeMapMarkdown),
+        DeterministicArchitectureEvidence.appendFromCodemap(grounded, codeMapMarkdown),
         inTok,
         outTok,
         resolved.getModel());

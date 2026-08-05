@@ -43,6 +43,7 @@ public record ValidationReportDTO(
     Boolean finalBuildPassed,
     Integer testsPassed,
     Integer testsTotal,
+    Integer testsSkipped,
     String reviewerVerdict, // CLEAN | FIXED_ISSUES | UNRESOLVED_ISSUES | REVIEW_FAILED
     Integer verifiedScore, // 0-100 deterministic score; primary UI badge
     /**

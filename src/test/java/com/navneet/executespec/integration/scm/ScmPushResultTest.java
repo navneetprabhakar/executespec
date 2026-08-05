@@ -19,6 +19,7 @@ class ScmPushResultTest {
     assertThat(result.code()).isEqualTo("SCM_PUSHED");
     assertThat(result.publicationEligible()).isTrue();
     assertThat(result.retryable()).isFalse();
+    assertThat(result.pushed()).isTrue();
   }
 
   @Test
@@ -34,6 +35,7 @@ class ScmPushResultTest {
     assertThat(result.publicationEligible()).isFalse();
     assertThat(result.retryable()).isTrue();
     assertThat(result.retryGuidance()).contains("credentials");
+    assertThat(result.pushed()).isFalse();
   }
 
   @Test
@@ -48,6 +50,7 @@ class ScmPushResultTest {
     assertThat(result.failed()).isOne();
     assertThat(result.code()).isEqualTo("SCM_PUSH_PARTIAL");
     assertThat(result.retryable()).isTrue();
+    assertThat(result.pushed()).isFalse();
   }
 
   @Test

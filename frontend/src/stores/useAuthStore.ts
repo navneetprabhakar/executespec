@@ -15,6 +15,8 @@ interface AuthStore {
   accessToken: string | null;
   isAuthenticated: boolean;
   isLoading: boolean;
+  /** Transient session-hydration failure. The access session is retained so the user can retry. */
+  loadMeError: string | null;
   permissions: TierPermissions | null;
   /** RR-198 — lifecycle of the permissions fetch. `error` ≠ empty permissions. */
   permissionsStatus: PermissionsStatus;
@@ -49,17 +51,24 @@ interface AuthStore {
   clearAuth: () => void;
 }
 
+// All protected-route mounts await the same hydration attempt. The generation fence prevents a
+// late /me response from reviving a logged-out session or overwriting a newer login/adopted session.
+let loadMeInFlight: Promise<void> | null = null;
+let authStateGeneration = 0;
+
 export const useAuthStore = create<AuthStore>((set, get) => ({
   user: null,
   accessToken: localStorage.getItem('access_token'),
   isAuthenticated: !!localStorage.getItem('access_token'),
   isLoading: false,
+  loadMeError: null,
   permissions: null,
   permissionsStatus: 'idle',
   logoutError: null,
 
   login: async (email, password) => {
     const resp = await api.authLogin({email, password});
+    authStateGeneration++;
     localStorage.setItem('access_token', resp.accessToken);
     // RR-196 — an explicit successful login clears any prior unconfirmed-logout marker so
     // cookie-based auto-refresh is allowed again for this deliberately re-authenticated session.
@@ -69,6 +78,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
       accessToken: resp.accessToken,
       user: api.normalizeAuthUser(resp.user),
       isAuthenticated: true,
+      loadMeError: null,
     });
     // RR-198 — load permissions with tracked loading/ready/error state.
     void get().loadPermissions();
@@ -91,6 +101,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
       }
     }
     localStorage.removeItem('access_token');
+    authStateGeneration++;
     if (confirmed) {
       localStorage.removeItem('es:logout_unconfirmed');
     } else {
@@ -102,6 +113,8 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
       isAuthenticated: false,
       permissions: null,
       permissionsStatus: 'idle',
+      isLoading: false,
+      loadMeError: null,
       logoutError: confirmed
         ? null
         : 'Sign-out could not be confirmed with the server — your session may still be active. Retry or close this browser.',
@@ -116,15 +129,18 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
   refreshAccessToken: async () => {
     try {
       const resp = await api.authRefresh();
+      authStateGeneration++;
       localStorage.setItem('access_token', resp.accessToken);
       // R-190 — normalize legacy 'vibe' viewMode at the parse boundary.
       set({
         accessToken: resp.accessToken,
         user: api.normalizeAuthUser(resp.user),
         isAuthenticated: true,
+        loadMeError: null,
       });
       return true;
     } catch {
+      authStateGeneration++;
       localStorage.removeItem('access_token');
       set({
         accessToken: null,
@@ -132,12 +148,14 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
         isAuthenticated: false,
         permissions: null,
         permissionsStatus: 'idle',
+        loadMeError: null,
       });
       return false;
     }
   },
 
   adoptSession: (accessToken, user) => {
+    authStateGeneration++;
     localStorage.setItem('access_token', accessToken);
     // RR-196 — a freshly adopted session is a deliberate authentication; clear any stale marker.
     localStorage.removeItem('es:logout_unconfirmed');
@@ -145,53 +163,78 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
       accessToken,
       user: api.normalizeAuthUser(user),
       isAuthenticated: true,
+      loadMeError: null,
       logoutError: null,
     });
     void get().loadPermissions();
   },
 
-  loadMe: async () => {
-    const token = localStorage.getItem('access_token');
-    if (!token) {
-      // RR-196 — do NOT resurrect a session the user explicitly (if unconfirmably) logged out of.
-      // The marker is cleared only by a deliberate login, so a shared machine cannot silently
-      // reauthenticate the next visitor from the still-live refresh cookie.
-      if (localStorage.getItem('es:logout_unconfirmed')) return;
-      // Try refresh via cookie
-      const ok = await get().refreshAccessToken();
-      if (!ok) return;
-    }
-    try {
-      const rawUser = await api.authMe();
-      // R-190 (post-cutover) — coerce legacy `view_mode='vibe'` rows to 'pro'
-      // at the API parse boundary so the rest of the frontend never sees
-      // 'vibe'. This is the only place we need to normalize: every other
-      // user-shaped read flows through useAuthStore.user.
-      const user = api.normalizeAuthUser(rawUser);
-      // 'project' is session-local — never a login default. If the server
-      // has it persisted from an older session, reset to 'pro' immediately
-      // so the toggle + view don't disagree.
-      if (user.viewMode === 'project') {
-        user.viewMode = 'pro';
-        api.updateViewMode('pro').catch(() => {});
+  loadMe: () => {
+    if (loadMeInFlight) return loadMeInFlight;
+
+    const hydrate = async () => {
+      set({isLoading: true, loadMeError: null});
+      let attemptGeneration = authStateGeneration;
+      try {
+        const token = localStorage.getItem('access_token');
+        if (!token) {
+          // RR-196 — do NOT resurrect a session the user explicitly (if unconfirmably) logged out
+          // of. The marker is cleared only by a deliberate login, so a shared machine cannot
+          // silently reauthenticate the next visitor from the still-live refresh cookie.
+          if (localStorage.getItem('es:logout_unconfirmed')) return;
+          // Try refresh via cookie. A successful refresh intentionally advances the generation;
+          // adopt that new generation before requesting /me.
+          const ok = await get().refreshAccessToken();
+          if (!ok) return;
+          attemptGeneration = authStateGeneration;
+        }
+        const rawUser = await api.authMe();
+        if (attemptGeneration !== authStateGeneration) return;
+        // R-190 (post-cutover) — coerce legacy `view_mode='vibe'` rows to 'pro'
+        // at the API parse boundary so the rest of the frontend never sees
+        // 'vibe'. This is the only place we need to normalize: every other
+        // user-shaped read flows through useAuthStore.user.
+        const user = api.normalizeAuthUser(rawUser);
+        // 'project' is session-local — never a login default. If the server
+        // has it persisted from an older session, reset to 'pro' immediately
+        // so the toggle + view don't disagree.
+        if (user.viewMode === 'project') {
+          user.viewMode = 'pro';
+          api.updateViewMode('pro').catch(() => {});
+        }
+        set({user, isAuthenticated: true, loadMeError: null});
+        // RR-198 — load tier permissions with tracked loading/ready/error state.
+        void get().loadPermissions();
+      } catch (e) {
+        // A newer login/logout/adopted session owns the store now; this stale attempt has no
+        // authority to clear it or publish an error against it.
+        if (attemptGeneration !== authStateGeneration) return;
+        // RR-197 — distinguish a definitively dead session from a transient fault.
+        // A 401/403 means the token is invalid: clear ALL access state including
+        // the persisted token, atomically, so a reload does not reconstruct
+        // isAuthenticated=true from the same dead token and loop the spinner /
+        // unauthorized-request path. A transient failure (network / 5xx / unknown)
+        // must NOT mutate authentication truth — leave the session intact so a
+        // retry can recover instead of forcing a spurious logout.
+        const status = e instanceof api.ApiError ? e.status : undefined;
+        const definitiveAuthFailure = status === 401 || status === 403;
+        if (definitiveAuthFailure) {
+          get().clearAuth();
+        } else {
+          set({
+            loadMeError:
+              'ExecuteSpec could not verify your session. Your session was kept; retry when the service is available.',
+          });
+        }
+      } finally {
+        set({isLoading: false});
       }
-      set({user, isAuthenticated: true});
-      // RR-198 — load tier permissions with tracked loading/ready/error state.
-      void get().loadPermissions();
-    } catch (e) {
-      // RR-197 — distinguish a definitively dead session from a transient fault.
-      // A 401/403 means the token is invalid: clear ALL access state including
-      // the persisted token, atomically, so a reload does not reconstruct
-      // isAuthenticated=true from the same dead token and loop the spinner /
-      // unauthorized-request path. A transient failure (network / 5xx / unknown)
-      // must NOT mutate authentication truth — leave the session intact so a
-      // retry can recover instead of forcing a spurious logout.
-      const status = e instanceof api.ApiError ? e.status : undefined;
-      const definitiveAuthFailure = status === 401 || status === 403;
-      if (definitiveAuthFailure) {
-        get().clearAuth();
-      }
-    }
+    };
+
+    loadMeInFlight = hydrate().finally(() => {
+      loadMeInFlight = null;
+    });
+    return loadMeInFlight;
   },
 
   loadPermissions: async () => {
@@ -208,13 +251,19 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
     }
   },
 
-  setUser: (user) => set({user}),
+  setUser: (user) => {
+    authStateGeneration++;
+    set({user});
+  },
   clearAuth: () => {
+    authStateGeneration++;
     localStorage.removeItem('access_token');
     set({
       accessToken: null,
       user: null,
       isAuthenticated: false,
+      isLoading: false,
+      loadMeError: null,
       permissions: null,
       permissionsStatus: 'idle',
     });

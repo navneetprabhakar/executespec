@@ -107,7 +107,7 @@ public class WorkspaceHealthService {
               .findFirstByProjectIdAndRepoIdOrderByVersionDesc(projectId, repo.getId())
               .orElse(null);
       String lastSha = cm == null ? null : cm.getGeneratedFromSha();
-      String currentSha = resolveOriginSha(repo, callerUserId);
+      String currentSha = currentOriginSha(repo, callerUserId);
       boolean stale = currentSha != null && (lastSha == null || !lastSha.equals(currentSha));
       String syncStatus = currentSha == null ? "UNKNOWN" : stale ? "DRIFTED" : "IN_SYNC";
       long openPrs =
@@ -132,7 +132,7 @@ public class WorkspaceHealthService {
   }
 
   /** Cached origin-HEAD SHA for the repo's default branch. Null on provider failure. */
-  private String resolveOriginSha(ProjectRepo repo, String callerUserId) {
+  public String currentOriginSha(ProjectRepo repo, String callerUserId) {
     if (ProjectRepo.SourceType.LOCAL.name().equals(repo.getSourceType()) || callerUserId == null) {
       return null;
     }

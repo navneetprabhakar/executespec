@@ -58,4 +58,45 @@ class WorkspaceTestRunnerTest {
             .WORKSPACE_TEST_SUITE,
         result.getEvidenceScope());
   }
+
+  @Test
+  void nestedMavenRepoPublishesFreshSurefireCountsAsExecutableEvidence(@TempDir Path workspace)
+      throws Exception {
+    Path repository = workspace.resolve("repos/orders-service");
+    Files.createDirectories(repository);
+    Files.writeString(repository.resolve("pom.xml"), "<project/>");
+    Path wrapper = repository.resolve("mvnw");
+    Files.writeString(
+        wrapper,
+        """
+#!/bin/sh
+mkdir -p target/surefire-reports
+i=1
+while [ "$i" -le 17 ]; do
+  printf '<testsuite tests="4" failures="0" errors="0" skipped="0"/>' > "target/surefire-reports/TEST-suite-$i.xml"
+  i=$((i + 1))
+done
+printf '<testsuite tests="8" failures="0" errors="0" skipped="0"/>' > target/surefire-reports/TEST-suite-18.xml
+exit 0
+""");
+    Files.setPosixFilePermissions(wrapper, PosixFilePermissions.fromString("rwxr-xr-x"));
+
+    WorkspaceTestRunner runner =
+        new WorkspaceTestRunner(
+            new TestCommandResolver(),
+            new com.navneet.executespec.tool.ShellSandboxPolicy(),
+            null,
+            null,
+            null);
+
+    var detailed = runner.runTestsDetailed("run-nested-maven", workspace).orElseThrow();
+    assertEquals("(cd repos/orders-service && ./mvnw -q test)", detailed.command());
+    assertEquals(76, detailed.summary().getTotalTests());
+    assertEquals(76, detailed.summary().getPassed());
+    assertTrue(detailed.summary().isExecutionProven());
+    assertEquals(
+        com.navneet.executespec.testgen.model.TestExecutionSummary.EvidenceScope
+            .WORKSPACE_TEST_SUITE,
+        detailed.summary().getEvidenceScope());
+  }
 }

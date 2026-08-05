@@ -9,10 +9,10 @@ import java.util.Optional;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import com.navneet.executespec.agent.LlmRequest;
 import com.navneet.executespec.agent.LlmRouter;
 import com.navneet.executespec.agent.PromptTrustBoundary;
 import com.navneet.executespec.context.ContextStore;
+import com.navneet.executespec.cost.ProjectedCallBudgetExceededException;
 import com.navneet.executespec.observability.Metrics;
 import com.navneet.executespec.smoketest.WorkspaceTestRunner;
 import com.navneet.executespec.state.RunMode;
@@ -261,14 +261,14 @@ public class WorkerAgent {
    */
   public static final int TERMINAL_VISIBLE_TEST_GATE_MAX_REFUSALS = 3;
 
-  /**
-   * Per-call HTTP read-timeout override applied to every worker LLM call. Honoured by {@link
-   * GeminiNativeToolClient} (where the static default 60s is too tight for thinking-model worker
-   * calls); ignored by Anthropic + OpenAI clients (Spring AI manages their HTTP timeouts).
-   * Calibrated 2026-05-08 from cmatrix gemini run 84252898 — task T3 timed out after a 17-min
-   * worker phase with 122k input tokens.
-   */
-  private static final int WORKER_HTTP_READ_TIMEOUT_SECONDS = 120;
+  // 2026-08-03 — the worker no longer pins a provider-blind HTTP read timeout on its LLM calls.
+  // The old global constant (120s pre-campaign, hardcoded 300s during the TB 2.1 campaign)
+  // overrode LlmRouter's per-provider transport windows on every call, which cancelled long
+  // GLM/DeepSeek turns mid-generation while the provider billed the discarded completion. The
+  // router now owns the window per provider (spring.ai.<provider>.read-timeout-seconds for
+  // gemini/deepseek/fireworks, constants for anthropic/default) and caps any caller override at
+  // that window. The worker supplies an override only when an absolute deadline constrains the
+  // call — see AbsoluteDeadlineBudget.readTimeoutOverride.
 
   public WorkerResult run(WorkerTaskRequest req) {
     return run(req, null);
@@ -310,11 +310,18 @@ public class WorkerAgent {
     WorkerTaskRequest effectiveRequest =
         WorkerTaskRequestControls.withRuntimeDefaults(
             req, start, bestEffortMaxTaskTotalTokens, bestEffortMaxTaskCostUsd);
-    return runInternal(effectiveRequest, resumeFrom, start);
+    Optional<PipelineRun> runRow =
+        pipelineRunRepository.findById(effectiveRequest.context().runId());
+    Double runHardCapUsd = runRow.map(PipelineRun::getHardCapUsd).orElse(null);
+    effectiveRequest = effectiveRequest.toBuilder().runHardCapUsd(runHardCapUsd).build();
+    return runInternal(effectiveRequest, resumeFrom, start, runRow);
   }
 
   private WorkerResult runInternal(
-      WorkerTaskRequest req, com.navneet.executespec.context.SavedContext resumeFrom, long start) {
+      WorkerTaskRequest req,
+      com.navneet.executespec.context.SavedContext resumeFrom,
+      long start,
+      Optional<PipelineRun> runRow) {
     int maxIter =
         (req.maxIterations() == null || req.maxIterations() <= 0)
             ? DEFAULT_MAX_ITER
@@ -407,6 +414,8 @@ public class WorkerAgent {
     final WorkerMutationEpochWatchdog mutationEpochWatchdog =
         terminalTaskMode ? null : new WorkerMutationEpochWatchdog();
     int textOnlyForcedRetries = 0;
+    boolean zeroWriteOutputCapRecoveryAttempted = false;
+    ChatResponse pendingOutputCapRecoveryResponse = null;
     boolean forceToolChoiceNextCall = false;
     // task 9 — context-overflow recovery attempts used (compactNow, then hard-trim, then ERROR).
     int overflowRecoveries = 0;
@@ -506,8 +515,7 @@ public class WorkerAgent {
     // Bug #2 fix — load the run's hard cap once so the loop can stop
     // itself if cost blows past it mid-task. Null cap = no enforcement.
     final String runId = req.context().runId();
-    Optional<PipelineRun> runRow = pipelineRunRepository.findById(runId);
-    final Double hardCapUsd = runRow.map(PipelineRun::getHardCapUsd).orElse(null);
+    final Double hardCapUsd = req.runHardCapUsd();
     final boolean patchNoEditNudgeOn =
         !terminalTaskMode && runRow.map(r -> RunMode.isPatch(r.getRunMode())).orElse(false);
 
@@ -515,7 +523,8 @@ public class WorkerAgent {
     // signal for WorkerHistoryCompactor. 0 until the first call returns usage.
     long lastInputTokens = 0L;
 
-    for (int iter = startIter; iter <= maxIter; iter++) {
+    int iterationLimit = maxIter;
+    for (int iter = startIter; iter <= iterationLimit; iter++) {
       // A4 (audit 2026-05-29) — cooperative cancellation. A reviewer pass / orchestrator cancels a
       // runaway via future.cancel(true), which sets this thread's interrupt flag; with no check the
       // loop kept generating to completion (still billed). Bail at the iter boundary, before the
@@ -633,38 +642,40 @@ public class WorkerAgent {
       final boolean forcedThisCall = progressV2 && forceToolChoiceNextCall;
       forceToolChoiceNextCall = false;
       ChatResponse resp;
+      boolean outputCapRecoveryResponse = pendingOutputCapRecoveryResponse != null;
       java.util.OptionalInt iterationTimeout = deadlineTimeoutSeconds(req);
       if (iterationTimeout.isEmpty()) {
         return deadlineExceededResult(
             req, iter, toolsDispatched, lastText, maxRepeatedAssistantTextCount, toolLog, start);
       }
       try {
-        resp =
-            router.call(
-                LlmRequest.builder()
-                    .provider(req.provider())
-                    .model(req.model())
-                    .messages(history)
-                    .context(req.context())
-                    .agentRole("WorkerAgent")
-                    .stepId("worker.iteration-" + iter)
-                    .temperature(req.temperature())
-                    .maxTokens(req.maxTokensPerCall())
-                    .strictProvider(Boolean.TRUE.equals(req.strictProvider()))
-                    .toolChoice(forcedThisCall ? "required" : null)
-                    // Strip gitCommit from the worker's tool authorities. See
-                    // ToolRegistry#WORKER_DENY_TOOLS for the rationale.
-                    .toolsOverride(workerTools)
-                    // 2026-05-08 — Gemini's static GeminiNativeToolClient.READ_TIMEOUT is 60s,
-                    // calibrated to fail fast on stalled worker calls. But Gemini thinking models
-                    // regularly take 60-90s on dense tool-call iterations,
-                    // tripping the timeout mid-task. Cmatrix run 84252898 task T3 FAILED with
-                    // ResourceAccessException I/O error after the worker burned 17m of work.
-                    // 120s gives 2× headroom while still detecting genuinely stuck calls within
-                    // 2 minutes. Gemini and OpenAI-wire clients honor this per-call deadline;
-                    // Anthropic retains its configured Spring AI transport timeout.
-                    .readTimeoutSeconds(iterationTimeout.getAsInt())
-                    .build());
+        if (outputCapRecoveryResponse) {
+          resp = pendingOutputCapRecoveryResponse;
+          pendingOutputCapRecoveryResponse = null;
+        } else {
+          resp =
+              router.call(
+                  WorkerLlmRequestFactory.create(
+                      req,
+                      history,
+                      "WorkerAgent",
+                      "worker.iteration-" + iter,
+                      req.temperature(),
+                      req.maxTokensPerCall(),
+                      workerTools,
+                      forcedThisCall ? "required" : null,
+                      AbsoluteDeadlineBudget.readTimeoutOverride(iterationTimeout)));
+        }
+      } catch (ProjectedCallBudgetExceededException e) {
+        log.warn(
+            "WorkerAgent PROJECTED_BUDGET_EXCEEDED run={} task={} iter={} reason={}",
+            runId,
+            req.context().taskId(),
+            iter,
+            e.getMessage());
+        recordTerminal(WorkerResult.Outcome.BUDGET_EXCEEDED, req, iter);
+        return WorkerAgentSupport.budgetExceededResult(
+            iter, toolsDispatched, e.getMessage(), maxRepeatedAssistantTextCount, toolLog, start);
       } catch (Exception e) {
         if (WorkerAgentSupport.cancellationRequested(pipelineRunRepository, runId)) {
           Thread.currentThread().interrupt();
@@ -776,6 +787,7 @@ public class WorkerAgent {
         }
       }
       String assistantText = textBuf.toString();
+      boolean outputCapReached = WorkerZeroWriteOutputCapRecovery.reached(resp);
       if (!assistantText.isEmpty()) {
         lastText = assistantText;
         String assistantSignature = assistantText.replaceAll("\\s+", " ").trim();
@@ -817,6 +829,26 @@ public class WorkerAgent {
         // yet, give the model one more iteration to either call completeTask or make the next
         // concrete edit. If we've already spent the nudge, stop with STOPPED_WITHOUT_COMPLETE.
         WorkerCompletionPolicy.appendTextTurn(history, assistantText);
+        if (outputCapReached
+            && totalWriteCalls == 0
+            && req.zeroWriteSalvageEnabled()
+            && !zeroWriteOutputCapRecoveryAttempted) {
+          zeroWriteOutputCapRecoveryAttempted = true;
+          history.add(WorkerZeroWriteOutputCapRecovery.instruction());
+          toolLog.add("OUTPUT_CAP_ZERO_WRITE_RECOVERY -> ATTEMPTED");
+          pendingOutputCapRecoveryResponse =
+              WorkerZeroWriteOutputCapRecovery.call(
+                  req,
+                  history,
+                  salvageTools(req, true),
+                  router,
+                  costTracker,
+                  deadlineTimeoutSeconds(req));
+          if (pendingOutputCapRecoveryResponse != null) {
+            iter--;
+            continue;
+          }
+        }
         if (terminalVerifiedPass) {
           String summary =
               "terminal verifier-shaped check passed; preserving verified candidate"
@@ -944,11 +976,21 @@ public class WorkerAgent {
       // below then consumes the cached envelopes in deterministic original order, so every per-call
       // state mutation (metrics / SSE / toolResponses ordering / gate-tracking) is unchanged. Empty
       // for any batch with a write/build/shell/completeTask call (or a remote run) → sequential.
-      java.util.Map<String, String> parallelReads = maybeParallelReadDispatch(calls, req);
+      java.util.Map<String, String> parallelReads =
+          outputCapRecoveryResponse ? java.util.Map.of() : maybeParallelReadDispatch(calls, req);
       for (int callIdx = 0; callIdx < calls.size(); callIdx++) {
         AssistantMessage.ToolCall tc = calls.get(callIdx);
         final boolean isImmediatelyPriorToolCall = (callIdx == lastIdx);
         toolsDispatched++;
+        WorkerZeroWriteOutputCapRecovery.ToolRefusal recoveryRefusal =
+            outputCapRecoveryResponse ? WorkerZeroWriteOutputCapRecovery.refusal(tc.name()) : null;
+        if (recoveryRefusal != null) {
+          String refused = errEnvelope("FORBIDDEN", recoveryRefusal.message());
+          toolResponses.add(
+              new ToolResponseMessage.ToolResponse(safeId(tc.id()), tc.name(), refused));
+          toolLog.add(tc.name() + " → REFUSED (" + recoveryRefusal.logReason() + ")");
+          continue;
+        }
         if (CompleteTaskTool.NAME.equals(tc.name())) {
           // V182 layer-3 verification gate. When the request opted in (patch mode),
           // refuse completeTask unless a runTests call landed within the last
@@ -1400,6 +1442,9 @@ public class WorkerAgent {
 
       completionPolicy.afterToolBatch(
           successfulEditsThisIter, fullSuitePassedThisIter, totalWriteCalls);
+      if (outputCapRecoveryResponse && successfulEditsThisIter > 0) {
+        iterationLimit = WorkerZeroWriteOutputCapRecovery.followUpIterationLimit(maxIter, iter);
+      }
 
       WorkerMutationChurnGuard.Decision churnDecision =
           mutationChurn.evaluate(
@@ -1677,7 +1722,7 @@ public class WorkerAgent {
         "WorkerAgent ITERATION LIMIT run={} task={} iters={} totalWrites={}",
         req.context().runId(),
         req.context().taskId(),
-        maxIter,
+        iterationLimit,
         totalWriteCalls);
 
     // 2026-05-08 Lever B: best-guess salvage. We hit the iter cap with zero writes — the agent
@@ -1700,10 +1745,10 @@ public class WorkerAgent {
       }
     }
 
-    recordTerminal(WorkerResult.Outcome.ITERATION_LIMIT_EXCEEDED, req, maxIter);
+    recordTerminal(WorkerResult.Outcome.ITERATION_LIMIT_EXCEEDED, req, iterationLimit);
     return WorkerResult.builder()
         .outcome(WorkerResult.Outcome.ITERATION_LIMIT_EXCEEDED)
-        .iterations(maxIter)
+        .iterations(iterationLimit)
         .toolCallsDispatched(toolsDispatched)
         .finalAssistantText(lastText)
         .repeatedAssistantTextCount(maxRepeatedAssistantTextCount)
@@ -1783,99 +1828,50 @@ public class WorkerAgent {
       long start,
       List<ToolCallback> tools,
       String toolChoice) {
-    if (WorkerLiveBudgetGuard.taskViolation(req, costTracker, req.workerStartedAtEpochMs())
-        != null) {
-      log.info("WorkerAgent SALVAGE refused: live task budget exhausted");
-      return null;
-    }
-    java.util.OptionalInt callTimeout = deadlineTimeoutSeconds(req);
-    if (callTimeout.isEmpty()) {
-      log.info("WorkerAgent SALVAGE refused: absolute deadline shutdown reserve reached");
-      return null;
-    }
-    ChatResponse resp;
-    try {
-      resp =
-          router.call(
-              LlmRequest.builder()
-                  .provider(req.provider())
-                  .model(req.model())
-                  .messages(history)
-                  .context(req.context())
-                  .agentRole("WorkerAgent")
-                  .stepId(
-                      toolChoice == null ? "worker.salvage-auto" : "worker.salvage-" + toolChoice)
-                  .temperature(0.0)
-                  .maxTokens(req.maxTokensPerCall())
-                  .strictProvider(Boolean.TRUE.equals(req.strictProvider()))
-                  .toolsOverride(tools)
-                  .toolChoice(toolChoice)
-                  .readTimeoutSeconds(callTimeout.getAsInt())
-                  .build());
-    } catch (Exception e) {
-      log.warn("WorkerAgent SALVAGE router error (toolChoice={}): {}", toolChoice, e.getMessage());
-      return null;
-    }
+    return salvageAttempt(
+        req,
+        history,
+        toolsDispatched,
+        toolLog,
+        start,
+        tools,
+        toolChoice,
+        req.maxTokensPerCall(),
+        maxIterations(req, DEFAULT_MAX_ITER),
+        toolChoice == null ? "worker.salvage-auto" : "worker.salvage-" + toolChoice,
+        "salvage: best-guess edit produced after iter-limit");
+  }
 
-    if (resp == null || resp.getResults() == null || resp.getResults().isEmpty()) return null;
-    AssistantMessage assistant = resp.getResults().get(0).getOutput();
-    List<AssistantMessage.ToolCall> calls = assistant.getToolCalls();
-    if (calls == null || calls.isEmpty()) {
-      log.info("WorkerAgent SALVAGE no tool calls produced — falling through to iter-limit");
-      return null;
-    }
-
-    // Dispatch each tool call from the salvage response. We accept writeFile, editFile, AND
-    // completeTask (the agent admitting it can't guess). Other tools dispatched but ignored
-    // (unlikely to fire at this stage given the prompt).
-    boolean wroteAnything = false;
-    String salvageSummary = null;
-    for (AssistantMessage.ToolCall tc : calls) {
-      if (CompleteTaskTool.NAME.equals(tc.name())) {
-        salvageSummary = "salvage path: " + extractSummary(tc.arguments());
-        log.info("WorkerAgent SALVAGE got completeTask: {}", salvageSummary);
-        recordTerminal(
-            WorkerResult.Outcome.ITERATION_LIMIT_EXCEEDED,
-            req,
-            maxIterations(req, DEFAULT_MAX_ITER));
-        return WorkerResult.builder()
-            .outcome(WorkerResult.Outcome.ITERATION_LIMIT_EXCEEDED)
-            .iterations(maxIterations(req, DEFAULT_MAX_ITER))
-            .toolCallsDispatched(toolsDispatched)
-            .completionSummary(salvageSummary)
-            .toolCallLog(toolLog)
-            .totalLatencyMs(System.currentTimeMillis() - start)
-            .build();
-      }
-      if (isWriteTool(tc.name())) {
-        // Salvage path only ever dispatches write/edit (both in ToolOutputCompactor.SKIP_TOOLS),
-        // so the isLast flag is don't-care; pass false for symmetry with the main loop.
-        String env = dispatchOne(tc, req, WorkerDispatchMode.NORMAL);
-        toolLog.add(
-            "SALVAGE "
-                + tc.name()
-                + " -> "
-                + (env != null && env.startsWith("{\"ok\":true") ? "OK" : "ERR"));
-        if (env != null && env.startsWith("{\"ok\":true")) wroteAnything = true;
-      }
-    }
-
-    if (wroteAnything) {
-      log.info("WorkerAgent SALVAGE produced an edit — returning COMPLETED (unverified)");
-      recordTerminal(WorkerResult.Outcome.COMPLETED, req, maxIterations(req, DEFAULT_MAX_ITER));
-      return WorkerResult.builder()
-          .outcome(WorkerResult.Outcome.COMPLETED)
-          .iterations(maxIterations(req, DEFAULT_MAX_ITER))
-          .toolCallsDispatched(toolsDispatched + calls.size())
-          .completionSummary("salvage: best-guess edit produced after iter-limit")
-          .toolCallLog(toolLog)
-          .totalLatencyMs(System.currentTimeMillis() - start)
-          // RR-260 — this best-guess edit is NOT a verified completion; flag it so the executor
-          // routes it through the smoke gate instead of promoting "file changed" to SUCCESS.
-          .salvagedUnverified(true)
-          .build();
-    }
-    return null;
+  private WorkerResult salvageAttempt(
+      WorkerTaskRequest req,
+      List<Message> history,
+      int toolsDispatched,
+      List<String> toolLog,
+      long start,
+      List<ToolCallback> tools,
+      String toolChoice,
+      Integer maxTokens,
+      int resultIterations,
+      String stepId,
+      String completionSummary) {
+    var config =
+        new WorkerSalvageAttempt.Config(
+            toolChoice, maxTokens, resultIterations, stepId, completionSummary);
+    return WorkerSalvageAttempt.execute(
+        req,
+        history,
+        toolsDispatched,
+        toolLog,
+        start,
+        tools,
+        config,
+        router,
+        costTracker,
+        deadlineTimeoutSeconds(req),
+        call -> dispatchOne(call, req, WorkerDispatchMode.NORMAL),
+        this::toolCallLogEntry,
+        (outcome, iterations) -> recordTerminal(outcome, req, iterations),
+        objectMapper);
   }
 
   /**
@@ -1987,23 +1983,18 @@ public class WorkerAgent {
     try {
       resp =
           router.call(
-              LlmRequest.builder()
-                  .provider(req.provider())
-                  .model(req.model())
-                  .messages(history)
-                  .context(req.context())
-                  .agentRole("WorkerAgent")
-                  .stepId(
-                      toolChoice == null
-                          ? "worker.terminal-finalizer-auto.iteration-" + iter
-                          : "worker.terminal-finalizer-" + toolChoice + ".iteration-" + iter)
-                  .temperature(0.0)
-                  .maxTokens(req.maxTokensPerCall())
-                  .strictProvider(Boolean.TRUE.equals(req.strictProvider()))
-                  .toolsOverride(tools)
-                  .toolChoice(toolChoice)
-                  .readTimeoutSeconds(callTimeout.getAsInt())
-                  .build());
+              WorkerLlmRequestFactory.create(
+                  req,
+                  history,
+                  "WorkerAgent",
+                  toolChoice == null
+                      ? "worker.terminal-finalizer-auto.iteration-" + iter
+                      : "worker.terminal-finalizer-" + toolChoice + ".iteration-" + iter,
+                  0.0,
+                  req.maxTokensPerCall(),
+                  tools,
+                  toolChoice,
+                  AbsoluteDeadlineBudget.readTimeoutOverride(callTimeout)));
     } catch (Exception e) {
       log.warn(
           "WorkerAgent TERMINAL_FINALIZER router error (toolChoice={}): {}",
@@ -2263,12 +2254,18 @@ public class WorkerAgent {
     return envelope != null && envelope.startsWith("{\"ok\":true");
   }
 
+  /**
+   * Remaining-deadline budget for the next LLM call. Empty ⇒ starting the call would consume the
+   * protected shutdown reserve and must be refused. {@link AbsoluteDeadlineBudget#NO_DEADLINE_CAP}
+   * ⇒ no deadline constrains this run; {@link AbsoluteDeadlineBudget#readTimeoutOverride} maps that
+   * to a null per-call override so the router's per-provider transport window governs.
+   */
   static java.util.OptionalInt deadlineTimeoutSeconds(WorkerTaskRequest req) {
     return AbsoluteDeadlineBudget.timeoutSeconds(
         req.absoluteDeadlineEpochMs(),
         req.shutdownReserveMs(),
         System.currentTimeMillis(),
-        WORKER_HTTP_READ_TIMEOUT_SECONDS);
+        AbsoluteDeadlineBudget.NO_DEADLINE_CAP);
   }
 
   private WorkerResult deadlineExceededResult(
@@ -3194,22 +3191,20 @@ own line and nothing else. Otherwise list ONLY the real gaps, most important fir
           PromptTrustBoundary.wrap("CRITIC_TASK", req.userPrompt())
               + "\n\n"
               + PromptTrustBoundary.wrap("CANDIDATE_DELIVERABLE", deliverable);
+      List<Message> criticMessages =
+          List.of(new SystemMessage(CRITIC_SYSTEM_PROMPT), new UserMessage(userMsg));
       ChatResponse resp =
           router.call(
-              LlmRequest.builder()
-                  .provider(req.provider())
-                  .model(req.model())
-                  .messages(
-                      List.of(new SystemMessage(CRITIC_SYSTEM_PROMPT), new UserMessage(userMsg)))
-                  .context(req.context())
-                  .agentRole("WorkerCriticPass")
-                  .stepId("worker.critic-pass")
-                  .temperature(0.0)
-                  .maxTokens(1500)
-                  .readTimeoutSeconds(callTimeout.getAsInt())
-                  .strictProvider(Boolean.TRUE.equals(req.strictProvider()))
-                  .toolsOverride(List.of()) // no tools — a plain completion
-                  .build());
+              WorkerLlmRequestFactory.create(
+                  req,
+                  criticMessages,
+                  "WorkerCriticPass",
+                  "worker.critic-pass",
+                  0.0,
+                  1500,
+                  List.of(),
+                  null,
+                  AbsoluteDeadlineBudget.readTimeoutOverride(callTimeout)));
       String verdict = resp.getResult().getOutput().getText();
       if (verdict == null) return null;
       String trimmed = verdict.strip();

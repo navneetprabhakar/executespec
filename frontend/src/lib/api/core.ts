@@ -78,6 +78,7 @@ export interface RunSummary {
    * Null on in-flight runs and on pre-v2.5.10 terminal runs that were never backfilled.
    */
   statusReason?: string | null;
+  terminalOutcome?: import('./runOutcomeTypes').RunTerminalOutcome | null;
   /**
    * PR-B (2026-05-13) — SCM-agnostic pull-request URL raised by this run (GitHub or Bitbucket).
    * Prefer this over {@link githubPrUrl}. Null when no PR has been opened yet.
@@ -915,9 +916,9 @@ export interface ValidationReportData extends WorkspaceGenerationBound {
   securityScore?: number | null;
   performanceScore?: number | null;
   designComplianceScore?: number | null;
-  /** V106 pipeline signals input verifiedScore and anchor the six dimensions above. */
   finalBuildPassed?: boolean | null;
   testsPassed?: number | null;
+  testsSkipped?: number | null;
   testsTotal?: number | null;
   reviewerVerdict?: 'CLEAN' | 'FIXED_ISSUES' | 'UNRESOLVED_ISSUES' | 'REVIEW_FAILED' | null;
   verifiedScore?: number | null;

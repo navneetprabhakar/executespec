@@ -71,6 +71,40 @@ class ProjectDocGeneratorControllerPublicationTest {
   }
 
   @Test
+  void generatedDocJobDtoNormalizesLegacyProviderExecutionWordingForEveryApiConsumer() {
+    var legacy =
+        new ProjectGeneratedDocJobStore.Job(
+            UUID.randomUUID(),
+            "project-1",
+            "org-1",
+            "user-1",
+            "SETUP",
+            "ANTHROPIC",
+            "claude-sonnet-4-6",
+            ProjectGeneratedDocJobStore.Status.NEEDS_CONFIRMATION,
+            0,
+            Instant.now(),
+            Instant.now().plusSeconds(1800),
+            null,
+            1,
+            null,
+            Instant.now(),
+            null,
+            null,
+            "OUTCOME_UNCERTAIN",
+            "No document was published after provider execution began. Retrying may incur usage.",
+            Instant.now(),
+            Instant.now(),
+            Instant.now());
+
+    var dto = ProjectDocGeneratorController.GeneratedDocJobDto.from(legacy);
+
+    assertThat(dto.errorMessage())
+        .contains("provider dispatch began; delivery outcome may be uncertain")
+        .doesNotContain("provider execution began");
+  }
+
+  @Test
   void uncertainRetryRequiresWriteAuthorityAndReturnsAcceptedSameJob() {
     ProjectDocGeneratorService service = mock(ProjectDocGeneratorService.class);
     ProjectGeneratedDocJobService jobs = mock(ProjectGeneratedDocJobService.class);

@@ -7,6 +7,8 @@ import com.navneet.executespec.auth.service.MailService;
 import com.navneet.executespec.harness.event.PipelineEvent;
 import com.navneet.executespec.notification.pref.NotificationPrefService;
 import com.navneet.executespec.report.ValidationReportRepository;
+import com.navneet.executespec.run.outcome.RunTerminalOutcome;
+import com.navneet.executespec.run.outcome.RunTerminalOutcomeContract;
 import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
 
@@ -83,12 +85,6 @@ public class RunCompletionEmailListener {
         return;
       }
 
-      // Preference gate. The user can turn this off in the notification matrix.
-      if (!prefService.shouldNotify(
-          submitterId, eventType, NotificationPrefService.Channel.EMAIL)) {
-        return;
-      }
-
       AppUser user = userRepo.findById(submitterId).orElse(null);
       if (user == null || user.getEmail() == null || user.getEmail().isBlank()) {
         log.warn(
@@ -117,15 +113,37 @@ public class RunCompletionEmailListener {
           run.getStatusReason() != null && !run.getStatusReason().isBlank()
               ? run.getStatusReason()
               : failureReason;
+      String persistedFailureReason =
+          run.getFailureReason() != null && !run.getFailureReason().isBlank()
+              ? run.getFailureReason()
+              : failureReason;
       // Prefer the SCM-agnostic PR URL; legacy rows fall back to githubPrUrl.
       String prUrl = run.getScmPrUrl() != null ? run.getScmPrUrl() : run.getGithubPrUrl();
+      RunTerminalOutcome terminalOutcome =
+          RunTerminalOutcomeContract.project(
+              runId,
+              run.getStatus(),
+              statusReason,
+              persistedFailureReason,
+              run.getActualCostUsd(),
+              run.getHardCapUsd() != null ? run.getHardCapUsd() : run.getUserCostCap(),
+              prUrl,
+              RunTerminalOutcomeContract.autoPublicationExpected(run));
+      // Use the projected customer impact, not merely the bus event. A PARTIAL run may arrive on
+      // RunCompleted while still requiring user action; that must honor RUN_FAILED preferences.
+      if (!prefService.shouldNotify(
+          submitterId,
+          RunNotificationPreferencePolicy.eventType(terminalOutcome, eventType),
+          NotificationPrefService.Channel.EMAIL)) {
+        return;
+      }
 
       mailService.sendRunCompletionEmail(
           user.getEmail(),
           firstName,
           runId,
           run.getStatus(),
-          friendlyFailureReason(statusReason),
+          terminalOutcome,
           run.getRunTitle(),
           verifiedScore,
           run.getActualCostUsd(),
@@ -154,27 +172,16 @@ public class RunCompletionEmailListener {
    * to omit the line entirely.
    */
   static String friendlyFailureReason(String statusReason) {
-    if (statusReason == null || statusReason.isBlank()) return null;
-    String r = statusReason.trim();
-    if (r.startsWith("TESTS_FAILED")) {
-      int colon = r.indexOf(':');
-      if (colon > 0 && colon < r.length() - 1) {
-        String counts = r.substring(colon + 1).replace("_OF_", " of ").replace('_', ' ').trim();
-        return "some generated tests failed (" + counts + ").";
-      }
-      return "some generated tests failed.";
-    }
-    return switch (r) {
-      case "FINAL_BUILD_FAILED" -> "the generated code didn't compile.";
-      case "ALL_TASKS_FAILED" -> "the run couldn't complete its tasks.";
-      case "REVIEWER_FAILED", "REVIEWER_UNRESOLVED" ->
-          "the automated review couldn't be completed.";
-      case "CLEAN_WITH_INTERMEDIATE_WARNINGS" -> "completed with some intermediate warnings.";
-      case "LEGACY_UNKNOWN" -> null;
-        // INTERNAL_ERROR, PATCH_AGENT_ERROR, RE_REVIEW_*, and any unrecognized / legacy raw text.
-      default ->
-          "an internal error on our end. You weren't charged — please try again, and contact"
-              + " support if it keeps happening.";
-    };
+    if (statusReason == null
+        || statusReason.isBlank()
+        || "LEGACY_UNKNOWN".equals(statusReason.trim())) return null;
+    String legacyStatus =
+        statusReason.trim().regionMatches(true, 0, "Cancelled by user", 0, 17)
+            ? "CANCELLED"
+            : "FAILED";
+    RunTerminalOutcome outcome =
+        RunTerminalOutcomeContract.project(
+            "legacy", legacyStatus, statusReason, null, null, null, null);
+    return outcome == null ? null : outcome.customerMessage();
   }
 }

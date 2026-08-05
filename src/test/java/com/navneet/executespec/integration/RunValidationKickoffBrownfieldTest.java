@@ -51,6 +51,7 @@ class RunValidationKickoffBrownfieldTest {
         .when(contracts)
         .assertCompatible(run.getRunId());
     SseBroadcaster broadcaster = mock(SseBroadcaster.class);
+    PerkyMessenger perky = mock(PerkyMessenger.class);
 
     RunValidationKickoff kickoff =
         new RunValidationKickoff(
@@ -69,6 +70,7 @@ class RunValidationKickoffBrownfieldTest {
             mock(WorkflowConfigEvidenceInspector.class),
             mock(DeterministicHttpRequirementVerifier.class),
             contracts,
+            perky,
             new RunValidationFailureReporter(runRepo, broadcaster, new ContextSanitizer()));
 
     assertThat(kickoff.generateValidationReport(run.getRunId(), null, null, null)).isEmpty();
@@ -79,6 +81,7 @@ class RunValidationKickoffBrownfieldTest {
     assertThat(kickoff.persistedDeterministicFailureCode(run.getRunId()))
         .isEqualTo("BROWNFIELD_HTTP_CONTRACT_REMOVED");
     verify(runRepo, org.mockito.Mockito.atLeastOnce()).save(run);
+    verify(perky).start(run.getRunId(), "VALIDATING");
     org.mockito.ArgumentCaptor<RunEvent> event =
         org.mockito.ArgumentCaptor.forClass(RunEvent.class);
     verify(broadcaster).emit(org.mockito.ArgumentMatchers.eq(run.getRunId()), event.capture());
@@ -138,6 +141,7 @@ class RunValidationKickoffBrownfieldTest {
             mock(WorkflowConfigEvidenceInspector.class),
             verifier,
             mock(BrownfieldHttpContractGuard.class),
+            mock(PerkyMessenger.class),
             new RunValidationFailureReporter(
                 runRepo, mock(SseBroadcaster.class), new ContextSanitizer()));
 

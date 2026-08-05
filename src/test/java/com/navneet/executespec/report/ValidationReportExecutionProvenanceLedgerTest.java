@@ -86,7 +86,7 @@ class ValidationReportExecutionProvenanceLedgerTest {
     assertEquals("DETERMINISTIC_WORKSPACE_SUITE", tests.source());
     assertEquals("HIGH", tests.confidence());
     assertEquals(
-        RunContinuationDecision.CONTINUE_SAME_MODEL_PROVIDER,
+        RunContinuationDecision.STOP_BLOCKED,
         new ValidationReportGoalProofEvaluator()
             .evaluate(
                 "run-prov",
@@ -98,6 +98,23 @@ class ValidationReportExecutionProvenanceLedgerTest {
                         .build(),
                     List.of()))
             .recommendedDecision());
+    assertEquals(
+        "UNPROVEN",
+        new ValidationReportGoalProofEvaluator()
+                .evidenceReferences(
+                    "COMPLETE",
+                    PipelineResult.PASSED,
+                    svc.buildVerificationLedger(
+                        greenReport()
+                            .testExecutionVerified(Boolean.TRUE)
+                            .testEvidenceScope("WORKSPACE_TEST_SUITE")
+                            .build(),
+                        List.of()))
+                .stream()
+                .filter(reference -> "tests".equals(reference.evidenceId()))
+                .findFirst()
+                .orElseThrow()
+                .proofStatus());
   }
 
   @Test

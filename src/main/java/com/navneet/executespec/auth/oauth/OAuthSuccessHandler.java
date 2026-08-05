@@ -70,6 +70,9 @@ public class OAuthSuccessHandler implements AuthenticationSuccessHandler {
   public void onAuthenticationSuccess(
       HttpServletRequest request, HttpServletResponse response, Authentication authentication)
       throws IOException {
+    // Consume once at callback entry so every safe outcome — including account-resolution errors —
+    // retains the protected return path for the user's next sign-in attempt.
+    String postLoginRedirect = consumeRedirectCookie(request, response);
     try {
       OAuth2AuthenticationToken oauthToken = (OAuth2AuthenticationToken) authentication;
       OAuth2User oAuth2User = oauthToken.getPrincipal();
@@ -90,9 +93,7 @@ public class OAuthSuccessHandler implements AuthenticationSuccessHandler {
       if (profile.email() == null || profile.email().isBlank()) {
         log.warn("OAuth login failed: no email returned from provider {}", registrationId);
         response.sendRedirect(
-            baseLoginErrorUrl
-                + "?error="
-                + URLEncoder.encode("oauth_no_email", StandardCharsets.UTF_8));
+            loginErrorUrl(baseLoginErrorUrl, "oauth_no_email", postLoginRedirect));
         return;
       }
 
@@ -125,11 +126,9 @@ public class OAuthSuccessHandler implements AuthenticationSuccessHandler {
           profile.email(),
           user.getId());
 
-      // Redirect to frontend callback with tokens. If sign-in began from the CLI / VS Code
-      // device-auth page, OAuthRedirectCookieFilter stashed its /cli-login return URL in a cookie —
-      // forward it so the browser lands back on /cli-login (the email+password path already
-      // preserves this via ?redirect=).
-      String postLoginRedirect = consumeRedirectCookie(request, response);
+      // Redirect to the frontend callback without credentials in the URL. The authorize filter
+      // stashed the validated same-origin return path in an HttpOnly cookie; forward it through
+      // the callback so password and OAuth sign-in preserve the same protected deep link.
       String redirectUrl = baseRedirectUrl + "?oauth=1";
       if (postLoginRedirect != null) {
         redirectUrl += "&redirect=" + URLEncoder.encode(postLoginRedirect, StandardCharsets.UTF_8);
@@ -138,15 +137,19 @@ public class OAuthSuccessHandler implements AuthenticationSuccessHandler {
 
     } catch (OAuthEmailConflictException e) {
       log.warn("OAuth email conflict: {}", e.getMessage());
-      response.sendRedirect(
-          loginUrl()
-              + "?error="
-              + URLEncoder.encode("oauth_email_conflict", StandardCharsets.UTF_8));
+      response.sendRedirect(loginErrorUrl(loginUrl(), "oauth_email_conflict", postLoginRedirect));
     } catch (Exception e) {
       log.error("OAuth login error", e);
-      response.sendRedirect(
-          loginUrl() + "?error=" + URLEncoder.encode("oauth_failed", StandardCharsets.UTF_8));
+      response.sendRedirect(loginErrorUrl(loginUrl(), "oauth_failed", postLoginRedirect));
     }
+  }
+
+  private String loginErrorUrl(String baseUrl, String error, String postLoginRedirect) {
+    String redirectUrl = baseUrl + "?error=" + URLEncoder.encode(error, StandardCharsets.UTF_8);
+    if (postLoginRedirect != null) {
+      redirectUrl += "&redirect=" + URLEncoder.encode(postLoginRedirect, StandardCharsets.UTF_8);
+    }
+    return redirectUrl;
   }
 
   /**
@@ -188,7 +191,7 @@ public class OAuthSuccessHandler implements AuthenticationSuccessHandler {
 
   /**
    * Reads and immediately clears the {@link OAuthRedirectCookieFilter#COOKIE} device-auth return
-   * cookie. Returns the decoded path only when it is a safe {@code /cli-login} path, else null.
+   * cookie. Returns the decoded path only when it remains a strict same-origin path, else null.
    */
   private String consumeRedirectCookie(HttpServletRequest request, HttpServletResponse response) {
     if (request.getCookies() == null) {
@@ -203,8 +206,12 @@ public class OAuthSuccessHandler implements AuthenticationSuccessHandler {
           clear.append("; Secure");
         }
         response.addHeader("Set-Cookie", clear.toString());
-        String decoded = URLDecoder.decode(cookie.getValue(), StandardCharsets.UTF_8);
-        return OAuthRedirectCookieFilter.isSafe(decoded) ? decoded : null;
+        try {
+          String decoded = URLDecoder.decode(cookie.getValue(), StandardCharsets.UTF_8);
+          return OAuthRedirectCookieFilter.isSafe(decoded) ? decoded : null;
+        } catch (IllegalArgumentException malformedCookie) {
+          return null;
+        }
       }
     }
     return null;

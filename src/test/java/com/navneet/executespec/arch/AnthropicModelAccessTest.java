@@ -18,11 +18,12 @@ import org.junit.jupiter.api.Test;
  *
  * <p>Background: before the V2 BYOK rewiring (audit-output/BYOK_DEEPDIVE.md), every paying
  * TEAM/ENTERPRISE customer's run silently dispatched against the platform's {@code
- * spring.ai.anthropic.api-key} singleton instead of their own configured Anthropic key. The fix
- * lives entirely in {@link com.navneet.executespec.agent.LlmRouter} — it builds per-key {@link
- * org.springframework.ai.anthropic.AnthropicChatModel} instances from customer keys via a Caffeine
- * cache, leaving the platform singleton bean (built in {@link
- * com.navneet.executespec.config.AgentModelConfig}) for the no-BYOK fallback.
+ * spring.ai.anthropic.api-key} singleton instead of their own configured Anthropic key. The fix is
+ * enforced by {@link com.navneet.executespec.agent.LlmRouter} and {@link
+ * com.navneet.executespec.agent.AnthropicAttemptModelFactory}. The router resolves the admitted key
+ * and deadline; the factory builds a fresh single-Spring-attempt {@link
+ * org.springframework.ai.anthropic.AnthropicChatModel}. {@link
+ * com.navneet.executespec.config.AgentModelConfig} retains only the compatibility bean.
  *
  * <p>If a future agent grabs {@code AnthropicChatModel} directly via {@code @Autowired} or {@code
  * applicationContext.getBean(AnthropicChatModel.class)} it will silently use the platform key again
@@ -30,7 +31,7 @@ import org.junit.jupiter.api.Test;
  * so the regression is caught at CI time.
  *
  * <p>To add a new approved consumer: justify why the new caller should either (a) use a per-key
- * model from {@code LlmRouter}'s cache or (b) is genuinely platform-key-only (e.g. an admin
+ * model from the admitted-attempt factory or (b) is genuinely platform-key-only (e.g. an admin
  * endpoint that doesn't route customer prompts), then add the simple class name to {@link
  * #APPROVED_CONSUMERS}.
  */
@@ -41,17 +42,19 @@ class AnthropicModelAccessTest {
    * simple class name. Justifications:
    *
    * <ul>
-   *   <li>{@code AgentModelConfig} — defines the platform singleton bean (the @Bean factory
-   *       method).
-   *   <li>{@code LlmRouter} — owns dispatch + the per-key cache. This is THE place that turns a
-   *       customer BYOK key into a model on the V2 path; every other consumer should call this
-   *       instead of grabbing the singleton.
+   *   <li>{@code AgentModelConfig} — defines the compatibility @Bean through the bounded factory.
+   *   <li>{@code AnthropicAttemptModelFactory} — builds the fresh deadline-bounded,
+   *       single-Spring-attempt model for each admitted physical request.
+   *   <li>{@code LlmRouter} — owns dispatch and passes the admitted key/deadline to that factory;
+   *       every other consumer should call the router.
    * </ul>
    */
   private static final Set<String> APPROVED_CONSUMERS =
       new TreeSet<>(
           Set.of(
-              "AgentModelConfig", "LlmRouter" // V2 router — main BYOK entry point
+              "AgentModelConfig",
+              "AnthropicAttemptModelFactory",
+              "LlmRouter" // V2 router — main BYOK entry point
               ));
 
   @Test

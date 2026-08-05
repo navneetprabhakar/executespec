@@ -51,8 +51,16 @@ import lombok.Builder;
  * @param llmExecutionOperationAuthority process-local operation capability derived only from {@code
  *     context}; never serialized, logged, or reconstructed from durable request fields
  * @param strictProvider when true, transient failures are not routed to another provider
+ * @param runHardCapUsd optional run-wide dollar ceiling propagated by a cost-bounded worker so the
+ *     router can recheck the exact physical route after managed-AI substitution and on failover
+ * @param taskCostCapUsd optional task-local dollar ceiling with the same exact-route semantics
+ * @param retryProfile transient-retry envelope selector; null ⇒ {@link RetryProfile#PIPELINE}.
+ *     Interactive chat surfaces set {@link RetryProfile#INTERACTIVE} so a human-facing turn never
+ *     inherits the pipeline ladder's long backoff tail.
  * @param usageLogicalCallId stable identity shared by retries/failovers of one logical LLM call;
  *     generated once when omitted and preserved by {@link #toBuilder()}
+ * @param physicalAttemptStartedCallback process-local callback invoked after physical-attempt
+ *     admission and local transport preflight, immediately before socket I/O; never serialized
  */
 @Builder(toBuilder = true)
 public record LlmRequest(
@@ -80,7 +88,11 @@ public record LlmRequest(
     Integer llmExecutionAttempt,
     String usageLogicalCallId,
     boolean strictProvider,
-    PromptCacheStrategy promptCacheStrategy) {
+    Double runHardCapUsd,
+    Double taskCostCapUsd,
+    PromptCacheStrategy promptCacheStrategy,
+    RetryProfile retryProfile,
+    @JsonIgnore Runnable physicalAttemptStartedCallback) {
 
   /**
    * Provider-neutral prompt-cache intent. Providers that do not support prompt caching ignore the
@@ -93,6 +105,27 @@ public record LlmRequest(
     SYSTEM_ONLY,
     CONVERSATION_HISTORY,
     NONE
+  }
+
+  /** Signals that an admitted physical request is about to cross the provider transport. */
+  public void signalPhysicalAttemptStarted() {
+    ProviderStartFenceException.signal(physicalAttemptStartedCallback);
+  }
+
+  /**
+   * Which transient-retry envelope the router applies to this call (2026-08-03 surface split).
+   * {@link #PIPELINE} — the default when null — keeps the accuracy-first ladder (6 attempts,
+   * 5/15/25/45/65s) proven on the TB 2.1 campaign: correct for worker/planner/reviewer calls where
+   * nobody is watching wall clock. {@link #INTERACTIVE} keeps the pre-campaign 4-attempt 2/4/8s
+   * ladder for human-facing chat turns, whose worst-case backoff must read as a slow reply, not a
+   * hang. {@link #AUXILIARY} bounds best-effort post-run enrichment to one retry; callers must also
+   * set a short read timeout so optional report prose cannot hold terminalization behind repeated
+   * provider socket windows.
+   */
+  public enum RetryProfile {
+    PIPELINE,
+    INTERACTIVE,
+    AUXILIARY
   }
 
   public LlmRequest {
@@ -131,8 +164,16 @@ public record LlmRequest(
     if (usageLogicalCallId == null || usageLogicalCallId.isBlank()) {
       usageLogicalCallId = UUID.randomUUID().toString();
     }
+    validateCostCap(runHardCapUsd, "runHardCapUsd");
+    validateCostCap(taskCostCapUsd, "taskCostCapUsd");
     if (temperature == null) temperature = 0.0;
     if (promptCacheStrategy == null) promptCacheStrategy = PromptCacheStrategy.DEFAULT;
+  }
+
+  private static void validateCostCap(Double value, String field) {
+    if (value != null && (!Double.isFinite(value) || value <= 0.0)) {
+      throw new IllegalArgumentException(field + " must be finite and positive when supplied");
+    }
   }
 
   /** Omits the opaque operation authority and prompt contents from diagnostic rendering. */

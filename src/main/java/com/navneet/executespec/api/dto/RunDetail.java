@@ -4,6 +4,7 @@ import java.time.Instant;
 import java.util.List;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.navneet.executespec.run.outcome.RunTerminalOutcome;
 
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -41,6 +42,9 @@ public class RunDetail {
 
   /** v2.5.10 — explicit terminal-status reason. See RunSummary.statusReason. */
   String statusReason;
+
+  /** Server-owned customer-safe interpretation of terminal status/failure evidence. */
+  RunTerminalOutcome terminalOutcome;
 
   String planJson;
   String reviewJson;
@@ -281,6 +285,7 @@ public class RunDetail {
   Boolean finalBuildPassed;
   Integer testsPassed;
   Integer testsTotal;
+  Integer testsSkipped;
 
   /** True only when the test totals came from an actual executed command. */
   Boolean testExecutionVerified;

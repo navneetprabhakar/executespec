@@ -2648,10 +2648,20 @@
   outline: 2px solid var(--ide-accent);
   outline-offset: -2px;
 }
+/* The model cell must never become the column the table steals width from. When
+   TB and SWE runs are listed together the TIME/TOKENS cells carry long nowrap
+   content, the layout squeezes this column toward zero, and `overflow-wrap:
+   anywhere` then breaks the model id one character per line. Truncate with an
+   ellipsis instead and keep the full value in a title attribute. */
 .ide-benchmark-model {
   min-width: 0;
-  overflow-wrap: anywhere;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-weight: 600;
+}
+.ide-benchmark-name-cell {
+  min-width: 190px;
 }
 
 /* C3 — breadcrumbs (ide/Crumbs.tsx). Desktop trail; mobile collapses to a

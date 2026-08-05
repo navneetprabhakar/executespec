@@ -16,6 +16,13 @@ final class IterationSubmitPolicyFactory {
         inherited.skipAutoPush(),
         inherited.tenantOrgId(),
         actorOrgId,
+        null,
+        // The child preflights against the same baseline branch the source run checked out;
+        // dropping this re-verified iterate children against the default branch and failed
+        // deterministically for any source that legitimately ran on another branch.
+        inherited.checkoutBranch(),
+        null,
+        null,
         null);
   }
 }

@@ -73,8 +73,8 @@ public class AutomaticCorrectionLifecycle {
     try {
       prepared.authority().assertOwned();
       CorrectionWorkspaceTransaction.Accepted accepted = workspaceTransaction.accept(checkpoint);
-      durableAttempts.remove(checkpoint, prepared);
       durableCorrectionLifecycle.accept(prepared, accepted.afterGeneration());
+      durableAttempts.remove(checkpoint, prepared);
       return accepted;
     } catch (RuntimeException failure) {
       prepared.authority().close();
@@ -580,9 +580,10 @@ public class AutomaticCorrectionLifecycle {
       String continuationDecisionJson) {}
 
   private void markDurableRolledBack(CorrectionWorkspaceTransaction.Checkpoint checkpoint) {
-    DurableCorrectionLifecycle.Prepared prepared = durableAttempts.remove(checkpoint);
+    DurableCorrectionLifecycle.Prepared prepared = durableAttempts.get(checkpoint);
     if (prepared != null) {
       durableCorrectionLifecycle.rolledBack(prepared);
+      durableAttempts.remove(checkpoint, prepared);
     }
   }
 

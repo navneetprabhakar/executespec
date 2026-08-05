@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.util.Optional;
@@ -23,6 +24,47 @@ import org.junit.jupiter.api.Test;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 
 class ValidationReportServiceConcreteRescoreTest {
+
+  @Test
+  void unverifiedPositiveCountsCannotProduceExecutablePassEvidence() {
+    ValidationReportRepository repository = mock(ValidationReportRepository.class);
+    FeatureFlagService flags = mock(FeatureFlagService.class);
+    ValidationReport report =
+        ValidationReport.builder()
+            .id("vr-unverified")
+            .runId("run-unverified")
+            .filesGenerated(1)
+            .pipelineResult(PipelineResult.PASSED)
+            .finalBuildPassed(true)
+            .reviewerVerdict("CLEAN")
+            .issuesJson("[]")
+            .build();
+    when(repository.findByRunId("run-unverified")).thenReturn(Optional.of(report));
+    when(repository.save(any(ValidationReport.class)))
+        .thenAnswer(invocation -> invocation.getArgument(0));
+    when(flags.isEnabled(any())).thenReturn(true);
+    ValidationReportService service =
+        new ValidationReportService(
+            repository, null, new ObjectMapper(), new SimpleMeterRegistry(), null, null, flags);
+
+    ValidationReport rescored =
+        service
+            .rescoreAfterConcreteTests(
+                "run-unverified",
+                TestExecutionSummary.builder()
+                    .totalTests(17)
+                    .passed(17)
+                    .failed(0)
+                    .executionVerified(Boolean.FALSE)
+                    .evidenceScope(TestExecutionSummary.EvidenceScope.WORKSPACE_TEST_SUITE)
+                    .build())
+            .orElseThrow();
+
+    assertFalse(rescored.getTestExecutionVerified());
+    assertEquals(0, rescored.getTestsTotal());
+    assertFalse(rescored.getExecutableTestsRun());
+    assertEquals("BUILD_ONLY", rescored.getExecutableVerificationStatus());
+  }
 
   @Test
   void concreteTestsRecomputeHeadlinesAndPublishFreshEvidence() {
@@ -133,7 +175,7 @@ class ValidationReportServiceConcreteRescoreTest {
   }
 
   @Test
-  void unavailableFunctionalSuiteOverridesWorkspaceCountsAndCapsQuality() {
+  void unavailableFunctionalSuiteCannotEraseProvenWorkspaceCounts() {
     ValidationReportRepository repository = mock(ValidationReportRepository.class);
     FeatureFlagService flags = mock(FeatureFlagService.class);
     var events = mock(org.springframework.context.ApplicationEventPublisher.class);
@@ -143,6 +185,8 @@ class ValidationReportServiceConcreteRescoreTest {
             .runId("run-worker-tests")
             .testsPassed(2)
             .testsTotal(2)
+            .testExecutionVerified(Boolean.TRUE)
+            .testEvidenceScope(TestExecutionSummary.EvidenceScope.WORKSPACE_TEST_SUITE.name())
             .filesGenerated(4)
             .pipelineResult(PipelineResult.PASSED)
             .finalBuildPassed(true)
@@ -173,13 +217,11 @@ class ValidationReportServiceConcreteRescoreTest {
                 "preview-failed", "Independent functional suite could not run"));
 
     assertTrue(result.isPresent());
-    assertEquals(0, result.orElseThrow().getTestsTotal());
-    assertEquals(0, result.orElseThrow().getTestsPassed());
-    assertEquals(Boolean.FALSE, result.orElseThrow().getTestExecutionVerified());
-    assertTrue(result.orElseThrow().getVerifiedScore() <= 75);
-    assertTrue(result.orElseThrow().getRubricScore() <= 75);
-    verify(repository).save(report);
-    verify(events).publishEvent(org.mockito.ArgumentMatchers.any(Object.class));
+    assertEquals(2, result.orElseThrow().getTestsTotal());
+    assertEquals(2, result.orElseThrow().getTestsPassed());
+    assertEquals(Boolean.TRUE, result.orElseThrow().getTestExecutionVerified());
+    assertEquals("WORKSPACE_TEST_SUITE", result.orElseThrow().getTestEvidenceScope());
+    verifyNoInteractions(events);
   }
 
   @Test
@@ -217,17 +259,22 @@ class ValidationReportServiceConcreteRescoreTest {
             .rescoreAfterConcreteTests(
                 "run-workspace-suite",
                 TestExecutionSummary.builder()
-                    .totalTests(7)
+                    .totalTests(8)
                     .passed(7)
+                    .skipped(1)
                     .executionVerified(Boolean.TRUE)
                     .evidenceScope(TestExecutionSummary.EvidenceScope.WORKSPACE_TEST_SUITE)
                     .build())
             .orElseThrow();
 
-    assertEquals(7, rescored.getTestsTotal());
+    assertEquals(8, rescored.getTestsTotal());
     assertEquals(7, rescored.getTestsPassed());
+    assertEquals(1, rescored.getTestsSkipped());
     assertEquals(Boolean.TRUE, rescored.getTestExecutionVerified());
     assertEquals("WORKSPACE_TEST_SUITE", rescored.getTestEvidenceScope());
+    assertEquals(Boolean.TRUE, rescored.getExecutableTestsPassed());
+    assertEquals("PASSED", rescored.getExecutableVerificationStatus());
+    assertTrue(rescored.getExecutableEvidenceJson().contains("\"testsSkipped\":1"));
     assertTrue(rescored.getVerifiedScore() <= 75);
     var eventCaptor = org.mockito.ArgumentCaptor.forClass(ValidationReportEvidenceEvent.class);
     verify(events).publishEvent(eventCaptor.capture());
@@ -238,10 +285,15 @@ class ValidationReportServiceConcreteRescoreTest {
             .orElseThrow();
     assertEquals("PASS", tests.status());
     assertEquals("DETERMINISTIC_WORKSPACE_SUITE", tests.source());
+    assertTrue(tests.summary().contains("1 skipped"));
+    var goalDecision = eventCaptor.getValue().runGoalDecision();
     assertEquals(
-        com.navneet.executespec.execution.model.RunContinuationDecision
-            .CONTINUE_SAME_MODEL_PROVIDER,
-        eventCaptor.getValue().runGoalDecision().recommendedDecision());
+        com.navneet.executespec.execution.model.GoalDonenessState.UNCERTAIN, goalDecision.state());
+    assertEquals(
+        com.navneet.executespec.execution.model.RunContinuationDecision.STOP_BLOCKED,
+        goalDecision.recommendedDecision());
+    assertFalse(goalDecision.anotherModelProviderMightHelp());
+    assertTrue(goalDecision.recommendedNextStep().contains("independent verifier"));
   }
 
   /**

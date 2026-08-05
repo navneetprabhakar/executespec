@@ -22,7 +22,13 @@ record ValidationAccuracyFacts(
     List<String> testEvidenceLocations,
     String specEvidenceStatus,
     String endpointEvidenceStatus,
-    String testEvidenceStatus) {
+    String testEvidenceStatus,
+    boolean heuristicEstimate) {
+
+  /**
+   * Marker prefix {@code AccuracyAssessmentService.defaultReport} writes when the LLM call failed.
+   */
+  private static final String HEURISTIC_GRADING_NOTES_PREFIX = "Accuracy assessment unavailable";
 
   static ValidationAccuracyFacts parse(ObjectMapper objectMapper, String accuracyJson) {
     if (accuracyJson == null || accuracyJson.isBlank()) return unavailable();
@@ -42,6 +48,10 @@ record ValidationAccuracyFacts(
       JsonNode unknown = root.path("unknownRequirements");
       JsonNode missing = root.path("missingRequirements");
       JsonNode partial = root.path("partialRequirements");
+      String gradingNotes =
+          root.hasNonNull("gradingNotes") ? root.get("gradingNotes").asText() : null;
+      boolean heuristicEstimate =
+          gradingNotes != null && gradingNotes.startsWith(HEURISTIC_GRADING_NOTES_PREFIX);
       return new ValidationAccuracyFacts(
           score,
           grade,
@@ -54,7 +64,8 @@ record ValidationAccuracyFacts(
           locations(root, "testEvidenceLocations"),
           status(root, "specEvidenceStatus"),
           status(root, "endpointEvidenceStatus"),
-          status(root, "testEvidenceStatus"));
+          status(root, "testEvidenceStatus"),
+          heuristicEstimate);
     } catch (Exception malformed) {
       log.warn(
           "Failed to parse accuracy facts for verification ledger: {}", malformed.getMessage());
@@ -127,6 +138,7 @@ record ValidationAccuracyFacts(
         List.of(),
         "UNAVAILABLE",
         "UNAVAILABLE",
-        "UNAVAILABLE");
+        "UNAVAILABLE",
+        false);
   }
 }
