@@ -28,6 +28,9 @@ import java.util.UUID;
  *     executespec/<runShort>} branch + opens a new PR.
  * @param userId the user dispatching the patch (used for tier check + run ownership).
  * @param aiProvider optional override; defaults to project's configured provider.
+ * @param publicationRepoFullName exact repository for a PR-shaped finding; required with branch
+ * @param publicationPrNumber exact positive PR number for a PR-shaped finding; required with branch
+ * @param publicationHeadSha exact head revision observed by the caller; required with branch
  */
 public record Finding(
     FindingType type,
@@ -37,7 +40,10 @@ public record Finding(
     String userPrompt,
     String branchOverride,
     String userId,
-    String aiProvider) {
+    String aiProvider,
+    String publicationRepoFullName,
+    Integer publicationPrNumber,
+    String publicationHeadSha) {
 
   public Finding {
     if (type == null) throw new IllegalArgumentException("type required");
@@ -52,6 +58,18 @@ public record Finding(
       throw new IllegalArgumentException("userPrompt required");
     if (selectedRepoIds == null) selectedRepoIds = List.of();
     if (userId == null || userId.isBlank()) throw new IllegalArgumentException("userId required");
+    boolean hasBranch = branchOverride != null && !branchOverride.isBlank();
+    boolean hasRepo = publicationRepoFullName != null && !publicationRepoFullName.isBlank();
+    boolean hasPr = publicationPrNumber != null && publicationPrNumber > 0;
+    boolean hasHeadSha = publicationHeadSha != null && !publicationHeadSha.isBlank();
+    if (hasBranch != hasRepo || hasBranch != hasPr || hasBranch != hasHeadSha) {
+      throw new IllegalArgumentException(
+          "PR-shaped finding requires branch, repository, positive PR number, and head SHA"
+              + " together");
+    }
+    if (hasHeadSha && !publicationHeadSha.matches("[0-9a-fA-F]{40}")) {
+      throw new IllegalArgumentException("PR-shaped finding head SHA must be 40 hexadecimal chars");
+    }
   }
 
   /** {@code <TYPE>:<id>} — stamped on {@code pipeline_run.triggered_by_finding}. */

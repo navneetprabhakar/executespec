@@ -114,6 +114,7 @@ final class CorrectionResolutionEvidence {
             testVerdict(report),
             report.getTestsPassed(),
             report.getTestsTotal(),
+            report.getTestsSkipped(),
             report.getTestExecutionVerified(),
             report.getTestEvidenceScope(),
             report.getTestExitCode()),
@@ -161,10 +162,14 @@ final class CorrectionResolutionEvidence {
     Boolean buildPassed = review == null ? null : review.finalBuildPassed();
     Integer testsPassed = review == null ? null : review.finalTestsPassed();
     Integer testsTotal = review == null ? null : review.finalTestsTotal();
+    Integer testsSkipped = review == null ? null : review.finalTestsSkipped();
     String testsVerdict =
         testsTotal == null || testsTotal <= 0 || testsPassed == null
             ? "UNPROVEN"
-            : testsPassed >= testsTotal ? "PASSED" : "FAILED";
+            : com.navneet.executespec.report.TestExecutionTrust.successfulPopulation(
+                    testsPassed, testsSkipped, testsTotal)
+                ? "PASSED"
+                : "FAILED";
     return new ValidationSnapshot(
         "CORRECTION_ATTEMPT",
         workspaceGeneration,
@@ -174,6 +179,7 @@ final class CorrectionResolutionEvidence {
             testsVerdict,
             testsPassed,
             testsTotal,
+            testsSkipped,
             testsTotal != null && testsTotal > 0,
             "WORKSPACE_TEST_SUITE",
             null),
@@ -193,7 +199,7 @@ final class CorrectionResolutionEvidence {
         "CORRECTION_ATTEMPT_FAILED",
         workspaceGeneration,
         new BuildValidation("UNAVAILABLE", null, null),
-        new TestValidation("UNAVAILABLE", null, null, null, null, null),
+        new TestValidation("UNAVAILABLE", null, null, null, null, null, null),
         new WorkflowValidation("UNAVAILABLE", 0, null),
         new ReviewerValidation("UNAVAILABLE"),
         contracts == null ? ContractValidation.unknown() : contracts,
@@ -219,7 +225,10 @@ final class CorrectionResolutionEvidence {
   private static String testVerdict(ValidationReport report) {
     if (report.getTestsTotal() == null || report.getTestsTotal() <= 0) return "UNPROVEN";
     if (report.getTestsPassed() == null) return "UNPROVEN";
-    return report.getTestsPassed() >= report.getTestsTotal() ? "PASSED" : "FAILED";
+    return com.navneet.executespec.report.TestExecutionTrust.successfulPopulation(
+            report.getTestsPassed(), report.getTestsSkipped(), report.getTestsTotal())
+        ? "PASSED"
+        : "FAILED";
   }
 
   private static WorkflowValidation workflow(ObjectMapper objectMapper, String json) {
@@ -266,6 +275,7 @@ final class CorrectionResolutionEvidence {
       String verdict,
       Integer passed,
       Integer total,
+      Integer skipped,
       Boolean executionVerified,
       String evidenceScope,
       Integer exitCode) {}

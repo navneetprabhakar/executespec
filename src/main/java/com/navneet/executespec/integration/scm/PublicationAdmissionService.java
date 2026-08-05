@@ -9,6 +9,7 @@ import com.navneet.executespec.cost.RunEffectiveRouteService;
 import com.navneet.executespec.integration.CorrectionWorkspaceTransaction;
 import com.navneet.executespec.integration.DurableCorrectionLifecycle;
 import com.navneet.executespec.integration.RunWorkspaceAuthorityService;
+import com.navneet.executespec.report.TestExecutionTrust;
 import com.navneet.executespec.report.ValidationReportRepository;
 import com.navneet.executespec.report.entity.PipelineResult;
 import com.navneet.executespec.report.entity.ValidationReport;
@@ -170,7 +171,10 @@ public class PublicationAdmissionService {
     }
     if (!Boolean.TRUE.equals(report.getTestExecutionVerified())
         || report.getTestsTotal() == null
-        || report.getTestsTotal() <= 0) {
+        || report.getTestsTotal() <= 0
+        || report.getTestsPassed() == null
+        || report.getTestsPassed() <= 0
+        || !admissibleTestScope(report.getTestEvidenceScope())) {
       return blockedEligibility(
           "PUBLICATION_TESTS_UNPROVEN",
           "TESTS",
@@ -180,7 +184,9 @@ public class PublicationAdmissionService {
           report.getWorkspaceGeneration(),
           currentGeneration);
     }
-    if (report.getTestsPassed() == null || report.getTestsPassed() < report.getTestsTotal()) {
+    int skipped = report.getTestsSkipped() == null ? 0 : report.getTestsSkipped();
+    if (!TestExecutionTrust.successfulPopulation(
+        report.getTestsPassed(), skipped, report.getTestsTotal())) {
       return blockedEligibility(
           "PUBLICATION_TESTS_FAILED",
           "TESTS",
@@ -188,6 +194,8 @@ public class PublicationAdmissionService {
               + String.valueOf(report.getTestsPassed())
               + "/"
               + report.getTestsTotal()
+              + ", skipped="
+              + skipped
               + ")",
           true,
           "Fix the failing tests and regenerate validation evidence.",
@@ -268,6 +276,10 @@ public class PublicationAdmissionService {
         null,
         report.getWorkspaceGeneration(),
         currentGeneration);
+  }
+
+  private static boolean admissibleTestScope(String scope) {
+    return "WORKSPACE_TEST_SUITE".equals(scope) || "LIVE_PREVIEW_FUNCTIONAL".equals(scope);
   }
 
   /** Rechecks that publication preparation did not mutate the admitted workspace. */

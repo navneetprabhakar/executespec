@@ -1,5 +1,6 @@
 package com.navneet.executespec.previewrender;
 
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 
@@ -9,9 +10,6 @@ import com.navneet.executespec.agent.PromptAssembler;
 import com.navneet.executespec.agent.PromptTrustBoundary;
 import com.navneet.executespec.executioncontext.LlmDispatchPolicyException;
 import com.navneet.executespec.executioncontext.LlmExecutionPolicyFactory;
-import com.navneet.executespec.router.AgentTier;
-import com.navneet.executespec.router.LlmProvider;
-import com.navneet.executespec.router.ModelResolver;
 import com.navneet.executespec.router.ResolvedModel;
 import com.navneet.executespec.tool.ExecutionContext;
 
@@ -43,7 +41,6 @@ public class PreviewRenderAgent {
   private static final int MAX_OUTPUT_TOKENS = 8192;
 
   private final LlmRouter llmRouter;
-  private final ModelResolver modelResolver;
   private final PromptAssembler promptAssembler;
   private final PreviewRenderGuard guard;
   private final LlmExecutionPolicyFactory executionPolicyFactory;
@@ -65,24 +62,7 @@ public class PreviewRenderAgent {
     }
   }
 
-  /** Renders a single surface. Never throws — a failed render degrades to a reason code. */
-  public RenderedSurface render(
-      PreviewSurface surface, LlmProvider provider, String runId, String renderAttemptId) {
-    ResolvedModel resolved =
-        modelResolver.resolve(
-            "PreviewRenderAgent",
-            provider == null ? LlmProvider.ANTHROPIC : provider,
-            AgentTier.WORKHORSE);
-    return render(surface, resolved, runId, renderAttemptId, null);
-  }
-
-  ResolvedModel resolveRoute(LlmProvider provider) {
-    return modelResolver.resolve(
-        "PreviewRenderAgent",
-        provider == null ? LlmProvider.ANTHROPIC : provider,
-        AgentTier.WORKHORSE);
-  }
-
+  /** Renders a single surface on the job's already-resolved route. */
   RenderedSurface render(
       PreviewSurface surface,
       ResolvedModel resolved,
@@ -102,34 +82,29 @@ public class PreviewRenderAgent {
       List<Message> messages =
           List.of(new SystemMessage(systemPrompt), new UserMessage(buildEvidence(surface)));
 
-      ChatResponse response;
-      if (executionContext == null) {
-        response =
-            llmRouter.callText(
-                resolved.providerName(),
-                resolved.getModel(),
-                messages,
+      ExecutionContext dispatchContext = executionContext;
+      if (dispatchContext == null) {
+        dispatchContext =
+            new ExecutionContext(
                 runId,
-                "PreviewRenderAgent",
-                "render:" + surface.id(),
-                MAX_OUTPUT_TOKENS,
-                LlmRequest.PromptCacheStrategy.DEFAULT,
-                executionPolicyFactory.forRunPreviewSurface(runId, renderAttemptId));
-      } else {
-        response =
-            llmRouter.call(
-                LlmRequest.builder()
-                    .provider(resolved.providerName())
-                    .model(resolved.getModel())
-                    .messages(messages)
-                    .context(executionContext)
-                    .toolsOverride(List.of())
-                    .agentRole("PreviewRenderAgent")
-                    .stepId("render:" + surface.id())
-                    .maxTokens(MAX_OUTPUT_TOKENS)
-                    .promptCacheStrategy(LlmRequest.PromptCacheStrategy.DEFAULT)
-                    .build());
+                "preview-render:" + surface.id(),
+                Path.of(System.getProperty("java.io.tmpdir", "/tmp")).toAbsolutePath().normalize(),
+                executionPolicyFactory.forRunPreviewSurface(runId, renderAttemptId, resolved));
       }
+      ChatResponse response =
+          llmRouter.call(
+              LlmRequest.builder()
+                  .provider(resolved.providerName())
+                  .model(resolved.getModel())
+                  .messages(messages)
+                  .context(dispatchContext)
+                  .toolsOverride(List.of())
+                  .agentRole("PreviewRenderAgent")
+                  .stepId("render:" + surface.id())
+                  .maxTokens(MAX_OUTPUT_TOKENS)
+                  .strictProvider(true)
+                  .promptCacheStrategy(LlmRequest.PromptCacheStrategy.DEFAULT)
+                  .build());
 
       String raw = response.getResult().getOutput().getText();
       String html = stripFences(raw);

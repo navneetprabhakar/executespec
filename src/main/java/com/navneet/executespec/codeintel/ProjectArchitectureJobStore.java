@@ -513,7 +513,7 @@ public class ProjectArchitectureJobStore {
 UPDATE project_architecture_job SET status='NEEDS_CONFIRMATION',
   completed_at=clock_timestamp(), lease_owner=NULL, lease_expires_at=NULL,
   error_code='OUTCOME_UNCERTAIN',
-  error_message='The worker stopped after provider execution began; retry requires confirmation.',
+  error_message='The worker stopped after provider dispatch began; delivery outcome may be uncertain. Retry requires confirmation.',
   staged_artifacts_json=NULL, staged_artifacts_digest=NULL
 WHERE status='RUNNING' AND phase IN ('EXECUTING','PUBLISHING')
   AND lease_expires_at<clock_timestamp()

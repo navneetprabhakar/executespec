@@ -194,7 +194,23 @@ try {
   );
 
   await page.goto(`${frontend}/agent`, {waitUntil: 'domcontentloaded'});
-  await visibleText(page, 'Remote workspace operator');
+  // The chat-first redesign resumes the latest ACTIVE scope-matching session when one exists.
+  // The fixture seeds exactly one, so landing may be either the empty launcher or the resumed
+  // fixture conversation; the resumed state additionally proves durable session reload.
+  await page.waitForFunction(
+    () =>
+      /Remote workspace operator|Release QA agent evidence/.test(
+        document.body?.innerText || '',
+      ),
+    undefined,
+    {timeout: 20_000},
+  );
+  if (/Release QA agent evidence/.test((await page.locator('body').innerText()) || '')) {
+    pass(
+      'durable session reload on /agent',
+      'The seeded ACTIVE fixture conversation was resumed from durable state on navigation.',
+    );
+  }
   const sessionCreationResponse = page.waitForResponse(
     (response) =>
       response.request().method() === 'POST' &&
@@ -202,7 +218,7 @@ try {
     {timeout: 20_000},
   );
   const newWorkspaceButton = page.locator(
-    'button.agent-bar-btn[aria-label="Start a new workspace"]',
+    'button.agent-bar-btn[aria-label="Start a new conversation"]',
   );
   await newWorkspaceButton.waitFor({state: 'visible', timeout: 20_000});
   await newWorkspaceButton.click();
@@ -219,7 +235,7 @@ try {
   await page.getByRole('textbox', {name: 'Message the agent'}).waitFor({timeout: 20_000});
   if (workspaceCreationRequests !== 1) {
     throw new Error(
-      `Start a new workspace issued ${workspaceCreationRequests} creation requests instead of one`,
+      `Start a new conversation issued ${workspaceCreationRequests} creation requests instead of one`,
     );
   }
   const agentText = await page.locator('body').innerText();
@@ -249,6 +265,39 @@ try {
   pass(
     'new-project functional lifecycle',
     'A real authenticated project was created, persisted, and loaded through the protected project UI without an LLM call.',
+  );
+
+  // Compare History must render an actual CONTENT diff between two architecture versions, not a
+  // bare "changed" marker. Two deterministic fixture versions differ by one known added line.
+  const archVersions = await api(
+    `/api/v2/test/web-fixture/projects/${createdProjectId}/architecture-versions`,
+    {method: 'POST', headers: authHeaders},
+  );
+  if (!archVersions?.toVersion) throw new Error('architecture version seeding failed');
+  await page.goto(`${frontend}/projects/${createdProjectId}/architecture`, {
+    waitUntil: 'domcontentloaded',
+  });
+  await page.getByRole('button', {name: /History · \d+/}).click();
+  // The heading renders uppercase via CSS text-transform, so innerText matching is unreliable;
+  // the labeled select is the stable readiness signal for the compare panel.
+  await page.getByLabel('Compare from version').waitFor({state: 'visible', timeout: 20_000});
+  await page
+    .getByLabel('Compare from version')
+    .selectOption(String(archVersions.fromVersion));
+  await page.getByLabel('Compare to version').selectOption(String(archVersions.toVersion));
+  await page.getByRole('button', {name: 'Compare', exact: true}).click();
+  await visibleText(
+    page,
+    `System map content · v${archVersions.fromVersion} → v${archVersions.toVersion}`,
+  );
+  await visibleText(page, archVersions.addedLine);
+  const compareBody = (await page.locator('body').innerText()) || '';
+  if (/No system-map content changes/.test(compareBody)) {
+    throw new Error('Compare History reported no content changes for two differing versions');
+  }
+  pass(
+    'Compare History content diff',
+    'Two fixture architecture versions rendered an actual line-level content diff including the known added service line.',
   );
 
   // The fixture's inert DeepSeek marker exists only to exercise provider-selectable project setup.
@@ -376,6 +425,31 @@ try {
     'Deterministic fixture facts rendered without a fabricated score; production evidence quality is not covered.',
   );
 
+  // Correction transaction visibility: the durable continuation_actions_json fixture must render
+  // as a correction card with checkpoint generations, evidence invalidation, and the validation
+  // before → after delta — the exact facts the trust slice persists for real corrections.
+  const correctionCard = page.getByTestId('correction-evidence-card').first();
+  await correctionCard.waitFor({state: 'visible', timeout: 20_000});
+  // Headings render uppercase via CSS text-transform, so all card assertions are
+  // case-insensitive against the card's own rendered text.
+  const correctionText = (await correctionCard.innerText()) || '';
+  if (!/correction transaction 1\/1/i.test(correctionText)) {
+    throw new Error('correction card did not render its transaction ordinal');
+  }
+  if (!/prior evidence was made stale/i.test(correctionText)) {
+    throw new Error('correction card did not render the evidence-invalidation state');
+  }
+  if (!/src\/app\.ts/.test(correctionText)) {
+    throw new Error('correction card did not render the changed-file evidence');
+  }
+  if (!/FAILED/.test(correctionText) || !/PASSED/.test(correctionText)) {
+    throw new Error('correction card did not render the before → after validation delta');
+  }
+  pass(
+    'correction transaction evidence card',
+    'Durable correction evidence rendered checkpoint generations, invalidation state, changed files, and the FAILED → PASSED validation delta from continuation_actions_json.',
+  );
+
   await selectRunTab(page, 'Tests', 'Tests');
   await visibleText(page, '2/2');
   pass(
@@ -392,10 +466,18 @@ try {
   );
 
   await selectRunTab(page, 'Pull request', 'Pull request');
-  await visibleText(page, 'No pull request yet');
+  // The fixture workspace has no Git generation, so the publication-trust PR tab renders the
+  // honest blocked state (workspace generation unreadable) rather than a generic empty state.
+  // A plain "No pull request yet" remains valid for eligible-but-unpublished workspaces.
+  await page.waitForFunction(
+    () =>
+      /No pull request yet|No pull request can be opened/i.test(document.body?.innerText || ''),
+    undefined,
+    {timeout: 20_000},
+  );
   pass(
     'Pull request empty state',
-    'The result view rendered the actionable no-PR state for a run without a linked repository mutation.',
+    'The result view rendered an honest no-PR state (generic empty state or explicit workspace-generation block) without inventing publication eligibility.',
   );
 
   await selectRunTab(page, 'Ask', 'Ask about this work');

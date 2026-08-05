@@ -15,6 +15,10 @@ snapshot is not a restorable filesystem image. Projects remain the canonical dur
 context: the agent can select an existing project or hand off to the normal Projects creation flow
 and return with that project selected. Closing a Web Agent workspace archives its conversation
 after active work is clear; it does not delete the linked project.
+Repository linking uses the caller's stored SCM credential. If that credential cannot see a
+private GitHub or Bitbucket repository, Web and scoped CLI clients receive the same safe,
+provider-specific instruction to grant repository access or reconnect the integration; the failure
+does not create a partial repository or project link.
 Within a selected project, exact repository search is paired with a read-only bounded source-range
 tool: the agent can expand a `file:line` match into up to 200 lines of method/signature context from
 the linked repository's revision-pinned clone. Reads are project-authorized, repository-relative,
@@ -23,20 +27,91 @@ Plan Review's “Start revised run” uses the canonical Start composer and rest
 request and its project/repository scope; it no longer falls through the project landing redirect.
 Exact HTTP paths in a submitted request retain their namespace through planning: `/route` and
 `/api/route` are distinct producer contracts, and an added or removed `/api` prefix is rejected
-before approval or code-generation spend. Web Agent streaming also treats a parsed terminal `done`
-as authoritative when a proxy resets the connection immediately afterward.
+before approval or code-generation spend. Explicit method-rejection acceptance such as
+`POST /route must return 405` is preserved as a negative contract: the forbidden method must remain
+absent while another supported method proves the path exists, so a 404 cannot masquerade as the
+requested behavior. Web Agent streaming also treats a parsed terminal `done` as authoritative when
+a proxy resets the connection immediately afterward. Its pinned-run event stream never opens
+without a run-scoped SSE token: 401/403/404 outcomes close with an explicit auth/access/not-found
+state, while transient failures use capped exponential reconnects whose budget resets only after a
+stable connection. When that budget is exhausted, the latest durable run snapshot remains visible
+as snapshot-only evidence instead of looping indefinitely.
+
+Run detail's **Screens** tab generates a static visual preview, not a live application runtime.
+New generation is available only after the run is terminal and only for screens affected by the
+run's product-code diff; backend-only changes do not reuse unrelated older screens. Every preview
+is permanently labelled as simulated, renders with a script-only sandbox, and uses one frozen
+provider/model route for the whole job. Exact run pins remain exact; otherwise the payer
+organization's WORKHORSE matrix is resolved once before admission. Parallel surfaces share one
+job-wide deadline, and generated examples use representative populated data unless the source
+itself is an empty, loading, or error screen.
 
 The BUILD planner preserves exact behavioral clauses, keeps focused maintained tests with the
 production task they verify, and bounds task breadth to avoid one runaway worker context. Workers
 reject disposable root-level smoke scripts as test substitutes and stop repeated same-path rewrite
 loops that do not obtain a passing test/build. Downloadable source archives omit interpreter and
 test-runner caches such as `__pycache__`, `.pytest_cache`, and compiled Python bytecode.
+Stale project architecture refresh runs durably in the background instead of blocking the planner.
+For monorepos, build and test verification discovers nested manifest roots but selects only modules
+with actual Git working-tree changes; ambiguous unscoped modules are reported unavailable rather
+than building unrelated applications. A provider output cap before the first write gets one bounded
+same-route mutation-only call with expanded output headroom. Recovered writes then re-enter the
+ordinary worker loop so required maintained tests, verification, and a later real `completeTask`
+still have to occur; unadvertised recovery tools are refused and at most two guarded follow-up turns
+are added at the iteration ceiling. Existing zero-write best-guess salvage remains a warning even when the current
+workspace suite is green: passing old tests is non-regression evidence, not proof that requested
+new coverage was delivered.
+
+Library/module changes without explicit server or API intent stay on the library validation
+surface. Node projects using the built-in `node --test` runner contribute their real executable
+counts, and weaker later test events cannot erase stronger proven evidence. Reviewer provider calls
+are recorded separately from worker calls in the run cost/evidence ledger.
+
+Terminal run results use the validation report's reviewer verdict and product-file count as the
+customer-facing truth. Bootstrap/workspace metadata remains visible in Explorer but is not labeled
+generated product code. “Run again” preserves the persisted provider/model route; changing provider
+is a separate, explicit paid action that clears an exact model pin.
 
 Terminal server-owned runs can be continued through
 `POST /api/runs/{sourceRunId}/iterate` with `{ "userRequest": "..." }`. The endpoint creates and
 starts a new BUILD run, records `sourceRunId`, inherits the source route/project/repository and
 execution/publication policies, and initializes from a fail-closed Git-tracked workspace snapshot.
 Callers may provide `Idempotency-Key`; the route requires write access to the source run.
+
+The protected Web surfaces send caller-owned idempotency keys for create, fork, and iterate
+mutations. A key is retained in the current browser tab only while the outcome is ambiguous, so a
+retry or same-tab reload replays the same server claim instead of creating duplicate work; a
+successful, definitively rejected, changed, or deliberately repeated action receives a fresh key.
+The tab ledger stores only a SHA-256 digest of the canonical request plus the idempotency key and
+timestamp; spec/request text is never written to sessionStorage.
+Project Start Work also exposes the existing exact per-run model override to Enterprise users; the
+selection applies to that run only and does not alter the project or organization matrix. Its
+catalog comes from the authenticated run-submitter model endpoint, so Enterprise developers do not
+need ORG_ADMIN access merely to select an allowed exact route.
+
+Active run detail overlays persisted cost with the higher JVM-owned live cost snapshot; terminal
+runs always expose stored durable cost. Effective route evidence keeps `MIXED` for multiple physical
+models, but retains the common provider when every tier stayed on that provider, so a provider-only
+request is not falsely shown as cross-provider divergence. Exact model pins remain strict.
+Terminal result pages render the server-owned outcome verbatim with exactly one primary next action;
+logs, evidence, and files remain secondary diagnostics. User cancellation is presented as a neutral
+stop, while platform failures retain a support code without exposing internal exception detail.
+An existing pull request does not by itself prove that the terminal attempt changed code; failed or
+limited attempts leave that impact unknown. Provider and model-route failures lead directly to
+`/provider-keys` rather than offering a retry against the same invalid configuration.
+
+Run-event publication uses bounded per-run lock striping to order Redis replay append, local
+delivery, Redis publication, subscription installation, and completion; unconstrained Spring
+listeners run afterward. Remote Redis callbacks are sequence-reordered in a bounded buffer, and a
+typed terminal event closes peer streams only after it is delivered. A bounded terminal marker
+makes later subscribers replay and close. Each connected Web/CLI subscriber has one ordered
+replay/live lane, bounded FIFO, and virtual-thread writer, so a
+disconnected or non-reading socket cannot stall the run orchestrator, Redis listener, event
+producer, or another subscriber. Heartbeats detect quiet half-open sockets; a 30-second blocked-send
+watchdog retires them, while stuck writer/close work remains bounded and admission-accounted.
+Buffer exhaustion retires only that client and relies on `Last-Event-ID` replay; terminal stream
+completion is queued after already accepted frames so final status/cost/completion events are not
+truncated.
 
 Standalone remote `repoMode=EXISTING` runs clone `repoUrl` into the run workspace before the first
 model call and fail closed unless the checkout contains Git metadata plus a deterministic source
@@ -87,7 +162,13 @@ source run's host tenant while assigning the current actor as payer on BUILD ite
 server-internal finding PATCH submission resolve its active host project and active actor before
 dedupe or dispatch.
 
-The current deployment candidate advances the migration source head to V367. V354 adds
+Project architecture and generated-document evidence distinguish an empty Spring parser result
+from positive Spring MVC evidence. Non-Spring repositories are labelled `NOT_ESTABLISHED`.
+Generated project explanations can ground narrowly scoped behavior in digest-validated, exact-SHA
+exported JavaScript/TypeScript function excerpts; incomplete or budget-truncated excerpts are never
+treated as authority.
+
+The current deployment candidate advances the migration source head to V373. V354 adds
 rollout-gated operation-fenced provider-attempt admission; its default remains
 `EXECUTESPEC_LLM_OPERATION_ADMISSION_MODE=LEGACY`, so this deployment does not activate the new
 admission path. V355 adds bounded oldest-first recovery for stale streamed agent turns and never
@@ -98,7 +179,19 @@ documents durable asynchronous jobs with exact-route admission, fenced publicati
 status, and bounded terminal-job retention. V359 gives each immutable GitHub check-run/head-SHA
 failure a unique database claim before CI autofix submission, binds the canonical PATCH run in the
 next fenced transaction, and permits a later delivery to retry after a fenced failed submission or
-an expired claim with no discoverable run. V360 persists a run-bound canonical Spring HTTP surface
+an expired claim with no discoverable run. V373 separates the durable checkout branch from
+existing-PR publication authority. Ordinary Execution View/AIDLC launches may clone a selected
+source branch while still opening a fresh ExecuteSpec PR. Continue-on-PR runs bind the checkout,
+repository, PR number, and head branch before async dispatch; publication revalidates that exact
+identity, fast-forwards without force, and never schedules the pre-existing branch for cleanup.
+PR-review and CI-fix admission also recheck the live open PR, configured base, and captured 40-hex
+head SHA before dispatch; V373 persists that SHA immutably and fresh/recovered clones prove actual
+HEAD before provider spend. An active-run replay is accepted only when actor, tenant, payer,
+selected repository, checkout branch, and publication tuple all match exactly. Private-repository
+clones retain the active actor's in-memory GitHub credential. Crash-recovered clones must prove
+their actual branch before planning, and correction runs project the reused PR's live status/CI
+evidence through their own run-detail API.
+V360 persists a run-bound canonical Spring HTTP surface
 at brownfield admission and blocks route removal after workers, corrections, validation, and
 immediately before publication unless an exact durable `BREAKING` gate receipt authorizes it. V361
 binds every new validation report and ledger entry to a canonical Git-tree workspace generation.
@@ -138,7 +231,26 @@ Validation-report responses expose their lifecycle status; a stale/pending/faile
 its previously computed pipeline result, and the Evidence UI presents regeneration state instead of
 relabeling old validation as current. Public report links reject those non-complete rows instead of
 publishing earlier scores or test claims. Known non-HTTP reports omit endpoint coverage from both score
-numerator and denominator rather than receiving a penalty or synthetic midpoint credit.
+numerator and denominator rather than receiving a penalty or synthetic midpoint credit. V367
+persists that runtime-surface applicability; V368 disables legacy Apply-to-Run until it uses the
+correction lifecycle; V369 persists crash-recoverable correction authority; V370 aligns correction
+digest column types with Hibernate validation; and V371 persists skipped tests separately. A fresh
+exit-zero suite is publication-green only when at least one test passed and
+`passed + skipped == total`; all-skipped, malformed, failed, errored, non-zero-exit, or unverified
+suites remain blocked.
+Historical plan estimates are tenant- and route-scoped: V372 fingerprints the successful physical
+provider/model set, corrected persisted task count, and canonical LOW/MEDIUM/HIGH distribution, so
+an exact model selection no longer loses compatible history or silently borrows costs from another
+model, failover route, or materially cheaper task mix. Project-generated
+setup/explanation documents exclude recursive model-generated architecture prose, reserve exact-SHA
+configuration/Compose/Spring-handler facts ahead of bulk codemap inventory, and retry or fail closed
+on unsupported schema-ownership, Compose-startup, or response-representation claims.
+System Map prose also fails closed on exhaustive function contracts such as allowed fields or
+options unless one complete exact-source entry is bound to the repository and exact source SHA and
+the same function checks a same-variable literal collection whose values exactly equal the claim.
+Declaration inventory, Purpose summaries, unrelated functions/repositories or collections, subset
+claims, unresolved constants, truncated evidence, and combined-project prose cannot authorize the
+claim.
 SCM push failures expose a stable failure code, the exact blocking gate (for example `GIT_PUSH` or
 `PR_CREATION`), and remediation. Correction evidence shows the complete durable task/action history
 instead of only the last transaction.
@@ -155,7 +267,7 @@ RequirementIR also remains `LEGACY`.
 | Project           | `2.0.0`             | [`VERSION`](VERSION), [`Version`](Version), [`pom.xml`](pom.xml) `<version>` |
 | Spring Boot       | `3.5.14`            | [`pom.xml`](pom.xml) `<parent>` (bumped from `3.3.0` by Dependabot #132, 2026-05-16) |
 | Spring AI         | `1.1.6`             | [`pom.xml`](pom.xml) `<spring-ai.version>` (BOM import)                |
-| Flyway head       | `V367`              | V366 persists score-zero causality; V367 binds validation runtime-surface applicability; next V368 |
+| Flyway head       | `V373`              | V373 separates checkout from exact existing-PR authority; next V374      |
 | Frontend          | `2.0.0`             | [`frontend/package.json`](frontend/package.json) `"version"`           |
 
 `VERSION` and `Version` are kept identical by hand; the project's own conventions reference `Version` as the source of truth. The frontend ships under the same release stamp as the backend.
@@ -174,6 +286,14 @@ The bind-mounted run workspace must also be owned and writable by the configured
 `executespec.sandbox.runtime-uid:runtime-gid` (defaults `65532:65532`). Provisioning verifies the
 existing tree and refuses it without changing permissions; the deployed service/workspace
 ownership must be aligned explicitly before rollout.
+When strict sandbox command routing is enabled, `backgroundJob` rejects new starts rather than
+launching a host process outside the container boundary; status/log/kill remain available so a
+runtime-policy transition cannot strand a process that was already running.
+The local validation script also exercises non-root identity, Docker-socket/host-path denial, zero
+capabilities, cgroup ceilings with swap disabled, no-exec `/tmp`, metadata-network denial, and the advertised compiler
+toolchains. This is not deployment readiness: a cold Maven build currently cannot resolve project
+dependencies under `--network none`, so a digest-pinned dependency cache or governed artifact
+egress is required before the four runtime flags can be enabled.
 
 ## Stack at a glance
 
@@ -183,7 +303,7 @@ ownership must be aligned explicitly before rollout.
 | Framework           | Spring Boot 3.5.14 (Web, Data JPA, Security, OAuth2 client, Mail, Thymeleaf, Actuator, AOP, Validation, Retry, Data Redis) | [`pom.xml`](pom.xml) deps 1, 5, 14–20, 30, 36–39, 60 |
 | LLM SDK             | Spring AI 1.1.6 starters for Anthropic, OpenAI, Google GenAI                        | [`pom.xml`](pom.xml) deps 2–4                                                    |
 | LLM auto-config     | Provider auto-configurations disabled in favor of manual `AgentModelConfig` beans   | [`src/main/java/com/navneet/executespec/ExecutespecApplication.java`](src/main/java/com/navneet/executespec/ExecutespecApplication.java) |
-| Database            | PostgreSQL (Cloud SQL in prod), Flyway migrations head V367                         | [`pom.xml`](pom.xml) deps 6–8, `src/main/resources/db/migration/`                 |
+| Database            | PostgreSQL (Cloud SQL in prod), Flyway migrations head V373                         | [`pom.xml`](pom.xml) deps 6–8, `src/main/resources/db/migration/`                 |
 | Cache / lock        | Redis (Lettuce), ShedLock 7.7.0                                                     | [`pom.xml`](pom.xml) deps 30–32                                                  |
 | Auth                | JJWT 0.13.0 + Spring Security OAuth2 client (Google, GitHub)                        | [`pom.xml`](pom.xml) deps 14–18                                                  |
 | Billing             | Stripe 32.1.0, Razorpay (HMAC), invoice PDFs via OpenPDF 2.0.3 + flying-saucer 9.4.0 | [`pom.xml`](pom.xml) deps 21–22, 56; HMAC via commons-codec 1.22.0 (dep 35)     |
@@ -195,8 +315,13 @@ ownership must be aligned explicitly before rollout.
 | Charts / UI         | Monaco editor 4.7, d3 7.9, recharts 2.12, framer-motion 11, lucide-react, cmdk, Radix Tabs, react-markdown + remark-gfm | [`frontend/package.json`](frontend/package.json) |
 | Frontend telemetry  | OpenTelemetry web SDK 2.7 + auto-instrumentations 0.63 + OTLP HTTP exporter; PostHog | [`frontend/package.json`](frontend/package.json), [`frontend/src/main.tsx`](frontend/src/main.tsx) |
 | Typography          | JetBrains Mono (variable) — `font-family: 'JetBrains Mono', ui-monospace, ...` for both `sans` and `mono` aliases | [`frontend/tailwind.config.ts`](frontend/tailwind.config.ts), [`frontend/src/index.css`](frontend/src/index.css) |
-| CI                  | GitHub Actions: `lint.yml` on PRs to `dev`/`main`; `deploy.yml` on push to `dev`/`benchmark` plus manual protected `prod` dispatch | [`.github/workflows/lint.yml`](.github/workflows/lint.yml), [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) |
+| CI                  | GitHub Actions: `lint.yml` on PRs to `dev`/`main`; `deploy.yml` on push to `dev`/`benchmark` plus manual protected `prod` dispatch. Deploy reads `/opt/app/RUNNING_SHA` back from the target host and fails on any target-SHA mismatch before health verification. | [`.github/workflows/lint.yml`](.github/workflows/lint.yml), [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) |
 | Cloud               | GCP us-east4 — single GCE VM serves prod + dev; Cloud Run for on-demand previews; Workload Identity Federation for deploy auth | [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) |
+
+Browser session hydration is fail-visible: protected routes retain a valid session across a
+transient `/auth/me` failure and show an explicit Retry action instead of an indefinite loading
+screen. Automatic cookie refresh uses the same bounded 30-second transport deadline as other API
+requests.
 
 Python previews resolve bounded nested application packages: a FastAPI app declared in
 `app/main.py` is launched as `app.main:app` for both VM/Docker and Cloud Run preview commands.
@@ -238,7 +363,7 @@ Gemini 3.5 Flash/3.5 Flash-Lite, native DeepSeek V4, and the surviving Fireworks
 │   └── ... (78 package roots total under com.navneet.executespec)
 ├── src/main/resources/
 │   ├── application.yml           Single source of truth for model matrix, provider routes, pricing, failover
-│   ├── db/migration/             Flyway V*.sql (head V367; next V368; 353 source files; immutable post-apply)
+│   ├── db/migration/             Flyway V*.sql (head V373; next V374; 359 source files; immutable post-apply)
 │   ├── prompts/                  External LLM prompts (assembled by PromptAssembler)
 │   └── static/                   Vite build output served by Spring Boot
 ├── src/test/java/                Unit + ArchUnit guard tests (e.g. AccessGuardCoverageTest)
@@ -364,11 +489,19 @@ Enterprise org matrix overrides. It cannot adapt or fail over, including across 
 Code Review executor; an unavailable or drifting route returns 503. Usage is attributed to the
 initiating actor while credential resolution remains bound to the host project subject.
 
-Hard caps are architecture **1,000,000 tokens / $10 / 64 provider calls**, generated docs
-**200,000 / $3 / 2**, and code review **300,000 / $5 / 2**. A consumed grant is never resurrected
+Hard limits apply to the configured token and provider-call counts: architecture **1,000,000 tokens
+/ 64 calls**, generated docs **200,000 / 2**, and code review **300,000 / 2**. The corresponding
+**$10 / $3 / $5** ceilings are reconciled from successful provider usage; the final admitted call
+can cross its dollar ceiling before a later call is denied. A consumed grant is never resurrected
 after failure. Issue, deny, consume, expiry, replay, completion, and failure decisions enter the
 hash-chained `activity_audit`; V292 rejects audit-row UPDATE/DELETE and serializes cross-JVM chain
 appends with a PostgreSQL transaction advisory lock.
+
+Durable Web document jobs enforce the same generated-doc token/call limits and post-call dollar
+reconciliation per confirmed attempt, and use the short interactive retry envelope. If provider
+dispatch began but delivery remains uncertain and nothing was published, the job requires explicit
+confirmation before replay and shows a stable safe failure code; it does not silently create
+another billable attempt.
 
 ### Enterprise LLM usage audit
 
@@ -450,6 +583,15 @@ Validation evidence is fail-closed: code-changing tasks require an admitted base
 diff attributable to that task, and persisted executable verification distinguishes `PASSED`,
 `BUILD_ONLY`, `FAILED`, and `UNAVAILABLE`. The Web evidence ledger exposes those deterministic facts;
 the headline score is a summary and must not be treated as independent proof.
+Standalone existing-repository runs persist the actual checked-out branch and immutable starting
+commit even when the default branch was implicit; root-workspace Files and change evidence use
+that baseline, while Render uses the admitted repository layout. Restored project Preview/Render
+use their nested `repos/<name>` content even though archives omit nested Git metadata; change
+evidence and required iteration copies fail closed when the original nested Git proof is
+unavailable. Project architecture and generated-doc
+admission return structured provider/matrix error codes, generated EXPLANATION workflow guidance is
+rebuilt from exact-revision setup evidence, and unbuilt semantic indexes are shown as unmeasured
+rather than misleading `0/0` coverage.
 Post-run Ask follows the same rule: configured build success is not test success, missing concrete
 test counts remain an explicit verification gap, and provider tool-protocol markup is suppressed
 rather than displayed to customers. A post-run Ask response stopped by `length` / `max_tokens`
@@ -486,7 +628,10 @@ budget across architecture plus every linked repository. Each repository section
 codemap at the exact SHA captured by that architecture version; source drift fails closed. Every
 abnormal provider finish reason is rejected. Required structure, balanced code fences, secrets, and
 tool-protocol leakage are checked before save, while reads/downloads re-scan retained legacy
-documents. EXPLANATION output also fails closed on concrete symbol-to-symbol call edges and
+documents. SETUP publication deterministically rebuilds the complete operational guide from exact
+setup authority: clone targets and projected commands are repository-scoped and fenced one command
+at a time, while unproven environment, startup-order, health, or troubleshooting details are stated
+as unknown. Provider-authored setup commands are never published. EXPLANATION output also fails closed on concrete symbol-to-symbol call edges and
 inactive/unused/stub/dead-code claims, plus directional Mermaid edges, that declaration-only
 codemaps cannot prove. Relationship euphemisms such as works/interacts/collaborates/depends/uses and
 symbol-local hinted/placeholder/prototype/candidate labels are covered by the same narrow gate.
@@ -529,7 +674,14 @@ Workers stop authorizing provider/tool turns after configured live task ceilings
 per-solve dollar cap is task-scoped. `worker.best-effort-max-task-cost-usd` and
 `worker.best-effort-max-task-total-tokens` optionally stop task spend and input+output tokens in the
 current JVM; both default to `-1` (disabled), and Terminal-Bench is exempt from these defaults.
-These are safety stops, not durable authorization boundaries: restart recovery does not yet hydrate
+Before a worker provider call, ExecuteSpec also reserves a conservative estimate of the complete
+next call against the run and task cost caps. Admission runs after managed routing and on failover,
+so it prices the effective provider/model rather than an earlier requested route. The estimate
+assumes uncached input with headroom and the requested maximum output; it reduces material one-call
+overshoot but is not an exact invoice guarantee because provider tokenization and cache results
+arrive after the response. Missing model pricing falls back to observed-spend enforcement rather
+than being treated as free. These are
+safety stops, not durable authorization boundaries: restart recovery does not yet hydrate
 `RunCostTracker` from `run_step_usage`. A successful build/test/shell check counts as progress
 once after a workspace mutation, but repeated verification against unchanged files cannot keep a
 worker alive indefinitely.

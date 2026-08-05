@@ -64,12 +64,35 @@ final class RequiredIterationWorkspaceCopier {
           "source workspace contains no Git-tracked files for iteration " + sourceRunId);
     }
 
-    for (RunRepoSnapshot sourceSnapshot : snapshotRepository.findByRunId(sourceRunId)) {
-      Path targetRepo =
-          target
+    List<RunRepoSnapshot> sourceSnapshots = snapshotRepository.findByRunId(sourceRunId);
+    for (RunRepoSnapshot sourceSnapshot : sourceSnapshots) {
+      Path sourceNested =
+          source
               .resolve("repos")
               .resolve(WorkspaceInitService.repoDirectoryName(sourceSnapshot.getRepoFullName()));
+      Path targetRepo;
+      if (sourceSnapshot.getRepoId() != null) {
+        if (!Files.isDirectory(sourceNested)) {
+          throw new IllegalStateException(
+              "source repository workspace unavailable after restore: "
+                  + sourceSnapshot.getRepoFullName());
+        }
+        if (!Files.isDirectory(sourceNested.resolve(".git"))) {
+          throw new IllegalStateException(
+              "source repository Git metadata unavailable after restore: "
+                  + sourceSnapshot.getRepoFullName());
+        }
+        targetRepo =
+            target
+                .resolve("repos")
+                .resolve(WorkspaceInitService.repoDirectoryName(sourceSnapshot.getRepoFullName()));
+      } else if (sourceSnapshots.size() == 1 && Files.isDirectory(source.resolve(".git"))) {
+        targetRepo = target;
+      } else {
+        continue;
+      }
       if (!Files.isDirectory(targetRepo.resolve(".git"))) continue;
+      checkoutBaselineBranch(targetRepo, sourceSnapshot);
       persistSnapshot(targetRunId, sourceSnapshot, targetRepo);
     }
     log.info(
@@ -143,6 +166,26 @@ final class RequiredIterationWorkspaceCopier {
             .map(source::resolve)
             .filter(path -> Files.exists(path, LinkOption.NOFOLLOW_LINKS))
             .count();
+  }
+
+  /**
+   * Re-anchors the copied repository on the source snapshot's baseline branch. Auto-push leaves the
+   * source checkout on its publication branch (`executespec/<runId>`), and the local clone follows
+   * that HEAD, so without this the child's preflight branch verification fails deterministically
+   * for every project run that published. The working tree and HEAD commit are unchanged — only the
+   * branch name is restored to the recorded baseline.
+   */
+  private static void checkoutBaselineBranch(Path repository, RunRepoSnapshot snapshot)
+      throws IOException, InterruptedException {
+    String branch = snapshot.getBranch();
+    if (branch == null || branch.isBlank()) return;
+    String trimmed = branch.trim();
+    if (trimmed.startsWith("-") || trimmed.contains("..") || !trimmed.matches("[A-Za-z0-9._/-]+")) {
+      throw new IllegalStateException(
+          "iteration baseline branch is not a safe Git branch name for "
+              + snapshot.getRepoFullName());
+    }
+    runGitStrict(repository, "git", "checkout", "-B", trimmed);
   }
 
   private void persistSnapshot(String runId, RunRepoSnapshot source, Path target)

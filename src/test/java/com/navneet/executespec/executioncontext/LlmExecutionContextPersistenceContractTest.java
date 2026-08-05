@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 
+import jakarta.persistence.Column;
 import jakarta.persistence.LockModeType;
 import jakarta.persistence.Version;
 
@@ -24,5 +25,16 @@ class LlmExecutionContextPersistenceContractTest {
     Lock lock = findForUpdate.getAnnotation(Lock.class);
     assertThat(lock).isNotNull();
     assertThat(lock.value()).isEqualTo(LockModeType.PESSIMISTIC_WRITE);
+  }
+
+  @Test
+  void sourceAndCorrelationLengthsMatchTheValidatedCreateRequestBounds() throws Exception {
+    Column sourceId =
+        LlmExecutionContext.class.getDeclaredField("sourceId").getAnnotation(Column.class);
+    Column correlationId =
+        LlmExecutionContext.class.getDeclaredField("correlationId").getAnnotation(Column.class);
+
+    assertThat(sourceId.length()).isEqualTo(160);
+    assertThat(correlationId.length()).isEqualTo(96);
   }
 }

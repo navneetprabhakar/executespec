@@ -10,6 +10,7 @@ import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -19,9 +20,11 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
@@ -72,7 +75,11 @@ class PreviewRenderServiceTest {
   private WorkspaceRestoreService restore;
   private RunChangeEvidenceService changes;
   private StateStore stateStore;
+  private PreviewRenderRouteResolver routeResolver;
+  private ResolvedModel frozenRoute;
   private PreviewRenderService service;
+  private PipelineRun run;
+  private final Set<String> changedPaths = Collections.synchronizedSet(new HashSet<>());
 
   @BeforeEach
   void setUp() throws Exception {
@@ -169,15 +176,37 @@ class PreviewRenderServiceTest {
 
     stateStore = mock(StateStore.class);
     changes = mock(RunChangeEvidenceService.class);
+    routeResolver = mock(PreviewRenderRouteResolver.class);
 
-    PipelineRun run = new PipelineRun();
+    run = new PipelineRun();
     run.setAiProvider(LlmProvider.ANTHROPIC.name());
+    run.setStatus("COMPLETE");
+    frozenRoute =
+        ResolvedModel.builder()
+            .requestedProvider(LlmProvider.ANTHROPIC)
+            .actualProvider(LlmProvider.ANTHROPIC)
+            .model("claude-workhorse")
+            .agentTier(AgentTier.WORKHORSE)
+            .build();
     when(stateStore.findRun(RUN_ID)).thenReturn(Optional.of(run));
     when(flags.isEnabled(PreviewRenderService.FLAG)).thenReturn(true);
     when(restore.ensureWorkspaceAvailable(RUN_ID)).thenReturn(workspace);
     when(changes.meaningfulProductDiffCount(RUN_ID)).thenReturn(1);
-    // An invalid diff must degrade the ranking signal, not fail the render.
-    when(changes.inspect(anyString(), any())).thenReturn(null);
+    when(routeResolver.resolve(run)).thenReturn(frozenRoute);
+    when(changes.inspect(anyString(), any()))
+        .thenAnswer(
+            ignored -> {
+              var files =
+                  changedPaths.stream()
+                      .sorted()
+                      .map(
+                          path ->
+                              new RunChangeEvidenceService.ChangedFile(
+                                  path, "M", RunChangeEvidenceService.Provenance.WORKER, true))
+                      .toList();
+              return new RunChangeEvidenceService.ChangeEvidence(
+                  true, null, "baseline", files, files);
+            });
 
     service =
         new PreviewRenderService(
@@ -188,7 +217,9 @@ class PreviewRenderServiceTest {
             restore,
             changes,
             stateStore,
-            flags);
+            flags,
+            null,
+            routeResolver);
 
     configure(service);
   }
@@ -222,7 +253,33 @@ class PreviewRenderServiceTest {
         .hasMessageContaining("produced no product files");
 
     assertThat(jobStore).isEmpty();
-    verify(agent, never()).render(any(), any(), anyString(), anyString());
+    verify(agent, never()).render(any(), any(), anyString(), anyString(), any());
+  }
+
+  @Test
+  void rejectsNewRenderUntilRunIsTerminal() {
+    run.setStatus("WORKING");
+
+    assertThatThrownBy(() -> service.requestRender(RUN_ID, "user"))
+        .isInstanceOf(ResponseStatusException.class)
+        .hasMessageContaining("only after the run is terminal");
+
+    assertThat(jobStore).isEmpty();
+    verify(changes, never()).meaningfulProductDiffCount(anyString());
+  }
+
+  @Test
+  void routeResolutionFailurePersistsNoJobAndStartsNoRender() throws Exception {
+    writeScreen("src/pages/Home.tsx", "Home");
+    when(routeResolver.resolve(any())).thenThrow(new IllegalStateException("invalid route"));
+
+    assertThatThrownBy(() -> service.requestRender(RUN_ID, "user"))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("invalid route");
+
+    assertThat(jobStore).isEmpty();
+    verify(jobs, never()).saveAndFlush(any());
+    verify(agent, never()).render(any(), any(), anyString(), anyString(), any());
   }
 
   @Test
@@ -230,7 +287,7 @@ class PreviewRenderServiceTest {
     writeScreen("src/pages/Home.tsx", "Home");
     writeScreen("src/pages/Settings.tsx", "Settings");
 
-    when(agent.render(any(), any(), anyString(), anyString()))
+    when(agent.render(any(), any(), anyString(), anyString(), any()))
         .thenAnswer(
             inv -> {
               PreviewSurface s = inv.getArgument(0);
@@ -246,6 +303,10 @@ class PreviewRenderServiceTest {
     assertThat(done.getSurfacesFound()).isEqualTo(2);
     assertThat(done.getSurfacesRendered()).isEqualTo(2);
     assertThat(done.getCompletedAt()).isNotNull();
+    assertThat(done.getProvider()).isEqualTo(LlmProvider.ANTHROPIC.name());
+    assertThat(done.getModel()).isEqualTo("claude-workhorse");
+    verify(routeResolver, times(1)).resolve(any());
+    verify(agent, times(2)).render(any(), eq(frozenRoute), eq(RUN_ID), anyString(), any());
 
     List<PreviewRenderBundle> saved = bundles.findByJobIdOrderByDisplayOrderAsc(job.getId());
     assertThat(saved).hasSize(2);
@@ -264,7 +325,6 @@ class PreviewRenderServiceTest {
         new LlmExecutionReference("ctx-preview", LlmExecutionScope.customer("org"));
     LlmExecutionOperationClaim claim =
         new LlmExecutionOperationClaim(reference, "llmop-preview", 1, 1, UUID.randomUUID());
-    when(policies.forRunPreviewSurface(eq(RUN_ID), anyString())).thenReturn(reference);
     when(operationService.claimOrResume(any(), any(), anyString(), any()))
         .thenReturn(Optional.of(claim));
     when(operationService.complete(eq(claim), anyString())).thenReturn(true);
@@ -278,7 +338,8 @@ class PreviewRenderServiceTest {
             .model("claude-sonnet")
             .agentTier(AgentTier.WORKHORSE)
             .build();
-    when(agent.resolveRoute(LlmProvider.ANTHROPIC)).thenReturn(route);
+    when(policies.forRunPreviewSurface(eq(RUN_ID), anyString(), eq(route))).thenReturn(reference);
+    when(routeResolver.resolve(any())).thenReturn(route);
     when(agent.render(any(), eq(route), eq(RUN_ID), anyString(), any()))
         .thenAnswer(
             invocation -> {
@@ -296,7 +357,8 @@ class PreviewRenderServiceTest {
             changes,
             stateStore,
             flags,
-            operationRoot);
+            operationRoot,
+            routeResolver);
     configure(service);
 
     PreviewRenderJob job = service.requestRender(RUN_ID, "user");
@@ -311,7 +373,7 @@ class PreviewRenderServiceTest {
   void persistsRejectedSurfaceAsReasonWithoutStoringItsHtml() throws Exception {
     writeScreen("src/pages/Home.tsx", "Home");
 
-    when(agent.render(any(), any(), anyString(), anyString()))
+    when(agent.render(any(), any(), anyString(), anyString(), any()))
         .thenAnswer(
             inv ->
                 new PreviewRenderAgent.RenderedSurface(
@@ -343,7 +405,51 @@ class PreviewRenderServiceTest {
     assertThat(jobs.findById(job.getId()).orElseThrow().getStatus())
         .isEqualTo(PreviewRenderJob.Status.NO_SURFACES.name());
     // A run with no UI must never spend a provider call.
-    verify(agent, never()).render(any(), any(), anyString(), anyString());
+    verify(agent, never()).render(any(), any(), anyString(), anyString(), any());
+  }
+
+  @Test
+  void backendOnlyChangeCannotRenderUntouchedUi() throws Exception {
+    writeScreen("src/pages/Home.tsx", "Home");
+    changedPaths.clear();
+    changedPaths.add("src/main/java/example/ApiController.java");
+
+    PreviewRenderJob job = service.requestRender(RUN_ID, "user");
+    awaitTerminal(job);
+
+    assertThat(jobs.findById(job.getId()).orElseThrow().getStatus())
+        .isEqualTo(PreviewRenderJob.Status.NO_SURFACES.name());
+    verify(agent, never()).render(any(), any(), anyString(), anyString(), any());
+  }
+
+  @Test
+  void oneDeadlineBoundsTheWholeJobAndCancelsQueuedSurfaces() throws Exception {
+    writeScreen("src/pages/Home.tsx", "Home");
+    writeScreen("src/pages/Settings.tsx", "Settings");
+    ReflectionTestUtils.setField(service, "parallelism", 1);
+    ReflectionTestUtils.setField(service, "timeoutSeconds", 1);
+    when(agent.render(any(), any(), anyString(), anyString(), any()))
+        .thenAnswer(
+            invocation -> {
+              Thread.sleep(Duration.ofSeconds(10));
+              PreviewSurface surface = invocation.getArgument(0);
+              return new PreviewRenderAgent.RenderedSurface(
+                  surface.id(), "<html><body>late</body></html>", null);
+            });
+
+    long started = System.nanoTime();
+    PreviewRenderJob job = service.requestRender(RUN_ID, "user");
+    awaitTerminal(job);
+    long elapsedMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started);
+
+    assertThat(elapsedMillis).isLessThan(2_500);
+    assertThat(bundles.findByJobIdOrderByDisplayOrderAsc(job.getId()))
+        .hasSize(2)
+        .allSatisfy(
+            bundle -> {
+              assertThat(bundle.getStatus()).isEqualTo(PreviewRenderBundle.Status.FAILED.name());
+              assertThat(bundle.getFailureReason()).isEqualTo("TIMEOUT");
+            });
   }
 
   @Test
@@ -356,13 +462,13 @@ class PreviewRenderServiceTest {
     PreviewRenderJob done = jobs.findById(job.getId()).orElseThrow();
     assertThat(done.getStatus()).isEqualTo(PreviewRenderJob.Status.FAILED.name());
     assertThat(done.getFailureReason()).isEqualTo("WORKSPACE_UNAVAILABLE");
-    verify(agent, never()).render(any(), any(), anyString(), anyString());
+    verify(agent, never()).render(any(), any(), anyString(), anyString(), any());
   }
 
   @Test
   void returnsTheInFlightJobInsteadOfStartingASecond() throws Exception {
     writeScreen("src/pages/Home.tsx", "Home");
-    when(agent.render(any(), any(), anyString(), anyString()))
+    when(agent.render(any(), any(), anyString(), anyString(), any()))
         .thenAnswer(
             inv -> {
               Thread.sleep(400);
@@ -391,6 +497,7 @@ class PreviewRenderServiceTest {
             .leaseExpiresAt(Instant.now().plus(Duration.ofMinutes(5)))
             .build();
     jobStore.put(active.getId(), active);
+    run.setStatus("WORKING");
     when(changes.meaningfulProductDiffCount(RUN_ID)).thenReturn(0);
 
     assertThat(service.requestRender(RUN_ID, "user").getId()).isEqualTo(active.getId());
@@ -453,7 +560,7 @@ class PreviewRenderServiceTest {
     writeScreen("src/pages/Home.tsx", "Home");
     CountDownLatch renderStarted = new CountDownLatch(1);
     CountDownLatch releaseRender = new CountDownLatch(1);
-    when(agent.render(any(), any(), anyString(), anyString()))
+    when(agent.render(any(), any(), anyString(), anyString(), any()))
         .thenAnswer(
             inv -> {
               renderStarted.countDown();
@@ -545,7 +652,7 @@ class PreviewRenderServiceTest {
   }
 
   private void stubSuccessfulRender() {
-    when(agent.render(any(), any(), anyString(), anyString()))
+    when(agent.render(any(), any(), anyString(), anyString(), any()))
         .thenAnswer(
             inv ->
                 new PreviewRenderAgent.RenderedSurface(
@@ -559,6 +666,7 @@ class PreviewRenderServiceTest {
     Files.createDirectories(target.getParent());
     Files.writeString(
         target, "export default function " + name + "(){ return (<div>" + name + "</div>); }");
+    changedPaths.add(relative);
   }
 
   /** The job runs on a virtual thread, so poll rather than assuming completion. */

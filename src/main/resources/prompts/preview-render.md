@@ -60,4 +60,14 @@ order, text content, and any colors or design tokens present in the supporting f
 source is genuinely silent on styling, choose clean, neutral, modern defaults rather than
 elaborate invention. You are showing the operator what they built, not redesigning it.
 
+Before returning the HTML, verify all of these conditions:
+
+- An ordinary product screen shows its populated successful state, with visible content rather
+  than a loading skeleton, placeholder, or empty state.
+- Every list, table, grid, or feed has 3–6 varied entries unless the source explicitly defines a
+  dedicated empty, loading, or error screen.
+- Source-defined structure and copy take priority over invented sample data or styling.
+- The result remains an offline visual approximation; it must not imply that the application,
+  backend, persistence, or controls are actually running.
+
 {{TARGET_GUIDANCE}}

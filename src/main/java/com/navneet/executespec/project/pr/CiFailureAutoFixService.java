@@ -141,6 +141,9 @@ public class CiFailureAutoFixService {
           FEATURE_FLAG);
       return AutoFixResult.skipped("feature flag " + FEATURE_FLAG + " disabled");
     }
+    if (headSha == null || !headSha.matches("[0-9a-fA-F]{40}")) {
+      return AutoFixResult.skipped("check_run delivery has no exact 40-character head SHA");
+    }
 
     Optional<PullRequestRecord> prOpt =
         prRepo.findFirstByRepoFullNameAndHeadBranchOrderByCreatedAtDesc(repoFullName, headBranch);
@@ -183,6 +186,14 @@ public class CiFailureAutoFixService {
     // the same repos.
     if (original.getCreatedByUserId() == null || original.getProjectId() == null) {
       return AutoFixResult.skipped("originating run missing user/project context");
+    }
+    List<UUID> publicationRepoIds =
+        pr.getRepoId() == null
+            ? parseRepoIds(original.getSelectedRepoIds())
+            : List.of(pr.getRepoId());
+    if (publicationRepoIds.size() != 1) {
+      return AutoFixResult.skipped(
+          "PR repository identity is unavailable or ambiguous — no auto-fix dispatched");
     }
 
     String findingId = ciFindingId(pr, checkRunId, headSha);
@@ -263,11 +274,14 @@ public class CiFailureAutoFixService {
             // attempt; duplicate delivery of the same event can never consume another attempt.
             findingId,
             original.getProjectId(),
-            parseRepoIds(original.getSelectedRepoIds()),
+            publicationRepoIds,
             prompt,
             headBranch,
             original.getCreatedByUserId(),
-            original.getAiProvider());
+            original.getAiProvider(),
+            repoFullName,
+            pr.getPrNumber(),
+            headSha);
 
     FindingPatchSubmitter.SubmitResult result;
     try {

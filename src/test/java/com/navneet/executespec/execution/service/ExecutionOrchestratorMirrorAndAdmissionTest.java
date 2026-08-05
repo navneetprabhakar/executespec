@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -17,6 +18,7 @@ import com.navneet.executespec.auth.entity.AppUser;
 import com.navneet.executespec.auth.entity.Project;
 import com.navneet.executespec.auth.repository.AppUserRepository;
 import com.navneet.executespec.codeintel.ProjectArchitectureService;
+import com.navneet.executespec.execution.dto.CreateExecutionRequest;
 import com.navneet.executespec.execution.entity.ExecutionRun;
 import com.navneet.executespec.execution.event.ExecutionEventTypes;
 import com.navneet.executespec.execution.repository.ExecutionRunRepository;
@@ -98,6 +100,145 @@ class ExecutionOrchestratorMirrorAndAdmissionTest {
             new PipelineExecutorPool());
     selfHolder[0] = orchestrator;
     ReflectionTestUtils.setField(orchestrator, "em", em);
+  }
+
+  @Test
+  void continuePrUsesCanonicalRecordedHeadBranch() {
+    when(projectRepoService.resolveForRunStrict(
+            org.mockito.ArgumentMatchers.eq("project-1"), any()))
+        .thenReturn(
+            List.of(
+                com.navneet.executespec.project.entity.ProjectRepo.builder()
+                    .githubRepoFullName("acme/app")
+                    .build()));
+    var pr =
+        com.navneet.executespec.project.pr.PullRequestRecord.builder()
+            .repoFullName("acme/app")
+            .prNumber(16)
+            .prUrl("https://github.com/acme/app/pull/16")
+            .headBranch("fix/pr16")
+            .status(com.navneet.executespec.project.pr.PullRequestRecord.Status.OPEN)
+            .build();
+    when(prRecordRepo.findByRepoFullNameAndPrNumber("acme/app", 16)).thenReturn(Optional.of(pr));
+    when(runRepo.save(any(ExecutionRun.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+    ExecutionRun run =
+        orchestrator.createExecution(
+            Project.builder().id("project-1").orgId("org-1").build(),
+            AppUser.builder().id("user-1").build(),
+            new CreateExecutionRequest(
+                "fix CI",
+                List.of(java.util.UUID.randomUUID().toString()),
+                List.of(),
+                false,
+                null,
+                null,
+                "FIREWORKS",
+                null,
+                "source-exec",
+                "acme/app",
+                16));
+
+    assertThat(run.getBranch()).isEqualTo("fix/pr16");
+    assertThat(run.getContinuePrRepo()).isEqualTo("acme/app");
+    assertThat(run.getContinuePrNumber()).isEqualTo(16);
+  }
+
+  @Test
+  void ordinaryExecutionPersistsCheckoutBranchWithoutContinuePrAuthority() {
+    when(runRepo.save(any(ExecutionRun.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+    ExecutionRun run =
+        orchestrator.createExecution(
+            Project.builder().id("project-1").orgId("org-1").build(),
+            AppUser.builder().id("user-1").build(),
+            new CreateExecutionRequest(
+                "build feature",
+                List.of(java.util.UUID.randomUUID().toString()),
+                List.of(),
+                false,
+                null,
+                null,
+                "FIREWORKS",
+                "feature/source",
+                null,
+                null,
+                null));
+
+    assertThat(run.getBranch()).isEqualTo("feature/source");
+    assertThat(run.getContinuePrRepo()).isNull();
+    assertThat(run.getContinuePrNumber()).isNull();
+  }
+
+  @Test
+  void continuePrRejectsExplicitBranchThatDoesNotMatchRecordedHead() {
+    when(projectRepoService.resolveForRunStrict(
+            org.mockito.ArgumentMatchers.eq("project-1"), any()))
+        .thenReturn(
+            List.of(
+                com.navneet.executespec.project.entity.ProjectRepo.builder()
+                    .githubRepoFullName("acme/app")
+                    .build()));
+    var pr =
+        com.navneet.executespec.project.pr.PullRequestRecord.builder()
+            .repoFullName("acme/app")
+            .prNumber(16)
+            .prUrl("https://github.com/acme/app/pull/16")
+            .headBranch("fix/pr16")
+            .status(com.navneet.executespec.project.pr.PullRequestRecord.Status.OPEN)
+            .build();
+    when(prRecordRepo.findByRepoFullNameAndPrNumber("acme/app", 16)).thenReturn(Optional.of(pr));
+
+    assertThatThrownBy(
+            () ->
+                orchestrator.createExecution(
+                    Project.builder().id("project-1").orgId("org-1").build(),
+                    AppUser.builder().id("user-1").build(),
+                    new CreateExecutionRequest(
+                        "fix CI",
+                        List.of(java.util.UUID.randomUUID().toString()),
+                        List.of(),
+                        false,
+                        null,
+                        null,
+                        "FIREWORKS",
+                        "other/pr",
+                        "source-exec",
+                        "acme/app",
+                        16)))
+        .isInstanceOf(ResponseStatusException.class)
+        .satisfies(
+            error ->
+                assertThat(((ResponseStatusException) error).getStatusCode())
+                    .isEqualTo(HttpStatus.CONFLICT));
+    verify(runRepo, never()).save(any());
+  }
+
+  @Test
+  void continuePrRejectsPartialIdentityBeforePersistingExecution() {
+    assertThatThrownBy(
+            () ->
+                orchestrator.createExecution(
+                    Project.builder().id("project-1").orgId("org-1").build(),
+                    AppUser.builder().id("user-1").build(),
+                    new CreateExecutionRequest(
+                        "fix CI",
+                        List.of(java.util.UUID.randomUUID().toString()),
+                        List.of(),
+                        false,
+                        null,
+                        null,
+                        "FIREWORKS",
+                        null,
+                        "source-exec",
+                        null,
+                        16)))
+        .isInstanceOf(ResponseStatusException.class)
+        .satisfies(
+            error ->
+                assertThat(((ResponseStatusException) error).getStatusCode())
+                    .isEqualTo(HttpStatus.BAD_REQUEST));
+    verify(runRepo, never()).save(any());
   }
 
   @Test

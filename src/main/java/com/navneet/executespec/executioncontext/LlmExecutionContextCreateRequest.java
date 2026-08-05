@@ -39,8 +39,8 @@ public record LlmExecutionContextCreateRequest(
 
     feature = require(feature, "feature").toLowerCase(java.util.Locale.ROOT);
     sourceType = require(sourceType, "sourceType").toUpperCase(java.util.Locale.ROOT);
-    sourceId = require(sourceId, "sourceId");
-    correlationId = require(correlationId, "correlationId");
+    sourceId = requireMax(sourceId, "sourceId", 160);
+    correlationId = requireMax(correlationId, "correlationId", 96);
     idempotencyKey = require(idempotencyKey, "idempotencyKey");
     parentContextId = trimToNull(parentContextId);
     userId = trimToNull(userId);
@@ -64,6 +64,14 @@ public record LlmExecutionContextCreateRequest(
   private static String require(String value, String field) {
     String normalized = trimToNull(value);
     if (normalized == null) throw new IllegalArgumentException(field + " required");
+    return normalized;
+  }
+
+  private static String requireMax(String value, String field, int maxLength) {
+    String normalized = require(value, field);
+    if (normalized.length() > maxLength) {
+      throw new IllegalArgumentException(field + " exceeds " + maxLength + " characters");
+    }
     return normalized;
   }
 

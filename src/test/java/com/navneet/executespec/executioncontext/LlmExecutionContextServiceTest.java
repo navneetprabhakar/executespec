@@ -197,6 +197,81 @@ class LlmExecutionContextServiceTest {
     assertThat(context.getKeySubjectUserId()).isEqualTo("host-org-key-user");
   }
 
+  @Test
+  void createRequestRejectsCorrelationIdsThatCannotFitTheDurableSchema() {
+    assertThatThrownBy(
+            () ->
+                new LlmExecutionContextCreateRequest(
+                    LlmExecutionContext.ContextType.PROJECT_JOB,
+                    "architecture",
+                    "PROJECT",
+                    "project-1",
+                    null,
+                    "x".repeat(97),
+                    ORG_A,
+                    "user-1",
+                    "org-a",
+                    "project-1",
+                    null,
+                    policy("user-1"),
+                    LlmExecutionBudget.UNBOUNDED,
+                    1,
+                    "idem-too-long-correlation",
+                    null))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("correlationId exceeds 96 characters");
+  }
+
+  @Test
+  void createRequestRejectsSourceIdsThatCannotFitTheDurableSchema() {
+    assertThatThrownBy(
+            () ->
+                new LlmExecutionContextCreateRequest(
+                    LlmExecutionContext.ContextType.PROJECT_JOB,
+                    "architecture",
+                    "PROJECT",
+                    "x".repeat(161),
+                    null,
+                    "corr-1",
+                    ORG_A,
+                    "user-1",
+                    "org-a",
+                    "project-1",
+                    null,
+                    policy("user-1"),
+                    LlmExecutionBudget.UNBOUNDED,
+                    1,
+                    "idem-too-long-source",
+                    null))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("sourceId exceeds 160 characters");
+  }
+
+  @Test
+  void createRequestAcceptsTheExactDurableSourceAndCorrelationBounds() {
+    LlmExecutionContextCreateRequest bounded =
+        new LlmExecutionContextCreateRequest(
+            LlmExecutionContext.ContextType.PROJECT_JOB,
+            "architecture",
+            "PROJECT",
+            "s".repeat(160),
+            null,
+            "c".repeat(96),
+            ORG_A,
+            "user-1",
+            "org-a",
+            "project-1",
+            null,
+            policy("user-1"),
+            LlmExecutionBudget.UNBOUNDED,
+            1,
+            "idem-exact-schema-bounds",
+            null);
+
+    assertThat(bounded.sourceId()).hasSize(160);
+    assertThat(bounded.correlationId()).hasSize(96);
+  }
+
   private LlmExecutionContext create(LlmExecutionContextCreateRequest request) {
     when(repository.saveAndFlush(any(LlmExecutionContext.class)))
         .thenAnswer(invocation -> invocation.getArgument(0));

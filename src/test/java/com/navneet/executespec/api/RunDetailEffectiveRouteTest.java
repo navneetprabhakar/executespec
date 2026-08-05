@@ -2,6 +2,9 @@ package com.navneet.executespec.api;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.util.List;
@@ -9,10 +12,12 @@ import java.util.Optional;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.api.dto.RunDetail;
+import com.navneet.executespec.api.dto.RunSummary;
 import com.navneet.executespec.auth.repository.AppUserRepository;
 import com.navneet.executespec.auth.repository.ProjectRepository;
 import com.navneet.executespec.billing.repository.ManagedAiUsageEventRepository;
 import com.navneet.executespec.codeintel.repository.RunCodeMapRepository;
+import com.navneet.executespec.cost.RunCostTracker;
 import com.navneet.executespec.cost.RunEffectiveRouteService;
 import com.navneet.executespec.cost.RunStepUsage;
 import com.navneet.executespec.cost.RunStepUsageRepository;
@@ -41,6 +46,7 @@ class RunDetailEffectiveRouteTest {
   private final ManagedAiUsageEventRepository managedAiUsageEventRepository =
       mock(ManagedAiUsageEventRepository.class);
   private final RunStepUsageRepository usageRepository = mock(RunStepUsageRepository.class);
+  private final RunCostTracker runCostTracker = mock(RunCostTracker.class);
 
   private RunMapper mapper() {
     when(integrationRunRepository.findByRunId(RUN_ID)).thenReturn(Optional.empty());
@@ -56,7 +62,9 @@ class RunDetailEffectiveRouteTest {
         managedAiUsageEventRepository,
         new RunEffectiveRouteService(usageRepository),
         null,
-        new ObjectMapper());
+        runCostTracker,
+        new ObjectMapper(),
+        null);
   }
 
   private static RunStepUsage success(String provider, String model) {
@@ -111,6 +119,76 @@ class RunDetailEffectiveRouteTest {
     RunDetail detail = mapper().toDetail(run("anthropic", null), List.of());
 
     assertThat(detail.getRouteDiverged()).isFalse();
+  }
+
+  @Test
+  void sameProviderTierModelsPreserveProviderTruthForProviderOnlyRequest() {
+    when(usageRepository.findByRunIdOrderByCreatedAtAsc(RUN_ID))
+        .thenReturn(
+            List.of(
+                success("anthropic", "claude-haiku-4-5"), success("anthropic", "claude-sonnet-5")));
+
+    RunDetail detail = mapper().toDetail(run("anthropic", null), List.of());
+
+    assertThat(detail.getEffectiveRouteAttribution()).isEqualTo("MIXED");
+    assertThat(detail.getEffectiveProvider()).isEqualTo("anthropic");
+    assertThat(detail.getEffectiveModel()).isNull();
+    assertThat(detail.getRouteDiverged()).isFalse();
+  }
+
+  @Test
+  void sameProviderTierModelsStillDivergeFromAnExactModelPin() {
+    when(usageRepository.findByRunIdOrderByCreatedAtAsc(RUN_ID))
+        .thenReturn(
+            List.of(
+                success("anthropic", "claude-haiku-4-5"), success("anthropic", "claude-sonnet-5")));
+
+    RunDetail detail = mapper().toDetail(run("anthropic", "claude-sonnet-5"), List.of());
+
+    assertThat(detail.getRouteDiverged()).isTrue();
+  }
+
+  @Test
+  void activeDetailOverlaysHigherJvmOwnedCostButNeverReducesStoredCost() {
+    PipelineRun active = run("anthropic", null);
+    active.setStatus("WORKING");
+    active.setActualCostUsd(0.25);
+    when(runCostTracker.liveSnapshot(RUN_ID))
+        .thenReturn(Optional.of(new RunCostTracker.Snapshot(0, 0, 0, 0, 0.75, 0)))
+        .thenReturn(Optional.of(new RunCostTracker.Snapshot(0, 0, 0, 0, 0.10, 0)));
+
+    assertThat(mapper().toDetail(active, List.of()).getActualCostUsd()).isEqualTo(0.75);
+    assertThat(mapper().toDetail(active, List.of()).getActualCostUsd()).isEqualTo(0.25);
+    verify(runCostTracker, times(2)).liveSnapshot(RUN_ID);
+  }
+
+  @Test
+  void activeSummaryUsesOneLiveSnapshotForItsCostProjection() {
+    PipelineRun active = run("anthropic", null);
+    active.setStatus("WORKING");
+    active.setActualCostUsd(0.25);
+    when(runCostTracker.liveSnapshot(RUN_ID))
+        .thenReturn(Optional.of(new RunCostTracker.Snapshot(0, 0, 0, 0, 0.75, 0)));
+
+    RunSummary summary = mapper().toSummary(active);
+
+    assertThat(summary.actualCostUsd()).isEqualTo(0.75);
+    verify(runCostTracker).liveSnapshot(RUN_ID);
+  }
+
+  @Test
+  void terminalDetailKeepsPersistedCostEvenIfAStaleLiveAccumulatorExists() {
+    PipelineRun terminal = run("anthropic", null);
+    terminal.setStatus("COMPLETE");
+    terminal.setActualCostUsd(0.40);
+    when(runCostTracker.liveSnapshot(RUN_ID))
+        .thenReturn(Optional.of(new RunCostTracker.Snapshot(0, 0, 0, 0, 0.90, 0)));
+
+    RunDetail detail = mapper().toDetail(terminal, List.of());
+
+    assertThat(detail.getActualCostUsd()).isEqualTo(0.40);
+    assertThat(detail.getTerminalOutcome().impact().actualCostUsd()).isEqualTo(0.40);
+    verify(runCostTracker, never()).liveSnapshot(RUN_ID);
   }
 
   @Test

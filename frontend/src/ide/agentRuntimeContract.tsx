@@ -47,11 +47,11 @@ export function RuntimeContractPanel({sandboxEnabled}: {sandboxEnabled: boolean}
         </span>
         <span>
           <b>PR</b>
-          target confirmed
+          publication policy shown
         </span>
         <span>
           <b>Cost</b>
-          cap before run
+          estimate and any cap shown
         </span>
         <span>
           <b>Local files</b>
@@ -68,8 +68,8 @@ export function TrustBoundaryPanel({compact = false}: {compact?: boolean}) {
       <span>Runs on a policy-guarded server workspace</span>
       <span>Your local files are never touched</span>
       <span>Approval required before any code runs</span>
-      <span>Every run event is recorded in the audit trail</span>
-      <span>Cost is capped before the run starts</span>
+      <span>Run actions and evidence are recorded subject to retention policy</span>
+      <span>Cost estimate and any selected cap are shown before approval</span>
     </div>
   );
 }
@@ -97,8 +97,9 @@ export function OperatorIntro({
               : 'Run work in a policy-guarded server workspace.'}
           </h1>
           <p>
-            Plan, code, test, review, and open a PR without touching your local machine. You approve
-            the plan and cost before remote work starts.
+            Plan, code, test, and review without touching your local machine, then prepare a PR when
+            publication gates pass. You approve the plan and cost before remote work starts; BYOK
+            cost caps are optional.
           </p>
         </div>
         <div className='agent-operator-steps' aria-label='Remote execution workflow'>
@@ -106,7 +107,7 @@ export function OperatorIntro({
           <span>Plan gate</span>
           <span>{remoteSandboxEnabled ? 'Sandbox work' : 'Workspace work'}</span>
           <span>Evidence</span>
-          <span>PR / deploy</span>
+          <span>Publish / deploy</span>
         </div>
       </div>
       <RuntimeContractPanel sandboxEnabled={remoteSandboxEnabled} />

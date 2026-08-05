@@ -115,6 +115,20 @@ class ReviewerAgentVerdictParsingTest {
             .build();
 
     assertEquals(ReviewerResult.Overall.REVIEW_FAILED, determineOverall(agent(), g, w, true));
+    org.junit.jupiter.api.Assertions.assertTrue(ReviewerAgent.needsWiringProtocolRecovery(w));
+  }
+
+  @Test
+  void sameRouteRecoveryMustReturnTypedVerdictBeforeGreenBuildCanBeAccepted() throws Exception {
+    var general = workerWithSummary("VERDICT: CLEAN\nGeneral review complete.");
+    var emptyTerminal = workerWithSummary("");
+    var recovered = workerWithSummary("VERDICT: CLEAN\nWiring revalidated on the same route.");
+
+    org.junit.jupiter.api.Assertions.assertTrue(
+        ReviewerAgent.needsWiringProtocolRecovery(emptyTerminal));
+    org.junit.jupiter.api.Assertions.assertFalse(
+        ReviewerAgent.needsWiringProtocolRecovery(recovered));
+    assertEquals(ReviewerResult.Overall.CLEAN, determineOverall(agent(), general, recovered, true));
   }
 
   @Test

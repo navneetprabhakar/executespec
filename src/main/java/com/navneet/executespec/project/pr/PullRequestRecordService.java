@@ -332,7 +332,22 @@ public class PullRequestRecordService {
   }
 
   public List<PullRequestRecord> listForRun(String runId) {
-    return repo.findByRunIdOrderByCreatedAtAsc(runId);
+    List<PullRequestRecord> direct = repo.findByRunIdOrderByCreatedAtAsc(runId);
+    if (!direct.isEmpty()) return direct;
+    // Existing-PR correction runs deliberately reuse the globally unique PR record owned by the
+    // original run. Their immutable publication tuple is the run-to-PR association, so expose the
+    // same live PR/CI record to Web and CLI without reassigning it or losing original-run webhook
+    // attribution.
+    return pipelineRunRepo
+        .findById(runId)
+        .filter(
+            run -> run.getPublicationRepoFullName() != null && run.getPublicationPrNumber() != null)
+        .flatMap(
+            run ->
+                repo.findByRepoFullNameAndPrNumber(
+                    run.getPublicationRepoFullName(), run.getPublicationPrNumber()))
+        .map(List::of)
+        .orElseGet(List::of);
   }
 
   /** Extracts N from URLs like {@code https://github.com/owner/repo/pull/42}. */

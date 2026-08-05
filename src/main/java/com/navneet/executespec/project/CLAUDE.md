@@ -119,6 +119,11 @@ for existing rows, and adds scoped unique/indexed local identities and lease loo
   the `message` alias ensures the shared web transport presents the real reason instead of its
   generic status fallback. The outbound GitHub call is bounded by a 5-second connect deadline and
   20-second request deadline, safely inside the web transport's 30-second request deadline.
+- GitHub repository attachment also preserves the typed upstream category. An inaccessible private
+  repository, rejected credential, missing repository, rate limit, and provider outage cannot be
+  collapsed into a generic 502. The controller returns a secret-free error code, safe message,
+  retryability, and exactly one provider-specific access action (`UPDATE_GITHUB_ACCESS` /
+  `UPDATE_BITBUCKET_ACCESS`) or `RETRY`; no failed lookup writes a repository or project link.
 - Repository topology and HEAD evidence have an explicit cache-invalidation boundary.
   `ProjectSourceFreshnessInvalidator` deletes the exact repo-scoped Workspace Health origin-SHA key
   and the exact linked project staleness keys after sync, after-commit link/unlink/create+link, and
@@ -213,6 +218,12 @@ bypassed with a raw user id.
   epoch. The immutable context records the initiating member for usage attribution, so a different
   authorized project member refreshing the same repository/SHA must receive a separate context
   rather than hitting `IDEMPOTENCY_CONFLICT` before inventory and reporting 0/0 files.
+- **2026-08-04 current-source readiness** — code-index readiness resolves the authenticated actor's
+  cached SCM default-branch HEAD through `WorkspaceHealthService`; `ProjectRepo.lastSyncedSha` is
+  not current-source authority. An unavailable current HEAD yields
+  `CURRENT_SOURCE_REVISION_UNAVAILABLE`, disables semantic claims, and retains lexical fallback.
+  UNINDEXED UI reports coverage as not measured and renders the actual lexical-fallback and
+  relationship-graph capability booleans rather than hardcoded labels.
 
 ## System Map UI evidence states
 

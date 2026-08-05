@@ -4,12 +4,15 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import java.nio.charset.StandardCharsets;
+import java.util.Base64;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -17,6 +20,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
+import com.navneet.executespec.agent.LlmRequest;
 import com.navneet.executespec.agent.LlmRouter;
 import com.navneet.executespec.agent.PromptAssembler;
 import com.navneet.executespec.auth.entity.Project;
@@ -43,6 +47,8 @@ import com.navneet.executespec.router.ResolvedModel;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.mockito.ArgumentCaptor;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.metadata.ChatGenerationMetadata;
@@ -64,6 +70,10 @@ class ProjectDocGeneratorServiceCacheHitTest {
 
   private static final UUID SOURCE_REPO_ID =
       UUID.fromString("00000000-0000-0000-0000-000000000099");
+  private static final String SHA_A = "a".repeat(40);
+  private static final String SHA_B = "b".repeat(40);
+  private static final String SHA_Z = "c".repeat(40);
+  private static final String SOURCE_SHA = "d".repeat(40);
 
   private ProjectArchitectureService architectureService;
   private ProjectWorkspaceService workspace;
@@ -143,10 +153,10 @@ class ProjectDocGeneratorServiceCacheHitTest {
 
   @Test
   void cacheHit_returnsCachedDoc_andSkipsLlmCall() {
-    String shasJson = "{\"owner/repo-a\":\"aaa\"}";
+    String shasJson = "{\"owner/repo-a\":\"" + SHA_A + "\"}";
     when(projectRepo.findById("p-1")).thenReturn(Optional.of(project("p-1")));
     when(architectureService.latest("p-1")).thenReturn(Optional.of(archDoc(7, shasJson)));
-    wireExactSourceRepository("aaa");
+    wireExactSourceRepository(SHA_A);
 
     ProjectGeneratedDoc cached = generatedDoc(DocType.EXPLANATION, 3, 7, shasJson);
     when(docRepo
@@ -167,13 +177,62 @@ class ProjectDocGeneratorServiceCacheHitTest {
   }
 
   @Test
+  void nonCanonicalOperationalGroundingIsRegeneratedInsteadOfReturnedFromCache() {
+    wireCacheMiss();
+    String shasJson = "{\"owner/repo-a\":\"" + SHA_A + "\"}";
+    ProjectGeneratedDoc stale = generatedDoc(DocType.EXPLANATION, 3, 7, shasJson);
+    stale.setContent(
+        stale
+            .getContent()
+            .replace(
+                "No install, test, run, or runtime prerequisite is established by the supplied"
+                    + " deterministic setup evidence.",
+                "Run `npm install` and `npm start`; this cached instruction is not evidenced."));
+    when(docRepo
+            .findFirstByProjectIdAndDocTypeAndSourceArchVersionAndSourceShasFingerprintOrderByVersionDesc(
+                "p-1", DocType.EXPLANATION, 7, shasJson))
+        .thenReturn(Optional.of(stale));
+    when(llmRouter.callTextStrict(
+            anyString(),
+            anyString(),
+            anyList(),
+            anyString(),
+            anyString(),
+            anyString(),
+            org.mockito.ArgumentMatchers.nullable(Integer.class),
+            any(LlmExecutionReference.class),
+            eq(LlmRequest.RetryProfile.INTERACTIVE),
+            any(Runnable.class)))
+        .thenReturn(textResponse(validDoc(DocType.EXPLANATION, "Regenerated"), "stop"));
+    when(docRepo.saveAndFlush(any(ProjectGeneratedDoc.class)))
+        .thenAnswer(invocation -> invocation.getArgument(0));
+
+    ProjectGeneratedDoc result =
+        svc.generate("p-1", DocType.EXPLANATION, "actor-1", LlmProvider.ANTHROPIC);
+
+    assertThat(result.getContent()).doesNotContain("cached instruction", "`npm install`");
+    verify(llmRouter)
+        .callTextStrict(
+            anyString(),
+            anyString(),
+            anyList(),
+            anyString(),
+            anyString(),
+            anyString(),
+            org.mockito.ArgumentMatchers.nullable(Integer.class),
+            any(LlmExecutionReference.class),
+            eq(LlmRequest.RetryProfile.INTERACTIVE),
+            any(Runnable.class));
+  }
+
+  @Test
   void cacheHit_emptyContent_fallsThrough() {
     // Defensive: if the cached row happens to have null/blank content (a bug or partial write
     // in some prior code path), we must NOT short-circuit on it — fall through to regenerate.
-    String shasJson = "{\"owner/repo-a\":\"aaa\"}";
+    String shasJson = "{\"owner/repo-a\":\"" + SHA_A + "\"}";
     when(projectRepo.findById("p-1")).thenReturn(Optional.of(project("p-1")));
     when(architectureService.latest("p-1")).thenReturn(Optional.of(archDoc(7, shasJson)));
-    wireExactSourceRepository("aaa");
+    wireExactSourceRepository(SHA_A);
 
     ProjectGeneratedDoc emptyCached = generatedDoc(DocType.EXPLANATION, 3, 7, shasJson);
     emptyCached.setContent(""); // simulate empty-content row
@@ -181,7 +240,7 @@ class ProjectDocGeneratorServiceCacheHitTest {
             .findFirstByProjectIdAndDocTypeAndSourceArchVersionAndSourceShasFingerprintOrderByVersionDesc(
                 "p-1", DocType.EXPLANATION, 7, shasJson))
         .thenReturn(Optional.of(emptyCached));
-    wireExactSourceRepository("aaa");
+    wireExactSourceRepository(SHA_A);
 
     // We don't bother mocking the full regenerate path — instead, observe that the cache-hit
     // didn't fire by checking the test gets past the cache lookup and would have tried to
@@ -201,7 +260,7 @@ class ProjectDocGeneratorServiceCacheHitTest {
   void cacheHitWithUnsupportedBehaviorIsRegeneratedInsteadOfReturned() {
     wireCacheMiss();
     wireExactSourceRepository(
-        "aaa",
+        SHA_A,
         """
         ## Functions
         ### `src/AIPlayer.java`
@@ -211,7 +270,7 @@ class ProjectDocGeneratorServiceCacheHitTest {
         - `class TicTacToe`
         - `checkWin`
         """);
-    String shasJson = "{\"owner/repo-a\":\"aaa\"}";
+    String shasJson = "{\"owner/repo-a\":\"" + SHA_A + "\"}";
     ProjectGeneratedDoc stale = generatedDoc(DocType.EXPLANATION, 3, 7, shasJson);
     stale.setContent(
         validDoc(DocType.EXPLANATION, "Legacy")
@@ -235,7 +294,9 @@ class ProjectDocGeneratorServiceCacheHitTest {
             anyString(),
             anyString(),
             org.mockito.ArgumentMatchers.nullable(Integer.class),
-            any(LlmExecutionReference.class)))
+            any(LlmExecutionReference.class),
+            eq(LlmRequest.RetryProfile.INTERACTIVE),
+            any(Runnable.class)))
         .thenReturn(textResponse(validDoc(DocType.EXPLANATION, "Regenerated"), "stop"));
     when(docRepo.saveAndFlush(any(ProjectGeneratedDoc.class)))
         .thenAnswer(invocation -> invocation.getArgument(0));
@@ -256,7 +317,9 @@ class ProjectDocGeneratorServiceCacheHitTest {
             anyString(),
             anyString(),
             org.mockito.ArgumentMatchers.nullable(Integer.class),
-            any(LlmExecutionReference.class));
+            any(LlmExecutionReference.class),
+            eq(LlmRequest.RetryProfile.INTERACTIVE),
+            any(Runnable.class));
   }
 
   @Test
@@ -271,7 +334,9 @@ class ProjectDocGeneratorServiceCacheHitTest {
             anyString(),
             anyString(),
             org.mockito.ArgumentMatchers.nullable(Integer.class),
-            any(LlmExecutionReference.class)))
+            any(LlmExecutionReference.class),
+            eq(LlmRequest.RetryProfile.INTERACTIVE),
+            any(Runnable.class)))
         .thenReturn(
             new ChatResponse(
                 List.of(
@@ -297,7 +362,9 @@ class ProjectDocGeneratorServiceCacheHitTest {
             anyString(),
             anyString(),
             org.mockito.ArgumentMatchers.nullable(Integer.class),
-            any(LlmExecutionReference.class));
+            any(LlmExecutionReference.class),
+            eq(LlmRequest.RetryProfile.INTERACTIVE),
+            any(Runnable.class));
   }
 
   @Test
@@ -399,23 +466,113 @@ class ProjectDocGeneratorServiceCacheHitTest {
         .thenReturn(
             Optional.of(
                 ProjectRepo.builder().id(aFirstId).githubRepoFullName("alpha/repo-a").build()));
-    when(architectureService.codeMapForSourceSha("p-1", zId, "sha-z"))
-        .thenReturn(Optional.of(ProjectCodeMap.builder().content("zeta-map").build()));
-    when(architectureService.codeMapForSourceSha("p-1", aLaterId, "sha-b"))
-        .thenReturn(Optional.of(ProjectCodeMap.builder().content("alpha-later-map").build()));
-    when(architectureService.codeMapForSourceSha("p-1", aFirstId, "sha-a"))
-        .thenReturn(Optional.of(ProjectCodeMap.builder().content("alpha-first-map").build()));
+    when(architectureService.codeMapForSourceSha("p-1", zId, SHA_Z))
+        .thenReturn(
+            Optional.of(
+                ProjectCodeMap.builder()
+                    .content(withFacts("zeta-map", "zeta/repo", SHA_Z))
+                    .build()));
+    when(architectureService.codeMapForSourceSha("p-1", aLaterId, SHA_B))
+        .thenReturn(
+            Optional.of(
+                ProjectCodeMap.builder()
+                    .content(withFacts("alpha-later-map", "alpha/repo-b", SHA_B))
+                    .build()));
+    when(architectureService.codeMapForSourceSha("p-1", aFirstId, SHA_A))
+        .thenReturn(
+            Optional.of(
+                ProjectCodeMap.builder()
+                    .content(withFacts("alpha-first-map", "alpha/repo-a", SHA_A))
+                    .build()));
 
     String bundle =
         svc.buildSourceBundle(
             project("p-1"),
             archDoc(
                 1,
-                "{\"alpha/repo-a\":\"sha-a\",\"alpha/repo-b\":\"sha-b\","
-                    + "\"zeta/repo\":\"sha-z\"}"));
+                "{\"alpha/repo-a\":\""
+                    + SHA_A
+                    + "\",\"alpha/repo-b\":\""
+                    + SHA_B
+                    + "\",\"zeta/repo\":\""
+                    + SHA_Z
+                    + "\"}"));
 
     assertThat(bundle.indexOf("alpha-first-map")).isLessThan(bundle.indexOf("alpha-later-map"));
     assertThat(bundle.indexOf("alpha-later-map")).isLessThan(bundle.indexOf("zeta-map"));
+  }
+
+  @Test
+  void sourceBundleDoesNotRecycleModelGeneratedArchitectureAsFactualEvidence() {
+    UUID repoId = UUID.fromString("00000000-0000-0000-0000-000000000010");
+    when(linkRepo.findByProjectId("p-1"))
+        .thenReturn(List.of(ProjectRepoLink.builder().projectId("p-1").repoId(repoId).build()));
+    when(repoRepo.findById(repoId))
+        .thenReturn(
+            Optional.of(ProjectRepo.builder().id(repoId).githubRepoFullName("owner/repo").build()));
+    when(architectureService.codeMapForSourceSha("p-1", repoId, SOURCE_SHA))
+        .thenReturn(
+            Optional.of(
+                ProjectCodeMap.builder()
+                    .content(withFacts("# exact codemap", "owner/repo", SOURCE_SHA))
+                    .build()));
+    ProjectArchitectureDoc architecture =
+        ProjectArchitectureDoc.builder()
+            .projectId("p-1")
+            .version(7)
+            .content("Flyway manages the schema and Compose runs the full application stack.")
+            .generatedFromShas("{\"owner/repo\":\"" + SOURCE_SHA + "\"}")
+            .build();
+
+    String bundle = svc.buildSourceBundle(project("p-1"), architecture);
+
+    assertThat(bundle)
+        .contains("generated architecture body is intentionally excluded", "# exact codemap")
+        .doesNotContain("Flyway manages", "Compose runs the full application stack");
+  }
+
+  @Test
+  void sourceBundleCarriesExactFunctionEvidenceOnceAndOutsideDeclarationCodemap() {
+    String functionEvidence =
+        ExportedFunctionEvidence.render(
+            "owner/repo-a",
+            SOURCE_SHA,
+            java.util.Map.of(
+                "src/catalog.js",
+                "export function countFeatured(items) {\n"
+                    + "  return items.filter((item) => item.tags.includes('featured')).length;\n"
+                    + "}\n"));
+    wireExactSourceRepository(SOURCE_SHA, "# exact codemap\n\n" + functionEvidence);
+
+    String bundle =
+        svc.buildSourceBundle(
+            project("p-1"), archDoc(7, "{\"owner/repo-a\":\"" + SOURCE_SHA + "\"}"));
+
+    assertThat(bundle)
+        .contains("# Exact exported-function source: owner/repo-a")
+        .contains("item.tags.includes('featured')")
+        .containsOnlyOnce(ExportedFunctionEvidence.BEGIN)
+        .containsOnlyOnce(ExportedFunctionEvidence.END);
+    assertThat(bundle.indexOf(ExportedFunctionEvidence.BEGIN))
+        .isGreaterThan(bundle.indexOf("# Exact exported-function source: owner/repo-a"));
+  }
+
+  @Test
+  void sourceBundleRejectsTamperedExactFunctionEvidence() {
+    String functionEvidence =
+        ExportedFunctionEvidence.render(
+                "owner/repo-a",
+                SOURCE_SHA,
+                java.util.Map.of(
+                    "src/catalog.js", "export function countFeatured() { return 1; }\n"))
+            .replace("return 1", "return 2");
+    wireExactSourceRepository(SOURCE_SHA, "# exact codemap\n\n" + functionEvidence);
+
+    org.assertj.core.api.Assertions.assertThatThrownBy(
+            () ->
+                svc.buildSourceBundle(
+                    project("p-1"), archDoc(7, "{\"owner/repo-a\":\"" + SOURCE_SHA + "\"}")))
+        .isInstanceOf(ProjectDocGeneratorService.StaleSourceException.class);
   }
 
   @Test
@@ -426,13 +583,13 @@ class ProjectDocGeneratorServiceCacheHitTest {
     when(repoRepo.findById(repoId))
         .thenReturn(
             Optional.of(ProjectRepo.builder().id(repoId).githubRepoFullName("owner/repo").build()));
-    when(architectureService.codeMapForSourceSha("p-1", repoId, "source-sha"))
+    when(architectureService.codeMapForSourceSha("p-1", repoId, SOURCE_SHA))
         .thenReturn(Optional.empty());
 
     org.assertj.core.api.Assertions.assertThatThrownBy(
             () ->
                 svc.buildSourceBundle(
-                    project("p-1"), archDoc(7, "{\"owner/repo\":\"source-sha\"}")))
+                    project("p-1"), archDoc(7, "{\"owner/repo\":\"" + SOURCE_SHA + "\"}")))
         .isInstanceOf(ProjectDocGeneratorService.StaleSourceException.class);
   }
 
@@ -461,7 +618,7 @@ class ProjectDocGeneratorServiceCacheHitTest {
   @Test
   void documentExecutionIdentityFitsDurableCorrelationColumn() {
     String identity =
-        ProjectDocGeneratorService.projectDocContextId(
+        ProjectDocExecutionPolicy.contextId(
             UUID.fromString("123e4567-e89b-12d3-a456-426614174000"));
 
     assertThat(identity).isEqualTo("project-doc:123e4567-e89b-12d3-a456-426614174000");
@@ -469,15 +626,31 @@ class ProjectDocGeneratorServiceCacheHitTest {
   }
 
   @Test
+  void durableJobAttemptsReceiveDistinctJoinableBoundedExecutionIdentities() {
+    String job = "123e4567-e89b-12d3-a456-426614174000";
+
+    String first = ProjectDocExecutionPolicy.durableContextId(job + ":1");
+    String confirmedReplay = ProjectDocExecutionPolicy.durableContextId(job + ":2");
+
+    assertThat(first).isEqualTo("project-doc:" + job + ":1").hasSizeLessThanOrEqualTo(96);
+    assertThat(confirmedReplay).isEqualTo("project-doc:" + job + ":2");
+    assertThat(confirmedReplay).isNotEqualTo(first);
+    assertThat(ProjectDocExecutionPolicy.ATTEMPT_BUDGET.maxTotalTokens()).isEqualTo(200_000L);
+    assertThat(ProjectDocExecutionPolicy.ATTEMPT_BUDGET.maxCostUsd().toPlainString())
+        .isEqualTo("3");
+    assertThat(ProjectDocExecutionPolicy.ATTEMPT_BUDGET.maxProviderCalls()).isEqualTo(2);
+  }
+
+  @Test
   void cacheMissPassesCompactIdentityIntoExecutionPolicyAndPersistsGeneratedDoc() {
-    String shasJson = "{\"owner/repo-a\":\"aaa\"}";
+    String shasJson = "{\"owner/repo-a\":\"" + SHA_A + "\"}";
     when(projectRepo.findById("p-1")).thenReturn(Optional.of(project("p-1")));
     when(architectureService.latest("p-1")).thenReturn(Optional.of(archDoc(7, shasJson)));
     when(docRepo
             .findFirstByProjectIdAndDocTypeAndSourceArchVersionAndSourceShasFingerprintOrderByVersionDesc(
                 "p-1", DocType.EXPLANATION, 7, shasJson))
         .thenReturn(Optional.empty());
-    wireExactSourceRepository("aaa");
+    wireExactSourceRepository(SHA_A);
     when(modelResolver.resolve("ProjectDocGeneratorService", LlmProvider.ANTHROPIC))
         .thenReturn(
             ResolvedModel.builder()
@@ -496,7 +669,8 @@ class ProjectDocGeneratorServiceCacheHitTest {
             anyString(),
             anyString(),
             org.mockito.ArgumentMatchers.nullable(String.class),
-            anyString()))
+            anyString(),
+            org.mockito.ArgumentMatchers.eq(ProjectDocExecutionPolicy.ATTEMPT_BUDGET)))
         .thenReturn(reference);
     when(llmRouter.callTextStrict(
             anyString(),
@@ -506,7 +680,9 @@ class ProjectDocGeneratorServiceCacheHitTest {
             anyString(),
             anyString(),
             org.mockito.ArgumentMatchers.nullable(Integer.class),
-            any(LlmExecutionReference.class)))
+            any(LlmExecutionReference.class),
+            eq(LlmRequest.RetryProfile.INTERACTIVE),
+            any(Runnable.class)))
         .thenReturn(
             new ChatResponse(
                 java.util.List.of(
@@ -533,7 +709,8 @@ class ProjectDocGeneratorServiceCacheHitTest {
             correlationId.capture(),
             org.mockito.ArgumentMatchers.eq("ANTHROPIC"),
             org.mockito.ArgumentMatchers.nullable(String.class),
-            org.mockito.ArgumentMatchers.eq("actor-1"));
+            org.mockito.ArgumentMatchers.eq("actor-1"),
+            org.mockito.ArgumentMatchers.eq(ProjectDocExecutionPolicy.ATTEMPT_BUDGET));
     assertThat(sourceId.getValue()).startsWith("project-doc:").hasSizeLessThanOrEqualTo(96);
     assertThat(correlationId.getValue()).isEqualTo(sourceId.getValue());
     assertThat(generated.getContent()).isEqualTo(validDoc(DocType.EXPLANATION, "Generated"));
@@ -553,7 +730,9 @@ class ProjectDocGeneratorServiceCacheHitTest {
             anyString(),
             anyString(),
             org.mockito.ArgumentMatchers.nullable(Integer.class),
-            any(LlmExecutionReference.class)))
+            any(LlmExecutionReference.class),
+            eq(LlmRequest.RetryProfile.INTERACTIVE),
+            any(Runnable.class)))
         .thenReturn(textResponse("# Cut document", "MAX_TOKENS"));
 
     org.assertj.core.api.Assertions.assertThatThrownBy(
@@ -586,7 +765,9 @@ class ProjectDocGeneratorServiceCacheHitTest {
             anyString(),
             anyString(),
             org.mockito.ArgumentMatchers.nullable(Integer.class),
-            any(LlmExecutionReference.class)))
+            any(LlmExecutionReference.class),
+            eq(LlmRequest.RetryProfile.INTERACTIVE),
+            any(Runnable.class)))
         .thenAnswer(
             ignored -> {
               providerEntered.countDown();
@@ -625,7 +806,9 @@ class ProjectDocGeneratorServiceCacheHitTest {
             anyString(),
             anyString(),
             org.mockito.ArgumentMatchers.nullable(Integer.class),
-            any(LlmExecutionReference.class));
+            any(LlmExecutionReference.class),
+            eq(LlmRequest.RetryProfile.INTERACTIVE),
+            any(Runnable.class));
     verify(docRepo, org.mockito.Mockito.times(1)).saveAndFlush(any(ProjectGeneratedDoc.class));
     verify(projectRepo, org.mockito.Mockito.times(1)).findByIdForQuotaUpdate("p-1");
   }
@@ -643,7 +826,9 @@ class ProjectDocGeneratorServiceCacheHitTest {
             anyString(),
             anyString(),
             org.mockito.ArgumentMatchers.nullable(Integer.class),
-            any(LlmExecutionReference.class)))
+            any(LlmExecutionReference.class),
+            eq(LlmRequest.RetryProfile.INTERACTIVE),
+            any(Runnable.class)))
         .thenAnswer(
             invocation -> {
               bothProvidersEntered.countDown();
@@ -687,7 +872,9 @@ class ProjectDocGeneratorServiceCacheHitTest {
             anyString(),
             anyString(),
             org.mockito.ArgumentMatchers.nullable(Integer.class),
-            any(LlmExecutionReference.class));
+            any(LlmExecutionReference.class),
+            eq(LlmRequest.RetryProfile.INTERACTIVE),
+            any(Runnable.class));
   }
 
   @Test
@@ -701,7 +888,9 @@ class ProjectDocGeneratorServiceCacheHitTest {
             anyString(),
             anyString(),
             org.mockito.ArgumentMatchers.nullable(Integer.class),
-            any(LlmExecutionReference.class)))
+            any(LlmExecutionReference.class),
+            eq(LlmRequest.RetryProfile.INTERACTIVE),
+            any(Runnable.class)))
         .thenReturn(
             textResponse("# Cut", "length"),
             textResponse(validDoc(DocType.SETUP, "Complete"), "stop"));
@@ -714,7 +903,10 @@ class ProjectDocGeneratorServiceCacheHitTest {
     ProjectGeneratedDoc retry =
         svc.generate("p-1", DocType.SETUP, "actor-1", LlmProvider.ANTHROPIC);
 
-    assertThat(retry.getContent()).isEqualTo(validDoc(DocType.SETUP, "Complete"));
+    assertThat(retry.getContent())
+        .startsWith("# Setting up Test")
+        .contains("git clone https://github.com/owner/repo-a.git")
+        .doesNotContain("Start the repository service", "dependency installation");
     verify(llmRouter, org.mockito.Mockito.times(2))
         .callTextStrict(
             anyString(),
@@ -724,14 +916,16 @@ class ProjectDocGeneratorServiceCacheHitTest {
             anyString(),
             anyString(),
             org.mockito.ArgumentMatchers.nullable(Integer.class),
-            any(LlmExecutionReference.class));
+            any(LlmExecutionReference.class),
+            eq(LlmRequest.RetryProfile.INTERACTIVE),
+            any(Runnable.class));
   }
 
   @Test
   void sourceChangeDuringProviderCallRejectsObsoleteDocumentWithoutPersistenceOrMirror() {
     wireCacheMiss();
-    String oldFingerprint = "{\"owner/repo-a\":\"aaa\"}";
-    String newFingerprint = "{\"owner/repo-a\":\"bbb\"}";
+    String oldFingerprint = "{\"owner/repo-a\":\"" + SHA_A + "\"}";
+    String newFingerprint = "{\"owner/repo-a\":\"" + SHA_B + "\"}";
     when(architectureService.latest("p-1"))
         .thenReturn(
             Optional.of(archDoc(7, oldFingerprint)), Optional.of(archDoc(8, newFingerprint)));
@@ -743,7 +937,9 @@ class ProjectDocGeneratorServiceCacheHitTest {
             anyString(),
             anyString(),
             org.mockito.ArgumentMatchers.nullable(Integer.class),
-            any(LlmExecutionReference.class)))
+            any(LlmExecutionReference.class),
+            eq(LlmRequest.RetryProfile.INTERACTIVE),
+            any(Runnable.class)))
         .thenReturn(textResponse(validDoc(DocType.EXPLANATION, "Obsolete"), "stop"));
 
     org.assertj.core.api.Assertions.assertThatThrownBy(
@@ -767,11 +963,51 @@ class ProjectDocGeneratorServiceCacheHitTest {
             anyString(),
             anyString(),
             org.mockito.ArgumentMatchers.nullable(Integer.class),
-            any(LlmExecutionReference.class)))
+            any(LlmExecutionReference.class),
+            eq(LlmRequest.RetryProfile.INTERACTIVE),
+            any(Runnable.class)))
         .thenReturn(textResponse(unsafe, "stop"));
 
     org.assertj.core.api.Assertions.assertThatThrownBy(
             () -> svc.generate("p-1", DocType.SETUP, "actor-1", LlmProvider.ANTHROPIC))
+        .isInstanceOf(ProjectDocGeneratorService.UnsafeGeneratedDocumentException.class);
+
+    verify(docRepo, never()).saveAndFlush(any(ProjectGeneratedDoc.class));
+    verify(workspace, never()).writeRawFile(anyString(), anyString(), anyString());
+  }
+
+  @Test
+  void credentialIntroducedByDeterministicWorkflowGroundingIsRejectedBeforePublication() {
+    wireCacheMiss();
+    String credential = "xoxb-1234567890-abcdefghijklmnop";
+    String setupSource =
+        "- Source-Path-Base64: "
+            + Base64.getEncoder().encodeToString("README.md".getBytes(StandardCharsets.UTF_8))
+            + "\n  Content-Base64: "
+            + Base64.getEncoder()
+                .encodeToString(
+                    ("pip install https://user:" + credential + "@packages.example/pkg")
+                        .getBytes(StandardCharsets.UTF_8))
+            + "\n  Truncated: false";
+    wireExactSourceRepository(
+        SHA_A,
+        facts("owner/repo-a", SHA_A)
+            .replace("- No exact setup command source was selected.", setupSource));
+    when(llmRouter.callTextStrict(
+            anyString(),
+            anyString(),
+            anyList(),
+            anyString(),
+            anyString(),
+            anyString(),
+            org.mockito.ArgumentMatchers.nullable(Integer.class),
+            any(LlmExecutionReference.class),
+            eq(LlmRequest.RetryProfile.INTERACTIVE),
+            any(Runnable.class)))
+        .thenReturn(textResponse(validDoc(DocType.EXPLANATION, "Grounded"), "stop"));
+
+    org.assertj.core.api.Assertions.assertThatThrownBy(
+            () -> svc.generate("p-1", DocType.EXPLANATION, "actor-1", LlmProvider.ANTHROPIC))
         .isInstanceOf(ProjectDocGeneratorService.UnsafeGeneratedDocumentException.class);
 
     verify(docRepo, never()).saveAndFlush(any(ProjectGeneratedDoc.class));
@@ -792,7 +1028,9 @@ class ProjectDocGeneratorServiceCacheHitTest {
             anyString(),
             anyString(),
             org.mockito.ArgumentMatchers.nullable(Integer.class),
-            any(LlmExecutionReference.class)))
+            any(LlmExecutionReference.class),
+            eq(LlmRequest.RetryProfile.INTERACTIVE),
+            any(Runnable.class)))
         .thenReturn(
             textResponse(missingArchitecture, "stop"),
             textResponse(validDoc(DocType.EXPLANATION, "Corrected"), "stop"));
@@ -819,7 +1057,9 @@ class ProjectDocGeneratorServiceCacheHitTest {
             org.mockito.ArgumentMatchers.eq("project-doc-explanation"),
             steps.capture(),
             org.mockito.ArgumentMatchers.nullable(Integer.class),
-            references.capture());
+            references.capture(),
+            org.mockito.ArgumentMatchers.eq(LlmRequest.RetryProfile.INTERACTIVE),
+            any(Runnable.class));
 
     assertThat(generated.getContent()).isEqualTo(validDoc(DocType.EXPLANATION, "Corrected"));
     assertThat(providers.getAllValues()).containsExactly("anthropic", "anthropic");
@@ -847,10 +1087,61 @@ class ProjectDocGeneratorServiceCacheHitTest {
   }
 
   @Test
+  void providerInventedSetupCommandIsDiscardedByCanonicalAssemblyWithoutCorrectiveCall() {
+    wireCacheMiss();
+    String unsupportedSetup =
+        validDoc(DocType.SETUP, "First")
+            .replace(
+                "Follow the repository README and detected package scripts.",
+                """
+                Run the conventional dependency installer:
+                ```bash
+                npm install
+                ```
+                """);
+    when(llmRouter.callTextStrict(
+            anyString(),
+            anyString(),
+            anyList(),
+            anyString(),
+            anyString(),
+            anyString(),
+            org.mockito.ArgumentMatchers.nullable(Integer.class),
+            any(LlmExecutionReference.class),
+            eq(LlmRequest.RetryProfile.INTERACTIVE),
+            any(Runnable.class)))
+        .thenReturn(textResponse(unsupportedSetup, "stop"));
+    when(docRepo.saveAndFlush(any(ProjectGeneratedDoc.class)))
+        .thenAnswer(invocation -> invocation.getArgument(0));
+
+    ProjectGeneratedDoc generated =
+        svc.generate("p-1", DocType.SETUP, "actor-1", LlmProvider.ANTHROPIC);
+
+    verify(llmRouter, org.mockito.Mockito.times(1))
+        .callTextStrict(
+            anyString(),
+            anyString(),
+            anyList(),
+            org.mockito.ArgumentMatchers.eq("project-doc-setup-p-1"),
+            org.mockito.ArgumentMatchers.eq("project-doc-setup"),
+            anyString(),
+            org.mockito.ArgumentMatchers.nullable(Integer.class),
+            any(LlmExecutionReference.class),
+            org.mockito.ArgumentMatchers.eq(LlmRequest.RetryProfile.INTERACTIVE),
+            any(Runnable.class));
+
+    assertThat(generated.getContent())
+        .startsWith("# Setting up Test")
+        .contains("git clone https://github.com/owner/repo-a.git")
+        .contains("No test, check, or start command is established")
+        .doesNotContain("npm install", "conventional dependency installer");
+  }
+
+  @Test
   void unsupportedBehaviorClaimIsDeterministicallyDegradedWithoutProviderRetry() {
     wireCacheMiss();
     wireExactSourceRepository(
-        "aaa",
+        SHA_A,
         """
         ## Functions
         ### `src/AIPlayer.java`
@@ -875,7 +1166,9 @@ class ProjectDocGeneratorServiceCacheHitTest {
             anyString(),
             anyString(),
             org.mockito.ArgumentMatchers.nullable(Integer.class),
-            any(LlmExecutionReference.class)))
+            any(LlmExecutionReference.class),
+            eq(LlmRequest.RetryProfile.INTERACTIVE),
+            any(Runnable.class)))
         .thenReturn(textResponse(unsupported, "stop"));
     when(docRepo.saveAndFlush(any(ProjectGeneratedDoc.class)))
         .thenAnswer(invocation -> invocation.getArgument(0));
@@ -902,7 +1195,56 @@ class ProjectDocGeneratorServiceCacheHitTest {
             anyString(),
             anyString(),
             org.mockito.ArgumentMatchers.nullable(Integer.class),
-            any(LlmExecutionReference.class));
+            any(LlmExecutionReference.class),
+            eq(LlmRequest.RetryProfile.INTERACTIVE),
+            any(Runnable.class));
+  }
+
+  @ParameterizedTest
+  @EnumSource(DocType.class)
+  void unsupportedProjectFactIsGroundedBeforeValidationWithoutAnotherProviderCall(DocType type) {
+    wireCacheMiss();
+    wireExactSourceRepository(SHA_A);
+    String unsafe =
+        validDoc(type, "Unsafe")
+            .replaceFirst(
+                "(?m)^# ([^\\r\\n]+)$", "$0\n\nDocker Compose starts the full application stack.");
+    when(llmRouter.callTextStrict(
+            anyString(),
+            anyString(),
+            anyList(),
+            anyString(),
+            anyString(),
+            anyString(),
+            org.mockito.ArgumentMatchers.nullable(Integer.class),
+            any(LlmExecutionReference.class),
+            eq(LlmRequest.RetryProfile.INTERACTIVE),
+            any(Runnable.class)))
+        .thenReturn(textResponse(unsafe, "stop"));
+    when(docRepo.saveAndFlush(any(ProjectGeneratedDoc.class)))
+        .thenAnswer(invocation -> invocation.getArgument(0));
+
+    ProjectGeneratedDoc generated = svc.generate("p-1", type, "actor-1", LlmProvider.ANTHROPIC);
+
+    assertThat(generated.getContent())
+        .contains(
+            type == DocType.EXPLANATION
+                ? "Compose application-service startup is not established"
+                : "No multi-service startup order, port, health endpoint, or health-check command"
+                    + " is established")
+        .doesNotContain("Docker Compose starts the full application stack");
+    verify(llmRouter, org.mockito.Mockito.times(1))
+        .callTextStrict(
+            anyString(),
+            anyString(),
+            anyList(),
+            anyString(),
+            anyString(),
+            anyString(),
+            org.mockito.ArgumentMatchers.nullable(Integer.class),
+            any(LlmExecutionReference.class),
+            eq(LlmRequest.RetryProfile.INTERACTIVE),
+            any(Runnable.class));
   }
 
   @Test
@@ -916,7 +1258,9 @@ class ProjectDocGeneratorServiceCacheHitTest {
             anyString(),
             anyString(),
             org.mockito.ArgumentMatchers.nullable(Integer.class),
-            any(LlmExecutionReference.class)))
+            any(LlmExecutionReference.class),
+            eq(LlmRequest.RetryProfile.INTERACTIVE),
+            any(Runnable.class)))
         .thenReturn(textResponse("# Generated", "stop"));
 
     org.assertj.core.api.Assertions.assertThatThrownBy(
@@ -933,7 +1277,9 @@ class ProjectDocGeneratorServiceCacheHitTest {
             anyString(),
             anyString(),
             org.mockito.ArgumentMatchers.nullable(Integer.class),
-            any(LlmExecutionReference.class));
+            any(LlmExecutionReference.class),
+            eq(LlmRequest.RetryProfile.INTERACTIVE),
+            any(Runnable.class));
     verify(docRepo, never()).saveAndFlush(any(ProjectGeneratedDoc.class));
     verify(workspace, never()).writeRawFile(anyString(), anyString(), anyString());
   }
@@ -949,7 +1295,9 @@ class ProjectDocGeneratorServiceCacheHitTest {
             anyString(),
             anyString(),
             org.mockito.ArgumentMatchers.nullable(Integer.class),
-            any(LlmExecutionReference.class)))
+            any(LlmExecutionReference.class),
+            eq(LlmRequest.RetryProfile.INTERACTIVE),
+            any(Runnable.class)))
         .thenReturn(textResponse(validDoc(DocType.EXPLANATION, "Unsafe prefix"), "SAFETY"));
 
     org.assertj.core.api.Assertions.assertThatThrownBy(
@@ -971,7 +1319,9 @@ class ProjectDocGeneratorServiceCacheHitTest {
             anyString(),
             anyString(),
             org.mockito.ArgumentMatchers.nullable(Integer.class),
-            any(LlmExecutionReference.class)))
+            any(LlmExecutionReference.class),
+            eq(LlmRequest.RetryProfile.INTERACTIVE),
+            any(Runnable.class)))
         .thenReturn(
             new ChatResponse(
                 List.of(
@@ -1014,7 +1364,7 @@ class ProjectDocGeneratorServiceCacheHitTest {
     org.assertj.core.api.Assertions.assertThatThrownBy(
             () ->
                 svc.buildSourceBundle(
-                    project("p-1"), archDoc(7, "{\"owner/old-repo\":\"source-sha\"}")))
+                    project("p-1"), archDoc(7, "{\"owner/old-repo\":\"" + SOURCE_SHA + "\"}")))
         .isInstanceOf(ProjectDocGeneratorService.StaleSourceException.class);
     verifyNoInteractions(llmRouter);
   }
@@ -1058,7 +1408,7 @@ class ProjectDocGeneratorServiceCacheHitTest {
   }
 
   private void wireCacheMiss() {
-    String shasJson = "{\"owner/repo-a\":\"aaa\"}";
+    String shasJson = "{\"owner/repo-a\":\"" + SHA_A + "\"}";
     when(projectRepo.findById("p-1")).thenReturn(Optional.of(project("p-1")));
     when(architectureService.latest("p-1")).thenReturn(Optional.of(archDoc(7, shasJson)));
     when(docRepo
@@ -1068,7 +1418,7 @@ class ProjectDocGeneratorServiceCacheHitTest {
                 org.mockito.ArgumentMatchers.eq(7),
                 org.mockito.ArgumentMatchers.eq(shasJson)))
         .thenReturn(Optional.empty());
-    wireExactSourceRepository("aaa");
+    wireExactSourceRepository(SHA_A);
     when(modelResolver.resolve("ProjectDocGeneratorService", LlmProvider.ANTHROPIC))
         .thenReturn(
             ResolvedModel.builder()
@@ -1085,7 +1435,8 @@ class ProjectDocGeneratorServiceCacheHitTest {
             anyString(),
             anyString(),
             org.mockito.ArgumentMatchers.nullable(String.class),
-            anyString()))
+            anyString(),
+            org.mockito.ArgumentMatchers.eq(ProjectDocExecutionPolicy.ATTEMPT_BUDGET)))
         .thenReturn(
             new LlmExecutionReference("project-doc-test", LlmExecutionScope.customer("org-1")));
     when(docRepo.findFirstByProjectIdAndDocTypeOrderByVersionDesc(
@@ -1115,8 +1466,45 @@ class ProjectDocGeneratorServiceCacheHitTest {
                     .projectId("p-1")
                     .repoId(SOURCE_REPO_ID)
                     .generatedFromSha(sha)
-                    .content(content)
+                    .content(withFacts(content, "owner/repo-a", sha))
                     .build()));
+  }
+
+  private static String withFacts(String content, String repository, String sha) {
+    return content != null && content.contains(DeterministicProjectFactEvidence.BEGIN)
+        ? content
+        : content + facts(repository, sha);
+  }
+
+  private static String facts(String repository, String sha) {
+    if (sha == null || !sha.matches("[0-9a-fA-F]{40}")) {
+      throw new IllegalArgumentException("test fact revision must be the exact 40-hex fingerprint");
+    }
+    return "\n\n"
+        + DeterministicProjectFactEvidence.BEGIN
+        + "\n- Evidence-Format: `EXECUTESPEC_PROJECT_FACTS_V2`"
+        + "\n- Repository: `"
+        + repository
+        + "`\n- Source revision: `"
+        + sha
+        + "`\n- Status: `AVAILABLE`\n"
+        + DeterministicProjectFactEvidence.ROUTES_BEGIN
+        + "\n- No exact Spring handler response evidence was discovered.\n"
+        + DeterministicProjectFactEvidence.ROUTES_END
+        + "\n"
+        + DeterministicProjectFactEvidence.END
+        + "\n\n"
+        + DeterministicProjectFactEvidence.SETUP_BEGIN
+        + "\n- Evidence-Format: EXECUTESPEC_SETUP_SOURCES_V2"
+        + "\n- Repository-Base64: "
+        + Base64.getEncoder().encodeToString(repository.getBytes(StandardCharsets.UTF_8))
+        + "\n- Source-Revision: "
+        + sha
+        + "\n- Scm-Provider: GITHUB"
+        + "\n- Source-Selection: COMPLETE"
+        + "\n- No exact setup command source was selected.\n"
+        + DeterministicProjectFactEvidence.SETUP_END
+        + "\n";
   }
 
   private static ChatResponse textResponse(String text, String finishReason) {
@@ -1137,17 +1525,25 @@ class ProjectDocGeneratorServiceCacheHitTest {
         switch (type) {
           case EXPLANATION ->
               """
-              # %s
-              %s
-              ## Repositories
-              - owner/repo-a: application source.
-              ## High-level architecture
-              %s
-              ## Key data flows
-              1. Request enters the application and reaches the service.
-              ## Where to contribute
-              Start with the linked repository and its existing tests.
-              """
+# %s
+%s
+## Repositories
+- owner/repo-a: application source.
+## High-level architecture
+%s
+## Key data flows
+1. Request enters the application and reaches the service.
+## Where to contribute
+Start with the linked repository and its existing tests.
+
+## Verified local workflow
+
+No install, test, run, or runtime prerequisite is established by the supplied deterministic setup evidence.
+
+## Troubleshooting
+
+No repository-specific troubleshooting remedy is established by the supplied deterministic evidence. Inspect the exact revision and its setup sources before choosing a command.
+"""
                   .formatted(label, detail, detail);
           case SETUP ->
               """
@@ -1155,9 +1551,10 @@ class ProjectDocGeneratorServiceCacheHitTest {
               %s
               ## Prerequisites
               - Git and the repository runtime.
+              - Linked repository: `owner/repo-a`.
               ## Clone
               ```bash
-              git clone https://example.invalid/owner/repo-a.git
+              git clone https://github.com/owner/repo-a.git
               ```
               ## Environment variables
               No required variables were proven by the supplied evidence.

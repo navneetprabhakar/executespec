@@ -456,6 +456,11 @@ SCORE COMPUTATION GUIDANCE:
             .messages(messages)
             .context(operationContext.child("accuracy-" + stepId))
             .toolsOverride(List.of())
+            // Best-effort enrichment: deterministic build/test/reviewer evidence remains usable
+            // when this call fails. Do not let six provider windows hold run terminalization.
+            .readTimeoutSeconds(60)
+            .retryProfile(LlmRequest.RetryProfile.AUXILIARY)
+            .strictProvider(true)
             .agentRole("AccuracyAssessmentService")
             .stepId(stepId)
             .build());
@@ -919,7 +924,8 @@ Return your assessment as a JSON object. No markdown fences. No explanation outs
     // blind. Kotlin/Swift/Rust included for Android/iOS/systems code.
     java.util.regex.Pattern ext =
         java.util.regex.Pattern.compile(
-            "(?i).*\\.(java|js|jsx|ts|tsx|py|go|rb|php|kt|kts|swift|rs|cs|scala|sh|sql)$");
+            "(?i).*\\.(java|js|jsx|ts|tsx|py|go|rb|php|kt|kts|swift|rs|cs|scala|sh|sql|"
+                + "html|htm|css|scss|sass|less|vue|svelte)$");
     // exclusion list aligned with VendoredPathGuard.VENDORED_DIRS so the assessor's read budget
     // can never be wasted on vendored picks. workspace SKIP_DIRS already drops them, but
     // defense in depth: this regex also drops fixture / lock-file / generated paths.

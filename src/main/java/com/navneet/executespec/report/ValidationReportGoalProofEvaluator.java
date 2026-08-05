@@ -163,6 +163,8 @@ public class ValidationReportGoalProofEvaluator {
     List<String> incomplete = new ArrayList<>();
     List<String> evidence = new ArrayList<>();
     List<String> risks = new ArrayList<>();
+    VerificationEvidenceDTO tests = byId.get("tests");
+    boolean nonFunctionalTests = nonFunctionalTestProof(tests);
 
     for (VerificationEvidenceDTO row : safeLedger) {
       if (row == null) continue;
@@ -172,10 +174,14 @@ public class ValidationReportGoalProofEvaluator {
         completed.add(label(row) + " passed");
       }
     }
+    if (nonFunctionalTests) {
+      completed.add(nonFunctionalTestCompletion(tests));
+    }
 
     boolean hasFailure = pipelineResult == PipelineResult.FAILED;
     boolean hasUnproven =
         pipelineResult == PipelineResult.NEEDS_ATTENTION || pipelineResult == null;
+    boolean hasOtherUnproven = hasUnproven;
 
     if (pipelineResult == PipelineResult.FAILED) {
       risks.add("validation report result is FAILED");
@@ -196,12 +202,20 @@ public class ValidationReportGoalProofEvaluator {
         continue;
       }
       if ("tests".equals(id) && "PASS".equals(status) && !trustedTestProof) {
+        if (nonFunctionalTests) {
+          String item = nonFunctionalTestGap(row);
+          incomplete.add(item);
+          risks.add(item);
+          hasUnproven = true;
+          continue;
+        }
         status = "UNKNOWN";
       }
       if ("FAIL".equals(status)) {
         hasFailure = true;
       } else {
         hasUnproven = true;
+        hasOtherUnproven = true;
       }
       String item = label(row, id) + " is " + status.toLowerCase();
       incomplete.add(item);
@@ -212,6 +226,7 @@ public class ValidationReportGoalProofEvaluator {
     String reportIssuesStatus = status(reportIssues);
     if (!"PASS".equals(reportIssuesStatus)) {
       hasUnproven = true;
+      hasOtherUnproven = true;
       String item =
           label(reportIssues, REPORT_ISSUES_ID) + " is " + reportIssuesStatus.toLowerCase();
       incomplete.add(item);
@@ -238,6 +253,7 @@ public class ValidationReportGoalProofEvaluator {
       if (row == null) {
         if ("spec-adherence".equals(id)) {
           hasUnproven = true;
+          hasOtherUnproven = true;
           incomplete.add("spec adherence evidence unavailable");
           risks.add("spec adherence evidence unavailable");
         }
@@ -253,7 +269,17 @@ public class ValidationReportGoalProofEvaluator {
       if ("UNKNOWN".equals(status)) {
         continue;
       }
+      // The explicit independent-functional trust-cap row explains the same gap already carried
+      // by a passing workspace-only tests row. Keep it in the evidence ledger, but do not turn
+      // that single verifier gap into a second code-quality gap that recommends more codegen.
+      if ("trust-cap".equals(id)
+          && nonFunctionalTests
+          && row.summary() != null
+          && row.summary().contains("independent functional verification is unavailable")) {
+        continue;
+      }
       hasUnproven = true;
+      hasOtherUnproven = true;
       String item = label(row) + " is " + status.toLowerCase();
       incomplete.add(item);
       risks.add(item);
@@ -288,6 +314,22 @@ public class ValidationReportGoalProofEvaluator {
           risks,
           false,
           true);
+    }
+
+    if (nonFunctionalTests && !hasOtherUnproven) {
+      return decision(
+          GoalDonenessState.UNCERTAIN,
+          RunContinuationDecision.STOP_BLOCKED,
+          nonFunctionalTestBlockedReason(tests),
+          "Run the surface-appropriate independent verifier; do not rerun code generation solely"
+              + " for this evidence gap.",
+          goal,
+          completed,
+          incomplete,
+          evidence,
+          risks,
+          false,
+          false);
     }
 
     return decision(
@@ -368,6 +410,49 @@ public class ValidationReportGoalProofEvaluator {
         && "HIGH".equalsIgnoreCase(tests.confidence());
   }
 
+  private static boolean nonFunctionalTestProof(VerificationEvidenceDTO tests) {
+    return tests != null
+        && "PASS".equalsIgnoreCase(tests.status())
+        && ("DETERMINISTIC_WORKSPACE_SUITE".equalsIgnoreCase(tests.source())
+            || "DETERMINISTIC_EXECUTION".equalsIgnoreCase(tests.source()));
+  }
+
+  private static boolean workspaceTestProof(VerificationEvidenceDTO tests) {
+    return tests != null && "DETERMINISTIC_WORKSPACE_SUITE".equalsIgnoreCase(tests.source());
+  }
+
+  private static String nonFunctionalTestCompletion(VerificationEvidenceDTO tests) {
+    String prefix =
+        workspaceTestProof(tests)
+            ? "Workspace test suite passed"
+            : "Execution-verified test suite passed";
+    if (tests.observed() != null && tests.total() != null) {
+      return prefix + " (" + tests.observed() + "/" + tests.total() + ")";
+    }
+    return prefix;
+  }
+
+  private static String nonFunctionalTestGap(VerificationEvidenceDTO tests) {
+    boolean workspace = workspaceTestProof(tests);
+    String counts =
+        tests.observed() != null && tests.total() != null
+            ? tests.observed()
+                + "/"
+                + tests.total()
+                + (workspace ? " workspace tests passed; " : " execution-verified tests passed; ")
+            : workspace ? "Workspace tests passed; " : "Execution-verified tests passed; ";
+    return counts
+        + (workspace
+            ? "independent functional verification is unavailable"
+            : "independent functional scope is unavailable");
+  }
+
+  private static String nonFunctionalTestBlockedReason(VerificationEvidenceDTO tests) {
+    return workspaceTestProof(tests)
+        ? "workspace tests passed, but independent functional verification is unavailable"
+        : "execution-verified tests passed, but independent functional scope is unavailable";
+  }
+
   private static List<String> incompleteWith(List<String> incomplete, String item) {
     if (item == null || item.isBlank() || incomplete.contains(item)) {
       return incomplete;
@@ -397,15 +482,51 @@ public class ValidationReportGoalProofEvaluator {
       List<String> risks,
       boolean userInputRequired,
       boolean anotherModelProviderMightHelp) {
-    return new GoalDonenessDecision(
+    return decision(
         state,
         recommendedDecision,
         reason,
+        "",
         goal,
         completed,
         incomplete,
         evidence,
         risks,
+        userInputRequired,
+        anotherModelProviderMightHelp);
+  }
+
+  private static GoalDonenessDecision decision(
+      GoalDonenessState state,
+      RunContinuationDecision recommendedDecision,
+      String reason,
+      String recommendedNextStep,
+      String goal,
+      List<String> completed,
+      List<String> incomplete,
+      List<String> evidence,
+      List<String> risks,
+      boolean userInputRequired,
+      boolean anotherModelProviderMightHelp) {
+    return new GoalDonenessDecision(
+        state,
+        recommendedDecision,
+        reason,
+        recommendedNextStep,
+        goal,
+        completed,
+        incomplete,
+        evidence,
+        risks,
+        "",
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0.0,
+        0L,
         userInputRequired,
         anotherModelProviderMightHelp);
   }

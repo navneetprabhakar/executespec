@@ -142,6 +142,27 @@ describe('protected transcript visual contract', () => {
     );
   });
 
+  it('renders forbidden run access as a stable authorization outcome', () => {
+    const rendered = mount(
+      <AgentConversation
+        {...baseConversation}
+        isBusy={false}
+        streamEvents={[]}
+        hasNewActivity={false}
+        runStreamStatus='CLOSED'
+        runUnavailable='ACCESS_DENIED'
+        runCard={activeRun}
+      />,
+    );
+
+    const card = rendered.querySelector('[data-agent-region="run-card"]');
+    expect(card?.getAttribute('data-run-unavailable')).toBe('ACCESS_DENIED');
+    expect(card?.textContent).toContain('You do not have access to this run');
+    expect(rendered.querySelector('[aria-live="polite"]')?.textContent).toContain(
+      'You do not have access to this run',
+    );
+  });
+
   it('marks terminal failure visually without losing the evidence action', () => {
     const failedRun: RunCard = {
       ...activeRun,
@@ -265,15 +286,19 @@ describe('protected transcript visual contract', () => {
 
     const confirm = Array.from(rendered.querySelectorAll('button')).find((button) =>
       button.textContent?.includes('Create revert plan'),
-    );
+    ) as HTMLButtonElement;
+    expect(confirm).toBeTruthy();
     await act(async () => {
-      confirm?.click();
-      await Promise.resolve();
-      await Promise.resolve();
+      confirm.click();
     });
+    // Revert submission derives its idempotency key through async WebCrypto before invoking the
+    // API. Assert at that observable boundary instead of racing crypto.subtle.digest with a fixed
+    // number of promise microtasks.
+    await vi.waitFor(() => expect(fork).toHaveBeenCalledTimes(1));
     expect(fork).toHaveBeenCalledWith(
       'run-visual-1',
       expect.objectContaining({userRequest: expect.stringContaining('Revert ONLY hunk 1')}),
+      expect.any(String),
     );
     expect(onOpenRun).toHaveBeenCalledWith('/plan/revert-plan-1');
   });

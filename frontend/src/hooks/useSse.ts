@@ -3,6 +3,7 @@ import {useSseStore} from '@/stores/useSseStore';
 import {useRunStore} from '@/stores/useRunStore';
 import {getMessages, getRunEventLog, getSseToken} from '@/lib/api';
 import {replayEntry, replayNotice, runEventKey} from '@/lib/runReplay';
+import {isTerminalRunStatus, normalizeRunStatus} from '@/lib/runStatus';
 
 const BACKOFF = [1000, 2000, 4000, 8000, 16000, 30000];
 /** RR-202 — the advertised reconnect ceiling; jitter never pushes past it. */
@@ -16,6 +17,26 @@ const STABLE_MS = 15000;
  * counter is cleared once a connection proves stable, so a healthy long-lived
  * run never exhausts it. */
 const MAX_ATTEMPTS = 12;
+
+function terminalStatusFromEvent(data: Record<string, unknown>): string | null {
+  const type = String(data.type || '').toUpperCase();
+  if (type !== 'RUN_STATUS' && type !== 'COMPLETE' && type !== 'RUN_DETAIL') return null;
+  const typed =
+    data.data && typeof data.data === 'object' ? (data.data as Record<string, unknown>) : null;
+  let raw = data.status ?? typed?.status;
+  if (raw == null && type !== 'RUN_DETAIL') raw = data.payload;
+  if (raw == null && type === 'RUN_DETAIL' && typeof data.payload === 'string') {
+    try {
+      const detail = JSON.parse(data.payload) as Record<string, unknown>;
+      raw = detail.status;
+    } catch {
+      return null;
+    }
+  }
+  if (raw == null) return null;
+  const status = normalizeRunStatus(String(raw).split('|', 1)[0].trim());
+  return isTerminalRunStatus(status) ? status : null;
+}
 
 export function useSse(runId: string | null) {
   const {setStatus, addEntry, hydrateEntries, clearEntries, setRunId, bumpFileWrittenTick} =
@@ -35,6 +56,7 @@ export function useSse(runId: string | null) {
       setRunId(null);
       return;
     }
+    const activeRunId = runId;
 
     // Only clear the log buffer when switching to a different run. Remounting the
     // hook for the SAME run (e.g. after a status flip re-renders RunDetail, or an
@@ -47,6 +69,7 @@ export function useSse(runId: string | null) {
     // resurrect an EventSource for an unmounted run or schedule reconnects into a new
     // run's store state.
     let active = true;
+    let terminal = false;
     if (isNewRun) clearEntries();
     setRunId(runId);
     attemptRef.current = 0;
@@ -99,7 +122,7 @@ export function useSse(runId: string | null) {
     // RR-202 — schedule the next reconnect under a jittered, ceiling-capped
     // backoff and a retry budget. Called from onerror and from a token failure.
     function scheduleReconnect() {
-      if (!active) return;
+      if (!active || terminal) return;
       clearStableTimer();
       if (attemptRef.current >= MAX_ATTEMPTS) {
         // Budget exhausted without ever stabilizing — stop the storm and surface
@@ -119,7 +142,7 @@ export function useSse(runId: string | null) {
     }
 
     async function connect() {
-      if (!active) return;
+      if (!active || terminal) return;
       esRef.current?.close();
       clearStableTimer();
       setStatus(attemptRef.current === 0 ? 'CONNECTING' : 'RECONNECTING');
@@ -147,6 +170,18 @@ export function useSse(runId: string | null) {
       const es = new EventSource(sseUrl);
       esRef.current = es;
 
+      function closeTerminalStream() {
+        terminal = true;
+        clearStableTimer();
+        if (timeoutRef.current) {
+          clearTimeout(timeoutRef.current);
+          timeoutRef.current = undefined;
+        }
+        es.close();
+        if (esRef.current === es) esRef.current = null;
+        setStatus('DISCONNECTED');
+      }
+
       es.onopen = () => {
         if (!active) return;
         setStatus('CONNECTED');
@@ -170,10 +205,14 @@ export function useSse(runId: string | null) {
           const data = JSON.parse(ev.data);
 
           // RUN_DETAIL: backend pushes full run detail — update store directly
-          if (data.type === 'RUN_DETAIL' && data.payload) {
+          if (data.type === 'RUN_DETAIL' && (data.payload || data.data)) {
             try {
-              const detail = JSON.parse(data.payload);
+              const detail =
+                data.data && typeof data.data === 'object'
+                  ? data.data
+                  : JSON.parse(String(data.payload));
               useRunStore.setState({activeRun: detail});
+              if (isTerminalRunStatus(detail.status)) closeTerminalStream();
             } catch {
               // Malformed payload — fall back to refetch
               // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
@@ -190,26 +229,34 @@ export function useSse(runId: string | null) {
           };
           addEntry(entry);
 
+          const terminalStatus = terminalStatusFromEvent(data);
+
           // Backend emits type as SCREAMING_SNAKE_CASE; payload carries the status string.
           if (data.type === 'RUN_STATUS' && data.payload) {
-            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-            patchRunStatus(runId!, data.payload);
+            patchRunStatus(
+              activeRunId,
+              terminalStatus ?? normalizeRunStatus(String(data.payload).split('|', 1)[0].trim()),
+            );
             // RUN_DETAIL push handles the full refetch — only fetch here as fallback
             // for terminal states where the SSE stream may close before RUN_DETAIL arrives.
             if (
-              [
-                'COMPLETE',
-                'FAILED',
-                'CANCELLED',
-                'COMPILING',
-                'WORKING',
-                'QUEUED_BATCH',
-                'IN_PROGRESS_BATCH',
-              ].includes(data.payload)
+              !terminalStatus &&
+              ['COMPILING', 'WORKING', 'QUEUED_BATCH', 'IN_PROGRESS_BATCH'].includes(
+                terminalStatus ?? data.payload,
+              )
             ) {
               // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
               fetchRun(runId!);
             }
+          }
+          if (terminalStatus) {
+            // The terminal event is authoritative. Refresh once for the durable reason/evidence,
+            // then close locally so the server's normal end-of-stream cannot start a reconnect
+            // loop on a run that will never emit another live event.
+            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+            void fetchRun(runId!);
+            closeTerminalStream();
+            return;
           }
           // Gate opened = plan tasks are now saved; RUN_DETAIL push covers this
           // but keep as fallback for reliable gate display
@@ -242,7 +289,7 @@ export function useSse(runId: string | null) {
       };
 
       es.onerror = () => {
-        if (!active) return;
+        if (!active || terminal) return;
         es.close();
         esRef.current = null;
         // RR-202 — go through the shared jittered/budgeted backoff scheduler.

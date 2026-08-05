@@ -12,6 +12,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.OptionalDouble;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -104,6 +105,14 @@ class WorkerAgentHardCapTest {
             inv ->
                 new RunCostTracker.Snapshot(
                     0, 0, 0, 0, costPerIter * callCount.incrementAndGet(), 0));
+    lenient()
+        .when(
+            costTracker.estimateConservativeCallCostUsd(
+                anyString(),
+                anyString(),
+                org.mockito.ArgumentMatchers.anyLong(),
+                org.mockito.ArgumentMatchers.anyLong()))
+        .thenReturn(OptionalDouble.of(0.001));
 
     lenient().when(registry.find(anyString())).thenAnswer(inv -> fakeTool(inv.getArgument(0)));
     lenient().when(registry.bindForWorker(any())).thenReturn(List.of());

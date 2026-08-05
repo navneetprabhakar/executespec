@@ -9,17 +9,21 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import com.navneet.executespec.config.featureflag.FeatureFlagService;
 import com.navneet.executespec.deployment.WorkspaceRestoreService;
+import com.navneet.executespec.integration.RunPipelineSupport;
 import com.navneet.executespec.report.RunChangeEvidenceService;
-import com.navneet.executespec.router.LlmProvider;
+import com.navneet.executespec.router.ResolvedModel;
 import com.navneet.executespec.state.StateStore;
 import com.navneet.executespec.state.entity.PipelineRun;
 
@@ -60,6 +64,7 @@ public class PreviewRenderService {
   private final StateStore stateStore;
   private final FeatureFlagService featureFlagService;
   private final PreviewRenderOperationRoot operationRoot;
+  private final PreviewRenderRouteResolver routeResolver;
 
   @Autowired
   public PreviewRenderService(
@@ -71,7 +76,8 @@ public class PreviewRenderService {
       RunChangeEvidenceService changeEvidenceService,
       StateStore stateStore,
       FeatureFlagService featureFlagService,
-      PreviewRenderOperationRoot operationRoot) {
+      PreviewRenderOperationRoot operationRoot,
+      PreviewRenderRouteResolver routeResolver) {
     this.discovery = discovery;
     this.renderAgent = renderAgent;
     this.jobRepository = jobRepository;
@@ -81,27 +87,7 @@ public class PreviewRenderService {
     this.stateStore = stateStore;
     this.featureFlagService = featureFlagService;
     this.operationRoot = operationRoot;
-  }
-
-  PreviewRenderService(
-      PreviewSurfaceDiscovery discovery,
-      PreviewRenderAgent renderAgent,
-      PreviewRenderJobRepository jobRepository,
-      PreviewRenderBundleRepository bundleRepository,
-      WorkspaceRestoreService workspaceRestoreService,
-      RunChangeEvidenceService changeEvidenceService,
-      StateStore stateStore,
-      FeatureFlagService featureFlagService) {
-    this(
-        discovery,
-        renderAgent,
-        jobRepository,
-        bundleRepository,
-        workspaceRestoreService,
-        changeEvidenceService,
-        stateStore,
-        featureFlagService,
-        null);
+    this.routeResolver = routeResolver;
   }
 
   @Value("${preview.render.max-surfaces:6}")
@@ -164,10 +150,15 @@ public class PreviewRenderService {
         stateStore
             .findRun(runId)
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "run not found"));
+    if (!RunPipelineSupport.isTerminal(run.getStatus())) {
+      throw new ResponseStatusException(
+          HttpStatus.CONFLICT, "preview render is available only after the run is terminal");
+    }
     if (!hasProductFilesToRender(runId)) {
       throw new ResponseStatusException(
           HttpStatus.CONFLICT, "this run produced no product files to render");
     }
+    ResolvedModel route = routeResolver.resolve(run);
 
     PreviewRenderJob job;
     try {
@@ -177,7 +168,8 @@ public class PreviewRenderService {
                   .runId(runId)
                   .requestedBy(requestedBy)
                   .status(PreviewRenderJob.Status.QUEUED.name())
-                  .provider(run.getAiProvider())
+                  .provider(route.getActualProvider().name())
+                  .model(route.getModel())
                   .build());
     } catch (DataIntegrityViolationException e) {
       // Lost the race. The winner's job is the single flight; hand the caller that one.
@@ -193,7 +185,7 @@ public class PreviewRenderService {
     var snapshot = ContextSnapshotFactory.builder().build().captureAll();
     Thread.ofVirtual()
         .name("preview-render-" + runId)
-        .start(snapshot.wrap(() -> executeJob(job.getId(), runId, run.getAiProviderEnum())));
+        .start(snapshot.wrap(() -> executeJob(job.getId(), runId, route)));
 
     return job;
   }
@@ -259,6 +251,19 @@ public class PreviewRenderService {
     }
   }
 
+  /** Whether a new paid render may be admitted. Existing active jobs bypass this on reload. */
+  public boolean canStartRender(String runId) {
+    try {
+      PipelineRun run = stateStore.findRun(runId).orElse(null);
+      return run != null
+          && RunPipelineSupport.isTerminal(run.getStatus())
+          && hasProductFilesToRender(runId);
+    } catch (RuntimeException e) {
+      log.warn("preview-render admission evidence unavailable run={}", runId, e);
+      return false;
+    }
+  }
+
   /** Surfaces belonging to a job, in display order. */
   public List<PreviewRenderBundle> bundles(UUID jobId) {
     return bundleRepository.findByJobIdOrderByDisplayOrderAsc(jobId);
@@ -278,7 +283,7 @@ public class PreviewRenderService {
     }
   }
 
-  private void executeJob(UUID jobId, String runId, LlmProvider provider) {
+  private void executeJob(UUID jobId, String runId, ResolvedModel route) {
     String owner = instanceId + ":" + UUID.randomUUID();
     if (jobRepository.claimLease(jobId, owner, Instant.now().plusSeconds(leaseSeconds)) == 0) {
       // Another instance reclaimed or is already running this job. Do not render it twice.
@@ -292,7 +297,7 @@ public class PreviewRenderService {
     Thread renewal = startLeaseRenewal(jobId, owner, running, operations);
     Outcome outcome;
     try {
-      outcome = renderJob(jobId, runId, provider, owner, operations);
+      outcome = renderJob(jobId, runId, route, owner, operations);
     } catch (RuntimeException e) {
       log.error("preview-render job failed run={} job={}", runId, jobId, e);
       outcome = Outcome.of(PreviewRenderJob.Status.FAILED, "RENDER_JOB_ERROR");
@@ -319,7 +324,7 @@ public class PreviewRenderService {
   private Outcome renderJob(
       UUID jobId,
       String runId,
-      LlmProvider provider,
+      ResolvedModel route,
       String owner,
       ConcurrentHashMap<String, PreviewRenderOperationRoot.Active> operations) {
     Path workspace;
@@ -336,7 +341,7 @@ public class PreviewRenderService {
       return Outcome.of(PreviewRenderJob.Status.NO_SURFACES, null);
     }
 
-    int rendered = renderSurfaces(jobId, runId, provider, owner, surfaces, operations);
+    int rendered = renderSurfaces(jobId, runId, route, owner, surfaces, operations);
     return new Outcome(
         rendered > 0 ? PreviewRenderJob.Status.READY : PreviewRenderJob.Status.FAILED,
         rendered > 0 ? null : "ALL_SURFACES_FAILED",
@@ -348,7 +353,7 @@ public class PreviewRenderService {
   private int renderSurfaces(
       UUID jobId,
       String runId,
-      LlmProvider provider,
+      ResolvedModel route,
       String owner,
       List<PreviewSurface> surfaces,
       ConcurrentHashMap<String, PreviewRenderOperationRoot.Active> operations) {
@@ -357,6 +362,8 @@ public class PreviewRenderService {
     try {
       var snapshot = ContextSnapshotFactory.builder().build().captureAll();
       List<Future<PreviewRenderAgent.RenderedSurface>> futures = new ArrayList<>();
+      long deadlineNanos =
+          System.nanoTime() + TimeUnit.SECONDS.toNanos(Math.max(1, timeoutSeconds));
       for (PreviewSurface surface : surfaces) {
         String renderAttemptId = jobId + ":" + surface.id();
         futures.add(
@@ -364,9 +371,8 @@ public class PreviewRenderService {
                 snapshot.wrap(
                     () -> {
                       if (operationRoot == null) {
-                        return renderAgent.render(surface, provider, runId, renderAttemptId);
+                        return renderAgent.render(surface, route, runId, renderAttemptId, null);
                       }
-                      var route = renderAgent.resolveRoute(provider);
                       PreviewRenderOperationRoot.Active active =
                           operationRoot
                               .claim(
@@ -388,16 +394,40 @@ public class PreviewRenderService {
       }
 
       int rendered = 0;
+      boolean deadlineExpired = false;
       for (int i = 0; i < surfaces.size(); i++) {
         PreviewSurface surface = surfaces.get(i);
         PreviewRenderAgent.RenderedSurface result;
         boolean uncertain = false;
         try {
-          result = futures.get(i).get(timeoutSeconds, TimeUnit.SECONDS);
-        } catch (Exception e) {
-          log.warn("preview-render surface timed out run={} surface={}", runId, surface.id(), e);
-          futures.get(i).cancel(true);
+          long remainingNanos = deadlineNanos - System.nanoTime();
+          if (deadlineExpired || remainingNanos <= 0) {
+            throw new TimeoutException("render job deadline exceeded");
+          }
+          result = futures.get(i).get(remainingNanos, TimeUnit.NANOSECONDS);
+        } catch (TimeoutException | CancellationException e) {
+          if (!deadlineExpired) {
+            log.warn("preview-render job deadline exceeded run={} surface={}", runId, surface.id());
+            cancelUnfinished(futures);
+            deadlineExpired = true;
+          }
           result = new PreviewRenderAgent.RenderedSurface(surface.id(), null, "TIMEOUT");
+          uncertain = true;
+        } catch (InterruptedException e) {
+          Thread.currentThread().interrupt();
+          cancelUnfinished(futures);
+          deadlineExpired = true;
+          result = new PreviewRenderAgent.RenderedSurface(surface.id(), null, "INTERRUPTED");
+          uncertain = true;
+        } catch (ExecutionException e) {
+          log.warn(
+              "preview-render surface failed run={} surface={} type={}",
+              runId,
+              surface.id(),
+              e.getCause() == null
+                  ? e.getClass().getSimpleName()
+                  : e.getCause().getClass().getSimpleName());
+          result = new PreviewRenderAgent.RenderedSurface(surface.id(), null, "RENDER_FAILED");
           uncertain = true;
         }
         PreviewRenderOperationRoot.Active active = operations.remove(surface.id());
@@ -415,6 +445,14 @@ public class PreviewRenderService {
       return rendered;
     } finally {
       pool.shutdownNow();
+    }
+  }
+
+  private static void cancelUnfinished(List<Future<PreviewRenderAgent.RenderedSurface>> futures) {
+    for (Future<?> future : futures) {
+      if (!future.isDone()) {
+        future.cancel(true);
+      }
     }
   }
 
@@ -463,10 +501,7 @@ public class PreviewRenderService {
             });
   }
 
-  /**
-   * The run's own changed product files, used to rank its work above pre-existing repo screens.
-   * Fails soft: on an invalid diff the render simply loses that ranking signal.
-   */
+  /** The exact run-baseline product paths allowed to affect screen discovery. Fails closed. */
   private Set<String> changedProductPaths(String runId) {
     try {
       var evidence = changeEvidenceService.inspect(runId, List.of());

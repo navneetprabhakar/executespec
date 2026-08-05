@@ -3,7 +3,7 @@
 > Last reviewed: 2026-05-12 (1.0.0-M1). **Merged to dev/main.**
 >
 > Paid-tier feature (FREE → 403; PRO=10/month, TEAM/ENTERPRISE=unlimited). Schema in V172.
-> Phase 1 of the [`finding/FindingPatchSubmitter`](../finding/) autofix surfaces — `PrReviewAutofixService` dispatches a patch-mode run on demand from the PR Review verdict popover, pushing the patch to the PR head branch via `branchOverride`.
+> Phase 1 of the [`finding/FindingPatchSubmitter`](../finding/) autofix surfaces — `PrReviewAutofixService` dispatches a patch-mode run on demand from the PR Review verdict popover, binding the exact repository, positive PR number, head branch, captured 40-hex head SHA, and configured base. The shared submitter rejects stale-head, missing-PAT, closed/merged, and wrong-base targets before provider spend; publication rechecks the live PR again before pushing without force.
 
 ## What it does
 

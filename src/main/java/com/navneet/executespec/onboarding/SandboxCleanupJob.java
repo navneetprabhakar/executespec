@@ -6,7 +6,6 @@ import java.time.Instant;
 import com.navneet.executespec.auth.entity.Project;
 import com.navneet.executespec.auth.repository.AppUserRepository;
 import com.navneet.executespec.auth.repository.ProjectRepository;
-import com.navneet.executespec.state.repository.PipelineRunRepository;
 
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -42,7 +41,7 @@ public class SandboxCleanupJob {
 
   private final ProjectRepository projectRepo;
   private final AppUserRepository userRepo;
-  private final PipelineRunRepository pipelineRunRepo;
+  private final SandboxRunActivityRepository pipelineRunRepo;
 
   /** Hourly at :05 past the hour. */
   @Scheduled(cron = "0 5 * * * *")
@@ -54,6 +53,10 @@ public class SandboxCleanupJob {
     long archived = 0;
     for (Project p : projectRepo.findByIsSandboxTrueAndStatus("ACTIVE")) {
       scanned++;
+      // Never archive a workspace while any run may still be using it. Unknown/legacy statuses
+      // fail closed as non-terminal in the repository query.
+      if (pipelineRunRepo.countNonTerminalByProjectId(p.getId()) > 0) continue;
+
       // Last-run-based idle detection: use the most recent pipeline_run
       // on this project. No run + project > 24h old → archive. Any run
       // more recent than the cutoff → keep alive.

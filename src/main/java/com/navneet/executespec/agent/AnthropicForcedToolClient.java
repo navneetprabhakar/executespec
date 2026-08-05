@@ -46,10 +46,11 @@ import lombok.extern.slf4j.Slf4j;
  * would 400). The restricted tool set (writeFile / editFile / completeTask) is passed by the
  * caller, so the forced call can only pick a productive action.
  *
- * <p><b>Fail-safe.</b> Returns {@code null} on ANY failure (no key, blank transcript, API 4xx,
- * parse error) so {@code LlmRouter.callAnthropic} falls through to the normal {@code
- * AnthropicChatModel} path — the forced salvage can NEVER regress the existing Anthropic behaviour,
- * and it only ever runs on an already-failing zero-write salvage call.
+ * <p><b>Fail-safe.</b> Returns an unusable outcome on provider/local failures (no key, blank
+ * transcript, API 4xx, parse error) so {@code LlmRouter.callAnthropic} falls through to the normal
+ * {@code AnthropicChatModel} path. A durable provider-start fence failure is the exception: it
+ * propagates and blocks fallback so a caller that lost dispatch authority cannot spend through a
+ * second transport.
  */
 @Component
 @Slf4j
@@ -140,11 +141,9 @@ public class AnthropicForcedToolClient {
    * bounded HTTP read timeout to the physical client.
    *
    * <p><b>Honest limits.</b> A read timeout aborts a stalled/silent socket, which is the RR-1180
-   * hazard, but it is a fixed HTTP ceiling, not the worker's live remaining budget: the caller
-   * ({@code LlmRouter}, which is outside this file's ownership) does not yet forward {@code
-   * LlmRequest.readTimeoutSeconds} here, so {@code readTimeoutSeconds} is null in production and
-   * the {@link #DEFAULT_FORCED_READ_TIMEOUT_SECONDS} ceiling applies. Wiring the live deadline is a
-   * caller-side change tracked separately.
+   * hazard, but it is a fixed HTTP ceiling rather than a continuously recomputed worker budget. The
+   * router forwards the admitted physical-attempt deadline; direct legacy callers fall back to
+   * {@link #DEFAULT_FORCED_READ_TIMEOUT_SECONDS}.
    */
   public ForcedToolCallOutcome forcedToolCallOutcome(
       String model,
@@ -153,6 +152,24 @@ public class AnthropicForcedToolClient {
       Integer maxTokens,
       String apiKeyOverride,
       Integer readTimeoutSeconds) {
+    return forcedToolCallOutcome(
+        model, messages, tools, maxTokens, apiKeyOverride, readTimeoutSeconds, null);
+  }
+
+  /**
+   * Deadline-aware, durably fenced forced call. The provider-start callback runs only after all
+   * local transcript/schema/request/client construction succeeds and immediately before the HTTP
+   * exchange. Callback failure propagates and therefore prevents both this socket write and the
+   * router's normal Anthropic fallback.
+   */
+  public ForcedToolCallOutcome forcedToolCallOutcome(
+      String model,
+      List<Message> messages,
+      List<ToolCallback> tools,
+      Integer maxTokens,
+      String apiKeyOverride,
+      Integer readTimeoutSeconds,
+      Runnable physicalAttemptStartedCallback) {
     if (!canAttempt(messages, tools, apiKeyOverride)) {
       return new ForcedToolCallOutcome(null, false, null, false);
     }
@@ -243,6 +260,7 @@ public class AnthropicForcedToolClient {
               .apiKey(key)
               .restClientBuilder(boundedRestClientBuilder(readTimeoutSeconds))
               .build();
+      signalPhysicalAttemptStarted(physicalAttemptStartedCallback);
       AnthropicApi.ChatCompletionResponse resp = api.chatCompletionEntity(req).getBody();
       if (resp == null || resp.content() == null) {
         return new ForcedToolCallOutcome(
@@ -254,10 +272,16 @@ public class AnthropicForcedToolClient {
 
       // 4) Parse content blocks -> outcome (fail-closed on abnormal stop reason, RR-1181).
       return buildForcedOutcome(resp, model);
+    } catch (ProviderStartFenceException fenceFailure) {
+      throw fenceFailure;
     } catch (Exception e) {
       log.warn("Anthropic forced salvage failed — falling back to auto: {}", e.toString());
       return new ForcedToolCallOutcome(null, false, e, true);
     }
+  }
+
+  private static void signalPhysicalAttemptStarted(Runnable callback) {
+    ProviderStartFenceException.signal(callback);
   }
 
   /**

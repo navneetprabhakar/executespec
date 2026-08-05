@@ -17,6 +17,7 @@ import com.navneet.executespec.auth.repository.ProjectRepository;
 import com.navneet.executespec.router.LlmProvider;
 import com.navneet.executespec.router.ModelAccessService;
 import com.navneet.executespec.router.ModelRegistry;
+import com.navneet.executespec.router.ResolvedModel;
 import com.navneet.executespec.state.BenchmarkSourceType;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
 
@@ -237,13 +238,14 @@ public class LlmExecutionPolicyFactory {
     String requestedProvider = firstNonBlank(run.getRequestedProvider(), run.getAiProvider());
     boolean pinned = run.isRoutePinned();
     String requestedModel = pinned ? require(run.getRequestedModel(), "pinned model") : null;
-    String source = "preview-render:" + runId + ":" + require(renderAttemptId, "renderAttemptId");
+    String source = compactPreviewSourceId(runId, renderAttemptId);
+    String correlationId = compactCorrelationId("preview-render", source);
     return createCustomer(
         LlmExecutionContext.ContextType.AGENT_TURN,
         "preview-render",
         "PREVIEW_RENDER",
         source,
-        source,
+        correlationId,
         userId,
         userId,
         orgId,
@@ -253,6 +255,46 @@ public class LlmExecutionPolicyFactory {
         pinned,
         PREVIEW_SURFACE_BUDGET,
         "preview-render-v1",
+        null);
+  }
+
+  /**
+   * Dedicated fixed-route context for one static screen-render surface.
+   *
+   * <p>The render job resolves its WORKHORSE route once before parallel surface work begins. This
+   * overload snapshots that exact physical provider/model as a pin even when the source run itself
+   * was provider-preferred, preventing managed-AI substitution or cross-provider failover from
+   * making persisted job attribution disagree with the route that produced a bundle.
+   */
+  public LlmExecutionReference forRunPreviewSurface(
+      String runId, String renderAttemptId, ResolvedModel route) {
+    var run =
+        runRepository
+            .findById(require(runId, "runId"))
+            .orElseThrow(() -> new IllegalArgumentException("pipeline run not found"));
+    String userId = require(run.getCreatedByUserId(), "run owner");
+    String orgId = require(run.getOrgId(), "run org");
+    requireRunCredentialBinding(run, userId, orgId);
+    if (route == null) throw new IllegalArgumentException("preview render route required");
+    String requestedProvider = require(route.providerName(), "preview render provider");
+    String requestedModel = require(route.getModel(), "preview render model");
+    String source = compactPreviewSourceId(runId, renderAttemptId);
+    String correlationId = compactCorrelationId("preview-render", source);
+    return createCustomer(
+        LlmExecutionContext.ContextType.AGENT_TURN,
+        "preview-render",
+        "PREVIEW_RENDER",
+        source,
+        correlationId,
+        userId,
+        userId,
+        orgId,
+        run.getProjectId(),
+        requestedProvider,
+        requestedModel,
+        true,
+        PREVIEW_SURFACE_BUDGET,
+        "preview-render-v2-exact-route",
         null);
   }
 
@@ -497,12 +539,23 @@ public class LlmExecutionPolicyFactory {
       return java.util.HexFormat.of()
           .formatHex(
               digest.digest(
-                  require(value, "embedding actor")
+                  require(value, "identity value")
                       .getBytes(java.nio.charset.StandardCharsets.UTF_8)))
           .substring(0, 16);
     } catch (java.security.NoSuchAlgorithmException impossible) {
       throw new IllegalStateException("SHA-256 unavailable", impossible);
     }
+  }
+
+  private static String compactCorrelationId(String namespace, String identity) {
+    return require(namespace, "correlation namespace") + ":" + stableIdentityComponent(identity);
+  }
+
+  private static String compactPreviewSourceId(String runId, String renderAttemptId) {
+    return "preview-render:"
+        + require(runId, "runId")
+        + ":"
+        + stableIdentityComponent(require(renderAttemptId, "renderAttemptId"));
   }
 
   public LlmExecutionReference platformInternal(

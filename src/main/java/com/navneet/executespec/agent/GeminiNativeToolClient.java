@@ -371,17 +371,22 @@ public class GeminiNativeToolClient {
               : inlineBody;
       long startedAt = System.currentTimeMillis();
       try {
-        JsonNode response =
+        RestClient client =
             clientFor(
-                    attempt.apiKey(), boundedReadTimeout(effectiveReadTimeout, attempt.deadline()))
-                .post()
-                .uri(uri)
-                .contentType(MediaType.APPLICATION_JSON)
-                .body(body)
-                .retrieve()
-                .body(JsonNode.class);
+                attempt.apiKey(), boundedReadTimeout(effectiveReadTimeout, attempt.deadline()));
+        RestClient.RequestHeadersSpec<?> requestSpec =
+            client.post().uri(uri).contentType(MediaType.APPLICATION_JSON).body(body);
+        signalPhysicalAttemptStarted(auditContext);
+        JsonNode response = requestSpec.retrieve().body(JsonNode.class);
         return new PendingHttpSuccess(
             response, attempt.handle(), Math.max(0, System.currentTimeMillis() - startedAt));
+      } catch (ProviderStartFenceException fenceFailure) {
+        recordFailure(
+            auditContext,
+            new PendingHttpSuccess(
+                null, attempt.handle(), Math.max(0, System.currentTimeMillis() - startedAt)),
+            fenceFailure.failure());
+        throw fenceFailure.failure();
       } catch (HttpClientErrorException.TooManyRequests e) {
         recordFailure(
             auditContext,
@@ -979,14 +984,16 @@ public class GeminiNativeToolClient {
           prepareAttempt(auditContext, "CACHE_MINT", legacyApiKey, effectiveReadTimeout);
       handle = attempt.handle();
       startedAt = System.currentTimeMillis();
-      JsonNode resp =
-          clientFor(attempt.apiKey(), boundedReadTimeout(effectiveReadTimeout, attempt.deadline()))
+      RestClient client =
+          clientFor(attempt.apiKey(), boundedReadTimeout(effectiveReadTimeout, attempt.deadline()));
+      RestClient.RequestHeadersSpec<?> requestSpec =
+          client
               .post()
               .uri("/v1beta/cachedContents")
               .contentType(MediaType.APPLICATION_JSON)
-              .body(body)
-              .retrieve()
-              .body(JsonNode.class);
+              .body(body);
+      signalPhysicalAttemptStarted(auditContext);
+      JsonNode resp = requestSpec.retrieve().body(JsonNode.class);
       String name = resp == null ? null : resp.path("name").asText(null);
       recordSuccess(
           auditContext,
@@ -998,6 +1005,12 @@ public class GeminiNativeToolClient {
         return new MintedExplicitCache(name, attempt.apiKey());
       }
       return null;
+    } catch (ProviderStartFenceException fenceFailure) {
+      recordFailure(
+          auditContext,
+          new PendingHttpSuccess(null, handle, elapsedSince(startedAt)),
+          fenceFailure.failure());
+      throw fenceFailure.failure();
     } catch (HttpClientErrorException he) {
       recordFailure(
           auditContext, new PendingHttpSuccess(null, handle, elapsedSince(startedAt)), he);
@@ -1055,6 +1068,28 @@ public class GeminiNativeToolClient {
             attemptKind,
             auditContext.parentAttemptId().get());
     return new PreparedHttpAttempt(handle, legacyApiKey, null);
+  }
+
+  private static void signalPhysicalAttemptStarted(AuditContext auditContext) {
+    if (auditContext == null) return;
+    try {
+      auditContext.request().signalPhysicalAttemptStarted();
+    } catch (RuntimeException failure) {
+      throw new ProviderStartFenceException(failure);
+    }
+  }
+
+  private static final class ProviderStartFenceException extends RuntimeException {
+    private final RuntimeException failure;
+
+    private ProviderStartFenceException(RuntimeException failure) {
+      super("Durable provider-start fence rejected Gemini transport", failure);
+      this.failure = failure;
+    }
+
+    private RuntimeException failure() {
+      return failure;
+    }
   }
 
   private String recordSuccess(

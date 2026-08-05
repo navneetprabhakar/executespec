@@ -8,22 +8,28 @@ import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 
 /**
- * Unit test for {@link OAuthRedirectCookieFilter} — the filter that preserves the CLI / VS Code
- * `/cli-login` device-auth return URL across the OAuth round-trip (RL: CLI OAuth onboarding fix).
- * No Spring context: pure servlet mocks, so it runs in milliseconds.
+ * Unit test for {@link OAuthRedirectCookieFilter}. No Spring context: pure servlet mocks, so it
+ * runs in milliseconds.
  */
 class OAuthRedirectCookieFilterTest {
 
   private final OAuthRedirectCookieFilter filter = new OAuthRedirectCookieFilter();
 
   @Test
-  void isSafe_acceptsOnlyCliLoginPaths() {
+  void isSafe_acceptsStrictSameOriginPathsWithQueryAndHash() {
     assertThat(OAuthRedirectCookieFilter.isSafe("/cli-login?port=1&state=x")).isTrue();
-    assertThat(OAuthRedirectCookieFilter.isSafe("/cli-login")).isTrue();
+    assertThat(
+            OAuthRedirectCookieFilter.isSafe(
+                "/settings?section=notifications#notification-preferences"))
+        .isTrue();
+    assertThat(OAuthRedirectCookieFilter.isSafe("/projects/p-1/runs/r-1")).isTrue();
     assertThat(OAuthRedirectCookieFilter.isSafe(null)).isFalse();
-    assertThat(OAuthRedirectCookieFilter.isSafe("/home")).isFalse();
+    assertThat(OAuthRedirectCookieFilter.isSafe("home")).isFalse();
     assertThat(OAuthRedirectCookieFilter.isSafe("https://evil.com")).isFalse();
     assertThat(OAuthRedirectCookieFilter.isSafe("//evil.com/cli-login")).isFalse();
+    assertThat(OAuthRedirectCookieFilter.isSafe("/%2f%2fevil.com/path")).isFalse();
+    assertThat(OAuthRedirectCookieFilter.isSafe("/\\evil.com/path")).isFalse();
+    assertThat(OAuthRedirectCookieFilter.isSafe("/settings\r\nSet-Cookie: attacked=1")).isFalse();
   }
 
   @Test
@@ -46,7 +52,7 @@ class OAuthRedirectCookieFilterTest {
   }
 
   @Test
-  void noCookie_onUnsafeRedirect() throws Exception {
+  void clearsStaleCookie_onUnsafeRedirect() throws Exception {
     MockHttpServletRequest req =
         new MockHttpServletRequest("GET", "/api/auth/oauth2/authorize/google");
     req.setParameter("redirect", "https://evil.com");
@@ -54,7 +60,25 @@ class OAuthRedirectCookieFilterTest {
 
     filter.doFilter(req, res, new MockFilterChain());
 
-    assertThat(res.getHeader("Set-Cookie")).isNull();
+    assertThat(res.getHeader("Set-Cookie"))
+        .contains(OAuthRedirectCookieFilter.COOKIE + "=")
+        .contains("Max-Age=0")
+        .doesNotContain("evil.com");
+  }
+
+  @Test
+  void preservesProtectedSettingsPathQueryAndHash() throws Exception {
+    MockHttpServletRequest req =
+        new MockHttpServletRequest("GET", "/api/auth/oauth2/authorize/google");
+    req.setParameter("redirect", "/settings?section=notifications#notification-preferences");
+    MockHttpServletResponse res = new MockHttpServletResponse();
+
+    filter.doFilter(req, res, new MockFilterChain());
+
+    assertThat(res.getHeader("Set-Cookie"))
+        .contains("%2Fsettings%3Fsection%3Dnotifications%23notification-preferences")
+        .contains("HttpOnly")
+        .contains("SameSite=Lax");
   }
 
   @Test

@@ -1,5 +1,11 @@
 # Cost and LLM usage attribution
 
+## Projected-call admission outcome (2026-08-02)
+
+`ProjectedCallBudgetExceededException` retains scope, cap, spend, and projected next-call cost.
+Agent streaming publishes typed `PROJECTED_CALL_BUDGET_EXCEEDED` pre-dispatch evidence with recovery
+guidance rather than an opaque provider/platform error.
+
 ## Canonical contracts
 
 - Managed-credit debit reconciliation compares canonical `key_source=PLATFORM` attempts only with
@@ -8,6 +14,17 @@
 
 - `RunCostTracker` is the live in-memory accumulator. Token totals and call counts are `long`; use
   `RunCostTracker.saturatedInt(...)` only at a documented legacy INTEGER entity/DTO boundary.
+  Active `RunDetail` reads may monotonically overlay a JVM-owned live snapshot over the persisted
+  checkpoint; terminal detail always keeps the stored durable cost.
+- `ProjectedCallCostAdmission` invokes
+  `RunCostTracker.estimateConservativeCallCostUsd(...)` at `LlmRouter`'s last common pre-transport
+  seam. It therefore prices the effective managed-AI or failover provider/model, not the worker's
+  earlier requested route. The estimate is not an invoice fact: it prices input with 25% headroom
+  at the uncached rate (including Anthropic's cache-write multiplier) and reserves the requested
+  maximum output. Missing pricing returns an empty projection; callers retain observed-spend
+  enforcement and must never reinterpret absence as a proven zero-cost call. Normal, salvage,
+  terminal-finalizer, and critic worker requests carry the run/task ceilings through route changes;
+  the default-off provider-backed history/tool compactors remain outside this slice.
 - `run_step_usage` is the canonical physical-provider-attempt ledger. V243 created success-call
   rows; V283 adds durable execution-context, tenant, feature, actual key-source, status/error,
   attempt, latency, and safe provider-usage metadata fields. V293 adds immutable write-ahead
@@ -16,9 +33,10 @@
   each write their own intent and terminal row.
 - `EffectiveRouteProjection` is the only sanctioned way to answer "which provider/model actually
   served this run". It reads successful `run_step_usage` attempts and returns `LEDGER` (exactly one
-  route), `MIXED` (several — `provider`/`model` stay null by design) or `UNATTRIBUTED` (no
-  successful attempt). It never falls back to the requested route. A caller that collapses `MIXED`
-  to a single provider reintroduces exactly the untruth this projection exists to remove. Consumed
+  route), `MIXED` (several — a same-provider mix keeps the common provider and null model;
+  cross-provider mixing keeps both null) or `UNATTRIBUTED` (no successful attempt). It never falls
+  back to the requested route. Exact-route consumers still require `LEDGER`; a provider-only
+  request may truthfully match a same-provider model mix. Consumed
   by `BenchmarkTrackingService` (V304 attempt attribution) and `BenchmarkGenerationService`
   (`GenerateResult.effectiveProvider`/`effectiveModel`/`routeAttribution`/`routeDiverged`).
 - `RunEffectiveRouteService` is the single read seam over that projection: `forRun(runId)`,
@@ -173,21 +191,26 @@ Prometheus loads `observability/alerts/executespec-enterprise-alerts.yml`. Alert
 delivery, deployed multi-JVM process-kill/DB-denial qualification, a shared fallback directory for
 total PostgreSQL outage, and ledger retention/partitioning remain release work.
 
-## Historical cost estimation is tenant-scoped (RR-1551)
+## Historical cost estimation is tenant- and route-scoped (RR-1551, V372)
 
 `CostHistoryService.estimateFromHistory` sets `pipeline_run.credits_charged` and tightens
 `pipeline_run.hard_cap_usd` through `integration/RunCostEstimatePersister`, so the estimate is
-derived exclusively from the submitting run's OWN org history. A validated voluntary
+derived exclusively from the submitting run's OWN org history on the same successful physical
+provider/model route set. A validated voluntary
 `user_cost_cap_usd` is already copied into `hard_cap_usd` on the initial run row before any
 classifier or planner call; the estimate may only preserve or tighten that ceiling. This keeps the
 customer cap enforceable and visible through `RunDetail.userCostCapUsd` even when planning fails
-before an estimate exists. Both `RunCostHistoryRepository` queries
-(`findSimilarCosts`, `findSimilarCostsLoose`) take a required `orgId` predicate; the loose fallback
-relaxes shape only, never the tenant boundary. A run with no `orgId` skips history entirely and
-takes the model-aware Stage-1 formula — a global pool is never a fallback. Before this fix the
+before an estimate exists. The `RunCostHistoryRepository` query requires org, strategy, requested
+provider, exact route, repository count, task count, and canonical LOW/MEDIUM/HIGH distribution;
+there is no shape-blind fallback that can borrow a many-task project's spend for a one-task approval
+cap or a LOW-heavy cohort for a HIGH-heavy plan. V372 adds both fingerprints and upgrades historical
+rows to schema v2 only when the successful physical-attempt ledger and real persisted task shape can
+be reconstructed. Expected route fingerprints always include LIGHTWEIGHT because even SINGLE_SHOT
+BUILD journeys make the title-summarizer call. New history records only COMPLETE runs with at least
+one attributed successful route. A run with no `orgId` or
+resolvable expected route skips history and takes the model-aware Stage-1 formula — a
+global/model-blind pool is never a fallback. Before this fix the
 P25/P75 band was computed across every organisation's observed `actual_cost_usd`, which both
 mispriced runs across tenants and made foreign orgs' cost distribution reconstructable by varying
-`planStrategy`/`provider`. Deferred: `idx_run_cost_history_similarity` still leads on
-`plan_strategy`, so the org-scoped query does not have a leading-column index — a future migration
-should add `(org_id, plan_strategy, provider, repo_count, task_count, completed_at DESC)`. This is
-a performance concern only; correctness does not depend on it.
+`planStrategy`/`provider`. V372's partial index leads with org, strategy, requested provider, route,
+repository count, task count, task-complexity distribution, and completion time.

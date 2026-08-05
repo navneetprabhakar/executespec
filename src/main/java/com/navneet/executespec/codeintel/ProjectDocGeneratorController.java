@@ -83,13 +83,21 @@ public class ProjectDocGeneratorController {
           job.resultDocId(),
           job.resultDocVersion(),
           job.errorCode(),
-          job.errorMessage(),
+          truthfulLegacyErrorMessage(job.errorMessage()),
           job.attemptCount(),
           job.deadlineAt(),
           job.providerStartedAt(),
           job.createdAt(),
           job.startedAt(),
           job.completedAt());
+    }
+
+    private static String truthfulLegacyErrorMessage(String message) {
+      return message == null
+          ? null
+          : message.replace(
+              "provider execution began",
+              "provider dispatch began; delivery outcome may be uncertain");
     }
   }
 

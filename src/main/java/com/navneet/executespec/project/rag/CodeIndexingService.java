@@ -28,6 +28,7 @@ import com.navneet.executespec.project.rag.CodeIndexStateStore.Completion;
 import com.navneet.executespec.project.rag.CodeIndexStateStore.Lease;
 import com.navneet.executespec.project.rag.CodeIndexStateStore.State;
 import com.navneet.executespec.project.rag.CodeIndexStateStore.Status;
+import com.navneet.executespec.project.service.WorkspaceHealthService;
 import com.navneet.executespec.security.GeneratedSecretScanner;
 import com.navneet.executespec.security.SensitiveWorkspacePathPolicy;
 
@@ -153,6 +154,7 @@ public class CodeIndexingService {
   private final CodeIndexStateStore stateStore;
   private final GeneratedSecretScanner secretScanner;
   private final EmbeddingOperationRoot operationRoot;
+  private final WorkspaceHealthService workspaceHealthService;
   private final int maxRefreshedFiles;
 
   @Autowired
@@ -163,7 +165,8 @@ public class CodeIndexingService {
       CodeChunkStore codeChunkStore,
       CodeIndexStateStore stateStore,
       GeneratedSecretScanner secretScanner,
-      EmbeddingOperationRoot operationRoot) {
+      EmbeddingOperationRoot operationRoot,
+      WorkspaceHealthService workspaceHealthService) {
     this(
         workspaceInitService,
         chunker,
@@ -172,6 +175,7 @@ public class CodeIndexingService {
         stateStore,
         secretScanner,
         operationRoot,
+        workspaceHealthService,
         DEFAULT_MAX_REFRESHED_FILES);
   }
 
@@ -191,6 +195,7 @@ public class CodeIndexingService {
         stateStore,
         new GeneratedSecretScanner(),
         null,
+        null,
         maxRefreshedFiles);
   }
 
@@ -210,6 +215,7 @@ public class CodeIndexingService {
         stateStore,
         secretScanner,
         null,
+        null,
         maxRefreshedFiles);
   }
 
@@ -222,6 +228,28 @@ public class CodeIndexingService {
       GeneratedSecretScanner secretScanner,
       EmbeddingOperationRoot operationRoot,
       int maxRefreshedFiles) {
+    this(
+        workspaceInitService,
+        chunker,
+        embedder,
+        codeChunkStore,
+        stateStore,
+        secretScanner,
+        operationRoot,
+        null,
+        maxRefreshedFiles);
+  }
+
+  CodeIndexingService(
+      WorkspaceInitService workspaceInitService,
+      ChunkingService chunker,
+      EmbeddingService embedder,
+      CodeChunkStore codeChunkStore,
+      CodeIndexStateStore stateStore,
+      GeneratedSecretScanner secretScanner,
+      EmbeddingOperationRoot operationRoot,
+      WorkspaceHealthService workspaceHealthService,
+      int maxRefreshedFiles) {
     this.workspaceInitService = workspaceInitService;
     this.chunker = chunker;
     this.embedder = embedder;
@@ -229,19 +257,40 @@ public class CodeIndexingService {
     this.stateStore = stateStore;
     this.secretScanner = secretScanner;
     this.operationRoot = operationRoot;
+    this.workspaceHealthService = workspaceHealthService;
     this.maxRefreshedFiles = Math.max(1, maxRefreshedFiles);
   }
 
   /** Ready means a completed 100%-covered state for this exact project/repo/source revision. */
+  @Deprecated(forRemoval = true)
   public boolean isIndexed(String projectId, ProjectRepo repo) {
     return readiness(projectId, repo).semanticSearchAvailable();
   }
 
+  /** Prefer the actor-aware overload; retained for package tests and legacy internal callers. */
+  @Deprecated(forRemoval = true)
   public Readiness readiness(String projectId, ProjectRepo repo) {
+    return readiness(projectId, repo, repo == null ? null : repo.getOwnerUserId());
+  }
+
+  public Readiness readiness(String projectId, ProjectRepo repo, String callerUserId) {
     if (repo == null || repo.getId() == null) {
       return emptyReadiness(projectId, null, "UNKNOWN", "REPOSITORY_NOT_FOUND", Status.FAILED);
     }
-    String sourceSha = sourceRevision(repo);
+    String sourceSha = sourceRevision(repo, callerUserId);
+    if ("UNKNOWN".equals(sourceSha)) {
+      return stateStore
+          .get(projectId, repo.getId())
+          .map(state -> unavailableSourceReadiness(state))
+          .orElseGet(
+              () ->
+                  emptyReadiness(
+                      projectId,
+                      repo.getId().toString(),
+                      sourceSha,
+                      "CURRENT_SOURCE_REVISION_UNAVAILABLE",
+                      Status.FAILED));
+    }
     stateStore.reconcile(projectId, repo.getId(), sourceSha);
     return stateStore
         .get(projectId, repo.getId())
@@ -322,9 +371,19 @@ public class CodeIndexingService {
               projectId, null, "UNKNOWN", "INVALID_PROJECT_OR_REPOSITORY", Status.FAILED));
     }
 
-    String sourceSha = sourceRevision(repo);
+    String sourceSha = sourceRevision(repo, actorUserId);
+    if ("UNKNOWN".equals(sourceSha)) {
+      return new IndexResult(
+          Outcome.UNSUPPORTED_SOURCE,
+          emptyReadiness(
+              projectId,
+              repo.getId().toString(),
+              sourceSha,
+              "CURRENT_SOURCE_REVISION_UNAVAILABLE",
+              Status.FAILED));
+    }
     stateStore.reconcile(projectId, repo.getId(), sourceSha);
-    Readiness before = readiness(projectId, repo);
+    Readiness before = readiness(projectId, repo, actorUserId);
     if (before.semanticSearchAvailable()) {
       return new IndexResult(Outcome.ALREADY_READY, before);
     }
@@ -341,13 +400,13 @@ public class CodeIndexingService {
             .tryAcquire(projectId, repo.getId(), sourceSha, owner, LEASE_DURATION)
             .orElse(null);
     if (lease == null) {
-      return new IndexResult(Outcome.ALREADY_RUNNING, readiness(projectId, repo));
+      return new IndexResult(Outcome.ALREADY_RUNNING, readiness(projectId, repo, actorUserId));
     }
 
     var embeddingAvailability = embedder.availability(projectId);
     if (!embeddingAvailability.semanticSearchAvailable()) {
       stateStore.fail(lease, "EMBEDDING_" + embeddingAvailability.reason());
-      return new IndexResult(Outcome.UNSUPPORTED_SOURCE, readiness(projectId, repo));
+      return new IndexResult(Outcome.UNSUPPORTED_SOURCE, readiness(projectId, repo, actorUserId));
     }
 
     EmbeddingOperationRoot.Active operation = null;
@@ -356,7 +415,7 @@ public class CodeIndexingService {
       String cloneUrl = cloneUrl(repo);
       if (cloneUrl == null) {
         stateStore.fail(lease, "SOURCE_CLONE_URL_UNAVAILABLE");
-        return new IndexResult(Outcome.UNSUPPORTED_SOURCE, readiness(projectId, repo));
+        return new IndexResult(Outcome.UNSUPPORTED_SOURCE, readiness(projectId, repo, actorUserId));
       }
       String cloneWsId = CodeIndexWorkspaceIdentity.workspaceId(projectId, repo);
       try {
@@ -369,13 +428,13 @@ public class CodeIndexingService {
       } catch (Exception cloneFailure) {
         stateStore.fail(lease, "SOURCE_CLONE_FAILED");
         log.warn("code index clone failed repo={} type={}", fullName, failureType(cloneFailure));
-        return new IndexResult(Outcome.FAILED, readiness(projectId, repo));
+        return new IndexResult(Outcome.FAILED, readiness(projectId, repo, actorUserId));
       }
 
       Path root = workspaceInitService.runWorkspacePath(cloneWsId);
       if (!Files.isDirectory(root, NOFOLLOW_LINKS)) {
         stateStore.fail(lease, "SOURCE_WORKSPACE_UNAVAILABLE");
-        return new IndexResult(Outcome.FAILED, readiness(projectId, repo));
+        return new IndexResult(Outcome.FAILED, readiness(projectId, repo, actorUserId));
       }
 
       // RR-641 — the readiness row + workspace name are labelled with `sourceSha`, but the clone
@@ -392,7 +451,7 @@ public class CodeIndexingService {
             "code index revision pin failed repo={} sha={}",
             sourceDisplayName(repo),
             shortSha(sourceSha));
-        return new IndexResult(Outcome.FAILED, readiness(projectId, repo));
+        return new IndexResult(Outcome.FAILED, readiness(projectId, repo, actorUserId));
       }
 
       Inventory inventory = inventory(root);
@@ -554,7 +613,7 @@ public class CodeIndexingService {
         operationRoot.complete(operation);
         operation = null;
       }
-      Readiness after = readiness(projectId, repo);
+      Readiness after = readiness(projectId, repo, actorUserId);
       log.info(
           "code index finished repo={} status={} coverage={} indexed={} eligible={} refreshed={}"
               + " deleted={} inventoryTruncated={}",
@@ -570,7 +629,7 @@ public class CodeIndexingService {
     } catch (LeaseLostException lost) {
       terminateOperation(operation, "CODE_INDEX_LEASE_LOST", "Code-index lease was lost");
       log.info("code index lease lost project={} repo={}", projectId, repo.getId());
-      return new IndexResult(Outcome.LEASE_LOST, readiness(projectId, repo));
+      return new IndexResult(Outcome.LEASE_LOST, readiness(projectId, repo, actorUserId));
     } catch (LlmExecutionContextException contextFailure) {
       String code = "EXECUTION_CONTEXT_" + contextFailure.reason().name();
       terminateOperation(operation, "CODE_INDEX_" + code, "Code-index admission did not complete");
@@ -580,7 +639,7 @@ public class CodeIndexingService {
           projectId,
           repo.getId(),
           contextFailure.reason());
-      return new IndexResult(Outcome.FAILED, readiness(projectId, repo));
+      return new IndexResult(Outcome.FAILED, readiness(projectId, repo, actorUserId));
     } catch (Exception failure) {
       terminateOperation(operation, "CODE_INDEX_FAILED", "Code indexing did not complete");
       stateStore.fail(lease, "INDEX_FAILED_" + failureType(failure));
@@ -589,7 +648,7 @@ public class CodeIndexingService {
           projectId,
           repo.getId(),
           failureType(failure));
-      return new IndexResult(Outcome.FAILED, readiness(projectId, repo));
+      return new IndexResult(Outcome.FAILED, readiness(projectId, repo, actorUserId));
     }
   }
 
@@ -713,6 +772,33 @@ public class CodeIndexingService {
         semanticReady ? embedding.model() : null);
   }
 
+  private Readiness unavailableSourceReadiness(State state) {
+    return new Readiness(
+        state.projectId(),
+        state.repoId().toString(),
+        "UNKNOWN",
+        state.sourceSha(),
+        Status.FAILED,
+        "CURRENT_SOURCE_REVISION_UNAVAILABLE",
+        state.discoveredFiles(),
+        state.eligibleFiles(),
+        state.indexedFiles(),
+        state.refreshedFiles(),
+        state.unchangedFiles(),
+        state.skippedFiles(),
+        state.deletedFiles(),
+        state.failedFiles(),
+        state.indexedChunks(),
+        state.coveragePercent(),
+        state.inventoryTruncated(),
+        false,
+        true,
+        false,
+        "LEXICAL",
+        null,
+        null);
+  }
+
   private Readiness emptyReadiness(
       String projectId, String repoId, String sourceSha, String reason, Status status) {
     var embedding =
@@ -726,7 +812,17 @@ public class CodeIndexingService {
         false, true, false, "LEXICAL", null, null);
   }
 
-  private static String sourceRevision(ProjectRepo repo) {
+  private String sourceRevision(ProjectRepo repo, String callerUserId) {
+    if (ProjectRepo.SourceType.LOCAL.name().equals(repo.getSourceType())) {
+      String revision = repo.getSourceRevision();
+      return revision == null || revision.isBlank() ? "UNKNOWN" : revision.trim();
+    }
+    if (workspaceHealthService != null) {
+      String current = workspaceHealthService.currentOriginSha(repo, callerUserId);
+      return current == null || current.isBlank() ? "UNKNOWN" : current.trim();
+    }
+    // Package-level tests constructed before current-origin resolution was injected retain their
+    // fixed fixture revision. The Spring constructor always installs the authoritative resolver.
     return CodeIndexWorkspaceIdentity.sourceRevision(repo);
   }
 

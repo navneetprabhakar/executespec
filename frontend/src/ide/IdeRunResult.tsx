@@ -12,6 +12,7 @@ import {useDocumentTitle} from '@/hooks/useDocumentTitle';
 import {Markdown} from '@/signal/components/Markdown';
 import {ConfirmModal} from '@/signal/components/Modal';
 import * as api from '@/lib/api';
+import {executeRunMutation} from '@/lib/runMutationAttempt';
 import {
   normalizeUiProvider,
   UI_PROVIDER_USAGE,
@@ -31,7 +32,7 @@ import {
 } from '@/ide/runCostLedger';
 import {providerIsDispatchable} from '@/ide/providerReadiness';
 import {useProviderReadiness} from '@/ide/useProviderReadiness';
-import {retryRunWithProvider} from '@/ide/providerRetry';
+import {retryRunSameRoute, retryRunWithProvider} from '@/ide/providerRetry';
 import {useAuthStore, selectIsSuperAdmin} from '@/stores/useAuthStore';
 import {
   IdeBadge,
@@ -45,6 +46,7 @@ import {
 } from '@/ide/IdeKit';
 import {ScoreBadge} from '@/ide/ScoreBadge';
 import {
+  authoritativeProductFileCount,
   confidenceColor,
   continuationApprovalCandidate,
   continuationApprovalReason,
@@ -72,6 +74,7 @@ import {
   logLabel,
   logMeta,
   logMessage,
+  missingValidationReportExplanation,
   missingScoreExplanation,
   modelRankingCandidateLabel,
   modelRankingCandidateMetrics,
@@ -82,7 +85,9 @@ import {
   correctionEvidenceHistory,
   correctionEvidenceInvalidationLabel,
   reportPipelineLabel,
+  reviewerSignal,
   publicationTrustFacts,
+  runSurfaceDestination,
   runArtifactActionAvailability,
   friendlyAiFailureMessage,
   runChatResponseContent,
@@ -99,6 +104,7 @@ import {
   taskBudgetFacts,
   taskGoalLine,
   terminalFailureEvidence,
+  terminalOutcomePrimaryAction,
   testEvidenceSummary,
   timelineTiming,
   testResultSummary,
@@ -469,19 +475,10 @@ export default function IdeRunResult() {
   // PAUSED + every terminal status stay here (the result page owns resume + the full detail).
   useEffect(() => {
     if (!runId || !run) return;
-    const s = (run.status || '').toUpperCase();
-    if (s === 'AWAITING_APPROVAL') {
+    const destination = runSurfaceDestination(run.status);
+    if (destination === 'plan') {
       navigate(`/plan/${runId}`, {replace: true});
-    } else if (
-      [
-        'CLASSIFYING',
-        'PLANNING',
-        'EXECUTING',
-        'RUNNING',
-        'IN_PROGRESS',
-        'PROVIDER_SWITCHING',
-      ].includes(s)
-    ) {
+    } else if (destination === 'live') {
       navigate(`/live/${runId}`, {replace: true});
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -853,11 +850,30 @@ export default function IdeRunResult() {
     if (!run) return;
     action(
       'reprovider',
-      () => retryRunWithProvider(api.forkRun, runId, p),
+      () =>
+        executeRunMutation(`fork:provider:${runId}`, {aiProvider: p}, (idempotencyKey) =>
+          retryRunWithProvider(api.forkRun, runId, p, idempotencyKey),
+        ),
       (r) => {
         const id = (r as {runId?: string})?.runId;
         if (id) navigate(`/live/${id}`);
         return 'Re-run started.';
+      },
+    );
+  }
+
+  function trySameRoute() {
+    if (!run) return;
+    action(
+      'reroute-same',
+      () =>
+        executeRunMutation(`fork:same-route:${runId}`, {}, (idempotencyKey) =>
+          retryRunSameRoute(api.forkRun, runId, idempotencyKey),
+        ),
+      (r) => {
+        const id = (r as {runId?: string})?.runId;
+        if (id) navigate(`/live/${id}`);
+        return 'Re-run started on the same route.';
       },
     );
   }
@@ -875,7 +891,12 @@ export default function IdeRunResult() {
         setBusy('revert-hunk');
         setMsg('Creating a reviewable revert run…');
         try {
-          const fork = await api.forkRun(runId, {userRequest: request});
+          const overrides = {userRequest: request};
+          const fork = await executeRunMutation(
+            `fork:revert:${runId}`,
+            overrides,
+            (idempotencyKey) => api.forkRun(runId, overrides, idempotencyKey),
+          );
           navigate(`/plan/${fork.runId}`);
         } catch (e: unknown) {
           setMsg(e instanceof Error ? e.message : 'Could not create the revert run.');
@@ -894,7 +915,9 @@ export default function IdeRunResult() {
     setMsg('');
     try {
       if (act === 'fork') {
-        const f = await api.forkRun(runId);
+        const f = await executeRunMutation(`fork:${runId}`, {}, (idempotencyKey) =>
+          api.forkRun(runId, undefined, idempotencyKey),
+        );
         navigate(`/plan/${f.runId}`);
         return;
       }
@@ -1126,7 +1149,12 @@ export default function IdeRunResult() {
     setChatBusy(true);
     setMsg('');
     try {
-      const {runId: newId} = await api.iterateRun(runId, instruction);
+      const payload = {userRequest: instruction};
+      const {runId: newId} = await executeRunMutation(
+        `iterate:${runId}`,
+        payload,
+        (idempotencyKey) => api.iterateRun(runId, instruction, idempotencyKey),
+      );
       if (newId) {
         setChatInput('');
         const prod = (run?.executionMode || '').toUpperCase() === 'PRODUCTION';
@@ -1158,7 +1186,7 @@ export default function IdeRunResult() {
   ].includes(statusUpper);
   const canResume = statusUpper === 'PAUSED';
   const score = report?.verifiedScore ?? null;
-  const v = verdictFor(score, run?.status);
+  const v = verdictFor(score, run?.status, run?.terminalOutcome);
   const measuredTestsTotal = tests?.totalTests ?? report?.testsTotal ?? null;
   const measuredTestsPassed = tests?.passed ?? report?.testsPassed ?? null;
   const testsEvidence = report?.verificationLedger?.find((row) => row.id === 'tests');
@@ -1171,13 +1199,21 @@ export default function IdeRunResult() {
   const issues = report?.issues ?? [];
   const reportedFiles = report?.filesGenerated ?? null;
   const workspaceFiles = producedWorkspaceFileCount;
+  const productFiles = authoritativeProductFileCount(reportedFiles, workspaceFiles);
   const fileCounts = fileCountSummary({reportedFiles, workspaceFiles});
+  const currentProvider = (run?.requestedProvider || run?.aiProvider || '').toLowerCase();
+  const alternativeProviders = providerReadiness.supported
+    ? providerReadiness.rows
+        .filter((row) => providerIsDispatchable(row))
+        .map((row) => row.provider.toLowerCase())
+        .filter((provider) => provider !== currentProvider)
+    : [];
   const hasExecutionEvidence =
     report != null ||
     Boolean(run?.tasks?.some((task) => task.startedAt != null || task.completedAt != null));
   const artifactActions = runArtifactActionAvailability({
     status: run?.status,
-    changedWorkspaceFiles: producedWorkspaceFileCount,
+    changedWorkspaceFiles: productFiles,
     hasExecutionEvidence,
     hasValidationReport: report != null,
     publication,
@@ -1198,6 +1234,7 @@ export default function IdeRunResult() {
     eventLog,
   });
   const failureText =
+    run?.terminalOutcome?.customerMessage ||
     run?.failureReason ||
     (run?.statusReason ? humanStatusReason(run.statusReason) : '') ||
     (failedTasks.length > 0
@@ -1206,6 +1243,8 @@ export default function IdeRunResult() {
         ? `${issues.length} validation issue${issues.length === 1 ? '' : 's'} found.`
         : 'Open the logs and evidence to identify the failing stage.');
   const durableFailureEvidence = terminalFailureEvidence(run);
+  const terminalPrimaryAction = terminalOutcomePrimaryAction(run?.terminalOutcome);
+  const stoppedByUser = run?.terminalOutcome?.category === 'USER_STOPPED';
   const trustFacts = publicationTrustFacts(run, publication);
   const correctionHistory = correctionEvidenceHistory(run);
   // C2 — tab title carries the run name once loaded.
@@ -1254,7 +1293,7 @@ export default function IdeRunResult() {
         >
           <span>
             {TAB_LABEL[tab]}
-            {tab === 'Code' && producedWorkspaceFileCount ? ` · ${producedWorkspaceFileCount}` : ''}
+            {tab === 'Code' && productFiles ? ` · ${productFiles}` : ''}
             {tab === 'Tasks' && run?.tasks?.length ? ` · ${run.tasks.length}` : ''}
             {tab === 'Validation' && issues.length ? ` · ${issues.length}` : ''}
           </span>
@@ -1265,7 +1304,7 @@ export default function IdeRunResult() {
             {TABS.map((t) => {
               const badge =
                 t === 'Code'
-                  ? producedWorkspaceFileCount
+                  ? productFiles
                   : t === 'Tasks'
                     ? run?.tasks?.length
                     : t === 'Validation'
@@ -1294,7 +1333,7 @@ export default function IdeRunResult() {
         {TABS.map((t) => {
           const badge =
             t === 'Code'
-              ? producedWorkspaceFileCount
+              ? productFiles
               : t === 'Tasks'
                 ? run?.tasks?.length
                 : t === 'Validation'
@@ -1345,57 +1384,93 @@ export default function IdeRunResult() {
                 <ScoreBadge score={score} verificationLedger={report?.verificationLedger} />
               )}
               <span style={{flex: 1}} />
-              {run?.statusReason && humanStatusReason(run.statusReason) && (
-                <span style={{color: 'var(--ide-fg-muted)', fontSize: 12}} title={run.statusReason}>
-                  {humanStatusReason(run.statusReason)}
+              {(run?.terminalOutcome?.customerTitle ||
+                (run?.statusReason && humanStatusReason(run.statusReason))) && (
+                <span style={{color: 'var(--ide-fg-muted)', fontSize: 12}}>
+                  {run?.terminalOutcome?.customerTitle ||
+                    humanStatusReason(run?.statusReason || '')}
                 </span>
               )}
             </div>
 
-            {failedTerminal && (
+            {(failedTerminal || stoppedByUser) && (
               <div className='ide-recovery-card'>
                 <div className='ide-recovery-main'>
-                  <div className='ide-recovery-kicker'>Recovery path</div>
+                  <div className='ide-recovery-kicker'>
+                    {stoppedByUser ? 'Run stopped' : 'Next step'}
+                  </div>
                   <div className='ide-recovery-title'>
-                    {statusUpper === 'PARTIAL'
-                      ? 'This run completed with unresolved work.'
-                      : 'This run did not reach a clean result.'}
+                    {run?.terminalOutcome?.customerTitle ||
+                      (statusUpper === 'PARTIAL'
+                        ? 'This run completed with unresolved work.'
+                        : 'This run did not reach a clean result.')}
                   </div>
                   <div className='ide-recovery-copy'>{failureText}</div>
                   <div className='ide-recovery-meta'>
-                    <span>
-                      {failedTasks.length} blocked step{failedTasks.length === 1 ? '' : 's'}
-                    </span>
+                    {!stoppedByUser && (
+                      <span>
+                        {failedTasks.length} blocked step{failedTasks.length === 1 ? '' : 's'}
+                      </span>
+                    )}
                     <span>
                       {issues.length} evidence issue{issues.length === 1 ? '' : 's'}
                     </span>
                     <span>
-                      {producedWorkspaceFileCount} generated file
-                      {producedWorkspaceFileCount === 1 ? '' : 's'}
+                      {productFiles} product file change{productFiles === 1 ? '' : 's'}
                     </span>
+                    {run?.terminalOutcome?.supportCode && (
+                      <span>Support code {run.terminalOutcome.supportCode}</span>
+                    )}
                   </div>
                 </div>
-                <div className='ide-recovery-actions' aria-label='Recovery actions'>
-                  <button className='ide-btn' onClick={() => setTab('Logs')}>
-                    Open logs
-                  </button>
-                  <button className='ide-btn ghost' onClick={() => setTab('Tasks')}>
-                    Failed steps
-                  </button>
-                  <button className='ide-btn ghost' onClick={() => setTab('Validation')}>
-                    Evidence
-                  </button>
-                  <button className='ide-btn ghost' onClick={() => setTab('Code')}>
-                    Files
-                  </button>
-                  <button className='ide-btn ghost' onClick={() => setTab('Chat')}>
-                    Ask about it
-                  </button>
+                <div className='ide-recovery-actions'>
+                  {terminalPrimaryAction && (
+                    <div aria-label='Primary outcome action'>
+                      {terminalPrimaryAction.behavior === 'navigate' ? (
+                        terminalPrimaryAction.href?.startsWith('/') ? (
+                          <Link className='ide-btn' to={terminalPrimaryAction.href}>
+                            {terminalPrimaryAction.label}
+                          </Link>
+                        ) : (
+                          <a className='ide-btn' href={terminalPrimaryAction.href}>
+                            {terminalPrimaryAction.label}
+                          </a>
+                        )
+                      ) : (
+                        <button
+                          className='ide-btn'
+                          disabled={
+                            terminalPrimaryAction.behavior === 'retry' && busy === 'reroute-same'
+                          }
+                          onClick={() => {
+                            if (terminalPrimaryAction.behavior === 'retry') trySameRoute();
+                            else if (terminalPrimaryAction.tab) setTab(terminalPrimaryAction.tab);
+                          }}
+                        >
+                          {terminalPrimaryAction.label}
+                        </button>
+                      )}
+                    </div>
+                  )}
+                  <div
+                    aria-label='Diagnostic navigation'
+                    style={{display: 'flex', gap: 8, flexWrap: 'wrap'}}
+                  >
+                    <button className='ide-btn ghost' onClick={() => setTab('Logs')}>
+                      Logs
+                    </button>
+                    <button className='ide-btn ghost' onClick={() => setTab('Validation')}>
+                      Evidence
+                    </button>
+                    <button className='ide-btn ghost' onClick={() => setTab('Code')}>
+                      Files
+                    </button>
+                  </div>
                 </div>
               </div>
             )}
 
-            {!failedTerminal && phaseDiagnosis && (
+            {!failedTerminal && !stoppedByUser && phaseDiagnosis && (
               <div className='ide-recovery-card'>
                 <div className='ide-recovery-main'>
                   <div className='ide-recovery-kicker'>Current diagnosis</div>
@@ -1457,16 +1532,7 @@ export default function IdeRunResult() {
                     }
                   />
                   <Kv k='Tests' v={testsSignal} />
-                  <Kv
-                    k='Reviewer'
-                    v={
-                      report
-                        ? report.reviewFailures > 0
-                          ? `${report.reviewFailures} unresolved`
-                          : 'clean'
-                        : '—'
-                    }
-                  />
+                  <Kv k='Reviewer' v={reviewerSignal(report)} />
                   <Kv k='Issues' v={issues.length} />
                   <Kv
                     k='Files'
@@ -1754,43 +1820,69 @@ export default function IdeRunResult() {
               >
                 ⌁ Share
               </button>
-              {(providerReadiness.supported
-                ? providerReadiness.rows
-                    .filter((row) => providerIsDispatchable(row))
-                    .map((row) => row.provider.toLowerCase())
-                : ['anthropic', 'openai']
-              )
-                .filter((p) => p !== (run?.aiProvider || '').toLowerCase())
-                .map((p) => (
-                  <button
-                    key={p}
-                    className='ide-btn ghost'
-                    onClick={() =>
-                      // C8 — re-running on another provider dispatches a NEW paid run.
-                      setConfirm({
-                        title: `Re-run with ${providerLabel(p)}`,
-                        body: `This dispatches a new run of the same spec on ${providerLabel(p)}. It consumes credits like any run. Continue?`,
-                        confirmLabel: 'Dispatch run',
-                        onConfirm: () => tryProvider(p.toUpperCase()),
-                      })
-                    }
-                  >
-                    ↻ Try {providerLabel(p)}
-                  </button>
-                ))}
-              {providerReadiness.supported &&
-                !providerReadiness.loading &&
-                providerReadiness.rows.every(
-                  (row) =>
-                    row.provider.toLowerCase() === (run?.aiProvider || '').toLowerCase() ||
-                    !providerIsDispatchable(row),
-                ) && (
-                  <span style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}>
-                    {providerReadiness.error
-                      ? 'Provider readiness unavailable; re-run choices are disabled.'
-                      : 'No other provider is currently ready for dispatch.'}
-                  </span>
-                )}
+              <button
+                className='ide-btn ghost'
+                onClick={() =>
+                  setConfirm({
+                    title: `Run again on ${providerLabel(currentProvider)}`,
+                    body: `This dispatches a new paid run on the same persisted provider/model route${run?.requestedModel ? ` (${run.requestedModel})` : ''}. Continue?`,
+                    confirmLabel: 'Dispatch run',
+                    onConfirm: trySameRoute,
+                  })
+                }
+              >
+                ↻ Run again · {providerLabel(currentProvider)}
+              </button>
+              <details style={{position: 'relative'}}>
+                <summary className='ide-btn ghost' style={{listStyle: 'none', cursor: 'pointer'}}>
+                  Change route…
+                </summary>
+                <div
+                  className='ide-card'
+                  style={{
+                    position: 'absolute',
+                    top: 'calc(100% + 4px)',
+                    right: 0,
+                    zIndex: 60,
+                    minWidth: 280,
+                    padding: 6,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 2,
+                    boxShadow: '0 6px 16px var(--ide-shadow)',
+                  }}
+                >
+                  <div style={{padding: '8px 10px', color: 'var(--ide-fg-muted)', fontSize: 11}}>
+                    {run?.routePinned
+                      ? 'This run used an exact route. Changing provider clears that model pin.'
+                      : 'Changing provider starts a separate paid run.'}
+                  </div>
+                  {alternativeProviders.map((provider) => (
+                    <button
+                      key={provider}
+                      className='ide-btn ghost'
+                      style={{justifyContent: 'flex-start'}}
+                      onClick={() =>
+                        setConfirm({
+                          title: `Change route to ${providerLabel(provider)}`,
+                          body: `This dispatches a new run on ${providerLabel(provider)} and does not preserve the current model pin. It consumes credits like any run. Continue?`,
+                          confirmLabel: 'Change route and dispatch',
+                          onConfirm: () => tryProvider(provider.toUpperCase()),
+                        })
+                      }
+                    >
+                      {providerLabel(provider)}
+                    </button>
+                  ))}
+                  {!providerReadiness.loading && alternativeProviders.length === 0 && (
+                    <div style={{padding: '8px 10px', color: 'var(--ide-fg-muted)', fontSize: 11}}>
+                      {providerReadiness.error
+                        ? 'Provider readiness unavailable; route changes are disabled.'
+                        : 'No other provider is currently ready for dispatch.'}
+                    </div>
+                  )}
+                </div>
+              </details>
               {/* Run management lives in an overflow so the row stays scannable. */}
               <div style={{position: 'relative'}}>
                 <button
@@ -2043,8 +2135,8 @@ export default function IdeRunResult() {
               >
                 <span>
                   Explorer
-                  {producedWorkspaceFileCount
-                    ? ` · ${producedWorkspaceFileCount} generated`
+                  {productFiles
+                    ? ` · ${productFiles} product change${productFiles === 1 ? '' : 's'}`
                     : files.length
                       ? ` · ${files.length} bootstrap/workspace`
                       : ''}
@@ -2220,9 +2312,28 @@ export default function IdeRunResult() {
               durableFailureEvidence ? (
                 <div className='ide-card' role='alert'>
                   <div style={{fontWeight: 600}}>{durableFailureEvidence.title}</div>
-                  <div style={{fontSize: 12, color: 'var(--ide-red)', marginTop: 6}}>
+                  <div
+                    style={{
+                      fontSize: 12,
+                      color:
+                        durableFailureEvidence.kind === 'bad'
+                          ? 'var(--ide-red)'
+                          : 'var(--ide-fg-muted)',
+                      marginTop: 6,
+                    }}
+                  >
                     {durableFailureEvidence.detail}
                   </div>
+                  {durableFailureEvidence.nextAction && (
+                    <div style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 8}}>
+                      Next: {durableFailureEvidence.nextAction}
+                    </div>
+                  )}
+                  {durableFailureEvidence.supportCode && (
+                    <div style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 8}}>
+                      Support code: {durableFailureEvidence.supportCode}
+                    </div>
+                  )}
                   <div style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 8}}>
                     Execution did not start, so no worker steps were created.
                   </div>
@@ -2858,11 +2969,30 @@ export default function IdeRunResult() {
               durableFailureEvidence ? (
                 <div className='ide-card' role='alert'>
                   <div style={{fontWeight: 600}}>{durableFailureEvidence.title}</div>
-                  <div style={{fontSize: 12, color: 'var(--ide-red)', marginTop: 6}}>
+                  <div
+                    style={{
+                      fontSize: 12,
+                      color:
+                        durableFailureEvidence.kind === 'bad'
+                          ? 'var(--ide-red)'
+                          : 'var(--ide-fg-muted)',
+                      marginTop: 6,
+                    }}
+                  >
                     {durableFailureEvidence.detail}
                   </div>
+                  {durableFailureEvidence.nextAction && (
+                    <div style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 8}}>
+                      Next: {durableFailureEvidence.nextAction}
+                    </div>
+                  )}
+                  {durableFailureEvidence.supportCode && (
+                    <div style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 8}}>
+                      Support code: {durableFailureEvidence.supportCode}
+                    </div>
+                  )}
                   <div style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 8}}>
-                    Validation did not run because execution never reached the worker phase.
+                    {missingValidationReportExplanation(run)}
                   </div>
                 </div>
               ) : (

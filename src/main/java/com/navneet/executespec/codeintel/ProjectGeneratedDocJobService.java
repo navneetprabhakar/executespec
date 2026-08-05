@@ -8,9 +8,11 @@ import com.navneet.executespec.auth.entity.Project;
 import com.navneet.executespec.auth.repository.ProjectRepository;
 import com.navneet.executespec.codeintel.entity.ProjectGeneratedDoc.DocType;
 import com.navneet.executespec.router.LlmProvider;
+import com.navneet.executespec.router.ModelMatrixConfigurationException;
 import com.navneet.executespec.router.ModelResolver;
 import com.navneet.executespec.router.OrgModelOverrideService;
 import com.navneet.executespec.router.ProjectProviderResolver;
+import com.navneet.executespec.router.ProjectRoutingException;
 import com.navneet.executespec.router.RunModelOverrides;
 
 import org.springframework.http.HttpStatus;
@@ -44,7 +46,11 @@ public class ProjectGeneratedDocJobService {
     RunModelOverrides.bind(overrides);
     com.navneet.executespec.router.ResolvedModel route;
     try {
-      route = modelResolver.resolve("ProjectDocGeneratorService", provider);
+      try {
+        route = modelResolver.resolve("ProjectDocGeneratorService", provider);
+      } catch (ModelMatrixConfigurationException invalidConfiguration) {
+        throw ProjectRoutingException.modelMatrixUnavailable(invalidConfiguration);
+      }
     } finally {
       RunModelOverrides.clear();
     }

@@ -1,5 +1,12 @@
 # Package: `auth`
 
+## Run completion email semantics (2026-08-02)
+
+Completion email consumes server-owned `RunTerminalOutcome`. Controlled budget, policy,
+validation, and cancellation outcomes are not internal errors; raw exceptions are never rendered.
+Spend/publication impact is stated only when known, and preferences link to
+`/settings?section=notifications`.
+
 Auth, account, org, project, RBAC, PAT, OAuth, and user-level client preferences.
 
 ## Token purpose (RR-128)
@@ -81,6 +88,9 @@ Auth, account, org, project, RBAC, PAT, OAuth, and user-level client preferences
   `api:read,runs:write,projects:write,agent:write,settings:write`. Billing, token management,
   `/api/admin/**`, `/api/v2/test/**`, and unknown mutations require an explicit capability or
   `full`. The filter stamps resolved token id/scopes request attributes after authorization.
+- The exact repository collection mutation `POST /api/repos` is a `projects:write` capability, as
+  are repository descendants. Keep exact collection paths pinned separately from descendant
+  prefixes so a least-privilege CLI PAT reaches the same attach admission path as browser JWT.
 - Boundary-crossing agent routes require the UNION of both capabilities, decided before the generic
   `/api/agent/` prefix rule: `POST /api/orchestrator/turn/confirm` creates a billable run and needs
   `agent:write` AND `runs:write`; `/api/agent/sessions/{id}/writer/**` mutates files on the caller's
@@ -172,8 +182,17 @@ Auth, account, org, project, RBAC, PAT, OAuth, and user-level client preferences
 
 - Browser OAuth success uses `auth.oauth.app-return-url` (`APP_SURFACE_RETURN_URL`, defaulting to `app.cors.app-return-url`) as the exact `/auth/callback` target. Do not use `app.mail.base-url` for OAuth; local backend-served mail links and Vite app OAuth callbacks can intentionally be different origins.
 - Deployed profiles (`dev`, `benchmark`, `prod`) must pin non-local `auth.oauth.app-return-url` / `app.cors.*-return-url` defaults, and the deploy workflow must upsert `APP_SURFACE_RETURN_URL`, `BUILD_SURFACE_RETURN_URL`, and `APP_MAIL_BASE_URL` from the resolved public URL. Otherwise OAuth and email links can silently fall back to localhost.
-- CLI / VS Code device login remains separate: `OAuthRedirectCookieFilter` only stores safe `/cli-login...` paths in `es_oauth_redirect`, and `OAuthSuccessHandler` appends that path as the callback `redirect=` param after token generation.
-- `OAuthSuccessHandlerTest` pins app-origin callback selection plus safe `/cli-login` handoff and unsafe redirect rejection.
+- `OAuthRedirectCookieFilter` stores a bounded strict same-origin application path (including query
+  and hash) in the short-lived HttpOnly `es_oauth_redirect` cookie. It rejects schemes,
+  authorities, protocol-relative/encoded-authority paths, backslashes and control characters, and
+  clears stale cookies on authorize requests without a safe target. This preserves both protected
+  web deep links and CLI / VS Code `/cli-login...` handoffs without creating an open redirect.
+- `OAuthSuccessHandler` clears and revalidates the cookie once at callback entry, then appends it as
+  the callback `redirect=` parameter on success or the login `redirect=` parameter on safe
+  no-email, account-conflict, and generic failure paths. This lets the next sign-in attempt resume
+  the same protected target without retaining a stale cookie. `OAuthRedirectCookieFilterTest` and
+  `OAuthSuccessHandlerTest` pin the settings path/query/hash round trip, CLI handoff, failure
+  recovery, stale-cookie clearing, and unsafe rejection.
 
 ## Tier Permissions
 

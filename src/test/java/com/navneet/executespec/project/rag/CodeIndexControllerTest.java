@@ -48,7 +48,7 @@ class CodeIndexControllerTest {
                     .build()));
     when(repos.findById(linkedId)).thenReturn(Optional.of(linked));
     when(repos.findById(unrelatedId)).thenReturn(Optional.of(repo(unrelatedId, "other/secret")));
-    when(indexing.readiness("project-1", linked)).thenReturn(readiness(linkedId));
+    when(indexing.readiness("project-1", linked, "user-1")).thenReturn(readiness(linkedId));
 
     var result = controller.list("project-1", principal);
 
@@ -71,7 +71,10 @@ class CodeIndexControllerTest {
 
     verify(links, never()).findByProjectId("foreign-project");
     verify(indexing, never())
-        .readiness(org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.any());
+        .readiness(
+            org.mockito.ArgumentMatchers.anyString(),
+            org.mockito.ArgumentMatchers.any(),
+            org.mockito.ArgumentMatchers.anyString());
   }
 
   @Test
@@ -83,7 +86,7 @@ class CodeIndexControllerTest {
         .thenReturn(
             Optional.of(ProjectRepoLink.builder().repoId(repoId).projectId("project-1").build()));
     when(repos.findById(repoId)).thenReturn(Optional.of(repo));
-    when(indexing.readiness("project-1", repo)).thenReturn(partialReadiness(repoId));
+    when(indexing.readiness("project-1", repo, "user-1")).thenReturn(partialReadiness(repoId));
 
     var response = controller.refresh("project-1", repoId, principal);
 
@@ -103,7 +106,7 @@ class CodeIndexControllerTest {
         .thenReturn(
             Optional.of(ProjectRepoLink.builder().repoId(repoId).projectId("project-1").build()));
     when(repos.findById(repoId)).thenReturn(Optional.of(repo));
-    when(indexing.readiness("project-1", repo)).thenReturn(readiness(repoId));
+    when(indexing.readiness("project-1", repo, "user-1")).thenReturn(readiness(repoId));
 
     var response = controller.refresh("project-1", repoId, principal);
 

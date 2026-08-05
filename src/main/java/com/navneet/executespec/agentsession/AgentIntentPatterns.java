@@ -118,7 +118,17 @@ final class AgentIntentPatterns {
         "find likely bug",
         "likely bug",
         "what changed",
-        "what is in");
+        "what is in",
+        // P1-3 (2026-08-01): interrogative questions ABOUT code ownership/location are read-only
+        // code help, so they get the grounded repository tool surface instead of bare chat.
+        "which file",
+        "which files",
+        "which class",
+        "which module",
+        "where is",
+        "where are",
+        "what implements",
+        "what code");
   }
 
   static boolean looksLikeLocalDeterministicAction(String lower) {
@@ -154,26 +164,89 @@ final class AgentIntentPatterns {
     // Quoted identifiers/examples are evidence, not imperatives. Without this boundary a turn
     // such as `Please handle "fix"` bypasses the structured classifier and creates a cloud run.
     String actionableText = QUOTED_TEXT.matcher(lower).replaceAll(" ");
-    return containsWordAny(
-            actionableText,
-            "fix",
-            "implement",
-            "add",
-            "update",
-            "change",
-            "refactor",
-            "debug",
-            "build",
-            "create",
-            "make")
-        || containsAny(
-            actionableText,
-            "failing test",
-            "failing tests",
-            "run tests",
-            "run the tests",
-            "create codemap",
-            "create codemap.md");
+    boolean vocabularyHit =
+        containsWordAny(
+                actionableText,
+                "fix",
+                "implement",
+                "add",
+                "update",
+                "change",
+                "refactor",
+                "debug",
+                "build",
+                "create",
+                "make")
+            || containsAny(
+                actionableText,
+                "failing test",
+                "failing tests",
+                "run tests",
+                "run the tests",
+                "create codemap",
+                "create codemap.md");
+    if (!vocabularyHit) {
+      return false;
+    }
+    // P1-3 (2026-08-01): "which files implement the simulation logic?" is a question ABOUT code,
+    // not an instruction to change it — the live router turned exactly that phrasing into a paid
+    // cloud-run proposal. A mutation keyword counts only when at least one clause uses it outside
+    // an interrogative-information context; polite imperatives ("can you implement …") remain
+    // code changes.
+    return !isOnlyAskingAboutCode(actionableText);
+  }
+
+  private static final java.util.regex.Pattern CLAUSE_SPLIT =
+      java.util.regex.Pattern.compile("[.?!;:\\n]+");
+
+  private static final String[] MUTATION_WORDS = {
+    "fix", "implement", "add", "update", "change", "refactor", "debug", "build", "create", "make"
+  };
+
+  private static final String[] INTERROGATIVE_LEADS = {
+    "which", "what", "where", "who", "when", "why", "how", "does", "do", "is", "are"
+  };
+
+  private static final String[] POLITE_IMPERATIVE_MARKERS = {
+    "can you", "could you", "would you", "will you", "please", "go ahead"
+  };
+
+  /**
+   * True only when EVERY clause containing mutation vocabulary reads as an information question: an
+   * interrogative word precedes the mutation keyword in the same clause and the clause carries no
+   * polite-imperative marker. "Explain X. Then implement Y" therefore stays a code change, while
+   * "which files implement X" and "where is the retry logic added" become read-only.
+   */
+  private static boolean isOnlyAskingAboutCode(String actionableText) {
+    boolean sawMutationClause = false;
+    for (String clause : CLAUSE_SPLIT.split(actionableText)) {
+      String trimmed = clause.strip();
+      if (trimmed.isEmpty()) continue;
+      int mutationIndex = earliestWordIndex(trimmed, MUTATION_WORDS);
+      if (mutationIndex < 0) continue;
+      sawMutationClause = true;
+      if (containsAny(trimmed, POLITE_IMPERATIVE_MARKERS)) {
+        return false;
+      }
+      int interrogativeIndex = earliestWordIndex(trimmed, INTERROGATIVE_LEADS);
+      if (interrogativeIndex < 0 || interrogativeIndex > mutationIndex) {
+        return false;
+      }
+    }
+    return sawMutationClause;
+  }
+
+  private static int earliestWordIndex(String clause, String[] words) {
+    int earliest = -1;
+    for (String word : words) {
+      java.util.regex.Matcher m =
+          java.util.regex.Pattern.compile("\\b" + java.util.regex.Pattern.quote(word) + "\\b")
+              .matcher(clause);
+      if (m.find() && (earliest < 0 || m.start() < earliest)) {
+        earliest = m.start();
+      }
+    }
+    return earliest;
   }
 
   static String routeForReadOnly(String lower) {

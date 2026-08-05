@@ -3,6 +3,8 @@ package com.navneet.executespec.api.advice;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.navneet.executespec.agentsession.SubagentBudgetExceededException;
+import com.navneet.executespec.run.sync.RunWorkspaceRestoreFailedException;
+import com.navneet.executespec.run.sync.RunWorkspaceUnavailableException;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
@@ -15,16 +17,14 @@ class GlobalExceptionAdviceTest {
   // RR-1119 — the status-derived error code uses the underscore convention CLI/core classifiers
   // recognize, matching onNoResource ("not_found") — not the old hyphenated "not-found".
   @Test
-  void statusDerivedErrorCodeUsesUnderscoreNotHyphen() {
-    var response =
-        new GlobalExceptionAdvice()
-            .onErrorResponse(new ResponseStatusException(HttpStatus.NOT_FOUND, "missing"));
-
-    assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
-    assertThat(response.getBody())
-        .containsEntry("error", "not_found")
-        .containsEntry("status", 404)
-        .containsEntry("message", "missing");
+  void lastChanceAdviceDoesNotGloballyRemapSpringStatusExceptions() {
+    for (var method : GlobalExceptionAdvice.class.getDeclaredMethods()) {
+      ExceptionHandler handler = method.getAnnotation(ExceptionHandler.class);
+      if (handler == null) continue;
+      assertThat(handler.value()).doesNotContain(ResponseStatusException.class);
+      assertThat(java.util.Arrays.stream(handler.value()).map(Class::getName))
+          .noneMatch(name -> name.equals("org.springframework.web.ErrorResponseException"));
+    }
   }
 
   @Test
@@ -38,8 +38,39 @@ class GlobalExceptionAdviceTest {
     assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_ENTITY);
     assertThat(response.getBody())
         .containsEntry("errorCode", "SUBAGENT_TREE_COST_BUDGET_EXHAUSTED")
-        .containsEntry("error", "subagent-budget-exhausted")
+        .containsEntry("error", "subagent_budget_exhausted")
         .containsEntry("status", 422);
+  }
+
+  @Test
+  void unavailableRunWorkspaceIsAGoneLifecycleOutcome() {
+    var response =
+        new GlobalExceptionAdvice()
+            .onRunWorkspaceUnavailable(
+                new RunWorkspaceUnavailableException("run-1", new RuntimeException("secret")));
+
+    assertThat(response.getStatusCode()).isEqualTo(HttpStatus.GONE);
+    assertThat(response.getBody())
+        .containsEntry("errorCode", "WORKSPACE_UNAVAILABLE")
+        .containsEntry("error", "workspace_unavailable")
+        .containsEntry("status", 410);
+    assertThat(response.getBody().get("message").toString()).doesNotContain("secret");
+  }
+
+  @Test
+  void transientRunWorkspaceRestoreFailureIsRetryable503() {
+    var response =
+        new GlobalExceptionAdvice()
+            .onRunWorkspaceRestoreFailed(
+                new RunWorkspaceRestoreFailedException(
+                    "run-1", new RuntimeException("internal GCS path")));
+
+    assertThat(response.getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
+    assertThat(response.getBody())
+        .containsEntry("errorCode", "WORKSPACE_RESTORE_FAILED")
+        .containsEntry("error", "workspace_restore_failed")
+        .containsEntry("status", 503);
+    assertThat(response.getBody().get("message").toString()).doesNotContain("GCS path");
   }
 
   @Test

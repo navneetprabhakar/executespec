@@ -3,8 +3,10 @@ package com.navneet.executespec.codeintel;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 
+import com.navneet.executespec.agent.LlmRequest;
 import com.navneet.executespec.agent.LlmRouter;
 import com.navneet.executespec.agent.PromptTrustBoundary;
 import com.navneet.executespec.codeintel.entity.ProjectGeneratedDoc.DocType;
@@ -32,6 +34,7 @@ final class ProjectDocValidatedGeneration {
       LlmRouter llmRouter,
       Consumer<String> publicationSafetyCheck,
       String projectId,
+      String projectName,
       DocType docType,
       ResolvedModel resolved,
       String exactModel,
@@ -45,17 +48,30 @@ final class ProjectDocValidatedGeneration {
     long totalInputTokens = 0;
     long totalOutputTokens = 0;
     for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-      providerDispatchFence.run();
-      ChatResponse response =
-          llmRouter.callTextStrict(
-              resolved.providerName(),
-              exactModel,
-              messages,
-              runId,
-              "project-doc-" + docType.name().toLowerCase(),
-              attempt == 1 ? "generate" : "generate-corrective-retry",
-              null,
-              executionReference);
+      AtomicBoolean currentCallStarted = new AtomicBoolean();
+      ChatResponse response;
+      try {
+        response =
+            llmRouter.callTextStrict(
+                resolved.providerName(),
+                exactModel,
+                messages,
+                runId,
+                "project-doc-" + docType.name().toLowerCase(),
+                attempt == 1 ? "generate" : "generate-corrective-retry",
+                null,
+                executionReference,
+                LlmRequest.RetryProfile.INTERACTIVE,
+                () -> {
+                  providerDispatchFence.run();
+                  currentCallStarted.set(true);
+                });
+      } catch (RuntimeException failure) {
+        if (!currentCallStarted.get()) {
+          throw new ProjectDocGeneratorService.PreTransportGenerationException(failure);
+        }
+        throw failure;
+      }
       if (ProjectDocGeneratorService.responseWasTruncated(response)) {
         log.warn(
             "[{}] Refusing truncated {} document response (reason={})",
@@ -67,22 +83,42 @@ final class ProjectDocValidatedGeneration {
       ProjectDocResponsePolicy.requireComplete(response);
       String content = responseText(response);
       publicationSafetyCheck.accept(content);
-      String groundedContent = GeneratedSignatureGrounding.sanitize(content, codemapEvidence);
-      groundedContent =
-          GeneratedSignatureGrounding.sanitizeUnsupportedBehavior(groundedContent, codemapEvidence);
       Usage usage = response.getMetadata() == null ? null : response.getMetadata().getUsage();
       totalInputTokens += usage == null ? 0 : safeInt(usage.getPromptTokens());
       totalOutputTokens += usage == null ? 0 : safeInt(usage.getCompletionTokens());
 
-      Optional<String> failure =
-          ProjectGeneratedDocValidator.validate(
-              docType, groundedContent, sourceRepositories, codemapEvidence);
+      String groundedContent = content;
+      Optional<String> failure = ProjectGeneratedDocValidator.validateProviderShape(content);
+      if (failure.isEmpty()) {
+        groundedContent = GeneratedSignatureGrounding.sanitize(content, codemapEvidence);
+        groundedContent =
+            GeneratedSignatureGrounding.sanitizeUnsupportedBehavior(
+                groundedContent, codemapEvidence);
+        groundedContent = GeneratedProjectFactGrounding.sanitize(groundedContent, codemapEvidence);
+        if (docType == DocType.EXPLANATION) {
+          groundedContent =
+              ProjectExplanationOperationalGrounding.append(
+                  groundedContent, codemapEvidence, sourceRepositories);
+        } else if (docType == DocType.SETUP) {
+          groundedContent =
+              ProjectSetupOperationalGrounding.assemble(
+                  projectName, codemapEvidence, sourceRepositories);
+        }
+        // Deterministic grounding is still customer-visible publication content. Scan the final
+        // assembled document as well as the provider response so an evidenced command cannot
+        // reintroduce a credential or tool-protocol payload after the first safety boundary.
+        publicationSafetyCheck.accept(groundedContent);
+        failure =
+            ProjectGeneratedDocValidator.validate(
+                docType, groundedContent, sourceRepositories, codemapEvidence);
+      }
       if (failure.isEmpty()) {
         return new Result(groundedContent, safeInt(totalInputTokens), safeInt(totalOutputTokens));
       }
       String reason = failure.orElseThrow();
       if (attempt == MAX_ATTEMPTS) {
-        throw new ProjectDocGeneratorService.InvalidGeneratedDocumentException(reason);
+        throw new ProjectDocGeneratorService.InvalidGeneratedDocumentException(
+            ProjectGeneratedDocFailureCode.fromReason(reason), reason);
       }
       log.warn(
           "[{}] {} document failed deterministic validation; retrying once on the same route: {}",
@@ -117,6 +153,27 @@ final class ProjectDocValidatedGeneration {
   }
 
   private static String correctiveGroundingInstruction(String reason) {
+    if (reason != null
+        && reason.startsWith(
+            "setup command is not present in encoded exact-revision setup evidence")) {
+      return """
+
+
+This SETUP correction must use any supplied `#### Safe deterministic command projection` as the
+complete allow-list for non-clone commands. If that projection is absent or empty, no non-clone
+command is authorized. Review the entire document and remove each command-like instruction from
+every fenced block regardless of its language label, every console prompt, every inline-code span,
+and every indented-code block unless that exact command is allow-listed. Keep each projected
+command only under the unambiguous exact linked-repository name that supplied it; do not place a
+repository command at project-wide scope or under another repository. Keep one literal fenced
+`git clone` command per linked repository. Do not infer
+`install`, `ci`, `build`, `test`, `start`, `dev`, migration, or health-check commands from a
+manifest, lockfile, framework, or ecosystem convention. Where an expected workflow command is not
+allow-listed, say that it is not established by the supplied deterministic evidence. Do not
+replace a removed command with a placeholder command. Preserve every required heading and
+meaningful section body.\
+""";
+    }
     if (reason == null || !reason.startsWith("unsupported ")) return "";
     return """
 
@@ -145,6 +202,8 @@ The corrected EXPLANATION must retain each of these exact H2 heading lines exact
 ## High-level architecture
 ## Key data flows
 ## Where to contribute
+## Verified local workflow
+## Troubleshooting
 Do not rename, delete, merge, reorder, or demote any of these headings. Keep meaningful \
 content beneath every one.
 """;

@@ -1,5 +1,11 @@
 # `report/` — validation reports and score evidence
 
+Run-end accuracy assessment and generated markdown are best-effort enrichment over deterministic
+build/test/reviewer evidence. Their provider calls use the AUXILIARY retry profile (two attempts,
+one 2-second backoff), a 60-second per-attempt read cap, and strict same-provider routing. Failure
+therefore falls back to the existing conservative accuracy/default report and structured markdown
+instead of keeping an otherwise reviewed run non-terminal through the unattended retry ladder.
+
 Validation-report inputs and test-failure details are wrapped user evidence. Static report and JSON
 output policy stays in `SystemMessage`; repository-derived issue descriptions, expected/actual
 values, conventions, and generated evidence never receive system authority.
@@ -57,7 +63,11 @@ invalid reports are excluded and counted separately.
 - Ledger entries label provenance (`DETERMINISTIC_FUNCTIONAL`,
   `DETERMINISTIC_WORKSPACE_SUITE`, `DETERMINISTIC_EXECUTION` for legacy fresh-but-unscoped rows,
   `UNVERIFIED_COUNT`, `LLM_REVIEWER`, `LLM_ASSESSMENT`, `LLM_ASSISTED_COUNT`, `HYBRID`, or
-  `INTERNAL_FORMULA`). A score is a summary, not independent proof.
+  `INTERNAL_FORMULA`). A score is a summary, not independent proof. When the accuracy provider
+  call failed and `accuracy_json.gradingNotes` carries the "Accuracy assessment unavailable"
+  fallback, the spec-adherence row is `UNKNOWN`/`INTERNAL_FORMULA` with an explicit
+  "heuristic estimate" summary and no numeric grade — it must never present the issue-count
+  heuristic as an `LLM_ASSESSMENT`.
 - Authenticated report DTOs expose `goalProofReferences`: a typed, reloadable projection of the
   durable run lifecycle, validation result, and exact verification-ledger rows used by final goal
   proof. Each reference carries a proof role (`PROVEN`, `BLOCKING`, `UNPROVEN`, or `CONTEXT`),
@@ -72,6 +82,14 @@ invalid reports are excluded and counted separately.
   only a `DETERMINISTIC_FUNCTIONAL`/HIGH tests row can satisfy
   `ValidationReportGoalProofEvaluator` and reach `STOP_DONE`. Null/false freshness renders the row
   `UNKNOWN` with `UNVERIFIED_COUNT`; positive stale or unbound counts never render as pass.
+- V371 persists `validation_report.tests_skipped` separately from passed/total. A fresh exit-zero
+  suite with at least one pass and `passed + skipped == total` is green code-level evidence and may
+  satisfy publication admission; all-skipped, malformed, non-zero-exit, failure, and error
+  populations remain blocked. Ordinary run-end validation now persists fresh
+  `WORKSPACE_TEST_SUITE` counts instead of discarding them as functional-tests-pending, while the
+  existing workspace-only score/goal-proof caps remain intact. Skips are excluded from the scoring
+  denominator only for an otherwise successful population; they never turn an all-skipped or
+  failing population into a green one.
 - `RunChangeEvidenceService` requires an admitted run-start baseline. When no `run_repo_snapshot`
   row exists, a Git workspace is accepted only if its history is a single commit — the case where
   the workspace was initialised for this run and `gitCommit` is filtered out of worker authority.
@@ -102,11 +120,25 @@ invalid reports are excluded and counted separately.
   zeros state that the cause is unavailable rather than inferring one.
 - Fresh workspace suites remain customer-visible deterministic test evidence, explicitly labelled
   `workspace suite only`; they cannot certify deployed journeys and cap both verified/rubric
-  headlines at 75. The independently generated black-box suite exercises the live preview/runtime
+  headlines at 75. The reloadable verification ledger emits that exact independent-functional
+  trust cap instead of leaving users to infer it from the test row. The independently generated black-box suite exercises the live preview/runtime
   and replaces the earlier population. Events are idempotent overwrite, not arithmetic merge:
   unit tests cannot dilute a failing functional result. Missing, failed, stale, zero-test, or
   provenance-unverified execution persists 0/0/unverified evidence; only a non-empty,
   provenance-verified `LIVE_PREVIEW_FUNCTIONAL` suite can earn full test credit and final-goal proof.
+  When workspace tests pass but independent functional proof is unavailable, run-level goal proof
+  remains `UNCERTAIN`/`UNPROVEN` and now recommends `STOP_BLOCKED` with the exact evidence gap; it
+  must not advise another code-generation turn because a model rerun cannot strengthen test scope.
+  Validation is initially persisted while the run is REVIEWING. After the terminal compare-and-set
+  succeeds, `RunOrchestrator` invokes the provider-free terminal refresh through
+  `RunValidationKickoff`; saved run-level goal proof and the evidence event therefore match the
+  terminal status projected by the report DTO instead of retaining stale REVIEWING prose.
+  Rescoring is monotonic by evidence strength: an unavailable/not-applicable asynchronous event
+  cannot replace a proven workspace population, and workspace evidence cannot replace proven live
+  functional evidence. Node's built-in test runner is parsed from its complete
+  `tests/pass/fail/cancelled/skipped/todo` footer, so successful `node --test` execution no longer
+  collapses to 0/0. Positive counts cannot produce executable `PASSED` unless the summary also
+  carries fresh proven-execution provenance.
 - Automatic-correction admission is synchronous and generation-bound: after read-only review,
   `RunValidationKickoff` re-executes the resolver-owned workspace suite, requires a non-empty green
   and provenance-verified result, and proves the canonical workspace generation is unchanged
@@ -125,6 +157,13 @@ invalid reports are excluded and counted separately.
   (six files / 30K characters). Production-file inference still excludes tests, but the LLM coverage
   judgment must inspect real test content rather than infer `NONE` from an intentionally test-free
   source snippet.
+- Static-web implementation files (`html`, `htm`, `css`, `scss`, `sass`, `less`, `vue`, and
+  `svelte`) participate in the bounded production-evidence lane. A page requirement must not be
+  marked unverified merely because the assessor sampled its test while filtering out the changed
+  page itself.
+- A run-start snapshot may identify a sole repository at the workspace root as well as under
+  `repos/<name>`. `RunChangeEvidenceService` applies the immutable snapshot SHA with an empty prefix
+  for that root layout, so standalone default-branch runs cannot lose product-diff/Render admission.
 - Final assessment is tighten-only: `CLEAN_*` pre-report status cannot erase a newly measured
   `NEEDS_ATTENTION` result; successfully auto-fixed visibility issues are not open blockers; and an
   accuracy report with admitted missing/partial/unknown requirements caps the headline/rubric score

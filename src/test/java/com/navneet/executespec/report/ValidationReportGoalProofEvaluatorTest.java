@@ -70,17 +70,100 @@ class ValidationReportGoalProofEvaluatorTest {
             .map(
                 row ->
                     "tests".equals(row.id())
-                        ? row("tests", "Tests", "PASS", "DETERMINISTIC_WORKSPACE_SUITE")
+                        ? row("tests", "Tests", "PASS", "DETERMINISTIC_WORKSPACE_SUITE", 23, 23)
                         : row)
             .toList();
 
     var decision = evaluator.evaluate("run-workspace-only", PipelineResult.PASSED, ledger);
 
     assertThat(decision.state()).isEqualTo(GoalDonenessState.UNCERTAIN);
+    assertThat(decision.recommendedDecision()).isEqualTo(RunContinuationDecision.STOP_BLOCKED);
+    assertThat(decision.recommendedNextStep())
+        .contains("independent verifier", "do not rerun code generation");
+    assertThat(decision.incompleteItems())
+        .contains(
+            "23/23 workspace tests passed; independent functional verification is unavailable");
+    assertThat(decision.completedItems()).contains("Workspace test suite passed (23/23)");
+    assertThat(decision.completedItems()).doesNotContain("Tests passed");
+    assertThat(decision.anotherModelProviderMightHelp()).isFalse();
+  }
+
+  @Test
+  void legacyDeterministicExecutionDoesNotClaimWorkspaceProvenance() {
+    List<VerificationEvidenceDTO> ledger =
+        passingLedger().stream()
+            .map(
+                row ->
+                    "tests".equals(row.id())
+                        ? row("tests", "Tests", "PASS", "DETERMINISTIC_EXECUTION", 6, 6)
+                        : row)
+            .toList();
+
+    var decision = evaluator.evaluate("run-legacy-execution", PipelineResult.PASSED, ledger);
+
+    assertThat(decision.recommendedDecision()).isEqualTo(RunContinuationDecision.STOP_BLOCKED);
+    assertThat(decision.reason()).contains("execution-verified tests").doesNotContain("workspace");
+    assertThat(decision.completedItems())
+        .contains("Execution-verified test suite passed (6/6)")
+        .noneMatch(item -> item.contains("Workspace"));
+    assertThat(decision.incompleteItems())
+        .contains(
+            "6/6 execution-verified tests passed; independent functional scope is unavailable")
+        .noneMatch(item -> item.contains("workspace"));
+  }
+
+  @Test
+  void workspaceScopeGapDoesNotMaskOtherUnprovenEvidence() {
+    List<VerificationEvidenceDTO> ledger =
+        passingLedger().stream()
+            .map(
+                row -> {
+                  if ("tests".equals(row.id())) {
+                    return row("tests", "Tests", "PASS", "DETERMINISTIC_WORKSPACE_SUITE", 23, 23);
+                  }
+                  if ("reviewer".equals(row.id())) {
+                    return row("reviewer", "Reviewer", "UNKNOWN", "LLM_REVIEWER");
+                  }
+                  return row;
+                })
+            .toList();
+
+    var decision = evaluator.evaluate("run-mixed-gaps", PipelineResult.PASSED, ledger);
+
     assertThat(decision.recommendedDecision())
         .isEqualTo(RunContinuationDecision.CONTINUE_SAME_MODEL_PROVIDER);
-    assertThat(decision.incompleteItems()).contains("Tests is unknown");
-    assertThat(decision.completedItems()).doesNotContain("Tests passed");
+    assertThat(decision.reason())
+        .isEqualTo("final validation report does not prove run completion");
+    assertThat(decision.incompleteItems())
+        .contains(
+            "23/23 workspace tests passed; independent functional verification is unavailable",
+            "Reviewer is unknown");
+  }
+
+  @Test
+  void workspaceScopeGapDoesNotMaskFailedRequiredEvidence() {
+    List<VerificationEvidenceDTO> ledger =
+        passingLedger().stream()
+            .map(
+                row -> {
+                  if ("tests".equals(row.id())) {
+                    return row("tests", "Tests", "PASS", "DETERMINISTIC_WORKSPACE_SUITE", 23, 23);
+                  }
+                  if ("build".equals(row.id())) {
+                    return row("build", "Build", "FAIL", "DETERMINISTIC");
+                  }
+                  return row;
+                })
+            .toList();
+
+    var decision = evaluator.evaluate("run-workspace-failed", PipelineResult.PASSED, ledger);
+
+    assertThat(decision.state()).isEqualTo(GoalDonenessState.FAILED);
+    assertThat(decision.recommendedDecision()).isEqualTo(RunContinuationDecision.STOP_FAILED);
+    assertThat(decision.incompleteItems())
+        .contains(
+            "23/23 workspace tests passed; independent functional verification is unavailable",
+            "Build is fail");
   }
 
   @Test
@@ -318,6 +401,11 @@ class ValidationReportGoalProofEvaluatorTest {
 
   private static VerificationEvidenceDTO row(
       String id, String label, String status, String source) {
+    return row(id, label, status, source, null, null);
+  }
+
+  private static VerificationEvidenceDTO row(
+      String id, String label, String status, String source, Integer observed, Integer total) {
     return new VerificationEvidenceDTO(
         id,
         label,
@@ -329,7 +417,7 @@ class ValidationReportGoalProofEvaluatorTest {
         label + " claim",
         label + " summary",
         "artifact",
-        null,
-        null);
+        observed,
+        total);
   }
 }

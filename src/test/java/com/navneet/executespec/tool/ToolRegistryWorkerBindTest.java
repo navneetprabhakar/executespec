@@ -164,7 +164,11 @@ class ToolRegistryWorkerBindTest {
   private static BackgroundJobTool backgroundJob(boolean enabled) {
     FeatureFlagService flags = mock(FeatureFlagService.class);
     when(flags.isEnabled(BackgroundJobTool.FLAG)).thenReturn(enabled);
-    return new BackgroundJobTool(flags, mock(JobRegistry.class), new ShellSandboxPolicy());
+    return new BackgroundJobTool(
+        flags,
+        mock(JobRegistry.class),
+        new ShellSandboxPolicy(),
+        mock(com.navneet.executespec.sandboxroute.SandboxCommandRoutingService.class));
   }
 
   private static WorkspaceRunTestsTool workspaceRunTests(boolean enabled) {

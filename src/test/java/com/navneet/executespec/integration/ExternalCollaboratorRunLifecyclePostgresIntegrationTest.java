@@ -186,6 +186,7 @@ class ExternalCollaboratorRunLifecyclePostgresIntegrationTest extends PostgresIn
             mock(PlanGateBypassPolicy.class),
             projectGuard,
             mock(ProjectRepoService.class),
+            mock(com.navneet.executespec.repo.GitHubRepoService.class),
             mock(ModelAccessService.class),
             mock(AiProviderPreferenceService.class),
             mock(ManagedAiUsageService.class),

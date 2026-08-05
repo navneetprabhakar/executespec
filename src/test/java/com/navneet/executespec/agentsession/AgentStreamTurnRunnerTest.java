@@ -3,6 +3,7 @@ package com.navneet.executespec.agentsession;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
@@ -151,9 +152,95 @@ class AgentStreamTurnRunnerTest {
     verify(sessionService)
         .failStreamTurn(
             ctx,
-            "This agent turn reached its AI execution limit before a response was produced. Start"
-                + " a new sandbox and retry; if it happens on the first message, contact support.",
+            "This agent turn reached its AI execution limit before a response was produced.",
             (RunCostTracker.Snapshot) null);
+    verify(eventRecorder)
+        .append(
+            eq("session-1"),
+            eq("turn-1"),
+            eq("TURN_ERROR"),
+            argThat(
+                payload ->
+                    payload instanceof java.util.Map<?, ?> map
+                        && "AGENT_TURN_BUDGET_EXHAUSTED".equals(map.get("code"))
+                        && "ACTION_REQUIRED".equals(map.get("category"))
+                        && Boolean.TRUE.equals(map.get("retryable"))
+                        && map.get("next_action").toString().contains("new agent turn")));
+  }
+
+  @Test
+  void mapsProjectedCallBudgetFailureWithoutDispatchingOrLeakingRawException() {
+    AgentSessionService sessionService = mock(AgentSessionService.class);
+    SpecChatService specChatService = mock(SpecChatService.class);
+    FeatureFlagService featureFlags = mock(FeatureFlagService.class);
+    AgentAttachmentService attachmentService = mock(AgentAttachmentService.class);
+    AgentEventRecorder eventRecorder = mock(AgentEventRecorder.class);
+    SseEmitter emitter = mock(SseEmitter.class);
+    AgentStreamTurnRunner runner =
+        new AgentStreamTurnRunner(
+            sessionService, specChatService, featureFlags, attachmentService, eventRecorder);
+    StreamTurnContext ctx =
+        new StreamTurnContext(
+            "session-1",
+            "turn-1",
+            1,
+            null,
+            null,
+            "org-1",
+            "user-1",
+            "deepseek",
+            null,
+            new OrchestratorDecision(
+                "ANSWER",
+                0.9,
+                "chat",
+                false,
+                "",
+                null,
+                new OrchestratorPolicy(true, false, "allowed"),
+                "trace-1"));
+
+    when(featureFlags.isEnabled("spec.chat.enabled")).thenReturn(true);
+    when(attachmentService.injectionBlock(anyString(), any())).thenReturn("");
+    doThrow(
+            new com.navneet.executespec.cost.ProjectedCallBudgetExceededException(
+                "run hard cap", 1.0, 0.95, 0.1))
+        .when(specChatService)
+        .runTurn(
+            any(),
+            any(),
+            anyString(),
+            any(),
+            any(),
+            anyString(),
+            any(),
+            any(),
+            any(),
+            any(),
+            anyString());
+
+    runner.run(emitter, ctx, null, new StreamTurnRequest("hello", null, null, null, null, null));
+
+    verify(sessionService)
+        .failStreamTurn(
+            ctx,
+            "The next model call would exceed the configured cost cap, so no provider request was"
+                + " sent.",
+            (RunCostTracker.Snapshot) null);
+    verify(eventRecorder)
+        .append(
+            eq("session-1"),
+            eq("turn-1"),
+            eq("TURN_ERROR"),
+            argThat(
+                payload ->
+                    payload instanceof java.util.Map<?, ?> map
+                        && "PROJECTED_CALL_BUDGET_EXCEEDED".equals(map.get("code"))
+                        && "ACTION_REQUIRED".equals(map.get("category"))
+                        && Double.valueOf(0.95).equals(map.get("actual_cost_usd"))
+                        && Double.valueOf(1.0).equals(map.get("cap_usd"))
+                        && Double.valueOf(0.1).equals(map.get("projected_call_usd"))
+                        && map.get("next_action").toString().contains("Raise the run cap")));
   }
 
   @Test
@@ -562,11 +649,7 @@ class AgentStreamTurnRunnerTest {
     runner.run(emitter, ctx, null, new StreamTurnRequest("hello", null, null, null, null, null));
 
     verify(sessionService)
-        .failStreamTurn(
-            ctx,
-            "anthropic authentication failed. Check the provider key in Settings > Provider keys,"
-                + " switch to a configured provider, or use managed AI credits before retrying.",
-            (RunCostTracker.Snapshot) null);
+        .failStreamTurn(ctx, "anthropic authentication failed.", (RunCostTracker.Snapshot) null);
     verify(emitter).complete();
     verify(emitter, never()).completeWithError(any());
   }
