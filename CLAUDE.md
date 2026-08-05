@@ -1321,6 +1321,23 @@ APPROVE atomically moves gate `PENDING → APPROVED`, run `AWAITING_APPROVAL →
 and outbox `WAITING → READY`. REJECT and pre-approval CANCEL are distinct decisions and atomically
 cancel the run/outbox; cancellation after approval preserves the immutable APPROVE receipt.
 
+Structurally broken durable gate state (2026-08-05) is a typed outcome, not an opaque failure. A
+missing gate row, missing continuation-outbox row, gate/continuation identity or payload-digest
+mismatch, invalid continuation payload, or missing immutable plan artifact — the partial-state
+class an interrupted rolling deploy can leave behind — is classified by
+`BrokenPlanGateStateException` inside the same decision transaction. APPROVE refuses with a stable
+`409 PLAN_GATE_STATE_UNRECOVERABLE[<code>]` conflict plus a cancel-and-resubmit remediation and
+never bypasses the gate. REJECT and pre-approval CANCEL succeed by fencing the run (and any
+surviving outbox row) to terminal `CANCELLED` with the typed reason persisted in
+`pipeline_run.failure_reason` / `plan_gate_resume_outbox.last_error`, so a customer can always stop
+a broken run. The fence never fabricates a receipt: a broken PENDING gate row is left byte-untouched
+because no canonical `DecisionEvidenceV1` can truthfully be written against corrupt rows, and
+resolved-gate receipts remain immutable. Fencing applies only while the run is `AWAITING_APPROVAL`;
+any other status keeps the prior typed conflict. A scheduled sweep that proactively fences broken
+`AWAITING_APPROVAL` rows older than a bound (with failed-run credit compensation) remains a
+documented follow-up — `PlanGateResumeStore`'s dead-letter sweep only observes outbox rows and
+cannot see a run whose outbox row is missing.
+
 The 400-line transaction coordinator delegates the exact 73-field receipt plus replay verification
 to package-private `PlanGateDecisionEvidence` (478 lines), and locked policy/credential/governance/
 acknowledgement evaluation to `PlanGateDecisionAdmission` (266 lines). This keeps each production
