@@ -1,14 +1,21 @@
 import type * as api from '@/lib/api';
 
+/**
+ * Compact project-scope control for the agent surface.
+ *
+ * Replaces the horizontal project tab strip (unusable past a handful of
+ * projects — founder feedback 2026-08-05) with one labelled dropdown plus the
+ * Create project action. Selecting "No project" preserves the old Unlink
+ * behavior; switching scope must never create a session by itself — sessions
+ * are created lazily on the first message.
+ */
 export function AgentProjectContext({
   currentProject,
   linkedProjectId,
   projects,
-  query,
   loading,
   error,
   disabledReason,
-  onQueryChange,
   onSelect,
   onUnlink,
   onCreate,
@@ -17,102 +24,83 @@ export function AgentProjectContext({
   currentProject: api.ProjectDto | null;
   linkedProjectId?: string | null;
   projects: api.ProjectDto[];
-  query: string;
   loading: boolean;
   error: string | null;
   disabledReason: string | null;
-  onQueryChange: (query: string) => void;
   onSelect: (project: api.ProjectDto) => void;
   onUnlink: () => void;
   onCreate: () => void;
   onRetry: () => void;
 }) {
-  const normalized = query.trim().toLowerCase();
-  const visible = projects
+  const active = projects
     .filter((project) => !project.archivedAt)
-    .filter((project) => !normalized || project.name.toLowerCase().includes(normalized))
-    .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt))
-    .slice(0, normalized ? 20 : 5);
+    .sort((left, right) => left.name.localeCompare(right.name));
+  // A linked project that fell out of the list (archived, or a stale fetch)
+  // must stay visible as the current selection instead of snapping to "No project".
+  const linkedMissing =
+    !!linkedProjectId && !active.some((project) => project.id === linkedProjectId);
   return (
     <section className='agent-project-context' aria-labelledby='agent-project-context-title'>
-      <div className='agent-project-context-head'>
-        <div>
-          <span className='agent-project-eyebrow'>Current project</span>
-          <strong id='agent-project-context-title'>
-            {currentProject?.name ??
-              (linkedProjectId
-                ? loading
-                  ? 'Loading linked project…'
-                  : 'Linked project unavailable'
-                : 'No project linked')}
-          </strong>
-        </div>
-        {linkedProjectId && (
-          <button
-            className='ide-btn ghost'
-            type='button'
-            disabled={!!disabledReason}
-            title={disabledReason || 'Unlink project'}
-            onClick={onUnlink}
-          >
-            Unlink
-          </button>
+      <label id='agent-project-context-title' htmlFor='agent-project-select'>
+        Project
+      </label>
+      <select
+        id='agent-project-select'
+        className='ide-select'
+        aria-label='Project context'
+        value={linkedProjectId ?? ''}
+        disabled={loading || !!disabledReason}
+        title={disabledReason || undefined}
+        onChange={(event) => {
+          const nextId = event.target.value;
+          if (!nextId) {
+            if (linkedProjectId) onUnlink();
+            return;
+          }
+          if (nextId === linkedProjectId) return;
+          const project = active.find((candidate) => candidate.id === nextId);
+          if (project) onSelect(project);
+        }}
+      >
+        <option value=''>No project</option>
+        {linkedMissing && (
+          <option value={linkedProjectId ?? ''}>
+            {currentProject?.name ?? (loading ? 'Loading linked project…' : 'Linked project')}
+          </option>
         )}
-      </div>
-      {!linkedProjectId && (
-        <p className='agent-project-recovery'>
-          Link a project to ground code questions and run proposals. You can continue a general
-          conversation without one.
-        </p>
+        {active.map((project) => (
+          <option key={project.id} value={project.id}>
+            {project.name}
+          </option>
+        ))}
+      </select>
+      {linkedProjectId && (
+        <button
+          className='ide-btn ghost'
+          type='button'
+          disabled={!!disabledReason}
+          title={disabledReason || 'Unlink project'}
+          onClick={onUnlink}
+        >
+          Unlink
+        </button>
       )}
-      <label htmlFor='agent-project-search'>Find an existing project</label>
-      <input
-        id='agent-project-search'
-        className='ide-input'
-        type='search'
-        value={query}
-        placeholder='Search projects'
-        disabled={loading}
-        onChange={(event) => onQueryChange(event.target.value)}
-      />
-      {error ? (
+      <button className='ide-btn' type='button' disabled={!!disabledReason} onClick={onCreate}>
+        Create project
+      </button>
+      {error && (
         <div className='agent-project-error' role='alert'>
           <span>{error}</span>
           <button type='button' className='ide-btn ghost' onClick={onRetry}>
             Retry
           </button>
         </div>
-      ) : (
-        <div
-          className='agent-project-results'
-          aria-label={normalized ? 'Project search results' : 'Recent projects'}
-        >
-          {loading ? (
-            <span>Loading projects…</span>
-          ) : visible.length === 0 ? (
-            <span>{normalized ? 'No matching projects.' : 'No existing projects.'}</span>
-          ) : (
-            visible.map((project) => (
-              <button
-                type='button'
-                key={project.id}
-                disabled={!!disabledReason || project.id === linkedProjectId}
-                title={disabledReason || undefined}
-                onClick={() => onSelect(project)}
-              >
-                <span>{project.name}</span>
-                <small>{project.id === linkedProjectId ? 'Linked' : 'Open in agent'}</small>
-              </button>
-            ))
-          )}
-        </div>
       )}
-      <div className='agent-project-actions'>
-        <button className='ide-btn' type='button' disabled={!!disabledReason} onClick={onCreate}>
-          Create project
-        </button>
-        {disabledReason && <span role='status'>{disabledReason}</span>}
-      </div>
+      {disabledReason && (
+        <span className='agent-project-locked' role='status'>
+          {disabledReason}
+        </span>
+      )}
     </section>
   );
 }

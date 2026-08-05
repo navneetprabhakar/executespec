@@ -24,6 +24,7 @@ import {agentRunUnavailableMessage, type AgentRunUnavailableReason} from '@/ide/
 import {AgentBlockedActionCard} from '@/ide/AgentBlockedActionCard';
 import {
   asText,
+  deriveSessionTitle,
   friendlyTool,
   isTerminalRunStatus,
   runOpenPath,
@@ -99,6 +100,7 @@ function usageLabel(usage?: AgentUsageSummary | null, isSuperAdmin = false): str
 /** Top bar: Chats · scope chip · title · honest status · New chat · settings popover. */
 export function AgentTopBar({
   selected,
+  sessionDisplayTitle,
   barStatus,
   scopeLabel,
   busy,
@@ -124,6 +126,8 @@ export function AgentTopBar({
   remoteSandboxEnabled = false,
 }: {
   selected: api.AgentSessionResponse | null;
+  /** Derived display title (project-aware / first-message-aware) for the selected session. */
+  sessionDisplayTitle?: string | null;
   barStatus: {label: string; tone: BarTone};
   scopeLabel: string | null;
   busy: boolean;
@@ -166,7 +170,7 @@ export function AgentTopBar({
       )}
       <div className='agent-bar-title'>
         {selected
-          ? sessionTitle(selected)
+          ? sessionDisplayTitle || sessionTitle(selected)
           : remoteSandboxEnabled
             ? 'Remote agent conversation'
             : 'Agent conversation'}
@@ -417,6 +421,7 @@ export function AgentChatsDrawer({
   sessionLimitReached = false,
   onClose,
   remoteSandboxEnabled = false,
+  projectNameFor,
 }: {
   open: boolean;
   sessions: api.AgentSessionResponse[];
@@ -433,6 +438,8 @@ export function AgentChatsDrawer({
   sessionLimitReached?: boolean;
   onClose: () => void;
   remoteSandboxEnabled?: boolean;
+  /** Resolves a linked project's display name for derived conversation titles. */
+  projectNameFor?: (projectId: string | null) => string | null;
 }) {
   if (!open) return null;
   return (
@@ -522,7 +529,7 @@ export function AgentChatsDrawer({
               {sessions.map((s) => (
                 <ConversationHistoryRow
                   key={s.id}
-                  title={sessionTitle(s)}
+                  title={deriveSessionTitle(s, projectNameFor?.(s.projectId) ?? null)}
                   meta={`${sessionDrawerMeta(s, remoteSandboxEnabled)} · ${relTime(s.updatedAt)}`}
                   active={s.id === selectedId}
                   archived={s.status === 'ARCHIVED'}
