@@ -3,9 +3,13 @@ import {describe, expect, it} from 'vitest';
 import {
   actionFromTurn,
   agentReducer,
+  conversationStartLabel,
   currency,
   deriveBarStatus,
+  deriveSessionTitle,
   initialAgentState,
+  isEmptyConversation,
+  isGenericSessionTitle,
   isTerminalRunStatus,
   pct,
   runOpenPath,
@@ -236,11 +240,84 @@ describe('agentState', () => {
   });
 
   it('formats compact labels and usage values', () => {
-    expect(sessionTitle(session)).toHaveLength(54);
+    expect(sessionTitle(session)).toHaveLength(60);
     expect(pct(5, 20)).toBe(25);
     expect(pct(5, 0)).toBe(0);
     expect(currency(4.125)).toBe('$4.1250');
     expect(currency(-1)).toBe('n/a');
+  });
+
+  describe('deriveSessionTitle', () => {
+    it('keeps a real, non-generic server title', () => {
+      expect(deriveSessionTitle({...session, title: 'Fix flaky webhook retries'})).toBe(
+        'Fix flaky webhook retries',
+      );
+    });
+
+    it('treats the legacy scope titles as absent', () => {
+      expect(isGenericSessionTitle('Project agent')).toBe(true);
+      expect(isGenericSessionTitle('Web agent')).toBe(true);
+      expect(isGenericSessionTitle('Run 4f1a2b3c-9d agent')).toBe(true);
+      expect(isGenericSessionTitle('')).toBe(true);
+      expect(isGenericSessionTitle('Add audit logging')).toBe(false);
+    });
+
+    it('prefers the first user message over scope fallbacks', () => {
+      expect(
+        deriveSessionTitle(
+          {...session, title: 'Project agent'},
+          'Inventory Platform',
+          'Add rate limiting to the reservation API please',
+        ),
+      ).toBe('Add rate limiting to the reservation API please');
+    });
+
+    it('clips a first-message title at 60 characters on one line', () => {
+      const derived = deriveSessionTitle(
+        {...session, title: 'Project agent'},
+        null,
+        `line one\nline two ${'x'.repeat(80)}`,
+      );
+      expect(derived).toHaveLength(60);
+      expect(derived).not.toContain('\n');
+      expect(derived.endsWith('…')).toBe(true);
+    });
+
+    it('falls back to the latest linked run title', () => {
+      expect(
+        deriveSessionTitle({
+          ...session,
+          title: 'Project agent',
+          latestLinkedRunId: 'run-9',
+          latestLinkedRunTitle: 'Add billing audit logs',
+          updatedAt: '2026-06-21T00:00:00Z',
+        }),
+      ).toBe('Add billing audit logs');
+    });
+
+    it('labels a provably message-less conversation as empty', () => {
+      expect(deriveSessionTitle({...session, title: 'Project agent'}, 'Inventory Platform')).toBe(
+        'Empty conversation',
+      );
+      expect(isEmptyConversation(session)).toBe(true);
+      expect(isEmptyConversation({...session, updatedAt: '2026-06-21T00:00:00Z'})).toBe(false);
+      expect(isEmptyConversation({...session, latestLinkedRunId: 'run-9'})).toBe(false);
+    });
+
+    it('derives project name plus start time for used generic-title sessions', () => {
+      const used = {
+        ...session,
+        title: 'Project agent',
+        updatedAt: '2026-06-21T00:00:00Z',
+      };
+      const expectedStamp = conversationStartLabel(used.createdAt);
+      expect(expectedStamp).not.toBe('');
+      expect(deriveSessionTitle(used, 'Inventory Platform')).toBe(
+        `Inventory Platform · ${expectedStamp}`,
+      );
+      // Unknown project name still yields a scope-derived deterministic title.
+      expect(deriveSessionTitle(used)).toBe(`Project · ${expectedStamp}`);
+    });
   });
 
   it('derives honest bar status, run phase, progress, and open path', () => {

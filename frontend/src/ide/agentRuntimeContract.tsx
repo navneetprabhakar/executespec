@@ -74,6 +74,12 @@ export function TrustBoundaryPanel({compact = false}: {compact?: boolean}) {
   );
 }
 
+/**
+ * Compact empty-state intro. One honest line plus suggestions; the full stage
+ * list, pre-spend contract, and trust chips stay available — unweakened —
+ * inside a collapsed "How it works" disclosure instead of dominating every new
+ * conversation (founder feedback 2026-08-05).
+ */
 export function OperatorIntro({
   hasHistory,
   onPick,
@@ -85,33 +91,12 @@ export function OperatorIntro({
 }) {
   const suggestions = remoteSandboxEnabled ? SANDBOX_SUGGESTIONS : WORKSPACE_SUGGESTIONS;
   return (
-    <div className='agent-operator-intro'>
-      <div className='agent-operator-kicker'>
-        {remoteSandboxEnabled ? 'Remote sandbox operator' : 'Remote workspace operator'}
-      </div>
-      <div className='agent-operator-grid'>
-        <div>
-          <h1>
-            {remoteSandboxEnabled
-              ? 'Run work in a remote sandbox.'
-              : 'Run work in a policy-guarded server workspace.'}
-          </h1>
-          <p>
-            Plan, code, test, and review without touching your local machine, then prepare a PR when
-            publication gates pass. You approve the plan and cost before remote work starts; BYOK
-            cost caps are optional.
-          </p>
-        </div>
-        <div className='agent-operator-steps' aria-label='Remote execution workflow'>
-          <span>Request</span>
-          <span>Plan gate</span>
-          <span>{remoteSandboxEnabled ? 'Sandbox work' : 'Workspace work'}</span>
-          <span>Evidence</span>
-          <span>Publish / deploy</span>
-        </div>
-      </div>
-      <RuntimeContractPanel sandboxEnabled={remoteSandboxEnabled} />
-      <TrustBoundaryPanel />
+    <div className='agent-operator-intro compact'>
+      <p className='agent-operator-lede'>
+        Plan, code, test, and review in a policy-guarded{' '}
+        {remoteSandboxEnabled ? 'remote sandbox' : 'server workspace'} — you approve the plan and
+        cost before any spend.
+      </p>
       <div className='agent-empty-chips'>
         {suggestions.map((suggestion) => (
           <button key={suggestion} onClick={() => onPick(suggestion)}>
@@ -119,6 +104,25 @@ export function OperatorIntro({
           </button>
         ))}
       </div>
+      <details className='agent-operator-details'>
+        <summary>How it works</summary>
+        <div className='agent-operator-details-body'>
+          <p>
+            Plan, code, test, and review without touching your local machine, then prepare a PR when
+            publication gates pass. You approve the plan and cost before remote work starts; BYOK
+            cost caps are optional.
+          </p>
+          <div className='agent-operator-steps' aria-label='Remote execution workflow'>
+            <span>Request</span>
+            <span>Plan gate</span>
+            <span>{remoteSandboxEnabled ? 'Sandbox work' : 'Workspace work'}</span>
+            <span>Evidence</span>
+            <span>Publish / deploy</span>
+          </div>
+          <RuntimeContractPanel sandboxEnabled={remoteSandboxEnabled} />
+          <TrustBoundaryPanel />
+        </div>
+      </details>
       {hasHistory && (
         <div className='agent-history-note'>
           Recent transcript is below. Start new remote work here or open Chats for older work.
