@@ -187,6 +187,24 @@ provider-dispatch lane itself (messages, bounded execution reference, validated 
 `ProjectGeneratedDocAssembly.dispatchProviderGeneration` so `ProjectDocGeneratorService` stays
 under the 600-line new-class gate.
 
+**Multi-repo command attribution (2026-08-05, dev project 7238a44d).** The strict SETUP validator
+attributes each fenced command block to a repository from the text between the PREVIOUS fenced
+block and the block itself (`SetupAuthority.presentedRepository`: last `##`–`######` heading in
+that window, then exactly one linked-repository mention). The deterministic assembly emitted the
+`### <repo>` heading once per repository in `## First-run per repo` and then bare labels
+(`Test:` / `Start:`), so in a multi-repository project every repository's SECOND and later command
+blocks had a context with no heading and no repository mention — attribution `null` →
+`authorizes(null, command)` → `SETUP_COMMAND_UNAUTHORIZED` even though the command was projected
+for that exact repository. Three scripts-bearing repos therefore terminated `NEEDS_CONFIRMATION`
+on every attempt. Producer-side fix in `ProjectSetupOperationalGrounding.appendFirstRun`: every
+command label now names the exact repository (`Test for `<repo>`:`), matching the convention the
+full-stack section already used (`Evidenced start command for `<repo>`:`), so each block's
+immediately-preceding context carries exactly one repository mention. The validator is byte-
+unchanged; wrong-repo and unattributable commands still fail closed
+(`ProjectSetupMultiRepoLiveShapeTest`, which builds the envelopes through the real
+`DeterministicProjectFactEvidence.render`). Canonicality follows `assemble`, so pre-fix cached
+SETUP documents simply read as non-canonical and regenerate.
+
 **Known gap — projection ignores V362 run command evidence.** The
 `#### Safe deterministic command projection` is rendered at codemap-generation time
 (`CodeMapGenerator` → `SpringHttpArchitectureEvidenceRenderer` →
