@@ -145,6 +145,24 @@ Documented deviations from Google TypeScript style in [`executespec-docs/backend
 - `agentChatHistory.ts` owns project/run conversion from durable `AgentTurnResponse` rows into visible chat history. Keep timestamp sorting and transcript-field filtering there instead of duplicating adapters in route files.
 - `IdeAgent.tsx` owns route params, data loading, stream side effects, action confirmation handlers, and refresh sequencing. Browser/Web routes can confirm cloud-run proposals and plan gates; local shell/git/working-tree actions remain CLI/VS Code-owned.
 - **Conversation/project truth contract (2026-07-29):** an agent session is durable conversation history, not a restorable filesystem workspace. The drawer must say that explicitly, loads at most 100 sessions with a visible ceiling notice, closes through `POST /api/agent/sessions/{id}/close`, and pages turns backward using the authoritative `GET .../turns/page?limit=100&before=<oldestTurnId>` cursor metadata (the legacy turns array is older-server compatibility only). `/agent` loads and searches real projects, shows the current project name, and creates a new scoped conversation when switching or unlinking; those context mutations are disabled for every nonterminal linked execution, including `AWAITING_APPROVAL`, and the unsent draft travels in router state to the new scoped conversation. New-project recovery must use the canonical `/projects` create form through `agentProjectHandoff.ts`, preserving source session, draft, conversation provider/model, and return path, then return to `/projects/:id/agent` to create the new project-scoped session. Chat provider/model controls persist through `PUT .../sessions/{id}/route`, carry into intentional new/project-scoped conversations, and apply only to conversation replies; Web Agent run confirmation sends no implicit route pin, so org-matrix/per-task routing applies.
+- **Agent chat UX fixes (2026-08-05, founder pre-demo pass):** (1) the empty-state hero is a
+  compact `OperatorIntro` — one honest line + suggestion chips + a collapsed "How it works"
+  disclosure that retains the full stage/contract/trust copy unweakened. (2) Assistant markdown
+  actually renders: the CSS selector was `.agent-msg.agent` while the component emits
+  `agent-msg assistant`, so replies fell back to the plain `pre-wrap` bubble (raw-looking blob with
+  doubled line gaps); assistant/system bodies now use `white-space: normal` with scoped
+  `.signal-md-h*` sizes, user bubbles keep `pre-wrap`. (3) Conversation titles are derived
+  deterministically (`agentState.deriveSessionTitle`): non-generic server title → first user
+  message → `latestLinkedRunTitle` → "Empty conversation" (`createdAt === updatedAt`, no linked
+  run) → project name + start time; lazy send-time creation also persists the first ~60 chars of
+  the first message as the server title (`conversationTitleFromMessage`). (4) Closing a
+  conversation is optimistic: the row disappears immediately, the archive request runs in the
+  background, and failure restores the row with a visible error. (5) Sessions are created LAZILY —
+  switching project scope or consuming a project handoff is navigation + draft/route transfer
+  only; `ensureSession` creates (or reuses an empty same-scope session) on the first message.
+  (6) `AgentProjectContext` is a compact labelled dropdown (`#agent-project-select`) + Unlink +
+  Create project instead of the overflowing project tab strip. Pinned by `agentState.test.ts` and
+  `IdeAgent.test.tsx`.
 - WEB `create_cloud_run` confirmation loads the proposal project's linked repositories through
   `getProjectRepos`, starts with no repositories selected, and sends the exact selected repo UUIDs
   as `selectedRepoIds`. A linked project cannot be confirmed until at least one remote-executable
