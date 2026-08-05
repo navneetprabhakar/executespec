@@ -110,6 +110,7 @@ export default function IdeProjects() {
     const totalRuns =
       (numOf(s, 'activeRuns') ?? 0) +
       (numOf(s, 'completedRuns') ?? 0) +
+      (numOf(s, 'partialRuns') ?? 0) +
       (numOf(s, 'failedRuns') ?? 0);
     const prs = ((s.recentPrs as unknown[]) || []).filter((pr) => {
       const st =
