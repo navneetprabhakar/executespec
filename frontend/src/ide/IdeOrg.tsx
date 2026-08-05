@@ -877,7 +877,17 @@ function CreateOrgPanel({
 
   return (
     <div className='ide-card' style={{marginBottom: 12}}>
-      <div style={{display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap'}}>
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          // Keep the action button its natural size instead of stretching to
+          // the multi-line description height (default align-items: stretch).
+          alignItems: 'flex-start',
+          gap: 12,
+          flexWrap: 'wrap',
+        }}
+      >
         <div style={{minWidth: 0, flex: 1}}>
           <div style={{fontSize: 13.5, fontWeight: 600, color: 'var(--ide-fg-bright)'}}>
             {workspaceSetupPending ? 'Team workspace setup' : 'Organization workspace'}
