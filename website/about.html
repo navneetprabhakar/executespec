@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>About — ExecuteSpec</title>
+    <meta name="description" content="ExecuteSpec is built solo in Bengaluru by Navneet Prabhakar — AI coding that ships evidence, not suggestions.">
+    <meta name="robots" content="index, follow">
+    <meta name="theme-color" content="#0B0D10">
+    <meta name="color-scheme" content="dark">
+    <link rel="icon" type="image/svg+xml" href="assets/brand/merge-rail/executespec-merge-rail-favicon.svg">
+    <link rel="canonical" href="https://executespec.ai/about">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300..700&family=JetBrains+Mono:wght@400..600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #F6F7F8;
+            --ink: #111318;
+            --ink-soft: #252A33;
+            --text-dim: #5F6673;
+            --hairline: #DDE2EA;
+            --rail-blue: #4F7FE7;
+        }
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --bg: #0B0D10;
+                --ink: #ECEEF2;
+                --ink-soft: #C9D1DB;
+                --text-dim: #9EA7B6;
+                --hairline: rgba(255, 255, 255, 0.08);
+            }
+        }
+        *, *::before, *::after { box-sizing: border-box; }
+        body {
+            margin: 0;
+            background: var(--bg);
+            color: var(--ink);
+            font-family: 'Space Grotesk', system-ui, -apple-system, sans-serif;
+            line-height: 1.65;
+            -webkit-font-smoothing: antialiased;
+            padding: 0 20px calc(48px + env(safe-area-inset-bottom));
+        }
+        main { max-width: 640px; margin: 0 auto; }
+        .top {
+            padding: 28px 0 0;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .brand {
+            font-weight: 700;
+            letter-spacing: -0.02em;
+            color: var(--ink);
+            text-decoration: none;
+            font-size: 17px;
+        }
+        .top a.back { color: var(--text-dim); text-decoration: none; font-size: 14px; }
+        .top a.back:hover { color: var(--ink); }
+        h1 {
+            font-size: 34px;
+            letter-spacing: -0.03em;
+            margin: 64px 0 24px;
+        }
+        p { color: var(--ink-soft); font-size: 17px; margin: 0 0 20px; }
+        .links {
+            margin-top: 32px;
+            padding-top: 24px;
+            border-top: 1px solid var(--hairline);
+            font-size: 16px;
+            color: var(--text-dim);
+        }
+        a { color: var(--rail-blue); }
+        .links a { text-decoration: none; }
+        .links a:hover { text-decoration: underline; }
+        .pip { margin: 0 10px; color: var(--text-dim); }
+    </style>
+</head>
+<body>
+<main>
+    <div class="top">
+        <a class="brand" href="/">ExecuteSpec</a>
+        <a class="back" href="/">&larr; Home</a>
+    </div>
+    <h1>About</h1>
+    <p>
+        ExecuteSpec is built solo in Bengaluru by Navneet Prabhakar — an engineering leader with
+        12+ years across ad tech and AI platforms. He has scaled a retail-media platform to $1B+
+        in annualized ad spend and builds production AI agent systems both at work and
+        independently.
+    </p>
+    <p>
+        ExecuteSpec grew out of a conviction: AI coding tools should ship evidence, not
+        suggestions. Every run carries a plan you approved, a token ledger you can audit, and a
+        verdict backed by real builds, tests, and review passes.
+    </p>
+    <div class="links">
+        <a href="https://www.linkedin.com/in/navneetprabhakar/">LinkedIn</a>
+        <span class="pip">&middot;</span>
+        <a href="https://github.com/navneetprabhakar">GitHub</a>
+        <span class="pip">&middot;</span>
+        <a href="mailto:hello@executespec.ai">hello@executespec.ai</a>
+    </div>
+</main>
+</body>
+</html>
