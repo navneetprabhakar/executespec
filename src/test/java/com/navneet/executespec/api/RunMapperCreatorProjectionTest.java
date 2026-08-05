@@ -27,7 +27,19 @@ class RunMapperCreatorProjectionTest {
 
     RunMapper mapper =
         new RunMapper(
-            null, null, users, null, null, null, null, null, null, null, new ObjectMapper(), null);
+            null,
+            null,
+            users,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            new ObjectMapper(),
+            null,
+            null);
     PipelineRun run = new PipelineRun();
     run.setRunId("run-1");
     run.setCreatedByUserId("user-1");

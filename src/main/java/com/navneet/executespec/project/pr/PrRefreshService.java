@@ -30,6 +30,14 @@ public class PrRefreshService {
   private final PostMergeCascadeService cascade;
 
   /**
+   * 2026-08-05 (P2 activity-feed gap) — the polling refresh path flips OPEN→MERGED/CLOSED directly
+   * and never crossed {@code applyWebhookUpdate}, so poll-detected merges produced a notification +
+   * cascade but no PR_MERGED activity event. The record service owns the
+   * transition-guarded, @Async, project-scoped emission.
+   */
+  private final PullRequestRecordService recordService;
+
+  /**
    * Result of a refresh sweep.
    *
    * @param checked total non-terminal PRs hit by this sweep
@@ -192,6 +200,22 @@ public class PrRefreshService {
         // Persist once after both state + ci updates so a single save catches both.
         if (stateChanged || rec.getCiCheckedAt() != null) {
           prRepo.save(rec);
+        }
+
+        // 2026-08-05 — emit the PR lifecycle transition to the project activity feed, guarded on
+        // the actual transition (stateChanged && wasOpen) so a repeated refresh over an
+        // already-terminal record (skipped by the loop's continue above / stateChanged=false)
+        // cannot append duplicates. Mirrors the webhook path's transition guards.
+        if (stateChanged && wasOpen && next != PullRequestRecord.Status.OPEN) {
+          try {
+            recordService.emitPrTransitionActivity(rec, next == PullRequestRecord.Status.MERGED);
+          } catch (Exception aex) {
+            log.warn(
+                "PrRefresh: activity emission failed for {}#{}: {}",
+                rec.getRepoFullName(),
+                rec.getPrNumber(),
+                aex.getMessage());
+          }
         }
 
         if (stateChanged && wasOpen && next == PullRequestRecord.Status.MERGED) {

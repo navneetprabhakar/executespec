@@ -75,6 +75,10 @@ export interface PublicationEligibility {
   remediation: string | null;
   evidenceWorkspaceGeneration: string | null;
   currentWorkspaceGeneration: string | null;
+  /** True when this run's changes were already published. Absent on older servers. */
+  alreadyPublished?: boolean;
+  /** PR URLs already created by a prior publication of this run. Absent on older servers. */
+  publishedPrUrls?: string[];
 }
 
 export const getPublicationEligibility = (runId: string) =>

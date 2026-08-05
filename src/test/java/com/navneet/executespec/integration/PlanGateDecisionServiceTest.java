@@ -295,6 +295,54 @@ class PlanGateDecisionServiceTest {
     assertThat(run.getStatus()).isEqualTo("CANCELLED");
     assertThat(result.evidence().managedAiOutcome()).isEqualTo("NOT_EVALUATED");
     verifyNoInteractions(apiKeyResolver, managedAiUsageService, governanceGuard);
+    // A rejection must never queue the resume continuation — but it IS a first-time customer
+    // decision, so the post-commit audit/activity event carrying the real actor is published.
+    verify(events, never()).publishEvent(any(PlanGateResumeReadyCommitted.class));
+    verify(events, times(1))
+        .publishEvent(
+            new PlanGateDecisionCommitted(
+                "run-1",
+                "project-1",
+                PlanGateDecisionService.DecisionKind.REJECT,
+                "owner-1",
+                null,
+                null,
+                null));
+  }
+
+  @Test
+  void firstTimeApprovalPublishesActorBearingDecisionEventAndReplayDoesNot() {
+    stubAllowedAdmission();
+    actor.getUser().setEmail("owner@example.com");
+    actor.getUser().setFirstName("Ada");
+    actor.getUser().setLastName("Lovelace");
+    run.setRunTitle("Fixture run");
+    var command = new PlanApprovalService.Command(true, 3, "REALTIME", null, null, null);
+
+    var first = service.decide("run-1", command, actor);
+    var replay = service.decide("run-1", command, actor);
+
+    assertThat(first.replayed()).isFalse();
+    assertThat(replay.replayed()).isTrue();
+    // Exactly ONE decision event for the first-time decision; the exact replay publishes nothing.
+    verify(events, times(1))
+        .publishEvent(
+            new PlanGateDecisionCommitted(
+                "run-1",
+                "project-1",
+                PlanGateDecisionService.DecisionKind.APPROVE,
+                "owner-1",
+                "owner@example.com",
+                "Ada Lovelace",
+                "Fixture run"));
+    verify(events, times(1)).publishEvent(new PlanGateResumeReadyCommitted("run-1"));
+  }
+
+  @Test
+  void preApprovalCancelPublishesNoCustomerDecisionEvent() {
+    service.cancel(
+        "run-1", actor, PlanGateDecisionService.ResolutionSource.RUN_CANCEL_API, "user cancelled");
+
     verify(events, never()).publishEvent(any());
   }
 

@@ -1,5 +1,12 @@
 # Execution View launch and solution execution
 
+`execution/model/GoalDonenessDecision` gained the additive boolean component
+`independentProofGapOnly` (2026-08-05, default false through compatibility constructors — the old
+19/20-argument shapes still compile). Only `report/ValidationReportGoalProofEvaluator` sets it
+true, on the UNCERTAIN/STOP_BLOCKED branch whose sole remaining gap is the
+independent-functional-scope gap; serialization is additive, and legacy persisted JSON without the
+field deserializes to false.
+
 `execution/` owns the retained Execution View launch/solution graph. BUILD child creation delegates
 to the same customer admission and orchestrator path as other cloud runs; it must not persist a
 detached `PipelineRun` or recreate project/repository/provider policy locally.

@@ -25,6 +25,7 @@ import com.navneet.executespec.deployment.GcsWorkspaceStore;
 import com.navneet.executespec.deployment.WorkspaceExportService;
 import com.navneet.executespec.deployment.WorkspaceFileService;
 import com.navneet.executespec.integration.scm.PublicationAdmissionService;
+import com.navneet.executespec.integration.scm.PublicationEligibilityPresenter;
 import com.navneet.executespec.integration.scm.ScmPushService;
 import com.navneet.executespec.run.CustomerRunSubmissionService;
 import com.navneet.executespec.state.StateStore;
@@ -60,7 +61,7 @@ public class RunController {
   private final com.navneet.executespec.integration.RunLifecycleService runLifecycleService;
   private final com.navneet.executespec.integration.PlanApprovalService planApprovalService;
   private final ScmPushService scmPushService;
-  private final PublicationAdmissionService publicationAdmissionService;
+  private final PublicationEligibilityPresenter publicationEligibilityPresenter;
   private final StateStore stateStore;
   private final RunMapper mapper;
   private final RunRecoveryRepository recoveryRepository;
@@ -275,18 +276,22 @@ public class RunController {
   public ResponseEntity<RunDetail> get(
       @PathVariable String runId, @AuthenticationPrincipal AppUserDetails userDetails) {
     PipelineRun run = guard.requireRunAccess(runId, userDetails);
-    return ResponseEntity.ok(mapper.toDetail(run, stateStore.getAllTasks(runId)));
+    return ResponseEntity.ok(mapper.toDetail(run, stateStore.getAllTasks(runId), userDetails));
   }
 
   /**
    * Read-only preview of the exact deterministic gates that the SCM/deployment mutation boundary
    * will repeat immediately before publication.
+   *
+   * <p>The gate verdict is unchanged {@link PublicationAdmissionService#evaluate}; the presenter
+   * only adds the additive {@code alreadyPublished} / {@code publishedPrUrls} acknowledgment so a
+   * BLOCKED re-publication does not contradict a visibly created/merged PR.
    */
   @GetMapping("/{runId}/publication-eligibility")
-  public ResponseEntity<PublicationAdmissionService.Eligibility> getPublicationEligibility(
+  public ResponseEntity<PublicationEligibilityPresenter.Response> getPublicationEligibility(
       @PathVariable String runId, @AuthenticationPrincipal AppUserDetails userDetails) {
     PipelineRun run = guard.requireRunAccess(runId, userDetails);
-    return ResponseEntity.ok(publicationAdmissionService.evaluate(run));
+    return ResponseEntity.ok(publicationEligibilityPresenter.present(run));
   }
 
   /**

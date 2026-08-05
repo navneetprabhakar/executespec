@@ -74,6 +74,16 @@ public class RunDetail {
   /** Run credits charged (proportional to estimated cost). */
   Integer creditsCharged;
 
+  /**
+   * Additive refund marker backed by the durable V300 {@code run_quota_refund} compensation ledger.
+   * {@code true} when a durable refund row exists for this run (PENDING rows are idempotently
+   * applied, so the durable intent is refund evidence); {@code false} when the run is terminal
+   * non-success (FAILED/ERROR/PARTIAL/CANCELLED/ABORTED/REJECTED display status) with no refund
+   * row; {@code null} when not applicable (non-terminal or success) or when refund state could not
+   * be resolved.
+   */
+  Boolean creditsRefunded;
+
   /** Managed AI credits actually debited by successful platform-key model calls for this run. */
   Long aiCreditsCharged;
 

@@ -1,6 +1,17 @@
 # Run admission, idempotency, and iteration
 
-## Terminal outcome and workspace recovery (2026-08-02)
+## Run-DTO truthfulness batch (2026-08-05)
+
+- `RunTerminalOutcome.Impact` gains additive `creditsRefunded` (Boolean, three-valued): the new
+  `RunTerminalOutcomeContract.project(..., Boolean creditsRefunded)` overload appends "The run
+  credit charged for this run was refunded." to the customer message when TRUE and surfaces the
+  fact on the impact record; FALSE states only the impact field; null means unresolved (success
+  outcomes, list projections, legacy callers). The fact is read from the durable V300
+  `run_quota_refund` compensation ledger by `api/RunMapper` for run-detail reads; a PENDING row is
+  refund evidence because the refund worker applies it idempotently.
+- `RunTerminalOutcomeDefinitions` is the package-private factory collaborator extracted from
+  `RunTerminalOutcomeContract` (600-line architecture gate). Pure copy/category/disposition
+  tuples; classification stays in the contract.
 
 `run/outcome/RunTerminalOutcomeContract` is the additive customer-safe interpretation of terminal
 runs. Persisted forensic fields remain unchanged; API/Web/email/in-app consumers use the safe

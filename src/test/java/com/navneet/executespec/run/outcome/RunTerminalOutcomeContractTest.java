@@ -256,6 +256,51 @@ class RunTerminalOutcomeContractTest {
   }
 
   @Test
+  void refundedFailureStatesTheCreditRefundInMessageAndImpact() {
+    RunTerminalOutcome outcome =
+        RunTerminalOutcomeContract.project(
+            "123e4567-e89b-12d3-a456-426614174000",
+            "FAILED",
+            "FINAL_BUILD_FAILED",
+            null,
+            0.0,
+            1.0,
+            null,
+            false,
+            true);
+
+    assertThat(outcome.impact().creditsRefunded()).isTrue();
+    assertThat(outcome.customerMessage())
+        .contains("The run credit charged for this run was refunded.");
+  }
+
+  @Test
+  void unrefundedFailureCarriesAnExplicitFalseWithoutClaimingARefund() {
+    RunTerminalOutcome outcome =
+        RunTerminalOutcomeContract.project(
+            "123e4567-e89b-12d3-a456-426614174000",
+            "FAILED",
+            "FINAL_BUILD_FAILED",
+            null,
+            0.0,
+            1.0,
+            null,
+            false,
+            false);
+
+    assertThat(outcome.impact().creditsRefunded()).isFalse();
+    assertThat(outcome.customerMessage()).doesNotContain("refunded");
+  }
+
+  @Test
+  void legacyProjectionsLeaveRefundStateUnresolvedRatherThanFalse() {
+    RunTerminalOutcome outcome = project("FAILED", "FINAL_BUILD_FAILED", null, 0.0, 1.0, null);
+
+    assertThat(outcome.impact().creditsRefunded()).isNull();
+    assertThat(outcome.customerMessage()).doesNotContain("refunded");
+  }
+
+  @Test
   void inFlightRunHasNoTerminalProjection() {
     assertThat(project("WORKING", null, null, 0.1, 1.0, null)).isNull();
   }

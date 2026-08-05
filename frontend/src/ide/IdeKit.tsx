@@ -13,7 +13,7 @@ export function IdeBadge({
   kind,
   children,
 }: {
-  kind: 'ok' | 'warn' | 'bad';
+  kind: 'ok' | 'warn' | 'bad' | 'info';
   children: React.ReactNode;
 }) {
   return <span className={`ide-badge ${kind}`}>{children}</span>;

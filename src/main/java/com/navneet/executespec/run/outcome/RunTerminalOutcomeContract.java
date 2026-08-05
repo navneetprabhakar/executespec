@@ -5,7 +5,6 @@ import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-import com.navneet.executespec.run.outcome.RunTerminalOutcome.AutomationDisposition;
 import com.navneet.executespec.run.outcome.RunTerminalOutcome.Category;
 import com.navneet.executespec.run.outcome.RunTerminalOutcome.Impact;
 import com.navneet.executespec.run.outcome.RunTerminalOutcome.NextAction;
@@ -134,6 +133,35 @@ public final class RunTerminalOutcomeContract {
       Double hardCapUsd,
       String prUrl,
       boolean autoPublicationExpected) {
+    return project(
+        runId,
+        status,
+        statusReason,
+        failureReason,
+        actualCostUsd,
+        hardCapUsd,
+        prUrl,
+        autoPublicationExpected,
+        null);
+  }
+
+  /**
+   * Full projection including the durable failed-run credit-refund fact. {@code creditsRefunded} is
+   * three-valued: {@code TRUE} appends the refund fact to the customer message and surfaces it on
+   * {@link Impact#creditsRefunded()}; {@code FALSE} states only the impact field (terminal
+   * non-success with no refund evidence); {@code null} leaves refund state unresolved (success or
+   * legacy callers that did not consult the refund ledger).
+   */
+  public static RunTerminalOutcome project(
+      String runId,
+      String status,
+      String statusReason,
+      String failureReason,
+      Double actualCostUsd,
+      Double hardCapUsd,
+      String prUrl,
+      boolean autoPublicationExpected,
+      Boolean creditsRefunded) {
     String normalizedStatus = normalize(status);
     if (!TERMINAL_STATUSES.contains(normalizedStatus)) return null;
 
@@ -144,7 +172,7 @@ public final class RunTerminalOutcomeContract {
             : normalize(failureReason);
     Publication publication =
         prUrl == null || prUrl.isBlank() ? Publication.NOT_CREATED : Publication.PR_CREATED;
-    Definition definition =
+    RunTerminalOutcomeDefinitions.Definition definition =
         definition(
             normalizedStatus,
             code,
@@ -153,7 +181,17 @@ public final class RunTerminalOutcomeContract {
             autoPublicationExpected,
             publicationBlockCode(failureReason));
     Impact impact =
-        new Impact(actualCostUsd, hardCapUsd, codeChanged(code, publication), publication, prUrl);
+        new Impact(
+            actualCostUsd,
+            hardCapUsd,
+            codeChanged(code, publication),
+            publication,
+            prUrl,
+            creditsRefunded);
+    String message =
+        Boolean.TRUE.equals(creditsRefunded)
+            ? definition.message() + " The run credit charged for this run was refunded."
+            : definition.message();
     String supportCode =
         definition.category() == Category.PLATFORM_FAILURE ? supportCode(runId) : null;
     return new RunTerminalOutcome(
@@ -161,7 +199,7 @@ public final class RunTerminalOutcomeContract {
         code,
         definition.category(),
         definition.title(),
-        definition.message(),
+        message,
         impact,
         definition.retryable(),
         definition.nextAction() == null
@@ -228,7 +266,7 @@ public final class RunTerminalOutcomeContract {
     return isKnownCode(codePrefix(failure));
   }
 
-  private static Definition definition(
+  private static RunTerminalOutcomeDefinitions.Definition definition(
       String status,
       String code,
       String reasonDetail,
@@ -238,28 +276,30 @@ public final class RunTerminalOutcomeContract {
     boolean publicationWithheld = publication == Publication.NOT_CREATED && autoPublicationExpected;
     if ("CLEAN_COMPLETION".equals(code)) {
       if (publicationWithheld) {
-        return successUnpublished(publicationBlockCode);
+        return RunTerminalOutcomeDefinitions.successUnpublished(publicationBlockCode);
       }
-      return success("Run complete", "The run completed successfully.");
+      return RunTerminalOutcomeDefinitions.success(
+          "Run complete", "The run completed successfully.");
     }
     if (WARNING_CODES.contains(code)) {
       if (publicationWithheld && !"LOCAL_EXECUTION".equals(code)) {
-        return warningUnpublished(publicationBlockCode);
+        return RunTerminalOutcomeDefinitions.warningUnpublished(publicationBlockCode);
       }
-      return warning(
+      return RunTerminalOutcomeDefinitions.warning(
           "Completed with warnings",
           "Changes were generated, but some completion evidence needs attention.",
           "Review the run evidence before publishing or merging the change.");
     }
     if ("RUN_CANCELLED".equals(code)) {
-      return stopped("Run cancelled", "The run was cancelled.", "Start a new run when ready.");
+      return RunTerminalOutcomeDefinitions.stopped(
+          "Run cancelled", "The run was cancelled.", "Start a new run when ready.");
     }
     if ("RUN_ABORTED".equals(code)) {
-      return stopped(
+      return RunTerminalOutcomeDefinitions.stopped(
           "Run stopped", "The run stopped before completion.", "Start a new run when ready.");
     }
     if ("RUN_REJECTED".equals(code)) {
-      return stopped(
+      return RunTerminalOutcomeDefinitions.stopped(
           "Run rejected", "The run was rejected before execution.", "Start a new run when ready.");
     }
     if (LIMIT_CODES.contains(code)) {
@@ -274,7 +314,8 @@ public final class RunTerminalOutcomeContract {
           code.contains("BUDGET")
               ? "Review the recorded spend and retry with a higher cost cap if appropriate."
               : "Review progress and retry with an appropriate execution limit.";
-      return actionRequired("Execution limit reached", message, action);
+      return RunTerminalOutcomeDefinitions.actionRequired(
+          "Execution limit reached", message, action);
     }
     if (POLICY_CODES.contains(code)) {
       String message =
@@ -285,19 +326,19 @@ public final class RunTerminalOutcomeContract {
                   : "The plan failed deterministic validation and bounded recovery could not"
                       + " produce an approvable plan. No code or pull request was created."
               : "The requested change was blocked by an enforced project policy.";
-      return policyBlocked(
+      return RunTerminalOutcomeDefinitions.policyBlocked(
           "Run blocked by policy",
           message,
           "Review the policy evidence before changing the request.");
     }
     if (code.startsWith("TESTS_FAILED")) {
-      return actionRequired(
+      return RunTerminalOutcomeDefinitions.actionRequired(
           "Generated tests failed",
           testFailureMessage(reasonDetail),
           "Inspect the failing-test evidence and correct the generated change before retrying.");
     }
     if (VALIDATION_CODES.contains(code)) {
-      return actionRequired(
+      return RunTerminalOutcomeDefinitions.actionRequired(
           "Validation needs attention",
           validationMessage(code),
           "Inspect the validation evidence and address the reported failure before retrying.");
@@ -308,14 +349,14 @@ public final class RunTerminalOutcomeContract {
               || reasonDetail.startsWith("BRANCH_MISMATCH"))) {
         // Repository access is fine here and a plain retry is deterministically futile, so the
         // generic access wording would be actively misleading.
-        return actionRequired(
+        return RunTerminalOutcomeDefinitions.actionRequired(
             "Workspace branch mismatch",
             "The run workspace is not on the expected repository branch, so the change could"
                 + " not be prepared.",
             "Retry the run; if this repeats, the source run's workspace branch state needs"
                 + " attention.");
       }
-      return actionRequired(
+      return RunTerminalOutcomeDefinitions.actionRequired(
           "Repository workspace unavailable",
           "The repository workspace could not be prepared.",
           "Check repository access and retry the run.");
@@ -324,36 +365,36 @@ public final class RunTerminalOutcomeContract {
         || "PROJECT_PROVIDER_NOT_CONFIGURED".equals(code)
         || "PROJECT_PROVIDER_INVALID".equals(code)
         || "MODEL_MATRIX_UNAVAILABLE".equals(code)) {
-      return providerSettingsRequired(
+      return RunTerminalOutcomeDefinitions.providerSettingsRequired(
           "AI route unavailable",
           "The configured provider or model route is unavailable.",
           "Open provider settings and correct the route.");
     }
     if ("LOCAL_HANDS_DISABLED".equals(code)) {
-      return actionRequired(
+      return RunTerminalOutcomeDefinitions.actionRequired(
           "Local execution unavailable",
           "Local execution is currently unavailable.",
           "Use a cloud run or ask an administrator to enable local execution.");
     }
     if ("PLANNER_UNAVAILABLE".equals(code) || "PLAN_VALIDATION_REJECTED".equals(code)) {
-      return actionRequired(
+      return RunTerminalOutcomeDefinitions.actionRequired(
           "Planning needs attention",
           "The planning step could not produce a safely executable plan.",
           "Review the planning evidence and revise the requirement before retrying.");
     }
     if ("EXECUTION_ABORTED".equals(code)) {
-      return actionRequired(
+      return RunTerminalOutcomeDefinitions.actionRequired(
           "Execution stopped",
           "Execution stopped before the run could complete.",
           "Review the run evidence before deciding whether to retry.");
     }
     if ("PARTIAL".equals(status)) {
-      return warning(
+      return RunTerminalOutcomeDefinitions.warning(
           "Completed with warnings",
           "The run completed partially and needs review.",
           "Review the run evidence before publishing or merging the change.");
     }
-    return platformFailure();
+    return RunTerminalOutcomeDefinitions.platformFailure();
   }
 
   private static String validationMessage(String code) {
@@ -416,46 +457,6 @@ public final class RunTerminalOutcomeContract {
   }
 
   /**
-   * Clean completion whose expected pull request was not created. The run itself succeeded, so the
-   * category and automation disposition stay SUCCESS, but the customer copy must not imply a PR
-   * exists and the primary action points at the publication evidence carrying the exact gate.
-   */
-  private static Definition successUnpublished(String publicationBlockCode) {
-    return new Definition(
-        Category.SUCCESS,
-        "Run complete — pull request not created",
-        "The run completed successfully, but its pull request was not created."
-            + blockedBySentence(publicationBlockCode),
-        false,
-        "OPEN_PUBLICATION_ELIGIBILITY",
-        "Open the run's publication evidence for the exact blocking gate and remediation.",
-        null,
-        AutomationDisposition.SUCCEEDED,
-        0);
-  }
-
-  private static Definition warningUnpublished(String publicationBlockCode) {
-    return new Definition(
-        Category.WARNING,
-        "Completed with warnings — pull request not created",
-        "Changes were generated, but some completion evidence needs attention and the pull"
-            + " request was not created."
-            + blockedBySentence(publicationBlockCode),
-        false,
-        "OPEN_PUBLICATION_ELIGIBILITY",
-        "Open the run's publication evidence for the exact blocking gate and remediation.",
-        null,
-        AutomationDisposition.COMPLETED_WITH_WARNINGS,
-        3);
-  }
-
-  private static String blockedBySentence(String publicationBlockCode) {
-    return publicationBlockCode == null
-        ? ""
-        : " Publication was blocked by " + publicationBlockCode + ".";
-  }
-
-  /**
    * Extracts the stable publication-block code the auto-push path persisted as a bounded {@code
    * PUBLICATION_BLOCKED[<code>]} marker. Only the validated code token is returned; the surrounding
    * detail never reaches customer copy through this path.
@@ -468,98 +469,6 @@ public final class RunTerminalOutcomeContract {
 
   private static boolean hasText(String value) {
     return value != null && !value.isBlank();
-  }
-
-  private static Definition success(String title, String message) {
-    return new Definition(
-        Category.SUCCESS,
-        title,
-        message,
-        false,
-        null,
-        null,
-        null,
-        AutomationDisposition.SUCCEEDED,
-        0);
-  }
-
-  private static Definition warning(String title, String message, String nextAction) {
-    return new Definition(
-        Category.WARNING,
-        title,
-        message,
-        false,
-        "REVIEW_EVIDENCE",
-        nextAction,
-        null,
-        AutomationDisposition.COMPLETED_WITH_WARNINGS,
-        3);
-  }
-
-  private static Definition actionRequired(String title, String message, String nextAction) {
-    return new Definition(
-        Category.ACTION_REQUIRED,
-        title,
-        message,
-        true,
-        "RETRY_RUN",
-        nextAction,
-        null,
-        AutomationDisposition.ACTION_REQUIRED,
-        3);
-  }
-
-  private static Definition providerSettingsRequired(
-      String title, String message, String nextAction) {
-    return new Definition(
-        Category.ACTION_REQUIRED,
-        title,
-        message,
-        true,
-        "OPEN_PROVIDER_SETTINGS",
-        nextAction,
-        "/provider-keys",
-        AutomationDisposition.ACTION_REQUIRED,
-        3);
-  }
-
-  private static Definition policyBlocked(String title, String message, String nextAction) {
-    return new Definition(
-        Category.POLICY_BLOCKED,
-        title,
-        message,
-        false,
-        "REVIEW_POLICY",
-        nextAction,
-        null,
-        AutomationDisposition.ACTION_REQUIRED,
-        3);
-  }
-
-  private static Definition stopped(String title, String message, String nextAction) {
-    return new Definition(
-        Category.USER_STOPPED,
-        title,
-        message,
-        false,
-        "START_NEW_RUN",
-        nextAction,
-        null,
-        AutomationDisposition.STOPPED,
-        3);
-  }
-
-  private static Definition platformFailure() {
-    return new Definition(
-        Category.PLATFORM_FAILURE,
-        "ExecuteSpec could not complete the run",
-        "An internal error occurred. No internal exception details were exposed.",
-        true,
-        "CONTACT_SUPPORT",
-        "Retry once, and contact support with the support code if the problem continues.",
-        null,
-        AutomationDisposition.FAILED,
-        1);
   }
 
   private static String codePrefix(String value) {
@@ -578,15 +487,4 @@ public final class RunTerminalOutcomeContract {
     if (safe.isBlank()) safe = "UNKNOWN";
     return "ES-RUN-" + safe.toUpperCase(Locale.ROOT);
   }
-
-  private record Definition(
-      Category category,
-      String title,
-      String message,
-      boolean retryable,
-      String nextActionType,
-      String nextAction,
-      String nextActionHref,
-      AutomationDisposition automationDisposition,
-      int automationExitCode) {}
 }
