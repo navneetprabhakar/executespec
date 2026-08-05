@@ -365,6 +365,14 @@ public interface PipelineRunRepository
 
   long countByProjectIdAndStatus(String projectId, String status);
 
+  /**
+   * Run-id-only projection for display-status bucketing (project dashboard counters). Loads no
+   * entity payload so callers can batch task goal-proof reads for exactly one persisted status.
+   */
+  @Query("SELECT r.runId FROM PipelineRun r WHERE r.projectId = :pid AND r.status = :status")
+  List<String> findRunIdsByProjectIdAndStatus(
+      @Param("pid") String projectId, @Param("status") String status);
+
   long countByProjectId(String projectId);
 
   /** Wave 2.2 — used by {@code SandboxCleanupJob} to detect "recent activity." */

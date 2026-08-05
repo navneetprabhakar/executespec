@@ -229,3 +229,7 @@ Persistence layer for pipeline runs, tasks, and all mutable state.
   COMPLETE task with non-DONE durable goal evidence renders PARTIAL, and a COMPLETE run containing
   any such task renders PARTIAL with `TASK_PROOF_INCOMPLETE`; list hydration batches task reads by
   run id so summary and detail surfaces agree without rewriting recovery state.
+- `PipelineRunRepository.findRunIdsByProjectIdAndStatus` (2026-08-05) is a run-id-only projection
+  for display-status bucketing: the project dashboard uses it to find persisted-COMPLETE runs,
+  batch their task goal proof, and move unproven runs into its additive `partialRuns` counter via
+  the now-public `RunMapper.displayRunStatus`.

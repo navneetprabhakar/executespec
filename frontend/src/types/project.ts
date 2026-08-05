@@ -185,6 +185,12 @@ export interface ProjectCostBreakdown {
 export interface ProjectDashboardDTO {
   activeRuns: number;
   completedRuns: number;
+  /**
+   * Runs whose customer-facing display status is PARTIAL (persisted PARTIAL plus
+   * persisted-COMPLETE runs with unproven goal evidence). Optional: older servers omit it, so
+   * consumers must stay null-safe.
+   */
+  partialRuns?: number;
   failedRuns: number;
   avgScore: number;
   /** Reports rejected by deterministic validity checks and omitted from avgScore. */

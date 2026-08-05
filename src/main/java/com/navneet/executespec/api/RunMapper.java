@@ -423,7 +423,11 @@ public class RunMapper {
         : "PARTIAL";
   }
 
-  String displayRunStatus(String persistedStatus, List<AgentTask> tasks) {
+  /**
+   * Public because customer-facing aggregates (e.g. the project dashboard counters) must bucket
+   * runs by the same fail-closed display projection as the run list, not by persisted status.
+   */
+  public String displayRunStatus(String persistedStatus, List<AgentTask> tasks) {
     if (!"COMPLETE".equals(persistedStatus) || tasks == null || tasks.isEmpty()) {
       return persistedStatus;
     }
