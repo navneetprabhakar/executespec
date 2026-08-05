@@ -20,16 +20,26 @@ final class ProjectSetupOperationalGrounding {
     }
   }
 
+  /**
+   * True when the exact-revision setup authority is valid, at least one repository is linked, and
+   * the safe deterministic command projection is empty for every linked repository. In that state
+   * no non-clone command can ever be authorized, so the clone-only SETUP document is fully
+   * determined by the evidence alone and a provider call could only produce discarded output.
+   * Malformed or incomplete evidence returns {@code false} so the existing fail-closed generation
+   * path surfaces its exact error.
+   */
+  static boolean hasEmptyCommandProjection(String evidence, Set<String> repositories) {
+    List<String> orderedRepositories = orderedRepositories(repositories);
+    if (orderedRepositories.isEmpty()) return false;
+    ProjectGeneratedDocValidator.SetupAuthority authority =
+        ProjectGeneratedDocValidator.decodedSetupSources(evidence, Set.copyOf(orderedRepositories));
+    if (!authority.valid()) return false;
+    return orderedRepositories.stream()
+        .allMatch(repository -> projectedCommands(authority, repository).isEmpty());
+  }
+
   static String assemble(String projectName, String evidence, Set<String> repositories) {
-    List<String> orderedRepositories =
-        repositories == null
-            ? List.of()
-            : repositories.stream()
-                .filter(java.util.Objects::nonNull)
-                .map(String::strip)
-                .filter(value -> !value.isBlank())
-                .sorted(String.CASE_INSENSITIVE_ORDER)
-                .toList();
+    List<String> orderedRepositories = orderedRepositories(repositories);
     ProjectGeneratedDocValidator.SetupAuthority authority =
         ProjectGeneratedDocValidator.decodedSetupSources(evidence, Set.copyOf(orderedRepositories));
     if (!authority.valid()) {
@@ -46,6 +56,17 @@ final class ProjectSetupOperationalGrounding {
     appendFullStack(out, authority, orderedRepositories);
     appendTroubleshooting(out);
     return out.toString().stripTrailing();
+  }
+
+  private static List<String> orderedRepositories(Set<String> repositories) {
+    return repositories == null
+        ? List.of()
+        : repositories.stream()
+            .filter(java.util.Objects::nonNull)
+            .map(String::strip)
+            .filter(value -> !value.isBlank())
+            .sorted(String.CASE_INSENSITIVE_ORDER)
+            .toList();
   }
 
   private static void appendPrerequisites(

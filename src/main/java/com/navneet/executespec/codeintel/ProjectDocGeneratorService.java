@@ -7,7 +7,6 @@ import java.util.UUID;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.agent.LlmRouter;
 import com.navneet.executespec.agent.PromptAssembler;
-import com.navneet.executespec.agent.PromptTrustBoundary;
 import com.navneet.executespec.agent.ToolProtocolLeakGuard;
 import com.navneet.executespec.auth.entity.Project;
 import com.navneet.executespec.auth.repository.ProjectRepository;
@@ -26,9 +25,6 @@ import com.navneet.executespec.router.ProjectProviderResolver;
 import com.navneet.executespec.router.ResolvedModel;
 import com.navneet.executespec.security.GeneratedSecretScanner;
 
-import org.springframework.ai.chat.messages.Message;
-import org.springframework.ai.chat.messages.SystemMessage;
-import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -449,47 +445,37 @@ public class ProjectDocGeneratorService {
       Runnable providerDispatchFence,
       java.util.function.Consumer<ProjectGeneratedDoc> publicationFence) {
     String projectId = project.getId();
-    List<Message> initialMessages =
-        List.of(
-            new SystemMessage(systemPrompt),
-            new UserMessage(PromptTrustBoundary.wrap("PROJECT_DOC_EVIDENCE", userPayload)));
-
-    String runId = "project-doc-" + docType.name().toLowerCase() + "-" + projectId;
-    if (executionPolicyFactory == null) {
-      throw new IllegalStateException("Execution policy factory is required for project docs");
-    }
-    String contextId =
-        durableJobId == null
-            ? ProjectDocExecutionPolicy.contextId(java.util.UUID.randomUUID())
-            : ProjectDocExecutionPolicy.durableContextId(durableJobId);
-    var executionReference =
-        confirmedActionReference != null
-            ? confirmedActionReference
-            : executionPolicyFactory.forProject(
-                projectId,
-                "project-doc",
-                "PROJECT_DOC",
-                contextId,
-                contextId,
-                resolved.getActualProvider().name(),
-                exactModel,
-                generatedByUser,
-                ProjectDocExecutionPolicy.ATTEMPT_BUDGET);
+    // An empty safe deterministic command projection fully determines the clone-only SETUP
+    // document: no provider output could ever add an authorized command, so it is assembled with
+    // zero provider spend and no execution context; the unchanged strict validator still gates
+    // publication. Every other document takes the existing provider-dispatch lane.
     ProjectDocValidatedGeneration.Result generation =
-        ProjectDocValidatedGeneration.generate(
-            llmRouter,
-            this::assertSafeForCustomer,
-            projectId,
-            project.getName(),
-            docType,
-            resolved,
-            exactModel,
-            runId,
-            executionReference,
-            initialMessages,
-            sourceRepositories,
-            codemapEvidence,
-            providerDispatchFence);
+        docType == DocType.SETUP
+                && ProjectSetupOperationalGrounding.hasEmptyCommandProjection(
+                    codemapEvidence, sourceRepositories)
+            ? ProjectDocValidatedGeneration.assembleDeterministicSetup(
+                this::assertSafeForCustomer,
+                projectId,
+                project.getName(),
+                sourceRepositories,
+                codemapEvidence)
+            : ProjectGeneratedDocAssembly.dispatchProviderGeneration(
+                llmRouter,
+                this::assertSafeForCustomer,
+                projectId,
+                project.getName(),
+                docType,
+                generatedByUser,
+                resolved,
+                exactModel,
+                confirmedActionReference,
+                executionPolicyFactory,
+                systemPrompt,
+                userPayload,
+                sourceRepositories,
+                codemapEvidence,
+                durableJobId,
+                providerDispatchFence);
     String content = generation.content();
     int inTok = generation.inputTokens();
     int outTok = generation.outputTokens();
