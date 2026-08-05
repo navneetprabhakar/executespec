@@ -240,7 +240,10 @@ jobs:
           elif [ "${{ env.DEPLOY_ENV }}" = "benchmark" ]; then
             echo "APP_PUBLIC_URL=https://benchmark.executespec.ai" >> $GITHUB_ENV
           else
-            echo "APP_PUBLIC_URL=https://dev.executespec.ai" >> $GITHUB_ENV
+            # dev VM now serves the customer-facing app.executespec.ai alias; browser
+            # OAuth return, dashboard/mail links, and surface URLs all use it. The
+            # dev.executespec.ai host stays reachable for operators and old links.
+            echo "APP_PUBLIC_URL=https://app.executespec.ai" >> $GITHUB_ENV
           fi
 
       # ── Sync design system files from GCS ──────────────────────────────────
