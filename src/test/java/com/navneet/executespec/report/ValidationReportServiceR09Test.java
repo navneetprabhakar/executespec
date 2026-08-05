@@ -160,6 +160,71 @@ class ValidationReportServiceR09Test {
   }
 
   @Test
+  void httpStackUnprovableDisclosureDoesNotGatePipelineResult() {
+    // 2026-08-05 — the non-Spring exact-route disclosure is evidence, not an open defect. A run
+    // whose ONLY issue is the disclosure must stay PASSED; before this, the note demoted clean
+    // Node-stack runs to NEEDS_ATTENTION → PARTIAL/VALIDATION_REPORT_LOW_QUALITY (dev d7a99bb9
+    // rerun), recreating the false failure it was meant to prevent.
+    String disclosure =
+        "Exact HTTP route verification is not applicable to this stack: no Spring MVC mapping"
+            + " sources were found in the inspected repositories. Declared required routes"
+            + " (unproven): GET /api/items/low-stock.";
+    ReviewReport review = new ReviewReport();
+    review.setIssues(
+        List.of(
+            ReviewIssue.builder()
+                .id("SYNTH-HTTP-STACK-UNPROVABLE")
+                .severity(IssueSeverity.MINOR)
+                .description(disclosure)
+                .build()));
+    ReportInput input = new ReportInput(null, List.of(), review, null, List.of());
+
+    PipelineResult result =
+        svc.computeResultHeuristic(
+            List.of(
+                new ReportIssueDTO(disclosure, "WOULD_FAIL_REVIEW", null, "REVIEWER_AGENT", null)),
+            input);
+
+    assertEquals(PipelineResult.PASSED, result);
+    org.junit.jupiter.api.Assertions.assertTrue(
+        ValidationReportService.isInformationalDisclosureDescription(disclosure));
+  }
+
+  @Test
+  void httpStackUnprovableDisclosureDoesNotMaskRealIssues() {
+    String disclosure =
+        "Exact HTTP route verification is not applicable to this stack: declared routes unproven.";
+    ReviewReport review = new ReviewReport();
+    review.setIssues(
+        List.of(
+            ReviewIssue.builder()
+                .id("SYNTH-HTTP-STACK-UNPROVABLE")
+                .severity(IssueSeverity.MINOR)
+                .description(disclosure)
+                .build(),
+            ReviewIssue.builder()
+                .id("REV-REAL-1")
+                .severity(IssueSeverity.MINOR)
+                .description("Null check missing on threshold parsing")
+                .build()));
+    ReportInput input = new ReportInput(null, List.of(), review, null, List.of());
+
+    PipelineResult result =
+        svc.computeResultHeuristic(
+            List.of(
+                new ReportIssueDTO(disclosure, "WOULD_FAIL_REVIEW", null, "REVIEWER_AGENT", null),
+                new ReportIssueDTO(
+                    "Null check missing on threshold parsing",
+                    "WOULD_FAIL_REVIEW",
+                    null,
+                    "REVIEWER_AGENT",
+                    null)),
+            input);
+
+    assertEquals(PipelineResult.NEEDS_ATTENTION, result);
+  }
+
+  @Test
   void adversarialLlmReviewerCriticalCannotHardFailPipelineResult() {
     ReviewReport review = new ReviewReport();
     review.setIssues(

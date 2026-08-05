@@ -50,11 +50,19 @@ final class ValidationReviewIssueSynthesizer {
    * source, so deterministic route proof is unavailable for this stack. MINOR by design — this is a
    * ledger note that exact-route proof is unavailable, never a failing verdict.
    */
+  /**
+   * Disclosure prefix; report-side gating recognizes it by literal (see
+   * ValidationReportService.isInformationalDisclosureDescription — cross-pinned by test).
+   */
+  static final String HTTP_STACK_UNPROVABLE_PREFIX =
+      "Exact HTTP route verification is not applicable to this stack";
+
   static ReviewIssue httpRequirementUnprovableForStack(
       DeterministicHttpRequirementVerifier.Verification verification) {
     StringBuilder description =
         new StringBuilder(
-            "Exact HTTP route verification is not applicable to this stack: no Spring MVC mapping"
+            HTTP_STACK_UNPROVABLE_PREFIX
+                + ": no Spring MVC mapping"
                 + " sources were found in the inspected repositories, so deterministic exact-route"
                 + " proof is unavailable (the routes were neither proven present nor proven"
                 + " absent).");
