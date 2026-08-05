@@ -72,6 +72,26 @@ public class ActivityEventEmitter {
       String targetId,
       String summary,
       Map<String, Object> structuredPayload) {
+    emitWithActor(
+        projectId, type, actorUserId, null, targetType, targetId, summary, structuredPayload);
+  }
+
+  /**
+   * Emit with an explicit human-actor fallback id for principals whose durable id is not a UUID
+   * (e.g. seeded operator accounts). The feed's typed {@code actor_user_id} column stays null when
+   * the id cannot be stored, but {@code actorType} is still USER and the audit row keeps the exact
+   * string id — a human decision must never be projected as SYSTEM (2026-08-05 live residual).
+   */
+  @Async
+  public void emitWithActor(
+      UUID projectId,
+      ActivityEventType type,
+      UUID actorUserId,
+      String actorIdFallback,
+      String targetType,
+      String targetId,
+      String summary,
+      Map<String, Object> structuredPayload) {
     if (projectId == null || type == null || summary == null) {
       log.warn(
           "[ActivityEventEmitter] skipping emit — missing required field "
@@ -84,11 +104,25 @@ public class ActivityEventEmitter {
     try {
       if (type.writesTo(ActivityEventType.Surface.ACTIVITY)) {
         writeFeedEntry(
-            projectId, type, actorUserId, targetType, targetId, summary, structuredPayload);
+            projectId,
+            type,
+            actorUserId,
+            actorIdFallback,
+            targetType,
+            targetId,
+            summary,
+            structuredPayload);
       }
       if (type.writesTo(ActivityEventType.Surface.AUDIT)) {
         writeAuditEntry(
-            projectId, type, actorUserId, targetType, targetId, summary, structuredPayload);
+            projectId,
+            type,
+            actorUserId,
+            actorIdFallback,
+            targetType,
+            targetId,
+            summary,
+            structuredPayload);
       }
     } catch (Exception ex) {
       // Non-blocking by contract — log + swallow. Losing an event is
@@ -105,6 +139,7 @@ public class ActivityEventEmitter {
       UUID projectId,
       ActivityEventType type,
       UUID actorUserId,
+      String actorIdFallback,
       String targetType,
       String targetId,
       String summary,
@@ -116,7 +151,10 @@ public class ActivityEventEmitter {
             .projectId(projectId)
             .occurredAt(now)
             .actorUserId(actorUserId)
-            .actorType(actorUserId == null ? "SYSTEM" : "USER")
+            .actorType(
+                actorUserId == null && (actorIdFallback == null || actorIdFallback.isBlank())
+                    ? "SYSTEM"
+                    : "USER")
             .eventType(type.name())
             .targetType(targetType)
             .targetId(targetId)
@@ -134,6 +172,7 @@ public class ActivityEventEmitter {
       UUID projectId,
       ActivityEventType type,
       UUID actorUserId,
+      String actorIdFallback,
       String targetType,
       String targetId,
       String summary,
@@ -145,7 +184,12 @@ public class ActivityEventEmitter {
             .entityType(targetType == null ? "PROJECT" : targetType)
             .entityId(targetId == null ? projectId.toString() : targetId)
             .orgId(resolveOrgId(projectId, targetType, targetId))
-            .actorId(actorUserId == null ? null : actorUserId.toString())
+            .actorId(
+                actorUserId != null
+                    ? actorUserId.toString()
+                    : (actorIdFallback == null || actorIdFallback.isBlank())
+                        ? null
+                        : actorIdFallback)
             .newValue(summary)
             .metadata(serializePayload(structuredPayload))
             .createdAt(Instant.now())
