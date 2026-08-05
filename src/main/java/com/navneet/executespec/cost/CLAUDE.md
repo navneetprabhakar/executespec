@@ -39,6 +39,17 @@ guidance rather than an opaque provider/platform error.
   request may truthfully match a same-provider model mix. Consumed
   by `BenchmarkTrackingService` (V304 attempt attribution) and `BenchmarkGenerationService`
   (`GenerateResult.effectiveProvider`/`effectiveModel`/`routeAttribution`/`routeDiverged`).
+- `EffectiveRouteProjection.distinctSuccessfulModels(rows)` /
+  `RunEffectiveRouteService.distinctSuccessfulModelsForRun(runId)` (2026-08-05) return the
+  distinct successful models in first-seen order with the same sentinel exclusion rules as the
+  singular projection. They back the validation-report DTO's additive `modelsUsed` list so a MIXED
+  run can report its full served-model set instead of one arbitrary model.
+- `CostVisibilityPolicy` is also reused (2026-08-05) by `api/RunMapper.toDetail(run, tasks,
+  viewer)` to gate the operator-grade `TaskSummary.continuationDecision.policy` subtree
+  (ranking/candidate evidence). Non-privileged viewers receive an explicit withheld marker
+  `{"included": false, "restrictedReason": "ORG_BILLING_ROLE_REQUIRED"}` — the RR-1552 shape —
+  never a silent removal; the viewer-less overload (SSE `RUN_DETAIL` pushes) is fail-closed
+  restricted.
 - `RunEffectiveRouteService` is the single read seam over that projection: `forRun(runId)`,
   `forTask(runId, taskId)`, planner-phase `forPlanner(runId)` (outline + expansion + coherence;
   classifier excluded), reviewer-pass-only
@@ -190,6 +201,37 @@ database outbox scheduler can claim an expired lease and recover the exact fact 
 Prometheus loads `observability/alerts/executespec-enterprise-alerts.yml`. Alertmanager/pager
 delivery, deployed multi-JVM process-kill/DB-denial qualification, a shared fallback directory for
 total PostgreSQL outage, and ledger retention/partitioning remain release work.
+
+## Plan-scaled formula estimate (P2 route-templated-estimate fix, 2026-08-05)
+
+`RunCostTracker.estimateRunTierAware` — the formula fallback behind the org/route-scoped history
+path — is calibrated to the ACTUAL approved plan, not a route template:
+
+- Per-task worker bands are anchored to `harness/WorkerTierBudgetPolicy` budgets (expected
+  provider calls ≈ the per-tier stagnation-warn threshold; output ≈ a small multiple of the
+  per-call output cap): LOW 12k/3k, MEDIUM 64k/12k, HIGH 160k/33k input/output tokens. The former
+  P75 bands (30k/200k/600k input) stacked with a flat 3.0× high multiplier and overshot observed
+  single-task DeepSeek runs by 10-15×.
+- The reviewer general and fix-build bands scale with the plan's complexity weight
+  (LOW=1/MEDIUM=2/HIGH=3 per task), capped at the old 60k pessimistic ceiling, so a one-task LOW
+  plan is not billed the review cost of a large multi-task plan.
+- The high band uses a plan-scaled tail multiplier `min(3.0, 1.6 + 0.15×weight
+  + 0.4×projectScoped + 0.2×(repoCount−1))`; small standalone plans sit near 1.75×, multi-repo
+  project plans saturate at the unchanged 3.0 cap (`HIGH_MULTIPLIER`, still the legacy
+  `estimateRun` multiplier).
+- The low estimate is floored at `MIN_ESTIMATE_LOW_USD` ($0.005) so an unpriced route or empty
+  plan can never present a zero/negative estimate at the plan gate.
+- UNCHANGED: `buffered = midpoint × 1.20`, `credits = max(1, ceil(buffered/$5))`,
+  `hardCapUsd = credits × $5` (so the platform cap keeps its $5 one-credit floor and a smaller
+  estimate can never tighten the cap below that), userCostCap clamping in
+  `integration/RunCostEstimatePersister`, and the BYOK exemption. V348 decision receipts bind the
+  PERSISTED `pipeline_run.cost_estimate_high` at decision time; nothing recomputes the formula for
+  replay comparison, so this recalibration affects only new runs' estimates.
+- The estimate is a pure deterministic function of (provider, plan complexities, strategy,
+  repoCount, projectScoped, model pin): the same plan reproduces the same estimate; two different
+  plans on one route always differ. Pinned by `RunCostTrackerPlanScaledEstimateTest` and
+  `RunCostTrackerEstimateStage1Test` (audit run 6024f510's $1.04 actual must stay inside the
+  band).
 
 ## Historical cost estimation is tenant- and route-scoped (RR-1551, V372)
 

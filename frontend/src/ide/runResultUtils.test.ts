@@ -23,12 +23,17 @@ import {
   emptyCodeTabMessage,
   fileCountSummary,
   fmtDur,
+  creditsReservedDisplay,
   goalDecisionHelp,
   goalDecisionLabel,
+  goalEvidenceKind,
+  goalEvidenceLabel,
   goalProofKind,
   goalProofLabel,
   goalStateLabel,
   goalStateKind,
+  independentProofGapNotice,
+  reportModelDisplay,
   hasRunCostEvidence,
   isNoisyLogEvent,
   isBootstrapWorkspaceMetadata,
@@ -1529,5 +1534,87 @@ describe('runResultUtils', () => {
     expect(content).toContain('Partial repository analysis');
     expect(content).toContain('answer is incomplete');
     expect(content).toContain('specific file');
+  });
+});
+
+describe('creditsReservedDisplay', () => {
+  it('renders the legacy em-dash and bare number when the refund field is absent', () => {
+    expect(creditsReservedDisplay(null)).toBe('—');
+    expect(creditsReservedDisplay({creditsCharged: null})).toBe('—');
+    expect(creditsReservedDisplay({creditsCharged: 2})).toBe('2');
+    expect(creditsReservedDisplay({creditsCharged: 2, creditsRefunded: null})).toBe('2');
+    expect(creditsReservedDisplay({creditsCharged: 2, creditsRefunded: false})).toBe('2');
+  });
+
+  it('acknowledges a durable refund next to the charge', () => {
+    expect(creditsReservedDisplay({creditsCharged: 1, creditsRefunded: true})).toBe(
+      '1 credit — refunded',
+    );
+    expect(creditsReservedDisplay({creditsCharged: 3, creditsRefunded: true})).toBe(
+      '3 credits — refunded',
+    );
+  });
+
+  it('never fabricates a refund for a run with no recorded charge', () => {
+    expect(creditsReservedDisplay({creditsCharged: null, creditsRefunded: true})).toBe('—');
+  });
+});
+
+describe('independent proof-gap disclosure', () => {
+  it('is silent when the flag is absent or false (older servers keep the advisory styling)', () => {
+    expect(independentProofGapNotice(null)).toBeNull();
+    expect(independentProofGapNotice({})).toBeNull();
+    expect(independentProofGapNotice({independentProofGapOnly: false})).toBeNull();
+    expect(goalEvidenceKind({state: 'UNCERTAIN'})).toBe('warn');
+    expect(goalEvidenceLabel({state: 'UNCERTAIN'})).toBe('Uncertain');
+  });
+
+  it('reframes a disclosure-only UNCERTAIN state as informational without hiding evidence', () => {
+    const goal = {state: 'UNCERTAIN', independentProofGapOnly: true};
+    expect(independentProofGapNotice(goal)).toContain(
+      'Independent functional verification pending',
+    );
+    expect(independentProofGapNotice(goal)).toContain('not a defect');
+    expect(goalEvidenceKind(goal)).toBe('info');
+    expect(goalEvidenceLabel(goal)).toBe('Independent verification pending');
+  });
+
+  it('keeps hard failure states styled as failures', () => {
+    expect(goalEvidenceKind({state: 'FAILED'})).toBe('bad');
+    expect(goalEvidenceLabel({state: 'FAILED'})).toBe('Proof failed');
+  });
+});
+
+describe('reportModelDisplay', () => {
+  it('falls back to the single legacy model name', () => {
+    expect(reportModelDisplay(null)).toBe('—');
+    expect(reportModelDisplay({modelUsed: 'claude-sonnet-5'})).toBe('claude-sonnet-5');
+    expect(reportModelDisplay({modelUsed: ''})).toBe('—');
+  });
+
+  it('prefers the proven modelsUsed set when present', () => {
+    expect(
+      reportModelDisplay({
+        modelUsed: 'claude-sonnet-5',
+        modelsUsed: ['claude-sonnet-5', 'gpt-5.4'],
+      }),
+    ).toBe('claude-sonnet-5, gpt-5.4');
+    expect(reportModelDisplay({modelUsed: 'claude-sonnet-5', modelsUsed: []})).toBe(
+      'claude-sonnet-5',
+    );
+  });
+
+  it('labels a MIXED route attribution explicitly', () => {
+    expect(
+      reportModelDisplay({
+        modelUsed: 'claude-sonnet-5',
+        modelsUsed: ['claude-sonnet-5', 'gpt-5.4'],
+        routeAttribution: 'MIXED',
+      }),
+    ).toBe('Mixed routes · claude-sonnet-5, gpt-5.4');
+    expect(reportModelDisplay({modelUsed: '', routeAttribution: 'MIXED'})).toBe('Mixed routes');
+    expect(reportModelDisplay({modelUsed: 'claude-sonnet-5', routeAttribution: 'LEDGER'})).toBe(
+      'claude-sonnet-5',
+    );
   });
 });

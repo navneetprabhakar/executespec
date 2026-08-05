@@ -86,6 +86,76 @@ class ValidationReportGoalProofEvaluatorTest {
     assertThat(decision.completedItems()).contains("Workspace test suite passed (23/23)");
     assertThat(decision.completedItems()).doesNotContain("Tests passed");
     assertThat(decision.anotherModelProviderMightHelp()).isFalse();
+    assertThat(decision.independentProofGapOnly())
+        .as("the only remaining gap is the independent-functional-scope gap")
+        .isTrue();
+  }
+
+  @Test
+  void independentProofGapOnlyIsFalseWheneverAnyOtherGapOrOutcomeExists() {
+    // Mixed gaps: workspace-scope gap plus an unknown reviewer — not the only gap.
+    List<VerificationEvidenceDTO> mixed =
+        passingLedger().stream()
+            .map(
+                row -> {
+                  if ("tests".equals(row.id())) {
+                    return row("tests", "Tests", "PASS", "DETERMINISTIC_WORKSPACE_SUITE", 23, 23);
+                  }
+                  if ("reviewer".equals(row.id())) {
+                    return row("reviewer", "Reviewer", "UNKNOWN", "LLM_REVIEWER");
+                  }
+                  return row;
+                })
+            .toList();
+    assertThat(
+            evaluator
+                .evaluate("run-gap-mixed", PipelineResult.PASSED, mixed)
+                .independentProofGapOnly())
+        .isFalse();
+
+    // Fully proven run: no gap at all.
+    assertThat(
+            evaluator
+                .evaluate("run-gap-done", PipelineResult.PASSED, passingLedger())
+                .independentProofGapOnly())
+        .isFalse();
+
+    // Failed required evidence: a real defect, not the advisory scope gap.
+    List<VerificationEvidenceDTO> failed =
+        passingLedger().stream()
+            .map(
+                row ->
+                    "build".equals(row.id()) ? row("build", "Build", "FAIL", "DETERMINISTIC") : row)
+            .toList();
+    assertThat(
+            evaluator
+                .evaluate("run-gap-failed", PipelineResult.PASSED, failed)
+                .independentProofGapOnly())
+        .isFalse();
+
+    // Missing ledger: unproven for a different reason.
+    assertThat(
+            evaluator
+                .evaluate("run-gap-empty", PipelineResult.PASSED, List.of())
+                .independentProofGapOnly())
+        .isFalse();
+  }
+
+  @Test
+  void legacyExecutionVerifiedScopeGapAlsoMarksIndependentProofGapOnly() {
+    List<VerificationEvidenceDTO> ledger =
+        passingLedger().stream()
+            .map(
+                row ->
+                    "tests".equals(row.id())
+                        ? row("tests", "Tests", "PASS", "DETERMINISTIC_EXECUTION", 6, 6)
+                        : row)
+            .toList();
+
+    var decision = evaluator.evaluate("run-legacy-gap", PipelineResult.PASSED, ledger);
+
+    assertThat(decision.recommendedDecision()).isEqualTo(RunContinuationDecision.STOP_BLOCKED);
+    assertThat(decision.independentProofGapOnly()).isTrue();
   }
 
   @Test

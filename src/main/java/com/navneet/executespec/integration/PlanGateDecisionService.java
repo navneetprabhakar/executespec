@@ -215,7 +215,45 @@ public class PlanGateDecisionService {
     if (kind == DecisionKind.APPROVE) {
       eventPublisher.publishEvent(new PlanGateResumeReadyCommitted(runId));
     }
+    // Approval auditability — publish the FIRST-TIME customer APPROVE/REJECT for the AFTER_COMMIT
+    // activity/audit listener. Replays return from replay() above and never reach this line, so an
+    // exact replayed decision cannot append a duplicate activity event. CANCEL is a distinct
+    // decision kind and deliberately not a customer plan decision event.
+    if (kind == DecisionKind.APPROVE || kind == DecisionKind.REJECT) {
+      eventPublisher.publishEvent(decisionCommitted(run, kind, actorEvidence, lockedActor));
+    }
     return new DecisionResult(run, kind, evidence, false);
+  }
+
+  /**
+   * Builds the post-commit decision event carrying the REAL human decider. APPROVE/REJECT always
+   * have a human actor ({@code actorEvidence} rejects system principals for those kinds), so the
+   * user id is non-null here; email/display are best-effort profile evidence for audit surfaces.
+   */
+  private static PlanGateDecisionCommitted decisionCommitted(
+      PipelineRun run,
+      DecisionKind kind,
+      PlanGateDecisionEvidence.ActorEvidence actorEvidence,
+      AppUserDetails lockedActor) {
+    com.navneet.executespec.auth.entity.AppUser user =
+        lockedActor == null ? null : lockedActor.getUser();
+    String email = user == null ? null : user.getEmail();
+    String displayName = user == null ? null : displayName(user.getFirstName(), user.getLastName());
+    return new PlanGateDecisionCommitted(
+        run.getRunId(),
+        run.getProjectId(),
+        kind,
+        actorEvidence.userId(),
+        email,
+        displayName,
+        run.getRunTitle());
+  }
+
+  private static String displayName(String firstName, String lastName) {
+    String first = firstName == null ? "" : firstName.trim();
+    String last = lastName == null ? "" : lastName.trim();
+    String joined = (first + " " + last).trim();
+    return joined.isEmpty() ? null : joined;
   }
 
   private LockedDecisionRows lockDecisionRows(String runId) {

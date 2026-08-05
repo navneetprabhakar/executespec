@@ -168,6 +168,17 @@ public class PrReviewAgent {
       throw new PrReviewAgentException("malformed submitReview arguments: " + e.getMessage());
     }
 
+    // Deterministic post-model CI gate — red CI on the head SHA caps an APPROVE to
+    // REQUEST_CHANGES and stamps a structured finding; unverified CI is labeled as such. Runs
+    // after the tool call is parsed so the model cannot override it.
+    parsed =
+        PrReviewCiGate.apply(
+            parsed,
+            new PrReviewCiGate.CiEvidence(
+                req.ciStatus(),
+                req.ciFailingCount() == null ? 0 : req.ciFailingCount(),
+                req.headSha()));
+
     long elapsed = System.currentTimeMillis() - start;
     log.info(
         "PrReviewAgent done provider={} model={} verdict={} comments={} elapsedMs={}",
@@ -215,6 +226,27 @@ public class PrReviewAgent {
     b.append("Files changed: ").append(req.changedFiles()).append('\n');
     b.append("Additions: +").append(req.additions()).append('\n');
     b.append("Deletions: −").append(req.deletions()).append('\n');
+    String ciStatus =
+        req.ciStatus() == null || req.ciStatus().isBlank()
+            ? PrReviewCiGate.STATUS_UNKNOWN
+            : req.ciStatus().trim().toUpperCase();
+    int ciFailing = req.ciFailingCount() == null ? 0 : req.ciFailingCount();
+    String ciEvidence =
+        "Head SHA: "
+            + req.headSha()
+            + "\nCheck-run rollup at review time: "
+            + ciStatus
+            + "\nFailing check-runs: "
+            + ciFailing;
+    b.append("\n## CI status for the head commit (untrusted evidence)\n")
+        .append(PromptTrustBoundary.wrap("PR_CI_STATUS", ciEvidence))
+        .append('\n')
+        .append(
+            "\nCI evidence rules: FAILURE means the head commit has red check-runs — do not"
+                + " APPROVE and call out the failing CI explicitly. UNKNOWN, PENDING, or NEUTRAL"
+                + " means CI is unverified — never state or assume that checks passed. A"
+                + " deterministic server-side gate re-checks your verdict against this evidence"
+                + " after you submit.\n");
     b.append("\n# Unified diff (untrusted)\n\n")
         .append(PromptTrustBoundary.wrap("PR_DIFF", "```diff\n" + req.diff() + "\n```"))
         .append('\n');
@@ -336,7 +368,9 @@ public class PrReviewAgent {
       String model,
       String actorUserId,
       LlmExecutionReference executionReference,
-      ExecutionContext executionContext) {}
+      ExecutionContext executionContext,
+      String ciStatus,
+      Integer ciFailingCount) {}
 
   public record AgentReviewComment(
       String filePath,

@@ -32,6 +32,22 @@ admission, and goal-doneness consumers must use its product diff rather than wor
 `ValidationReportValidityService` is the single fail-closed predicate for project score aggregates;
 invalid reports are excluded and counted separately.
 
+## Run-DTO truthfulness batch (2026-08-05)
+
+- `ValidationReportDTO` gains additive `modelsUsed` (distinct successful models from the canonical
+  `run_step_usage` ledger via `RunEffectiveRouteService.distinctSuccessfulModelsForRun`,
+  first-seen order) and `routeAttribution` (`LEDGER` | `MIXED` | `UNATTRIBUTED`; null only when
+  the route seam is unavailable to a bare test construction). The legacy `modelUsed` field carries
+  the literal `"MIXED"` when the run's physical attribution is MIXED instead of an arbitrary
+  single model; on single-route or unattributed runs it retains its historical value (the model
+  that generated the report markdown). Scoring is untouched.
+- `GoalDonenessDecision` gains additive `independentProofGapOnly` (boolean, default false via
+  compatibility constructors). `ValidationReportGoalProofEvaluator` sets it true exactly on the
+  UNCERTAIN/STOP_BLOCKED branch where the ONLY remaining run-goal gap is the
+  independent-functional-scope gap (deterministic workspace or legacy execution-verified suite
+  passed, everything else proven). Derived from the gap set, never from reason text, so customer
+  surfaces can render the clean-run advisory distinctly from a defect.
+
 ## Evidence contract
 
 - V361 persists `validation_report.workspace_generation`, the SHA-256 of the canonical Git trees

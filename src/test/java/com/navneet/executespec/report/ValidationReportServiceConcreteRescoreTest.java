@@ -110,7 +110,8 @@ class ValidationReportServiceConcreteRescoreTest {
             null,
             null,
             flags,
-            events);
+            events,
+            null);
 
     Optional<ValidationReport> result =
         service.rescoreAfterConcreteTests(
@@ -208,7 +209,8 @@ class ValidationReportServiceConcreteRescoreTest {
             null,
             null,
             flags,
-            events);
+            events,
+            null);
 
     Optional<ValidationReport> result =
         service.rescoreAfterConcreteTests(
@@ -252,7 +254,8 @@ class ValidationReportServiceConcreteRescoreTest {
             null,
             null,
             flags,
-            events);
+            events,
+            null);
 
     ValidationReport rescored =
         service

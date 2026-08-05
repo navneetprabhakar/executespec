@@ -52,6 +52,14 @@ public class ValidationReportService {
   private final FeatureFlagService featureFlagService;
   private final ApplicationEventPublisher eventPublisher;
   private final ValidationVerificationLedgerBuilder verificationLedgerBuilder;
+
+  /**
+   * Canonical effective-route read seam. Nullable-tolerant for bare test constructions: when
+   * absent, the report DTO leaves {@code routeAttribution} null and {@code modelsUsed} empty
+   * instead of guessing a served route.
+   */
+  private final com.navneet.executespec.cost.RunEffectiveRouteService runEffectiveRouteService;
+
   private final ValidationReportGoalProofEvaluator goalProofEvaluator =
       new ValidationReportGoalProofEvaluator();
 
@@ -64,7 +72,8 @@ public class ValidationReportService {
       StateStore stateStore,
       ReviewScoringService reviewScoringService,
       FeatureFlagService featureFlagService,
-      ApplicationEventPublisher eventPublisher) {
+      ApplicationEventPublisher eventPublisher,
+      com.navneet.executespec.cost.RunEffectiveRouteService runEffectiveRouteService) {
     this.repository = repository;
     this.generator = generator;
     this.objectMapper = objectMapper;
@@ -73,6 +82,7 @@ public class ValidationReportService {
     this.reviewScoringService = reviewScoringService;
     this.featureFlagService = featureFlagService;
     this.eventPublisher = eventPublisher;
+    this.runEffectiveRouteService = runEffectiveRouteService;
     this.verificationLedgerBuilder = new ValidationVerificationLedgerBuilder(objectMapper);
   }
 
@@ -92,6 +102,7 @@ public class ValidationReportService {
         stateStore,
         reviewScoringService,
         featureFlagService,
+        null,
         null);
   }
 
@@ -1257,6 +1268,18 @@ public class ValidationReportService {
             : List.of();
     PipelineRun reportRun = findRunForReport(entity.getRunId());
     PipelineResult currentPipelineResult = reportComplete ? entity.getPipelineResult() : null;
+    com.navneet.executespec.cost.EffectiveRouteProjection effectiveRoute =
+        runEffectiveRouteService == null
+            ? null
+            : runEffectiveRouteService.forRun(entity.getRunId());
+    List<String> modelsUsed =
+        runEffectiveRouteService == null
+            ? List.of()
+            : runEffectiveRouteService.distinctSuccessfulModelsForRun(entity.getRunId());
+    boolean mixedRoute =
+        effectiveRoute != null
+            && effectiveRoute.attribution()
+                == com.navneet.executespec.cost.EffectiveRouteProjection.Attribution.MIXED;
 
     return new ValidationReportDTO(
         entity.getId(),
@@ -1269,7 +1292,8 @@ public class ValidationReportService {
         issues,
         checksPassed,
         reportComplete ? entity.getReportMarkdown() : null,
-        entity.getModelUsed(),
+        // A MIXED run has no single served model; the legacy field must not pretend otherwise.
+        mixedRoute ? "MIXED" : entity.getModelUsed(),
         entity.getCreatedAt(),
         issues.size(),
         countBySeverity(issues, "WOULD_BREAK_BUILD"),
@@ -1304,7 +1328,9 @@ public class ValidationReportService {
         goalProofEvaluator.evidenceReferences(
             runStatus(reportRun), currentPipelineResult, verificationLedger),
         effectiveRubricScore,
-        entity.getPreviewUrl());
+        entity.getPreviewUrl(),
+        modelsUsed,
+        effectiveRoute == null ? null : effectiveRoute.attribution().name());
   }
 
   private PipelineRun findRunForReport(String runId) {

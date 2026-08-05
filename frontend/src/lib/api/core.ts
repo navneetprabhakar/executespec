@@ -3,6 +3,7 @@ export * from './transport';
 export type {GoalProofEvidenceReference} from './validationReportTypes';
 
 import type {GoalProofEvidenceReference, WorkspaceGenerationBound} from './validationReportTypes';
+import type {GoalDonenessDecisionData} from './goalEvidenceTypes';
 import type {RunEvidenceDetail} from './runEvidence';
 import type {TaskSummary} from './tasks';
 // Billing DTOs moved to the billing domain module, but remain type-re-exported here so existing
@@ -97,28 +98,9 @@ export interface RunSummary {
   verifiedScore?: number | null;
 }
 
-export interface GoalDonenessDecisionData {
-  state?: string;
-  recommendedDecision?: string;
-  reason?: string;
-  recommendedNextStep?: string;
-  goalSummary?: string;
-  completedItems?: string[];
-  incompleteItems?: string[];
-  evidence?: string[];
-  risks?: string[];
-  budgetCeilingReason?: string;
-  inputTokens?: number;
-  outputTokens?: number;
-  cacheReadTokens?: number;
-  cacheWriteTokens?: number;
-  reasoningTokens?: number;
-  totalTokens?: number;
-  costUsd?: number;
-  wallClockMs?: number;
-  userInputRequired?: boolean;
-  anotherModelProviderMightHelp?: boolean;
-}
+// Goal-doneness evidence moved to goalEvidenceTypes.ts (god-class ceiling); re-exported for
+// existing `@/lib/api/core` consumers.
+export type {GoalDonenessDecisionData} from './goalEvidenceTypes';
 
 // Review types (mirrors Java ReviewReport / TaskReview / ReviewIssue)
 
@@ -192,6 +174,8 @@ export interface RunDetail extends RunSummary, RunEvidenceDetail {
   actualCostUsd?: number | null;
   /** Number of credits charged for this run. */
   creditsCharged?: number | null;
+  /** True when a failed run's charged credits were durably refunded. Absent on older servers. */
+  creditsRefunded?: boolean | null;
   /** Managed AI credits debited by successful platform-key model calls for this run. */
   aiCreditsCharged?: number | null;
   /** Customer-selected voluntary cap, persisted before classification/planning starts. */
@@ -898,6 +882,10 @@ export interface ValidationReportData extends WorkspaceGenerationBound {
   checksPassed: string[];
   reportMarkdown: string | null;
   modelUsed: string;
+  /** Every model that physically served this run, when the server can prove the set. */
+  modelsUsed?: string[];
+  /** Ledger-derived route attribution for the run's provider calls. */
+  routeAttribution?: 'LEDGER' | 'MIXED' | 'UNATTRIBUTED';
   createdAt: string;
   issuesCaught: number;
   buildBreakers: number;

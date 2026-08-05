@@ -53,31 +53,47 @@ public class RunCostTracker {
   private final ModelPricingRepository pricingRepo;
   private final ModelResolver modelResolver;
 
-  // rough per-task input/output token estimates by complexity
-  // Used by estimateRun() for pre-plan cost estimation. Calibrated against
-  // observed V2 worker invocations (~3-8 iterations × ~1.5k input / ~500 output).
-  // Bands recalibrated 2026-04-19 from real run data. Previous values
-  // (6k/20k/50k input, 1.5k/4k/10k output) underestimated by ~3x on
-  // code-dense tasks — Calorie Tracker MEDIUM task T2 burned 629k in /
-  // 19k out, nowhere near the old 20k/4k band. New bands target the
-  // observed P75 per complexity so the pre-plan estimate lands in a
-  // credible ballpark instead of looking like a bug.
-  private static final int[] TOKENS_LOW = {30_000, 4_000}; // was 6k/1.5k
-  private static final int[] TOKENS_MEDIUM = {200_000, 15_000}; // was 20k/4k
-  private static final int[] TOKENS_HIGH = {600_000, 40_000}; // was 50k/10k
+  // Per-task expected input/output token bands by complexity.
+  //
+  // 2026-08-05 (P2 route-templated-estimate fix) — the bands are anchored to the ACTUAL worker
+  // tier budgets in harness/WorkerTierBudgetPolicy instead of the former P75-pessimistic
+  // calibration (30k/200k/600k input), which stacked with HIGH_MULTIPLIER 3.0 to overshoot
+  // observed single-task DeepSeek runs by 10-15x. Anchors:
+  //   LOW    — warn threshold 10 iterations × ~1.2k avg input; output ≈ 0.75 × the 4,096
+  //            per-call output cap.
+  //   MEDIUM — warn threshold 16 iterations × ~4k avg input; output ≈ 1.5 × the 8,192 cap.
+  //   HIGH   — warn threshold 24 iterations × ~6.5k avg input; output ≈ 2 × the 16,384 cap.
+  // The stagnation-warn threshold is where a healthy task typically converges (the iteration CAP
+  // is a runaway guard, not a norm). Tail runs (e.g. the 629k-input Calorie Tracker MEDIUM task)
+  // are covered by the plan-scaled tail multiplier plus the credit-quantized hard-cap floor, not
+  // by inflating every estimate to the tail.
+  private static final int[] TOKENS_LOW = {12_000, 3_000}; // was 30k/4k
+  private static final int[] TOKENS_MEDIUM = {64_000, 12_000}; // was 200k/15k
+  private static final int[] TOKENS_HIGH = {160_000, 33_000}; // was 600k/40k
 
   // Planner + reviewer fixed overhead (input / output tokens per run).
   private static final int OVERHEAD_INPUT_TOKENS =
       40_000; // bumped 12k→40k (2026-04-19) after RN run showed
   private static final int OVERHEAD_OUTPUT_TOKENS = 5_000; // pre-plan estimate was 42% under actual
 
-  // High-end multiplier for the buffered estimate (retries, cache misses, escalations).
+  // High-end multiplier CAP for the buffered estimate (retries, cache misses, escalations).
   // 2026-05-13 audit run 6024f510 (estimate $0.05-$0.09, actual $1.04, 12× miss) showed
-  // the old 1.75× tail cap is calibrated for happy-path runs; real distribution has 5-10×
-  // tails on multi-repo / reviewer-heavy specs. Bump to 3.0× — still optimistic on the
-  // fat tail but closes most of the gap that the new post-planning-cost terms below don't
-  // already cover.
+  // real distributions have fat tails on multi-repo / reviewer-heavy specs. 2026-08-05: the
+  // flat 3.0× on top of P75 bands was double conservatism and produced 10-15× overshoot on
+  // single-task runs, so the tier-aware path now derives a PLAN-SCALED multiplier via
+  // {@link #tailMultiplier} (small standalone plans ≈1.75×, multi-repo project plans grow
+  // toward this cap). This constant remains the cap and the legacy estimateRun() multiplier.
   private static final double HIGH_MULTIPLIER = 3.0;
+
+  /** Base of the plan-scaled tail multiplier — the minimum high/low spread for any plan. */
+  private static final double TAIL_MULTIPLIER_BASE = 1.6;
+
+  /**
+   * Floor for the low estimate. A run always spends SOMETHING (at minimum the worker + terminal
+   * assessment calls), so an unpriced route or degenerate plan must never produce a zero/negative
+   * estimate that reads as "free" at the plan gate.
+   */
+  private static final double MIN_ESTIMATE_LOW_USD = 0.005;
 
   /** Buffered-midpoint inflator that drives credits + silent hard cap. Was 1.10. */
   private static final double BUFFERED_MULTIPLIER = 1.20;
@@ -269,12 +285,50 @@ public class RunCostTracker {
       }
     }
 
-    double low = (totalIn / 1_000_000.0) * inRate + (totalOut / 1_000_000.0) * outRate;
+    double low =
+        Math.max(
+            MIN_ESTIMATE_LOW_USD,
+            (totalIn / 1_000_000.0) * inRate + (totalOut / 1_000_000.0) * outRate);
     double high = low * HIGH_MULTIPLIER;
     double buffered = (low + high) / 2.0 * 1.10; // +10% estimation buffer
     int credits = Math.max(1, (int) Math.ceil(buffered / USD_PER_CREDIT));
     double hardCap = credits * USD_PER_CREDIT;
     return new Estimate(low, high, credits, hardCap, tasks);
+  }
+
+  /**
+   * Total complexity weight of a plan — LOW=1, MEDIUM=2, HIGH=3 per task. This is the single
+   * plan-mass signal that scales the reviewer evidence bands and the tail multiplier, so two
+   * different plans on the same route always price differently while the same plan reproduces the
+   * same estimate.
+   */
+  private static int complexityWeight(java.util.List<String> taskComplexities) {
+    if (taskComplexities == null) return 0;
+    int weight = 0;
+    for (String c : taskComplexities) {
+      weight +=
+          switch (c == null ? "MEDIUM" : c.toUpperCase()) {
+            case "LOW" -> 1;
+            case "HIGH" -> 3;
+            default -> 2;
+          };
+    }
+    return weight;
+  }
+
+  /**
+   * Plan-scaled high-band multiplier, capped at {@link #HIGH_MULTIPLIER}. Small standalone plans
+   * have a bounded downside (the worker caps are small and the reviewer reads little), so their
+   * tail factor stays near {@link #TAIL_MULTIPLIER_BASE}; multi-repo project plans carry the
+   * reviewer/codemap escalation tails the 2026-05-13 audit measured and grow toward the 3.0 cap.
+   */
+  private static double tailMultiplier(int complexityWeight, int repoCount, boolean projectScoped) {
+    double multiplier =
+        TAIL_MULTIPLIER_BASE
+            + 0.15 * complexityWeight
+            + (projectScoped ? 0.4 : 0.0)
+            + 0.2 * Math.max(0, repoCount - 1);
+    return Math.min(HIGH_MULTIPLIER, multiplier);
   }
 
   private static int[] bandFor(String complexity) {
@@ -366,14 +420,18 @@ public class RunCostTracker {
 
     String pinned = modelOverride == null || modelOverride.isBlank() ? null : modelOverride.trim();
     int totalTasks = taskComplexities == null ? 0 : taskComplexities.size();
+    int planWeight = complexityWeight(taskComplexities);
     double workerCost = computeWorkerCost(p, taskComplexities, pinned);
     double planningPhaseCost = computePlanningPhaseCost(p, strategy, totalTasks, pinned);
     double postPlanningCost =
-        computePostPlanningCost(p, repoCount, isProjectScoped, totalTasks, pinned);
+        computePostPlanningCost(p, repoCount, isProjectScoped, totalTasks, planWeight, pinned);
     double cacheOverhead = computeCacheWriteOverhead(p, workerCost + postPlanningCost);
 
-    double low = workerCost + planningPhaseCost + postPlanningCost + cacheOverhead;
-    double high = low * HIGH_MULTIPLIER;
+    double low =
+        Math.max(
+            MIN_ESTIMATE_LOW_USD,
+            workerCost + planningPhaseCost + postPlanningCost + cacheOverhead);
+    double high = low * tailMultiplier(planWeight, repoCount, isProjectScoped);
     double buffered = (low + high) / 2.0 * BUFFERED_MULTIPLIER;
     int credits = Math.max(1, (int) Math.ceil(buffered / USD_PER_CREDIT));
     double hardCap = credits * USD_PER_CREDIT;
@@ -477,19 +535,26 @@ public class RunCostTracker {
    * Cost of every LLM phase that runs AFTER the planner+workers but is invariant of strategy:
    * reviewer (general + optionally wiring + multi-repo scaling), accuracy assessment, validation
    * report generation, per-repo codemap (project-scoped only).
+   *
+   * <p>2026-08-05 — the reviewer general/fix-build bands scale with the plan's complexity weight
+   * instead of a fixed 40k/35k input: the reviewer reads what the workers wrote, and a one-task LOW
+   * plan produces a fraction of the changed surface an eight-task HIGH plan does. Bounded by {@link
+   * #REVIEWER_DYNAMIC_INPUT_CAP} so huge plans stay at the old pessimistic ceiling.
    */
   private double computePostPlanningCost(
-      LlmProvider p, int repoCount, boolean isProjectScoped, int totalTasks) {
-    return computePostPlanningCost(p, repoCount, isProjectScoped, totalTasks, null);
-  }
-
-  private double computePostPlanningCost(
-      LlmProvider p, int repoCount, boolean isProjectScoped, int totalTasks, String modelOverride) {
+      LlmProvider p,
+      int repoCount,
+      boolean isProjectScoped,
+      int totalTasks,
+      int planComplexityWeight,
+      String modelOverride) {
     double[] planningRates = tierRatesWithOverride(p, AgentTier.PLANNING, modelOverride);
     double[] workhorseRates = tierRatesWithOverride(p, AgentTier.WORKHORSE, modelOverride);
 
-    // Reviewer general pass — always runs on terminal-state workspaces.
-    double reviewerGeneral = cost(REVIEWER_GENERAL_PASS_TOKENS, planningRates);
+    // Reviewer general pass — always runs on terminal-state workspaces; band scales with the
+    // plan mass it will actually have to read.
+    int[] reviewerBand = reviewerDynamicBand(planComplexityWeight);
+    double reviewerGeneral = cost(reviewerBand, planningRates);
 
     // Reviewer wiring pass — skipped on single-repo × single-task (see RunOrchestrator
     // 2026-05-13 broadened gate). For estimation we ASSUME wiring runs unless the run is
@@ -502,9 +567,9 @@ public class RunCostTracker {
 
     // RL-2026-05-041 (audit #9) — reviewer fix-build THIRD pass, probabilistically (only fires when
     // the final build is red). Expected cost = probability × pass cost. Closes a phase the estimate
-    // previously ignored entirely.
-    double reviewerFixBuild =
-        FIX_BUILD_PASS_PROBABILITY * cost(REVIEWER_FIX_BUILD_PASS_TOKENS, planningRates);
+    // previously ignored entirely. Same plan-scaled band as the general pass: the fix-build pass
+    // re-reads the same changed surface plus the build error.
+    double reviewerFixBuild = FIX_BUILD_PASS_PROBABILITY * cost(reviewerBand, planningRates);
 
     // Accuracy assessment — runs once per terminal state on every run.
     double accuracy = cost(ACCURACY_ASSESSMENT_TOKENS, planningRates);
@@ -606,10 +671,31 @@ public class RunCostTracker {
    */
   // RL-2026-05-041 (audit #9): bumped 18k→40k input. The general pass reads the terminal workspace
   // AND runs PostEditFormatter over the changed files; 18k under-modeled real multi-file reviews.
-  // Calibrated against eval run a45c3694 (anthropic/high, single-repo SMALL): estimate band was
-  // [$0.58,$1.64] but actual was $2.32 (42% over the high) — the reviewer terms were the dominant
-  // under-count. Re-validated against the 3×3 v2-eval (LOW/MED/HIGH × 3 providers).
-  private static final int[] REVIEWER_GENERAL_PASS_TOKENS = {40_000, 3_000};
+  // 2026-08-05 (P2 route-templated-estimate fix): replaced the fixed 40k/3k band with a
+  // plan-scaled band — base + per-complexity-weight growth, capped at the old pessimistic
+  // ceiling — so a one-task LOW plan is not billed the review cost of a large multi-task plan.
+  private static final int REVIEWER_DYNAMIC_INPUT_BASE = 6_000;
+
+  private static final int REVIEWER_DYNAMIC_INPUT_PER_WEIGHT = 4_000;
+  private static final int REVIEWER_DYNAMIC_INPUT_CAP = 60_000;
+  private static final int REVIEWER_DYNAMIC_OUTPUT_BASE = 1_200;
+  private static final int REVIEWER_DYNAMIC_OUTPUT_PER_WEIGHT = 400;
+  private static final int REVIEWER_DYNAMIC_OUTPUT_CAP = 4_000;
+
+  /**
+   * Reviewer general/fix-build band scaled by the plan's complexity weight (LOW=1/MED=2/HIGH=3).
+   */
+  private static int[] reviewerDynamicBand(int planComplexityWeight) {
+    int weight = Math.max(1, planComplexityWeight);
+    return new int[] {
+      Math.min(
+          REVIEWER_DYNAMIC_INPUT_CAP,
+          REVIEWER_DYNAMIC_INPUT_BASE + REVIEWER_DYNAMIC_INPUT_PER_WEIGHT * weight),
+      Math.min(
+          REVIEWER_DYNAMIC_OUTPUT_CAP,
+          REVIEWER_DYNAMIC_OUTPUT_BASE + REVIEWER_DYNAMIC_OUTPUT_PER_WEIGHT * weight)
+    };
+  }
 
   /**
    * ReviewerAgent wiring pass: same tier, narrower scope but reads ALL routers / barrels / import
@@ -619,14 +705,11 @@ public class RunCostTracker {
    */
   private static final int[] REVIEWER_WIRING_PASS_TOKENS = {30_000, 2_500};
 
-  /**
-   * RL-2026-05-041 (audit #9) — reviewer fix-build THIRD pass (RL-2026-05-019, flag {@code
-   * reviewer.third-pass.enabled} default ON): when the final build is still red after the earlier
-   * passes, ONE more targeted pass runs (up to 25 iters / 360s) with the verbatim build error. It
-   * was entirely missing from the estimate. Modeled probabilistically in {@link
-   * #computePostPlanningCost} via {@link #FIX_BUILD_PASS_PROBABILITY}.
-   */
-  private static final int[] REVIEWER_FIX_BUILD_PASS_TOKENS = {35_000, 3_000};
+  // RL-2026-05-041 (audit #9) — reviewer fix-build THIRD pass (RL-2026-05-019, flag
+  // reviewer.third-pass.enabled default ON): when the final build is still red after the earlier
+  // passes, ONE more targeted pass runs (up to 25 iters / 360s) with the verbatim build error.
+  // 2026-08-05: priced with the same plan-scaled reviewerDynamicBand as the general pass (it
+  // re-reads the same changed surface), still weighted by FIX_BUILD_PASS_PROBABILITY.
 
   /** Fraction of runs whose final build is red and trigger the reviewer fix-build third pass. */
   private static final double FIX_BUILD_PASS_PROBABILITY = 0.35;

@@ -41,6 +41,8 @@ public class ProjectDashboardController {
   private final ValidationReportRepository reportRepo;
   private final ValidationReportValidityService reportValidityService;
   private final PullRequestRecordRepository prRepo;
+  private final com.navneet.executespec.project.pr.PullRequestRecordService
+      pullRequestRecordService;
   private final ProjectArchitectureService archService;
   private final StalenessService stalenessService;
   private final com.navneet.executespec.project.service.WorkspaceHealthService
@@ -73,6 +75,15 @@ public class ProjectDashboardController {
   private final com.navneet.executespec.project.security.ProjectAccessGuard projectAccessGuard;
   private final ProjectRepository projectRepository;
 
+  /**
+   * Task-proof fail-closed status projection (2026-07-24 contract): a persisted COMPLETE run with
+   * durable non-DONE goal evidence must display PARTIAL on every customer surface. The dashboard's
+   * recent-run rows previously projected the raw persisted status and bypassed that contract.
+   */
+  private final com.navneet.executespec.api.RunMapper runMapper;
+
+  private final com.navneet.executespec.state.repository.AgentTaskRepository agentTaskRepository;
+
   public record TaskSummary(
       String taskId, String runId, String name, String status, Integer score, String createdAt) {}
 
@@ -85,8 +96,17 @@ public class ProjectDashboardController {
       String mergedAt,
       String ciStatus,
       Integer ciFailingCount,
-      String ciCheckedAt) {
-    static PrSummaryDto from(PullRequestRecord r) {
+      String ciCheckedAt,
+      String ciStatusReason,
+      String repoId) {
+    static PrSummaryDto from(PullRequestRecord r, Boolean webhookInstalled) {
+      String ciStatus = r.getCiStatus() != null ? r.getCiStatus().name() : "UNKNOWN";
+      // Mirrors PullRequestController.PrSummary: WEBHOOK_NOT_INSTALLED only when the durable
+      // project_repo.webhook_installed column PROVES no webhook; unknown install state stays null.
+      String ciStatusReason =
+          "UNKNOWN".equals(ciStatus) && Boolean.FALSE.equals(webhookInstalled)
+              ? "WEBHOOK_NOT_INSTALLED"
+              : null;
       return new PrSummaryDto(
           r.getRepoFullName(),
           r.getPrNumber(),
@@ -94,9 +114,11 @@ public class ProjectDashboardController {
           r.getStatus().name(),
           r.getCreatedAt() != null ? r.getCreatedAt().toString() : null,
           r.getMergedAt() != null ? r.getMergedAt().toString() : null,
-          r.getCiStatus() != null ? r.getCiStatus().name() : "UNKNOWN",
+          ciStatus,
           r.getCiFailingCount() != null ? r.getCiFailingCount() : 0,
-          r.getCiCheckedAt() != null ? r.getCiCheckedAt().toString() : null);
+          r.getCiCheckedAt() != null ? r.getCiCheckedAt().toString() : null,
+          ciStatusReason,
+          r.getRepoId() != null ? r.getRepoId().toString() : null);
     }
   }
 
@@ -215,6 +237,17 @@ public class ProjectDashboardController {
     int excludedScoreReports = scoreAggregate.excludedCount();
     double avgScore = scoreAggregate.averageScore();
 
+    // One batched task read for the page, then the same fail-closed projection RunMapper applies
+    // to the run list/detail: persisted COMPLETE beside durable non-DONE goal evidence is PARTIAL.
+    java.util.Map<String, List<com.navneet.executespec.state.entity.AgentTask>> tasksByRun =
+        recentRuns.isEmpty()
+            ? java.util.Map.of()
+            : agentTaskRepository
+                .findByRunIdIn(recentRuns.stream().map(PipelineRun::getRunId).toList())
+                .stream()
+                .collect(
+                    java.util.stream.Collectors.groupingBy(
+                        com.navneet.executespec.state.entity.AgentTask::getRunId));
     List<TaskSummary> recentTasks =
         recentRuns.stream()
             .map(
@@ -223,16 +256,25 @@ public class ProjectDashboardController {
                         r.getRunId(),
                         r.getRunId(),
                         r.getRunTitle() != null ? r.getRunTitle() : r.getUserRequest(),
-                        r.getStatus(),
+                        runMapper.displayRunStatus(
+                            r.getStatus(), tasksByRun.getOrDefault(r.getRunId(), List.of())),
                         latestScoreForRun(canonicalReports, r.getRunId()),
                         r.getStartedAt() != null ? r.getStartedAt().toString() : null))
             .toList();
 
+    java.util.Map<java.util.UUID, Boolean> webhookByRepo = new java.util.HashMap<>();
     List<PrSummaryDto> recentPrs =
         recentRuns.stream()
             .flatMap(r -> prRepo.findByRunIdOrderByCreatedAtAsc(r.getRunId()).stream())
             .limit(15)
-            .map(PrSummaryDto::from)
+            .map(
+                pr ->
+                    PrSummaryDto.from(
+                        pr,
+                        pr.getRepoId() == null
+                            ? null
+                            : webhookByRepo.computeIfAbsent(
+                                pr.getRepoId(), pullRequestRecordService::webhookInstalled)))
             .toList();
 
     var arch = archService.latest(projectId);

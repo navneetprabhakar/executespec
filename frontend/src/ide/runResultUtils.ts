@@ -1349,6 +1349,63 @@ export function goalDecisionLabel(decision?: string | null): string {
   }
 }
 
+/**
+ * Informational copy for a clean run whose ONLY remaining goal-proof gap is independent
+ * functional verification. The evidence stays visible; only the audience framing changes so
+ * customers do not misread an evidence disclosure as a defect. Absent/false flag => null, which
+ * keeps the existing advisory rendering for older servers.
+ */
+export function independentProofGapNotice(
+  goal?: Pick<api.GoalDonenessDecisionData, 'independentProofGapOnly'> | null,
+): string | null {
+  if (goal?.independentProofGapOnly !== true) return null;
+  return 'Independent functional verification pending — all deterministic checks passed. This is an evidence disclosure, not a defect.';
+}
+
+/** Badge kind for goal evidence: neutral/informational when the gap is disclosure-only. */
+export function goalEvidenceKind(
+  goal?: Pick<api.GoalDonenessDecisionData, 'state' | 'independentProofGapOnly'> | null,
+): 'ok' | 'warn' | 'bad' | 'info' {
+  if (goal?.independentProofGapOnly === true) return 'info';
+  return goalStateKind(goal?.state);
+}
+
+/** Badge label for goal evidence: reworded (not hidden) when the gap is disclosure-only. */
+export function goalEvidenceLabel(
+  goal?: Pick<api.GoalDonenessDecisionData, 'state' | 'independentProofGapOnly'> | null,
+): string {
+  if (goal?.independentProofGapOnly === true) return 'Independent verification pending';
+  return goalStateLabel(goal?.state);
+}
+
+/**
+ * Run-credit display with the durable refund acknowledgment. Absent `creditsRefunded` (older
+ * servers) renders exactly the legacy number/em-dash.
+ */
+export function creditsReservedDisplay(
+  run?: Pick<api.RunDetail, 'creditsCharged' | 'creditsRefunded'> | null,
+): string {
+  if (run?.creditsCharged == null) return '—';
+  const base = String(run.creditsCharged);
+  if (run.creditsRefunded !== true) return base;
+  return `${base} ${run.creditsCharged === 1 ? 'credit' : 'credits'} — refunded`;
+}
+
+/**
+ * Report model attribution: prefer the proven `modelsUsed` set over the single legacy
+ * `modelUsed` string, and surface a MIXED route attribution explicitly.
+ */
+export function reportModelDisplay(
+  report?: Pick<api.ValidationReportData, 'modelUsed' | 'modelsUsed' | 'routeAttribution'> | null,
+): string {
+  if (!report) return '—';
+  const base = report.modelsUsed?.length ? report.modelsUsed.join(', ') : report.modelUsed || '—';
+  if (report.routeAttribution === 'MIXED') {
+    return base === '—' ? 'Mixed routes' : `Mixed routes · ${base}`;
+  }
+  return base;
+}
+
 export function goalDecisionHelp(decision?: string | null): string | null {
   switch ((decision || '').toUpperCase()) {
     case 'STOP_FAILED':

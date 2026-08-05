@@ -1,6 +1,7 @@
 import {useEffect, useMemo, useRef, useState} from 'react';
 import {Link, useNavigate, useParams} from 'react-router-dom';
 import {PrCommentInbox} from '@/signal/components/PrCommentInbox';
+import {RunPrCiPanel} from '@/ide/PrCiWebhook';
 import {humanStatusReason, providerLabel} from '@/signal/lib/runUtils';
 import {RunTimeline} from '@/ide/RunTimeline';
 import {RunTechnicalDetails} from '@/ide/RunTechnicalDetails';
@@ -56,16 +57,19 @@ import {
   customerStepSummary,
   customerStepStatusLabel,
   customerStepTitle,
+  creditsReservedDisplay,
   evidenceKind,
   emptyCodeTabMessage,
   fileCountSummary,
   fmtDur,
   goalDecisionHelp,
   goalDecisionLabel,
+  goalEvidenceKind,
+  goalEvidenceLabel,
   goalProofKind,
   goalProofLabel,
-  goalStateLabel,
-  goalStateKind,
+  independentProofGapNotice,
+  reportModelDisplay,
   hasRunCostEvidence,
   isNoisyLogEvent,
   isFailedTerminalStatus,
@@ -1616,7 +1620,7 @@ export default function IdeRunResult() {
                   }
                 />
                 <Kv k='AI credits used' v={run?.aiCreditsCharged ?? '—'} />
-                <Kv k='Run credits reserved' v={run?.creditsCharged ?? '—'} />
+                <Kv k='Run credits reserved' v={creditsReservedDisplay(run)} />
                 {isSuperAdmin && <Kv k='Cost' v={usd(run?.actualCostUsd)} />}
               </div>
             </div>
@@ -2254,8 +2258,8 @@ export default function IdeRunResult() {
             {effectiveRunGoal && (
               <div className='ide-card' style={{marginBottom: 12}}>
                 <div style={{display: 'flex', alignItems: 'center', gap: 8}}>
-                  <IdeBadge kind={goalStateKind(effectiveRunGoal.state)}>
-                    {goalStateLabel(effectiveRunGoal.state)}
+                  <IdeBadge kind={goalEvidenceKind(effectiveRunGoal)}>
+                    {goalEvidenceLabel(effectiveRunGoal)}
                   </IdeBadge>
                   {effectiveRunGoal.recommendedDecision && (
                     <span className='ide-mono' style={{fontSize: 12}}>
@@ -2263,9 +2267,12 @@ export default function IdeRunResult() {
                     </span>
                   )}
                 </div>
-                {goalDecisionHelp(effectiveRunGoal.recommendedDecision) && (
+                {/* Disclosure-only proof gap: informational copy, never warning styling. */}
+                {(independentProofGapNotice(effectiveRunGoal) ||
+                  goalDecisionHelp(effectiveRunGoal.recommendedDecision)) && (
                   <div style={{fontSize: 12, marginTop: 8, color: 'var(--ide-fg-muted)'}}>
-                    {goalDecisionHelp(effectiveRunGoal.recommendedDecision)}
+                    {independentProofGapNotice(effectiveRunGoal) ??
+                      goalDecisionHelp(effectiveRunGoal.recommendedDecision)}
                   </div>
                 )}
                 {(effectiveRunGoal.reason ||
@@ -3002,6 +3009,7 @@ export default function IdeRunResult() {
               <>
                 <div className='ide-card'>
                   <Kv k='Pipeline' v={reportPipelineLabel(report)} />
+                  <Kv k='Model' v={reportModelDisplay(report)} />
                   <Kv k='Files generated' v={report.filesGenerated} />
                   <Kv k='Build breakers' v={report.buildBreakers} />
                   <Kv k='Review failures' v={report.reviewFailures} />
@@ -3012,8 +3020,8 @@ export default function IdeRunResult() {
                     <div className='ide-h2'>Final goal proof</div>
                     <div className='ide-card'>
                       <div style={{display: 'flex', alignItems: 'center', gap: 8}}>
-                        <IdeBadge kind={goalStateKind(report.runGoalDecision.state)}>
-                          {goalStateLabel(report.runGoalDecision.state)}
+                        <IdeBadge kind={goalEvidenceKind(report.runGoalDecision)}>
+                          {goalEvidenceLabel(report.runGoalDecision)}
                         </IdeBadge>
                         {report.runGoalDecision.recommendedDecision && (
                           <span className='ide-mono' style={{fontSize: 12}}>
@@ -3021,9 +3029,12 @@ export default function IdeRunResult() {
                           </span>
                         )}
                       </div>
-                      {goalDecisionHelp(report.runGoalDecision.recommendedDecision) && (
+                      {/* Disclosure-only proof gap: informational copy, never warning styling. */}
+                      {(independentProofGapNotice(report.runGoalDecision) ||
+                        goalDecisionHelp(report.runGoalDecision.recommendedDecision)) && (
                         <div style={{fontSize: 12, marginTop: 8, color: 'var(--ide-fg-muted)'}}>
-                          {goalDecisionHelp(report.runGoalDecision.recommendedDecision)}
+                          {independentProofGapNotice(report.runGoalDecision) ??
+                            goalDecisionHelp(report.runGoalDecision.recommendedDecision)}
                         </div>
                       )}
                       {report.runGoalDecision.goalSummary && (
@@ -3245,7 +3256,7 @@ export default function IdeRunResult() {
             <h1 className='ide-h1'>Cost</h1>
             <div className='ide-card'>
               <Kv k='AI credits used' v={run?.aiCreditsCharged ?? '—'} />
-              <Kv k='Run credits reserved' v={run?.creditsCharged ?? '—'} />
+              <Kv k='Run credits reserved' v={creditsReservedDisplay(run)} />
               <Kv k='Input tokens' v={num(costEvidence?.inputTokens ?? run?.totalInputTokens)} />
               <Kv k='Output tokens' v={num(costEvidence?.outputTokens ?? run?.totalOutputTokens)} />
               <Kv k='Cache-read tokens' v={num(costEvidence?.cacheReadTokens)} />
@@ -3479,6 +3490,7 @@ export default function IdeRunResult() {
                     ↗ Open on {scmProviderLabel(run?.scmProvider)}
                   </a>
                 </div>
+                <RunPrCiPanel runId={runId} />
                 <PrCommentInbox runId={runId} variant='ide' />
               </>
             ) : (

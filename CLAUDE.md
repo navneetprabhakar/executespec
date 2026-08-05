@@ -926,10 +926,10 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318/v1/traces
 | GET    | `/api/runs/{id}/events`               | SSE event stream (scoped token). `RunEvent` keeps legacy `payload` and adds `schemaVersion=1` + typed `data`; advisory task waves use `TASK_WAVE_PLAN`; evidence-gated initial route explanations use `INITIAL_ROUTING_DECISION`; goal/continuation decisions use `GOAL_DECISION` and `CONTINUATION_DECISION`; automatic selected-candidate continuation reruns use `CONTINUATION_ACTION`, while limit-blocked rerun recommendations use `CONTINUATION_ACTION_SKIPPED`. Goal/continuation decision/action events also trigger a fresh `RUN_DETAIL` push so the Steps tab sees persisted upgrade proposals live. |
 | GET    | `/api/runs/{id}/sse-token`            | Get scoped SSE token (5-min TTL).                                                                                                                                                                                                                                                           |
 | GET    | `/api/runs/{id}/event-log`            | Persisted run-event replay (24h Redis `sse:replay:{id}`) — backs the IDE run-detail **Logs** tab (RL-2026-05-046). Run-read guarded.                                                                                                                                                        |
-| GET    | `/api/runs/{id}/publication-eligibility` | Read-only deterministic publication preview. Returns ELIGIBLE/BLOCKED plus the exact gate, stable code, remediation, retryability, and evidence/current workspace generations; protected-contract inspection does not rewrite durable comparison evidence. |
+| GET    | `/api/runs/{id}/publication-eligibility` | Read-only deterministic publication preview. Returns ELIGIBLE/BLOCKED plus the exact gate, stable code, remediation, retryability, and evidence/current workspace generations; protected-contract inspection does not rewrite durable comparison evidence. Additive `alreadyPublished` + `publishedPrUrls[]` acknowledge durable created-PR evidence (`pull_request_record` rows, falling back to the run row's persisted PR URL) via `integration/scm/PublicationEligibilityPresenter` without changing the gate verdict, so a BLOCKED re-publication does not contradict a visibly merged PR. |
 | GET    | `/api/executions/{id}/requirement-gate` | Compatibility route resolving the canonical pipeline run after project and run read guards. |
 | POST   | `/api/runs/{id}/run-tests`            | Manually trigger test execution (Beta).                                                                                                                                                                                                                                                     |
-| GET    | `/api/runs/{id}/prs`                  | List PRs opened by this run with status.                                                                                                                                                                                                                                                    |
+| GET    | `/api/runs/{id}/prs`                  | List PRs opened by this run with status. Additive (2026-08-05): `ciStatusReason` (`WEBHOOK_NOT_INSTALLED` only when `ciStatus` is UNKNOWN and `project_repo.webhook_installed` proves no webhook; null when unknown) + `repoId` so the client can offer `POST /api/repos/{repoId}/webhook`. |
 | GET    | `/api/runs/{id}/cost`                 | Live token + cost snapshot; V2 live responses include cache/reasoning fields, `schemaVersion=1`, and separate physical/successful/failed attempt counts. Per-attempt `stepCalls[]` detail is ORG_ADMIN/SUPER_ADMIN-only: lower-privileged callers get `stepCallsIncluded=false` + `stepCallsRestrictedReason` + `stepCallsTotal` so the UI can say "withheld", not "none" (RR-1552). |
 | POST   | `/api/runs/{id}/sync`                 | Reset workspace to current origin HEAD.                                                                                                                                                                                                                                                     |
 | POST   | `/api/runs/{id}/sync/original`        | Reset workspace to the SHAs captured at run start (from `run_repo_snapshot`).                                                                                                                                                                                                               |
@@ -1320,6 +1320,13 @@ RequirementIR approval requires one.
 APPROVE atomically moves gate `PENDING → APPROVED`, run `AWAITING_APPROVAL → APPROVAL_RESUMING`,
 and outbox `WAITING → READY`. REJECT and pre-approval CANCEL are distinct decisions and atomically
 cancel the run/outbox; cancellation after approval preserves the immutable APPROVE receipt.
+Approval auditability (2026-08-05): a first-time customer APPROVE/REJECT also publishes
+`PlanGateDecisionCommitted` in-transaction; `activity/PlanGateDecisionActivityListener` consumes it
+AFTER_COMMIT + async and appends dual-surface `RUN_PLAN_APPROVED`/`RUN_PLAN_REJECTED` entries to
+the project activity feed and the append-only `activity_audit` chain carrying the real human
+decider (user id + email/display), so approvals no longer appear actorless/SYSTEM. Replays never
+reach the publish site, so no duplicate event is appended. The polling PR refresh path likewise
+emits transition-guarded `PR_MERGED`/`PR_CLOSED` activity (webhook path already did).
 
 The 400-line transaction coordinator delegates the exact 73-field receipt plus replay verification
 to package-private `PlanGateDecisionEvidence` (478 lines), and locked policy/credential/governance/
@@ -1753,7 +1760,21 @@ evidence, and horizontally scaled JVMs require a shared persistent trajectory ro
 - **Run completion DTO truthfulness** — persisted COMPLETE remains an execution/recovery boundary,
   not sufficient customer proof. If any task has durable non-DONE goal evidence, run detail and
   list DTOs expose the task and run as PARTIAL with `TASK_PROOF_INCOMPLETE` without rewriting
-  recovery state.
+  recovery state. **2026-08-05 batch:** the same fail-closed projection now also covers the
+  single-run summary responses (submit/fork ACK, project reassignment — `RunMapper` loads the
+  task-proof evidence itself for persisted-COMPLETE rows) and the project dashboard's recent-run
+  rows (`ProjectDashboardController` batch-loads tasks and calls `RunMapper.displayRunStatus`).
+  Additive DTO facts: `RunDetail.creditsRefunded` + `RunTerminalOutcome.Impact.creditsRefunded`
+  (durable V300 `run_quota_refund` evidence; null = not applicable/unresolved), report DTO
+  `modelsUsed`/`routeAttribution` with legacy `modelUsed` carrying literal `"MIXED"` on
+  multi-route runs, and `runGoalDecision.independentProofGapOnly` (true exactly when the only
+  remaining goal gap is the independent-functional-scope gap). Terminal-success projections
+  suppress non-structured `failureReason` text (success prose never renders as a failure reason;
+  the `PUBLICATION_BLOCKED[<code>]` marker and `CODE`/`CODE[...]`-shaped values survive), and the
+  operator-grade `TaskSummary.continuationDecision.policy` subtree is withheld from viewers who
+  fail `CostVisibilityPolicy.canViewRawCost` with an explicit `{"included": false,
+  "restrictedReason": "ORG_BILLING_ROLE_REQUIRED"}` marker (SSE `RUN_DETAIL` pushes are
+  fail-closed restricted; the authenticated REST detail passes the viewer).
 - **Multi-task worker scope (2026-07-24)** — worker evidence omits the full original spec, names
   later tasks/files as reserved future scope, and makes the current task description/constraints
   the sole deliverable. Existing generated code/tests are untrusted intermediate output: later
