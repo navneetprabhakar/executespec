@@ -103,7 +103,10 @@ class DeterministicHttpRequirementVerifierTest {
   }
 
   @Test
-  void absentEndpointCannotMasqueradeAsMethodNotAllowed() {
+  void absentEndpointCannotMasqueradeAsMethodNotAllowed() throws Exception {
+    // A Spring surface must exist for the deterministic verdict to be claimable at all; the
+    // constrained path is still absent from it, so the 405 contract remains unproven.
+    writeController("GET", "/api/other");
     Plan plan = Plan.builder().runtimeSurface(Plan.RuntimeSurface.HTTP).build();
 
     assertThatThrownBy(
@@ -111,6 +114,100 @@ class DeterministicHttpRequirementVerifierTest {
                 verifier.assertSatisfied(
                     plan, "POST /api/system/ping must return HTTP 405", workspace))
         .hasMessageContaining("DETERMINISTIC_HTTP_METHOD_REJECTION_UNPROVEN");
+  }
+
+  @Test
+  void nodeOnlyRepositoriesCannotFailByConstruction() throws Exception {
+    writeNodeRepo(workspace.resolve("repos/inventory-api"));
+    writeNodeRepo(workspace.resolve("repos/inventory-web"));
+    Plan plan = Plan.builder().runtimeSurface(Plan.RuntimeSurface.HTTP).build();
+    String request = "The application must also expose GET /api/items/low-stock";
+
+    var verification = verifier.assertSatisfied(plan, request, workspace);
+
+    assertThat(verification.applicable()).isTrue();
+    assertThat(verification.unprovableForStack()).isTrue();
+    assertThat(verification.required())
+        .containsExactly(new SpringHttpSurfaceExtractor.RouteKey("GET", "/api/items/low-stock"));
+    assertThat(verification.missing()).isEmpty();
+    assertThat(verification.presentForbidden()).isEmpty();
+    assertThat(verification.unprovenMethodRejections()).isEmpty();
+  }
+
+  @Test
+  void nodeOnlyForbiddenConstraintIsUnprovableForStackNotAFailure() throws Exception {
+    writeNodeRepo(workspace.resolve("repos/inventory-api"));
+    Plan plan = Plan.builder().runtimeSurface(Plan.RuntimeSurface.HTTP).build();
+
+    var verification =
+        verifier.assertSatisfied(plan, "POST /api/system/ping must return HTTP 405", workspace);
+
+    assertThat(verification.unprovableForStack()).isTrue();
+    assertThat(verification.unprovenMethodRejections()).isEmpty();
+  }
+
+  @Test
+  void emptyWorkspaceHasNoApplicableSurfaceAndIsUnprovable() {
+    Plan plan = Plan.builder().runtimeSurface(Plan.RuntimeSurface.HTTP).build();
+
+    var verification =
+        verifier.assertSatisfied(plan, "Implement POST /items returning 201", workspace);
+
+    assertThat(verification.unprovableForStack()).isTrue();
+    assertThat(verification.missing()).isEmpty();
+  }
+
+  @Test
+  void mixedSpringAndNodeWorkspaceKeepsFailClosedSemantics() throws Exception {
+    writeNodeRepo(workspace.resolve("repos/inventory-web"));
+    writeControllerAt(
+        workspace.resolve("repos/spring-api"), "@PostMapping(\"/todos\")\nvoid route() {}");
+    Plan plan = Plan.builder().runtimeSurface(Plan.RuntimeSurface.HTTP).build();
+
+    assertThatThrownBy(
+            () ->
+                verifier.assertSatisfied(
+                    plan, "The application must also expose GET /api/items/low-stock", workspace))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("DETERMINISTIC_HTTP_REQUIREMENT_MISSING")
+        .hasMessageContaining("GET /api/items/low-stock");
+  }
+
+  @Test
+  void mixedWorkspaceSatisfiedBySpringSurfaceStillPasses() throws Exception {
+    writeNodeRepo(workspace.resolve("repos/inventory-web"));
+    writeControllerAt(
+        workspace.resolve("repos/spring-api"),
+        "@GetMapping(\"/api/items/low-stock\")\nvoid route() {}");
+    Plan plan = Plan.builder().runtimeSurface(Plan.RuntimeSurface.HTTP).build();
+
+    var verification =
+        verifier.assertSatisfied(
+            plan, "The application must also expose GET /api/items/low-stock", workspace);
+
+    assertThat(verification.unprovableForStack()).isFalse();
+    assertThat(verification.missing()).isEmpty();
+  }
+
+  @Test
+  void unprovableForStackEvidenceNoteListsDeclaredRoutes() throws Exception {
+    writeNodeRepo(workspace.resolve("repos/inventory-api"));
+    Plan plan = Plan.builder().runtimeSurface(Plan.RuntimeSurface.HTTP).build();
+    var verification =
+        verifier.verify(
+            plan,
+            "The application must also expose GET /api/items/low-stock and prove"
+                + " DELETE /api/items must return 405",
+            workspace);
+
+    var note = ValidationReviewIssueSynthesizer.httpRequirementUnprovableForStack(verification);
+
+    assertThat(note.getId()).isEqualTo("SYNTH-HTTP-STACK-UNPROVABLE");
+    assertThat(note.getSeverity())
+        .isEqualTo(com.navneet.executespec.reviewer.model.IssueSeverity.MINOR);
+    assertThat(note.getDescription())
+        .contains("no Spring MVC mapping sources")
+        .contains("GET /api/items/low-stock");
   }
 
   @Test
@@ -163,7 +260,11 @@ class DeterministicHttpRequirementVerifierTest {
   }
 
   private void writeControllerBody(String body) throws Exception {
-    Path file = workspace.resolve("src/main/java/example/TodoController.java");
+    writeControllerAt(workspace, body);
+  }
+
+  private void writeControllerAt(Path repositoryRoot, String body) throws Exception {
+    Path file = repositoryRoot.resolve("src/main/java/example/TodoController.java");
     Files.createDirectories(file.getParent());
     Files.writeString(
         file,
@@ -175,5 +276,23 @@ class DeterministicHttpRequirementVerifierTest {
         }
         """
             .formatted(body));
+  }
+
+  /** A Node/Express repository: real HTTP routes, but zero Spring-recognizable Java sources. */
+  private void writeNodeRepo(Path repositoryRoot) throws Exception {
+    Files.createDirectories(repositoryRoot);
+    Files.writeString(
+        repositoryRoot.resolve("package.json"),
+        """
+        {"name":"inventory","main":"server.js","dependencies":{"express":"^4.19.0"}}
+        """);
+    Files.writeString(
+        repositoryRoot.resolve("server.js"),
+        """
+        const express = require('express');
+        const app = express();
+        app.get('/api/items/low-stock', (req, res) => res.json([]));
+        app.listen(3000);
+        """);
   }
 }

@@ -66,15 +66,36 @@ public class SpringHttpSurfaceExtractor {
     return extract(workspaceRoot, SpringContractSourceInventory.DEFAULT_LIMITS);
   }
 
+  /**
+   * Extracts the canonical surface AND reports whether the workspace contains any production Java
+   * source carrying a Spring MVC mapping annotation the extractor recognizes.
+   *
+   * <p>V367 principle: an empty successful extraction over a Node, Go, Python, Rust, or plain-Java
+   * repository is NOT positive Spring MVC evidence — it means the extractor's evidence class is not
+   * applicable to that stack. Callers that convert "route absent from the extracted surface" into a
+   * failing verdict must first check {@link WorkspaceExtraction#springMvcMappingSourcePresent()} so
+   * a non-Spring deliverable cannot fail by construction.
+   */
+  public WorkspaceExtraction extractWithApplicability(Path workspaceRoot) {
+    return extractWithApplicability(workspaceRoot, SpringContractSourceInventory.DEFAULT_LIMITS);
+  }
+
   SpringHttpSurfaceSnapshot extract(
       Path workspaceRoot, SpringContractSourceInventory.TraversalLimits limits) {
+    return extractWithApplicability(workspaceRoot, limits).snapshot();
+  }
+
+  private WorkspaceExtraction extractWithApplicability(
+      Path workspaceRoot, SpringContractSourceInventory.TraversalLimits limits) {
     if (workspaceRoot == null || !Files.isDirectory(workspaceRoot)) {
-      return SpringHttpSurfaceSnapshot.of(List.of(), List.of());
+      return new WorkspaceExtraction(SpringHttpSurfaceSnapshot.of(List.of(), List.of()), false);
     }
     SpringContractSourceInventory.Inventory inventory =
         SpringContractSourceInventory.scan(workspaceRoot, limits);
     List<ParsedSource> sources = parseSources(workspaceRoot, inventory.javaSources());
     rejectComposedMappings(workspaceRoot, sources);
+    boolean springMvcMappingSourcePresent =
+        sources.stream().anyMatch(SpringHttpSurfaceExtractor::containsMappingAnnotation);
     Map<Path, ContextPath> contextPaths = new LinkedHashMap<>();
     List<ConfigurationSource> configurationSources = new ArrayList<>();
     List<Route> routes = new ArrayList<>();
@@ -89,7 +110,13 @@ public class SpringHttpSurfaceExtractor {
       configurationSources.addAll(contextPath.sources());
       extractCompilationUnit(workspaceRoot, source, contextPath.value(), routes);
     }
-    return SpringHttpSurfaceSnapshot.of(routes, configurationSources);
+    return new WorkspaceExtraction(
+        SpringHttpSurfaceSnapshot.of(routes, configurationSources), springMvcMappingSourcePresent);
+  }
+
+  private static boolean containsMappingAnnotation(ParsedSource source) {
+    return source.compilationUnit().findAll(AnnotationExpr.class).stream()
+        .anyMatch(SpringHttpSurfaceExtractor::isMappingAnnotation);
   }
 
   /**
@@ -517,6 +544,18 @@ public class SpringHttpSurfaceExtractor {
     int line = annotation.getBegin().map(position -> position.line).orElse(1);
     return new SurfaceExtractionException(reason + " at " + relative(root, file) + ":" + line);
   }
+
+  /**
+   * A materialized-workspace extraction result plus its stack-applicability evidence.
+   *
+   * <p>{@code springMvcMappingSourcePresent} is true only when at least one admitted production
+   * Java source declares a Spring MVC mapping annotation this extractor recognizes
+   * ({@code @RequestMapping} / {@code @GetMapping} family). Micronaut/JAX-RS/plain-Java sources and
+   * non-Java stacks report {@code false}, keeping an empty snapshot honest as "not applicable"
+   * rather than "no routes exist".
+   */
+  public record WorkspaceExtraction(
+      SpringHttpSurfaceSnapshot snapshot, boolean springMvcMappingSourcePresent) {}
 
   private record ParsedSource(Path path, CompilationUnit compilationUnit) {}
 
