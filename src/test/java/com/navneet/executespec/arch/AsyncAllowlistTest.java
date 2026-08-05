@@ -188,6 +188,12 @@ class AsyncAllowlistTest {
               // §8 (E1.8/9/10 bundle).
               "ActivityEventEmitter#emit",
 
+              // 2026-08-05 live residual — same profile as ActivityEventEmitter#emit (primitive
+              // args only, entity built in-method, internal try/catch swallows persist failure);
+              // adds a String human-actor fallback id for non-UUID principals so a plan-gate
+              // decision never projects actorType=SYSTEM.
+              "ActivityEventEmitter#emitWithActor",
+
               // E1.5 — bootstrap PR flow. Loads ProjectRepo by id (no eager
               // collection nav — it has no @OneToMany relations) and saves
               // back primitive field updates. Outer try/catch wraps the whole

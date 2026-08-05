@@ -49,10 +49,11 @@ class PlanGateDecisionActivityListenerTest {
     ArgumentCaptor<String> summary = ArgumentCaptor.forClass(String.class);
     ArgumentCaptor<Map<String, Object>> payload = ArgumentCaptor.forClass(Map.class);
     verify(emitter)
-        .emit(
+        .emitWithActor(
             eq(PROJECT_ID),
             eq(ActivityEventType.RUN_PLAN_APPROVED),
             eq(ACTOR_ID), // the real decider — the emitter renders actorType=USER, not SYSTEM
+            eq(ACTOR_ID.toString()),
             eq("RUN"),
             eq(RUN_ID),
             summary.capture(),
@@ -79,13 +80,41 @@ class PlanGateDecisionActivityListenerTest {
             null));
 
     verify(emitter)
-        .emit(
+        .emitWithActor(
             eq(PROJECT_ID),
             eq(ActivityEventType.RUN_PLAN_REJECTED),
             eq(ACTOR_ID),
+            eq(ACTOR_ID.toString()),
             eq("RUN"),
             eq(RUN_ID),
             eq("Plan rejected by owner@example.com"),
+            any(Map.class));
+  }
+
+  @Test
+  @SuppressWarnings("unchecked")
+  void nonUuidActorIdStillCarriesHumanActorFallback() {
+    listener.onDecisionCommitted(
+        new PlanGateDecisionCommitted(
+            RUN_ID,
+            PROJECT_ID.toString(),
+            PlanGateDecisionService.DecisionKind.APPROVE,
+            "admin-00000000-0000-0000-0000-000000000001",
+            "admin@executespec.ai",
+            "Super Admin",
+            "Fixture run"));
+
+    // typed UUID column cannot hold the seeded id, but the raw id travels as the human-actor
+    // fallback so the feed row projects actorType=USER, never SYSTEM.
+    verify(emitter)
+        .emitWithActor(
+            eq(PROJECT_ID),
+            eq(ActivityEventType.RUN_PLAN_APPROVED),
+            eq(null),
+            eq("admin-00000000-0000-0000-0000-000000000001"),
+            eq("RUN"),
+            eq(RUN_ID),
+            org.mockito.ArgumentMatchers.contains("Plan approved by admin@executespec.ai"),
             any(Map.class));
   }
 

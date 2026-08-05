@@ -227,3 +227,13 @@ invalid reports are excluded and counted separately.
 - `V367__validation_report_runtime_surface.sql` adds nullable `runtime_surface`. New reports bind
   endpoint applicability to the persisted plan surface; null remains historical/unknown and is
   never interpreted as non-HTTP.
+
+## Not-applicable evidence and the sole-independent-gap state (2026-08-05)
+
+`ValidationReportGoalProofEvaluator` skips optional ledger rows whose status is explicitly `N/A` /
+`NOT_APPLICABLE` (V367 runtime-surface applicability — e.g. endpoint coverage on a
+LIBRARY/CLI/STATIC_WEB run) when deriving unproven gaps. Declared-not-measurable evidence is not a
+missing proof; before this, "Endpoint coverage is n/a" demoted every non-HTTP clean run from the
+sole-independent-gap advisory state (`independentProofGapOnly=true`) to a generic UNCERTAIN that
+recommended more provider work. Pinned by
+`ValidationReportGoalProofEvaluatorTest.explicitlyNotApplicableEvidenceDoesNotBlockTheSoleIndependentGapState`.

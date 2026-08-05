@@ -269,6 +269,13 @@ public class ValidationReportGoalProofEvaluator {
       if ("UNKNOWN".equals(status)) {
         continue;
       }
+      // Explicitly not-applicable evidence (V367 runtime-surface applicability — e.g. endpoint
+      // coverage "N/A" on a LIBRARY/CLI/STATIC_WEB run) declares that nothing was measurable, not
+      // that a proof is missing. Counting it as an unproven gap blocked the sole-independent-gap
+      // advisory state on every non-HTTP clean run (2026-08-05 live-verification residual).
+      if ("N/A".equalsIgnoreCase(status) || "NOT_APPLICABLE".equalsIgnoreCase(status)) {
+        continue;
+      }
       // The explicit independent-functional trust-cap row explains the same gap already carried
       // by a passing workspace-only tests row. Keep it in the evidence ledger, but do not turn
       // that single verifier gap into a second code-quality gap that recommends more codegen.
