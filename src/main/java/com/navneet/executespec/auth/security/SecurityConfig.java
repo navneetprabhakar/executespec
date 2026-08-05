@@ -44,6 +44,7 @@ public class SecurityConfig {
   private final SecurityProperties securityProperties;
   private final boolean oauthEnabled;
   private final JsonAuthenticationEntryPoint jsonAuthenticationEntryPoint;
+  private final JsonAccessDeniedHandler jsonAccessDeniedHandler;
 
   @Value(
       "${app.cors.allowed-origins:http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174}")
@@ -63,6 +64,7 @@ public class SecurityConfig {
       CookieOAuth2AuthorizationRequestRepository authorizationRequestRepository,
       SecurityProperties securityProperties,
       JsonAuthenticationEntryPoint jsonAuthenticationEntryPoint,
+      JsonAccessDeniedHandler jsonAccessDeniedHandler,
       @Value("${spring.security.oauth2.client.registration.google.client-id:none}")
           String googleClientId,
       @Value("${spring.security.oauth2.client.registration.github.client-id:none}")
@@ -73,6 +75,7 @@ public class SecurityConfig {
     this.authorizationRequestRepository = authorizationRequestRepository;
     this.securityProperties = securityProperties;
     this.jsonAuthenticationEntryPoint = jsonAuthenticationEntryPoint;
+    this.jsonAccessDeniedHandler = jsonAccessDeniedHandler;
 
     boolean hasGoogle =
         googleClientId != null && !"none".equals(googleClientId) && !googleClientId.isBlank();
@@ -270,7 +273,13 @@ public class SecurityConfig {
                     // Everything else (SPA routes) — permit
                     .anyRequest()
                     .permitAll())
-        .exceptionHandling(ex -> ex.authenticationEntryPoint(jsonAuthenticationEntryPoint))
+        // 401s take the JSON entry point; filter-level 403s (URL-rule role denials that never
+        // reach ValidationAdvice.onAccessDenied) take the matching JSON access-denied handler so
+        // both share one stable error contract instead of leaking Spring's default 403 body.
+        .exceptionHandling(
+            ex ->
+                ex.authenticationEntryPoint(jsonAuthenticationEntryPoint)
+                    .accessDeniedHandler(jsonAccessDeniedHandler))
         .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
         .addFilterAfter(rateLimitFilter, JwtAuthenticationFilter.class);
 

@@ -299,10 +299,49 @@ public class PullRequestRecordService {
   }
 
   /**
+   * P2 activity-feed gap (2026-08-05) — emit the PR lifecycle transition detected by the POLLING
+   * refresh path ({@link PrRefreshService}), which flips OPEN→MERGED/CLOSED directly and never
+   * crossed {@link #applyWebhookUpdate}, so poll-detected merges emitted a notification but no
+   * PR_MERGED activity event. Callers MUST invoke this only on a real state transition (the refresh
+   * loop's {@code stateChanged && wasOpen} guard); the guard-on-transition contract is what keeps a
+   * re-delivered webhook or repeated refresh from appending duplicates.
+   */
+  public void emitPrTransitionActivity(PullRequestRecord r, boolean merged) {
+    if (r == null) return;
+    if (merged) {
+      emitPrActivity(
+          r,
+          ActivityEventType.PR_MERGED,
+          "PR #" + r.getPrNumber() + " merged in " + r.getRepoFullName());
+    } else {
+      emitPrActivity(
+          r,
+          ActivityEventType.PR_CLOSED,
+          "PR #" + r.getPrNumber() + " closed in " + r.getRepoFullName());
+    }
+  }
+
+  /**
+   * Webhook-onboarding surfacing (2026-08-05, P1 backend half) — whether the repo backing a PR
+   * record has the ExecuteSpec pull_request webhook installed ({@code
+   * project_repo.webhook_installed}, flipped true by {@code POST /api/repos/{repoId}/webhook}).
+   * Returns null when the record carries no repoId or the repo row is gone — "unknown" must not be
+   * presented as "not installed".
+   */
+  public Boolean webhookInstalled(UUID repoId) {
+    if (repoId == null) return null;
+    return projectRepoRepo
+        .findById(repoId)
+        .map(com.navneet.executespec.project.entity.ProjectRepo::isWebhookInstalled)
+        .orElse(null);
+  }
+
+  /**
    * RL-2026-05-041 (audit #11) — emit a PR lifecycle event to the project activity feed. Resolves
    * the project from the record directly (project/system PRs) or via the linked run (run PRs, where
    * projectId is null on the record but the PipelineRun carries it). No-op for standalone runs with
-   * no project. Best-effort: the emitter is @Async + swallows its own failures.
+   * no project. Best-effort: the emitter is @Async + swallows its own failures. The payload carries
+   * the run linkage ({@code runId}) so feed consumers can navigate from a PR event to its run.
    */
   private void emitPrActivity(PullRequestRecord r, ActivityEventType type, String summary) {
     if (r == null) return;
@@ -328,7 +367,8 @@ public class PullRequestRecordService {
         Map.of(
             "repo", r.getRepoFullName() == null ? "" : r.getRepoFullName(),
             "prNumber", r.getPrNumber() == null ? 0 : r.getPrNumber(),
-            "prUrl", r.getPrUrl() == null ? "" : r.getPrUrl()));
+            "prUrl", r.getPrUrl() == null ? "" : r.getPrUrl(),
+            "runId", r.getRunId() == null ? "" : r.getRunId()));
   }
 
   public List<PullRequestRecord> listForRun(String runId) {

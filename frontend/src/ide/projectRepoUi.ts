@@ -94,6 +94,15 @@ export function codeIndexRefreshNotice(result: ProjectCodeIndexRefreshAccepted):
   }
 }
 
+/**
+ * State-aware trigger label for the code-index action. An UNINDEXED (or not-yet-loaded) repo has
+ * nothing to resume — "Resume semantic index" read as a dead-end when no index was ever built.
+ */
+export function codeIndexActionLabel(readiness?: ProjectCodeIndexReadiness | null): string {
+  if (!readiness || readiness.status === 'UNINDEXED') return 'Build semantic index';
+  return 'Resume semantic index';
+}
+
 export function semanticIndexBadgeLabel(readiness: ProjectCodeIndexReadiness): string {
   const status = readiness.status.toLowerCase();
   return readiness.status === 'UNINDEXED'

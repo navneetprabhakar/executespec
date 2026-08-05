@@ -20,6 +20,7 @@ import {runTitleFor, repoDisplayName, repoIdFor} from '@/signal/lib/runUtils';
 import {useAuthStore, selectIsSuperAdmin} from '@/stores/useAuthStore';
 import {
   codeSearchCapabilitiesLabel,
+  codeIndexActionLabel,
   codeIndexRefreshNotice,
   normalizeScmRepoQuery,
   repoSupports,
@@ -29,6 +30,8 @@ import {
   syncBadge,
 } from '@/ide/projectRepoUi';
 import {openPrsFromDashboard} from '@/ide/projectMoreUtils';
+import {PrCiWebhookNotice} from '@/ide/PrCiWebhook';
+import {prCiBadge} from '@/ide/prCiUtils';
 
 type Dash = Record<string, unknown>;
 const numOf = (s: Dash, k: string): number | undefined =>
@@ -481,10 +484,14 @@ export function IdeProjectPulse() {
                   const add = numOf(pr, 'additions');
                   const rem = numOf(pr, 'deletions');
                   const url = (pr.prUrl as string) || (pr.htmlUrl as string) || '';
+                  // Additive V186+ CI fields; absent on older servers (null-safe).
+                  const ciFields = pr as Partial<import('@/types/project').PrSummary>;
+                  const ci = prCiBadge(ciFields);
                   return (
                     <div key={`${repo}-${num}-${i}`} className='ide-card'>
                       <div style={{display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6}}>
                         <IdeBadge kind={statusKind(status)}>PR · {status}</IdeBadge>
+                        {ci && <IdeBadge kind={ci.kind}>{ci.label}</IdeBadge>}
                         <span style={{flex: 1}} />
                         {(add != null || rem != null) && (
                           <span
@@ -512,6 +519,7 @@ export function IdeProjectPulse() {
                       >
                         {repo}#{String(num ?? '')}
                       </div>
+                      <PrCiWebhookNotice pr={ciFields} onInstalled={loadDash} />
                       {url && (
                         <button
                           className='ide-btn ghost'
@@ -1930,7 +1938,7 @@ export function IdeProjectRepos() {
                       className='ide-btn ghost'
                       style={{padding: '4px 10px'}}
                       disabled={repoBusy(id) || semanticIndex?.status === 'INDEXING'}
-                      title='Resume the source-SHA-bound semantic chunk index. Exact ripgrep search remains available.'
+                      title='Build or resume the source-SHA-bound semantic chunk index. Exact ripgrep search remains available.'
                       onClick={() =>
                         act(
                           `index${id}`,
@@ -1940,7 +1948,7 @@ export function IdeProjectRepos() {
                         )
                       }
                     >
-                      {isBusy(`index${id}`) ? '…' : 'Resume semantic index'}
+                      {isBusy(`index${id}`) ? '…' : codeIndexActionLabel(semanticIndex)}
                     </button>
                   )}
                   {!isLocal && canWebhook && !wh && (

@@ -23,7 +23,16 @@ public record GoalDonenessDecision(
     double costUsd,
     long wallClockMs,
     boolean userInputRequired,
-    boolean anotherModelProviderMightHelp) {
+    boolean anotherModelProviderMightHelp,
+    /**
+     * True exactly when the ONLY remaining run-goal gap is the independent-functional-scope gap:
+     * the deterministic workspace suite (or legacy execution-verified suite) passed, every other
+     * required and optional proof passed, and the decision is UNCERTAIN/STOP_BLOCKED solely because
+     * independent functional verification is unavailable. Derived deterministically by {@code
+     * ValidationReportGoalProofEvaluator}; false for every other gap combination, so customer
+     * surfaces can render this advisory state distinctly from a real defect.
+     */
+    boolean independentProofGapOnly) {
 
   public GoalDonenessDecision {
     if (state == null) {
@@ -52,6 +61,52 @@ public record GoalDonenessDecision(
     totalTokens = Math.max(0, totalTokens);
     costUsd = Math.max(0.0, costUsd);
     wallClockMs = Math.max(0L, wallClockMs);
+  }
+
+  /** Pre-independentProofGapOnly canonical shape; the flag defaults to {@code false}. */
+  public GoalDonenessDecision(
+      GoalDonenessState state,
+      RunContinuationDecision recommendedDecision,
+      String reason,
+      String recommendedNextStep,
+      String goalSummary,
+      List<String> completedItems,
+      List<String> incompleteItems,
+      List<String> evidence,
+      List<String> risks,
+      String budgetCeilingReason,
+      int inputTokens,
+      int outputTokens,
+      int cacheReadTokens,
+      int cacheWriteTokens,
+      int reasoningTokens,
+      int totalTokens,
+      double costUsd,
+      long wallClockMs,
+      boolean userInputRequired,
+      boolean anotherModelProviderMightHelp) {
+    this(
+        state,
+        recommendedDecision,
+        reason,
+        recommendedNextStep,
+        goalSummary,
+        completedItems,
+        incompleteItems,
+        evidence,
+        risks,
+        budgetCeilingReason,
+        inputTokens,
+        outputTokens,
+        cacheReadTokens,
+        cacheWriteTokens,
+        reasoningTokens,
+        totalTokens,
+        costUsd,
+        wallClockMs,
+        userInputRequired,
+        anotherModelProviderMightHelp,
+        false);
   }
 
   public GoalDonenessDecision(

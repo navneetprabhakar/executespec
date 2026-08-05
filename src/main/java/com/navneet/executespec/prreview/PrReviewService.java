@@ -1,14 +1,12 @@
 package com.navneet.executespec.prreview;
 
 import java.time.Instant;
-import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.auth.entity.AppUser;
-import com.navneet.executespec.auth.entity.TierConfig;
 import com.navneet.executespec.auth.repository.AppUserRepository;
 import com.navneet.executespec.auth.repository.ProjectRepository;
 import com.navneet.executespec.auth.repository.TierConfigRepository;
@@ -138,42 +136,11 @@ public class PrReviewService {
   void shutdown() {}
 
   /**
-   * Validates that the supplied user is on a paid tier with the {@code pr_review_enabled} feature
-   * flag flipped on AND has remaining monthly quota. Throws on rejection so the caller (HTTP
-   * controller) can map to 403/429 cleanly.
+   * Tier + monthly-quota admission; extracted to {@link PrReviewQuotaPolicy} for the 600-line
+   * production-class ceiling. Throws so the HTTP controller can map to 403/429 cleanly.
    */
   public void assertTierAndQuota(AppUser user) {
-    if (user == null) throw new TierBlockedException("authentication required");
-    String tier = user.getTier();
-    if (tier == null || "FREE".equalsIgnoreCase(tier)) {
-      throw new TierBlockedException(
-          "PR review is a paid feature — upgrade to PRO or above to enable.");
-    }
-    TierConfig cfg = tierConfigRepo.findById(tier).orElse(null);
-    if (cfg == null || !Boolean.TRUE.equals(cfg.getPrReviewEnabled())) {
-      throw new TierBlockedException(
-          "PR review not enabled for tier " + tier + " — contact support if this is wrong.");
-    }
-    int quota = cfg.getPrReviewMonthlyQuota() == null ? 0 : cfg.getPrReviewMonthlyQuota();
-    if (quota >= 0) {
-      // -1 = unlimited; 0 = blocked; positive = capped.
-      Instant monthStart =
-          Instant.now()
-              .atZone(ZoneOffset.UTC)
-              .toLocalDate()
-              .withDayOfMonth(1)
-              .atStartOfDay()
-              .toInstant(ZoneOffset.UTC);
-      long usedThisMonth = reviewRepo.countByUserSince(user.getId(), monthStart);
-      if (usedThisMonth >= quota) {
-        throw new QuotaExhaustedException(
-            "Monthly PR-review quota exhausted ("
-                + usedThisMonth
-                + "/"
-                + quota
-                + "). Resets on the 1st UTC.");
-      }
-    }
+    PrReviewQuotaPolicy.assertTierAndQuota(user, tierConfigRepo, reviewRepo);
   }
 
   /**
@@ -348,6 +315,12 @@ public class PrReviewService {
                 job.executionScopeMode()),
             job.executionScopeOrgId());
     LlmProvider provider = LlmProvider.valueOf(job.provider());
+    // Persona register P1 #4 — fetch the head SHA's CURRENT check-run status at review time so a
+    // red-CI PR can never be approved on stale or absent CI evidence. getCheckRunRollup never
+    // throws: fetch/auth failures and zero check-runs degrade to UNKNOWN, which the deterministic
+    // gate labels "unverified" rather than treating as green.
+    GitHubRepoService.CheckRunRollup ciRollup =
+        github.getCheckRunRollup(repoFullName, headSha, actor.getGithubPat());
     java.util.concurrent.atomic.AtomicReference<DurablePrReviewResult> result =
         new java.util.concurrent.atomic.AtomicReference<>();
     RunModelOverrides.runWith(
@@ -360,6 +333,7 @@ public class PrReviewService {
                     prNumber,
                     headSha,
                     snapshot,
+                    ciRollup,
                     provider,
                     job.model(),
                     actor.getId(),
@@ -379,6 +353,7 @@ public class PrReviewService {
       int prNumber,
       String headSha,
       GitHubRepoService.PullRequestSnapshot snap,
+      GitHubRepoService.CheckRunRollup ciRollup,
       LlmProvider pinnedProvider,
       String pinnedModel,
       String actorUserId,
@@ -411,6 +386,18 @@ public class PrReviewService {
                 + "/-"
                 + (snap == null ? 0 : snap.deletions())
                 + ")"));
+    broadcaster.emit(
+        channel,
+        RunEvent.log(
+            channel,
+            "review",
+            "CI check-runs @ head "
+                + (headSha == null || headSha.length() < 7 ? headSha : headSha.substring(0, 7))
+                + ": "
+                + (ciRollup == null ? "UNKNOWN" : ciRollup.status())
+                + (ciRollup != null && ciRollup.failingCount() > 0
+                    ? " (" + ciRollup.failingCount() + " failing)"
+                    : "")));
 
     PrReview row = reviewRepo.findById(reviewId).orElse(null);
     if (row == null) {
@@ -437,6 +424,8 @@ public class PrReviewService {
             .actorUserId(actorUserId)
             .executionReference(executionReference)
             .executionContext(executionContext)
+            .ciStatus(ciRollup == null ? null : ciRollup.status())
+            .ciFailingCount(ciRollup == null ? null : ciRollup.failingCount())
             .build();
 
     final PrReviewAgent.AgentReview result;

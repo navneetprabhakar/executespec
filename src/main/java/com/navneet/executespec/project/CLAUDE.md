@@ -1,5 +1,35 @@
 # Project source and linking package
 
+## PR lifecycle activity + webhook-onboarding surfacing (2026-08-05)
+
+- **PR_MERGED on the polling path:** `project/pr/PrRefreshService` flips OPEN→MERGED/CLOSED
+  directly (it never crosses `applyWebhookUpdate`), so poll-detected merges previously produced a
+  notification + cascade but no activity event. The refresh loop now calls
+  `PullRequestRecordService.emitPrTransitionActivity(record, merged)` guarded on the actual
+  transition (`stateChanged && wasOpen`), mirroring the webhook path's transition guards — a
+  re-delivered webhook or repeated refresh cannot append duplicates because emission is bound to
+  the state transition, not the state. PR activity payloads now also carry the run linkage
+  (`runId`) alongside repo/prNumber/prUrl. Pinned by `PrRefreshServiceMergeActivityTest`.
+- **`GET /api/runs/{id}/prs` additive DTO fields:** `PullRequestController.PrSummary` gains
+  `ciStatusReason` (stable value `WEBHOOK_NOT_INSTALLED` only when `ciStatus` is UNKNOWN and the
+  durable `project_repo.webhook_installed` column PROVES no PR webhook; null otherwise, including
+  when install state is unknown) and `repoId` (the ProjectRepo UUID, so the frontend can offer
+  `POST /api/repos/{repoId}/webhook`). Install state is resolved through
+  `PullRequestRecordService.webhookInstalled(repoId)`, which returns null — never false — for a
+  missing repo row. Pinned by `PullRequestControllerCiStatusReasonTest`. The project dashboard's
+  separate `PrSummaryDto` (`project/dashboard/ProjectDashboardController`) carries the same
+  additive `ciStatusReason`/`repoId` pair through the identical decision rule and the shared
+  per-repo `webhookInstalled` resolution, so run-PR and dashboard PR surfaces agree.
+
+## Dashboard recent-run task-proof projection (2026-08-05)
+
+`project/dashboard/ProjectDashboardController` no longer projects the raw persisted run status
+into its recent-run rows. It batch-loads the page's agent tasks (`AgentTaskRepository
+.findByRunIdIn`) and applies `api/RunMapper.displayRunStatus`, so a persisted COMPLETE run with
+durable non-DONE goal evidence displays PARTIAL on the dashboard exactly as it does on the run
+list and run detail (the 2026-07-24 task-proof contract). Pinned by
+`ProjectDashboardTaskProofStatusTest`.
+
 ## CI failure autofix delivery admission (V359)
 
 `project/pr/CiFailureAutoFixService` derives one immutable finding key from the persisted PR id,

@@ -317,7 +317,10 @@ public class ValidationReportGoalProofEvaluator {
     }
 
     if (nonFunctionalTests && !hasOtherUnproven) {
-      return decision(
+      // The ONLY remaining gap is the independent-functional-scope gap: deterministic workspace
+      // (or legacy execution-verified) tests passed and every other proof passed. Mark it
+      // explicitly so customer surfaces can render this advisory state instead of a defect.
+      return new GoalDonenessDecision(
           GoalDonenessState.UNCERTAIN,
           RunContinuationDecision.STOP_BLOCKED,
           nonFunctionalTestBlockedReason(tests),
@@ -328,8 +331,18 @@ public class ValidationReportGoalProofEvaluator {
           incomplete,
           evidence,
           risks,
+          "",
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0.0,
+          0L,
           false,
-          false);
+          false,
+          true);
     }
 
     return decision(

@@ -26,7 +26,12 @@ public enum ActivityEventType {
   // Run lifecycle
   RUN_SUBMITTED(Tier.HIGH_SIGNAL, EnumSet.of(Surface.ACTIVITY), 1),
   RUN_PLAN_READY(Tier.HIGH_SIGNAL, EnumSet.of(Surface.ACTIVITY), 1),
-  RUN_PLAN_APPROVED(Tier.HIGH_SIGNAL, EnumSet.of(Surface.ACTIVITY), 1),
+  // Plan-gate decisions are governance/spend decisions, so — like MEMBER_ROLE_CHANGED — they are
+  // dual-surface: customer-visible in the Activity tab AND written to the append-only
+  // activity_audit hash-chain with the real human decider (never SYSTEM). Fired post-commit by
+  // PlanGateDecisionActivityListener from the V348 PlanGateDecisionService receipt.
+  RUN_PLAN_APPROVED(Tier.HIGH_SIGNAL, EnumSet.of(Surface.ACTIVITY, Surface.AUDIT), 1),
+  RUN_PLAN_REJECTED(Tier.HIGH_SIGNAL, EnumSet.of(Surface.ACTIVITY, Surface.AUDIT), 1),
   RUN_COMPLETED(Tier.HIGH_SIGNAL, EnumSet.of(Surface.ACTIVITY), 1),
   RUN_FAILED(Tier.HIGH_SIGNAL, EnumSet.of(Surface.ACTIVITY), 1),
 

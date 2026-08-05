@@ -40,6 +40,18 @@ public class RunEffectiveRouteService {
     return EffectiveRouteProjection.from(rows);
   }
 
+  /**
+   * Distinct successful models across the run's whole physical-attempt ledger, first-seen order.
+   * Empty when no successful attempt names a real model.
+   */
+  public List<String> distinctSuccessfulModelsForRun(String runId) {
+    if (runId == null || runId.isBlank()) {
+      return List.of();
+    }
+    return EffectiveRouteProjection.distinctSuccessfulModels(
+        repository.findByRunIdOrderByCreatedAtAsc(runId));
+  }
+
   /** Physical route(s) that served planning, excluding the separately attributed classifier. */
   public EffectiveRouteProjection forPlanner(String runId) {
     return forRunRowsMatching(runId, row -> isPlannerRole(row.getAgentRole()));

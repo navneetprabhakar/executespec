@@ -153,6 +153,7 @@ class RunMapperVerifiedScoreParityTest {
         tasks,
         null,
         objectMapper,
+        null,
         null);
   }
 }
