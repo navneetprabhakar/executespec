@@ -75,6 +75,13 @@ is loaded. Exact HTTP acceptance parsing is polarity-aware: an explicit 405/Meth
 constraint is not converted into a required producer route. Planning rejects an executable task
 that declares the forbidden method; final validation requires that method to be absent and another
 method to exist at the path, with methodless `ANY` mappings treated as violations.
+Exact-route verification is also stack-applicability aware (2026-08-05, dev run d7a99bb9): the
+Spring-only surface extractor reports whether any inspected repository root contains a Spring MVC
+mapping source. When exact routes are required but no root does (Node/Express, FastAPI, Go,
+plain-Java), `DeterministicHttpRequirementVerifier` returns the honest `unprovableForStack` state —
+recorded in the report issue ledger as "exact-route proof unavailable for this stack" — instead of
+terminating the run `FAILED / DETERMINISTIC_HTTP_REQUIREMENT_MISSING` by construction. Any root
+with a Spring surface keeps the full fail-closed missing/forbidden/405 semantics unchanged.
 V364 claims the exact persisted proposal with one durable conditional update, so a duplicate while
 CLAIMED conflicts, while QUEUED/COMPLETED duplicates replay one receipt without queueing or spending
 twice. Every server-side

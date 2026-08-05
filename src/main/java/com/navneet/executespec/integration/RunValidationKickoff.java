@@ -151,7 +151,12 @@ class RunValidationKickoff {
       if (brownfieldHttpContractGuard.hasBaseline(runId)) {
         brownfieldHttpContractGuard.assertCompatible(runId);
       }
-      deterministicHttpRequirementVerifier.assertSatisfied(plan, run.getUserRequest(), workspace);
+      // Throws on a deterministic violation of the exact-route contract; returns the honest
+      // unprovable-for-stack state (recorded below as evidence, never as VALIDATION_FAILED) when
+      // no inspected root contains a Spring-recognizable HTTP source.
+      DeterministicHttpRequirementVerifier.Verification httpRequirementVerification =
+          deterministicHttpRequirementVerifier.assertSatisfied(
+              plan, run.getUserRequest(), workspace);
       List<WorkerReport> provenanceClaims = workerProvenanceClaims(execResult);
       RunChangeEvidenceService.ChangeEvidence changeEvidence =
           runChangeEvidenceService.inspect(runId, provenanceClaims);
@@ -257,6 +262,14 @@ class RunValidationKickoff {
       // assessor, allowing dc6df05f to receive A/100 immediately before pytest reported 9/10.
       java.util.List<com.navneet.executespec.reviewer.model.ReviewIssue> workspaceDiagnosticIssues =
           new java.util.ArrayList<>();
+      if (httpRequirementVerification != null && httpRequirementVerification.unprovableForStack()) {
+        // Evidence note, not failure: exact-route proof is unavailable for this stack because no
+        // inspected repository root contains a Spring MVC mapping source. Flows into both the
+        // accuracy-assessment evidence and the persisted report issue ledger.
+        workspaceDiagnosticIssues.add(
+            ValidationReviewIssueSynthesizer.httpRequirementUnprovableForStack(
+                httpRequirementVerification));
+      }
       com.navneet.executespec.smoketest.WorkspaceTestRunner.DetailedResult workspaceTestEvidence =
           null;
       String testsGenerationBefore =

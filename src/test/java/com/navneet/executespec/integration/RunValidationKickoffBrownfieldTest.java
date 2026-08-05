@@ -161,6 +161,85 @@ class RunValidationKickoffBrownfieldTest {
   }
 
   @Test
+  void unprovableForStackRequirementIsRecordedAsEvidenceNotAsValidationFailure() {
+    PipelineRunRepository runRepo = mock(PipelineRunRepository.class);
+    ValidationReportService validation = mock(ValidationReportService.class);
+    DeterministicHttpRequirementVerifier verifier =
+        mock(DeterministicHttpRequirementVerifier.class);
+    RunChangeEvidenceService changeEvidence = mock(RunChangeEvidenceService.class);
+    AgentProperties properties = new AgentProperties();
+    properties.setWorkspace(tempDir.toString());
+    PipelineRun run =
+        PipelineRun.builder()
+            .runId("run-node-http-requirement")
+            .status("WORKING")
+            .userRequest("Expose GET /api/items/low-stock")
+            .build();
+    when(runRepo.findById(run.getRunId())).thenReturn(Optional.of(run));
+    when(verifier.assertSatisfied(
+            org.mockito.ArgumentMatchers.isNull(),
+            org.mockito.ArgumentMatchers.eq(run.getUserRequest()),
+            org.mockito.ArgumentMatchers.any(Path.class)))
+        .thenReturn(
+            DeterministicHttpRequirementVerifier.Verification.unprovableForStack(
+                java.util.Set.of(
+                    new com.navneet.executespec.contractsurface.SpringHttpSurfaceExtractor.RouteKey(
+                        "GET", "/api/items/low-stock")),
+                java.util.Set.of()));
+    when(changeEvidence.inspect(
+            org.mockito.ArgumentMatchers.eq(run.getRunId()),
+            org.mockito.ArgumentMatchers.anyList()))
+        .thenReturn(
+            new RunChangeEvidenceService.ChangeEvidence(
+                false, "no baseline", null, java.util.List.of(), java.util.List.of()));
+    when(validation.generateAndPersist(
+            org.mockito.ArgumentMatchers.eq(run.getRunId()), org.mockito.ArgumentMatchers.any()))
+        .thenReturn(
+            Optional.of(com.navneet.executespec.report.entity.ValidationReport.builder().build()));
+
+    RunValidationKickoff kickoff =
+        new RunValidationKickoff(
+            runRepo,
+            mock(AgentTaskRepository.class),
+            properties,
+            mock(ModelResolver.class),
+            mock(AccuracyAssessmentService.class),
+            validation,
+            changeEvidence,
+            mock(com.navneet.executespec.smoketest.WorkspaceTestRunner.class),
+            mock(com.navneet.executespec.deployment.preview.verify.PreviewVerifier.class),
+            mock(com.navneet.executespec.config.featureflag.FeatureFlagService.class),
+            mock(RunLlmOperationLifecycleService.class),
+            mock(CorrectionWorkspaceTransaction.class),
+            mock(WorkflowConfigEvidenceInspector.class),
+            verifier,
+            mock(BrownfieldHttpContractGuard.class),
+            mock(PerkyMessenger.class),
+            new RunValidationFailureReporter(
+                runRepo, mock(SseBroadcaster.class), new ContextSanitizer()));
+
+    assertThat(kickoff.generateValidationReport(run.getRunId(), null, null, null)).isPresent();
+
+    // Not a failure: no VALIDATION_FAILED diagnostic and no deterministic failure code persisted.
+    assertThat(run.getFailureReason()).isNull();
+    assertThat(kickoff.persistedDeterministicFailureCode(run.getRunId())).isNull();
+
+    // Evidence: the persisted report input carries the unprovable-for-stack ledger note.
+    org.mockito.ArgumentCaptor<com.navneet.executespec.report.model.ReportInput> input =
+        org.mockito.ArgumentCaptor.forClass(com.navneet.executespec.report.model.ReportInput.class);
+    verify(validation)
+        .generateAndPersist(org.mockito.ArgumentMatchers.eq(run.getRunId()), input.capture());
+    assertThat(input.getValue().review().getIssues())
+        .anySatisfy(
+            issue -> {
+              assertThat(issue.getId()).isEqualTo("SYNTH-HTTP-STACK-UNPROVABLE");
+              assertThat(issue.getSeverity())
+                  .isEqualTo(com.navneet.executespec.reviewer.model.IssueSeverity.MINOR);
+              assertThat(issue.getDescription()).contains("GET /api/items/low-stock");
+            });
+  }
+
+  @Test
   void deterministicRequirementFailureRetainsItsMachineCodeAndReadableReason() {
     var diagnostic =
         RunValidationFailureReporter.diagnostic(

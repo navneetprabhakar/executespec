@@ -44,6 +44,51 @@ final class ValidationReviewIssueSynthesizer {
         false);
   }
 
+  /**
+   * Honest evidence note for the {@code unprovableForStack} exact-route verification state: the
+   * spec declared exact HTTP routes but no inspected repository root contains a Spring MVC mapping
+   * source, so deterministic route proof is unavailable for this stack. MINOR by design — this is a
+   * ledger note that exact-route proof is unavailable, never a failing verdict.
+   */
+  static ReviewIssue httpRequirementUnprovableForStack(
+      DeterministicHttpRequirementVerifier.Verification verification) {
+    StringBuilder description =
+        new StringBuilder(
+            "Exact HTTP route verification is not applicable to this stack: no Spring MVC mapping"
+                + " sources were found in the inspected repositories, so deterministic exact-route"
+                + " proof is unavailable (the routes were neither proven present nor proven"
+                + " absent).");
+    String required = displayRoutes(verification.required());
+    if (!required.isEmpty()) {
+      description.append(" Declared required routes (unproven): ").append(required).append(".");
+    }
+    String forbidden = displayRoutes(verification.forbidden());
+    if (!forbidden.isEmpty()) {
+      description
+          .append(" Declared method-not-allowed constraints (unproven): ")
+          .append(forbidden)
+          .append(".");
+    }
+    return issue(
+        "SYNTH-HTTP-STACK-UNPROVABLE",
+        IssueSeverity.MINOR,
+        IssueCategory.COMPLETENESS,
+        truncate(description.toString(), 1_200),
+        false);
+  }
+
+  private static String displayRoutes(
+      java.util.Collection<
+              com.navneet.executespec.contractsurface.SpringHttpSurfaceExtractor.RouteKey>
+          routes) {
+    if (routes == null) return "";
+    return routes.stream()
+        .sorted()
+        .map(route -> route.method() + " " + route.path())
+        .reduce((left, right) -> left + ", " + right)
+        .orElse("");
+  }
+
   static List<ReviewIssue> synthesise(
       ReviewerResult reviewResult, CompileResult compile, AccuracyReport accuracy) {
     List<ReviewIssue> out = new ArrayList<>();
