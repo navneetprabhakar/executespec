@@ -172,9 +172,28 @@ export async function confirmUncertainGeneratedDocRetry(
 ): Promise<api.GeneratedDocJob | null> {
   if (job.status !== 'NEEDS_CONFIRMATION') return job;
   const approved = confirm(
-    `The previous ${job.docType.toLowerCase()} document attempt may have reached ${job.provider}/${job.model} before its outcome became uncertain. Retry that same job and route? This may incur additional usage.`,
+    `No ${job.docType.toLowerCase()} document was published after ${job.provider}/${job.model} dispatch began; delivery outcome may be uncertain. Retry that same job and route? This may incur additional usage.`,
   );
   return approved ? retry(job.projectId, job.docType, job.id) : null;
+}
+
+export function generatedDocConfirmationSummary(job: api.GeneratedDocJob): string {
+  const code = job.errorCode || 'RETRY_CONFIRMATION_REQUIRED';
+  return `${code} · No document was published after provider dispatch began; delivery outcome may be uncertain. Retrying the same route may incur additional usage.`;
+}
+
+export function generatedDocFailureMessage(job: api.GeneratedDocJob): string {
+  const fallback =
+    'No document was published after provider dispatch began; delivery outcome may be uncertain. Retrying the same route may incur additional usage.';
+  return (job.errorMessage?.trim() || fallback)
+    .split('provider execution began')
+    .join('provider dispatch began; delivery outcome may be uncertain');
+}
+
+export function generatedDocRetryDeclinedMessage(job: api.GeneratedDocJob): string {
+  return job.errorCode === 'OUTCOME_UNCERTAIN'
+    ? 'The uncertain document generation was not retried.'
+    : `The document generation was not retried (${job.errorCode || 'RETRY_CONFIRMATION_REQUIRED'}).`;
 }
 
 export function techDebtCategories(

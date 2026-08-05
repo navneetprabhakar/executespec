@@ -50,7 +50,9 @@ public class CodeIndexController {
         .filter(java.util.Objects::nonNull)
         .map(
             repo ->
-                new RepoIndexStatus(displayName(repo), indexingService.readiness(projectId, repo)))
+                new RepoIndexStatus(
+                    displayName(repo),
+                    indexingService.readiness(projectId, repo, userDetails.getUser().getId())))
         .toList();
   }
 
@@ -61,7 +63,9 @@ public class CodeIndexController {
       @AuthenticationPrincipal AppUserDetails userDetails) {
     projectAccessGuard.assertCanRead(projectId, userDetails);
     ProjectRepo repo = requireLinked(projectId, repoId);
-    return new RepoIndexStatus(displayName(repo), indexingService.readiness(projectId, repo));
+    return new RepoIndexStatus(
+        displayName(repo),
+        indexingService.readiness(projectId, repo, userDetails.getUser().getId()));
   }
 
   /**
@@ -75,7 +79,8 @@ public class CodeIndexController {
       @AuthenticationPrincipal AppUserDetails userDetails) {
     projectAccessGuard.assertCanWrite(projectId, userDetails);
     ProjectRepo repo = requireLinked(projectId, repoId);
-    CodeIndexingService.Readiness readiness = indexingService.readiness(projectId, repo);
+    CodeIndexingService.Readiness readiness =
+        indexingService.readiness(projectId, repo, userDetails.getUser().getId());
     if (readiness.status() == CodeIndexStateStore.Status.READY
         && readiness.semanticSearchAvailable()) {
       return ResponseEntity.accepted()

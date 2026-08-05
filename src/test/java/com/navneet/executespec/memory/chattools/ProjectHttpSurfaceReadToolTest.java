@@ -84,6 +84,7 @@ class ProjectHttpSurfaceReadToolTest {
     JsonNode result = call("{}");
 
     assertThat(result.path("ok").asBoolean()).isTrue();
+    assertThat(result.path("applicable").asBoolean()).isTrue();
     assertThat(result.path("framework").asText()).isEqualTo("SPRING_MVC");
     assertThat(result.path("routes").size()).isEqualTo(1);
     assertThat(result.path("routes").get(0).path("method").asText()).isEqualTo("POST");
@@ -92,6 +93,25 @@ class ProjectHttpSurfaceReadToolTest {
     assertThat(result.path("routes").get(0).path("source").asText())
         .contains("SimulationController.java");
     verify(materializer).materialize("project-1", repository, null, "caller-pat");
+  }
+
+  @Test
+  void doesNotClassifyNodeRepositoryAsSpringMvcWhenExtractionIsEmpty() throws Exception {
+    Path source = workspace.resolve("src/catalog.js");
+    Files.createDirectories(source.getParent());
+    Files.writeString(source, "export function filterCatalog(items) { return [...items]; }\n");
+    Files.writeString(workspace.resolve("package.json"), "{\"type\":\"module\"}\n");
+    when(materializer.materialize("project-1", repository, null, "caller-pat"))
+        .thenReturn(workspace);
+
+    JsonNode result = call("{}");
+
+    assertThat(result.path("ok").asBoolean()).isTrue();
+    assertThat(result.path("applicable").asBoolean()).isFalse();
+    assertThat(result.path("framework").asText()).isEqualTo("NOT_ESTABLISHED");
+    assertThat(result.path("reasonCode").asText())
+        .isEqualTo("NO_DETERMINISTIC_SPRING_MVC_EVIDENCE");
+    assertThat(result.path("routes")).isEmpty();
   }
 
   @Test

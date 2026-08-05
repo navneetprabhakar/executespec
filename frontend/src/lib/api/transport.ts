@@ -129,10 +129,12 @@ function shouldAttemptRefresh(url: string): boolean {
 
 async function refreshAccessTokenOnce(): Promise<boolean> {
   if (!refreshInFlight) {
+    const deadline = timeoutSignal(undefined, DEFAULT_REQUEST_TIMEOUT_MS);
     refreshInFlight = fetch(BASE + '/auth/refresh', {
       method: 'POST',
       credentials: 'include',
       headers: {'Content-Type': 'application/json'},
+      signal: deadline.signal,
     })
       .then(async (res) => {
         if (!res.ok) return false;
@@ -145,6 +147,7 @@ async function refreshAccessTokenOnce(): Promise<boolean> {
       })
       .catch(() => false)
       .finally(() => {
+        deadline.clear();
         refreshInFlight = null;
       });
   }

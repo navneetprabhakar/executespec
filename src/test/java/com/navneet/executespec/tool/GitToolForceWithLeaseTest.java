@@ -186,4 +186,144 @@ class GitToolForceWithLeaseTest {
         .as("remote feat2 must have moved to the run's new commit")
         .isNotEqualTo(clonedSha);
   }
+
+  @Test
+  void existingBranchPublicationFastForwardsWithoutCreatingOrForceSwitchingBranches()
+      throws Exception {
+    Path remote = tmp.resolve("remote.git");
+    Path ws = tmp.resolve("ws");
+    Path repo = ws.resolve("run1").resolve("repos").resolve("app");
+    Files.createDirectories(repo.getParent());
+    initRemoteAndClone(remote, repo);
+    git(repo, "checkout", "-b", "feature/pr-12");
+    git(repo, "push", remote.toString(), "feature/pr-12");
+    String before = remoteTip(remote, "feature/pr-12");
+    Files.writeString(repo.resolve("f.txt"), "ci fix\n");
+
+    GitToolResult result =
+        newGitTool(ws)
+            .pushToExistingBranch(
+                "run1", "repos/app", remote.toString(), null, "feature/pr-12", "fix CI");
+
+    assertThat(result.isOk()).isTrue();
+    assertThat(git(repo, "branch", "--show-current")).isEqualTo("feature/pr-12");
+    assertThat(remoteTip(remote, "feature/pr-12")).isNotEqualTo(before);
+  }
+
+  @Test
+  void cleanRetryTruthfullyReportsAndPushesAPreviouslyCommittedLocalFix() throws Exception {
+    Path remote = tmp.resolve("remote.git");
+    Path ws = tmp.resolve("ws");
+    Path repo = ws.resolve("run1").resolve("repos").resolve("app");
+    Files.createDirectories(repo.getParent());
+    initRemoteAndClone(remote, repo);
+    git(repo, "checkout", "-b", "feature/pr-12");
+    git(repo, "push", remote.toString(), "feature/pr-12");
+    String remoteBefore = remoteTip(remote, "feature/pr-12");
+
+    Files.writeString(repo.resolve("f.txt"), "committed fix awaiting retry\n");
+    git(repo, "add", "f.txt");
+    git(repo, "commit", "-m", "fix CI before transport failure");
+    String localHead = git(repo, "rev-parse", "HEAD");
+    assertThat(localHead).isNotEqualTo(remoteBefore);
+    assertThat(git(repo, "status", "--porcelain")).isBlank();
+
+    GitToolResult result =
+        newGitTool(ws)
+            .pushToExistingBranch(
+                "run1", "repos/app", remote.toString(), null, "feature/pr-12", "retry CI fix");
+
+    assertThat(result.isOk()).isTrue();
+    assertThat(result.value()).isEqualTo("PUSHED_EXISTING_COMMIT");
+    assertThat(remoteTip(remote, "feature/pr-12")).isEqualTo(localHead);
+  }
+
+  @Test
+  void cleanExistingBranchIsAlreadyCurrentOnlyWhenRemoteAndLocalHeadsMatch() throws Exception {
+    Path remote = tmp.resolve("remote.git");
+    Path ws = tmp.resolve("ws");
+    Path repo = ws.resolve("run1").resolve("repos").resolve("app");
+    Files.createDirectories(repo.getParent());
+    initRemoteAndClone(remote, repo);
+    git(repo, "checkout", "-b", "feature/pr-12");
+    git(repo, "push", remote.toString(), "feature/pr-12");
+
+    GitToolResult result =
+        newGitTool(ws)
+            .pushToExistingBranch(
+                "run1", "repos/app", remote.toString(), null, "feature/pr-12", "no-op retry");
+
+    assertThat(result.isOk()).isTrue();
+    assertThat(result.value()).isEqualTo("ALREADY_CURRENT");
+  }
+
+  @Test
+  void existingBranchPublicationRejectsAConcurrentRemoteCommitAndPreservesIt() throws Exception {
+    Path remote = tmp.resolve("remote.git");
+    Path ws = tmp.resolve("ws");
+    Path repo = ws.resolve("run1").resolve("repos").resolve("app");
+    Files.createDirectories(repo.getParent());
+    initRemoteAndClone(remote, repo);
+    git(repo, "checkout", "-b", "feature/pr-12");
+    git(repo, "push", remote.toString(), "feature/pr-12");
+
+    Path human = tmp.resolve("human-existing");
+    git(tmp, "clone", remote.toString(), human.getFileName().toString());
+    git(human, "checkout", "feature/pr-12");
+    Files.writeString(human.resolve("human.txt"), "review follow-up\n");
+    git(human, "add", "human.txt");
+    git(human, "commit", "-m", "human follow-up");
+    git(human, "push", remote.toString(), "feature/pr-12");
+    String humanSha = remoteTip(remote, "feature/pr-12");
+
+    Files.writeString(repo.resolve("f.txt"), "stale run fix\n");
+    GitToolResult result =
+        newGitTool(ws)
+            .pushToExistingBranch(
+                "run1", "repos/app", remote.toString(), null, "feature/pr-12", "stale CI fix");
+
+    assertThat(result.isOk()).isFalse();
+    assertThat(remoteTip(remote, "feature/pr-12")).isEqualTo(humanSha);
+
+    GitToolResult retry =
+        newGitTool(ws)
+            .pushToExistingBranch(
+                "run1",
+                "repos/app",
+                remote.toString(),
+                null,
+                "feature/pr-12",
+                "stale CI fix retry");
+    assertThat(retry.isOk()).as("a clean retry must retry the rejected push").isFalse();
+    assertThat(remoteTip(remote, "feature/pr-12")).isEqualTo(humanSha);
+  }
+
+  @Test
+  void existingBranchPublicationRefusesAWorkspaceCheckedOutOnAnotherBranch() throws Exception {
+    Path remote = tmp.resolve("remote.git");
+    Path ws = tmp.resolve("ws");
+    Path repo = ws.resolve("run1").resolve("repos").resolve("app");
+    Files.createDirectories(repo.getParent());
+    initRemoteAndClone(remote, repo);
+    git(repo, "checkout", "-b", "feature/pr-12");
+    git(repo, "push", remote.toString(), "feature/pr-12");
+    String remoteBefore = remoteTip(remote, "feature/pr-12");
+    git(repo, "checkout", "main");
+    Files.writeString(repo.resolve("f.txt"), "wrong checkout\n");
+
+    GitToolResult result =
+        newGitTool(ws)
+            .pushToExistingBranch(
+                "run1",
+                "repos/app",
+                remote.toString(),
+                null,
+                "feature/pr-12",
+                "must not mispublish");
+
+    assertThat(result.isOk()).isFalse();
+    assertThat(result.value()).contains("existing branch mismatch");
+    assertThat(git(repo, "status", "--porcelain")).contains("f.txt");
+    assertThat(remoteTip(remote, "feature/pr-12")).isEqualTo(remoteBefore);
+  }
 }

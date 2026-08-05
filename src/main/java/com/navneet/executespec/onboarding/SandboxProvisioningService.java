@@ -1,6 +1,7 @@
 package com.navneet.executespec.onboarding;
 
 import java.time.Instant;
+import java.util.Objects;
 import java.util.UUID;
 
 import com.navneet.executespec.auth.entity.AppUser;
@@ -50,12 +51,13 @@ public class SandboxProvisioningService {
   public String provisionIfNeeded(String userId, String sampleId) {
     AppUser user =
         userRepo
-            .findById(userId)
+            .findByIdForUpdate(userId)
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));
 
     if (user.getSandboxProjectId() != null) {
       // Verify the project still exists — cleanup job may have deleted it.
-      if (projectRepo.findById(user.getSandboxProjectId()).isPresent()) {
+      Project existing = projectRepo.findById(user.getSandboxProjectId()).orElse(null);
+      if (isReusableSandbox(existing, user)) {
         log.debug(
             "Sandbox already provisioned: userId={} projectId={}",
             userId,
@@ -63,7 +65,7 @@ public class SandboxProvisioningService {
         return user.getSandboxProjectId();
       }
       log.info(
-          "Sandbox project {} gone (cleanup) — re-provisioning for userId={}",
+          "Sandbox project {} is missing or no longer reusable — re-provisioning for userId={}",
           user.getSandboxProjectId(),
           userId);
     }
@@ -120,6 +122,18 @@ public class SandboxProvisioningService {
 
   /** Nullable — returns current sandbox id or null if none. */
   public String currentSandboxId(String userId) {
-    return userRepo.findById(userId).map(AppUser::getSandboxProjectId).orElse(null);
+    AppUser user = userRepo.findById(userId).orElse(null);
+    if (user == null || user.getSandboxProjectId() == null) return null;
+    Project project = projectRepo.findById(user.getSandboxProjectId()).orElse(null);
+    return isReusableSandbox(project, user) ? project.getId() : null;
+  }
+
+  private static boolean isReusableSandbox(Project project, AppUser user) {
+    return project != null
+        && project.isSandbox()
+        && "ACTIVE".equals(project.getStatus())
+        && project.getDeletedAt() == null
+        && Objects.equals(project.getCreatedBy(), user.getId())
+        && Objects.equals(project.getOrgId(), user.getOrgId());
   }
 }

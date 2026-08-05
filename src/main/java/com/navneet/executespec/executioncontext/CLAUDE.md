@@ -54,6 +54,9 @@ terminal, cross-tenant, out-of-policy and exhausted contexts fail before provide
   a policy rejection, not a platform fallback.
 - Provider failover and model step-up/down are re-authorized against the same snapshot. A candidate
   that is not allowed and currently credentialed is skipped before spend.
+- Preview rendering snapshots the resolved run route before job admission and builds every surface
+  context with that exact provider/model and `allowProviderFailover=false`; post-run rendering
+  cannot drift from an exact run pin or a persisted payer-org WORKHORSE override.
 - Credentials are not stored in V282 or `ExecutionContext`; only the context reference propagates
   through planner/worker/reviewer/compactor children and survives a JVM restart.
 - Lifecycle mutations take a tenant scope and use a pessimistic row lock plus JPA `@Version`.
@@ -74,6 +77,9 @@ terminal, cross-tenant, out-of-policy and exhausted contexts fail before provide
   `ExecutionContext`/`LlmRequest`, heartbeat bounded work and terminalize only after the business
   result is durable. Explicit retry/re-review begins a new invocation; recovery reclaims or
   cancels the incomplete invocation instead of reconstructing authority from identifiers.
+- Preview-render contexts use stable compact `source_id` and `correlation_id` identities while the
+  render job/surface rows and operation fingerprint retain the full tuple. The request validates
+  the durable 160/96-character bounds before persistence.
 - V354 adds the atomic physical-attempt boundary. `LlmExecutionOperationAdmissionService` locks the
   aggregate context and exact operation in one transaction, validates the opaque authority,
   reserves aggregate call/output budget, extends the lease and no-reclaim horizon, and flushes a
@@ -173,10 +179,13 @@ terminal, cross-tenant, out-of-policy and exhausted contexts fail before provide
 - Project chat/compaction/compiler, architecture, generated docs, project brief/memory, PR Review
   and Code Review create explicit project contexts and resolve the project provider without a
   hidden Anthropic default.
-- Generated project documents use the compact `project-doc:<uuid>` source/correlation/idempotency
-  identity. Project and feature already occupy dedicated context columns, so the full run id is not
-  duplicated into the bounded correlation field; this keeps the value below the 96-character
-  database limit without weakening uniqueness.
+- Ordinary generated project-document calls use compact `project-doc:<uuid>` identities. Durable
+  attempts use `project-doc:<job UUID>:<lease token>` so a confirmed replay retains its job identity
+  and lifetime attempt count while receiving a distinct per-confirmed-attempt budget. Each attempt
+  has hard 200,000-token and two-provider-call limits; its $3 ceiling is reconciled from successful
+  usage, so the final admitted call may cross it before another call is denied. Project and feature
+  already occupy dedicated context columns, keeping both forms within the 96-character database
+  limit without weakening uniqueness.
 - `AvailableProviderResolver` no longer reads the dead `RunKeyStore`; it reloads V282 and current
   credential provenance, failing closed to no candidates on missing/stale/tenant-mismatched state.
 - Project document/code indexing and query vectors use explicit `EMBEDDING_JOB` contexts through

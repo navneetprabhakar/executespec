@@ -13,8 +13,6 @@ import java.util.UUID;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.navneet.executespec.auth.entity.Project;
-import com.navneet.executespec.auth.repository.ProjectRepository;
 import com.navneet.executespec.executioncontext.LlmExecutionBudget;
 import com.navneet.executespec.executioncontext.LlmExecutionContextService;
 import com.navneet.executespec.executioncontext.LlmExecutionOperationCoordinator;
@@ -29,8 +27,6 @@ import com.navneet.executespec.repo.GitHubRepoService;
 import com.navneet.executespec.repo.ScmCredentialResolver;
 import com.navneet.executespec.repo.ScmProvider;
 import com.navneet.executespec.router.LlmProvider;
-import com.navneet.executespec.router.ModelResolver;
-import com.navneet.executespec.router.ProjectProviderResolver;
 import com.navneet.executespec.tool.ExecutionContext;
 
 import org.springframework.http.HttpStatus;
@@ -59,13 +55,11 @@ public class ProjectArchitectureJobService {
   public record Prepared(SourceSnapshot snapshot, String canonicalJson, String digest) {}
 
   private final ProjectArchitectureJobStore store;
-  private final ProjectRepository projectRepository;
+  private final ProjectArchitectureJobAdmission admission;
   private final ProjectRepoLinkRepository links;
   private final ProjectRepoRepository repos;
   private final ScmCredentialResolver credentialResolver;
   private final GitHubRepoService github;
-  private final ProjectProviderResolver providerResolver;
-  private final ModelResolver modelResolver;
   private final LlmExecutionPolicyFactory executionPolicyFactory;
   private final LlmExecutionContextService executionContexts;
   private final LlmExecutionOperationCoordinator operationCoordinator;
@@ -82,35 +76,7 @@ public class ProjectArchitectureJobService {
 
   public ProjectArchitectureJobStore.Job request(
       String projectId, String actorUserId, String branchOverride) {
-    Project project =
-        projectRepository
-            .findById(projectId)
-            .orElseThrow(
-                () -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Project not found"));
-    LlmProvider requested = providerResolver.resolve(project);
-    var repoRoute = modelResolver.resolve("RepoArchitectureGenerator", requested);
-    var projectRoute = modelResolver.resolve("ArchitectureDocGenerator", requested);
-    if (repoRoute.getActualProvider() != projectRoute.getActualProvider()) {
-      throw new ResponseStatusException(
-          HttpStatus.SERVICE_UNAVAILABLE,
-          "Architecture routes do not resolve to one durable provider");
-    }
-    return requireCompatible(
-        store.createOrGet(
-            UUID.randomUUID(),
-            projectId,
-            project.getOrgId(),
-            actorUserId,
-            branchOverride == null || branchOverride.isBlank() ? null : branchOverride.trim(),
-            projectRoute.getActualProvider().name(),
-            repoRoute.getModel(),
-            projectRoute.getModel(),
-            Duration.ofSeconds(properties.getDeadlineSeconds())),
-        actorUserId,
-        branchOverride,
-        projectRoute.getActualProvider(),
-        repoRoute.getModel(),
-        projectRoute.getModel());
+    return admission.request(projectId, actorUserId, branchOverride);
   }
 
   /**
@@ -122,84 +88,13 @@ public class ProjectArchitectureJobService {
       String branchOverride,
       LlmProvider provider,
       String exactModel) {
-    if (provider == null || exactModel == null || exactModel.isBlank()) {
-      throw new ResponseStatusException(
-          HttpStatus.BAD_REQUEST, "Exact architecture provider/model route is required");
-    }
-    Project project =
-        projectRepository
-            .findById(projectId)
-            .orElseThrow(
-                () -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Project not found"));
-    return requireCompatible(
-        store.createOrGet(
-            UUID.randomUUID(),
-            projectId,
-            project.getOrgId(),
-            actorUserId,
-            branchOverride == null || branchOverride.isBlank() ? null : branchOverride.trim(),
-            provider.name(),
-            exactModel.trim(),
-            exactModel.trim(),
-            Duration.ofSeconds(properties.getDeadlineSeconds())),
-        actorUserId,
-        branchOverride,
-        provider,
-        exactModel,
-        exactModel);
+    return admission.requestExact(projectId, actorUserId, branchOverride, provider, exactModel);
   }
 
   /** Run-scoped admission with an explicit provider; tier models remain independently resolved. */
   public ProjectArchitectureJobStore.Job requestWithProvider(
       String projectId, String actorUserId, String branchOverride, LlmProvider provider) {
-    Project project =
-        projectRepository
-            .findById(projectId)
-            .orElseThrow(
-                () -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Project not found"));
-    var repoRoute = modelResolver.resolve("RepoArchitectureGenerator", provider);
-    var projectRoute = modelResolver.resolve("ArchitectureDocGenerator", provider);
-    if (repoRoute.getActualProvider() != projectRoute.getActualProvider()) {
-      throw new ResponseStatusException(
-          HttpStatus.SERVICE_UNAVAILABLE,
-          "Architecture routes do not resolve to one durable provider");
-    }
-    return requireCompatible(
-        store.createOrGet(
-            UUID.randomUUID(),
-            projectId,
-            project.getOrgId(),
-            actorUserId,
-            branchOverride == null || branchOverride.isBlank() ? null : branchOverride.trim(),
-            projectRoute.getActualProvider().name(),
-            repoRoute.getModel(),
-            projectRoute.getModel(),
-            Duration.ofSeconds(properties.getDeadlineSeconds())),
-        actorUserId,
-        branchOverride,
-        projectRoute.getActualProvider(),
-        repoRoute.getModel(),
-        projectRoute.getModel());
-  }
-
-  private ProjectArchitectureJobStore.Job requireCompatible(
-      ProjectArchitectureJobStore.Job job,
-      String actorUserId,
-      String branch,
-      LlmProvider provider,
-      String repoModel,
-      String projectModel) {
-    String normalizedBranch = branch == null || branch.isBlank() ? null : branch.trim();
-    if (!java.util.Objects.equals(job.requestedByUserId(), actorUserId)
-        || !java.util.Objects.equals(job.requestedBranch(), normalizedBranch)
-        || !job.requestedProvider().equals(provider.name())
-        || !job.repoArchitectureModel().equals(repoModel)
-        || !job.projectArchitectureModel().equals(projectModel)) {
-      throw new ResponseStatusException(
-          HttpStatus.CONFLICT,
-          "A map refresh is already active with a different actor, branch, or exact route");
-    }
-    return job;
+    return admission.requestWithProvider(projectId, actorUserId, branchOverride, provider);
   }
 
   /**

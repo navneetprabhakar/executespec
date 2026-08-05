@@ -84,17 +84,53 @@ public class ProjectArchitectureJobPublisher {
             .map(ProjectArchitectureService.StagedCodeMap::content)
             .filter(java.util.Objects::nonNull)
             .collect(java.util.stream.Collectors.joining("\n"));
+    Map<UUID, String> codeMapEvidenceByRepo = new LinkedHashMap<>();
+    for (ProjectArchitectureService.StagedCodeMap codeMap : staged.codeMaps()) {
+      codeMapEvidenceByRepo.put(codeMap.repoId(), codeMap.content());
+    }
     Map<UUID, String> groundedRepoArchitectures = new LinkedHashMap<>();
     for (ProjectArchitectureService.StagedRepoArchitecture repoArchitecture :
         staged.repoArchitectures()) {
+      String repoEvidence = codeMapEvidenceByRepo.get(repoArchitecture.repoId());
+      if (repoEvidence == null) {
+        throw new IllegalStateException("Repository architecture has no matching codemap evidence");
+      }
+      String groundedProse =
+          GeneratedProjectFactGrounding.sanitize(
+              GeneratedSourceContractGrounding.sanitizeForRepository(
+                  GeneratedSignatureGrounding.sanitizeUnsupportedBehavior(
+                      GeneratedSignatureGrounding.sanitize(
+                          repoArchitecture.content(), repoEvidence),
+                      repoEvidence),
+                  repoEvidence,
+                  repoArchitecture.repoFullName(),
+                  repoArchitecture.revision()),
+              repoEvidence);
       groundedRepoArchitectures.put(
           repoArchitecture.repoId(),
-          GeneratedSignatureGrounding.sanitize(repoArchitecture.content(), sourceEvidence));
+          DeterministicArchitectureEvidence.appendFromCodemap(
+              groundedProse,
+              repoEvidence,
+              repoArchitecture.repoFullName(),
+              repoArchitecture.revision()));
     }
-    String groundedProjectArchitecture =
-        GeneratedSignatureGrounding.sanitize(
-            staged.projectArchitecture().content(), sourceEvidence);
-    String groundedSummary = GeneratedSignatureGrounding.sanitize(staged.summary(), sourceEvidence);
+    String groundedProjectProse =
+        GeneratedProjectFactGrounding.sanitize(
+            GeneratedSourceContractGrounding.sanitizeWithoutSourceAuthority(
+                GeneratedSignatureGrounding.sanitizeUnsupportedBehavior(
+                    GeneratedSignatureGrounding.sanitize(
+                        staged.projectArchitecture().content(), sourceEvidence),
+                    sourceEvidence),
+                sourceEvidence),
+            sourceEvidence);
+    String groundedSummary =
+        GeneratedProjectFactGrounding.sanitize(
+            GeneratedSourceContractGrounding.sanitizeWithoutSourceAuthority(
+                GeneratedSignatureGrounding.sanitizeUnsupportedBehavior(
+                    GeneratedSignatureGrounding.sanitize(staged.summary(), sourceEvidence),
+                    sourceEvidence),
+                sourceEvidence),
+            sourceEvidence);
 
     List<ProjectCodeMap> savedCodeMaps = new ArrayList<>();
     Map<UUID, ProjectCodeMap> codeMapByRepo = new LinkedHashMap<>();
@@ -149,6 +185,10 @@ public class ProjectArchitectureJobPublisher {
       repoNames.add(stagedRepo.repoFullName());
     }
 
+    String groundedProjectArchitecture =
+        DeterministicArchitectureEvidence.appendFromRepoDocs(
+            groundedProjectProse, savedRepoArchitectures, repoNames);
+
     ProjectArchitectureService.StagedProjectArchitecture stagedProject =
         staged.projectArchitecture();
     int projectVersion =
@@ -182,21 +222,23 @@ public class ProjectArchitectureJobPublisher {
    * committed; a later warmer can reconstruct them if this best-effort mirror is interrupted.
    */
   public void publishWorkspace(String projectId, Published published) {
-    for (int i = 0; i < published.codeMaps().size(); i++) {
-      ProjectCodeMap map = published.codeMaps().get(i);
-      String repo = published.repoNames().get(i);
+    Map<UUID, String> repoNamesById = repoNamesById(published);
+    Map<UUID, String> mirrorNamesById = mirrorNamesById(repoNamesById);
+    for (ProjectCodeMap map : published.codeMaps()) {
+      String repo = requiredRepoName(repoNamesById, map.getRepoId());
+      String mirrorName = mirrorNamesById.get(map.getRepoId());
       workspace.writeAndCommit(
           projectId,
-          "codemaps/" + shortName(repo) + ".md",
+          "codemaps/" + mirrorName + ".md",
           map.getContent(),
           "codemap: " + repo + " v" + map.getVersion());
     }
-    for (int i = 0; i < published.repoArchitectures().size(); i++) {
-      RepoArchitectureDoc architecture = published.repoArchitectures().get(i);
-      String repo = published.repoNames().get(i);
+    for (RepoArchitectureDoc architecture : published.repoArchitectures()) {
+      String repo = requiredRepoName(repoNamesById, architecture.getRepoId());
+      String mirrorName = mirrorNamesById.get(architecture.getRepoId());
       workspace.writeAndCommit(
           projectId,
-          "repos/" + shortName(repo) + "/architecture.md",
+          "repos/" + mirrorName + "/architecture.md",
           architecture.getContent(),
           "repo-arch: " + repo + " v" + architecture.getVersion());
     }
@@ -209,6 +251,56 @@ public class ProjectArchitectureJobPublisher {
       workspace.writeAndCommit(
           projectId, "summary.md", published.summary(), "summary: regenerated");
     }
+  }
+
+  private static Map<UUID, String> repoNamesById(Published published) {
+    if (published.repoArchitectures().size() != published.repoNames().size()) {
+      throw new IllegalStateException("Published repository names do not cover every repository");
+    }
+    Map<UUID, String> namesById = new LinkedHashMap<>();
+    for (int i = 0; i < published.repoArchitectures().size(); i++) {
+      UUID repoId = published.repoArchitectures().get(i).getRepoId();
+      String repoName = published.repoNames().get(i);
+      if (repoId == null
+          || repoName == null
+          || repoName.isBlank()
+          || namesById.put(repoId, repoName) != null) {
+        throw new IllegalStateException("Published repository identity is not one-to-one");
+      }
+    }
+    return namesById;
+  }
+
+  private static String requiredRepoName(Map<UUID, String> repoNamesById, UUID repoId) {
+    String repoName = repoNamesById.get(repoId);
+    if (repoName == null) {
+      throw new IllegalStateException("Published artifact has no matching repository identity");
+    }
+    return repoName;
+  }
+
+  private static Map<UUID, String> mirrorNamesById(Map<UUID, String> repoNamesById) {
+    Map<String, Long> basenameCounts =
+        repoNamesById.values().stream()
+            .collect(
+                java.util.stream.Collectors.groupingBy(
+                    name -> shortName(name).toLowerCase(java.util.Locale.ROOT),
+                    java.util.stream.Collectors.counting()));
+    Map<UUID, String> result = new LinkedHashMap<>();
+    repoNamesById.forEach(
+        (repoId, fullName) -> {
+          String basename = shortName(fullName);
+          String candidate =
+              basenameCounts.getOrDefault(basename.toLowerCase(java.util.Locale.ROOT), 0L) == 1L
+                  ? basename
+                  : fullName.replace('/', '_');
+          String safe = candidate.replaceAll("[^A-Za-z0-9._-]", "_");
+          if (safe.isBlank() || ".".equals(safe) || "..".equals(safe)) {
+            safe = "repo-" + repoId;
+          }
+          result.put(repoId, safe);
+        });
+    return Map.copyOf(result);
   }
 
   public void prune(Published published) {

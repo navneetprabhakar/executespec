@@ -12,7 +12,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
-import com.navneet.executespec.agentsession.entity.AgentActionEvent;
 import com.navneet.executespec.agentsession.entity.AgentSession;
 import com.navneet.executespec.agentsession.entity.AgentTurn;
 import com.navneet.executespec.agentsession.repository.AgentActionEventRepository;
@@ -67,7 +66,7 @@ import lombok.RequiredArgsConstructor;
 @PreAuthorize("hasRole('SUPER_ADMIN')")
 public class WebQaFixtureController {
 
-  private static final String PREFIX = "web-qa-";
+  static final String PREFIX = "web-qa-";
   private static final String PROVIDER_READINESS_MARKER = "web-qa-disabled-provider-key";
 
   private final PipelineRunRepository runRepository;
@@ -84,6 +83,8 @@ public class WebQaFixtureController {
   private final SseBroadcaster sseBroadcaster;
   private final FeatureFlagService featureFlagService;
   private final Environment environment;
+  private final WebQaProjectEvidenceFixtures projectEvidenceFixtures;
+  private final com.navneet.executespec.project.security.ProjectAccessGuard projectAccessGuard;
 
   @org.springframework.beans.factory.annotation.Value("${executespec.live-llm.enabled:true}")
   private boolean liveLlmEnabled;
@@ -117,51 +118,13 @@ public class WebQaFixtureController {
               user.setDeepSeekApiKey(PROVIDER_READINESS_MARKER);
               userRepository.save(user);
             });
-    String sessionId = PREFIX + UUID.randomUUID();
-    AgentSession session =
-        sessionRepository.save(
-            AgentSession.builder()
-                .id(sessionId)
-                .orgId(orgId)
-                .userId(userId)
-                .clientSurface("WEB")
-                .title("Release QA agent evidence")
-                .status("ACTIVE")
-                .defaultExecutionMode("REMOTE")
-                .approvalPolicy("MANUAL")
-                .createdAt(Instant.now())
-                .updatedAt(Instant.now())
-                .build());
-    AgentTurn turn =
-        turnRepository.save(
-            AgentTurn.builder()
-                .id(PREFIX + "turn-" + UUID.randomUUID())
-                .sessionId(sessionId)
-                .orgId(orgId)
-                .userId(userId)
-                .sequence(1)
-                .userMessage("Implement the release QA fixture")
-                .assistantSummary("Fixture action is ready for approval.")
-                .intentType("CODE_RUN_REQUIRED")
-                .intentConfidence(1.0)
-                .actionType("create_cloud_run")
-                .proposedActionJson(
-                    "{\"action\":\"create_cloud_run\",\"requiresConfirmation\":true}")
-                .status("OK")
-                .build());
-    eventRepository.save(
-        AgentActionEvent.builder()
-            .id(PREFIX + "event-" + UUID.randomUUID())
-            .sessionId(sessionId)
-            .turnId(turn.getId())
-            .actionId(PREFIX + "action")
-            .type("GOAL_DECISION")
-            .payloadJson("{\"status\":\"READY\",\"summary\":\"Fixture evidence is ready\"}")
-            .createdAt(Instant.now())
-            .build());
-
+    WebQaProjectEvidenceFixtures.SessionEvidence sessionEvidence =
+        projectEvidenceFixtures.seedAgentSessionEvidence(userId, orgId);
+    String sessionId = sessionEvidence.sessionId();
+    AgentTurn turn = sessionEvidence.turn();
     PipelineRun success =
         createRun(userId, orgId, "COMPLETE", "CLEAN_COMPLETION", "Release QA success", true);
+    projectEvidenceFixtures.seedCorrectionEvidenceTask(success.getRunId());
     PipelineRun failed =
         createRun(userId, orgId, "FAILED", "FINAL_BUILD_FAILED", "Release QA recovery", false);
     PipelineRun gate =
@@ -193,6 +156,32 @@ public class WebQaFixtureController {
         recovery.getRunId(),
         sessionId,
         safety);
+  }
+
+  /**
+   * Seed two deterministic architecture versions for a fixture-created project (Compare History
+   * content-diff walkthrough). Safety-profile admission stays here; the seeding itself lives in
+   * {@link WebQaProjectEvidenceFixtures}.
+   */
+  @PostMapping("/projects/{projectId}/architecture-versions")
+  @Transactional(rollbackFor = Exception.class)
+  public Map<String, Object> seedArchitectureVersions(
+      @org.springframework.security.core.annotation.AuthenticationPrincipal
+          AppUserDetails principal,
+      @org.springframework.web.bind.annotation.PathVariable String projectId) {
+    SafetyEvidence safety = safetyEvidence();
+    if (!safety.safe()) {
+      throw new ResponseStatusException(
+          HttpStatus.SERVICE_UNAVAILABLE,
+          "Web QA architecture fixtures require the isolated web-qa profile with live LLM calls"
+              + " disabled");
+    }
+    projectAccessGuard.assertCanWrite(projectId, principal);
+    var response =
+        new java.util.LinkedHashMap<String, Object>(
+            projectEvidenceFixtures.seedArchitectureVersions(principal, projectId));
+    response.put("safety", safety);
+    return response;
   }
 
   /**
@@ -336,9 +325,11 @@ public class WebQaFixtureController {
                 userRepository.save(user);
               });
     }
+    int deletedArchitectureVersions = projectEvidenceFixtures.deleteArchitectureFixtures();
     return Map.of(
         "deletedRuns", runs.size(),
         "deletedAgentSessions", sessions.size(),
+        "deletedArchitectureVersions", deletedArchitectureVersions,
         "safety", safetyEvidence());
   }
 

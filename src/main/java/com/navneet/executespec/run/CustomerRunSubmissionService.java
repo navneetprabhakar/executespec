@@ -15,8 +15,10 @@ import com.navneet.executespec.config.featureflag.FeatureFlagService;
 import com.navneet.executespec.cost.CostCapValues;
 import com.navneet.executespec.integration.PlanGateBypassPolicy;
 import com.navneet.executespec.integration.RunOrchestrator;
+import com.navneet.executespec.project.entity.ProjectRepo;
 import com.navneet.executespec.project.security.ProjectAccessGuard;
 import com.navneet.executespec.project.service.ProjectRepoService;
+import com.navneet.executespec.repo.GitHubRepoService;
 import com.navneet.executespec.router.ModelAccessService;
 import com.navneet.executespec.security.InputSanitizer;
 import com.navneet.executespec.state.StateStore;
@@ -49,6 +51,7 @@ public class CustomerRunSubmissionService {
   private final PlanGateBypassPolicy planGateBypassPolicy;
   private final ProjectAccessGuard projectAccessGuard;
   private final ProjectRepoService projectRepoService;
+  private final GitHubRepoService gitHubRepoService;
   private final ModelAccessService modelAccessService;
   private final AiProviderPreferenceService aiProviderPreferenceService;
   private final ManagedAiUsageService managedAiUsageService;
@@ -66,7 +69,7 @@ public class CustomerRunSubmissionService {
 
     String userId = actor.getUser().getId();
     boolean localExecution = command.localExecution();
-    Project hostProject = authorizeCodeBoundary(command, actor, localExecution);
+    CodeBoundary boundary = authorizeCodeBoundary(command, actor, localExecution);
 
     RunIdempotencyClaim claim =
         runIdempotencyService.claim(userId, command.idempotencyKey(), command.requestFingerprint());
@@ -77,6 +80,8 @@ public class CustomerRunSubmissionService {
 
     PipelineRun run;
     try {
+      PublicationTarget publicationTarget =
+          validateExistingPrTarget(command, actor, boundary, localExecution);
       String provider = resolveProvider(command, actor, userId);
       managedAiUsageService.assertCanStartRun(actor, apiKeyResolver.isOwnKeysMode(userId));
       apiKeyResolver.validateKeyAvailability(userId);
@@ -111,9 +116,15 @@ public class CustomerRunSubmissionService {
               new RunOrchestrator.SubmitPolicy(
                   command.userCostCap(),
                   command.skipAutoPush(),
-                  hostProject == null ? actor.getUser().getOrgId() : hostProject.getOrgId(),
+                  boundary.project() == null
+                      ? actor.getUser().getOrgId()
+                      : boundary.project().getOrgId(),
                   actor.getUser().getOrgId(),
-                  null));
+                  null,
+                  command.checkoutBranch(),
+                  publicationTarget.repoFullName(),
+                  publicationTarget.prNumber(),
+                  publicationTarget.headSha()));
     } catch (ResponseStatusException e) {
       finishFailedClaim(claim, e);
       throw e;
@@ -219,6 +230,22 @@ public class CustomerRunSubmissionService {
     }
     inputSanitizer.scan(command.userRequest());
     CostCapValues.requireValidOptional(command.userCostCap());
+    if (blankToNull(command.branchOverride()) != null
+        && !com.navneet.executespec.run.sync.RunSyncService.isValidBranch(
+            command.branchOverride().trim())) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "branch is invalid");
+    }
+    if (blankToNull(command.checkoutBranch()) != null
+        && !com.navneet.executespec.run.sync.RunSyncService.isValidBranch(
+            command.checkoutBranch().trim())) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "checkout branch is invalid");
+    }
+    if (command.localExecution() && blankToNull(command.branchOverride()) != null) {
+      throw new ResponseStatusException(
+          HttpStatus.UNPROCESSABLE_ENTITY,
+          "Local-hands execution cannot publish to an existing pull request; submit a remote run"
+              + " for that PR instead.");
+    }
     validateLocalRepositoryInventory(command.localRepositoryInventory());
     if (command.localRepositoryInventory() != null) {
       inputSanitizer.scan(command.localRepositoryInventory());
@@ -247,22 +274,165 @@ public class CustomerRunSubmissionService {
     }
   }
 
-  private Project authorizeCodeBoundary(
+  private CodeBoundary authorizeCodeBoundary(
       Command command, AppUserDetails actor, boolean localExecution) {
     if (command.projectId() == null || command.projectId().isBlank()) {
-      return null;
+      return new CodeBoundary(null, List.of());
     }
     Project project = projectAccessGuard.assertCanWrite(command.projectId(), actor);
+    List<ProjectRepo> repos;
     if (localExecution) {
-      projectRepoService.resolveForLocalRunStrict(
-          command.projectId(),
-          command.selectedRepoIds(),
-          command.localInstallationId(),
-          actor.getUser().getId());
+      repos =
+          projectRepoService.resolveForLocalRunStrict(
+              command.projectId(),
+              command.selectedRepoIds(),
+              command.localInstallationId(),
+              actor.getUser().getId());
     } else {
-      projectRepoService.resolveForRunStrict(command.projectId(), command.selectedRepoIds());
+      repos =
+          projectRepoService.resolveForRunStrict(command.projectId(), command.selectedRepoIds());
     }
-    return project;
+    return new CodeBoundary(project, repos);
+  }
+
+  private PublicationTarget validateExistingPrTarget(
+      Command command, AppUserDetails actor, CodeBoundary boundary, boolean localExecution) {
+    if (boundary.project() == null) {
+      return validateStandaloneExistingPrTarget(command, actor, localExecution);
+    }
+    return validateProjectExistingPrTarget(
+        command, actor, boundary.project(), boundary.repositories(), localExecution);
+  }
+
+  private PublicationTarget validateStandaloneExistingPrTarget(
+      Command command, AppUserDetails actor, boolean localExecution) {
+    String branch = blankToNull(command.branchOverride());
+    if (branch == null || localExecution) return PublicationTarget.NONE;
+    if (blankToNull(command.repoUrl()) == null
+        || !command.repoUrl().startsWith("https://github.com/")) {
+      throw new ResponseStatusException(
+          HttpStatus.UNPROCESSABLE_ENTITY,
+          "An existing-branch run requires a GitHub repository and an open pull request.");
+    }
+    String repoFullName = githubFullName(command.repoUrl());
+    String pat = actor.getUser().getGithubPat();
+    return requireExistingPrHead(
+        command.repoUrl(),
+        repoFullName,
+        branch.trim(),
+        pat,
+        null,
+        command.existingPrRepoFullName(),
+        command.existingPrNumber());
+  }
+
+  private PublicationTarget validateProjectExistingPrTarget(
+      Command command,
+      AppUserDetails actor,
+      Project project,
+      List<ProjectRepo> repos,
+      boolean localExecution) {
+    String branch = blankToNull(command.branchOverride());
+    if (branch == null || localExecution) return PublicationTarget.NONE;
+    if (repos.size() != 1) {
+      throw new ResponseStatusException(
+          HttpStatus.UNPROCESSABLE_ENTITY,
+          "Existing-PR publication requires exactly one selected repository.");
+    }
+    String normalized = branch.trim();
+    if (normalized.equals(project.getTargetBranch())) {
+      throw protectedBranch();
+    }
+    ProjectRepo repo = repos.get(0);
+    if (!"GITHUB".equalsIgnoreCase(repo.getScmProvider())) {
+      throw new ResponseStatusException(
+          HttpStatus.UNPROCESSABLE_ENTITY,
+          "Existing-branch runs currently require a GitHub project repository.");
+    }
+    if (normalized.equals(repo.getDefaultBranch())) throw protectedBranch();
+    return requireExistingPrHead(
+        "https://github.com/" + repo.getGithubRepoFullName(),
+        repo.getGithubRepoFullName(),
+        normalized,
+        actor.getUser().getGithubPat(),
+        blankToNull(project.getTargetBranch()) == null
+            ? repo.getDefaultBranch()
+            : project.getTargetBranch(),
+        command.existingPrRepoFullName(),
+        command.existingPrNumber());
+  }
+
+  private PublicationTarget requireExistingPrHead(
+      String repoUrl,
+      String repoFullName,
+      String branch,
+      String pat,
+      String knownDefaultBranch,
+      String expectedRepoFullName,
+      Integer expectedPrNumber) {
+    if (blankToNull(pat) == null) {
+      throw new ResponseStatusException(
+          HttpStatus.CONFLICT, "Connect GitHub before targeting an existing pull-request branch.");
+    }
+    String defaultBranch = knownDefaultBranch;
+    if (blankToNull(defaultBranch) == null) {
+      GitHubRepoService.DefaultBranchLookup defaultLookup =
+          gitHubRepoService.findDefaultBranch(repoUrl, pat);
+      if (!defaultLookup.known()) {
+        throw new ResponseStatusException(
+            HttpStatus.SERVICE_UNAVAILABLE,
+            "GitHub default-branch verification is temporarily unavailable.");
+      }
+      defaultBranch = defaultLookup.branch();
+    }
+    if (branch.equals(defaultBranch)) throw protectedBranch();
+    GitHubRepoService.OpenPullRequestLookup lookup =
+        gitHubRepoService.findOpenPullRequestForHead(repoFullName, branch, pat);
+    if (!lookup.known()) {
+      throw new ResponseStatusException(
+          HttpStatus.SERVICE_UNAVAILABLE,
+          "GitHub pull-request verification is temporarily unavailable.");
+    }
+    if (!lookup.present()) {
+      throw new ResponseStatusException(
+          HttpStatus.CONFLICT, "The selected branch is not the head of an open pull request.");
+    }
+    if (blankToNull(lookup.baseBranch()) == null || !defaultBranch.equals(lookup.baseBranch())) {
+      throw new ResponseStatusException(
+          HttpStatus.CONFLICT,
+          "The selected pull request does not target the configured project branch.");
+    }
+    if (blankToNull(expectedRepoFullName) != null
+        && !repoFullName.equalsIgnoreCase(expectedRepoFullName.trim())) {
+      throw new ResponseStatusException(
+          HttpStatus.CONFLICT,
+          "The selected repository does not match the requested pull request.");
+    }
+    if (expectedPrNumber != null && !expectedPrNumber.equals(lookup.prNumber())) {
+      throw new ResponseStatusException(
+          HttpStatus.CONFLICT, "The selected branch resolves to a different pull request.");
+    }
+    if (blankToNull(lookup.headSha()) == null || !lookup.headSha().matches("[0-9a-fA-F]{40}")) {
+      throw new ResponseStatusException(
+          HttpStatus.SERVICE_UNAVAILABLE,
+          "GitHub pull-request head verification is temporarily unavailable.");
+    }
+    return new PublicationTarget(repoFullName, lookup.prNumber(), lookup.headSha());
+  }
+
+  private static ResponseStatusException protectedBranch() {
+    return new ResponseStatusException(
+        HttpStatus.BAD_REQUEST,
+        "The repository default or target branch cannot be used as an existing PR head.");
+  }
+
+  private static String githubFullName(String repoUrl) {
+    String fullName = repoUrl.substring("https://github.com/".length());
+    if (fullName.endsWith(".git")) fullName = fullName.substring(0, fullName.length() - 4);
+    if (!fullName.matches("[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "GitHub repository URL is invalid");
+    }
+    return fullName;
   }
 
   private String resolveProvider(Command command, AppUserDetails actor, String userId) {
@@ -375,6 +545,12 @@ public class CustomerRunSubmissionService {
 
   public record Submission(PipelineRun run, boolean created, boolean localExecution) {}
 
+  private record CodeBoundary(Project project, List<ProjectRepo> repositories) {}
+
+  private record PublicationTarget(String repoFullName, Integer prNumber, String headSha) {
+    private static final PublicationTarget NONE = new PublicationTarget(null, null, null);
+  }
+
   @Builder
   public record Command(
       String userRequest,
@@ -393,6 +569,9 @@ public class CustomerRunSubmissionService {
       String figmaUrl,
       boolean tddMode,
       String branchOverride,
+      String checkoutBranch,
+      String existingPrRepoFullName,
+      Integer existingPrNumber,
       String prReviewComments,
       Double userCostCap,
       boolean skipAutoPush,

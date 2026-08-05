@@ -79,6 +79,16 @@ Structured public/report responses scan their serialized JSON, while PDF/Markdow
 scan the actual outbound bytes. Current Git publication candidates are covered; deleted credentials
 reachable only through older local-only Git history are not recursively object-scanned.
 
+## Workspace path redaction (2026-08-04)
+
+`WorkspacePathRedaction` redacts server filesystem paths from customer-facing diagnostics. The
+known-root pattern covers macOS/Linux user and temp trees plus the literal Linux deploy parent
+`/opt/app`; the Spring bean form additionally redacts the exact configured `agent.workspace` root.
+The path character class excludes quotes so redaction over a raw JSON string cannot corrupt the
+document. Consumers: `PlannerFailureDiagnostic` (durable planner rejection evidence, via the static
+known-root form with its legacy "[local path redacted]" label) and `api/RunMapper` (DTO-projected
+task `failureReason`, `goalDoneness`, continuation decision/action JSON, and run-level goal proof).
+
 ## 2026-07-18 verification boundary
 
 Publication/security focused tests pass 39/39 and the full backend regression passes 3,243/3,243

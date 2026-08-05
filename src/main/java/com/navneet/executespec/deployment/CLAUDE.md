@@ -69,6 +69,11 @@ LOCAL-hands runs are excluded from GCS workspace upload queries and the event li
   probe permission disables the store at boot even when object access would otherwise work.
   Construction is also disabled before ADC initialization when workspace GCS is off or the bucket
   is blank; local runs must never probe credentials or attempt `gs:///local/...` checkpoints.
+- `WorkspaceRestoreService.java` — Materializes a run archive when local state has expired. Absence
+  of a run row or durable object key is reported as `WorkspaceArchiveUnavailableException`, which
+  lets run sync distinguish a permanent lifecycle 410 from retryable GCS/platform restoration
+  faults. Archives do not contain `.git`; `run/sync/RunSyncService` owns the separate, snapshot-bound
+  Git metadata reconstruction before authenticated fetch/reset.
 - `WorkspaceExportService.java` — ZIP/repo handoff now applies `ArtifactPublicationGuard` to every
   included file and to restored GCS ZIP members before returning bytes. Secret-like content blocks
   the export; symlinks are omitted so an archive cannot follow a link outside the run workspace.
@@ -202,3 +207,13 @@ App VM (executespec)                    Preview GW VM (preview-gw)
 3. **VM cron** (`cleanup-expired.sh`): every 5 min, checks directory age on preview-gw — last-resort safety net
 
 **VM config:** `preview.vm.*` in `application.yml` — gateway IP, SSH key, TTL, VM list with `maxConcurrent` for load balancing.
+
+## 2026-08-04 standalone snapshot resolution
+
+`PreviewWorkspaceResolver` uses the admitted snapshot's durable `repoId` as the layout authority:
+non-null identifies `repos/<repository-name>` Project/restored layout, while null identifies the
+standalone run root. Directory existence is never the discriminator, so a legitimate standalone
+repository containing its own `repos/<name>` directory cannot be reclassified. Multiple snapshots
+still fail closed. `WorkspaceFileService` uses the same authority for root base/head diffs and
+status. Preview/Render may read restored Project bytes whose archive omits nested Git; evidence and
+iteration paths separately fail closed when exact Git history is unavailable.

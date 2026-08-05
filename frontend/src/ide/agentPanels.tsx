@@ -20,6 +20,7 @@ import {extractAgentArtifacts} from '@/ide/agentArtifacts';
 import {ArtifactRail} from '@/ide/agentArtifactRail';
 import {boundedInlineDiff} from '@/ide/agentDiff';
 import {isCloudRunAction, isConfirmableCloudRun} from '@/ide/agentActionPolicy';
+import {agentRunUnavailableMessage, type AgentRunUnavailableReason} from '@/ide/agentRunStream';
 import {AgentBlockedActionCard} from '@/ide/AgentBlockedActionCard';
 import {
   asText,
@@ -58,6 +59,7 @@ import {
 } from '@/ide/AgentRepositoryScope';
 import {ConversationHistoryPager, ConversationHistoryRow} from '@/ide/AgentConversationHistory';
 import {AgentManagedAiBalance} from '@/ide/AgentManagedAiBalance';
+import {executeRunMutation} from '@/lib/runMutationAttempt';
 
 export type {CloudRunRepoChoice, CloudRunRepoSelection} from '@/ide/AgentRepositoryScope';
 
@@ -733,7 +735,7 @@ function SandboxRunCard({
   run: api.RunDetail;
   liveCostUsd: number | null;
   streamStatus?: 'IDLE' | 'CONNECTING' | 'CONNECTED' | 'RECONNECTING' | 'CLOSED';
-  unavailable?: 'RUN_NOT_FOUND' | 'AUTH_REQUIRED' | null;
+  unavailable?: AgentRunUnavailableReason | null;
   busy: boolean;
   onOpen: (path: string) => void;
   onStop: () => void;
@@ -753,19 +755,16 @@ function SandboxRunCard({
     run.verifiedScore == null ? 'Evidence pending' : `${run.verifiedScore}/100 · internal`;
   const provider = run.aiProvider || run.workerModel || 'default route';
   const streamLabel =
-    unavailable === 'RUN_NOT_FOUND'
-      ? 'Run no longer available'
-      : unavailable === 'AUTH_REQUIRED'
-        ? 'Sign in again to view this run'
-        : streamStatus === 'RECONNECTING'
-          ? 'Reconnecting live events'
-          : streamStatus === 'CONNECTING'
-            ? 'Connecting live events'
-            : streamStatus === 'CONNECTED'
-              ? 'Live events connected'
-              : streamStatus === 'CLOSED' && !terminal
-                ? 'Snapshot only · live events unavailable'
-                : null;
+    agentRunUnavailableMessage(unavailable) ??
+    (streamStatus === 'RECONNECTING'
+      ? 'Reconnecting live events'
+      : streamStatus === 'CONNECTING'
+        ? 'Connecting live events'
+        : streamStatus === 'CONNECTED'
+          ? 'Live events connected'
+          : streamStatus === 'CLOSED' && !terminal
+            ? 'Snapshot only · live events unavailable'
+            : null);
   const prUrl = run.scmPrUrl || run.githubPrUrl;
   const terminalLabel = failed
     ? 'Open failure evidence'
@@ -804,7 +803,7 @@ function SandboxRunCard({
       </div>
       <div className='agent-runcard-mode'>
         {remoteSandboxEnabled ? 'Remote sandbox' : 'Remote server workspace'} · plan-gated ·
-        PR-oriented
+        publication-gated
       </div>
       {streamLabel && (
         <div
@@ -975,7 +974,10 @@ function InlineRunDiff({runId, onOpen}: {runId: string; onOpen: (path: string) =
     setRevertBusy(true);
     setMessage('Creating a reviewable revert run…');
     try {
-      const fork = await api.forkRun(runId, {userRequest: pendingRevert.request});
+      const overrides = {userRequest: pendingRevert.request};
+      const fork = await executeRunMutation(`fork:revert:${runId}`, overrides, (idempotencyKey) =>
+        api.forkRun(runId, overrides, idempotencyKey),
+      );
       setPendingRevert(null);
       onOpen(`/plan/${fork.runId}`);
     } catch (error: unknown) {
@@ -1221,7 +1223,7 @@ function SandboxProposalCard({
         <span>plan first</span>
         <span>no local files touched</span>
         <span>approval before credits</span>
-        <span>PR-oriented result</span>
+        <span>PR when publication gates pass</span>
       </div>
       <div className='agent-card-actions'>
         <button
@@ -1299,7 +1301,7 @@ function GateCard({
         {gate.hardCapUsd != null && <span>cap ${gate.hardCapUsd.toFixed(2)}</span>}
         {gate.provider && <span>{gate.provider}</span>}
         {gateAge(gate) && <span>{gateAge(gate)}</span>}
-        <span>opens a PR</span>
+        <span>PR only after publication gates pass</span>
       </div>
       {gate.creditsRequired == null && (
         <div className='agent-card-sub' role='status'>
@@ -1502,7 +1504,7 @@ export function AgentConversation({
   runCard: api.RunDetail | null;
   runCost: number | null;
   runStreamStatus?: 'IDLE' | 'CONNECTING' | 'CONNECTED' | 'RECONNECTING' | 'CLOSED';
-  runUnavailable?: 'RUN_NOT_FOUND' | 'AUTH_REQUIRED' | null;
+  runUnavailable?: AgentRunUnavailableReason | null;
   routingState?: RoutingState;
   remoteSandboxEnabled?: boolean;
   repoSelection?: CloudRunRepoSelection;
@@ -1541,15 +1543,13 @@ export function AgentConversation({
         <div className='ide-sr-only' role='status' aria-live='polite' aria-atomic='true'>
           {runCard
             ? `${remoteSandboxEnabled ? 'Remote sandbox' : 'Remote workspace'} ${runPhaseLabel(runCard.status)}${
-                runUnavailable === 'RUN_NOT_FOUND'
-                  ? '. Run no longer available.'
-                  : runUnavailable === 'AUTH_REQUIRED'
-                    ? '. Sign in again to view this run.'
-                    : runStreamStatus === 'RECONNECTING'
-                      ? '. Reconnecting live events.'
-                      : runStreamStatus === 'CLOSED' && !isTerminalRunStatus(runCard.status)
-                        ? '. Live events unavailable; showing the latest snapshot.'
-                        : ''
+                runUnavailable
+                  ? `. ${agentRunUnavailableMessage(runUnavailable)}.`
+                  : runStreamStatus === 'RECONNECTING'
+                    ? '. Reconnecting live events.'
+                    : runStreamStatus === 'CLOSED' && !isTerminalRunStatus(runCard.status)
+                      ? '. Live events unavailable; showing the latest snapshot.'
+                      : ''
               }`
             : isBusy
               ? streamText
@@ -1655,7 +1655,7 @@ export function AgentConversation({
                 {remoteSandboxEnabled ? 'Remote sandbox only' : 'Remote server workspace'}
               </span>
               <span>Plan and cost first</span>
-              <span>Branch, tests, PR, and cap shown before run</span>
+              <span>Branch, tests, publication policy, and cost controls shown before run</span>
               <span>No local files touched</span>
             </div>
           )}

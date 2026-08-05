@@ -311,6 +311,7 @@ describe('IdeAgent', () => {
     setHappyPathMocks();
     Object.defineProperty(Element.prototype, 'scrollIntoView', {
       configurable: true,
+      writable: true,
       value: vi.fn(),
     });
   });
@@ -752,12 +753,15 @@ describe('IdeAgent', () => {
 
     expect(host.textContent).toContain('Remote sandbox operator');
     expect(host.textContent).toContain('Run work in a remote sandbox.');
-    expect(host.textContent).toContain('Plan, code, test, review, and open a PR');
+    expect(host.textContent).toContain('prepare a PR when publication gates pass');
     expect(host.textContent).toContain('Create a remote sandbox to add audit logging');
     expect(host.textContent).toContain('What will happen before spend');
     expect(host.textContent).toContain('remote clone');
     // RR-839 — honest trust copy: enforced properties only.
-    expect(host.textContent).toContain('Every run event is recorded in the audit trail');
+    expect(host.textContent).toContain(
+      'Run actions and evidence are recorded subject to retention policy',
+    );
+    expect(host.textContent).toContain('BYOK cost caps are optional');
     expect(host.querySelectorAll('.agent-operator-intro').length).toBe(1);
     expect(host.querySelectorAll('.agent-empty').length).toBe(0);
     expect(host.querySelectorAll('.agent-composer-contract').length).toBe(1);
@@ -1699,7 +1703,7 @@ describe('IdeAgent', () => {
 
     expect(api.getRun).toHaveBeenCalledWith('run-2');
     expect(host.textContent).toContain('Add billing audit logs');
-    expect(host.textContent).toContain('Remote sandbox · plan-gated · PR-oriented');
+    expect(host.textContent).toContain('Remote sandbox · plan-gated · publication-gated');
     expect(host.textContent).toContain('91/100');
     expect(host.textContent).toContain('Review evidence');
   });

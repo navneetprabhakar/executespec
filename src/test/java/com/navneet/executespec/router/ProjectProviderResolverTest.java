@@ -14,6 +14,7 @@ import com.navneet.executespec.auth.repository.ProjectRepository;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.http.HttpStatus;
 
 class ProjectProviderResolverTest {
 
@@ -55,11 +56,31 @@ class ProjectProviderResolverTest {
 
     assertThatThrownBy(
             () -> resolver.resolve(Project.builder().aiProvider(null).createdBy("u-1").build()))
-        .isInstanceOf(IllegalStateException.class)
-        .hasMessageContaining("invalid account provider preference");
+        .isInstanceOfSatisfying(
+            ProjectRoutingException.class,
+            error -> {
+              assertThat(error.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+              assertThat(error.errorCode()).isEqualTo("PROJECT_PROVIDER_INVALID");
+              assertThat(error.getReason()).doesNotContain("retired-provider");
+            });
     assertThatThrownBy(() -> resolver.resolve((Project) null))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("project required");
+  }
+
+  @Test
+  void unsetProviderAndPreferenceReturnsCustomerCorrectableConflict() {
+    AppUser user = new AppUser();
+    when(appUserRepository.findById("u-1")).thenReturn(Optional.of(user));
+
+    assertThatThrownBy(
+            () -> resolver.resolve(Project.builder().aiProvider(null).createdBy("u-1").build()))
+        .isInstanceOfSatisfying(
+            ProjectRoutingException.class,
+            error -> {
+              assertThat(error.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+              assertThat(error.errorCode()).isEqualTo("PROJECT_PROVIDER_NOT_CONFIGURED");
+            });
   }
 
   @Test

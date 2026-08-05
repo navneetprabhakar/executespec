@@ -7,56 +7,225 @@ import com.navneet.executespec.codeintel.entity.RepoArchitectureDoc;
 /** Keeps provider-free architecture evidence byte-exact across model-generated artifacts. */
 final class DeterministicArchitectureEvidence {
 
-  static final String HTTP_BEGIN = "<!-- EXECUTESPEC_DETERMINISTIC_HTTP_SURFACE_V2_BEGIN -->";
-  static final String HTTP_END = "<!-- EXECUTESPEC_DETERMINISTIC_HTTP_SURFACE_V2_END -->";
+  private static final String REPOSITORY_EVIDENCE_HEADING = "## Deterministic repository evidence";
+
+  static final String HTTP_BEGIN = "<!-- EXECUTESPEC_DETERMINISTIC_HTTP_SURFACE_V3_BEGIN -->";
+  static final String HTTP_END = "<!-- EXECUTESPEC_DETERMINISTIC_HTTP_SURFACE_V3_END -->";
+  private static final String LEGACY_HTTP_V2_BEGIN =
+      "<!-- EXECUTESPEC_DETERMINISTIC_HTTP_SURFACE_V2_BEGIN -->";
+  private static final String LEGACY_HTTP_V2_END =
+      "<!-- EXECUTESPEC_DETERMINISTIC_HTTP_SURFACE_V2_END -->";
 
   private DeterministicArchitectureEvidence() {}
 
   static String appendFromCodemap(String generatedMarkdown, String codemapMarkdown) {
-    String evidence = exactHttpBlock(codemapMarkdown);
-    if (evidence == null) return generatedMarkdown;
-    return stripHttpBlocks(generatedMarkdown).stripTrailing() + "\n\n" + evidence + "\n";
+    String http = exactHttpBlock(codemapMarkdown);
+    String facts = exactProjectFactBlock(codemapMarkdown);
+    if (http == null && facts == null) return generatedMarkdown;
+    StringBuilder appendix =
+        new StringBuilder(stripEvidenceBlocks(generatedMarkdown).stripTrailing());
+    if (http != null) appendix.append("\n\n").append(http);
+    if (facts != null) appendix.append("\n\n").append(facts);
+    return appendix.append('\n').toString();
+  }
+
+  static String appendFromCodemap(
+      String generatedMarkdown,
+      String codemapMarkdown,
+      String expectedRepository,
+      String expectedRevision) {
+    String http = exactHttpBlock(codemapMarkdown);
+    String facts = exactProjectFactBlock(codemapMarkdown, expectedRepository, expectedRevision);
+    if (http != null && !http.contains("- Source revision: `" + expectedRevision + "`"))
+      http = null;
+    if (facts == null) {
+      throw new IllegalStateException(
+          "Codemap deterministic evidence is not uniquely bound to its repository revision");
+    }
+    StringBuilder appendix =
+        new StringBuilder(stripEvidenceBlocks(generatedMarkdown).stripTrailing());
+    if (http != null) appendix.append("\n\n").append(http);
+    appendix.append("\n\n").append(facts);
+    return appendix.append('\n').toString();
   }
 
   static String appendFromRepoDocs(
       String generatedMarkdown, List<RepoArchitectureDoc> docs, List<String> repoFullNames) {
     StringBuilder appendix = new StringBuilder();
     for (int i = 0; i < docs.size(); i++) {
-      String evidence = exactHttpBlock(docs.get(i).getContent());
-      if (evidence == null) continue;
+      String http = exactHttpBlock(docs.get(i).getContent());
+      String facts = exactProjectFactBlock(docs.get(i).getContent());
+      if (http == null && facts == null) continue;
       String name =
           i < repoFullNames.size() ? repoFullNames.get(i) : "repo-" + docs.get(i).getRepoId();
-      appendix.append("### `").append(name).append("`\n\n").append(evidence).append("\n\n");
+      appendix.append("### `").append(safeMarkdown(name)).append("`\n\n");
+      if (http != null) appendix.append(http).append("\n\n");
+      if (facts != null) appendix.append(facts).append("\n\n");
     }
     if (appendix.isEmpty()) return generatedMarkdown;
-    return stripHttpBlocks(generatedMarkdown).stripTrailing()
-        + "\n\n## Deterministic public HTTP surfaces by repository\n\n"
+    return stripEvidenceBlocks(stripGeneratedRepositoryAppendix(generatedMarkdown)).stripTrailing()
+        + "\n\n"
+        + REPOSITORY_EVIDENCE_HEADING
+        + "\n\n"
         + appendix.toString().stripTrailing()
         + "\n";
+  }
+
+  /**
+   * Removes only an appendix previously assembled by this class. Stripping the marker bodies alone
+   * leaves their generated H2/H3 wrappers behind, so a refresh otherwise publishes duplicate
+   * deterministic-evidence headings. A model-authored section with the same title is preserved
+   * unless its suffix also contains one of our private evidence markers.
+   */
+  private static String stripGeneratedRepositoryAppendix(String markdown) {
+    if (markdown == null || markdown.isBlank()) return "";
+    int heading = markdown.lastIndexOf(REPOSITORY_EVIDENCE_HEADING);
+    if (heading < 0) return markdown;
+    String suffix = markdown.substring(heading);
+    if (!containsDeterministicMarker(suffix)) return markdown;
+    return markdown.substring(0, heading);
+  }
+
+  private static boolean containsDeterministicMarker(String markdown) {
+    return markdown.contains(HTTP_BEGIN)
+        || markdown.contains(LEGACY_HTTP_V2_BEGIN)
+        || markdown.contains(DeterministicProjectFactEvidence.BEGIN)
+        || markdown.contains(DeterministicProjectFactEvidence.SETUP_BEGIN);
   }
 
   static boolean hasCurrentHttpEvidence(String markdown) {
     return exactHttpBlock(markdown) != null;
   }
 
+  static boolean hasCurrentProjectFactEvidence(String markdown) {
+    String block = exactProjectFactBlock(markdown);
+    return block != null
+        && block.contains("- Evidence-Format: `EXECUTESPEC_PROJECT_FACTS_V2`")
+        && uniqueBlock(
+                block,
+                DeterministicProjectFactEvidence.ROUTES_BEGIN,
+                DeterministicProjectFactEvidence.ROUTES_END)
+            != null;
+  }
+
+  static boolean hasCurrentEvidence(String markdown) {
+    String setup = exactSetupSourceBlock(markdown);
+    return hasCurrentHttpEvidence(markdown)
+        && hasCurrentProjectFactEvidence(markdown)
+        && setup != null
+        && setup.contains("- Evidence-Format: EXECUTESPEC_SETUP_SOURCES_V2");
+  }
+
   private static String exactHttpBlock(String markdown) {
-    if (markdown == null) return null;
-    int begin = markdown.lastIndexOf(HTTP_BEGIN);
-    if (begin < 0) return null;
-    int end = markdown.indexOf(HTTP_END, begin + HTTP_BEGIN.length());
-    if (end < 0) return null;
-    return markdown.substring(begin, end + HTTP_END.length()).strip();
+    return uniqueBlock(markdown, HTTP_BEGIN, HTTP_END);
+  }
+
+  static String exactProjectFactBlock(String markdown) {
+    return uniqueBlock(
+        markdown, DeterministicProjectFactEvidence.BEGIN, DeterministicProjectFactEvidence.END);
+  }
+
+  static String exactProjectFactBlock(
+      String markdown, String expectedRepository, String expectedRevision) {
+    String block = exactProjectFactBlock(markdown);
+    if (block == null
+        || !block.contains("- Evidence-Format: `EXECUTESPEC_PROJECT_FACTS_V2`")
+        || uniqueBlock(
+                block,
+                DeterministicProjectFactEvidence.ROUTES_BEGIN,
+                DeterministicProjectFactEvidence.ROUTES_END)
+            == null
+        || !block.contains("- Repository: `" + expectedRepository + "`")
+        || !block.contains("- Source revision: `" + expectedRevision + "`")) {
+      return null;
+    }
+    return block;
+  }
+
+  static String exactSetupSourceBlock(
+      String markdown, String expectedRepository, String expectedRevision) {
+    String block = exactSetupSourceBlock(markdown);
+    if (block == null) return null;
+    String repository =
+        java.util.Base64.getEncoder()
+            .encodeToString(expectedRepository.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    if (!block.contains("- Evidence-Format: EXECUTESPEC_SETUP_SOURCES_V2")
+        || !block.contains("- Repository-Base64: " + repository + "\n")
+        || !block.contains("- Source-Revision: " + expectedRevision + "\n")) {
+      return null;
+    }
+    return block;
+  }
+
+  private static String exactSetupSourceBlock(String markdown) {
+    return uniqueBlock(
+        markdown,
+        DeterministicProjectFactEvidence.SETUP_BEGIN,
+        DeterministicProjectFactEvidence.SETUP_END);
   }
 
   private static String stripHttpBlocks(String markdown) {
+    return stripBlocks(
+        stripBlocks(markdown, HTTP_BEGIN, HTTP_END), LEGACY_HTTP_V2_BEGIN, LEGACY_HTTP_V2_END);
+  }
+
+  private static String stripEvidenceBlocks(String markdown) {
+    return stripSetupSourceBlocks(stripProjectFactBlocks(stripHttpBlocks(markdown)));
+  }
+
+  static String stripProjectFactBlocks(String markdown) {
     if (markdown == null || markdown.isBlank()) return "";
     String remaining = markdown;
     while (true) {
-      int begin = remaining.indexOf(HTTP_BEGIN);
+      int begin = remaining.indexOf(DeterministicProjectFactEvidence.BEGIN);
       if (begin < 0) return remaining;
-      int end = remaining.indexOf(HTTP_END, begin + HTTP_BEGIN.length());
+      int end =
+          remaining.indexOf(
+              DeterministicProjectFactEvidence.END,
+              begin + DeterministicProjectFactEvidence.BEGIN.length());
       if (end < 0) return remaining.substring(0, begin);
-      remaining = remaining.substring(0, begin) + remaining.substring(end + HTTP_END.length());
+      remaining =
+          remaining.substring(0, begin)
+              + remaining.substring(end + DeterministicProjectFactEvidence.END.length());
     }
+  }
+
+  static String stripSetupSourceBlocks(String markdown) {
+    return stripBlocks(
+        markdown,
+        DeterministicProjectFactEvidence.SETUP_BEGIN,
+        DeterministicProjectFactEvidence.SETUP_END);
+  }
+
+  private static String uniqueBlock(String markdown, String beginMarker, String endMarker) {
+    if (markdown == null) return null;
+    int begin = markdown.indexOf(beginMarker);
+    if (begin < 0 || markdown.indexOf(beginMarker, begin + beginMarker.length()) >= 0) return null;
+    int end = markdown.indexOf(endMarker, begin + beginMarker.length());
+    if (end < 0 || markdown.indexOf(endMarker, end + endMarker.length()) >= 0) return null;
+    if (markdown.indexOf(endMarker) < begin) return null;
+    return markdown.substring(begin, end + endMarker.length()).strip();
+  }
+
+  private static String stripBlocks(String markdown, String beginMarker, String endMarker) {
+    if (markdown == null || markdown.isBlank()) return "";
+    String remaining = markdown;
+    while (true) {
+      int begin = remaining.indexOf(beginMarker);
+      if (begin < 0) return remaining;
+      int end = remaining.indexOf(endMarker, begin + beginMarker.length());
+      if (end < 0) return remaining.substring(0, begin);
+      remaining = remaining.substring(0, begin) + remaining.substring(end + endMarker.length());
+    }
+  }
+
+  private static String safeMarkdown(String value) {
+    return (value == null ? "" : value)
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace("`", "&#96;")
+        .replace("\r", "&#13;")
+        .replace("\n", "&#10;");
   }
 }

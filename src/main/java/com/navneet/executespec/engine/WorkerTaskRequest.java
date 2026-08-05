@@ -166,6 +166,9 @@ import lombok.Builder;
  * @param dollarCap optional per-solve hard dollar ceiling forwarded from {@code
  *     EngineBudget.dollarCap}. It is enforced against task-scoped spend; the durable {@code
  *     PipelineRun.hardCapUsd} remains an independent run-wide ceiling.
+ * @param runHardCapUsd immutable run-wide cost ceiling loaded from {@code PipelineRun} before the
+ *     worker starts. Internal worker call paths use it for conservative projected-call admission;
+ *     callers do not set it directly.
  * @param taskTotalTokenCap optional JVM-local per-task input+output safety stop; null/non-positive
  *     is unbounded. It is best-effort because restart recovery does not hydrate RunCostTracker.
  * @param workerStartedAtEpochMs start timestamp used by nested provider/tool guards to enforce the
@@ -173,6 +176,11 @@ import lombok.Builder;
  * @param zeroWriteSalvageAllowed whether a zero-write attempt may make the final unverified
  *     best-guess edit. Recovery attempts over an already-mutated shared workspace set this false:
  *     "zero writes in this attempt" does not mean "empty patch for the run".
+ * @param agentRole optional physical-call attribution override for a specialized pass that reuses
+ *     the worker loop. Null/blank preserves {@code WorkerAgent}; reviewers set {@code
+ *     ReviewerAgent} so the durable usage ledger does not mislabel review spend.
+ * @param stepPrefix optional step-id prefix paired with {@code agentRole}. Null/blank preserves
+ *     {@code worker}; reviewer passes set {@code reviewer}.
  */
 @Builder(toBuilder = true)
 public record WorkerTaskRequest(
@@ -204,9 +212,12 @@ public record WorkerTaskRequest(
     Long absoluteDeadlineEpochMs,
     Long shutdownReserveMs,
     Double dollarCap,
+    Double runHardCapUsd,
     Long taskTotalTokenCap,
     Long workerStartedAtEpochMs,
-    Boolean zeroWriteSalvageAllowed) {
+    Boolean zeroWriteSalvageAllowed,
+    String agentRole,
+    String stepPrefix) {
 
   public WorkerTaskRequest {
     if (provider == null || provider.isBlank())
@@ -219,5 +230,14 @@ public record WorkerTaskRequest(
 
   public boolean zeroWriteSalvageEnabled() {
     return !Boolean.FALSE.equals(zeroWriteSalvageAllowed);
+  }
+
+  String effectiveAgentRole(String fallback) {
+    return agentRole == null || agentRole.isBlank() ? fallback : agentRole;
+  }
+
+  String effectiveStepId(String stepId) {
+    if (stepPrefix == null || stepPrefix.isBlank() || stepId == null) return stepId;
+    return stepId.startsWith("worker.") ? stepPrefix + stepId.substring("worker".length()) : stepId;
   }
 }

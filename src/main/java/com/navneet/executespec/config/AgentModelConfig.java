@@ -4,11 +4,10 @@ import java.net.http.HttpClient;
 import java.time.Duration;
 
 import com.google.genai.Client;
+import com.navneet.executespec.agent.AnthropicAttemptModelFactory;
 import com.navneet.executespec.router.ModelRegistry;
 
 import org.springframework.ai.anthropic.AnthropicChatModel;
-import org.springframework.ai.anthropic.AnthropicChatOptions;
-import org.springframework.ai.anthropic.api.AnthropicApi;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.google.genai.GoogleGenAiChatModel;
 import org.springframework.ai.google.genai.GoogleGenAiChatOptions;
@@ -33,6 +32,7 @@ public class AgentModelConfig {
   private final AgentProperties props;
   private final ApplicationContext ctx;
   private final ModelRegistry modelRegistry;
+  private final AnthropicAttemptModelFactory anthropicAttemptModelFactory;
 
   /**
    * Replaces the default (no-timeout) JDK HTTP client factory with one that has an explicit
@@ -132,14 +132,10 @@ public class AgentModelConfig {
       return null;
     }
     log.info("[AgentModelConfig] Creating system Anthropic bean ({})", model);
-    AnthropicApi api = AnthropicApi.builder().apiKey(apiKey).build();
-    // Do not set a provider-wide temperature default here. Spring AI merges the model's
-    // default options into every request, including requests that switch the model to a newer
-    // Anthropic family. Sonnet 5/Opus 4.7+ reject the otherwise harmless legacy temperature=0.0
-    // field, so a default configured for the startup model (usually Haiku) can break a per-run
-    // frontier-model override before LlmRouter has a chance to omit it.
-    var options = AnthropicChatOptions.builder().model(model).maxTokens(maxTokens).build();
-    return AnthropicChatModel.builder().anthropicApi(api).defaultOptions(options).build();
+    // Keep this compatibility bean bounded and single-attempt too. Production router calls build
+    // a fresh admitted-attempt model, but role beans and focused legacy callers must not regain
+    // Spring AI's hidden ten-attempt default.
+    return anthropicAttemptModelFactory.create(apiKey, model, maxTokens, 300);
   }
 
   /**

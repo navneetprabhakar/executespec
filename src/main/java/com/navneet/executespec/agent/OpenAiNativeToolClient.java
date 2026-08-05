@@ -179,6 +179,7 @@ public class OpenAiNativeToolClient {
     // connection or stalled body never blocks the harness loop indefinitely while keeping TCP/TLS
     // pooling across the many attempts a worker makes.
     RestClient client = resolveClient(effectiveBaseUrl, effectiveReadTimeout(request));
+    request.signalPhysicalAttemptStarted();
     JsonNode response;
     try {
       // RR-1084 — decode with an explicit byte ceiling and bounded JSON structural limits instead
@@ -528,5 +529,11 @@ public class OpenAiNativeToolClient {
       String apiKey,
       String baseUrl,
       Map<String, Object> extraBody,
-      Integer readTimeoutSeconds) {}
+      Integer readTimeoutSeconds,
+      Runnable physicalAttemptStartedCallback) {
+
+    void signalPhysicalAttemptStarted() {
+      if (physicalAttemptStartedCallback != null) physicalAttemptStartedCallback.run();
+    }
+  }
 }

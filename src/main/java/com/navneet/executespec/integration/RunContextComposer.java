@@ -4,11 +4,8 @@ import static com.navneet.executespec.integration.RunPipelineSupport.languageCon
 import static com.navneet.executespec.integration.RunPipelineSupport.lastPathSegment;
 import static com.navneet.executespec.integration.RunPipelineSupport.truncate;
 
-import java.io.IOException;
 import java.nio.file.Files;
-import java.nio.file.LinkOption;
 import java.nio.file.Path;
-import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
@@ -18,12 +15,9 @@ import com.navneet.executespec.agent.PromptTrustBoundary;
 import com.navneet.executespec.auth.repository.ProjectRepository;
 import com.navneet.executespec.codeintel.ProjectArchitectureService;
 import com.navneet.executespec.codeintel.TieredCodemapSelector;
-import com.navneet.executespec.harness.ExecutionResult;
-import com.navneet.executespec.harness.TaskOutcome;
 import com.navneet.executespec.harness.UiStyleResolver;
 import com.navneet.executespec.project.entity.ProjectRepo;
 import com.navneet.executespec.project.service.ProjectRepoService;
-import com.navneet.executespec.reviewer.ReviewerResult;
 import com.navneet.executespec.router.ModelAccessService;
 import com.navneet.executespec.router.ModelRegistry;
 import com.navneet.executespec.security.SafeWorkspacePath;
@@ -36,9 +30,8 @@ import lombok.extern.slf4j.Slf4j;
 /**
  * Run-context / prompt-block builders extracted from {@link RunOrchestrator} (god-class split,
  * increment 3 — audit #43). Stateless string assembly with no run-lifecycle state: the run-meta
- * README, the {@code .agent-context} project descriptor, the design-system block, the code-intel
- * codemap block, and provider/model resolution. Every method is a relocated, byte-identical
- * builder.
+ * {@code .agent-context} project descriptor, design-system block, code-intel codemap block, and
+ * provider/model resolution. Every method is a relocated, byte-identical builder.
  *
  * <p>Includes the multi-repo workspace summary ({@code buildMultiRepoSummary} + {@code
  * buildLanguageParityBlock}) since inc-3b; the {@code languageConventionHint} mapping it uses was
@@ -73,119 +66,6 @@ class RunContextComposer {
   private final ProjectRepository projectRepository;
   private final ModelRegistry modelRegistry;
   private final ProjectRepoService projectRepoService;
-
-  void ensureReadme(
-      String runId,
-      Path workspace,
-      String userRequest,
-      Plan plan,
-      ExecutionResult execResult,
-      ReviewerResult reviewResult,
-      Instant startedAt) {
-    // RR-465 — the workspace holds a customer-controlled clone. `README.md` may be a symlink to a
-    // host path; a dangling one would make writeString CREATE the target outside the workspace.
-    Path readme;
-    try {
-      readme = SafeWorkspacePath.resolveWithin(workspace, "README.md");
-    } catch (IOException | SecurityException e) {
-      log.warn("RunOrchestrator run={} refused unsafe README.md path: {}", runId, e.getMessage());
-      return;
-    }
-    if (Files.exists(readme, LinkOption.NOFOLLOW_LINKS)) {
-      log.debug(
-          "RunOrchestrator run={} README.md already present (planner-authored), skipping", runId);
-      return;
-    }
-    try {
-      Files.writeString(
-          readme, renderRunReadme(runId, userRequest, plan, execResult, reviewResult, startedAt));
-      log.info(
-          "RunOrchestrator run={} wrote run-meta README.md ({} bytes)", runId, Files.size(readme));
-    } catch (IOException e) {
-      log.warn("RunOrchestrator run={} failed to write README.md: {}", runId, e.getMessage());
-    }
-  }
-
-  String renderRunReadme(
-      String runId,
-      String userRequest,
-      Plan plan,
-      ExecutionResult execResult,
-      ReviewerResult reviewResult,
-      Instant startedAt) {
-    StringBuilder sb = new StringBuilder();
-    sb.append("# ")
-        .append(plan.planTitle() != null ? plan.planTitle() : "Run Output")
-        .append("\n\n");
-    if (plan.planSummary() != null && !plan.planSummary().isBlank()) {
-      sb.append(plan.planSummary()).append("\n\n");
-    } else {
-      sb.append("This project was generated from the following request:\n\n> ")
-          .append(userRequest)
-          .append("\n\n");
-    }
-
-    // How to run
-    String buildCmd = plan.buildCommand();
-    if (buildCmd != null && !buildCmd.isBlank()) {
-      sb.append("## How to build / run\n\n```bash\n").append(buildCmd).append("\n```\n\n");
-    } else {
-      sb.append("## How to run\n\nSee source files for entry points.\n\n");
-    }
-
-    // Task summary
-    sb.append("## Tasks\n\n| ID | Title | Status |\n|---|---|---|\n");
-    for (TaskOutcome t : execResult.perTask()) {
-      sb.append("| `")
-          .append(t.taskId())
-          .append("` | ")
-          .append(t.taskTitle() == null ? "" : t.taskTitle().replace("|", "\\|"))
-          .append(" | `")
-          .append(t.status().name())
-          .append("` |\n");
-    }
-    sb.append("\n");
-
-    // Review verdict
-    if (reviewResult != null) {
-      sb.append("## Code review\n\n")
-          .append("**Verdict:** `")
-          .append(reviewResult.overall().name())
-          .append("`");
-      if (reviewResult.finalBuildPassed() != null) {
-        sb.append("  \n**Build passed:** `").append(reviewResult.finalBuildPassed()).append("`");
-      }
-      sb.append("\n\n");
-      if (reviewResult.generalPassSummary() != null
-          && !reviewResult.generalPassSummary().isBlank()) {
-        sb.append("**General review:** ").append(reviewResult.generalPassSummary()).append("\n\n");
-      }
-      if (reviewResult.wiringPassSummary() != null && !reviewResult.wiringPassSummary().isBlank()) {
-        sb.append("**Wiring review:** ").append(reviewResult.wiringPassSummary()).append("\n\n");
-      }
-    }
-
-    // Run metadata
-    sb.append("## Run details\n\n")
-        .append("- **Run ID:** `")
-        .append(runId)
-        .append("`\n")
-        .append("- **Started:** `")
-        .append(startedAt)
-        .append("`\n")
-        .append("- **Completed:** `")
-        .append(Instant.now())
-        .append("`\n")
-        .append("- **Harness:** ExecuteSpec V2\n")
-        .append("- **Overall:** `")
-        .append(execResult.overall().name())
-        .append("`\n");
-    if (plan.projectType() != null && !plan.projectType().isBlank()) {
-      sb.append("- **Project type:** `").append(plan.projectType()).append("`\n");
-    }
-    sb.append("\n---\n\n*Generated by ExecuteSpec V2.*\n");
-    return sb.toString();
-  }
 
   void writeAgentContext(Path workspace, Plan plan) {
     if (workspace == null || plan.projectType() == null) return;

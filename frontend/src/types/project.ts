@@ -101,7 +101,7 @@ export interface ProjectCodeIndexReadiness {
   inventoryTruncated: boolean;
   semanticSearchAvailable: boolean;
   lexicalFallbackAvailable: boolean;
-  relationshipGraphAvailable: false;
+  relationshipGraphAvailable: boolean;
   retrievalMode: 'SEMANTIC' | 'LEXICAL';
   embeddingProvider: string | null;
   embeddingModel: string | null;

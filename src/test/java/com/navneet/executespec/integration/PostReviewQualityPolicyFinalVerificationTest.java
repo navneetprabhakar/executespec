@@ -64,4 +64,13 @@ class PostReviewQualityPolicyFinalVerificationTest {
     r.setExecutableVerificationStatus("BUILD_ONLY");
     assertEquals(FinalVerification.LOW_QUALITY, PostReviewQualityPolicy.finalVerification(r, 70));
   }
+
+  @Test
+  void reviewerProtocolFailureIsUnavailableForAutomaticWorkerMutation() {
+    ValidationReport r = report(PipelineResult.NEEDS_ATTENTION, 60);
+    r.setReviewerVerdict("REVIEW_FAILED");
+
+    org.junit.jupiter.api.Assertions.assertTrue(
+        PostReviewQualityPolicy.reviewerProtocolUnavailable(r));
+  }
 }

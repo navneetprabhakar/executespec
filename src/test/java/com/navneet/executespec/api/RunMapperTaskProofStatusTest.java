@@ -12,7 +12,8 @@ import org.junit.jupiter.api.Test;
 class RunMapperTaskProofStatusTest {
 
   private final RunMapper mapper =
-      new RunMapper(null, null, null, null, null, null, null, null, null, new ObjectMapper());
+      new RunMapper(
+          null, null, null, null, null, null, null, null, null, null, new ObjectMapper(), null);
 
   @Test
   void completeWorkerBoundaryWithUnprovenGoalIsExposedAsPartial() {
@@ -129,5 +130,67 @@ class RunMapperTaskProofStatusTest {
   void unprovenRunCannotExposeAPassingVerifiedScore() {
     assertThat(RunMapper.displayVerifiedScore(97, "PARTIAL")).isEqualTo(84);
     assertThat(RunMapper.displayVerifiedScore(97, "COMPLETE")).isEqualTo(97);
+  }
+
+  @Test
+  void serverWorkspacePathsAreRedactedFromProjectedTaskDiagnostics() {
+    RunMapper redactingMapper =
+        new RunMapper(
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            new ObjectMapper(),
+            new com.navneet.executespec.security.WorkspacePathRedaction(
+                new com.navneet.executespec.config.AgentProperties()));
+    AgentTask task =
+        AgentTask.builder()
+            .taskId("T1")
+            .status("FAILED")
+            .lastLlmFailure("build failed under /opt/app/workspace/x/y")
+            .goalDonenessJson(
+                "{\"state\":\"NOT_DONE\",\"reason\":\"missing tests\","
+                    + "\"incompleteItems\":[\"tests absent at /opt/app/workspace/x/y/tests\"],"
+                    + "\"risks\":[\"artifacts left in /opt/app/workspace/x/y/tmp\"]}")
+            .build();
+
+    TaskSummary summary = redactingMapper.toTaskSummary(task);
+
+    assertThat(summary.failureReason())
+        .doesNotContain("/opt/app/workspace/x/y")
+        .contains("[workspace path redacted]");
+    assertThat(summary.goalDoneness().toString())
+        .doesNotContain("/opt/app/workspace/x/y")
+        .contains("[workspace path redacted]");
+  }
+
+  @Test
+  void failedRowWithoutStatusReasonFallsBackToTheStableFailureCodePrefixOnly() {
+    assertThat(
+            RunMapper.displayRunStatusReason(
+                null,
+                "WORKSPACE_PREFLIGHT_FAILED:CLONE_MISSING: clone missing for acme/api",
+                "FAILED",
+                "FAILED"))
+        .isEqualTo("WORKSPACE_PREFLIGHT_FAILED");
+    // Free prose never becomes a fake status code and detail after the colon never leaks.
+    assertThat(
+            RunMapper.displayRunStatusReason(
+                null, "provider stack api_key=secret", "FAILED", "FAILED"))
+        .isNull();
+    // Non-failed rows keep their existing null semantics.
+    assertThat(RunMapper.displayRunStatusReason(null, "ANY:detail", "COMPLETE", "COMPLETE"))
+        .isNull();
+    // A persisted reason always wins.
+    assertThat(
+            RunMapper.displayRunStatusReason(
+                "CLEAN_COMPLETION", "IGNORED:detail", "COMPLETE", "COMPLETE"))
+        .isEqualTo("CLEAN_COMPLETION");
   }
 }

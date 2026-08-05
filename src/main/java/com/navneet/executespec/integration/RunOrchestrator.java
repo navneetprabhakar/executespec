@@ -1,6 +1,5 @@
 package com.navneet.executespec.integration;
 
-import static com.navneet.executespec.integration.RunPipelineSupport.deserializeRepoIds;
 import static com.navneet.executespec.integration.RunPipelineSupport.mapOverallToV1Status;
 import static com.navneet.executespec.integration.RunPipelineSupport.serializeRepoIds;
 import static com.navneet.executespec.integration.RunPipelineSupport.truncate;
@@ -59,7 +58,6 @@ import com.navneet.executespec.project.service.ProjectRepoService;
 import com.navneet.executespec.report.entity.ValidationReport;
 import com.navneet.executespec.reviewer.PostEditFormatter;
 import com.navneet.executespec.reviewer.ReviewerAgent;
-import com.navneet.executespec.reviewer.ReviewerRequest;
 import com.navneet.executespec.reviewer.ReviewerResult;
 import com.navneet.executespec.router.AvailableProviderResolver;
 import com.navneet.executespec.router.LlmProvider;
@@ -259,33 +257,19 @@ public class RunOrchestrator implements RunControlPort {
   /** Submit-time handoff used to stamp local intent before the async pipeline can start. */
   private final ThreadLocal<Boolean> submitLocalExecutionIntent = new ThreadLocal<>();
 
-  /**
-   * RR-233 / RR-234 / RR-236 — submit-time policy that MUST be durable on the run row before the
-   * async pipeline can act on it.
-   *
-   * <p>All three findings are the same defect: a control was persisted <em>after</em> the thing it
-   * controls had already started. The customer's hard cost cap was written after {@code submitRun}
-   * returned, so a fast planner clamped to the platform cap before ever seeing the tighter customer
-   * cap; the "don't publish this" consent lived only in a Redis key whose own contract says a JVM
-   * crash silently reverts it to auto-push; and the run's tenant was stamped from the caller's home
-   * org rather than the authorized host project's org.
-   *
-   * <p>Handed over on the submitting (request) thread — the same mechanism V261 used for {@code
-   * localExecutionRequested} — and read inside the {@code PipelineRun.builder()} so the very first
-   * persisted row already carries the policy.
-   *
-   * @param userCostCap customer's "stop at $X" ceiling; null means platform cap only
-   * @param skipAutoPush true when the customer asked NOT to publish automatically
-   * @param tenantOrgId org that owns the project/data boundary; host project org when scoped
-   * @param billingOrgId immutable payer/provider-policy org from the submitting actor
-   */
+  /** Submit-time controls stamped on the initial run row before asynchronous work can start. */
   public record SubmitPolicy(
       Double userCostCap,
       boolean skipAutoPush,
       String tenantOrgId,
       String billingOrgId,
-      String triggeredByFinding) {
-    public static final SubmitPolicy NONE = new SubmitPolicy(null, false, null, null, null);
+      String triggeredByFinding,
+      String checkoutBranch,
+      String publicationRepoFullName,
+      Integer publicationPrNumber,
+      String publicationHeadSha) {
+    public static final SubmitPolicy NONE =
+        new SubmitPolicy(null, false, null, null, null, null, null, null, null);
   }
 
   private final ThreadLocal<SubmitPolicy> submitPolicyIntent = new ThreadLocal<>();
@@ -531,7 +515,8 @@ public class RunOrchestrator implements RunControlPort {
         source.isTddMode(),
         source.getUserCostCap(),
         source.isSkipAutoPush(),
-        source.getOrgId());
+        source.getOrgId(),
+        source.getCheckoutBranch());
   }
 
   record IterationPolicy(
@@ -543,7 +528,8 @@ public class RunOrchestrator implements RunControlPort {
       boolean tddMode,
       Double userCostCap,
       boolean skipAutoPush,
-      String tenantOrgId) {}
+      String tenantOrgId,
+      String checkoutBranch) {}
 
   static String normalizeIterationExecutionMode(String executionMode) {
     return "PROTOTYPE".equalsIgnoreCase(executionMode) ? "PROTOTYPE" : "PRODUCTION";
@@ -1017,6 +1003,12 @@ public class RunOrchestrator implements RunControlPort {
       Boolean requireBenchmarkPriorForAutomaticContinuation,
       String lowComplexityWorkerStartTier) {
     String runId = reservedPipelineRunStore.currentOrRandomRunId();
+    SubmitPolicy policy =
+        submitPolicyIntent.get() == null ? SubmitPolicy.NONE : submitPolicyIntent.get();
+    RunBranchPublicationIntent.Resolved branchIntent =
+        RunBranchPublicationIntent.resolve(branchOverride, policy);
+    final String branchOverrideFinal = branchIntent.publicationBranch();
+    final String checkoutBranchFinal = branchIntent.checkoutBranch();
     String provider = contextComposer.normalizeProvider(aiProvider, projectId, runId);
 
     // RR-241 — the plan gate is the cost/governance checkpoint before provider spend and
@@ -1045,11 +1037,6 @@ public class RunOrchestrator implements RunControlPort {
     String plannerDbModel = route.plannerModel();
     String reviewerDbModel = route.reviewerModel();
 
-    // RR-233 / RR-234 / RR-236 — read the submit-time policy on the SUBMITTING thread, before the
-    // async pipeline exists. Every one of these controls used to be written after submitRun
-    // returned, i.e. after the pipeline that consumes them had already started.
-    SubmitPolicy policy =
-        submitPolicyIntent.get() == null ? SubmitPolicy.NONE : submitPolicyIntent.get();
     // RR-236 — a run's tenant is the org that OWNS the work, which for a project-scoped run is the
     // authorized host project's org, not the actor's home org. An external collaborator's run used
     // to carry the host projectId with their personal orgId, splitting the run away from the tenant
@@ -1070,6 +1057,11 @@ public class RunOrchestrator implements RunControlPort {
             .sourceType(source != null ? source : "MANUAL")
             .repoUrl(repoUrl)
             .repoMode(repoMode)
+            .branchOverride(branchOverrideFinal)
+            .checkoutBranch(checkoutBranchFinal)
+            .publicationRepoFullName(policy.publicationRepoFullName())
+            .publicationPrNumber(policy.publicationPrNumber())
+            .publicationHeadSha(policy.publicationHeadSha())
             .aiProvider(provider.toUpperCase())
             .requestedProvider(provider.toUpperCase())
             .requestedModel(canonicalPin)
@@ -1169,8 +1161,6 @@ public class RunOrchestrator implements RunControlPort {
     final List<UUID> selectedRepoIdsFinal = selectedRepoIds != null ? selectedRepoIds : List.of();
     final String githubPatFinal = githubPat;
     final boolean tddModeFinal = tddMode;
-    final String branchOverrideFinal =
-        (branchOverride == null || branchOverride.isBlank()) ? null : branchOverride.trim();
     final String prReviewCommentsFinal =
         (prReviewComments == null || prReviewComments.isBlank()) ? null : prReviewComments.trim();
     final String lowComplexityWorkerStartTierFinal =
@@ -1216,6 +1206,14 @@ public class RunOrchestrator implements RunControlPort {
       throw dispatchFailure;
     }
     return run;
+  }
+
+  static String normalizeBranchOverride(String branchOverride) {
+    return RunBranchPublicationIntent.normalize(branchOverride);
+  }
+
+  static String resolveCheckoutBranch(PipelineRun run, String legacyBranchOverride) {
+    return RunBranchPublicationIntent.checkoutBranch(run, legacyBranchOverride);
   }
 
   static void applyContinuationSubmitOptions(
@@ -1591,6 +1589,7 @@ public class RunOrchestrator implements RunControlPort {
 
       if (approvedPlanContinuation == null) {
         PipelineRun workspaceRun = runRepo.findById(runId).orElse(null);
+        String cloneBranch = resolveCheckoutBranch(workspaceRun, branchOverride);
         StandaloneExistingWorkspaceAdmission.Admission admission =
             standaloneExistingWorkspaceAdmission.prepareInitial(
                 runId,
@@ -1599,7 +1598,8 @@ public class RunOrchestrator implements RunControlPort {
                 localRun,
                 workspaceRun == null ? null : workspaceRun.getRepoMode(),
                 workspaceRun == null ? null : workspaceRun.getRepoUrl(),
-                githubPat);
+                githubPat,
+                cloneBranch);
         if (!admission.admitted()) {
           terminate(runId, "FAILED", "WORKSPACE_PREFLIGHT_FAILED:" + admission.reason(), startedAt);
           return;
@@ -1616,6 +1616,8 @@ public class RunOrchestrator implements RunControlPort {
           if (repos.isEmpty()) {
             log.info("V2 run={} project has no linked brownfield repositories", runId);
           } else {
+            PipelineRun workspaceRun = runRepo.findById(runId).orElse(null);
+            String cloneBranch = resolveCheckoutBranch(workspaceRun, branchOverride);
             List<WorkspaceInitService.RepoToClone> toClone =
                 repos.stream()
                     .map(
@@ -1624,7 +1626,7 @@ public class RunOrchestrator implements RunControlPort {
                                 r.getGithubRepoFullName(),
                                 "https://github.com/" + r.getGithubRepoFullName(),
                                 r.getId(),
-                                branchOverride != null ? branchOverride : r.getDefaultBranch()))
+                                cloneBranch != null ? cloneBranch : r.getDefaultBranch()))
                     .toList();
             if (sourceRunId == null) {
               workspaceInit.cloneMultipleRepos(runId, toClone, githubPat);
@@ -1646,6 +1648,27 @@ public class RunOrchestrator implements RunControlPort {
               "WORKSPACE_PREFLIGHT_FAILED:repository clone or inventory failed",
               startedAt);
           return;
+        }
+      }
+
+      // Existing-PR authority includes the exact head observed during synchronous admission. A
+      // branch name alone is insufficient: it may advance between preflight and async clone. Prove
+      // the actual cloned HEAD before classifier/planner spend, including crash-recovered clones.
+      if (approvedPlanContinuation == null && !localRun) {
+        PipelineRun publicationRun = runRepo.findById(runId).orElse(null);
+        if (publicationRun != null && publicationRun.getPublicationHeadSha() != null) {
+          try {
+            workspaceInit.requirePublicationHead(
+                runId,
+                publicationRun.getPublicationRepoFullName(),
+                publicationRun.getPublicationHeadSha());
+          } catch (RuntimeException staleHead) {
+            log.warn(
+                "V2 run={} existing-PR head admission failed: {}", runId, staleHead.getMessage());
+            terminate(
+                runId, "FAILED", "WORKSPACE_PREFLIGHT_FAILED:pull-request head changed", startedAt);
+            return;
+          }
         }
       }
 
@@ -2014,7 +2037,7 @@ public class RunOrchestrator implements RunControlPort {
         var gatePreparation =
             planGateCoordinator.prepare(needsApproval, runId, runRow.getUserRequest(), plan);
         contextComposer.writeAgentContext(workspace, plan);
-        persistEstimate(runId, provider, model, plan);
+        persistEstimate(runId, provider, model, plan, lowComplexityWorkerStartTierOverride);
         designBlock = contextComposer.buildDesignBlock(userRequest, plan);
         // Phase 1: book the planner's own delta, not the whole-run snapshot (RR-1561).
         afterPlan = costTracker.snapshot(runId);
@@ -2120,7 +2143,6 @@ public class RunOrchestrator implements RunControlPort {
         terminate(runId, "FAILED", INTERNAL_ERROR_REASON, INTERNAL_ERROR_REASON, startedAt);
         return;
       }
-      brownfieldHttpContractGuard.assertCompatibleIfPresent(runId);
       persistenceWriter.applyExecutionResultToTasks(runId, execResult);
       op = runOperationLifecycle.completeAndClear(op);
       // Phase 2 delta: tokens spent by the executor (all worker tasks).
@@ -2128,6 +2150,19 @@ public class RunOrchestrator implements RunControlPort {
       long workerIn = afterExec.inputTokens() - afterPlan.inputTokens();
       long workerOut = afterExec.outputTokens() - afterPlan.outputTokens();
       tokenAttributor.attributeWorker(runId, execResult, workerIn, workerOut, upperProvider, model);
+
+      if (execResult.overall() == ExecutionResult.Overall.ABORTED) {
+        StatusAndReason aborted = resolveTerminalStatus(execResult, null);
+        terminate(
+            runId,
+            aborted.status(),
+            aborted.reason(),
+            "execution stopped: " + aborted.reason(),
+            startedAt);
+        return;
+      }
+
+      brownfieldHttpContractGuard.assertCompatibleIfPresent(runId);
 
       // 2.5 Code-gen-only stop (benchmark)
       // RL-2026-05-050 — the SWE-bench harness wants the REAL classifier→planner→worker decisioning
@@ -2387,15 +2422,7 @@ public class RunOrchestrator implements RunControlPort {
         }
       }
 
-      // 4. Ensure README.md exists in the workspace
-      // If the planner emitted a "create README" task the file is already there
-      // and we leave it alone. If not (typical for trivial specs), write a
-      // deterministic run-meta README so the download-zip experience always
-      // includes an entry-point doc.
-      contextComposer.ensureReadme(
-          runId, workspace, userRequest, plan, execResult, reviewResult, startedAt);
-
-      // 4b. Pre-resolve terminal status BEFORE the validation report.
+      // 4. Pre-resolve terminal status BEFORE the validation report.
       // 2026-05-10 — bug fix for dev run 61c9fffa where the run came back
       // status=COMPLETE + statusReason=CLEAN_WITH_INTERMEDIATE_WARNINGS but
       // the validation report was persisted with pipelineResult=FAILED.
@@ -2642,8 +2669,19 @@ public class RunOrchestrator implements RunControlPort {
             PipelineRun fresh = runRepo.findById(runId).orElse(null);
             // RR-1689 — publication authority is bound to the still-current solution attempt.
             if (fresh != null && publicationFence.mayPublish(fresh)) {
-              scmPushService.push(fresh);
-              log.info("V2 run={} auto-pushed to SCM (projectScoped={})", runId, projectId != null);
+              com.navneet.executespec.integration.scm.ScmPushService.PushResult pushResult =
+                  scmPushService.push(fresh);
+              if (pushResult.pushed()) {
+                log.info(
+                    "V2 run={} auto-pushed to SCM (projectScoped={})", runId, projectId != null);
+              } else {
+                log.warn(
+                    "V2 run={} auto-push did not publish status={} code={} gate={}",
+                    runId,
+                    pushResult.status(),
+                    pushResult.code(),
+                    pushResult.blockingGate());
+              }
             }
           } catch (Exception pushEx) {
             log.warn(
@@ -3030,7 +3068,7 @@ public class RunOrchestrator implements RunControlPort {
         req.selectedRepoIds(),
         req.githubPat(),
         req.tddMode(),
-        req.branchOverride(),
+        req.checkoutBranch(),
         null,
         continuation == null ? null : continuation.pinnedModel(),
         continuation == null ? null : continuation.lowComplexityWorkerStartTierOverride(),
@@ -3079,7 +3117,7 @@ public class RunOrchestrator implements RunControlPort {
       List<UUID> selectedRepoIds,
       String githubPat,
       boolean tddMode,
-      String branchOverride,
+      String checkoutBranch,
       PlanGateContinuation planGateContinuation) {
 
     /** Compatibility constructor for pause/crash resume callers that predate plan suspension. */
@@ -3094,7 +3132,7 @@ public class RunOrchestrator implements RunControlPort {
         List<UUID> selectedRepoIds,
         String githubPat,
         boolean tddMode,
-        String branchOverride) {
+        String checkoutBranch) {
       this(
           runId,
           userRequest,
@@ -3106,7 +3144,7 @@ public class RunOrchestrator implements RunControlPort {
           selectedRepoIds,
           githubPat,
           tddMode,
-          branchOverride,
+          checkoutBranch,
           null);
     }
 
@@ -3117,39 +3155,12 @@ public class RunOrchestrator implements RunControlPort {
 
     public static RunPipelineRequest fromPausedRow(
         com.navneet.executespec.state.entity.PipelineRun run, PlanGateContinuation continuation) {
-      // Worker model is the closest analogue to a single "run model" — it's what the bulk of the
-      // run's LLM calls used. Resume re-resolves per-tier per-call so this is mostly a label;
-      // null falls through to ModelResolver defaults.
-      return new RunPipelineRequest(
-          run.getRunId(),
-          run.getUserRequest(),
-          run.getAiProvider(),
-          run.getWorkerModel(),
-          run.getApprovedExecutionMode() == null ? "PRODUCTION" : run.getApprovedExecutionMode(),
-          /* skipApproval */ true, // already approved before the original execution started
-          run.getProjectId(),
-          deserializeRepoIds(run.getSelectedRepoIds()),
-          /* githubPat */ null, // resume reuses workspace state — no fresh PAT needed for clones
-          /* tddMode */ false,
-          /* branchOverride */ null,
-          continuation);
+      return RunBranchPublicationIntent.pausedRequest(run, continuation);
     }
 
     public static RunPipelineRequest fromApprovedPlanRow(
         PipelineRun run, PlanGateContinuation continuation) {
-      return new RunPipelineRequest(
-          run.getRunId(),
-          run.getUserRequest(),
-          run.getAiProvider(),
-          run.getWorkerModel(),
-          run.getApprovedExecutionMode() == null ? "PRODUCTION" : run.getApprovedExecutionMode(),
-          true,
-          run.getProjectId(),
-          deserializeRepoIds(run.getSelectedRepoIds()),
-          null,
-          false,
-          null,
-          continuation);
+      return RunBranchPublicationIntent.approvedPlanRequest(run, continuation);
     }
   }
 
@@ -3306,6 +3317,9 @@ public class RunOrchestrator implements RunControlPort {
             });
     String actualStatus = persistedStatus[0];
     String actualReason = persistedReason[0];
+    if (terminalClaim > 0 && !"PAUSED".equalsIgnoreCase(actualStatus)) {
+      validationKickoff.refreshRunGoalDecisionAfterTerminal(runId);
+    }
     broadcaster.emit(runId, RunEvent.runStatus(runId, actualStatus));
     broadcaster.emit(runId, RunEvent.costUpdate(runId, cost.costUsd()));
     broadcaster.emit(runId, RunEvent.complete(runId, actualStatus, actualReason));
@@ -3367,18 +3381,6 @@ public class RunOrchestrator implements RunControlPort {
     }
   }
 
-  /**
-   * Writes a run-meta README.md into the workspace if one doesn't already exist.
-   *
-   * <p>The planner is instructed (in prompts/planner.md invariant #3) to emit a "Create README.md"
-   * task for non-trivial specs. That user-facing README is authored by the worker and takes
-   * precedence — we never overwrite it. For trivial specs (single-file, no framework) the planner
-   * skips the README task; this method then writes a deterministic run-meta README so the
-   * download-zip experience always includes an entry-point doc.
-   *
-   * <p>Best-effort — IO errors are logged and swallowed. A missing README isn't worth failing a run
-   * over.
-   */
   // Run-end validation-report kickoff (assemble ReportInput + accuracy + synthesise ReviewIssues +
   // score) moved to RunValidationKickoff (god-class split inc-5b); called via validationKickoff.
 
@@ -3391,8 +3393,10 @@ public class RunOrchestrator implements RunControlPort {
    * falls back to filesystem heuristics — works for simple cases but less reliable for polyglot
    * workspaces.
    */
-  private void persistEstimate(String runId, String provider, String model, Plan plan) {
-    costEstimatePersister.persistEstimate(runId, provider, model, plan);
+  private void persistEstimate(
+      String runId, String provider, String model, Plan plan, String lowComplexityWorkerStartTier) {
+    costEstimatePersister.persistEstimate(
+        runId, provider, model, plan, lowComplexityWorkerStartTier);
   }
 
   /**
@@ -3555,11 +3559,11 @@ public class RunOrchestrator implements RunControlPort {
       boolean benchmarkPriorRequired,
       boolean routePinned) {
     // RR-826 remainder — escalate only on MEASURED low quality. A null report is UNAVAILABLE, not
-    // failed output: re-running the task on a stronger model cannot fix a report generator that
-    // threw, and doing so on every such run converts one persistent bug into recurring provider
-    // spend on every run in the fleet. Stamp the honest reason instead (see
+    // failed output: re-running on a stronger model cannot fix a report generator that threw, and
+    // doing so fleet-wide converts one persistent bug into recurring spend. Stamp the reason (see
     // applyFinalVerificationStatus) and stop.
     if (!postReviewContinuationEnabled
+        || PostReviewQualityPolicy.reviewerProtocolUnavailable(report)
         || PostReviewQualityPolicy.finalVerification(report, postReviewRequiredQualityThreshold)
             != PostReviewQualityPolicy.FinalVerification.LOW_QUALITY) {
       return Optional.empty();
@@ -3846,7 +3850,7 @@ public class RunOrchestrator implements RunControlPort {
       try {
         rerunReviewResult =
             reviewer.review(
-                ReviewerRequest.builder()
+                InitialReviewerRequestPolicy.builder()
                     .provider(reviewerRoute.provider())
                     .model(reviewerRoute.model())
                     .strictProvider(true)
@@ -4269,38 +4273,14 @@ public class RunOrchestrator implements RunControlPort {
   static StatusAndReason applyStandardsGateStatus(
       StatusAndReason base,
       java.util.List<com.navneet.executespec.reviewer.model.ReviewIssue> issues) {
-    if (base == null || "FAILED".equals(base.status()) || issues == null) return base;
-    boolean unavailable =
-        issues.stream()
-            .map(com.navneet.executespec.reviewer.model.ReviewIssue::getId)
-            .filter(java.util.Objects::nonNull)
-            .anyMatch(id -> id.startsWith("SYNTH-STANDARD-UNAVAILABLE"));
-    if (unavailable) return new StatusAndReason("PARTIAL", "STANDARDS_ENFORCEMENT_UNAVAILABLE");
-    boolean blocking =
-        issues.stream()
-            .map(com.navneet.executespec.reviewer.model.ReviewIssue::getId)
-            .filter(java.util.Objects::nonNull)
-            .anyMatch(id -> id.startsWith("SYNTH-STANDARD-BLOCKING"));
-    return blocking ? new StatusAndReason("PARTIAL", "STANDARDS_BLOCKING_VIOLATION") : base;
+    return RunTerminalStatusPolicy.applyStandards(base, issues);
   }
 
   /** Configured architecture invariants are hard evidence, not a decorative report. */
   static StatusAndReason applyInvariantGateStatus(
       StatusAndReason base,
       java.util.List<com.navneet.executespec.reviewer.model.ReviewIssue> issues) {
-    if (base == null || "FAILED".equals(base.status()) || issues == null) return base;
-    boolean unavailable =
-        issues.stream()
-            .map(com.navneet.executespec.reviewer.model.ReviewIssue::getId)
-            .filter(java.util.Objects::nonNull)
-            .anyMatch(id -> id.startsWith("SYNTH-INVARIANT-UNAVAILABLE"));
-    if (unavailable) return new StatusAndReason("PARTIAL", "INVARIANT_ENFORCEMENT_UNAVAILABLE");
-    boolean violated =
-        issues.stream()
-            .map(com.navneet.executespec.reviewer.model.ReviewIssue::getId)
-            .filter(java.util.Objects::nonNull)
-            .anyMatch(id -> id.startsWith("SYNTH-INVARIANT-VIOLATION"));
-    return violated ? new StatusAndReason("PARTIAL", "ARCHITECTURE_INVARIANT_VIOLATION") : base;
+    return RunTerminalStatusPolicy.applyInvariants(base, issues);
   }
 
   /** Multi-repo context moved to {@link RunContextComposer} and {@link RunPipelineSupport}. */

@@ -122,6 +122,7 @@ class RunLifecycleServiceContinuationApprovalTest {
       mock(DurableCorrectionLifecycle.class);
   private final CorrectionWorkspaceTransaction.Checkpoint correctionCheckpoint =
       new CorrectionWorkspaceTransaction.Checkpoint(
+          Path.of("/tmp/executespec-test-repository"),
           java.util.List.of(
               new CorrectionWorkspaceTransaction.RepositoryCheckpoint(
                   Path.of("/tmp/executespec-test-repository"), "head", "tree")));

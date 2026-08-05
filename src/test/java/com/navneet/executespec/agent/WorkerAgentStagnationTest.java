@@ -6,15 +6,18 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -38,8 +41,11 @@ import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
+import org.springframework.ai.chat.metadata.ChatGenerationMetadata;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
+import org.springframework.ai.tool.ToolCallback;
+import org.springframework.ai.tool.definition.DefaultToolDefinition;
 
 /**
  * Pins the stagnation guard introduced for the run {@code a076c876} task T2 runaway (2026-05-03).
@@ -66,6 +72,26 @@ class WorkerAgentStagnationTest {
     return new ChatResponse(List.of(new Generation(msg)));
   }
 
+  private static ChatResponse outputCappedWithoutTools(String text) {
+    AssistantMessage msg = AssistantMessage.builder().content(text).build();
+    return new ChatResponse(
+        List.of(
+            new Generation(msg, ChatGenerationMetadata.builder().finishReason("length").build())));
+  }
+
+  private static ToolCallback callback(String name) {
+    ToolCallback callback = mock(ToolCallback.class);
+    lenient()
+        .when(callback.getToolDefinition())
+        .thenReturn(
+            DefaultToolDefinition.builder()
+                .name(name)
+                .description(name)
+                .inputSchema("{\"type\":\"object\"}")
+                .build());
+    return callback;
+  }
+
   /** Fake tool that returns Ok for any input. Used as the registry's stand-in for read/write. */
   private static Tool fakeTool(String name) {
     return new Tool() {
@@ -87,6 +113,30 @@ class WorkerAgentStagnationTest {
       @Override
       public ToolResult execute(JsonNode args, ExecutionContext ctx) {
         return new ToolResult.Ok("ok");
+      }
+    };
+  }
+
+  private static Tool failingTool(String name) {
+    return new Tool() {
+      @Override
+      public String name() {
+        return name;
+      }
+
+      @Override
+      public String description() {
+        return "stub failure";
+      }
+
+      @Override
+      public String inputSchema() {
+        return "{\"type\":\"object\",\"additionalProperties\":false}";
+      }
+
+      @Override
+      public ToolResult execute(JsonNode args, ExecutionContext ctx) {
+        return new ToolResult.Err("rejected by test", ToolResult.ErrorKind.FORBIDDEN);
       }
     };
   }
@@ -499,6 +549,42 @@ class WorkerAgentStagnationTest {
             + " flip to COMPLETED via the salvage write, not stay COMPLETED_BY_STAGNATION."
             + " Saw: "
             + result.outcome());
+    assertTrue(result.salvagedUnverified(), "successful salvage remains explicitly unverified");
+    assertTrue(
+        result.toolCallLog().stream()
+            .anyMatch(
+                entry ->
+                    entry.startsWith("writeFile(sig=")
+                        && entry.contains("[target=y]")
+                        && entry.endsWith("-> OK")),
+        "salvage writes must use the canonical durable tool-log shape: " + result.toolCallLog());
+    assertFalse(
+        result.toolCallLog().stream().anyMatch(entry -> entry.startsWith("SALVAGE ")),
+        "the legacy salvage marker is invisible to downstream write/diff evidence");
+  }
+
+  @Test
+  void failed_salvage_write_uses_canonical_error_entry_and_does_not_rescue_task() {
+    List<ChatResponse> seq = new ArrayList<>();
+    for (int i = 0; i < 12; i++) {
+      seq.add(responseWithCalls(toolCall("readFile", "{\"path\":\"x\"}")));
+    }
+    seq.add(responseWithCalls(toolCall("writeFile", "{\"path\":\"y\",\"content\":\"z\"}")));
+    Fixture f = newWorker(seq);
+    lenient().when(f.registry.find("writeFile")).thenReturn(failingTool("writeFile"));
+
+    WorkerResult result = f.worker.run(req(40));
+
+    assertEquals(WorkerResult.Outcome.COMPLETED_BY_STAGNATION, result.outcome());
+    assertFalse(result.salvagedUnverified(), "a rejected salvage write did not recover an edit");
+    assertTrue(
+        result.toolCallLog().stream()
+            .anyMatch(
+                entry ->
+                    entry.startsWith("writeFile(sig=")
+                        && entry.contains("[target=y]")
+                        && entry.endsWith("-> ERR")),
+        "failed salvage must retain canonical target and error status: " + result.toolCallLog());
   }
 
   /**
@@ -545,6 +631,209 @@ class WorkerAgentStagnationTest {
         .maxTokensPerCall(4096)
         .forceToolChoiceOnSalvage(force)
         .build();
+  }
+
+  @Test
+  void outputCapRecoveryReentersNormalWorkerForTestsAndRealCompletion() {
+    Fixture f =
+        newWorker(
+            List.of(
+                responseWithCalls(toolCall("readFile", "{\"path\":\"pom.xml\"}")),
+                outputCappedWithoutTools(
+                    "[Provider terminated with finish_reason=length; tool call(s) suppressed]"),
+                responseWithCalls(
+                    toolCall(
+                        "writeFile",
+                        "{\"path\":\"src/main/java/App.java\",\"content\":\"class App {}\"}")),
+                responseWithCalls(
+                    toolCall(
+                        "writeFile",
+                        "{\"path\":\"src/test/java/AppTest.java\",\"content\":\"class AppTest"
+                            + " {}\"}")),
+                responseWithCalls(toolCall("runTests", "{}")),
+                responseWithCalls(
+                    toolCall("completeTask", "{\"summary\":\"implementation and tests done\"}"))));
+    List<ToolCallback> advertised =
+        List.of(
+            callback("readFile"),
+            callback("writeFile"),
+            callback("editFile"),
+            callback("completeTask"),
+            callback("runTests"),
+            callback("shell"));
+    lenient()
+        .when(f.registry.bindForWorker(any(), anyString(), anyString(), nullable(Set.class)))
+        .thenReturn(advertised);
+
+    WorkerTaskRequest request =
+        reqSalvage(30, false, "deepseek").toBuilder()
+            .maxTokensPerCall(4096)
+            .strictProvider(true)
+            .build();
+    WorkerResult result = f.worker.run(request);
+
+    assertEquals(WorkerResult.Outcome.COMPLETED, result.outcome());
+    assertFalse(result.salvagedUnverified());
+    assertTrue(result.iterations() > 2, "recovery must re-enter ordinary verification turns");
+    assertTrue(result.toolCallLog().stream().anyMatch(line -> line.startsWith("runTests")));
+
+    ArgumentCaptor<LlmRequest> cap = ArgumentCaptor.forClass(LlmRequest.class);
+    verify(f.router, atLeastOnce()).call(cap.capture());
+    LlmRequest recovery =
+        cap.getAllValues().stream()
+            .filter(call -> "worker.output-cap-recovery".equals(call.stepId()))
+            .findFirst()
+            .orElseThrow();
+    assertEquals("worker.output-cap-recovery", recovery.stepId());
+    assertEquals("deepseek", recovery.provider());
+    assertEquals("deepseek-v4-flash-native", recovery.model());
+    assertTrue(recovery.strictProvider(), "the exact route fence must survive recovery");
+    assertEquals("required", recovery.toolChoice());
+    assertEquals(8192, recovery.maxTokens());
+    assertEquals(
+        Set.of("writeFile", "editFile", "completeTask"),
+        recovery.toolsOverride().stream()
+            .map(tool -> tool.getToolDefinition().name())
+            .collect(java.util.stream.Collectors.toSet()),
+        "recovery authority is tighten-only: no reads, shell, build, or publication tools");
+    assertTrue(
+        cap.getAllValues().stream()
+            .filter(call -> call.stepId().startsWith("worker.iteration-"))
+            .skip(2)
+            .anyMatch(
+                call ->
+                    call.toolsOverride().stream()
+                        .anyMatch(tool -> tool.getToolDefinition().name().equals("runTests"))),
+        "after the recovered mutation, the normal worker tool surface must resume");
+  }
+
+  @Test
+  void outputCapRecoveryCannotCompleteBeforeNormalWorkerVerification() {
+    Fixture f =
+        newWorker(
+            List.of(
+                outputCappedWithoutTools("truncated"),
+                responseWithCalls(toolCall("completeTask", "{\"summary\":\"done\"}")),
+                responseWithCalls(
+                    toolCall(
+                        "writeFile", "{\"path\":\"test/feature.test.js\",\"content\":\"ok\"}")),
+                responseWithCalls(toolCall("runTests", "{}")),
+                responseWithCalls(toolCall("completeTask", "{\"summary\":\"verified\"}"))));
+    List<ToolCallback> advertised =
+        List.of(
+            callback("writeFile"),
+            callback("editFile"),
+            callback("completeTask"),
+            callback("runTests"));
+    lenient()
+        .when(f.registry.bindForWorker(any(), anyString(), anyString(), nullable(Set.class)))
+        .thenReturn(advertised);
+
+    WorkerResult result = f.worker.run(reqSalvage(30, false, "deepseek"));
+
+    assertEquals(WorkerResult.Outcome.COMPLETED, result.outcome());
+    assertTrue(
+        result.toolCallLog().stream()
+            .anyMatch(line -> line.contains("REFUSED (output-cap recovery")));
+    assertEquals("verified", result.completionSummary());
+  }
+
+  @Test
+  void outputCapRecoveryRefusesUnadvertisedShellAuthority() {
+    Fixture f =
+        newWorker(
+            List.of(
+                outputCappedWithoutTools("truncated"),
+                responseWithCalls(toolCall("shell", "{\"command\":\"rm -rf /tmp/nope\"}")),
+                responseWithCalls(
+                    toolCall(
+                        "writeFile", "{\"path\":\"test/feature.test.js\",\"content\":\"ok\"}")),
+                responseWithCalls(toolCall("runTests", "{}")),
+                responseWithCalls(toolCall("completeTask", "{\"summary\":\"verified\"}"))));
+    List<ToolCallback> advertised =
+        List.of(
+            callback("writeFile"),
+            callback("editFile"),
+            callback("completeTask"),
+            callback("runTests"),
+            callback("shell"));
+    lenient()
+        .when(f.registry.bindForWorker(any(), anyString(), anyString(), nullable(Set.class)))
+        .thenReturn(advertised);
+
+    WorkerResult result = f.worker.run(reqSalvage(30, false, "deepseek"));
+
+    assertEquals(WorkerResult.Outcome.COMPLETED, result.outcome());
+    assertTrue(
+        result.toolCallLog().stream()
+            .anyMatch(line -> line.contains("outside output-cap recovery authority")));
+    verify(f.registry, never()).find("shell");
+  }
+
+  @Test
+  void outputCapRecoveryRefusesParallelReadsAndBroaderMutationAliasesBeforeDispatch() {
+    Fixture f =
+        newWorker(
+            List.of(
+                outputCappedWithoutTools("truncated"),
+                responseWithCalls(
+                    toolCall("readFile", "{\"path\":\"src/a.js\"}"),
+                    toolCall("readFile", "{\"path\":\"src/b.js\"}"),
+                    toolCall("delete", "{\"path\":\"src/keep.js\"}")),
+                responseWithCalls(
+                    toolCall(
+                        "writeFile", "{\"path\":\"test/feature.test.js\",\"content\":\"ok\"}")),
+                responseWithCalls(toolCall("runTests", "{}")),
+                responseWithCalls(toolCall("completeTask", "{\"summary\":\"verified\"}"))));
+    List<ToolCallback> advertised =
+        List.of(
+            callback("readFile"),
+            callback("writeFile"),
+            callback("editFile"),
+            callback("delete"),
+            callback("completeTask"),
+            callback("runTests"));
+    lenient()
+        .when(f.registry.bindForWorker(any(), anyString(), anyString(), nullable(Set.class)))
+        .thenReturn(advertised);
+
+    WorkerResult result = f.worker.run(reqSalvage(30, false, "deepseek"));
+
+    assertEquals(WorkerResult.Outcome.COMPLETED, result.outcome());
+    assertEquals(
+        3,
+        result.toolCallLog().stream()
+            .filter(line -> line.contains("outside output-cap recovery authority"))
+            .count());
+    verify(f.registry, never()).find("readFile");
+    verify(f.registry, never()).find("delete");
+  }
+
+  @Test
+  void outputCapRecoveryAtIterationCeilingGetsExactlyTwoGuardedFollowUpTurns() {
+    Fixture f =
+        newWorker(
+            List.of(
+                outputCappedWithoutTools("truncated"),
+                responseWithCalls(
+                    toolCall(
+                        "writeFile", "{\"path\":\"test/feature.test.js\",\"content\":\"ok\"}")),
+                responseWithCalls(toolCall("runTests", "{}")),
+                responseWithCalls(toolCall("completeTask", "{\"summary\":\"verified\"}"))));
+    List<ToolCallback> advertised =
+        List.of(
+            callback("writeFile"),
+            callback("editFile"),
+            callback("completeTask"),
+            callback("runTests"));
+    lenient()
+        .when(f.registry.bindForWorker(any(), anyString(), anyString(), nullable(Set.class)))
+        .thenReturn(advertised);
+
+    WorkerResult result = f.worker.run(reqSalvage(1, false, "deepseek"));
+
+    assertEquals(WorkerResult.Outcome.COMPLETED, result.outcome());
+    assertEquals(3, result.iterations());
   }
 
   /**

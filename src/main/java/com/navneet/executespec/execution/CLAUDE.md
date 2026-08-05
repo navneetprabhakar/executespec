@@ -4,6 +4,13 @@
 to the same customer admission and orchestrator path as other cloud runs; it must not persist a
 detached `PipelineRun` or recreate project/repository/provider policy locally.
 
+`ExecutionRun.branch` is checkout/source intent, not publication authority. V373 persists it as
+`PipelineRun.checkoutBranch`. Ordinary launches clone that branch and open a fresh generated PR;
+only complete continue-on-PR metadata (tracked open repository + PR number + canonical head branch
+and exact 40-hex head SHA) also sets `branchOverride` and the immutable publication identity. Both
+unified and approved-solution paths
+must preserve this distinction, and canonical replay rejects a child with different branch intent.
+
 ## Committed reservation and recovery contract (`13ead3f40`)
 
 - `ExecutionSolutionDispatchRegistry` uses the existing V90 unique

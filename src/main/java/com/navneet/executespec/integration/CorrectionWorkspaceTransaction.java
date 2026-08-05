@@ -2,16 +2,15 @@ package com.navneet.executespec.integration;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
-import java.util.concurrent.TimeUnit;
+import java.util.TreeSet;
+import java.util.UUID;
 import java.util.stream.Stream;
 
 import org.springframework.stereotype.Component;
@@ -20,22 +19,35 @@ import org.springframework.stereotype.Component;
  * Creates a reversible, content-addressed checkpoint before an automatic correction mutates a run
  * workspace.
  *
- * <p>The checkpoint is a Git tree object produced with plumbing commands. It captures tracked and
- * untracked (but not ignored) files without moving {@code HEAD}, creating a branch, or copying the
- * repository. A rejected correction restores that exact tree while leaving the repository on its
- * original commit. The service rejects pre-staged work because resetting an unknown caller-owned
- * index would destroy authority that this transaction did not create.
+ * <p>The checkpoint is a Git tree object produced with plumbing commands against a TEMPORARY index
+ * file ({@code GIT_INDEX_FILE}). It captures tracked and untracked (but not ignored) files without
+ * moving {@code HEAD}, creating a branch, copying the repository, or staging/resetting the live
+ * caller-owned index. A rejected correction restores that exact tree while leaving the repository
+ * on its original commit.
  *
- * <p>Multi-repository project workspaces are supported by checkpointing every Git repository below
- * the run root. All repositories must checkpoint successfully before correction may begin.
+ * <p>Multi-repository project workspaces are supported by checkpointing the workspace root
+ * repository (when it is Git-backed) PLUS every nested repository below it, so uncommitted worker
+ * edits inside {@code repos/<name>} clones are first-class evidence rather than opaque gitlinks.
+ * Nested repository paths are excluded from their parent's tree so each byte is counted exactly
+ * once by the repository that owns it; commit-only gitlink movement therefore cannot change the
+ * workspace generation. All repositories must checkpoint successfully before correction may begin.
  */
 @Component
 public class CorrectionWorkspaceTransaction {
 
-  private static final Duration COMMAND_TIMEOUT = Duration.ofSeconds(30);
-  private static final int MAX_OUTPUT_BYTES = 16_384;
   static final int MAX_PATCH_BYTES = 32_768;
   private static final int MAX_REPOSITORIES = 32;
+
+  /**
+   * Version tag hashed INSIDE the generation preimage. Legacy (pre-v2) digests hashed {@code
+   * <index>=<tree>} rows computed over the workspace root repository alone, so uncommitted edits
+   * inside nested {@code repos/<name>} clones were invisible. Every persisted pre-v2 digest
+   * intentionally compares unequal to a v2 digest, so legacy generations read as stale and route to
+   * the existing regenerate/mismatch remediation instead of silently attesting unseen bytes.
+   */
+  static final String GENERATION_PREIMAGE_VERSION = "v2\n";
+
+  private final CorrectionGitCommands commands = new CorrectionGitCommands();
 
   /**
    * Captures the current content-addressed workspace generation without retaining rollback state.
@@ -57,13 +69,15 @@ public class CorrectionWorkspaceTransaction {
     List<RepositoryCheckpoint> captured = new ArrayList<>();
     try {
       for (Path repository : repositories) {
-        captured.add(capture(repository));
+        captured.add(capture(repository, nestedRepositoryPaths(repositories, repository)));
       }
-      return new Checkpoint(List.copyOf(captured));
+      return new Checkpoint(workspaceRoot.toAbsolutePath().normalize(), List.copyOf(captured));
     } catch (RuntimeException failure) {
       for (int i = captured.size() - 1; i >= 0; i--) {
+        RepositoryCheckpoint checkpoint = captured.get(i);
         try {
-          restore(captured.get(i));
+          restore(
+              checkpoint, nestedRepositoryPaths(repositories, checkpoint.repository()), () -> {});
         } catch (RuntimeException restoreFailure) {
           failure.addSuppressed(restoreFailure);
         }
@@ -82,13 +96,19 @@ public class CorrectionWorkspaceTransaction {
     Objects.requireNonNull(checkpoint, "checkpoint");
     Objects.requireNonNull(authorityFence, "authorityFence");
     List<String> trees = new ArrayList<>();
-    for (int i = 0; i < checkpoint.repositories().size(); i++) {
-      RepositoryCheckpoint repository = checkpoint.repositories().get(i);
+    for (RepositoryCheckpoint repository : checkpoint.repositories()) {
       authorityFence.run();
       assertHeadUnchanged(repository);
-      trees.add(i + "=" + writeTree(repository.repository(), authorityFence));
+      trees.add(
+          workspaceRelativePath(checkpoint.workspaceRoot(), repository.repository())
+              + "="
+              + writeTree(
+                  repository.repository(),
+                  checkpoint.nestedRepositoriesOf(repository),
+                  authorityFence));
     }
-    return org.apache.commons.codec.digest.DigestUtils.sha256Hex(String.join("\n", trees));
+    return org.apache.commons.codec.digest.DigestUtils.sha256Hex(
+        GENERATION_PREIMAGE_VERSION + String.join("\n", trees));
   }
 
   /** Accepts the current workspace only when it differs from no uncommitted caller-owned index. */
@@ -119,11 +139,13 @@ public class CorrectionWorkspaceTransaction {
       RepositoryCheckpoint repository = checkpoint.repositories().get(i);
       authorityFence.run();
       assertHeadUnchanged(repository);
-      String currentTree = writeTree(repository.repository(), authorityFence);
+      String currentTree =
+          writeTree(
+              repository.repository(), checkpoint.nestedRepositoriesOf(repository), authorityFence);
       contentAddressedTreePairs.add(i + "\t" + repository.tree() + "\t" + currentTree);
       authorityFence.run();
       String output =
-          git(
+          commands.git(
               repository.repository(),
               "diff",
               "--name-status",
@@ -161,8 +183,9 @@ public class CorrectionWorkspaceTransaction {
         fullPatchBytes += header.length;
         appendBounded(patch, header);
         authorityFence.run();
-        BinaryCommandResult patchResult =
-            gitBytes(repository.repository(), MAX_PATCH_BYTES, args.toArray(String[]::new));
+        CorrectionGitCommands.BinaryCommandResult patchResult =
+            commands.gitBytes(
+                repository.repository(), MAX_PATCH_BYTES, args.toArray(String[]::new));
         fullPatchBytes += patchResult.fullOutputBytes();
         appendBounded(patch, patchResult.output());
       }
@@ -235,9 +258,10 @@ public class CorrectionWorkspaceTransaction {
     RuntimeException failure = null;
     List<RepositoryCheckpoint> repositories = checkpoint.repositories();
     for (int i = repositories.size() - 1; i >= 0; i--) {
+      RepositoryCheckpoint repository = repositories.get(i);
       try {
         authorityFence.run();
-        restore(repositories.get(i), authorityFence);
+        restore(repository, checkpoint.nestedRepositoriesOf(repository), authorityFence);
       } catch (RuntimeException restoreFailure) {
         if (failure == null) {
           failure =
@@ -252,71 +276,80 @@ public class CorrectionWorkspaceTransaction {
     }
   }
 
-  private RepositoryCheckpoint capture(Path repository) {
-    requireCleanIndex(repository);
-    String head = git(repository, "rev-parse", "HEAD").trim();
-    String tree = writeTree(repository);
+  private RepositoryCheckpoint capture(Path repository, List<String> nestedRepositories) {
+    String head = commands.git(repository, "rev-parse", "HEAD").trim();
+    String tree = writeTree(repository, nestedRepositories, () -> {});
     return new RepositoryCheckpoint(repository.toAbsolutePath().normalize(), head, tree);
   }
 
-  private String writeTree(Path repository) {
-    requireCleanIndex(repository);
-    boolean stagedByThisService = false;
+  /**
+   * Computes the content-addressed working-tree object through a TEMPORARY index file, so the live
+   * caller-owned index is never staged or reset and pre-staged caller state survives untouched.
+   * Nested repository paths are removed/excluded so the parent tree owns none of their bytes.
+   */
+  private String writeTree(
+      Path repository, List<String> nestedRepositories, Runnable authorityFence) {
+    authorityFence.run();
+    Path indexFile =
+        commands.gitDir(repository).resolve("es-generation-" + UUID.randomUUID() + ".idx");
     try {
-      git(repository, "add", "-A");
-      stagedByThisService = true;
-      return git(repository, "write-tree").trim();
+      if (commands.hasCommit(repository)) {
+        authorityFence.run();
+        commands.gitIndexed(repository, indexFile, "read-tree", "HEAD");
+        if (!nestedRepositories.isEmpty()) {
+          List<String> remove =
+              new ArrayList<>(List.of("rm", "-r", "-q", "--cached", "--ignore-unmatch", "--"));
+          remove.addAll(nestedRepositories);
+          authorityFence.run();
+          commands.gitIndexed(repository, indexFile, remove.toArray(String[]::new));
+        }
+      }
+      List<String> add = new ArrayList<>(List.of("add", "-A"));
+      if (!nestedRepositories.isEmpty()) {
+        add.add("--");
+        add.add(".");
+        nestedRepositories.forEach(nested -> add.add(":(exclude)" + nested));
+      }
+      authorityFence.run();
+      commands.gitIndexed(repository, indexFile, add.toArray(String[]::new));
+      authorityFence.run();
+      return commands.gitIndexed(repository, indexFile, "write-tree").trim();
     } finally {
-      if (stagedByThisService) {
-        git(repository, "reset", "--mixed", "--quiet", "HEAD");
+      try {
+        Files.deleteIfExists(indexFile);
+      } catch (IOException cleanupFailure) {
+        // The temporary index is content-addressed scratch; a leaked file cannot alter evidence.
       }
     }
   }
 
-  private void restore(RepositoryCheckpoint checkpoint) {
-    restore(checkpoint, () -> {});
-  }
-
-  private void restore(RepositoryCheckpoint checkpoint, Runnable authorityFence) {
+  private void restore(
+      RepositoryCheckpoint checkpoint, List<String> nestedRepositories, Runnable authorityFence) {
     Path repository = checkpoint.repository();
     authorityFence.run();
     assertHeadUnchanged(checkpoint);
     authorityFence.run();
-    git(repository, "reset", "--hard", "--quiet", checkpoint.head());
+    commands.git(repository, "reset", "--hard", "--quiet", checkpoint.head());
     authorityFence.run();
-    git(repository, "clean", "-fd", "--quiet");
+    // Nested repositories are restored by their own checkpoint entries; the parent clean must
+    // never delete them.
+    List<String> clean = new ArrayList<>(List.of("clean", "-fd", "--quiet"));
+    nestedRepositories.forEach(nested -> clean.add("--exclude=" + nested));
+    commands.git(repository, clean.toArray(String[]::new));
     authorityFence.run();
-    git(repository, "read-tree", "--reset", "-u", checkpoint.tree());
+    commands.git(repository, "read-tree", "--reset", "-u", checkpoint.tree());
     authorityFence.run();
-    git(repository, "reset", "--mixed", "--quiet", checkpoint.head());
+    commands.git(repository, "reset", "--mixed", "--quiet", checkpoint.head());
     authorityFence.run();
-    String restored = writeTree(repository, authorityFence);
+    String restored = writeTree(repository, nestedRepositories, authorityFence);
     if (!checkpoint.tree().equals(restored)) {
       throw new IllegalStateException(
           "Correction rollback did not restore the checkpointed workspace tree for " + repository);
     }
   }
 
-  private String writeTree(Path repository, Runnable authorityFence) {
-    authorityFence.run();
-    requireCleanIndex(repository);
-    boolean stagedByThisService = false;
-    try {
-      authorityFence.run();
-      git(repository, "add", "-A");
-      stagedByThisService = true;
-      authorityFence.run();
-      return git(repository, "write-tree").trim();
-    } finally {
-      if (stagedByThisService) {
-        authorityFence.run();
-        git(repository, "reset", "--mixed", "--quiet", "HEAD");
-      }
-    }
-  }
-
   private void assertHeadUnchanged(RepositoryCheckpoint checkpoint) {
-    String current = git(checkpoint.repository(), "rev-parse", "HEAD").trim();
+    String current = commands.git(checkpoint.repository(), "rev-parse", "HEAD").trim();
     if (!checkpoint.head().equals(current)) {
       throw new IllegalStateException(
           "Correction changed repository HEAD; refusing to attest or roll back "
@@ -324,19 +357,11 @@ public class CorrectionWorkspaceTransaction {
     }
   }
 
-  private void requireCleanIndex(Path repository) {
-    CommandResult result = run(repository, "git", "diff", "--cached", "--quiet", "--exit-code");
-    if (result.exitCode() == 0) {
-      return;
-    }
-    if (result.exitCode() == 1) {
-      throw new IllegalStateException(
-          "Automatic correction cannot checkpoint a workspace with pre-staged changes: "
-              + repository);
-    }
-    throw commandFailure(repository, result, "git diff --cached");
-  }
-
+  /**
+   * Discovers the workspace root repository (when Git-backed) PLUS every nested repository from a
+   * depth-bounded walk, deduplicated in deterministic path order. Candidates inside another
+   * repository's {@code .git/} metadata are skipped.
+   */
   private List<Path> discoverRepositories(Path workspaceRoot) {
     if (workspaceRoot == null) {
       return List.of();
@@ -345,23 +370,21 @@ public class CorrectionWorkspaceTransaction {
     if (!Files.isDirectory(root)) {
       return List.of();
     }
-    List<Path> repositories = new ArrayList<>();
+    TreeSet<Path> repositories = new TreeSet<>(Comparator.comparing(Path::toString));
     if (Files.exists(root.resolve(".git"))) {
       repositories.add(root);
-    } else {
-      try (Stream<Path> paths = Files.walk(root, 3)) {
-        paths
-            .filter(Files::isDirectory)
-            .filter(
-                path -> path.getFileName() != null && ".git".equals(path.getFileName().toString()))
-            .map(Path::getParent)
-            .filter(Objects::nonNull)
-            .sorted(Comparator.comparing(Path::toString))
-            .limit(MAX_REPOSITORIES + 1L)
-            .forEach(repositories::add);
-      } catch (IOException e) {
-        throw new IllegalStateException("Failed to discover correction workspace repositories", e);
-      }
+    }
+    try (Stream<Path> paths = Files.walk(root, 3)) {
+      paths
+          .filter(Files::isDirectory)
+          .filter(
+              path -> path.getFileName() != null && ".git".equals(path.getFileName().toString()))
+          .map(Path::getParent)
+          .filter(Objects::nonNull)
+          .filter(parent -> !isInsideGitMetadata(root, parent))
+          .forEach(repositories::add);
+    } catch (IOException e) {
+      throw new IllegalStateException("Failed to discover correction workspace repositories", e);
     }
     if (repositories.size() > MAX_REPOSITORIES) {
       throw new IllegalStateException(
@@ -370,123 +393,48 @@ public class CorrectionWorkspaceTransaction {
     return List.copyOf(repositories);
   }
 
-  private String git(Path repository, String... args) {
-    List<String> command = new ArrayList<>(args.length + 1);
-    command.add("git");
-    command.addAll(List.of(args));
-    CommandResult result = run(repository, command.toArray(String[]::new));
-    if (result.exitCode() != 0) {
-      throw commandFailure(repository, result, String.join(" ", command));
-    }
-    return result.output();
-  }
-
-  private BinaryCommandResult gitBytes(Path repository, int captureLimit, String... args) {
-    List<String> command = new ArrayList<>(args.length + 1);
-    command.add("git");
-    command.addAll(List.of(args));
-    BinaryCommandResult result = runBytes(repository, captureLimit, command.toArray(String[]::new));
-    if (result.exitCode() != 0) {
-      throw new IllegalStateException(
-          String.join(" ", command)
-              + " failed in "
-              + repository
-              + " (exit="
-              + result.exitCode()
-              + ")");
-    }
-    return result;
-  }
-
-  private IllegalStateException commandFailure(
-      Path repository, CommandResult result, String command) {
-    return new IllegalStateException(
-        command
-            + " failed in "
-            + repository
-            + " (exit="
-            + result.exitCode()
-            + "): "
-            + result.output());
-  }
-
-  private CommandResult run(Path repository, String... command) {
-    try {
-      Process process =
-          new ProcessBuilder(command)
-              .directory(repository.toFile())
-              .redirectErrorStream(true)
-              .start();
-      ByteArrayOutputStream output = new ByteArrayOutputStream();
-      Thread reader =
-          Thread.ofVirtual()
-              .start(
-                  () -> {
-                    try (var input = process.getInputStream()) {
-                      input.transferTo(output);
-                    } catch (IOException ignored) {
-                      // Process exit/timeout remains the authoritative failure signal.
-                    }
-                  });
-      boolean completed = process.waitFor(COMMAND_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
-      if (!completed) {
-        process.destroyForcibly();
-        process.waitFor(5, TimeUnit.SECONDS);
-        reader.join(Duration.ofSeconds(5));
-        throw new IllegalStateException(
-            String.join(" ", command) + " exceeded the correction checkpoint timeout");
+  /** True when any path segment between the workspace root and the candidate is {@code .git}. */
+  private static boolean isInsideGitMetadata(Path root, Path candidate) {
+    Path current = candidate;
+    while (current != null && !current.equals(root)) {
+      Path name = current.getFileName();
+      if (name != null && ".git".equals(name.toString())) {
+        return true;
       }
-      reader.join(Duration.ofSeconds(5));
-      byte[] bytes = output.toByteArray();
-      int length = Math.min(bytes.length, MAX_OUTPUT_BYTES);
-      return new CommandResult(
-          process.exitValue(), new String(bytes, 0, length, StandardCharsets.UTF_8).trim());
-    } catch (InterruptedException e) {
-      Thread.currentThread().interrupt();
-      throw new IllegalStateException("Correction checkpoint command was interrupted", e);
-    } catch (IOException e) {
-      throw new IllegalStateException("Correction checkpoint command could not start", e);
+      current = current.getParent();
     }
+    return false;
   }
 
-  private BinaryCommandResult runBytes(Path repository, int captureLimit, String... command) {
-    try {
-      Process process =
-          new ProcessBuilder(command)
-              .directory(repository.toFile())
-              .redirectErrorStream(true)
-              .start();
-      BoundedCountingOutputStream output = new BoundedCountingOutputStream(captureLimit);
-      Thread reader =
-          Thread.ofVirtual()
-              .start(
-                  () -> {
-                    try (var input = process.getInputStream()) {
-                      input.transferTo(output);
-                    } catch (IOException ignored) {
-                      // Process exit/timeout remains the authoritative failure signal.
-                    }
-                  });
-      boolean completed = process.waitFor(COMMAND_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
-      if (!completed) {
-        process.destroyForcibly();
-        process.waitFor(5, TimeUnit.SECONDS);
-        reader.join(Duration.ofSeconds(5));
-        throw new IllegalStateException(
-            String.join(" ", command) + " exceeded the correction checkpoint timeout");
-      }
-      reader.join(Duration.ofSeconds(5));
-      return new BinaryCommandResult(process.exitValue(), output.captured(), output.count());
-    } catch (InterruptedException e) {
-      Thread.currentThread().interrupt();
-      throw new IllegalStateException("Correction checkpoint command was interrupted", e);
-    } catch (IOException e) {
-      throw new IllegalStateException("Correction checkpoint command could not start", e);
+  /** Workspace-relative POSIX repository identity; {@code "."} for the workspace root itself. */
+  private static String workspaceRelativePath(Path workspaceRoot, Path repository) {
+    Path root = workspaceRoot.toAbsolutePath().normalize();
+    Path repo = repository.toAbsolutePath().normalize();
+    if (root.equals(repo)) {
+      return ".";
     }
+    return posix(root.relativize(repo));
   }
 
-  public record Checkpoint(List<RepositoryCheckpoint> repositories) {
+  /** Relative paths (from {@code repository}) of every other discovered repository beneath it. */
+  private static List<String> nestedRepositoryPaths(List<Path> repositories, Path repository) {
+    Path parent = repository.toAbsolutePath().normalize();
+    return repositories.stream()
+        .map(candidate -> candidate.toAbsolutePath().normalize())
+        .filter(candidate -> !candidate.equals(parent) && candidate.startsWith(parent))
+        .map(candidate -> posix(parent.relativize(candidate)))
+        .sorted()
+        .toList();
+  }
+
+  private static String posix(Path path) {
+    return path.toString().replace('\\', '/');
+  }
+
+  public record Checkpoint(Path workspaceRoot, List<RepositoryCheckpoint> repositories) {
     public Checkpoint {
+      Objects.requireNonNull(workspaceRoot, "workspaceRoot");
+      workspaceRoot = workspaceRoot.toAbsolutePath().normalize();
       repositories = repositories == null ? List.of() : List.copyOf(repositories);
       if (repositories.isEmpty()) {
         throw new IllegalArgumentException("checkpoint requires at least one repository");
@@ -495,10 +443,20 @@ public class CorrectionWorkspaceTransaction {
 
     public String generation() {
       List<String> trees = new ArrayList<>();
-      for (int i = 0; i < repositories.size(); i++) {
-        trees.add(i + "=" + repositories.get(i).tree());
+      for (RepositoryCheckpoint repository : repositories) {
+        trees.add(
+            workspaceRelativePath(workspaceRoot, repository.repository())
+                + "="
+                + repository.tree());
       }
-      return org.apache.commons.codec.digest.DigestUtils.sha256Hex(String.join("\n", trees));
+      return org.apache.commons.codec.digest.DigestUtils.sha256Hex(
+          GENERATION_PREIMAGE_VERSION + String.join("\n", trees));
+    }
+
+    List<String> nestedRepositoriesOf(RepositoryCheckpoint repository) {
+      return nestedRepositoryPaths(
+          repositories.stream().map(RepositoryCheckpoint::repository).toList(),
+          repository.repository());
     }
   }
 
@@ -523,40 +481,4 @@ public class CorrectionWorkspaceTransaction {
   }
 
   public record RepositoryCheckpoint(Path repository, String head, String tree) {}
-
-  private record CommandResult(int exitCode, String output) {}
-
-  private record BinaryCommandResult(int exitCode, byte[] output, long fullOutputBytes) {}
-
-  private static final class BoundedCountingOutputStream extends OutputStream {
-    private final ByteArrayOutputStream captured;
-    private final int limit;
-    private long count;
-
-    private BoundedCountingOutputStream(int limit) {
-      this.limit = Math.max(0, limit);
-      this.captured = new ByteArrayOutputStream(this.limit);
-    }
-
-    @Override
-    public void write(int value) {
-      count++;
-      if (captured.size() < limit) captured.write(value);
-    }
-
-    @Override
-    public void write(byte[] bytes, int offset, int length) {
-      count += length;
-      int remaining = limit - captured.size();
-      if (remaining > 0) captured.write(bytes, offset, Math.min(remaining, length));
-    }
-
-    private byte[] captured() {
-      return captured.toByteArray();
-    }
-
-    private long count() {
-      return count;
-    }
-  }
 }

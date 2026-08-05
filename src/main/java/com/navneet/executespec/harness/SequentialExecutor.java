@@ -214,6 +214,10 @@ also create or extend a test that exercises it before calling completeTask:
   - Tests MUST invoke the real production implementation through its public or supported boundary.
     Never copy the target predicate/algorithm into the test and test the copy; that is zero
     coverage even when it passes.
+  - Treat explicit input types as contracts. For a direct function or module API, include a
+    valid-looking value of the wrong runtime type (for example `"2"` for a positive integer), not
+    only an obviously unparsable value. Reject coercion unless the actual framework boundary is
+    documented to deliver encoded strings.
   - Never disable, replace, monkeypatch, or no-op authentication, authorization, CSRF, validation,
     middleware, persistence, or another requirement under test merely to make the suite green.
     Mock only a true external dependency while keeping the required production boundary active.
@@ -371,6 +375,10 @@ to boot — skip it for those.""";
   /** Canonical admitted-baseline product-diff evidence; nullable only in legacy unit tests. */
   private RunChangeEvidenceService runChangeEvidenceService;
 
+  // P1-4: nullable admitted-surface source for worker evidence; bounded test ctors leave it null.
+  private com.navneet.executespec.contractsurface.BrownfieldHttpContractGuard
+      brownfieldHttpContractGuard;
+
   /**
    * Legacy construction seam retained for focused unit tests. Production uses the fully injected
    * constructor below and always supplies {@link TaskStatusPersistenceService}.
@@ -477,7 +485,9 @@ to boot — skip it for those.""";
       com.navneet.executespec.engine.RepoOrientationService repoOrientationService,
       InitialRoutingService initialRoutingService,
       com.navneet.executespec.router.TaskOutcomeMetricService taskOutcomeMetricService,
-      RunChangeEvidenceService runChangeEvidenceService) {
+      RunChangeEvidenceService runChangeEvidenceService,
+      com.navneet.executespec.contractsurface.BrownfieldHttpContractGuard
+          brownfieldHttpContractGuard) {
     this(
         worker,
         buildProjectTool,
@@ -500,6 +510,7 @@ to boot — skip it for those.""";
     this.taskOutcomeMetricService = taskOutcomeMetricService;
     this.initialRoutingService = initialRoutingService;
     this.runChangeEvidenceService = runChangeEvidenceService;
+    this.brownfieldHttpContractGuard = brownfieldHttpContractGuard;
   }
 
   private final ConcurrentMap<String, AtomicInteger> continuationProviderSwitchesPerRun =
@@ -1855,33 +1866,17 @@ to boot — skip it for those.""";
             requestedProvider,
             requestedModel,
             req.localHandsMode());
-    String orientation =
-        (featureFlagService != null
-                && featureFlagService.isEnabled("worker.localization.enabled")
-                && repoOrientationService != null)
-            ? repoOrientationService.orient(
-                taskCtx.workspaceRoot(), task.title() + "\n" + task.description())
-            : "";
-    // task 12 — run-journal injection: plan outline + last few task outcomes, so this task is a
-    // MEMBER OF A RUN rather than an isolated job (naming/placement/interface choices stay
-    // globally coherent). Flag-gated; empty when off or first task.
-    String journalBlock =
-        (featureFlagService != null
-                && featureFlagService.isEnabled("execution.run-journal.enabled")
-                && runJournal != null
-                && !runJournal.isEmpty())
-            ? journalBlock(plan, runJournal)
-            : "";
     String workerEvidence =
-        PromptComposer.composeWorkerEvidence(
+        PromptComposer.assembleWorkerEvidence(
             task,
-            req.designBlock(),
+            req,
             refDocs,
-            req.workspaceSummary(),
-            orientation,
-            journalBlock,
-            req.plan(),
-            req.originalGoal());
+            runJournal,
+            plan,
+            featureFlagService,
+            repoOrientationService,
+            brownfieldHttpContractGuard,
+            taskCtx.workspaceRoot());
     String userPrompt = composeUserPrompt(task, null, workerEvidence);
     if (providerModelOverride != null
         && providerModelOverride.recoveryNote() != null
@@ -1977,9 +1972,10 @@ to boot — skip it for those.""";
             .stagnationForceAfter(cfg.stagnationForceAfter)
             .wallClockSeconds(cfg.wallClockSeconds)
             .forceToolChoiceOnSalvage(cfg.forceToolChoiceOnSalvage)
-            // A continuation is an exact dispatch contract: disable cross-route failover for that
-            // target attempt. Ordinary fresh runs and crash resumes retain existing failover.
-            .strictProvider(providerModelOverride != null)
+            // A continuation or an explicitly pinned run is an exact dispatch contract: disable
+            // cross-route failover for that target attempt. Ordinary unpinned fresh runs and crash
+            // resumes retain existing failover.
+            .strictProvider(providerModelOverride != null || Boolean.TRUE.equals(req.routePinned()))
             .zeroWriteSalvageAllowed(providerModelOverride == null)
             .mutationChurnForceAfter(maxEditChurn())
             // VBC verify-before-complete (RL-2026-06-…, V235, default OFF) — server-RUN the
@@ -3635,7 +3631,9 @@ to boot — skip it for those.""";
     int runTotalTokens = totalTrackedTokens(runCost);
     long wallClockMs = workerResult == null ? 0L : workerResult.totalLatencyMs();
     boolean completeTaskClaimed =
-        workerResult != null && workerResult.outcome() == WorkerResult.Outcome.COMPLETED;
+        workerResult != null
+            && workerResult.outcome() == WorkerResult.Outcome.COMPLETED
+            && !workerResult.salvagedUnverified();
     boolean validationAttempted = smokePassed != null;
     boolean validationPassed = Boolean.TRUE.equals(smokePassed);
     boolean statusClean =

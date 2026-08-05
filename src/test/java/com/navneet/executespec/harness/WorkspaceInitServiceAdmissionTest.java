@@ -5,18 +5,23 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.UUID;
 
 import com.navneet.executespec.config.AgentProperties;
 import com.navneet.executespec.deployment.WorkspaceRestoreService;
+import com.navneet.executespec.state.entity.RunRepoSnapshot;
 import com.navneet.executespec.state.repository.RunRepoSnapshotRepository;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.mockito.ArgumentCaptor;
 
 class WorkspaceInitServiceAdmissionTest {
 
@@ -72,6 +77,168 @@ class WorkspaceInitServiceAdmissionTest {
 
     assertFalse(admission.admitted());
     assertTrue(admission.reason().contains("no source files"));
+  }
+
+  @Test
+  void rejectsCrashRecoveredCloneOnDifferentBranchBeforeProviderDispatch() throws Exception {
+    WorkspaceInitService service = service();
+    Path repo = workspace.resolve("run-branch/repos/api");
+    Files.createDirectories(repo);
+    run(repo, "git", "init", "-b", "main");
+    Files.writeString(repo.resolve("Application.java"), "class Application {}\n");
+
+    var admission =
+        service.verifyMultipleRepos(
+            "run-branch",
+            List.of(new WorkspaceInitService.RepoToClone("acme/api", null, null, "feature/pr-12")));
+
+    assertFalse(admission.admitted());
+    assertTrue(admission.reason().contains("branch mismatch"));
+    assertTrue(admission.reason().contains("feature/pr-12"));
+  }
+
+  @Test
+  void publicationHeadRejectsMissingNamedProjectCloneInsteadOfFallingBackToOuterRepository()
+      throws Exception {
+    Path run = workspace.resolve("run-missing-publication-clone");
+    Files.createDirectories(run);
+    run(run, "git", "init", "-b", "main");
+    Files.writeString(run.resolve("README.md"), "outer seed\n");
+    run(run, "git", "add", "README.md");
+    run(
+        run,
+        "git",
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@example.com",
+        "commit",
+        "-m",
+        "outer seed");
+    Files.createDirectories(run.resolve("repos/another-repo"));
+    String outerHead = output(run, "git", "rev-parse", "HEAD");
+
+    IllegalStateException missing =
+        assertThrows(
+            IllegalStateException.class,
+            () ->
+                service()
+                    .requirePublicationHead(
+                        "run-missing-publication-clone", "acme/expected-repo", outerHead));
+
+    assertTrue(missing.getMessage().contains("expected-repo"));
+    assertTrue(missing.getMessage().contains("clone is unavailable"));
+  }
+
+  @Test
+  void clonesExactNonDefaultBranchAndPersistsItsVerifiedBaseline() throws Exception {
+    Path source = workspace.resolve("source-pr");
+    Files.createDirectories(source);
+    run(source, "git", "init", "-b", "main");
+    Files.writeString(source.resolve("Application.java"), "class Main {}\n");
+    run(source, "git", "add", "Application.java");
+    run(
+        source,
+        "git",
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@example.com",
+        "commit",
+        "-m",
+        "main");
+    run(source, "git", "checkout", "-b", "feature/pr-12");
+    Files.writeString(source.resolve("Application.java"), "class PullRequestHead {}\n");
+    run(source, "git", "add", "Application.java");
+    run(
+        source,
+        "git",
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@example.com",
+        "commit",
+        "-m",
+        "pr head");
+    String admittedHead = output(source, "git", "rev-parse", "HEAD");
+
+    RunRepoSnapshotRepository snapshots = mock(RunRepoSnapshotRepository.class);
+    AgentProperties properties = new AgentProperties();
+    properties.setWorkspace(workspace.resolve("runs").toString());
+    WorkspaceInitService service =
+        new WorkspaceInitService(
+            properties,
+            mock(WorkspaceRestoreService.class),
+            snapshots,
+            mock(VendoredPathGuard.class),
+            mock(com.navneet.executespec.contractsurface.BrownfieldHttpContractGuard.class),
+            new WorkspaceRepositoryRevisionService(properties, snapshots));
+    UUID repoId = UUID.randomUUID();
+    when(snapshots.findByRunId("run-pr-clone")).thenReturn(List.of());
+
+    service.cloneMultipleRepos(
+        "run-pr-clone",
+        List.of(
+            new WorkspaceInitService.RepoToClone(
+                "acme/app", source.toString(), repoId, "feature/pr-12")),
+        null);
+
+    Path clone = workspace.resolve("runs/run-pr-clone/repos/app");
+    assertEquals("feature/pr-12", output(clone, "git", "branch", "--show-current"));
+    assertTrue(Files.readString(clone.resolve("Application.java")).contains("PullRequestHead"));
+    ArgumentCaptor<RunRepoSnapshot> snapshot = ArgumentCaptor.forClass(RunRepoSnapshot.class);
+    verify(snapshots).save(snapshot.capture());
+    assertEquals("feature/pr-12", snapshot.getValue().getBranch());
+    assertEquals(repoId, snapshot.getValue().getRepoId());
+    assertEquals(output(clone, "git", "rev-parse", "HEAD"), snapshot.getValue().getCommitSha());
+    service.requirePublicationHead("run-pr-clone", "acme/app", admittedHead);
+
+    run(clone, "git", "config", "user.name", "Test");
+    run(clone, "git", "config", "user.email", "test@example.com");
+    Files.writeString(clone.resolve("Application.java"), "class AdvancedHead {}\n");
+    run(clone, "git", "add", "Application.java");
+    run(clone, "git", "commit", "-m", "unexpected newer head");
+    IllegalStateException stale =
+        assertThrows(
+            IllegalStateException.class,
+            () -> service.requirePublicationHead("run-pr-clone", "acme/app", admittedHead));
+    assertTrue(stale.getMessage().contains("head changed"));
+  }
+
+  @Test
+  void snapshotPersistenceRecordsTheActualDefaultBranchInsteadOfAssumingMain() throws Exception {
+    Path checkout = workspace.resolve("default-branch-checkout");
+    Files.createDirectories(checkout);
+    run(checkout, "git", "init", "-b", "trunk");
+    Files.writeString(checkout.resolve("Application.java"), "class Application {}\n");
+    run(checkout, "git", "add", "Application.java");
+    run(
+        checkout,
+        "git",
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@example.com",
+        "commit",
+        "-m",
+        "baseline");
+
+    RunRepoSnapshotRepository snapshots = mock(RunRepoSnapshotRepository.class);
+    when(snapshots.findByRunId("run-default")).thenReturn(List.of());
+    AgentProperties properties = new AgentProperties();
+    properties.setWorkspace(workspace.toString());
+    WorkspaceRepositoryRevisionService revisions =
+        new WorkspaceRepositoryRevisionService(properties, snapshots);
+
+    revisions.persistCloneSnapshot(
+        "run-default",
+        new WorkspaceInitService.RepoToClone("acme/app", null, null, null),
+        checkout);
+
+    ArgumentCaptor<RunRepoSnapshot> snapshot = ArgumentCaptor.forClass(RunRepoSnapshot.class);
+    verify(snapshots).save(snapshot.capture());
+    assertEquals("trunk", snapshot.getValue().getBranch());
+    assertEquals(output(checkout, "git", "rev-parse", "HEAD"), snapshot.getValue().getCommitSha());
   }
 
   @Test
@@ -134,23 +301,58 @@ class WorkspaceInitServiceAdmissionTest {
     var baseline = mock(com.navneet.executespec.contractsurface.BrownfieldHttpContractGuard.class);
     AgentProperties properties = new AgentProperties();
     properties.setWorkspace(workspace.resolve("runs").toString());
+    RunRepoSnapshotRepository snapshots = mock(RunRepoSnapshotRepository.class);
     WorkspaceInitService service =
         new WorkspaceInitService(
             properties,
             mock(WorkspaceRestoreService.class),
-            mock(RunRepoSnapshotRepository.class),
+            snapshots,
             mock(VendoredPathGuard.class),
-            baseline);
+            baseline,
+            new WorkspaceRepositoryRevisionService(properties, snapshots));
 
     service.cloneReadOnlyRepository("project-source", source.toString(), null, null);
 
     assertTrue(Files.exists(service.runWorkspacePath("project-source").resolve("App.java")));
-    verifyNoInteractions(baseline);
+    verifyNoInteractions(snapshots, baseline);
+  }
+
+  @Test
+  void emptyRepositoryBaselineIsRejectedWithoutFabricatingSnapshot() throws Exception {
+    Path empty = workspace.resolve("empty");
+    Files.createDirectories(empty);
+    run(empty, "git", "init", "-b", "main");
+    AgentProperties properties = new AgentProperties();
+    properties.setWorkspace(workspace.toString());
+    RunRepoSnapshotRepository snapshots = mock(RunRepoSnapshotRepository.class);
+    WorkspaceRepositoryRevisionService revisions =
+        new WorkspaceRepositoryRevisionService(properties, snapshots);
+
+    var failure =
+        assertThrows(
+            IllegalStateException.class,
+            () ->
+                revisions.persistCloneSnapshot(
+                    "run-empty",
+                    new WorkspaceInitService.RepoToClone(
+                        "acme/empty", "https://github.com/acme/empty", null, "main"),
+                    empty));
+
+    assertTrue(failure.getMessage().contains("could not persist repository baseline"));
+    assertTrue(failure.getCause().getMessage().contains("repository has no committed revision"));
+    verifyNoInteractions(snapshots);
   }
 
   private static void run(Path directory, String... command) throws Exception {
     Process process = new ProcessBuilder(command).directory(directory.toFile()).start();
     assertEquals(0, process.waitFor(), new String(process.getErrorStream().readAllBytes()));
+  }
+
+  private static String output(Path directory, String... command) throws Exception {
+    Process process = new ProcessBuilder(command).directory(directory.toFile()).start();
+    String stdout = new String(process.getInputStream().readAllBytes()).trim();
+    assertEquals(0, process.waitFor(), new String(process.getErrorStream().readAllBytes()));
+    return stdout;
   }
 
   private WorkspaceInitService service() {
@@ -161,6 +363,7 @@ class WorkspaceInitServiceAdmissionTest {
         mock(WorkspaceRestoreService.class),
         mock(RunRepoSnapshotRepository.class),
         mock(VendoredPathGuard.class),
-        mock(com.navneet.executespec.contractsurface.BrownfieldHttpContractGuard.class));
+        mock(com.navneet.executespec.contractsurface.BrownfieldHttpContractGuard.class),
+        new WorkspaceRepositoryRevisionService(properties, mock(RunRepoSnapshotRepository.class)));
   }
 }

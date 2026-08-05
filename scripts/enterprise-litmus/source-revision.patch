@@ -1,0 +1,21 @@
+diff --git a/src/catalog.js b/src/catalog.js
+--- a/src/catalog.js
++++ b/src/catalog.js
+@@ -180,0 +181,4 @@
++
++export function countFeatured(items) {
++  return items.filter((item) => item.tags.includes('featured')).length;
++}
+diff --git a/test/baseline.test.js b/test/baseline.test.js
+--- a/test/baseline.test.js
++++ b/test/baseline.test.js
+@@ -3 +3 @@
+-import {catalog, filterCatalog} from '../src/catalog.js';
++import {catalog, countFeatured, filterCatalog} from '../src/catalog.js';
+@@ -20,0 +21,6 @@
++
++test('counts featured products without changing the catalogue', () => {
++  const before = structuredClone(catalog);
++  assert.equal(countFeatured(catalog), catalog.filter((item) => item.tags.includes('featured')).length);
++  assert.deepEqual(catalog, before);
++});

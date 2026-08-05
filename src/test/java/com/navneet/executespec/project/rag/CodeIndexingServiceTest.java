@@ -32,6 +32,7 @@ import com.navneet.executespec.project.rag.CodeIndexStateStore.Completion;
 import com.navneet.executespec.project.rag.CodeIndexStateStore.Lease;
 import com.navneet.executespec.project.rag.CodeIndexStateStore.State;
 import com.navneet.executespec.project.rag.CodeIndexStateStore.Status;
+import com.navneet.executespec.project.service.WorkspaceHealthService;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -328,6 +329,64 @@ class CodeIndexingServiceTest {
     assertThat(service(4000).isIndexed("proj-1", moved)).isFalse();
     // A different tenant context has no state even for the same registry repository.
     assertThat(service(4000).isIndexed("proj-2", repo)).isFalse();
+  }
+
+  @Test
+  void readinessUsesCurrentOriginShaInsteadOfStaleRegistryMetadata() {
+    String indexedSha = repo.getLastSyncedSha();
+    String currentSha = "b".repeat(40);
+    State ready = readyState("proj-1", repo.getId(), indexedSha);
+    when(states.get("proj-1", repo.getId())).thenReturn(Optional.of(ready));
+    WorkspaceHealthService health = mock(WorkspaceHealthService.class);
+    when(health.currentOriginSha(repo, "member-1")).thenReturn(currentSha);
+    CodeIndexingService service =
+        new CodeIndexingService(
+            ws,
+            chunker,
+            embedder,
+            chunks,
+            states,
+            new com.navneet.executespec.security.GeneratedSecretScanner(),
+            null,
+            health,
+            4000);
+
+    var readiness = service.readiness("proj-1", repo, "member-1");
+
+    assertThat(readiness.currentSourceSha()).isEqualTo(currentSha);
+    assertThat(readiness.indexedSourceSha()).isEqualTo(indexedSha);
+    assertThat(readiness.status()).isEqualTo(Status.STALE);
+    assertThat(readiness.reason()).isEqualTo("SOURCE_REVISION_CHANGED");
+    assertThat(readiness.semanticSearchAvailable()).isFalse();
+    verify(states).reconcile("proj-1", repo.getId(), currentSha);
+  }
+
+  @Test
+  void readinessFailsHonestlyWhenCurrentOriginShaCannotBeEstablished() {
+    State ready = readyState("proj-1", repo.getId(), repo.getLastSyncedSha());
+    when(states.get("proj-1", repo.getId())).thenReturn(Optional.of(ready));
+    WorkspaceHealthService health = mock(WorkspaceHealthService.class);
+    when(health.currentOriginSha(repo, "member-1")).thenReturn(null);
+    CodeIndexingService service =
+        new CodeIndexingService(
+            ws,
+            chunker,
+            embedder,
+            chunks,
+            states,
+            new com.navneet.executespec.security.GeneratedSecretScanner(),
+            null,
+            health,
+            4000);
+
+    var readiness = service.readiness("proj-1", repo, "member-1");
+
+    assertThat(readiness.currentSourceSha()).isEqualTo("UNKNOWN");
+    assertThat(readiness.status()).isEqualTo(Status.FAILED);
+    assertThat(readiness.reason()).isEqualTo("CURRENT_SOURCE_REVISION_UNAVAILABLE");
+    assertThat(readiness.semanticSearchAvailable()).isFalse();
+    assertThat(readiness.lexicalFallbackAvailable()).isTrue();
+    verify(states, never()).reconcile(anyString(), any(), anyString());
   }
 
   @Test

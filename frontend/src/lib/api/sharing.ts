@@ -95,6 +95,7 @@ export interface SharedValidationReportLink {
   reviewerVerdict: string | null;
   finalBuildPassed: boolean | null;
   testsPassed: number | null;
+  testsSkipped: number | null;
   testsTotal: number | null;
   recommendation: string | null;
   createdAt: string | null;

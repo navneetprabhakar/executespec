@@ -6,6 +6,10 @@ It supports both a materialized workspace and an immutable map of repository-rel
 bytes. Surface schema v2 includes explicit context-path configuration locations in the digest, so
 remote codemap generation preserves controller and configuration provenance without staging a
 temporary checkout.
+Both extraction paths use an instance-scoped JavaParser configured for Java 21; valid modern Java
+syntax such as records must not collapse a completed worker outcome into a generic pipeline error.
+An actual parse failure remains fail-closed and surfaces as the typed
+`BROWNFIELD_HTTP_SURFACE_UNPARSABLE` diagnostic without leaking workspace paths.
 `SpringContractSourceInventory` owns materialized-workspace discovery: it walks the complete tree
 without a depth cutoff, prunes `.git`, vendor, dependency, and conventional build-output trees
 before descent, filters tests only by explicit `src/test`, and enforces visited-entry,
@@ -17,6 +21,13 @@ exceeded budget fails extraction; it must never produce a partial baseline that 
 deep controller.
 `SpringHttpSurfaceSnapshot` owns canonical ordering, route keys and digest construction separately
 from source parsing; provider prose never participates in that digest.
+`ExactHttpConstraintParser` is the shared provider-free parser for explicit `METHOD /path`
+acceptance. It distinguishes required producer routes from route-bound 405/Method Not Allowed
+constraints, binds suffix polarity only to the current route occurrence, and ignores explicit
+removal instructions. Both `PlanSourceHttpRouteGate` and final deterministic HTTP verification must
+use this parser rather than maintaining divergent regexes. Exact source polarity overrides a
+contradictory planner restatement. A forbidden method must be absent while another supported method
+exists at the same path; an `ANY` mapping violates the forbidden-method contract.
 `BrownfieldHttpContractGuard` stores the admitted surface/digest on `pipeline_run` (V360) and
 compares it after workers/corrections and before publication. It is also enforced inside
 `RunValidationKickoff`, so every normal, crash-resume, retry-validation, and re-review entrypoint

@@ -1,7 +1,13 @@
 import {describe, expect, it} from 'vitest';
-import type {PublicationEligibility, RunDetail, ValidationReportData} from '@/lib/api';
+import type {
+  PublicationEligibility,
+  RunDetail,
+  RunTerminalOutcome,
+  ValidationReportData,
+} from '@/lib/api';
 
 import {
+  authoritativeProductFileCount,
   boundedLineDiff,
   confidenceColor,
   continuationApprovalCandidate,
@@ -33,10 +39,13 @@ import {
   correctionEvidenceHistory,
   correctionEvidenceInvalidationLabel,
   reportPipelineLabel,
+  reviewerSignal,
+  runSurfaceDestination,
   logIcon,
   logLabel,
   logMeta,
   logMessage,
+  missingValidationReportExplanation,
   missingScoreExplanation,
   modelRankingCandidateLabel,
   modelRankingCandidateMetrics,
@@ -49,6 +58,7 @@ import {
   runChatResponseContent,
   friendlyAiFailureMessage,
   terminalFailureEvidence,
+  terminalOutcomePrimaryAction,
   runPhaseDiagnosis,
   shouldUseRunEvidenceChat,
   shouldShowModelRanking,
@@ -62,6 +72,80 @@ import {
   usd,
   verdictFor,
 } from './runResultUtils';
+
+describe('run result surface routing', () => {
+  it.each(['REVIEWING', 'VALIDATING', 'GENERATING_REPORT', 'REPORTING'])(
+    'keeps %s on the live run surface while report evidence is pending',
+    (status) => {
+      expect(runSurfaceDestination(status)).toBe('live');
+    },
+  );
+
+  it.each([
+    'PENDING',
+    'QUEUED',
+    'APPROVAL_RESUMING',
+    'CLASSIFYING',
+    'PLANNING',
+    'WORKING',
+    'EXECUTING',
+    'RUNNING',
+    'IN_PROGRESS',
+    'IN_PROGRESS_BATCH',
+    'CODING',
+    'BUILDING',
+    'COMPILING',
+    'TESTING',
+    'SUBMITTED',
+    'PROVIDER_SWITCHING',
+    'PAUSED',
+    'STUCK',
+  ])('routes active phase %s to the live run surface', (status) => {
+    expect(runSurfaceDestination(status)).toBe('live');
+  });
+
+  it('routes the approval gate to the plan surface', () => {
+    expect(runSurfaceDestination('awaiting_approval')).toBe('plan');
+  });
+
+  it.each([null, undefined, '', 'COMPLETE', 'PARTIAL', 'FAILED', 'CANCELLED'])(
+    'keeps terminal or user-controlled status %s on the result surface',
+    (status) => {
+      expect(runSurfaceDestination(status)).toBeNull();
+    },
+  );
+});
+
+describe('terminal result honesty', () => {
+  it('does not claim the worker never ran when terminal tasks exist without a report', () => {
+    expect(
+      missingValidationReportExplanation({
+        tasks: [{id: 'T1'} as unknown as RunDetail['tasks'][number]],
+      }),
+    ).toContain('Worker steps ran');
+    expect(missingValidationReportExplanation({tasks: []})).toContain(
+      'did not reach the worker phase',
+    );
+  });
+
+  it('uses the reviewer verdict before legacy severity counts', () => {
+    expect(reviewerSignal({reviewerVerdict: 'UNRESOLVED_ISSUES', reviewFailures: 0})).toBe(
+      'unresolved issues',
+    );
+    expect(reviewerSignal({reviewerVerdict: 'REVIEW_FAILED', reviewFailures: 0})).toBe(
+      'review failed',
+    );
+    expect(reviewerSignal({reviewerVerdict: 'CLEAN', reviewFailures: 4})).toBe('clean');
+    expect(reviewerSignal({reviewerVerdict: null, reviewFailures: 2})).toBe('2 unresolved');
+  });
+
+  it('uses validation product evidence instead of workspace metadata candidates', () => {
+    expect(authoritativeProductFileCount(0, 1)).toBe(0);
+    expect(authoritativeProductFileCount(3, 1)).toBe(3);
+    expect(authoritativeProductFileCount(null, 2)).toBe(2);
+    expect(authoritativeProductFileCount(-1, 2)).toBe(2);
+  });
+});
 
 describe('publicationTrustFacts', () => {
   it('keeps route, executable checks, generations, and eligibility as independent facts', () => {
@@ -136,7 +220,7 @@ describe('publicationTrustFacts', () => {
       'Approved correction route': 'OPENROUTER/x-ai/grok-4.20',
       'Actual worker route': 'OPENROUTER/x-ai/grok-4.20 (LEDGER · 1 physical attempt)',
       Build: 'Passed',
-      Tests: '2/2 passed · execution verified',
+      Tests: '2/2 passed · 0 skipped · execution verified',
       'Workflow/config': 'PASSED · 1 workflow parsed',
       'Protected contracts': 'COMPATIBLE',
       'Reviewer result': 'CLEAN',
@@ -176,6 +260,36 @@ describe('publicationTrustFacts', () => {
     expect(facts.find((fact) => fact.label === 'Tests')).toMatchObject({kind: 'bad'});
     expect(facts.find((fact) => fact.label === 'Evidence freshness')).toMatchObject({kind: 'bad'});
     expect(facts.find((fact) => fact.label === 'Publication')).toMatchObject({kind: 'bad'});
+  });
+
+  it('treats a verified green suite with explicit skips as passing evidence', () => {
+    const facts = publicationTrustFacts({
+      tasks: [],
+      testsPassed: 82,
+      testsSkipped: 6,
+      testsTotal: 88,
+      testExecutionVerified: true,
+    } as unknown as RunDetail);
+
+    expect(facts.find((fact) => fact.label === 'Tests')).toMatchObject({
+      value: '82/88 passed · 6 skipped · execution verified',
+      kind: 'ok',
+    });
+  });
+
+  it.each([
+    {testsPassed: 82, testsSkipped: 7, testsTotal: 88},
+    {testsPassed: -1, testsSkipped: 0, testsTotal: 88},
+    {testsPassed: 82, testsSkipped: -1, testsTotal: 88},
+    {testsPassed: 0, testsSkipped: 88, testsTotal: 88},
+  ])('treats malformed or all-skipped counts as failed evidence: %o', (counts) => {
+    const facts = publicationTrustFacts({
+      tasks: [],
+      ...counts,
+      testExecutionVerified: true,
+    } as unknown as RunDetail);
+
+    expect(facts.find((fact) => fact.label === 'Tests')).toMatchObject({kind: 'bad'});
   });
 
   it('reports terminal task state without claiming failed, partial, or blocked work executed', () => {
@@ -461,6 +575,7 @@ describe('terminalFailureEvidence', () => {
     ).toEqual({
       title: 'Planning rejection evidence',
       detail: 'Plan validation rejected: T8 misses producer GET /api/products.',
+      kind: 'bad',
     });
   });
 
@@ -474,8 +589,144 @@ describe('terminalFailureEvidence', () => {
     ).toEqual({
       title: 'Planning failure evidence',
       detail: 'planning could not produce a safe executable plan',
+      kind: 'bad',
     });
   });
+
+  it('prefers the server-owned outcome and never renders a legacy raw exception', () => {
+    const evidence = terminalFailureEvidence({
+      status: 'FAILED',
+      statusReason: 'INTERNAL_ERROR',
+      failureReason:
+        'RuntimeException: API key secret-value leaked from /Users/example/private/workspace',
+      terminalOutcome: {
+        schemaVersion: 1,
+        code: 'INTERNAL_ERROR',
+        category: 'PLATFORM_FAILURE',
+        customerTitle: 'Run could not complete',
+        customerMessage: 'An internal error stopped this run. Contact support if it repeats.',
+        impact: {
+          actualCostUsd: 0.42,
+          capUsd: 1,
+          codeChanged: null,
+          publication: 'NOT_CREATED',
+          prUrl: null,
+        },
+        retryable: true,
+        nextAction: {type: 'RETRY', label: 'Retry this run', href: '/runs/r1'},
+        supportCode: 'ES-RUN-R1',
+        automationDisposition: 'FAILED',
+        automationExitCode: 1,
+      },
+    });
+
+    expect(evidence).toEqual({
+      title: 'Run could not complete',
+      detail: 'An internal error stopped this run. Contact support if it repeats.',
+      kind: 'bad',
+      nextAction: 'Retry this run',
+      supportCode: 'ES-RUN-R1',
+    });
+    expect(JSON.stringify(evidence)).not.toContain('secret-value');
+    expect(JSON.stringify(evidence)).not.toContain('/Users/example');
+  });
+
+  it('renders cancellation as a neutral user stop rather than a platform failure', () => {
+    const terminalOutcome = {
+      schemaVersion: 1 as const,
+      code: 'USER_CANCELLED',
+      category: 'USER_STOPPED' as const,
+      customerTitle: 'Run cancelled',
+      customerMessage: 'You cancelled this run.',
+      impact: {
+        actualCostUsd: 0.04,
+        capUsd: 1,
+        codeChanged: false,
+        publication: 'NOT_CREATED' as const,
+        prUrl: null,
+      },
+      retryable: true,
+      nextAction: {type: 'START_NEW_RUN', label: 'Start again', href: '/compose'},
+      supportCode: null,
+      automationDisposition: 'STOPPED' as const,
+      automationExitCode: 130,
+    };
+
+    expect(
+      terminalFailureEvidence({
+        status: 'CANCELLED',
+        statusReason: 'Cancelled by user',
+        failureReason: 'legacy failure copy',
+        terminalOutcome,
+      }),
+    ).toMatchObject({
+      title: 'Run cancelled',
+      detail: 'You cancelled this run.',
+      kind: 'neutral',
+    });
+    expect(verdictFor(null, 'CANCELLED', terminalOutcome)).toEqual({
+      label: 'Cancelled',
+      kind: 'warn',
+    });
+    expect(isFailedTerminalStatus('CANCELLED')).toBe(false);
+  });
+
+  it.each([
+    ['REVIEW_EVIDENCE', {behavior: 'tab', tab: 'Validation'}],
+    ['OPEN_PUBLICATION_ELIGIBILITY', {behavior: 'tab', tab: 'PR'}],
+    ['RETRY_RUN', {behavior: 'retry'}],
+    ['OPEN_PROVIDER_SETTINGS', {behavior: 'navigate', href: '/provider-keys'}],
+    ['REVIEW_POLICY', {behavior: 'navigate', href: '/org/settings'}],
+    ['START_NEW_RUN', {behavior: 'navigate', href: '/compose'}],
+  ] as const)(
+    'maps the server %s action to exactly one executable primary action',
+    (type, expected) => {
+      const outcome = terminalOutcomeFixture(type, null);
+
+      expect(terminalOutcomePrimaryAction(outcome)).toMatchObject({
+        type,
+        label: `Action ${type}`,
+        ...expected,
+      });
+    },
+  );
+
+  it('uses the support code in the contact action and honors an explicit server href', () => {
+    const contact = terminalOutcomePrimaryAction(
+      terminalOutcomeFixture('CONTACT_SUPPORT', null, 'ES-RUN-ABC123'),
+    );
+    expect(contact).toMatchObject({
+      type: 'CONTACT_SUPPORT',
+      behavior: 'navigate',
+      label: 'Action CONTACT_SUPPORT',
+    });
+    expect(contact?.href).toContain('mailto:navneet@executespec.ai');
+    expect(contact?.href).toContain('ES-RUN-ABC123');
+
+    expect(
+      terminalOutcomePrimaryAction(
+        terminalOutcomeFixture('RETRY_RUN', '/runs/r1/retry', 'ES-RUN-ABC123'),
+      ),
+    ).toEqual({
+      type: 'RETRY_RUN',
+      label: 'Action RETRY_RUN',
+      behavior: 'navigate',
+      href: '/runs/r1/retry',
+    });
+  });
+
+  it.each(['javascript:alert(1)', '//evil.example/runs/r1'])(
+    'rejects an unsafe server action href and uses the typed fallback: %s',
+    (href) => {
+      expect(
+        terminalOutcomePrimaryAction(terminalOutcomeFixture('RETRY_RUN', href, 'ES-RUN-ABC123')),
+      ).toEqual({
+        type: 'RETRY_RUN',
+        label: 'Action RETRY_RUN',
+        behavior: 'retry',
+      });
+    },
+  );
 
   it('does not invent evidence for an in-flight or reasonless run', () => {
     expect(
@@ -486,6 +737,32 @@ describe('terminalFailureEvidence', () => {
     ).toBeNull();
   });
 });
+
+function terminalOutcomeFixture(
+  type: string,
+  href: string | null,
+  supportCode: string | null = null,
+): RunTerminalOutcome {
+  return {
+    schemaVersion: 1,
+    code: 'TEST_OUTCOME',
+    category: type === 'START_NEW_RUN' ? 'USER_STOPPED' : 'ACTION_REQUIRED',
+    customerTitle: 'Outcome title',
+    customerMessage: 'Outcome message',
+    impact: {
+      actualCostUsd: 0,
+      capUsd: 1,
+      codeChanged: false,
+      publication: 'NOT_CREATED',
+      prUrl: null,
+    },
+    retryable: type === 'RETRY_RUN',
+    nextAction: {type, label: `Action ${type}`, href},
+    supportCode,
+    automationDisposition: type === 'START_NEW_RUN' ? 'STOPPED' : 'ACTION_REQUIRED',
+    automationExitCode: 3,
+  };
+}
 
 describe('testResultSummary', () => {
   it('does not present a zero-test report as a passing measurement', () => {
@@ -1162,14 +1439,14 @@ describe('runResultUtils', () => {
 
   it('explains validation-reported file counts versus Code-tab workspace files', () => {
     expect(fileCountSummary({reportedFiles: 3, workspaceFiles: 1})).toEqual({
-      label: '3 reported · 1 visible',
-      title: '1 generated or modified product file(s)',
+      label: '3 product change(s)',
+      title: '3 product file change(s) proven by validation',
       mismatch: true,
       explanation:
-        'File counts differ because validation reports persisted generation evidence, while this count uses current git-derived product changes and excludes bootstrap metadata.',
+        'Validation proves 3 product change(s). The workspace inventory also contains 1 delta candidate(s), which can include deterministic run metadata.',
     });
     expect(fileCountSummary({reportedFiles: 2, workspaceFiles: 2})).toMatchObject({
-      label: '2 reported',
+      label: '2 product change(s)',
       mismatch: false,
       explanation: null,
     });

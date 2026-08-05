@@ -42,6 +42,11 @@ import {repoSupports} from '@/ide/projectRepoUi';
 import {friendlyAiFailureMessage} from '@/ide/runResultUtils';
 import {ConfirmModal} from '@/signal/components/Modal';
 import {consumeAgentProjectHandoff, createAgentProjectHandoff} from '@/ide/agentProjectHandoff';
+import {
+  agentComposerDraftKey,
+  loadAgentComposerDraft,
+  saveAgentComposerDraft,
+} from '@/ide/agentComposerDraft';
 
 interface RepoBoundaryState {
   actionKey: string | null;
@@ -105,6 +110,9 @@ export default function IdeAgent() {
   const handoffHandledRef = useRef<string | null>(null);
   const overlayFocusRef = useRef<HTMLElement | null>(null);
   const stickToBottom = useRef(true);
+  // Read at load-resolution time so an in-flight background reload cannot clobber a selection
+  // the operator made (or a session they created) after the load's list snapshot was fetched.
+  const selectedIdRef = useRef<string | null>(null);
   const liveRun = useAgentRunStream(state.activeRun);
   const runDetail = liveRun.detail;
   const runCost = liveRun.costUsd;
@@ -201,6 +209,27 @@ export default function IdeAgent() {
     if (!candidate) return null;
     return agentSessionMatchesScope(candidate, scope) ? candidate : null;
   }, [scope, state.sessions, state.selectedId]);
+
+  // Enterprise-litmus P2: an ordinary reload must not lose a typed-but-unsent
+  // draft. Restore once per scope; declared before the handoff effects so an
+  // explicit handoff/router draft dispatched later still wins over the stored
+  // one, and an already-populated composer is never clobbered.
+  const draftScopeRef = useRef<string | null>(null);
+  useEffect(() => {
+    const key = agentComposerDraftKey(scope);
+    if (draftScopeRef.current === key) return;
+    draftScopeRef.current = key;
+    if (state.input) return;
+    const draft = loadAgentComposerDraft(scope);
+    if (draft) dispatch({type: 'input:set', input: draft});
+  }, [scope, state.input]);
+
+  // Persist the draft as it changes; an emptied composer (message sent, or the
+  // user cleared it) removes the stored value. Text only — attachments are
+  // never persisted — and the module fails open on any storage error.
+  useEffect(() => {
+    saveAgentComposerDraft(scope, state.input);
+  }, [scope, state.input]);
 
   useEffect(() => {
     setSelectedProvider(selected?.defaultProvider ?? '');
@@ -560,8 +589,11 @@ export default function IdeAgent() {
           userModelsPromise,
         ]);
       setAvailableModels(eligibleAgentProviderCatalog(modelCatalog.providers ?? [], userModels));
+      // An explicit existing selection always survives a background reload: the fetched list
+      // snapshot may predate a conversation the operator just created or switched to, and the
+      // scoped auto-pick must never snap them back to an older ACTIVE session.
       const scoped = selectScopedAgentSession(sessionRows, scope);
-      const selectedId = scoped?.id ?? null;
+      const selectedId = selectedIdRef.current ?? scoped?.id ?? null;
       dispatch({
         type: 'load:success',
         sessions: sessionRows,
@@ -605,6 +637,10 @@ export default function IdeAgent() {
     document.addEventListener('visibilitychange', onVisibilityChange);
     return () => document.removeEventListener('visibilitychange', onVisibilityChange);
   }, [load, state.status]);
+
+  useEffect(() => {
+    selectedIdRef.current = state.selectedId;
+  }, [state.selectedId]);
 
   useEffect(() => {
     if (!state.selectedId) {

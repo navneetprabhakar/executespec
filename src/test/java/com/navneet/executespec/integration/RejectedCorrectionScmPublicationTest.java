@@ -169,6 +169,11 @@ class RejectedCorrectionScmPublicationTest {
         .thenReturn(
             new CompatibilityReport(
                 "baseline", acceptedGeneration, List.of(), List.of(), true, false));
+    RunWorkspaceAuthorityService workspaceAuthorities = mock(RunWorkspaceAuthorityService.class);
+    RunWorkspaceAuthorityService.Lease publicationLease =
+        mock(RunWorkspaceAuthorityService.Lease.class);
+    when(workspaceAuthorities.acquire(RUN_ID, RunWorkspaceAuthorityService.Authority.PUBLICATION))
+        .thenReturn(publicationLease);
     PublicationAdmissionService admission =
         new PublicationAdmissionService(
             reports,
@@ -179,7 +184,7 @@ class RejectedCorrectionScmPublicationTest {
             brownfieldGuard,
             mock(RunEffectiveRouteService.class),
             mock(DurableCorrectionLifecycle.class),
-            mock(RunWorkspaceAuthorityService.class));
+            workspaceAuthorities);
 
     GitTool gitTool = mock(GitTool.class);
     when(gitTool.pushToBranch(
@@ -255,6 +260,7 @@ class RejectedCorrectionScmPublicationTest {
         .workspaceGeneration(generation)
         .finalBuildPassed(true)
         .testExecutionVerified(true)
+        .testEvidenceScope("WORKSPACE_TEST_SUITE")
         .testsPassed(2)
         .testsTotal(2)
         .workflowConfigEvidenceJson(

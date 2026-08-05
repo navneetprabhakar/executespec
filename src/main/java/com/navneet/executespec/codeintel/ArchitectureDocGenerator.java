@@ -47,47 +47,56 @@ public class ArchitectureDocGenerator {
 
   private static final String SYSTEM_PROMPT =
       """
-      You are writing the combined architecture document for a multi-repo
-      project. The input is a set of per-repo architecture docs (HLD + LLD)
-      already produced. Your job is to synthesise a single project-wide
-      document that stitches them together into one coherent narrative.
+You are writing the combined architecture document for a multi-repo
+project. The input is a set of per-repo architecture docs (HLD + LLD)
+already produced. Your job is to synthesise a single project-wide
+document that stitches them together into one coherent narrative.
 
-      Produce a markdown document with:
+Produce a markdown document with:
 
-      # <project name or id> — Combined architecture
+# <project name or id> — Combined architecture
 
       ## 1. Overview
-      2-3 paragraphs: what the project does end-to-end, which repos exist
-      and their role in one sentence each, and the high-level request /
-      data flow between them.
+      Summarise the deterministic repository and evidence inventory. Describe project purpose,
+      repository roles, or end-to-end request/data flow only when deterministic evidence establishes
+      them; otherwise state that they are not established.
 
       ## 2. Repository layer
-      One subsection per repo. For each, SUMMARISE (don't copy verbatim)
-      its HLD in 1-2 paragraphs. Link conceptually — call out where
-      request paths cross repo boundaries.
+      One subsection per repo. Report only deterministically evidenced inventory. Model-generated HLD
+      prose may supply open questions, never factual grounding. Do not add conceptual links or
+      cross-repository request paths.
 
-      ## 3. Cross-repo data flows
-      Numbered list of 3-6 concrete end-to-end flows (user action →
-      repo A endpoint → repo B service → storage → ...). Reference file
-      paths from the per-repo docs so a reviewer can verify.
+## 3. Cross-repo data flows
+Include zero or more end-to-end flows only when deterministic evidence establishes every
+step and direction. If none is established, state that directly; never fabricate a flow to
+satisfy a minimum count.
 
-      ## 4. Shared contracts
-      - APIs consumed / produced between repos
-      - Shared models / DTOs
-      - Shared infra (DBs, queues, caches)
+## 4. Shared contracts
+List APIs consumed/produced between repos, shared models/DTOs, or shared infrastructure only
+when deterministic relationship evidence establishes the exact edge. It is valid to list zero.
 
-      ## 5. Open questions
-      Items that the per-repo docs surfaced with 'not evident from the
-      codemap' — collect those here so reviewers know what to annotate.
+## 5. Open questions
+Items that the per-repo docs surfaced with 'not evident from the
+codemap' — collect those here so reviewers know what to annotate.
 
-      Rules:
-      - Do NOT invent routes, classes, or integrations not present in the
-        per-repo docs.
-      - Prefer prose to bulletised dumps.
+Rules:
+- Do NOT invent routes, classes, or integrations not present in the
+  per-repo docs.
+- Model-generated prose in the per-repo documents is explanatory context, not corroboration.
+  Deterministic evidence blocks are authoritative for the facts they cover. Declaration
+  co-occurrence does not prove calls, dependencies, schema ownership, Compose application
+  startup, response representation, or cross-repository flow.
+- Per-repository model prose cannot establish behavior or a cross-repository relationship.
+  EXECUTESPEC_EXPORTED_FUNCTION_EVIDENCE_V1 is not propagated into this combined input, so it
+  cannot be used here as exact-source authority.
+- Do not enumerate allowed, supported, accepted, or valid fields/options/values for a symbol. The
+  combined input has no exact-source authority for exhaustive source contracts.
+- Prefer prose to bulletised dumps.
       - If only one repo is in scope, produce the document anyway but
-        note that cross-repo flows degenerate to intra-repo flows.
-      - Aim for 700-1500 words total.
-      """;
+        state that no cross-repository flow exists in scope. Describe an intra-repository flow only
+        when deterministic relationship evidence establishes every step and direction.
+- Aim for 700-1500 words total.
+""";
 
   public record Result(String markdown, int inputTokens, int outputTokens, String modelUsed) {}
 
@@ -215,9 +224,18 @@ public class ArchitectureDocGenerator {
         inTok,
         outTok,
         resolved.getModel());
+    String sourceEvidence =
+        repoArchDocs.stream()
+            .map(RepoArchitectureDoc::getContent)
+            .filter(java.util.Objects::nonNull)
+            .collect(java.util.stream.Collectors.joining("\n"));
+    String grounded = GeneratedSignatureGrounding.sanitize(text.trim(), sourceEvidence);
+    grounded = GeneratedSignatureGrounding.sanitizeUnsupportedBehavior(grounded, sourceEvidence);
+    grounded =
+        GeneratedSourceContractGrounding.sanitizeWithoutSourceAuthority(grounded, sourceEvidence);
+    grounded = GeneratedProjectFactGrounding.sanitize(grounded, sourceEvidence);
     return new Result(
-        DeterministicArchitectureEvidence.appendFromRepoDocs(
-            text.trim(), repoArchDocs, repoFullNames),
+        DeterministicArchitectureEvidence.appendFromRepoDocs(grounded, repoArchDocs, repoFullNames),
         inTok,
         outTok,
         resolved.getModel());

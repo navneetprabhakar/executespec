@@ -53,10 +53,12 @@ export const archiveRun = (runId: string) =>
  */
 export const forkRun = (
   runId: string,
-  overrides?: {userRequest?: string; executionMode?: string; aiProvider?: string},
+  overrides: {userRequest?: string; executionMode?: string; aiProvider?: string} | undefined,
+  idempotencyKey: string,
 ) =>
   req<RunSummary>(`/runs/${runId}/fork`, {
     method: 'POST',
+    headers: {'Idempotency-Key': idempotencyKey},
     body: JSON.stringify(overrides ?? {}),
   });
 
@@ -78,52 +80,60 @@ export interface PublicationEligibility {
 export const getPublicationEligibility = (runId: string) =>
   req<PublicationEligibility>(`/runs/${runId}/publication-eligibility`);
 
-export const createRun = (body: {
-  userRequest: string;
-  executionMode?: 'PROTOTYPE' | 'PRODUCTION';
-  skipApproval?: boolean;
-  autoMerge?: boolean;
-  modelName?: string;
-  aiProvider?: string;
-  projectId?: string;
-  repoMode?: string | null;
-  repoUrl?: string | null;
-  /** Pilot v3.0 — project-linked repo IDs to clone into workspace/<runId>/repos/<name>/. */
-  selectedRepoIds?: string[];
-  /** Pilot R7 — Figma URL passed through to planner + scoring. */
-  figmaUrl?: string;
-  /** v2.5.2 (Phase 4.3) — when true, planner emits test tasks first. */
-  tddMode?: boolean;
-  /**
-   * GA-readiness P3.2 — optional customer "Stop at $X" cost ceiling, USD. The platform
-   * cap (credits × $5 × 1.5) still applies as the upper bound. Range $0.10–$1000;
-   * server-side @DecimalMin/@DecimalMax rejects out-of-range values with 400.
-   */
-  userCostCap?: number;
-  /**
-   * Audit r5 (#5, 2026-05-06) — staged-PR-before-push mode. When true, the run executes
-   * normally but RunOrchestrator skips the trailing scmPushService.push call on success.
-   * The user can inspect the diff in Run Detail and manually push via the existing
-   * /runs/{id}/push-github endpoint if they want to ship. Backend reads this from a
-   * 24h Redis flag; not persisted to pipeline_run.
-   */
-  skipAutoPush?: boolean;
-  /**
-   * When true, automatic model/provider continuation stops for confirmation before spending on the
-   * rerun. This is a per-run tightening guard and does not override stricter server policy.
-   */
-  requireConfirmationBeforeExpensiveContinuation?: boolean;
-  /**
-   * When true, automatic model/provider continuation needs a compatible benchmark prior. When
-   * false, the selected quality-ranked candidate may run even if unbenchmarked for that task type.
-   */
-  requireBenchmarkPriorForAutomaticContinuation?: boolean;
-  /**
-   * Optional LOW-task start tier. LIGHTWEIGHT starts simple worker tasks cheaper while preserving
-   * automatic step-up; unlike modelName this is not a route pin.
-   */
-  lowComplexityWorkerStartTier?: 'WORKHORSE' | 'LIGHTWEIGHT';
-}) => req<{runId: string}>('/runs', {method: 'POST', body: JSON.stringify(body)});
+export const createRun = (
+  body: {
+    userRequest: string;
+    executionMode?: 'PROTOTYPE' | 'PRODUCTION';
+    skipApproval?: boolean;
+    autoMerge?: boolean;
+    modelName?: string;
+    aiProvider?: string;
+    projectId?: string;
+    repoMode?: string | null;
+    repoUrl?: string | null;
+    /** Pilot v3.0 — project-linked repo IDs to clone into workspace/<runId>/repos/<name>/. */
+    selectedRepoIds?: string[];
+    /** Pilot R7 — Figma URL passed through to planner + scoring. */
+    figmaUrl?: string;
+    /** v2.5.2 (Phase 4.3) — when true, planner emits test tasks first. */
+    tddMode?: boolean;
+    /**
+     * GA-readiness P3.2 — optional customer "Stop at $X" cost ceiling, USD. The platform
+     * cap (credits × $5 × 1.5) still applies as the upper bound. Range $0.10–$1000;
+     * server-side @DecimalMin/@DecimalMax rejects out-of-range values with 400.
+     */
+    userCostCap?: number;
+    /**
+     * Audit r5 (#5, 2026-05-06) — staged-PR-before-push mode. When true, the run executes
+     * normally but RunOrchestrator skips the trailing scmPushService.push call on success.
+     * The user can inspect the diff in Run Detail and manually push via the existing
+     * /runs/{id}/push-github endpoint if they want to ship. Backend reads this from a
+     * 24h Redis flag; not persisted to pipeline_run.
+     */
+    skipAutoPush?: boolean;
+    /**
+     * When true, automatic model/provider continuation stops for confirmation before spending on the
+     * rerun. This is a per-run tightening guard and does not override stricter server policy.
+     */
+    requireConfirmationBeforeExpensiveContinuation?: boolean;
+    /**
+     * When true, automatic model/provider continuation needs a compatible benchmark prior. When
+     * false, the selected quality-ranked candidate may run even if unbenchmarked for that task type.
+     */
+    requireBenchmarkPriorForAutomaticContinuation?: boolean;
+    /**
+     * Optional LOW-task start tier. LIGHTWEIGHT starts simple worker tasks cheaper while preserving
+     * automatic step-up; unlike modelName this is not a route pin.
+     */
+    lowComplexityWorkerStartTier?: 'WORKHORSE' | 'LIGHTWEIGHT';
+  },
+  idempotencyKey: string,
+) =>
+  req<{runId: string}>('/runs', {
+    method: 'POST',
+    headers: {'Idempotency-Key': idempotencyKey},
+    body: JSON.stringify(body),
+  });
 
 /**
  * RR-819 — one registered contract this plan intends to modify, as composed by the server while
@@ -320,9 +330,10 @@ export const sendRunChatMessage = (runId: string, message: string) =>
   });
 
 /** Creates a new iteration run that starts from the source run's codebase. */
-export const iterateRun = (runId: string, userRequest: string) =>
+export const iterateRun = (runId: string, userRequest: string, idempotencyKey: string) =>
   req<{runId: string}>(`/runs/${runId}/iterate`, {
     method: 'POST',
+    headers: {'Idempotency-Key': idempotencyKey},
     body: JSON.stringify({userRequest}),
   });
 

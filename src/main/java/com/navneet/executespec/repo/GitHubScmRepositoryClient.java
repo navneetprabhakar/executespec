@@ -48,9 +48,13 @@ public class GitHubScmRepositoryClient implements ScmRepositoryClient {
   @Override
   public ScmRemoteRepository inspect(String fullName, ScmCredential credential) {
     requireCredential(credential);
-    GitHubRepoService.RemoteRepo repo = github.getRemoteRepo(fullName, credential.secret());
-    if (repo == null) throw new ScmProviderException("GITHUB_REPOSITORY_UNREADABLE", null, false);
-    return map(repo);
+    GitHubRepoService.RemoteRepoLookupResult result =
+        github.getRemoteRepoResult(fullName, credential.secret());
+    if (!result.successful()) {
+      throw new ScmProviderException(
+          result.errorCode(), result.upstreamStatus(), result.retryable());
+    }
+    return map(result.repository());
   }
 
   @Override

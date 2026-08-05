@@ -4,6 +4,7 @@ import java.io.IOException;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.navneet.executespec.config.featureflag.FeatureFlagService;
+import com.navneet.executespec.sandboxroute.SandboxCommandRoutingService;
 
 import org.springframework.stereotype.Component;
 
@@ -36,6 +37,7 @@ public class BackgroundJobTool implements Tool, FlagGatedTool {
   private final FeatureFlagService flags;
   private final JobRegistry jobs;
   private final ShellSandboxPolicy sandboxPolicy;
+  private final SandboxCommandRoutingService sandboxRouting;
 
   @Override
   public boolean enabled() {
@@ -89,6 +91,12 @@ public class BackgroundJobTool implements Tool, FlagGatedTool {
           ToolResult.ErrorKind.FORBIDDEN, "background jobs are not enabled for this run");
     }
     String action = args.path("action").asText("");
+    if (sandboxRoutingEnabled() && "start".equals(action)) {
+      return ToolResult.err(
+          ToolResult.ErrorKind.UNAVAILABLE,
+          "starting background jobs is unavailable while strict sandbox routing is enabled; no"
+              + " host process was started. Existing jobs may still be inspected or killed");
+    }
     try {
       return switch (action) {
         case "start" -> start(args, ctx);
@@ -104,6 +112,10 @@ public class BackgroundJobTool implements Tool, FlagGatedTool {
       log.warn("backgroundJob IO error action={} run={}", action, ctx.runId(), e);
       return ToolResult.err(ToolResult.ErrorKind.IO_ERROR, e.getMessage());
     }
+  }
+
+  private boolean sandboxRoutingEnabled() {
+    return sandboxRouting != null && sandboxRouting.routingEnabled();
   }
 
   private ToolResult start(JsonNode args, ExecutionContext ctx) throws IOException {

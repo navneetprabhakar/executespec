@@ -83,8 +83,9 @@ public record RunRequest(
      * the DTO didn't expose it. Also accepted as {@code branchOverride} for forward-compat with
      * external callers that prefer the longer name.
      *
-     * <p>Use cases: (1) re-launch on an existing PR's head branch to address review comments; (2)
-     * stack a staged launch onto an in-progress branch.
+     * <p>The branch must be the verified head of an open pull request against the configured target
+     * branch. Default/target branches, unverified refs, and staged branches without an open PR are
+     * rejected before provider spend.
      */
     @Size(max = 200, message = "Branch must not exceed 200 characters") @JsonAlias({"branchOverride"})
         String branch,
@@ -101,8 +102,10 @@ public record RunRequest(
     /**
      * GA-readiness P3.2 (2026-05-06) — optional customer-supplied hard cost ceiling in USD. When
      * set, this overrides the platform-derived {@code hard_cap_usd} (credits × $5 × 1.5) with a
-     * tighter ceiling. The {@code WorkerAgent} budget guard will force-terminate the run with
-     * {@code Outcome.BUDGET_EXCEEDED} the moment cumulative spend reaches this value.
+     * tighter ceiling. The {@code WorkerAgent} budget guard force-terminates with {@code
+     * Outcome.BUDGET_EXCEEDED} when observed spend reaches the value or when a conservative
+     * estimate says the complete next provider call would cross it. The projection reduces one-call
+     * overshoot but is not an exact provider-invoice guarantee.
      *
      * <p>Capped at $1,000 by validation so a typo or copy-paste error can't accidentally authorise
      * an unbounded run. Min $0.10 — anything lower would prevent even a no-op run from finishing.

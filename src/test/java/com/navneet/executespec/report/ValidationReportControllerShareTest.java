@@ -64,6 +64,7 @@ class ValidationReportControllerShareTest {
             true,
             1,
             1,
+            0,
             "CLEAN",
             List.of());
     when(reportService.getByShareToken("shared-token")).thenReturn(Optional.of(report));

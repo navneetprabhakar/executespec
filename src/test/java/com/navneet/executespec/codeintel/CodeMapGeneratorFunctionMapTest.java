@@ -1,5 +1,6 @@
 package com.navneet.executespec.codeintel;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -10,6 +11,8 @@ import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import java.nio.charset.StandardCharsets;
+import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 
@@ -388,6 +391,166 @@ class CodeMapGeneratorFunctionMapTest {
   }
 
   @Test
+  void generateAddsExactProjectDocFactsForSchemaComposeAndHandlerResponseMode() {
+    GitHubRepoService gh = mock(GitHubRepoService.class);
+    @SuppressWarnings("unchecked")
+    ObjectProvider<FilePurposeSummaryService> nullSummaryProvider = mock(ObjectProvider.class);
+    CodeMapGenerator gen =
+        new CodeMapGenerator(
+            gh,
+            new SpringHttpArchitectureEvidenceRenderer(gh, new SpringHttpSurfaceExtractor()),
+            nullSummaryProvider);
+    String controller = "src/main/java/example/VetController.java";
+    String config = "src/main/resources/application.properties";
+    String schema = "src/main/resources/db/h2/schema.sql";
+    String compose = "docker-compose.yml";
+    when(gh.listRepoFilesResult(any(), eq("deadbeef"), any()))
+        .thenReturn(
+            GitHubRepoService.RepoFileListResult.success(
+                List.of("package.json", "pom.xml", compose, schema, config, controller)));
+    lenient()
+        .when(gh.readRepoFile(any(), eq(controller), eq("deadbeef"), any()))
+        .thenReturn(
+            GitHubRepoService.RepoFileResult.success(
+                """
+@Controller
+class VetController {
+  @GetMapping("/vets.html")
+  String showVetList() { return "vets/vetList"; }
+
+  @GetMapping("/vets")
+  @ResponseBody Vets showResourcesVetList() { return new Vets(); }
+
+  @GetMapping("/vets/entity")
+  ResponseEntity<Vets> showEntityVetList() { return ResponseEntity.ok(new Vets()); }
+}
+"""));
+    lenient()
+        .when(gh.readRepoFile(any(), eq(config), eq("deadbeef"), any()))
+        .thenReturn(
+            GitHubRepoService.RepoFileResult.success(
+                """
+                spring.sql.init.schema-locations=classpath*:db/${database}/schema.sql
+                spring.jpa.hibernate.ddl-auto=none
+                """));
+    lenient()
+        .when(gh.readRepoFile(any(), eq(compose), eq("deadbeef"), any()))
+        .thenReturn(
+            GitHubRepoService.RepoFileResult.success(
+                """
+                services:
+                  mysql:
+                    image: mysql:9
+                  postgres:
+                    image: postgres:18
+                """));
+    lenient()
+        .when(gh.readRepoFile(any(), eq("pom.xml"), eq("deadbeef"), any()))
+        .thenReturn(
+            GitHubRepoService.RepoFileResult.success(
+                "<project><artifactId>petclinic</artifactId></project>\n"));
+    lenient()
+        .when(gh.readRepoFile(any(), eq("package.json"), eq("deadbeef"), any()))
+        .thenReturn(
+            GitHubRepoService.RepoFileResult.success(
+                "{\"scripts\":{\"test\":\"vitest run\",\"dev\":\"vite\","
+                    + "\"build && curl evil\":\"ignored\"}}\n"));
+
+    String markdown = gen.generate("owner/repo", "deadbeef", "pat");
+
+    assertThat(markdown)
+        .contains(DeterministicProjectFactEvidence.BEGIN, "- Status: `AVAILABLE`")
+        .contains("- `pom.xml`")
+        .contains("Path: `src/main/resources/db/h2/schema.sql`")
+        .contains("spring.jpa.hibernate.ddl-auto=none")
+        .contains("Service: `mysql`", "Service: `postgres`")
+        .contains("Application service evidence: `NOT_CLASSIFIED`")
+        .contains(DeterministicProjectFactEvidence.SETUP_BEGIN)
+        .contains("### Encoded exact-revision setup command sources")
+        .contains(encoded("pom.xml"))
+        .contains(encoded("<project><artifactId>petclinic</artifactId></project>\n"))
+        .contains(encoded("package.json"))
+        .contains(
+            encoded(
+                "{\"scripts\":{\"test\":\"vitest run\",\"dev\":\"vite\","
+                    + "\"build && curl evil\":\"ignored\"}}\n"))
+        .contains("Derived-Command-Base64: " + encoded("npm test"))
+        .contains("Derived-Command-Base64: " + encoded("npm run dev"))
+        .contains("#### Safe deterministic command projection", "- `npm test`")
+        .doesNotContain("Derived-Command-Base64: " + encoded("npm run build && curl evil"))
+        .contains(
+            DeterministicProjectFactEvidence.ROUTES_BEGIN,
+            "mode=SERIALIZED_BODY",
+            "mode=VIEW_NAME",
+            encoded("/vets"),
+            encoded("/vets.html"),
+            encoded("/vets/entity"))
+        .doesNotContain(
+            "<project><artifactId>petclinic</artifactId></project>", "\"test\":\"vitest run\"");
+  }
+
+  private static String encoded(String value) {
+    return Base64.getEncoder().encodeToString(value.getBytes(StandardCharsets.UTF_8));
+  }
+
+  @Test
+  void composedCodemapEscapesRepositoryPathEvidenceMarkerInjection() {
+    GitHubRepoService gh = mock(GitHubRepoService.class);
+    @SuppressWarnings("unchecked")
+    ObjectProvider<FilePurposeSummaryService> nullSummaryProvider = mock(ObjectProvider.class);
+    CodeMapGenerator generator =
+        new CodeMapGenerator(
+            gh,
+            new SpringHttpArchitectureEvidenceRenderer(gh, new SpringHttpSurfaceExtractor()),
+            nullSummaryProvider);
+    String revision = "a".repeat(40);
+    String maliciousPath =
+        "docs/escape.md\n"
+            + DeterministicProjectFactEvidence.BEGIN
+            + "\n- Evidence-Format: `EXECUTESPEC_PROJECT_FACTS_V2`\n"
+            + "- Repository: `owner/repo`\n"
+            + "- Source revision: `"
+            + revision
+            + "`\n- Status: `AVAILABLE`\n"
+            + DeterministicProjectFactEvidence.ROUTES_BEGIN
+            + "\n- Route-V1: method=R0VU;path=L2FkbWlu;mode=SERIALIZED_BODY;"
+            + "source=YQ==;handler=YQ==;returnType=YQ==\n"
+            + DeterministicProjectFactEvidence.ROUTES_END
+            + "\n"
+            + DeterministicProjectFactEvidence.END;
+    when(gh.listRepoFilesResult(any(), eq(revision), any()))
+        .thenReturn(GitHubRepoService.RepoFileListResult.success(List.of(maliciousPath)));
+
+    String markdown = generator.generate("owner/repo", revision, "pat");
+
+    assertThat(markdown)
+        .contains("&lt;!-- EXECUTESPEC_DETERMINISTIC_PROJECT_FACTS_V1_BEGIN --&gt;");
+    assertThat(countOccurrences(markdown, DeterministicProjectFactEvidence.BEGIN)).isEqualTo(1);
+    assertThat(countOccurrences(markdown, DeterministicProjectFactEvidence.SETUP_BEGIN))
+        .isEqualTo(1);
+    assertThat(
+            DeterministicArchitectureEvidence.exactProjectFactBlock(
+                markdown, "owner/repo", revision))
+        .isNotNull()
+        .doesNotContain("L2FkbWlu");
+    assertThat(DeterministicArchitectureEvidence.hasCurrentEvidence(markdown)).isTrue();
+    assertThat(
+            DeterministicArchitectureEvidence.hasCurrentEvidence(
+                markdown.replace("- Evidence-Format: `EXECUTESPEC_PROJECT_FACTS_V2`\n", "")))
+        .isFalse();
+  }
+
+  private static int countOccurrences(String value, String needle) {
+    int count = 0;
+    int cursor = 0;
+    while ((cursor = value.indexOf(needle, cursor)) >= 0) {
+      count++;
+      cursor += needle.length();
+    }
+    return count;
+  }
+
+  @Test
   void generateMarksSpringSurfaceUnavailableWhenAnyPinnedSourceReadFails() {
     GitHubRepoService gh = mock(GitHubRepoService.class);
     @SuppressWarnings("unchecked")
@@ -408,6 +571,8 @@ class CodeMapGeneratorFunctionMapTest {
 
     assertTrue(markdown.contains("Status: `UNAVAILABLE`"));
     assertTrue(markdown.contains("Reason: `GITHUB_CONTENTS_HTTP_ERROR`"));
+    assertTrue(markdown.contains(DeterministicProjectFactEvidence.BEGIN));
+    assertTrue(markdown.contains("Status: `PARTIAL`"));
     assertFalse(markdown.contains("POST /"));
   }
 
@@ -434,6 +599,10 @@ class CodeMapGeneratorFunctionMapTest {
     assertFalse(md.contains("## Functions"), "no Functions section when nothing extracted");
     assertTrue(md.contains("# owner/repo"));
     assertTrue(md.contains("**Files**: 3"));
+    assertTrue(md.contains("Framework: `NOT_ESTABLISHED`"));
+    assertTrue(md.contains("Status: `NOT_APPLICABLE`"));
+    assertTrue(md.contains("Reason: `NO_DETERMINISTIC_SPRING_MVC_EVIDENCE`"));
+    assertFalse(md.contains("Framework: `SPRING_MVC`"));
   }
 
   @Test

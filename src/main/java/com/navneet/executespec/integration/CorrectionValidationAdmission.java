@@ -78,8 +78,8 @@ class CorrectionValidationAdmission {
     if (!Boolean.TRUE.equals(report.getTestExecutionVerified())
         || report.getTestsTotal() == null
         || report.getTestsTotal() <= 0
-        || report.getTestsPassed() == null
-        || !report.getTestsPassed().equals(report.getTestsTotal())
+        || !com.navneet.executespec.report.TestExecutionTrust.successfulPopulation(
+            report.getTestsPassed(), report.getTestsSkipped(), report.getTestsTotal())
         || !"WORKSPACE_TEST_SUITE".equals(report.getTestEvidenceScope())
         || report.getTestCommand() == null
         || report.getTestCommand().isBlank()

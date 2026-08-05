@@ -67,10 +67,11 @@ class ProjectRepoServiceSourceReadinessTest {
             .build();
     when(repoRepo.findById(repoId)).thenReturn(Optional.of(repo));
     when(repoRepo.save(any(ProjectRepo.class))).thenAnswer(invocation -> invocation.getArgument(0));
-    when(gitHub.getRemoteRepo("acme/api", "pat"))
+    when(gitHub.getRemoteRepoResult("acme/api", "pat"))
         .thenReturn(
-            new GitHubRepoService.RemoteRepo(
-                "123", "acme/api", "https://github.com/acme/api", "main", true, 10L));
+            GitHubRepoService.RemoteRepoLookupResult.found(
+                new GitHubRepoService.RemoteRepo(
+                    "123", "acme/api", "https://github.com/acme/api", "main", true, 10L)));
   }
 
   @Test
@@ -144,7 +145,7 @@ class ProjectRepoServiceSourceReadinessTest {
         .isInstanceOf(org.springframework.web.server.ResponseStatusException.class)
         .hasMessageContaining("Only ORG_ADMIN");
 
-    verify(gitHub, never()).getRemoteRepo(any(), any());
+    verify(gitHub, never()).getRemoteRepoResult(any(), any());
     verify(repoRepo, never()).save(any());
   }
 }

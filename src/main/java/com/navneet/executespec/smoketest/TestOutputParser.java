@@ -27,6 +27,15 @@ public final class TestOutputParser {
   private static final Pattern PYTEST_ERROR = Pattern.compile("(\\d+)\\s+error");
   private static final Pattern PYTEST_SKIPPED = Pattern.compile("(\\d+)\\s+skipped");
 
+  // node:test summary, emitted either by the spec reporter ("ℹ tests 5") or TAP reporter
+  // ("# tests 5"). Require the complete footer so ordinary test names cannot become counts.
+  private static final Pattern NODE_TEST_TOTAL = nodeTestFooter("tests");
+  private static final Pattern NODE_TEST_PASSED = nodeTestFooter("pass");
+  private static final Pattern NODE_TEST_FAILED = nodeTestFooter("fail");
+  private static final Pattern NODE_TEST_CANCELLED = nodeTestFooter("cancelled");
+  private static final Pattern NODE_TEST_SKIPPED = nodeTestFooter("skipped");
+  private static final Pattern NODE_TEST_TODO = nodeTestFooter("todo");
+
   // jest: "Tests:       2 failed, 5 passed, 7 total"
   private static final Pattern JEST_TOTAL = Pattern.compile("Tests:.*?(\\d+)\\s+total");
   private static final Pattern JEST_PASSED = Pattern.compile("Tests:.*?(\\d+)\\s+passed");
@@ -73,6 +82,7 @@ public final class TestOutputParser {
     if (output == null) output = "";
     return switch (framework) {
       case PYTEST -> parsePytest(output);
+      case NODE_TEST -> parseNodeTest(output);
       case JEST -> parseJest(output);
       case VITEST -> parseVitest(output);
       case SUREFIRE -> parseSurefire(output);
@@ -87,6 +97,7 @@ public final class TestOutputParser {
     java.util.List<TestExecutionSummary> summaries =
         java.util.stream.Stream.of(
                 parsePytest(output),
+                parseNodeTest(output),
                 parseJest(output),
                 parseVitest(output),
                 parseSurefire(output),
@@ -126,6 +137,27 @@ public final class TestOutputParser {
     int s = orZero(firstInt(JEST_SKIPPED, out));
     if (invalidCounts(total, p, f, 0, s)) return Optional.empty();
     return Optional.of(summary(total, p, f, 0, s));
+  }
+
+  private static Optional<TestExecutionSummary> parseNodeTest(String out) {
+    String clean = out.replaceAll("\\u001B\\[[;\\d]*m", "");
+    Integer total = firstInt(NODE_TEST_TOTAL, clean);
+    Integer passed = firstInt(NODE_TEST_PASSED, clean);
+    Integer failed = firstInt(NODE_TEST_FAILED, clean);
+    Integer cancelled = firstInt(NODE_TEST_CANCELLED, clean);
+    Integer skipped = firstInt(NODE_TEST_SKIPPED, clean);
+    Integer todo = firstInt(NODE_TEST_TODO, clean);
+    if (total == null
+        || passed == null
+        || failed == null
+        || cancelled == null
+        || skipped == null
+        || todo == null) {
+      return Optional.empty();
+    }
+    int skippedTotal = skipped + todo;
+    if (invalidCounts(total, passed, failed, cancelled, skippedTotal)) return Optional.empty();
+    return Optional.of(summary(total, passed, failed, cancelled, skippedTotal));
   }
 
   private static Optional<TestExecutionSummary> parseVitest(String out) {
@@ -227,6 +259,10 @@ public final class TestOutputParser {
   private static Integer firstInt(Pattern p, String s) {
     Matcher m = p.matcher(s);
     return m.find() ? Integer.parseInt(m.group(1)) : null;
+  }
+
+  private static Pattern nodeTestFooter(String label) {
+    return Pattern.compile("(?m)^\\s*(?:ℹ|#)\\s*" + label + "\\s+(\\d+)\\s*$");
   }
 
   private static int count(Pattern p, String s) {

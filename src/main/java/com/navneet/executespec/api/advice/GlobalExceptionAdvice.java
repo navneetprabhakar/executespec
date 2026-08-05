@@ -5,16 +5,16 @@ import java.util.Map;
 import java.util.UUID;
 
 import com.navneet.executespec.agentsession.SubagentBudgetExceededException;
+import com.navneet.executespec.run.sync.RunWorkspaceRestoreFailedException;
+import com.navneet.executespec.run.sync.RunWorkspaceUnavailableException;
 
 import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.ErrorResponseException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.context.request.async.AsyncRequestNotUsableException;
 import org.springframework.web.context.request.async.AsyncRequestTimeoutException;
-import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import lombok.extern.slf4j.Slf4j;
@@ -29,9 +29,9 @@ import lombok.extern.slf4j.Slf4j;
  * <p>Two design choices worth calling out:
  *
  * <ul>
- *   <li><b>{@link Order} runs last</b>. {@link OptimisticLockAdvice} + {@link ValidationAdvice} +
- *       Spring's own {@link ResponseStatusException} handling all win — this is strictly the
- *       fallback for unexpected exceptions, never for the normal API-error shape.
+ *   <li><b>{@link Order} runs last</b>. {@link OptimisticLockAdvice} and {@link ValidationAdvice}
+ *       win first; this is strictly the fallback for unexpected exceptions, never normal API
+ *       errors.
  *   <li><b>Opaque error id in the response, full stack trace in the log</b>. The client gets a
  *       short correlation id (so support can grep) but no internal class names / line numbers /
  *       message strings that could leak schema or library internals. The full exception is logged
@@ -64,49 +64,10 @@ public class GlobalExceptionAdvice {
   }
 
   /**
-   * Spring 6 ships {@link ErrorResponseException} as the supertype of every standard error-class
-   * exception ({@link ResponseStatusException}, {@code NoResourceFoundException}, {@code
-   * MethodArgumentNotValidException} after Spring 6.1, etc). Catching the supertype here means a
-   * 404 from the static-resource handler stays a 404 instead of falling to {@link #onAny}'s generic
-   * 500 envelope.
-   *
-   * <p>Each subclass carries its own status code; we forward it as-is + render the canonical
-   * envelope. The pre-existing {@link OptimisticLockAdvice} + {@link ValidationAdvice} stay in
-   * front of this handler via their own narrower {@code @ExceptionHandler} mappings.
-   */
-  @ExceptionHandler(ErrorResponseException.class)
-  public ResponseEntity<Map<String, Object>> onErrorResponse(ErrorResponseException ex) {
-    HttpStatus status = HttpStatus.resolve(ex.getStatusCode().value());
-    if (status == null) status = HttpStatus.INTERNAL_SERVER_ERROR;
-    // RR-1119 — the status-derived error code must use the underscore convention the CLI/core
-    // classifiers recognize (and that onNoResource and ValidationAdvice already emit). This
-    // handler previously produced "not-found" for a 404, so client 404-classification and
-    // self-healing silently failed against a real Spring ResponseStatusException. The enum name is
-    // already underscore-delimited (NOT_FOUND); do not hyphenate it.
-    String error = status.name().toLowerCase();
-    String message =
-        ex instanceof ResponseStatusException rse && rse.getReason() != null
-            ? rse.getReason()
-            : status.getReasonPhrase();
-    return ResponseEntity.status(status)
-        .body(
-            Map.of(
-                "timestamp",
-                Instant.now().toString(),
-                "status",
-                status.value(),
-                "error",
-                error,
-                "message",
-                message));
-  }
-
-  /**
    * Spring's static-resource handler throws {@link NoResourceFoundException} when a URL doesn't
-   * match any controller AND no static asset exists at that path. It does NOT extend {@link
-   * ErrorResponseException} in current Spring 6.x, so it would otherwise fall through to {@link
-   * #onAny}'s opaque 500. Map it to the canonical 404 envelope so unmapped backend paths are
-   * obviously 404 (not 500) to clients + dashboards.
+   * match any controller AND no static asset exists at that path. It is handled explicitly so it
+   * cannot fall through to {@link #onAny}'s opaque 500. Map it to the canonical 404 envelope so
+   * unmapped backend paths are obviously 404 (not 500) to clients + dashboards.
    */
   @ExceptionHandler(NoResourceFoundException.class)
   public ResponseEntity<Map<String, Object>> onNoResource(NoResourceFoundException ex) {
@@ -135,11 +96,50 @@ public class GlobalExceptionAdvice {
                 "status",
                 422,
                 "error",
-                "subagent-budget-exhausted",
+                "subagent_budget_exhausted",
                 "errorCode",
                 ex.errorCode(),
                 "message",
                 ex.getMessage()));
+  }
+
+  /** An expired run workspace is a stable lifecycle outcome, not an opaque platform exception. */
+  @ExceptionHandler(RunWorkspaceUnavailableException.class)
+  public ResponseEntity<Map<String, Object>> onRunWorkspaceUnavailable(
+      RunWorkspaceUnavailableException ex) {
+    return ResponseEntity.status(HttpStatus.GONE)
+        .body(
+            Map.of(
+                "timestamp",
+                Instant.now().toString(),
+                "status",
+                HttpStatus.GONE.value(),
+                "error",
+                "workspace_unavailable",
+                "errorCode",
+                RunWorkspaceUnavailableException.ERROR_CODE,
+                "message",
+                "The run workspace is no longer available. Start a new run from the current"
+                    + " project revision."));
+  }
+
+  /** A durable archive exists, but a retryable platform/storage fault prevented restoration. */
+  @ExceptionHandler(RunWorkspaceRestoreFailedException.class)
+  public ResponseEntity<Map<String, Object>> onRunWorkspaceRestoreFailed(
+      RunWorkspaceRestoreFailedException ex) {
+    return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+        .body(
+            Map.of(
+                "timestamp",
+                Instant.now().toString(),
+                "status",
+                HttpStatus.SERVICE_UNAVAILABLE.value(),
+                "error",
+                "workspace_restore_failed",
+                "errorCode",
+                RunWorkspaceRestoreFailedException.ERROR_CODE,
+                "message",
+                "The run workspace could not be restored right now. Retry the sync shortly."));
   }
 
   /** Last-chance handler. Any uncaught Throwable becomes a structured 500 with a correlation id. */

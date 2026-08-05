@@ -75,7 +75,7 @@ public class PreviewRenderController {
     // Feature-off wins and avoids a needless workspace/Git inspection. An active job remains
     // reloadable even if its workspace evidence disappears after it was admitted.
     boolean renderAllowed =
-        (job != null && !job.isTerminal()) || renderService.hasProductFilesToRender(runId);
+        (job != null && !job.isTerminal()) || renderService.canStartRender(runId);
     if (job == null) {
       return ResponseEntity.ok(
           PreviewRenderDtos.RenderManifest.absent(runId, available, renderAllowed));
@@ -90,9 +90,7 @@ public class PreviewRenderController {
    * <p>Returns 404 rather than an error page when the surface failed to render, so the client
    * cannot accidentally display rejected model output.
    */
-  @GetMapping(
-      value = "/{runId}/preview-render/surfaces/{surfaceId}",
-      produces = MediaType.TEXT_HTML_VALUE)
+  @GetMapping("/{runId}/preview-render/surfaces/{surfaceId}")
   public ResponseEntity<String> surface(
       @PathVariable String runId,
       @PathVariable String surfaceId,

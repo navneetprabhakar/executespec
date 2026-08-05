@@ -108,6 +108,7 @@ final class ProjectGeneratedDocPublisher {
 
   ProjectGeneratedDoc publishValidated(
       ProjectGeneratedDoc candidate,
+      String projectName,
       java.util.Set<String> sourceRepositories,
       String codemapEvidence,
       Consumer<ProjectGeneratedDoc> publicationFence) {
@@ -115,11 +116,13 @@ final class ProjectGeneratedDocPublisher {
         candidate,
         existing ->
             ProjectGeneratedDocValidator.validate(
-                    existing.getDocType(),
-                    existing.getContent(),
-                    sourceRepositories,
-                    codemapEvidence)
-                .isEmpty(),
+                        existing.getDocType(),
+                        existing.getContent(),
+                        sourceRepositories,
+                        codemapEvidence)
+                    .isEmpty()
+                && ProjectGeneratedDocCanonicality.isCanonical(
+                    existing, projectName, codemapEvidence, sourceRepositories),
         publicationFence);
   }
 }

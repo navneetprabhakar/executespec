@@ -101,7 +101,9 @@ class WebQaFixtureControllerTest {
             users,
             mock(SseBroadcaster.class),
             featureFlags(),
-            webQaEnvironment());
+            webQaEnvironment(),
+            evidenceFixtures(),
+            mock(com.navneet.executespec.project.security.ProjectAccessGuard.class));
 
     Map<String, Object> result = controller.cleanup(new AppUserDetails(user, null));
 
@@ -247,7 +249,9 @@ class WebQaFixtureControllerTest {
             mock(AppUserRepository.class),
             mock(SseBroadcaster.class),
             featureFlags(),
-            webQaEnvironment());
+            webQaEnvironment(),
+            evidenceFixtures(),
+            mock(com.navneet.executespec.project.security.ProjectAccessGuard.class));
 
     PipelineRun run =
         controller.createRun("user-1", "org-1", "COMPLETE", "CLEAN_COMPLETION", "fixture", true);
@@ -281,7 +285,9 @@ class WebQaFixtureControllerTest {
             mock(AppUserRepository.class),
             mock(SseBroadcaster.class),
             featureFlags(),
-            webQaEnvironment());
+            webQaEnvironment(),
+            evidenceFixtures(),
+            mock(com.navneet.executespec.project.security.ProjectAccessGuard.class));
 
     controller.createLegacyPlanGate("web-qa-gate");
 
@@ -332,7 +338,9 @@ class WebQaFixtureControllerTest {
             mock(AppUserRepository.class),
             mock(SseBroadcaster.class),
             featureFlags(),
-            unsafe);
+            unsafe,
+            evidenceFixtures(),
+            mock(com.navneet.executespec.project.security.ProjectAccessGuard.class));
     assertThat(sharedProfileController.safetyEvidence().safe()).isFalse();
   }
 
@@ -357,7 +365,9 @@ class WebQaFixtureControllerTest {
             mock(AppUserRepository.class),
             mock(SseBroadcaster.class),
             featureFlags(),
-            unsafe);
+            unsafe,
+            evidenceFixtures(),
+            mock(com.navneet.executespec.project.security.ProjectAccessGuard.class));
 
     assertThatThrownBy(() -> controller.seed(user()))
         .isInstanceOf(ResponseStatusException.class)
@@ -399,7 +409,9 @@ class WebQaFixtureControllerTest {
         mock(AppUserRepository.class),
         mock(SseBroadcaster.class),
         featureFlags(),
-        webQaEnvironment());
+        webQaEnvironment(),
+        evidenceFixtures(),
+        mock(com.navneet.executespec.project.security.ProjectAccessGuard.class));
   }
 
   private static FeatureFlagService featureFlags() {
@@ -412,5 +424,21 @@ class WebQaFixtureControllerTest {
     Environment environment = mock(Environment.class);
     when(environment.getActiveProfiles()).thenReturn(new String[] {"web-qa"});
     return environment;
+  }
+
+  private static WebQaProjectEvidenceFixtures evidenceFixtures() {
+    WebQaProjectEvidenceFixtures fixtures = mock(WebQaProjectEvidenceFixtures.class);
+    org.mockito.Mockito.when(
+            fixtures.seedAgentSessionEvidence(
+                org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.any()))
+        .thenAnswer(
+            inv ->
+                new WebQaProjectEvidenceFixtures.SessionEvidence(
+                    "web-qa-session",
+                    com.navneet.executespec.agentsession.entity.AgentTurn.builder()
+                        .id("web-qa-turn")
+                        .sessionId("web-qa-session")
+                        .build()));
+    return fixtures;
   }
 }

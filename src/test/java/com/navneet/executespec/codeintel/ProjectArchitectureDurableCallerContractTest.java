@@ -7,7 +7,7 @@ import java.nio.file.Path;
 
 import org.junit.jupiter.api.Test;
 
-/** Pins the whole-project callers to durable admission and completion-aware semantics. */
+/** Pins whole-project callers to durable admission and workflow-appropriate await semantics. */
 class ProjectArchitectureDurableCallerContractTest {
 
   @Test
@@ -28,9 +28,9 @@ class ProjectArchitectureDurableCallerContractTest {
     assertThat(run).contains("prePlannerArchitectureRefreshService.refreshIfStale(");
     assertThat(run).doesNotContain("requestWithProviderAndAwaitArchitectureId(");
     assertThat(run).doesNotContain("projectArchitectureService.generate(");
-    assertThat(prePlannerRefresh).contains("requestWithProviderAndAwaitArchitectureId(");
+    assertThat(prePlannerRefresh).contains("requestWithProvider(");
     assertThat(prePlannerRefresh)
-        .contains("architectureService", ".findById(refreshedArchitectureId)");
+        .doesNotContain("requestWithProviderAndAwaitArchitectureId(", "architectureService");
   }
 
   private static String source(String relative) throws Exception {
