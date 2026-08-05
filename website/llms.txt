@@ -85,6 +85,6 @@ ExecuteSpec runs its production pipeline through public benchmarks with an ident
 
 ## Contact
 
-- Sales / enterprise: sales@executespec.ai
+- Enterprise / general: hello@executespec.ai
 - Support: admin@executespec.ai
 - LinkedIn: https://www.linkedin.com/company/executespec

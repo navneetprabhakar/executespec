@@ -21,7 +21,6 @@
 
     <!-- ── Core SEO & Agentic Search Meta Tags ─────────────────────────────── -->
     <meta name="description" content="Write a spec in plain English. ExecuteSpec plans it, codes it across one or more linked repos, runs your tests, reviews it, and opens a pull request with a deterministic Ready / Needs review / Failed verdict. Free 200 AI credits/mo · Pro $20/mo · Team $50/seat BYOK · Enterprise custom.">
-    <meta name="keywords" content="AI pull request automation, AI that ships PRs, merge-validated AI coding, agentic code review, AI PR reviewer, multi-repo AI coding, cross-repo AI agent, AI coding pipeline, plan-approval gate, BYOK AI coding, autonomous PR generation, AI code review tool, CI/CD validation, automated tech debt, agentic refactor, AI code templates, AI starter solutions, AI scaffold library, Stripe checkout boilerplate, OAuth login boilerplate, Razorpay checkout, Resend transactional email, RAG pgvector, AI feature scaffolding, AI codegen catalog, ai modernization recipes, ai migration tool, JavaScript to TypeScript codemod, CommonJS to ESM, Express to Fastify migration, Mongoose to Prisma migration, REST to tRPC migration, React class components to hooks, Tailwind v3 to v4 migration, Vue 2 to Vue 3 migration, Webpack to Vite migration, Mocha to Vitest migration, Pages Router to App Router, Figma to code, React Native AI codegen, Cursor alternative, Windsurf alternative, Claude Code alternative, GitHub Copilot alternative, GitHub Copilot Workspaces alternative, Lovable alternative, Bolt.new alternative, v0 alternative, Replit Agent alternative, Devin alternative, Codeium alternative, Continue.dev alternative, Sourcegraph Cody alternative, Tabnine alternative, Aider alternative, Cline alternative, JetBrains AI Assistant alternative, Amazon Q Developer alternative, emergent.sh alternative, StackBlitz Bolt alternative, Augment Code alternative">
     <meta name="author" content="ExecuteSpec">
     <meta name="publisher" content="ExecuteSpec">
     <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1">
@@ -1665,9 +1664,9 @@
                     <li>Model matrix override + per-run pin</li>
                     <li>Standards · Contracts · ADRs</li>
                     <li>Org governance + audit trail</li>
-                    <li>Dedicated support</li>
+                    <li>Priority support</li>
                 </ul>
-                <a class='btn' href='mailto:sales@executespec.ai'>Talk to sales</a>
+                <a class='btn' href='mailto:hello@executespec.ai'>Get in touch</a>
             </div>
         </div>
     </div>
@@ -1859,7 +1858,7 @@
                 </picture>
                 ExecuteSpec
             </div>
-            <p>AI that ships pull requests your team can review and merge. Built in India for teams worldwide. ExecuteSpec 2.0 / CLI 1.0 release track.</p>
+            <p>AI that ships pull requests your team can review and merge. Built in India for teams worldwide. Built by <a href='https://www.linkedin.com/in/navneetprabhakar/'>Navneet Prabhakar</a>. ExecuteSpec 2.0 / CLI 1.0 release track.</p>
         </div>
         <div>
             <h5>Product</h5>
@@ -1871,11 +1870,13 @@
                 <li><a href='#pricing'>Pricing</a></li>
                 <li><a href='#compare'>Compare</a></li>
                 <li><a href='#benchmarks'>Benchmarks</a></li>
+                <li><a href='/notes'>Notes</a></li>
             </ul>
         </div>
         <div>
             <h5>Company</h5>
             <ul>
+                <li><a href='/about'>About</a></li>
                 <li><a href='https://dev.executespec.ai/trust'>Trust &amp; security</a></li>
                 <li><a href='/terms'>Terms</a></li>
                 <li><a href='/privacy'>Privacy</a></li>
@@ -1905,6 +1906,22 @@
         <a href='/dpa'>DPA</a>
     </div>
 </footer>
+
+<script>
+  // App-origin config constant. The app is moving from dev.executespec.ai to
+  // app.executespec.ai; until DNS + TLS for the app subdomain are live, this stays on the
+  // current origin so links are never half-switched. To flip: set APP_ORIGIN to
+  // 'https://app.executespec.ai' AND rewrite the literal hrefs in this file (plus llms.txt,
+  // sitemap.xml, site.webmanifest, press-kit/README.md) so view-source matches.
+  (function () {
+    var APP_ORIGIN = 'https://dev.executespec.ai';
+    var CURRENT = 'https://dev.executespec.ai';
+    if (APP_ORIGIN === CURRENT) return;
+    document.querySelectorAll('a[href^="' + CURRENT + '"]').forEach(function (a) {
+      a.setAttribute('href', a.getAttribute('href').replace(CURRENT, APP_ORIGIN));
+    });
+  })();
+</script>
 
 <script>
   (function () {
