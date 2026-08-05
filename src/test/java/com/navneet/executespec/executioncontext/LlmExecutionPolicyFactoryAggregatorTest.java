@@ -75,6 +75,60 @@ class LlmExecutionPolicyFactoryAggregatorTest {
   }
 
   @Test
+  void snapshotUsesResolverNormalizedKeySourceModeNotRawOrgColumn() {
+    // 2026-08-05 project-chat dispatch fix: a FREE-tier org with a stale HYBRID column is
+    // normalized to SYSTEM by ApiKeyResolver at dispatch. The creation snapshot must record the
+    // same normalized value or every dispatch fails POLICY_STALE on a policy that never changed.
+    LlmExecutionContextService contexts = mock(LlmExecutionContextService.class);
+    PipelineRunRepository runs = mock(PipelineRunRepository.class);
+    OrgRepository orgs = mock(OrgRepository.class);
+    ApiKeyResolver keys = mock(ApiKeyResolver.class);
+    when(orgs.findById("org-1"))
+        .thenReturn(
+            java.util.Optional.of(
+                Org.builder().id("org-1").tier("FREE").keySourceMode("HYBRID").build()));
+    when(keys.resolveWithProvenance("user-1"))
+        .thenReturn(
+            new ApiKeyResolver.CredentialResolution(
+                new ResolvedKeys(null, null, null, null, null, null, "SYSTEM", null),
+                "org-1",
+                Map.of()));
+    when(contexts.create(org.mockito.ArgumentMatchers.any()))
+        .thenAnswer(
+            inv -> {
+              LlmExecutionContextCreateRequest req = inv.getArgument(0);
+              assertThat(req.policy().keySourceMode())
+                  .as("snapshot must carry the resolver-normalized mode")
+                  .isEqualTo(LlmPolicySnapshot.KeySourceMode.SYSTEM);
+              return LlmExecutionContext.queued(
+                  "llmctx-test", "fp", req, java.time.Instant.parse("2026-08-05T00:00:00Z"));
+            });
+    LlmExecutionPolicyFactory factory =
+        new LlmExecutionPolicyFactory(
+            contexts,
+            runs,
+            mock(AgentSessionRepository.class),
+            mock(ProjectRepository.class),
+            orgs,
+            keys,
+            mock(ModelRegistry.class));
+    ReflectionTestUtils.setField(factory, "platformDeepSeekKey", "test-platform-key");
+
+    factory.forChatTurn(
+        "user-1",
+        "org-1",
+        null,
+        "project-chat",
+        "sess-1",
+        "turn-1",
+        "corr-1",
+        "deepseek",
+        null,
+        new LlmExecutionBudget(null, null, 10_000L, new java.math.BigDecimal("1.0"), 4));
+    verify(contexts).create(org.mockito.ArgumentMatchers.any());
+  }
+
+  @Test
   void runRecoveryPrefersExistingOwnKeysContextAfterOrgChangesToHybrid() {
     LlmExecutionContextService contexts = mock(LlmExecutionContextService.class);
     PipelineRunRepository runs = mock(PipelineRunRepository.class);

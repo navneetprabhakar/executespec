@@ -14,6 +14,22 @@ import org.springframework.data.jpa.repository.Lock;
 
 class LlmExecutionContextPersistenceContractTest {
 
+  @org.junit.jupiter.api.Test
+  void createCommitsIndependentlyOfTheCallerTransaction() throws Exception {
+    // 2026-08-05 project-chat dispatch fix: LlmExecutionBudgetGate reserves budget in REQUIRES_NEW
+    // and cannot see a context row the caller's still-open transaction inserted. create() must
+    // therefore commit in its own transaction; removing this propagation makes every
+    // in-transaction creator (project chat) undispatchable.
+    java.lang.reflect.Method create =
+        LlmExecutionContextService.class.getDeclaredMethod(
+            "create", LlmExecutionContextCreateRequest.class);
+    org.springframework.transaction.annotation.Transactional tx =
+        create.getAnnotation(org.springframework.transaction.annotation.Transactional.class);
+    org.assertj.core.api.Assertions.assertThat(tx).isNotNull();
+    org.assertj.core.api.Assertions.assertThat(tx.propagation())
+        .isEqualTo(org.springframework.transaction.annotation.Propagation.REQUIRES_NEW);
+  }
+
   @Test
   void entityUsesOptimisticVersionAndLifecycleLookupUsesTenantScopedWriteLock() throws Exception {
     Field version = LlmExecutionContext.class.getDeclaredField("version");
