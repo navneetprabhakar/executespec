@@ -10,8 +10,8 @@ _Last refreshed 2026-07-13 (ExecuteSpec 2.0 / CLI 1.0 release track)._
 - **Email (sales / enterprise)**: `admin@executespec.ai`
 - **Email (support)**: `admin@executespec.ai`
 - **Website**: `https://executespec.ai`
-- **App**: `https://dev.executespec.ai`
-- **Trust posture**: `https://dev.executespec.ai/trust`
+- **App**: `https://app.executespec.ai`
+- **Trust posture**: `https://app.executespec.ai/trust`
 - **Product Hunt**: (link after launch)
 
 ## One-liner
