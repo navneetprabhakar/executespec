@@ -1272,13 +1272,7 @@ public class ScmPushService {
         StringUtils.hasText(run.getRunSummary()) ? run.getRunSummary() : run.getUserRequest();
     List<String> reviewers = parseReviewers(project);
 
-    record Created(
-        ProjectRepo repo,
-        String prUrl,
-        Integer prNumber,
-        boolean alreadyExisted,
-        boolean noNewChanges) {}
-    List<Created> created = new java.util.ArrayList<>();
+    List<CreatedPr> created = new java.util.ArrayList<>();
     int attempted = 0;
     int failed = 0;
     int clean = 0;
@@ -1383,118 +1377,140 @@ public class ScmPushService {
         }
       }
 
-      var pushResult =
-          existingBranchTarget
-              ? gitTool.pushToExistingBranch(
-                  run.getRunId(), subPath, remote, pat, branchName, commitMsg)
-              : gitTool.commitAndPushSubdir(
-                  run.getRunId(),
-                  subPath,
-                  remote,
-                  pat,
-                  branchName,
-                  commitMsg,
-                  expectedRemoteShaFor(run.getRunId(), repo.getGithubRepoFullName(), branchName));
-      if (!pushResult.isOk()) {
-        log.warn(
-            "[{}] multi-repo push failed for {}: {}",
-            run.getRunId(),
-            repo.getGithubRepoFullName(),
-            pushResult.value());
-        broadcaster.emit(
-            run.getRunId(),
-            RunEvent.log(
-                run.getRunId(),
-                "scm",
-                "Push failed for " + repo.getGithubRepoFullName() + ": " + pushResult.value()));
-        failed++;
-        continue;
-      }
-      if ("CLEAN".equals(pushResult.value()) && !existingBranchTarget) {
-        log.info(
-            "[{}] no changes for {}, skipping PR", run.getRunId(), repo.getGithubRepoFullName());
-        clean++;
-        continue;
-      }
-      boolean noNewChanges = "ALREADY_CURRENT".equals(pushResult.value());
-
-      GitHubRepoService.PullRequestCreation creation =
-          existingBranchTarget
-              ? GitHubRepoService.PullRequestCreation.alreadyExists(
-                  existingPullRequest.prUrl(), existingPullRequest.prNumber())
-              : gitHubRepoService.createPullRequestDetailed(
-                  remote, branchName, targetBranch, prTitle, prBodyBase, pat);
-      if (creation.failed()) {
-        // RL-2026-05-041 (audit #16) — branch pushed but PR creation failed → orphan branch.
-        // RR-146: only a typed FAILED outcome reaches here; "a pull request already exists" does
-        // not, because that branch is live review material.
-        if (!existingBranchTarget) {
-          enqueueOrphanBranchCleanup(run.getRunId(), repo.getGithubRepoFullName(), branchName);
-        }
-        failed++;
-        continue;
-      }
-      String prUrl = creation.prUrl();
-      if (prUrl == null) {
-        log.info(
-            "[{}] Pull request already exists for {} branch {} — URL unresolved",
-            run.getRunId(),
-            repo.getGithubRepoFullName(),
-            branchName);
-        continue;
-      }
-
-      Integer prNumber = PullRequestRecordService.extractPrNumber(prUrl);
-      PullRequestRecord record =
-          pullRequestRecordService.recordCreated(
+      // 2026-08-05 (dev run b4a5f5bc) — everything from the push through the PR-record write is
+      // fault-isolated PER REPOSITORY. Previously an exception thrown after repo A's record was
+      // persisted (most likely from the @Transactional recordCreated call for repo B) escaped the
+      // loop: repo B's already-created GitHub PR lost its durable record, the cross-link pass
+      // never ran, and the caller saw an exception instead of a PushResult.
+      try {
+        var pushResult =
+            existingBranchTarget
+                ? gitTool.pushToExistingBranch(
+                    run.getRunId(), subPath, remote, pat, branchName, commitMsg)
+                : gitTool.commitAndPushSubdir(
+                    run.getRunId(),
+                    subPath,
+                    remote,
+                    pat,
+                    branchName,
+                    commitMsg,
+                    expectedRemoteShaFor(run.getRunId(), repo.getGithubRepoFullName(), branchName));
+        if (!pushResult.isOk()) {
+          log.warn(
+              "[{}] multi-repo push failed for {}: {}",
               run.getRunId(),
-              repo.getId(),
               repo.getGithubRepoFullName(),
-              prUrl,
-              branchName,
-              targetBranch);
-      if (record != null) {
+              pushResult.value());
+          broadcaster.emit(
+              run.getRunId(),
+              RunEvent.log(
+                  run.getRunId(),
+                  "scm",
+                  "Push failed for " + repo.getGithubRepoFullName() + ": " + pushResult.value()));
+          failed++;
+          continue;
+        }
+        if ("CLEAN".equals(pushResult.value()) && !existingBranchTarget) {
+          log.info(
+              "[{}] no changes for {}, skipping PR", run.getRunId(), repo.getGithubRepoFullName());
+          clean++;
+          continue;
+        }
+        boolean noNewChanges = "ALREADY_CURRENT".equals(pushResult.value());
+
+        GitHubRepoService.PullRequestCreation creation =
+            existingBranchTarget
+                ? GitHubRepoService.PullRequestCreation.alreadyExists(
+                    existingPullRequest.prUrl(), existingPullRequest.prNumber())
+                : gitHubRepoService.createPullRequestDetailed(
+                    remote, branchName, targetBranch, prTitle, prBodyBase, pat);
+        if (creation.failed()) {
+          // RL-2026-05-041 (audit #16) — branch pushed but PR creation failed → orphan branch.
+          // RR-146: only a typed FAILED outcome reaches here; "a pull request already exists" does
+          // not, because that branch is live review material.
+          if (!existingBranchTarget) {
+            enqueueOrphanBranchCleanup(run.getRunId(), repo.getGithubRepoFullName(), branchName);
+          }
+          failed++;
+          continue;
+        }
+        String prUrl = creation.prUrl();
+        if (prUrl == null) {
+          log.info(
+              "[{}] Pull request already exists for {} branch {} — URL unresolved",
+              run.getRunId(),
+              repo.getGithubRepoFullName(),
+              branchName);
+          continue;
+        }
+
+        Integer prNumber = PullRequestRecordService.extractPrNumber(prUrl);
+        // The PR now EXISTS on GitHub — from here on nothing may drop it from `created`, because
+        // that list drives the cross-link pass, the representative URL, and the caller-visible
+        // result. Record persistence is retried once and failure is loud + recoverable, never a
+        // loop abort.
+        boolean recordPersisted =
+            persistPullRequestRecordDurably(run.getRunId(), repo, prUrl, branchName, targetBranch);
         created.add(
-            new Created(
-                repo,
+            new CreatedPr(
+                repo.getGithubRepoFullName(),
                 prUrl,
                 prNumber,
                 creation.outcome() == GitHubRepoService.PullRequestCreation.Outcome.ALREADY_EXISTS,
-                noNewChanges));
-      }
+                noNewChanges,
+                recordPersisted));
 
-      if (!reviewers.isEmpty() && prNumber != null) {
-        gitHubRepoService.requestReviewers(remote, prNumber, reviewers, pat);
-      }
-      broadcaster.emit(
-          run.getRunId(),
-          RunEvent.log(
+        try {
+          if (!reviewers.isEmpty() && prNumber != null) {
+            gitHubRepoService.requestReviewers(remote, prNumber, reviewers, pat);
+          }
+          broadcaster.emit(
               run.getRunId(),
-              "scm",
-              (creation.outcome() == GitHubRepoService.PullRequestCreation.Outcome.ALREADY_EXISTS
-                      ? noNewChanges ? "PR already current for " : "PR updated for "
-                      : "PR opened for ")
-                  + repo.getGithubRepoFullName()
-                  + ": "
-                  + prUrl));
-    }
-
-    // Cross-link: patch each PR body with the list of sibling PRs.
-    if (created.size() > 1) {
-      String siblingList =
-          created.stream()
-              .map(c -> "- " + c.repo().getGithubRepoFullName() + ": " + c.prUrl())
-              .collect(java.util.stream.Collectors.joining("\n"));
-      for (Created c : created) {
-        if (c.prNumber() == null) continue;
-        String body =
-            (prBodyBase == null ? "" : prBodyBase)
-                + "\n\n---\n**Multi-repo change** — sibling PRs:\n"
-                + siblingList;
-        gitHubRepoService.updatePullRequestBody(
-            "https://github.com/" + c.repo().getGithubRepoFullName(), c.prNumber(), body, pat);
+              RunEvent.log(
+                  run.getRunId(),
+                  "scm",
+                  (creation.outcome()
+                              == GitHubRepoService.PullRequestCreation.Outcome.ALREADY_EXISTS
+                          ? noNewChanges ? "PR already current for " : "PR updated for "
+                          : "PR opened for ")
+                      + repo.getGithubRepoFullName()
+                      + ": "
+                      + prUrl));
+        } catch (Exception decorateEx) {
+          // Reviewer request / SSE emission are best-effort decoration; the PR + record are the
+          // durable facts and must not be lost to a decoration failure.
+          log.warn(
+              "[{}] post-PR decoration failed for {} ({}): {}",
+              run.getRunId(),
+              repo.getGithubRepoFullName(),
+              prUrl,
+              decorateEx.toString());
+        }
+      } catch (Exception repoEx) {
+        failed++;
+        log.error(
+            "[{}] multi-repo publication failed unexpectedly for {} — continuing with remaining"
+                + " repositories: {}",
+            run.getRunId(),
+            repo.getGithubRepoFullName(),
+            repoEx.toString(),
+            repoEx);
+        try {
+          broadcaster.emit(
+              run.getRunId(),
+              RunEvent.log(
+                  run.getRunId(),
+                  "scm",
+                  "Publication failed for " + repo.getGithubRepoFullName() + ": " + repoEx));
+        } catch (Exception ignored) {
+          // best-effort SSE only
+        }
       }
     }
+
+    // Cross-link: patch each PR body with the list of sibling PRs. Best-effort per PR and
+    // idempotent — see applyCrossLinks/buildCrossLinkedBody.
+    applyCrossLinks(run.getRunId(), prBodyBase, created, pat);
 
     // 2026-05-10 — persist a representative PR url on `pipeline_run.github_pr_url`. The
     // single-repo path (lines 200–212 above) already does this when its single PR succeeds,
@@ -1544,19 +1560,20 @@ public class ScmPushService {
     }
 
     String representativePr = created.isEmpty() ? "" : created.get(0).prUrl();
+    String unrecordedNote = unrecordedPullRequestNote(created);
     if (!created.isEmpty() && failed > 0) {
       return PushResult.partial(
           "GITHUB",
           representativePr,
-          "Some repositories pushed successfully; others failed",
+          "Some repositories pushed successfully; others failed" + unrecordedNote,
           attempted,
           created.size(),
           failed);
     }
     if (!created.isEmpty()) {
-      boolean allExisting = created.stream().allMatch(Created::alreadyExisted);
-      boolean anyExisting = created.stream().anyMatch(Created::alreadyExisted);
-      boolean allAlreadyCurrent = allExisting && created.stream().allMatch(Created::noNewChanges);
+      boolean allExisting = created.stream().allMatch(CreatedPr::alreadyExisted);
+      boolean anyExisting = created.stream().anyMatch(CreatedPr::alreadyExisted);
+      boolean allAlreadyCurrent = allExisting && created.stream().allMatch(CreatedPr::noNewChanges);
       String message =
           allAlreadyCurrent
               ? "Existing GitHub pull requests already current; no new changes"
@@ -1565,7 +1582,7 @@ public class ScmPushService {
                   : anyExisting
                       ? "GitHub pull requests created or updated"
                       : "GitHub pull requests created";
-      return PushResult.pushed("GITHUB", representativePr, message);
+      return PushResult.pushed("GITHUB", representativePr, message + unrecordedNote);
     }
     if (failed > 0) {
       return PushResult.failed(
@@ -1577,6 +1594,135 @@ public class ScmPushService {
     }
     return PushResult.noChanges(
         "GITHUB", "No repository changes to push", attempted == 0 ? clean : attempted);
+  }
+
+  /**
+   * One pull request that exists on GitHub after a multi-repo push, whether or not its durable
+   * {@code pull_request_record} row could be persisted. Package-private so tests can drive the
+   * cross-link pass directly.
+   */
+  record CreatedPr(
+      String repoFullName,
+      String prUrl,
+      Integer prNumber,
+      boolean alreadyExisted,
+      boolean noNewChanges,
+      boolean recordPersisted) {}
+
+  /**
+   * Header of the sibling-PR cross-link section appended to multi-repo PR bodies. {@link
+   * #buildCrossLinkedBody} strips any existing section before appending a fresh one, so re-running
+   * the cross-link pass can never duplicate it.
+   */
+  static final String CROSS_LINK_SECTION_HEADER = "\n\n---\n**Multi-repo change** — sibling PRs:\n";
+
+  /**
+   * 2026-08-05 (dev run b4a5f5bc) — persist the durable record for a pull request that already
+   * exists on GitHub. Never throws: a persistence failure is retried once and otherwise logged
+   * loudly with the exact PR URL so an operator can recover the row, because losing the record
+   * silently made {@code GET /api/runs/{id}/prs} under-report real PRs and skipped the cross-link
+   * pass.
+   *
+   * @return true when a durable record exists after this call
+   */
+  private boolean persistPullRequestRecordDurably(
+      String runId, ProjectRepo repo, String prUrl, String headBranch, String baseBranch) {
+    for (int attempt = 1; attempt <= 2; attempt++) {
+      try {
+        PullRequestRecord record =
+            pullRequestRecordService.recordCreated(
+                runId, repo.getId(), repo.getGithubRepoFullName(), prUrl, headBranch, baseBranch);
+        if (record != null) return true;
+        // Null means the PR number could not be extracted from the URL — deterministic, so a
+        // retry cannot help; fall through to the loud recovery log.
+        break;
+      } catch (Exception persistEx) {
+        log.warn(
+            "[{}] PR record persistence attempt {}/2 failed for {} ({}): {}",
+            runId,
+            attempt,
+            repo.getGithubRepoFullName(),
+            prUrl,
+            persistEx.toString());
+      }
+    }
+    log.error(
+        "[{}] PR RECORD LOST — pull request exists on GitHub but its durable record could not be"
+            + " persisted. repo={} url={} headBranch={} baseBranch={}. Recover by inserting the"
+            + " pull_request_record row for this exact URL.",
+        runId,
+        repo.getGithubRepoFullName(),
+        prUrl,
+        headBranch,
+        baseBranch);
+    try {
+      broadcaster.emit(
+          runId,
+          RunEvent.log(
+              runId,
+              "scm",
+              "PR record persistence failed for "
+                  + repo.getGithubRepoFullName()
+                  + " — PR exists at "
+                  + prUrl));
+    } catch (Exception ignored) {
+      // best-effort SSE only
+    }
+    return false;
+  }
+
+  /**
+   * Cross-link pass over every PR this run created on GitHub — fault-isolated per PR (one failed
+   * body update cannot skip the siblings) and idempotent via {@link #buildCrossLinkedBody}.
+   * Includes PRs whose durable record failed to persist: the PR is live review material on GitHub
+   * either way, and the sibling links are how a reviewer discovers the paired change.
+   */
+  void applyCrossLinks(String runId, String prBodyBase, List<CreatedPr> created, String pat) {
+    if (created.size() < 2) return;
+    String siblingList =
+        created.stream()
+            .map(c -> "- " + c.repoFullName() + ": " + c.prUrl())
+            .collect(java.util.stream.Collectors.joining("\n"));
+    for (CreatedPr c : created) {
+      if (c.prNumber() == null) continue;
+      try {
+        gitHubRepoService.updatePullRequestBody(
+            "https://github.com/" + c.repoFullName(),
+            c.prNumber(),
+            buildCrossLinkedBody(prBodyBase, siblingList),
+            pat);
+      } catch (Exception linkEx) {
+        log.warn(
+            "[{}] cross-link body update failed for {} PR#{} ({}): {}",
+            runId,
+            c.repoFullName(),
+            c.prNumber(),
+            c.prUrl(),
+            linkEx.toString());
+      }
+    }
+  }
+
+  /**
+   * Build a PR body carrying exactly one sibling cross-link section: any existing section in the
+   * base body is stripped before the fresh one is appended, so repeated passes converge instead of
+   * stacking duplicates.
+   */
+  static String buildCrossLinkedBody(String baseBody, String siblingList) {
+    String base = baseBody == null ? "" : baseBody;
+    int existing = base.indexOf(CROSS_LINK_SECTION_HEADER);
+    if (existing >= 0) {
+      base = base.substring(0, existing);
+    }
+    return base + CROSS_LINK_SECTION_HEADER + siblingList;
+  }
+
+  /** Caller-visible note naming every PR whose durable record could not be persisted. */
+  private static String unrecordedPullRequestNote(List<CreatedPr> created) {
+    List<String> lost =
+        created.stream().filter(c -> !c.recordPersisted()).map(CreatedPr::prUrl).toList();
+    if (lost.isEmpty()) return "";
+    return " (PR record persistence failed for: " + String.join(", ", lost) + " — see server logs)";
   }
 
   private List<java.util.UUID> parseRepoIds(String json) {
