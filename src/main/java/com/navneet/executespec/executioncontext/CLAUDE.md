@@ -222,3 +222,22 @@ the earlier context-enforcement pass: both hydrate the persisted run context. Th
 operation-authority fixture repairs pass provider-free test compilation and the focused 18-test
 lifecycle/context/async-governance cohort. Full current-worktree verification and an
 `ENFORCED`-mode transport/restart exercise remain separate release evidence gates.
+
+## Dispatchability fixes (2026-08-05, found by project-feature E2E)
+
+Two defects made every project-chat turn fail while runs kept working:
+
+1. **Context visibility:** `LlmExecutionContextService.create` joined the caller's transaction, but
+   `LlmExecutionBudgetGate` reserves budget in `REQUIRES_NEW` and could not see the uncommitted row
+   — project chat creates its context inside a long `@Transactional` turn, so every dispatch died
+   with "LLM execution context disappeared before budget reservation". `create` is now
+   `REQUIRES_NEW`: the context commits before any transport, matching the fail-closed-before-
+   transport principle. An orphaned QUEUED context after a caller rollback is inert and reused
+   idempotently on retry. Pinned by
+   `LlmExecutionContextPersistenceContractTest.createCommitsIndependentlyOfTheCallerTransaction`.
+2. **Key-source snapshot drift:** `createCustomer` snapshotted the RAW `org.key_source_mode`
+   column while `LlmExecutionDispatchGuard` revalidates against `ApiKeyResolver`'s tier-normalized
+   value (non-BYOK tier ⇒ SYSTEM even when a stale HYBRID/OWN_KEYS marker remains). Orgs with that
+   drift failed every dispatch `POLICY_STALE` on a policy that never changed. The snapshot now uses
+   the resolver's normalized mode — one derivation on both sides. Pinned by
+   `LlmExecutionPolicyFactoryAggregatorTest.snapshotUsesResolverNormalizedKeySourceModeNotRawOrgColumn`.
