@@ -41,7 +41,16 @@ public class LlmExecutionContextService {
   /**
    * Creates a queued context or returns the original row for an exact idempotent retry. Reusing the
    * same key with different scope, policy, budget, or source data fails closed.
+   *
+   * <p>REQUIRES_NEW (2026-08-05): the context row must be COMMITTED before any provider dispatch,
+   * because {@code LlmExecutionBudgetGate} reserves budget in its own REQUIRES_NEW transaction and
+   * cannot see a row the caller's still-open transaction inserted. Project chat creates its context
+   * inside a long {@code @Transactional} turn and every dispatch died with "LLM execution context
+   * disappeared before budget reservation". Committing early is the fail-closed direction: an
+   * orphaned QUEUED context after a caller rollback is inert and idempotently reused on retry,
+   * while an uncommitted context makes the whole turn undispatchable.
    */
+  @Transactional(propagation = org.springframework.transaction.annotation.Propagation.REQUIRES_NEW)
   public LlmExecutionContext create(LlmExecutionContextCreateRequest request) {
     String fingerprint = fingerprint(request);
     Optional<LlmExecutionContext> existing = findIdempotent(request);

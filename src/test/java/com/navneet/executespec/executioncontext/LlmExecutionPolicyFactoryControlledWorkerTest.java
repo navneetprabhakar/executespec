@@ -88,7 +88,11 @@ class LlmExecutionPolicyFactoryControlledWorkerTest {
                 "openrouter",
                 ApiKeyResolver.CredentialOrigin.ORG)
             : Map.of();
-    return new ApiKeyResolver.CredentialResolution(null, "org-1", origins);
+    return new ApiKeyResolver.CredentialResolution(
+        new com.navneet.executespec.agent.ResolvedKeys(
+            null, null, null, null, null, null, keySourceMode, null),
+        "org-1",
+        origins);
   }
 
   private LlmPolicySnapshot capturePolicy() {
