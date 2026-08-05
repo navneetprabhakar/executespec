@@ -30,6 +30,19 @@ durable non-DONE goal evidence displays PARTIAL on the dashboard exactly as it d
 list and run detail (the 2026-07-24 task-proof contract). Pinned by
 `ProjectDashboardTaskProofStatusTest`.
 
+## Dashboard run counters bucket by display status (2026-08-05)
+
+`project/dashboard/ProjectDashboardController.DashboardDto` gained additive `partialRuns`, and all
+four run counters (`activeRuns` / `completedRuns` / `partialRuns` / `failedRuns`) now bucket by the
+customer-facing DISPLAY status. Persisted PARTIAL runs were previously invisible in every bucket,
+and a persisted-COMPLETE run with non-DONE durable goal proof counted as completed even though the
+run list shows it as PARTIAL (`RunMapper.displayRunStatus`, now public). The controller counts
+persisted COMPLETE/PARTIAL/FAILED/active statuses via the existing count queries, then moves
+COMPLETE runs whose display status is PARTIAL from completed to partial using a run-id-only query
+(`PipelineRunRepository.findRunIdsByProjectIdAndStatus`) plus one batched
+`AgentTaskRepository.findByRunIdIn` read — each run lands in exactly one bucket. Pinned by
+`ProjectDashboardTaskProofStatusTest`.
+
 ## CI failure autofix delivery admission (V359)
 
 `project/pr/CiFailureAutoFixService` derives one immutable finding key from the persisted PR id,

@@ -365,6 +365,11 @@ public interface PipelineRunRepository
 
   long countByProjectIdAndStatus(String projectId, String status);
 
+  /** Run-id-only projection for display-status bucketing (project dashboard counters). */
+  @Query("SELECT r.runId FROM PipelineRun r WHERE r.projectId = :pid AND r.status = :status")
+  List<String> findRunIdsByProjectIdAndStatus(
+      @Param("pid") String projectId, @Param("status") String status);
+
   long countByProjectId(String projectId);
 
   /** Wave 2.2 — used by {@code SandboxCleanupJob} to detect "recent activity." */
@@ -475,17 +480,11 @@ public interface PipelineRunRepository
   /**
    * Soft-deletes the terminal runs belonging to a user (GDPR right-to-erasure).
    *
-   * <p>RR-090: this was a {@code NOT IN} DENYLIST naming only the obsolete spellings {@code
-   * PENDING} / {@code PLANNING} / {@code IN_PROGRESS} / {@code IN_PROGRESS_BATCH}. The live V2
-   * statuses are {@code QUEUED}, {@code PLANNING}, {@code AWAITING_APPROVAL}, {@code
-   * APPROVAL_RESUMING}, {@code WORKING} and {@code REVIEWING}, so four of the six live states were
-   * not protected at all — erasure could tombstone a currently spending, writing or reviewing run
-   * without cancelling its worker, and the 7-day retention sweep would then hard-delete the row out
-   * from under it.
-   *
-   * <p>It is now an {@code IN} ALLOWLIST of terminal statuses. A status that is unknown, new, or
-   * not positively proven finished is left untouched rather than tombstoned; adding a future
-   * execution state can no longer silently open this hole again.
+   * <p>RR-090: this was a {@code NOT IN} denylist naming only obsolete status spellings, so most
+   * live V2 states were unprotected — erasure could tombstone a currently spending run without
+   * cancelling its worker, and the 7-day retention sweep would then hard-delete the row out from
+   * under it. It is now an {@code IN} ALLOWLIST of terminal statuses: a status that is unknown,
+   * new, or not positively proven finished is left untouched rather than tombstoned.
    */
   @Modifying
   @Query(

@@ -30,6 +30,38 @@ final class ProjectDocValidatedGeneration {
 
   private ProjectDocValidatedGeneration() {}
 
+  /**
+   * Zero-provider SETUP assembly for an empty safe deterministic command projection. When no
+   * non-clone command is authorized by the exact-revision setup evidence, the clone-only document
+   * is fully determined before any model call: the provider→validate→corrective loop can neither
+   * add an authorized command nor change the byte-stable assembly, so dispatching would only spend
+   * budget on output that is discarded. The unchanged strict validator still gates publication and
+   * a failure here is a deterministic pre-transport rejection, never an uncertain provider outcome.
+   */
+  static Result assembleDeterministicSetup(
+      Consumer<String> publicationSafetyCheck,
+      String projectId,
+      String projectName,
+      Set<String> sourceRepositories,
+      String codemapEvidence) {
+    String content =
+        ProjectSetupOperationalGrounding.assemble(projectName, codemapEvidence, sourceRepositories);
+    publicationSafetyCheck.accept(content);
+    Optional<String> failure =
+        ProjectGeneratedDocValidator.validate(
+            DocType.SETUP, content, sourceRepositories, codemapEvidence);
+    if (failure.isPresent()) {
+      String reason = failure.orElseThrow();
+      throw new ProjectDocGeneratorService.InvalidGeneratedDocumentException(
+          ProjectGeneratedDocFailureCode.fromReason(reason), reason);
+    }
+    log.info(
+        "[{}] SETUP command projection is empty; assembled the clone-only document"
+            + " deterministically without provider dispatch",
+        projectId);
+    return new Result(content, 0, 0);
+  }
+
   static Result generate(
       LlmRouter llmRouter,
       Consumer<String> publicationSafetyCheck,

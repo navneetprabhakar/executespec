@@ -3,6 +3,7 @@ package com.navneet.executespec.project.dashboard;
 import java.util.List;
 import java.util.Set;
 
+import com.navneet.executespec.api.RunMapper;
 import com.navneet.executespec.auth.entity.Project;
 import com.navneet.executespec.auth.repository.ProjectRepository;
 import com.navneet.executespec.codeintel.ProjectArchitectureService;
@@ -13,7 +14,9 @@ import com.navneet.executespec.project.pr.PullRequestRecordRepository;
 import com.navneet.executespec.report.ValidationReportRepository;
 import com.navneet.executespec.report.ValidationReportValidityService;
 import com.navneet.executespec.report.entity.ValidationReport;
+import com.navneet.executespec.state.entity.AgentTask;
 import com.navneet.executespec.state.entity.PipelineRun;
+import com.navneet.executespec.state.repository.AgentTaskRepository;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
 
 import org.springframework.data.domain.PageRequest;
@@ -38,6 +41,15 @@ public class ProjectDashboardController {
       Set.of("PLANNING", "WORKING", "REVIEWING", "AWAITING_APPROVAL");
 
   private final PipelineRunRepository runRepo;
+
+  /**
+   * Task-proof fail-closed status projection (2026-07-24 contract): a persisted COMPLETE run with
+   * durable non-DONE goal evidence must display PARTIAL on every customer surface — the dashboard's
+   * recent-run rows AND its run counters both reuse {@link RunMapper#displayRunStatus}.
+   */
+  private final AgentTaskRepository agentTaskRepo;
+
+  private final RunMapper runMapper;
   private final ValidationReportRepository reportRepo;
   private final ValidationReportValidityService reportValidityService;
   private final PullRequestRecordRepository prRepo;
@@ -74,15 +86,6 @@ public class ProjectDashboardController {
 
   private final com.navneet.executespec.project.security.ProjectAccessGuard projectAccessGuard;
   private final ProjectRepository projectRepository;
-
-  /**
-   * Task-proof fail-closed status projection (2026-07-24 contract): a persisted COMPLETE run with
-   * durable non-DONE goal evidence must display PARTIAL on every customer surface. The dashboard's
-   * recent-run rows previously projected the raw persisted status and bypassed that contract.
-   */
-  private final com.navneet.executespec.api.RunMapper runMapper;
-
-  private final com.navneet.executespec.state.repository.AgentTaskRepository agentTaskRepository;
 
   public record TaskSummary(
       String taskId, String runId, String name, String status, Integer score, String createdAt) {}
@@ -146,9 +149,17 @@ public class ProjectDashboardController {
       double architecture,
       double generatedDocs) {}
 
+  /**
+   * Run counters are bucketed by the customer-facing DISPLAY status (the same fail-closed
+   * task-proof projection the run list uses via {@link RunMapper#displayRunStatus}), not by the
+   * persisted crash-resume status alone. A persisted-COMPLETE run whose durable goal proof is not
+   * DONE therefore lands in {@code partialRuns}, never in {@code completedRuns}, and each run is
+   * counted in exactly one bucket. {@code partialRuns} is additive (older clients ignore it).
+   */
   public record DashboardDto(
       int activeRuns,
       int completedRuns,
+      int partialRuns,
       int failedRuns,
       double avgScore,
       int excludedScoreReports,
@@ -171,7 +182,15 @@ public class ProjectDashboardController {
       @org.springframework.security.core.annotation.AuthenticationPrincipal
           com.navneet.executespec.auth.security.AppUserDetails userDetails) {
     projectAccessGuard.assertCanRead(projectId, userDetails);
-    long completed = runRepo.countByProjectIdAndStatus(projectId, "COMPLETE");
+    // Counters bucket by DISPLAY status so the dashboard agrees with the run list: a persisted
+    // COMPLETE run whose task goal proof is not DONE is customer-facing PARTIAL
+    // (RunMapper.displayRunStatus), and persisted PARTIAL runs were previously invisible in all
+    // three legacy buckets. Each run lands in exactly one bucket — the flipped COMPLETE runs move
+    // from completed to partial rather than double-counting.
+    long persistedComplete = runRepo.countByProjectIdAndStatus(projectId, "COMPLETE");
+    long completeShownAsPartial = countCompleteRunsDisplayedAsPartial(projectId);
+    long completed = persistedComplete - completeShownAsPartial;
+    long partial = runRepo.countByProjectIdAndStatus(projectId, "PARTIAL") + completeShownAsPartial;
     long failed = runRepo.countByProjectIdAndStatus(projectId, "FAILED");
     long active =
         ACTIVE_STATUSES.stream()
@@ -242,7 +261,7 @@ public class ProjectDashboardController {
     java.util.Map<String, List<com.navneet.executespec.state.entity.AgentTask>> tasksByRun =
         recentRuns.isEmpty()
             ? java.util.Map.of()
-            : agentTaskRepository
+            : agentTaskRepo
                 .findByRunIdIn(recentRuns.stream().map(PipelineRun::getRunId).toList())
                 .stream()
                 .collect(
@@ -313,6 +332,7 @@ public class ProjectDashboardController {
         new DashboardDto(
             (int) active,
             (int) completed,
+            (int) partial,
             (int) failed,
             avgScore,
             excludedScoreReports,
@@ -439,6 +459,29 @@ public class ProjectDashboardController {
     projectAccessGuard.assertCanWrite(projectId, userDetails);
     postMergeCascadeService.dismissPostMergeBars(projectId);
     return ResponseEntity.noContent().build();
+  }
+
+  /**
+   * Counts persisted-COMPLETE runs whose customer-facing display status is PARTIAL because durable
+   * task goal proof is present and not DONE. Reuses the exact run-list projection ({@link
+   * RunMapper#displayRunStatus}) over a run-id-only query plus one batched task read, so the
+   * dashboard cannot disagree with the run list about what counts as completed. Legacy COMPLETE
+   * runs without task rows or goal proof stay in the completed bucket.
+   */
+  private long countCompleteRunsDisplayedAsPartial(String projectId) {
+    List<String> completeRunIds = runRepo.findRunIdsByProjectIdAndStatus(projectId, "COMPLETE");
+    if (completeRunIds.isEmpty()) return 0;
+    java.util.Map<String, List<AgentTask>> tasksByRun =
+        agentTaskRepo.findByRunIdIn(completeRunIds).stream()
+            .collect(java.util.stream.Collectors.groupingBy(AgentTask::getRunId));
+    return completeRunIds.stream()
+        .filter(
+            runId ->
+                "PARTIAL"
+                    .equals(
+                        runMapper.displayRunStatus(
+                            "COMPLETE", tasksByRun.getOrDefault(runId, List.of()))))
+        .count();
   }
 
   private static Integer latestScoreForRun(List<ValidationReport> reports, String runId) {
