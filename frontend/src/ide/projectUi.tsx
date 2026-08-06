@@ -1,4 +1,5 @@
 import {useState, type ReactNode} from 'react';
+import {ChevronDown} from 'lucide-react';
 
 import {Markdown} from '@/signal/components/Markdown';
 import type {AgentChatBubble} from '@/ide/agentChatHistory';
@@ -32,7 +33,7 @@ export function ProjectRouteTabs({
           onClick={() => setOpen((v) => !v)}
         >
           <span>{activeTab?.label ?? 'Section'}</span>
-          <span aria-hidden='true'>⌄</span>
+          <ChevronDown size='var(--ide-icon)' strokeWidth={1.75} aria-hidden='true' />
         </button>
         {open && (
           <div className='ide-project-mobile-menu' role='menu'>
@@ -50,7 +51,10 @@ export function ProjectRouteTabs({
           </div>
         )}
       </div>
-      <div className='ide-rtabs ide-local-tabs' style={{marginBottom: 16, borderRadius: 4}}>
+      <div
+        className='ide-rtabs ide-local-tabs'
+        style={{marginBottom: 16, borderRadius: 'var(--ide-r-control)'}}
+      >
         {tabs.map((t) => (
           <button
             key={t.key}
@@ -66,55 +70,37 @@ export function ProjectRouteTabs({
   );
 }
 
+/**
+ * A result banner is state, and state is a 3px leading edge plus a tint — it was a
+ * full card with both its border AND its text repainted, which is the loudest thing
+ * on the surface for what is usually a one-line "Synced." confirmation.
+ */
 export function ProjectBanner({err, msg}: {err?: string; msg?: string}) {
   if (!err && !msg) return null;
   return (
     <div
-      className='ide-card'
-      style={{
-        marginBottom: 12,
-        fontSize: 13,
-        color: err ? 'var(--ide-red)' : 'var(--ide-green)',
-        borderColor: err ? 'var(--ide-red)' : 'var(--ide-green)',
-      }}
+      className={`ide-note ${err ? 'bad' : 'ok'}`}
+      role={err ? 'alert' : 'status'}
+      style={{marginBottom: 'var(--ide-s3)'}}
     >
       {err || msg}
     </div>
   );
 }
 
+/**
+ * Field and meta labels. These were 12px/700 tracked out to 0.1–0.14em uppercase —
+ * the exact treatment ide.css's own `.ide-h2` note rejects ("hierarchy comes from
+ * weight and colour, not from tracking out 11px capitals"). They predated it.
+ */
 export function ProjectMetaLabel({children}: {children: ReactNode}) {
-  return (
-    <div
-      style={{
-        fontSize: 10,
-        fontWeight: 700,
-        color: 'var(--ide-fg-muted)',
-        letterSpacing: '0.1em',
-        textTransform: 'uppercase',
-        marginBottom: 4,
-      }}
-    >
-      {children}
-    </div>
-  );
+  return <div className='ide-project-fieldlabel'>{children}</div>;
 }
 
 export function ProjectField({label, children}: {label: string; children: ReactNode}) {
   return (
-    <div style={{marginBottom: 14}}>
-      <div
-        style={{
-          fontSize: 11,
-          fontWeight: 700,
-          letterSpacing: '0.14em',
-          textTransform: 'uppercase',
-          color: 'var(--ide-fg-muted)',
-          marginBottom: 6,
-        }}
-      >
-        {label}
-      </div>
+    <div className='ide-project-field'>
+      <div className='ide-project-fieldlabel'>{label}</div>
       {children}
     </div>
   );
@@ -143,7 +129,7 @@ export function ProjectChatMessageCard({message}: {message: AgentChatBubble}) {
           </button>
         )}
       </div>
-      <div className='signal-md' style={{fontSize: 13.5}}>
+      <div className='signal-md' style={{fontSize: 13}}>
         <Markdown>{visible}</Markdown>
       </div>
     </div>

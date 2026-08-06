@@ -401,7 +401,9 @@ public class OrgController {
       return List.of();
     }
     if ("openrouter".equalsIgnoreCase(provider)) {
-      return OpenRouterModelMapper.allowList().keySet().stream()
+      // Picker view only — routing and org-override validation keep the full allow-list so a
+      // customer already pinned to a de-listed model still dispatches.
+      return OpenRouterModelMapper.selectableAllowList().keySet().stream()
           .filter(model -> !ModelAccessService.isDisabledProviderModelSlug(model))
           .sorted()
           .toList();

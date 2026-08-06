@@ -23,7 +23,7 @@ function Row({row}: {row: PlanContractGateRow}) {
         borderTop: '1px solid var(--ide-border)',
         paddingTop: 10,
         marginTop: 10,
-        fontSize: 12.5,
+        fontSize: 'var(--ide-t-caption)',
         lineHeight: 1.6,
       }}
     >
@@ -77,22 +77,27 @@ export function PlanContractGateCard({
   const mistyped = typed.trim().length > 0 && !satisfied;
   return (
     <div
-      className='ide-card'
-      style={{borderColor: 'var(--ide-red)', marginTop: 12}}
+      className='ide-card rl-note is-failed'
+      style={{marginTop: 12}}
       data-testid='plan-contract-gate'
     >
-      <div style={{display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6}}>
+      {/* State is the 3px leading edge plus the red heading and the bad badge, not a full red
+          outline around the box. The friction is unmissable without repainting the card. */}
+      <div
+        style={{display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 6}}
+      >
         <strong style={{color: 'var(--ide-red)'}}>Breaking change</strong>
         <IdeBadge kind='bad'>Acknowledgement required</IdeBadge>
       </div>
-      <div style={{fontSize: 12.5, lineHeight: 1.6, color: 'var(--ide-fg-muted)'}}>
+      <div
+        style={{fontSize: 'var(--ide-t-caption)', lineHeight: 1.6, color: 'var(--ide-fg-muted)'}}
+      >
         {rows.length > 0 && `${gateHeadline(rows)} `}
         {brownfieldHttpRouteRemovals.length > 0 &&
           `This plan explicitly removes ${brownfieldHttpRouteRemovals.length} protected HTTP ${
             brownfieldHttpRouteRemovals.length === 1 ? 'route' : 'routes'
           }. `}
-        Approving starts work that can break existing callers. Review the exact change before you
-        acknowledge.
+        Approving starts work that can break existing callers — review the exact change below.
       </div>
 
       {rows.map((row, i) => (
@@ -108,7 +113,7 @@ export function PlanContractGateCard({
             paddingTop: 10,
             marginTop: 10,
             color: 'var(--ide-red)',
-            fontSize: 12.5,
+            fontSize: 'var(--ide-t-caption)',
           }}
         >
           Remove {route.method} {route.path}
@@ -119,7 +124,7 @@ export function PlanContractGateCard({
         style={{
           display: 'block',
           marginTop: 14,
-          fontSize: 12.5,
+          fontSize: 'var(--ide-t-caption)',
           color: 'var(--ide-fg)',
         }}
       >
@@ -138,7 +143,7 @@ export function PlanContractGateCard({
         />
       </label>
       {mistyped && (
-        <div style={{color: 'var(--ide-red)', fontSize: 12, marginTop: 6}}>
+        <div style={{color: 'var(--ide-red)', fontSize: 'var(--ide-t-caption)', marginTop: 6}}>
           Type {REQUIRED_ACK_TEXT} exactly, in capitals.
         </div>
       )}

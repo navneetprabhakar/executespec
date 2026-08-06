@@ -1,5 +1,6 @@
 import {useEffect, useState} from 'react';
 import {useNavigate, useParams} from 'react-router-dom';
+import {Pencil} from 'lucide-react';
 import * as api from '@/lib/api';
 import {IdeBadge, IdeLoader, statusKind} from '@/ide/IdeKit';
 import {RunTimeline} from '@/ide/RunTimeline';
@@ -418,7 +419,7 @@ export default function IdePlan() {
           <div style={{color: 'var(--ide-red)', marginBottom: 10}}>
             The plan could not be loaded. {runLoadError}
           </div>
-          <button className='ide-btn' onClick={() => setReloadRun((attempt) => attempt + 1)}>
+          <button className='ide-btn ghost' onClick={() => setReloadRun((attempt) => attempt + 1)}>
             Retry loading plan
           </button>
         </div>
@@ -426,22 +427,29 @@ export default function IdePlan() {
         <IdeLoader label='Loading plan…' />
       ) : !awaiting ? (
         <div className='ide-card'>
-          <div style={{fontSize: 13, color: 'var(--ide-fg-muted)', marginBottom: 10}}>
-            This work is {planStatusPhrase(status)} — this page updates automatically.
+          <div
+            style={{
+              fontSize: 'var(--ide-t-body)',
+              color: 'var(--ide-fg-muted)',
+              marginBottom: 10,
+            }}
+          >
+            This work is {planStatusPhrase(status)}. Updates automatically.
           </div>
-          <div style={{display: 'flex', alignItems: 'center', gap: 10}}>
+          <div className='rl-row'>
             <IdeBadge kind={statusKind(run.status)}>{run.status}</IdeBadge>
             {planStatusPhrase(status) === 'being planned' && (
-              <span style={{color: 'var(--ide-fg-muted)'}}>
-                Planning — classifying + outlining your request…
-              </span>
+              <span style={{color: 'var(--ide-fg-muted)'}}>Classifying and outlining…</span>
             )}
           </div>
         </div>
       ) : (
         <>
           {run.runSummary && (
-            <div className='ide-card' style={{fontSize: 13, lineHeight: 1.6, marginBottom: 12}}>
+            <div
+              className='ide-card'
+              style={{fontSize: 'var(--ide-t-body)', lineHeight: 1.6, marginBottom: 12}}
+            >
               {run.runSummary}
             </div>
           )}
@@ -479,26 +487,27 @@ export default function IdePlan() {
                 marginTop: 10,
                 paddingTop: 10,
                 borderTop: '1px solid var(--ide-border)',
-                fontSize: 12,
+                fontSize: 'var(--ide-t-caption)',
                 color: 'var(--ide-fg-muted)',
                 lineHeight: 1.5,
               }}
             >
-              Run credits reserve the approved work. Managed AI credits debit per successful
-              platform-key model call while work executes.{' '}
-              <strong style={{color: 'var(--ide-fg)'}}>
-                Run credits are refunded if the work fails
-              </strong>
-              .
+              {/* Compressed to two fragments. Every qualifier is load-bearing and kept verbatim in
+                  meaning: credits are RESERVED (not spent), the refund is conditional on FAILURE,
+                  and managed-AI debits only on a SUCCESSFUL PLATFORM-KEY call DURING execution. */}
+              Run credits: reserved now,{' '}
+              <strong style={{color: 'var(--ide-fg)'}}>refunded if the work fails</strong>. Managed
+              AI credits: debited per successful platform-key model call while work executes.
             </div>
           </div>
 
-          <div className='ide-card' style={{fontSize: 12.5, lineHeight: 1.5}}>
+          <div className='ide-card' style={{fontSize: 'var(--ide-t-caption)', lineHeight: 1.5}}>
             <div
               style={{
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'space-between',
+                flexWrap: 'wrap',
                 gap: 10,
                 marginBottom: 8,
               }}
@@ -552,33 +561,32 @@ export default function IdePlan() {
               <div
                 style={{
                   textAlign: 'right',
-                  fontSize: 11,
+                  fontSize: 'var(--ide-t-caption)',
                   color: 'var(--ide-fg-muted)',
                   marginTop: 4,
                 }}
               >
                 {feedback.length} / 2000
               </div>
-              <div style={{display: 'flex', gap: 8, marginTop: 8}}>
+              {/* Ghost, not accent. Approve is this surface's one commit action; a second filled
+                  button here made the page offer two equally-loud "go" affordances at once. */}
+              <div className='rl-actions' style={{marginTop: 8}}>
                 <button
-                  className='ide-btn'
+                  className='ide-btn ghost'
                   disabled={busy !== '' || !feedback.trim()}
                   onClick={revise}
                 >
                   Start revised run
                 </button>
                 <button className='ide-btn ghost' onClick={() => setEditing(false)}>
-                  Cancel
+                  Discard
                 </button>
               </div>
             </div>
           ) : (
-            <button
-              className='ide-btn ghost'
-              style={{borderColor: 'var(--ide-accent)', color: 'var(--ide-accent)'}}
-              onClick={() => setEditing(true)}
-            >
-              ✎ Revise as new run
+            <button className='ide-btn ghost' onClick={() => setEditing(true)}>
+              <Pencil className='rl-icon' size='1em' strokeWidth={1.75} aria-hidden='true' />
+              Revise as new run
             </button>
           )}
 
@@ -645,14 +653,21 @@ export default function IdePlan() {
           )}
 
           {err && (
-            <div style={{color: 'var(--ide-red)', fontSize: 13, margin: '12px 0'}}>{err}</div>
+            <div style={{color: 'var(--ide-red)', fontSize: 'var(--ide-t-body)', margin: '12px 0'}}>
+              {err}
+            </div>
           )}
           {planIdentityError && (
-            <div role='alert' style={{color: 'var(--ide-red)', fontSize: 13, margin: '12px 0'}}>
+            <div
+              role='alert'
+              style={{color: 'var(--ide-red)', fontSize: 'var(--ide-t-body)', margin: '12px 0'}}
+            >
               {planIdentityError} Approval is unavailable.
             </div>
           )}
-          <div style={{display: 'flex', gap: 8, marginTop: 16}}>
+          {/* Wraps at 375px: the approve label carries a server-supplied credit count and must not
+              squeeze Cancel below its own word width. */}
+          <div className='rl-actions' style={{marginTop: 16}}>
             <button
               className='ide-btn'
               disabled={busy !== '' || !approvalAllowed || !exactPlanFingerprint}
@@ -662,12 +677,9 @@ export default function IdePlan() {
                 ? 'Approving…'
                 : `Approve and start work · ${run.creditsCharged ?? 1} credit(s)`}
             </button>
-            <button
-              className='ide-btn ghost'
-              style={{color: 'var(--ide-red)'}}
-              disabled={busy !== ''}
-              onClick={cancel}
-            >
+            {/* danger is a ghost that reddens on hover; a permanently red control competes with
+                the accent CTA for the eye. */}
+            <button className='ide-btn danger' disabled={busy !== ''} onClick={cancel}>
               Cancel
             </button>
           </div>

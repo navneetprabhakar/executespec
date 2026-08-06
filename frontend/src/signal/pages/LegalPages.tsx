@@ -138,6 +138,17 @@ export function DpaPage() {
   );
 }
 
+/**
+ * Reading shell for the three legal routes.
+ *
+ * The legal WORDING above is not a design surface and is deliberately
+ * untouched — only its typography and layout are. This used to inject a
+ * per-page inline `<style>` element whose selectors (`article h3`, `article p`,
+ * `article a`) were unscoped and leaked to every other `<article>` on the page
+ * for as long as a legal route was mounted. The rules now live in
+ * `.signal-legal*` in signal.css, which also gives them a phone gutter and a
+ * 680px reading measure.
+ */
 function LegalShell({
   title,
   subtitle,
@@ -148,44 +159,14 @@ function LegalShell({
   children: ReactNode;
 }) {
   return (
-    <div style={{minHeight: '100dvh', background: 'var(--signal-bg)', color: 'var(--signal-ink)'}}>
-      <div style={{maxWidth: 720, margin: '0 auto', padding: '40px 24px 80px'}}>
-        <Link
-          to='/login'
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 6,
-            fontSize: 13,
-            color: 'var(--signal-text-dim)',
-            textDecoration: 'none',
-            marginBottom: 32,
-          }}
-        >
+    <div className='signal-legal'>
+      <div className='signal-legal-inner'>
+        <Link to='/login' className='signal-legal-back'>
           ← Back to ExecuteSpec
         </Link>
-        <h1
-          style={{
-            fontSize: 28,
-            fontWeight: 700,
-            letterSpacing: '-0.02em',
-            margin: 0,
-            marginBottom: 6,
-          }}
-        >
-          {title}
-        </h1>
-        <p style={{fontSize: 13, color: 'var(--signal-text-dim)', marginTop: 0, marginBottom: 28}}>
-          {subtitle}
-        </p>
-        <article style={{fontSize: 14, lineHeight: 1.7, color: 'var(--signal-ink)'}}>
-          <style>{`
-            article h3 { font-size: 16px; font-weight: 700; letter-spacing: -0.01em; margin: 24px 0 6px; }
-            article p { margin: 0 0 14px; }
-            article a { color: var(--signal-coral); text-decoration: underline; }
-          `}</style>
-          {children}
-        </article>
+        <h1>{title}</h1>
+        <p className='signal-legal-updated'>{subtitle}</p>
+        <article className='signal-legal-body'>{children}</article>
       </div>
     </div>
   );

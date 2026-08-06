@@ -79,7 +79,13 @@ export const PLAN_SUBCOPY: Record<string, string> = {
   ENTERPRISE: 'SSO · SLA · custom models · dedicated support',
 };
 
-const TIER_ORDER = ['FREE', 'PRO', 'TEAM', 'ENTERPRISE'];
+/* Ladder order for the /plans grid. This is presentation order only — prices,
+ * cadence and availability still come entirely from GET /api/billing/plans, and
+ * a tier the API does not return is never synthesized here (except the FREE and
+ * ENTERPRISE bookends below, which have no purchasable row by design).
+ * PRO_PLUS and BYOK are listed so V253's real ladder does not render with the
+ * unrecognised tiers dumped after ENTERPRISE. */
+const TIER_ORDER = ['FREE', 'PRO', 'PRO_PLUS', 'BYOK', 'TEAM', 'ENTERPRISE'];
 
 /*
  * RR-357 — there is deliberately NO hardcoded fallback plan ladder here.

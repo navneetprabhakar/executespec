@@ -20,7 +20,7 @@ export function ArchDocView({md}: {md: string}) {
 
   if (sections.length === 0) {
     return (
-      <div className='signal-md' style={{fontSize: 13.5, lineHeight: 1.6}}>
+      <div className='signal-md' style={{fontSize: 13, lineHeight: 1.6}}>
         <Markdown>{md}</Markdown>
       </div>
     );
@@ -29,7 +29,7 @@ export function ArchDocView({md}: {md: string}) {
   return (
     <div>
       {preamble.trim() && (
-        <div className='signal-md' style={{fontSize: 13.5, lineHeight: 1.6, marginBottom: 8}}>
+        <div className='signal-md' style={{fontSize: 13, lineHeight: 1.6, marginBottom: 8}}>
           <Markdown>{preamble}</Markdown>
         </div>
       )}
@@ -69,7 +69,7 @@ export function ArchDocView({md}: {md: string}) {
                 textAlign: 'left',
                 color: 'var(--ide-fg-bright)',
                 fontWeight: 600,
-                fontSize: 13.5,
+                fontSize: 13,
               }}
             >
               <span className='ide-tree-chev' style={{color: 'var(--ide-fg-muted)'}}>
@@ -80,7 +80,7 @@ export function ArchDocView({md}: {md: string}) {
             {isOpen && (
               <div
                 className='signal-md'
-                style={{padding: '0 14px 12px', fontSize: 13.5, lineHeight: 1.6}}
+                style={{padding: '0 14px 12px', fontSize: 13, lineHeight: 1.6}}
               >
                 <Markdown>{s.body}</Markdown>
               </div>

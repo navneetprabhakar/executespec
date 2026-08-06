@@ -18,6 +18,9 @@ import {
   customerLimitSummary,
   customerStepStatusLabel,
   customerStepSummary,
+  headerStatusNoteFor,
+  recoveryCardTitleFor,
+  splitActionLabel,
   customerStepTitle,
   evidenceKind,
   emptyCodeTabMessage,
@@ -875,10 +878,16 @@ describe('runResultUtils', () => {
   });
 
   it('formats log rows and skips noisy run-detail events', () => {
-    expect(logIcon('TOOL_CALL')).toBe('🔧');
-    expect(logIcon('TASK_WAVE_PLAN')).toBe('≋');
-    expect(logIcon('GOAL_DECISION')).toBe('🧭');
-    expect(logIcon('UNKNOWN')).toBe('·');
+    // The log now returns lucide components rather than emoji, so assert on
+    // identity + distinctness: the map must route these four types to three
+    // different glyphs, with an explicit fallback for the unknown case.
+    const tool = logIcon('TOOL_CALL');
+    const wave = logIcon('TASK_WAVE_PLAN');
+    const goal = logIcon('GOAL_DECISION');
+    const unknown = logIcon('UNKNOWN');
+    expect(typeof tool).toBe('object');
+    expect(new Set([tool, wave, goal, unknown]).size).toBe(4);
+    expect(logIcon('TOOL_RESULT')).toBe(tool);
     expect(logLabel('RUN_STATUS')).toBe('Run');
     expect(logLabel('GATE_OPENED')).toBe('Approval');
     expect(logLabel('RUN_PROVIDER_SWITCHED')).toBe('Provider');
@@ -1616,5 +1625,83 @@ describe('reportModelDisplay', () => {
     expect(reportModelDisplay({modelUsed: 'claude-sonnet-5', routeAttribution: 'LEDGER'})).toBe(
       'claude-sonnet-5',
     );
+  });
+});
+
+describe('terminal status is stated once in the run header', () => {
+  // verdictFor() puts the server's customerTitle straight into the badge for
+  // ACTION_REQUIRED / POLICY_BLOCKED / WARNING, so the muted header note and
+  // the recovery-card title used to repeat that same sentence twice more.
+  const title = 'Validation needs attention';
+
+  it('drops the muted header note when it repeats the badge label', () => {
+    expect(headerStatusNoteFor(title, title, 'Validation failed')).toBeNull();
+  });
+
+  it('ignores trailing punctuation, case and whitespace when deduping', () => {
+    expect(headerStatusNoteFor(title, '  validation needs attention. ', '')).toBeNull();
+  });
+
+  it('keeps a header note that adds a statement the badge does not make', () => {
+    expect(headerStatusNoteFor('Failed', title, '')).toBe(title);
+    expect(headerStatusNoteFor('Failed', null, 'Planner unavailable')).toBe('Planner unavailable');
+  });
+
+  it('returns null when there is nothing to say', () => {
+    expect(headerStatusNoteFor('Failed', null, '')).toBeNull();
+    expect(headerStatusNoteFor('Failed', '   ', undefined)).toBeNull();
+  });
+
+  it('drops the recovery-card title rather than repeat the badge a third time', () => {
+    // The card's diagnosis copy already says what went wrong, so a generic
+    // restatement would only cost a line.
+    expect(recoveryCardTitleFor(title, title)).toBeNull();
+  });
+
+  it('keeps a distinct customerTitle as the recovery-card title', () => {
+    expect(recoveryCardTitleFor('Failed', title)).toBe(title);
+  });
+
+  it('has no title line when the server supplied no customer title', () => {
+    expect(recoveryCardTitleFor('Failed', null)).toBeNull();
+  });
+});
+
+describe('a primary action reads as a short verb phrase', () => {
+  const sentence =
+    'Inspect the validation evidence and address the reported failure before retrying.';
+
+  it('splits a server sentence into a button phrase plus prose', () => {
+    expect(splitActionLabel(sentence)).toEqual({
+      button: 'Inspect the validation evidence',
+      prose: sentence,
+    });
+  });
+
+  it('leaves an already-short label alone and asks for no prose line', () => {
+    expect(splitActionLabel('Add a provider key')).toEqual({
+      button: 'Add a provider key',
+      prose: null,
+    });
+  });
+
+  it('drops a trailing period from a short label', () => {
+    expect(splitActionLabel('Open the logs.')).toEqual({button: 'Open the logs', prose: null});
+  });
+
+  it('never truncates mid-thought when no clause boundary fits', () => {
+    const unbroken = 'Contact support with the run identifier shown beside this outcome summary';
+    expect(splitActionLabel(unbroken)).toEqual({button: unbroken, prose: null});
+  });
+
+  it('rejects a leading fragment that is too short to stand alone', () => {
+    // "Go" would be a meaningless button; fall through to the next boundary.
+    const label = 'Go and open the run evidence tab to review the failing gate in detail';
+    expect(splitActionLabel(label).button).not.toBe('Go');
+  });
+
+  it('handles absent labels', () => {
+    expect(splitActionLabel(null)).toEqual({button: '', prose: null});
+    expect(splitActionLabel('   ')).toEqual({button: '', prose: null});
   });
 });

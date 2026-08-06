@@ -1,0 +1,562 @@
+/* Version B — systemdiscovery surfaces. Scoped rules for this lane only.
+   Shared grammar lives in ide.css; do not duplicate it here.
+
+   Owns: IdeSystem (/notifications · /search · /audit · /setup · empty project),
+   IdeDiscovery (/insights) and IdeBenchmark (/benchmark).
+
+   The five rules this file implements, in the order they were violated:
+     1. one accent-filled commit action per surface — everything else ghost
+     2. state is a 3px leading stripe, never a repainted card body
+     3. one visible edge per box — inner structure is a tint
+     4. alignment is a COLUMN — the leading status marker is a fixed track so
+        every title in a list starts at the same x
+     5. hover changes colour, not position; one easing curve (--ide-ease)
+   ───────────────────────────────────────────────────────────── */
+
+/* ═══════════════════════════════════════════════════════════════
+   Row grammar — shared by notification / audit / search / setup lists.
+
+   Before: every list was a flex row of inline-styled spans with a hard-coded
+   px font-size, and the leading dot / trailing timestamp were laid out by
+   content width. The audit page's `actor · target` line wrapped to three
+   lines at 375px and collided with the absolute-time column.
+
+   Now the row is a grid with an explicit leading track, so a dot, a severity
+   stripe or nothing at all still leaves every title on the same x.
+   ═══════════════════════════════════════════════════════════════ */
+.ide-root .sysd-list {
+  padding: 0;
+  overflow: hidden;
+}
+
+.ide-root .sysd-row {
+  display: grid;
+  grid-template-columns: var(--sysd-lead, 14px) minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: var(--ide-s3);
+  padding: var(--ide-s3) var(--ide-s4);
+  text-decoration: none;
+  color: var(--ide-fg);
+  border-bottom: 1px solid var(--ide-border);
+  border-left: 3px solid transparent;
+  width: 100%;
+  text-align: left;
+  background: none;
+  font: inherit;
+  transition: background-color 120ms var(--ide-ease);
+}
+.ide-root .sysd-row:last-child {
+  border-bottom: 0;
+}
+.ide-root .sysd-row:hover {
+  background: var(--ide-hover);
+}
+.ide-root .sysd-row:focus-visible {
+  outline: 2px solid var(--ide-accent);
+  outline-offset: -2px;
+}
+button.ide-root .sysd-row,
+.ide-root button.sysd-row {
+  cursor: pointer;
+}
+
+/* Rule 2 — state is the leading stripe. The body is never repainted, so a
+   list of five severities still reads as one surface. */
+.ide-root .sysd-row.is-ok {
+  border-left-color: var(--ide-green);
+}
+.ide-root .sysd-row.is-warn {
+  border-left-color: var(--ide-yellow);
+}
+.ide-root .sysd-row.is-bad {
+  border-left-color: var(--ide-red);
+}
+.ide-root .sysd-row.is-info {
+  border-left-color: var(--ide-blue);
+}
+
+/* Every row renders exactly four children with stable classes, so grid
+   placement is explicit rather than dependent on source order. Auto-flow broke
+   the moment a row had no timestamp or the phone layout dropped a track. */
+.ide-root .sysd-row-lead {
+  grid-column: 1;
+  grid-row: 1;
+}
+.ide-root .sysd-row-main {
+  grid-column: 2;
+  grid-row: 1;
+  min-width: 0;
+}
+.ide-root .sysd-row-time {
+  grid-column: 3;
+  grid-row: 1;
+}
+.ide-root .sysd-row-end {
+  grid-column: 4;
+  grid-row: 1;
+  justify-self: end;
+}
+
+/* The unread marker lives in the fixed leading track. A read row keeps the
+   track (so titles stay aligned) and only hollows the dot out. */
+.ide-root .sysd-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+  justify-self: start;
+  align-self: center;
+}
+.ide-root .sysd-dot.is-read {
+  background: none;
+  border: 1px solid var(--ide-border-strong);
+}
+.ide-root .sysd-row-title {
+  display: block;
+  font-size: var(--ide-t-body);
+  font-weight: 500;
+  color: var(--ide-fg-bright);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ide-root .sysd-row-title.is-unread {
+  font-weight: 600;
+}
+.ide-root .sysd-row-sub {
+  display: block;
+  margin-top: 2px;
+  font-size: var(--ide-t-caption);
+  color: var(--ide-fg-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Trailing time column. Tabular figures so a stack of them forms a real
+   column instead of a ragged edge. */
+.ide-root .sysd-row-time {
+  font-size: var(--ide-t-caption);
+  color: var(--ide-fg-muted);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  justify-self: end;
+  align-self: center;
+}
+.ide-root .sysd-row-chev {
+  font-size: var(--ide-t-caption);
+  color: var(--ide-fg-muted);
+}
+
+/* Phone: the row becomes two lines. The time drops under the subtitle instead
+   of stealing ~45% of a 375px row — the defect that truncated every
+   notification title to about eighteen characters. */
+@media (max-width: 600px) {
+  /* Three tracks instead of four, and the time drops to a second row under the
+     body. Placement stays explicit — auto-flow would wrap the trailing cell
+     onto its own row and push the leading marker out of its column. */
+  .ide-root .sysd-row {
+    grid-template-columns: var(--sysd-lead, 14px) minmax(0, 1fr) auto;
+    align-items: start;
+    row-gap: 2px;
+  }
+  .ide-root .sysd-row-lead {
+    align-self: start;
+  }
+  .ide-root .sysd-dot {
+    align-self: start;
+    margin-top: 5px;
+  }
+  /* Titles wrap rather than truncate: a 375px row that ellipsised at about
+     eighteen characters told the reader nothing. */
+  .ide-root .sysd-row-title,
+  .ide-root .sysd-row-sub {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  .ide-root .sysd-row-time {
+    grid-column: 2;
+    grid-row: 2;
+    justify-self: start;
+  }
+  .ide-root .sysd-row-end {
+    grid-column: 3;
+    grid-row: 1;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Toolbar — filter tabs plus a single trailing ghost action.
+   Rule 1: `Mark all read` / `Export CSV` are secondary reads of a list, not
+   the commit action for the surface, so both stay ghost.
+   ═══════════════════════════════════════════════════════════════ */
+.ide-root .sysd-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--ide-s3);
+  margin-bottom: var(--ide-s3);
+}
+.ide-root .sysd-toolbar .ide-rtabs {
+  flex: 1;
+  min-width: 0;
+  margin-bottom: 0;
+}
+.ide-root .sysd-toolbar > .ide-btn {
+  flex-shrink: 0;
+}
+@media (max-width: 600px) {
+  .ide-root .sysd-toolbar {
+    flex-wrap: wrap;
+  }
+  .ide-root .sysd-toolbar .ide-rtabs {
+    flex: 1 0 100%;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Search
+   ═══════════════════════════════════════════════════════════════ */
+.ide-root .sysd-search {
+  display: flex;
+  gap: var(--ide-s2);
+  align-items: center;
+  background: var(--ide-bg-input, var(--ide-bg-tab-inactive));
+  border: 1px solid var(--ide-border);
+  border-radius: var(--ide-r-control);
+  padding: var(--ide-s2) var(--ide-s3);
+  margin-bottom: var(--ide-s4);
+}
+.ide-root .sysd-search:focus-within {
+  border-color: var(--ide-accent);
+}
+.ide-root .sysd-search-icon {
+  width: var(--ide-icon);
+  height: var(--ide-icon);
+  flex-shrink: 0;
+  color: var(--ide-fg-muted);
+}
+.ide-root .sysd-search input {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: 0;
+  outline: 0;
+  font-size: var(--ide-t-body-lg);
+  color: var(--ide-fg-bright);
+}
+.ide-root .sysd-search-kbd {
+  font-size: var(--ide-t-caption);
+  color: var(--ide-fg-muted);
+  background: var(--ide-bg-tab-inactive);
+  padding: 3px 7px;
+  border-radius: var(--ide-r-control);
+  flex-shrink: 0;
+}
+/* A keyboard hint is desktop affordance noise on a phone. */
+@media (max-width: 600px) {
+  .ide-root .sysd-search-kbd {
+    display: none;
+  }
+}
+
+/* Search hits carry a fixed-width kind column so `RUN` and `PROJECT` do not
+   move the title. Rule 4 again, on the trailing side. */
+/* `RUN` (62px) next to `PROJECT` (74px) left a ragged inner edge down the
+   trailing column. Size the widest label once so the column is real. */
+.ide-root .sysd-kind {
+  flex: 0 0 auto;
+  min-width: 78px;
+  justify-self: end;
+  text-align: center;
+  justify-content: center;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Onboarding (empty project). Rule 2: the "you have no projects yet" card is a
+   tinted note with a leading edge, not a card whose whole border turns green.
+   Rule 1: exactly one accent button — Connect GitHub.
+   ═══════════════════════════════════════════════════════════════ */
+.ide-root .sysd-onboard-note {
+  border: 0;
+  border-left: 3px solid var(--ide-accent);
+  border-radius: var(--ide-r-control);
+  background: color-mix(in srgb, var(--ide-accent) 9%, transparent);
+  padding: var(--ide-s3) var(--ide-s4);
+}
+.ide-root .sysd-onboard-note strong {
+  display: block;
+  font-size: var(--ide-t-body-lg);
+  font-weight: 600;
+  color: var(--ide-fg-bright);
+  margin-bottom: 2px;
+}
+.ide-root .sysd-onboard-note span {
+  font-size: var(--ide-t-body);
+  color: var(--ide-fg-muted);
+  line-height: 1.5;
+}
+.ide-root .sysd-onboard-body {
+  font-size: var(--ide-t-body);
+  color: var(--ide-fg-muted);
+  line-height: 1.5;
+  margin-bottom: var(--ide-s3);
+}
+.ide-root .sysd-onboard-icon {
+  width: var(--ide-icon);
+  height: var(--ide-icon);
+}
+
+.ide-root .sysd-version {
+  text-align: center;
+  font-size: var(--ide-t-caption);
+  color: var(--ide-fg-muted);
+  margin-top: var(--ide-s6);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Insights (/insights)
+   ═══════════════════════════════════════════════════════════════ */
+/* A range switch is three ~40px controls. Letting `.ide-rtabs` stretch to the
+   full 1130px pane turned it into a rule across the page. */
+.ide-root .sysd-range {
+  width: fit-content;
+  max-width: 100%;
+  border-bottom: 0;
+  margin-bottom: var(--ide-s3);
+  border-radius: var(--ide-r-control);
+  border: 1px solid var(--ide-border);
+}
+
+.ide-root .sysd-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: var(--ide-s3);
+}
+.ide-root .sysd-metric-label {
+  font-size: var(--ide-t-caption);
+  font-weight: 600;
+  color: var(--ide-fg-muted);
+  margin-bottom: var(--ide-s1);
+}
+.ide-root .sysd-metric-value {
+  font-size: var(--ide-t-h2);
+  font-weight: 600;
+  color: var(--ide-fg-bright);
+  font-variant-numeric: tabular-nums;
+}
+.ide-root .sysd-metric-value small {
+  font-size: var(--ide-t-body);
+  font-weight: 400;
+  color: var(--ide-fg-muted);
+}
+
+/* The outcome bar used `flex: <count>` on three children, so a range with no
+   runs collapsed all three to zero width and rendered an unexplained 18px
+   void. An empty range now shows an explicit neutral track. */
+.ide-root .sysd-outcome {
+  display: flex;
+  gap: 3px;
+  height: 10px;
+  border-radius: var(--ide-r-pill);
+  overflow: hidden;
+  background: var(--ide-bg-input, var(--ide-bg-tab-inactive));
+  margin-bottom: var(--ide-s4);
+}
+.ide-root .sysd-outcome-empty {
+  height: 10px;
+  border-radius: var(--ide-r-pill);
+  background: var(--ide-bg-input, var(--ide-bg-tab-inactive));
+  border: 1px dashed var(--ide-border);
+  margin-bottom: var(--ide-s2);
+}
+.ide-root .sysd-outcome-none {
+  font-size: var(--ide-t-caption);
+  color: var(--ide-fg-muted);
+  margin-bottom: var(--ide-s4);
+}
+.ide-root .sysd-swatch {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  margin-right: var(--ide-s2);
+  vertical-align: middle;
+}
+.ide-root .sysd-note {
+  font-size: var(--ide-t-body);
+  color: var(--ide-fg-muted);
+  margin: 0;
+}
+.ide-root .sysd-top-user {
+  font-size: var(--ide-t-body);
+  font-weight: 500;
+  color: var(--ide-fg-bright);
+}
+.ide-root .sysd-top-user-meta {
+  font-size: var(--ide-t-caption);
+  color: var(--ide-fg-muted);
+  margin-top: var(--ide-s1);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Benchmark (/benchmark) — operator telemetry.
+   ═══════════════════════════════════════════════════════════════ */
+/* Every wide table owns its own horizontal scroll. The page body must never
+   scroll sideways at 375px. */
+.ide-root .sysd-scroll {
+  padding: 0;
+  overflow-x: auto;
+  max-width: 100%;
+}
+.ide-root .sysd-scroll > table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 560px;
+}
+.ide-root .sysd-th {
+  text-align: left;
+  padding: var(--ide-s2) var(--ide-s3);
+  font-size: var(--ide-t-caption);
+  font-weight: 600;
+  color: var(--ide-fg-muted);
+  white-space: nowrap;
+  border-bottom: 1px solid var(--ide-border);
+}
+.ide-root .sysd-td {
+  padding: var(--ide-s2) var(--ide-s3);
+  font-size: var(--ide-t-body);
+  vertical-align: top;
+}
+.ide-root .sysd-tr {
+  border-top: 1px solid var(--ide-border);
+}
+/* Rule 2 on a table: the task result is a leading edge on the row, not a
+   repainted cell. */
+.ide-root .sysd-tr.is-ok > td:first-child {
+  box-shadow: inset 3px 0 0 var(--ide-green);
+}
+.ide-root .sysd-tr.is-bad > td:first-child {
+  box-shadow: inset 3px 0 0 var(--ide-red);
+}
+.ide-root .sysd-tr.is-warn > td:first-child {
+  box-shadow: inset 3px 0 0 var(--ide-yellow);
+}
+.ide-root .sysd-mono {
+  font-family: inherit;
+  font-variant-numeric: tabular-nums;
+}
+.ide-root .sysd-sub {
+  margin-top: 3px;
+  color: var(--ide-fg-muted);
+  font-size: var(--ide-t-caption);
+}
+
+.ide-root .sysd-chip {
+  font-size: var(--ide-t-caption);
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: var(--ide-r-control);
+  background: var(--ide-bg-input);
+  border: 1px solid var(--ide-border);
+  color: var(--ide-fg-bright);
+  white-space: nowrap;
+}
+/* Rule 4 — the leading suite chip is a fixed COLUMN. `TERMINAL_BENCH` is four
+   characters wider than `SWE_BENCH`, so a content-width chip started each
+   run's model name at a different x. */
+.ide-root .ide-benchmark-name-cell .sysd-chip,
+.ide-root .ide-benchmark-mobile-card-head .sysd-chip {
+  flex: 0 0 120px;
+  display: inline-flex;
+  justify-content: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+@media (max-width: 600px) {
+  .ide-root .ide-benchmark-mobile-card-head .sysd-chip {
+    flex: 0 0 auto;
+  }
+}
+.ide-root .sysd-sub-chip {
+  font-size: var(--ide-t-caption);
+  padding: 2px 7px;
+  border-radius: var(--ide-r-control);
+  border: 1px solid currentColor;
+  white-space: nowrap;
+  text-decoration: none;
+}
+.ide-root .sysd-kv-label {
+  font-size: var(--ide-t-caption);
+  color: var(--ide-fg-muted);
+}
+.ide-root .sysd-kv-value {
+  font-size: var(--ide-t-body);
+}
+.ide-root .sysd-empty-card {
+  color: var(--ide-fg-muted);
+  font-size: var(--ide-t-body);
+}
+.ide-root .sysd-sync {
+  font-size: var(--ide-t-caption);
+  color: var(--ide-fg-muted);
+  margin-bottom: var(--ide-s3);
+}
+.ide-root .sysd-sync.is-warn {
+  color: var(--ide-yellow);
+}
+.ide-root .sysd-detail-head {
+  display: flex;
+  align-items: center;
+  gap: var(--ide-s3);
+  flex-wrap: wrap;
+  margin-bottom: var(--ide-s3);
+}
+.ide-root .sysd-kv-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: var(--ide-s4);
+}
+.ide-root .sysd-attempts {
+  display: inline-flex;
+  gap: 5px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Event log — a three-column flex row whose 140px type column plus a nowrap
+   timestamp overflowed a 375px viewport. Below 600px the timestamp moves
+   under the message. */
+.ide-root .sysd-eventlog {
+  padding: 0;
+  max-height: 340px;
+  overflow-y: auto;
+}
+.ide-root .sysd-event {
+  display: grid;
+  grid-template-columns: minmax(120px, max-content) minmax(0, 1fr) auto;
+  gap: var(--ide-s3);
+  padding: var(--ide-s2) var(--ide-s3);
+  font-size: var(--ide-t-caption);
+  border-top: 1px solid var(--ide-border);
+}
+.ide-root .sysd-event:first-child {
+  border-top: 0;
+}
+.ide-root .sysd-event-type {
+  font-weight: 600;
+}
+.ide-root .sysd-event-msg {
+  overflow-wrap: anywhere;
+}
+.ide-root .sysd-event-time {
+  color: var(--ide-fg-muted);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+@media (max-width: 600px) {
+  .ide-root .sysd-event {
+    grid-template-columns: minmax(0, 1fr) auto;
+    row-gap: 2px;
+  }
+  .ide-root .sysd-event-msg {
+    grid-column: 1 / -1;
+  }
+}

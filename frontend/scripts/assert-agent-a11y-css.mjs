@@ -9,6 +9,27 @@ const ideCss = readFileSync(join(srcRoot, 'ide/ide.css'), 'utf8');
 const consoleCss = readFileSync(join(srcRoot, 'console/console.css'), 'utf8');
 const css = `${ideCss}\n${consoleCss}`;
 const cssWithoutComments = css.replace(/\/\*[\s\S]*?\*\//g, '');
+
+// The design-grammar pass replaced literal control metrics with tokens
+// (`min-height: 32px` -> `min-height: var(--ide-control-h)`), which silently
+// broke every literal assertion below. Resolve the shape/space/control tokens
+// back to the literals declared at the top of ide.css before matching. The
+// values are read from the stylesheet, not restated here, so retuning a token
+// retunes the assertion with it.
+const TOKEN_LITERALS = (() => {
+  const out = new Map();
+  const decl = /(--ide-(?:control-h-lg|control-h|r-control|r-card|r-pill|s[1-6]))\s*:\s*([^;]+);/g;
+  for (const match of cssWithoutComments.matchAll(decl)) {
+    if (!out.has(match[1])) out.set(match[1], match[2].trim());
+  }
+  return out;
+})();
+
+function resolveTokens(text) {
+  return text.replace(/var\((--ide-[a-z0-9-]+)\)/g, (whole, name) =>
+    TOKEN_LITERALS.has(name) ? TOKEN_LITERALS.get(name) : whole,
+  );
+}
 const ideFiles = sourceFiles(join(srcRoot, 'ide'));
 const consoleFiles = sourceFiles(join(srcRoot, 'console'));
 
@@ -108,7 +129,7 @@ assertContains(
   'compose provider select label',
 );
 assertContains(composeSurface, "aria-labelledby='compose-mode-label'", 'compose mode select label');
-assertContains(composeSurface, "aria-label='Run cost cap in USD'", 'compose cap input label');
+assertContains(composeSurface, "aria-label='Run cost cap in USD", 'compose cap input label');
 
 const projectCompose = readFileSync(join(srcRoot, 'ide/IdeProject.tsx'), 'utf8');
 assertContains(
@@ -210,6 +231,24 @@ assertContains(
   'org model matrix picker label',
 );
 
+// A control must fit its own label. `terminalOutcome.primaryAction.label` is
+// server-supplied prose, so `white-space: nowrap` grew the run-result recovery
+// card's .ide-btn to 526px inside a 375px viewport, where the pane's
+// `overflow: hidden` clipped it. Controls now wrap and grow downward inside
+// their container instead of past it.
+assertContains(rule('.ide-root .ide-btn'), 'white-space: normal', '.ide-btn wraps its label');
+assertNotContains(rule('.ide-root .ide-btn'), 'white-space: nowrap', '.ide-btn single-line lock');
+assertContains(rule('.ide-root .ide-btn'), 'max-width: 100%', '.ide-btn container bound');
+assertContains(rule('.ide-root .ide-btn'), 'overflow-wrap: break-word', '.ide-btn token break');
+assertContains(
+  rule('.ide-root .ide-btn'),
+  'min-height: 32px',
+  '.ide-btn control height is a floor',
+);
+assertNotContains(rule('.ide-root .ide-btn'), 'overflow: hidden', '.ide-btn must not clip');
+assertContains(rule('.ide-root .ide-btn'), 'line-height: 1.35', '.ide-btn wrapped-label leading');
+assertContains(rule('.ide-root .ide-btn'), 'text-align: center', '.ide-btn wrapped-label alignment');
+
 console.log('Agent a11y guardrail passed.');
 
 function rule(selector) {
@@ -222,7 +261,7 @@ function rule(selector) {
       .includes(selector),
   );
   if (!block) throw new Error(`Missing CSS rule for ${selector}`);
-  return block.slice(block.indexOf('{') + 1, block.lastIndexOf('}'));
+  return resolveTokens(block.slice(block.indexOf('{') + 1, block.lastIndexOf('}')));
 }
 
 function groupedRuleContaining(selector) {

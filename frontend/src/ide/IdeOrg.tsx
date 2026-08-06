@@ -24,6 +24,7 @@ import {
   isTeamWorkspaceSetupPending,
   KEY_PLACEHOLDER,
   matrixModelLabel,
+  matrixProviderLabel,
   matrixProviderRows,
   normalizedOrgTier,
   orgDisplayName,
@@ -38,20 +39,12 @@ import {
   type UserKeyProvider,
 } from '@/ide/orgUtils';
 
-// Inline error / success banner — colours map to the IDE token set (mirrors
-// IdeProjectMore's Banner). Renders nothing when both are empty.
+// Inline error / success banner. STATE IS A STRIPE — a 3px leading edge plus a
+// tint, not a second fully stroked box competing with the cards around it.
 function Banner({err, msg}: {err?: string; msg?: string}) {
   if (!err && !msg) return null;
   return (
-    <div
-      className='ide-card'
-      style={{
-        marginBottom: 12,
-        fontSize: 13,
-        color: err ? 'var(--ide-red)' : 'var(--ide-green)',
-        borderColor: err ? 'var(--ide-red)' : 'var(--ide-green)',
-      }}
-    >
+    <div className={`ide-note ${err ? 'bad' : 'ok'}`} style={{marginBottom: 12}} role='status'>
       {err || msg}
     </div>
   );
@@ -61,38 +54,18 @@ function Banner({err, msg}: {err?: string; msg?: string}) {
 // "heads up" cards. Blue-tinted so it reads as guidance, not an error.
 function InfoCard({children}: {children: React.ReactNode}) {
   return (
-    <div
-      className='ide-card'
-      style={{
-        marginBottom: 12,
-        fontSize: 12.5,
-        lineHeight: 1.55,
-        color: 'var(--ide-fg)',
-        background: 'color-mix(in srgb, var(--ide-blue) 12%, transparent)',
-        borderColor: 'color-mix(in srgb, var(--ide-blue) 35%, transparent)',
-      }}
-    >
+    <div className='ide-note info' style={{marginBottom: 12}}>
       {children}
     </div>
   );
 }
 
-// Uppercase field label + control wrapper (mirrors the Signal `Field` helper).
+// Field label + control wrapper. Sentence case, not tracked-out capitals —
+// hierarchy comes from weight and colour, matching the `.ide-h2` decision.
 function Field({label, children}: {label: string; children: React.ReactNode}) {
   return (
-    <div style={{marginBottom: 12}}>
-      <div
-        style={{
-          fontSize: 11,
-          fontWeight: 700,
-          letterSpacing: '0.06em',
-          textTransform: 'uppercase',
-          color: 'var(--ide-fg-muted)',
-          marginBottom: 6,
-        }}
-      >
-        {label}
-      </div>
+    <div className='ob-field'>
+      <div className='ob-field-label'>{label}</div>
       {children}
     </div>
   );
@@ -239,32 +212,37 @@ export function IdeApiKeys() {
       <div
         key={provider}
         style={{
-          padding: '14px 16px',
+          padding: 'var(--ide-s3) var(--ide-s4)',
           borderBottom: last ? 'none' : '1px solid var(--ide-border)',
         }}
       >
-        <div
-          style={{fontSize: 13.5, fontWeight: 600, marginBottom: 8, color: 'var(--ide-fg-bright)'}}
-        >
-          {label}
+        <div className='ob-split' style={{alignItems: 'center', marginBottom: 'var(--ide-s2)'}}>
+          <div className='ob-row-title ob-split-main'>{label}</div>
+          <IdeBadge kind={connected ? 'ok' : 'warn'}>
+            {connected ? 'Connected' : 'Not set'}
+          </IdeBadge>
         </div>
         {/* TIER-3 — when the tier gate is closed the whole row renders
             disabled; the upgrade banner above is the single CTA. */}
-        <div style={{display: 'flex', gap: 8}}>
+        <div className='ob-key-controls'>
           <input
             className='ide-input ide-mono'
             type='password'
             aria-label={`${label} personal provider key`}
             autoComplete='off'
-            placeholder={`Paste your ${provider.toLowerCase()} key (${KEY_PLACEHOLDER[provider]})`}
+            placeholder={
+              connected
+                ? 'Paste a new key to replace · blank keeps the current one'
+                : `Paste your ${label} key (${KEY_PLACEHOLDER[provider]})`
+            }
             value={value}
             onChange={(e) => set(e.target.value)}
             disabled={!canManage}
-            style={{flex: 1}}
           />
+          {/* Five identical row-level saves would be five competing accents, so
+              they are ghosts; the surface keeps no filled commit action. */}
           <button
-            className='ide-btn'
-            style={{flexShrink: 0}}
+            className='ide-btn ghost'
             disabled={!canManage || busy === provider}
             onClick={() => saveProviderKey(provider, value)}
           >
@@ -272,8 +250,7 @@ export function IdeApiKeys() {
           </button>
           {connected && (
             <button
-              className='ide-btn ghost'
-              style={{flexShrink: 0, color: 'var(--ide-red)'}}
+              className='ide-btn danger'
               disabled={!canManage || busy === provider}
               onClick={() => setConfirmRevoke(provider)}
             >
@@ -281,11 +258,6 @@ export function IdeApiKeys() {
             </button>
           )}
         </div>
-        {canManage && connected && (
-          <div style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 6}}>
-            Leave blank to keep your current key
-          </div>
-        )}
       </div>
     );
   }
@@ -296,24 +268,15 @@ export function IdeApiKeys() {
       <div className='ide-sub'>Bring your own model keys · bypass platform cost cap</div>
 
       <InfoCard>
-        When you connect a provider key, work using that provider{' '}
-        <strong>bypass our cost cap</strong> entirely. Keys are stored server-side under this
-        deployment's configured crypto policy and are never shown again. Available on BYOK, TEAM,
-        and ENTERPRISE tiers.
+        Work using a provider you supply a key for <strong>bypasses our cost cap</strong> entirely.
+        Keys are stored server-side under this deployment&apos;s configured crypto policy and are
+        never shown again. Available on BYOK, TEAM, and ENTERPRISE tiers.
       </InfoCard>
 
       {!canManage && (
-        <div
-          className='ide-card'
-          style={{
-            marginBottom: 12,
-            fontSize: 13,
-            color: 'var(--ide-red)',
-            borderColor: 'var(--ide-red)',
-          }}
-        >
+        <div className='ide-note bad' style={{marginBottom: 12}}>
           Provider keys require a BYOK, TEAM, or ENTERPRISE workspace.{' '}
-          <Link to='/plans' style={{color: 'var(--ide-red)', fontWeight: 600}}>
+          <Link to='/plans' style={{fontWeight: 600}}>
             Upgrade →
           </Link>
         </div>
@@ -329,25 +292,27 @@ export function IdeApiKeys() {
         {ProviderRow('DeepSeek', 'DEEPSEEK', deepSeekKey, setDeepSeekKey, false)}
         {ProviderRow('Fireworks', 'FIREWORKS', fireworksKey, setFireworksKey, true)}
       </div>
-      <div className='ide-card' style={{marginTop: 12}}>
-        <div style={{display: 'flex', alignItems: 'center', gap: 10}}>
-          <div style={{flex: 1}}>
-            <div style={{fontSize: 13.5, fontWeight: 600, color: 'var(--ide-fg-bright)'}}>
-              OpenRouter
-            </div>
-            <div style={{fontSize: 11.5, color: 'var(--ide-fg-muted)', marginTop: 4}}>
-              OpenRouter is an organization gateway credential, shared under the org provider policy
-              rather than stored as a personal key.
+      <div className='ide-card' style={{marginTop: 12, padding: 0}}>
+        <div className='ob-row'>
+          <div className='ob-row-main'>
+            <div className='ob-row-title'>OpenRouter</div>
+            <div className='ob-row-meta'>
+              An organization gateway credential — shared under the org provider policy, not stored
+              as a personal key.
             </div>
           </div>
-          <IdeBadge kind={org?.hasOpenRouterKey ? 'ok' : 'warn'}>
-            {org?.hasOpenRouterKey ? 'Connected' : 'Not set'}
-          </IdeBadge>
-          <Link className='ide-btn' to='/org/settings#provider-keys'>
-            {user?.orgRole === 'ORG_ADMIN' || user?.globalRole === 'SUPER_ADMIN'
-              ? 'Configure org key'
-              : 'View org setting'}
-          </Link>
+          <div className='ob-status'>
+            <IdeBadge kind={org?.hasOpenRouterKey ? 'ok' : 'warn'}>
+              {org?.hasOpenRouterKey ? 'Connected' : 'Not set'}
+            </IdeBadge>
+          </div>
+          <div className='ob-actions'>
+            <Link className='ide-btn ghost' to='/org/settings#provider-keys'>
+              {user?.orgRole === 'ORG_ADMIN' || user?.globalRole === 'SUPER_ADMIN'
+                ? 'Configure org key'
+                : 'View org setting'}
+            </Link>
+          </div>
         </div>
       </div>
       <ConfirmModal
@@ -502,9 +467,7 @@ export function IdeOrgMembers() {
     <div className='ide-pane' style={{maxWidth: 820}}>
       <h1 className='ide-h1'>Team access</h1>
       <div className='ide-sub'>
-        Manage organization members, roles, and work-domain invites for {orgDisplayName(org)} ·{' '}
-        {members.length} member
-        {members.length === 1 ? '' : 's'} · {tier}
+        {orgDisplayName(org)} · {members.length} member{members.length === 1 ? '' : 's'} · {tier}
       </div>
 
       <Banner err={err} msg={msg} />
@@ -521,19 +484,14 @@ export function IdeOrgMembers() {
           }}
         >
           <div>
+            <div className='ob-field-label'>Seats used</div>
             <div
               style={{
-                fontSize: 10,
+                fontSize: 'var(--ide-t-title)',
                 fontWeight: 700,
-                color: 'var(--ide-fg-muted)',
-                letterSpacing: '0.1em',
-                textTransform: 'uppercase',
-                marginBottom: 4,
+                color: 'var(--ide-fg-bright)',
               }}
             >
-              Seats used
-            </div>
-            <div style={{fontSize: 22, fontWeight: 700, color: 'var(--ide-fg-bright)'}}>
               {seatValue}
             </div>
             {orgTier === 'ENTERPRISE' && (
@@ -558,20 +516,12 @@ export function IdeOrgMembers() {
           </div>
           {canInvite && (
             <div style={{display: 'flex', flexDirection: 'column', gap: 8, minWidth: 240}}>
-              <div
-                style={{
-                  fontSize: 10,
-                  fontWeight: 700,
-                  color: 'var(--ide-fg-muted)',
-                  letterSpacing: '0.1em',
-                  textTransform: 'uppercase',
-                }}
-              >
+              <div className='ob-field-label' style={{marginBottom: 0}}>
                 Invite org member
               </div>
-              <div style={{fontSize: 12, color: 'var(--ide-fg-muted)', lineHeight: 1.45}}>
-                Use a company email matching your org domains. Gmail, Yahoo, Outlook, and similar
-                consumer domains are project-collaborator invites, not org membership.
+              <div style={{fontSize: 'var(--ide-t-caption)', color: 'var(--ide-fg-muted)'}}>
+                Company email matching your org domains. Consumer domains (Gmail, Yahoo, Outlook)
+                are project-collaborator invites, not org membership.
               </div>
               <input
                 className='ide-input'
@@ -594,8 +544,11 @@ export function IdeOrgMembers() {
               <button className='ide-btn' onClick={invite} disabled={busy || !inviteEmail.trim()}>
                 {busy ? 'Inviting…' : `Send org ${inviteRole.toLowerCase()} invite`}
               </button>
-              <Link to='/projects' style={{fontSize: 12, color: 'var(--ide-blue)'}}>
-                Need to invite an external contractor? Open a project Members page.
+              <Link
+                to='/projects'
+                style={{fontSize: 'var(--ide-t-caption)', color: 'var(--ide-blue)'}}
+              >
+                Inviting an external contractor? Use a project&apos;s Members page.
               </Link>
             </div>
           )}
@@ -630,12 +583,9 @@ export function IdeOrgMembers() {
             return (
               <div
                 key={mAny.id || mAny.userId}
+                className='ob-row'
                 style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 12,
-                  padding: '11px 16px',
-                  borderBottom: idx < members.length - 1 ? '1px solid var(--ide-border)' : 'none',
+                  borderTop: idx > 0 ? '1px solid var(--ide-border)' : undefined,
                 }}
               >
                 <div
@@ -646,7 +596,7 @@ export function IdeOrgMembers() {
                     flexShrink: 0,
                     display: 'grid',
                     placeItems: 'center',
-                    fontSize: 11,
+                    fontSize: 'var(--ide-t-caption)',
                     fontWeight: 700,
                     color: 'var(--ide-accent-fg)',
                     background: 'var(--ide-accent)',
@@ -654,23 +604,15 @@ export function IdeOrgMembers() {
                 >
                   {av}
                 </div>
-                <div style={{minWidth: 0, flex: 1}}>
-                  <div style={{fontSize: 13, fontWeight: 500, color: 'var(--ide-fg-bright)'}}>
+                <div className='ob-row-main'>
+                  <div className='ob-row-title'>
                     {displayName}{' '}
                     {isMe && (
                       <span style={{color: 'var(--ide-fg-muted)', fontWeight: 400}}>· you</span>
                     )}
                   </div>
-                  <div
-                    style={{
-                      fontSize: 11.5,
-                      color: 'var(--ide-fg-muted)',
-                      display: 'flex',
-                      gap: 6,
-                      flexWrap: 'wrap',
-                    }}
-                  >
-                    <span>{mAny.email}</span>
+                  <div className='ob-row-meta'>
+                    <span className='ob-truncate'>{mAny.email}</span>
                     {isMe && isSuperAdmin && (
                       <>
                         <span>·</span>
@@ -685,7 +627,7 @@ export function IdeOrgMembers() {
                     )}
                   </div>
                 </div>
-                <div style={{display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0}}>
+                <div className='ob-actions'>
                   {isMe && isSuperAdmin && <IdeBadge kind='warn'>SUPER_ADMIN</IdeBadge>}
                   {canInvite && !isMe ? (
                     <>
@@ -695,15 +637,14 @@ export function IdeOrgMembers() {
                         value={mAny.orgRole || 'DEVELOPER'}
                         disabled={roleBusy || removeBusy}
                         onChange={(e) => changeRole(uid, e.target.value)}
-                        style={{width: 'auto', padding: '4px 8px', fontSize: 12}}
+                        style={{width: 'auto'}}
                       >
                         <option value='DEVELOPER'>DEVELOPER</option>
                         <option value='BILLING_ADMIN'>BILLING_ADMIN</option>
                         <option value='ORG_ADMIN'>ORG_ADMIN</option>
                       </select>
                       <button
-                        className='ide-btn ghost'
-                        style={{padding: '4px 10px', fontSize: 12}}
+                        className='ide-btn danger'
                         disabled={removeBusy || roleBusy}
                         onClick={() =>
                           setConfirmRemove({
@@ -744,27 +685,12 @@ export function IdeOrgMembers() {
               return (
                 <div
                   key={ivAny.id}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 12,
-                    padding: '11px 16px',
-                    borderBottom: idx < invites.length - 1 ? '1px solid var(--ide-border)' : 'none',
-                  }}
+                  className='ob-row'
+                  style={{borderTop: idx > 0 ? '1px solid var(--ide-border)' : undefined}}
                 >
-                  <div style={{minWidth: 0, flex: 1}}>
-                    <div style={{fontSize: 13, fontWeight: 500, color: 'var(--ide-fg-bright)'}}>
-                      {email}
-                    </div>
-                    <div
-                      style={{
-                        fontSize: 11.5,
-                        color: 'var(--ide-fg-muted)',
-                        display: 'flex',
-                        gap: 6,
-                        flexWrap: 'wrap',
-                      }}
-                    >
+                  <div className='ob-row-main'>
+                    <div className='ob-row-title ob-truncate'>{email}</div>
+                    <div className='ob-row-meta'>
                       <span>{ivAny.orgRole || 'DEVELOPER'}</span>
                       {ivAny.expiresAt && (
                         <>
@@ -775,10 +701,9 @@ export function IdeOrgMembers() {
                     </div>
                   </div>
                   {canInvite ? (
-                    <div style={{display: 'flex', gap: 6, flexShrink: 0}}>
+                    <div className='ob-actions'>
                       <button
                         className='ide-btn ghost'
-                        style={{padding: '4px 10px', fontSize: 12}}
                         onClick={() => resend(ivAny.id || '')}
                         disabled={
                           rowBusy === `resend-${ivAny.id}` || rowBusy === `cancel-${ivAny.id}`
@@ -787,8 +712,7 @@ export function IdeOrgMembers() {
                         {rowBusy === `resend-${ivAny.id}` ? '…' : 'Resend'}
                       </button>
                       <button
-                        className='ide-btn ghost'
-                        style={{padding: '4px 10px', fontSize: 12, color: 'var(--ide-red)'}}
+                        className='ide-btn danger'
                         onClick={() => cancelInvite(ivAny.id || '')}
                         disabled={
                           rowBusy === `cancel-${ivAny.id}` || rowBusy === `resend-${ivAny.id}`
@@ -889,10 +813,10 @@ function CreateOrgPanel({
         }}
       >
         <div style={{minWidth: 0, flex: 1}}>
-          <div style={{fontSize: 13.5, fontWeight: 600, color: 'var(--ide-fg-bright)'}}>
+          <div style={{fontSize: 13, fontWeight: 600, color: 'var(--ide-fg-bright)'}}>
             {workspaceSetupPending ? 'Team workspace setup' : 'Organization workspace'}
           </div>
-          <div style={{fontSize: 12.5, color: 'var(--ide-fg-muted)', lineHeight: 1.5}}>
+          <div style={{fontSize: 12, color: 'var(--ide-fg-muted)', lineHeight: 1.5}}>
             {workspaceSetupPending
               ? 'Your paid workspace has team controls enabled. Add organization name and domains so buyers do not see a personal workspace shell.'
               : org?.isPersonal
@@ -962,7 +886,7 @@ function CreateOrgPanel({
             />
           </Field>
           {err && (
-            <div style={{fontSize: 12.5, color: 'var(--ide-red)', marginBottom: 10}}>{err}</div>
+            <div style={{fontSize: 12, color: 'var(--ide-red)', marginBottom: 10}}>{err}</div>
           )}
           <button className='ide-btn' disabled={busy} onClick={submit}>
             {busy
@@ -1353,7 +1277,7 @@ export function IdeOrgSettings() {
         <div className='ide-card'>
           <div
             style={{
-              fontSize: 12.5,
+              fontSize: 12,
               color: 'var(--ide-fg-muted)',
               lineHeight: 1.5,
               marginBottom: 12,
@@ -1391,14 +1315,12 @@ export function IdeOrgSettings() {
         </div>
       ) : (
         <div className='ide-card'>
-          <div style={{fontSize: 13.5, fontWeight: 600, color: 'var(--ide-fg-bright)'}}>
+          <div style={{fontSize: 13, fontWeight: 600, color: 'var(--ide-fg-bright)'}}>
             {orgTier === 'ENTERPRISE'
               ? 'Enterprise seats are contract-managed'
               : 'Seat changes are unavailable'}
           </div>
-          <div
-            style={{fontSize: 12.5, color: 'var(--ide-fg-muted)', lineHeight: 1.5, marginTop: 6}}
-          >
+          <div style={{fontSize: 12, color: 'var(--ide-fg-muted)', lineHeight: 1.5, marginTop: 6}}>
             This org currently reports {seatDisplayCount} seat
             {seatDisplayCount === 1 ? '' : 's'}. Self-serve seat adjustment only applies to
             TEAM-tier billing. To give someone access to a project, open the project&apos;s{' '}
@@ -1530,42 +1452,36 @@ export function IdeOrgSettings() {
           <div
             key={row.provider}
             style={{
-              padding: '14px 16px',
-              borderBottom: i < orgKeyRows.length - 1 ? '1px solid var(--ide-border)' : 'none',
+              padding: 'var(--ide-s3) var(--ide-s4)',
+              borderTop: i > 0 ? '1px solid var(--ide-border)' : undefined,
             }}
           >
-            <div
-              style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                marginBottom: 8,
-              }}
-            >
-              <div style={{fontSize: 13.5, fontWeight: 600, color: 'var(--ide-fg-bright)'}}>
-                {row.label}
-              </div>
+            <div className='ob-split' style={{alignItems: 'center', marginBottom: 'var(--ide-s2)'}}>
+              <div className='ob-row-title ob-split-main'>{row.label}</div>
               <IdeBadge kind={row.connected ? 'ok' : 'warn'}>
                 {row.connected ? 'Connected' : 'Not set'}
               </IdeBadge>
             </div>
-            <div style={{display: 'flex', gap: 8}}>
+            <div className='ob-key-controls'>
               <input
                 className='ide-input ide-mono'
                 type='password'
                 aria-label={`${row.label} organization provider key`}
                 autoComplete='off'
                 placeholder={
-                  row.connected ? 'Paste a new key to replace' : `Paste your ${row.label} key`
+                  row.connected
+                    ? 'Paste a new key to replace · blank keeps the current one'
+                    : `Paste your ${row.label} key`
                 }
                 value={keyInputs[row.provider]}
                 onChange={(e) => setKeyInputs((k) => ({...k, [row.provider]: e.target.value}))}
                 disabled={!canEdit || ['FREE', 'PRO', 'PRO_PLUS'].includes(orgTier)}
-                style={{flex: 1}}
               />
+              {/* Six identical row-level saves would be six competing accents,
+                  so they are ghosts. The one filled action in this section's
+                  neighbourhood stays "Save model matrix". */}
               <button
-                className='ide-btn'
-                style={{flexShrink: 0}}
+                className='ide-btn ghost'
                 disabled={
                   !canEdit ||
                   ['FREE', 'PRO', 'PRO_PLUS'].includes(orgTier) ||
@@ -1577,8 +1493,7 @@ export function IdeOrgSettings() {
               </button>
               {row.connected && (
                 <button
-                  className='ide-btn ghost'
-                  style={{flexShrink: 0, color: 'var(--ide-red)'}}
+                  className='ide-btn danger'
                   disabled={!canEdit || keyBusy === row.provider}
                   onClick={() => setConfirmOrgKeyRevoke(row.provider)}
                 >
@@ -1619,10 +1534,10 @@ export function IdeOrgSettings() {
           }}
         >
           <div>
-            <div style={{fontSize: 13.5, fontWeight: 700, color: 'var(--ide-fg-bright)'}}>
+            <div style={{fontSize: 13, fontWeight: 700, color: 'var(--ide-fg-bright)'}}>
               Managed AI policy
             </div>
-            <div style={{fontSize: 12.5, color: 'var(--ide-fg-muted)', marginTop: 2}}>
+            <div style={{fontSize: 12, color: 'var(--ide-fg-muted)', marginTop: 2}}>
               Effective server policy for this account. Enforcement is backend-side and can step
               models up or down during execution.
             </div>
@@ -1668,36 +1583,32 @@ export function IdeOrgSettings() {
           </div>
         )}
       </div>
+      {matrix && matrix.providers.length === 0 && (
+        /* An empty provider list used to render three tier cards with nothing
+           in them beside a Save button that could not change anything. Say what
+           is actually true instead. */
+        <div className='ide-note warn'>
+          No provider routes are registered on this server, so there is nothing to override yet.
+        </div>
+      )}
       {matrix &&
+        matrix.providers.length > 0 &&
         matrix.tiers.map((t) => (
           <div className='ide-card' key={t} style={{marginBottom: 10}}>
             <div
               style={{
-                fontSize: 13,
+                fontSize: 'var(--ide-t-body)',
                 fontWeight: 700,
                 textTransform: 'capitalize',
-                marginBottom: 10,
+                marginBottom: 'var(--ide-s3)',
                 color: 'var(--ide-fg-bright)',
               }}
             >
               {t}
             </div>
             {matrixProviderRows(matrix, t, matrixOverrides).map((row) => (
-              <div
-                key={row.key}
-                style={{display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8}}
-              >
-                <div
-                  style={{
-                    width: 92,
-                    flexShrink: 0,
-                    fontSize: 12.5,
-                    color: 'var(--ide-fg-muted)',
-                    textTransform: 'capitalize',
-                  }}
-                >
-                  {row.provider}
-                </div>
+              <div key={row.key} className='ob-matrix-row'>
+                <div className='ob-matrix-provider'>{matrixProviderLabel(row.provider)}</div>
                 <ModelPicker
                   ariaLabel={`${t} ${row.provider} model override`}
                   value={row.selectedOverride}
@@ -1711,16 +1622,12 @@ export function IdeOrgSettings() {
                       return nextO;
                     });
                   }}
-                  style={{
-                    flex: 1,
-                    minWidth: 0,
-                  }}
                 />
               </div>
             ))}
           </div>
         ))}
-      {matrix && matrix.editable && canEdit && (
+      {matrix && matrix.providers.length > 0 && matrix.editable && canEdit && (
         <button
           className='ide-btn'
           style={{width: '100%'}}
@@ -1734,33 +1641,33 @@ export function IdeOrgSettings() {
       {/* ── External project collaborators (V198) ── */}
       <div className='ide-h2'>Project external collaborators</div>
       <div className='ide-card'>
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'flex-start',
-            gap: 12,
-          }}
-        >
-          <div style={{minWidth: 0, flex: 1}}>
-            <div
-              style={{
-                fontSize: 13.5,
-                fontWeight: 600,
-                marginBottom: 4,
-                color: 'var(--ide-fg-bright)',
-              }}
-            >
+        <div className='ob-split'>
+          <div className='ob-split-main'>
+            <div className='ob-row-title' style={{marginBottom: 4}}>
               Allow project-only collaborators outside your org
             </div>
-            <div style={{fontSize: 12.5, color: 'var(--ide-fg-muted)', lineHeight: 1.5}}>
-              When on, org admins and super admins can invite any email — including Gmail or Outlook
-              — to a single project as a viewer, developer, or project admin. This does not make
-              them organization members and does not bypass the work-domain requirement for org
-              membership. When off, project access is limited to existing org members.
-            </div>
+            {/* COMPRESS THE COPY — the four-line policy paragraph is the kind of
+                detail an engineer reads once. It stays verbatim behind the
+                disclosure; nothing is softened or dropped. */}
+            <details>
+              <summary style={{fontSize: 'var(--ide-t-caption)'}}>What this changes</summary>
+              <div
+                style={{
+                  fontSize: 'var(--ide-t-caption)',
+                  color: 'var(--ide-fg-muted)',
+                  lineHeight: 1.5,
+                  marginTop: 6,
+                }}
+              >
+                When on, org admins and super admins can invite any email — including Gmail or
+                Outlook — to a single project as a viewer, developer, or project admin. This does
+                not make them organization members and does not bypass the work-domain requirement
+                for org membership. When off, project access is limited to existing org members.
+              </div>
+            </details>
           </div>
           <button
+            className='ob-split-action'
             type='button'
             role='switch'
             aria-label='Allow external project collaborators'
@@ -1849,31 +1756,31 @@ export function IdeOrgSettings() {
             return (
               <div
                 key={m.userId}
-                style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  gap: 12,
-                  padding: '12px 16px',
-                  borderBottom: i < members.length - 1 ? '1px solid var(--ide-border)' : 'none',
-                }}
+                className='ob-row'
+                style={{borderTop: i > 0 ? '1px solid var(--ide-border)' : undefined}}
               >
-                <div style={{minWidth: 0, flex: 1}}>
-                  <div style={{fontSize: 13, fontWeight: 600, color: 'var(--ide-fg-bright)'}}>
+                <div className='ob-row-main'>
+                  <div className='ob-row-title'>
                     {mName}
                     {isSelf && (
-                      <span style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}> · you</span>
+                      <span
+                        style={{fontSize: 'var(--ide-t-caption)', color: 'var(--ide-fg-muted)'}}
+                      >
+                        {' '}
+                        · you
+                      </span>
                     )}
                   </div>
-                  <div style={{fontSize: 11.5, color: 'var(--ide-fg-muted)'}}>
-                    {m.email} · {m.orgRole}
+                  <div className='ob-row-meta'>
+                    <span className='ob-truncate'>{m.email}</span>
+                    <span>·</span>
+                    <span>{m.orgRole}</span>
                   </div>
                 </div>
                 {canEdit && !isSelf && (
-                  <div style={{display: 'flex', gap: 6, flexShrink: 0}}>
+                  <div className='ob-actions'>
                     <button
-                      className='ide-btn ghost'
-                      style={{padding: '4px 10px', fontSize: 12, color: 'var(--ide-red)'}}
+                      className='ide-btn danger'
                       disabled={suspendBusy === m.userId}
                       onClick={() => toggleSuspend(m.userId, true)}
                     >
@@ -1881,7 +1788,6 @@ export function IdeOrgSettings() {
                     </button>
                     <button
                       className='ide-btn ghost'
-                      style={{padding: '4px 10px', fontSize: 12}}
                       disabled={suspendBusy === m.userId}
                       onClick={() => toggleSuspend(m.userId, false)}
                     >
@@ -1903,7 +1809,7 @@ export function IdeOrgSettings() {
       <div className='ide-card' style={{padding: 0}}>
         {!auditOpen ? (
           <div style={{padding: 16}}>
-            <div style={{fontSize: 12.5, color: 'var(--ide-fg-muted)', marginBottom: 12}}>
+            <div style={{fontSize: 12, color: 'var(--ide-fg-muted)', marginBottom: 12}}>
               Org-scoped audit trail — role changes, SSO, project-collaborator toggles, member
               actions. Shows only the most recent 50 events; older entries are not paged here.
             </div>
@@ -1916,7 +1822,7 @@ export function IdeOrgSettings() {
             <IdeLoader label='Loading audit log…' />
           </div>
         ) : audit.length === 0 ? (
-          <div style={{padding: 16, fontSize: 12.5, color: 'var(--ide-fg-muted)'}}>
+          <div style={{padding: 16, fontSize: 12, color: 'var(--ide-fg-muted)'}}>
             No audit entries yet.
           </div>
         ) : (
@@ -1939,11 +1845,11 @@ export function IdeOrgSettings() {
                 <span style={{fontSize: 13, fontWeight: 600, color: 'var(--ide-fg-bright)'}}>
                   {a.eventType}
                 </span>
-                <span style={{fontSize: 11, color: 'var(--ide-fg-muted)', flexShrink: 0}}>
+                <span style={{fontSize: 12, color: 'var(--ide-fg-muted)', flexShrink: 0}}>
                   {a.createdAt ? new Date(a.createdAt).toLocaleString() : ''}
                 </span>
               </div>
-              <div style={{fontSize: 11.5, color: 'var(--ide-fg-muted)', marginTop: 2}}>
+              <div style={{fontSize: 12, color: 'var(--ide-fg-muted)', marginTop: 2}}>
                 {a.entityType}
                 {a.entityId ? ` · ${a.entityId.slice(0, 12)}` : ''}
                 {a.actorEmail ? ` · by ${a.actorEmail}` : ''}
@@ -1952,7 +1858,7 @@ export function IdeOrgSettings() {
           ))
         )}
         {auditOpen && audit && audit.length >= 50 && (
-          <div style={{padding: '11px 16px', fontSize: 11.5, color: 'var(--ide-fg-muted)'}}>
+          <div style={{padding: '11px 16px', fontSize: 12, color: 'var(--ide-fg-muted)'}}>
             Showing the latest 50 events. Older audit history is not paginated here.
           </div>
         )}

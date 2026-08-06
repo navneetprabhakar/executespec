@@ -45,7 +45,7 @@ export function CostProgressBar({
         style={{
           display: 'flex',
           justifyContent: 'space-between',
-          fontSize: 11,
+          fontSize: 12,
           fontFamily: "'JetBrains Mono', monospace",
           color: labelColor,
           marginBottom: 4,
@@ -59,14 +59,14 @@ export function CostProgressBar({
       {overage > 0 && (
         <div
           role='status'
-          style={{color: labelColor, fontSize: 11, marginBottom: 4}}
+          style={{color: labelColor, fontSize: 12, marginBottom: 4}}
         >{`Exceeded by $${overage.toFixed(4)}`}</div>
       )}
       <div
         style={{
           height: 6,
           background: 'var(--signal-card-elev)',
-          borderRadius: 3,
+          borderRadius: 'var(--ide-r-control)',
           overflow: 'hidden',
         }}
       >

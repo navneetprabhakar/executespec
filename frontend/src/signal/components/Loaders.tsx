@@ -52,7 +52,7 @@ export function LoadingState({
       }}
     >
       <Spinner size={16} />
-      <div style={{fontSize: 13.5, color: 'var(--signal-text-dim)'}}>
+      <div style={{fontSize: 13, color: 'var(--signal-text-dim)'}}>
         {label}
         {children && <div style={{marginTop: 4}}>{children}</div>}
       </div>
