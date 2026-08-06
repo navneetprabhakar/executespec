@@ -85,7 +85,13 @@ export function AgentProjectContext({
           Unlink
         </button>
       )}
-      <button className='ide-btn' type='button' disabled={!!disabledReason} onClick={onCreate}>
+      {/* Ghost: this bar is context chrome, not the surface's commit. */}
+      <button
+        className='ide-btn ghost'
+        type='button'
+        disabled={!!disabledReason}
+        onClick={onCreate}
+      >
         Create project
       </button>
       {error && (

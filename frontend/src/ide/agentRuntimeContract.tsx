@@ -31,7 +31,7 @@ export function RuntimeContractPanel({sandboxEnabled}: {sandboxEnabled: boolean}
       className='agent-contract-panel'
       aria-label={sandboxEnabled ? 'Sandbox contract' : 'Remote workspace contract'}
     >
-      <div className='agent-contract-title'>What will happen before spend</div>
+      <div className='agent-contract-title'>Before spend</div>
       <div className='agent-contract-grid'>
         <span>
           <b>Workspace</b>
@@ -62,14 +62,19 @@ export function RuntimeContractPanel({sandboxEnabled}: {sandboxEnabled: boolean}
   );
 }
 
+/**
+ * Trust facts, as fragments. Every qualifier that carries meaning survives —
+ * "policy-guarded", "subject to retention policy", "any selected cap" — only
+ * the sentence scaffolding around them is gone.
+ */
 export function TrustBoundaryPanel({compact = false}: {compact?: boolean}) {
   return (
     <div className={compact ? 'agent-trust-panel compact' : 'agent-trust-panel'}>
-      <span>Runs on a policy-guarded server workspace</span>
-      <span>Your local files are never touched</span>
+      <span>Policy-guarded server workspace</span>
+      <span>Local files never touched</span>
       <span>Approval required before any code runs</span>
-      <span>Run actions and evidence are recorded subject to retention policy</span>
-      <span>Cost estimate and any selected cap are shown before approval</span>
+      <span>Actions and evidence recorded subject to retention policy</span>
+      <span>Cost estimate and any selected cap shown before approval</span>
     </div>
   );
 }
@@ -107,11 +112,7 @@ export function OperatorIntro({
       <details className='agent-operator-details'>
         <summary>How it works</summary>
         <div className='agent-operator-details-body'>
-          <p>
-            Plan, code, test, and review without touching your local machine, then prepare a PR when
-            publication gates pass. You approve the plan and cost before remote work starts; BYOK
-            cost caps are optional.
-          </p>
+          <p>A PR is prepared only when publication gates pass. BYOK cost caps are optional.</p>
           <div className='agent-operator-steps' aria-label='Remote execution workflow'>
             <span>Request</span>
             <span>Plan gate</span>
@@ -125,7 +126,7 @@ export function OperatorIntro({
       </details>
       {hasHistory && (
         <div className='agent-history-note'>
-          Recent transcript is below. Start new remote work here or open Chats for older work.
+          Recent transcript below. Open Conversations for older work.
         </div>
       )}
     </div>
@@ -147,9 +148,8 @@ export function EmptyRuntimeState({
       </div>
       <strong>{remoteSandboxEnabled ? 'Remote sandbox ready' : 'Remote workspace ready'}</strong>
       <p>
-        Describe the change, review the generated plan, then let ExecuteSpec work in a remote
-        {remoteSandboxEnabled ? ' sandbox' : ' server workspace'}. Browser sessions never get local
-        shell authority.
+        Describe the change and review the plan before anything runs. Browser sessions never get
+        local shell authority.
       </p>
       <div className='agent-empty-chips'>
         {suggestions.map((suggestion) => (

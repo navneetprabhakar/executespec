@@ -44,6 +44,7 @@ import {repoDisplayName, repoIdFor} from '@/signal/lib/runUtils';
 import {repoSupports} from '@/ide/projectRepoUi';
 import {friendlyAiFailureMessage} from '@/ide/runResultUtils';
 import {ConfirmModal} from '@/signal/components/Modal';
+import {CloseIcon} from '@/ide/agentIcons';
 import {consumeAgentProjectHandoff, createAgentProjectHandoff} from '@/ide/agentProjectHandoff';
 import {
   agentComposerDraftKey,
@@ -1135,7 +1136,7 @@ export default function IdeAgent() {
     state.status === 'toolRunning' ||
     state.status === 'runStreaming';
   const projectContextDisabledReason = executionContextLocked
-    ? 'Project context cannot change while this conversation has an active execution.'
+    ? 'Locked while this conversation has an active run.'
     : null;
   // The run card owns the active run across every phase; drop it from the inline
   // gate list so a just-submitted run isn't shown twice while it waits for approval.
@@ -1293,32 +1294,33 @@ export default function IdeAgent() {
       {state.error && (
         <div className='ide-card agent-error' role='alert'>
           <span className='agent-error-body'>
-            <b>Something went wrong</b>
             <span>{friendlyAiFailureMessage(state.error)}</span>
           </span>
-          <button
-            className='agent-error-dismiss'
-            onClick={() => {
-              setErrorRecovery(null);
-              dispatch({type: 'error:clear'});
-            }}
-            aria-label='Dismiss error'
-          >
-            ×
-          </button>
-          <button
-            className='agent-error-retry'
-            onClick={() => void recoverFromError()}
-            disabled={state.status === 'loadingSession' || recovering}
-          >
-            {state.status === 'loadingSession' || recovering
-              ? errorRecovery?.error === state.error
-                ? 'Retrying…'
-                : 'Refreshing…'
-              : errorRecovery?.error === state.error
-                ? 'Retry new session'
-                : 'Refresh'}
-          </button>
+          <span className='agent-error-actions'>
+            <button
+              className='ide-btn ghost'
+              onClick={() => void recoverFromError()}
+              disabled={state.status === 'loadingSession' || recovering}
+            >
+              {state.status === 'loadingSession' || recovering
+                ? errorRecovery?.error === state.error
+                  ? 'Retrying…'
+                  : 'Refreshing…'
+                : errorRecovery?.error === state.error
+                  ? 'Retry'
+                  : 'Refresh'}
+            </button>
+            <button
+              className='agent-error-dismiss'
+              onClick={() => {
+                setErrorRecovery(null);
+                dispatch({type: 'error:clear'});
+              }}
+              aria-label='Dismiss error'
+            >
+              <CloseIcon size={15} />
+            </button>
+          </span>
         </div>
       )}
 
@@ -1416,7 +1418,7 @@ export default function IdeAgent() {
       <ConfirmModal
         open={closeTarget != null}
         title='Close conversation?'
-        body='This archives the conversation on the server. Messages and run links may remain subject to retention policy; its filesystem is not restorable.'
+        body='Archives it on the server. Messages and run links may remain subject to retention policy; the filesystem is not restorable.'
         confirmLabel='Close conversation'
         danger
         onConfirm={confirmCloseSession}

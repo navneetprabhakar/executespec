@@ -1,3 +1,5 @@
+import {CloseIcon} from '@/ide/agentIcons';
+
 export function ConversationHistoryRow({
   title,
   meta,
@@ -33,7 +35,7 @@ export function ConversationHistoryRow({
         disabled={archived || !!closeDisabledReason}
         onClick={onClose}
       >
-        ×
+        <CloseIcon size={14} />
       </button>
     </div>
   );
