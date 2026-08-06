@@ -32,9 +32,9 @@ function parsePlan(planJson: string): ReviewPlan | null {
 }
 
 function BulletList({items}: {items?: string[]}) {
-  if (!items?.length) return <span style={{color: 'var(--ide-fg-muted)'}}>None</span>;
+  if (!items?.length) return <span className='gf-none'>None</span>;
   return (
-    <ul style={{margin: '4px 0 0', paddingLeft: 20}}>
+    <ul className='gf-bullets'>
       {items.map((item, index) => (
         <li key={`${item}-${index}`}>{item}</li>
       ))}
@@ -42,6 +42,14 @@ function BulletList({items}: {items?: string[]}) {
   );
 }
 
+/**
+ * The plan the approver is about to authorise, step by step.
+ *
+ * Version B: no px font literals (the phone ramp owns type), and each step is a
+ * disclosure using the app's one summary marker. The task text itself is the
+ * exact planner contract and is rendered verbatim — nothing here summarises or
+ * abbreviates a constraint the worker will be held to.
+ */
 export function PlanReviewDetails({planJson}: {planJson: string}) {
   const plan = parsePlan(planJson);
   if (!plan?.tasks?.length) return null;
@@ -51,7 +59,7 @@ export function PlanReviewDetails({planJson}: {planJson: string}) {
 
   return (
     <div data-testid='plan-review-details'>
-      <div className='ide-card' style={{fontSize: 12.5, lineHeight: 1.55}}>
+      <div className='ide-card gf-plan-body' style={{marginTop: 0}}>
         <div className='ide-kv'>
           <span>Runtime</span>
           <span>{[plan.projectType, plan.runtimeSurface].filter(Boolean).join(' · ') || '—'}</span>
@@ -72,24 +80,30 @@ export function PlanReviewDetails({planJson}: {planJson: string}) {
           return requirement?.text ? `${id}: ${requirement.text}` : id;
         });
         return (
-          <details className='ide-card' key={task.id || index} style={{marginBottom: 8}}>
-            <summary style={{cursor: 'pointer', color: 'var(--ide-fg-bright)'}}>
+          <details
+            className='ide-card'
+            key={task.id || index}
+            style={{marginBottom: 'var(--ide-s2)'}}
+          >
+            <summary className='gf-plan-summary'>
               {index + 1}. {task.title || task.id || 'Untitled step'}
               {task.complexity ? ` · ${task.complexity}` : ''}
             </summary>
-            <div style={{fontSize: 12.5, lineHeight: 1.55, marginTop: 10}}>
-              <div style={{marginBottom: 10}}>{task.description || 'No task description.'}</div>
-              <strong>Depends on</strong>
-              <BulletList items={task.dependsOn} />
-              <div style={{marginTop: 10}}>
+            <div className='gf-plan-body'>
+              <div>{task.description || 'No task description.'}</div>
+              <div className='gf-plan-section'>
+                <strong>Depends on</strong>
+                <BulletList items={task.dependsOn} />
+              </div>
+              <div className='gf-plan-section'>
                 <strong>Requirements covered</strong>
                 <BulletList items={covered} />
               </div>
-              <div style={{marginTop: 10}}>
+              <div className='gf-plan-section'>
                 <strong>Non-negotiable constraints</strong>
                 <BulletList items={task.hardConstraints} />
               </div>
-              <div style={{marginTop: 10}}>
+              <div className='gf-plan-section'>
                 <strong>Expected file scope</strong>
                 <BulletList items={task.touchesFiles} />
               </div>

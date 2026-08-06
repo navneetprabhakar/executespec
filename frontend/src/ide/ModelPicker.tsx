@@ -1,6 +1,8 @@
 import {useEffect, useId, useMemo, useRef, useState} from 'react';
 import type {CSSProperties} from 'react';
+import {ChevronDown} from 'lucide-react';
 import {providerLabel} from '@/signal/lib/runUtils';
+import {ICON_STROKE} from '@/ide/IdeIcons';
 
 export type ModelPickerOption = {
   value: string;
@@ -143,8 +145,15 @@ export function ModelPicker({
           <span>{selected?.label || 'Recommended'}</span>
           {selected?.helper && <small>{selected.helper}</small>}
         </span>
-        <span className='ide-model-picker-chevron' aria-hidden='true'>
-          ▾
+        {/* Was the text glyph `▾`, which renders in the UI face at whatever the
+            surrounding font-size happens to be and has no relation to the rest of
+            the icon set. Lucide is the app's one icon library; `--ide-icon` keeps
+            the glyph tracking the type ramp instead of a px literal. */}
+        <span
+          className={`ide-model-picker-chevron ${open ? 'gf-chevron-open' : 'gf-chevron-closed'}`}
+          aria-hidden='true'
+        >
+          <ChevronDown size='1.15em' strokeWidth={ICON_STROKE} />
         </span>
       </button>
 

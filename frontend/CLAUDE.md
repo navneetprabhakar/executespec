@@ -136,7 +136,11 @@ Documented deviations from Google TypeScript style in [`executespec-docs/backend
 - `/agent`, `/projects/:projectId/agent`, and `/runs/:runId/agent` share one protected control-plane surface rendered inside `ConsoleShell`.
 - `agentState.ts` owns the pure reducer, local transcript/timeline/action types, stream-event state transitions, title fallback, action extraction, honest bar status (`deriveBarStatus`), run-card helpers (`runPhaseLabel` / `runProgress` / `runOpenPath` / `isTerminalRunStatus`), and display formatting helpers. Keep state changes covered in `agentState.test.ts` before adding more rendering or side-effect logic to `IdeAgent.tsx`.
 - `agentPanels.tsx` owns the render-only chat-first panels: `AgentTopBar` (Conversations button · scope chip · honest status · New conversation · a `SettingsPopover` holding chat routing / managed-AI balance / capabilities), `AgentChatsDrawer` (auto-titled, time-stamped conversation history), `AgentProjectContext` (current project, recent/search results, switch/unlink/create recovery), and `AgentConversation` (agent-as-hero markdown messages, cursor-paged history, friendly activity chips, inline gate cards, the pinned `RunCard`, action cards, and composer).
-- `agentSandboxPhase.ts` owns the backend run-status → sandbox-phase mapping and the corresponding phase CSS state. Keep this presentation policy out of `agentPanels.tsx`; project context, conversation-history controls, and managed-AI balance now live in focused components, keeping the panel module at 1,671 lines under its 1,682-line ratchet.
+- `agentSandboxPhase.ts` owns the backend run-status → sandbox-phase mapping and the corresponding phase CSS state. Keep this presentation policy out of `agentPanels.tsx`; project context, conversation-history controls, and managed-AI balance now live in focused components.
+- `agentToolActivity.tsx` owns the **tool-call grammar**: it pairs each `tool` stream frame with the `result` frame that follows it and renders one inline-sized pill per call — status glyph, friendly label, mono basename file chip, arguments/result behind a disclosure, and a collapsed group above four calls. Status is never invented: a call with no matching result is _dispatched_, and a result is `err` only on an explicit failure marker. Do NOT reintroduce a flat chip list in `agentPanels.tsx`, and do not add a chevron to the summary — `.ide-root details > summary::before` is the app's one disclosure marker.
+- `AgentApprovalCards.tsx` owns `GateCard` (in-transcript) and `GateQueueRow` (drawer) plus `gateCostLabel` / `gateQueueMeta` / `gateAge` / `relTime`. Both share one anatomy so an approval is the same object wherever the operator meets it. **Approval state is a 3px leading stripe (`is-pending` / `is-approved` / `is-rejected`), never a body repaint**, attention is the calm in-place `agent-await` pulse (reduced-motion aware), and the controls stay ghost — `Reject` is `ide-btn danger`, which reddens on hover only. The run card follows the same stripe rule.
+- **Streaming caret.** `MessageBubble` renders `.agent-caret` for the live `pending:assistant` edge only. It blinks on its own 1.1s `step-end` clock, decoupled from token arrival, so a stall does not read as a freeze; it is a sibling of the markdown tree so a react-markdown remount cannot restart it. Reduced motion settles it to steady rather than hiding it.
+- These extractions took `agentPanels.tsx` from 1,684 to ~1,560 lines; `GodClassLineCeilingTest` was lowered to match (the ratchet only moves down).
 - **Chat-first redesign + live run card (RL-2026-06-196):** `/agent` is a single centered conversation, not a 3-rail layout. The top bar shows an **honest status** ("Waiting for you" amber when an action/gate is pending or the active run is `AWAITING_APPROVAL`; "Running" while it executes); the internals live behind the ⚙ settings popover. After the agent submits or the user approves a run, `IdeAgent` polls `getRun` + `getLiveCost` (4s) and pins a **`RunCard`** in the chat (phase · current task · progress · live cost vs estimate · Open · Stop) that owns the active run across every phase and is de-duped out of the inline gate list. Cost/consequence ("N tasks · ~N credits · opens a PR", "nothing bills until approval") render on the action/gate cards. Also: dropped the internal `[Run id]` transcript prefix, stick-to-bottom scroll, dismissible errors (`error:clear`), Escape-closes-overlays, and Chats-drawer rows with scope badge + relative time. Supersedes the RL-195 right-rail layout.
 - **Remote sandbox operator plan + frontend/backend slices (2026-06-29):** the Web Agent UX direction is documented at [`../WEB_AGENT_REMOTE_SANDBOX_OPERATOR_PLAN.md`](../../executespec-docs/backend/plans/source-repository/WEB_AGENT_REMOTE_SANDBOX_OPERATOR_PLAN.md). Keep the existing Console shell and chat-first architecture, but reframe `/agent` as the remote sandbox operator. Slice 1 updates `agentPanels.tsx`/`ide.css`/`IdeAgent.test.tsx`: the empty state is now a remote-sandbox launcher, top-bar CTA says "New sandbox", settings expose "Sandbox creation" instead of Run API jargon, `create_cloud_run` renders as a typed sandbox proposal card, local-only requests stay as CLI handoff cards, plan gates render as inline sandbox approval cards, and the active run card becomes a remote-sandbox cockpit with phase chips, task/evidence/route KPIs, and evidence-first terminal actions. Slice 2 turns the Chats drawer into an operator queue with a first-class "Awaiting approval" group and summary counts, `IdeAgent` hydrates the pinned sandbox run from durable `AgentTurnResponse.linkedRunId` after reload, and the drawer consumes additive `AgentSessionResponse.latestLinkedRun*` backend fields so cross-session rows can show the latest sandbox title/status without loading every transcript. Slice 3 remediates the PDF audit findings: historical chat is collapsed into a compact Recent answer disclosure only for settled assistant history, so a newly submitted or pending user prompt remains visible; launcher/proposal/composer surfaces show the pre-run sandbox contract and trust boundary; gate cards and the approval inbox expose project, route, age, risk, task count, credits, estimate, cap, and approve/reject actions; settings lead with Sandbox policy and hide raw provider/capability diagnostics in a disclosure; Managed AI copy replaces the old ES AI credit label and shows "Managed credits not configured" instead of a zero/zero balance when applicable; mobile `/agent` shows a labeled Sandbox CTA plus pending-approval pill; and project/run agent routes now select only matching scoped sessions, never a stale all-project session. `ConsoleShell` now suppresses the global announcement banner on active work routes (`/agent`, `/plan`, `/live`, `/result`) and adds command-palette entries for new sandbox, waiting approvals, and latest sandbox. Do not move CLI/VS Code local-hands file/shell permissions into WEB. Current gate DTOs do not expose requester/owner, so approval queue UI must not invent one.
 - **Web search + uploads + declutter (RL-2026-06-195):** the composer has a file picker + drag-drop that POSTs to `/api/agent/sessions/{id}/attachments` (`lib/api/agent.ts` `uploadAgentAttachment`) and passes `attachmentIds` on the next turn; the global `ConsoleShell` sidebar collapses (localStorage-persisted, desktop-only; mobile drawer unchanged). `agentState.ts` holds `attachments`. (The condensed right rail + sessions rail from this pass were replaced by the RL-196 chat-first surface above.)
@@ -145,6 +149,24 @@ Documented deviations from Google TypeScript style in [`executespec-docs/backend
 - `agentChatHistory.ts` owns project/run conversion from durable `AgentTurnResponse` rows into visible chat history. Keep timestamp sorting and transcript-field filtering there instead of duplicating adapters in route files.
 - `IdeAgent.tsx` owns route params, data loading, stream side effects, action confirmation handlers, and refresh sequencing. Browser/Web routes can confirm cloud-run proposals and plan gates; local shell/git/working-tree actions remain CLI/VS Code-owned.
 - **Conversation/project truth contract (2026-07-29):** an agent session is durable conversation history, not a restorable filesystem workspace. The drawer must say that explicitly, loads at most 100 sessions with a visible ceiling notice, closes through `POST /api/agent/sessions/{id}/close`, and pages turns backward using the authoritative `GET .../turns/page?limit=100&before=<oldestTurnId>` cursor metadata (the legacy turns array is older-server compatibility only). `/agent` loads and searches real projects, shows the current project name, and creates a new scoped conversation when switching or unlinking; those context mutations are disabled for every nonterminal linked execution, including `AWAITING_APPROVAL`, and the unsent draft travels in router state to the new scoped conversation. New-project recovery must use the canonical `/projects` create form through `agentProjectHandoff.ts`, preserving source session, draft, conversation provider/model, and return path, then return to `/projects/:id/agent` to create the new project-scoped session. Chat provider/model controls persist through `PUT .../sessions/{id}/route`, carry into intentional new/project-scoped conversations, and apply only to conversation replies; Web Agent run confirmation sends no implicit route pin, so org-matrix/per-task routing applies.
+- **Agent chat UX fixes (2026-08-05, founder pre-demo pass):** (1) the empty-state hero is a
+  compact `OperatorIntro` — one honest line + suggestion chips + a collapsed "How it works"
+  disclosure that retains the full stage/contract/trust copy unweakened. (2) Assistant markdown
+  actually renders: the CSS selector was `.agent-msg.agent` while the component emits
+  `agent-msg assistant`, so replies fell back to the plain `pre-wrap` bubble (raw-looking blob with
+  doubled line gaps); assistant/system bodies now use `white-space: normal` with scoped
+  `.signal-md-h*` sizes, user bubbles keep `pre-wrap`. (3) Conversation titles are derived
+  deterministically (`agentState.deriveSessionTitle`): non-generic server title → first user
+  message → `latestLinkedRunTitle` → "Empty conversation" (`createdAt === updatedAt`, no linked
+  run) → project name + start time; lazy send-time creation also persists the first ~60 chars of
+  the first message as the server title (`conversationTitleFromMessage`). (4) Closing a
+  conversation is optimistic: the row disappears immediately, the archive request runs in the
+  background, and failure restores the row with a visible error. (5) Sessions are created LAZILY —
+  switching project scope or consuming a project handoff is navigation + draft/route transfer
+  only; `ensureSession` creates (or reuses an empty same-scope session) on the first message.
+  (6) `AgentProjectContext` is a compact labelled dropdown (`#agent-project-select`) + Unlink +
+  Create project instead of the overflowing project tab strip. Pinned by `agentState.test.ts` and
+  `IdeAgent.test.tsx`.
 - WEB `create_cloud_run` confirmation loads the proposal project's linked repositories through
   `getProjectRepos`, starts with no repositories selected, and sends the exact selected repo UUIDs
   as `selectedRepoIds`. A linked project cannot be confirmed until at least one remote-executable
@@ -359,6 +381,37 @@ Surfaces that report absence must distinguish "none" from "we could not tell you
 - `frontend/.pa11yci.json` — pa11y-ci config for public surfaces (login, register, plans, pricing, terms, privacy, dpa).
 - Dormant WCAG ratio regression test at `src/design-system/contrast.test.ts`.
 - See `frontend/A11Y.md` for the enablement guide.
+
+## Design grammar (tokens in `ide/ide.css`, 2026-08-05)
+
+The protected app has ONE visual vocabulary. Reach for a token; do not add a literal.
+
+- **Type.** `--ide-font-ui` is the UI face. `--ide-font-mono` is **opt-in** — code, identifiers, and
+  columns of aligned numbers only (`.ide-mono`, `code`, `pre`, `kbd`). `.con-root` used to force
+  JetBrains Mono onto every word of UI prose; it no longer does, and re-adding a blanket monospace
+  `font-family` to a shell class regresses the whole app. Ramp: page title 24 / card title + body 14 /
+  labels + buttons 13 / captions + badges 12. **Nothing below 12px**, and hierarchy comes from weight
+  and token tier, never opacity.
+- **Shape.** `--ide-r-control` (6px) for controls and pills, `--ide-r-card` (10px) for containers,
+  `--ide-r-pill` (999px) for badges and dots. Three roles, no fourth.
+- **Space.** `--ide-s1…--ide-s6` = 4/8/12/16/24/32.
+- **Controls.** Every button, input, and select is `--ide-control-h` (32px) or `--ide-control-h-lg`
+  (38px). `.ide-btn` is the accent-filled commit action, `.ide-btn.ghost` is everything else,
+  `.ide-btn.danger` is a ghost that turns destructive on hover only, and `:disabled` is unmistakably
+  dead. A control must fit its label or let the row wrap — never `overflow: hidden` on a control.
+- **Containers.** One visible edge per box. A card inside a card takes a tint (`.ide-card .ide-card`,
+  `.ide-inner`); an inline callout is `.ide-note[.ok|.warn|.bad|.info]` — a tint plus a 3px leading
+  edge, not a second full stroke.
+- **Selection** is a fill plus strengthened text, never a border or an inset ring. Status/identity is
+  a quiet pill or an edge bar and must not fight the hover/selection grammar.
+- **Alignment.** A leading status badge in a list is a fixed-width COLUMN (`.ide-work-row > .ide-badge:first-child`,
+  and the 84px grid track in the run Evidence ledger). Letting the badge label size itself pushes every
+  row's title to a different x — the defect this pass was opened for.
+- **Disclosures.** All `<details>` inside `.ide-root` share one chevron + control-height summary.
+- **Motion.** `--ide-ease` only; hover changes colour, not position.
+
+Before/after evidence for the pass lives outside the repo in `ux-gallery/` (92 pairs, desktop
+1600×900 + mobile 375×667, captured on the provider-free `web-qa` fixture stack).
 
 ## Recent work (kept as breadcrumbs)
 

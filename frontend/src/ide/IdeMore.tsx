@@ -134,14 +134,10 @@ export function IdeRuns() {
       </div>
 
       {err && (
-        <div className='ide-card' style={{marginBottom: 12, color: 'var(--ide-red)'}}>
+        <div className='ide-note bad' style={{marginBottom: 12}}>
           {err}{' '}
           {(runs?.length ?? 0) === 0 && (
-            <button
-              className='ide-btn ghost'
-              style={{padding: '2px 10px', marginLeft: 6}}
-              onClick={loadFirst}
-            >
+            <button className='ide-btn ghost' style={{marginLeft: 6}} onClick={loadFirst}>
               Retry
             </button>
           )}
@@ -157,7 +153,7 @@ export function IdeRuns() {
           No work matches{q.trim() ? ` “${q.trim()}”` : ' this filter'}.{' '}
           <button
             className='ide-btn ghost'
-            style={{padding: '2px 8px', marginLeft: 4}}
+            style={{marginLeft: 4}}
             onClick={() => {
               setFilter('all');
               setQ('');
@@ -218,7 +214,7 @@ export function IdeRuns() {
                     {score != null ? (
                       <ScoreBadge score={score} compact />
                     ) : (
-                      <span style={{fontSize: 12.5, fontWeight: 600, color: scoreColor(score)}}>
+                      <span style={{fontSize: 12, fontWeight: 600, color: scoreColor(score)}}>
                         {isLiveStatus(r.status) ? 'live' : '—'}
                       </span>
                     )}
@@ -487,7 +483,7 @@ export function IdeAccount() {
       <div className='ide-sub'>{email}</div>
 
       <div className='ide-card'>
-        <div style={{fontSize: 15, fontWeight: 600, color: 'var(--ide-fg-bright)'}}>{name}</div>
+        <div style={{fontSize: 14, fontWeight: 600, color: 'var(--ide-fg-bright)'}}>{name}</div>
         <div style={{display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap'}}>
           <IdeBadge kind='ok'>{tier} tier</IdeBadge>
           <IdeBadge kind='warn'>
@@ -539,7 +535,7 @@ export function IdeAccount() {
       </button>
       {contactOpen && (
         <div className='ide-card'>
-          <div style={{fontSize: 12.5, color: 'var(--ide-fg-muted)', marginBottom: 12}}>
+          <div style={{fontSize: 12, color: 'var(--ide-fg-muted)', marginBottom: 12}}>
             Questions, bugs, or ideas — this reaches the ExecuteSpec team directly.
           </div>
           <label
@@ -585,7 +581,7 @@ export function IdeAccount() {
             {contactNote && (
               <span
                 style={{
-                  fontSize: 12.5,
+                  fontSize: 12,
                   color: contactNote.kind === 'ok' ? 'var(--ide-green)' : 'var(--ide-red)',
                 }}
               >
@@ -667,7 +663,7 @@ export function IdeAccount() {
                   <span style={{display: 'block', fontSize: 13, color: 'var(--ide-fg-bright)'}}>
                     {notificationPreferenceLabel(row.eventType)}
                   </span>
-                  <span style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}>
+                  <span style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}>
                     {notificationChannelLabel(row.channel)}
                   </span>
                 </span>
@@ -723,87 +719,61 @@ export function IdeAccount() {
       )}
 
       <div className='ide-h2'>Security &amp; data</div>
-      <div className='ide-card'>
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            gap: 12,
-            paddingBottom: 12,
-            borderBottom: '1px solid var(--ide-border)',
-          }}
-        >
-          <span>
-            <span style={{display: 'block', fontWeight: 500, color: 'var(--ide-fg-bright)'}}>
-              Export my data (GDPR)
-            </span>
-            <span style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}>
-              ZIP · work, projects, billing
-            </span>
-          </span>
-          <button
-            className='ide-btn ghost'
-            style={{padding: '6px 14px', flexShrink: 0}}
-            disabled={exporting}
-            onClick={onExport}
-          >
-            {exporting ? 'Preparing…' : 'Export'}
-          </button>
+      <div className='ide-card' style={{padding: 0}}>
+        <div className='ob-row'>
+          <div className='ob-row-main'>
+            <div className='ob-row-title'>Export my data (GDPR)</div>
+            <div className='ob-row-meta'>ZIP · work, projects, billing</div>
+          </div>
+          <div className='ob-actions ob-actions-fixed ob-actions-wide'>
+            <button className='ide-btn ghost' disabled={exporting} onClick={onExport}>
+              {exporting ? 'Preparing…' : 'Export'}
+            </button>
+          </div>
         </div>
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            gap: 12,
-            padding: '12px 0',
-            borderBottom: '1px solid var(--ide-border)',
-          }}
-        >
-          <span>
-            <span style={{display: 'block', fontWeight: 500, color: 'var(--ide-fg-bright)'}}>
-              Request my data (DSAR)
-            </span>
-            <span style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}>
-              JSON · everything we hold · GDPR Art. 15
-            </span>
-          </span>
-          <button
-            className='ide-btn ghost'
-            style={{padding: '6px 14px', flexShrink: 0}}
-            disabled={dsarBusy}
-            onClick={onDsarExport}
-          >
-            {dsarBusy ? 'Preparing…' : 'Download JSON'}
-          </button>
+        <div className='ob-row'>
+          <div className='ob-row-main'>
+            <div className='ob-row-title'>Request my data (DSAR)</div>
+            <div className='ob-row-meta'>JSON · everything we hold · GDPR Art. 15</div>
+          </div>
+          <div className='ob-actions ob-actions-fixed ob-actions-wide'>
+            <button className='ide-btn ghost' disabled={dsarBusy} onClick={onDsarExport}>
+              {dsarBusy ? 'Preparing…' : 'Download JSON'}
+            </button>
+          </div>
         </div>
-        <div
-          style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12}}
-        >
-          <span>
-            <span style={{display: 'block', fontWeight: 500, color: 'var(--ide-fg-bright)'}}>
-              Delete my data (right to erasure)
-            </span>
-            <span style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}>
+        <div className='ob-row'>
+          <div className='ob-row-main'>
+            <div className='ob-row-title'>Delete my data (right to erasure)</div>
+            <div className='ob-row-meta'>
               Schedules your completed work for permanent deletion · GDPR Art. 17
-            </span>
-          </span>
-          <button
-            className='ide-btn ghost'
-            style={{padding: '6px 14px', flexShrink: 0, color: 'var(--ide-red)'}}
-            disabled={erasing}
-            onClick={() => setEraseOpen(true)}
-          >
-            {erasing ? 'Deleting…' : 'Delete'}
-          </button>
+            </div>
+          </div>
+          <div className='ob-actions ob-actions-fixed ob-actions-wide'>
+            {/* Destructive is a ghost that only reddens when aimed at. */}
+            <button
+              className='ide-btn danger'
+              disabled={erasing}
+              onClick={() => setEraseOpen(true)}
+            >
+              {erasing ? 'Deleting…' : 'Delete'}
+            </button>
+          </div>
         </div>
-        {msg && <div style={{marginTop: 10, fontSize: 12.5, color: 'var(--ide-blue)'}}>{msg}</div>}
+        {msg && (
+          <div
+            className='ob-row'
+            style={{fontSize: 'var(--ide-t-caption)', color: 'var(--ide-blue)'}}
+            role='status'
+          >
+            {msg}
+          </div>
+        )}
       </div>
 
       <button
-        className='ide-btn ghost'
-        style={{marginTop: 16, color: 'var(--ide-red)'}}
+        className='ide-btn danger'
+        style={{marginTop: 16}}
         onClick={() => {
           void logout();
           navigate('/login', {replace: true});
@@ -898,7 +868,7 @@ export function IdeDeployments() {
       </div>
       <GcpCredentialPanel variant='ide' />
       {msg && (
-        <div className='ide-card' style={{marginBottom: 12, color: 'var(--ide-blue)'}}>
+        <div className='ide-note info' style={{marginBottom: 12}} role='status'>
           {msg}
         </div>
       )}
@@ -918,49 +888,56 @@ export function IdeDeployments() {
           {items.map((d, i) => (
             <div
               key={d.id}
+              className='ob-row'
               style={{
-                padding: '12px 16px',
-                borderBottom: i < items.length - 1 ? '1px solid var(--ide-border)' : 'none',
+                alignItems: 'flex-start',
+                borderTop: i > 0 ? '1px solid var(--ide-border)' : undefined,
               }}
             >
-              <div style={{display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6}}>
+              {/* ALIGNMENT IS A COLUMN — the leading status pill is a fixed
+                  column, so DEPLOYED / FAILED / PROVISIONING do not each start
+                  the version tag at a different x. */}
+              <div className='ob-status'>
                 <IdeBadge kind={statusKind(d.status)}>{d.status}</IdeBadge>
-                <span className='ide-mono' style={{fontSize: 12.5, fontWeight: 600}}>
-                  {d.versionTag || d.id.slice(0, 8)}
-                </span>
-                <span style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}>{d.strategy}</span>
-                <Link
-                  to={`/result/${d.runId}`}
-                  style={{fontSize: 11, color: 'var(--ide-blue)', marginLeft: 'auto'}}
-                >
-                  work ↗
+              </div>
+              <div className='ob-row-main'>
+                <div className='ob-row-title'>
+                  <span className='ide-mono'>{d.versionTag || d.id.slice(0, 8)}</span>{' '}
+                  <span style={{color: 'var(--ide-fg-muted)', fontWeight: 400}}>{d.strategy}</span>
+                </div>
+                {d.serviceUrl && (
+                  <a
+                    href={d.serviceUrl}
+                    target='_blank'
+                    rel='noreferrer'
+                    className='ide-mono'
+                    style={{
+                      fontSize: 'var(--ide-t-caption)',
+                      color: 'var(--ide-blue)',
+                      wordBreak: 'break-all',
+                      display: 'block',
+                      marginTop: 2,
+                    }}
+                  >
+                    {d.serviceUrl}
+                  </a>
+                )}
+                <div className='ob-row-meta'>
+                  <span>Created {fmtWhen(d.createdAt)}</span>
+                  {d.ttlExpiresAt && (
+                    <>
+                      <span>·</span>
+                      <span>TTL {fmtWhen(d.ttlExpiresAt)}</span>
+                    </>
+                  )}
+                </div>
+              </div>
+              <div className='ob-actions'>
+                <Link className='ide-btn ghost' to={`/result/${d.runId}`}>
+                  Work
                 </Link>
-              </div>
-              {d.serviceUrl && (
-                <a
-                  href={d.serviceUrl}
-                  target='_blank'
-                  rel='noreferrer'
-                  className='ide-mono'
-                  style={{
-                    fontSize: 12,
-                    color: 'var(--ide-blue)',
-                    wordBreak: 'break-all',
-                    display: 'block',
-                    marginBottom: 8,
-                  }}
-                >
-                  {d.serviceUrl}
-                </a>
-              )}
-              <div style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginBottom: 8}}>
-                Created {fmtWhen(d.createdAt)}
-                {d.ttlExpiresAt ? ` · TTL ${fmtWhen(d.ttlExpiresAt)}` : ''}
-              </div>
-              <div style={{display: 'flex', gap: 6}}>
                 <button
                   className='ide-btn ghost'
-                  style={{padding: '4px 10px'}}
                   disabled={busy === `rb${d.id}`}
                   onClick={() =>
                     setPendingAct({
@@ -975,8 +952,7 @@ export function IdeDeployments() {
                   Rollback
                 </button>
                 <button
-                  className='ide-btn ghost'
-                  style={{padding: '4px 10px', color: 'var(--ide-red)'}}
+                  className='ide-btn danger'
                   disabled={busy === `rm${d.id}`}
                   onClick={() =>
                     setPendingAct({

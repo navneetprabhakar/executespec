@@ -6,8 +6,9 @@
     <title>About — ExecuteSpec</title>
     <meta name="description" content="ExecuteSpec is built solo in Bengaluru by Navneet Prabhakar — AI coding that ships evidence, not suggestions.">
     <meta name="robots" content="index, follow">
-    <meta name="theme-color" content="#0B0D10">
-    <meta name="color-scheme" content="dark">
+    <meta name="theme-color" content="#0B0D10" media="(prefers-color-scheme: dark)">
+    <meta name="theme-color" content="#F6F7F8" media="(prefers-color-scheme: light)">
+    <meta name="color-scheme" content="light dark">
     <link rel="icon" type="image/svg+xml" href="assets/brand/merge-rail/executespec-merge-rail-favicon.svg">
     <link rel="canonical" href="https://executespec.ai/about">
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -20,7 +21,7 @@
             --ink-soft: #252A33;
             --text-dim: #5F6673;
             --hairline: #DDE2EA;
-            --rail-blue: #4F7FE7;
+            --rail-blue: #5B8CFF;
         }
         @media (prefers-color-scheme: dark) {
             :root {
@@ -96,7 +97,14 @@
         suggestions. Every run carries a plan you approved, a token ledger you can audit, and a
         verdict backed by real builds, tests, and review passes.
     </p>
+    <p>
+        What the lab has measured so far — published benchmark trials, the method behind them, and the
+        questions still open — is on the <a href="/notes">research notes</a> page. Every Terminal-Bench
+        trajectory there is public, including the failed ones.
+    </p>
     <div class="links">
+        <a href="/notes">Research notes</a>
+        <span class="pip">&middot;</span>
         <a href="https://www.linkedin.com/in/navneetprabhakar/">LinkedIn</a>
         <span class="pip">&middot;</span>
         <a href="https://github.com/navneetprabhakar">GitHub</a>

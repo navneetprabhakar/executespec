@@ -111,7 +111,7 @@ export function PrCommentInbox({runId, variant}: {runId: string; variant: 'signa
       style={{
         marginTop: 12,
         border: '1px solid var(--signal-hairline)',
-        borderRadius: 12,
+        borderRadius: 'var(--ide-r-card)',
         padding: 14,
         background: 'var(--signal-surface)',
       }}
@@ -133,7 +133,7 @@ export function PrCommentInbox({runId, variant}: {runId: string; variant: 'signa
           <div style={{fontSize: 12, color: 'var(--signal-text-dim)'}}>{meta(c)}</div>
           <div
             style={{
-              fontSize: 13.5,
+              fontSize: 13,
               margin: '4px 0',
               whiteSpace: 'pre-wrap',
               color: 'var(--signal-ink)',

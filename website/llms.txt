@@ -6,7 +6,7 @@
 
 ExecuteSpec runs a multi-agent pipeline on every spec: **classifier** (sizes the work) → **planner** (decomposes the spec into a structured plan with a cost estimate) → **plan-approval gate** (production mode — you read and approve the plan and price before execution spends anything) → **sequential worker** (executes each task with a per-task build smoke test) → **reviewer** (general + wiring passes, plus a fix-the-build pass when needed) → **final build + test gate** → **0–100 internal verification summary on the resulting PR**. The summary is derived from real signals (build pass, real test pass rate, reviewer verdict, code delivered) — not LLM self-rating — but it is not independent proof of correctness or mergeability.
 
-The positioning line: **"AI that ships pull requests your team will actually merge."** Cursor, GitHub Copilot, Claude Code, Devin, v0, Bolt, Lovable, and Cody each optimise different parts of the SDLC. ExecuteSpec focuses on a reviewable handoff: plan, execute, validate, explain, and open a PR. It is a complement to local coding agents, not a claim of universal superiority.
+The positioning line: **"Coding agents that prove their work."** The lab builds evidence-first coding agents and publishes the benchmark trials behind them (see Benchmarks below; every Terminal-Bench trajectory is public, including the failures). Cursor, GitHub Copilot, Claude Code, Devin, v0, Bolt, Lovable, and Cody each optimise different parts of the SDLC. ExecuteSpec focuses on a reviewable handoff: plan, execute, validate, explain, and open a PR. It is a complement to local coding agents, not a claim of universal superiority.
 
 ## Key concepts
 
@@ -79,6 +79,9 @@ ExecuteSpec runs its production pipeline through public benchmarks with an ident
 
 - Home: https://executespec.ai/
 - App (sign up): https://app.executespec.ai
+- Research notes (published results + method + open questions): https://executespec.ai/notes
+- Research & benchmarks section: https://executespec.ai/#benchmarks
+- About the lab: https://executespec.ai/about
 - Pricing: https://executespec.ai/#pricing
 - Trust & security: https://app.executespec.ai/trust
 - FAQ: https://executespec.ai/#faq

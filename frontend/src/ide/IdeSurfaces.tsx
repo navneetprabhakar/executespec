@@ -1,5 +1,15 @@
 import {useEffect, useMemo, useRef, useState} from 'react';
 import {Link, useNavigate, useParams} from 'react-router-dom';
+import {
+  AlertCircle,
+  ArrowRight,
+  Check,
+  CheckCircle2,
+  Circle,
+  CircleDot,
+  Play,
+  XCircle,
+} from 'lucide-react';
 import * as api from '@/lib/api';
 import {consumeSpecHandoff, writeSpecHandoff} from '@/lib/specHandoff';
 import {repoSupports} from '@/ide/projectRepoUi';
@@ -226,7 +236,10 @@ export function IdeWelcome() {
                 boxShadow: '0 0 8px var(--ide-accent)',
               }}
             />
-            <span className='ide-mono' style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}>
+            <span
+              className='ide-mono'
+              style={{fontSize: 'var(--ide-t-caption)', color: 'var(--ide-fg-muted)'}}
+            >
               {shortRunId(liveRun.runId)}
             </span>
             <IdeBadge kind={statusKind(liveRun.status)}>{phaseLabel(liveRun.status)}</IdeBadge>
@@ -295,7 +308,9 @@ export function IdeWelcome() {
             </div>
           )}
           {sampleError && (
-            <div style={{marginBottom: 10, fontSize: 12, color: 'var(--ide-red)'}}>
+            <div
+              style={{marginBottom: 10, fontSize: 'var(--ide-t-caption)', color: 'var(--ide-red)'}}
+            >
               {sampleError}
             </div>
           )}
@@ -814,384 +829,476 @@ export function IdeCompose() {
     projectId == null ||
     (repoDiscovery.projectId === projectId && repoDiscovery.status === 'ready');
 
+  // The commit predicate is ONE value used by BOTH the desktop rail action and the
+  // phone footer action. They used to disagree: the phone button ignored repository
+  // scope readiness entirely, so it looked live while `submit()` would refuse.
+  const commitBlocked =
+    busy ||
+    providerReadiness.loading ||
+    providerReadiness.error ||
+    !selectedProviderReady ||
+    !repositoryScopeReady ||
+    (projectRepos.length > 0 && selectedRepoIds.length === 0);
+  const contextSummary = projectId
+    ? repoDiscovery.projectId !== projectId || repoDiscovery.status === 'loading'
+      ? `${selectedProjectName}. Loading repositories…`
+      : repoDiscovery.status === 'error'
+        ? `${selectedProjectName}. Repository discovery failed.`
+        : `${selectedProjectName}. ${selectedRepoIds.length} ${selectedRepoIds.length === 1 ? 'repo' : 'repos'} selected.`
+    : 'Standalone starts a run without linking a repository.';
+  // RR-787 — warn only for the SCM provider(s) the selected repositories actually
+  // need. A greenfield / no-repo run publishes to GitHub, so default there.
+  const publishBlockers = (() => {
+    if (projectId == null || user == null) return {github: false, bitbucket: false};
+    const providers = new Set<string>(
+      projectRepos.length > 0 && selectedRepoIds.length > 0
+        ? selectedRepoIds.map((id) =>
+            String(
+              (projectRepos.find((r) => repoIdFor(r) === id) as {scmProvider?: string} | undefined)
+                ?.scmProvider || 'GITHUB',
+            ).toUpperCase(),
+          )
+        : ['GITHUB'],
+    );
+    return {
+      github: providers.has('GITHUB') && !user.hasGithubPat,
+      bitbucket: providers.has('BITBUCKET') && !user.hasBitbucketAppPassword,
+    };
+  })();
+
   return (
-    <div className='ide-pane ide-compose' style={{maxWidth: 1060}}>
-      <h1 className='ide-h1'>Start work</h1>
-      <div className='ide-sub'>
-        Describe the change. We will ask before coding and keep the technical defaults out of the
-        way.
-      </div>
+    <div className='ide-pane ide-compose rl-compose'>
+      {/* On a phone this wrapper is the scroll region and the step footer below it is
+          not, so the footer physically cannot be over the content. On a desktop it is
+          an ordinary block and the page scrolls as before — which matters, because the
+          sticky Review rail needs `.con-content` to stay its scrolling ancestor. */}
+      <div className='rl-compose-scroll'>
+        <h1 className='ide-h1'>Start work</h1>
+        {/* The promise is a page-level statement, so on a phone it is shown once, on
+            the first step, instead of costing ~60px of the fold on every step. The
+            approval semantics it names stay visible as the Approval control and the
+            Review row on the later steps. */}
+        <div className={`ide-sub rl-compose-sub${mobileStep === 1 ? '' : ' rl-desktop-only'}`}>
+          Describe the change. We will ask before coding and keep the technical defaults out of the
+          way.
+        </div>
 
-      <div className='ide-compose-steps' aria-label='New work steps'>
-        {[
-          [1, 'Request'],
-          [2, 'Context'],
-          [3, 'Setup'],
-          [4, 'Review'],
-        ].map(([step, label]) => (
-          <button
-            key={step}
-            type='button'
-            className={mobileStep === step ? 'active' : ''}
-            onClick={() => setMobileStep(step as 1 | 2 | 3 | 4)}
-          >
-            <span>{step}</span>
-            {label}
-          </button>
-        ))}
-      </div>
+        <div className='ide-compose-steps rl-steps' aria-label='New work steps'>
+          {[
+            [1, 'Request'],
+            [2, 'Context'],
+            [3, 'Setup'],
+            [4, 'Review'],
+          ].map(([step, label]) => (
+            <button
+              key={step}
+              type='button'
+              className={mobileStep === step ? 'active' : ''}
+              onClick={() => setMobileStep(step as 1 | 2 | 3 | 4)}
+            >
+              <span>{step}</span>
+              {label}
+            </button>
+          ))}
+        </div>
 
-      <div className='ide-compose-layout'>
-        <div className='ide-compose-main'>
-          <section className={`ide-compose-section${mobileStep === 1 ? ' active' : ''}`}>
-            <div className='ide-card ide-compose-request'>
-              <div className='ide-h2' style={{marginTop: 0}}>
-                What should change?
-              </div>
-              <textarea
-                className='ide-textarea ide-compose-textarea'
-                aria-label='Work request'
-                rows={8}
-                placeholder='e.g. Add a health endpoint that returns build SHA and uptime, with tests.'
-                value={spec}
-                onChange={(e) => {
-                  setSpec(e.target.value);
-                  if (err === 'Describe what to build first.') setErr('');
-                }}
-              />
-              <div style={{marginTop: 10}}>
-                <SpecChat projectId={projectId || undefined} draftSpec={spec} onApply={setSpec} />
-              </div>
-            </div>
-          </section>
-
-          <section className={`ide-compose-section${mobileStep === 2 ? ' active' : ''}`}>
-            <div className='ide-card'>
-              <div className='ide-h2' style={{marginTop: 0}}>
-                Context
-              </div>
-              <div style={{display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 6}}>
-                <button
-                  className={projectId == null ? 'ide-btn' : 'ide-btn ghost'}
-                  onClick={() => pickProject(null)}
-                >
-                  {projectId == null ? '✓ ' : ''}Standalone
-                </button>
-                {chipProjects.map((p) => (
-                  <button
-                    key={p.id}
-                    className={projectId === p.id ? 'ide-btn' : 'ide-btn ghost'}
-                    onClick={() => pickProject(p.id)}
-                  >
-                    {projectId === p.id ? '✓ ' : ''}
-                    {p.name}
-                  </button>
-                ))}
-                {projects.length > 4 && (
-                  <button
-                    className='ide-btn ghost'
-                    aria-expanded={projectPickerOpen}
-                    onClick={() => {
-                      setProjectPickerOpen((v) => !v);
-                      setProjectQuery('');
-                    }}
-                  >
-                    All projects... ({projects.length})
-                  </button>
-                )}
-              </div>
-              {projectPickerOpen && (
-                <div
-                  className='ide-card'
-                  style={{marginBottom: 8, padding: 10}}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Escape') setProjectPickerOpen(false);
+        <div className='ide-compose-layout rl-layout'>
+          <div className='ide-compose-main'>
+            <section className={`ide-compose-section${mobileStep === 1 ? ' active' : ''}`}>
+              {/* One dense card instead of three sparse ones: the request box owns most
+                  of its own card, and the two things you do TO a request — refine it,
+                  or start from an example — sit on the same footing directly under it. */}
+              <div className='ide-card ide-compose-request rl-request-card'>
+                <div className='ide-h2 rl-card-title'>What should change?</div>
+                <textarea
+                  className='ide-textarea ide-compose-textarea rl-request-textarea'
+                  aria-label='Work request'
+                  rows={8}
+                  placeholder='e.g. Add a health endpoint that returns build SHA and uptime, with tests.'
+                  value={spec}
+                  onChange={(e) => {
+                    setSpec(e.target.value);
+                    if (err === 'Describe what to build first.') setErr('');
                   }}
-                >
-                  <input
-                    className='ide-input'
-                    autoFocus
-                    placeholder='Search projects...'
-                    value={projectQuery}
-                    onChange={(e) => setProjectQuery(e.target.value)}
-                    aria-label='Search projects'
-                    style={{marginBottom: 8}}
-                  />
-                  <div style={{maxHeight: 240, overflowY: 'auto'}}>
-                    {filteredProjects.length === 0 ? (
-                      <div style={{fontSize: 13, color: 'var(--ide-fg-muted)', padding: '8px 4px'}}>
-                        No projects match "{projectQuery.trim()}".
+                />
+                <div className='rl-request-tools'>
+                  <SpecChat projectId={projectId || undefined} draftSpec={spec} onApply={setSpec} />
+                  {samples.length > 0 && (
+                    <details className='ide-compose-advanced rl-inline-disclosure'>
+                      <summary>Examples</summary>
+                      <div className='rl-chip-wrap'>
+                        {samples.map((s) => (
+                          <button
+                            key={s.id}
+                            className='ide-btn ghost'
+                            disabled={sampleBusyId != null}
+                            onClick={() => void applySample(s)}
+                            title={`${s.category} · ${s.complexity}`}
+                          >
+                            {sampleBusyId === s.id ? '...' : s.title}
+                          </button>
+                        ))}
                       </div>
-                    ) : (
-                      filteredProjects.map((p, i) => (
-                        <button
-                          key={p.id}
-                          type='button'
-                          onClick={() => pickProject(p.id)}
-                          style={{
-                            display: 'block',
-                            width: '100%',
-                            textAlign: 'left',
-                            background: 'transparent',
-                            border: 'none',
-                            borderBottom:
-                              i < filteredProjects.length - 1
-                                ? '1px solid var(--ide-border)'
-                                : 'none',
-                            padding: '8px 6px',
-                            fontSize: 13,
-                            color: projectId === p.id ? 'var(--ide-accent)' : 'var(--ide-fg)',
-                            cursor: 'pointer',
-                          }}
-                        >
-                          {projectId === p.id ? '✓ ' : ''}
-                          {p.name}
-                        </button>
-                      ))
-                    )}
-                  </div>
+                    </details>
+                  )}
                 </div>
-              )}
-              <div className='ide-sub' style={{marginTop: 0, marginBottom: 0}}>
-                {projectId
-                  ? repoDiscovery.projectId !== projectId || repoDiscovery.status === 'loading'
-                    ? `${projects.find((p) => p.id === projectId)?.name}. Loading repositories…`
-                    : repoDiscovery.status === 'error'
-                      ? `${projects.find((p) => p.id === projectId)?.name}. Repository discovery failed.`
-                      : `${projects.find((p) => p.id === projectId)?.name}. ${selectedRepoIds.length} ${selectedRepoIds.length === 1 ? 'repo' : 'repos'} selected.`
-                  : 'Standalone starts a run without linking a repository.'}
               </div>
-            </div>
+            </section>
 
-            {projectId &&
-              repoDiscovery.projectId === projectId &&
-              repoDiscovery.status === 'error' && (
-                <div className='ide-card' role='alert'>
-                  <div style={{color: 'var(--ide-red)', marginBottom: 10}}>
-                    Linked repositories could not be loaded. {repoDiscovery.error}
-                  </div>
+            <section className={`ide-compose-section${mobileStep === 2 ? ' active' : ''}`}>
+              {/* Project scope, repository scope and the credential pre-flight are one
+                  question — "what does this run touch?" — so they are one box. A box
+                  inside a box takes a tint, not a second border. */}
+              <div className='ide-card'>
+                <div className='ide-h2 rl-card-title'>Context</div>
+                {/* Selection is a state, not a commit action: a selected chip is a tinted ghost with
+                    an accent edge, so "Create plan" stays the only accent-filled control here. */}
+                <div className='rl-chip-wrap'>
                   <button
-                    type='button'
-                    className='ide-btn ghost'
-                    onClick={() => setRepoDiscoveryRetry((attempt) => attempt + 1)}
+                    className={`ide-btn ghost rl-chip${projectId == null ? ' is-selected' : ''}`}
+                    aria-pressed={projectId == null}
+                    onClick={() => pickProject(null)}
                   >
-                    Retry repository discovery
+                    {projectId == null && (
+                      <Check className='rl-icon' size='1em' strokeWidth={1.75} aria-hidden='true' />
+                    )}
+                    Standalone
                   </button>
-                </div>
-              )}
-
-            {samples.length > 0 && (
-              <details className='ide-card ide-compose-samples ide-compose-advanced'>
-                <summary>Examples</summary>
-                <div style={{display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 12}}>
-                  {samples.map((s) => (
+                  {chipProjects.map((p) => (
                     <button
-                      key={s.id}
-                      className='ide-btn ghost'
-                      disabled={sampleBusyId != null}
-                      onClick={() => void applySample(s)}
-                      title={`${s.category} · ${s.complexity}`}
+                      key={p.id}
+                      className={`ide-btn ghost rl-chip${projectId === p.id ? ' is-selected' : ''}`}
+                      aria-pressed={projectId === p.id}
+                      onClick={() => pickProject(p.id)}
                     >
-                      {sampleBusyId === s.id ? '...' : s.title}
+                      {projectId === p.id && (
+                        <Check
+                          className='rl-icon'
+                          size='1em'
+                          strokeWidth={1.75}
+                          aria-hidden='true'
+                        />
+                      )}
+                      {p.name}
                     </button>
                   ))}
+                  {projects.length > 4 && (
+                    <button
+                      className='ide-btn ghost'
+                      aria-expanded={projectPickerOpen}
+                      onClick={() => {
+                        setProjectPickerOpen((v) => !v);
+                        setProjectQuery('');
+                      }}
+                    >
+                      All projects... ({projects.length})
+                    </button>
+                  )}
                 </div>
-              </details>
-            )}
-
-            {err && (
-              <div style={{color: 'var(--ide-red)', fontSize: 13, marginBottom: 10}}>{err}</div>
-            )}
-            <div className='ide-run-action ide-compose-submit-action'>
-              <button
-                className='ide-btn'
-                onClick={submit}
-                disabled={
-                  busy ||
-                  providerReadiness.loading ||
-                  providerReadiness.error ||
-                  !selectedProviderReady ||
-                  !repositoryScopeReady ||
-                  (projectRepos.length > 0 && selectedRepoIds.length === 0)
-                }
-              >
-                {busy ? 'Submitting...' : 'Create plan'}
-              </button>
-            </div>
-
-            {projectId && projectRepos.length > 0 && (
-              <div className='ide-card'>
-                <div className='ide-h2' style={{marginTop: 0}}>
-                  Repos
-                </div>
-                <div style={{display: 'flex', flexWrap: 'wrap', gap: 8}}>
-                  {projectRepos.map((r) => {
-                    const rId = repoIdFor(r);
-                    const selected = selectedRepoIds.includes(rId);
-                    const canRun = repoSupports(r, 'CLOUD_RUN');
-                    return (
-                      <button
-                        key={rId}
-                        className={selected ? 'ide-btn' : 'ide-btn ghost'}
-                        disabled={!canRun}
-                        title={
-                          canRun
-                            ? undefined
-                            : 'This provider is linked for source browsing and sync; cloud execution is not supported yet.'
-                        }
-                        onClick={() => toggleRepo(rId)}
-                      >
-                        {selected ? '✓ ' : ''}
-                        {repoDisplayName(r)}
-                        {!canRun ? ' · browse only' : ''}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-
-            {/* PAT pre-flight (2026-06-10): pushes use the CALLER's own credential (no system PAT
-          since 2026-05-23). Without one, a project run completes but the PR push fails — previously
-          discovered only on the result page.
-          RR-787 — aggregate the SCM providers of the SELECTED repositories and warn only for the
-          provider(s) actually needed, so a Bitbucket-only user no longer sees an irrelevant GitHub
-          blocker (and vice versa). A greenfield/no-repo run publishes to GitHub, so default there. */}
-            {projectId != null &&
-              user != null &&
-              (() => {
-                const providers = new Set<string>(
-                  projectRepos.length > 0 && selectedRepoIds.length > 0
-                    ? selectedRepoIds.map((id) =>
-                        String(
-                          (
-                            projectRepos.find((r) => repoIdFor(r) === id) as
-                              | {scmProvider?: string}
-                              | undefined
-                          )?.scmProvider || 'GITHUB',
-                        ).toUpperCase(),
-                      )
-                    : ['GITHUB'],
-                );
-                const needsGithub = providers.has('GITHUB') && !user.hasGithubPat;
-                const needsBitbucket = providers.has('BITBUCKET') && !user.hasBitbucketAppPassword;
-                if (!needsGithub && !needsBitbucket) return null;
-                return (
+                {projectPickerOpen && (
                   <div
-                    className='ide-card'
-                    style={{borderColor: 'var(--ide-yellow)', fontSize: 13, lineHeight: 1.5}}
+                    className='ide-inner rl-project-picker'
+                    onKeyDown={(e) => {
+                      if (e.key === 'Escape') setProjectPickerOpen(false);
+                    }}
                   >
-                    {needsGithub && (
+                    <input
+                      className='ide-input'
+                      autoFocus
+                      placeholder='Search projects...'
+                      value={projectQuery}
+                      onChange={(e) => setProjectQuery(e.target.value)}
+                      aria-label='Search projects'
+                    />
+                    <div className='rl-project-list'>
+                      {filteredProjects.length === 0 ? (
+                        <div className='rl-project-empty'>
+                          No projects match "{projectQuery.trim()}".
+                        </div>
+                      ) : (
+                        filteredProjects.map((p) => (
+                          <button
+                            key={p.id}
+                            type='button'
+                            onClick={() => pickProject(p.id)}
+                            className={`rl-project-row${projectId === p.id ? ' is-selected' : ''}`}
+                          >
+                            <span className='rl-step-glyph' aria-hidden='true'>
+                              {projectId === p.id ? (
+                                <Check size='1em' strokeWidth={1.75} />
+                              ) : (
+                                <span />
+                              )}
+                            </span>
+                            {p.name}
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                )}
+                <div className='rl-context-summary'>{contextSummary}</div>
+
+                {projectId && projectRepos.length > 0 && (
+                  <div className='ide-inner rl-repo-block'>
+                    <div className='ide-field-label'>Repositories in scope</div>
+                    <div className='rl-chip-wrap'>
+                      {projectRepos.map((r) => {
+                        const rId = repoIdFor(r);
+                        const selected = selectedRepoIds.includes(rId);
+                        const canRun = repoSupports(r, 'CLOUD_RUN');
+                        return (
+                          <button
+                            key={rId}
+                            className={`ide-btn ghost rl-chip${selected ? ' is-selected' : ''}`}
+                            aria-pressed={selected}
+                            disabled={!canRun}
+                            title={
+                              canRun
+                                ? undefined
+                                : 'This provider is linked for source browsing and sync; cloud execution is not supported yet.'
+                            }
+                            onClick={() => toggleRepo(rId)}
+                          >
+                            {selected && (
+                              <Check
+                                className='rl-icon'
+                                size='1em'
+                                strokeWidth={1.75}
+                                aria-hidden='true'
+                              />
+                            )}
+                            {repoDisplayName(r)}
+                            {!canRun ? ' · browse only' : ''}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {projectId &&
+                  repoDiscovery.projectId === projectId &&
+                  repoDiscovery.status === 'error' && (
+                    <div className='ide-note bad rl-context-note' role='alert'>
+                      <div>Linked repositories could not be loaded. {repoDiscovery.error}</div>
+                      <button
+                        type='button'
+                        className='ide-btn ghost'
+                        onClick={() => setRepoDiscoveryRetry((attempt) => attempt + 1)}
+                      >
+                        Retry repository discovery
+                      </button>
+                    </div>
+                  )}
+
+                {/* PAT pre-flight (2026-06-10): pushes use the CALLER's own credential (no system PAT
+                    since 2026-05-23). Without one, a project run completes but the PR push fails —
+                    previously discovered only on the result page. */}
+                {(publishBlockers.github || publishBlockers.bitbucket) && (
+                  <div className='ide-note warn rl-context-note'>
+                    {publishBlockers.github && (
                       <div>
                         No GitHub token connected. The run can generate code, but it cannot open a
                         GitHub PR until you add one.{' '}
-                        <Link
-                          to='/integrations'
-                          style={{color: 'var(--ide-accent)', fontWeight: 600}}
-                        >
+                        <Link to='/integrations' className='rl-note-link'>
                           Connect GitHub →
                         </Link>
                       </div>
                     )}
-                    {needsBitbucket && (
-                      <div style={{marginTop: needsGithub ? 8 : 0}}>
+                    {publishBlockers.bitbucket && (
+                      <div>
                         No Bitbucket credential connected. The run can generate code, but it cannot
                         open a Bitbucket PR until you add one.{' '}
-                        <Link
-                          to='/integrations'
-                          style={{color: 'var(--ide-accent)', fontWeight: 600}}
-                        >
+                        <Link to='/integrations' className='rl-note-link'>
                           Connect Bitbucket →
                         </Link>
                       </div>
                     )}
                   </div>
-                );
-              })()}
-          </section>
-        </div>
-
-        <aside className='ide-compose-side'>
-          {/* RUN-4 — grid (3 or 4 cols depending on the ENTERPRISE model column) that
-          .ide-stack-mobile collapses to one column under 600px. */}
-          <section className={`ide-compose-section${mobileStep === 3 ? ' active' : ''}`}>
-            <div className='ide-card'>
-              <div className='ide-h2' style={{marginTop: 0}}>
-                Run setup
+                )}
               </div>
-              <div className='ide-compose-control-grid'>
-                <div role='group' aria-labelledby='compose-provider-label' style={{minWidth: 0}}>
-                  <div className='ide-field-label' id='compose-provider-label'>
-                    Provider
-                  </div>
-                  <select
-                    className='ide-select'
-                    aria-labelledby='compose-provider-label'
-                    value={provider}
-                    onChange={(e) => chooseProvider(e.target.value)}
-                  >
-                    {selectableProviders.map((p) => (
-                      <option
-                        key={p.id}
-                        value={p.id}
-                        disabled={!providerIsDispatchable(providerReadiness.byProvider.get(p.id))}
-                      >
-                        {providerOptionLabel(
-                          p.label || providerLabel(p.id),
-                          providerReadiness.byProvider.get(p.id),
-                        )}
-                        {p.tag ? ` · ${p.tag}` : ''}
-                      </option>
-                    ))}
-                  </select>
-                  <div
-                    role={selectedProviderReady ? 'status' : 'alert'}
-                    style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 4}}
-                  >
-                    {providerReadiness.error
-                      ? 'Provider readiness unavailable; starting work is disabled.'
-                      : providerReadiness.loading
-                        ? 'Checking provider readiness…'
-                        : providerReadinessLabel(selectedProviderReadiness)}
-                  </div>
+            </section>
+          </div>
+
+          <aside className='ide-compose-side'>
+            {/* Review leads the rail. It used to close it, which put the one card whose
+                whole job is "check this before you spend money" below the fold — and the
+                commit action 616px away at the foot of the OTHER column. Leading the rail
+                makes its visibility structural rather than a height budget that a longer
+                estimate or an Enterprise model row can break. Run setup follows, because
+                changing a setting is the second act, not the first. Phone order is
+                unaffected: the steps show one section at a time. */}
+            <section
+              className={`ide-compose-section rl-review-section${mobileStep === 4 ? ' active' : ''}`}
+            >
+              {/* The estimate is folded in — it is part of the same check — and the commit
+                  action closes the card it commits. */}
+              <div className='ide-card ide-compose-review rl-review-card'>
+                <div className='ide-h2 rl-card-title'>Review</div>
+                <div className='ide-kv'>
+                  <span>Request</span>
+                  <span>
+                    {spec.trim()
+                      ? `${spec.trim().slice(0, 90)}${spec.trim().length > 90 ? '...' : ''}`
+                      : 'Not described'}
+                  </span>
                 </div>
-                {/* Per-run provider+model pin (Beta, Enterprise-only — 2026-05-22). Overrides org &
-                  default matrix for this run only. '' = Default → no modelName sent. */}
-                {tier === 'ENTERPRISE' && (
-                  <div role='group' aria-labelledby='compose-model-label' style={{minWidth: 0}}>
-                    <div className='ide-field-label' id='compose-model-label'>
-                      Model · Beta
+                <div className='ide-kv'>
+                  <span>Context</span>
+                  <span>{selectedProjectName}</span>
+                </div>
+                <div className='ide-kv'>
+                  <span>Provider</span>
+                  <span>{providerLabel(provider)}</span>
+                </div>
+                <div className='ide-kv'>
+                  <span>Approval</span>
+                  <span>{mode === 'PRODUCTION' ? 'Ask before coding' : 'Start automatically'}</span>
+                </div>
+                <div className='ide-kv'>
+                  <span>Model upgrades</span>
+                  <span>{confirmModelUpgrades ? 'Ask first' : 'Automatic within policy'}</span>
+                </div>
+                <div className='ide-kv'>
+                  <span>Benchmark guard</span>
+                  <span>{requireBenchmarkedUpgrades ? 'Required' : 'Can use unbenchmarked'}</span>
+                </div>
+                <div className='ide-kv'>
+                  <span>LOW start tier</span>
+                  <span>{startLowTasksOnCheapTier ? 'Cheap tier' : 'Server default'}</span>
+                </div>
+                <div className='ide-kv'>
+                  <span>Cap</span>
+                  <span>{costCap > 0 ? `$${costCap.toFixed(2)}` : 'Platform default'}</span>
+                </div>
+                {estimate && (
+                  <>
+                    <div className='ide-kv'>
+                      <span>Estimated steps</span>
+                      <span>
+                        {estimate.estimatedTasksLow}-{estimate.estimatedTasksHigh}
+                      </span>
                     </div>
-                    <ModelPicker
-                      ariaLabel='Compose model'
-                      value={modelName}
-                      options={modelPickerOptions}
-                      onChange={setModelName}
-                    />
-                    <div style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 4}}>
-                      Overrides this run only
+                    <div className='ide-kv'>
+                      <span>Estimated cost</span>
+                      <span>
+                        ${estimate.estimatedCostLow.toFixed(4)}-$
+                        {estimate.estimatedCostHigh.toFixed(4)}
+                      </span>
                     </div>
+                    {/* RUN-7 — freshness line; flips to a refresh link-button after 60s. */}
+                    <div className='rl-estimate-note'>
+                      {estimateStale ? (
+                        <button type='button' className='rl-linkbtn' onClick={refreshEstimate}>
+                          Refresh estimate
+                        </button>
+                      ) : (
+                        'Estimate updated just now.'
+                      )}
+                      {estimate.basis ? ` ${estimate.basis}` : ''}
+                    </div>
+                  </>
+                )}
+
+                {err && (
+                  <div className='ide-note bad rl-commit-error rl-desktop-only' role='alert'>
+                    {err}
                   </div>
                 )}
-                <div role='group' aria-labelledby='compose-mode-label' style={{minWidth: 0}}>
-                  <div className='ide-field-label' id='compose-mode-label'>
-                    Approval
-                  </div>
-                  <select
-                    className='ide-select'
-                    aria-labelledby='compose-mode-label'
-                    value={mode}
-                    onChange={(e) => setMode(e.target.value as 'PROTOTYPE' | 'PRODUCTION')}
-                  >
-                    <option value='PRODUCTION'>Ask before coding</option>
-                    <option value='PROTOTYPE'>Start automatically</option>
-                  </select>
+
+                <div className='ide-run-action rl-commit'>
+                  <button className='ide-btn' onClick={submit} disabled={commitBlocked}>
+                    {busy ? 'Submitting...' : 'Create plan'}
+                  </button>
                 </div>
-                <div role='group' aria-labelledby='compose-cap-label' style={{minWidth: 0}}>
-                  <div className='ide-field-label' id='compose-cap-label'>
-                    Cap
+              </div>
+            </section>
+            <section
+              className={`ide-compose-section rl-setup-section${mobileStep === 3 ? ' active' : ''}`}
+            >
+              <div className='ide-card'>
+                <div className='ide-h2 rl-card-title'>Run setup</div>
+                {/* Two columns on a desktop rail, one on a phone. Four stacked single
+                    column fields were pushing Review off the bottom of the screen. */}
+                <div className='ide-compose-control-grid rl-setup-grid'>
+                  <div
+                    role='group'
+                    aria-labelledby='compose-provider-label'
+                    className='rl-field rl-field-wide'
+                  >
+                    <div className='ide-field-label' id='compose-provider-label'>
+                      Provider
+                    </div>
+                    <select
+                      className='ide-select'
+                      aria-labelledby='compose-provider-label'
+                      value={provider}
+                      onChange={(e) => chooseProvider(e.target.value)}
+                    >
+                      {selectableProviders.map((p) => (
+                        <option
+                          key={p.id}
+                          value={p.id}
+                          disabled={!providerIsDispatchable(providerReadiness.byProvider.get(p.id))}
+                        >
+                          {providerOptionLabel(
+                            p.label || providerLabel(p.id),
+                            providerReadiness.byProvider.get(p.id),
+                          )}
+                          {p.tag ? ` · ${p.tag}` : ''}
+                        </option>
+                      ))}
+                    </select>
+                    <div
+                      className='rl-field-help'
+                      role={selectedProviderReady ? 'status' : 'alert'}
+                    >
+                      {providerReadiness.error
+                        ? 'Provider readiness unavailable; starting work is disabled.'
+                        : providerReadiness.loading
+                          ? 'Checking provider readiness…'
+                          : providerReadinessLabel(selectedProviderReadiness)}
+                    </div>
                   </div>
-                  <div style={{display: 'flex', alignItems: 'center', gap: 6}}>
+                  {/* Per-run provider+model pin (Beta, Enterprise-only — 2026-05-22). Overrides org &
+                      default matrix for this run only. '' = Default → no modelName sent. */}
+                  {tier === 'ENTERPRISE' && (
+                    <div
+                      role='group'
+                      aria-labelledby='compose-model-label'
+                      className='rl-field rl-field-wide'
+                    >
+                      <div className='ide-field-label' id='compose-model-label'>
+                        Model · Beta
+                      </div>
+                      <ModelPicker
+                        ariaLabel='Compose model'
+                        value={modelName}
+                        options={modelPickerOptions}
+                        onChange={setModelName}
+                      />
+                      <div className='rl-field-help'>Overrides this run only</div>
+                    </div>
+                  )}
+                  <div role='group' aria-labelledby='compose-mode-label' className='rl-field'>
+                    <div className='ide-field-label' id='compose-mode-label'>
+                      Approval
+                    </div>
+                    <select
+                      className='ide-select'
+                      aria-labelledby='compose-mode-label'
+                      value={mode}
+                      onChange={(e) => setMode(e.target.value as 'PROTOTYPE' | 'PRODUCTION')}
+                    >
+                      <option value='PRODUCTION'>Ask before coding</option>
+                      <option value='PROTOTYPE'>Start automatically</option>
+                    </select>
+                  </div>
+                  <div role='group' aria-labelledby='compose-cap-label' className='rl-field'>
+                    <div className='ide-field-label' id='compose-cap-label'>
+                      Cap
+                    </div>
                     <input
                       className='ide-input'
                       type='number'
@@ -1208,250 +1315,112 @@ export function IdeCompose() {
                         const v = Number(e.target.value) || 0;
                         setCostCap(v <= 0 ? 0 : Math.max(0.5, Math.min(tierMaxCap, v)));
                       }}
-                      style={{width: 90}}
                     />
-                    <span style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}>
+                    <div className='rl-field-help'>
                       {costCap <= 0
                         ? 'platform default'
                         : tierMaxCap === 1000
                           ? 'USD'
                           : `max $${tierMaxCap}`}
-                    </span>
+                    </div>
                   </div>
                 </div>
-              </div>
 
-              <div
-                style={{
-                  marginTop: 12,
-                  padding: 12,
-                  border: '1px solid var(--ide-border)',
-                  borderRadius: 8,
-                  fontSize: 12.5,
-                  lineHeight: 1.45,
-                  background: 'color-mix(in srgb, var(--ide-bg-tab-inactive) 55%, transparent)',
-                }}
-              >
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    gap: 10,
-                    marginBottom: 4,
-                  }}
-                >
-                  <strong style={{color: 'var(--ide-fg-bright)'}}>Managed AI routing</strong>
-                  {managedAi && (
-                    <IdeBadge
-                      kind={
-                        hasUnlimitedAiCredits(managedAi)
-                          ? 'ok'
-                          : managedKind(managedAi.routingState)
-                      }
-                    >
-                      {managedAiStatusLabel(managedAi)}
-                    </IdeBadge>
-                  )}
+                <div className='ide-note rl-managed'>
+                  <div className='rl-managed-head'>
+                    <strong>Managed AI routing</strong>
+                    {managedAi && (
+                      <IdeBadge
+                        kind={
+                          hasUnlimitedAiCredits(managedAi)
+                            ? 'ok'
+                            : managedKind(managedAi.routingState)
+                        }
+                      >
+                        {managedAiStatusLabel(managedAi)}
+                      </IdeBadge>
+                    )}
+                  </div>
+                  <div>{managedAiMessage}</div>
                 </div>
-                <div style={{color: 'var(--ide-fg-muted)'}}>{managedAiMessage}</div>
-              </div>
 
-              <details className='ide-compose-advanced'>
-                <summary>Advanced options</summary>
-                <div className='ide-compose-options'>
-                  <label
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 8,
-                      fontSize: 13,
-                      cursor: 'pointer',
-                    }}
-                  >
-                    <input
-                      type='checkbox'
-                      checked={tddMode}
-                      onChange={(e) => setTddMode(e.target.checked)}
-                    />
-                    TDD mode
-                  </label>
-                  <label
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 8,
-                      fontSize: 13,
-                      cursor: 'pointer',
-                    }}
-                  >
-                    <input
-                      type='checkbox'
-                      checked={confirmModelUpgrades}
-                      onChange={(e) => setConfirmModelUpgrades(e.target.checked)}
-                    />
-                    Confirm model upgrades
-                  </label>
-                  <label
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 8,
-                      fontSize: 13,
-                      cursor: 'pointer',
-                    }}
-                  >
-                    <input
-                      type='checkbox'
-                      checked={requireBenchmarkedUpgrades}
-                      onChange={(e) => setRequireBenchmarkedUpgrades(e.target.checked)}
-                    />
-                    Require benchmark evidence
-                  </label>
-                  <label
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 8,
-                      fontSize: 13,
-                      cursor: 'pointer',
-                    }}
-                  >
-                    <input
-                      type='checkbox'
-                      checked={startLowTasksOnCheapTier}
-                      onChange={(e) => setStartLowTasksOnCheapTier(e.target.checked)}
-                    />
-                    Start LOW tasks on cheap tier
-                  </label>
-                  <div style={{flex: 1, minWidth: 220}}>
-                    <label
-                      htmlFor='compose-figma-url'
-                      style={{
-                        display: 'block',
-                        fontSize: 12,
-                        color: 'var(--ide-fg-muted)',
-                        marginBottom: 4,
-                      }}
-                    >
-                      Figma URL
+                <details className='ide-compose-advanced'>
+                  <summary>Advanced options</summary>
+                  <div className='ide-compose-options rl-options'>
+                    <label className='rl-check'>
+                      <input
+                        type='checkbox'
+                        checked={tddMode}
+                        onChange={(e) => setTddMode(e.target.checked)}
+                      />
+                      TDD mode
                     </label>
-                    <input
-                      id='compose-figma-url'
-                      className='ide-input'
-                      type='url'
-                      placeholder='https://figma.com/...'
-                      value={figmaUrl}
-                      onChange={(e) => setFigmaUrl(e.target.value)}
-                      style={{width: '100%'}}
-                    />
+                    <label className='rl-check'>
+                      <input
+                        type='checkbox'
+                        checked={confirmModelUpgrades}
+                        onChange={(e) => setConfirmModelUpgrades(e.target.checked)}
+                      />
+                      Confirm model upgrades
+                    </label>
+                    <label className='rl-check'>
+                      <input
+                        type='checkbox'
+                        checked={requireBenchmarkedUpgrades}
+                        onChange={(e) => setRequireBenchmarkedUpgrades(e.target.checked)}
+                      />
+                      Require benchmark evidence
+                    </label>
+                    <label className='rl-check'>
+                      <input
+                        type='checkbox'
+                        checked={startLowTasksOnCheapTier}
+                        onChange={(e) => setStartLowTasksOnCheapTier(e.target.checked)}
+                      />
+                      Start LOW tasks on cheap tier
+                    </label>
+                    <div className='rl-field'>
+                      <label htmlFor='compose-figma-url' className='ide-field-label'>
+                        Figma URL
+                      </label>
+                      <input
+                        id='compose-figma-url'
+                        className='ide-input'
+                        type='url'
+                        placeholder='https://figma.com/...'
+                        value={figmaUrl}
+                        onChange={(e) => setFigmaUrl(e.target.value)}
+                      />
+                    </div>
                   </div>
-                </div>
-              </details>
-            </div>
-
-            {estimate && (
-              <div className='ide-card'>
-                <div className='ide-h2' style={{marginTop: 0}}>
-                  Estimate
-                </div>
-                {/* RUN-7 — freshness line; flips to a refresh link-button after 60s. */}
-                <div style={{fontSize: 11, color: 'var(--ide-fg-muted)', margin: '-6px 0 8px'}}>
-                  {estimateStale ? (
-                    <button
-                      type='button'
-                      onClick={refreshEstimate}
-                      style={{
-                        background: 'none',
-                        border: 'none',
-                        padding: 0,
-                        font: 'inherit',
-                        color: 'var(--ide-accent)',
-                        cursor: 'pointer',
-                      }}
-                    >
-                      Refresh
-                    </button>
-                  ) : (
-                    'Updated just now'
-                  )}
-                </div>
-                <div className='ide-kv'>
-                  <span>Steps</span>
-                  <span>
-                    {estimate.estimatedTasksLow}-{estimate.estimatedTasksHigh}
-                  </span>
-                </div>
-                <div className='ide-kv'>
-                  <span>Cost</span>
-                  <span>
-                    ${estimate.estimatedCostLow.toFixed(4)}-${estimate.estimatedCostHigh.toFixed(4)}
-                  </span>
-                </div>
-                {estimate.basis && (
-                  <div className='ide-sub' style={{marginTop: 6, marginBottom: 0}}>
-                    {estimate.basis}
-                  </div>
-                )}
+                </details>
               </div>
-            )}
-          </section>
-
-          <section className={`ide-compose-section${mobileStep === 4 ? ' active' : ''}`}>
-            <div className='ide-card ide-compose-review'>
-              <div className='ide-h2' style={{marginTop: 0}}>
-                Review
-              </div>
-              <div className='ide-kv'>
-                <span>Request</span>
-                <span>
-                  {spec.trim()
-                    ? `${spec.trim().slice(0, 90)}${spec.trim().length > 90 ? '...' : ''}`
-                    : 'Not described'}
-                </span>
-              </div>
-              <div className='ide-kv'>
-                <span>Context</span>
-                <span>{selectedProjectName}</span>
-              </div>
-              <div className='ide-kv'>
-                <span>Provider</span>
-                <span>{providerLabel(provider)}</span>
-              </div>
-              <div className='ide-kv'>
-                <span>Approval</span>
-                <span>{mode === 'PRODUCTION' ? 'Ask before coding' : 'Start automatically'}</span>
-              </div>
-              <div className='ide-kv'>
-                <span>Model upgrades</span>
-                <span>{confirmModelUpgrades ? 'Ask first' : 'Automatic within policy'}</span>
-              </div>
-              <div className='ide-kv'>
-                <span>Benchmark guard</span>
-                <span>{requireBenchmarkedUpgrades ? 'Required' : 'Can use unbenchmarked'}</span>
-              </div>
-              <div className='ide-kv'>
-                <span>LOW start tier</span>
-                <span>{startLowTasksOnCheapTier ? 'Cheap tier' : 'Server default'}</span>
-              </div>
-              <div className='ide-kv'>
-                <span>Cap</span>
-                <span>{costCap > 0 ? `$${costCap.toFixed(2)}` : 'Platform default'}</span>
-              </div>
-            </div>
-          </section>
-        </aside>
+            </section>
+          </aside>
+        </div>
       </div>
 
-      <div className='ide-compose-mobile-actions'>
-        <button
-          type='button'
-          className='ide-btn ghost'
-          onClick={() => setMobileStep(Math.max(1, mobileStep - 1) as 1 | 2 | 3 | 4)}
-          disabled={mobileStep === 1}
-        >
-          Back
-        </button>
+      {/* Phone footer. On a phone it is a plain flex sibling of the scroll region
+          above it (see surfaces/runloop.css), not the `position: fixed` overlay it
+          used to be. A fixed bar has no flow slot and no relationship to the scroll
+          port, so whichever content happened to land in its band was covered — and
+          `position: sticky` only moves that problem to mid-scroll. Taking the footer
+          out of the scroll region is what makes the overlap impossible rather than
+          unlikely: measured 0px at every viewport and scroll position. */}
+      <div
+        className={`ide-compose-mobile-actions rl-compose-actions${
+          mobileStep === 1 ? ' is-single' : ''
+        }`}
+      >
+        {mobileStep > 1 && (
+          <button
+            type='button'
+            className='ide-btn ghost'
+            onClick={() => setMobileStep(Math.max(1, mobileStep - 1) as 1 | 2 | 3 | 4)}
+          >
+            Back
+          </button>
+        )}
         {mobileStep < 4 ? (
           <button
             type='button'
@@ -1463,19 +1432,18 @@ export function IdeCompose() {
             Next
           </button>
         ) : (
-          <button
-            className='ide-btn'
-            onClick={submit}
-            disabled={
-              busy || providerReadiness.loading || providerReadiness.error || !selectedProviderReady
-            }
-          >
+          <button className='ide-btn' onClick={submit} disabled={commitBlocked}>
             {busy ? 'Submitting...' : 'Create plan'}
           </button>
         )}
         {mobileNextBlocked && (
           <div id='compose-mobile-next-help' className='ide-compose-mobile-help'>
             Describe the change before choosing context.
+          </div>
+        )}
+        {err && (
+          <div className='ide-compose-mobile-help rl-mobile-error' role='alert'>
+            {err}
           </div>
         )}
       </div>
@@ -1636,9 +1604,10 @@ export function IdeLive() {
           </div>
         </div>
         {!terminal && (
+          /* danger is a ghost that reddens on hover. A permanently red control at the top of a
+             healthy running page reads as an error state, not an available action. */
           <button
-            className='ide-btn ghost'
-            style={{color: 'var(--ide-red)'}}
+            className='ide-btn danger'
             onClick={() => setConfirmCancel(true)}
             disabled={cancelBusy}
           >
@@ -1659,23 +1628,30 @@ export function IdeLive() {
         onClose={() => setConfirmCancel(false)}
       />
 
-      {err && <div style={{color: 'var(--ide-red)', fontSize: 13, margin: '8px 0'}}>{err}</div>}
+      {err && (
+        <div style={{color: 'var(--ide-red)', fontSize: 'var(--ide-t-body)', margin: '8px 0'}}>
+          {err}
+        </div>
+      )}
 
       {!run ? (
         <IdeLoader label='Connecting to work…' />
       ) : (
         <>
           <div className='ide-card'>
-            <div style={{display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12}}>
+            <div className='rl-row' style={{gap: 8, marginBottom: 12}}>
               <IdeBadge kind={statusKind(run.status)}>{phaseLabel(run.status)}</IdeBadge>
               {(run.terminalOutcome?.customerTitle || run.statusReason) && (
-                <span style={{color: 'var(--ide-fg-muted)', fontSize: 12}}>
+                <span
+                  className='rl-break'
+                  style={{color: 'var(--ide-fg-muted)', fontSize: 'var(--ide-t-caption)'}}
+                >
                   {run.terminalOutcome?.customerTitle || run.statusReason}
                 </span>
               )}
             </div>
             {(run.userRequest || run.runSummary) && (
-              <div style={{fontSize: 13, lineHeight: 1.6, marginBottom: 12}}>
+              <div style={{fontSize: 'var(--ide-t-body)', lineHeight: 1.6, marginBottom: 12}}>
                 {run.runSummary || run.userRequest}
               </div>
             )}
@@ -1695,13 +1671,13 @@ export function IdeLive() {
             </div>
             <div className='ide-kv'>
               <span>Worker model</span>
-              <span className='ide-mono' style={{fontSize: 11}}>
+              <span className='ide-mono' style={{fontSize: 'var(--ide-t-caption)'}}>
                 {run.workerModel || '—'}
               </span>
             </div>
             <div className='ide-kv'>
               <span>Tokens</span>
-              <span className='ide-mono' style={{fontSize: 11}}>
+              <span className='ide-mono' style={{fontSize: 'var(--ide-t-caption)'}}>
                 {tokIn + tokOut > 0
                   ? `${tokIn.toLocaleString()} in · ${tokOut.toLocaleString()} out`
                   : '—'}
@@ -1713,7 +1689,8 @@ export function IdeLive() {
                 style={{marginTop: 14}}
                 onClick={() => navigate(`/result/${runId}`)}
               >
-                View result →
+                View result
+                <ArrowRight className='rl-icon' size='1em' strokeWidth={1.75} aria-hidden='true' />
               </button>
             )}
           </div>
@@ -1737,11 +1714,24 @@ export function IdeLive() {
                         : partial
                           ? 'var(--ide-yellow)'
                           : 'var(--ide-fg-muted)';
-                  const icon = done ? '●' : running ? '◉' : failed ? '✕' : partial ? '◐' : '○';
+                  // One icon family. The unicode set (●◉✕◐○) came from five different Unicode
+                  // blocks with five different optical weights and five different advance widths,
+                  // so a column of them neither matched the lucide chrome nor lined its titles up.
+                  const Glyph = done
+                    ? CheckCircle2
+                    : running
+                      ? CircleDot
+                      : failed
+                        ? XCircle
+                        : partial
+                          ? AlertCircle
+                          : Circle;
                   return (
                     <div key={t.taskId || i} className='ide-kv' style={{alignItems: 'center'}}>
-                      <span style={{display: 'flex', alignItems: 'center', gap: 8}}>
-                        <span style={{color}}>{icon}</span>
+                      <span style={{display: 'flex', alignItems: 'center', gap: 8, minWidth: 0}}>
+                        <span className='rl-step-glyph' style={{color}}>
+                          <Glyph size='1em' strokeWidth={1.75} aria-hidden='true' />
+                        </span>
                         {t.title || `Step ${i + 1}`}
                       </span>
                       <IdeBadge kind={statusKind(t.status)}>{t.status}</IdeBadge>
@@ -1756,21 +1746,41 @@ export function IdeLive() {
             Activity log{logList.length ? ` · ${logList.length}` : ''}{' '}
             <span
               className='ide-mono'
-              style={{fontSize: 11, color: 'var(--ide-fg-muted)', fontWeight: 400}}
+              style={{
+                fontSize: 'var(--ide-t-caption)',
+                color: 'var(--ide-fg-muted)',
+                fontWeight: 400,
+              }}
             >
               · {sseLabel}
             </span>
           </div>
           {tasks.length > 0 && (
-            <div style={{fontSize: 12, color: 'var(--ide-fg-muted)', margin: '0 0 6px'}}>
-              ▶ {completed}/{tasks.length} steps
-              {currentTaskTitle ? ` — ${currentTaskTitle}` : ''}
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                fontSize: 'var(--ide-t-caption)',
+                color: 'var(--ide-fg-muted)',
+                margin: '0 0 6px',
+              }}
+            >
+              <Play className='rl-icon' size='1em' strokeWidth={1.75} aria-hidden='true' />
+              <span className='rl-break'>
+                {completed}/{tasks.length} steps
+                {currentTaskTitle ? ` — ${currentTaskTitle}` : ''}
+              </span>
             </div>
           )}
           {replayWarning && (
             <div
               role='status'
-              style={{fontSize: 12, color: 'var(--ide-yellow)', margin: '0 0 8px'}}
+              style={{
+                fontSize: 'var(--ide-t-caption)',
+                color: 'var(--ide-yellow)',
+                margin: '0 0 8px',
+              }}
             >
               {replayWarning}
             </div>
@@ -1784,7 +1794,7 @@ export function IdeLive() {
               style={{
                 maxHeight: '46vh',
                 overflowY: 'auto',
-                borderRadius: 8,
+                borderRadius: 'var(--ide-r-card)',
                 border: '1px solid var(--ide-border)',
                 background: 'var(--ide-bg-panel)',
                 padding: 8,
@@ -1795,7 +1805,7 @@ export function IdeLive() {
                   role='status'
                   style={{
                     padding: '6px 8px',
-                    fontSize: 11,
+                    fontSize: 'var(--ide-t-caption)',
                     color: 'var(--ide-fg-muted)',
                     borderBottom: '1px solid var(--ide-border)',
                   }}
@@ -1825,17 +1835,24 @@ export function IdeLive() {
                     style={{
                       padding: '6px 8px',
                       borderBottom: '1px solid var(--ide-border)',
-                      fontSize: 12,
+                      fontSize: 'var(--ide-t-caption)',
                       lineHeight: 1.5,
                     }}
                   >
-                    <span className='ide-mono' style={{color, marginRight: 8, fontSize: 10}}>
+                    <span
+                      className='ide-mono'
+                      style={{color, marginRight: 8, fontSize: 'var(--ide-t-caption)'}}
+                    >
                       {logLabel(ev.type)}
                     </span>
                     {ts != null && (
                       <span
                         className='ide-mono'
-                        style={{color: 'var(--ide-fg-muted)', marginRight: 8, fontSize: 10}}
+                        style={{
+                          color: 'var(--ide-fg-muted)',
+                          marginRight: 8,
+                          fontSize: 'var(--ide-t-caption)',
+                        }}
                       >
                         {new Date(ts).toLocaleTimeString()}
                       </span>

@@ -1,7 +1,7 @@
 {
   "name": "ExecuteSpec",
   "short_name": "ExecuteSpec",
-  "description": "AI that ships pull requests your team will actually merge — for one repo or for twenty. Multi-repo project workspaces, plan-approval gate, and a Ready / Needs review / Failed verdict on every PR.",
+  "description": "An independent AI R&D lab building coding agents that prove their work. Multi-repo project workspaces, a plan-approval gate, and a Ready / Needs review / Failed verdict on every pull request — with the benchmark trials behind the harness published in full.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
@@ -45,7 +45,7 @@
       "sizes": "1200x630",
       "type": "image/png",
       "form_factor": "wide",
-      "label": "ExecuteSpec — AI that ships PRs your team will merge."
+      "label": "ExecuteSpec — coding agents that prove their work."
     }
   ],
   "shortcuts": [

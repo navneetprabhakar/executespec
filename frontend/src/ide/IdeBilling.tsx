@@ -45,17 +45,7 @@ function SectionTitle({children}: {children: React.ReactNode}) {
 // Soft blue informational callout (mirrors IdeOrg's InfoCard).
 function InfoCard({children}: {children: React.ReactNode}) {
   return (
-    <div
-      className='ide-card'
-      style={{
-        marginBottom: 12,
-        fontSize: 12.5,
-        lineHeight: 1.55,
-        color: 'var(--ide-fg)',
-        background: 'color-mix(in srgb, var(--ide-blue) 12%, transparent)',
-        borderColor: 'color-mix(in srgb, var(--ide-blue) 35%, transparent)',
-      }}
-    >
+    <div className='ide-note info' style={{marginBottom: 12}}>
       {children}
     </div>
   );
@@ -64,8 +54,8 @@ function InfoCard({children}: {children: React.ReactNode}) {
 function Stat({label, value}: {label: string; value: React.ReactNode}) {
   return (
     <div>
-      <div style={{color: 'var(--ide-fg-muted)', fontSize: 11, marginBottom: 2}}>{label}</div>
-      <div style={{fontWeight: 700, fontSize: 16, color: 'var(--ide-fg-bright)'}}>{value}</div>
+      <div className='ob-stat-label'>{label}</div>
+      <div className='ob-stat-value'>{value}</div>
     </div>
   );
 }
@@ -139,43 +129,21 @@ export function IdeBilling() {
   return (
     <div className='ide-pane' style={{maxWidth: 760}}>
       <h1 className='ide-h1'>Billing</h1>
-      <div className='ide-sub'>
-        {tier}
-        {billing?.gateway ? ` · billed via ${billing.gateway}` : ''}
-      </div>
+      <div className='ide-sub'>{tier}</div>
 
       {!loaded ? (
         <IdeLoader label='Loading billing…' />
       ) : (
         <>
-          {/* Subscription summary */}
+          {/* Subscription summary. This is the ONE place the cycle numbers are
+              stated; the old separate "This cycle" card repeated runs, tier and
+              spend a second time under a different heading. */}
           <div className='ide-card'>
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                flexWrap: 'wrap',
-                gap: 12,
-                marginBottom: 14,
-              }}
-            >
-              <div>
+            <div className='ob-split' style={{alignItems: 'center', marginBottom: 14}}>
+              <div className='ob-split-main'>
                 <div
                   style={{
-                    fontSize: 10,
-                    fontWeight: 700,
-                    color: 'var(--ide-fg-muted)',
-                    letterSpacing: '0.12em',
-                    textTransform: 'uppercase',
-                    marginBottom: 4,
-                  }}
-                >
-                  {tier} tier
-                </div>
-                <div
-                  style={{
-                    fontSize: 20,
+                    fontSize: 'var(--ide-t-h2)',
                     fontWeight: 700,
                     letterSpacing: '-0.02em',
                     color: 'var(--ide-fg-bright)',
@@ -183,9 +151,9 @@ export function IdeBilling() {
                 >
                   {planStatus}
                 </div>
-                <div style={{fontSize: 12, color: 'var(--ide-fg-muted)', marginTop: 2}}>
+                <div className='ob-plan-note' style={{marginTop: 2}}>
                   {billing?.gateway
-                    ? `billed via ${billing.gateway}${
+                    ? `Billed via ${billing.gateway}${
                         next ? ` · renews ${new Date(next).toLocaleDateString()}` : ''
                       }`
                     : tier === 'FREE'
@@ -194,27 +162,21 @@ export function IdeBilling() {
                 </div>
               </div>
               {canManageBilling && (
-                <Link
-                  className='ide-btn'
-                  to='/plans'
-                  style={{flexShrink: 0, textDecoration: 'none'}}
-                >
+                <Link className='ide-btn ob-split-action' to='/plans'>
                   Change plan
                 </Link>
               )}
             </div>
             {/* C9 — auto-fit grid so the stats wrap cleanly at 375px instead of
-                squeezing three fixed columns. */}
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
-                gap: 12,
-                paddingTop: 12,
-                borderTop: '1px solid var(--ide-border)',
-              }}
-            >
-              <Stat label='Work runs' value={<>{periodRuns}</>} />
+                squeezing fixed columns. */}
+            <div className='ob-stats'>
+              <Stat label='Work runs this cycle' value={<>{periodRuns}</>} />
+              {/* TIER-6 — a real 0 renders as 0; '—' only when the metric is
+                  genuinely unknown (usage endpoint unavailable). */}
+              <Stat
+                label='Successful (30d)'
+                value={typeof usage?.successfulRuns === 'number' ? usage.successfulRuns : '—'}
+              />
               {isSuperAdmin && <Stat label='Model spend' value={`$${totalSpend.toFixed(4)}`} />}
               <Stat label='Next invoice' value={next ? new Date(next).toLocaleDateString() : '—'} />
             </div>
@@ -226,27 +188,10 @@ export function IdeBilling() {
           <div className='ide-card'>
             {managedAi ? (
               <>
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    gap: 10,
-                    flexWrap: 'wrap',
-                    marginBottom: 12,
-                  }}
-                >
-                  <div>
-                    <div
-                      style={{
-                        fontSize: 13.5,
-                        fontWeight: 700,
-                        color: 'var(--ide-fg-bright)',
-                      }}
-                    >
-                      AI credits
-                    </div>
-                    <div style={{fontSize: 12.5, color: 'var(--ide-fg-muted)', marginTop: 2}}>
+                <div className='ob-split' style={{alignItems: 'center', marginBottom: 10}}>
+                  <div className='ob-split-main'>
+                    <div className='ob-row-title'>AI credits</div>
+                    <div className='ob-plan-note' style={{marginTop: 2}}>
                       $1.25 = 100 AI credits. Frontier calls step down automatically near policy
                       thresholds.
                     </div>
@@ -259,18 +204,10 @@ export function IdeBilling() {
                     {managedAiStatusLabel(managedAi)}
                   </IdeBadge>
                 </div>
-                <div style={{fontSize: 12.5, color: 'var(--ide-fg-muted)', marginBottom: 12}}>
+                <div className='ob-plan-note' style={{marginBottom: 12}}>
                   {formatManagedAiPlanMessage(managedAi)}
                 </div>
-                <div
-                  style={{
-                    display: 'grid',
-                    gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
-                    gap: 12,
-                    paddingTop: 12,
-                    borderTop: '1px solid var(--ide-border)',
-                  }}
-                >
+                <div className='ob-stats'>
                   {(() => {
                     const unlimited = hasUnlimitedAiCredits(managedAi);
                     const totalCredits =
@@ -292,35 +229,37 @@ export function IdeBilling() {
                   })()}
                 </div>
                 {managedAiEvents.length > 0 && (
-                  <div style={{marginTop: 14, borderTop: '1px solid var(--ide-border)'}}>
-                    {managedAiEvents.map((event) => (
-                      <div
-                        key={event.id}
-                        style={{
-                          display: 'flex',
-                          justifyContent: 'space-between',
-                          gap: 10,
-                          paddingTop: 10,
-                          fontSize: 12,
-                          color: 'var(--ide-fg-muted)',
-                        }}
-                      >
-                        <span style={{minWidth: 0}}>
-                          <span style={{color: 'var(--ide-fg-bright)'}}>
-                            {event.agentRole || event.sourceType}
-                          </span>{' '}
-                          {event.model || event.provider || 'model call'}
-                        </span>
-                        <span className='ide-mono' style={{flexShrink: 0}}>
-                          {event.aiCreditsCharged} cr
-                        </span>
-                      </div>
-                    ))}
-                  </div>
+                  <details style={{marginTop: 12}}>
+                    <summary>Recent charges · {managedAiEvents.length}</summary>
+                    <div style={{marginTop: 6}}>
+                      {managedAiEvents.map((event) => (
+                        <div
+                          key={event.id}
+                          className='ob-split'
+                          style={{
+                            alignItems: 'center',
+                            paddingTop: 8,
+                            fontSize: 'var(--ide-t-caption)',
+                            color: 'var(--ide-fg-muted)',
+                          }}
+                        >
+                          <span className='ob-split-main ob-truncate'>
+                            <span style={{color: 'var(--ide-fg-bright)'}}>
+                              {event.agentRole || event.sourceType}
+                            </span>{' '}
+                            {event.model || event.provider || 'model call'}
+                          </span>
+                          <span className='ide-mono ob-split-action'>
+                            {event.aiCreditsCharged} cr
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </details>
                 )}
               </>
             ) : (
-              <div style={{fontSize: 13, color: 'var(--ide-fg-muted)'}}>
+              <div style={{fontSize: 'var(--ide-t-body)', color: 'var(--ide-fg-muted)'}}>
                 Managed-AI usage is unavailable for this account or server profile.
               </div>
             )}
@@ -331,133 +270,40 @@ export function IdeBilling() {
               (V237 added DeepSeek + Fireworks). Deep-links the TEAM card. */}
           {tier === 'FREE' && (
             <div className='ide-card' style={{marginTop: 12}}>
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  flexWrap: 'wrap',
-                  gap: 10,
-                  fontSize: 13,
-                  lineHeight: 1.45,
-                }}
-              >
-                <div>
+              <div className='ob-split' style={{alignItems: 'center'}}>
+                <div className='ob-split-main' style={{fontSize: 'var(--ide-t-body)'}}>
                   <strong style={{color: 'var(--ide-fg-bright)'}}>
-                    Bring your own provider keys, bypass the managed-AI cap.
+                    Bring your own provider keys.
                   </strong>{' '}
                   <span style={{color: 'var(--ide-fg-muted)'}}>
-                    Upgrade to TEAM and use your own Anthropic / OpenAI / DeepSeek / Fireworks keys
-                    — you pay the LLM bill directly, no platform cap.
+                    On TEAM you use your own Anthropic / OpenAI / DeepSeek / Fireworks keys, pay the
+                    LLM bill directly, and bypass both the managed-AI cap and the platform cost cap.
                   </span>
                 </div>
-                <Link
-                  className='ide-btn ghost'
-                  to='/plans?highlight=TEAM'
-                  style={{flexShrink: 0, textDecoration: 'none'}}
-                >
+                <Link className='ide-btn ghost ob-split-action' to='/plans?highlight=TEAM'>
                   See TEAM
                 </Link>
               </div>
             </div>
           )}
 
-          {/* This cycle */}
-          <SectionTitle>This cycle</SectionTitle>
-          <div className='ide-card'>
-            <div
-              style={{
-                fontSize: 11,
-                fontWeight: 700,
-                color: 'var(--ide-fg-muted)',
-                letterSpacing: '0.12em',
-                textTransform: 'uppercase',
-                marginBottom: 8,
-              }}
-            >
-              Work runs this cycle
-            </div>
-            <div
-              style={{
-                fontSize: 36,
-                fontWeight: 600,
-                letterSpacing: '-0.02em',
-                lineHeight: 1,
-                marginBottom: 8,
-                color: 'var(--ide-fg-bright)',
-              }}
-            >
-              {periodRuns}
-              <span style={{fontSize: 18, color: 'var(--ide-fg-muted)', fontWeight: 400}}>
-                {' '}
-                runs
-              </span>
-            </div>
-            <div className='ide-kv'>
-              <span>Tier</span>
-              <span>{tier}</span>
-            </div>
-            <div className='ide-kv'>
-              <span>{isSuperAdmin ? 'Model spend (cycle)' : 'Billing meter'}</span>
-              <span>{isSuperAdmin ? `$${totalSpend.toFixed(4)}` : 'AI credits'}</span>
-            </div>
-            <div className='ide-kv' style={{borderBottom: 'none'}}>
-              <span>Successful work (30d)</span>
-              {/* TIER-6 — a real 0 renders as 0; '—' only when the metric is
-                  genuinely unknown (usage endpoint unavailable). */}
-              <span>{typeof usage?.successfulRuns === 'number' ? usage.successfulRuns : '—'}</span>
-            </div>
-          </div>
-
           {/* Invoices */}
           <SectionTitle>Invoices</SectionTitle>
           {payments.length === 0 ? (
-            <div className='ide-card' style={{fontSize: 13}}>
-              <div style={{fontWeight: 700, color: 'var(--ide-fg-bright)', marginBottom: 4}}>
-                Invoices
-              </div>
-              <div style={{color: 'var(--ide-fg-muted)', lineHeight: 1.5}}>
-                Invoices appear at the end of each billing cycle. Your subscription status is shown
-                above.
-              </div>
-            </div>
+            <div className='ide-note'>Invoices appear at the end of each billing cycle.</div>
           ) : (
             <div className='ide-card' style={{padding: 0}}>
-              {payments.slice(0, 6).map((p, i) => {
+              {payments.slice(0, 6).map((p) => {
                 const invoice = invoiceDisplay(p);
                 return (
-                  <div
-                    key={String(p.id || invoice.number)}
-                    className='ide-invoice-row'
-                    style={{
-                      padding: '11px 16px',
-                      borderBottom:
-                        i < Math.min(payments.length, 6) - 1
-                          ? '1px solid var(--ide-border)'
-                          : 'none',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 10,
-                    }}
-                  >
-                    <div style={{flex: 1, minWidth: 0}}>
-                      <div
-                        className='ide-invoice-title'
-                        style={{fontSize: 13, fontWeight: 600, color: 'var(--ide-fg-bright)'}}
-                      >
+                  <div key={String(p.id || invoice.number)} className='ide-invoice-row ob-row'>
+                    <div className='ob-row-main'>
+                      <div className='ide-invoice-title ob-row-title'>
                         <span className='ide-invoice-number'>{invoice.number}</span>
                         <span className='ide-invoice-sep'> — </span>
                         <span>{invoice.amount}</span>
                       </div>
-                      <div
-                        style={{
-                          fontSize: 11.5,
-                          color: 'var(--ide-fg-muted)',
-                          display: 'flex',
-                          gap: 6,
-                          flexWrap: 'wrap',
-                        }}
-                      >
+                      <div className='ob-row-meta'>
                         <span className='ide-mono'>{p.gateway || 'card'}</span>
                         <span>·</span>
                         <span>{invoice.statusLabel}</span>
@@ -469,9 +315,11 @@ export function IdeBilling() {
                         )}
                       </div>
                     </div>
-                    <IdeBadge kind={invoice.paid ? 'ok' : 'warn'}>
-                      {invoice.paid ? 'Paid' : 'Pending'}
-                    </IdeBadge>
+                    <div className='ob-status'>
+                      <IdeBadge kind={invoice.paid ? 'ok' : 'warn'}>
+                        {invoice.paid ? 'Paid' : 'Pending'}
+                      </IdeBadge>
+                    </div>
                   </div>
                 );
               })}
@@ -481,10 +329,10 @@ export function IdeBilling() {
           {/* Payment method (display-only — managed by the gateway, like Signal) */}
           <SectionTitle>Payment method</SectionTitle>
           <InfoCard>
-            Cards are managed securely by your payment gateway
-            {billing?.gateway ? ` (${billing.gateway})` : ''}.{' '}
+            Cards are held by your payment gateway
+            {billing?.gateway ? ` (${billing.gateway})` : ''}, not by ExecuteSpec.{' '}
             {canManageBilling
-              ? 'Use “Change plan” to start or update a subscription — checkout opens on the gateway’s hosted page.'
+              ? '“Change plan” opens the gateway’s hosted checkout.'
               : 'Ask an org admin or billing admin to start or update a subscription.'}
           </InfoCard>
         </>
@@ -553,6 +401,22 @@ export function IdePlans() {
     return planCardsFrom(planRows);
   }, [planRows]);
 
+  // ACCENT DISCIPLINE — exactly one filled commit action on this surface. The
+  // deep-linked tier wins (that is what the customer was sent here for), else
+  // the recommended tier. The current plan and ENTERPRISE (a mailto, not a
+  // checkout) never take the accent, and neither does anything a viewer without
+  // billing rights cannot actually buy.
+  const accentTier = useMemo(() => {
+    if (!canManageBilling) return null;
+    const buyable = (p: PlanCard) =>
+      p.tier !== tier && p.tier !== 'ENTERPRISE' && p.tier !== 'FREE';
+    return (
+      plans.find((p) => p.tier === highlightTier && buyable(p))?.tier ??
+      plans.find((p) => p.recommended && buyable(p))?.tier ??
+      null
+    );
+  }, [plans, highlightTier, tier, canManageBilling]);
+
   // Subscribe → gateway hosted checkout. Flow unchanged by TIER-1 (same
   // endpoint + redirect handling): ENTERPRISE → sales mailto, FREE → no-op,
   // else POST /api/billing/subscribe and redirect to the returned checkout
@@ -595,15 +459,7 @@ export function IdePlans() {
       <div className='ide-sub'>Currently on {tier}</div>
 
       {err && (
-        <div
-          className='ide-card'
-          style={{
-            marginBottom: 12,
-            fontSize: 13,
-            color: 'var(--ide-red)',
-            borderColor: 'var(--ide-red)',
-          }}
-        >
+        <div className='ide-note bad' style={{marginBottom: 12}}>
           {err}
         </div>
       )}
@@ -616,7 +472,9 @@ export function IdePlans() {
           <div style={{fontWeight: 700, color: 'var(--ide-fg-bright)', marginBottom: 6}}>
             Pricing is temporarily unavailable
           </div>
-          <div style={{fontSize: 13, color: 'var(--ide-fg-muted)', marginBottom: 14}}>
+          <div
+            style={{fontSize: 'var(--ide-t-body)', color: 'var(--ide-fg-muted)', marginBottom: 14}}
+          >
             We could not load the current plans, so we will not show prices we cannot confirm. Your
             existing subscription and access are unaffected. Please try again in a moment.
           </div>
@@ -625,16 +483,11 @@ export function IdePlans() {
           </button>
         </div>
       ) : (
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))',
-            gap: 12,
-            alignItems: 'start',
-          }}
-        >
+        <div className='ob-plan-grid'>
           {plans.map((p) => {
-            const features = PLAN_FEATURES[p.tier] || ['—'];
+            // No invented feature claims: a tier with no curated bullet list
+            // renders none rather than a placeholder row.
+            const features = PLAN_FEATURES[p.tier] ?? [];
             const isCurrent = p.tier === tier;
             const isHighlight = p.tier === highlightTier && !isCurrent;
             const monthlyKnown = p.monthly != null;
@@ -654,127 +507,66 @@ export function IdePlans() {
             const showYearlyLine = monthlyKnown && p.yearly != null && p.yearly > 0;
             return (
               <div
-                className='ide-card'
+                className='ide-card ob-plan-card'
                 key={p.tier}
+                /* One visible edge per box: the state is carried by the border
+                   colour plus the flag pill — never a second stroked ring. */
                 style={{
-                  position: 'relative',
                   borderColor: isCurrent
                     ? 'var(--ide-green)'
                     : isHighlight || p.recommended
                       ? 'var(--ide-accent)'
                       : undefined,
-                  boxShadow: isHighlight ? '0 0 0 1px var(--ide-accent)' : undefined,
                 }}
               >
                 {(p.recommended && !isCurrent) || isCurrent ? (
-                  <div
-                    style={{
-                      position: 'absolute',
-                      top: -9,
-                      right: 14,
-                      background: isCurrent ? 'var(--ide-green)' : 'var(--ide-accent)',
-                      color: 'var(--ide-accent-fg)',
-                      fontSize: 9.5,
-                      fontWeight: 700,
-                      padding: '3px 9px',
-                      borderRadius: 999,
-                      letterSpacing: '0.06em',
-                    }}
-                  >
-                    {isCurrent ? 'CURRENT' : 'RECOMMENDED'}
-                  </div>
+                  <div className={`ob-plan-flag`}>{isCurrent ? 'CURRENT' : 'RECOMMENDED'}</div>
                 ) : null}
-                <div
-                  style={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'baseline',
-                    marginBottom: 6,
-                  }}
-                >
-                  <div style={{fontSize: 16, fontWeight: 700, color: 'var(--ide-fg-bright)'}}>
-                    {p.tier}
-                  </div>
+                <div className='ob-plan-head'>
+                  <div className='ob-plan-tier'>{p.tier}</div>
                   <div>
-                    <span
-                      style={{
-                        fontSize: 22,
-                        fontWeight: 700,
-                        letterSpacing: '-0.02em',
-                        color: 'var(--ide-fg-bright)',
-                      }}
-                    >
-                      {planMoney(headlineAmount, p.currency)}
-                    </span>
-                    {headlineUnit && (
-                      <span style={{fontSize: 13, color: 'var(--ide-fg-muted)', fontWeight: 400}}>
-                        {headlineUnit}
-                      </span>
-                    )}
+                    <span className='ob-plan-price'>{planMoney(headlineAmount, p.currency)}</span>
+                    {headlineUnit && <span className='ob-plan-unit'>{headlineUnit}</span>}
                   </div>
                 </div>
                 {/* Per-card yearly line — only when the API has a yearly row
                     for this tier (TEAM is monthly-only per V165). */}
                 {showYearlyLine && (
-                  <div
-                    style={{
-                      fontSize: 11.5,
-                      color: 'var(--ide-fg-muted)',
-                      textAlign: 'right',
-                      marginBottom: 6,
-                    }}
-                  >
+                  <div className='ob-plan-note' style={{textAlign: 'right'}}>
                     or {planMoney(p.yearly, p.currency)}/yr
                     {p.yearlySavePct != null && p.yearlySavePct > 0
                       ? ` · save ${p.yearlySavePct}%`
                       : ''}
                   </div>
                 )}
-                <div
-                  style={{
-                    fontSize: 12,
-                    color: 'var(--ide-fg-muted)',
-                    marginBottom: p.recommended ? 4 : 14,
-                  }}
-                >
-                  {PLAN_SUBCOPY[p.tier] || ''}
-                </div>
+                {PLAN_SUBCOPY[p.tier] && <div className='ob-plan-note'>{PLAN_SUBCOPY[p.tier]}</div>}
                 {p.recommended && (
-                  <div
-                    style={{
-                      fontSize: 11.5,
-                      fontWeight: 600,
-                      color: 'var(--ide-accent)',
-                      marginBottom: 14,
-                    }}
-                  >
+                  <div className='ob-plan-note ob-plan-note-accent'>
                     Most popular — bring your own keys
                   </div>
                 )}
-                <ul
-                  style={{
-                    listStyle: 'none',
-                    padding: 0,
-                    margin: 0,
-                    display: 'grid',
-                    gap: 8,
-                    fontSize: 13,
-                  }}
-                >
-                  {features.map((f) => (
-                    <li
-                      key={f}
-                      style={{
-                        color: f.startsWith('○') ? 'var(--ide-fg-muted)' : 'var(--ide-fg)',
-                      }}
-                    >
-                      {f}
-                    </li>
-                  ))}
-                </ul>
+                {features.length > 0 ? (
+                  <ul className='ob-plan-features'>
+                    {features.map((f) => (
+                      <li key={f} className={f.startsWith('○') ? 'ob-muted' : undefined}>
+                        {f}
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  /* No curated bullet list for this tier. Point at the public
+                     pricing page rather than inventing entitlement claims — and
+                     keep the flex slack so the CTA still lands on the row's
+                     shared baseline. */
+                  <div className='ob-plan-features ob-plan-note'>
+                    <Link to='/pricing'>See what this plan includes</Link>
+                  </div>
+                )}
                 <button
-                  className='ide-btn'
-                  style={{width: '100%', marginTop: 14}}
+                  /* ACCENT DISCIPLINE: exactly one filled commit action on this
+                     screen. Every other tier's CTA is a ghost, so the page does
+                     not present five equally-loud "buy" buttons. */
+                  className={`ide-btn ob-plan-cta${p.tier === accentTier ? '' : ' ghost'}`}
                   onClick={() => subscribe(p.tier)}
                   disabled={!canManageBilling || isCurrent || busyTier === p.tier}
                 >

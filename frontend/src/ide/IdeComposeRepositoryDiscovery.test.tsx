@@ -128,6 +128,68 @@ describe('IdeCompose repository discovery', () => {
     expect(sessionStorage.getItem('signal:pending-spec')).toBeNull();
   });
 
+  it('keeps the phone footer outside the scroll region and the commit action inside Review', async () => {
+    await act(async () => {
+      root.render(
+        <MemoryRouter>
+          <IdeCompose />
+        </MemoryRouter>,
+      );
+    });
+
+    const scroll = host.querySelector('.rl-compose-scroll');
+    const footer = host.querySelector('.rl-compose-actions');
+    expect(scroll).toBeTruthy();
+    expect(footer).toBeTruthy();
+    // The overlap defect was a fixed footer sharing pixels with the scrolling
+    // content. It is only impossible while the footer is a SIBLING of the scroll
+    // region, so that is the thing worth pinning — not a CSS value.
+    expect(scroll?.contains(footer as Node)).toBe(false);
+    expect(footer?.parentElement?.classList.contains('rl-compose')).toBe(true);
+
+    // The commit action must close the card it commits.
+    const commit = host.querySelector('.rl-review-card .rl-commit .ide-btn');
+    expect(commit?.textContent).toContain('Create plan');
+
+    // Version B: exactly one accent-filled control on the surface. The phone
+    // footer's copy is display:none on a desktop, so scope the count to the
+    // layout the way the stylesheet does.
+    const accent = Array.from(host.querySelectorAll('.ide-compose-layout .ide-btn')).filter(
+      (b) => !b.classList.contains('ghost'),
+    );
+    expect(accent).toHaveLength(1);
+  });
+
+  it('offers no dead Back control on the first phone step', async () => {
+    await act(async () => {
+      root.render(
+        <MemoryRouter>
+          <IdeCompose />
+        </MemoryRouter>,
+      );
+    });
+
+    const footer = host.querySelector('.rl-compose-actions');
+    const labels = Array.from(footer?.querySelectorAll('button') ?? []).map((b) =>
+      (b.textContent || '').trim(),
+    );
+    expect(labels).toEqual(['Next']);
+    expect(footer?.classList.contains('is-single')).toBe(true);
+
+    // Next is gated on a described request, so describe one before advancing.
+    const textarea = host.querySelector('textarea') as HTMLTextAreaElement;
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+      setter?.call(textarea, 'Add a health endpoint.');
+      textarea.dispatchEvent(new Event('input', {bubbles: true}));
+    });
+    await act(async () => (footer?.querySelector('button') as HTMLButtonElement | null)?.click());
+    const afterNext = Array.from(
+      host.querySelector('.rl-compose-actions')?.querySelectorAll('button') ?? [],
+    ).map((b) => (b.textContent || '').trim());
+    expect(afterNext).toEqual(['Back', 'Next']);
+  });
+
   it('disables desktop plan creation when the selected provider cannot dispatch', async () => {
     readiness.byProvider = new Map([
       ['ANTHROPIC', {provider: 'ANTHROPIC', state: 'UNAVAILABLE', dispatchable: false}],

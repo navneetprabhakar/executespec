@@ -138,7 +138,7 @@ describe('IdeProjects agent handoff', () => {
     await render(`/projects?agentProjectHandoff=${handoff.id}`);
 
     const cancel = [...host!.querySelectorAll<HTMLButtonElement>('button')].find((button) =>
-      button.textContent?.includes('Cancel and return'),
+      button.textContent?.includes('Back to conversation'),
     );
     await act(async () => cancel?.click());
 

@@ -31,7 +31,7 @@ export default class AppErrorBoundary extends React.Component<React.PropsWithChi
           style={{
             width: 'min(460px, 100%)',
             border: '1px solid var(--signal-hairline)',
-            borderRadius: 8,
+            borderRadius: 'var(--ide-r-card)',
             background: 'var(--signal-card-bg)',
             padding: 20,
           }}

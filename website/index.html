@@ -8,7 +8,7 @@
          env(safe-area-inset-*). Pairs with the safe-area rules added in
          the global stylesheet below. -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <title>ExecuteSpec — AI that ships pull requests your team actually merges</title>
+    <title>ExecuteSpec — AI R&amp;D lab building coding agents that ship merge-able pull requests</title>
     
     <!-- Google Analytics (GA4) -->
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-Y6JSSQ2Y83"></script>
@@ -29,12 +29,14 @@
     <meta name="rating" content="General">
     <meta name="referrer" content="strict-origin-when-cross-origin">
     <meta name="format-detection" content="telephone=no">
-    <!-- R-303 (Wave 6) — both theme-color values now match --c-graphite-0
-         (#0B0D10) so the browser address-bar tint, the page background,
-         and the PWA manifest background all stop drifting. -->
+    <!-- The page defaults LIGHT (--bg #F6F7F8) and overrides to graphite via
+         prefers-color-scheme, so the address-bar tint is paired the same way.
+         Declaring a single dark theme-color (and color-scheme: dark) made a
+         light-mode visitor get dark scrollbars and form controls on a light
+         page. Supersedes R-303, which matched both values to --c-graphite-0. -->
     <meta name="theme-color" content="#0B0D10" media="(prefers-color-scheme: dark)">
-    <meta name="theme-color" content="#0B0D10">
-    <meta name="color-scheme" content="dark">
+    <meta name="theme-color" content="#F6F7F8" media="(prefers-color-scheme: light)">
+    <meta name="color-scheme" content="light dark">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="ExecuteSpec">
@@ -61,7 +63,7 @@
 
     <!-- ── Open Graph / Twitter for Social Sharing + Chatbot Previews ───────── -->
     <meta property="og:site_name" content="ExecuteSpec">
-    <meta property="og:title" content="ExecuteSpec — AI that ships pull requests your team will actually merge.">
+    <meta property="og:title" content="ExecuteSpec — coding agents that prove their work.">
     <meta property="og:description" content="An independent AI R&D lab building evidence-first coding agents. Plan, build, test, review, open a PR. We attach the verdict (Ready / Needs review / Failed) to every one of yours. Pro $20/mo · Team $50/seat BYOK · Enterprise custom.">
     <meta property="og:type" content="website">
     <meta property="og:url" content="https://executespec.ai/">
@@ -71,14 +73,14 @@
     <meta property="og:image:type" content="image/png">
     <meta property="og:image:width" content="1200">
     <meta property="og:image:height" content="630">
-    <meta property="og:image:alt" content="ExecuteSpec — AI that ships pull requests your team will actually merge.">
+    <meta property="og:image:alt" content="ExecuteSpec — coding agents that prove their work.">
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:site" content="@executespec">
     <meta name="twitter:creator" content="@executespec">
-    <meta name="twitter:title" content="ExecuteSpec — AI that ships pull requests your team will merge">
+    <meta name="twitter:title" content="ExecuteSpec — coding agents that prove their work">
     <meta name="twitter:description" content="Plan, build, test, review, open PR. Pro $20/mo. Team $50/seat BYOK. Enterprise custom contract + DPA.">
     <meta name="twitter:image" content="https://executespec.ai/images/og-hero.png">
-    <meta name="twitter:image:alt" content="ExecuteSpec — AI that ships PRs your team will merge.">
+    <meta name="twitter:image:alt" content="ExecuteSpec — coding agents that prove their work.">
 
     <!-- Structured Data for Agentic Search (GEO/SEO) -->
     <script type="application/ld+json">
@@ -485,7 +487,7 @@
             --ink: #111318;
             --ink-soft: #252A33;
             --text-dim: #5F6673;
-            --text-mute: #8B93A0;
+            --text-mute: #666E7A;
             --hairline: #DDE2EA;
             --hairline-strong: #B8C0CC;
 
@@ -494,19 +496,29 @@
             --hero-text: #ECEEF2;
             --hero-text-dim: rgba(236, 238, 242, 0.66);
 
-            --rail-blue: #4F7FE7;
+            /* Accent + semantics are shared verbatim with the product
+               (frontend/src/ide/ide.css). The site legitimately breathes more
+               than a control plane, so scale and radii diverge — but a verdict
+               badge must be the same object here as it is in the app, or the
+               screenshot in the hero contradicts the page around it. */
+            --rail-blue: #5B8CFF;
             --rail-blue-soft: #E8EEFF;
-            --rail-blue-text: #274FBA;
+            --rail-blue-text: #2B54C4;
+            /* The accent is tuned to sit ON a ground, not to carry white text:
+               #FFF on #5B8CFF is 3.16:1, below AA. Large filled CTAs use this
+               deeper shade of the same hue instead (4.79:1) so the button is
+               still unmistakably the accent, and still readable. */
+            --rail-blue-fill: #3E6BE0;
             --rail-teal: #2BB7A8;
             --rail-teal-soft: #DDF5F1;
             --rail-teal-text: #176D64;
-            --success: #139A67;
+            --success: #217A59;
             --success-soft: #DCF3E9;
-            --warning: #B88700;
+            --warning: #8A6712;
             --warning-soft: #F4E8BF;
-            --danger: #D14B4B;
+            --danger: #C4514F;
             --danger-soft: #F5DADA;
-            --violet: #7C6BE8;
+            --violet: #6354D6;
             --violet-soft: #E7E4FB;
 
             --signal-y: var(--warning);
@@ -535,17 +547,26 @@
                 --ink: #ECEEF2;
                 --ink-soft: #C9D1DB;
                 --text-dim: #9EA7B6;
-                --text-mute: #737C8B;
+                --text-mute: #828B9A;
                 --hairline: rgba(255, 255, 255, 0.08);
                 --hairline-strong: rgba(255, 255, 255, 0.16);
 
-                --rail-blue-soft: rgba(91, 141, 239, 0.16);
+                /* Dark semantics match the product's ide.css ramp exactly. */
+                --rail-blue-soft: rgba(91, 140, 255, 0.16);
                 --rail-blue-text: #9DBBFF;
+                --rail-blue-fill: #3E6BE0;
                 --rail-teal-soft: rgba(122, 209, 200, 0.15);
                 --rail-teal-text: #7AD1C8;
-                --success-soft: rgba(16, 185, 129, 0.14);
-                --warning-soft: rgba(251, 191, 36, 0.14);
-                --danger-soft: rgba(209, 75, 75, 0.16);
+                --success: #3FBF8F;
+                --success-soft: rgba(63, 191, 143, 0.14);
+                /* The light block darkens --violet to clear AA as eyebrow text
+                   on the light ground; the dark ground needs the opposite
+                   direction, so it keeps its own brighter value (4.75:1). */
+                --violet: #7C6BE8;
+                --warning: #E5A93C;
+                --warning-soft: rgba(229, 169, 60, 0.14);
+                --danger: #F06B6B;
+                --danger-soft: rgba(240, 107, 107, 0.16);
                 --violet-soft: rgba(124, 107, 232, 0.16);
 
                 --signal-y-soft: var(--warning-soft);
@@ -628,7 +649,7 @@
         }
         .nav .cta-row .btn-sm.primary:hover {
             transform: translateY(-1px);
-            box-shadow: 0 7px 20px rgba(14, 15, 18, 0.24), 0 0 0 3px rgba(79, 127, 231, 0.22);
+            box-shadow: 0 7px 20px rgba(14, 15, 18, 0.24), 0 0 0 3px rgba(91, 140, 255, 0.22);
             opacity: 1;
         }
         .nav .cta-row .btn-sm:not(.primary):hover { opacity: 0.7; }
@@ -673,7 +694,11 @@
         }
         .hero h1 em {
             font-style: normal;
-            color: var(--rail-blue);
+            /* --rail-blue-text, not --rail-blue: the fill accent measures
+               2.95:1 as text on the light ground, under the 3:1 large-text
+               floor. The -text member of the family is per-scheme and clears
+               it in both (6.18 light). */
+            color: var(--rail-blue-text);
         }
         .hero .lede {
             font-size: clamp(16px, 1.4vw, 19px);
@@ -705,7 +730,7 @@
         .hero .btn.primary:hover {
             background: var(--ink-soft);
             transform: translateY(-2px);
-            box-shadow: 0 14px 32px rgba(14, 15, 18, 0.24), 0 0 0 4px rgba(79, 127, 231, 0.2);
+            box-shadow: 0 14px 32px rgba(14, 15, 18, 0.24), 0 0 0 4px rgba(91, 140, 255, 0.2);
         }
         .hero .btn.secondary { background: transparent; color: var(--ink); border: 1px solid var(--hairline-strong); }
         .hero .btn.secondary:hover { background: var(--card-elev); }
@@ -733,7 +758,29 @@
         .hero-stats .stat .lbl {
             font-size: 12px; color: var(--text-dim);
             margin-top: 2px;
+            line-height: 1.4;
         }
+        /* The scope qualifier travels with the numbers it qualifies. It is not
+           fine print to be shrunk away — a benchmark figure without its scope
+           is a claim about the reader's codebase that we have not measured. */
+        .hero-foot {
+            margin: 16px 0 0;
+            font-size: 13px;
+            line-height: 1.55;
+            /* --text-dim, not --text-mute: on the light ground the mute token
+               measures 2.89:1, which fails AA for text this size. A benchmark
+               scope qualifier that cannot be read is worse than no qualifier,
+               because the unqualified number is what the reader takes away. */
+            color: var(--text-dim);
+            max-width: 62ch;
+        }
+        .hero-foot a {
+            color: var(--rail-blue-text);
+            text-decoration: none;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+        .hero-foot a:hover { text-decoration: underline; }
 
         /* ─────────── Section heading ─────────── */
         .section {
@@ -942,7 +989,7 @@
             content: ""; position: absolute;
             top: -30px; right: -30px;
             width: 140px; height: 140px;
-            background: radial-gradient(circle, rgba(79, 127, 231, 0.18), transparent 65%);
+            background: radial-gradient(circle, rgba(91, 140, 255, 0.18), transparent 65%);
         }
         .phone-mock .screen .hero-card .ribbon {
             font-size: 9px; font-weight: 700; letter-spacing: 0.14em;
@@ -1058,7 +1105,11 @@
             position: absolute;
             top: -10px; right: 18px;
             background: var(--signal-y);
-            color: var(--signal-y-text);
+            /* Not --signal-y-text: that token is amber FOR a dark ground and
+               measured 1.25:1 on the amber pill itself. A FIXED ink fails too,
+               because this fill is dark in light mode and bright in dark mode.
+               --bg is the exact inverse of the ground in both schemes. */
+            color: var(--bg);
             font-size: 10px; font-weight: 700;
             padding: 4px 10px;
             border-radius: 999px;
@@ -1101,7 +1152,7 @@
         .price-card.best .btn:hover {
             background: var(--ink-soft);
             transform: translateY(-2px);
-            box-shadow: 0 14px 30px rgba(14, 15, 18, 0.26), 0 0 0 4px rgba(79, 127, 231, 0.2);
+            box-shadow: 0 14px 30px rgba(14, 15, 18, 0.26), 0 0 0 4px rgba(91, 140, 255, 0.2);
         }
         /* Currency toggle */
         .cur-wrap { text-align: center; margin-bottom: 22px; }
@@ -1207,8 +1258,14 @@
         }
         .bench-stat .v { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 22px; font-weight: 700; color: var(--mint-text-on-light); }
         .bench-stat .k { font-size: 12.5px; color: var(--text-dim); margin-top: 4px; line-height: 1.5; }
+        /* Pre-existing defect found while retinting: at --text-mute this
+           measured 2.89:1 on the light ground — below AA. This paragraph is
+           the page's most load-bearing text (it states these are internal
+           comparative numbers, not leaderboard submissions, and not a
+           guarantee about the reader's codebase). A disclaimer nobody can
+           read does not disclaim anything. Now --text-dim at 13px. */
         .bench-method {
-            margin-top: 14px; font-size: 12.5px; color: var(--text-mute); line-height: 1.6;
+            margin-top: 14px; font-size: 13px; color: var(--text-dim); line-height: 1.6;
             border-left: 2px solid var(--hairline-strong); padding-left: 12px;
         }
         .bench-method strong { color: var(--text-dim); }
@@ -1258,7 +1315,7 @@
             content: ""; position: absolute;
             top: -80px; right: -80px;
             width: 320px; height: 320px;
-            background: radial-gradient(circle, rgba(79, 127, 231, 0.18), transparent 65%);
+            background: radial-gradient(circle, rgba(91, 140, 255, 0.18), transparent 65%);
         }
         .cta-block h2 {
             color: var(--hero-text);
@@ -1275,17 +1332,17 @@
         }
         .cta-block .btn-cta {
             display: inline-flex; align-items: center; gap: 8px;
-            background: var(--rail-blue); color: #FFFFFF;
+            background: var(--rail-blue-fill); color: #FFFFFF;
             padding: 16px 34px;
             border-radius: 999px;
             font-size: 15px; font-weight: 700;
-            box-shadow: 0 10px 30px rgba(79, 127, 231, 0.28);
+            box-shadow: 0 10px 30px rgba(91, 140, 255, 0.28);
             transition: transform 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
         }
         .cta-block .btn-cta:hover {
             background: #3F6FDB;
             transform: translateY(-2px);
-            box-shadow: 0 16px 36px rgba(79, 127, 231, 0.32);
+            box-shadow: 0 16px 36px rgba(91, 140, 255, 0.32);
         }
         .cta-block .btn-cta:active { transform: scale(0.98); }
 
@@ -1346,13 +1403,16 @@
             ExecuteSpec
         </div>
         <nav class='links'>
+            <!-- Research leads. The anchor stays #benchmarks so every existing
+                 inbound link and share still lands. -->
+            <a href='#benchmarks'>Research</a>
             <a href='#how'>How it works</a>
             <a href='#tokens'>Token ledger</a>
             <a href='#workspace'>Workspace</a>
             <a href='#library'>Library</a>
-            <a href='#pricing'>Pricing</a>
             <a href='#compare'>Compare</a>
-            <a href='#benchmarks'>Benchmarks</a>
+            <a href='#pricing'>Pricing</a>
+            <a href='/notes'>Notes</a>
             <a href='#faq'>FAQ</a>
         </nav>
         <div class='cta-row'>
@@ -1365,9 +1425,9 @@
 <section class='hero'>
     <div class='wrap'>
         <div class='eyebrow'>EXECUTESPEC · INDEPENDENT AI R&amp;D LAB</div>
-        <h1>AI that ships <em>pull requests</em> your team actually merges.</h1>
+        <h1>Coding agents that <em>prove</em> their work.</h1>
         <p class='lede'>
-            Write a one-line spec. We plan it, code it across one or more linked repos, run the tests, review it, and open a pull request with a deterministic <strong>Ready / Needs review / Failed</strong> verdict attached. <strong>You merge it.</strong>
+            We research evidence-first coding agents and ship them as a product. Write a one-line spec: the lab's harness plans it, codes it across one or more linked repos, runs your tests, reviews the result, and opens a pull request carrying a deterministic <strong>Ready / Needs review / Failed</strong> verdict. <strong>You merge it.</strong> Then we publish the trials behind the harness — including the ones it failed.
         </p>
         <div class='cta-row'>
             <a class='btn primary' href='https://app.executespec.ai/signup'>
@@ -1378,12 +1438,21 @@
             <span class='pip'>No card required · 200 AI credits / mo</span>
         </div>
 
+        <!-- These were feature labels (0-100 / Live / Tokens / BYOK). A lab's
+             hero should carry results, and every number here is sourced from
+             the published trials in #benchmarks below — same harness, official
+             scorers, public trajectories. Each label states its own scope so a
+             benchmark figure cannot be read as a promise about your codebase. -->
         <div class='hero-stats'>
-            <div class='stat'><div class='v mint'>0–100</div><div class='lbl'>Verified score, every run</div></div>
-            <div class='stat'><div class='v signal'>Live</div><div class='lbl'>Run status and evidence</div></div>
-            <div class='stat'><div class='v'>Tokens</div><div class='lbl'>Estimate, live meter, final ledger</div></div>
-            <div class='stat'><div class='v coral'>BYOK</div><div class='lbl'>Bypass cost cap</div></div>
+            <div class='stat'><div class='v mint'>79 / 89</div><div class='lbl'>Terminal-Bench 2.1 tasks solved, GLM 5.2 on our harness</div></div>
+            <div class='stat'><div class='v'>58.2%</div><div class='lbl'>SWE-bench Lite resolved, scored by the official harness</div></div>
+            <div class='stat'><div class='v signal'>~$0.05</div><div class='lbl'>LLM cost per solved Terminal-Bench trial</div></div>
+            <div class='stat'><div class='v'>1,327</div><div class='lbl'>Trials published with public trajectories</div></div>
         </div>
+        <p class='hero-foot'>
+            Benchmark figures measure our harness on benchmark tasks, not a guarantee about your repository.
+            <a href='#benchmarks'>See the method and every trial &rarr;</a>
+        </p>
     </div>
 </section>
 
@@ -1407,6 +1476,72 @@
             </ol>
             <p class='demo-transcript-note'>This is a synthetic product walkthrough, not a customer run, production measurement, or benchmark result.</p>
         </details>
+    </div>
+</section>
+
+<section class='section' id='benchmarks'>
+    <div class='wrap'>
+        <div class='section-eyebrow signal'>Research · measured, not promised</div>
+        <h2>The lab's open result: we publish every trial, including the failures.</h2>
+        <p class='lede'>
+            This is what the lab actually does. The same pipeline that runs customer specs — classifier, planner, worker, reviewer — drives open-weight models through Terminal-Bench 2.1 and SWE-bench Lite. Identical frozen harness for every model, official scorers, raw output with no exclusions. Anyone can open a trajectory below and watch our agent fail a task.
+        </p>
+
+        <div class='bench-table-wrap'>
+            <table class='bench-table'>
+                <thead>
+                    <tr>
+                        <th>Model on our harness</th>
+                        <th class='num'>Tasks solved (of 89)</th>
+                        <th class='num'>Per-attempt</th>
+                        <th class='num'>Trials</th>
+                        <th>Evidence</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td class='model'>GLM 5.2 <span class='via'>via Fireworks Fast</span></td>
+                        <td class='num lead'>79 / 89</td>
+                        <td class='num'>70.6%</td>
+                        <td class='num'>445</td>
+                        <td class='hub'><a href='https://hub.harborframework.com/jobs/7870521c-c40b-4c16-815c-ecb0dfe9774f' target='_blank' rel='noopener'>Harbor Hub ↗</a></td>
+                    </tr>
+                    <tr>
+                        <td class='model'>DeepSeek V4 Pro <span class='via'>native API</span></td>
+                        <td class='num'>73 / 89</td>
+                        <td class='num'>66.6%</td>
+                        <td class='num'>440</td>
+                        <td class='hub'><a href='https://hub.harborframework.com/jobs/e778501b-6e95-4b40-9d79-5bf0a4cf32a0' target='_blank' rel='noopener'>Harbor Hub ↗</a></td>
+                    </tr>
+                    <tr>
+                        <td class='model'>DeepSeek V4 Flash 0731 <span class='via'>via Fireworks</span></td>
+                        <td class='num'>72 / 89</td>
+                        <td class='num'>62.7%</td>
+                        <td class='num'>442</td>
+                        <td class='hub'><a href='https://hub.harborframework.com/jobs/aa2ccc8c-5c99-41f9-ae0e-145ace60a60c' target='_blank' rel='noopener'>Harbor Hub ↗</a></td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class='bench-stat-row'>
+            <div class='bench-stat'>
+                <div class='v'>58.2%</div>
+                <div class='k'>SWE-bench Lite resolved (174 of 299) with DeepSeek V4 Pro — scored by the official swebench 4.1.0 harness. Total LLM cost: $6.02.</div>
+            </div>
+            <div class='bench-stat'>
+                <div class='v'>~$0.05</div>
+                <div class='k'>Cost per solved Terminal-Bench trial on DeepSeek V4 Pro. Open-weight models plus a disciplined harness keep verified delivery cheap.</div>
+            </div>
+            <div class='bench-stat'>
+                <div class='v'>0 errors</div>
+                <div class='k'>Non-timeout transport errors across the 882 DeepSeek Terminal-Bench trials. Every failure was the model, the task, or the clock — not the harness.</div>
+            </div>
+        </div>
+
+        <p class='bench-method'>
+            <strong>Method, stated plainly:</strong> Terminal-Bench 2.1 runs used 89 tasks × 5 attempts under a fixed 1,500-second per-task ceiling — tighter than some tasks declare, so these are internal comparative numbers, not leaderboard submissions. "Tasks solved" counts tasks solved on at least one of five attempts; "per-attempt" is the mean across all trials. All Terminal-Bench trials and agent trajectories are public on Harbor Hub at the links above. Benchmark results measure harness+model performance on benchmark tasks and are not a guarantee of results on your codebase.
+        </p>
     </div>
 </section>
 
@@ -1722,71 +1857,6 @@
     </div>
 </section>
 
-<section class='section' id='benchmarks'>
-    <div class='wrap'>
-        <div class='section-eyebrow signal'>Measured, not promised</div>
-        <h2>We run the production harness through public benchmarks — and publish every trial.</h2>
-        <p class='lede'>
-            The same pipeline that runs customer specs — classifier, planner, worker, reviewer — drives open-weight models through Terminal-Bench 2.1 and SWE-bench Lite. Identical frozen harness for every model, official scorers, raw output with no exclusions.
-        </p>
-
-        <div class='bench-table-wrap'>
-            <table class='bench-table'>
-                <thead>
-                    <tr>
-                        <th>Model on our harness</th>
-                        <th class='num'>Tasks solved (of 89)</th>
-                        <th class='num'>Per-attempt</th>
-                        <th class='num'>Trials</th>
-                        <th>Evidence</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <tr>
-                        <td class='model'>GLM 5.2 <span class='via'>via Fireworks Fast</span></td>
-                        <td class='num lead'>79 / 89</td>
-                        <td class='num'>70.6%</td>
-                        <td class='num'>445</td>
-                        <td class='hub'><a href='https://hub.harborframework.com/jobs/7870521c-c40b-4c16-815c-ecb0dfe9774f' target='_blank' rel='noopener'>Harbor Hub ↗</a></td>
-                    </tr>
-                    <tr>
-                        <td class='model'>DeepSeek V4 Pro <span class='via'>native API</span></td>
-                        <td class='num'>73 / 89</td>
-                        <td class='num'>66.6%</td>
-                        <td class='num'>440</td>
-                        <td class='hub'><a href='https://hub.harborframework.com/jobs/e778501b-6e95-4b40-9d79-5bf0a4cf32a0' target='_blank' rel='noopener'>Harbor Hub ↗</a></td>
-                    </tr>
-                    <tr>
-                        <td class='model'>DeepSeek V4 Flash 0731 <span class='via'>via Fireworks</span></td>
-                        <td class='num'>72 / 89</td>
-                        <td class='num'>62.7%</td>
-                        <td class='num'>442</td>
-                        <td class='hub'><a href='https://hub.harborframework.com/jobs/aa2ccc8c-5c99-41f9-ae0e-145ace60a60c' target='_blank' rel='noopener'>Harbor Hub ↗</a></td>
-                    </tr>
-                </tbody>
-            </table>
-        </div>
-
-        <div class='bench-stat-row'>
-            <div class='bench-stat'>
-                <div class='v'>58.2%</div>
-                <div class='k'>SWE-bench Lite resolved (174 of 299) with DeepSeek V4 Pro — scored by the official swebench 4.1.0 harness. Total LLM cost: $6.02.</div>
-            </div>
-            <div class='bench-stat'>
-                <div class='v'>~$0.05</div>
-                <div class='k'>Cost per solved Terminal-Bench trial on DeepSeek V4 Pro. Open-weight models plus a disciplined harness keep verified delivery cheap.</div>
-            </div>
-            <div class='bench-stat'>
-                <div class='v'>0 errors</div>
-                <div class='k'>Non-timeout transport errors across the 882 DeepSeek Terminal-Bench trials. Every failure was the model, the task, or the clock — not the harness.</div>
-            </div>
-        </div>
-
-        <p class='bench-method'>
-            <strong>Method, stated plainly:</strong> Terminal-Bench 2.1 runs used 89 tasks × 5 attempts under a fixed 1,500-second per-task ceiling — tighter than some tasks declare, so these are internal comparative numbers, not leaderboard submissions. "Tasks solved" counts tasks solved on at least one of five attempts; "per-attempt" is the mean across all trials. All Terminal-Bench trials and agent trajectories are public on Harbor Hub at the links above. Benchmark results measure harness+model performance on benchmark tasks and are not a guarantee of results on your codebase.
-        </p>
-    </div>
-</section>
 
 <section class='section' id='faq'>
     <div class='wrap'>
@@ -1864,14 +1934,14 @@
         <div>
             <h5>Product</h5>
             <ul>
+                <li><a href='#benchmarks'>Research &amp; benchmarks</a></li>
+                <li><a href='/notes'>Research notes</a></li>
                 <li><a href='#how'>How it works</a></li>
                 <li><a href='#tokens'>Token ledger</a></li>
                 <li><a href='#workspace'>Workspace</a></li>
                 <li><a href='#library'>Library</a></li>
-                <li><a href='#pricing'>Pricing</a></li>
                 <li><a href='#compare'>Compare</a></li>
-                <li><a href='#benchmarks'>Benchmarks</a></li>
-                <li><a href='/notes'>Notes</a></li>
+                <li><a href='#pricing'>Pricing</a></li>
             </ul>
         </div>
         <div>

@@ -210,17 +210,17 @@ export function PrReviewPanel({projectId, repoId, repoFullName, prNumber, varian
         {err && (
           <div
             className='ide-card'
-            style={{margin: '0 0 8px', color: 'var(--ide-red)', fontSize: 12.5}}
+            style={{margin: '0 0 8px', color: 'var(--ide-red)', fontSize: 12}}
           >
             {err}
           </div>
         )}
 
         {loading ? (
-          <div style={{fontSize: 12.5, color: 'var(--ide-fg-muted)'}}>Loading review…</div>
+          <div style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}>Loading review…</div>
         ) : !review ? (
           <>
-            <div style={{fontSize: 12.5, color: 'var(--ide-fg-muted)', marginBottom: 8}}>
+            <div style={{fontSize: 12, color: 'var(--ide-fg-muted)', marginBottom: 8}}>
               Run the AI reviewer over this PR for a verdict + line-anchored comments.
             </div>
             <button className='ide-btn' disabled={submitting || gated} onClick={submit}>
@@ -230,13 +230,13 @@ export function PrReviewPanel({projectId, repoId, repoFullName, prNumber, varian
         ) : inFlight ? (
           <div style={{display: 'flex', alignItems: 'center', gap: 8}}>
             <span className='ide-spinner' aria-hidden='true' />
-            <span style={{fontSize: 12.5, color: 'var(--ide-fg-muted)'}}>
+            <span style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}>
               {status === 'QUEUED' ? 'Queued — waiting for a worker…' : 'Reviewing the diff…'}
             </span>
           </div>
         ) : failed ? (
           <>
-            <div style={{fontSize: 12.5, color: 'var(--ide-red)', marginBottom: 8}}>
+            <div style={{fontSize: 12, color: 'var(--ide-red)', marginBottom: 8}}>
               {review.failureReason || 'The review failed.'}
             </div>
             <button className='ide-btn ghost' disabled={submitting} onClick={submit}>
@@ -264,19 +264,19 @@ export function PrReviewPanel({projectId, repoId, repoFullName, prNumber, varian
                       <div style={{display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2}}>
                         <span
                           className='ide-mono'
-                          style={{fontSize: 11.5, color: 'var(--ide-fg-muted)'}}
+                          style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}
                         >
                           {c.filePath}
                           {c.lineNumber ? `:${c.lineNumber}` : ''}
                         </span>
                         {sev && <IdeBadge kind={sevKind}>{sev}</IdeBadge>}
                         {c.category && (
-                          <span style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}>
+                          <span style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}>
                             {c.category}
                           </span>
                         )}
                       </div>
-                      <div style={{fontSize: 12.5, color: 'var(--ide-fg)'}}>
+                      <div style={{fontSize: 12, color: 'var(--ide-fg)'}}>
                         <Markdown>{c.body}</Markdown>
                       </div>
                     </div>
@@ -284,7 +284,7 @@ export function PrReviewPanel({projectId, repoId, repoFullName, prNumber, varian
                 })}
               </div>
             ) : (
-              <div style={{fontSize: 12.5, color: 'var(--ide-fg-muted)', marginBottom: 8}}>
+              <div style={{fontSize: 12, color: 'var(--ide-fg-muted)', marginBottom: 8}}>
                 No line-anchored comments.
               </div>
             )}
@@ -334,10 +334,10 @@ export function PrReviewPanel({projectId, repoId, repoFullName, prNumber, varian
             background: 'var(--signal-coral-soft)',
             color: 'var(--signal-coral-text)',
             border: '1px solid var(--signal-coral)',
-            borderRadius: 10,
+            borderRadius: 'var(--ide-r-card)',
             padding: '8px 12px',
             marginBottom: 10,
-            fontSize: 12.5,
+            fontSize: 12,
           }}
         >
           {err}
@@ -378,7 +378,7 @@ export function PrReviewPanel({projectId, repoId, repoFullName, prNumber, varian
       ) : (
         <>
           {review.summary && (
-            <div style={{fontSize: 13.5, color: 'var(--signal-ink)', marginBottom: 10}}>
+            <div style={{fontSize: 13, color: 'var(--signal-ink)', marginBottom: 10}}>
               <Markdown>{review.summary}</Markdown>
             </div>
           )}
@@ -401,7 +401,7 @@ export function PrReviewPanel({projectId, repoId, repoFullName, prNumber, varian
                     <span
                       style={{
                         fontFamily: "'JetBrains Mono', monospace",
-                        fontSize: 11.5,
+                        fontSize: 12,
                         color: 'var(--signal-text-dim)',
                       }}
                     >
@@ -409,12 +409,12 @@ export function PrReviewPanel({projectId, repoId, repoFullName, prNumber, varian
                       {c.lineNumber ? `:${c.lineNumber}` : ''}
                     </span>
                     {c.severity && (
-                      <span style={{fontSize: 11, fontWeight: 700, color: sevColor(c.severity)}}>
+                      <span style={{fontSize: 12, fontWeight: 700, color: sevColor(c.severity)}}>
                         {c.severity}
                       </span>
                     )}
                     {c.category && (
-                      <span style={{fontSize: 11, color: 'var(--signal-text-mute)'}}>
+                      <span style={{fontSize: 12, color: 'var(--signal-text-mute)'}}>
                         {c.category}
                       </span>
                     )}

@@ -1,5 +1,23 @@
 import {useEffect, useMemo, useRef, useState} from 'react';
 import {Link, useNavigate, useParams} from 'react-router-dom';
+import {
+  Archive,
+  ArchiveRestore,
+  ArrowUpFromLine,
+  ChevronDown,
+  Cloud,
+  Download,
+  ExternalLink,
+  GitFork,
+  MoreHorizontal,
+  Pause,
+  Play,
+  RotateCw,
+  Share2,
+  Trash2,
+  Undo2,
+  X,
+} from 'lucide-react';
 import {PrCommentInbox} from '@/signal/components/PrCommentInbox';
 import {RunPrCiPanel} from '@/ide/PrCiWebhook';
 import {humanStatusReason, providerLabel} from '@/signal/lib/runUtils';
@@ -99,7 +117,10 @@ import {
   SEV,
   shouldUseRunEvidenceChat,
   shouldShowModelRanking,
+  headerStatusNoteFor,
   isTestExecutionTerminal,
+  recoveryCardTitleFor,
+  splitActionLabel,
   TEST_EXECUTION_MAX_POLLS,
   TEST_EXECUTION_POLL_INTERVAL_MS,
   TABS,
@@ -183,7 +204,7 @@ function CorrectionEvidenceCard({
         <IdeBadge kind={failed ? 'bad' : status === 'ACCEPTED' ? 'ok' : 'warn'}>{status}</IdeBadge>
         {action.code && <span className='ide-mono'>{action.code}</span>}
       </div>
-      <div style={{marginTop: 6, color: 'var(--ide-fg-muted)', fontSize: 12}}>
+      <div style={{marginTop: 6, color: 'var(--ide-fg-muted)', fontSize: 'var(--ide-t-caption)'}}>
         Durable task/action order · {taskTitle || 'Untitled task'}
       </div>
       {action.reason && (
@@ -214,7 +235,12 @@ function CorrectionEvidenceCard({
             {rows.map(([label, key]) => (
               <div
                 key={key}
-                style={{display: 'grid', gridTemplateColumns: '150px 1fr', gap: 10, fontSize: 12}}
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: '150px 1fr',
+                  gap: 10,
+                  fontSize: 'var(--ide-t-caption)',
+                }}
               >
                 <span style={{color: 'var(--ide-fg-muted)'}}>{label}</span>
                 <span className='ide-mono'>
@@ -230,7 +256,9 @@ function CorrectionEvidenceCard({
         <summary style={{cursor: 'pointer', fontWeight: 600}}>
           Correction diff{action.diffDigest ? ` · ${action.diffDigest.slice(0, 12)}` : ''}
         </summary>
-        <div style={{margin: '8px 0', color: 'var(--ide-fg-muted)', fontSize: 12}}>
+        <div
+          style={{margin: '8px 0', color: 'var(--ide-fg-muted)', fontSize: 'var(--ide-t-caption)'}}
+        >
           {patchMeta
             ? `${patchMeta.capturedBytes ?? 0}/${patchMeta.fullBytes ?? 0} bytes captured${
                 patchMeta.truncated ? ' · truncated' : ''
@@ -250,7 +278,7 @@ function CorrectionEvidenceCard({
             {patch}
           </pre>
         ) : (
-          <div style={{color: 'var(--ide-fg-muted)', fontSize: 12}}>
+          <div style={{color: 'var(--ide-fg-muted)', fontSize: 'var(--ide-t-caption)'}}>
             Patch content unavailable for this historical correction.
           </div>
         )}
@@ -1246,9 +1274,21 @@ export default function IdeRunResult() {
       : issues.length > 0
         ? `${issues.length} validation issue${issues.length === 1 ? '' : 's'} found.`
         : 'Open the logs and evidence to identify the failing stage.');
+  const headerStatusNote = headerStatusNoteFor(
+    v.label,
+    run?.terminalOutcome?.customerTitle,
+    run?.statusReason ? humanStatusReason(run.statusReason) : '',
+  );
+  const recoveryCardTitle = recoveryCardTitleFor(v.label, run?.terminalOutcome?.customerTitle);
   const durableFailureEvidence = terminalFailureEvidence(run);
   const terminalPrimaryAction = terminalOutcomePrimaryAction(run?.terminalOutcome);
+  const primaryActionCopy = splitActionLabel(terminalPrimaryAction?.label);
   const stoppedByUser = run?.terminalOutcome?.category === 'USER_STOPPED';
+  // ONE accent-filled commit action per surface. When the recovery card is showing the
+  // server-owned primary action, that IS the surface's next step, so the "Next action" CTA
+  // below demotes to a ghost rather than offering a second, equally-loud blue button.
+  const recoveryOwnsPrimary = Boolean((failedTerminal || stoppedByUser) && terminalPrimaryAction);
+  const nextActionClass = recoveryOwnsPrimary ? 'ide-btn ghost' : 'ide-btn';
   const trustFacts = publicationTrustFacts(run, publication);
   const correctionHistory = correctionEvidenceHistory(run);
   // C2 — tab title carries the run name once loaded.
@@ -1301,7 +1341,7 @@ export default function IdeRunResult() {
             {tab === 'Tasks' && run?.tasks?.length ? ` · ${run.tasks.length}` : ''}
             {tab === 'Validation' && issues.length ? ` · ${issues.length}` : ''}
           </span>
-          <span aria-hidden='true'>⌄</span>
+          <ChevronDown className='rl-icon' size='1em' strokeWidth={1.75} aria-hidden='true' />
         </button>
         {tabMenuOpen && (
           <div className='ide-project-mobile-menu' role='menu'>
@@ -1382,34 +1422,40 @@ export default function IdeRunResult() {
             >
               {run ? run.runTitle || (run.userRequest || '').slice(0, 70) || 'Work' : 'Loading…'}
             </h1>
-            <div style={{display: 'flex', gap: 8, alignItems: 'center', margin: '8px 0 18px'}}>
+            {/* Wraps: the status note is server-supplied sentence-length text and used to be
+                pinned to the right of a flex spacer that could not give way at 375px. */}
+            <div className='rl-row' style={{gap: 8, margin: '8px 0 18px'}}>
               <IdeBadge kind={v.kind}>{v.label}</IdeBadge>
               {score != null && (
                 <ScoreBadge score={score} verificationLedger={report?.verificationLedger} />
               )}
-              <span style={{flex: 1}} />
-              {(run?.terminalOutcome?.customerTitle ||
-                (run?.statusReason && humanStatusReason(run.statusReason))) && (
-                <span style={{color: 'var(--ide-fg-muted)', fontSize: 12}}>
-                  {run?.terminalOutcome?.customerTitle ||
-                    humanStatusReason(run?.statusReason || '')}
+              <span style={{flex: '1 1 0', minWidth: 0}} />
+              {headerStatusNote && (
+                <span
+                  className='rl-break'
+                  style={{color: 'var(--ide-fg-muted)', fontSize: 'var(--ide-t-caption)'}}
+                >
+                  {headerStatusNote}
                 </span>
               )}
             </div>
 
             {(failedTerminal || stoppedByUser) && (
-              <div className='ide-recovery-card'>
+              /* The variant is required: `.ide-recovery-card` is state-neutral and puts state on
+                 a 3px leading edge. A user-initiated stop is NOT a failure, and the class used to
+                 paint both the same red. */
+              <div className={`ide-recovery-card ${stoppedByUser ? 'is-stopped' : 'is-failed'}`}>
                 <div className='ide-recovery-main'>
                   <div className='ide-recovery-kicker'>
                     {stoppedByUser ? 'Run stopped' : 'Next step'}
                   </div>
-                  <div className='ide-recovery-title'>
-                    {run?.terminalOutcome?.customerTitle ||
-                      (statusUpper === 'PARTIAL'
-                        ? 'This run completed with unresolved work.'
-                        : 'This run did not reach a clean result.')}
-                  </div>
+                  {recoveryCardTitle && (
+                    <div className='ide-recovery-title'>{recoveryCardTitle}</div>
+                  )}
                   <div className='ide-recovery-copy'>{failureText}</div>
+                  {primaryActionCopy.prose && (
+                    <div className='ide-recovery-copy'>{primaryActionCopy.prose}</div>
+                  )}
                   <div className='ide-recovery-meta'>
                     {!stoppedByUser && (
                       <span>
@@ -1432,12 +1478,20 @@ export default function IdeRunResult() {
                     <div aria-label='Primary outcome action'>
                       {terminalPrimaryAction.behavior === 'navigate' ? (
                         terminalPrimaryAction.href?.startsWith('/') ? (
-                          <Link className='ide-btn' to={terminalPrimaryAction.href}>
-                            {terminalPrimaryAction.label}
+                          <Link
+                            className='ide-btn'
+                            to={terminalPrimaryAction.href}
+                            title={primaryActionCopy.prose || undefined}
+                          >
+                            {primaryActionCopy.button}
                           </Link>
                         ) : (
-                          <a className='ide-btn' href={terminalPrimaryAction.href}>
-                            {terminalPrimaryAction.label}
+                          <a
+                            className='ide-btn'
+                            href={terminalPrimaryAction.href}
+                            title={primaryActionCopy.prose || undefined}
+                          >
+                            {primaryActionCopy.button}
                           </a>
                         )
                       ) : (
@@ -1450,8 +1504,9 @@ export default function IdeRunResult() {
                             if (terminalPrimaryAction.behavior === 'retry') trySameRoute();
                             else if (terminalPrimaryAction.tab) setTab(terminalPrimaryAction.tab);
                           }}
+                          title={primaryActionCopy.prose || undefined}
                         >
-                          {terminalPrimaryAction.label}
+                          {primaryActionCopy.button}
                         </button>
                       )}
                     </div>
@@ -1475,7 +1530,9 @@ export default function IdeRunResult() {
             )}
 
             {!failedTerminal && !stoppedByUser && phaseDiagnosis && (
-              <div className='ide-recovery-card'>
+              /* "Current diagnosis" is a run that is still working — it is NOT a failure, and the
+                 shared class was painting it in the same red as a failed run. */
+              <div className='ide-recovery-card is-progress'>
                 <div className='ide-recovery-main'>
                   <div className='ide-recovery-kicker'>Current diagnosis</div>
                   <div className='ide-recovery-title'>{phaseDiagnosis.title}</div>
@@ -1516,7 +1573,12 @@ export default function IdeRunResult() {
               ) : !report && !tests && score == null ? (
                 <div
                   className='ide-card'
-                  style={{flex: 1, minWidth: 240, color: 'var(--ide-fg-muted)', fontSize: 12}}
+                  style={{
+                    flex: 1,
+                    minWidth: 240,
+                    color: 'var(--ide-fg-muted)',
+                    fontSize: 'var(--ide-t-caption)',
+                  }}
                 >
                   {missingScoreExplanation(run)}
                 </div>
@@ -1550,34 +1612,12 @@ export default function IdeRunResult() {
                   />
                   <Kv k='Pipeline' v={reportPipelineLabel(report)} />
                   {fileCounts.explanation && (
-                    <div
-                      className='ide-card'
-                      style={{
-                        marginTop: 12,
-                        padding: 12,
-                        borderColor: 'color-mix(in srgb, var(--ide-yellow) 55%, var(--ide-border))',
-                        background: 'color-mix(in srgb, var(--ide-yellow) 8%, var(--ide-bg-card))',
-                        color: 'var(--ide-fg-muted)',
-                        fontSize: 12.5,
-                        lineHeight: 1.45,
-                      }}
-                    >
+                    <div className='ide-note warn' style={{marginTop: 12}}>
                       {fileCounts.explanation}
                     </div>
                   )}
                   {scoredWithoutFunctionalTests && (
-                    <div
-                      className='ide-card'
-                      style={{
-                        marginTop: 12,
-                        padding: 12,
-                        borderColor: 'color-mix(in srgb, var(--ide-yellow) 55%, var(--ide-border))',
-                        background: 'color-mix(in srgb, var(--ide-yellow) 8%, var(--ide-bg-card))',
-                        color: 'var(--ide-fg-muted)',
-                        fontSize: 12.5,
-                        lineHeight: 1.45,
-                      }}
-                    >
+                    <div className='ide-note warn' style={{marginTop: 12}}>
                       No independently verified functional test run backs this score. Fresh
                       workspace tests remain useful code-level evidence, but they do not prove
                       deployed product journeys or external integrations end to end.
@@ -1614,7 +1654,7 @@ export default function IdeRunResult() {
                 <Kv
                   k='Worker'
                   v={
-                    <span className='ide-mono' style={{fontSize: 11}}>
+                    <span className='ide-mono' style={{fontSize: 'var(--ide-t-caption)'}}>
                       {run?.workerModel || '—'}
                     </span>
                   }
@@ -1630,7 +1670,11 @@ export default function IdeRunResult() {
                 <div className='ide-h2'>Original request</div>
                 <div
                   className='ide-card ide-mono'
-                  style={{fontSize: 12, lineHeight: 1.6, whiteSpace: 'pre-wrap'}}
+                  style={{
+                    fontSize: 'var(--ide-t-caption)',
+                    lineHeight: 1.6,
+                    whiteSpace: 'pre-wrap',
+                  }}
                 >
                   {run.userRequest}
                 </div>
@@ -1655,17 +1699,32 @@ export default function IdeRunResult() {
                     )
                   }
                 >
-                  {busy === 'resume' ? 'Resuming…' : '▶ Resume'}
+                  {busy === 'resume' ? (
+                    'Resuming…'
+                  ) : (
+                    <>
+                      <Play className='rl-icon' size='1em' strokeWidth={1.75} aria-hidden='true' />
+                      Resume
+                    </>
+                  )}
                 </button>
               )}
               {!canResume &&
                 (prUrl ? (
-                  <a className='ide-btn' href={prUrl} target='_blank' rel='noreferrer'>
-                    ↗ Open PR
+                  <a className={nextActionClass} href={prUrl} target='_blank' rel='noreferrer'>
+                    <>
+                      <ExternalLink
+                        className='rl-icon'
+                        size='1em'
+                        strokeWidth={1.75}
+                        aria-hidden='true'
+                      />
+                      Open PR
+                    </>
                   </a>
                 ) : artifactActions.push ? (
                   <button
-                    className='ide-btn'
+                    className={nextActionClass}
                     disabled={busy === 'push' || !artifactActions.push}
                     title={
                       !artifactActions.push
@@ -1676,11 +1735,29 @@ export default function IdeRunResult() {
                       action('push', () => api.pushToScm(runId), pushOutcomeMessage, reloadRun)
                     }
                   >
-                    {busy === 'push' ? 'Pushing…' : '⤴ Push changes'}
+                    {busy === 'push' ? (
+                      'Pushing…'
+                    ) : (
+                      <>
+                        <ArrowUpFromLine
+                          className='rl-icon'
+                          size='1em'
+                          strokeWidth={1.75}
+                          aria-hidden='true'
+                        />
+                        Push changes
+                      </>
+                    )}
                   </button>
                 ) : (
-                  <button className='ide-btn' onClick={() => setTab('Chat')}>
-                    ↻ Iterate in chat
+                  <button className={nextActionClass} onClick={() => setTab('Chat')}>
+                    <RotateCw
+                      className='rl-icon'
+                      size='1em'
+                      strokeWidth={1.75}
+                      aria-hidden='true'
+                    />
+                    Iterate in chat
                   </button>
                 ))}
               {canPause && (
@@ -1695,7 +1772,14 @@ export default function IdeRunResult() {
                     )
                   }
                 >
-                  {busy === 'pause' ? 'Pausing…' : '⏸ Pause'}
+                  {busy === 'pause' ? (
+                    'Pausing…'
+                  ) : (
+                    <>
+                      <Pause className='rl-icon' size='1em' strokeWidth={1.75} aria-hidden='true' />
+                      Pause
+                    </>
+                  )}
                 </button>
               )}
               {artifactActions.revertWorkspace &&
@@ -1703,8 +1787,7 @@ export default function IdeRunResult() {
                   String(run?.status || '').toUpperCase(),
                 ) && (
                   <button
-                    className='ide-btn ghost'
-                    style={{color: 'var(--ide-red)'}}
+                    className='ide-btn ghost danger'
                     disabled={busy === 'revert-workspace'}
                     onClick={() =>
                       setConfirm({
@@ -1727,7 +1810,19 @@ export default function IdeRunResult() {
                       })
                     }
                   >
-                    {busy === 'revert-workspace' ? 'Reverting…' : '↶ Revert workspace'}
+                    {busy === 'revert-workspace' ? (
+                      'Reverting…'
+                    ) : (
+                      <>
+                        <Undo2
+                          className='rl-icon'
+                          size='1em'
+                          strokeWidth={1.75}
+                          aria-hidden='true'
+                        />
+                        Revert workspace
+                      </>
+                    )}
                   </button>
                 )}
               <button
@@ -1747,7 +1842,8 @@ export default function IdeRunResult() {
                   )
                 }
               >
-                ▶ Preview
+                <Play className='rl-icon' size='1em' strokeWidth={1.75} aria-hidden='true' />
+                Preview
               </button>
               <button
                 className='ide-btn ghost'
@@ -1776,7 +1872,14 @@ export default function IdeRunResult() {
                   })
                 }
               >
-                {busy === 'deploy' ? 'Deploying…' : '☁ Deploy'}
+                {busy === 'deploy' ? (
+                  'Deploying…'
+                ) : (
+                  <>
+                    <Cloud className='rl-icon' size='1em' strokeWidth={1.75} aria-hidden='true' />
+                    Deploy
+                  </>
+                )}
               </button>
               <button
                 className='ide-btn ghost'
@@ -1790,7 +1893,8 @@ export default function IdeRunResult() {
                   )
                 }
               >
-                ⬇ Report PDF
+                <Download className='rl-icon' size='1em' strokeWidth={1.75} aria-hidden='true' />
+                Report PDF
               </button>
               <button
                 className='ide-btn ghost'
@@ -1808,7 +1912,8 @@ export default function IdeRunResult() {
                   )
                 }
               >
-                ⬇ Code ZIP
+                <Download className='rl-icon' size='1em' strokeWidth={1.75} aria-hidden='true' />
+                Code ZIP
               </button>
               <button
                 className='ide-btn ghost'
@@ -1822,7 +1927,8 @@ export default function IdeRunResult() {
                   )
                 }
               >
-                ⌁ Share
+                <Share2 className='rl-icon' size='1em' strokeWidth={1.75} aria-hidden='true' />
+                Share
               </button>
               <button
                 className='ide-btn ghost'
@@ -1835,7 +1941,8 @@ export default function IdeRunResult() {
                   })
                 }
               >
-                ↻ Run again · {providerLabel(currentProvider)}
+                <RotateCw className='rl-icon' size='1em' strokeWidth={1.75} aria-hidden='true' />
+                Run again · {providerLabel(currentProvider)}
               </button>
               <details style={{position: 'relative'}}>
                 <summary className='ide-btn ghost' style={{listStyle: 'none', cursor: 'pointer'}}>
@@ -1856,7 +1963,13 @@ export default function IdeRunResult() {
                     boxShadow: '0 6px 16px var(--ide-shadow)',
                   }}
                 >
-                  <div style={{padding: '8px 10px', color: 'var(--ide-fg-muted)', fontSize: 11}}>
+                  <div
+                    style={{
+                      padding: '8px 10px',
+                      color: 'var(--ide-fg-muted)',
+                      fontSize: 'var(--ide-t-caption)',
+                    }}
+                  >
                     {run?.routePinned
                       ? 'This run used an exact route. Changing provider clears that model pin.'
                       : 'Changing provider starts a separate paid run.'}
@@ -1879,7 +1992,13 @@ export default function IdeRunResult() {
                     </button>
                   ))}
                   {!providerReadiness.loading && alternativeProviders.length === 0 && (
-                    <div style={{padding: '8px 10px', color: 'var(--ide-fg-muted)', fontSize: 11}}>
+                    <div
+                      style={{
+                        padding: '8px 10px',
+                        color: 'var(--ide-fg-muted)',
+                        fontSize: 'var(--ide-t-caption)',
+                      }}
+                    >
                       {providerReadiness.error
                         ? 'Provider readiness unavailable; route changes are disabled.'
                         : 'No other provider is currently ready for dispatch.'}
@@ -1895,7 +2014,13 @@ export default function IdeRunResult() {
                   aria-expanded={moreOpen}
                   onClick={() => setMoreOpen((o) => !o)}
                 >
-                  ⋯ More
+                  <MoreHorizontal
+                    className='rl-icon'
+                    size='1em'
+                    strokeWidth={1.75}
+                    aria-hidden='true'
+                  />
+                  More
                 </button>
                 {moreOpen && (
                   <div
@@ -1923,7 +2048,13 @@ export default function IdeRunResult() {
                         manageRun('fork');
                       }}
                     >
-                      ⑂ Fork
+                      <GitFork
+                        className='rl-icon'
+                        size='1em'
+                        strokeWidth={1.75}
+                        aria-hidden='true'
+                      />
+                      Fork
                     </button>
                     <button
                       className='ide-btn ghost'
@@ -1934,7 +2065,27 @@ export default function IdeRunResult() {
                         manageRun(run?.archivedAt ? 'unarchive' : 'archive');
                       }}
                     >
-                      {run?.archivedAt ? '⊡ Unarchive' : '⊟ Archive'}
+                      {run?.archivedAt ? (
+                        <>
+                          <ArchiveRestore
+                            className='rl-icon'
+                            size='1em'
+                            strokeWidth={1.75}
+                            aria-hidden='true'
+                          />
+                          Unarchive
+                        </>
+                      ) : (
+                        <>
+                          <Archive
+                            className='rl-icon'
+                            size='1em'
+                            strokeWidth={1.75}
+                            aria-hidden='true'
+                          />
+                          Archive
+                        </>
+                      )}
                     </button>
                     {terminal && (
                       <button
@@ -1952,7 +2103,13 @@ export default function IdeRunResult() {
                           });
                         }}
                       >
-                        ⊘ Delete
+                        <Trash2
+                          className='rl-icon'
+                          size='1em'
+                          strokeWidth={1.75}
+                          aria-hidden='true'
+                        />
+                        Delete
                       </button>
                     )}
                   </div>
@@ -1977,7 +2134,9 @@ export default function IdeRunResult() {
                       Preview
                       <IdeBadge kind={live ? 'ok' : failed ? 'bad' : 'warn'}>{ps}</IdeBadge>
                       {preview?.ttlRemainingSeconds ? (
-                        <span style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}>
+                        <span
+                          style={{fontSize: 'var(--ide-t-caption)', color: 'var(--ide-fg-muted)'}}
+                        >
                           TTL {Math.max(0, Math.round(preview.ttlRemainingSeconds))}s
                         </span>
                       ) : null}
@@ -1999,7 +2158,19 @@ export default function IdeRunResult() {
                           )
                         }
                       >
-                        {busy === 'preview-rebuild' ? 'Rebuilding…' : '↻ Rebuild'}
+                        {busy === 'preview-rebuild' ? (
+                          'Rebuilding…'
+                        ) : (
+                          <>
+                            <RotateCw
+                              className='rl-icon'
+                              size='1em'
+                              strokeWidth={1.75}
+                              aria-hidden='true'
+                            />
+                            Rebuild
+                          </>
+                        )}
                       </button>
                       <button
                         className='ide-btn ghost'
@@ -2032,7 +2203,11 @@ export default function IdeRunResult() {
                     {preview?.errorMessage && failed && (
                       <div
                         className='ide-card'
-                        style={{color: 'var(--ide-red)', fontSize: 12, marginBottom: 10}}
+                        style={{
+                          color: 'var(--ide-red)',
+                          fontSize: 'var(--ide-t-caption)',
+                          marginBottom: 10,
+                        }}
                       >
                         {preview.errorMessage}
                       </div>
@@ -2052,7 +2227,7 @@ export default function IdeRunResult() {
                           <span
                             className='ide-mono'
                             style={{
-                              fontSize: 11,
+                              fontSize: 'var(--ide-t-caption)',
                               color: 'var(--ide-fg-muted)',
                               flex: 1,
                               minWidth: 0,
@@ -2070,7 +2245,13 @@ export default function IdeRunResult() {
                             target='_blank'
                             rel='noreferrer'
                           >
-                            ↗ Open
+                            <ExternalLink
+                              className='rl-icon'
+                              size='1em'
+                              strokeWidth={1.75}
+                              aria-hidden='true'
+                            />
+                            Open
                           </a>
                         </div>
                         <iframe
@@ -2090,7 +2271,7 @@ export default function IdeRunResult() {
                       !settled && (
                         <div
                           className='ide-card'
-                          style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}
+                          style={{fontSize: 'var(--ide-t-caption)', color: 'var(--ide-fg-muted)'}}
                         >
                           Preview is {ps.toLowerCase()}… this can take up to a minute.
                         </div>
@@ -2099,13 +2280,13 @@ export default function IdeRunResult() {
 
                     {previewLogs && previewLogs.length > 0 && (
                       <>
-                        <div className='ide-h2' style={{fontSize: 12}}>
+                        <div className='ide-h2' style={{fontSize: 'var(--ide-t-caption)'}}>
                           Preview logs
                         </div>
                         <pre
                           className='ide-card ide-mono'
                           style={{
-                            fontSize: 11,
+                            fontSize: 'var(--ide-t-caption)',
                             lineHeight: 1.5,
                             maxHeight: 220,
                             overflow: 'auto',
@@ -2148,7 +2329,7 @@ export default function IdeRunResult() {
                 {files.length > 0 && (
                   <button
                     className='ide-btn ghost'
-                    style={{padding: '2px 8px', fontSize: 11}}
+                    style={{padding: '2px 8px', fontSize: 'var(--ide-t-caption)'}}
                     disabled={busy === 'code' || !artifactActions.codeZip}
                     title={
                       artifactActions.codeZip
@@ -2163,7 +2344,19 @@ export default function IdeRunResult() {
                       )
                     }
                   >
-                    {busy === 'code' ? '…' : '⬇ Zip'}
+                    {busy === 'code' ? (
+                      '…'
+                    ) : (
+                      <>
+                        <Download
+                          className='rl-icon'
+                          size='1em'
+                          strokeWidth={1.75}
+                          aria-hidden='true'
+                        />
+                        Zip
+                      </>
+                    )}
                   </button>
                 )}
               </div>
@@ -2213,8 +2406,13 @@ export default function IdeRunResult() {
                     >
                       <FileIcon name={f.split('/').pop() || f} />
                       {f.split('/').pop()}
-                      <span className='ide-tab-close' onClick={(e) => closeFile(f, e)}>
-                        ×
+                      <span
+                        className='ide-tab-close'
+                        role='button'
+                        aria-label={`Close ${f.split('/').pop()}`}
+                        onClick={(e) => closeFile(f, e)}
+                      >
+                        <X size='1em' strokeWidth={1.75} aria-hidden='true' />
                       </span>
                     </div>
                   ))}
@@ -2262,7 +2460,7 @@ export default function IdeRunResult() {
                     {goalEvidenceLabel(effectiveRunGoal)}
                   </IdeBadge>
                   {effectiveRunGoal.recommendedDecision && (
-                    <span className='ide-mono' style={{fontSize: 12}}>
+                    <span className='ide-mono' style={{fontSize: 'var(--ide-t-caption)'}}>
                       {goalDecisionLabel(effectiveRunGoal.recommendedDecision)}
                     </span>
                   )}
@@ -2270,7 +2468,13 @@ export default function IdeRunResult() {
                 {/* Disclosure-only proof gap: informational copy, never warning styling. */}
                 {(independentProofGapNotice(effectiveRunGoal) ||
                   goalDecisionHelp(effectiveRunGoal.recommendedDecision)) && (
-                  <div style={{fontSize: 12, marginTop: 8, color: 'var(--ide-fg-muted)'}}>
+                  <div
+                    style={{
+                      fontSize: 'var(--ide-t-caption)',
+                      marginTop: 8,
+                      color: 'var(--ide-fg-muted)',
+                    }}
+                  >
                     {independentProofGapNotice(effectiveRunGoal) ??
                       goalDecisionHelp(effectiveRunGoal.recommendedDecision)}
                   </div>
@@ -2321,7 +2525,7 @@ export default function IdeRunResult() {
                   <div style={{fontWeight: 600}}>{durableFailureEvidence.title}</div>
                   <div
                     style={{
-                      fontSize: 12,
+                      fontSize: 'var(--ide-t-caption)',
                       color:
                         durableFailureEvidence.kind === 'bad'
                           ? 'var(--ide-red)'
@@ -2332,16 +2536,34 @@ export default function IdeRunResult() {
                     {durableFailureEvidence.detail}
                   </div>
                   {durableFailureEvidence.nextAction && (
-                    <div style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 8}}>
+                    <div
+                      style={{
+                        fontSize: 'var(--ide-t-caption)',
+                        color: 'var(--ide-fg-muted)',
+                        marginTop: 8,
+                      }}
+                    >
                       Next: {durableFailureEvidence.nextAction}
                     </div>
                   )}
                   {durableFailureEvidence.supportCode && (
-                    <div style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 8}}>
+                    <div
+                      style={{
+                        fontSize: 'var(--ide-t-caption)',
+                        color: 'var(--ide-fg-muted)',
+                        marginTop: 8,
+                      }}
+                    >
                       Support code: {durableFailureEvidence.supportCode}
                     </div>
                   )}
-                  <div style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 8}}>
+                  <div
+                    style={{
+                      fontSize: 'var(--ide-t-caption)',
+                      color: 'var(--ide-fg-muted)',
+                      marginTop: 8,
+                    }}
+                  >
                     Execution did not start, so no worker steps were created.
                   </div>
                 </div>
@@ -2381,22 +2603,26 @@ export default function IdeRunResult() {
                           i < run.tasks.length - 1 ? '1px solid var(--ide-border)' : 'none',
                       }}
                     >
-                      <div style={{display: 'flex', alignItems: 'center', gap: 10}}>
-                        <IdeBadge
-                          kind={
-                            t.status === 'COMPLETE' || t.status === 'SUCCESS'
-                              ? 'ok'
-                              : t.status === 'FAILED'
-                                ? 'bad'
-                                : 'warn'
-                          }
-                        >
-                          {customerStepStatusLabel(t.status)}
-                        </IdeBadge>
-                        <span style={{flex: 1, fontWeight: 500}}>{safeTitle}</span>
-                        <span style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}>
-                          {fmtDur(t.durationMs)}
+                      {/* The status badge is a fixed-width COLUMN. "Complete", "Failed",
+                          "Needs input", "Needs review" and "In progress" span ~48px of label
+                          width, so letting the badge size the first cell started every step title
+                          at a different x and the list had no left edge to scan down. */}
+                      <div className='rl-row'>
+                        <span className='rl-status-col'>
+                          <IdeBadge
+                            kind={
+                              t.status === 'COMPLETE' || t.status === 'SUCCESS'
+                                ? 'ok'
+                                : t.status === 'FAILED'
+                                  ? 'bad'
+                                  : 'warn'
+                            }
+                          >
+                            {customerStepStatusLabel(t.status)}
+                          </IdeBadge>
                         </span>
+                        <span className='rl-row-title'>{safeTitle}</span>
+                        <span className='rl-row-meta'>{fmtDur(t.durationMs)}</span>
                         {(t.status === 'FAILED' ||
                           t.status === 'PARTIAL' ||
                           t.status === 'BLOCKED') && (
@@ -2417,8 +2643,11 @@ export default function IdeRunResult() {
                           </button>
                         )}
                         {approvalCandidate && (
+                          /* Ghost. `primary` is not a defined variant, so this rendered as the
+                             accent-filled base — one per blocked step, competing with the
+                             surface's single Next-action CTA. */
                           <button
-                            className='ide-btn primary'
+                            className='ide-btn ghost'
                             style={{padding: '3px 8px'}}
                             disabled={busy === `continuation-${t.taskId}`}
                             title='Approve the recommended recovery'
@@ -2438,12 +2667,22 @@ export default function IdeRunResult() {
                           </button>
                         )}
                       </div>
-                      <div style={{fontSize: 12, color: 'var(--ide-fg-muted)', marginTop: 6}}>
+                      <div
+                        style={{
+                          fontSize: 'var(--ide-t-caption)',
+                          color: 'var(--ide-fg-muted)',
+                          marginTop: 6,
+                        }}
+                      >
                         {safeSummary}
                       </div>
                       <div
                         className='ide-mono'
-                        style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 4}}
+                        style={{
+                          fontSize: 'var(--ide-t-caption)',
+                          color: 'var(--ide-fg-muted)',
+                          marginTop: 4,
+                        }}
                       >
                         {(t.complexity || 'complexity pending').toUpperCase()} ·{' '}
                         {t.routingTaskCategory || 'category pending'} ·{' '}
@@ -2456,12 +2695,24 @@ export default function IdeRunResult() {
                         {t.routeDiverged ? ' · changed during execution' : ''}
                       </div>
                       {continuationSummary && (
-                        <div style={{fontSize: 11, color: 'var(--ide-amber)', marginTop: 4}}>
+                        <div
+                          style={{
+                            fontSize: 'var(--ide-t-caption)',
+                            color: 'var(--ide-amber)',
+                            marginTop: 4,
+                          }}
+                        >
                           {continuationSummary}
                         </div>
                       )}
                       {limitSummary && (
-                        <div style={{fontSize: 11, color: 'var(--ide-amber)', marginTop: 4}}>
+                        <div
+                          style={{
+                            fontSize: 'var(--ide-t-caption)',
+                            color: 'var(--ide-amber)',
+                            marginTop: 4,
+                          }}
+                        >
                           {limitSummary}
                         </div>
                       )}
@@ -2514,7 +2765,7 @@ export default function IdeRunResult() {
                           <div
                             style={{
                               border: '1px solid var(--ide-border)',
-                              borderRadius: 6,
+                              borderRadius: 'var(--ide-r-control)',
                               padding: '7px 8px',
                             }}
                           >
@@ -2573,12 +2824,17 @@ export default function IdeRunResult() {
                                 key={fact.k}
                                 style={{
                                   border: '1px solid var(--ide-border)',
-                                  borderRadius: 6,
+                                  borderRadius: 'var(--ide-r-control)',
                                   padding: '6px 8px',
                                   minWidth: 0,
                                 }}
                               >
-                                <div style={{fontSize: 10, textTransform: 'uppercase'}}>
+                                <div
+                                  style={{
+                                    fontSize: 'var(--ide-t-caption)',
+                                    textTransform: 'uppercase',
+                                  }}
+                                >
                                   {fact.k}
                                 </div>
                                 <div className='ide-mono'>{fact.v}</div>
@@ -2640,24 +2896,27 @@ export default function IdeRunResult() {
             const visibleLog = eventLog?.filter((ev) => !isNoisyLogEvent(ev)) ?? null;
             return (
               <div className='ide-pane' style={{position: 'absolute', inset: 0, overflowY: 'auto'}}>
-                <h1 className='ide-h1' style={{display: 'flex', alignItems: 'center', gap: 8}}>
+                <h1 className='ide-h1 ide-head-row'>
                   Activity log{visibleLog?.length ? ` · ${visibleLog.length}` : ''}{' '}
-                  <span
-                    className='ide-mono'
-                    style={{fontSize: 11, color: 'var(--ide-fg-muted)', fontWeight: 400}}
-                  >
+                  <span className='ide-mono ide-head-note'>
                     {eventReplay?.available && eventReplay.retainedUntil
-                      ? `· replay available until ${new Date(eventReplay.retainedUntil).toLocaleString()}`
-                      : '· replay retained for up to 24h'}
+                      ? `· replay until ${new Date(eventReplay.retainedUntil).toLocaleString()}`
+                      : '· replay kept up to 24h'}
                   </span>
                   <span style={{flex: 1}} />
                   {/* RES-6 — the replay is a snapshot; let the user re-pull it. */}
                   <button
                     className='ide-btn ghost'
-                    style={{padding: '3px 10px', fontSize: 12}}
+                    style={{padding: '3px 10px', fontSize: 'var(--ide-t-caption)'}}
                     onClick={() => void loadEventLog().catch(() => {})}
                   >
-                    ↻ Refresh
+                    <RotateCw
+                      className='rl-icon'
+                      size='1em'
+                      strokeWidth={1.75}
+                      aria-hidden='true'
+                    />
+                    Refresh
                   </button>
                 </h1>
                 {visibleLog == null ? (
@@ -2671,7 +2930,7 @@ export default function IdeRunResult() {
                 ) : (
                   <div
                     style={{
-                      borderRadius: 8,
+                      borderRadius: 'var(--ide-r-card)',
                       border: '1px solid var(--ide-border)',
                       background: 'var(--ide-bg-panel)',
                       padding: 8,
@@ -2691,29 +2950,23 @@ export default function IdeRunResult() {
                               ? 'var(--ide-yellow)'
                               : 'var(--ide-fg-muted)';
                       return (
-                        <div
-                          key={i}
-                          style={{
-                            display: 'grid',
-                            gridTemplateColumns: '18px 104px 76px minmax(0, 1fr)',
-                            gap: 8,
-                            padding: '8px 10px',
-                            borderBottom:
-                              i < visibleLog.length - 1 ? '1px solid var(--ide-border)' : 'none',
-                            fontSize: 12,
-                            lineHeight: 1.45,
-                            alignItems: 'start',
-                          }}
-                        >
-                          <span style={{flexShrink: 0}} aria-hidden='true'>
-                            {logIcon(ev.type)}
-                          </span>
+                        <div key={i} className='ide-log-row'>
+                          {(() => {
+                            const Glyph = logIcon(ev.type);
+                            return (
+                              <Glyph
+                                size={14}
+                                strokeWidth={1.75}
+                                style={{flexShrink: 0, color}}
+                                aria-hidden='true'
+                              />
+                            );
+                          })()}
                           <span
                             className='ide-mono'
                             style={{
                               color,
-                              textTransform: 'uppercase',
-                              fontSize: 10,
+                              fontSize: 'var(--ide-t-caption)',
                               paddingTop: 2,
                               overflow: 'hidden',
                               textOverflow: 'ellipsis',
@@ -2725,7 +2978,11 @@ export default function IdeRunResult() {
                           </span>
                           <span
                             className='ide-mono'
-                            style={{color: 'var(--ide-fg-muted)', fontSize: 10, paddingTop: 2}}
+                            style={{
+                              color: 'var(--ide-fg-muted)',
+                              fontSize: 'var(--ide-t-caption)',
+                              paddingTop: 2,
+                            }}
                           >
                             {ev.timestamp != null
                               ? new Date(ev.timestamp as string | number).toLocaleTimeString()
@@ -2753,7 +3010,7 @@ export default function IdeRunResult() {
                                       borderRadius: 999,
                                       padding: '1px 6px',
                                       color: 'var(--ide-fg-muted)',
-                                      fontSize: 10,
+                                      fontSize: 'var(--ide-t-caption)',
                                       background:
                                         'color-mix(in srgb, var(--ide-bg-widget) 78%, transparent)',
                                     }}
@@ -2830,7 +3087,7 @@ export default function IdeRunResult() {
                         >
                           <span
                             style={{
-                              fontSize: 13,
+                              fontSize: 'var(--ide-t-body)',
                               color: 'var(--ide-fg-bright)',
                               flex: 1,
                               minWidth: 0,
@@ -2843,7 +3100,11 @@ export default function IdeRunResult() {
                           </span>
                           <span
                             className='ide-mono'
-                            style={{fontSize: 11, color: 'var(--ide-fg-muted)', flexShrink: 0}}
+                            style={{
+                              fontSize: 'var(--ide-t-caption)',
+                              color: 'var(--ide-fg-muted)',
+                              flexShrink: 0,
+                            }}
                           >
                             {fmtDur(timing.durationMs)}
                           </span>
@@ -2853,7 +3114,7 @@ export default function IdeRunResult() {
                             position: 'relative',
                             height: 8,
                             background: 'var(--ide-bg)',
-                            borderRadius: 4,
+                            borderRadius: 'var(--ide-r-control)',
                             overflow: 'hidden',
                           }}
                         >
@@ -2864,7 +3125,7 @@ export default function IdeRunResult() {
                               width: `${widthPct}%`,
                               top: 0,
                               bottom: 0,
-                              borderRadius: 4,
+                              borderRadius: 'var(--ide-r-control)',
                               background: failed
                                 ? 'var(--ide-red)'
                                 : done
@@ -2899,7 +3160,8 @@ export default function IdeRunResult() {
                     )
                   }
                 >
-                  ⬇ PDF
+                  <Download className='rl-icon' size='1em' strokeWidth={1.75} aria-hidden='true' />
+                  PDF
                 </button>
               )}
             </h1>
@@ -2912,21 +3174,14 @@ export default function IdeRunResult() {
               />
             )}
             <div className='ide-card' style={{padding: 0}}>
-              {trustFacts.map((fact, index) => (
-                <div
-                  key={fact.label}
-                  style={{
-                    padding: '10px 16px',
-                    borderBottom:
-                      index < trustFacts.length - 1 ? '1px solid var(--ide-border)' : 'none',
-                    display: 'grid',
-                    gridTemplateColumns: 'minmax(150px, 0.35fr) minmax(0, 1fr)',
-                    gap: 12,
-                    alignItems: 'start',
-                  }}
-                >
-                  <span style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}>{fact.label}</span>
-                  <div style={{display: 'flex', alignItems: 'flex-start', gap: 8, minWidth: 0}}>
+              {trustFacts.map((fact) => (
+                <div key={fact.label} className='ide-trust-row'>
+                  <span className='ide-trust-label'>{fact.label}</span>
+                  {/* Verdict pill and value share a row; the pill is a fixed
+                      column on wide viewports so every row's evidence text
+                      starts at the same x, and the whole row stacks on phones
+                      rather than squeezing the value into ~50px. */}
+                  <div className='ide-trust-verdict'>
                     <IdeBadge kind={fact.kind === 'neutral' ? 'warn' : fact.kind}>
                       {fact.kind === 'ok'
                         ? 'PASS'
@@ -2936,12 +3191,7 @@ export default function IdeRunResult() {
                             ? 'UNKNOWN'
                             : 'INFO'}
                     </IdeBadge>
-                    <span
-                      className='ide-mono'
-                      style={{fontSize: 11, overflowWrap: 'anywhere', lineHeight: 1.5}}
-                    >
-                      {fact.value}
-                    </span>
+                    <span className='ide-mono ide-trust-value'>{fact.value}</span>
                   </div>
                 </div>
               ))}
@@ -2959,11 +3209,17 @@ export default function IdeRunResult() {
               <div className='ide-card' role='alert'>
                 <div style={{fontWeight: 600}}>{publication.reason}</div>
                 {publication.remediation && (
-                  <div style={{fontSize: 12, color: 'var(--ide-fg-muted)', marginTop: 6}}>
+                  <div
+                    style={{
+                      fontSize: 'var(--ide-t-caption)',
+                      color: 'var(--ide-fg-muted)',
+                      marginTop: 6,
+                    }}
+                  >
                     {publication.remediation}
                   </div>
                 )}
-                <div className='ide-mono' style={{fontSize: 11, marginTop: 6}}>
+                <div className='ide-mono' style={{fontSize: 'var(--ide-t-caption)', marginTop: 6}}>
                   {publication.retryable
                     ? 'Safe to retry after remediation'
                     : 'Direct retry blocked'}
@@ -2978,7 +3234,7 @@ export default function IdeRunResult() {
                   <div style={{fontWeight: 600}}>{durableFailureEvidence.title}</div>
                   <div
                     style={{
-                      fontSize: 12,
+                      fontSize: 'var(--ide-t-caption)',
                       color:
                         durableFailureEvidence.kind === 'bad'
                           ? 'var(--ide-red)'
@@ -2989,16 +3245,34 @@ export default function IdeRunResult() {
                     {durableFailureEvidence.detail}
                   </div>
                   {durableFailureEvidence.nextAction && (
-                    <div style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 8}}>
+                    <div
+                      style={{
+                        fontSize: 'var(--ide-t-caption)',
+                        color: 'var(--ide-fg-muted)',
+                        marginTop: 8,
+                      }}
+                    >
                       Next: {durableFailureEvidence.nextAction}
                     </div>
                   )}
                   {durableFailureEvidence.supportCode && (
-                    <div style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 8}}>
+                    <div
+                      style={{
+                        fontSize: 'var(--ide-t-caption)',
+                        color: 'var(--ide-fg-muted)',
+                        marginTop: 8,
+                      }}
+                    >
                       Support code: {durableFailureEvidence.supportCode}
                     </div>
                   )}
-                  <div style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 8}}>
+                  <div
+                    style={{
+                      fontSize: 'var(--ide-t-caption)',
+                      color: 'var(--ide-fg-muted)',
+                      marginTop: 8,
+                    }}
+                  >
                     {missingValidationReportExplanation(run)}
                   </div>
                 </div>
@@ -3024,7 +3298,7 @@ export default function IdeRunResult() {
                           {goalEvidenceLabel(report.runGoalDecision)}
                         </IdeBadge>
                         {report.runGoalDecision.recommendedDecision && (
-                          <span className='ide-mono' style={{fontSize: 12}}>
+                          <span className='ide-mono' style={{fontSize: 'var(--ide-t-caption)'}}>
                             {goalDecisionLabel(report.runGoalDecision.recommendedDecision)}
                           </span>
                         )}
@@ -3032,13 +3306,19 @@ export default function IdeRunResult() {
                       {/* Disclosure-only proof gap: informational copy, never warning styling. */}
                       {(independentProofGapNotice(report.runGoalDecision) ||
                         goalDecisionHelp(report.runGoalDecision.recommendedDecision)) && (
-                        <div style={{fontSize: 12, marginTop: 8, color: 'var(--ide-fg-muted)'}}>
+                        <div
+                          style={{
+                            fontSize: 'var(--ide-t-caption)',
+                            marginTop: 8,
+                            color: 'var(--ide-fg-muted)',
+                          }}
+                        >
                           {independentProofGapNotice(report.runGoalDecision) ??
                             goalDecisionHelp(report.runGoalDecision.recommendedDecision)}
                         </div>
                       )}
                       {report.runGoalDecision.goalSummary && (
-                        <div style={{fontSize: 12, marginTop: 8}}>
+                        <div style={{fontSize: 'var(--ide-t-caption)', marginTop: 8}}>
                           Goal: {report.runGoalDecision.goalSummary}
                         </div>
                       )}
@@ -3046,7 +3326,7 @@ export default function IdeRunResult() {
                         <div style={{marginTop: 10}}>
                           <div
                             className='ide-mono'
-                            style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}
+                            style={{fontSize: 'var(--ide-t-caption)', color: 'var(--ide-fg-muted)'}}
                           >
                             Decision evidence
                           </div>
@@ -3059,24 +3339,38 @@ export default function IdeRunResult() {
                                 borderTop: '1px solid var(--ide-border)',
                               }}
                             >
-                              <div style={{display: 'flex', alignItems: 'center', gap: 8}}>
-                                <IdeBadge kind={goalProofKind(reference.proofStatus)}>
-                                  {goalProofLabel(reference.proofStatus)}
-                                </IdeBadge>
-                                <span style={{fontSize: 12, fontWeight: 600}}>
+                              {/* Server-chosen evidence identifiers are long and exact; the row
+                                  wraps rather than pushing them past the card edge at 375px. */}
+                              <div className='rl-row' style={{gap: 8}}>
+                                <span className='rl-status-col'>
+                                  <IdeBadge kind={goalProofKind(reference.proofStatus)}>
+                                    {goalProofLabel(reference.proofStatus)}
+                                  </IdeBadge>
+                                </span>
+                                <span
+                                  className='rl-row-title'
+                                  style={{fontSize: 'var(--ide-t-caption)', fontWeight: 600}}
+                                >
                                   {reference.label}
                                 </span>
                                 <span
-                                  className='ide-mono'
-                                  style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}
+                                  className='ide-mono rl-break'
+                                  style={{
+                                    fontSize: 'var(--ide-t-caption)',
+                                    color: 'var(--ide-fg-muted)',
+                                  }}
                                 >
                                   {reference.observedStatus}
                                 </span>
                               </div>
                               {(reference.source || reference.confidence) && (
                                 <div
-                                  className='ide-mono'
-                                  style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 4}}
+                                  className='ide-mono rl-break'
+                                  style={{
+                                    fontSize: 'var(--ide-t-caption)',
+                                    color: 'var(--ide-fg-muted)',
+                                    marginTop: 4,
+                                  }}
                                 >
                                   {[reference.source, reference.confidence]
                                     .filter(Boolean)
@@ -3085,8 +3379,12 @@ export default function IdeRunResult() {
                               )}
                               {reference.artifact && (
                                 <div
-                                  className='ide-mono'
-                                  style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 3}}
+                                  className='ide-mono rl-break'
+                                  style={{
+                                    fontSize: 'var(--ide-t-caption)',
+                                    color: 'var(--ide-fg-muted)',
+                                    marginTop: 3,
+                                  }}
                                 >
                                   {reference.artifact}
                                   {reference.total != null && reference.observed != null
@@ -3100,12 +3398,18 @@ export default function IdeRunResult() {
                       ) : (
                         <>
                           {report.runGoalDecision.reason && (
-                            <div style={{fontSize: 13, marginTop: 8}}>
+                            <div style={{fontSize: 'var(--ide-t-body)', marginTop: 8}}>
                               {report.runGoalDecision.reason}
                             </div>
                           )}
                           {report.runGoalDecision.recommendedNextStep && (
-                            <div style={{fontSize: 12, marginTop: 8, color: 'var(--ide-fg-muted)'}}>
+                            <div
+                              style={{
+                                fontSize: 'var(--ide-t-caption)',
+                                marginTop: 8,
+                                color: 'var(--ide-fg-muted)',
+                              }}
+                            >
                               Next: {report.runGoalDecision.recommendedNextStep}
                             </div>
                           )}
@@ -3117,11 +3421,20 @@ export default function IdeRunResult() {
                           <div style={{marginTop: 10}}>
                             <div
                               className='ide-mono'
-                              style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}
+                              style={{
+                                fontSize: 'var(--ide-t-caption)',
+                                color: 'var(--ide-fg-muted)',
+                              }}
                             >
                               Remaining proof
                             </div>
-                            <ul style={{margin: '6px 0 0 18px', padding: 0, fontSize: 12}}>
+                            <ul
+                              style={{
+                                margin: '6px 0 0 18px',
+                                padding: 0,
+                                fontSize: 'var(--ide-t-caption)',
+                              }}
+                            >
                               {report.runGoalDecision.incompleteItems.slice(0, 4).map((item, i) => (
                                 <li key={i}>{item}</li>
                               ))}
@@ -3134,11 +3447,20 @@ export default function IdeRunResult() {
                           <div style={{marginTop: 10}}>
                             <div
                               className='ide-mono'
-                              style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}
+                              style={{
+                                fontSize: 'var(--ide-t-caption)',
+                                color: 'var(--ide-fg-muted)',
+                              }}
                             >
                               Risks
                             </div>
-                            <ul style={{margin: '6px 0 0 18px', padding: 0, fontSize: 12}}>
+                            <ul
+                              style={{
+                                margin: '6px 0 0 18px',
+                                padding: 0,
+                                fontSize: 'var(--ide-t-caption)',
+                              }}
+                            >
                               {report.runGoalDecision.risks.slice(0, 4).map((risk, i) => (
                                 <li key={i}>{risk}</li>
                               ))}
@@ -3163,19 +3485,31 @@ export default function IdeRunResult() {
                                 : 'none',
                           }}
                         >
-                          <div style={{display: 'flex', gap: 8, alignItems: 'center'}}>
-                            <IdeBadge kind={evidenceKind(e.status)}>{e.status}</IdeBadge>
-                            <span style={{fontWeight: 600}}>{e.label}</span>
+                          {/* At 375px these rows measured 443px inside a 335px card with overflow
+                              visible, so the confidence and the tail of the source identifier were
+                              simply unreachable. An evidence identifier must stay exact, so it
+                              wraps rather than truncating. */}
+                          <div className='rl-row' style={{gap: 8}}>
+                            <span className='rl-status-col'>
+                              <IdeBadge kind={evidenceKind(e.status)}>{e.status}</IdeBadge>
+                            </span>
+                            <span className='rl-row-title' style={{fontWeight: 600}}>
+                              {e.label}
+                            </span>
                             <span
-                              className='ide-mono'
-                              style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}
+                              className='ide-mono rl-break'
+                              style={{
+                                fontSize: 'var(--ide-t-caption)',
+                                color: 'var(--ide-fg-muted)',
+                              }}
                             >
                               {e.source}
                             </span>
                             <span
                               className='ide-mono'
                               style={{
-                                fontSize: 11,
+                                flex: '0 0 auto',
+                                fontSize: 'var(--ide-t-caption)',
                                 color: confidenceColor(e.confidence),
                                 marginLeft: 'auto',
                               }}
@@ -3183,10 +3517,16 @@ export default function IdeRunResult() {
                               {e.confidence}
                             </span>
                           </div>
-                          <div style={{fontSize: 13, marginTop: 4}}>{e.summary}</div>
+                          <div style={{fontSize: 'var(--ide-t-body)', marginTop: 4}}>
+                            {e.summary}
+                          </div>
                           <div
-                            className='ide-mono'
-                            style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 4}}
+                            className='ide-mono rl-break'
+                            style={{
+                              fontSize: 'var(--ide-t-caption)',
+                              color: 'var(--ide-fg-muted)',
+                              marginTop: 4,
+                            }}
                           >
                             {e.artifact}
                             {e.total != null && e.observed != null
@@ -3214,19 +3554,26 @@ export default function IdeRunResult() {
                               i < issues.length - 1 ? '1px solid var(--ide-border)' : 'none',
                           }}
                         >
-                          <div style={{display: 'flex', gap: 8, alignItems: 'center'}}>
-                            <IdeBadge kind={sv.k}>{sv.l}</IdeBadge>
+                          <div className='rl-row' style={{gap: 8}}>
+                            <span className='rl-status-col'>
+                              <IdeBadge kind={sv.k}>{sv.l}</IdeBadge>
+                            </span>
                             {is.filePath && (
                               <span
-                                className='ide-mono'
-                                style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}
+                                className='ide-mono rl-break'
+                                style={{
+                                  flex: '1 1 12ch',
+                                  fontSize: 'var(--ide-t-caption)',
+                                  color: 'var(--ide-fg-muted)',
+                                }}
                               >
                                 {is.filePath}
                               </span>
                             )}
                             <span
                               style={{
-                                fontSize: 10,
+                                flex: '0 0 auto',
+                                fontSize: 'var(--ide-t-caption)',
                                 color: 'var(--ide-fg-muted)',
                                 marginLeft: 'auto',
                               }}
@@ -3234,9 +3581,17 @@ export default function IdeRunResult() {
                               {is.stage}
                             </span>
                           </div>
-                          <div style={{fontSize: 13, marginTop: 4}}>{is.description}</div>
+                          <div style={{fontSize: 'var(--ide-t-body)', marginTop: 4}}>
+                            {is.description}
+                          </div>
                           {is.fix && (
-                            <div style={{fontSize: 12, color: 'var(--ide-green)', marginTop: 3}}>
+                            <div
+                              style={{
+                                fontSize: 'var(--ide-t-caption)',
+                                color: 'var(--ide-green)',
+                                marginTop: 3,
+                              }}
+                            >
                               Fix: {is.fix}
                             </div>
                           )}
@@ -3295,17 +3650,7 @@ export default function IdeRunResult() {
               )}
             </div>
             {!hasCostEvidence && failedTerminal && (
-              <div
-                className='ide-card'
-                style={{
-                  marginTop: 12,
-                  borderColor: 'color-mix(in srgb, var(--ide-yellow) 55%, var(--ide-border))',
-                  background: 'color-mix(in srgb, var(--ide-yellow) 8%, var(--ide-bg-card))',
-                  color: 'var(--ide-fg-muted)',
-                  fontSize: 12.5,
-                  lineHeight: 1.45,
-                }}
-              >
+              <div className='ide-note warn' style={{marginTop: 12}}>
                 No token or AI-credit usage was recorded for this failed run. That usually means the
                 run stopped before a billable provider response, for example provider authentication
                 failure or tool setup failure.
@@ -3331,7 +3676,10 @@ export default function IdeRunResult() {
                         style={{alignItems: 'start'}}
                       >
                         <span>{agent.role}</span>
-                        <span className='ide-mono' style={{fontSize: 11, textAlign: 'right'}}>
+                        <span
+                          className='ide-mono'
+                          style={{fontSize: 'var(--ide-t-caption)', textAlign: 'right'}}
+                        >
                           {agent.provider || '—'} · {agent.model || '—'}
                           <br />
                           {agent.inputTokens.toLocaleString()} in ·{' '}
@@ -3362,7 +3710,13 @@ export default function IdeRunResult() {
                       No per-call attribution is available for this run.
                     </div>
                   ) : (
-                    <table style={{width: '100%', borderCollapse: 'collapse', fontSize: 11}}>
+                    <table
+                      style={{
+                        width: '100%',
+                        borderCollapse: 'collapse',
+                        fontSize: 'var(--ide-t-caption)',
+                      }}
+                    >
                       <thead>
                         <tr style={{textAlign: 'left', color: 'var(--ide-fg-muted)'}}>
                           <th>Role / task</th>
@@ -3441,7 +3795,13 @@ export default function IdeRunResult() {
                   {stepCalls.kind === 'rows' && stepCalls.hasMore && (
                     // RR-1558 paged the ledger newest-first. Without this the table silently
                     // looks like the complete history of the run.
-                    <div style={{marginTop: 8, fontSize: 11, color: 'var(--ide-fg-muted)'}}>
+                    <div
+                      style={{
+                        marginTop: 8,
+                        fontSize: 'var(--ide-t-caption)',
+                        color: 'var(--ide-fg-muted)',
+                      }}
+                    >
                       Showing the {stepCalls.rows.length.toLocaleString()} most recent of{' '}
                       {stepCalls.total.toLocaleString()} provider calls.
                     </div>
@@ -3482,12 +3842,22 @@ export default function IdeRunResult() {
                 <div className='ide-card'>
                   <div
                     className='ide-mono'
-                    style={{fontSize: 12, wordBreak: 'break-all', marginBottom: 10}}
+                    style={{
+                      fontSize: 'var(--ide-t-caption)',
+                      wordBreak: 'break-all',
+                      marginBottom: 10,
+                    }}
                   >
                     {prUrl}
                   </div>
                   <a className='ide-btn' href={prUrl} target='_blank' rel='noreferrer'>
-                    ↗ Open on {scmProviderLabel(run?.scmProvider)}
+                    <ExternalLink
+                      className='rl-icon'
+                      size='1em'
+                      strokeWidth={1.75}
+                      aria-hidden='true'
+                    />
+                    Open on {scmProviderLabel(run?.scmProvider)}
                   </a>
                 </div>
                 <RunPrCiPanel runId={runId} />
@@ -3512,7 +3882,19 @@ export default function IdeRunResult() {
                     action('push', () => api.pushToScm(runId), pushOutcomeMessage, reloadRun)
                   }
                 >
-                  {busy === 'push' ? 'Pushing…' : '⤴ Push changes'}
+                  {busy === 'push' ? (
+                    'Pushing…'
+                  ) : (
+                    <>
+                      <ArrowUpFromLine
+                        className='rl-icon'
+                        size='1em'
+                        strokeWidth={1.75}
+                        aria-hidden='true'
+                      />
+                      Push changes
+                    </>
+                  )}
                 </button>
               </div>
             )}
@@ -3547,7 +3929,19 @@ export default function IdeRunResult() {
                 }
                 onClick={() => void rerunTests()}
               >
-                {testRunPending ? '⏳ Tests running…' : '↻ Re-run tests'}
+                {testRunPending ? (
+                  'Tests running…'
+                ) : (
+                  <>
+                    <RotateCw
+                      className='rl-icon'
+                      size='1em'
+                      strokeWidth={1.75}
+                      aria-hidden='true'
+                    />
+                    Re-run tests
+                  </>
+                )}
               </button>
             </h1>
             {testRunPending && (
@@ -3563,22 +3957,40 @@ export default function IdeRunResult() {
               <>
                 <div className='ide-card' style={{display: 'flex', gap: 18}}>
                   <div>
-                    <div style={{fontSize: 22, fontWeight: 700}}>{testsSummary?.headline}</div>
-                    <div style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}>
+                    <div style={{fontSize: 'var(--ide-t-title)', fontWeight: 700}}>
+                      {testsSummary?.headline}
+                    </div>
+                    <div style={{fontSize: 'var(--ide-t-caption)', color: 'var(--ide-fg-muted)'}}>
                       {testsSummary?.label}
                     </div>
                   </div>
                   {testsSummary?.measured && (
                     <>
                       <div>
-                        <div style={{fontSize: 22, fontWeight: 700, color: 'var(--ide-red)'}}>
+                        <div
+                          style={{
+                            fontSize: 'var(--ide-t-title)',
+                            fontWeight: 700,
+                            color: 'var(--ide-red)',
+                          }}
+                        >
                           {tests.failed}
                         </div>
-                        <div style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}>failed</div>
+                        <div
+                          style={{fontSize: 'var(--ide-t-caption)', color: 'var(--ide-fg-muted)'}}
+                        >
+                          failed
+                        </div>
                       </div>
                       <div>
-                        <div style={{fontSize: 22, fontWeight: 700}}>{tests.errors}</div>
-                        <div style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}>errors</div>
+                        <div style={{fontSize: 'var(--ide-t-title)', fontWeight: 700}}>
+                          {tests.errors}
+                        </div>
+                        <div
+                          style={{fontSize: 'var(--ide-t-caption)', color: 'var(--ide-fg-muted)'}}
+                        >
+                          errors
+                        </div>
                       </div>
                     </>
                   )}
@@ -3586,7 +3998,7 @@ export default function IdeRunResult() {
                     style={{
                       marginLeft: 'auto',
                       alignSelf: 'center',
-                      fontSize: 12,
+                      fontSize: 'var(--ide-t-caption)',
                       color: 'var(--ide-fg-muted)',
                     }}
                   >
@@ -3632,11 +4044,16 @@ export default function IdeRunResult() {
                             >
                               {tk.status}
                             </IdeBadge>
-                            <span style={{flex: 1, fontSize: 13, fontWeight: 500}}>
+                            <span style={{flex: 1, fontSize: 'var(--ide-t-body)', fontWeight: 500}}>
                               {tk.taskName}
                             </span>
                             {tk.testCategory && (
-                              <span style={{fontSize: 10, color: 'var(--ide-fg-muted)'}}>
+                              <span
+                                style={{
+                                  fontSize: 'var(--ide-t-caption)',
+                                  color: 'var(--ide-fg-muted)',
+                                }}
+                              >
                                 {tk.testCategory}
                               </span>
                             )}
@@ -3644,7 +4061,11 @@ export default function IdeRunResult() {
                           {tk.compilationError && (
                             <div
                               className='ide-mono'
-                              style={{fontSize: 11, color: 'var(--ide-red)', marginTop: 4}}
+                              style={{
+                                fontSize: 'var(--ide-t-caption)',
+                                color: 'var(--ide-red)',
+                                marginTop: 4,
+                              }}
                             >
                               {tk.compilationError}
                             </div>
@@ -3673,12 +4094,18 @@ export default function IdeRunResult() {
                       const affected = gAny.failureCount ?? gAny.count ?? 0;
                       return (
                         <div className='ide-card' key={i} style={{marginBottom: 10}}>
-                          <div style={{fontSize: 13, fontWeight: 600, marginBottom: 4}}>
+                          <div
+                            style={{
+                              fontSize: 'var(--ide-t-body)',
+                              fontWeight: 600,
+                              marginBottom: 4,
+                            }}
+                          >
                             {gAny.description || gAny.signature || `Root cause ${i + 1}`}
                           </div>
                           <div
                             style={{
-                              fontSize: 11,
+                              fontSize: 'var(--ide-t-caption)',
                               color: 'var(--ide-fg-muted)',
                               marginBottom: fix ? 10 : 0,
                             }}
@@ -3690,8 +4117,8 @@ export default function IdeRunResult() {
                               style={{
                                 background: 'var(--ide-bg-input)',
                                 padding: '10px 12px',
-                                borderRadius: 6,
-                                fontSize: 12,
+                                borderRadius: 'var(--ide-r-control)',
+                                fontSize: 'var(--ide-t-caption)',
                                 lineHeight: 1.5,
                               }}
                             >
@@ -3759,16 +4186,24 @@ export default function IdeRunResult() {
                               <IdeBadge kind={st === 'PASSED' ? 'ok' : bad ? 'bad' : 'warn'}>
                                 {st}
                               </IdeBadge>
-                              <span style={{flex: 1, fontSize: 13, minWidth: 0}}>
+                              <span style={{flex: 1, fontSize: 'var(--ide-t-body)', minWidth: 0}}>
                                 <span style={{fontWeight: 500}}>{r.testMethod}</span>{' '}
                                 <span
                                   className='ide-mono'
-                                  style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}
+                                  style={{
+                                    fontSize: 'var(--ide-t-caption)',
+                                    color: 'var(--ide-fg-muted)',
+                                  }}
                                 >
                                   {r.testClass}
                                 </span>
                               </span>
-                              <span style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}>
+                              <span
+                                style={{
+                                  fontSize: 'var(--ide-t-caption)',
+                                  color: 'var(--ide-fg-muted)',
+                                }}
+                              >
                                 {fmtDur(r.durationMs)}
                               </span>
                               {bad && r.testResultId != null && (
@@ -3799,7 +4234,7 @@ export default function IdeRunResult() {
                               <div
                                 className='ide-mono'
                                 style={{
-                                  fontSize: 11,
+                                  fontSize: 'var(--ide-t-caption)',
                                   color: 'var(--ide-red)',
                                   marginTop: 4,
                                   whiteSpace: 'pre-wrap',
@@ -3816,7 +4251,7 @@ export default function IdeRunResult() {
                     {tests.results.length > 60 && (
                       <div
                         style={{
-                          fontSize: 11,
+                          fontSize: 'var(--ide-t-caption)',
                           color: 'var(--ide-fg-muted)',
                           marginTop: 8,
                         }}
@@ -3840,7 +4275,13 @@ export default function IdeRunResult() {
             style={{position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column'}}
           >
             <h1 className='ide-h1'>Ask about this work</h1>
-            <div style={{fontSize: 12, color: 'var(--ide-fg-muted)', marginBottom: 12}}>
+            <div
+              style={{
+                fontSize: 'var(--ide-t-caption)',
+                color: 'var(--ide-fg-muted)',
+                marginBottom: 12,
+              }}
+            >
               Ask the agent about its decisions, or describe a change and start a fresh iteration
               from this work&apos;s codebase.
             </div>
@@ -3881,7 +4322,7 @@ export default function IdeRunResult() {
                     >
                       <div
                         className='ide-mono'
-                        style={{fontSize: 10, opacity: 0.7, marginBottom: 4}}
+                        style={{fontSize: 'var(--ide-t-caption)', opacity: 0.7, marginBottom: 4}}
                       >
                         {isUser ? 'YOU' : 'RUN COPILOT'}
                       </div>
@@ -3892,7 +4333,13 @@ export default function IdeRunResult() {
                 })
               )}
               {chatBusy && (
-                <div style={{alignSelf: 'flex-start', fontSize: 12, color: 'var(--ide-fg-muted)'}}>
+                <div
+                  style={{
+                    alignSelf: 'flex-start',
+                    fontSize: 'var(--ide-t-caption)',
+                    color: 'var(--ide-fg-muted)',
+                  }}
+                >
                   Thinking…
                 </div>
               )}

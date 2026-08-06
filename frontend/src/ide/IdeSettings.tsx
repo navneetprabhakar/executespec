@@ -298,11 +298,7 @@ export function IdeIntegrations() {
       ) : (
         // RR-772 — a connected integration must be revocable from the surface where
         // it was connected. The server exposes DELETE /integrations/slack/disconnect.
-        <button
-          className='ide-btn ghost'
-          style={{...INT_BTN, color: 'var(--ide-red)', borderColor: 'var(--ide-red)'}}
-          onClick={() => setDisconnectSlack(true)}
-        >
+        <button className='ide-btn danger' style={INT_BTN} onClick={() => setDisconnectSlack(true)}>
           Disconnect
         </button>
       ),
@@ -348,15 +344,7 @@ export function IdeIntegrations() {
       <div className='ide-sub'>Connect GitHub, Slack, and your issue trackers.</div>
 
       {(err || msg) && (
-        <div
-          className='ide-card'
-          style={{
-            marginBottom: 12,
-            fontSize: 13,
-            color: err ? 'var(--ide-red)' : 'var(--ide-green)',
-            borderColor: err ? 'var(--ide-red)' : 'var(--ide-green)',
-          }}
-        >
+        <div className={`ide-note ${err ? 'bad' : 'ok'}`} style={{marginBottom: 12}} role='status'>
           {err || msg}
         </div>
       )}
@@ -367,36 +355,31 @@ export function IdeIntegrations() {
         <IdeLoader label='Loading integrations…' />
       ) : (
         <div className='ide-card' style={{padding: 0}}>
-          {rows.map((r, i) => (
-            <div
-              key={r.name}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 10,
-                padding: '13px 16px',
-                borderBottom: i < rows.length - 1 ? '1px solid var(--ide-border)' : 'none',
-              }}
-            >
-              <div style={{flex: 1, minWidth: 0}}>
-                <div style={{fontWeight: 500}}>
+          {rows.map((r) => (
+            <div key={r.name} className='ob-row'>
+              <div className='ob-row-main'>
+                <div className='ob-row-title'>
                   {r.name}
                   {r.sub && (
                     <span style={{color: 'var(--ide-fg-muted)', fontWeight: 400}}> · {r.sub}</span>
                   )}
                 </div>
-                <div style={{fontSize: 11.5, color: 'var(--ide-fg-muted)', marginTop: 2}}>
-                  {r.desc}
-                </div>
+                <div className='ob-row-meta'>{r.desc}</div>
               </div>
-              <IdeBadge kind={r.connected ? 'ok' : 'warn'}>
-                {r.connected
-                  ? 'Connected'
-                  : r.statusUnknown
-                    ? 'Status unavailable'
-                    : 'Not connected'}
-              </IdeBadge>
-              {r.actions}
+              {/* ALIGNMENT IS A COLUMN — "Connected", "Not connected" and
+                  "Status unavailable" are three different widths, so a
+                  shrink-to-fit badge started every row's action button at a
+                  different x. */}
+              <div className='ob-status ob-status-wide'>
+                <IdeBadge kind={r.connected ? 'ok' : 'warn'}>
+                  {r.connected
+                    ? 'Connected'
+                    : r.statusUnknown
+                      ? 'Status unavailable'
+                      : 'Not connected'}
+                </IdeBadge>
+              </div>
+              <div className='ob-actions ob-actions-fixed'>{r.actions}</div>
             </div>
           ))}
         </div>
@@ -417,38 +400,38 @@ export function IdeIntegrations() {
         <div className='ide-empty'>No personal access tokens.</div>
       ) : (
         <div className='ide-card' style={{padding: 0}}>
-          {pats.map((token, i) => (
-            <div
-              key={token.id}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 10,
-                padding: '12px 16px',
-                borderBottom: i < pats.length - 1 ? '1px solid var(--ide-border)' : 'none',
-              }}
-            >
-              <div style={{flex: 1, minWidth: 0}}>
-                <div style={{fontWeight: 500}}>{token.name}</div>
-                <div style={{fontSize: 11.5, color: 'var(--ide-fg-muted)', marginTop: 2}}>
-                  {token.tokenPrefix}… · created {new Date(token.createdAt).toLocaleDateString()}
-                  {token.lastUsedAt
-                    ? ` · last used ${new Date(token.lastUsedAt).toLocaleDateString()}`
-                    : ' · never used'}
+          {pats.map((token) => (
+            <div key={token.id} className='ob-row'>
+              <div className='ob-row-main'>
+                <div className='ob-row-title ob-truncate'>{token.name}</div>
+                <div className='ob-row-meta'>
+                  <span className='ide-mono'>{token.tokenPrefix}…</span>
+                  <span>·</span>
+                  <span>created {new Date(token.createdAt).toLocaleDateString()}</span>
+                  <span>·</span>
+                  <span>
+                    {token.lastUsedAt
+                      ? `last used ${new Date(token.lastUsedAt).toLocaleDateString()}`
+                      : 'never used'}
+                  </span>
                 </div>
               </div>
-              <IdeBadge kind={token.revoked ? 'warn' : 'ok'}>
-                {token.revoked ? 'Revoked' : 'Active'}
-              </IdeBadge>
-              {!token.revoked && (
-                <button
-                  className='ide-btn ghost'
-                  style={{...INT_BTN, color: 'var(--ide-red)', borderColor: 'var(--ide-red)'}}
-                  onClick={() => setRevokePat(token)}
-                >
-                  Revoke
-                </button>
-              )}
+              <div className='ob-status'>
+                <IdeBadge kind={token.revoked ? 'warn' : 'ok'}>
+                  {token.revoked ? 'Revoked' : 'Active'}
+                </IdeBadge>
+              </div>
+              <div className='ob-actions'>
+                {!token.revoked && (
+                  <button
+                    className='ide-btn danger'
+                    style={INT_BTN}
+                    onClick={() => setRevokePat(token)}
+                  >
+                    Revoke
+                  </button>
+                )}
+              </div>
             </div>
           ))}
         </div>
@@ -700,7 +683,7 @@ export function IdeAdmin() {
             marginBottom: 12,
             color: toast.kind === 'ok' ? 'var(--ide-green)' : 'var(--ide-red)',
             borderColor: toast.kind === 'ok' ? 'var(--ide-green)' : 'var(--ide-red)',
-            fontSize: 12.5,
+            fontSize: 12,
           }}
         >
           {toast.text}
@@ -749,10 +732,10 @@ function AdminOverview() {
       <div style={{display: 'flex', gap: 10, flexWrap: 'wrap'}}>
         {FUNNEL_STAGES.map(([label, key]) => (
           <div key={key} className='ide-card' style={{flex: 1, minWidth: 120}}>
-            <div style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}>{label}</div>
+            <div style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}>{label}</div>
             <div
               style={{
-                fontSize: 22,
+                fontSize: 24,
                 fontWeight: 700,
                 color: 'var(--ide-fg-bright)',
                 marginTop: 4,
@@ -858,7 +841,7 @@ function AdminUsers({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => vo
               <div style={{fontWeight: 500}}>
                 {u.firstName} {u.lastName}
               </div>
-              <div style={{fontSize: 11.5, color: 'var(--ide-fg-muted)'}} className='ide-mono'>
+              <div style={{fontSize: 12, color: 'var(--ide-fg-muted)'}} className='ide-mono'>
                 {u.email}
               </div>
             </div>
@@ -988,7 +971,7 @@ function AdminOrgs({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => voi
           <div key={o.id} style={{...rowStyle(i === orgs.length - 1), flexWrap: 'wrap'}}>
             <div style={{flex: 1, minWidth: 160}}>
               <div style={{fontWeight: 500}}>{o.name}</div>
-              <div style={{fontSize: 11.5, color: 'var(--ide-fg-muted)'}}>
+              <div style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}>
                 {o.monthlyRunCount} work items ·{' '}
                 {o.monthlyRunLimitOverride != null
                   ? `${o.monthlyRunLimitOverride} cap`
@@ -1195,10 +1178,10 @@ function AdminAnalytics({orgId}: {orgId: string | null}) {
               ['Total cost', `$${(usage.totalCost ?? 0).toFixed(4)}`],
             ].map(([label, value]) => (
               <div key={label} className='ide-card' style={{flex: 1, minWidth: 110}}>
-                <div style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}>{label}</div>
+                <div style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}>{label}</div>
                 <div
                   style={{
-                    fontSize: 20,
+                    fontSize: 18,
                     fontWeight: 700,
                     color: 'var(--ide-fg-bright)',
                     marginTop: 4,
@@ -1217,7 +1200,7 @@ function AdminAnalytics({orgId}: {orgId: string | null}) {
           <div className='ide-h2'>Cost by model</div>
           <AdminList>
             {costEntries.map(([model, cost], i) => (
-              <div key={model} style={{...rowStyle(i === costEntries.length - 1), fontSize: 12.5}}>
+              <div key={model} style={{...rowStyle(i === costEntries.length - 1), fontSize: 12}}>
                 <span className='ide-mono' style={{flex: 1}}>
                   {model}
                 </span>
@@ -1259,7 +1242,7 @@ function AdminAnalytics({orgId}: {orgId: string | null}) {
           <div className='ide-h2'>Members · {members.length}</div>
           <AdminList>
             {members.map((m, i) => (
-              <div key={m.userId} style={{...rowStyle(i === members.length - 1), fontSize: 12.5}}>
+              <div key={m.userId} style={{...rowStyle(i === members.length - 1), fontSize: 12}}>
                 <span style={{flex: 1}}>
                   {m.firstName} {m.lastName}
                 </span>
@@ -1275,7 +1258,7 @@ function AdminAnalytics({orgId}: {orgId: string | null}) {
 
       <div className='ide-h2'>Audit tenant</div>
       <div className='ide-card'>
-        <label style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}>
+        <label style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}>
           Organization
           <select
             className='ide-input'
@@ -1290,7 +1273,7 @@ function AdminAnalytics({orgId}: {orgId: string | null}) {
             ))}
           </select>
         </label>
-        <div style={{fontSize: 11.5, color: 'var(--ide-fg-muted)', marginTop: 7}}>
+        <div style={{fontSize: 12, color: 'var(--ide-fg-muted)', marginTop: 7}}>
           SUPER_ADMIN can select any tenant. Every query remains explicitly tenant-scoped; there is
           no accidental cross-tenant combined export.
         </div>
@@ -1458,7 +1441,7 @@ function FeatureFlagsPanel({ok, bad}: {ok: (s: string) => void; bad: (e: unknown
             {flags.map((f, i) => {
               const isBool = f.valueType === 'BOOLEAN';
               return (
-                <div key={f.id} style={{...rowStyle(i === flags.length - 1), fontSize: 12.5}}>
+                <div key={f.id} style={{...rowStyle(i === flags.length - 1), fontSize: 12}}>
                   <span style={{flex: 1, minWidth: 0}}>
                     <span
                       className='ide-mono'
@@ -1467,12 +1450,12 @@ function FeatureFlagsPanel({ok, bad}: {ok: (s: string) => void; bad: (e: unknown
                       {f.flagKey}
                     </span>
                     {f.description && (
-                      <span style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}>
+                      <span style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}>
                         {f.description}
                       </span>
                     )}
                   </span>
-                  <span style={{color: 'var(--ide-fg-muted)', fontSize: 11}}>{f.scope}</span>
+                  <span style={{color: 'var(--ide-fg-muted)', fontSize: 12}}>{f.scope}</span>
                   {isBool && isSuperAdmin ? (
                     <IdeSwitch
                       on={f.flagValue === 'true'}
@@ -1587,7 +1570,7 @@ function AdminOps({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => void
       <div style={{...ROW_BASE, borderBottom: '1px solid var(--ide-border)'}}>
         <div style={{flex: 1}}>
           <div style={{fontWeight: 500, color: danger ? 'var(--ide-red)' : undefined}}>{title}</div>
-          <div style={{fontSize: 11.5, color: 'var(--ide-fg-muted)'}}>{desc}</div>
+          <div style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}>{desc}</div>
         </div>
         <button
           className='ide-btn ghost'
@@ -1630,7 +1613,7 @@ function AdminOps({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => void
         <div style={{...ROW_BASE, borderBottom: 'none'}}>
           <div style={{flex: 1}}>
             <div style={{fontWeight: 500}}>Trigger usage report</div>
-            <div style={{fontSize: 11.5, color: 'var(--ide-fg-muted)'}}>
+            <div style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}>
               Email the periodic usage digest to org admins.
             </div>
           </div>
@@ -1726,7 +1709,7 @@ function AdminTopups({ok, bad}: {ok: (s: string) => void; bad: (e: unknown) => v
             <div key={p.id} style={{...rowStyle(i === pkgs.length - 1), flexWrap: 'wrap'}}>
               <div style={{flex: 1, minWidth: 150}}>
                 <div style={{fontWeight: 500}}>{p.name}</div>
-                <div style={{fontSize: 11.5, color: 'var(--ide-fg-muted)'}}>
+                <div style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}>
                   {p.runCount} work items · ₹{p.amountInr} / ${p.amountUsd}
                 </div>
               </div>
