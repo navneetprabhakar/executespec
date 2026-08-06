@@ -53,7 +53,10 @@ class GodClassLineCeilingTest {
     ceilings.put("src/main/java/com/navneet/executespec/harness/SequentialExecutor.java", 4693);
     ceilings.put("src/main/java/com/navneet/executespec/engine/WorkerAgent.java", 3415);
     ceilings.put("frontend/src/lib/api/core.ts", 1681);
-    ceilings.put("frontend/src/ide/agentPanels.tsx", 1682);
+    // Lowered 2026-08-06 (chat/agent design pass): the tool-call grammar moved to
+    // agentToolActivity.tsx and the approval cards to AgentApprovalCards.tsx. The
+    // ratchet only moves DOWN — this is the new measured line count.
+    ceilings.put("frontend/src/ide/agentPanels.tsx", 1547);
     return Map.copyOf(ceilings);
   }
 

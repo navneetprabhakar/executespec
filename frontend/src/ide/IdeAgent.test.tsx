@@ -340,7 +340,8 @@ describe('IdeAgent', () => {
     expect(host.textContent).toContain('Add audit logs');
     // RR-839 — the trust panel states only enforced properties, not an unproven
     // credential-scope guarantee.
-    expect(host.textContent).toContain('Runs on a policy-guarded server workspace');
+    // Compressed to a fragment; the load-bearing qualifier survives verbatim.
+    expect(host.textContent).toContain('Policy-guarded server workspace');
     expect(host.textContent).not.toContain('Repo token scoped to selected project');
     // Internals are de-jargoned out of the main view
     expect(host.textContent).not.toContain('chat_answer');
@@ -362,8 +363,10 @@ describe('IdeAgent', () => {
     expect(host.textContent).not.toContain('0 of 0 credits left');
     expect(host.textContent).toContain('Run credits');
     expect(host.textContent).toContain('Operator diagnostics');
-    expect(host.textContent).toContain('These settings control conversation replies only');
-    expect(host.textContent).toContain('does not turn the chat model into a run-wide pin');
+    // Compressed: "applies to chat replies only" IS the no-run-wide-pin claim,
+    // so the third sentence restating it was removed rather than shortened.
+    expect(host.textContent).toContain('Applies to chat replies only');
+    expect(host.textContent).toContain('organization model matrix and per-task tier routing');
   });
 
   it('does not advertise an isolated sandbox when the runtime gates are off', async () => {
@@ -515,10 +518,10 @@ describe('IdeAgent', () => {
       'session service unavailable',
     );
     const firstRequest = api.createAgentSession.mock.calls[0]?.[0];
-    const retry = [...host.querySelectorAll<HTMLButtonElement>('button')].find((button) =>
-      button.textContent?.includes('Retry new session'),
+    const retry = [...host.querySelectorAll<HTMLButtonElement>('button')].find(
+      (button) => button.textContent?.trim() === 'Retry',
     );
-    if (!retry) throw new Error('Retry new session control was not rendered.');
+    if (!retry) throw new Error('Retry control was not rendered.');
 
     await act(async () => retry.click());
     await flush();
@@ -762,13 +765,12 @@ describe('IdeAgent', () => {
     const details = host.querySelector<HTMLDetailsElement>('details.agent-operator-details');
     expect(details).not.toBeNull();
     expect(details?.open).toBe(false);
-    expect(host.textContent).toContain('prepare a PR when publication gates pass');
-    expect(host.textContent).toContain('What will happen before spend');
+    expect(host.textContent).toContain('A PR is prepared only when publication gates pass');
+    expect(host.textContent).toContain('Before spend');
     expect(host.textContent).toContain('remote clone');
-    // RR-839 — honest trust copy: enforced properties only.
-    expect(host.textContent).toContain(
-      'Run actions and evidence are recorded subject to retention policy',
-    );
+    // RR-839 — honest trust copy: enforced properties only. Compressed to a
+    // fragment; "subject to retention policy" is load-bearing and survives.
+    expect(host.textContent).toContain('Actions and evidence recorded subject to retention policy');
     expect(host.textContent).toContain('BYOK cost caps are optional');
     expect(host.querySelectorAll('.agent-operator-intro').length).toBe(1);
     expect(host.querySelectorAll('.agent-empty').length).toBe(0);
@@ -1478,7 +1480,7 @@ describe('IdeAgent', () => {
     expect(host.textContent).toContain('Add billing audit logs');
     expect(host.textContent).toContain('Create sandbox plan');
     expect(host.textContent).toContain('approval before credits');
-    expect(host.textContent).toContain('What will happen before spend');
+    expect(host.textContent).toContain('Before spend');
     expect(host.textContent).toContain('Branch');
     // RR-839 — the trust panel must NOT claim a secret-hiding or outbound-network
     // policy: neither is enforced by the current policy-guarded host workspace.
@@ -1894,9 +1896,7 @@ describe('IdeAgent', () => {
     const projectSelect = host.querySelector<HTMLSelectElement>('#agent-project-select');
     expect(createProject?.disabled).toBe(true);
     expect(projectSelect?.disabled).toBe(true);
-    expect(host.textContent).toContain(
-      'cannot change while this conversation has an active execution',
-    );
+    expect(host.textContent).toContain('Locked while this conversation has an active run');
   });
 
   it('shows project-loading errors and retries without hiding the conversation', async () => {
@@ -2019,7 +2019,8 @@ describe('IdeAgent', () => {
     expect(resolveClose).not.toBeNull();
     expect(host.querySelector('[role="dialog"][aria-label="Close conversation?"]')).toBeNull();
     expect(host.querySelector('.agent-conversation-close')).toBeNull();
-    expect(host.textContent).toContain('No conversations yet.');
+    // Empty is now a designed state, not a bare sentence.
+    expect(host.textContent).toContain('No conversations yet');
 
     // Server completion keeps the closed row hidden even if the list still
     // returns its archived shell.

@@ -3443,11 +3443,13 @@
   line-height: 1.35;
   overflow-wrap: anywhere;
 }
+/* Inside the popover, so it takes a tint rather than a second stroke. */
 .agent-pop-balance {
   display: grid;
   gap: 4px;
-  border: 1px solid var(--ide-border);
+  border: 0;
   border-radius: var(--ide-r-card);
+  background: color-mix(in srgb, var(--ide-fg) 5%, transparent);
   padding: 8px;
   color: var(--ide-fg-muted);
   font-size: 12px;
@@ -3531,17 +3533,19 @@
   font-size: 14px;
   color: var(--ide-fg-bright);
 }
+/* Two counts are two facts, not two containers. */
 .agent-drawer-summary {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 6px;
-}
-.agent-drawer-summary span {
-  border: 1px solid var(--ide-border);
-  border-radius: var(--ide-r-control);
-  padding: 7px 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
   color: var(--ide-fg-muted);
   font-size: 12px;
+}
+.agent-drawer-summary span {
+  border: 0;
+  padding: 0;
+  color: inherit;
+  font-size: inherit;
   min-width: 0;
 }
 .agent-drawer-truth {
@@ -3893,44 +3897,158 @@
   color: var(--ide-blue);
   text-decoration: none;
 }
+/* ── Tool-call grammar ──────────────────────────────────────────────────────
+   A call is a PILL, inline-sized, so a run of them reads like annotated lines
+   of prose rather than a log dump. Hover BRIGHTENS instead of recolouring, so
+   the status colour stays legible while the target is obvious. Arguments and
+   results are the deeper altitude and stay one click away. */
 .agent-activity {
   display: flex;
   flex-wrap: wrap;
-  gap: 7px;
+  align-items: flex-start;
+  gap: 6px;
 }
-.agent-activity-chip {
+.agent-tool-pill {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: 12px;
-  color: var(--ide-fg-muted);
+  max-width: 100%;
+  min-height: 24px;
+  padding: 2px 9px;
   border: 1px solid var(--ide-border);
-  border-radius: 999px;
-  padding: 4px 10px;
+  border-radius: var(--ide-r-control);
+  background: var(--ide-bg-sidebar);
+  color: var(--ide-fg-muted);
+  font-size: 13px;
+  line-height: 1.4;
+  cursor: default;
+  list-style: none;
+  transition: filter 0.15s var(--ide-ease, ease);
 }
-.agent-activity-chip svg {
+/* Suppress BOTH default disclosure markers. Chrome draws the modern `::marker`
+   from `display: list-item` on the summary, so `list-style: none` alone left a
+   second chevron pointing the wrong way beside our own. */
+.agent-tool-pill::-webkit-details-marker,
+.agent-tool-pill::marker {
+  display: none;
+  content: '';
+}
+.agent-tool-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* File chip: mono basename, bounded, opens nothing it cannot deliver. */
+.agent-tool-file {
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0 5px;
+  border-radius: var(--ide-r-control);
+  background: color-mix(in srgb, var(--ide-fg) 8%, transparent);
+  color: var(--ide-fg);
+  font-family: var(--ide-font-mono);
+  font-size: 12px;
+}
+.agent-tool-pill.is-ok > svg:first-child,
+.agent-tool-call.is-ok > .agent-tool-pill > svg:first-child {
+  color: var(--ide-green);
+}
+.agent-tool-pill.is-err > svg:first-child,
+.agent-tool-call.is-err > .agent-tool-pill > svg:first-child {
+  color: var(--ide-red);
+}
+.agent-tool-pill.is-running > svg:first-child,
+.agent-tool-call.is-running > .agent-tool-pill > svg:first-child,
+.agent-tool-group > .agent-tool-pill > svg:first-child {
+  color: var(--ide-fg-muted);
+}
+.agent-tool-pill.is-event > svg:first-child {
   color: var(--ide-blue);
 }
-.agent-activity-evidence {
-  margin: 0;
-  border: 1px solid color-mix(in srgb, var(--ide-blue) 28%, transparent);
-  border-radius: var(--ide-r-card);
-  background: color-mix(in srgb, var(--ide-blue) 7%, transparent);
+.agent-tool-count.is-err {
+  color: var(--ide-red);
+  font-size: 12px;
 }
-.agent-activity-evidence summary {
+.agent-tool-call,
+.agent-tool-group {
+  margin: 0;
+  min-width: 0;
+  max-width: 100%;
+}
+/* A pill you can OPEN is a control and owes the surface's 32px target; a pure
+   annotation is not clickable and keeps prose density. */
+.agent-tool-call > summary,
+.agent-tool-group > summary {
   cursor: pointer;
-  list-style: none;
+  min-height: var(--ide-control-h);
 }
-.agent-activity-evidence summary::-webkit-details-marker {
-  display: none;
+.agent-tool-call > summary:hover,
+.agent-tool-group > summary:hover {
+  filter: brightness(1.25);
 }
-.agent-activity-evidence p {
-  margin: 0;
-  padding: 0 10px 9px 31px;
+/* The shared `.ide-root details > summary::before` chevron already sits inside
+   the pill's flex row and rotates on open — nothing to add here. */
+.agent-tool-detail {
+  display: grid;
+  gap: 8px;
+  margin-top: 6px;
+  padding: 9px 11px;
+  border-radius: var(--ide-r-card);
+  background: color-mix(in srgb, var(--ide-fg) 5%, transparent);
+}
+.agent-tool-detail-row {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+.agent-tool-detail-row > span {
   color: var(--ide-fg-muted);
   font-size: 12px;
-  line-height: 1.45;
+}
+.agent-tool-detail-row > pre {
+  margin: 0;
+  max-height: 220px;
+  overflow: auto;
+  color: var(--ide-fg);
+  font-family: var(--ide-font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+.agent-tool-group-body {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+  padding-left: 10px;
+  border-left: 2px solid var(--ide-border);
+}
+
+/* ── Streaming heartbeat ────────────────────────────────────────────────────
+   Blinks on its own clock, decoupled from token arrival, so a stalled network
+   or a thinking model never reads as a frozen app. Under reduced motion it
+   settles to steady rather than vanishing — "off" would be the wrong answer. */
+.agent-caret {
+  display: inline-block;
+  width: 2px;
+  height: 1.05em;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  background: var(--ide-blue);
+  animation: agent-caret-blink 1.1s step-end infinite;
+}
+@keyframes agent-caret-blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
 }
 .agent-typing {
   display: inline-flex;
@@ -3980,8 +4098,12 @@
 .agent-card-head svg {
   color: var(--ide-blue);
 }
+/* A two-word status ("risk low") must not break across lines when the head
+   tightens on a narrow viewport. */
 .agent-card-meta {
   margin-left: auto;
+  flex-shrink: 0;
+  white-space: nowrap;
   font-size: 12px;
   color: var(--ide-fg-muted);
 }
@@ -4059,13 +4181,18 @@
   gap: 8px;
   color: var(--ide-error, #f14c4c);
 }
+/* A plan step list with no marker reads as stray indented prose. */
 .agent-card-tasks {
   margin: 0;
-  padding-left: 18px;
+  padding-left: 16px;
   font-size: 12px;
   color: var(--ide-fg);
   display: grid;
   gap: 2px;
+  list-style: disc;
+}
+.agent-card-tasks li::marker {
+  color: var(--ide-fg-muted);
 }
 .agent-card-actions {
   display: flex;
@@ -4085,19 +4212,22 @@
   font-size: 12px;
   font-weight: 650;
 }
+/* One visible edge per box. These sit INSIDE a card, so they are a definition
+   grid and a fact list — not six and five more bordered containers stacked
+   inside the one the reader is already looking at. */
 .agent-contract-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 6px;
+  gap: var(--ide-s2) var(--ide-s4);
 }
 .agent-contract-grid span {
   display: grid;
-  gap: 2px;
-  border: 1px solid var(--ide-border);
-  border-radius: var(--ide-r-control);
-  padding: 7px 8px;
+  gap: 1px;
+  border: 0;
+  padding: 0;
   color: var(--ide-fg-muted);
   font-size: 12px;
+  line-height: 1.4;
   min-width: 0;
 }
 .agent-contract-grid b {
@@ -4107,17 +4237,27 @@
 }
 .agent-trust-panel {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 6px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 2px var(--ide-s4);
 }
 .agent-trust-panel span {
-  border: 1px solid rgba(63, 185, 80, 0.26);
-  border-radius: var(--ide-r-control);
-  background: rgba(63, 185, 80, 0.06);
+  position: relative;
+  border: 0;
+  background: none;
+  padding: 0 0 0 13px;
   color: var(--ide-fg-muted);
-  padding: 6px 8px;
   font-size: 12px;
-  line-height: 1.35;
+  line-height: 1.5;
+}
+.agent-trust-panel span::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0.55em;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--ide-green);
 }
 .agent-trust-panel.compact {
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -4151,13 +4291,17 @@
   border-top: 1px solid var(--ide-border);
   padding-top: 9px;
 }
-.agent-btn-primary {
-  border-color: var(--ide-blue) !important;
-  color: var(--ide-accent-fg) !important;
+/* The one accent-filled commit on this surface is the composer's send and the
+   single visible proposal confirm. Approvals, navigation and drawer actions are
+   ghosts: colour appears only at the moment of commit or danger. */
+.ide-root .agent-btn-primary {
+  border-color: var(--ide-blue);
+  color: var(--ide-accent-fg);
 }
+/* The one card that IS a commit prompt keeps an accent leading edge — the
+   accent-filled confirm inside it is this surface's single primary. */
 .agent-sandbox-proposal {
-  border-color: rgba(91, 141, 239, 0.44);
-  background: rgba(91, 141, 239, 0.08);
+  border-left: 3px solid var(--ide-blue);
 }
 .agent-local-handoff {
   border-color: var(--ide-border);
@@ -4178,9 +4322,11 @@
 .agent-gate-card .agent-card-actions {
   flex-wrap: wrap;
 }
+/* Uniform control height across the surface. A label that cannot fit lets the
+   row wrap; it is never clipped and never given its own taller metric. */
 .agent-gate-card .agent-card-actions .ide-btn {
   min-width: 0;
-  min-height: 36px;
+  min-height: var(--ide-control-h);
   justify-content: center;
   white-space: normal;
 }
@@ -4413,12 +4559,22 @@
   outline-offset: 2px;
 }
 @media (max-width: 760px) {
+  /* On a 667px viewport this bar was costing three stacked rows before any
+     conversation appeared. The label becomes the select's own affordance and
+     the select shares its row with the actions. */
   .agent-project-context {
     padding: 8px 12px;
+    gap: 6px 8px;
+  }
+  .agent-project-context > label {
+    display: none;
   }
   .agent-project-context .ide-select {
     max-width: 100%;
-    flex: 1 1 160px;
+    flex: 1 1 140px;
+  }
+  .agent-project-locked {
+    flex: 1 1 100%;
   }
   .agent-bar {
     padding: 9px 12px;
@@ -4498,34 +4654,87 @@
   padding: 3px 9px;
 }
 
+/* Errors hold position in place, on the same column and with the same card
+   anatomy as every other event — a danger STRIPE, not a full-bleed repaint,
+   and real controls rather than a bare glyph beside a bare text link. */
 .agent-error {
+  width: min(100%, 1080px);
+  margin: 10px auto 0;
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 10px;
-  border-left: 2px solid var(--ide-red);
+  align-items: center;
+  gap: var(--ide-s3);
+  border-left: 3px solid var(--ide-red);
 }
 .agent-error-body {
+  flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 2px;
 }
+.agent-error-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
 .agent-error-dismiss {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--ide-control-h);
+  height: var(--ide-control-h);
   border: none;
+  border-radius: var(--ide-r-control);
   background: transparent;
   color: var(--ide-fg-muted);
-  font-size: 18px;
-  line-height: 1;
   cursor: pointer;
-  padding: 0 2px;
+  padding: 0;
   flex-shrink: 0;
 }
 .agent-error-dismiss:hover {
   color: var(--ide-fg-bright);
+  background: var(--ide-bg-hover);
 }
+/* ── Approval choreography ──────────────────────────────────────────────────
+   The decision is a STRIPE, not a repaint. The card body keeps the ordinary
+   surface so a pending approval still reads as part of the record; the leading
+   edge carries pending / approved / rejected. Attention is a calm in-place
+   pulse on that edge — nothing moves, nothing blocks, and the controls stay
+   quiet ghosts because an approval prompt is routine workflow, not an alarm. */
+.agent-card.is-pending,
 .agent-card.waiting {
-  border-color: rgba(210, 153, 34, 0.34);
-  background: rgba(210, 153, 34, 0.07);
+  border-left: 3px solid var(--ide-amber, #d29922);
+  animation: agent-await 2.5s ease-in-out infinite;
+}
+.agent-card.is-approved {
+  border-left: 3px solid var(--ide-green);
+}
+.agent-card.is-rejected {
+  border-left: 3px solid var(--ide-red);
+}
+.agent-drawer-gate.is-pending {
+  border-left: 3px solid var(--ide-amber, #d29922);
+}
+@keyframes agent-await {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(210, 153, 34, 0);
+  }
+  50% {
+    box-shadow: 0 0 0 3px rgba(210, 153, 34, 0.14);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .agent-card.is-pending,
+  .agent-card.waiting,
+  .agent-caret,
+  .agent-skeleton-line {
+    animation: none;
+  }
+  .agent-caret {
+    opacity: 0.9;
+  }
 }
 .agent-card-consequence {
   font-size: 12px;
@@ -4544,21 +4753,24 @@
   border-radius: 999px;
   padding: 2px 9px;
 }
+/* The run card follows the same rule as the approval card: outcome is the
+   LEADING EDGE, the body keeps the ordinary card surface. A card that repaints
+   itself blue/green/red fights the transcript it is meant to sit inside, and
+   makes "running" and "succeeded" look like two different objects. */
 .agent-runcard {
-  border: 1px solid rgba(91, 141, 239, 0.34);
-  background: rgba(91, 141, 239, 0.08);
+  border: 1px solid var(--ide-border);
+  border-left: 3px solid var(--ide-blue);
+  background: var(--ide-bg-sidebar);
   border-radius: var(--ide-r-card);
   padding: 14px;
   display: grid;
   gap: 11px;
 }
 .agent-runcard.done {
-  border-color: rgba(63, 185, 80, 0.34);
-  background: rgba(63, 185, 80, 0.07);
+  border-left-color: var(--ide-green);
 }
 .agent-runcard.failed {
-  border-color: rgba(248, 81, 73, 0.34);
-  background: rgba(248, 81, 73, 0.07);
+  border-left-color: var(--ide-red);
 }
 .agent-runcard-head {
   display: flex;
@@ -4757,6 +4969,73 @@
   font-size: 12px;
   color: var(--ide-fg-muted);
 }
+/* A conversation row is fixed-width chrome: its title and meta must ELLIPSIS,
+   not run under the close control and get sliced by `overflow: hidden`. */
+.agent-drawer-conversation > button:first-child {
+  align-self: stretch;
+}
+.agent-drawer-conversation .agent-drawer-title,
+.agent-drawer-conversation .agent-drawer-meta {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Loading is a skeleton shaped like the row that is coming. */
+.agent-row-skeleton {
+  display: grid;
+  gap: 6px;
+  padding: 9px 11px;
+}
+.agent-skeleton-line {
+  display: block;
+  height: 9px;
+  border-radius: var(--ide-r-pill, 999px);
+  background: var(--ide-bg-hover, color-mix(in srgb, var(--ide-fg) 9%, transparent));
+  animation: agent-skel 1.5s ease-in-out infinite;
+}
+.agent-skeleton-line.title {
+  width: 62%;
+}
+.agent-skeleton-line.meta {
+  width: 88%;
+  height: 8px;
+}
+.agent-row-skeleton:nth-child(2) .agent-skeleton-line.title {
+  width: 74%;
+}
+.agent-row-skeleton:nth-child(3) .agent-skeleton-line.title {
+  width: 55%;
+}
+.agent-row-skeleton:nth-child(4) .agent-skeleton-line.title {
+  width: 68%;
+}
+@keyframes agent-skel {
+  0%,
+  100% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 0.85;
+  }
+}
+
+/* Empty is a designed state, never a bare sentence. */
+.agent-drawer-empty {
+  display: grid;
+  justify-items: start;
+  gap: 6px;
+  padding: 18px 2px;
+  color: var(--ide-fg-muted);
+  font-size: 12px;
+}
+.agent-drawer-empty strong {
+  color: var(--ide-fg-bright);
+  font-size: 13px;
+}
 .ide-sr-only {
   position: absolute;
   width: 1px;
@@ -4789,9 +5068,10 @@
   color: var(--ide-fg-muted);
   font-size: 12px;
 }
+/* Sentence case: `capitalize` rewrote "Answer from context" into
+   "Answer From Context", which reads as a proper noun the product does not have. */
 .agent-route-decision strong {
   color: var(--ide-fg-bright);
-  text-transform: capitalize;
   letter-spacing: 0.02em;
 }
 .agent-route-decision-label {
@@ -4801,8 +5081,7 @@
   letter-spacing: 0.08em;
 }
 .agent-runcard.cancelled {
-  border-color: var(--ide-border);
-  background: var(--ide-hover);
+  border-left-color: var(--ide-fg-muted);
 }
 .agent-runcard.cancelled .agent-runcard-bar span {
   background: var(--ide-fg-muted);
