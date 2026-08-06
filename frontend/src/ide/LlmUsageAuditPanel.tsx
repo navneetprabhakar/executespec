@@ -54,23 +54,24 @@ function ReconciliationCard({
     {label: 'Provider invoice', status: reconciliation.providerInvoiceStatus},
   ];
   return (
-    <div className='ide-card' style={{marginBottom: 12}}>
-      <div style={{fontSize: 12, fontWeight: 700, marginBottom: 8}}>Reconciliation</div>
-      <div style={{display: 'flex', flexDirection: 'column', gap: 8}}>
-        {rows.map((row) => (
-          <div key={row.label} style={{display: 'flex', gap: 8, alignItems: 'flex-start'}}>
+    <div className='ide-card' style={{marginBottom: 'var(--ide-s3)'}}>
+      <span className='gf-note-title'>Reconciliation</span>
+      {/* Each status IS measured state, so it keeps its colour and leads its row
+          in a fixed cell — three content-width badges left three different label
+          x-positions in a three-row list. */}
+      {rows.map((row) => (
+        <div key={row.label} className='gf-evidence-row'>
+          <span className='ide-project-statuscol'>
             <IdeBadge kind={reconciliationBadgeKind(row.status)}>
               {row.status || 'UNKNOWN'}
             </IdeBadge>
-            <div style={{minWidth: 0}}>
-              <div style={{fontSize: 12, color: 'var(--ide-fg-bright)'}}>{row.label}</div>
-              {row.explanation && (
-                <div style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}>{row.explanation}</div>
-              )}
-            </div>
+          </span>
+          <div style={{minWidth: 0, flex: 1}}>
+            <div style={{color: 'var(--ide-fg-bright)'}}>{row.label}</div>
+            {row.explanation && <div>{row.explanation}</div>}
           </div>
-        ))}
-      </div>
+        </div>
+      ))}
     </div>
   );
 }
@@ -238,12 +239,15 @@ export function LlmUsageAuditPanel({orgId, scopeLabel}: {orgId: string; scopeLab
     <section aria-label='LLM usage audit'>
       <div className='ide-h2'>LLM token and cost audit</div>
       <div className='ide-card'>
-        <div style={{fontSize: 12, color: 'var(--ide-fg-muted)', marginBottom: 12}}>
+        {/* Load-bearing: "physical" attempts include retries and failures, and the
+            dollar figure is a LOWER BOUND, not an invoice. Neither qualifier may
+            be shortened away. */}
+        <div className='gf-hint' style={{marginBottom: 'var(--ide-s3)'}}>
           {scopeLabel}. Physical provider attempts include retries and failures. Cost is explicitly
           a lower bound whenever a provider did not report failed-attempt cost.
         </div>
-        <div style={{display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'end'}}>
-          <label style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}>
+        <div className='gf-toolbar'>
+          <label className='gf-field'>
             From
             <input
               aria-label='Usage from date'
@@ -253,7 +257,7 @@ export function LlmUsageAuditPanel({orgId, scopeLabel}: {orgId: string; scopeLab
               onChange={(e) => setFrom(e.target.value)}
             />
           </label>
-          <label style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}>
+          <label className='gf-field'>
             To
             <input
               aria-label='Usage to date'
@@ -263,7 +267,7 @@ export function LlmUsageAuditPanel({orgId, scopeLabel}: {orgId: string; scopeLab
               onChange={(e) => setTo(e.target.value)}
             />
           </label>
-          <label style={{fontSize: 12, color: 'var(--ide-fg-muted)', flex: 1, minWidth: 180}}>
+          <label className='gf-field gf-field-grow'>
             IANA timezone
             <input
               aria-label='Usage timezone'
@@ -293,9 +297,13 @@ export function LlmUsageAuditPanel({orgId, scopeLabel}: {orgId: string; scopeLab
             {download === 'json' ? 'Downloading…' : 'Download JSON (first 500)'}
           </button>
         </div>
-        {error && <div style={{color: 'var(--ide-red)', fontSize: 12, marginTop: 10}}>{error}</div>}
+        {error && (
+          <div className='ide-note bad' style={{marginTop: 'var(--ide-s3)'}}>
+            {error}
+          </div>
+        )}
         {downloadNote && (
-          <div role='status' style={{color: 'var(--ide-yellow)', fontSize: 12, marginTop: 10}}>
+          <div className='ide-note warn' role='status' style={{marginTop: 'var(--ide-s3)'}}>
             {downloadNote}
           </div>
         )}
@@ -304,7 +312,8 @@ export function LlmUsageAuditPanel({orgId, scopeLabel}: {orgId: string; scopeLab
       {loading && <IdeLoader label='Loading usage attempts…' />}
       {report && !loading && (
         <>
-          <div style={{display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12}}>
+          {/* The value was an 18px literal, so the phone ramp could not reach it. */}
+          <div className='gf-stats'>
             {[
               ['Attempts', fmt(report.totals.attempts)],
               ['Failed', fmt(report.totals.failedAttempts)],
@@ -314,15 +323,17 @@ export function LlmUsageAuditPanel({orgId, scopeLabel}: {orgId: string; scopeLab
               ['Cache read', fmt(report.totals.cacheReadTokens)],
               ['Known cost', `$${Number(report.totals.knownCostUsdLowerBound).toFixed(4)}`],
             ].map(([label, value]) => (
-              <div className='ide-card' key={label} style={{minWidth: 120, flex: 1}}>
-                <div style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}>{label}</div>
-                <div style={{fontSize: 18, fontWeight: 700, marginTop: 3}}>{value}</div>
+              <div className='ide-card' key={label}>
+                <div className='gf-stat-label'>{label}</div>
+                <div className='gf-stat-value'>{value}</div>
               </div>
             ))}
           </div>
 
+          {/* Was a whole card whose every word was painted yellow. The claim is
+              unchanged, and it is exactly the qualifier the number above needs. */}
           {report.totals.hasUnknownProviderCost && (
-            <div className='ide-card' style={{color: 'var(--ide-yellow)', fontSize: 12}}>
+            <div className='ide-note warn' style={{marginBottom: 'var(--ide-s3)'}}>
               {fmt(report.totals.unknownCostAttempts)} attempt(s) have unknown provider cost. The
               displayed USD amount is a lower bound, not a reconciled invoice total.
             </div>
@@ -332,15 +343,15 @@ export function LlmUsageAuditPanel({orgId, scopeLabel}: {orgId: string; scopeLab
               vs run totals vs managed debits, plus provider-invoice availability). */}
           <ReconciliationCard reconciliation={report.reconciliation} />
 
-          <div className='ide-card' style={{marginBottom: 12}}>
-            <div style={{display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap'}}>
-              <strong style={{fontSize: 12}}>Group by</strong>
+          <div className='ide-card' style={{marginBottom: 'var(--ide-s3)'}}>
+            <div className='gf-actions'>
+              <strong style={{fontSize: 'var(--ide-t-caption)'}}>Group by</strong>
               <select
-                className='ide-input'
+                className='ide-select'
                 aria-label='Usage grouping dimension'
                 value={dimension}
                 onChange={(e) => setDimension(e.target.value as api.UsageAuditDimension)}
-                style={{width: 180}}
+                style={{width: 180, maxWidth: '100%'}}
               >
                 {DIMENSIONS.map(([value, label]) => (
                   <option key={value} value={value}>
@@ -352,8 +363,9 @@ export function LlmUsageAuditPanel({orgId, scopeLabel}: {orgId: string; scopeLab
                 <IdeBadge kind='warn'>Rollups truncated at {report.limits.rollupRowLimit}</IdeBadge>
               )}
             </div>
-            <div style={{overflowX: 'auto', marginTop: 10}}>
-              <table className='ide-table' style={{width: '100%'}}>
+            {/* Wide evidence scrolls inside its own container, never the page. */}
+            <div className='gf-tablewrap'>
+              <table className='gf-table'>
                 <thead>
                   <tr>
                     <th>{DIMENSIONS.find(([value]) => value === dimension)?.[1]}</th>
@@ -387,15 +399,15 @@ export function LlmUsageAuditPanel({orgId, scopeLabel}: {orgId: string; scopeLab
           </div>
 
           <div className='ide-card'>
-            <div style={{display: 'flex', justifyContent: 'space-between', gap: 8}}>
-              <strong style={{fontSize: 12}}>Physical attempts</strong>
-              <span style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}>
+            <div className='gf-rowhead'>
+              <strong>Physical attempts</strong>
+              <span style={{color: 'var(--ide-fg-muted)'}}>
                 {report.page.totalRows} total · page {report.page.number + 1} of{' '}
                 {Math.max(1, report.page.totalPages)}
               </span>
             </div>
-            <div style={{overflowX: 'auto', marginTop: 10}}>
-              <table className='ide-table' style={{width: '100%'}}>
+            <div className='gf-tablewrap'>
+              <table className='gf-table'>
                 <thead>
                   <tr>
                     <th>Time</th>
@@ -443,7 +455,7 @@ export function LlmUsageAuditPanel({orgId, scopeLabel}: {orgId: string; scopeLab
                 </tbody>
               </table>
             </div>
-            <div style={{display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 10}}>
+            <div className='gf-pager'>
               <button
                 className='ide-btn ghost'
                 type='button'

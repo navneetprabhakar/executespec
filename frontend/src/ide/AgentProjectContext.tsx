@@ -94,8 +94,12 @@ export function AgentProjectContext({
       >
         Create project
       </button>
+      {/* `.agent-project-error` alone styles a failure as muted body text — the
+          same treatment as the hint beside it. The note classes add the 3px
+          leading edge and tint; the original class is retained because it is the
+          identity other surfaces (and IdeAgent.test.tsx) select this element by. */}
       {error && (
-        <div className='agent-project-error' role='alert'>
+        <div className='agent-project-error ide-note bad gf-inline-note' role='alert'>
           <span>{error}</span>
           <button type='button' className='ide-btn ghost' onClick={onRetry}>
             Retry

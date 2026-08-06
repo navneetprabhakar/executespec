@@ -38,7 +38,11 @@ function DecisionRow({r, prPending = 0}: {r: api.RunSummary; prPending?: number}
   const isSuperAdmin = useAuthStore(selectIsSuperAdmin);
   const decision = decisionFor(r, prPending);
   return (
-    <button className='con-runrow con-decision-row' onClick={() => navigate(decision.to)}>
+    <button
+      type='button'
+      className='con-runrow con-decision-row'
+      onClick={() => navigate(decision.to)}
+    >
       <StatusDot kind={statusKind(r.status)} size={9} />
       <span className='con-runrow-main'>
         <span className='con-runrow-title'>{runTitleFor(r)}</span>
@@ -112,11 +116,12 @@ export default function ConsoleDecisions() {
         <div>
           <h1 className='con-hero-title'>Decisions</h1>
           <div className='con-hero-sub'>
-            The work that needs human attention: plan approvals, running work, PR review comments,
-            and failures.
+            Plan approvals, running work, PR comments, and failures.
           </div>
         </div>
-        <button className='con-newrun lg' onClick={load}>
+        {/* Ghost, not accent-filled. Decisions has no commit action of its own,
+            and a reload control was rendering as the loudest thing on the page. */}
+        <button type='button' className='ide-btn ghost' onClick={load}>
           Refresh
         </button>
       </section>

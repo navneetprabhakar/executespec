@@ -1,2 +1,98 @@
 /* Version B — runloop surfaces. Scoped rules for this lane only.
    Shared grammar lives in ide.css; do not duplicate it here. */
+
+/* ── Alignment is a column ────────────────────────────────────────────────
+ * A leading status badge is a COLUMN, not an inline word. "Complete" (75px),
+ * "Needs review" (~103px) and "Failed" (~55px) are a ~48px spread, so a list
+ * that lets the badge size the first cell starts every title at a different x
+ * and the eye has nothing to run down. Fixing the column costs one rule and
+ * makes the list scannable; the badge itself keeps its own pill metric and is
+ * left-aligned inside the reserved width.
+ *
+ * The badge may still exceed the reservation (a future longer label): the
+ * column grows, the row does not clip, and only that row steps out.
+ */
+.rl-status-col {
+  display: flex;
+  flex: 0 0 auto;
+  justify-content: flex-start;
+  min-width: 104px;
+}
+@media (max-width: 600px) {
+  /* On a phone a 104px reservation is 28% of the viewport and pushes every
+     title into a two-line wrap, which costs more scannability than the column
+     buys. Below 600px the badge sizes itself and the row wraps instead. */
+  .rl-status-col {
+    min-width: 0;
+  }
+}
+
+/* A list row whose title must not be squeezed under its own trailing controls.
+   Wraps the ROW rather than crushing a control below its word width. */
+.rl-row {
+  display: flex;
+  align-items: center;
+  gap: var(--ide-s3);
+  flex-wrap: wrap;
+}
+.rl-row-title {
+  flex: 1 1 12ch;
+  min-width: 0;
+  font-weight: 500;
+  overflow-wrap: break-word;
+}
+.rl-row-meta {
+  flex: 0 0 auto;
+  color: var(--ide-fg-muted);
+  font-size: var(--ide-t-caption);
+}
+
+/* (removed) The recovery/diagnosis card's state variants were promoted into
+   ide.css as `.ide-recovery-card.is-failed|is-stopped|is-progress`. The bug
+   was in the shared class, so it is fixed in the shared class. */
+
+/* ── A row of actions wraps; it never clips ───────────────────────────────*/
+.rl-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--ide-s2);
+}
+
+/* ── Selection is a state, not a commit action ────────────────────────────
+ * A selected repository chip used to become `.ide-btn` — accent-filled, i.e.
+ * visually identical to "Create plan". N selected repos meant N competing
+ * primary actions. Selection is now a tinted ghost with an accent edge.
+ */
+.ide-root .rl-chip.is-selected {
+  border-color: var(--ide-accent);
+  color: var(--ide-fg-bright);
+  background: color-mix(in srgb, var(--ide-accent) 14%, transparent);
+}
+.ide-root .rl-chip.is-selected:hover {
+  background: color-mix(in srgb, var(--ide-accent) 20%, transparent);
+  border-color: var(--ide-accent);
+}
+
+/* Inline icons sit on the text baseline optically, not geometrically. */
+.rl-icon {
+  flex: 0 0 auto;
+  vertical-align: -0.15em;
+}
+
+/* Fixed-width leading glyph so a step list's titles share one left edge even
+   though the glyph differs per state. */
+.rl-step-glyph {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 1.15em;
+}
+
+/* A long identifier is evidence: it may wrap, it may scroll, it may not be
+   silently cut. */
+.rl-break {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}

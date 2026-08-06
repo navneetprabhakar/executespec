@@ -5,18 +5,22 @@ import {
   auditAccessErrorMessage,
   auditActor,
   auditCsvText,
+  auditRowState,
   auditTarget,
   auditTimestamp,
   buildSearchHits,
   customerSafeNotificationText,
+  exactTime,
   filterAuditLogs,
   filterNotifications,
   isNotificationUnread,
   markAllNotificationsReadLocal,
   markNotificationReadLocal,
   notificationDotColor,
+  notificationRowState,
   notificationTarget,
   setupAccountRows,
+  shortAge,
   setupEssentialRows,
   setupOperationRows,
   setupWorkspaceRows,
@@ -133,6 +137,39 @@ describe('systemUtils', () => {
     expect(auditAccessErrorMessage('permission denied', 'TEAM', false)).toContain('org admins');
     expect(auditAccessErrorMessage('forbidden', 'TEAM', true)).toContain("isn't enabled");
     expect(auditAccessErrorMessage('network failed', 'TEAM', true)).toBe('network failed');
+  });
+
+  it('renders a compact age instead of a full locale timestamp', () => {
+    // `06/08/2026, 09:20:58` claimed ~45% of a 375px row and truncated every
+    // notification title to about eighteen characters.
+    const now = Date.parse('2026-06-20T12:00:00Z');
+    expect(shortAge('2026-06-20T11:59:30Z', now)).toBe('just now');
+    expect(shortAge('2026-06-20T11:44:00Z', now)).toBe('16m ago');
+    expect(shortAge('2026-06-20T09:00:00Z', now)).toBe('3h ago');
+    expect(shortAge('2026-06-17T12:00:00Z', now)).toBe('3d ago');
+    expect(shortAge('2026-06-06T12:00:00Z', now)).toBe('2w ago');
+    // Beyond a month a relative label stops being informative — show a date.
+    expect(shortAge('2026-01-04T12:00:00Z', now)).not.toContain('ago');
+    // A clock skew that puts the row in the future must not render "-3m ago".
+    expect(shortAge('2026-06-20T12:05:00Z', now)).toBe('just now');
+    // Missing / unparseable timestamps render nothing, never `Invalid Date`.
+    expect(shortAge(null, now)).toBe('');
+    expect(shortAge('not-a-date', now)).toBe('');
+    expect(exactTime(null)).toBe('');
+    expect(exactTime('not-a-date')).toBe('');
+    expect(exactTime('2026-06-20T12:00:00Z')).not.toBe('');
+  });
+
+  it('maps rows to the four leading-stripe states the CSS knows about', () => {
+    expect(notificationRowState(notification({type: 'RUN_PLATFORM_FAILURE'}))).toBe('bad');
+    expect(notificationRowState(notification({type: 'RUN_ACTION_REQUIRED'}))).toBe('warn');
+    expect(notificationRowState(notification({type: 'RUN_SUCCESS'}))).toBe('ok');
+    expect(notificationRowState(notification({type: 'RUN_USER_STOPPED'}))).toBe('info');
+
+    expect(auditRowState(audit({eventType: 'API_KEY_REVOKED'}))).toBe('bad');
+    expect(auditRowState(audit({eventType: 'BILLING_PAYMENT_CAPTURED'}))).toBe('warn');
+    expect(auditRowState(audit({eventType: 'USER_LOGIN'}))).toBe('info');
+    expect(auditRowState(audit({eventType: 'ORG_EXTERNAL_SHARING_CHANGED'}))).toBe('ok');
   });
 
   it('builds setup-menu rows from account state', () => {

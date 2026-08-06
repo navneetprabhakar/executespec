@@ -1,2 +1,332 @@
 /* Version B — projects surfaces. Scoped rules for this lane only.
    Shared grammar lives in ide.css; do not duplicate it here. */
+
+/* ── 1. Alignment is a column ──────────────────────────────────────────────
+ *
+ * Every project list puts a status badge first and the title after it. `.ide-badge`
+ * is content-width, so COMPLETE / PARTIAL / FAILED / WORKING / AWAITING_APPROVAL
+ * produced five different title x-positions in one list — the reported defect.
+ * The badge now sits in a fixed-width leading cell it can be narrower than but
+ * never wider than, so titles start on one line and long statuses shrink their
+ * own label instead of pushing the column.
+ */
+.ide-root .ide-project-statuscol {
+  flex: 0 0 var(--ide-project-statuscol-w, 112px);
+  width: var(--ide-project-statuscol-w, 112px);
+  min-width: 0;
+  display: flex;
+  align-items: center;
+}
+/* The cell is sized for the common statuses. The one long status
+   ("Awaiting approval", 182px) WRAPS rather than truncates: reserving 182px would
+   push every title 80px right for a rare case, and "Awaiting ap…" would drop the
+   part of the label that carries the meaning. */
+.ide-root .ide-project-statuscol > .ide-badge {
+  max-width: 100%;
+  min-width: 0;
+  display: block;
+  text-align: center;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.3;
+  padding-top: 2px;
+  padding-bottom: 2px;
+}
+/* The trailing evidence cell is the mirror of the leading one: score and cost
+   land on one right edge whether or not either is present. */
+.ide-root .ide-project-evidencecol {
+  flex: 0 0 auto;
+  min-width: 92px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  font-size: var(--ide-t-caption);
+  color: var(--ide-fg-muted);
+}
+
+/* ── 2. Split panes must be allowed to shrink ──────────────────────────────
+ *
+ * The shared `.ide-stack-mobile` phone rule collapses to `1fr`, which is
+ * `minmax(auto, 1fr)`. The `auto` minimum is the item's min-content, so a run row
+ * whose title does not wrap forced a 731px track inside a 345px grid and the Work
+ * tab scrolled sideways at 375px. `minmax(0, 1fr)` removes that floor.
+ * PROMOTION CANDIDATE: the same one-character fix belongs on `.ide-stack-mobile`
+ * in ide.css, which every split surface uses.
+ */
+.ide-root .ide-project-run-split {
+  min-width: 0;
+}
+.ide-root .ide-project-run-split > * {
+  min-width: 0;
+}
+
+/* ── 3. Metric tiles ───────────────────────────────────────────────────────
+ *
+ * The value was a 24px literal, so the phone ramp could not reach it: a
+ * two-word value wrapped at 24px and dragged every tile in the row taller.
+ * The number now uses the ramp and any qualifier drops to a caption line, which
+ * keeps the claim's exact words while letting the number stay a number.
+ */
+.ide-root .ide-project-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: var(--ide-s3);
+  align-items: stretch;
+}
+.ide-root .ide-project-metric {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ide-s1);
+  min-width: 0;
+}
+.ide-root .ide-project-metric-label {
+  font-size: var(--ide-t-caption);
+  color: var(--ide-fg-muted);
+}
+.ide-root .ide-project-metric-value {
+  font-size: var(--ide-t-h2);
+  font-weight: 700;
+  line-height: 1.15;
+  color: var(--ide-fg-bright);
+  font-variant-numeric: tabular-nums;
+}
+.ide-root .ide-project-metric-note {
+  font-size: var(--ide-t-caption);
+  color: var(--ide-fg-muted);
+  line-height: 1.35;
+}
+
+/* ── 4. Field labels are weight, not shouting ──────────────────────────────
+ *
+ * `PROJECT NAME` / `BRANCH NAMING PATTERN` were 12px/700 tracked out 0.14em.
+ * ide.css's own `.ide-h2` note rejects that treatment; these helpers predated it.
+ */
+.ide-root .ide-project-fieldlabel {
+  font-size: var(--ide-t-caption);
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--ide-fg-muted);
+  margin-bottom: var(--ide-s1);
+}
+.ide-root .ide-project-field {
+  margin-bottom: var(--ide-s4);
+}
+
+/* ── 5. Rows ───────────────────────────────────────────────────────────────
+ * One row grammar for health / work / doc / issue lists: a fixed leading cell,
+ * a shrinkable body, a trailing cell, and a hairline between rows only.
+ */
+.ide-root .ide-project-row {
+  display: flex;
+  align-items: center;
+  gap: var(--ide-s3);
+  padding: var(--ide-s3) var(--ide-s4);
+  border-bottom: 1px solid var(--ide-border);
+  min-width: 0;
+}
+.ide-root .ide-project-row:last-child {
+  border-bottom: 0;
+}
+.ide-root .ide-project-row-body {
+  flex: 1;
+  min-width: 0;
+}
+.ide-root .ide-project-row-title {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+.ide-root .ide-project-row-sub {
+  display: block;
+  font-size: var(--ide-t-caption);
+  color: var(--ide-fg-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Selection is a 3px leading edge plus a tint — never a repaint of the row. */
+.ide-root .ide-project-row.is-selected {
+  background: color-mix(in srgb, var(--ide-accent) 8%, transparent);
+  box-shadow: inset 3px 0 0 var(--ide-accent);
+}
+
+/* ── 6. Identity chips are not status ──────────────────────────────────────
+ *
+ * A repo card carried six saturated pills, so "GitHub" (which is an identity,
+ * always true, never a state) read as loudly as "drifted". Identity chips are
+ * neutral; only measured state keeps its colour.
+ */
+.ide-root .ide-project-chips {
+  display: flex;
+  gap: var(--ide-s2);
+  flex-wrap: wrap;
+  align-items: center;
+  margin-bottom: var(--ide-s3);
+}
+.ide-root .ide-project-chips .ide-badge {
+  min-height: 20px;
+}
+
+/* ── 7. Card headers ───────────────────────────────────────────────────────*/
+.ide-root .ide-project-cardhead {
+  display: flex;
+  align-items: center;
+  gap: var(--ide-s2);
+  margin-bottom: var(--ide-s2);
+  min-width: 0;
+}
+.ide-root .ide-project-cardhead-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+  color: var(--ide-fg-bright);
+}
+.ide-root .ide-project-cardicon {
+  flex-shrink: 0;
+  color: var(--ide-fg-muted);
+  display: inline-flex;
+}
+
+/* Projects-list card footer: three small facts under a hairline. */
+.ide-root .ide-project-cardstats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(80px, 1fr));
+  gap: var(--ide-s2);
+  padding-top: var(--ide-s3);
+  border-top: 1px solid var(--ide-border);
+}
+.ide-root .ide-project-cardstat-label {
+  font-size: var(--ide-t-caption);
+  color: var(--ide-fg-muted);
+}
+.ide-root .ide-project-cardstat-value {
+  font-size: var(--ide-t-body-lg);
+  font-weight: 600;
+  color: var(--ide-fg-bright);
+  font-variant-numeric: tabular-nums;
+  margin-top: 2px;
+}
+
+/* ── 8. Page toolbar (title + one commit action) ───────────────────────────*/
+.ide-root .ide-project-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--ide-s3);
+  flex-wrap: wrap;
+  margin-bottom: var(--ide-s1);
+}
+.ide-root .ide-project-toolbar-spacer {
+  flex: 1;
+  min-width: 0;
+}
+.ide-root .ide-project-createrow {
+  display: flex;
+  gap: var(--ide-s2);
+  align-items: center;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+/* Segmented filter — the "Mine / Archived" pair read as two bare words. */
+.ide-root .ide-project-segment {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  margin-bottom: var(--ide-s4);
+  border: 1px solid var(--ide-border);
+  border-radius: var(--ide-r-pill);
+  background: var(--ide-bg-sidebar);
+}
+.ide-root .ide-project-segment button {
+  min-height: 26px;
+  padding: 0 var(--ide-s3);
+  border: 0;
+  border-radius: var(--ide-r-pill);
+  background: transparent;
+  color: var(--ide-fg-muted);
+  font: inherit;
+  font-size: var(--ide-t-caption);
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 120ms var(--ide-ease);
+}
+.ide-root .ide-project-segment button:hover {
+  color: var(--ide-fg-bright);
+}
+.ide-root .ide-project-segment button.active {
+  background: color-mix(in srgb, var(--ide-accent) 16%, transparent);
+  color: var(--ide-accent);
+}
+.ide-root .ide-project-segment button:focus-visible {
+  outline: 2px solid var(--ide-accent);
+  outline-offset: 1px;
+}
+
+/* ── 9. Phone layout ───────────────────────────────────────────────────────
+ * Type and gutters already step down globally. What phones need here is
+ * different SHAPE: nothing may force the row wider than the viewport.
+ */
+@media (max-width: 600px) {
+  .ide-root .ide-project-statuscol {
+    --ide-project-statuscol-w: 84px;
+  }
+  /* The one-character fix the shared phone rule is missing. */
+  .ide-root .ide-project-run-split {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+  .ide-root .ide-project-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  /* At 375px a status cell + title + evidence cell on one line leaves the title
+     about 120px, which truncates every run to three words. Wrap instead: status +
+     title on the first line, evidence on a second line indented to the title's x
+     so the column reading still holds. */
+  .ide-root .ide-project-row {
+    padding: var(--ide-s3);
+    flex-wrap: wrap;
+    row-gap: var(--ide-s1);
+  }
+  .ide-root .ide-project-row-body {
+    flex: 1 1 55%;
+  }
+  .ide-root .ide-project-evidencecol {
+    flex: 1 1 100%;
+    min-width: 0;
+    flex-direction: row;
+    align-items: center;
+    justify-content: flex-start;
+    gap: var(--ide-s2);
+    padding-left: calc(var(--ide-project-statuscol-w, 84px) + var(--ide-s3));
+  }
+  .ide-root .ide-project-evidencecol:empty {
+    display: none;
+  }
+  /* A label/value pair with a long value ("1284/1284 files · 100.0%") wrapped
+     into a ragged two-column tangle at 375px. Stack it. */
+  .ide-root .ide-project-kv-stack .ide-kv {
+    display: block;
+    gap: 0;
+  }
+  .ide-root .ide-project-kv-stack .ide-kv span:last-child {
+    display: block;
+    text-align: left;
+    margin-top: 2px;
+  }
+  .ide-root .ide-project-toolbar .ide-project-toolbar-spacer {
+    display: none;
+  }
+  .ide-root .ide-project-toolbar .ide-btn {
+    width: 100%;
+  }
+  .ide-root .ide-project-cardstats {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}

@@ -29,6 +29,10 @@ export function useDocumentTitle(title: string | null | undefined) {
 export function routeTitle(pathname: string): string {
   const exact: Record<string, string> = {
     '/home': 'Home',
+    // Without this the map falls through and the tab reads
+    // "ExecuteSpec · ExecuteSpec". The comment above claims this map is
+    // exhaustive over App.tsx's protected routes; /decisions was the gap.
+    '/decisions': 'Decisions',
     '/runs': 'Work',
     '/compose': 'Start',
     '/projects': 'Projects',

@@ -1,5 +1,15 @@
 import {useEffect, useMemo, useRef, useState} from 'react';
 import {Link, useNavigate, useParams} from 'react-router-dom';
+import {
+  AlertCircle,
+  ArrowRight,
+  Check,
+  CheckCircle2,
+  Circle,
+  CircleDot,
+  Play,
+  XCircle,
+} from 'lucide-react';
 import * as api from '@/lib/api';
 import {consumeSpecHandoff, writeSpecHandoff} from '@/lib/specHandoff';
 import {repoSupports} from '@/ide/projectRepoUi';
@@ -226,7 +236,10 @@ export function IdeWelcome() {
                 boxShadow: '0 0 8px var(--ide-accent)',
               }}
             />
-            <span className='ide-mono' style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}>
+            <span
+              className='ide-mono'
+              style={{fontSize: 'var(--ide-t-caption)', color: 'var(--ide-fg-muted)'}}
+            >
               {shortRunId(liveRun.runId)}
             </span>
             <IdeBadge kind={statusKind(liveRun.status)}>{phaseLabel(liveRun.status)}</IdeBadge>
@@ -295,7 +308,9 @@ export function IdeWelcome() {
             </div>
           )}
           {sampleError && (
-            <div style={{marginBottom: 10, fontSize: 12, color: 'var(--ide-red)'}}>
+            <div
+              style={{marginBottom: 10, fontSize: 'var(--ide-t-caption)', color: 'var(--ide-red)'}}
+            >
               {sampleError}
             </div>
           )}
@@ -870,20 +885,29 @@ export function IdeCompose() {
               <div className='ide-h2' style={{marginTop: 0}}>
                 Context
               </div>
+              {/* Selection is a state, not a commit action: a selected chip is a tinted ghost with
+                  an accent edge, so "Create plan" stays the only accent-filled control here. */}
               <div style={{display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 6}}>
                 <button
-                  className={projectId == null ? 'ide-btn' : 'ide-btn ghost'}
+                  className={`ide-btn ghost rl-chip${projectId == null ? ' is-selected' : ''}`}
+                  aria-pressed={projectId == null}
                   onClick={() => pickProject(null)}
                 >
-                  {projectId == null ? '✓ ' : ''}Standalone
+                  {projectId == null && (
+                    <Check className='rl-icon' size='1em' strokeWidth={1.75} aria-hidden='true' />
+                  )}
+                  Standalone
                 </button>
                 {chipProjects.map((p) => (
                   <button
                     key={p.id}
-                    className={projectId === p.id ? 'ide-btn' : 'ide-btn ghost'}
+                    className={`ide-btn ghost rl-chip${projectId === p.id ? ' is-selected' : ''}`}
+                    aria-pressed={projectId === p.id}
                     onClick={() => pickProject(p.id)}
                   >
-                    {projectId === p.id ? '✓ ' : ''}
+                    {projectId === p.id && (
+                      <Check className='rl-icon' size='1em' strokeWidth={1.75} aria-hidden='true' />
+                    )}
                     {p.name}
                   </button>
                 ))}
@@ -919,7 +943,13 @@ export function IdeCompose() {
                   />
                   <div style={{maxHeight: 240, overflowY: 'auto'}}>
                     {filteredProjects.length === 0 ? (
-                      <div style={{fontSize: 13, color: 'var(--ide-fg-muted)', padding: '8px 4px'}}>
+                      <div
+                        style={{
+                          fontSize: 'var(--ide-t-body)',
+                          color: 'var(--ide-fg-muted)',
+                          padding: '8px 4px',
+                        }}
+                      >
                         No projects match "{projectQuery.trim()}".
                       </div>
                     ) : (
@@ -939,12 +969,20 @@ export function IdeCompose() {
                                 ? '1px solid var(--ide-border)'
                                 : 'none',
                             padding: '8px 6px',
-                            fontSize: 13,
+                            fontSize: 'var(--ide-t-body)',
                             color: projectId === p.id ? 'var(--ide-accent)' : 'var(--ide-fg)',
                             cursor: 'pointer',
                           }}
                         >
-                          {projectId === p.id ? '✓ ' : ''}
+                          {projectId === p.id && (
+                            <Check
+                              className='rl-icon'
+                              size='1em'
+                              strokeWidth={1.75}
+                              aria-hidden='true'
+                              style={{marginRight: 6}}
+                            />
+                          )}
                           {p.name}
                         </button>
                       ))
@@ -1000,7 +1038,11 @@ export function IdeCompose() {
             )}
 
             {err && (
-              <div style={{color: 'var(--ide-red)', fontSize: 13, marginBottom: 10}}>{err}</div>
+              <div
+                style={{color: 'var(--ide-red)', fontSize: 'var(--ide-t-body)', marginBottom: 10}}
+              >
+                {err}
+              </div>
             )}
             <div className='ide-run-action ide-compose-submit-action'>
               <button
@@ -1032,7 +1074,8 @@ export function IdeCompose() {
                     return (
                       <button
                         key={rId}
-                        className={selected ? 'ide-btn' : 'ide-btn ghost'}
+                        className={`ide-btn ghost rl-chip${selected ? ' is-selected' : ''}`}
+                        aria-pressed={selected}
                         disabled={!canRun}
                         title={
                           canRun
@@ -1041,7 +1084,14 @@ export function IdeCompose() {
                         }
                         onClick={() => toggleRepo(rId)}
                       >
-                        {selected ? '✓ ' : ''}
+                        {selected && (
+                          <Check
+                            className='rl-icon'
+                            size='1em'
+                            strokeWidth={1.75}
+                            aria-hidden='true'
+                          />
+                        )}
                         {repoDisplayName(r)}
                         {!canRun ? ' · browse only' : ''}
                       </button>
@@ -1079,7 +1129,11 @@ export function IdeCompose() {
                 return (
                   <div
                     className='ide-card'
-                    style={{borderColor: 'var(--ide-yellow)', fontSize: 13, lineHeight: 1.5}}
+                    style={{
+                      borderColor: 'var(--ide-yellow)',
+                      fontSize: 'var(--ide-t-body)',
+                      lineHeight: 1.5,
+                    }}
                   >
                     {needsGithub && (
                       <div>
@@ -1146,7 +1200,11 @@ export function IdeCompose() {
                   </select>
                   <div
                     role={selectedProviderReady ? 'status' : 'alert'}
-                    style={{fontSize: 12, color: 'var(--ide-fg-muted)', marginTop: 4}}
+                    style={{
+                      fontSize: 'var(--ide-t-caption)',
+                      color: 'var(--ide-fg-muted)',
+                      marginTop: 4,
+                    }}
                   >
                     {providerReadiness.error
                       ? 'Provider readiness unavailable; starting work is disabled.'
@@ -1168,7 +1226,13 @@ export function IdeCompose() {
                       options={modelPickerOptions}
                       onChange={setModelName}
                     />
-                    <div style={{fontSize: 12, color: 'var(--ide-fg-muted)', marginTop: 4}}>
+                    <div
+                      style={{
+                        fontSize: 'var(--ide-t-caption)',
+                        color: 'var(--ide-fg-muted)',
+                        marginTop: 4,
+                      }}
+                    >
                       Overrides this run only
                     </div>
                   </div>
@@ -1210,7 +1274,7 @@ export function IdeCompose() {
                       }}
                       style={{width: 90}}
                     />
-                    <span style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}>
+                    <span style={{fontSize: 'var(--ide-t-caption)', color: 'var(--ide-fg-muted)'}}>
                       {costCap <= 0
                         ? 'platform default'
                         : tierMaxCap === 1000
@@ -1255,7 +1319,7 @@ export function IdeCompose() {
                       display: 'flex',
                       alignItems: 'center',
                       gap: 8,
-                      fontSize: 13,
+                      fontSize: 'var(--ide-t-body)',
                       cursor: 'pointer',
                     }}
                   >
@@ -1271,7 +1335,7 @@ export function IdeCompose() {
                       display: 'flex',
                       alignItems: 'center',
                       gap: 8,
-                      fontSize: 13,
+                      fontSize: 'var(--ide-t-body)',
                       cursor: 'pointer',
                     }}
                   >
@@ -1287,7 +1351,7 @@ export function IdeCompose() {
                       display: 'flex',
                       alignItems: 'center',
                       gap: 8,
-                      fontSize: 13,
+                      fontSize: 'var(--ide-t-body)',
                       cursor: 'pointer',
                     }}
                   >
@@ -1303,7 +1367,7 @@ export function IdeCompose() {
                       display: 'flex',
                       alignItems: 'center',
                       gap: 8,
-                      fontSize: 13,
+                      fontSize: 'var(--ide-t-body)',
                       cursor: 'pointer',
                     }}
                   >
@@ -1319,7 +1383,7 @@ export function IdeCompose() {
                       htmlFor='compose-figma-url'
                       style={{
                         display: 'block',
-                        fontSize: 12,
+                        fontSize: 'var(--ide-t-caption)',
                         color: 'var(--ide-fg-muted)',
                         marginBottom: 4,
                       }}
@@ -1346,7 +1410,13 @@ export function IdeCompose() {
                   Estimate
                 </div>
                 {/* RUN-7 — freshness line; flips to a refresh link-button after 60s. */}
-                <div style={{fontSize: 12, color: 'var(--ide-fg-muted)', margin: '-6px 0 8px'}}>
+                <div
+                  style={{
+                    fontSize: 'var(--ide-t-caption)',
+                    color: 'var(--ide-fg-muted)',
+                    margin: '-6px 0 8px',
+                  }}
+                >
                   {estimateStale ? (
                     <button
                       type='button'
@@ -1626,9 +1696,10 @@ export function IdeLive() {
           </div>
         </div>
         {!terminal && (
+          /* danger is a ghost that reddens on hover. A permanently red control at the top of a
+             healthy running page reads as an error state, not an available action. */
           <button
-            className='ide-btn ghost'
-            style={{color: 'var(--ide-red)'}}
+            className='ide-btn danger'
             onClick={() => setConfirmCancel(true)}
             disabled={cancelBusy}
           >
@@ -1649,23 +1720,30 @@ export function IdeLive() {
         onClose={() => setConfirmCancel(false)}
       />
 
-      {err && <div style={{color: 'var(--ide-red)', fontSize: 13, margin: '8px 0'}}>{err}</div>}
+      {err && (
+        <div style={{color: 'var(--ide-red)', fontSize: 'var(--ide-t-body)', margin: '8px 0'}}>
+          {err}
+        </div>
+      )}
 
       {!run ? (
         <IdeLoader label='Connecting to work…' />
       ) : (
         <>
           <div className='ide-card'>
-            <div style={{display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12}}>
+            <div className='rl-row' style={{gap: 8, marginBottom: 12}}>
               <IdeBadge kind={statusKind(run.status)}>{phaseLabel(run.status)}</IdeBadge>
               {(run.terminalOutcome?.customerTitle || run.statusReason) && (
-                <span style={{color: 'var(--ide-fg-muted)', fontSize: 12}}>
+                <span
+                  className='rl-break'
+                  style={{color: 'var(--ide-fg-muted)', fontSize: 'var(--ide-t-caption)'}}
+                >
                   {run.terminalOutcome?.customerTitle || run.statusReason}
                 </span>
               )}
             </div>
             {(run.userRequest || run.runSummary) && (
-              <div style={{fontSize: 13, lineHeight: 1.6, marginBottom: 12}}>
+              <div style={{fontSize: 'var(--ide-t-body)', lineHeight: 1.6, marginBottom: 12}}>
                 {run.runSummary || run.userRequest}
               </div>
             )}
@@ -1685,13 +1763,13 @@ export function IdeLive() {
             </div>
             <div className='ide-kv'>
               <span>Worker model</span>
-              <span className='ide-mono' style={{fontSize: 12}}>
+              <span className='ide-mono' style={{fontSize: 'var(--ide-t-caption)'}}>
                 {run.workerModel || '—'}
               </span>
             </div>
             <div className='ide-kv'>
               <span>Tokens</span>
-              <span className='ide-mono' style={{fontSize: 12}}>
+              <span className='ide-mono' style={{fontSize: 'var(--ide-t-caption)'}}>
                 {tokIn + tokOut > 0
                   ? `${tokIn.toLocaleString()} in · ${tokOut.toLocaleString()} out`
                   : '—'}
@@ -1703,7 +1781,8 @@ export function IdeLive() {
                 style={{marginTop: 14}}
                 onClick={() => navigate(`/result/${runId}`)}
               >
-                View result →
+                View result
+                <ArrowRight className='rl-icon' size='1em' strokeWidth={1.75} aria-hidden='true' />
               </button>
             )}
           </div>
@@ -1727,11 +1806,24 @@ export function IdeLive() {
                         : partial
                           ? 'var(--ide-yellow)'
                           : 'var(--ide-fg-muted)';
-                  const icon = done ? '●' : running ? '◉' : failed ? '✕' : partial ? '◐' : '○';
+                  // One icon family. The unicode set (●◉✕◐○) came from five different Unicode
+                  // blocks with five different optical weights and five different advance widths,
+                  // so a column of them neither matched the lucide chrome nor lined its titles up.
+                  const Glyph = done
+                    ? CheckCircle2
+                    : running
+                      ? CircleDot
+                      : failed
+                        ? XCircle
+                        : partial
+                          ? AlertCircle
+                          : Circle;
                   return (
                     <div key={t.taskId || i} className='ide-kv' style={{alignItems: 'center'}}>
-                      <span style={{display: 'flex', alignItems: 'center', gap: 8}}>
-                        <span style={{color}}>{icon}</span>
+                      <span style={{display: 'flex', alignItems: 'center', gap: 8, minWidth: 0}}>
+                        <span className='rl-step-glyph' style={{color}}>
+                          <Glyph size='1em' strokeWidth={1.75} aria-hidden='true' />
+                        </span>
                         {t.title || `Step ${i + 1}`}
                       </span>
                       <IdeBadge kind={statusKind(t.status)}>{t.status}</IdeBadge>
@@ -1746,21 +1838,41 @@ export function IdeLive() {
             Activity log{logList.length ? ` · ${logList.length}` : ''}{' '}
             <span
               className='ide-mono'
-              style={{fontSize: 12, color: 'var(--ide-fg-muted)', fontWeight: 400}}
+              style={{
+                fontSize: 'var(--ide-t-caption)',
+                color: 'var(--ide-fg-muted)',
+                fontWeight: 400,
+              }}
             >
               · {sseLabel}
             </span>
           </div>
           {tasks.length > 0 && (
-            <div style={{fontSize: 12, color: 'var(--ide-fg-muted)', margin: '0 0 6px'}}>
-              ▶ {completed}/{tasks.length} steps
-              {currentTaskTitle ? ` — ${currentTaskTitle}` : ''}
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                fontSize: 'var(--ide-t-caption)',
+                color: 'var(--ide-fg-muted)',
+                margin: '0 0 6px',
+              }}
+            >
+              <Play className='rl-icon' size='1em' strokeWidth={1.75} aria-hidden='true' />
+              <span className='rl-break'>
+                {completed}/{tasks.length} steps
+                {currentTaskTitle ? ` — ${currentTaskTitle}` : ''}
+              </span>
             </div>
           )}
           {replayWarning && (
             <div
               role='status'
-              style={{fontSize: 12, color: 'var(--ide-yellow)', margin: '0 0 8px'}}
+              style={{
+                fontSize: 'var(--ide-t-caption)',
+                color: 'var(--ide-yellow)',
+                margin: '0 0 8px',
+              }}
             >
               {replayWarning}
             </div>
@@ -1785,7 +1897,7 @@ export function IdeLive() {
                   role='status'
                   style={{
                     padding: '6px 8px',
-                    fontSize: 12,
+                    fontSize: 'var(--ide-t-caption)',
                     color: 'var(--ide-fg-muted)',
                     borderBottom: '1px solid var(--ide-border)',
                   }}
@@ -1815,17 +1927,24 @@ export function IdeLive() {
                     style={{
                       padding: '6px 8px',
                       borderBottom: '1px solid var(--ide-border)',
-                      fontSize: 12,
+                      fontSize: 'var(--ide-t-caption)',
                       lineHeight: 1.5,
                     }}
                   >
-                    <span className='ide-mono' style={{color, marginRight: 8, fontSize: 12}}>
+                    <span
+                      className='ide-mono'
+                      style={{color, marginRight: 8, fontSize: 'var(--ide-t-caption)'}}
+                    >
                       {logLabel(ev.type)}
                     </span>
                     {ts != null && (
                       <span
                         className='ide-mono'
-                        style={{color: 'var(--ide-fg-muted)', marginRight: 8, fontSize: 12}}
+                        style={{
+                          color: 'var(--ide-fg-muted)',
+                          marginRight: 8,
+                          fontSize: 'var(--ide-t-caption)',
+                        }}
                       >
                         {new Date(ts).toLocaleTimeString()}
                       </span>
