@@ -96,3 +96,308 @@
   min-width: 0;
   overflow-wrap: anywhere;
 }
+
+/* ═══ /compose ════════════════════════════════════════════════════════════
+ *
+ * `surfaces/runloop.css` is `@import`ed at the TOP of ide.css, so at equal
+ * specificity ide.css wins. Every rule below that has to beat a shared
+ * `.ide-compose-*` declaration is therefore written with a `.ide-root` (or
+ * `.ide-root .ide-compose`) prefix — that is the reason for the extra class,
+ * not decoration. Rules on `.rl-*` names that ide.css has never heard of need
+ * no prefix and do not get one.
+ */
+
+/* ── Desktop proportion ───────────────────────────────────────────────────
+ * Compose carried an inline `maxWidth: 1060` that disagreed with the app's one
+ * measure (`.ide-pane`, 1180px), and split it 636 / 360 — a request box barely
+ * wider than the settings rail beside it. The measure is now the shared one and
+ * the split is ~66/34, so the thing you actually write in is the dominant
+ * column and the rail is unmistakably secondary.
+ */
+.ide-root .rl-layout {
+  grid-template-columns: minmax(0, 1fr) 372px;
+  gap: var(--ide-s5);
+}
+
+/* A card's own title sits at its top edge; `.ide-h2`'s 24px lead is for a title
+   that follows body copy, not one that opens a box. */
+.rl-card-title {
+  margin-top: 0;
+}
+
+/* ── The request box owns its card ────────────────────────────────────────
+ * It was a 179px control inside a 304px card — 59%. The box is the point of the
+ * screen, so it gets the room, and the two things you do TO a request (refine
+ * it, or start from an example) sit under it instead of in cards of their own.
+ */
+.ide-root .rl-request-textarea {
+  min-height: 248px;
+}
+.rl-request-tools {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--ide-s3);
+  margin-top: var(--ide-s3);
+}
+/* An inline disclosure must not claim a block of its own next to a button. */
+.ide-root .rl-inline-disclosure {
+  margin-top: 0;
+}
+
+.rl-chip-wrap {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--ide-s2);
+}
+.rl-context-summary {
+  margin-top: var(--ide-s3);
+  color: var(--ide-fg-muted);
+  font-size: var(--ide-t-body);
+}
+
+/* A box inside a box takes a tint, not a second border (`.ide-card .ide-inner`
+   already clears the border); these rules only give it its own metric. */
+.rl-repo-block,
+.rl-project-picker {
+  margin-top: var(--ide-s3);
+  padding: var(--ide-s3);
+  border-radius: var(--ide-r-control);
+}
+.rl-project-list {
+  max-height: 240px;
+  margin-top: var(--ide-s2);
+  overflow-y: auto;
+}
+.rl-project-empty {
+  padding: var(--ide-s2) var(--ide-s1);
+  color: var(--ide-fg-muted);
+  font-size: var(--ide-t-body);
+}
+.ide-root .rl-project-row {
+  display: flex;
+  align-items: center;
+  gap: var(--ide-s2);
+  width: 100%;
+  min-height: var(--ide-control-h);
+  padding: var(--ide-s1) var(--ide-s2);
+  border: 0;
+  border-radius: var(--ide-r-control);
+  background: transparent;
+  color: var(--ide-fg);
+  font: inherit;
+  font-size: var(--ide-t-body);
+  text-align: left;
+  cursor: pointer;
+}
+.ide-root .rl-project-row:hover {
+  background: var(--ide-hover);
+  color: var(--ide-fg-bright);
+}
+/* Selection is a state, so it is a leading mark plus weight — not the accent
+   fill that belongs to the one commit action on this surface. */
+.ide-root .rl-project-row.is-selected {
+  color: var(--ide-fg-bright);
+  font-weight: 600;
+}
+
+.rl-context-note {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--ide-s2);
+  margin-top: var(--ide-s3);
+}
+.ide-root .rl-note-link {
+  color: var(--ide-accent);
+  font-weight: 600;
+}
+
+/* ── Run setup: two columns, so Review is not pushed off the screen ───────*/
+.ide-root .rl-setup-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--ide-s3) var(--ide-s3);
+}
+.rl-field {
+  min-width: 0;
+}
+/* A select plus a full sentence of readiness evidence does not fit a 164px
+   column: the sentence wrapped to three lines and made the row taller than the
+   two rows it was supposed to save. It spans instead. */
+.ide-root .rl-setup-grid > .rl-field-wide {
+  grid-column: 1 / -1;
+}
+.rl-field-help {
+  margin-top: var(--ide-s1);
+  color: var(--ide-fg-muted);
+  font-size: var(--ide-t-caption);
+  line-height: 1.4;
+}
+.ide-root .rl-managed {
+  margin-top: var(--ide-s3);
+}
+.rl-managed-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ide-s2);
+  margin-bottom: var(--ide-s1);
+}
+.rl-managed-head strong {
+  color: var(--ide-fg-bright);
+}
+.ide-root .rl-options {
+  gap: var(--ide-s2);
+  margin-top: var(--ide-s3);
+}
+.rl-check {
+  display: flex;
+  align-items: center;
+  gap: var(--ide-s2);
+  min-height: var(--ide-control-h);
+  font-size: var(--ide-t-body);
+  cursor: pointer;
+}
+
+/* ── Review is the decision surface, so it must fit on the screen ─────────
+ * Measured before this change at 1600x900: the Review card ran from y=746 to
+ * y=1142 against an 854px-tall scroll port — the summary whose whole job is
+ * "check this before you spend money" was invisible at the moment of decision,
+ * and the button that spends the money was 616px away in the other column.
+ * The estimate is folded in (it is part of the same check), the rows are
+ * denser, and the commit action now closes the card it commits.
+ */
+.ide-root .rl-review-card .ide-kv {
+  padding: 5px 0;
+  gap: var(--ide-s3);
+}
+.rl-estimate-note {
+  margin-top: var(--ide-s2);
+  color: var(--ide-fg-muted);
+  font-size: var(--ide-t-caption);
+  line-height: 1.45;
+}
+.ide-root .rl-linkbtn {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ide-accent);
+  font: inherit;
+  cursor: pointer;
+}
+.ide-root .rl-linkbtn:hover {
+  text-decoration: underline;
+}
+.ide-root .rl-commit-error {
+  margin-top: var(--ide-s3);
+}
+.ide-root .rl-commit {
+  margin-top: var(--ide-s3);
+  padding-top: var(--ide-s3);
+}
+
+@media (max-width: 900px) {
+  /* One column before the rail would be narrower than its own controls. */
+  .ide-root .rl-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  /* Review leads only while it is a RAIL beside the request. Once the rail
+     folds underneath, "check this then start" reads correctly after the
+     settings it summarises, and nothing is below a fold to rescue. */
+  .rl-setup-section {
+    order: 1;
+  }
+  .rl-review-section {
+    order: 2;
+  }
+}
+
+@media (max-width: 600px) {
+  /* ── The phone footer must not sit on top of the content ────────────────
+   * It was `position: fixed`, which gives it no slot in the flow and no
+   * relationship to the scroll port: whichever content happened to land in its
+   * band was covered. Measured on the pre-change build at the Request step,
+   * "Improve request" was clipped by 5px at 360x640 with the Console's
+   * announcement banner, 10px at 375x600 and 63px at 320x568.
+   *
+   * `position: sticky` is NOT the fix — it only moves the overlap to mid-scroll.
+   * The fix is to stop the footer being inside the scroll region at all: the
+   * surface becomes a fixed-height flex column whose upper half scrolls and
+   * whose footer does not, so the two can never occupy the same pixels. The
+   * gutter is re-applied inside the scroller so the full-bleed step rail still
+   * lines up with the screen edges.
+   */
+  .ide-root .rl-compose {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
+    /* No bottom gutter: the footer IS the bottom of the surface and its own
+       padding carries the safe-area inset. */
+    padding-bottom: 0;
+  }
+  .rl-compose-scroll {
+    flex: 1 1 auto;
+    min-height: 0;
+    margin-inline: calc(var(--ide-s4) * -1);
+    padding-inline: var(--ide-s4);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+  .ide-root .ide-compose .rl-compose-actions {
+    position: static;
+    flex: 0 0 auto;
+    margin: 0 calc(var(--ide-s4) * -1);
+    padding-bottom: calc(var(--ide-s3) + env(safe-area-inset-bottom));
+  }
+  /* Step 1 has no "Back" to offer, and a disabled full-width control that never
+     becomes enabled is furniture. Next takes the whole bar instead. */
+  .ide-root .ide-compose .rl-compose-actions.is-single {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .rl-mobile-error {
+    color: var(--ide-red);
+  }
+
+  /* ── Chrome before the first input ──────────────────────────────────────
+   * Measured at 182px of a 621px scroll port (29%) before the request box:
+   * a 67px header, then a 71px step rail with 26px of margin around it.
+   */
+  .ide-root .rl-compose-sub {
+    margin-bottom: var(--ide-s3);
+  }
+  .ide-root .rl-desktop-only {
+    display: none;
+  }
+  /* The rail bled 4px past the viewport on each side: a -16px margin against a
+     12px pane gutter. Deriving both from the same token makes them agree at any
+     breakpoint instead of at one. */
+  .ide-root .rl-steps {
+    margin: 0 calc(var(--ide-s4) * -1) var(--ide-s3);
+    padding: var(--ide-s2) var(--ide-s4);
+  }
+  /* The step number was stacked above its label, which cost ~15px of height per
+     step for no added meaning. Inline, the label still reads first. */
+  .ide-root .rl-steps button {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--ide-s1);
+    min-height: 36px;
+    padding: var(--ide-s1) var(--ide-s1);
+  }
+  .ide-root .rl-steps button span {
+    width: 16px;
+    height: 16px;
+    margin: 0;
+    line-height: 16px;
+  }
+  .ide-root .rl-request-textarea {
+    min-height: 168px;
+  }
+  .ide-root .rl-setup-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

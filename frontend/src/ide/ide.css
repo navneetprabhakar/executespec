@@ -612,9 +612,16 @@
 /* ───────── generic IDE surface chrome (welcome/compose/result) ───────── */
 /* One page container for every surface: identical gutter, identical measure, so
    cards and rows on different routes stop drifting relative to each other. */
+/* `.ide-pane` is the generic chrome for compose, the run result, and most
+   protected surfaces. It capped its measure but never centred, so on a wide
+   display every leftover pixel piled up on the right — at 1600px that is a
+   ~350px dead gutter down one side of the app, which reads as broken rather
+   than as deliberate whitespace. `.con-home` already centred; these two
+   disagreeing is why some screens looked balanced and others did not. */
 .ide-pane {
   padding: var(--ide-s5) var(--ide-s5) 48px;
   max-width: 1180px;
+  margin-inline: auto;
 }
 /* The narrow gutter is set once, in the canonical <=860 block below. s4/s6 step
    down again at <=600 through the phone ramp, so tablet gets 16/32 and phone

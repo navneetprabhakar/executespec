@@ -106,9 +106,17 @@ export function AgentProjectContext({
           </button>
         </div>
       )}
+      {/* The reason is stated in full at every width. On a phone it is stated in
+          the accessibility tree and the control's own tooltip while the visible
+          form shrinks to one word, because three wrapped lines of it were the
+          third stacked header bar above a 375px transcript. Nothing about the
+          lock is dropped — only its typography changes. */}
       {disabledReason && (
-        <span className='agent-project-locked' role='status'>
-          {disabledReason}
+        <span className='agent-project-locked' role='status' title={disabledReason}>
+          <span className='agent-project-locked-full'>{disabledReason}</span>
+          <span className='agent-project-locked-brief' aria-hidden='true'>
+            Locked
+          </span>
         </span>
       )}
     </section>

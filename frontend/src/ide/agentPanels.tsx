@@ -1,4 +1,4 @@
-import {useRef, useState, type Dispatch, type RefObject, type UIEvent} from 'react';
+import {useEffect, useRef, useState, type Dispatch, type RefObject, type UIEvent} from 'react';
 import * as api from '@/lib/api';
 import {
   providerIsDispatchable,
@@ -57,6 +57,40 @@ import {executeRunMutation} from '@/lib/runMutationAttempt';
 
 export type {CloudRunRepoChoice, CloudRunRepoSelection} from '@/ide/AgentRepositoryScope';
 export {gateCostLabel} from '@/ide/AgentApprovalCards';
+
+/** Mirrors the phone breakpoint that `surfaces/agent.css` compacts this surface at. */
+const PHONE_LAYOUT_QUERY = '(max-width: 600px)';
+
+function phoneLayoutNow(): boolean {
+  return (
+    typeof window !== 'undefined' &&
+    typeof window.matchMedia === 'function' &&
+    window.matchMedia(PHONE_LAYOUT_QUERY).matches
+  );
+}
+
+/**
+ * True only on a genuinely phone-sized viewport.
+ *
+ * The run card's descriptive rows cost more vertical space than the whole
+ * transcript has on a 375x667 screen, so the phone form moves them behind a
+ * disclosure. That is a DOM decision, not a paint decision, so it cannot be
+ * made in CSS — a closed `<details>` cannot be forced open by a media query in
+ * every engine. Environments without `matchMedia` (jsdom) report false, so the
+ * desktop form stays the default and nothing is hidden by accident.
+ */
+function usePhoneLayout(): boolean {
+  const [phone, setPhone] = useState(phoneLayoutNow);
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
+    const mql = window.matchMedia(PHONE_LAYOUT_QUERY);
+    const onChange = () => setPhone(mql.matches);
+    onChange();
+    mql.addEventListener('change', onChange);
+    return () => mql.removeEventListener('change', onChange);
+  }, []);
+  return phone;
+}
 
 function tokenCount(value: number): string {
   if (!Number.isFinite(value) || value <= 0) return '0';
@@ -678,6 +712,7 @@ function SandboxRunCard({
 }) {
   const prog = runProgress(run.tasks);
   const isSuperAdmin = useAuthStore(selectIsSuperAdmin);
+  const compact = usePhoneLayout();
   const terminal = isTerminalRunStatus(run.status);
   const failed = (run.status || '').toUpperCase() === 'FAILED';
   const cancelled = (run.status || '').toUpperCase() === 'CANCELLED';
@@ -706,6 +741,31 @@ function SandboxRunCard({
     : cancelled
       ? 'Open cancelled run'
       : 'Review evidence';
+  // The two descriptive rows. Both stay in the DOM on every viewport; the phone
+  // form only changes WHERE they sit, so no fact about execution target,
+  // publication gating, task count, evidence state or route is ever dropped.
+  const modeRow = (
+    <div className='agent-runcard-mode'>
+      {remoteSandboxEnabled ? 'Remote sandbox' : 'Remote server workspace'} · plan-gated ·
+      publication-gated
+    </div>
+  );
+  const kpiRow = (
+    <div className='agent-runcard-kpis'>
+      <span>
+        <b>{prog.total || 'n/a'}</b>
+        tasks
+      </span>
+      <span>
+        <b>{score}</b>
+        evidence
+      </span>
+      <span>
+        <b>{provider}</b>
+        route
+      </span>
+    </div>
+  );
   return (
     <div
       className={`agent-runcard${variant}`}
@@ -736,13 +796,15 @@ function SandboxRunCard({
           )}
         </span>
       </div>
-      <div className='agent-runcard-mode'>
-        {remoteSandboxEnabled ? 'Remote sandbox' : 'Remote server workspace'} · plan-gated ·
-        publication-gated
-      </div>
+      {!compact && modeRow}
       {streamLabel && (
         <div
-          className={`agent-runcard-stream ${streamStatus === 'CONNECTED' ? 'ok' : ''}`}
+          /* `ok` means "the live channel is healthy" — an unavailable stream is
+             never healthy, whatever the socket last reported. Only this state is
+             quietened on a phone; every degraded one keeps its line. */
+          className={`agent-runcard-stream ${
+            streamStatus === 'CONNECTED' && !unavailable ? 'ok' : ''
+          }`}
           role='status'
         >
           <span aria-hidden='true' />
@@ -765,20 +827,7 @@ function SandboxRunCard({
           {prog.current}
         </div>
       )}
-      <div className='agent-runcard-kpis'>
-        <span>
-          <b>{prog.total || 'n/a'}</b>
-          tasks
-        </span>
-        <span>
-          <b>{score}</b>
-          evidence
-        </span>
-        <span>
-          <b>{provider}</b>
-          route
-        </span>
-      </div>
+      {!compact && kpiRow}
       {prog.total > 0 && (
         <div className='agent-runcard-bar'>
           {/* RR-1492 — the fill reflects the measured succeeded-task percentage.
@@ -794,6 +843,19 @@ function SandboxRunCard({
             />
           )}
         </div>
+      )}
+      {/* Phone: the run stays pinned, but the rows that DESCRIBE it rather than
+          report its live state move one tap away. Phase, progress, spend and
+          Stop are never inside the disclosure — a running paid job must not be
+          able to hide. */}
+      {compact && (
+        <details className='agent-runcard-detail'>
+          <summary>Run details</summary>
+          <div className='agent-runcard-detail-body'>
+            {modeRow}
+            {kpiRow}
+          </div>
+        </details>
       )}
       <div className='agent-runcard-actions'>
         {/* Navigation, not a commit — it stays a ghost so the surface keeps one
@@ -1311,8 +1373,16 @@ function Composer({
           </button>
         )}
       </div>
+      {/* Two rows of hint text on a phone is chrome eating the transcript. The
+          brief variant is the same claim with the file list dropped — the exact
+          accepted types stay on the attach control's own label, which is where
+          they are actionable. Separators are drawn by CSS, so a hidden variant
+          never leaves a stray dot behind. */}
       <div className='agent-composer-hint'>
-        Enter to send · attach image, PDF, Markdown, text · web search
+        <span>Enter to send</span>
+        <span className='agent-hint-full'>attach image, PDF, Markdown, text</span>
+        <span className='agent-hint-brief'>attach files</span>
+        <span>web search</span>
       </div>
     </div>
   );
